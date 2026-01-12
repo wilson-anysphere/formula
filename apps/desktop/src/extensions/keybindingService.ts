@@ -50,7 +50,8 @@ function isInputTarget(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
   if (!el) return false;
   const tag = el.tagName;
-  return tag === "INPUT" || tag === "TEXTAREA" || el.isContentEditable;
+  // Coerce `isContentEditable` because some DOM shims (jsdom) may not define it.
+  return tag === "INPUT" || tag === "TEXTAREA" || Boolean((el as any).isContentEditable);
 }
 
 function isInsideKeybindingBarrier(target: EventTarget | null): boolean {
@@ -298,7 +299,11 @@ export class KeybindingService {
   ): boolean {
     if (event.defaultPrevented) return false;
     if (isInsideKeybindingBarrier(event.target)) return false;
-    const inputTarget = isInputTarget(event.target);
+    // Prefer context keys for focus/input state so callers can centralize the logic
+    // (e.g. via `installKeyboardContextKeys`) rather than scattering DOM checks.
+    // Fall back to `event.target` for environments that don't maintain these keys.
+    const focusInTextInput = this.params.contextKeys.get("focus.inTextInput");
+    const inputTarget = typeof focusInTextInput === "boolean" ? focusInTextInput : isInputTarget(event.target);
     if (inputTarget && this.ignoreInputTargets === "all") return false;
 
     const match = this.findMatchingBinding(event, {
@@ -326,7 +331,8 @@ export class KeybindingService {
   ): Promise<boolean> {
     if (event.defaultPrevented) return false;
     if (isInsideKeybindingBarrier(event.target)) return false;
-    const inputTarget = isInputTarget(event.target);
+    const focusInTextInput = this.params.contextKeys.get("focus.inTextInput");
+    const inputTarget = typeof focusInTextInput === "boolean" ? focusInTextInput : isInputTarget(event.target);
     if (inputTarget && this.ignoreInputTargets === "all") return false;
 
     const match = this.findMatchingBinding(event, {

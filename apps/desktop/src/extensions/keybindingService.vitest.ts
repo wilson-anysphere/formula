@@ -525,11 +525,9 @@ describe("KeybindingService", () => {
     const service = new KeybindingService({ commandRegistry, contextKeys, platform: "other" });
     service.setBuiltinKeybindings([{ command: "builtin.inputGuard", key: "ctrl+k" }]);
 
-    const event = makeKeydownEvent({
-      key: "k",
-      ctrlKey: true,
-      target: { tagName: "INPUT", isContentEditable: false },
-    });
+    // Simulate focus being inside a text input via context keys (preferred over inspecting `event.target`).
+    contextKeys.set("focus.inTextInput", true);
+    const event = makeKeydownEvent({ key: "k", ctrlKey: true });
     const handled = await service.dispatchKeydown(event);
 
     expect(handled).toBe(false);
@@ -553,11 +551,12 @@ describe("KeybindingService", () => {
     service.setBuiltinKeybindings([{ command: "builtin.inputAllowed", key: "ctrl+j", when: "builtinEnabled" }]);
     service.setExtensionKeybindings([{ extensionId: "ext", command: "ext.inputBlocked", key: "ctrl+j", mac: null, when: null }]);
 
-    const inputTarget = { tagName: "INPUT", isContentEditable: false };
+    // Simulate focus being in a text input via context keys.
+    contextKeys.set("focus.inTextInput", true);
 
     // Builtins still dispatch from inputs when allowed by their when-clause.
     contextKeys.set("builtinEnabled", true);
-    const event1 = makeKeydownEvent({ key: "j", ctrlKey: true, target: inputTarget });
+    const event1 = makeKeydownEvent({ key: "j", ctrlKey: true });
     const handled1 = await service.dispatchKeydown(event1);
     expect(handled1).toBe(true);
     expect(event1.defaultPrevented).toBe(true);
@@ -566,7 +565,7 @@ describe("KeybindingService", () => {
 
     // Extensions should never dispatch from inputs in this mode, even if the builtin does not match.
     contextKeys.set("builtinEnabled", false);
-    const event2 = makeKeydownEvent({ key: "j", ctrlKey: true, target: inputTarget });
+    const event2 = makeKeydownEvent({ key: "j", ctrlKey: true });
     const handled2 = await service.dispatchKeydown(event2);
     expect(handled2).toBe(false);
     expect(event2.defaultPrevented).toBe(false);
