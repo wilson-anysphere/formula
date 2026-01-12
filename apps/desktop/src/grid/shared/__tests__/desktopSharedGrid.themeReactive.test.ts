@@ -131,6 +131,47 @@ describe("DesktopSharedGrid theme reactivity", () => {
     }
   });
 
+  it("updates its renderer theme when the container style attribute changes", async () => {
+    const container = document.createElement("div");
+    container.setAttribute("style", "--formula-grid-bg: rgb(10, 20, 30);");
+    document.body.appendChild(container);
+
+    const provider = new MockCellProvider({ rowCount: 10, colCount: 10 });
+
+    const canvases = {
+      grid: document.createElement("canvas"),
+      content: document.createElement("canvas"),
+      selection: document.createElement("canvas")
+    };
+
+    const scrollbars = {
+      vTrack: document.createElement("div"),
+      vThumb: document.createElement("div"),
+      hTrack: document.createElement("div"),
+      hThumb: document.createElement("div")
+    };
+
+    const grid = new DesktopSharedGrid({
+      container,
+      provider,
+      rowCount: 10,
+      colCount: 10,
+      canvases,
+      scrollbars
+    });
+
+    try {
+      expect(grid.renderer.getTheme().gridBg).toBe("rgb(10, 20, 30)");
+
+      container.setAttribute("style", "--formula-grid-bg: rgb(40, 50, 60);");
+      await Promise.resolve();
+
+      expect(grid.renderer.getTheme().gridBg).toBe("rgb(40, 50, 60)");
+    } finally {
+      grid.destroy();
+    }
+  });
+
   it("updates its renderer theme when a relevant matchMedia query fires a change event", () => {
     // Disable MutationObserver so this test specifically exercises the matchMedia path.
     vi.stubGlobal("MutationObserver", undefined);
