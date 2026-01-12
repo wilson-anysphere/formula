@@ -332,6 +332,11 @@ def main() -> int:
     actual_path = Path(args.actual)
     report_path = Path(args.report)
 
+    # Keep the gate debuggable in CI logs: the "expected dataset" selection has precedence rules
+    # (versioned corpus-hash match vs pinned fallback) that can otherwise be non-obvious when
+    # investigating mismatches.
+    print(f"Excel-oracle datasets: expected={expected_path} actual={actual_path} report={report_path}")
+
     include_tags = _effective_include_tags(tier=args.tier, user_include_tags=args.include_tag)
     exclude_tags = _normalize_tags(args.exclude_tag)
 
