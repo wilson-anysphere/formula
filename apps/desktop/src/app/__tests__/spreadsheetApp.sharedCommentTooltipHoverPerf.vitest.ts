@@ -150,7 +150,18 @@ describe("SpreadsheetApp shared-grid comment tooltip hover perf", () => {
       observer.observe(tooltip, { attributes: true, childList: true, characterData: true, subtree: true });
 
       const move = (clientX: number, clientY: number) => {
-        (app as any).onSharedPointerMove({ clientX, clientY, buttons: 0 } as any);
+        // In production, pointermove events over the grid body target the selection canvas.
+        // Include `target` + `offsetX/Y` so the handler exercises the fast path that avoids
+        // root-relative coordinate math.
+        (app as any).onSharedPointerMove({
+          clientX,
+          clientY,
+          offsetX: clientX,
+          offsetY: clientY,
+          buttons: 0,
+          pointerType: "mouse",
+          target: selectionCanvas,
+        } as any);
       };
 
       move(60, 30);
