@@ -14,7 +14,7 @@ use crate::SharedString;
 use quick_xml::events::Event;
 use quick_xml::Reader as XmlReader;
 use quick_xml::Writer as XmlWriter;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
 use std::io::{self, Cursor, Read, Seek, Write};
 use std::path::{Path, PathBuf};
@@ -728,6 +728,58 @@ impl XlsbWorkbook {
             &sheet_part,
             |input, output| patch_sheet_bin_streaming(input, output, &updated_edits),
         )
+    }
+
+    /// Save the workbook with cell edits across multiple worksheets.
+    ///
+    /// This is a convenience wrapper around the in-memory worksheet patcher
+    /// ([`patch_sheet_bin`]) plus the part override writer
+    /// ([`XlsbWorkbook::save_with_part_overrides`]).
+    ///
+    /// - Each affected worksheet part is read once (from `preserved_parts` if present, otherwise
+    ///   streamed from the source ZIP).
+    /// - Each sheet is patched once with all of its edits.
+    /// - The workbook is then written with a single call to `save_with_part_overrides`.
+    pub fn save_with_cell_edits_multi(
+        &self,
+        dest: impl AsRef<Path>,
+        edits_by_sheet: &BTreeMap<usize, Vec<CellEdit>>,
+    ) -> Result<(), ParseError> {
+        let mut overrides: HashMap<String, Vec<u8>> = HashMap::new();
+        let mut zip: Option<ZipArchive<File>> = None;
+
+        for (&sheet_index, edits) in edits_by_sheet {
+            if edits.is_empty() {
+                continue;
+            }
+
+            let meta = self
+                .sheets
+                .get(sheet_index)
+                .ok_or(ParseError::SheetIndexOutOfBounds(sheet_index))?;
+            let sheet_part = meta.part_path.clone();
+
+            let patched = if let Some(bytes) = self.preserved_parts.get(&sheet_part) {
+                patch_sheet_bin(bytes, edits)?
+            } else {
+                let zip = match zip.as_mut() {
+                    Some(zip) => zip,
+                    None => {
+                        let file = File::open(&self.path)?;
+                        zip = Some(ZipArchive::new(file)?);
+                        zip.as_mut().expect("zip just initialized")
+                    }
+                };
+                let mut entry = zip.by_name(&sheet_part)?;
+                let mut bytes = Vec::with_capacity(entry.size() as usize);
+                entry.read_to_end(&mut bytes)?;
+                patch_sheet_bin(&bytes, edits)?
+            };
+
+            overrides.insert(sheet_part, patched);
+        }
+
+        self.save_with_part_overrides(dest, &overrides)
     }
 
     /// Save the workbook while overriding specific part payloads.
