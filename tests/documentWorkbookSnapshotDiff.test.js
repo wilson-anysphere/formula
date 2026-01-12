@@ -215,6 +215,36 @@ test("diffDocumentWorkbookSnapshots reports formatOnly edits for sheet-default f
   assert.deepEqual(sheet1.diff.formatOnly[0].cell, { row: 0, col: 0 });
 });
 
+test("diffDocumentWorkbookSnapshots reports formatOnly edits for range-run formatting (DocumentController snapshots)", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", "x");
+  const beforeSnapshot = doc.encodeState();
+
+  // This range is:
+  // - not full-sheet
+  // - not full-height columns
+  // - not full-width rows
+  // - above RANGE_RUN_FORMAT_THRESHOLD (50k) so it should be encoded as `formatRunsByCol`.
+  doc.setRangeFormat("Sheet1", "A1:Z2000", { font: { bold: true } });
+  const afterSnapshot = doc.encodeState();
+
+  const parsed = JSON.parse(new TextDecoder().decode(afterSnapshot));
+  const sheet = parsed.sheets.find((s) => s.id === "Sheet1");
+  assert.ok(sheet);
+  assert.ok(Array.isArray(sheet.formatRunsByCol) && sheet.formatRunsByCol.length > 0);
+  assert.equal(
+    sheet.cells.find((c) => c.row === 0 && c.col === 0)?.format ?? null,
+    null,
+    "A1 should not have a per-cell format override when encoded via range runs",
+  );
+
+  const diff = diffDocumentWorkbookSnapshots({ beforeSnapshot, afterSnapshot });
+  const sheet1 = diff.cellsBySheet.find((entry) => entry.sheetId === "Sheet1");
+  assert.ok(sheet1);
+  assert.equal(sheet1.diff.formatOnly.length, 1);
+  assert.deepEqual(sheet1.diff.formatOnly[0].cell, { row: 0, col: 0 });
+});
+
 test("diffDocumentWorkbookSnapshots reports formatOnly edits when range format runs change (layered formats)", () => {
   const beforeSnapshot = encodeSnapshot({
     schemaVersion: 1,
