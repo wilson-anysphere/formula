@@ -5709,6 +5709,7 @@ mountRibbon(ribbonReactRoot, {
       commandId === "home.font.strikethrough" ||
       commandId === "home.alignment.wrapText" ||
       commandId === "view.show.showFormulas" ||
+      commandId === "formulas.formulaAuditing.showFormulas" ||
       commandId === "view.show.performanceStats" ||
       commandId === "view.window.split" ||
       commandId === "review.comments.showComments" ||
