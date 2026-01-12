@@ -84,6 +84,7 @@ describe("ai chat orchestrator (desktop integration)", () => {
 
     const result = await orchestrator.sendMessage({
       text: "Set C1 to 99",
+      attachments: [{ type: "range", reference: "Sheet1!A1:B3" }],
       history: [],
       onToolCall: onToolCall as any,
       onToolResult: onToolResult as any,
@@ -105,6 +106,8 @@ describe("ai chat orchestrator (desktop integration)", () => {
     expect(firstRequest.messages?.[0]?.role).toBe("system");
     expect(firstRequest.messages?.[0]?.content).toContain("WORKBOOK_CONTEXT");
     expect(firstRequest.messages?.[0]?.content).toContain("Workbook summary");
+    expect(firstRequest.messages?.[0]?.content).toContain('"kind": "selection"');
+    expect(firstRequest.messages?.[0]?.content).toContain("Sheet1!A1:B3");
 
     const entries = await auditStore.listEntries({ session_id: "session_test" });
     expect(entries.length).toBe(1);

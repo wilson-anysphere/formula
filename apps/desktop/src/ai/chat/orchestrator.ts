@@ -20,10 +20,12 @@ import { SpreadsheetLLMToolExecutor, createPreviewApprovalHandler } from "../../
 import { runChatWithToolsAuditedVerified } from "../../../../../packages/ai-tools/src/llm/audited-run.js";
 import type { PreviewEngineOptions, ToolPlanPreview } from "../../../../../packages/ai-tools/src/preview/preview-engine.js";
 import type { SpreadsheetApi } from "../../../../../packages/ai-tools/src/spreadsheet/api.js";
+import { parseA1Range } from "../../../../../packages/ai-tools/src/spreadsheet/a1.js";
 
 import { DlpViolationError } from "../../../../../packages/security/dlp/src/errors.js";
 
 import type { DocumentController } from "../../document/documentController.js";
+import type { Range } from "../../selection/types";
 
 import { DocumentControllerSpreadsheetApi } from "../tools/documentControllerSpreadsheetApi.js";
 import { createDesktopRagService, type DesktopRagService, type DesktopRagServiceOptions } from "../rag/ragService.js";
@@ -38,6 +40,29 @@ export type AiChatAttachment =
   | { type: "formula"; reference: string; data?: { formula: string } }
   | { type: "table"; reference: string; data?: unknown }
   | { type: "chart"; reference: string; data?: unknown };
+
+function selectionFromAttachments(
+  attachments: AiChatAttachment[],
+  defaultSheetId: string,
+): { sheetId: string; range: Range } | undefined {
+  const rangeAttachment = attachments.find((a) => a.type === "range" && typeof a.reference === "string");
+  if (!rangeAttachment) return undefined;
+
+  try {
+    const parsed = parseA1Range(rangeAttachment.reference, defaultSheetId);
+    return {
+      sheetId: parsed.sheet,
+      range: {
+        startRow: parsed.startRow - 1,
+        endRow: parsed.endRow - 1,
+        startCol: parsed.startCol - 1,
+        endCol: parsed.endCol - 1,
+      },
+    };
+  } catch {
+    return undefined;
+  }
+}
 
 export interface SendAiChatMessageParams {
   text: string;
@@ -240,6 +265,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
 
     const activeSheetId = options.getActiveSheetId?.() ?? "Sheet1";
     const attachments = params.attachments ?? [];
+    const selectedRange = selectionFromAttachments(attachments, activeSheetId);
 
     const dlp = maybeGetAiCloudDlpOptions({ documentId: options.workbookId, sheetId: activeSheetId }) ?? undefined;
 
@@ -263,6 +289,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
         signal,
         contextBuilder.build({
           activeSheetId,
+          ...(selectedRange ? { selectedRange } : {}),
           focusQuestion: text,
           attachments
         })
