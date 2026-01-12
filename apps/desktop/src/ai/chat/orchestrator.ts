@@ -24,7 +24,7 @@ import { SpreadsheetLLMToolExecutor, createPreviewApprovalHandler } from "../../
 import { runChatWithToolsAuditedVerified } from "../../../../../packages/ai-tools/src/llm/audited-run.js";
 import type { PreviewEngineOptions, ToolPlanPreview } from "../../../../../packages/ai-tools/src/preview/preview-engine.js";
 import type { SpreadsheetApi } from "../../../../../packages/ai-tools/src/spreadsheet/api.js";
-import { parseA1Range } from "../../../../../packages/ai-tools/src/spreadsheet/a1.js";
+import { parseA1Range } from "../../../../../packages/ai-tools/src/spreadsheet/a1.ts";
 
 import { DlpViolationError } from "../../../../../packages/security/dlp/src/errors.js";
 

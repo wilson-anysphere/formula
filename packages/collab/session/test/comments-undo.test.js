@@ -649,8 +649,11 @@ test("Binder-origin undo captures comment edits when comments root itself was cr
   // Apply update via the CJS build to simulate y-websocket applying updates.
   Ycjs.applyUpdate(doc, update, REMOTE_ORIGIN);
 
-  // Root exists but is not necessarily `instanceof Y.Map` in this module.
-  assert.ok(doc.share.get("comments"));
+  // Root exists but may be a generic placeholder type after applying updates via
+  // a different Yjs module instance (CJS vs ESM).
+  const existing = doc.share.get("comments");
+  assert.ok(existing);
+  assert.equal(existing instanceof Y.Map, false);
 
   const root = getCommentsRoot(doc);
   if (root.kind !== "map") {
