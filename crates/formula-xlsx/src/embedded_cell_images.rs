@@ -181,13 +181,41 @@ impl XlsxPackage {
             zero_based_matches > one_based_matches
         };
 
-        // Optional: richValue.xml relationship indices (rich value index -> relationship slot).
-        let rich_value_rel_indices: Vec<Option<u32>> = match self.part("xl/richData/richValue.xml") {
-            Some(bytes) => crate::rich_data::rich_value::parse_rich_value_relationship_indices(bytes)?
-                .into_iter()
-                .map(|idx| idx.map(|idx| idx as u32))
-                .collect(),
-            None => Vec::new(),
+        // Optional: richValue*.xml relationship indices (rich value index -> relationship slot).
+        //
+        // Excel can split rich values across multiple parts (`richValue.xml`, `richValue1.xml`, ...).
+        // Concatenate them in numeric-suffix order so that the resulting vector index matches the
+        // global rich value index.
+        let rich_value_rel_indices: Vec<Option<u32>> = {
+            let mut rich_value_parts: Vec<(u32, String)> = self
+                .part_names()
+                .filter_map(|name| {
+                    let name = name.strip_prefix('/').unwrap_or(name);
+                    rich_value_part_suffix_index(name).map(|idx| (idx, name.to_string()))
+                })
+                .collect();
+
+            if rich_value_parts.is_empty() {
+                Vec::new()
+            } else {
+                rich_value_parts.sort_by(|(a_idx, a_part), (b_idx, b_part)| {
+                    a_idx.cmp(b_idx).then_with(|| a_part.cmp(b_part))
+                });
+                rich_value_parts.dedup_by(|a, b| a.1 == b.1);
+
+                let mut out: Vec<Option<u32>> = Vec::new();
+                for (_idx, part) in rich_value_parts {
+                    let Some(bytes) = self.part(&part) else {
+                        continue;
+                    };
+                    out.extend(
+                        crate::rich_data::rich_value::parse_rich_value_relationship_indices(bytes)?
+                            .into_iter()
+                            .map(|idx| idx.map(|idx| idx as u32)),
+                    );
+                }
+                out
+            }
         };
 
         // Optional: rdRichValue local-image metadata (rich value index -> relationship slot + alt/calcOrigin).
@@ -322,6 +350,28 @@ impl XlsxPackage {
 
         Ok(out)
     }
+}
+
+fn rich_value_part_suffix_index(part_path: &str) -> Option<u32> {
+    let part_path = part_path.strip_prefix('/').unwrap_or(part_path);
+    if !part_path.starts_with("xl/richData/") {
+        return None;
+    }
+    let file_name = part_path.rsplit('/').next()?;
+    let file_name_lower = file_name.to_ascii_lowercase();
+    if !file_name_lower.ends_with(".xml") {
+        return None;
+    }
+
+    let stem = &file_name_lower[..file_name_lower.len() - ".xml".len()];
+    let suffix = stem.strip_prefix("richvalue")?;
+    if suffix.is_empty() {
+        return Some(0);
+    }
+    if !suffix.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    suffix.parse::<u32>().ok()
 }
 
 fn parse_rich_value_rel_ids(xml: &str) -> Result<Vec<String>, XlsxError> {
