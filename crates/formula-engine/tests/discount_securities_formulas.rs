@@ -20,10 +20,18 @@ fn evaluates_discount_security_and_tbill_financial_functions() {
 
     // Use dates whose YEARFRAC(.,.,0) is an integer to keep expected values simple.
     engine
-        .set_cell_formula("Sheet1", "A1", "=DISC(DATE(2020,1,1),DATE(2021,1,1),97,100)")
+        .set_cell_formula(
+            "Sheet1",
+            "A1",
+            "=DISC(DATE(2020,1,1),DATE(2021,1,1),97,100)",
+        )
         .unwrap();
     engine
-        .set_cell_formula("Sheet1", "B1", "=DISC(\"2020-01-01\",\"2021-01-01\",97,100)")
+        .set_cell_formula(
+            "Sheet1",
+            "B1",
+            "=DISC(\"2020-01-01\",\"2021-01-01\",97,100)",
+        )
         .unwrap();
     engine
         .set_cell_formula(
@@ -97,12 +105,31 @@ fn evaluates_discount_security_and_tbill_financial_functions() {
             "=TBILLEQ(DATE(2020,1,1),DATE(2020,7,1),0.05)",
         )
         .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A12",
+            "=DISC(DATE(2011,1,1),DATE(2011,12,31),97,100,4)",
+        )
+        .unwrap();
 
     engine.recalculate();
 
-    assert_close(assert_number(engine.get_cell_value("Sheet1", "A1")), 0.03, 1e-12);
-    assert_close(assert_number(engine.get_cell_value("Sheet1", "B1")), 0.03, 1e-12);
-    assert_close(assert_number(engine.get_cell_value("Sheet1", "A2")), 95.0, 1e-12);
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "A1")),
+        0.03,
+        1e-12,
+    );
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "B1")),
+        0.03,
+        1e-12,
+    );
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "A2")),
+        95.0,
+        1e-12,
+    );
     assert_close(
         assert_number(engine.get_cell_value("Sheet1", "A3")),
         3.0 / 97.0,
@@ -113,7 +140,11 @@ fn evaluates_discount_security_and_tbill_financial_functions() {
         3.0 / 97.0,
         1e-12,
     );
-    assert_close(assert_number(engine.get_cell_value("Sheet1", "A5")), 100.0, 1e-12);
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "A5")),
+        100.0,
+        1e-12,
+    );
 
     let expected_pricemat = 110.0 / 1.04 - 5.0;
     assert_close(
@@ -121,7 +152,11 @@ fn evaluates_discount_security_and_tbill_financial_functions() {
         expected_pricemat,
         1e-12,
     );
-    assert_close(assert_number(engine.get_cell_value("Sheet1", "A7")), 0.04, 1e-12);
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "A7")),
+        0.04,
+        1e-12,
+    );
 
     let expected_tbillprice = 100.0 * (1.0 - 0.05 * 182.0 / 360.0);
     assert_close(
@@ -151,6 +186,14 @@ fn evaluates_discount_security_and_tbill_financial_functions() {
         expected_tbilleq_short,
         1e-12,
     );
+
+    // Basis 4 (European 30/360) yields YEARFRAC == 359/360 between 2011-01-01 and 2011-12-31.
+    let expected_disc_basis4 = (100.0 - 97.0) / 100.0 / (359.0 / 360.0);
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "A12")),
+        expected_disc_basis4,
+        1e-12,
+    );
 }
 
 #[test]
@@ -158,7 +201,11 @@ fn discount_security_functions_validate_dates_and_basis() {
     let mut engine = Engine::new();
 
     engine
-        .set_cell_formula("Sheet1", "A1", "=DISC(DATE(2020,1,1),DATE(2020,1,1),97,100)")
+        .set_cell_formula(
+            "Sheet1",
+            "A1",
+            "=DISC(DATE(2020,1,1),DATE(2020,1,1),97,100)",
+        )
         .unwrap();
     engine
         .set_cell_formula(
@@ -168,7 +215,11 @@ fn discount_security_functions_validate_dates_and_basis() {
         )
         .unwrap();
     engine
-        .set_cell_formula("Sheet1", "A3", "=DISC(\"not a date\",DATE(2021,1,1),97,100)")
+        .set_cell_formula(
+            "Sheet1",
+            "A3",
+            "=DISC(\"not a date\",DATE(2021,1,1),97,100)",
+        )
         .unwrap();
     engine
         .set_cell_formula(
@@ -180,13 +231,22 @@ fn discount_security_functions_validate_dates_and_basis() {
 
     engine.recalculate();
 
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::Num));
-    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Error(ErrorKind::Num));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Num)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A2"),
+        Value::Error(ErrorKind::Num)
+    );
     assert_eq!(
         engine.get_cell_value("Sheet1", "A3"),
         Value::Error(ErrorKind::Value)
     );
-    assert_eq!(engine.get_cell_value("Sheet1", "A4"), Value::Error(ErrorKind::Div0));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A4"),
+        Value::Error(ErrorKind::Div0)
+    );
 }
 
 #[test]
@@ -243,12 +303,30 @@ fn discount_security_functions_validate_additional_constraints() {
 
     engine.recalculate();
 
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::Num));
-    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Error(ErrorKind::Num));
-    assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Error(ErrorKind::Num));
-    assert_eq!(engine.get_cell_value("Sheet1", "A4"), Value::Error(ErrorKind::Num));
-    assert_eq!(engine.get_cell_value("Sheet1", "A5"), Value::Error(ErrorKind::Num));
-    assert_eq!(engine.get_cell_value("Sheet1", "A6"), Value::Error(ErrorKind::Num));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Num)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A2"),
+        Value::Error(ErrorKind::Num)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A3"),
+        Value::Error(ErrorKind::Num)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A4"),
+        Value::Error(ErrorKind::Num)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A5"),
+        Value::Error(ErrorKind::Num)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A6"),
+        Value::Error(ErrorKind::Num)
+    );
 }
 
 #[test]
@@ -276,6 +354,12 @@ fn discount_security_functions_reject_non_finite_numbers() {
 
     engine.recalculate();
 
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::Num));
-    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Error(ErrorKind::Num));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Num)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A2"),
+        Value::Error(ErrorKind::Num)
+    );
 }
