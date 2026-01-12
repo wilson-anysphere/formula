@@ -17,3 +17,39 @@ fn xlsb_dump_prints_sheet_and_formula() {
         "stdout:\n{stdout}"
     );
 }
+
+#[test]
+fn xlsb_dump_prints_known_error_literals() {
+    let fixture_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/simple.xlsb");
+    let wb = formula_xlsb::XlsbWorkbook::open(fixture_path).expect("open xlsb fixture");
+
+    // Patch A1 to a modern error code (#SPILL!) so the CLI should display the literal rather than
+    // a raw hex code.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let patched = dir.path().join("errors.xlsb");
+    wb.save_with_cell_edits(
+        &patched,
+        0,
+        &[formula_xlsb::CellEdit {
+            row: 0,
+            col: 0,
+            new_value: formula_xlsb::CellValue::Error(0x2C), // #SPILL!
+            new_formula: None,
+            new_rgcb: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect("save patched xlsb");
+
+    let assert = Command::new(assert_cmd::cargo::cargo_bin!("xlsb_dump"))
+        .arg(&patched)
+        .arg("--sheet")
+        .arg("0")
+        .arg("--max")
+        .arg("10")
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(stdout.contains("#SPILL!"), "stdout:\n{stdout}");
+}

@@ -2,6 +2,7 @@ use std::env;
 use std::io;
 use std::path::PathBuf;
 
+use formula_xlsb::errors::xlsb_error_display;
 use formula_xlsb::format::{format_a1, format_hex};
 use formula_xlsb::rgce::decode_rgce_with_rgcb;
 use formula_xlsb::{CellValue, Formula, SheetMeta, XlsbWorkbook};
@@ -229,7 +230,7 @@ fn format_cell_value(value: &CellValue) -> String {
                 "FALSE".to_string()
             }
         }
-        CellValue::Error(code) => format!("#ERR(0x{code:02X})"),
+        CellValue::Error(code) => xlsb_error_display(*code),
         CellValue::Text(s) => format!("{s:?}"),
     }
 }
