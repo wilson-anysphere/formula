@@ -31112,6 +31112,64 @@
       "id": "oddlyield_high_price_ee9439059f8e"
     },
     {
+      "formula": "=ODDFPRICE(\"2008-11-11\",\"2021-03-01\",\"2008-10-15\",\"2009-03-01\",0.0785,0.0625,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDFPRICE"
+      ],
+      "description": "ODDFPRICE with ISO date text arguments (date coercion)",
+      "id": "oddfprice_date_text_b84f071d663c"
+    },
+    {
+      "formula": "=ODDLPRICE(\"2020-11-11\",\"2021-03-01\",\"2020-10-15\",0.0785,0.0625,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLPRICE"
+      ],
+      "description": "ODDLPRICE with ISO date text arguments (date coercion)",
+      "id": "oddlprice_date_text_47ed72c27f51"
+    },
+    {
+      "formula": "=ODDFYIELD(\"2008-11-11\",\"2021-03-01\",\"2008-10-15\",\"2009-03-01\",0.0785,A1,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "formula": "=ODDFPRICE(\"2008-11-11\",\"2021-03-01\",\"2008-10-15\",\"2009-03-01\",0.0785,0.0625,100,2,0)"
+        }
+      ],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDFYIELD"
+      ],
+      "description": "ODDFYIELD with ISO date text arguments (date coercion + roundtrip via ODDFPRICE)",
+      "id": "oddfyield_date_text_85273bc9c621"
+    },
+    {
+      "formula": "=ODDLYIELD(\"2020-11-11\",\"2021-03-01\",\"2020-10-15\",0.0785,A1,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "formula": "=ODDLPRICE(\"2020-11-11\",\"2021-03-01\",\"2020-10-15\",0.0785,0.0625,100,2,0)"
+        }
+      ],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLYIELD"
+      ],
+      "description": "ODDLYIELD with ISO date text arguments (date coercion + roundtrip via ODDLPRICE)",
+      "id": "oddlyield_date_text_a1e10539f6f5"
+    },
+    {
       "formula": "=NPV(0.1,A1:A4)",
       "outputCell": "C1",
       "inputs": [
@@ -32364,149 +32422,6 @@
       "id": "lambda_makearray_ce970103b29c"
     },
     {
-      "formula": "=ODDLPRICE(DATE(2023,2,15),DATE(2023,5,15),DATE(2023,1,31),0.05,0.06,100,2,0)",
-      "outputCell": "A1",
-      "inputs": [],
-      "tags": [
-        "financial",
-        "ODDLPRICE",
-        "odd_coupon"
-      ],
-      "id": "fin_oddlprice_in_period_b0_6f4f85c5e0a7"
-    },
-    {
-      "formula": "=ODDLPRICE(DATE(2023,1,31),DATE(2023,5,15),DATE(2023,1,31),0.05,0.06,100,2,0)",
-      "outputCell": "A1",
-      "inputs": [],
-      "tags": [
-        "financial",
-        "ODDLPRICE",
-        "odd_coupon"
-      ],
-      "id": "fin_oddlprice_settle_eq_last_b0_4d1a6e0a2d2a"
-    },
-    {
-      "formula": "=ODDLPRICE(DATE(2022,11,1),DATE(2023,5,15),DATE(2023,1,31),0.05,0.06,100,2,0)",
-      "outputCell": "A1",
-      "inputs": [],
-      "tags": [
-        "financial",
-        "ODDLPRICE",
-        "odd_coupon"
-      ],
-      "id": "fin_oddlprice_settle_before_last_b0_1c3c4e93d8f2"
-    },
-    {
-      "formula": "=ODDLPRICE(DATE(2023,2,15),DATE(2023,5,15),DATE(2023,1,31),0.05,0.06,100,2,1)",
-      "outputCell": "A1",
-      "inputs": [],
-      "tags": [
-        "financial",
-        "ODDLPRICE",
-        "odd_coupon"
-      ],
-      "id": "fin_oddlprice_in_period_b1_6948f06e1c6b"
-    },
-    {
-      "formula": "=ODDLYIELD(DATE(2023,2,15),DATE(2023,5,15),DATE(2023,1,31),0.05,ODDLPRICE(DATE(2023,2,15),DATE(2023,5,15),DATE(2023,1,31),0.05,0.06,100,2,0),100,2,0)",
-      "outputCell": "A1",
-      "inputs": [],
-      "tags": [
-        "financial",
-        "ODDLYIELD",
-        "odd_coupon"
-      ],
-      "id": "fin_oddlyield_roundtrip_b0_3517a63547f2"
-    },
-    {
-      "formula": "=ODDLYIELD(DATE(2022,11,1),DATE(2023,5,15),DATE(2023,1,31),0.05,99,100,2,0)",
-      "outputCell": "A1",
-      "inputs": [],
-      "tags": [
-        "financial",
-        "ODDLYIELD",
-        "odd_coupon"
-      ],
-      "id": "fin_oddlyield_settle_before_last_b0_4ef7acb86b86"
-    },
-    {
-      "formula": "=ODDLYIELD(DATE(2023,2,15),DATE(2023,5,15),DATE(2023,1,31),0.05,ODDLPRICE(DATE(2023,2,15),DATE(2023,5,15),DATE(2023,1,31),0.05,0.06,100,2,1),100,2,1)",
-      "outputCell": "A1",
-      "inputs": [],
-      "tags": [
-        "financial",
-        "ODDLYIELD",
-        "odd_coupon"
-      ],
-      "id": "fin_oddlyield_roundtrip_b1_0336d3a84bb5"
-    },
-    {
-      "formula": "=ODDFPRICE(DATE(2022,12,20),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,31),0.05,0.06,100,2,0)",
-      "outputCell": "A1",
-      "inputs": [],
-      "tags": [
-        "financial",
-        "ODDFPRICE",
-        "odd_coupon"
-      ],
-      "id": "fin_oddfprice_in_period_b0_9fe0c2e3c0ed"
-    },
-    {
-      "formula": "=ODDFPRICE(DATE(2023,1,31),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,31),0.05,0.06,100,2,0)",
-      "outputCell": "A1",
-      "inputs": [],
-      "tags": [
-        "financial",
-        "ODDFPRICE",
-        "odd_coupon"
-      ],
-      "id": "fin_oddfprice_settle_eq_first_b0_4d9f4b7e1d1a"
-    },
-    {
-      "formula": "=ODDFPRICE(DATE(2023,2,1),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,31),0.05,0.06,100,2,0)",
-      "outputCell": "A1",
-      "inputs": [],
-      "tags": [
-        "financial",
-        "ODDFPRICE",
-        "odd_coupon"
-      ],
-      "id": "fin_oddfprice_settle_after_first_b0_0e5d51d6b24d"
-    },
-    {
-      "formula": "=ODDFPRICE(DATE(2022,12,20),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,31),0.05,0.06,100,2,1)",
-      "outputCell": "A1",
-      "inputs": [],
-      "tags": [
-        "financial",
-        "ODDFPRICE",
-        "odd_coupon"
-      ],
-      "id": "fin_oddfprice_in_period_b1_7b00d37ce88f"
-    },
-    {
-      "formula": "=ODDFYIELD(DATE(2022,12,20),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,31),0.05,ODDFPRICE(DATE(2022,12,20),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,31),0.05,0.06,100,2,0),100,2,0)",
-      "outputCell": "A1",
-      "inputs": [],
-      "tags": [
-        "financial",
-        "ODDFYIELD",
-        "odd_coupon"
-      ],
-      "id": "fin_oddfyield_roundtrip_b0_5b76f8166e82"
-    },
-    {
-      "formula": "=ODDFYIELD(DATE(2022,12,20),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,31),0.05,ODDFPRICE(DATE(2022,12,20),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,31),0.05,0.06,100,2,1),100,2,1)",
-      "outputCell": "A1",
-      "inputs": [],
-      "tags": [
-        "financial",
-        "ODDFYIELD",
-        "odd_coupon"
-      ],
-      "id": "fin_oddfyield_roundtrip_b1_aa9bf2df61d5"
-    },
-    {
       "formula": "=1/0",
       "outputCell": "A1",
       "inputs": [],
@@ -32523,54 +32438,6 @@
         "error"
       ],
       "id": "err_na_110d25eb74fa"
-    },
-    {
-      "formula": "=ODDFPRICE(43831,44378,43739,44013,0,0.1,100,2,0)",
-      "outputCell": "A1",
-      "inputs": [],
-      "tags": [
-        "financial",
-        "ODDFPRICE",
-        "zero-coupon"
-      ],
-      "description": "ODDFPRICE zero-coupon: discounted redemption with odd first coupon schedule",
-      "id": "financial_oddfprice_zero_coupon_5a4bd7ab1a3c"
-    },
-    {
-      "formula": "=ODDFYIELD(43831,44378,43739,44013,0,86.3837598531476,100,2,0)",
-      "outputCell": "A1",
-      "inputs": [],
-      "tags": [
-        "financial",
-        "ODDFYIELD",
-        "zero-coupon"
-      ],
-      "description": "ODDFYIELD inverts ODDFPRICE for a zero-coupon bond",
-      "id": "financial_oddfyield_zero_coupon_2d7f1a6b0c9e"
-    },
-    {
-      "formula": "=ODDLPRICE(44228,44317,44197,0,0.1,100,2,0)",
-      "outputCell": "A1",
-      "inputs": [],
-      "tags": [
-        "financial",
-        "ODDLPRICE",
-        "zero-coupon"
-      ],
-      "description": "ODDLPRICE zero-coupon: discounted redemption with odd last coupon schedule",
-      "id": "financial_oddlprice_zero_coupon_3a2c6d48d1fe"
-    },
-    {
-      "formula": "=ODDLYIELD(44228,44317,44197,0,97.59000729485331,100,2,0)",
-      "outputCell": "A1",
-      "inputs": [],
-      "tags": [
-        "financial",
-        "ODDLYIELD",
-        "zero-coupon"
-      ],
-      "description": "ODDLYIELD inverts ODDLPRICE for a zero-coupon bond",
-      "id": "financial_oddlyield_zero_coupon_1f5d9b0e3c71"
     },
     {
       "formula": "=NO_SUCH_FUNCTION(1)",

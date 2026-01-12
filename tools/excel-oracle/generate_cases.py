@@ -1892,8 +1892,9 @@ def generate_cases() -> dict[str, Any]:
 
     # Odd-coupon bond functions (ODDF*/ODDL*)
     #
-    # These cases are intentionally small + focused on input validation semantics so the corpus
-    # can be used to confirm Excel behavior around negative yields / negative coupon rates.
+    # Keep these cases small + focused on:
+    # - input validation semantics (negative yields / negative coupon rates)
+    # - date coercion (ISO-like date text should be accepted and coerced to a date serial)
     _add_case(
         cases,
         prefix="oddfprice_neg_yld",
@@ -1935,6 +1936,47 @@ def generate_cases() -> dict[str, Any]:
         tags=["financial", "odd_coupon", "ODDLYIELD"],
         formula="=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,300,100,2,0)",
         description="ODDLYIELD with a price that implies a negative yield if allowed (confirm whether Excel returns a negative yield or #NUM!)",
+    )
+
+    _add_case(
+        cases,
+        prefix="oddfprice_date_text",
+        tags=["financial", "odd_coupon", "ODDFPRICE"],
+        formula='=ODDFPRICE("2008-11-11","2021-03-01","2008-10-15","2009-03-01",0.0785,0.0625,100,2,0)',
+        description="ODDFPRICE with ISO date text arguments (date coercion)",
+    )
+    _add_case(
+        cases,
+        prefix="oddlprice_date_text",
+        tags=["financial", "odd_coupon", "ODDLPRICE"],
+        formula='=ODDLPRICE("2020-11-11","2021-03-01","2020-10-15",0.0785,0.0625,100,2,0)',
+        description="ODDLPRICE with ISO date text arguments (date coercion)",
+    )
+    _add_case(
+        cases,
+        prefix="oddfyield_date_text",
+        tags=["financial", "odd_coupon", "ODDFYIELD"],
+        formula='=ODDFYIELD("2008-11-11","2021-03-01","2008-10-15","2009-03-01",0.0785,A1,100,2,0)',
+        inputs=[
+            CellInput(
+                "A1",
+                formula='=ODDFPRICE("2008-11-11","2021-03-01","2008-10-15","2009-03-01",0.0785,0.0625,100,2,0)',
+            )
+        ],
+        description="ODDFYIELD with ISO date text arguments (date coercion + roundtrip via ODDFPRICE)",
+    )
+    _add_case(
+        cases,
+        prefix="oddlyield_date_text",
+        tags=["financial", "odd_coupon", "ODDLYIELD"],
+        formula='=ODDLYIELD("2020-11-11","2021-03-01","2020-10-15",0.0785,A1,100,2,0)',
+        inputs=[
+            CellInput(
+                "A1",
+                formula='=ODDLPRICE("2020-11-11","2021-03-01","2020-10-15",0.0785,0.0625,100,2,0)',
+            )
+        ],
+        description="ODDLYIELD with ISO date text arguments (date coercion + roundtrip via ODDLPRICE)",
     )
 
     # Range-based cashflow functions.

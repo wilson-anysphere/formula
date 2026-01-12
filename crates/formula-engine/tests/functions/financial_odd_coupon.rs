@@ -50,6 +50,14 @@ fn eval_value_or_skip(sheet: &mut TestSheet, formula: &str) -> Option<Value> {
     }
 }
 
+fn cell_number_or_skip(sheet: &TestSheet, addr: &str) -> Option<f64> {
+    match sheet.get(addr) {
+        Value::Number(n) => Some(n),
+        Value::Error(ErrorKind::Name) => None,
+        other => panic!("expected number, got {other:?} from cell {addr}"),
+    }
+}
+
 #[test]
 fn oddfprice_zero_coupon_rate_reduces_to_discounted_redemption() {
     let system = ExcelDateSystem::EXCEL_1900;
@@ -537,6 +545,89 @@ fn odd_coupon_functions_coerce_basis_like_excel() {
     let oddl_true_basis_value = eval_number_or_skip(&mut sheet, oddl_true_basis)
         .expect("ODDLPRICE should accept TRUE basis (TRUE->1)");
     assert_close(oddl_true_basis_value, oddl_baseline_basis_1_value, 1e-9);
+}
+
+#[test]
+fn odd_coupon_functions_accept_iso_date_text_arguments() {
+    let mut sheet = TestSheet::new();
+    // Excel date coercion: ISO-like text should be parsed as a date serial.
+    // Ensure odd coupon functions accept text dates and produce the same result
+    // as DATE()-based inputs.
+
+    // Baseline case (Task 56): odd first coupon period.
+    let baseline_oddfprice = "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,0)";
+    let baseline_oddfprice_value = match eval_number_or_skip(&mut sheet, baseline_oddfprice) {
+        Some(v) => v,
+        None => return,
+    };
+    let iso_oddfprice = r#"=ODDFPRICE("2008-11-11","2021-03-01","2008-10-15","2009-03-01",0.0785,0.0625,100,2,0)"#;
+    let iso_oddfprice_value = eval_number_or_skip(&mut sheet, iso_oddfprice)
+        .expect("ODDFPRICE should accept ISO date text arguments");
+    assert_close(iso_oddfprice_value, baseline_oddfprice_value, 1e-9);
+
+    // Baseline case (Task 56): odd last coupon period.
+    let baseline_oddlprice =
+        "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,0)";
+    let baseline_oddlprice_value = eval_number_or_skip(&mut sheet, baseline_oddlprice)
+        .expect("ODDLPRICE should return a number for the baseline");
+    let iso_oddlprice =
+        r#"=ODDLPRICE("2020-11-11","2021-03-01","2020-10-15",0.0785,0.0625,100,2,0)"#;
+    let iso_oddlprice_value = eval_number_or_skip(&mut sheet, iso_oddlprice)
+        .expect("ODDLPRICE should accept ISO date text arguments");
+    assert_close(iso_oddlprice_value, baseline_oddlprice_value, 1e-9);
+}
+
+#[test]
+fn odd_coupon_functions_floor_time_fractions_in_date_arguments() {
+    let mut sheet = TestSheet::new();
+    // Excel date serials can contain a fractional time component. For these bond functions,
+    // Excel behaves as though date arguments are floored to the day.
+
+    let baseline_oddfprice = "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,0)";
+    let baseline_oddfprice_value = match eval_number_or_skip(&mut sheet, baseline_oddfprice) {
+        Some(v) => v,
+        None => return,
+    };
+    let fractional_oddfprice = "=ODDFPRICE(DATE(2008,11,11)+0.75,DATE(2021,3,1)+0.1,DATE(2008,10,15)+0.9,DATE(2009,3,1)+0.5,0.0785,0.0625,100,2,0)";
+    let fractional_oddfprice_value = eval_number_or_skip(&mut sheet, fractional_oddfprice)
+        .expect("ODDFPRICE should floor fractional date serials");
+    assert_close(fractional_oddfprice_value, baseline_oddfprice_value, 1e-9);
+
+    let baseline_oddlprice =
+        "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,0)";
+    let baseline_oddlprice_value = eval_number_or_skip(&mut sheet, baseline_oddlprice)
+        .expect("ODDLPRICE should return a number for the baseline");
+    let fractional_oddlprice = "=ODDLPRICE(DATE(2020,11,11)+0.75,DATE(2021,3,1)+0.1,DATE(2020,10,15)+0.9,0.0785,0.0625,100,2,0)";
+    let fractional_oddlprice_value = eval_number_or_skip(&mut sheet, fractional_oddlprice)
+        .expect("ODDLPRICE should floor fractional date serials");
+    assert_close(fractional_oddlprice_value, baseline_oddlprice_value, 1e-9);
+}
+
+#[test]
+fn oddfyield_roundtrips_price_with_text_dates() {
+    let mut sheet = TestSheet::new();
+    // Ensure ODDFYIELD accepts date arguments supplied as ISO-like text, and that the
+    // ODDFPRICE/ODDFYIELD pair roundtrips the yield.
+
+    sheet.set_formula(
+        "A1",
+        "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,0)",
+    );
+    sheet.recalc();
+
+    let _price = match cell_number_or_skip(&sheet, "A1") {
+        Some(v) => v,
+        None => return,
+    };
+
+    let recovered_yield = match eval_number_or_skip(
+        &mut sheet,
+        r#"=ODDFYIELD("2008-11-11","2021-03-01","2008-10-15","2009-03-01",0.0785,A1,100,2,0)"#,
+    ) {
+        Some(v) => v,
+        None => return,
+    };
+    assert_close(recovered_yield, 0.0625, 1e-10);
 }
 
 #[test]
