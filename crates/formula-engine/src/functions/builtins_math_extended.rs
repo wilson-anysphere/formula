@@ -470,7 +470,10 @@ inventory::submit! {
 
 fn log_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let number = dynamic_value_from_arg(ctx, ctx.eval_arg(&args[0]));
-    if args.len() == 1 {
+    // Excel treats omitted optional arguments as the function's default. In formulas like
+    // `LOG(100,)` the base expression is parsed as a blank argument (`CompiledExpr::Blank`), which
+    // should be treated the same as an omitted base (`LOG(100)`).
+    if matches!(args.get(1), None | Some(CompiledExpr::Blank)) {
         return elementwise_unary(&number, |elem| match elem {
             Value::Error(e) => Value::Error(*e),
             other => {

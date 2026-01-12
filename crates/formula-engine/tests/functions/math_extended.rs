@@ -10,6 +10,8 @@ fn core_math_functions_match_excel_errors() {
 
     assert_number(&sheet.eval("=PRODUCT(2,3,4)"), 24.0);
     assert_number(&sheet.eval("=POWER(2,3)"), 8.0);
+    assert_number(&sheet.eval("=LOG(100)"), 2.0);
+    assert_number(&sheet.eval("=LOG(100,)"), 2.0);
 
     // POWER domain errors.
     assert_eq!(sheet.eval("=POWER(0,-1)"), Value::Error(ErrorKind::Div0));
