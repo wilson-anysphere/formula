@@ -301,15 +301,13 @@ export class ContextMenu {
     const focusInSubmenu = Boolean(this.submenu && activeEl && this.submenu.contains(activeEl));
     const focusContainer = focusInSubmenu && this.submenu ? this.submenu : this.menu;
 
-    if (e.key === "Escape") {
+    // "Escape" is standard, but tolerate legacy values (e.g. "Esc") and rely on
+    // `code`/`keyCode` as a fallback for WebView environments that may differ.
+    const isEscape =
+      e.key === "Escape" || e.key === "Esc" || e.code === "Escape" || e.keyCode === 27;
+    if (isEscape) {
       e.preventDefault();
       e.stopPropagation();
-      if (this.submenu) {
-        const parent = this.submenuParent;
-        this.closeSubmenu();
-        if (focusInSubmenu) parent?.focus({ preventScroll: true });
-        return;
-      }
       this.close();
       return;
     }

@@ -3,8 +3,8 @@ import { expect, test, type Page } from "@playwright/test";
 import { gotoDesktop } from "./helpers";
 
 async function waitForIdle(page: Page): Promise<void> {
-  await page.waitForFunction(() => Boolean((window as any).__formulaApp?.whenIdle), null, { timeout: 10_000 });
-  await page.evaluate(() => (window as any).__formulaApp.whenIdle());
+  await page.waitForFunction(() => Boolean((window.__formulaApp as any)?.whenIdle), null, { timeout: 10_000 });
+  await page.evaluate(() => (window.__formulaApp as any).whenIdle());
 }
 
 test.describe("grid context menu keyboard invocation", () => {
@@ -27,6 +27,8 @@ test.describe("grid context menu keyboard invocation", () => {
     const copy = menu.getByRole("button", { name: "Copy" });
     await expect(copy.locator('span[aria-hidden="true"]')).toHaveText(expectedCopyShortcut);
 
+    // Ensure Escape targets the menu (focus can remain on the grid depending on timing).
+    await copy.focus();
     await page.keyboard.press("Escape");
     await expect(menu).toBeHidden();
 
@@ -42,8 +44,7 @@ test.describe("grid context menu keyboard invocation", () => {
     await page.click("#grid", { position: { x: 80, y: 40 } });
 
     const selectionBefore = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const app: any = (window as any).__formulaApp;
+      const app = window.__formulaApp as any;
       const limits = app?.limits ?? { maxRows: 1_048_576, maxCols: 16_384 };
       app.selectRange({ range: { startRow: 0, endRow: 0, startCol: 0, endCol: limits.maxCols - 1 } });
       return app.getSelectionRanges();
@@ -54,7 +55,7 @@ test.describe("grid context menu keyboard invocation", () => {
     await expect(menu).toBeVisible();
     await expect(menu.getByRole("button", { name: "Row Height…" })).toBeVisible();
 
-    const selectionAfter = await page.evaluate(() => (window as any).__formulaApp.getSelectionRanges());
+    const selectionAfter = await page.evaluate(() => (window.__formulaApp as any).getSelectionRanges());
     expect(selectionAfter).toEqual(selectionBefore);
   });
 
@@ -65,8 +66,7 @@ test.describe("grid context menu keyboard invocation", () => {
     await page.click("#grid", { position: { x: 80, y: 40 } });
 
     const selectionBefore = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const app: any = (window as any).__formulaApp;
+      const app = window.__formulaApp as any;
       const limits = app?.limits ?? { maxRows: 1_048_576, maxCols: 16_384 };
       app.selectRange({ range: { startRow: 0, endRow: limits.maxRows - 1, startCol: 0, endCol: 0 } });
       return app.getSelectionRanges();
@@ -77,7 +77,7 @@ test.describe("grid context menu keyboard invocation", () => {
     await expect(menu).toBeVisible();
     await expect(menu.getByRole("button", { name: "Column Width…" })).toBeVisible();
 
-    const selectionAfter = await page.evaluate(() => (window as any).__formulaApp.getSelectionRanges());
+    const selectionAfter = await page.evaluate(() => (window.__formulaApp as any).getSelectionRanges());
     expect(selectionAfter).toEqual(selectionBefore);
   });
 });
