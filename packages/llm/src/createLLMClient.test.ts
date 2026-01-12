@@ -10,6 +10,7 @@ describe("createLLMClient", () => {
   });
 
   it("rejects legacy provider configuration", () => {
-    expect(() => (createLLMClient as any)({ provider: "openai", apiKey: "test-key" })).toThrow(/no longer accepts/);
+    // Any arguments should be rejected (legacy provider config no longer supported).
+    expect(() => (createLLMClient as any)({})).toThrow(/no longer accepts/);
   });
 });
