@@ -6069,6 +6069,11 @@ mountRibbon(ribbonReactRoot, {
   },
   onCommand: (commandId) => {
     const doc = app.getDocument();
+    const executeBuiltinCommand = (builtinId: string, ...args: any[]) => {
+      void commandRegistry.executeCommand(builtinId, ...args).catch((err) => {
+        showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
+      });
+    };
 
     // Toggle buttons trigger both `onToggle` and `onCommand`. We handle most toggle
     // semantics in `onToggle` (since it provides the `pressed` state). Avoid
@@ -7037,6 +7042,20 @@ mountRibbon(ribbonReactRoot, {
       case "home.number.moreFormats.custom":
       case "home.cells.format.formatCells":
         openFormatCells();
+        return;
+      case "home.editing.autoSum":
+      case "home.editing.autoSum.sum":
+        executeBuiltinCommand("edit.autoSum");
+        // `edit.autoSum` restores focus, but ensure the grid is focused even if the command is a no-op.
+        app.focus();
+        return;
+      case "home.editing.fill.down":
+        executeBuiltinCommand("edit.fillDown");
+        app.focus();
+        return;
+      case "home.editing.fill.right":
+        executeBuiltinCommand("edit.fillRight");
+        app.focus();
         return;
       case "home.editing.findSelect.find":
         showDialogAndFocus(findDialog);
