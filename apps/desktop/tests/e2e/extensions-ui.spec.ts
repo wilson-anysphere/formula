@@ -194,9 +194,10 @@ test.describe("Extensions UI integration", () => {
     await page.keyboard.press(`${primary}+Shift+P`);
     await expect(page.getByTestId("command-palette")).toBeVisible();
     await page.getByTestId("command-palette-input").fill("Sum Selection");
-    await expect(page.getByTestId("command-palette-list")).toContainText("Sample Hello: Sum Selection", {
-      timeout: 10_000,
-    });
+    // Command palette groups commands by category header (Sample Hello) and command title row.
+    const list = page.getByTestId("command-palette-list");
+    await expect(list).toContainText("Sample Hello", { timeout: 10_000 });
+    await expect(list).toContainText("Sum Selection", { timeout: 10_000 });
     await page.keyboard.press("Escape");
 
     await expect(page.getByTestId("panel-sampleHello.panel")).toBeAttached();
@@ -471,17 +472,69 @@ test.describe("Extensions UI integration", () => {
     await expect(page.getByTestId("panel-extensions")).toBeVisible();
     await expect(page.getByTestId("run-command-sampleHello.openPanel")).toBeVisible();
 
-    // Right-click inside the selection on a non-active cell; selection should remain multi-cell.
-    const b2 = await page.evaluate(() => {
+    // Ensure the grid has a usable hit-test surface (headless environments can end up with a
+    // near-zero grid height depending on viewport/layout).
+    await page.evaluate(() => {
+      const grid = document.getElementById("grid");
+      if (!grid) return;
+      grid.style.height = "600px";
+      grid.style.minHeight = "600px";
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const app: any = (window as any).__formulaApp;
-      return app.getCellRectA1("B2");
+      try {
+        app?.onResize?.();
+      } catch {
+        // ignore
+      }
     });
-    if (!b2) throw new Error("Missing B2 rect");
-    await page.locator("#grid").click({
-      button: "right",
-      position: { x: b2.x + b2.width / 2, y: b2.y + b2.height / 2 },
+    await page.waitForFunction(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const app: any = (window as any).__formulaApp;
+      const rect = app?.getCellRectA1?.("D4");
+      return Boolean(rect && rect.width > 0 && rect.height > 0);
     });
+
+    // Right-click inside the selection on a non-active cell; selection should remain multi-cell.
+    const b2Point = await page.evaluate(() => {
+      const grid = document.getElementById("grid");
+      if (!grid) throw new Error("Missing #grid container");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const app: any = (window as any).__formulaApp;
+      if (!app?.getCellRectA1 || !app?.pickCellAtClientPoint) {
+        throw new Error("Missing required SpreadsheetApp test helpers");
+      }
+
+      const target = { row: 1, col: 1 };
+      const rect = app.getCellRectA1("B2");
+      if (!rect) throw new Error("Missing B2 rect");
+      const gridRect = grid.getBoundingClientRect();
+
+      const candidates = [
+        { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 },
+        { x: gridRect.left + rect.x + rect.width / 2, y: gridRect.top + rect.y + rect.height / 2 },
+      ];
+
+      for (const point of candidates) {
+        const picked = app.pickCellAtClientPoint(point.x, point.y);
+        if (picked && picked.row === target.row && picked.col === target.col) return point;
+      }
+
+      throw new Error("Failed to resolve B2 client coordinates for context menu test");
+    });
+
+    await page.evaluate((point) => {
+      const grid = document.getElementById("grid");
+      if (!grid) throw new Error("Missing #grid container");
+      grid.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          button: 2,
+          clientX: point.x,
+          clientY: point.y,
+        }),
+      );
+    }, b2Point);
 
     const menu = page.getByTestId("context-menu");
     await expect(menu).toBeVisible();
@@ -493,16 +546,46 @@ test.describe("Extensions UI integration", () => {
     await expect(menu).toBeHidden();
 
     // Right-click outside the selection should move active cell (and collapse selection).
-    const d4 = await page.evaluate(() => {
+    const d4Point = await page.evaluate(() => {
+      const grid = document.getElementById("grid");
+      if (!grid) throw new Error("Missing #grid container");
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const app: any = (window as any).__formulaApp;
-      return app.getCellRectA1("D4");
+      if (!app?.getCellRectA1 || !app?.pickCellAtClientPoint) {
+        throw new Error("Missing required SpreadsheetApp test helpers");
+      }
+
+      const target = { row: 3, col: 3 };
+      const rect = app.getCellRectA1("D4");
+      if (!rect) throw new Error("Missing D4 rect");
+      const gridRect = grid.getBoundingClientRect();
+
+      const candidates = [
+        { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 },
+        { x: gridRect.left + rect.x + rect.width / 2, y: gridRect.top + rect.y + rect.height / 2 },
+      ];
+
+      for (const point of candidates) {
+        const picked = app.pickCellAtClientPoint(point.x, point.y);
+        if (picked && picked.row === target.row && picked.col === target.col) return point;
+      }
+
+      throw new Error("Failed to resolve D4 client coordinates for context menu test");
     });
-    if (!d4) throw new Error("Missing D4 rect");
-    await page.locator("#grid").click({
-      button: "right",
-      position: { x: d4.x + d4.width / 2, y: d4.y + d4.height / 2 },
-    });
+
+    await page.evaluate((point) => {
+      const grid = document.getElementById("grid");
+      if (!grid) throw new Error("Missing #grid container");
+      grid.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          button: 2,
+          clientX: point.x,
+          clientY: point.y,
+        }),
+      );
+    }, d4Point);
 
     await expect(menu).toBeVisible();
     await expect(page.getByTestId("active-cell")).toHaveText("D4");
