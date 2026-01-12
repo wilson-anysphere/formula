@@ -1493,6 +1493,17 @@ export default {
       ]
     },
     {
+      "name": "FVSCHEDULE",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "any"
+      ]
+    },
+    {
       "name": "GAUSS",
       "min_args": 1,
       "max_args": 1,

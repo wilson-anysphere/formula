@@ -21,6 +21,7 @@ mod financial_amortization;
 mod financial_depreciation_ext;
 mod financial_bonds_invariants;
 mod financial_french_depreciation;
+mod financial_fvschedule;
 mod financial_discount_securities;
 mod financial_misc;
 mod financial_odd_coupon;

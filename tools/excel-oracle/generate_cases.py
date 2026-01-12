@@ -1744,6 +1744,14 @@ def generate_cases() -> dict[str, Any]:
     _add_case(cases, prefix="pv", tags=["financial", "PV"], formula="=PV(0.05, 10, -100)")
     _add_case(cases, prefix="fv", tags=["financial", "FV"], formula="=FV(0, 5, -10)")
     _add_case(cases, prefix="fv", tags=["financial", "FV"], formula="=FV(0.05, 10, -100)")
+    _add_case(
+        cases,
+        prefix="fvschedule",
+        tags=["financial", "FVSCHEDULE"],
+        formula="=FVSCHEDULE(100,A1:A3)",
+        inputs=[CellInput("A1", 0.1), CellInput("A2", 0.2), CellInput("A3", 0.3)],
+        output_cell="C1",
+    )
     _add_case(cases, prefix="pmt", tags=["financial", "PMT"], formula="=PMT(0, 2, 10)")
     _add_case(cases, prefix="pmt", tags=["financial", "PMT"], formula="=PMT(0.05, 10, 1000)")
     _add_case(cases, prefix="ipmt", tags=["financial", "IPMT"], formula="=IPMT(0.05, 1, 10, 1000)")

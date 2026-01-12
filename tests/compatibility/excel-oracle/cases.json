@@ -30728,6 +30728,29 @@
       "id": "fv_b6105e0cea52"
     },
     {
+      "formula": "=FVSCHEDULE(100,A1:A3)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 0.1
+        },
+        {
+          "cell": "A2",
+          "value": 0.2
+        },
+        {
+          "cell": "A3",
+          "value": 0.3
+        }
+      ],
+      "tags": [
+        "financial",
+        "FVSCHEDULE"
+      ],
+      "id": "fvschedule_c316083deaa1"
+    },
+    {
       "formula": "=PMT(0, 2, 10)",
       "outputCell": "C1",
       "inputs": [],

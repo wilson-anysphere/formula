@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-01-12T09:08:53.926059826Z",
+  "generatedAt": "2026-01-12T09:20:23.393844454Z",
   "source": {
     "kind": "excel",
     "version": "unknown",
@@ -17,8 +17,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "4368e0ca2533e0df4657c6bc6f02a4e855a14d7449c4e71868b1b67e5459487a",
-    "count": 1586
+    "sha256": "a496c3147f7f96972bfa1e320f1568557b8ed97dbcab48fc352ec630891bfe73",
+    "count": 1587
   },
   "results": [
     {
@@ -14403,6 +14403,16 @@
       },
       "address": "C1",
       "displayText": "1257.7892535548829"
+    },
+    {
+      "caseId": "fvschedule_c316083deaa1",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 171.6
+      },
+      "address": "C1",
+      "displayText": "171.6"
     },
     {
       "caseId": "pmt_195c5c382248",

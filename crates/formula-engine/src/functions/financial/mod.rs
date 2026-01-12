@@ -8,6 +8,7 @@ mod builtins_depreciation_ext;
 mod builtins_french_depreciation;
 mod builtins_odd_coupon;
 mod builtins_misc;
+mod builtins_schedules;
 mod builtins_securities;
 mod bonds;
 mod bonds_odd;
@@ -19,6 +20,7 @@ mod french_depreciation;
 mod iterative;
 mod misc;
 mod odd_coupon;
+mod schedules;
 mod securities;
 mod time_value;
 
@@ -34,6 +36,7 @@ pub use duration::pduration;
 pub use french_depreciation::{amordegrec, amorlinc};
 pub use misc::{dollarde, dollarfr, ispmt};
 pub use odd_coupon::{oddfprice, oddfyield, oddlprice, oddlyield};
+pub use schedules::fvschedule;
 pub use securities::{
     disc, intrate, pricedisc, pricemat, received, tbilleq, tbillprice, tbillyield, yielddisc,
     yieldmat,
