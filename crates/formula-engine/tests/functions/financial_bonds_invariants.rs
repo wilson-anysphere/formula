@@ -97,6 +97,7 @@ fn coup_invariants_when_settlement_is_coupon_date() {
                         &mut sheet,
                         &format!("=COUPDAYS({settlement},{maturity},{frequency},{basis})"),
                     );
+
                     // For bases 2 (Actual/360) and 3 (Actual/365), Excel treats the coupon-period
                     // length E as a fixed fraction of a 360/365-day year, while DSC remains an
                     // actual day count. That means DSC is not necessarily equal to E even when
@@ -240,16 +241,14 @@ fn coup_schedule_roundtrips_when_settlement_is_coupon_date() {
                         &mut sheet,
                         &format!("=COUPPCD({settlement},{maturity},{frequency},{basis})"),
                     );
-                    let settlement_serial =
-                        eval_number(&mut sheet, &format!("={settlement}"));
+                    let settlement_serial = eval_number(&mut sheet, &format!("={settlement}"));
                     assert_close(pcd, settlement_serial, 0.0);
 
                     let ncd = eval_number(
                         &mut sheet,
                         &format!("=COUPNCD({settlement},{maturity},{frequency},{basis})"),
                     );
-                    let expected_ncd_serial =
-                        eval_number(&mut sheet, &format!("={expected_ncd}"));
+                    let expected_ncd_serial = eval_number(&mut sheet, &format!("={expected_ncd}"));
                     assert_close(ncd, expected_ncd_serial, 0.0);
 
                     let n = eval_number(
@@ -436,8 +435,7 @@ fn duration_n1_equals_time_to_maturity() {
                 let settlement = format!("({pcd}+{delta})");
 
                 for &basis in &bases {
-                    // For N=1, NCD == maturity and PCD == EDATE(maturity, -months_per_period) (since
-                    // we picked settlement in the final coupon period).
+                    // For N=1, NCD == maturity and PCD is the coupon date one period prior.
                     //
                     // Compute expected DURATION using the same day-count definitions as the bond
                     // schedule (`coupon_schedule` in `bonds.rs`):
@@ -492,11 +490,7 @@ fn mduration_matches_duration_identity() {
         return;
     }
 
-    let maturities = [
-        "DATE(2030,12,31)",
-        "DATE(2031,2,28)",
-        "DATE(2030,8,30)",
-    ];
+    let maturities = ["DATE(2030,12,31)", "DATE(2031,2,28)", "DATE(2030,8,30)"];
     let frequencies = [1, 2, 4];
     let bases = [0, 1, 2, 3, 4];
     let coupons = [0.025, 0.08];
@@ -506,8 +500,7 @@ fn mduration_matches_duration_identity() {
         for &frequency in &frequencies {
             let months_per_period = 12 / frequency;
             for k in 1..=6 {
-                let settlement =
-                    coupon_date_from_maturity(maturity, months_per_period, k);
+                let settlement = coupon_date_from_maturity(maturity, months_per_period, k);
 
                 for &basis in &bases {
                     for &coupon in &coupons {

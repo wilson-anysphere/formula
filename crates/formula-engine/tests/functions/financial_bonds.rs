@@ -119,6 +119,33 @@ fn settlement_on_coupon_date_has_zero_accrued_interest() {
 }
 
 #[test]
+fn yield_price_roundtrip_end_of_month_schedule() {
+    let system = ExcelDateSystem::EXCEL_1900;
+    let settlement = ymd_to_serial(ExcelDate::new(2020, 3, 1), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2021, 8, 31), system).unwrap();
+    let rate = 0.05;
+    let yld = 0.07;
+    let redemption = 100.0;
+    let frequency = 2;
+    let basis = 3; // Actual/365 has a fixed coupon-period length (365/frequency).
+
+    let pr = price(
+        settlement,
+        maturity,
+        rate,
+        yld,
+        redemption,
+        frequency,
+        basis,
+        system,
+    )
+    .unwrap();
+
+    let recovered = yield_rate(settlement, maturity, rate, pr, redemption, frequency, basis, system).unwrap();
+    assert_close(recovered, yld, 1e-10);
+}
+
+#[test]
 fn price_supports_zero_yield() {
     let system = ExcelDateSystem::EXCEL_1900;
     let settlement = ymd_to_serial(ExcelDate::new(2020, 1, 1), system).unwrap();
@@ -309,7 +336,6 @@ fn builtins_accept_date_strings_via_datevalue() {
         Value::Error(ErrorKind::Num)
     );
 }
-
 #[test]
 fn coupon_schedule_sanity_basis_0_and_1() {
     let system = ExcelDateSystem::EXCEL_1900;
