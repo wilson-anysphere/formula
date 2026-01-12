@@ -22,6 +22,17 @@ describe("command palette search", () => {
     expect(names).toContain("SUMIF");
   });
 
+  it("matches functions when users include parentheses (e.g. SUM()", () => {
+    const sections = buildCommandPaletteSections({
+      query: "sum(",
+      commands: [],
+      limits: { maxResults: 50, maxResultsPerGroup: 50 },
+    });
+    const functions = sections.find((s) => s.title === "FUNCTIONS");
+    expect(functions).toBeTruthy();
+    expect(functions!.results[0]).toMatchObject({ kind: "function", name: "SUM" });
+  });
+
   it("groups recent commands separately from the COMMANDS section", () => {
     const commands: CommandContribution[] = [
       { commandId: "freeze", title: "Freeze Panes", category: "View", source: { kind: "builtin" } },

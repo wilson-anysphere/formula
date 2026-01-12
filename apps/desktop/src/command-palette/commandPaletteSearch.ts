@@ -66,7 +66,9 @@ export function searchFunctionResults(query: string, opts: { limit: number }): C
   const normalized = String(query ?? "")
     .trim()
     .replace(/^=+/, "")
-    .replace(/\s+/g, "");
+    .replace(/\s+/g, "")
+    // Users often type formulas like `SUM(` or `=SUM(`; ignore non-word characters.
+    .replace(/[^A-Za-z0-9_]/g, "");
   const limit = Math.max(0, Math.floor(opts.limit));
   return scoreFunctionResults(normalized.toLowerCase(), limit);
 }
@@ -132,7 +134,7 @@ function buildQuerySections(
   limits: { maxResults: number; maxResultsPerGroup: number },
 ): CommandPaletteSection[] {
   const compiled = compileFuzzyQuery(query);
-  const functionQueryLower = compiled.normalizedLower.replace(/\s+/g, "");
+  const functionQueryLower = compiled.normalizedLower.replace(/\s+/g, "").replace(/[^a-z0-9_]/g, "");
 
   const commandResults = scoreCommandResults(compiled, commands, limits.maxResults).slice(0, limits.maxResultsPerGroup);
   const functionResults = scoreFunctionResults(functionQueryLower, limits.maxResults).slice(0, limits.maxResultsPerGroup);
