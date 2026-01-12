@@ -4,7 +4,7 @@ use crate::WorkbookKind;
 use formula_columnar::{ColumnType as ColumnarType, Value as ColumnarValue};
 use formula_model::{
     normalize_formula_text, Cell, CellRef, CellValue, DateSystem, DefinedNameScope, Hyperlink,
-    HyperlinkTarget, Range, SheetVisibility, Workbook, Worksheet,
+    HyperlinkTarget, Outline, Range, SheetVisibility, Workbook, Worksheet,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
@@ -307,6 +307,106 @@ fn sheet_rels_xml(table_parts: &[(String, String)]) -> String {
     )
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct ColXmlProps {
+    width: Option<f32>,
+    hidden: bool,
+    outline_level: u8,
+    collapsed: bool,
+}
+
+fn render_cols(sheet: &Worksheet, outline: &Outline) -> String {
+    let mut col_xml_props: BTreeMap<u32, ColXmlProps> = BTreeMap::new();
+
+    // Column properties are stored 0-based in the model; OOXML uses 1-based indices.
+    for (col0, props) in sheet.col_properties.iter() {
+        let col_1 = col0.saturating_add(1);
+        if col_1 == 0 || col_1 > formula_model::EXCEL_MAX_COLS {
+            continue;
+        }
+        col_xml_props.insert(
+            col_1,
+            ColXmlProps {
+                width: props.width,
+                hidden: props.hidden,
+                outline_level: 0,
+                collapsed: false,
+            },
+        );
+    }
+
+    // Merge in outline metadata (levels/collapsed/hidden). Outline indices are already 1-based.
+    for (col_1, entry) in outline.cols.iter() {
+        if col_1 == 0 || col_1 > formula_model::EXCEL_MAX_COLS {
+            continue;
+        }
+        if entry.level == 0 && !entry.hidden.is_hidden() && !entry.collapsed {
+            continue;
+        }
+        col_xml_props
+            .entry(col_1)
+            .and_modify(|props| {
+                props.outline_level = entry.level;
+                props.collapsed = entry.collapsed;
+                props.hidden |= entry.hidden.is_hidden();
+            })
+            .or_insert_with(|| ColXmlProps {
+                width: None,
+                hidden: entry.hidden.is_hidden(),
+                outline_level: entry.level,
+                collapsed: entry.collapsed,
+            });
+    }
+
+    if col_xml_props.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::new();
+    out.push_str("<cols>");
+
+    let mut current: Option<(u32, u32, ColXmlProps)> = None;
+    for (&col_1, props) in col_xml_props.iter() {
+        let props = props.clone();
+        match current.take() {
+            None => current = Some((col_1, col_1, props)),
+            Some((start, end, cur)) if col_1 == end + 1 && props == cur => {
+                current = Some((start, col_1, cur));
+            }
+            Some((start, end, cur)) => {
+                out.push_str(&render_col_range(start, end, &cur));
+                current = Some((col_1, col_1, props));
+            }
+        }
+    }
+    if let Some((start, end, cur)) = current {
+        out.push_str(&render_col_range(start, end, &cur));
+    }
+
+    out.push_str("</cols>");
+    out
+}
+
+fn render_col_range(start_col_1: u32, end_col_1: u32, props: &ColXmlProps) -> String {
+    let mut s = String::new();
+    s.push_str(&format!(r#"<col min="{start_col_1}" max="{end_col_1}""#));
+    if let Some(width) = props.width {
+        s.push_str(&format!(r#" width="{width}""#));
+        s.push_str(r#" customWidth="1""#);
+    }
+    if props.hidden {
+        s.push_str(r#" hidden="1""#);
+    }
+    if props.outline_level > 0 {
+        s.push_str(&format!(r#" outlineLevel="{}""#, props.outline_level));
+    }
+    if props.collapsed {
+        s.push_str(r#" collapsed="1""#);
+    }
+    s.push_str("/>");
+    s
+}
+
 fn sheet_xml(
     sheet: &Worksheet,
     shared_strings: &SharedStrings,
@@ -344,6 +444,26 @@ fn sheet_xml(
         .unwrap_or_else(|| Range::new(CellRef::new(0, 0), CellRef::new(0, 0)))
         .to_string();
 
+    let outline = {
+        // Ensure outline-hidden flags are up to date before emitting `hidden="1"` for collapsed
+        // detail rows/columns.
+        let mut outline = sheet.outline.clone();
+        outline.recompute_outline_hidden_rows();
+        outline.recompute_outline_hidden_cols();
+        outline
+    };
+    let sheet_pr_xml = if outline != Outline::default() {
+        format!(
+            r#"<sheetPr><outlinePr summaryBelow="{}" summaryRight="{}" showOutlineSymbols="{}"/></sheetPr>"#,
+            bool_attr(outline.pr.summary_below),
+            bool_attr(outline.pr.summary_right),
+            bool_attr(outline.pr.show_outline_symbols),
+        )
+    } else {
+        String::new()
+    };
+    let cols_xml = render_cols(sheet, &outline);
+
     struct ColumnarInfo<'a> {
         origin: CellRef,
         rows: usize,
@@ -375,6 +495,18 @@ fn sheet_xml(
     }
     let overlay_rows: Vec<u32> = overlay_by_row.keys().copied().collect();
 
+    let outline_rows: Vec<u32> = outline
+        .rows
+        .iter()
+        .filter_map(|(row_1, entry)| {
+            if entry.level > 0 || entry.hidden.is_hidden() || entry.collapsed {
+                Some(row_1.saturating_sub(1))
+            } else {
+                None
+            }
+        })
+        .collect();
+
     // Emit rows in ascending order, streaming through the columnar table rows if present.
     let mut sheet_data = String::new();
     let mut overlay_row_idx: usize = 0;
@@ -382,6 +514,7 @@ fn sheet_xml(
     let table_end_row: Option<u32> = columnar
         .as_ref()
         .map(|c| c.origin.row.saturating_add(c.rows.saturating_sub(1) as u32));
+    let mut outline_row_idx: usize = 0;
 
     loop {
         let next_overlay_row = overlay_rows.get(overlay_row_idx).copied();
@@ -389,21 +522,27 @@ fn sheet_xml(
             (Some(r), Some(end)) if r <= end => Some(r),
             _ => None,
         };
+        let next_outline_row = outline_rows.get(outline_row_idx).copied();
 
-        let Some(row_idx) = (match (next_table_row, next_overlay_row) {
-            (Some(t), Some(o)) => Some(t.min(o)),
-            (Some(t), None) => Some(t),
-            (None, Some(o)) => Some(o),
-            (None, None) => None,
-        }) else {
-            break;
-        };
+        let mut row_idx: Option<u32> = None;
+        for candidate in [next_table_row, next_overlay_row, next_outline_row] {
+            if let Some(candidate) = candidate {
+                row_idx = Some(match row_idx {
+                    Some(existing) => existing.min(candidate),
+                    None => candidate,
+                });
+            }
+        }
+        let Some(row_idx) = row_idx else { break };
 
         if next_overlay_row == Some(row_idx) {
             overlay_row_idx += 1;
         }
         if next_table_row == Some(row_idx) {
             table_row = Some(row_idx + 1);
+        }
+        if next_outline_row == Some(row_idx) {
+            outline_row_idx += 1;
         }
 
         let overlay_cells: &[(u32, CellRef, &Cell)] = overlay_by_row
@@ -494,14 +633,34 @@ fn sheet_xml(
             }
         }
 
-        if !wrote_any_cell {
+        let row_number = row_idx + 1;
+        let outline_entry = outline.rows.entry(row_number);
+        let needs_row = wrote_any_cell
+            || outline_entry.level > 0
+            || outline_entry.hidden.is_hidden()
+            || outline_entry.collapsed;
+        if !needs_row {
             continue;
         }
 
-        let row_number = row_idx + 1;
-        sheet_data.push_str(&format!(r#"<row r="{}">"#, row_number));
-        sheet_data.push_str(&row_cells_xml);
-        sheet_data.push_str("</row>");
+        let mut row_attrs = format!(r#" r="{}""#, row_number);
+        if outline_entry.level > 0 {
+            row_attrs.push_str(&format!(r#" outlineLevel="{}""#, outline_entry.level));
+        }
+        if outline_entry.hidden.is_hidden() {
+            row_attrs.push_str(r#" hidden="1""#);
+        }
+        if outline_entry.collapsed {
+            row_attrs.push_str(r#" collapsed="1""#);
+        }
+
+        if wrote_any_cell {
+            sheet_data.push_str(&format!(r#"<row{row_attrs}>"#));
+            sheet_data.push_str(&row_cells_xml);
+            sheet_data.push_str("</row>");
+        } else {
+            sheet_data.push_str(&format!(r#"<row{row_attrs}/>"#));
+        }
     }
 
     let table_parts_xml = if table_parts.is_empty() {
@@ -530,8 +689,18 @@ fn sheet_xml(
     xml.push('\n');
     xml.push_str(r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">"#);
     xml.push('\n');
+    if !sheet_pr_xml.is_empty() {
+        xml.push_str("  ");
+        xml.push_str(&sheet_pr_xml);
+        xml.push('\n');
+    }
     xml.push_str(&format!(r#"  <dimension ref="{dimension_ref}"/>"#));
     xml.push('\n');
+    if !cols_xml.is_empty() {
+        xml.push_str("  ");
+        xml.push_str(&cols_xml);
+        xml.push('\n');
+    }
     xml.push_str("  <sheetData>\n");
     if !sheet_data.is_empty() {
         xml.push_str("    ");
@@ -702,7 +871,11 @@ fn cell_xml(
         CellValue::Record(record) => {
             let display = record_display_string(record);
             attrs.push_str(r#" t="s""#);
-            let idx = shared_strings.index.get(&display).copied().unwrap_or_default();
+            let idx = shared_strings
+                .index
+                .get(&display)
+                .copied()
+                .unwrap_or_default();
             value_xml.push_str(&format!(r#"<v>{}</v>"#, idx));
         }
         CellValue::Error(e) => {
@@ -876,11 +1049,7 @@ fn shared_strings_xml(shared: &SharedStrings) -> String {
     let count = shared.values.len();
     let mut si = String::new();
     for v in &shared.values {
-        let preserve = v
-            .chars()
-            .next()
-            .map(|c| c.is_whitespace())
-            .unwrap_or(false)
+        let preserve = v.chars().next().map(|c| c.is_whitespace()).unwrap_or(false)
             || v.chars().last().map(|c| c.is_whitespace()).unwrap_or(false);
         if preserve {
             si.push_str(&format!(
