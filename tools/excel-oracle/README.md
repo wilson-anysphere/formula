@@ -111,6 +111,8 @@ powershell -ExecutionPolicy Bypass -File tools/excel-oracle/run-excel-oracle.ps1
   -OutPath tests/compatibility/excel-oracle/datasets/excel-oracle.json
 ```
 
+Tip: pass `-DryRun` to see how many cases would be selected by the tag filters / `-MaxCases` without starting Excel.
+
 To generate only a subset of cases (by tag):
 
 ```powershell

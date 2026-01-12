@@ -28,6 +28,9 @@
 
 .PARAMETER Visible
   Make Excel visible while running (useful for debugging).
+
+.PARAMETER DryRun
+  Print a summary of how many cases would be evaluated (after tag filtering / MaxCases) and exit without running Excel.
 #>
 
 [CmdletBinding()]
@@ -44,7 +47,9 @@ param(
 
   [string[]]$ExcludeTags = @(),
 
-  [switch]$Visible
+  [switch]$Visible,
+
+  [switch]$DryRun
 )
 
 Set-StrictMode -Version Latest
@@ -191,6 +196,29 @@ if ($MaxCases -gt 0) {
 }
 
 $caseHash = (Get-FileHash -LiteralPath $CasesPath -Algorithm SHA256).Hash.ToLowerInvariant()
+
+if ($DryRun) {
+  Write-Host "Dry run: run-excel-oracle.ps1"
+  Write-Host ""
+  Write-Host "CasesPath: $CasesPath"
+  Write-Host "OutPath:   $OutPath"
+  Write-Host "Cases selected: $($caseList.Count)"
+  Write-Host "cases.json sha256: $caseHash"
+  if ($include.Count -gt 0) {
+    Write-Host "IncludeTags: $($include -join ',')"
+  } else {
+    Write-Host "IncludeTags: <none>"
+  }
+  if ($exclude.Count -gt 0) {
+    Write-Host "ExcludeTags: $($exclude -join ',')"
+  } else {
+    Write-Host "ExcludeTags: <none>"
+  }
+  Write-Host "Visible: $([bool]$Visible)"
+  Write-Host ""
+  Write-Host "No files were written; Excel was not started."
+  return
+}
 
 $excel = $null
 $workbook = $null

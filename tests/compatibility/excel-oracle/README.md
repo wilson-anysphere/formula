@@ -214,6 +214,8 @@ powershell -ExecutionPolicy Bypass -File tools/excel-oracle/run-excel-oracle.ps1
   -OutPath  tests/compatibility/excel-oracle/datasets/excel-oracle.json
 ```
 
+Tip: pass `-DryRun` to preview how many cases would be run (after tag filtering / MaxCases) without launching Excel.
+
 Then pin the dataset for CI (and optionally write a version-tagged copy):
 
 ```bash
