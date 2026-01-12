@@ -85,10 +85,11 @@ When adding odd-coupon coverage to the oracle corpus, prefer:
 
 The generator includes a small set of boundary-date equality cases (e.g. `issue == settlement`,
 `settlement == first_coupon`, `settlement == last_interest`). The engine currently **rejects** these
-with `#NUM!` (matching the intended Excel boundary behavior; pinned by unit tests), but this has
-not yet been validated against a real Excel oracle dataset. Today, these cases are pinned in the
-synthetic CI dataset to catch regressions in engine date validation rules over time; once a real
-Excel dataset is pinned, they should serve as true parity checks.
+with `#NUM!` (matching the intended Excel boundary behavior; see
+`crates/formula-engine/tests/odd_coupon_date_boundaries.rs`), but this has not yet been validated
+against a real Excel oracle dataset. Today, these cases are pinned in the synthetic CI dataset to
+catch regressions in engine date validation rules over time; once a real Excel dataset is pinned,
+they should serve as true parity checks.
 
 ## High-risk compatibility areas
 
