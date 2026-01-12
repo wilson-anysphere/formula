@@ -301,54 +301,46 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
   ]);
 
   return (
-    <div style={{ position: "relative", height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
-      <div
-        style={{
-          display: "flex",
-          gap: 6,
-          padding: 8,
-          borderBottom: "1px solid var(--border)",
-          background: "var(--bg-secondary)",
-        }}
-      >
+    <div className="ai-chat-runtime">
+      <div className="ai-chat-runtime__tabs">
         <TabButton active={tab === "chat"} onClick={() => setTab("chat")} testId="ai-tab-chat">
           Chat
         </TabButton>
         <TabButton active={tab === "agent"} onClick={() => setTab("agent")} testId="ai-tab-agent">
           Agent
         </TabButton>
-        <div style={{ flex: 1 }} />
+        <div className="ai-chat-runtime__tabs-spacer" />
       </div>
-      <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
+      <div className="ai-chat-runtime__content">
         {tab === "chat" ? (
           <AIChatPanel sendMessage={sendMessage} />
         ) : (
-          <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10, height: "100%", minHeight: 0 }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <label style={{ fontSize: 12, fontWeight: 600 }}>Goal</label>
+          <div className="ai-chat-agent">
+            <div className="ai-chat-agent__section">
+              <label className="ai-chat-agent__label">Goal</label>
               <textarea
                 value={agentGoal}
                 onChange={(e) => setAgentGoal(e.target.value)}
                 placeholder="e.g. Summarize the data in Sheet1 and add a chart."
                 rows={3}
-                style={{ padding: 8, resize: "vertical" }}
+                className="ai-chat-agent__textarea"
                 data-testid="agent-goal"
                 disabled={agentRunning}
               />
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <label style={{ fontSize: 12, fontWeight: 600 }}>Constraints (one per line, optional)</label>
+            <div className="ai-chat-agent__section">
+              <label className="ai-chat-agent__label">Constraints (one per line, optional)</label>
               <textarea
                 value={agentConstraints}
                 onChange={(e) => setAgentConstraints(e.target.value)}
                 placeholder="e.g. Don’t overwrite existing data."
                 rows={2}
-                style={{ padding: 8, resize: "vertical" }}
+                className="ai-chat-agent__textarea"
                 data-testid="agent-constraints"
                 disabled={agentRunning}
               />
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div className="ai-chat-agent__buttons">
               <button type="button" onClick={() => void runAgent()} disabled={agentRunning || !agentGoal.trim()} data-testid="agent-run">
                 {agentRunning ? "Running…" : "Run"}
               </button>
@@ -356,7 +348,7 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
                 Cancel
               </button>
             </div>
-            <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, opacity: agentRunning ? 0.6 : 1 }}>
+            <label className={agentRunning ? "ai-chat-agent__continue ai-chat-agent__continue--disabled" : "ai-chat-agent__continue"}>
               <input
                 type="checkbox"
                 checked={agentContinueOnDenied}
@@ -366,29 +358,29 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
               />
               Continue running if I deny an approval (agent will re-plan)
             </label>
-            <div ref={agentStepsRootRef} style={{ borderTop: "1px solid var(--border)", paddingTop: 10, minHeight: 0, flex: 1, overflow: "auto" }}>
-              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Steps</div>
+            <div ref={agentStepsRootRef} className="ai-chat-agent__steps">
+              <div className="ai-chat-agent__steps-title">Steps</div>
               {agentEvents.length === 0 ? (
-                <div style={{ fontSize: 12, opacity: 0.8 }}>No steps yet.</div>
+                <div className="ai-chat-agent__steps-empty">No steps yet.</div>
               ) : (
-                <ol style={{ display: "flex", flexDirection: "column", gap: 8, paddingLeft: 18, margin: 0 }}>
+                <ol className="ai-chat-agent__steps-list">
                   {agentEvents.map((event, idx) => (
-                    <li key={idx} style={{ fontSize: 12 }}>
+                    <li key={idx} className="ai-chat-agent__steps-item">
                       <AgentEventRow event={event} />
                     </li>
                   ))}
                 </ol>
               )}
               {agentResult ? (
-                <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--border)" }} data-testid="agent-result">
-                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Result</div>
-                  <div style={{ fontSize: 12, opacity: 0.85 }}>
+                <div className="ai-chat-agent__result" data-testid="agent-result">
+                  <div className="ai-chat-agent__result-title">Result</div>
+                  <div className="ai-chat-agent__result-meta">
                     Status: <code>{agentResult.status}</code> • session_id: <code>{agentResult.session_id}</code>
                   </div>
                   {agentResult.final ? (
-                    <pre style={{ whiteSpace: "pre-wrap", fontSize: 12, marginTop: 8 }}>{agentResult.final}</pre>
+                    <pre className="ai-chat-agent__result-pre">{agentResult.final}</pre>
                   ) : agentResult.error ? (
-                    <pre style={{ whiteSpace: "pre-wrap", fontSize: 12, marginTop: 8 }}>{agentResult.error}</pre>
+                    <pre className="ai-chat-agent__result-pre">{agentResult.error}</pre>
                   ) : null}
                 </div>
               ) : null}
@@ -414,14 +406,7 @@ function TabButton(props: { active: boolean; onClick: () => void; children: Reac
       type="button"
       onClick={props.onClick}
       data-testid={props.testId}
-      style={{
-        padding: "6px 10px",
-        borderRadius: 8,
-        border: "1px solid var(--border)",
-        background: props.active ? "var(--bg-tertiary)" : "transparent",
-        color: "var(--text-primary)",
-        fontWeight: props.active ? 600 : 500,
-      }}
+      className={props.active ? "ai-chat-tab-button ai-chat-tab-button--active" : "ai-chat-tab-button"}
     >
       {props.children}
     </button>

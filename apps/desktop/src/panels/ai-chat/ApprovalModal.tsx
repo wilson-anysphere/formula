@@ -44,48 +44,31 @@ export function ApprovalModal(props: ApprovalModalProps): React.ReactElement {
       aria-modal="true"
       tabIndex={-1}
       ref={dialogRef}
-      style={{
-        position: "absolute",
-        inset: 0,
-        zIndex: 50,
-        background: "var(--dialog-backdrop)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 12,
-      }}
+      className="ai-chat-approval-modal"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) props.onReject();
       }}
     >
       <div
-        style={{
-          width: "min(560px, 100%)",
-          maxHeight: "100%",
-          overflow: "auto",
-          background: "var(--dialog-bg)",
-          border: "1px solid var(--dialog-border)",
-          borderRadius: 8,
-          boxShadow: "var(--dialog-shadow)",
-        }}
+        className="ai-chat-approval-modal__panel"
       >
-        <div style={{ padding: "12px 12px 8px 12px", borderBottom: "1px solid var(--border)" }}>
-          <div style={{ fontWeight: 700 }}>Approve AI changes?</div>
-          <div style={{ fontSize: 12, opacity: 0.8, marginTop: 4 }}>
-            Tool: <span style={{ fontFamily: "monospace" }}>{call.name}</span>
+        <div className="ai-chat-approval-modal__header">
+          <div className="ai-chat-approval-modal__title">Approve AI changes?</div>
+          <div className="ai-chat-approval-modal__tool">
+            Tool: <span className="ai-chat-approval-modal__tool-name">{call.name}</span>
           </div>
         </div>
 
-        <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={{ fontSize: 12, opacity: 0.85 }}>
+        <div className="ai-chat-approval-modal__body">
+          <div className="ai-chat-approval-modal__summary">
             Summary: {summary.total_changes} changes (creates={summary.creates}, modifies={summary.modifies}, deletes=
             {summary.deletes})
           </div>
 
           {preview.approval_reasons.length ? (
-            <div style={{ fontSize: 12 }}>
-              <div style={{ fontWeight: 600, marginBottom: 4 }}>Approval reasons</div>
-              <ul style={{ margin: 0, paddingInlineStart: 18 }}>
+            <div className="ai-chat-approval-modal__section">
+              <div className="ai-chat-approval-modal__section-title">Approval reasons</div>
+              <ul className="ai-chat-approval-modal__list">
                 {preview.approval_reasons.map((reason) => (
                   <li key={reason}>{reason}</li>
                 ))}
@@ -94,9 +77,9 @@ export function ApprovalModal(props: ApprovalModalProps): React.ReactElement {
           ) : null}
 
           {preview.warnings.length ? (
-            <div style={{ fontSize: 12 }}>
-              <div style={{ fontWeight: 600, marginBottom: 4 }}>Warnings</div>
-              <ul style={{ margin: 0, paddingInlineStart: 18 }}>
+            <div className="ai-chat-approval-modal__section">
+              <div className="ai-chat-approval-modal__section-title">Warnings</div>
+              <ul className="ai-chat-approval-modal__list">
                 {preview.warnings.map((warning) => (
                   <li key={warning}>{warning}</li>
                 ))}
@@ -105,36 +88,28 @@ export function ApprovalModal(props: ApprovalModalProps): React.ReactElement {
           ) : null}
 
           {preview.changes.length ? (
-            <div style={{ fontSize: 12 }}>
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>Cell changes (preview)</div>
-              <div style={{ border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <div className="ai-chat-approval-modal__section">
+              <div className="ai-chat-approval-modal__changes-title">Cell changes (preview)</div>
+              <div className="ai-chat-approval-modal__table-wrap">
+                <table className="ai-chat-approval-modal__table">
                   <thead>
-                    <tr style={{ background: "var(--bg-secondary)" }}>
-                      <th style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid var(--border)" }}>
-                        Cell
-                      </th>
-                      <th style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid var(--border)" }}>
-                        Type
-                      </th>
-                      <th style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid var(--border)" }}>
-                        Before
-                      </th>
-                      <th style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid var(--border)" }}>
-                        After
-                      </th>
+                    <tr>
+                      <th>Cell</th>
+                      <th>Type</th>
+                      <th>Before</th>
+                      <th>After</th>
                     </tr>
                   </thead>
                   <tbody>
                     {preview.changes.map((change) => (
                       <tr key={change.cell}>
-                        <td style={{ padding: "6px 8px", borderBottom: "1px solid var(--border)" }}>{change.cell}</td>
-                        <td style={{ padding: "6px 8px", borderBottom: "1px solid var(--border)" }}>{change.type}</td>
-                        <td style={{ padding: "6px 8px", borderBottom: "1px solid var(--border)", opacity: 0.85 }}>
-                          <code style={{ whiteSpace: "pre-wrap" }}>{safeStringify(change.before)}</code>
+                        <td>{change.cell}</td>
+                        <td>{change.type}</td>
+                        <td className="ai-chat-approval-modal__before">
+                          <code className="ai-chat-approval-modal__code">{safeStringify(change.before)}</code>
                         </td>
-                        <td style={{ padding: "6px 8px", borderBottom: "1px solid var(--border)" }}>
-                          <code style={{ whiteSpace: "pre-wrap" }}>{safeStringify(change.after)}</code>
+                        <td>
+                          <code className="ai-chat-approval-modal__code">{safeStringify(change.after)}</code>
                         </td>
                       </tr>
                     ))}
@@ -144,38 +119,21 @@ export function ApprovalModal(props: ApprovalModalProps): React.ReactElement {
             </div>
           ) : null}
 
-          <div style={{ fontSize: 12 }}>
-            <div style={{ fontWeight: 600, marginBottom: 4 }}>Arguments</div>
-            <pre
-              style={{
-                margin: 0,
-                padding: 10,
-                background: "var(--bg-secondary)",
-                border: "1px solid var(--border)",
-                borderRadius: 6,
-                overflow: "auto",
-              }}
-            >
+          <div className="ai-chat-approval-modal__section">
+            <div className="ai-chat-approval-modal__section-title">Arguments</div>
+            <pre className="ai-chat-approval-modal__args-pre">
               {safeStringify(call.arguments)}
             </pre>
           </div>
         </div>
 
-        <div
-          style={{
-            padding: 12,
-            borderTop: "1px solid var(--border)",
-            display: "flex",
-            justifyContent: "flex-end",
-            gap: 8,
-          }}
-        >
-          <button type="button" style={{ padding: "8px 12px" }} onClick={props.onReject}>
+        <div className="ai-chat-approval-modal__footer">
+          <button type="button" className="ai-chat-approval-modal__button" onClick={props.onReject}>
             Cancel
           </button>
           <button
             type="button"
-            style={{ padding: "8px 12px", background: "var(--accent)", color: "var(--text-on-accent)" }}
+            className="ai-chat-approval-modal__button ai-chat-approval-modal__button--approve"
             onClick={props.onApprove}
           >
             Approve

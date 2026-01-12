@@ -327,21 +327,12 @@ export function AIChatPanel(props: AIChatPanelProps) {
   }
 
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        height: "100%",
-        borderInlineStart: "1px solid var(--border)",
-      }}
-    >
-      <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--border)", fontWeight: 600 }}>
-        {t("chat.title")}
-      </div>
-      <div ref={scrollRef} style={{ flex: 1, overflow: "auto", padding: 12 }}>
+    <div className="ai-chat-panel">
+      <div className="ai-chat-panel__header">{t("chat.title")}</div>
+      <div ref={scrollRef} className="ai-chat-panel__messages">
         {messages.map((m) => (
-          <div key={m.id} style={{ marginBottom: 12 }}>
-            <div style={{ fontSize: 12, opacity: 0.7 }}>
+          <div key={m.id} className="ai-chat-panel__message">
+            <div className="ai-chat-panel__meta">
               {m.role === "user"
                 ? t("chat.role.user")
                 : m.role === "assistant"
@@ -353,22 +344,13 @@ export function AIChatPanel(props: AIChatPanelProps) {
             {m.role === "assistant" &&
             m.verification &&
             (!m.verification.verified || (m.verification.confidence ?? 0) < CONFIDENCE_WARNING_THRESHOLD) ? (
-              <div
-                style={{
-                  marginTop: 6,
-                  padding: "6px 8px",
-                  border: "1px solid var(--border)",
-                  borderRadius: 6,
-                  background: "var(--warning-bg)",
-                  fontSize: 12,
-                }}
-              >
+              <div className="ai-chat-panel__unverified">
                 {t("chat.meta.unverifiedAnswer")}
               </div>
             ) : null}
-            <div style={{ whiteSpace: "pre-wrap" }}>{m.content}</div>
+            <div className="ai-chat-panel__message-content">{m.content}</div>
             {m.attachments?.length ? (
-              <div style={{ marginTop: 6, fontSize: 12, opacity: 0.85 }}>
+              <div className="ai-chat-panel__attachments">
                 {t("chat.attachmentsLabel")}
                 <ul>
                   {m.attachments.map((a, i) => (
@@ -383,18 +365,18 @@ export function AIChatPanel(props: AIChatPanelProps) {
         ))}
       </div>
       {attachments.length ? (
-        <div style={{ padding: "6px 12px", borderTop: "1px solid var(--border)", fontSize: 12 }}>
+        <div className="ai-chat-panel__pending-attachments">
           {t("chat.pendingAttachments")}{" "}
           {attachments.map((a) => (
-            <span key={`${a.type}:${a.reference}`} style={{ marginRight: 8 }}>
+            <span key={`${a.type}:${a.reference}`} className="ai-chat-panel__pending-attachment">
               {a.type}:{a.reference}
             </span>
           ))}
         </div>
       ) : null}
-      <div style={{ display: "flex", gap: 8, padding: 12, borderTop: "1px solid var(--border)" }}>
+      <div className="ai-chat-panel__composer">
         <input
-          style={{ flex: 1, padding: 8 }}
+          className="ai-chat-panel__input"
           placeholder={t("chat.input.placeholder")}
           value={input}
           disabled={sending}
@@ -406,29 +388,22 @@ export function AIChatPanel(props: AIChatPanelProps) {
             }
           }}
         />
-        <button onClick={() => void send()} style={{ padding: "8px 12px" }} disabled={sending}>
+        <button onClick={() => void send()} className="ai-chat-panel__button" disabled={sending}>
           {t("chat.send")}
         </button>
         <button
           onClick={() => abortControllerRef.current?.abort()}
-          style={{ padding: "8px 12px" }}
+          className="ai-chat-panel__button"
           disabled={!sending}
           type="button"
         >
           {t("chat.cancel")}
         </button>
       </div>
-      <div
-        style={{
-          padding: "6px 12px",
-          borderTop: "1px solid var(--border)",
-          fontSize: 12,
-          opacity: 0.7,
-        }}
-      >
+      <div className="ai-chat-panel__attachments-api">
         {t("chat.attachmentsApiPlaceholder")}
         <button
-          style={{ marginInlineStart: 8 }}
+          className="ai-chat-panel__attachments-api-button"
           onClick={() =>
             setAttachments((prev) => [
               ...prev,
