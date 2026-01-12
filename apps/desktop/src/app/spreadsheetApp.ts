@@ -4646,6 +4646,90 @@ export class SpreadsheetApp {
     });
   }
 
+  private applyFillShortcut(direction: "down" | "right"): void {
+    const clampInt = (value: number, min: number, max: number): number => {
+      const n = Math.trunc(value);
+      return Math.min(max, Math.max(min, n));
+    };
+
+    const maxRowInclusive = Math.max(0, this.limits.maxRows - 1);
+    const maxColInclusive = Math.max(0, this.limits.maxCols - 1);
+    const maxRowExclusive = Math.max(0, this.limits.maxRows);
+    const maxColExclusive = Math.max(0, this.limits.maxCols);
+
+    const operations: Array<{ sourceRange: FillEngineRange; targetRange: FillEngineRange }> = [];
+
+    for (const range of this.selection.ranges) {
+      const startRow = clampInt(Math.min(range.startRow, range.endRow), 0, maxRowInclusive);
+      const endRow = clampInt(Math.max(range.startRow, range.endRow), 0, maxRowInclusive);
+      const startCol = clampInt(Math.min(range.startCol, range.endCol), 0, maxColInclusive);
+      const endCol = clampInt(Math.max(range.startCol, range.endCol), 0, maxColInclusive);
+
+      if (direction === "down") {
+        if (endRow <= startRow) continue; // height === 1
+
+        const sourceRange: FillEngineRange = {
+          startRow,
+          endRow: Math.min(startRow + 1, maxRowExclusive),
+          startCol,
+          endCol: Math.min(endCol + 1, maxColExclusive)
+        };
+        const targetRange: FillEngineRange = {
+          startRow: Math.min(startRow + 1, maxRowExclusive),
+          endRow: Math.min(endRow + 1, maxRowExclusive),
+          startCol,
+          endCol: Math.min(endCol + 1, maxColExclusive)
+        };
+
+        if (targetRange.endRow <= targetRange.startRow) continue;
+        if (sourceRange.endCol <= sourceRange.startCol) continue;
+        operations.push({ sourceRange, targetRange });
+        continue;
+      }
+
+      if (endCol <= startCol) continue; // width === 1
+
+      const sourceRange: FillEngineRange = {
+        startRow,
+        endRow: Math.min(endRow + 1, maxRowExclusive),
+        startCol,
+        endCol: Math.min(startCol + 1, maxColExclusive)
+      };
+      const targetRange: FillEngineRange = {
+        startRow,
+        endRow: Math.min(endRow + 1, maxRowExclusive),
+        startCol: Math.min(startCol + 1, maxColExclusive),
+        endCol: Math.min(endCol + 1, maxColExclusive)
+      };
+
+      if (targetRange.endCol <= targetRange.startCol) continue;
+      if (sourceRange.endRow <= sourceRange.startRow) continue;
+      operations.push({ sourceRange, targetRange });
+    }
+
+    if (operations.length === 0) return;
+
+    // Explicit batch so multi-range selections become a single undo step.
+    this.document.beginBatch({ label: "Fill" });
+    try {
+      for (const op of operations) {
+        applyFillCommitToDocumentController({
+          document: this.document,
+          sheetId: this.sheetId,
+          sourceRange: op.sourceRange,
+          targetRange: op.targetRange,
+          mode: "formulas",
+          getCellComputedValue: (row, col) => this.getCellComputedValue({ row, col }) as any
+        });
+      }
+    } finally {
+      this.document.endBatch();
+    }
+
+    this.refresh();
+    this.focus();
+  }
+
   private onKeyDown(e: KeyboardEvent): void {
     if (this.inlineEditController.isOpen()) {
       return;
@@ -4706,6 +4790,25 @@ export class SpreadsheetApp {
     }
 
     const primary = e.ctrlKey || e.metaKey;
+
+    // Excel-style fill shortcuts:
+    // - Ctrl/Cmd+D: Fill Down
+    // - Ctrl/Cmd+R: Fill Right
+    // Only trigger when *not* editing text (editor, formula bar, inline edit).
+    if (primary && !e.altKey && !e.shiftKey && (e.key === "d" || e.key === "D")) {
+      if (this.formulaBar?.isEditing() || this.formulaEditCell) return;
+      e.preventDefault();
+      this.applyFillShortcut("down");
+      return;
+    }
+
+    if (primary && !e.altKey && !e.shiftKey && (e.key === "r" || e.key === "R")) {
+      if (this.formulaBar?.isEditing() || this.formulaEditCell) return;
+      e.preventDefault();
+      this.applyFillShortcut("right");
+      return;
+    }
+
     if (primary && (e.key === "k" || e.key === "K")) {
       // Inline edit (Cmd/Ctrl+K) should not trigger while the formula bar is actively editing.
       if (this.formulaBar?.isEditing() || this.formulaEditCell) return;
