@@ -23,6 +23,24 @@ test.describe("tauri native menu integration", () => {
         return originalExecCommand ? originalExecCommand(commandId, showUI, value) : false;
       }) as any;
 
+      // Ensure the menu fallback logic uses the Tauri clipboard IPC (deterministic) rather than
+      // Chromium's clipboard implementation (which can vary across CI/headless environments).
+      const stubClipboard = {
+        readText: async () => {
+          throw new Error("clipboard read blocked");
+        },
+        writeText: async () => {
+          throw new Error("clipboard write blocked");
+        },
+      };
+
+      try {
+        Object.defineProperty(navigator, "clipboard", { value: stubClipboard, configurable: true });
+      } catch {
+        const platform = (navigator as any)?.platform ?? "";
+        Object.defineProperty(window, "navigator", { value: { platform, clipboard: stubClipboard }, configurable: true });
+      }
+
       (window as any).__TAURI__ = {
         core: {
           invoke: async (cmd: string, args: any) => {
