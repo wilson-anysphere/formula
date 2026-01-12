@@ -62,9 +62,14 @@ function isInsideKeybindingBarrier(target: EventTarget | null): boolean {
   const closest = (target as any).closest;
   if (typeof closest === "function") {
     try {
-      // NOTE: `closest()` does not cross shadow DOM boundaries. If no match is found,
-      // fall back to manual traversal below so we can climb via `ShadowRoot.host`.
+      // NOTE: `closest()` does not cross shadow DOM boundaries. If no match is found
+      // and the target isn't inside a shadow root, we can safely return `false`
+      // without doing a second manual traversal.
       if (closest.call(target, '[data-keybinding-barrier="true"]')) return true;
+
+      const root = (target as any).getRootNode?.();
+      const inShadowRoot = Boolean(root && typeof root === "object" && typeof (root as any).host === "object");
+      if (!inShadowRoot) return false;
     } catch {
       // ignore and fall back to manual traversal
     }
