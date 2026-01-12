@@ -4186,7 +4186,7 @@ mountRibbon(ribbonRoot, {
         return;
     }
   },
-}, { initialTabId: "view" });
+});
 
 installUnsavedChangesPrompt(window, app.getDocument());
 
