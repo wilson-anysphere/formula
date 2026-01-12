@@ -9,7 +9,7 @@ import { tryEvaluateFormula } from "./formula-eval.js";
  * @property {string} id
  * @property {import("./cell-ref.js").CellRef} cell
  * @property {string} cellKey
- * @property {string} remoteUserId
+ * @property {string} remoteUserId Best-effort id of the remote user. May be an empty string when unavailable.
  * @property {number} detectedAt
  */
 

@@ -9,7 +9,7 @@ import { cellRefFromKey } from "./cell-ref.js";
  * @property {"value"} field
  * @property {any} localValue
  * @property {any} remoteValue
- * @property {string} remoteUserId
+ * @property {string} remoteUserId Best-effort id of the remote user. May be an empty string when unavailable.
  * @property {number} detectedAt
  */
 
