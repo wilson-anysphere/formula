@@ -2167,6 +2167,35 @@ mod tests {
     }
 
     #[test]
+    fn window1_tabs_bit_does_not_map_to_maximized_state() {
+        // Real-world `.xls` files often set WINDOW1.grbit = 0x0038 (hscroll|vscroll|tabs).
+        // Ensure the `tabs` UI bit (0x0020) is not interpreted as `fMaximized`.
+        let mut payload = [0u8; 18];
+        payload[0..2].copy_from_slice(&9i16.to_le_bytes()); // xWn
+        payload[2..4].copy_from_slice(&10i16.to_le_bytes()); // yWn
+        payload[4..6].copy_from_slice(&11u16.to_le_bytes()); // dxWn
+        payload[6..8].copy_from_slice(&12u16.to_le_bytes()); // dyWn
+        payload[8..10].copy_from_slice(&0x0020u16.to_le_bytes()); // grbit (tabs UI bit)
+
+        let stream = [
+            record(RECORD_WINDOW1, &payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+        let globals = parse_biff_workbook_globals(&stream, BiffVersion::Biff8, 1252).expect("parse");
+        assert_eq!(
+            globals.workbook_window,
+            Some(WorkbookWindow {
+                x: Some(9),
+                y: Some(10),
+                width: Some(11),
+                height: Some(12),
+                state: Some(WorkbookWindowState::Normal),
+            })
+        );
+    }
+
+    #[test]
     fn workbook_protection_warns_on_truncated_protect_but_continues() {
         // PROTECT record with a 1-byte payload (too short for u16).
         let stream = [
