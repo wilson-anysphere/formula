@@ -1,10 +1,11 @@
 import type { CommandContribution, CommandRegistry } from "../extensions/commandRegistry.js";
 import type { ContextKeyService } from "../extensions/contextKeys.js";
 
-import { fuzzyMatchCommand, type MatchRange } from "./fuzzy.js";
+import { debounce } from "./debounce.js";
+import { compileFuzzyQuery, fuzzyMatchCommandPrepared, prepareCommandForFuzzy, type MatchRange, type PreparedCommandForFuzzy } from "./fuzzy.js";
 import { readCommandPaletteRecents, recordCommandPaletteRecent } from "./recents.js";
 
-type RenderableCommand = CommandContribution & {
+type RenderableCommand = PreparedCommandForFuzzy<CommandContribution> & {
   score: number;
   titleRanges: MatchRange[];
 };
@@ -31,6 +32,21 @@ export type CreateCommandPaletteOptions = {
    * (notably in e2e tests that just invoke built-in commands).
    */
   extensionLoadDelayMs?: number;
+  /**
+   * Hard cap the number of command rows rendered (excludes group headers).
+   * Defaults to 100 to prevent DOM blowups with large command/function sets.
+   */
+  maxResults?: number;
+  /**
+   * Optional per-category cap (applied after global ranking).
+   * Defaults to 20 to keep large categories from dominating.
+   */
+  maxResultsPerGroup?: number;
+  /**
+   * Debounce input updates to keep typing responsive when rescoring large lists.
+   * Defaults to 70ms.
+   */
+  inputDebounceMs?: number;
 };
 
 export type CommandPaletteController = {
@@ -48,12 +64,18 @@ function sortCommandsAlpha(a: CommandContribution, b: CommandContribution): numb
   return a.title.localeCompare(b.title);
 }
 
-function buildGroupsForEmptyQuery(allCommands: CommandContribution[], recentIds: string[]): CommandGroup[] {
+function buildGroupsForEmptyQuery(
+  allCommands: PreparedCommandForFuzzy<CommandContribution>[],
+  recentIds: string[],
+  limits: { maxResults: number; maxResultsPerGroup: number },
+): CommandGroup[] {
   const byId = new Map(allCommands.map((cmd) => [cmd.commandId, cmd]));
 
   const recents: RenderableCommand[] = [];
   const recentSet = new Set<string>();
+  const recentLimit = Math.min(limits.maxResultsPerGroup, limits.maxResults);
   for (const id of recentIds) {
+    if (recents.length >= recentLimit) break;
     const cmd = byId.get(id);
     if (!cmd) continue;
     recentSet.add(id);
@@ -71,27 +93,65 @@ function buildGroupsForEmptyQuery(allCommands: CommandContribution[], recentIds:
   }
 
   const groups: CommandGroup[] = [];
+  let remainingSlots = Math.max(0, limits.maxResults - recents.length);
+
   if (recents.length > 0) groups.push({ label: "RECENT", commands: recents });
 
   const sortedCategoryLabels = [...categories.keys()].sort((a, b) => a.localeCompare(b));
   for (const label of sortedCategoryLabels) {
+    if (remainingSlots <= 0) break;
     const cmds = categories.get(label)!;
     cmds.sort(sortCommandsAlpha);
-    groups.push({ label, commands: cmds });
+    const slice = cmds.slice(0, Math.min(limits.maxResultsPerGroup, remainingSlots));
+    if (slice.length === 0) continue;
+    groups.push({ label, commands: slice });
+    remainingSlots -= slice.length;
   }
 
   return groups;
 }
 
-function buildGroupsForQuery(allCommands: CommandContribution[], query: string): CommandGroup[] {
-  const matches: RenderableCommand[] = [];
+function buildGroupsForQuery(
+  allCommands: PreparedCommandForFuzzy<CommandContribution>[],
+  query: string,
+  limits: { maxResults: number; maxResultsPerGroup: number },
+): CommandGroup[] {
+  const compiled = compileFuzzyQuery(query);
+
+  // Keep only top N matches to avoid sorting huge arrays (N = maxResults).
+  const top: RenderableCommand[] = [];
+
+  const isBetter = (a: RenderableCommand, b: RenderableCommand): boolean => {
+    if (a.score !== b.score) return a.score > b.score;
+    return a.title.localeCompare(b.title) < 0;
+  };
+
+  const worstIndex = (): number => {
+    let worst = 0;
+    for (let i = 1; i < top.length; i += 1) {
+      // If the current `worst` is better than `top[i]`, then `top[i]` is the new worst.
+      if (isBetter(top[worst]!, top[i]!)) worst = i;
+    }
+    return worst;
+  };
+
   for (const cmd of allCommands) {
-    const match = fuzzyMatchCommand(query, cmd);
+    const match = fuzzyMatchCommandPrepared(compiled, cmd);
     if (!match) continue;
-    matches.push({ ...cmd, score: match.score, titleRanges: match.titleRanges });
+
+    const candidate: RenderableCommand = { ...cmd, score: match.score, titleRanges: match.titleRanges };
+    if (top.length < limits.maxResults) {
+      top.push(candidate);
+      continue;
+    }
+
+    const idx = worstIndex();
+    if (isBetter(candidate, top[idx]!)) {
+      top[idx] = candidate;
+    }
   }
 
-  matches.sort((a, b) => {
+  top.sort((a, b) => {
     if (a.score !== b.score) return b.score - a.score;
     return a.title.localeCompare(b.title);
   });
@@ -99,12 +159,14 @@ function buildGroupsForQuery(allCommands: CommandContribution[], query: string):
   const groupsByLabel = new Map<string, RenderableCommand[]>();
   const groupOrder: string[] = [];
 
-  for (const cmd of matches) {
+  for (const cmd of top) {
     const label = groupLabel(cmd.category);
     if (!groupsByLabel.has(label)) groupOrder.push(label);
     const list = groupsByLabel.get(label) ?? [];
-    list.push(cmd);
-    groupsByLabel.set(label, list);
+    if (list.length < limits.maxResultsPerGroup) {
+      list.push(cmd);
+      groupsByLabel.set(label, list);
+    }
   }
 
   return groupOrder.map((label) => ({ label, commands: groupsByLabel.get(label) ?? [] }));
@@ -140,6 +202,9 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     onCloseFocus,
     placeholder = "Type a command…",
     extensionLoadDelayMs = 600,
+    maxResults = 100,
+    maxResultsPerGroup = 20,
+    inputDebounceMs = 70,
   } = options;
 
   const overlay = document.createElement("div");
@@ -172,10 +237,19 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   overlay.appendChild(palette);
   document.body.appendChild(overlay);
 
+  const limits = {
+    maxResults: Math.max(0, Math.floor(maxResults)),
+    maxResultsPerGroup: Math.max(1, Math.floor(maxResultsPerGroup)),
+  };
+  const inputDebounce = Math.max(0, Math.floor(inputDebounceMs));
+
   let isOpen = false;
   let query = "";
   let selectedIndex = 0;
   let visibleCommands: RenderableCommand[] = [];
+  let visibleCommandEls: HTMLLIElement[] = [];
+  let commandsCacheDirty = true;
+  let cachedCommands: PreparedCommandForFuzzy<CommandContribution>[] = [];
   let extensionLoadTimer: number | null = null;
   // Track which commands were launched from the palette so we only record those in
   // palette recents (and only after they successfully execute).
@@ -191,10 +265,12 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   function close(): void {
     if (!isOpen) return;
     isOpen = false;
+    debouncedRender.cancel();
     overlay.style.display = "none";
     query = "";
     selectedIndex = 0;
     visibleCommands = [];
+    visibleCommandEls = [];
     if (extensionLoadTimer != null) {
       window.clearTimeout(extensionLoadTimer);
       extensionLoadTimer = null;
@@ -203,13 +279,14 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   }
 
   function open(): void {
+    debouncedRender.cancel();
     query = "";
     selectedIndex = 0;
     input.value = "";
     overlay.style.display = "flex";
     isOpen = true;
 
-    render();
+    renderResults();
 
     input.focus();
     input.select();
@@ -225,28 +302,36 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     }, extensionLoadDelayMs);
   }
 
-  function getRecentsForDisplay(allCommands: CommandContribution[]): string[] {
+  function ensureCommandsCache(): void {
+    if (!commandsCacheDirty) return;
+    cachedCommands = commandRegistry
+      .listCommands()
+      // The command palette owns opening itself; avoid showing a no-op entry.
+      .filter((cmd) => cmd.commandId !== "workbench.showCommandPalette")
+      .map((cmd) => prepareCommandForFuzzy(cmd));
+    commandsCacheDirty = false;
+  }
+
+  function getRecentsForDisplay(allCommands: Array<{ commandId: string }>): string[] {
     const ids = readCommandPaletteRecents(localStorage);
     if (ids.length === 0) return [];
     const existing = new Set(allCommands.map((cmd) => cmd.commandId));
     return ids.filter((id) => existing.has(id));
   }
 
-  function render(): void {
-    const allCommands = commandRegistry
-      .listCommands()
-      // The command palette owns opening itself; avoid showing a no-op entry.
-      .filter((cmd) => cmd.commandId !== "workbench.showCommandPalette");
+  function renderResults(): void {
+    ensureCommandsCache();
 
     const groups =
       query.trim() === ""
-        ? buildGroupsForEmptyQuery(allCommands, getRecentsForDisplay(allCommands))
-        : buildGroupsForQuery(allCommands, query);
+        ? buildGroupsForEmptyQuery(cachedCommands, getRecentsForDisplay(cachedCommands), limits)
+        : buildGroupsForQuery(cachedCommands, query, limits);
 
     visibleCommands = groups.flatMap((g) => g.commands);
     if (selectedIndex >= visibleCommands.length) selectedIndex = Math.max(0, visibleCommands.length - 1);
 
     list.replaceChildren();
+    visibleCommandEls = [];
 
     if (groups.length === 0 || visibleCommands.length === 0) {
       const empty = document.createElement("li");
@@ -313,14 +398,41 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
         });
 
         list.appendChild(li);
-
-        if (globalIndex === selectedIndex) {
-          // Keep selection in view when navigating via keyboard.
-          queueMicrotask(() => li.scrollIntoView({ block: "nearest" }));
-        }
+        visibleCommandEls[globalIndex] = li;
       }
 
       commandOffset += group.commands.length;
+    }
+
+    // Keep selection in view after re-render.
+    queueMicrotask(() => visibleCommandEls[selectedIndex]?.scrollIntoView({ block: "nearest" }));
+  }
+
+  const debouncedRender = debounce(
+    () => {
+      if (!isOpen) return;
+      renderResults();
+    },
+    inputDebounce,
+  );
+
+  function updateSelection(nextIndex: number): void {
+    if (visibleCommands.length === 0) {
+      selectedIndex = 0;
+      return;
+    }
+
+    const prev = selectedIndex;
+    selectedIndex = Math.max(0, Math.min(nextIndex, visibleCommands.length - 1));
+    if (prev === selectedIndex) return;
+
+    const prevEl = visibleCommandEls[prev];
+    if (prevEl) prevEl.setAttribute("aria-selected", "false");
+
+    const nextEl = visibleCommandEls[selectedIndex];
+    if (nextEl) {
+      nextEl.setAttribute("aria-selected", "true");
+      nextEl.scrollIntoView({ block: "nearest" });
     }
   }
 
@@ -332,8 +444,10 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   }
 
   const disposeRegistrySub = commandRegistry.subscribe(() => {
+    commandsCacheDirty = true;
     if (!isOpen) return;
-    render();
+    debouncedRender.cancel();
+    renderResults();
   });
 
   const disposeExecuteSub = commandRegistry.onDidExecuteCommand((evt) => {
@@ -353,7 +467,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   const onInput = () => {
     query = input.value;
     selectedIndex = 0;
-    render();
+    debouncedRender();
   };
   input.addEventListener("input", onInput);
 
@@ -366,20 +480,21 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
 
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      selectedIndex = visibleCommands.length === 0 ? 0 : Math.min(visibleCommands.length - 1, selectedIndex + 1);
-      render();
+      debouncedRender.flush();
+      updateSelection(selectedIndex + 1);
       return;
     }
 
     if (e.key === "ArrowUp") {
       e.preventDefault();
-      selectedIndex = visibleCommands.length === 0 ? 0 : Math.max(0, selectedIndex - 1);
-      render();
+      debouncedRender.flush();
+      updateSelection(selectedIndex - 1);
       return;
     }
 
     if (e.key === "Enter") {
       e.preventDefault();
+      debouncedRender.flush();
       runSelected();
     }
   };
@@ -403,6 +518,11 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   window.addEventListener("keydown", onGlobalKeyDown);
 
   function dispose(): void {
+    debouncedRender.cancel();
+    if (extensionLoadTimer != null) {
+      window.clearTimeout(extensionLoadTimer);
+      extensionLoadTimer = null;
+    }
     disposeRegistrySub();
     disposeExecuteSub();
     overlay.removeEventListener("click", onOverlayClick);

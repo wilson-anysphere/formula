@@ -18,6 +18,66 @@ export type CommandMatch = {
   titleRanges: MatchRange[];
 };
 
+export type CompiledFuzzyQuery = {
+  /** Whitespace-normalized query (original case preserved). */
+  normalized: string;
+  /** Lowercased whitespace-normalized query. */
+  normalizedLower: string;
+  /**
+   * Lowercased query tokens split on spaces.
+   *
+   * These are precomputed once per query so we don't re-split/re-lowercase
+   * inside the per-command matching loop.
+   */
+  tokens: string[];
+};
+
+export function compileFuzzyQuery(query: string): CompiledFuzzyQuery {
+  const normalized = normalizeQuery(query);
+  const normalizedLower = normalized.toLowerCase();
+  const tokens = normalizedLower
+    ? normalizedLower
+        .split(" ")
+        .map((t) => t.trim())
+        .filter((t) => t.length > 0)
+    : [];
+  return { normalized, normalizedLower, tokens };
+}
+
+export type PreparedCommandForFuzzy<T extends CommandLike = CommandLike> = T & {
+  commandIdLower: string;
+  titleLower: string;
+  categoryLower: string | null;
+  descriptionLower: string | null;
+  keywordsJoined: string;
+  keywordsJoinedLower: string;
+  titleNormalizedLower: string;
+};
+
+export function prepareCommandForFuzzy<T extends CommandLike>(command: T): PreparedCommandForFuzzy<T> {
+  const title = String(command.title ?? "");
+  const category = command.category == null ? null : String(command.category);
+  const description = command.description == null ? null : String(command.description);
+  const keywordsJoined =
+    Array.isArray(command.keywords) && command.keywords.length > 0
+      ? command.keywords
+          .filter((k) => typeof k === "string" && k.trim() !== "")
+          .map((k) => k.trim())
+          .join(" ")
+      : "";
+
+  return {
+    ...command,
+    commandIdLower: String(command.commandId ?? "").toLowerCase(),
+    titleLower: title.toLowerCase(),
+    categoryLower: category ? category.toLowerCase() : null,
+    descriptionLower: description ? description.toLowerCase() : null,
+    keywordsJoined,
+    keywordsJoinedLower: keywordsJoined.toLowerCase(),
+    titleNormalizedLower: normalizeQuery(title).toLowerCase(),
+  };
+}
+
 function isWordBoundary(text: string, index: number): boolean {
   if (index <= 0) return true;
   const prev = text[index - 1] ?? "";
@@ -77,22 +137,24 @@ export function mergeRanges(ranges: MatchRange[]): MatchRange[] {
  * - Penalizes gaps and longer candidate strings
  */
 export function fuzzyMatchToken(query: string, candidate: string): FuzzyMatch | null {
-  const q = String(query ?? "").trim().toLowerCase();
-  if (!q) return { score: 0, ranges: [] };
+  const qLower = String(query ?? "").trim().toLowerCase();
+  if (!qLower) return { score: 0, ranges: [] };
 
   const text = String(candidate ?? "");
   if (!text) return null;
 
-  const lower = text.toLowerCase();
+  return fuzzyMatchTokenPrepared(qLower, text, text.toLowerCase());
+}
 
+function fuzzyMatchTokenPrepared(qLower: string, text: string, lower: string): FuzzyMatch | null {
   let score = 0;
   const indices: number[] = [];
 
   let lastIndex = -1;
   let firstIndex = -1;
 
-  for (let qi = 0; qi < q.length; qi += 1) {
-    const ch = q[qi]!;
+  for (let qi = 0; qi < qLower.length; qi += 1) {
+    const ch = qLower[qi]!;
     const idx = lower.indexOf(ch, lastIndex + 1);
     if (idx === -1) return null;
 
@@ -119,7 +181,7 @@ export function fuzzyMatchToken(query: string, candidate: string): FuzzyMatch | 
   }
 
   const isSubstring =
-    indices.length > 0 && indices.every((idx, i) => idx === indices[0]! + i) && lower.includes(q);
+    indices.length > 0 && indices.every((idx, i) => idx === indices[0]! + i) && lower.includes(qLower);
   if (isSubstring) score += 30;
 
   if (firstIndex === 0) score += 20;
@@ -138,23 +200,22 @@ function normalizeQuery(query: string): string {
 }
 
 function splitQueryTokens(query: string): string[] {
-  const normalized = normalizeQuery(query);
-  if (!normalized) return [];
-  return normalized
-    .split(" ")
-    .map((t) => t.trim())
-    .filter((t) => t.length > 0);
+  return compileFuzzyQuery(query).tokens;
 }
 
 type TokenMatch = { score: number; field: "title" | "category" | "id" | "description" | "keywords"; ranges: MatchRange[] };
 
-function bestTokenMatch(token: string, command: CommandLike): TokenMatch | null {
-  const titleMatch = fuzzyMatchToken(token, command.title);
-  const categoryMatch = command.category ? fuzzyMatchToken(token, command.category) : null;
-  const idMatch = fuzzyMatchToken(token, command.commandId);
-  const descriptionMatch = command.description ? fuzzyMatchToken(token, command.description) : null;
+function bestTokenMatch(tokenLower: string, command: PreparedCommandForFuzzy): TokenMatch | null {
+  const titleMatch = fuzzyMatchTokenPrepared(tokenLower, command.title, command.titleLower);
+  const categoryMatch =
+    command.category && command.categoryLower ? fuzzyMatchTokenPrepared(tokenLower, command.category, command.categoryLower) : null;
+  const idMatch = fuzzyMatchTokenPrepared(tokenLower, command.commandId, command.commandIdLower);
+  const descriptionMatch =
+    command.description && command.descriptionLower ? fuzzyMatchTokenPrepared(tokenLower, command.description, command.descriptionLower) : null;
   const keywordsMatch =
-    Array.isArray(command.keywords) && command.keywords.length > 0 ? fuzzyMatchToken(token, command.keywords.join(" ")) : null;
+    command.keywordsJoined && command.keywordsJoinedLower
+      ? fuzzyMatchTokenPrepared(tokenLower, command.keywordsJoined, command.keywordsJoinedLower)
+      : null;
 
   const candidates: Array<TokenMatch | null> = [
     titleMatch ? { score: titleMatch.score * 3, field: "title", ranges: titleMatch.ranges } : null,
@@ -173,8 +234,8 @@ function bestTokenMatch(token: string, command: CommandLike): TokenMatch | null 
   return best;
 }
 
-export function fuzzyMatchCommand(query: string, command: CommandLike): CommandMatch | null {
-  const tokens = splitQueryTokens(query);
+export function fuzzyMatchCommandPrepared(query: CompiledFuzzyQuery, command: PreparedCommandForFuzzy): CommandMatch | null {
+  const tokens = query.tokens;
 
   // Empty query: everything matches with neutral score.
   if (tokens.length === 0) return { score: 0, titleRanges: [] };
@@ -190,14 +251,18 @@ export function fuzzyMatchCommand(query: string, command: CommandLike): CommandM
   }
 
   // Make exact title matches unambiguous (e.g. "Freeze Panes" > "Unfreeze Panes").
-  const normQuery = normalizeQuery(query).toLowerCase();
-  const normTitle = normalizeQuery(command.title).toLowerCase();
-  if (normQuery === normTitle) score += 10_000;
-  else if (normQuery && normTitle.startsWith(normQuery)) score += 2_500;
-  else if (normQuery && normTitle.includes(normQuery)) score += 1_000;
+  const normQueryLower = query.normalizedLower;
+  const normTitleLower = command.titleNormalizedLower;
+  if (normQueryLower === normTitleLower) score += 10_000;
+  else if (normQueryLower && normTitleLower.startsWith(normQueryLower)) score += 2_500;
+  else if (normQueryLower && normTitleLower.includes(normQueryLower)) score += 1_000;
 
   // Prefer commands with categories when searching by category, but don't dominate title matches.
   if (command.category) score += 5;
 
   return { score, titleRanges: mergeRanges(titleRanges) };
+}
+
+export function fuzzyMatchCommand(query: string, command: CommandLike): CommandMatch | null {
+  return fuzzyMatchCommandPrepared(compileFuzzyQuery(query), prepareCommandForFuzzy(command));
 }
