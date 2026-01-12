@@ -78,10 +78,12 @@
  *    *\/
  *   colFormats?: Record<string, JsonObject>,
  *   /**
- *    * Range-run formatting overrides (compressed rectangular formatting).
+ *    * Range-run formatting (compressed rectangular formatting) stored as a per-column list
+ *    * of half-open row intervals: `[startRow, endRowExclusive)`.
  *    *
- *    * Stored per column as non-overlapping row runs, covering the half-open interval
- *    * `[startRow, endRowExclusive)`.
+ *    * This mirrors DocumentController's `formatRunsByCol` snapshot representation and allows
+ *    * branches to persist large rectangle format changes without materializing per-cell
+ *    * `Cell.format` overrides.
  *    *
  *    * Values are style objects (not style ids) so BranchService snapshots are self-contained.
  *    *\/

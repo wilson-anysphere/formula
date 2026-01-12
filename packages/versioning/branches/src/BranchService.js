@@ -452,6 +452,14 @@ export class BranchService {
           mergedView.rowHeights = structuredClone(currentView.rowHeights);
           didOverlay = true;
         }
+
+        // Preserve range-run formatting when the caller omits it from the view payload.
+        // (e.g. older schemaVersion=1 clients that know about frozen panes but not compressed
+        // range formatting).
+        if (!("formatRunsByCol" in rawView) && currentView.formatRunsByCol !== undefined) {
+          mergedView.formatRunsByCol = structuredClone(currentView.formatRunsByCol);
+          didOverlay = true;
+        }
       }
 
       if (didOverlay) effectiveNextState = merged;

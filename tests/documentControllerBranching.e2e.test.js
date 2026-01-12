@@ -255,3 +255,47 @@ test("DocumentController + BranchService: masked cells do not overwrite encrypte
   const state = await branchService.getCurrentState();
   assert.deepEqual(state.cells.Sheet1.A1, { enc });
 });
+
+test("DocumentController + BranchService: range-run formatting persists through commit/checkout/merge", async () => {
+  const actor = { userId: "u1", role: "owner" };
+
+  const doc = new DocumentController();
+  // Materialize the sheet so range formatting can be applied deterministically.
+  doc.setCellValue("Sheet1", "A1", null);
+
+  const store = new InMemoryBranchStore();
+  const branchService = new BranchService({ docId: "doc-range-runs-branching", store });
+  await branchService.init(actor, { sheets: { Sheet1: {} } });
+
+  const workflow = new DocumentBranchingWorkflow({ doc, branchService });
+  await workflow.commitCurrentState(actor, "base");
+
+  await branchService.createBranch(actor, { name: "fmt" });
+  await workflow.checkoutIntoDoc(actor, "fmt");
+
+  // Large rectangle => stored as range-run formatting (formatRunsByCol) instead of per-cell overrides.
+  doc.setRangeFormat("Sheet1", "A1:Z1000000", { font: { bold: true } });
+  await workflow.commitCurrentState(actor, "fmt: bold");
+
+  const fmtState = await branchService.getCurrentState();
+  const runs = fmtState.sheets.metaById.Sheet1?.view?.formatRunsByCol;
+  assert.ok(Array.isArray(runs) && runs.length > 0, "expected committed branch state to include formatRunsByCol");
+  assert.deepEqual(runs[0].runs[0].format, { font: { bold: true } });
+
+  await workflow.checkoutIntoDoc(actor, "main");
+  // Checkout should clear the range-run layer (main branch has none).
+  assert.notEqual(doc.getCellFormat("Sheet1", "A1")?.font?.bold, true);
+
+  // Diverge main with a content edit so merge exercises both cell and view state.
+  doc.setCellValue("Sheet1", "A1", 123);
+  await workflow.commitCurrentState(actor, "main: value");
+
+  const preview = await branchService.previewMerge(actor, { sourceBranch: "fmt" });
+  assert.equal(preview.conflicts.length, 0);
+
+  await workflow.mergeIntoDoc(actor, "fmt", []);
+
+  // Main's value + fmt's formatting should both be present.
+  assert.equal(doc.getCell("Sheet1", "A1").value, 123);
+  assert.equal(doc.getCellFormat("Sheet1", "A1")?.font?.bold, true);
+});

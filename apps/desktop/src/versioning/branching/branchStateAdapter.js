@@ -1,5 +1,4 @@
 import { formatA1, parseA1 } from "../../document/coords.js";
-import { applyStylePatch } from "../../formatting/styleTable.js";
 import { normalizeDocumentState } from "../../../../../packages/versioning/branches/src/state.js";
 
 /**
@@ -180,6 +179,54 @@ function branchFormatMapFromDocFormatMap(doc, raw) {
 }
 
 /**
+ * Normalize a DocumentController per-column format-run store into the BranchService `formatRunsByCol`
+ * representation (style objects, not style ids).
+ *
+ * @param {DocumentController} doc
+ * @param {any} sheet
+ * @returns {Array<{ col: number, runs: Array<{ startRow: number, endRowExclusive: number, format: Record<string, any> }> }>}
+ */
+function branchFormatRunsByColFromDocSheet(doc, sheet) {
+  const runsByCol = sheet?.formatRunsByCol ?? sheet?.formatRunsByColumn ?? sheet?.rangeRunsByCol ?? null;
+  if (!runsByCol) return [];
+
+  /** @type {Array<{ col: number, runs: Array<{ startRow: number, endRowExclusive: number, format: Record<string, any> }> }>} */
+  const out = [];
+
+  const iter =
+    typeof runsByCol?.entries === "function"
+      ? runsByCol.entries()
+      : isPlainObject(runsByCol)
+        ? Object.entries(runsByCol)
+        : [];
+
+  for (const [colKey, runs] of iter) {
+    const col = Number(colKey);
+    if (!Number.isInteger(col) || col < 0) continue;
+    if (!Array.isArray(runs) || runs.length === 0) continue;
+
+    /** @type {Array<{ startRow: number, endRowExclusive: number, format: Record<string, any> }>} */
+    const outRuns = [];
+    for (const run of runs) {
+      const startRow = Number(run?.startRow);
+      const endRowExclusive = Number(run?.endRowExclusive);
+      const styleId = Number(run?.styleId);
+      if (!Number.isInteger(startRow) || startRow < 0) continue;
+      if (!Number.isInteger(endRowExclusive) || endRowExclusive <= startRow) continue;
+      if (!Number.isInteger(styleId) || styleId <= 0) continue;
+      const format = branchFormatFromDocFormat(doc, styleId);
+      if (!format) continue;
+      outRuns.push({ startRow, endRowExclusive, format });
+    }
+    outRuns.sort((a, b) => a.startRow - b.startRow);
+    if (outRuns.length > 0) out.push({ col, runs: outRuns });
+  }
+
+  out.sort((a, b) => a.col - b.col);
+  return out;
+}
+
+/**
  * @param {string} key
  * @returns {{ row: number, col: number } | null}
  */
@@ -231,68 +278,8 @@ export function documentControllerToBranchState(doc) {
           outCell.value = cloneJsonish(cell.value);
         }
 
-        // BranchService only has a single `Cell.format` field (cell-level formatting).
-        //
-        // DocumentController now supports an additional "range run" formatting layer that applies
-        // to arbitrary rectangles without materializing per-cell style overrides.
-        //
-        // To preserve formatting through the branching adapter (and keep merge conflict detection
-        // working), we merge the run + cell layers into the serialized `Cell.format` object.
-        //
-        // Note: we intentionally do *not* bake sheet/row/col defaults into `Cell.format` since
-        // those are stored separately in the sheet view state and should remain layered.
-        const runStyleId = (() => {
-          // Prefer the public DocumentController helper if present (future-proof against model changes).
-          try {
-            if (typeof doc.getCellFormatStyleIds === "function") {
-              const tuple = doc.getCellFormatStyleIds(sheetId, coord);
-              if (Array.isArray(tuple) && tuple.length >= 5) {
-                const id = Number(tuple[4]);
-                return Number.isInteger(id) && id >= 0 ? id : 0;
-              }
-              return 0;
-            }
-          } catch {
-            // Fall through to best-effort internal shape inspection.
-          }
-
-          // DocumentController internal sheet model (preferred).
-          const runsByCol = sheet?.formatRunsByCol ?? sheet?.formatRunsByColumn ?? sheet?.rangeRunsByCol;
-          const runs = (() => {
-            if (!runsByCol) return null;
-            if (typeof runsByCol.get === "function") return runsByCol.get(coord.col);
-            return runsByCol[String(coord.col)] ?? runsByCol[coord.col];
-          })();
-
-          if (Array.isArray(runs) && runs.length > 0) {
-            // Binary search for the containing run. Runs are half-open intervals:
-            // [startRow, endRowExclusive).
-            let lo = 0;
-            let hi = runs.length - 1;
-            while (lo <= hi) {
-              const mid = (lo + hi) >> 1;
-              const run = runs[mid];
-              const startRow = Number(run?.startRow);
-              const endRowExclusive = Number(run?.endRowExclusive);
-              const styleId = Number(run?.styleId);
-              if (!Number.isInteger(startRow) || !Number.isInteger(endRowExclusive) || !Number.isInteger(styleId)) return 0;
-              if (coord.row < startRow) hi = mid - 1;
-              else if (coord.row >= endRowExclusive) lo = mid + 1;
-              else return styleId;
-            }
-          }
-
-          // Legacy fallback: older controllers stored runs behind a helper object.
-          return sheet?.formatRunStore?.getStyleId?.(coord.row, coord.col) ?? 0;
-        })();
-        const runFormat = branchFormatFromDocFormat(doc, runStyleId);
         const cellFormat = branchFormatFromDocFormat(doc, cell.styleId);
-        if (runFormat || cellFormat) {
-          let merged = {};
-          if (runFormat) merged = applyStylePatch(merged, runFormat);
-          if (cellFormat) merged = applyStylePatch(merged, cellFormat);
-          if (isNonEmptyPlainObject(merged)) outCell.format = merged;
-        }
+        if (cellFormat) outCell.format = cellFormat;
 
         if (Object.keys(outCell).length === 0) continue;
         outSheet[formatA1(coord)] = outCell;
@@ -363,65 +350,13 @@ export function documentControllerToBranchState(doc) {
 
     // --- Range-run formatting (compressed rectangular formatting) ---
     //
-    // DocumentController stores large-rectangle formatting as per-column row runs
-    // (`sheet.formatRunsByCol`) referencing style ids. Convert these to self-contained
-    // style objects so BranchService snapshots can round-trip without needing the
-    // DocumentController style table.
-    const formatRunsByCol = (() => {
-      const rawRunsByCol = sheet?.formatRunsByCol;
-      if (!rawRunsByCol) return null;
-
-      /** @type {Array<{ col: number, runs: Array<{ startRow: number, endRowExclusive: number, format: Record<string, any> }> }>} */
-      const out = [];
-
-      /**
-       * @param {any} colKey
-       * @param {any} rawRuns
-       */
-      const addColRuns = (colKey, rawRuns) => {
-        const col = Number(colKey);
-        if (!Number.isInteger(col) || col < 0) return;
-        if (!Array.isArray(rawRuns) || rawRuns.length === 0) return;
-
-        /** @type {Array<{ startRow: number, endRowExclusive: number, format: Record<string, any> }>} */
-        const runs = [];
-
-        for (const entry of rawRuns) {
-          const startRow = Number(entry?.startRow);
-          const endRowExclusive = Number(entry?.endRowExclusive);
-          if (!Number.isInteger(startRow) || startRow < 0) continue;
-          if (!Number.isInteger(endRowExclusive) || endRowExclusive <= startRow) continue;
-
-          const format = branchFormatFromDocFormat(doc, entry?.styleId);
-          if (!format) continue;
-          runs.push({ startRow, endRowExclusive, format });
-        }
-
-        runs.sort((a, b) => a.startRow - b.startRow);
-        if (runs.length === 0) return;
-        out.push({ col, runs });
-      };
-
-      if (rawRunsByCol instanceof Map) {
-        for (const [col, runs] of rawRunsByCol.entries()) addColRuns(col, runs);
-      } else if (Array.isArray(rawRunsByCol)) {
-        for (const entry of rawRunsByCol) {
-          if (Array.isArray(entry)) addColRuns(entry[0], entry[1]);
-          else if (isPlainObject(entry)) addColRuns(entry.col ?? entry.index, entry.runs);
-        }
-      } else if (isPlainObject(rawRunsByCol)) {
-        for (const [col, runs] of Object.entries(rawRunsByCol)) addColRuns(col, runs);
-      }
-
-      out.sort((a, b) => a.col - b.col);
-      return out.length > 0 ? out : null;
-    })();
-
-    if (formatRunsByCol) {
-      view.formatRunsByCol = formatRunsByCol;
-    } else {
-      delete view.formatRunsByCol;
-    }
+    // DocumentController stores large-rectangle formatting as per-column row runs (`sheet.formatRunsByCol`)
+    // referencing style ids. Convert these to self-contained style objects so BranchService snapshots can
+    // round-trip without depending on the DocumentController style table.
+    //
+    // Important: we always include the key (even if empty) so BranchService can distinguish
+    // "caller omitted the field" from "caller explicitly cleared all runs" during commit overlays.
+    view.formatRunsByCol = branchFormatRunsByColFromDocSheet(doc, sheet);
 
     /** @type {Record<string, any>} */
     const metaOut = { id: sheetId, name, view };

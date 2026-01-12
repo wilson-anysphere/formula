@@ -59,6 +59,57 @@ function normalizeSheetView(value) {
     return structuredClone(raw);
   };
 
+  const normalizeFormatRunsByCol = (raw) => {
+    if (!raw) return null;
+    /** @type {Array<{ col: number, runs: Array<{ startRow: number, endRowExclusive: number, format: Record<string, any> }> }>} */
+    const out = [];
+
+    const normalizeRunList = (rawRuns) => {
+      if (!Array.isArray(rawRuns) || rawRuns.length === 0) return [];
+      /** @type {Array<{ startRow: number, endRowExclusive: number, format: Record<string, any> }>} */
+      const runs = [];
+      for (const entry of rawRuns) {
+        const startRow = Number(entry?.startRow);
+        const endRowExclusiveNum = Number(entry?.endRowExclusive);
+        const endRowNum = Number(entry?.endRow);
+        const endRowExclusive = Number.isInteger(endRowExclusiveNum)
+          ? endRowExclusiveNum
+          : Number.isInteger(endRowNum)
+            ? endRowNum + 1
+            : NaN;
+        if (!Number.isInteger(startRow) || startRow < 0) continue;
+        if (!Number.isInteger(endRowExclusive) || endRowExclusive <= startRow) continue;
+        const format = normalizeFormatObject(entry?.format ?? entry?.style);
+        if (!format) continue;
+        runs.push({ startRow, endRowExclusive, format });
+      }
+      runs.sort((a, b) => a.startRow - b.startRow);
+      return runs;
+    };
+
+    const addColRuns = (colRaw, runsRaw) => {
+      const col = Number(colRaw);
+      if (!Number.isInteger(col) || col < 0) return;
+      const runs = normalizeRunList(runsRaw);
+      if (runs.length === 0) return;
+      out.push({ col, runs });
+    };
+
+    if (raw instanceof Map) {
+      for (const [col, runs] of raw.entries()) addColRuns(col, runs);
+    } else if (Array.isArray(raw)) {
+      for (const entry of raw) {
+        if (!entry) continue;
+        addColRuns(entry?.col ?? entry?.index ?? entry?.column, entry?.runs ?? entry?.formatRuns ?? entry?.segments);
+      }
+    } else if (isRecord(raw)) {
+      for (const [key, runs] of Object.entries(raw)) addColRuns(key, runs);
+    }
+
+    out.sort((a, b) => a.col - b.col);
+    return out.length === 0 ? null : out;
+  };
+
   const normalizeFormatOverrides = (raw) => {
     if (!raw) return null;
     /** @type {Record<string, any>} */
@@ -128,6 +179,14 @@ function normalizeSheetView(value) {
   const defaultFormat = isRecord(value) ? normalizeFormatObject(value.defaultFormat) : null;
   const rowFormats = isRecord(value) ? normalizeFormatOverrides(value.rowFormats) : null;
   const colFormats = isRecord(value) ? normalizeFormatOverrides(value.colFormats) : null;
+  let formatRunsByCol = null;
+  if (isRecord(value)) {
+    const hasKey = Object.prototype.hasOwnProperty.call(value, "formatRunsByCol");
+    formatRunsByCol = normalizeFormatRunsByCol(value.formatRunsByCol);
+    // Preserve explicit clears/empties so callers can distinguish omission ("don't change")
+    // from "set to empty" when performing back-compat overlays in BranchService.commit().
+    if (formatRunsByCol == null && hasKey) formatRunsByCol = [];
+  }
 
   const normalizeFormatRunsByCol = (raw) => {
     if (!raw) return null;
