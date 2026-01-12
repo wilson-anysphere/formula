@@ -435,7 +435,12 @@ pub fn decode_rgce(rgce: &[u8]) -> Result<String, DecodeRgceError> {
             //   [table: XLUnicodeString(u16-len)]
             //   [col1: XLUnicodeString(u16-len)]
             //   [col2: XLUnicodeString(u16-len)]
-            0x2E | 0x4E | 0x6E => {
+            //
+            // NOTE: Excel's on-disk token layout for structured references is not yet implemented
+            // in `formula-biff`. For now we use a `PtgList`-like placeholder token id (0x30) with a
+            // self-contained string payload so rgce streams can be round-tripped by our own
+            // decoder/encoder.
+            0x30 | 0x50 | 0x70 => {
                 if input.len() < 2 {
                     return Err(DecodeRgceError::UnexpectedEof);
                 }
@@ -1008,7 +1013,7 @@ fn encode_structured_ref(
         }
     };
 
-    const PTG_LIST: u8 = 0x2E;
+    const PTG_LIST: u8 = 0x30;
     let ptg = match class {
         StructuredRefClass::Ref => PTG_LIST,
         StructuredRefClass::Value => PTG_LIST.wrapping_add(0x20),
