@@ -153,7 +153,7 @@ export const enUS = {
   "commandCategory.data": "Data",
   "commandCategory.view": "View",
   "commandCategory.audit": "Audit",
-  "commandCategory.editing": "Editing",
+  "commandCategory.editing": "Edit",
   "commandCategory.format": "Format",
   "commandCategory.comments": "Comments",
   "commandCategory.help": "Help",
