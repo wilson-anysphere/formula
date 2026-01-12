@@ -419,6 +419,16 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
     runningEventMacro = true;
     currentEventMacroKind = kind;
     try {
+      // Allow microtask-batched workbook operations (e.g. `startWorkbookSync` queueing `set_cell`)
+      // to attach to the backend sync promise chain before we drain it, so the VBA runtime sees
+      // the latest persisted workbook state.
+      //
+      // Use a Promise-based yield (rather than `queueMicrotask`) to stay compatible with Vitest
+      // fake timers and other environments that stub `queueMicrotask`.
+      if (kind !== "selection_change") {
+        await Promise.resolve();
+      }
+
       // Sync any pending workbook changes (backend sync chain) and the current UI context before
       // firing the macro. Selection changes are sourced from the UI (not the backend sync chain),
       // so draining backend sync here only adds latency.
