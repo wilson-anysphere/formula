@@ -155,6 +155,8 @@ const tools = [
 ];
 ```
 
+Tool calling should be implemented using the provider-agnostic `ToolDefinition` and `LLMMessage` models in `packages/llm`. Cursor's backend is responsible for translating these structures into whatever underlying model API it routes to.
+
 ---
 
 ## Safety and Verification
@@ -204,5 +206,5 @@ FORMULA_SKIP_WASM_BUILD=1 pnpm vitest run packages/llm/src/*.test.ts
 ## Reference
 
 - Cursor's AI implementation patterns
-- Tool calling: OpenAI function calling format
+- Tool calling: JSON-schema tool definitions (Cursor backend handles provider-specific encoding)
 - Context: RAG best practices
