@@ -146,7 +146,15 @@ export function fuzzyMatchToken(query: string, candidate: string): FuzzyMatch | 
   return fuzzyMatchTokenPrepared(qLower, text, text.toLowerCase());
 }
 
-function fuzzyMatchTokenPrepared(qLower: string, text: string, lower: string): FuzzyMatch | null {
+/**
+ * A slightly lower-level variant of {@link fuzzyMatchToken} that accepts a
+ * pre-lowercased query and candidate.
+ *
+ * This is useful for large catalogs (commands/functions) where we want to avoid
+ * allocating/lowercasing the same strings on every keystroke.
+ */
+export function fuzzyMatchTokenPrepared(qLower: string, text: string, lower: string): FuzzyMatch | null {
+  if (!qLower) return { score: 0, ranges: [] };
   let score = 0;
   const indices: number[] = [];
 

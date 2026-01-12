@@ -6,7 +6,7 @@ import FUNCTION_CATALOG from "../../../../shared/functionCatalog.mjs";
 import {
   compileFuzzyQuery,
   fuzzyMatchCommandPrepared,
-  fuzzyMatchToken,
+  fuzzyMatchTokenPrepared,
   type MatchRange,
   type PreparedCommandForFuzzy,
 } from "./fuzzy.js";
@@ -36,9 +36,17 @@ export type CommandPaletteSection = {
 
 type CatalogFunction = { name?: string | null };
 
-const FUNCTION_NAMES: string[] = ((FUNCTION_CATALOG as { functions?: CatalogFunction[] } | null)?.functions ?? [])
+type PreparedFunctionForSearch = { name: string; nameLower: string; nameLowerNormalized: string };
+
+const FUNCTIONS: PreparedFunctionForSearch[] = ((FUNCTION_CATALOG as { functions?: CatalogFunction[] } | null)?.functions ?? [])
   .map((fn) => String(fn?.name ?? "").trim())
-  .filter((name) => name.length > 0);
+  .filter((name) => name.length > 0)
+  .map((name) => {
+    const nameLower = name.toLowerCase();
+    // Remove punctuation so dotted function names like `RANK.EQ` are searchable by `rankeq`.
+    const nameLowerNormalized = nameLower.replace(/[^a-z0-9_]/g, "");
+    return { name, nameLower, nameLowerNormalized };
+  });
 
 export function buildCommandPaletteSections(opts: {
   query: string;
@@ -221,33 +229,58 @@ type FunctionMatch = { name: string; score: number; matchRanges: MatchRange[] };
 
 function scoreFunctionResults(queryLower: string, limit: number): CommandPaletteFunctionResult[] {
   const trimmed = queryLower.trim();
-  if (!trimmed) return [];
+  const cappedLimit = Math.max(0, Math.floor(limit));
+  if (!trimmed || cappedLimit === 0) return [];
+  const normalizedQuery = trimmed.replace(/[^a-z0-9_]/g, "");
+  if (!normalizedQuery) return [];
 
-  const matches: FunctionMatch[] = [];
-  for (const name of FUNCTION_NAMES) {
-    const match = fuzzyMatchToken(trimmed, name);
+  // Keep only the top-N matches so we don't allocate/sort huge arrays for large
+  // function catalogs.
+  const top: FunctionMatch[] = [];
+
+  const isBetter = (a: FunctionMatch, b: FunctionMatch): boolean => {
+    if (a.score !== b.score) return a.score > b.score;
+    return a.name.localeCompare(b.name) < 0;
+  };
+
+  const worstIndex = (): number => {
+    let worst = 0;
+    for (let i = 1; i < top.length; i += 1) {
+      if (isBetter(top[worst]!, top[i]!)) worst = i;
+    }
+    return worst;
+  };
+
+  for (const fn of FUNCTIONS) {
+    const match = fuzzyMatchTokenPrepared(normalizedQuery, fn.name, fn.nameLower);
     if (!match) continue;
 
     let score = match.score;
-    const nameLower = name.toLowerCase();
-    const nameLowerNormalized = nameLower.replace(/[^a-z0-9_]/g, "");
 
     // Make exact/prefix matches unambiguous (helps function names beat similarly-named commands like "AutoSum").
-    // Normalize punctuation so dotted function names like `RANK.EQ` still receive the bonus
-    // when the user types `rank.eq` or `rankeq`.
-    if (nameLowerNormalized === trimmed) score += 10_000;
-    else if (nameLowerNormalized.startsWith(trimmed)) score += 2_500;
-    else if (nameLowerNormalized.includes(trimmed)) score += 1_000;
+    if (fn.nameLowerNormalized === normalizedQuery) score += 10_000;
+    else if (fn.nameLowerNormalized.startsWith(normalizedQuery)) score += 2_500;
+    else if (fn.nameLowerNormalized.includes(normalizedQuery)) score += 1_000;
 
-    matches.push({ name, score, matchRanges: match.ranges });
+    const candidate: FunctionMatch = { name: fn.name, score, matchRanges: match.ranges };
+
+    if (top.length < cappedLimit) {
+      top.push(candidate);
+      continue;
+    }
+
+    const idx = worstIndex();
+    if (isBetter(candidate, top[idx]!)) {
+      top[idx] = candidate;
+    }
   }
 
-  matches.sort((a, b) => {
+  top.sort((a, b) => {
     if (a.score !== b.score) return b.score - a.score;
     return a.name.localeCompare(b.name);
   });
 
-  return matches.slice(0, Math.max(0, limit)).map((match) => {
+  return top.map((match) => {
     const sig = getFunctionSignature(match.name);
     const signature = sig ? formatSignature(sig) : undefined;
     const summary = sig?.summary?.trim() ? sig.summary.trim() : undefined;
