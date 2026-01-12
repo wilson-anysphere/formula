@@ -157,6 +157,30 @@ class DocumentControllerStub {
       ],
     });
   }
+
+  /**
+   * @param {string} sheetId
+   * @param {{ row: number, col: number }} coord
+   * @param {any} value
+   */
+  setCellValue(sheetId, coord, value) {
+    const key = makeCellKey(sheetId, coord.row, coord.col);
+    const before = this._cells.get(key) ?? { value: null, formula: null, styleId: 0 };
+    const after = { value, formula: null, styleId: before.styleId };
+    this._cells.set(key, after);
+
+    this._events.emit("change", {
+      deltas: [
+        {
+          sheetId,
+          row: coord.row,
+          col: coord.col,
+          before,
+          after,
+        },
+      ],
+    });
+  }
 }
 
 test("CollabSession↔DocumentController binder edits are treated as local by FormulaConflictMonitor even when modifiedBy is missing", async () => {
@@ -227,6 +251,79 @@ test("CollabSession↔DocumentController binder edits are treated as local by Fo
   assert.ok(sessionA.formulaConflictMonitor?.resolveConflict(conflict.id, conflict.localFormula));
   await waitForCondition(async () => (await sessionA.getCell("Sheet1:0:0"))?.formula === conflict.localFormula.trim());
   await waitForCondition(async () => (await sessionB.getCell("Sheet1:0:0"))?.formula === conflict.localFormula.trim());
+
+  binder.destroy();
+  sessionA.destroy();
+  sessionB.destroy();
+  disconnect();
+  docA.destroy();
+  docB.destroy();
+});
+
+test("CollabSession↔DocumentController binder value edits are treated as local by FormulaConflictMonitor even when modifiedBy is missing (formula+value mode)", async () => {
+  // Deterministic tie-break: higher clientID wins map entry overwrites.
+  const docA = new Y.Doc();
+  docA.clientID = 1;
+  const docB = new Y.Doc();
+  docB.clientID = 2;
+
+  let disconnect = connectDocs(docA, docB);
+
+  /** @type {Array<any>} */
+  const conflictsA = [];
+
+  const sessionA = createCollabSession({
+    doc: docA,
+    formulaConflicts: {
+      localUserId: "user-a",
+      mode: "formula+value",
+      onConflict: (c) => conflictsA.push(c),
+    },
+  });
+  const sessionB = createCollabSession({ doc: docB });
+
+  const documentController = new DocumentControllerStub();
+  const binder = await bindCollabSessionToDocumentController({
+    session: sessionA,
+    documentController,
+    userId: null,
+  });
+
+  // Establish a shared base cell map without `modifiedBy`.
+  await sessionB.setCellValue("Sheet1:0:0", "base");
+  await waitForCondition(async () => (await sessionA.getCell("Sheet1:0:0"))?.value === "base");
+  assert.equal((await sessionA.getCell("Sheet1:0:0"))?.modifiedBy, null);
+
+  // Ensure DocumentController has hydrated.
+  await waitForCondition(() => documentController.getCell("Sheet1", { row: 0, col: 0 }).value === "base");
+
+  // Offline concurrent edits:
+  // - Local (via DocumentController binder): "ours"
+  // - Remote (docB): "theirs"
+  disconnect();
+
+  documentController.setCellValue("Sheet1", { row: 0, col: 0 }, "ours");
+  await waitForCondition(async () => (await sessionA.getCell("Sheet1:0:0"))?.value === "ours");
+  assert.equal((await sessionA.getCell("Sheet1:0:0"))?.modifiedBy, null);
+
+  await sessionB.setCellValue("Sheet1:0:0", "theirs");
+
+  // Reconnect.
+  disconnect = connectDocs(docA, docB);
+
+  // Remote should win deterministically (clientID=2).
+  await waitForCondition(async () => (await sessionA.getCell("Sheet1:0:0"))?.value === "theirs");
+
+  await waitForCondition(() => conflictsA.some((c) => c.kind === "value"));
+  const conflict = conflictsA.find((c) => c.kind === "value");
+  assert.ok(conflict, "expected a value conflict to be detected");
+  assert.equal(conflict.remoteUserId, "", "expected remoteUserId to be unknown when modifiedBy is missing");
+  assert.equal(conflict.localValue, "ours");
+  assert.equal(conflict.remoteValue, "theirs");
+
+  assert.ok(sessionA.formulaConflictMonitor?.resolveConflict(conflict.id, conflict.localValue));
+  await waitForCondition(async () => (await sessionA.getCell("Sheet1:0:0"))?.value === "ours");
+  await waitForCondition(async () => (await sessionB.getCell("Sheet1:0:0"))?.value === "ours");
 
   binder.destroy();
   sessionA.destroy();
