@@ -6372,6 +6372,12 @@ try {
 
   const isMac = /Mac|iPhone|iPad|iPod/i.test(navigator.platform);
   const primaryModifiers = () => ({ ctrlKey: !isMac, metaKey: isMac });
+  const isTextEditingTargetFocused = (): boolean => {
+    const target = document.activeElement as HTMLElement | null;
+    if (!target) return false;
+    const tag = target.tagName;
+    return tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable;
+  };
   const dispatchSpreadsheetShortcut = (key: string, opts: { shift?: boolean; alt?: boolean } = {}) => {
     const { ctrlKey, metaKey } = primaryModifiers();
     const e = new KeyboardEvent("keydown", {
@@ -6388,23 +6394,73 @@ try {
   };
 
   void listen("menu-undo", () => {
+    if (isTextEditingTargetFocused()) {
+      try {
+        document.execCommand("undo");
+      } catch {
+        // Ignore failures; some environments disable `execCommand`.
+      }
+      return;
+    }
     app.undo();
     app.focus();
   });
   void listen("menu-redo", () => {
+    if (isTextEditingTargetFocused()) {
+      try {
+        document.execCommand("redo");
+      } catch {
+        // Ignore failures; some environments disable `execCommand`.
+      }
+      return;
+    }
     app.redo();
     app.focus();
   });
   void listen("menu-cut", () => {
+    if (isTextEditingTargetFocused()) {
+      try {
+        document.execCommand("cut");
+      } catch {
+        // Ignore failures; some environments disable `execCommand`.
+      }
+      return;
+    }
     void app.cutToClipboard();
   });
   void listen("menu-copy", () => {
+    if (isTextEditingTargetFocused()) {
+      try {
+        document.execCommand("copy");
+      } catch {
+        // Ignore failures; some environments disable `execCommand`.
+      }
+      return;
+    }
     void app.copyToClipboard();
   });
   void listen("menu-paste", () => {
+    if (isTextEditingTargetFocused()) {
+      try {
+        document.execCommand("paste");
+      } catch {
+        // Ignore failures; some environments disable `execCommand`.
+      }
+      return;
+    }
     void app.pasteFromClipboard();
   });
-  void listen("menu-select-all", () => dispatchSpreadsheetShortcut("a"));
+  void listen("menu-select-all", () => {
+    if (isTextEditingTargetFocused()) {
+      try {
+        document.execCommand("selectAll");
+      } catch {
+        // Ignore failures; some environments disable `execCommand`.
+      }
+      return;
+    }
+    dispatchSpreadsheetShortcut("a");
+  });
 
   const zoomStepPercent = 10;
   const applyMenuZoom = (nextPercent: number) => {
