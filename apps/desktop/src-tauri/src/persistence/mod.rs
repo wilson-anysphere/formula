@@ -164,24 +164,33 @@ fn sheet_from_model(
     for (cell_ref, cell) in sheet.iter_cells() {
         let row = cell_ref.row as usize;
         let col = cell_ref.col as usize;
-        let number_format = style_table
-            .get(cell.style_id)
-            .and_then(|s| s.number_format.clone());
+        let number_format = (cell.style_id != 0)
+            .then(|| {
+                style_table
+                    .get(cell.style_id)
+                    .and_then(|s| s.number_format.clone())
+            })
+            .flatten();
 
         let cached_value = model_value_to_scalar(&cell.value);
         if let Some(formula) = cell.formula.as_deref() {
-            if formula.trim().is_empty() {
+            let normalized = display_formula_text(formula);
+            if !normalized.trim().is_empty() {
+                let mut c = Cell::from_formula(normalized);
+                c.computed_value = cached_value;
+                c.number_format = number_format;
+                out.set_cell(row, col, c);
                 continue;
             }
-            let normalized = display_formula_text(formula);
-            let mut c = Cell::from_formula(normalized);
-            c.computed_value = cached_value;
-            c.number_format = number_format;
-            out.set_cell(row, col, c);
-            continue;
+            // Treat empty formulas as blank/no-formula cells.
         }
 
         if matches!(cached_value, CellScalar::Empty) {
+            if let Some(number_format) = number_format {
+                let mut c = Cell::empty();
+                c.number_format = Some(number_format);
+                out.set_cell(row, col, c);
+            }
             continue;
         }
 

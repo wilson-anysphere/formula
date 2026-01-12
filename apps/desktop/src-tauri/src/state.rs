@@ -3213,6 +3213,51 @@ mod tests {
     }
 
     #[test]
+    fn xlsx_style_only_number_formats_survive_persistent_recovery() {
+        use formula_model::{Cell as ModelCell, CellRef, CellValue as ModelCellValue, Style};
+
+        let mut model = formula_model::Workbook::new();
+        let sheet_id = model.add_sheet("Sheet1").expect("add sheet");
+        let style_id = model.intern_style(Style {
+            number_format: Some("m/d/yyyy".to_string()),
+            ..Default::default()
+        });
+        let sheet = model.sheet_mut(sheet_id).expect("sheet exists");
+        let mut model_cell = ModelCell::new(ModelCellValue::Empty);
+        model_cell.style_id = style_id;
+        sheet.set_cell(CellRef::new(0, 0), model_cell);
+
+        let mut buf = std::io::Cursor::new(Vec::new());
+        formula_xlsx::write_workbook_to_writer(&model, &mut buf).expect("write xlsx bytes");
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let xlsx_path = tmp.path().join("style-only.xlsx");
+        std::fs::write(&xlsx_path, buf.into_inner()).expect("write xlsx file");
+
+        let db_path = tmp.path().join("autosave.sqlite");
+        let location = WorkbookPersistenceLocation::OnDisk(db_path);
+
+        {
+            let workbook = read_xlsx_blocking(&xlsx_path).expect("read xlsx workbook");
+            let mut state = AppState::new();
+            state
+                .load_workbook_persistent(workbook, location.clone())
+                .expect("load persistent workbook");
+        }
+
+        let workbook = read_xlsx_blocking(&xlsx_path).expect("re-read xlsx workbook");
+        let mut state = AppState::new();
+        state
+            .load_workbook_persistent(workbook, location)
+            .expect("recover workbook from autosave storage");
+
+        let recovered = state.get_workbook().expect("workbook");
+        let cell = recovered.sheets[0].get_cell(0, 0);
+        assert_eq!(cell.computed_value, CellScalar::Empty);
+        assert_eq!(cell.number_format.as_deref(), Some("m/d/yyyy"));
+    }
+
+    #[test]
     fn xls_number_formats_survive_persistent_recovery() {
         let fixture_path = Path::new(concat!(
             env!("CARGO_MANIFEST_DIR"),
