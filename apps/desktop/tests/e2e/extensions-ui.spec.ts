@@ -152,6 +152,9 @@ test.describe("Extensions UI integration", () => {
       "allow",
       /clipboard-read 'none'; clipboard-write 'none'/,
     );
+    await expect(iframeLocator, "webview should explicitly disable camera").toHaveAttribute("allow", /camera 'none'/);
+    await expect(iframeLocator, "webview should explicitly disable microphone").toHaveAttribute("allow", /microphone 'none'/);
+    await expect(iframeLocator, "webview should explicitly disable geolocation").toHaveAttribute("allow", /geolocation 'none'/);
 
     const frame = page.frameLocator('iframe[data-testid="extension-webview-sampleHello.panel"]');
     await expect(frame.locator("h1")).toHaveText("Sample Hello Panel");
