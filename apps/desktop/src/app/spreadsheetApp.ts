@@ -1728,7 +1728,10 @@ export class SpreadsheetApp {
   }
 
   clearContents(): void {
-    this.clearSelectionContents();
+    // `clearSelectionContents()` is a public command surface used by the command registry / context
+    // menus. It already triggers a refresh, but `clearContents()` is also called by some internal
+    // UX flows; avoid double-refreshing by calling the underlying mutation directly here.
+    this.clearSelectionContentsInternal();
     this.refresh();
     this.focus();
   }
@@ -6144,7 +6147,6 @@ export class SpreadsheetApp {
     if (e.key === "Delete") {
       e.preventDefault();
       this.clearSelectionContents();
-      this.refresh();
       return;
     }
 
@@ -7462,7 +7464,18 @@ export class SpreadsheetApp {
     return this.document.getUsedRange(this.sheetId);
   }
 
-  private clearSelectionContents(): void {
+  /**
+   * Clear the contents (values/formulas) of all selection ranges, preserving formats.
+   *
+   * This is intentionally separate from Delete-key handling so other UI surfaces
+   * (command palette, context menus, extensions) can invoke it via `CommandRegistry`.
+   */
+  clearSelectionContents(): void {
+    this.clearSelectionContentsInternal();
+    this.refresh();
+  }
+
+  private clearSelectionContentsInternal(): void {
     const used = this.computeUsedRange();
     if (!used) return;
     const label = t("command.edit.clearContents");
