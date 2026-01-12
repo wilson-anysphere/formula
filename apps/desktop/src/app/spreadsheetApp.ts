@@ -7966,7 +7966,12 @@ export class SpreadsheetApp {
     // Excel-style: Shift+F2 adds/edits a comment (we wire this to "Add Comment").
     if (e.key === "F2" && e.shiftKey) {
       // Avoid opening comment UI while the formula bar is actively editing (range selection mode).
-      if (this.formulaBar?.isEditing() || this.formulaEditCell) return;
+      if (this.formulaBar?.isEditing() || this.formulaEditCell) {
+        // Prevent the global keybinding layer from running the Comments command while the user is
+        // selecting ranges for a formula in the formula bar.
+        e.preventDefault();
+        return;
+      }
       e.preventDefault();
       this.openCommentsPanel();
       this.focusNewCommentInput();
