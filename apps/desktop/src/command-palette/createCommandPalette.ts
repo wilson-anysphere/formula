@@ -283,14 +283,8 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   } = options;
 
   const overlay = document.createElement("div");
-  overlay.style.position = "fixed";
-  overlay.style.inset = "0";
-  overlay.style.display = "none";
-  overlay.style.alignItems = "flex-start";
-  overlay.style.justifyContent = "center";
-  overlay.style.paddingTop = "80px";
-  overlay.style.background = "var(--dialog-backdrop)";
-  overlay.style.zIndex = "1000";
+  overlay.className = "command-palette-overlay";
+  overlay.hidden = true;
   overlay.setAttribute("role", "dialog");
   overlay.setAttribute("aria-modal", "true");
 
@@ -361,7 +355,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     isOpen = false;
     debouncedRender.cancel();
     abortChunkedSearch();
-    overlay.style.display = "none";
+    overlay.hidden = true;
     query = "";
     selectedIndex = 0;
     visibleItems = [];
@@ -379,7 +373,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     query = "";
     selectedIndex = 0;
     input.value = "";
-    overlay.style.display = "flex";
+    overlay.hidden = false;
     isOpen = true;
 
     renderResults("sync");
@@ -564,17 +558,17 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
 
         const descriptionText = typeof cmd.description === "string" ? cmd.description.trim() : "";
         cached.description.textContent = descriptionText;
-        cached.description.style.display = descriptionText ? "" : "none";
+        cached.description.hidden = !descriptionText;
 
         const kbValue = keybindingIndex.get(cmd.commandId);
         const shortcut =
           typeof kbValue === "string" ? kbValue : Array.isArray(kbValue) ? (kbValue[0] ?? null) : null;
         if (shortcut) {
           cached.shortcutPill.textContent = shortcut;
-          cached.right.style.display = "";
+          cached.right.hidden = false;
         } else {
           cached.shortcutPill.textContent = "";
-          cached.right.style.display = "none";
+          cached.right.hidden = true;
         }
 
         list.appendChild(cached.li);
