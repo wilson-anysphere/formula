@@ -204,6 +204,29 @@ describe("updaterUi (events)", () => {
     expect(toastSpy).not.toHaveBeenCalled();
   });
 
+  it("does not show/focus the window for startup update-available events", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '<div id="toast-root"></div>';
+
+    const show = vi.fn(async () => {});
+    const setFocus = vi.fn(async () => {});
+    const handle = { show, setFocus };
+
+    vi.stubGlobal("__TAURI__", {
+      window: {
+        getCurrentWindow: () => handle,
+      },
+    });
+
+    const notifySpy = vi.spyOn(notifications, "notify").mockResolvedValue(undefined);
+
+    await handleUpdaterEvent("update-available", { source: "startup", version: "1.2.3", body: "Bug fixes" });
+
+    expect(notifySpy).toHaveBeenCalledTimes(1);
+    expect(show).not.toHaveBeenCalled();
+    expect(setFocus).not.toHaveBeenCalled();
+  });
+
   it("does not send a system notification for manual update-available events", async () => {
     vi.useFakeTimers();
     document.body.innerHTML = '<div id="toast-root"></div>';
