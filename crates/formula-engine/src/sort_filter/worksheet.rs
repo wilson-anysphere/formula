@@ -303,6 +303,15 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
                 .and_then(|v| v.as_str())?;
             Some(CellValue::Text(display_value.to_string()))
         }
+        "image" => {
+            let value = serialized.get("value")?;
+            let alt_text = value
+                .get("altText")
+                .or_else(|| value.get("alt_text"))
+                .and_then(|v| v.as_str());
+            let display = alt_text.filter(|s| !s.is_empty()).unwrap_or("[Image]");
+            Some(CellValue::Text(display.to_string()))
+        }
         "record" => {
             let record = serialized.get("value")?;
             // Some legacy IPC payloads represented record values as a simple display string.
@@ -369,6 +378,17 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
                                 "entity" | "record" => serde_json::from_value(display_value.clone())
                                     .ok()
                                     .map(|v: ModelCellValue| model_cell_value_to_sort_value(&v)),
+                                "image" => display_value
+                                    .get("value")
+                                    .and_then(|v| {
+                                        v.get("altText").or_else(|| v.get("alt_text"))
+                                    })
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| {
+                                        let display = if s.is_empty() { "[Image]" } else { s };
+                                        CellValue::Text(display.to_string())
+                                    })
+                                    .or_else(|| Some(CellValue::Text("[Image]".to_string()))),
                                 _ => None,
                             };
 
@@ -411,7 +431,7 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
 
 #[cfg(test)]
 mod tests {
-    use super::model_cell_value_to_sort_value;
+    use super::{model_cell_value_to_sort_value, rich_model_cell_value_to_sort_value};
     use crate::sort_filter::CellValue;
     use formula_model::CellValue as ModelCellValue;
     use formula_model::ErrorValue;
@@ -729,6 +749,49 @@ mod tests {
         assert_eq!(
             model_cell_value_to_sort_value(&record_blank_display),
             CellValue::Blank
+        );
+    }
+
+    #[test]
+    fn rich_model_cell_value_to_sort_value_image() {
+        let image: ModelCellValue = serde_json::from_value(json!({
+            "type": "image",
+            "value": {
+                "imageId": "logo.png",
+                "altText": "Logo"
+            }
+        }))
+        .expect("image should deserialize");
+        assert_eq!(
+            rich_model_cell_value_to_sort_value(&image),
+            Some(CellValue::Text("Logo".to_string()))
+        );
+
+        let image_no_alt: ModelCellValue = serde_json::from_value(json!({
+            "type": "image",
+            "value": {
+                "imageId": "logo.png"
+            }
+        }))
+        .expect("image should deserialize");
+        assert_eq!(
+            rich_model_cell_value_to_sort_value(&image_no_alt),
+            Some(CellValue::Text("[Image]".to_string()))
+        );
+
+        let record_display_field_image: ModelCellValue = serde_json::from_value(json!({
+            "type": "record",
+            "value": {
+                "displayField": "logo",
+                "fields": {
+                    "logo": { "type": "image", "value": { "imageId": "logo.png", "altText": "Logo" } }
+                }
+            }
+        }))
+        .expect("record should deserialize");
+        assert_eq!(
+            rich_model_cell_value_to_sort_value(&record_display_field_image),
+            Some(CellValue::Text("Logo".to_string()))
         );
     }
 }
