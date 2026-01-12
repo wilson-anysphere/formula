@@ -3004,7 +3004,13 @@ impl Engine {
         current_sheet: SheetId,
     ) -> crate::Expr {
         let mut visiting: HashSet<(SheetId, String)> = HashSet::new();
-        self.inline_static_defined_names_for_bytecode_inner(expr, current_sheet, &mut visiting)
+        let mut lexical_scopes: Vec<HashSet<String>> = Vec::new();
+        self.inline_static_defined_names_for_bytecode_inner(
+            expr,
+            current_sheet,
+            &mut visiting,
+            &mut lexical_scopes,
+        )
     }
 
     fn inline_static_defined_names_for_bytecode_inner(
@@ -3012,16 +3018,55 @@ impl Engine {
         expr: &crate::Expr,
         current_sheet: SheetId,
         visiting: &mut HashSet<(SheetId, String)>,
+        lexical_scopes: &mut Vec<HashSet<String>>,
     ) -> crate::Expr {
+        fn name_is_local(scopes: &[HashSet<String>], name_key: &str) -> bool {
+            scopes.iter().rev().any(|scope| scope.contains(name_key))
+        }
+
+        fn bare_identifier(expr: &crate::Expr) -> Option<String> {
+            match expr {
+                crate::Expr::NameRef(nref) if nref.workbook.is_none() && nref.sheet.is_none() => {
+                    let name_key = normalize_defined_name(&nref.name);
+                    (!name_key.is_empty()).then_some(name_key)
+                }
+                _ => None,
+            }
+        }
+
         match expr {
-            crate::Expr::NameRef(nref) => self
-                .try_inline_defined_name_ref_for_bytecode(nref, current_sheet, visiting)
-                .unwrap_or_else(|| expr.clone()),
+            crate::Expr::NameRef(nref) => {
+                let name_key = normalize_defined_name(&nref.name);
+                if name_key.is_empty() {
+                    return expr.clone();
+                }
+
+                // LET/LAMBDA lexical bindings are only visible for unqualified identifiers.
+                // If a name reference is explicitly sheet-qualified (e.g. `Sheet1!X`), it should
+                // bypass the local LET/LAMBDA scope and resolve as a defined name.
+                if nref.workbook.is_none()
+                    && nref.sheet.is_none()
+                    && name_is_local(lexical_scopes, &name_key)
+                {
+                    return expr.clone();
+                }
+
+                match self.try_inline_defined_name_ref_for_bytecode(nref, current_sheet, visiting) {
+                    Some(inlined) => self.inline_static_defined_names_for_bytecode_inner(
+                        &inlined,
+                        current_sheet,
+                        visiting,
+                        lexical_scopes,
+                    ),
+                    None => expr.clone(),
+                }
+            }
             crate::Expr::FieldAccess(access) => crate::Expr::FieldAccess(crate::FieldAccessExpr {
                 base: Box::new(self.inline_static_defined_names_for_bytecode_inner(
                     access.base.as_ref(),
                     current_sheet,
                     visiting,
+                    lexical_scopes,
                 )),
                 field: access.field.clone(),
             }),
@@ -3036,12 +3081,88 @@ impl Engine {
                                     e,
                                     current_sheet,
                                     visiting,
+                                    lexical_scopes,
                                 )
                             })
                             .collect()
                     })
                     .collect(),
             }),
+            crate::Expr::FunctionCall(call) if call.name.name_upper == "LET" => {
+                if call.args.len() < 3 || call.args.len() % 2 == 0 {
+                    return expr.clone();
+                }
+
+                lexical_scopes.push(HashSet::new());
+                let mut args = Vec::with_capacity(call.args.len());
+
+                for pair in call.args[..call.args.len() - 1].chunks_exact(2) {
+                    // LET binding identifiers are not evaluated; keep them as written.
+                    let name_expr = pair[0].clone();
+                    let value_expr = self.inline_static_defined_names_for_bytecode_inner(
+                        &pair[1],
+                        current_sheet,
+                        visiting,
+                        lexical_scopes,
+                    );
+                    args.push(name_expr.clone());
+                    args.push(value_expr);
+
+                    if let Some(name_key) = bare_identifier(&name_expr) {
+                        lexical_scopes
+                            .last_mut()
+                            .expect("pushed scope")
+                            .insert(name_key);
+                    }
+                }
+
+                let body = self.inline_static_defined_names_for_bytecode_inner(
+                    &call.args[call.args.len() - 1],
+                    current_sheet,
+                    visiting,
+                    lexical_scopes,
+                );
+                args.push(body);
+
+                lexical_scopes.pop();
+
+                crate::Expr::FunctionCall(crate::FunctionCall {
+                    name: call.name.clone(),
+                    args,
+                })
+            }
+            crate::Expr::FunctionCall(call) if call.name.name_upper == "LAMBDA" => {
+                if call.args.is_empty() {
+                    return expr.clone();
+                }
+
+                let mut scope = HashSet::new();
+                for param in &call.args[..call.args.len() - 1] {
+                    let Some(name_key) = bare_identifier(param) else {
+                        return expr.clone();
+                    };
+                    if !scope.insert(name_key) {
+                        return expr.clone();
+                    }
+                }
+
+                lexical_scopes.push(scope);
+                let mut args = Vec::with_capacity(call.args.len());
+                args.extend(call.args[..call.args.len() - 1].iter().cloned());
+                let body = self.inline_static_defined_names_for_bytecode_inner(
+                    &call.args[call.args.len() - 1],
+                    current_sheet,
+                    visiting,
+                    lexical_scopes,
+                );
+                args.push(body);
+                lexical_scopes.pop();
+
+                crate::Expr::FunctionCall(crate::FunctionCall {
+                    name: call.name.clone(),
+                    args,
+                })
+            }
             crate::Expr::FunctionCall(call) => crate::Expr::FunctionCall(crate::FunctionCall {
                 name: call.name.clone(),
                 args: call
@@ -3052,6 +3173,7 @@ impl Engine {
                             arg,
                             current_sheet,
                             visiting,
+                            lexical_scopes,
                         )
                     })
                     .collect(),
@@ -3061,6 +3183,7 @@ impl Engine {
                     &call.callee,
                     current_sheet,
                     visiting,
+                    lexical_scopes,
                 )),
                 args: call
                     .args
@@ -3070,6 +3193,7 @@ impl Engine {
                             arg,
                             current_sheet,
                             visiting,
+                            lexical_scopes,
                         )
                     })
                     .collect(),
@@ -3080,6 +3204,7 @@ impl Engine {
                     &u.expr,
                     current_sheet,
                     visiting,
+                    lexical_scopes,
                 )),
             }),
             crate::Expr::Postfix(p) => crate::Expr::Postfix(crate::PostfixExpr {
@@ -3088,6 +3213,7 @@ impl Engine {
                     &p.expr,
                     current_sheet,
                     visiting,
+                    lexical_scopes,
                 )),
             }),
             crate::Expr::Binary(b) => crate::Expr::Binary(crate::BinaryExpr {
@@ -3096,11 +3222,13 @@ impl Engine {
                     &b.left,
                     current_sheet,
                     visiting,
+                    lexical_scopes,
                 )),
                 right: Box::new(self.inline_static_defined_names_for_bytecode_inner(
                     &b.right,
                     current_sheet,
                     visiting,
+                    lexical_scopes,
                 )),
             }),
             crate::Expr::CellRef(_)
@@ -3135,11 +3263,14 @@ impl Engine {
                 .as_single_sheet()
                 .and_then(|name| self.workbook.sheet_id(name)),
         }?;
+        if sheet_id != current_sheet {
+            return None;
+        }
 
-        self.resolve_defined_name_to_static_ref_for_bytecode(sheet_id, &name_key, visiting)
+        self.resolve_defined_name_expr_for_bytecode(sheet_id, &name_key, visiting)
     }
 
-    fn resolve_defined_name_to_static_ref_for_bytecode(
+    fn resolve_defined_name_expr_for_bytecode(
         &self,
         sheet_id: SheetId,
         name_key: &str,
@@ -3203,7 +3334,7 @@ impl Engine {
                         return None;
                     }
                 };
-                self.extract_static_ref_expr_for_bytecode(&ast.expr, sheet_id, visiting)
+                Some(ast.expr)
             }
             NameDefinition::Constant(_) => None,
         };
