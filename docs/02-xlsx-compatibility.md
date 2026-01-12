@@ -195,14 +195,15 @@ At the worksheet level, this shows up as additional attributes on the `<c>` (cel
 - `vm="…"`, the **value metadata index**
 - `cm="…"`, the **cell metadata index**
 
-These are integer indices (typically 0-based) into metadata tables stored at the workbook level.
+These are integer indices into metadata tables stored at the workbook level (Excel-produced files
+commonly use **1-based** indices for `vm`; treat `vm`/`cm` as opaque and preserve them exactly).
 
 Example cell carrying rich/linked metadata:
 
 ```xml
 <row r="2">
   <!-- The visible value is a shared string, but rich metadata is attached. -->
-  <c r="A2" t="s" s="1" vm="1" cm="0">
+  <c r="A2" t="s" s="1" vm="1" cm="7">
     <v>0</v>
   </c>
 </row>
@@ -239,7 +240,9 @@ Minimal sketch of `xl/metadata.xml` structure:
 </metadata>
 ```
 
-The structured payloads referenced by this metadata live under `xl/richData/` (commonly `richValueTypes.xml` + `richValues.xml`).
+The structured payloads referenced by this metadata live under `xl/richData/` (commonly
+`richValueTypes.xml` + `richValue.xml` / `richValues.xml`, plus related supporting tables such as
+`richValueRel.xml`).
 
 These pieces are connected via OPC relationships:
 
