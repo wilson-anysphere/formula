@@ -20,6 +20,11 @@ const DEFAULT_RESOLVED_FORMAT: { style: CellStyle | undefined; numberFormat: str
   numberFormat: null,
 };
 const DEFAULT_NUMERIC_ALIGNMENT_STYLE: CellStyle = { textAlign: "end" };
+// Style ids come from DocumentController's StyleTable; in practice these stay well under 1M.
+// Using a large stride allows encoding `(sheetDefaultStyleId, layerStyleId)` pairs into a single
+// collision-free number for cache keys (stays below MAX_SAFE_INTEGER for ids < 1_048_576).
+const STYLE_ID_PAIR_STRIDE = 1_048_576;
+const SINGLE_LAYER_FORMAT_CACHE_MAX_SIZE = 10_000;
 
 function isPlainObject(value: unknown): value is Record<string, any> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -88,6 +93,18 @@ export class DocumentCellProvider implements CellProvider {
   private readonly coordScratch = { row: 0, col: 0 };
   private readonly styleCache = new Map<number, CellStyle | undefined>();
   private readonly sheetDefaultResolvedFormatCache = new Map<number, { style: CellStyle | undefined; numberFormat: string | null }>();
+  private readonly sheetColResolvedFormatCache = new LruCache<number, { style: CellStyle | undefined; numberFormat: string | null }>(
+    SINGLE_LAYER_FORMAT_CACHE_MAX_SIZE
+  );
+  private readonly sheetRowResolvedFormatCache = new LruCache<number, { style: CellStyle | undefined; numberFormat: string | null }>(
+    SINGLE_LAYER_FORMAT_CACHE_MAX_SIZE
+  );
+  private readonly sheetRunResolvedFormatCache = new LruCache<number, { style: CellStyle | undefined; numberFormat: string | null }>(
+    SINGLE_LAYER_FORMAT_CACHE_MAX_SIZE
+  );
+  private readonly sheetCellResolvedFormatCache = new LruCache<number, { style: CellStyle | undefined; numberFormat: string | null }>(
+    SINGLE_LAYER_FORMAT_CACHE_MAX_SIZE
+  );
   private readonly numericAlignmentStyleCache = new WeakMap<CellStyle, CellStyle>();
   // Cache resolved layered formats by contributing style ids (sheet/col/row/range-run/cell). This avoids
   // re-merging OOXML-ish style objects for every cell when large regions share the same
@@ -190,6 +207,62 @@ export class DocumentCellProvider implements CellProvider {
             this.sheetDefaultResolvedFormatCache.set(sheetDefaultStyleId, out);
             return out;
           }
+        }
+
+        // Fast path for “single-layer” formatting: when only one formatting layer is active
+        // (row/col/range-run/cell), we can cache by `(sheetDefaultStyleId, layerStyleId)` without
+        // building a 5-tuple key string.
+        //
+        // Note: We only take this path when the cache key can be encoded as a safe integer.
+        const resolveSingleLayer = (
+          layerId: number,
+          cache: LruCache<number, { style: CellStyle | undefined; numberFormat: string | null }>
+        ): { style: CellStyle | undefined; numberFormat: string | null } | null => {
+          if (sheetDefaultStyleId >= STYLE_ID_PAIR_STRIDE || layerId >= STYLE_ID_PAIR_STRIDE) return null;
+          const key = sheetDefaultStyleId * STYLE_ID_PAIR_STRIDE + layerId;
+          const cached = cache.get(key);
+          if (cached !== undefined) return cached;
+
+          if (typeof styleTable?.get === "function") {
+            // When the sheet default is 0, the effective style is just the layer style.
+            if (sheetDefaultStyleId === 0) {
+              const layerStyle = styleTable.get(layerId);
+              const out = { style: this.resolveStyle(layerId), numberFormat: getNumberFormat(layerStyle) };
+              cache.set(key, out);
+              return out;
+            }
+
+            const sheetStyle = styleTable.get(sheetDefaultStyleId);
+            const layerStyle = styleTable.get(layerId);
+            const merged = applyStylePatch(sheetStyle, layerStyle);
+            const out = { style: this.convertDocStyleToGridStyle(merged), numberFormat: getNumberFormat(merged) };
+            cache.set(key, out);
+            return out;
+          }
+
+          if (typeof controller.getCellFormat === "function") {
+            const resolvedDocStyle: unknown = controller.getCellFormat(sheetId, coord);
+            const docStyle: DocStyle = isPlainObject(resolvedDocStyle) ? (resolvedDocStyle as DocStyle) : {};
+            const out = { style: this.convertDocStyleToGridStyle(docStyle), numberFormat: getNumberFormat(docStyle) };
+            cache.set(key, out);
+            return out;
+          }
+
+          return null;
+        };
+
+        if (rowStyleId === 0 && rangeRunStyleId === 0 && cellStyleId === 0 && colStyleId !== 0) {
+          const resolved = resolveSingleLayer(colStyleId, this.sheetColResolvedFormatCache);
+          if (resolved) return resolved;
+        } else if (colStyleId === 0 && rangeRunStyleId === 0 && cellStyleId === 0 && rowStyleId !== 0) {
+          const resolved = resolveSingleLayer(rowStyleId, this.sheetRowResolvedFormatCache);
+          if (resolved) return resolved;
+        } else if (colStyleId === 0 && rowStyleId === 0 && cellStyleId === 0 && rangeRunStyleId !== 0) {
+          const resolved = resolveSingleLayer(rangeRunStyleId, this.sheetRunResolvedFormatCache);
+          if (resolved) return resolved;
+        } else if (colStyleId === 0 && rowStyleId === 0 && rangeRunStyleId === 0 && cellStyleId !== 0) {
+          const resolved = resolveSingleLayer(cellStyleId, this.sheetCellResolvedFormatCache);
+          if (resolved) return resolved;
         }
 
         // Key order matches merge precedence `sheet < col < row < range-run < cell`.

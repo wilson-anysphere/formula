@@ -304,4 +304,74 @@ describe("DocumentCellProvider (shared grid)", () => {
     expect(styleTableGet).toHaveBeenCalledTimes(2); // once for sheetStyle, once for resolveStyle cache
     expect(cacheGetSpy).not.toHaveBeenCalled();
   });
+
+  it("caches column-only formatting without using the resolved-format LRU cache", () => {
+    const sheetId = "sheet-1";
+    const styleTableGet = vi.fn((id: number) => {
+      if (id === 1) return { numberFormat: "0%" };
+      return {};
+    });
+    const doc = {
+      getCell: vi.fn(() => ({ value: 1, formula: null, styleId: 0 })),
+      getCellFormatStyleIds: vi.fn(() => [0, 0, 1, 0, 0]),
+      styleTable: { get: styleTableGet },
+    };
+
+    const provider = new DocumentCellProvider({
+      document: doc as any,
+      getSheetId: () => sheetId,
+      headerRows: 1,
+      headerCols: 1,
+      rowCount: 10,
+      colCount: 10,
+      showFormulas: () => false,
+      getComputedValue: () => null,
+    });
+
+    const cacheGetSpy = vi.spyOn((provider as any).resolvedFormatCache, "get");
+
+    const a1 = provider.getCell(1, 1);
+    expect(a1?.value).toBe("100%");
+    const callsAfterFirst = styleTableGet.mock.calls.length;
+
+    const a2 = provider.getCell(2, 1);
+    expect(a2?.value).toBe("100%");
+    expect(styleTableGet).toHaveBeenCalledTimes(callsAfterFirst);
+    expect(cacheGetSpy).not.toHaveBeenCalled();
+  });
+
+  it("caches row-only formatting without using the resolved-format LRU cache", () => {
+    const sheetId = "sheet-1";
+    const styleTableGet = vi.fn((id: number) => {
+      if (id === 1) return { numberFormat: "0%" };
+      return {};
+    });
+    const doc = {
+      getCell: vi.fn(() => ({ value: 1, formula: null, styleId: 0 })),
+      getCellFormatStyleIds: vi.fn(() => [0, 1, 0, 0, 0]),
+      styleTable: { get: styleTableGet },
+    };
+
+    const provider = new DocumentCellProvider({
+      document: doc as any,
+      getSheetId: () => sheetId,
+      headerRows: 1,
+      headerCols: 1,
+      rowCount: 10,
+      colCount: 10,
+      showFormulas: () => false,
+      getComputedValue: () => null,
+    });
+
+    const cacheGetSpy = vi.spyOn((provider as any).resolvedFormatCache, "get");
+
+    const a1 = provider.getCell(1, 1);
+    expect(a1?.value).toBe("100%");
+    const callsAfterFirst = styleTableGet.mock.calls.length;
+
+    const b1 = provider.getCell(1, 2);
+    expect(b1?.value).toBe("100%");
+    expect(styleTableGet).toHaveBeenCalledTimes(callsAfterFirst);
+    expect(cacheGetSpy).not.toHaveBeenCalled();
+  });
 });
