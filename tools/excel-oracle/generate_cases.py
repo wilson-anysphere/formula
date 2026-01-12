@@ -1993,6 +1993,69 @@ def generate_cases() -> dict[str, Any]:
         formula="=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,98,100,2,0)",
     )
 
+    # Long odd-coupon stubs (period spans > 1 regular coupon interval).
+    #
+    # These stress:
+    # - coupon scaling for long stubs (DFC/E > 1, DSM/E > 1)
+    # - coupon-count logic in ODDF*/ODDL*
+    # - basis=1 actual/actual behavior across leap years
+    _add_case(
+        cases,
+        prefix="oddfprice_long_stub",
+        tags=["financial", "ODDFPRICE", "odd_coupon", "long_stub", "basis0"],
+        formula="=ODDFPRICE(DATE(2019,6,1),DATE(2022,3,1),DATE(2019,1,1),DATE(2020,3,1),0.0785,0.0625,100,2,0)",
+        description="Long odd-first coupon period (DFC/E > 1), basis=0",
+    )
+    _add_case(
+        cases,
+        prefix="oddfyield_long_stub",
+        tags=["financial", "ODDFYIELD", "odd_coupon", "long_stub", "basis0"],
+        formula="=ODDFYIELD(DATE(2019,6,1),DATE(2022,3,1),DATE(2019,1,1),DATE(2020,3,1),0.0785,98,100,2,0)",
+        description="Long odd-first coupon period (DFC/E > 1), basis=0",
+    )
+    _add_case(
+        cases,
+        prefix="oddfprice_long_stub",
+        tags=["financial", "ODDFPRICE", "odd_coupon", "long_stub", "basis1"],
+        formula="=ODDFPRICE(DATE(2019,6,1),DATE(2022,3,1),DATE(2019,1,1),DATE(2020,3,1),0.0785,0.0625,100,2,1)",
+        description="Long odd-first coupon period (DFC/E > 1), basis=1 (crosses leap day)",
+    )
+    _add_case(
+        cases,
+        prefix="oddfyield_long_stub",
+        tags=["financial", "ODDFYIELD", "odd_coupon", "long_stub", "basis1"],
+        formula="=ODDFYIELD(DATE(2019,6,1),DATE(2022,3,1),DATE(2019,1,1),DATE(2020,3,1),0.0785,98,100,2,1)",
+        description="Long odd-first coupon period (DFC/E > 1), basis=1 (crosses leap day)",
+    )
+    _add_case(
+        cases,
+        prefix="oddlprice_long_stub",
+        tags=["financial", "ODDLPRICE", "odd_coupon", "long_stub", "basis0"],
+        formula="=ODDLPRICE(DATE(2021,2,1),DATE(2022,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,0)",
+        description="Long odd-last coupon period (DSM/E > 1), basis=0",
+    )
+    _add_case(
+        cases,
+        prefix="oddlyield_long_stub",
+        tags=["financial", "ODDLYIELD", "odd_coupon", "long_stub", "basis0"],
+        formula="=ODDLYIELD(DATE(2021,2,1),DATE(2022,3,1),DATE(2020,10,15),0.0785,98,100,2,0)",
+        description="Long odd-last coupon period (DSM/E > 1), basis=0",
+    )
+    _add_case(
+        cases,
+        prefix="oddlprice_long_stub",
+        tags=["financial", "ODDLPRICE", "odd_coupon", "long_stub", "basis1"],
+        formula="=ODDLPRICE(DATE(2021,2,1),DATE(2022,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,1)",
+        description="Long odd-last coupon period (DSM/E > 1), basis=1",
+    )
+    _add_case(
+        cases,
+        prefix="oddlyield_long_stub",
+        tags=["financial", "ODDLYIELD", "odd_coupon", "long_stub", "basis1"],
+        formula="=ODDLYIELD(DATE(2021,2,1),DATE(2022,3,1),DATE(2020,10,15),0.0785,98,100,2,1)",
+        description="Long odd-last coupon period (DSM/E > 1), basis=1",
+    )
+
     # French accounting depreciation functions (AMOR*)
     amor_date_purchased = _excel_serial_1900(2008, 8, 19)
     amor_first_period = _excel_serial_1900(2008, 12, 31)
