@@ -30,6 +30,9 @@ Files written
 - tools/excel-oracle/odd_coupon_long_stub_cases.json
   - All cases tagged `odd_coupon` AND `long_stub`
 
+- tools/excel-oracle/odd_coupon_basis4_cases.json
+  - All cases tagged `odd_coupon` AND `basis4`
+
 - tools/excel-oracle/odd_coupon_invalid_schedule_cases.json
   - All cases tagged `odd_coupon` AND `invalid_schedule`
 
@@ -112,6 +115,7 @@ def main() -> int:
     validation_cases = [c for c in cases if _has_tag(c, "odd_coupon_validation")]
     boundary_cases = [c for c in cases if _has_tag(c, "odd_coupon") and _has_tag(c, "boundary")]
     long_stub_cases = [c for c in cases if _has_tag(c, "odd_coupon") and _has_tag(c, "long_stub")]
+    basis4_cases = [c for c in cases if _has_tag(c, "odd_coupon") and _has_tag(c, "basis4")]
     invalid_schedule_cases = [
         c for c in cases if _has_tag(c, "odd_coupon") and _has_tag(c, "invalid_schedule")
     ]
@@ -133,6 +137,11 @@ def main() -> int:
             out_dir / "odd_coupon_long_stub_cases.json",
             _expected_subset_payload(case_set="financial-odd-coupon-long", cases=long_stub_cases),
             len(long_stub_cases),
+        ),
+        (
+            out_dir / "odd_coupon_basis4_cases.json",
+            _expected_subset_payload(case_set="financial-odd-coupon-basis4", cases=basis4_cases),
+            len(basis4_cases),
         ),
         (
             out_dir / "odd_coupon_invalid_schedule_cases.json",

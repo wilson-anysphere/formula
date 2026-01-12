@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "caseSet": "financial-odd-coupon-basis4",
+  "defaultSheet": "Sheet1",
+  "cases": [
+    {
+      "formula": "=ODDFPRICE(DATE(2020,1,20),DATE(2021,8,30),DATE(2020,1,15),DATE(2020,2,29),0.08,0.075,100,2,4)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDFPRICE",
+        "basis4"
+      ],
+      "description": "ODDFPRICE basis=4 (semiannual; clamped Feb coupon)",
+      "id": "oddfprice_basis4_0679b2004f6c"
+    },
+    {
+      "formula": "=ODDFYIELD(DATE(2020,1,20),DATE(2021,8,30),DATE(2020,1,15),DATE(2020,2,29),0.08,98,100,2,4)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDFYIELD",
+        "basis4"
+      ],
+      "description": "ODDFYIELD basis=4 (semiannual; fixed price)",
+      "id": "oddfyield_basis4_b8c7df4a447f"
+    },
+    {
+      "formula": "=ODDLPRICE(DATE(2021,7,1),DATE(2021,8,15),DATE(2021,6,15),0.06,0.055,100,4,4)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLPRICE",
+        "basis4"
+      ],
+      "description": "ODDLPRICE basis=4 (quarterly; short odd last)",
+      "id": "oddlprice_basis4_546c496042bd"
+    },
+    {
+      "formula": "=ODDLYIELD(DATE(2021,7,1),DATE(2021,8,15),DATE(2021,6,15),0.06,98,100,4,4)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLYIELD",
+        "basis4"
+      ],
+      "description": "ODDLYIELD basis=4 (quarterly; fixed price)",
+      "id": "oddlyield_basis4_45ff4139618f"
+    }
+  ]
+}

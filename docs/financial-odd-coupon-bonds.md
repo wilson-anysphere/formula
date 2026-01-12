@@ -103,6 +103,7 @@ For quick Windows + Excel runs, use the derived subset corpora (all regenerated 
 - Boundary cases: `tools/excel-oracle/odd_coupon_boundary_cases.json` (tagged `odd_coupon` + `boundary`)
 - Negative yield / negative coupon validation: `tools/excel-oracle/odd_coupon_validation_cases.json` (tagged `odd_coupon_validation`)
 - Long stub (long first/last odd periods): `tools/excel-oracle/odd_coupon_long_stub_cases.json` (tagged `odd_coupon` + `long_stub`)
+- Basis=4 (European 30/360): `tools/excel-oracle/odd_coupon_basis4_cases.json` (tagged `odd_coupon` + `basis4`)
 - Invalid schedule / schedule-misalignment cases: `tools/excel-oracle/odd_coupon_invalid_schedule_cases.json` (tagged `odd_coupon` + `invalid_schedule`)
 
 To **patch real Excel results for just these odd-coupon cases** into the committed pinned dataset
@@ -114,6 +115,9 @@ powershell -ExecutionPolicy Bypass -File tools/excel-oracle/patch-pinned-dataset
 
 powershell -ExecutionPolicy Bypass -File tools/excel-oracle/patch-pinned-dataset-with-excel.ps1 `
   -SubsetCasesPath tools/excel-oracle/odd_coupon_long_stub_cases.json
+
+powershell -ExecutionPolicy Bypass -File tools/excel-oracle/patch-pinned-dataset-with-excel.ps1 `
+  -SubsetCasesPath tools/excel-oracle/odd_coupon_basis4_cases.json
 
 powershell -ExecutionPolicy Bypass -File tools/excel-oracle/patch-pinned-dataset-with-excel.ps1 `
   -SubsetCasesPath tools/excel-oracle/odd_coupon_validation_cases.json

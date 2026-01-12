@@ -161,7 +161,17 @@ powershell -ExecutionPolicy Bypass -File tools/excel-oracle/run-excel-oracle.ps1
 
 This subset corresponds to the cases tagged `odd_coupon` + `invalid_schedule` in the canonical corpus.
 
-To regenerate the derived odd-coupon subset corpora (boundary + validation + long-stub + invalid-schedule) from the
+To generate only the **odd-coupon basis=4** scenarios (European 30/360), use:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/excel-oracle/run-excel-oracle.ps1 `
+  -CasesPath tools/excel-oracle/odd_coupon_basis4_cases.json `
+  -OutPath  tests/compatibility/excel-oracle/datasets/excel-oracle.json
+```
+
+This subset corresponds to the cases tagged `odd_coupon` + `basis4` in the canonical corpus.
+
+To regenerate the derived odd-coupon subset corpora (boundary + validation + long-stub + basis4 + invalid-schedule) from the
 canonical corpus, run:
 
 ```bash

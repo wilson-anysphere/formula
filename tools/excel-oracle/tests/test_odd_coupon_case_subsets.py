@@ -35,6 +35,7 @@ class OddCouponSubsetCorpusTests(unittest.TestCase):
         subset_paths = [
             repo_root / "tools/excel-oracle/odd_coupon_boundary_cases.json",
             repo_root / "tools/excel-oracle/odd_coupon_invalid_schedule_cases.json",
+            repo_root / "tools/excel-oracle/odd_coupon_basis4_cases.json",
             repo_root / "tools/excel-oracle/odd_coupon_long_stub_cases.json",
             repo_root / "tools/excel-oracle/odd_coupon_validation_cases.json",
         ]
@@ -95,4 +96,3 @@ class OddCouponSubsetCorpusTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
