@@ -60,6 +60,14 @@ test("CSV export quotes fields when needed", () => {
   assert.equal(csv, 'a,"b,c"\r\n1,TRUE');
 });
 
+test("CSV export serializes rich text values as plain text", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", { text: "Hello", runs: [] });
+
+  const csv = exportDocumentRangeToCsv(doc, "Sheet1", "A1");
+  assert.equal(csv, "Hello");
+});
+
 test("CSV export respects DocumentController cell numberFormat when serializing date numbers", () => {
   const doc = new DocumentController();
   const serial = dateToExcelSerial(new Date(Date.UTC(2024, 0, 31)));

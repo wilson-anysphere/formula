@@ -29,6 +29,12 @@ function cellToCsvField(cell) {
   const value = cell.value;
   if (value == null) return "";
 
+  // DocumentController stores rich text as `{ text, runs }`. CSV exports should serialize
+  // this as plain text rather than `[object Object]`.
+  if (typeof value === "object" && typeof value.text === "string") {
+    return value.text;
+  }
+
   const numberFormat = cell.format?.numberFormat;
   if (typeof value === "number" && isLikelyDateNumberFormat(numberFormat)) {
     const date = excelSerialToDate(value);
