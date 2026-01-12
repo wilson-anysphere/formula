@@ -46,6 +46,28 @@ describe("CellEditorOverlay F4 absolute reference toggle", () => {
     container.remove();
   });
 
+  it("ignores modifier chords (Alt/Ctrl/Cmd) for F4", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const overlay = new CellEditorOverlay(container, { onCancel: () => {}, onCommit: () => {} });
+    overlay.open({ row: 0, col: 0 }, { x: 0, y: 0, width: 100, height: 24 }, "=A1");
+
+    overlay.element.setSelectionRange(2, 2);
+
+    overlay.element.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", altKey: true, cancelable: true }));
+    expect(overlay.element.value).toBe("=A1");
+
+    overlay.element.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", ctrlKey: true, cancelable: true }));
+    expect(overlay.element.value).toBe("=A1");
+
+    overlay.element.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", metaKey: true, cancelable: true }));
+    expect(overlay.element.value).toBe("=A1");
+
+    overlay.close();
+    container.remove();
+  });
+
   it("cycles absolute modes correctly on repeated F4 presses", () => {
     const container = document.createElement("div");
     document.body.appendChild(container);

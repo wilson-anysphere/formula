@@ -56,6 +56,30 @@ describe("FormulaBarView F4 absolute reference toggle", () => {
     host.remove();
   });
 
+  it("ignores modifier chords (Alt/Ctrl/Cmd) for F4", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=A1";
+    view.textarea.setSelectionRange(2, 2);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", altKey: true, cancelable: true }));
+    expect(view.textarea.value).toBe("=A1");
+
+    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", ctrlKey: true, cancelable: true }));
+    expect(view.textarea.value).toBe("=A1");
+
+    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", metaKey: true, cancelable: true }));
+    expect(view.textarea.value).toBe("=A1");
+
+    host.remove();
+  });
+
   it("cycles absolute modes correctly on repeated F4 presses", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
