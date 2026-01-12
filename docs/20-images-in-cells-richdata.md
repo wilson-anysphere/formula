@@ -913,10 +913,9 @@ Other builds may:
 
 Notes:
 
-* The “rich value index” is 0-based. Depending on the `metadata.xml` schema, the cell metadata may
-  reference it either:
-  * directly (e.g. `rc/@v = richValueIndex`), or
-  * indirectly via a `rvb/@i` lookup table.
+* The “rich value index” is 0-based. In this repo’s images-in-cell fixtures, the cell metadata reaches it
+  indirectly via the `futureMetadata`/`xlrd:rvb` lookup table. Other mapping schemas may exist in the wild;
+  treat the metadata tables as opaque and preserve them.
 * The “relationship index” stored in the payload is 0-based and indexes into `richValueRel.xml`.
 
 ### 4b) `xl/richData/rdrichvalue.xml` + `xl/richData/rdrichvaluestructure.xml` (rdRichValue variant)
