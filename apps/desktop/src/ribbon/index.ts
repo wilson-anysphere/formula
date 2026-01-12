@@ -13,3 +13,7 @@ export type {
   RibbonButtonKind,
   RibbonButtonSize,
 } from "./ribbonSchema.js";
+
+export type { RibbonProps } from "./Ribbon.js";
+export type { RibbonButtonProps } from "./RibbonButton.js";
+export type { RibbonGroupProps } from "./RibbonGroup.js";
