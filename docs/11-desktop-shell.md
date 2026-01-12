@@ -713,7 +713,7 @@ is a list of capability **identifiers** (e.g. `capabilities: ["main"]`). The mai
 
 - **`core:allow-invoke`**: which `__TAURI__.core.invoke("<command>")` names can be called from the frontend.
 - **`event:allow-listen` / `event:allow-emit`**: which event names the frontend can `listen(...)` for or `emit(...)`.
-- Additional plugin permissions for using JS plugin APIs (dialog/window/clipboard/shell/updater), for example:
+- Additional plugin permissions for using JS plugin APIs (dialog/window/clipboard/updater), for example:
   - `dialog:allow-open`, `dialog:allow-save`
   - `window:allow-hide`, `window:allow-show`, `window:allow-set-focus`, `window:allow-close`
   - `clipboard:allow-read-text`, `clipboard:allow-write-text`
@@ -747,7 +747,7 @@ High-level contents (see the file for the exhaustive list):
   - `close-prep-done`, `close-handled`
   - `updater-ui-ready`
   - `coi-check-result` (used by `pnpm -C apps/desktop check:coi`)
-- Plugin permissions include dialog/window/clipboard/shell APIs plus updater permissions (`updater:allow-check`, `updater:allow-download`, `updater:allow-install`, required for the updater UI).
+- Plugin permissions include dialog/window/clipboard APIs plus updater permissions (`updater:allow-check`, `updater:allow-download`, `updater:allow-install`, required for the updater UI).
 
 We intentionally keep capabilities narrow and rely on explicit Rust commands + higher-level app permission gates (macro trust, DLP, extension permissions) for privileged operations.
 
@@ -755,7 +755,7 @@ We intentionally keep capabilities narrow and rely on explicit Rust commands + h
 
 - If you add a new `#[tauri::command]` and the frontend needs to call it, add the command name to the `core:allow-invoke` allowlist.
 - If you add a new event name used by `listen(...)` or `emit(...)`, update the `event:allow-listen` / `event:allow-emit` allowlists.
-- If the frontend starts using a new Tauri core/plugin API (dialog/window/clipboard/shell/updater), add the corresponding `*:allow-*` permission string.
+- If the frontend starts using a new Tauri core/plugin API (dialog/window/clipboard/updater), add the corresponding `*:allow-*` permission string.
 
 Note: do **not** add `plugin:*` command names to `core:allow-invoke`. Plugin APIs are gated by their own permission strings
 (e.g. `dialog:allow-open`, `updater:allow-check`).
