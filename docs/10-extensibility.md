@@ -813,6 +813,20 @@ declare namespace formula {
 }
 ```
 
+#### Workbook lifecycle, events, and cancellation (Desktop/Tauri)
+
+Workbook APIs are synchronous *from the extension’s perspective* (async Promises), but in desktop builds they may
+involve **user prompts** (discard-unsaved-changes confirmation, Save As dialogs, etc).
+
+- `formula.workbook.openWorkbook(path)` / `saveAs(path)` require a **non-empty** path string.
+- If the user cancels a workbook UI prompt, the Promise rejects with an error whose `name` is **`"AbortError"`**.
+  - Cancellation does **not** emit `events.onWorkbookOpened` / `events.onBeforeSave`.
+- `events.onWorkbookOpened` is emitted after a workbook is successfully opened/created/closed.
+- `events.onBeforeSave` is emitted before a workbook save actually occurs.
+  - For `workbook.save()` on an **unsaved** workbook, the desktop host first prompts for a Save As path, and only emits
+    `beforeSave` once the path is selected (so cancelling the dialog does not fire the event, and the event payload
+    includes the final path).
+
 #### Clipboard + DLP (Data Loss Prevention)
 
 In desktop builds with DLP enabled, `formula.clipboard.writeText(...)` may be **blocked** by your organization’s policy.
