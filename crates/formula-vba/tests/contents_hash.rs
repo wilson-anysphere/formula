@@ -558,6 +558,48 @@ fn content_normalized_data_does_not_strip_attribute_with_leading_whitespace() {
 }
 
 #[test]
+fn content_normalized_data_preserves_blank_lines() {
+    // Blank (empty) lines are not Attribute lines, and should be preserved as CRLF in the
+    // normalized output.
+    let module_code = concat!(
+        "Option Explicit\r\n",
+        "\r\n",
+        "Sub Foo()\r\n",
+        "End Sub\r\n",
+    );
+    let module_container = compress_container(module_code.as_bytes());
+
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        push_record(&mut out, 0x0019, b"Module1");
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"Module1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes());
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        let mut s = ole.create_stream("VBA/Module1").expect("module stream");
+        s.write_all(&module_container).expect("write module");
+    }
+    let vba_bin = ole.into_inner().into_inner();
+
+    let normalized = content_normalized_data(&vba_bin).expect("ContentNormalizedData");
+    assert_eq!(normalized, module_code.as_bytes());
+}
+
+#[test]
 fn content_normalized_data_attribute_keyword_matching_is_exact() {
     // Ensure we only strip `Attribute` lines when the keyword is followed by whitespace (or end-of-line),
     // not when it's merely a prefix like `AttributeX`.
