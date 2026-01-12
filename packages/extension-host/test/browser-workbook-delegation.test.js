@@ -828,3 +828,80 @@ test("BrowserExtensionHost: dispose unsubscribes from spreadsheetApi event hooks
   assert.equal(workbookDisposed, true);
   assert.equal(beforeSaveDisposed, true);
 });
+
+test("BrowserExtensionHost: workbookOpened sent via _sendEventToExtension updates the fallback workbook snapshot", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  /** @type {any} */
+  let apiResult;
+
+  /** @type {(value?: unknown) => void} */
+  let resolveDone;
+  const done = new Promise((resolve) => {
+    resolveDone = resolve;
+  });
+
+  const scenarios = [
+    {
+      onPostMessage(msg) {
+        if (msg?.type === "api_result" && msg.id === "req1") {
+          apiResult = msg.result;
+          resolveDone();
+        }
+      },
+    },
+  ];
+
+  installFakeWorker(t, scenarios);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {},
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.workbook-opened-targeted";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "memory://workbook-opened-targeted/",
+    mainUrl: "memory://workbook-opened-targeted/main.mjs",
+    manifest: {
+      name: "workbook-opened-targeted",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: [],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension?.worker);
+
+  host._sendEventToExtension(extension, "workbookOpened", {
+    workbook: {
+      name: "opened.xlsx",
+      path: "/tmp/opened.xlsx",
+      sheets: [{ id: "sheet1", name: "Sheet1" }],
+      activeSheet: { id: "sheet1", name: "Sheet1" },
+    },
+  });
+
+  extension.worker.emitMessage({
+    type: "api_call",
+    id: "req1",
+    namespace: "workbook",
+    method: "getActiveWorkbook",
+    args: [],
+  });
+
+  await done;
+
+  assert.equal(apiResult?.path, "/tmp/opened.xlsx");
+  assert.equal(apiResult?.name, "opened.xlsx");
+});
