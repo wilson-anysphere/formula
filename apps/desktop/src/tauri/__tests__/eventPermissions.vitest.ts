@@ -50,4 +50,99 @@ describe("tauri capability event permissions", () => {
       }
     }
   });
+
+  it("includes the desktop shell event names used by the frontend", () => {
+    const capabilityUrl = new URL("../../../src-tauri/capabilities/main.json", import.meta.url);
+    const capability = JSON.parse(readFileSync(capabilityUrl, "utf8")) as {
+      permissions?: CapabilityPermission[];
+    };
+
+    const permissions = Array.isArray(capability.permissions) ? capability.permissions : [];
+
+    const allowListen = permissions.find(
+      (p): p is Exclude<CapabilityPermission, string> =>
+        typeof p === "object" && p != null && (p as any).identifier === "event:allow-listen",
+    ) as any;
+    const allowEmit = permissions.find(
+      (p): p is Exclude<CapabilityPermission, string> =>
+        typeof p === "object" && p != null && (p as any).identifier === "event:allow-emit",
+    ) as any;
+
+    const listenEvents = new Set(
+      Array.isArray(allowListen?.allow) ? allowListen.allow.map((entry: any) => entry?.event).filter(Boolean) : [],
+    );
+    const emitEvents = new Set(
+      Array.isArray(allowEmit?.allow) ? allowEmit.allow.map((entry: any) => entry?.event).filter(Boolean) : [],
+    );
+
+    // Rust -> JS (frontend listens)
+    const requiredListen = [
+      // Close flow
+      "close-prep",
+      "close-requested",
+
+      // File open flows
+      "open-file",
+      "file-dropped",
+
+      // Tray
+      "tray-open",
+      "tray-new",
+      "tray-quit",
+
+      // Shortcuts
+      "shortcut-quick-open",
+      "shortcut-command-palette",
+
+      // Menu bar
+      "menu-open",
+      "menu-new",
+      "menu-save",
+      "menu-save-as",
+      "menu-close-window",
+      "menu-quit",
+      "menu-undo",
+      "menu-redo",
+      "menu-cut",
+      "menu-copy",
+      "menu-paste",
+      "menu-select-all",
+      "menu-about",
+      "menu-check-updates",
+
+      // Updater
+      "update-check-started",
+      "update-check-already-running",
+      "update-not-available",
+      "update-check-error",
+      "update-available",
+
+      // Startup instrumentation
+      "startup:window-visible",
+      "startup:webview-loaded",
+      "startup:tti",
+      "startup:metrics",
+
+      // Deep links
+      "oauth-redirect",
+    ];
+
+    for (const event of requiredListen) {
+      expect(listenEvents.has(event)).toBe(true);
+    }
+
+    // JS -> Rust (frontend emits)
+    const requiredEmit = [
+      "close-prep-done",
+      "close-handled",
+      "open-file-ready",
+      "updater-ui-ready",
+      // Emitted by the COI check harness (window.eval) to report results back to Rust.
+      "coi-check-result",
+    ];
+
+    for (const event of requiredEmit) {
+      expect(emitEvents.has(event)).toBe(true);
+    }
+  });
 });
