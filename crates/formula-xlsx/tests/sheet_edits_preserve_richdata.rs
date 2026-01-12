@@ -325,6 +325,10 @@ fn sheet_edits_preserve_richdata_parts_and_relationships() {
 
     let content_types = content_type_overrides(&zip_part(&saved, "[Content_Types].xml"));
     assert!(
+        !content_types.contains("/xl/worksheets/sheet2.xml"),
+        "expected [Content_Types].xml to drop override for deleted /xl/worksheets/sheet2.xml"
+    );
+    assert!(
         content_types.contains("/xl/metadata.xml"),
         "[Content_Types].xml must retain override for /xl/metadata.xml"
     );
@@ -335,5 +339,11 @@ fn sheet_edits_preserve_richdata_parts_and_relationships() {
     assert!(
         content_types.contains("/xl/richData/richValues.xml"),
         "[Content_Types].xml must retain override for /xl/richData/richValues.xml"
+    );
+
+    let added_override_name = format!("/{added_part_name}");
+    assert!(
+        content_types.contains(&added_override_name),
+        "expected [Content_Types].xml to include override for newly-added worksheet part: {added_override_name}"
     );
 }
