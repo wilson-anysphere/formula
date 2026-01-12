@@ -961,7 +961,7 @@ fn value_to_key(v: &Value, out: &mut String) {
             out.push('x');
             out.push_str(&a.cols.to_string());
             out.push(':');
-            for v in &a.values {
+            for v in a.values.iter() {
                 value_to_key(v, out);
                 out.push(',');
             }

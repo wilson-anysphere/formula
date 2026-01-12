@@ -6891,15 +6891,29 @@ fn bytecode_value_to_engine(value: bytecode::Value) -> Value {
             if values.try_reserve_exact(total).is_err() {
                 return Value::Error(ErrorKind::Num);
             }
-            for v in arr.values {
-                // Arrays should only contain scalar values. If nested arrays/ranges appear, treat them
-                // as errors rather than attempting to spill recursively.
-                values.push(match v {
-                    bytecode::Value::Array(_)
-                    | bytecode::Value::Range(_)
-                    | bytecode::Value::MultiRange(_) => Value::Error(ErrorKind::Value),
-                    other => bytecode_value_to_engine(other),
-                });
+            match Arc::try_unwrap(arr.values) {
+                Ok(values_vec) => {
+                    for v in values_vec {
+                        // Arrays should only contain scalar values. If nested arrays/ranges appear,
+                        // treat them as errors rather than attempting to spill recursively.
+                        values.push(match v {
+                            bytecode::Value::Array(_)
+                            | bytecode::Value::Range(_)
+                            | bytecode::Value::MultiRange(_) => Value::Error(ErrorKind::Value),
+                            other => bytecode_value_to_engine(other),
+                        });
+                    }
+                }
+                Err(shared) => {
+                    for v in shared.iter() {
+                        values.push(match v {
+                            bytecode::Value::Array(_)
+                            | bytecode::Value::Range(_)
+                            | bytecode::Value::MultiRange(_) => Value::Error(ErrorKind::Value),
+                            other => bytecode_value_to_engine(other.clone()),
+                        });
+                    }
+                }
             }
             Value::Array(Array::new(arr.rows, arr.cols, values))
         }

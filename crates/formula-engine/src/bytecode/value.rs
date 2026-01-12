@@ -223,14 +223,18 @@ pub struct Array {
     pub rows: usize,
     pub cols: usize,
     /// Row-major order values (length = rows * cols).
-    pub values: Vec<Value>,
+    pub values: Arc<Vec<Value>>,
 }
 
 impl Array {
     #[inline]
     pub fn new(rows: usize, cols: usize, values: Vec<Value>) -> Self {
         debug_assert_eq!(rows * cols, values.len());
-        Self { rows, cols, values }
+        Self {
+            rows,
+            cols,
+            values: Arc::new(values),
+        }
     }
 
     #[inline]

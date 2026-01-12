@@ -8196,9 +8196,9 @@ fn fn_match(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 return Value::Error(ErrorKind::NA);
             }
             match match_type {
-                0 => exact_match_1d_slice(lookup_value, &arr.values),
-                1 => approximate_match_1d_slice(lookup_value, &arr.values, true),
-                -1 => approximate_match_1d_slice(lookup_value, &arr.values, false),
+                0 => exact_match_1d_slice(lookup_value, arr.values.as_slice()),
+                1 => approximate_match_1d_slice(lookup_value, arr.values.as_slice(), true),
+                -1 => approximate_match_1d_slice(lookup_value, arr.values.as_slice(), false),
                 _ => return Value::Error(ErrorKind::NA),
             }
         }
