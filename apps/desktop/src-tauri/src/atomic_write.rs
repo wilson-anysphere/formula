@@ -3,6 +3,14 @@ use std::io::Write;
 use std::path::Path;
 use tempfile::NamedTempFile;
 
+fn sync_dir_best_effort(path: &Path) {
+    // Syncing a directory is platform/filesystem dependent; this is strictly best-effort.
+    // On Unix this helps make the final rename durable after a crash/power loss.
+    if let Ok(dir) = std::fs::File::open(path) {
+        let _ = dir.sync_all();
+    }
+}
+
 /// Atomically writes `bytes` to `path`.
 ///
 /// This creates any missing parent directories, writes to a temp file in the
@@ -25,11 +33,17 @@ pub(crate) fn write_file_atomic_io(path: &Path, bytes: &[u8]) -> std::io::Result
     tmp.as_file().sync_all()?;
 
     match tmp.persist(path) {
-        Ok(_) => Ok(()),
+        Ok(_) => {
+            // Best-effort: ensure the directory entry for the new file is durable.
+            sync_dir_best_effort(parent);
+            Ok(())
+        }
         Err(err) if err.error.kind() == std::io::ErrorKind::AlreadyExists => {
             // Best-effort replacement on platforms/filesystems where rename doesn't clobber.
             let _ = std::fs::remove_file(path);
-            err.file.persist(path).map(|_| ()).map_err(|e| e.error)
+            err.file.persist(path).map(|_| ()).map_err(|e| e.error)?;
+            sync_dir_best_effort(parent);
+            Ok(())
         }
         Err(err) => Err(err.error),
     }
@@ -37,4 +51,30 @@ pub(crate) fn write_file_atomic_io(path: &Path, bytes: &[u8]) -> std::io::Result
 
 pub fn write_file_atomic(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     write_file_atomic_io(path, bytes).with_context(|| format!("write file atomically to {path:?}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn write_file_atomic_io_creates_parent_dirs() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let path = tmp.path().join("nested/dir/file.bin");
+        assert!(!path.parent().unwrap().exists(), "parent dir should not exist");
+
+        write_file_atomic_io(&path, b"hello").expect("write_file_atomic_io");
+        assert!(path.is_file(), "expected file to exist");
+        assert_eq!(std::fs::read(&path).expect("read file"), b"hello");
+    }
+
+    #[test]
+    fn write_file_atomic_io_replaces_existing_file() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let path = tmp.path().join("file.bin");
+
+        write_file_atomic_io(&path, b"old").expect("write old");
+        write_file_atomic_io(&path, b"new").expect("write new");
+        assert_eq!(std::fs::read(&path).expect("read file"), b"new");
+    }
 }
