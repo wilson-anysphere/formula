@@ -29,8 +29,16 @@ fn index_reference_supports_row_and_column_zero_slices() {
     sheet.set("C3", 300.0);
 
     assert_number(&sheet.eval("=SUM(INDEX(A1:C3,0,2))"), 222.0);
+    // Blank row_num coerces to 0.
+    assert_number(&sheet.eval("=SUM(INDEX(A1:C3,,2))"), 222.0);
     assert_number(&sheet.eval("=SUM(INDEX(A1:C3,2,0))"), 60.0);
+    // Blank col_num coerces to 0.
+    assert_number(&sheet.eval("=SUM(INDEX(A1:C3,2,))"), 60.0);
     assert_number(&sheet.eval("=SUM(INDEX(A1:C3,0,0))"), 666.0);
+    assert_number(&sheet.eval("=SUM(INDEX(A1:C3,,))"), 666.0);
+
+    // If column_num is omitted it defaults to 1 (first column slice).
+    assert_number(&sheet.eval("=SUM(INDEX(A1:C3,0))"), 111.0);
 }
 
 #[test]
