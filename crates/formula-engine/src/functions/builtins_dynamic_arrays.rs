@@ -1378,15 +1378,10 @@ inventory::submit! {
 
 fn reduce_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let (initial, array_expr, lambda_expr) = match args {
-        [array, lambda] => (Value::Blank, array, lambda),
-        [initial, array, lambda] => (eval_scalar_arg(ctx, initial), array, lambda),
+        [array, lambda] => (None, array, lambda),
+        [initial, array, lambda] => (Some(eval_scalar_arg(ctx, initial)), array, lambda),
         _ => return Value::Error(ErrorKind::Value),
     };
-
-    let mut acc = initial;
-    if let Value::Error(e) = &acc {
-        return Value::Error(*e);
-    }
 
     let array = match eval_array_arg(ctx, array_expr) {
         Ok(v) => v,
@@ -1403,7 +1398,19 @@ fn reduce_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     }
 
     let call = prepare_lambda_call(&call_name, 2);
-    for cell in &array.values {
+    let mut iter = array.values.iter();
+    let mut acc = match initial {
+        Some(initial) => initial,
+        None => match iter.next() {
+            Some(v) => v.clone(),
+            None => return Value::Error(ErrorKind::Calc),
+        },
+    };
+    if let Value::Error(e) = &acc {
+        return Value::Error(*e);
+    }
+
+    for cell in iter {
         let args = [acc.clone(), cell.clone()];
         acc = invoke_lambda_value(ctx, &lambda, &call, &args);
         if let Value::Error(e) = &acc {
@@ -1430,18 +1437,10 @@ inventory::submit! {
 
 fn scan_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let (initial, array_expr, lambda_expr) = match args {
-        [array, lambda] => (Value::Blank, array, lambda),
-        [initial, array, lambda] => (eval_scalar_arg(ctx, initial), array, lambda),
+        [array, lambda] => (None, array, lambda),
+        [initial, array, lambda] => (Some(initial), array, lambda),
         _ => return Value::Error(ErrorKind::Value),
     };
-
-    let mut acc = match scalarize_value(initial) {
-        Ok(v) => v,
-        Err(e) => return Value::Error(e),
-    };
-    if let Value::Error(e) = acc {
-        return Value::Error(e);
-    }
 
     let array = match eval_array_arg(ctx, array_expr) {
         Ok(v) => v,
@@ -1459,10 +1458,39 @@ fn scan_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
     let call = prepare_lambda_call(&call_name, 2);
     let mut values = Vec::with_capacity(array.values.len());
-    for cell in &array.values {
-        let args = [acc.clone(), cell.clone()];
-        acc = invoke_lambda(ctx, &lambda, &call, &args);
-        values.push(acc.clone());
+    match initial {
+        Some(initial_expr) => {
+            let initial = eval_scalar_arg(ctx, initial_expr);
+            let mut acc = match scalarize_value(initial) {
+                Ok(v) => v,
+                Err(e) => return Value::Error(e),
+            };
+            if let Value::Error(e) = acc {
+                return Value::Error(e);
+            }
+
+            for cell in &array.values {
+                let args = [acc.clone(), cell.clone()];
+                acc = invoke_lambda(ctx, &lambda, &call, &args);
+                values.push(acc.clone());
+            }
+        }
+        None => {
+            let Some((first, rest)) = array.values.split_first() else {
+                return Value::Error(ErrorKind::Calc);
+            };
+            let mut acc = match scalarize_value(first.clone()) {
+                Ok(v) => v,
+                Err(e) => Value::Error(e),
+            };
+            values.push(acc.clone());
+
+            for cell in rest {
+                let args = [acc.clone(), cell.clone()];
+                acc = invoke_lambda(ctx, &lambda, &call, &args);
+                values.push(acc.clone());
+            }
+        }
     }
 
     Value::Array(Array::new(array.rows, array.cols, values))

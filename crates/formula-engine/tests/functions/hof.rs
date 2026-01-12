@@ -79,6 +79,22 @@ fn reduce_sums_over_range_with_and_without_initial() {
 }
 
 #[test]
+fn reduce_without_initial_uses_first_array_element() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 3.0).unwrap();
+
+    // If initial_value is omitted, Excel uses the first element of the array as the initial
+    // accumulator (rather than starting from blank/zero).
+    engine
+        .set_cell_formula("Sheet1", "C7", "=REDUCE(A1:A2,LAMBDA(acc,v,acc*v))")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "C7"), Value::Number(6.0));
+}
+
+#[test]
 fn scan_spills_running_accumulations_over_range() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
@@ -97,6 +113,27 @@ fn scan_spills_running_accumulations_over_range() {
     assert_eq!(engine.get_cell_value("Sheet1", "F1"), Value::Number(1.0));
     assert_eq!(engine.get_cell_value("Sheet1", "F2"), Value::Number(3.0));
     assert_eq!(engine.get_cell_value("Sheet1", "F3"), Value::Number(6.0));
+}
+
+#[test]
+fn scan_without_initial_uses_first_array_element() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 4.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "G1", "=SCAN(A1:A3,LAMBDA(acc,v,acc*v))")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "G1").expect("spill range");
+    assert_eq!(start, parse_a1("G1").unwrap());
+    assert_eq!(end, parse_a1("G3").unwrap());
+
+    assert_eq!(engine.get_cell_value("Sheet1", "G1"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "G2"), Value::Number(6.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "G3"), Value::Number(24.0));
 }
 
 #[test]
