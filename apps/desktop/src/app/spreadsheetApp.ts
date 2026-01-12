@@ -800,11 +800,22 @@ export class SpreadsheetApp {
     };
     this.commentsDoc.on("update", this.commentsDocUpdateListener);
 
-    this.auditingUnsubscribe = this.document.on("change", () => {
+    this.auditingUnsubscribe = this.document.on("change", (payload: any) => {
       this.auditingCache.clear();
       this.auditingLastCellKey = null;
       if (this.auditingMode !== "off") {
         this.scheduleAuditingUpdate();
+      }
+
+      // DocumentController changes can also include sheet-level view deltas
+      // (e.g. frozen panes). In shared-grid mode, frozen panes must be pushed
+      // down to the CanvasGridRenderer explicitly.
+      if (
+        this.sharedGrid &&
+        Array.isArray(payload?.sheetViewDeltas) &&
+        payload.sheetViewDeltas.some((delta: any) => delta?.sheetId === this.sheetId)
+      ) {
+        this.syncFrozenPanes();
       }
     });
 

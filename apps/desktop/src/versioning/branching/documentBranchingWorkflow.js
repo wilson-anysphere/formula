@@ -121,7 +121,20 @@ export class DocumentBranchingWorkflow {
       merged.cells[sheetId] = mergedSheet;
 
       if (!merged.sheets.metaById[sheetId]) {
-        merged.sheets.metaById[sheetId] = { id: sheetId, name: sheetId };
+        const nextMeta = nextState.sheets.metaById[sheetId];
+        merged.sheets.metaById[sheetId] = {
+          id: sheetId,
+          name: sheetId,
+          view: nextMeta?.view ? structuredClone(nextMeta.view) : { frozenRows: 0, frozenCols: 0 },
+        };
+      } else {
+        // DocumentController only knows about sheet ids (names/order live in BranchService),
+        // but it *does* own per-sheet view state (e.g. frozen panes). Preserve the existing
+        // sheet name while syncing view state from the live workbook.
+        const nextMeta = nextState.sheets.metaById[sheetId];
+        if (nextMeta?.view) {
+          merged.sheets.metaById[sheetId] = { ...merged.sheets.metaById[sheetId], view: structuredClone(nextMeta.view) };
+        }
       }
     }
 

@@ -13,6 +13,7 @@ test("DocumentController + BranchService: checkout/merge mutate the live workboo
   doc.setCellValue("Sheet1", "A1", 1);
   doc.setCellFormula("Sheet1", "B1", "=A1*2");
   doc.setRangeFormat("Sheet1", "A1", { font: { bold: true }, meta: { foo: "bar", nested: { n: 1 } } });
+  doc.setFrozen("Sheet1", 2, 1);
   doc.setCellValue("Sheet2", "A1", "s2");
 
   const store = new InMemoryBranchStore();
@@ -27,7 +28,10 @@ test("DocumentController + BranchService: checkout/merge mutate the live workboo
 
   await workflow.checkoutIntoDoc(actor, "feature");
   assert.deepEqual(new Set(doc.getSheetIds()), new Set(["Sheet1", "Sheet2", "EmptySheet"]));
+  assert.deepEqual(doc.getSheetView("Sheet1"), { frozenRows: 2, frozenCols: 1 });
 
+  // Change frozen panes on the feature branch to ensure view state is committed and merged.
+  doc.setFrozen("Sheet1", 3, 0);
   doc.setCellValue("Sheet1", "A1", 10);
   doc.setCellValue("Sheet1", "C1", 99);
   await workflow.commitCurrentState(actor, "feature edits");
@@ -59,6 +63,7 @@ test("DocumentController + BranchService: checkout/merge mutate the live workboo
   assert.equal(doc.getCell("Sheet1", "C1").value, 99);
   assert.equal(doc.getCell("Sheet1", "D1").value, 123);
   assert.equal(doc.getCell("Sheet2", "A1").value, "s2");
+  assert.deepEqual(doc.getSheetView("Sheet1"), { frozenRows: 3, frozenCols: 0 });
 
   const a1 = doc.getCell("Sheet1", "A1");
   assert.deepEqual(doc.styleTable.get(a1.styleId), {
