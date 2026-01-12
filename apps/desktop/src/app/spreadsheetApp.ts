@@ -98,6 +98,10 @@ type AuditingCacheEntry = {
   dependentsError: string | null;
 };
 const MAX_KEYBOARD_FORMATTING_CELLS = 50_000;
+// Copying a large rectangle requires allocating a per-cell clipboard payload (TSV/HTML/RTF)
+// and (for internal pastes) a per-cell snapshot of effective formats. Keep this bounded so
+// Excel-scale sheet limits don't allow accidental multi-million-cell allocations.
+const MAX_CLIPBOARD_CELLS = 200_000;
 // Encode (row, col) into a single numeric key for allocation-free lookups.
 // `16_384` matches Excel's maximum column count, so the mapping is collision-free for Excel-sized sheets.
 const COMMENT_COORD_COL_STRIDE = 16_384;
@@ -7501,6 +7505,20 @@ export class SpreadsheetApp {
   private async copySelectionToClipboard(): Promise<void> {
     try {
       const range = this.getClipboardCopyRange();
+      const rowCount = Math.max(0, range.endRow - range.startRow + 1);
+      const colCount = Math.max(0, range.endCol - range.startCol + 1);
+      const cellCount = rowCount * colCount;
+      if (cellCount > MAX_CLIPBOARD_CELLS) {
+        try {
+          showToast(
+            `Selection too large to copy (>${MAX_CLIPBOARD_CELLS.toLocaleString()} cells). Select fewer cells and try again.`,
+            "warning"
+          );
+        } catch {
+          // `showToast` requires a #toast-root; unit tests don't always include it.
+        }
+        return;
+      }
       const cellRange = {
         start: { row: range.startRow, col: range.startCol },
         end: { row: range.endRow, col: range.endCol }
@@ -7685,6 +7703,20 @@ export class SpreadsheetApp {
   private async cutSelectionToClipboard(): Promise<void> {
     try {
       const range = this.getClipboardCopyRange();
+      const rowCount = Math.max(0, range.endRow - range.startRow + 1);
+      const colCount = Math.max(0, range.endCol - range.startCol + 1);
+      const cellCount = rowCount * colCount;
+      if (cellCount > MAX_CLIPBOARD_CELLS) {
+        try {
+          showToast(
+            `Selection too large to cut (>${MAX_CLIPBOARD_CELLS.toLocaleString()} cells). Select fewer cells and try again.`,
+            "warning"
+          );
+        } catch {
+          // `showToast` requires a #toast-root; unit tests don't always include it.
+        }
+        return;
+      }
       const cellRange = {
         start: { row: range.startRow, col: range.startCol },
         end: { row: range.endRow, col: range.endCol }
