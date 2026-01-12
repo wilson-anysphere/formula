@@ -41,7 +41,7 @@ The desktop shell reports real startup timings from the Rust host + webview so w
 - **Optional multi-run benchmark**: `apps/desktop/tests/performance/desktop-startup-runner.ts` can launch a built desktop binary multiple times and compute p50/p95 for window-visible + TTI.
   - Example:
     ```bash
-    node --experimental-strip-types apps/desktop/tests/performance/desktop-startup-runner.ts --bin apps/desktop/src-tauri/target/release/formula-desktop --runs 20
+    node --experimental-strip-types apps/desktop/tests/performance/desktop-startup-runner.ts --bin target/release/formula-desktop --runs 20
     ```
 
 ---

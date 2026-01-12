@@ -48,6 +48,10 @@ function parseArgs(argv: string[]): {
 function defaultDesktopBinPath(): string | null {
   const exe = process.platform === "win32" ? "formula-desktop.exe" : "formula-desktop";
   const candidates = [
+    // Cargo workspace default target dir (most common).
+    resolve(repoRoot, "target/release", exe),
+    resolve(repoRoot, "target/debug", exe),
+    // Fallbacks in case a caller built with a custom target dir rooted under the app.
     resolve(repoRoot, "apps/desktop/src-tauri/target/release", exe),
     resolve(repoRoot, "apps/desktop/src-tauri/target/debug", exe),
   ];
