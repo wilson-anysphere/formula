@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ContextMenu, type ContextMenuItem } from "../menus/contextMenu.js";
 import { normalizeExcelColorToCss } from "../shared/colors.js";
 import * as nativeDialogs from "../tauri/nativeDialogs";
-import type { SheetMeta, WorkbookSheetStore } from "./workbookSheetStore";
+import { validateSheetName, type SheetMeta, type TabColor, type WorkbookSheetStore } from "./workbookSheetStore";
 import { computeWorkbookSheetMoveIndex } from "./sheetReorder";
 
 const SHEET_TAB_COLOR_PALETTE: Array<{ label: string; rgb: string }> = [
@@ -21,6 +21,13 @@ type Props = {
   activeSheetId: string;
   onActivateSheet: (sheetId: string) => void;
   onAddSheet: () => Promise<void> | void;
+  /**
+   * Optional hook to persist sheet renames before updating the local sheet metadata store.
+   *
+   * Used by the desktop (Tauri) shell to route renames through the backend so the workbook
+   * stays consistent across reloads.
+   */
+  onPersistSheetRename?: (sheetId: string, name: string) => Promise<void> | void;
   /**
    * Called after a sheet tab reorder is committed (drag-and-drop).
    *
@@ -51,6 +58,7 @@ export function SheetTabStrip({
   activeSheetId,
   onActivateSheet,
   onAddSheet,
+  onPersistSheetRename,
   onSheetsReordered,
   onSheetRenamed,
   onSheetDeleted,
@@ -80,6 +88,7 @@ export function SheetTabStrip({
   const [draftName, setDraftName] = useState("");
   const [renameError, setRenameError] = useState<string | null>(null);
   const renameInputRef = useRef<HTMLInputElement>(null!);
+  const renameCommitRef = useRef<Promise<boolean> | null>(null);
   const [canScroll, setCanScroll] = useState<{ left: boolean; right: boolean }>({ left: false, right: false });
 
   const lastContextMenuTabRef = useRef<HTMLButtonElement | null>(null);
@@ -152,29 +161,72 @@ export function SheetTabStrip({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const commitRename = (sheetId: string): boolean => {
-    const oldName = store.getName(sheetId) ?? "";
-    try {
-      store.rename(sheetId, draftName);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setRenameError(message);
-      onError?.(message);
-      // Keep editing: refocus the input.
-      requestAnimationFrame(() => renameInputRef.current?.focus());
-      return false;
-    }
-    const newName = store.getName(sheetId) ?? draftName.trim();
-    setRenameError(null);
-    setEditingSheetId(null);
-    if (oldName && newName && oldName !== newName) {
+  const commitRename = (sheetId: string): Promise<boolean> => {
+    if (renameCommitRef.current) return renameCommitRef.current;
+
+    const promise = (async () => {
+      const oldName = store.getName(sheetId) ?? "";
+
+      let normalized: string;
       try {
-        onSheetRenamed?.({ sheetId, oldName, newName });
+        normalized = validateSheetName(draftName, {
+          sheets: store.listAll(),
+          ignoreId: sheetId,
+        });
       } catch (err) {
-        onError?.(err instanceof Error ? err.message : String(err));
+        const message = err instanceof Error ? err.message : String(err);
+        setRenameError(message);
+        onError?.(message);
+        // Keep editing: refocus the input.
+        requestAnimationFrame(() => renameInputRef.current?.focus());
+        return false;
       }
-    }
-    return true;
+
+      // Treat no-op renames as a simple exit from rename mode.
+      if (oldName && normalized === oldName) {
+        setRenameError(null);
+        setEditingSheetId(null);
+        return true;
+      }
+
+      try {
+        await onPersistSheetRename?.(sheetId, normalized);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setRenameError(message);
+        onError?.(message);
+        requestAnimationFrame(() => renameInputRef.current?.focus());
+        return false;
+      }
+
+      try {
+        store.rename(sheetId, normalized);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setRenameError(message);
+        onError?.(message);
+        // Keep editing: refocus the input.
+        requestAnimationFrame(() => renameInputRef.current?.focus());
+        return false;
+      }
+
+      const newName = store.getName(sheetId) ?? normalized;
+      setRenameError(null);
+      setEditingSheetId(null);
+      if (oldName && newName && oldName !== newName) {
+        try {
+          onSheetRenamed?.({ sheetId, oldName, newName });
+        } catch (err) {
+          onError?.(err instanceof Error ? err.message : String(err));
+        }
+      }
+      return true;
+    })().finally(() => {
+      renameCommitRef.current = null;
+    });
+
+    renameCommitRef.current = promise;
+    return promise;
   };
 
   const moveSheet = (sheetId: string, dropTarget: Parameters<typeof computeWorkbookSheetMoveIndex>[0]["dropTarget"]) => {
@@ -193,17 +245,17 @@ export function SheetTabStrip({
     onSheetsReordered?.();
   };
 
-  const activateSheetWithRenameGuard = (sheetId: string) => {
+  const activateSheetWithRenameGuard = async (sheetId: string) => {
     if (editingSheetId && editingSheetId !== sheetId) {
-      const ok = commitRename(editingSheetId);
+      const ok = await commitRename(editingSheetId);
       if (!ok) return;
     }
     onActivateSheet(sheetId);
   };
 
-  const beginRenameWithGuard = (sheet: SheetMeta) => {
+  const beginRenameWithGuard = async (sheet: SheetMeta) => {
     if (editingSheetId && editingSheetId !== sheet.id) {
-      const ok = commitRename(editingSheetId);
+      const ok = await commitRename(editingSheetId);
       if (!ok) return;
     }
 
@@ -229,7 +281,9 @@ export function SheetTabStrip({
       {
         type: "item",
         label: "Rename",
-        onSelect: () => beginRenameWithGuard(sheet),
+        onSelect: () => {
+          void beginRenameWithGuard(sheet);
+        },
       },
       {
         type: "item",
@@ -330,7 +384,7 @@ export function SheetTabStrip({
 
   const deleteSheet = async (sheet: SheetMeta): Promise<void> => {
     if (editingSheetId && editingSheetId !== sheet.id) {
-      const ok = commitRename(editingSheetId);
+      const ok = await commitRename(editingSheetId);
       if (!ok) return;
     }
 
@@ -477,13 +531,16 @@ export function SheetTabStrip({
                 e.stopPropagation();
                 const sheetId = target.dataset.sheetId;
                 if (!sheetId) return;
-                if (editingSheetId && editingSheetId !== sheetId) {
-                  const ok = commitRename(editingSheetId);
-                  if (!ok) return;
-                }
-                lastContextMenuTabRef.current = target;
-                const rect = target.getBoundingClientRect();
-                openSheetTabContextMenu(sheetId, { x: rect.left + rect.width / 2, y: rect.bottom });
+                const activeEditingId = editingSheetId;
+                void (async () => {
+                  if (activeEditingId && activeEditingId !== sheetId) {
+                    const ok = await commitRename(activeEditingId);
+                    if (!ok) return;
+                  }
+                  lastContextMenuTabRef.current = target;
+                  const rect = target.getBoundingClientRect();
+                  openSheetTabContextMenu(sheetId, { x: rect.left + rect.width / 2, y: rect.bottom });
+                })();
                 return;
               }
 
@@ -526,7 +583,7 @@ export function SheetTabStrip({
           if (idx === -1) return;
           const delta = e.key === "PageUp" ? -1 : 1;
           const next = visibleSheets[(idx + delta + visibleSheets.length) % visibleSheets.length];
-          if (next) activateSheetWithRenameGuard(next.id);
+          if (next) void activateSheetWithRenameGuard(next.id);
         }}
         onDragOver={(e) => {
           if (!isSheetDrag(e.dataTransfer)) return;
@@ -557,19 +614,26 @@ export function SheetTabStrip({
             renameError={editingSheetId === sheet.id ? renameError : null}
             renameInputRef={renameInputRef}
             tabRef={sheet.id === activeSheetId ? activeTabRef : undefined}
-            onActivate={() => activateSheetWithRenameGuard(sheet.id)}
-            onBeginRename={() => beginRenameWithGuard(sheet)}
+            onActivate={() => void activateSheetWithRenameGuard(sheet.id)}
+            onBeginRename={() => void beginRenameWithGuard(sheet)}
             onContextMenu={(e) => {
               e.preventDefault();
               e.stopPropagation();
-              if (editingSheetId && editingSheetId !== sheet.id) {
-                const ok = commitRename(editingSheetId);
-                if (!ok) return;
-              }
-              lastContextMenuTabRef.current = e.currentTarget;
-              openSheetTabContextMenu(sheet.id, { x: e.clientX, y: e.clientY });
+              const activeEditingId = editingSheetId;
+              const anchor = { x: e.clientX, y: e.clientY };
+              const target = e.currentTarget;
+              void (async () => {
+                if (activeEditingId && activeEditingId !== sheet.id) {
+                  const ok = await commitRename(activeEditingId);
+                  if (!ok) return;
+                }
+                lastContextMenuTabRef.current = target;
+                openSheetTabContextMenu(sheet.id, anchor);
+              })();
             }}
-            onCommitRename={() => commitRename(sheet.id)}
+            onCommitRename={() => {
+              void commitRename(sheet.id);
+            }}
             onCancelRename={() => {
               setEditingSheetId(null);
               setRenameError(null);
@@ -602,11 +666,13 @@ export function SheetTabStrip({
         className="sheet-add"
         data-testid="sheet-add"
         onClick={() => {
-          if (editingSheetId) {
-            const ok = commitRename(editingSheetId);
-            if (!ok) return;
-          }
-          void onAddSheet();
+          void (async () => {
+            if (editingSheetId) {
+              const ok = await commitRename(editingSheetId);
+              if (!ok) return;
+            }
+            await onAddSheet();
+          })();
         }}
         aria-label="Add sheet"
       >

@@ -2085,6 +2085,23 @@ function renderSheetTabs(): void {
         restoreFocusAfterSheetNavigation();
       },
       onAddSheet: handleAddSheet,
+      onPersistSheetRename: async (sheetId: string, name: string) => {
+        // In collab mode, sheet metadata changes are persisted to the shared Yjs document.
+        // Skip the local workbook backend.
+        const session = app.getCollabSession?.() ?? null;
+        if (session) return;
+
+        const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
+        if (typeof baseInvoke !== "function") return;
+
+        // Prefer the queued invoke (it sequences behind pending `set_cell` / `set_range` sync work).
+        const invoke = queuedInvoke ?? ((cmd: string, args?: any) => queueBackendOp(() => baseInvoke(cmd, args)));
+
+        // Allow any microtask-batched workbook edits to enqueue before we request a rename.
+        await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+        await invoke("rename_sheet", { sheet_id: sheetId, name });
+      },
       onSheetsReordered: () => restoreFocusAfterSheetNavigation(),
       onSheetRenamed: ({ oldName, newName }) => {
         try {

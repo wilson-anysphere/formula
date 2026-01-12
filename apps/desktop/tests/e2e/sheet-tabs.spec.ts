@@ -127,7 +127,7 @@ test.describe("sheet tabs", () => {
     await expect(sheet1Tab).toBeFocused();
   });
 
-  test("double-click rename commits on Enter and updates the tab label", async ({ page }) => {
+  test("double-click rename commits on Enter and updates tab + switcher labels", async ({ page }) => {
     await gotoDesktop(page);
 
     const tab = page.getByTestId("sheet-tab-Sheet1");
@@ -137,10 +137,11 @@ test.describe("sheet tabs", () => {
     const input = tab.locator("input.sheet-tab__input");
     await expect(input).toBeVisible();
 
-    await input.fill("Renamed");
+    await input.fill("Budget");
     await input.press("Enter");
 
-    await expect(tab).toContainText("Renamed");
+    await expect(tab.locator(".sheet-tab__name")).toHaveText("Budget");
+    await expect(page.getByTestId("sheet-switcher").locator('option[value="Sheet1"]')).toHaveText("Budget");
   });
 
   test("sheet switcher select activates sheets and updates sheet position", async ({ page }) => {
@@ -286,7 +287,7 @@ test.describe("sheet tabs", () => {
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet2");
   });
 
-  test("invalid rename keeps editing and blocks switching sheets", async ({ page }) => {
+  test("invalid rename (forbidden characters) keeps editing and blocks switching sheets", async ({ page }) => {
     await gotoDesktop(page);
 
     // Create a second sheet we can attempt to switch to.
@@ -302,9 +303,11 @@ test.describe("sheet tabs", () => {
     const input = sheet1Tab.locator("input.sheet-tab__input");
     await expect(input).toBeVisible();
 
-    // Trigger an invalid name (empty) and attempt to commit.
-    await input.fill("");
+    // Trigger an invalid name (contains a forbidden character) and attempt to commit.
+    await input.fill("A/B");
     await input.press("Enter");
+
+    await expect(page.locator('[data-testid="toast"]').filter({ hasText: /cannot contain/i })).toBeVisible();
 
     // Attempt to switch sheets; invalid rename should block activation.
     await page.getByTestId("sheet-tab-Sheet2").click();
@@ -312,6 +315,7 @@ test.describe("sheet tabs", () => {
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet1");
     await expect(sheet1Tab).toHaveAttribute("data-active", "true");
     await expect(input).toBeVisible();
+    await expect(input).toBeFocused();
   });
 
   test("drag reordering sheet tabs updates Ctrl+PgUp/PgDn navigation order", async ({ page }) => {
