@@ -718,4 +718,33 @@ mod tests {
         assert_eq!(parsed.pkcs7_offset, expected_offset);
         assert_eq!(parsed.pkcs7_len, pkcs7.len());
     }
+
+    #[test]
+    fn parses_digsig_info_serialized_when_signature_bytes_come_first() {
+        let pkcs7 = include_bytes!("../tests/fixtures/cms_indefinite.der");
+
+        let project_name_utf16: Vec<u16> = "VBAProject\0".encode_utf16().collect();
+        let mut project_name_bytes = Vec::new();
+        for ch in &project_name_utf16 {
+            project_name_bytes.extend_from_slice(&ch.to_le_bytes());
+        }
+        let cert_store = vec![0xAA, 0xBB, 0xCC, 0xDD];
+
+        let cb_signature = pkcs7.len() as u32;
+        let cb_cert_store = cert_store.len() as u32;
+        let cch_project = project_name_utf16.len() as u32;
+
+        // Layout: header, signature, project name, cert store.
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&cb_signature.to_le_bytes());
+        stream.extend_from_slice(&cb_cert_store.to_le_bytes());
+        stream.extend_from_slice(&cch_project.to_le_bytes());
+        stream.extend_from_slice(pkcs7);
+        stream.extend_from_slice(&project_name_bytes);
+        stream.extend_from_slice(&cert_store);
+
+        let parsed = parse_digsig_info_serialized(&stream).expect("should parse");
+        assert_eq!(parsed.pkcs7_offset, 12);
+        assert_eq!(parsed.pkcs7_len, pkcs7.len());
+    }
 }
