@@ -25,7 +25,7 @@ describe("FormulaBarView tab completion (integration)", () => {
       getSheetId: () => "Sheet1",
       limits: { maxRows: 10_000, maxCols: 10_000 },
       completionClient: {
-        complete: async () => {
+        completeTabCompletion: async (_req) => {
           calls += 1;
           return "2";
         },
