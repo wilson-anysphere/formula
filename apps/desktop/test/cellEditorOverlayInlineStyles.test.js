@@ -115,3 +115,24 @@ test("CellEditorOverlay keeps geometry dynamic via inline styles", () => {
     );
   }
 });
+
+test("CellEditorOverlay only uses inline styles for dynamic geometry", () => {
+  const filePath = path.join(__dirname, "..", "src", "editor", "cellEditorOverlay.ts");
+  const content = fs.readFileSync(filePath, "utf8");
+
+  const allowed = new Set(["left", "top", "width", "height"]);
+
+  const dotMatches = [...content.matchAll(/\.style\.([a-zA-Z]+)\s*=/g)];
+  const bracketMatches = [...content.matchAll(/\.style\s*\[\s*["']([a-zA-Z-]+)["']\s*\]\s*=/g)];
+
+  const disallowed = [
+    ...dotMatches.filter((m) => !allowed.has(m[1])),
+    ...bracketMatches.filter((m) => !allowed.has(m[1])),
+  ];
+
+  assert.deepEqual(
+    disallowed.map((m) => m[0]),
+    [],
+    "CellEditorOverlay should only set inline styles for left/top/width/height; move other presentation styles to CSS",
+  );
+});
