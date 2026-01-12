@@ -46,6 +46,17 @@ If this regresses, the Pyodide Worker backend breaks (and Python will fall back 
 
 ### Quick check (recommended)
 
+Run the automated smoke check:
+
+```bash
+pnpm -C apps/desktop check:coi
+```
+
+This builds the production frontend + a release desktop binary and launches it in a special mode that exits with
+success/failure after evaluating `globalThis.crossOriginIsolated` and `SharedArrayBuffer` inside the WebView.
+
+### Manual check
+
 1. Build a production desktop binary:
 
    ```bash

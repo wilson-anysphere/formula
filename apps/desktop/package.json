@@ -8,6 +8,7 @@
     "dev": "node scripts/ensure-pyodide-assets.mjs && vite --port 4174 --strictPort",
     "build": "node scripts/ensure-pyodide-assets.mjs && vite build",
     "preview": "vite preview --port 4174 --strictPort",
+    "check:coi": "node scripts/check-cross-origin-isolation.mjs",
     "pyodide:setup": "node scripts/ensure-pyodide-assets.mjs",
     "test:node": "node scripts/run-node-tests.mjs",
     "test": "vitest run --minWorkers=1",

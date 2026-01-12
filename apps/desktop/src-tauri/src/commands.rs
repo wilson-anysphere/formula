@@ -3358,6 +3358,21 @@ pub fn quit_app() {
     std::process::exit(0);
 }
 
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub fn exit_process(code: i32) {
+    std::process::exit(code);
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub fn report_cross_origin_isolation(cross_origin_isolated: bool, shared_array_buffer: bool) {
+    println!(
+        "[formula][coi-check] crossOriginIsolated={}, SharedArrayBuffer={}",
+        cross_origin_isolated, shared_array_buffer
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

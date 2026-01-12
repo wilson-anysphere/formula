@@ -317,6 +317,8 @@ fn main() {
             commands::validate_vba_migration,
             commands::run_python_script,
             commands::quit_app,
+            commands::exit_process,
+            commands::report_cross_origin_isolation,
             commands::fire_workbook_open,
             commands::fire_workbook_before_close,
             commands::fire_worksheet_change,
@@ -478,6 +480,60 @@ fn main() {
             _ => {}
         })
         .setup(|app| {
+            if std::env::args().any(|arg| arg == "--cross-origin-isolation-check") {
+                // CI/developer smoke test: validate cross-origin isolation (COOP/COEP) in the
+                // packaged Tauri build by running in a special mode that exits quickly with a
+                // status code.
+                //
+                // This is evaluated inside the WebView so we can check `globalThis.crossOriginIsolated`
+                // and `SharedArrayBuffer` availability.
+                const TIMEOUT_SECS: u64 = 20;
+                std::thread::spawn(|| {
+                    std::thread::sleep(Duration::from_secs(TIMEOUT_SECS));
+                    eprintln!(
+                        "[formula][coi-check] timed out after {TIMEOUT_SECS}s (webview did not report)"
+                    );
+                    std::process::exit(2);
+                });
+
+                let Some(window) = app.get_webview_window("main") else {
+                    eprintln!("[formula][coi-check] missing main window");
+                    std::process::exit(2);
+                };
+
+                window
+                    .eval(
+                        r#"
+(() => {
+  const deadline = Date.now() + 10_000;
+  const tick = () => {
+    const invoke = globalThis.__TAURI__?.core?.invoke;
+    if (typeof invoke === "function") {
+      const crossOriginIsolated = globalThis.crossOriginIsolated === true;
+      const sharedArrayBuffer = typeof SharedArrayBuffer !== "undefined";
+      const ok = crossOriginIsolated && sharedArrayBuffer;
+
+      invoke("report_cross_origin_isolation", {
+        cross_origin_isolated: crossOriginIsolated,
+        shared_array_buffer: sharedArrayBuffer,
+      }).catch(() => {});
+
+      invoke("exit_process", { code: ok ? 0 : 1 });
+      return;
+    }
+    if (Date.now() > deadline) return;
+    setTimeout(tick, 50);
+  };
+  tick();
+})();
+"#,
+                    )
+                    .unwrap_or_else(|err| {
+                        eprintln!("[formula][coi-check] failed to eval script: {err}");
+                        std::process::exit(2);
+                    });
+            }
+
             tray::init(app)?;
 
             // Register global shortcuts (handled by the frontend via the Tauri plugin).
