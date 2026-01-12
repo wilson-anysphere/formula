@@ -3,7 +3,33 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use sqlx::{Column, Connection, Executor, Row, TypeInfo};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
+
+const SQLITE_SCOPE_DENIED_ERROR: &str =
+    "Access denied: SQLite database path is outside the allowed filesystem scope";
+
+fn validate_sqlite_db_path(path: &str) -> Result<PathBuf> {
+    let raw = Path::new(path);
+    let canonical =
+        std::fs::canonicalize(raw).with_context(|| format!("canonicalize sqlite path {path:?}"))?;
+    let allowed_roots = crate::fs_scope::desktop_allowed_roots()
+        .context("determine allowed filesystem scope roots")?;
+    if crate::fs_scope::path_in_allowed_roots(&canonical, &allowed_roots) {
+        Ok(canonical)
+    } else {
+        Err(anyhow!(SQLITE_SCOPE_DENIED_ERROR))
+    }
+}
+
+fn sqlite_connect_options_from_path(path: &str) -> Result<sqlx::sqlite::SqliteConnectOptions> {
+    let trimmed = path.trim();
+    if trimmed.eq_ignore_ascii_case(":memory:") || trimmed.eq_ignore_ascii_case("memory") {
+        return Ok(sqlx::sqlite::SqliteConnectOptions::from_str("sqlite::memory:")?);
+    }
+    let canonical = validate_sqlite_db_path(path)?;
+    Ok(sqlx::sqlite::SqliteConnectOptions::new().filename(canonical))
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -584,7 +610,7 @@ pub async fn sql_query(
                 let path = descriptor
                     .path
                     .ok_or_else(|| anyhow!("sqlite connection requires `path`"))?;
-                sqlx::sqlite::SqliteConnectOptions::new().filename(path)
+                sqlite_connect_options_from_path(&path)?
             };
             opts = opts.create_if_missing(false);
             query_sqlite(&opts, &sql, &params).await
@@ -663,7 +689,7 @@ pub async fn sql_query(
                 let mut opts = if in_memory {
                     sqlx::sqlite::SqliteConnectOptions::from_str("sqlite::memory:")?
                 } else {
-                    sqlx::sqlite::SqliteConnectOptions::new().filename(path)
+                    sqlite_connect_options_from_path(&path)?
                 };
                 opts = opts.create_if_missing(false);
                 query_sqlite(&opts, &sql, &params).await
@@ -743,7 +769,7 @@ pub async fn sql_get_schema(
                 let path = descriptor
                     .path
                     .ok_or_else(|| anyhow!("sqlite connection requires `path`"))?;
-                sqlx::sqlite::SqliteConnectOptions::new().filename(path)
+                sqlite_connect_options_from_path(&path)?
             };
             opts = opts.create_if_missing(false);
             sqlite_schema(&opts, &sql).await
@@ -821,7 +847,7 @@ pub async fn sql_get_schema(
                 let mut opts = if in_memory {
                     sqlx::sqlite::SqliteConnectOptions::from_str("sqlite::memory:")?
                 } else {
-                    sqlx::sqlite::SqliteConnectOptions::new().filename(path)
+                    sqlite_connect_options_from_path(&path)?
                 };
                 opts = opts.create_if_missing(false);
                 sqlite_schema(&opts, &sql).await

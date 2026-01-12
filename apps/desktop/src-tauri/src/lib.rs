@@ -1,4 +1,5 @@
 pub mod commands;
+mod fs_scope;
 pub mod file_io;
 pub mod macro_trust;
 pub mod macros;
