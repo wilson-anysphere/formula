@@ -167,6 +167,12 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
     el.scrollBy({ left: delta, behavior: "smooth" });
   };
 
+  const isSheetDrag = (dt: DataTransfer): boolean => {
+    // We set both the custom type and `text/plain` on dragStart. Some environments
+    // can be finicky about exposing custom MIME types during drag operations.
+    return dt.types.includes("text/sheet-id") || dt.types.includes("text/plain");
+  };
+
   useEffect(() => {
     updateScrollButtons();
   }, [updateScrollButtons, visibleSheets.length]);
@@ -237,16 +243,16 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
           if (next) onActivateSheet(next.id);
         }}
         onDragOver={(e) => {
-          if (!e.dataTransfer.types.includes("text/sheet-id")) return;
+          if (!isSheetDrag(e.dataTransfer)) return;
           e.preventDefault();
           e.dataTransfer.dropEffect = "move";
           maybeAutoScroll(e.clientX);
         }}
         onDrop={(e) => {
-          if (!e.dataTransfer.types.includes("text/sheet-id")) return;
+          if (!isSheetDrag(e.dataTransfer)) return;
           e.preventDefault();
           stopAutoScroll();
-          const fromId = e.dataTransfer.getData("text/sheet-id");
+          const fromId = e.dataTransfer.getData("text/sheet-id") || e.dataTransfer.getData("text/plain");
           if (!fromId) return;
           // Dropping on the container inserts at the end of the visible list.
           moveVisibleSheet(fromId, visibleSheets.length);
@@ -285,7 +291,7 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
             }}
             onDropOnTab={(e) => {
               stopAutoScroll();
-              const fromId = e.dataTransfer.getData("text/sheet-id");
+              const fromId = e.dataTransfer.getData("text/sheet-id") || e.dataTransfer.getData("text/plain");
               if (!fromId || fromId === sheet.id) return;
 
               const targetIndex = visibleSheets.findIndex((s) => s.id === sheet.id);
@@ -354,15 +360,16 @@ function SheetTab(props: {
       onDragStart={(e) => {
         props.onDragStart();
         e.dataTransfer.setData("text/sheet-id", sheet.id);
+        e.dataTransfer.setData("text/plain", sheet.id);
         e.dataTransfer.effectAllowed = "move";
       }}
       onDragOver={(e) => {
-        if (!e.dataTransfer.types.includes("text/sheet-id")) return;
+        if (!e.dataTransfer.types.includes("text/sheet-id") && !e.dataTransfer.types.includes("text/plain")) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = "move";
       }}
       onDrop={(e) => {
-        if (!e.dataTransfer.types.includes("text/sheet-id")) return;
+        if (!e.dataTransfer.types.includes("text/sheet-id") && !e.dataTransfer.types.includes("text/plain")) return;
         e.preventDefault();
         e.stopPropagation();
         props.onDropOnTab(e);
