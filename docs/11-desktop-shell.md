@@ -315,7 +315,7 @@ delete prior release assets.
 - **state** (`SharedAppState`) + **macro trust store** (`SharedMacroTrustStore`)
 - Tauri plugins:
   - `tauri_plugin_global_shortcut` (registers accelerators + emits app events)
-  - `tauri_plugin_shell` (used by the Rust command `open_external_url` to open external links in the host OS; direct webview access is not granted)
+  - `tauri_plugin_shell` (used for external link opening; the UI generally routes through the `open_external_url` command, and the window capability also grants `shell:allow-open`)
   - `tauri_plugin_updater` (update checks)
   - `tauri_plugin_notification` (native notifications)
   - `tauri_plugin_single_instance` (forward argv/cwd from subsequent launches into the running instance)
@@ -714,11 +714,12 @@ is a list of capability **identifiers** (e.g. `capabilities: ["main"]`). The mai
 `apps/desktop/src-tauri/capabilities/main.json` is intentionally an explicit allowlist for what the webview is allowed to do:
 
 - **`core:allow-invoke`**: which `__TAURI__.core.invoke("<command>")` names can be called from the frontend.
-- **`event:allow-listen` / `event:allow-emit`**: which event names the frontend can `listen(...)` for or `emit(...)`.
-- Additional plugin permissions for using JS plugin APIs (dialog/window/clipboard/updater), for example:
+- **`core:event:allow-listen` / `core:event:allow-emit`**: which event names the frontend can `listen(...)` for or `emit(...)`.
+- Additional plugin permissions for using JS plugin APIs (dialog/window/clipboard/shell/updater), for example:
   - `dialog:allow-open`, `dialog:allow-save`
-  - `window:allow-hide`, `window:allow-show`, `window:allow-set-focus`, `window:allow-close`
-  - `clipboard:allow-read-text`, `clipboard:allow-write-text`
+  - `core:window:allow-hide`, `core:window:allow-show`, `core:window:allow-set-focus`, `core:window:allow-close`
+  - `clipboard-manager:allow-read-text`, `clipboard-manager:allow-write-text`
+  - `shell:allow-open`
   - `updater:allow-check`, `updater:allow-download`, `updater:allow-install`
 
 Note: the Tauri clipboard plugin permissions above only cover the legacy **plain-text** clipboard helpers
@@ -727,16 +728,17 @@ custom Rust IPC commands (`clipboard_read` / `clipboard_write`) and must be adde
 
 External URL opening is also routed through a custom Rust IPC command:
 
-- `open_external_url` (allows only `http:`, `https:`, and `mailto:` at the Rust boundary)
+- `open_external_url` (validates scheme at the Rust boundary: allows `http:`, `https:`, and `mailto:`; blocks `javascript:`, `data:`, `file:`)
 
-We intentionally do **not** grant `shell:allow-open` so a compromised webview cannot bypass this validation by calling
-the shell plugin directly.
+Note: the capability currently also grants `shell:allow-open` (the JS shell plugin API). Prefer using the `open_external_url`
+command (via `apps/desktop/src/tauri/shellOpen.ts`) so link handling remains consistent and scheme allowlisting lives at a
+single trusted boundary.
 
 High-level contents (see the file for the exhaustive list):
 
 - `core:default` enables the `__TAURI__.core.invoke` bridge; `core:allow-invoke` restricts which command names can be invoked from the webview.
 - `core:allow-invoke` includes workbook operations, Power Query file IO, macro APIs, multi-format clipboard access, updater checks, tray status, notifications, and startup metrics reporting.
-- `event:allow-listen` includes:
+- `core:event:allow-listen` includes:
   - close flow: `close-prep`, `close-requested`
   - open flow: `open-file`, `file-dropped`
   - deep links / OAuth: `oauth-redirect`
@@ -744,20 +746,20 @@ High-level contents (see the file for the exhaustive list):
   - tray + shortcuts (e.g. `tray-open`, `shortcut-command-palette`)
   - startup timing instrumentation (e.g. `startup:webview-loaded`, `startup:tti`)
   - updater events (e.g. `update-check-started`, `update-available`)
-- `event:allow-emit` includes acknowledgements and check-mode signals:
+- `core:event:allow-emit` includes acknowledgements and check-mode signals:
   - `open-file-ready`, `oauth-redirect-ready`
   - `close-prep-done`, `close-handled`
   - `updater-ui-ready`
   - `coi-check-result` (used by `pnpm -C apps/desktop check:coi`)
-- Plugin permissions include dialog/window/clipboard APIs plus updater permissions (`updater:allow-check`, `updater:allow-download`, `updater:allow-install`, required for the updater UI).
+- Plugin permissions include dialog/window/clipboard/shell APIs plus updater permissions (`updater:allow-check`, `updater:allow-download`, `updater:allow-install`, required for the updater UI).
 
 We intentionally keep capabilities narrow and rely on explicit Rust commands + higher-level app permission gates (macro trust, DLP, extension permissions) for privileged operations.
 
 ### Practical workflow
 
 - If you add a new `#[tauri::command]` and the frontend needs to call it, add the command name to the `core:allow-invoke` allowlist.
-- If you add a new event name used by `listen(...)` or `emit(...)`, update the `event:allow-listen` / `event:allow-emit` allowlists.
-- If the frontend starts using a new Tauri core/plugin API (dialog/window/clipboard/updater), add the corresponding `*:allow-*` permission string.
+- If you add a new event name used by `listen(...)` or `emit(...)`, update the `core:event:allow-listen` / `core:event:allow-emit` allowlists.
+- If the frontend starts using a new Tauri core/plugin API (dialog/window/clipboard/shell/updater), add the corresponding `*:allow-*` permission string.
 
 Note: do **not** add `plugin:*` command names to `core:allow-invoke`. Plugin APIs are gated by their own permission strings
 (e.g. `dialog:allow-open`, `updater:allow-check`).
@@ -765,7 +767,7 @@ Note: do **not** add `plugin:*` command names to `core:allow-invoke`. Plugin API
 Guardrails (CI/tests):
 
 - `apps/desktop/src-tauri/tests/tauri_ipc_allowlist.rs` ensures `core:allow-invoke` matches the command list registered in `apps/desktop/src-tauri/src/main.rs` (`generate_handler![...]`).
-- `apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts` enforces that `event:allow-listen` / `event:allow-emit` are explicit (no allow-all) and match the events used by the desktop code.
+- `apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts` enforces that `core:event:allow-listen` / `core:event:allow-emit` are explicit (no allow-all) and match the events used by the desktop code.
 - `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts` asserts the updater permission surface stays minimal (split `allow-check` / `allow-download` / `allow-install`).
 
 For background on capability syntax/semantics, see the upstream Tauri v2 docs:
