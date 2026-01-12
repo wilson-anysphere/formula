@@ -40,6 +40,17 @@ In the wild, the signature stream bytes are not always “just a PKCS#7 blob”.
      (see MS-OFFCRYPTO).
    - `DigSigInfoSerialized` is a little-endian length-prefixed structure; parsing it lets us locate
      the embedded CMS payload deterministically instead of scanning for a DER `SEQUENCE`.
+   - Common (but not universal) layout:
+     - `u32le cbSignature`
+     - `u32le cbSigningCertStore`
+     - `u32le cchProjectName` (UTF-16 code units)
+     - followed by variable-size blobs (often: `projectNameUtf16le`, `certStoreBytes`, `signatureBytes`)
+     - some producers include a `version` and/or `reserved` DWORD before the length fields.
+   - The ordering of the variable blobs can vary across producers/versions. A robust parser should
+     compute candidate offsets and **validate** by checking that the bytes at the computed offset
+     parse as a CMS `signedData` `ContentInfo`.
+   - The wrapper's `cbSignature` region can include padding; prefer using the DER length inside the
+     region to find the actual CMS payload size.
 3. **Detached `content || pkcs7`**
    - The stream contains `signed_content_bytes` followed by a detached CMS signature (`pkcs7_der`).
    - Verification must pass the prefix bytes as the detached content when verifying the CMS blob.
@@ -72,6 +83,40 @@ High-level extraction steps:
 
 That `(hash_oid, digest_bytes)` pair is the “signed digest” we use to bind a VBA signature to a
 specific VBA project.
+
+### Relevant ASN.1 shapes (high level)
+
+This is a simplified sketch of the structures we care about (names from RFC 5652 / Authenticode):
+
+```text
+ContentInfo ::= SEQUENCE {
+  contentType OBJECT IDENTIFIER,                -- e.g. signedData (1.2.840.113549.1.7.2)
+  content     [0] EXPLICIT ANY OPTIONAL
+}
+
+SignedData ::= SEQUENCE {
+  ...,
+  encapContentInfo EncapsulatedContentInfo,
+  ...
+}
+
+EncapsulatedContentInfo ::= SEQUENCE {
+  eContentType OBJECT IDENTIFIER,               -- e.g. SpcIndirectDataContent (1.3.6.1.4.1.311.2.1.4)
+  eContent     [0] EXPLICIT OCTET STRING OPTIONAL
+}
+
+SpcIndirectDataContent ::= SEQUENCE {
+  data          SpcAttributeTypeAndOptionalValue,  -- ignored for VBA binding
+  messageDigest DigestInfo
+}
+
+DigestInfo ::= SEQUENCE {
+  digestAlgorithm AlgorithmIdentifier,
+  digest          OCTET STRING
+}
+```
+
+For VBA binding, we ignore `SpcIndirectDataContent.data` and use only `messageDigest`.
 
 ### OIDs (quick reference)
 
