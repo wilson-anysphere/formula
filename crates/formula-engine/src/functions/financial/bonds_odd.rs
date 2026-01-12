@@ -107,14 +107,15 @@
 //!   by stepping **backward from `maturity`** in whole coupon periods (`12 / frequency` months).
 //!   This matches Excel’s `COUP*` behavior: month stepping is anchored on `maturity`, not on
 //!   `first_coupon` (which may be clamped in shorter months).
-//! - **EOM schedule detection:** the schedule is treated as EOM iff `maturity` itself is end-of-month.
-//!   When `maturity` is EOM, month stepping uses `date_time::eomonth` (Excel’s `EOMONTH`) rather than
-//!   `date_time::edate`, ensuring non-drifting EOM schedules.
+//! - **ODDF* EOM schedule detection:** the schedule is treated as EOM iff `maturity` itself is
+//!   end-of-month. When `maturity` is EOM, month stepping uses `date_time::eomonth` (Excel’s
+//!   `EOMONTH`) rather than `date_time::edate`, ensuring non-drifting EOM schedules.
 //! - This logic lives in `crates/formula-engine/src/functions/financial/odd_coupon.rs`, notably the
 //!   helpers `coupon_schedule_from_maturity` (schedule generation) and `coupon_date_with_eom` (EOM vs
 //!   non-EOM stepping).
 //! - For **ODDL***, we only need the prior regular coupon date before `last_interest` to compute `E`;
-//!   we step backward from `last_interest` by `12 / frequency` months.
+//!   we step backward from `last_interest` by `12 / frequency` months. If `last_interest` is EOM,
+//!   the step is pinned to EOM (equivalent to `EOMONTH` stepping).
 //!
 //! ---
 //!
