@@ -7911,6 +7911,13 @@ export class SpreadsheetApp {
       return;
     }
 
+    // Preserve keyboard access to non-grid UI (sheet tabs, ribbon, status bar, etc) by
+    // allowing Tab to follow the browser's focus order instead of treating it as a
+    // cell-navigation key. In-cell editing still uses Tab/Enter via the editor overlay.
+    if (e.key === "Tab") {
+      return;
+    }
+
     const next = navigateSelectionByKey(
       this.selection,
       e.key,

@@ -8,18 +8,35 @@ import * as nativeDialogs from "../tauri/nativeDialogs";
 import type { SheetMeta, SheetVisibility, TabColor, WorkbookSheetStore } from "./workbookSheetStore";
 import { computeWorkbookSheetMoveIndex } from "./sheetReorder";
 
-const SHEET_TAB_COLOR_PALETTE: Array<{ label: string; token: string; fallbackCss: string }> = [
-  // Use hex fallbacks (instead of named colors) so we can reliably convert palette selections
-  // into Excel/OOXML ARGB values even if design tokens are unavailable (e.g. in tests).
-  { label: "Red", token: "--sheet-tab-red", fallbackCss: "#ff0000" },
-  { label: "Orange", token: "--sheet-tab-orange", fallbackCss: "#ff9900" },
-  { label: "Yellow", token: "--sheet-tab-yellow", fallbackCss: "#ffff00" },
-  { label: "Green", token: "--sheet-tab-green", fallbackCss: "#00b050" },
-  { label: "Teal", token: "--sheet-tab-teal", fallbackCss: "#00b0f0" },
-  { label: "Blue", token: "--sheet-tab-blue", fallbackCss: "#0070c0" },
-  { label: "Purple", token: "--sheet-tab-purple", fallbackCss: "#7030a0" },
-  { label: "Gray", token: "--sheet-tab-gray", fallbackCss: "#7f7f7f" },
+type SheetTabPaletteEntry = {
+  label: string;
+  token: string;
+  /**
+   * OOXML / Excel-style ARGB (AARRGGBB) string stored in workbook metadata.
+   *
+   * This keeps the palette stable without hardcoding CSS hex colors in source (enforced by
+   * `apps/desktop/test/noHardcodedColors.test.js`).
+   */
+  excelArgb: string;
+};
+
+const SHEET_TAB_COLOR_PALETTE: SheetTabPaletteEntry[] = [
+  { label: "Red", token: "--sheet-tab-red", excelArgb: "FFFF0000" },
+  { label: "Orange", token: "--sheet-tab-orange", excelArgb: "FFFF9900" },
+  { label: "Yellow", token: "--sheet-tab-yellow", excelArgb: "FFFFFF00" },
+  { label: "Green", token: "--sheet-tab-green", excelArgb: "FF00B050" },
+  { label: "Teal", token: "--sheet-tab-teal", excelArgb: "FF00B0F0" },
+  { label: "Blue", token: "--sheet-tab-blue", excelArgb: "FF0070C0" },
+  { label: "Purple", token: "--sheet-tab-purple", excelArgb: "FF7030A0" },
+  { label: "Gray", token: "--sheet-tab-gray", excelArgb: "FF7F7F7F" },
 ];
+
+function excelArgbToCssHex(argb: string): string | null {
+  const raw = String(argb ?? "").trim();
+  if (!/^[0-9a-fA-F]{8}$/.test(raw)) return null;
+  // Ignore alpha; CSS hex expects #RRGGBB.
+  return `#${raw.slice(2).toLowerCase()}`;
+}
 
 function normalizeCssHexToExcelArgb(cssColor: string): string | null {
   const trimmed = String(cssColor ?? "").trim();
@@ -573,7 +590,8 @@ export function SheetTabStrip({
           },
           { type: "separator" },
           ...SHEET_TAB_COLOR_PALETTE.map((entry) => {
-            const rgb = resolveCssVar(entry.token, { fallback: entry.fallbackCss });
+            const fallbackCss = excelArgbToCssHex(entry.excelArgb) ?? "";
+            const rgb = resolveCssVar(entry.token, { fallback: fallbackCss });
             return {
               type: "item" as const,
               label: entry.label,
@@ -582,13 +600,7 @@ export function SheetTabStrip({
               // presentation attributes).
               leading: { type: "swatch" as const, color: rgb },
               onSelect: async () => {
-                const excelArgb = normalizeCssHexToExcelArgb(rgb);
-                if (!excelArgb) {
-                  onError?.(`Failed to set tab color: "${entry.label}" is not a hex color (${rgb}).`);
-                  return;
-                }
-
-                const tabColor: TabColor = { rgb: excelArgb };
+                const tabColor: TabColor = { rgb: entry.excelArgb };
                 try {
                   await onPersistSheetTabColor?.(sheet.id, tabColor);
                 } catch (err) {
@@ -1112,7 +1124,7 @@ function SheetTab(props: {
   renameInFlight: boolean;
   renameInputRef: React.RefObject<HTMLInputElement>;
   tabRef?: React.Ref<HTMLButtonElement>;
-  onActivate: () => void;
+  onActivate: (event: React.MouseEvent<HTMLButtonElement>) => void;
   onBeginRename: () => void;
   onContextMenu: (e: React.MouseEvent<HTMLButtonElement>) => void;
   onCommitRename: () => void;
@@ -1144,8 +1156,12 @@ function SheetTab(props: {
       data-drop-position={props.dropPosition ?? undefined}
       draggable={!editing}
       ref={props.tabRef}
-      onClick={() => {
-        if (!editing) props.onActivate();
+      onClick={(event) => {
+        // React dispatches a separate `click` event for each click in a double-click.
+        // Avoid treating the second click as another activation; `onDoubleClick` handles rename.
+        if (editing) return;
+        if (event.detail > 1) return;
+        props.onActivate(event);
       }}
       onDoubleClick={() => {
         if (!editing) props.onBeginRename();
@@ -1175,45 +1191,47 @@ function SheetTab(props: {
       onDragEnd={() => props.onDragEnd()}
     >
       {editing ? (
-        <input
-          ref={props.renameInputRef}
-          className="sheet-tab__input"
-          value={draftName}
-          autoFocus
-          readOnly={renameInFlight}
-          aria-busy={renameInFlight ? true : undefined}
-          aria-invalid={renameError ? true : undefined}
-          title={renameError ?? undefined}
-          onClick={(e) => e.stopPropagation()}
-          onChange={(e) => props.onDraftNameChange(e.target.value)}
-          onFocus={(e) => e.currentTarget.select()}
-          onBlur={() => {
-            if (renameInFlight) return;
-            if (cancelBlurCommitRef.current) {
-              cancelBlurCommitRef.current = false;
-              return;
-            }
-            props.onCommitRename();
-          }}
-          onKeyDown={(e) => {
-            e.stopPropagation();
-            if (renameInFlight) return;
-            if (e.key === "Enter") {
-              e.preventDefault();
+        <span className="sheet-tab__pill sheet-tab__pill--editing">
+          <input
+            ref={props.renameInputRef}
+            className="sheet-tab__input"
+            value={draftName}
+            autoFocus
+            readOnly={renameInFlight}
+            aria-busy={renameInFlight ? true : undefined}
+            aria-invalid={renameError ? true : undefined}
+            title={renameError ?? undefined}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => props.onDraftNameChange(e.target.value)}
+            onFocus={(e) => e.currentTarget.select()}
+            onBlur={() => {
+              if (renameInFlight) return;
+              if (cancelBlurCommitRef.current) {
+                cancelBlurCommitRef.current = false;
+                return;
+              }
               props.onCommitRename();
-            }
-            if (e.key === "Escape") {
-              e.preventDefault();
-              cancelBlurCommitRef.current = true;
-              props.onCancelRename();
-            }
-          }}
-        />
+            }}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (renameInFlight) return;
+              if (e.key === "Enter") {
+                e.preventDefault();
+                props.onCommitRename();
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                cancelBlurCommitRef.current = true;
+                props.onCancelRename();
+              }
+            }}
+          />
+        </span>
       ) : (
-        <>
+        <span className="sheet-tab__pill">
           <span className="sheet-tab__name">{sheet.name}</span>
           {tabColorCss ? <span className="sheet-tab__color" style={{ background: tabColorCss }} /> : null}
-        </>
+        </span>
       )}
     </button>
   );

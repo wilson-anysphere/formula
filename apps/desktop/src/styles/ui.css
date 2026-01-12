@@ -743,6 +743,27 @@
 
 #sheet-tabs.sheet-bar .sheet-tab {
   height: 22px;
+  padding: 0;
+  display: flex;
+  align-items: flex-end;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  font-size: 12px;
+  position: relative;
+  flex: 0 0 auto;
+}
+
+#sheet-tabs.sheet-bar .sheet-tabs .sheet-tab:last-child {
+  /* Fill the remaining tab strip width so dropping "after" the last tab still hits the tab element.
+   * (This keeps Playwright dragTo stable while preserving the visual blank area using the inner pill.) */
+  flex: 1 0 auto;
+}
+
+#sheet-tabs.sheet-bar .sheet-tab__pill {
+  height: 22px;
   padding: 0 12px;
   display: inline-flex;
   align-items: center;
@@ -751,10 +772,7 @@
   border-bottom: none;
   border-radius: 6px 6px 0 0;
   background: var(--bg-primary);
-  color: var(--text-secondary);
-  cursor: pointer;
-  white-space: nowrap;
-  font-size: 12px;
+  color: inherit;
 }
 
 #sheet-tabs.sheet-bar .sheet-tabs[data-dragging="true"] .sheet-tab {
@@ -785,11 +803,15 @@
   background: var(--accent);
 }
 
-#sheet-tabs.sheet-bar .sheet-tab:hover {
+#sheet-tabs.sheet-bar .sheet-tab__pill--editing {
+  padding: 0 6px;
+}
+
+#sheet-tabs.sheet-bar .sheet-tab:hover .sheet-tab__pill {
   background: var(--bg-tertiary);
 }
 
-#sheet-tabs.sheet-bar .sheet-tab[data-active="true"] {
+#sheet-tabs.sheet-bar .sheet-tab[data-active="true"] .sheet-tab__pill {
   background: var(--accent-light);
   border-color: var(--accent);
   border-bottom: 1px solid var(--accent-light);
@@ -799,6 +821,10 @@
 }
 
 #sheet-tabs.sheet-bar .sheet-tab:focus-visible {
+  outline: none;
+}
+
+#sheet-tabs.sheet-bar .sheet-tab:focus-visible .sheet-tab__pill {
   outline: 2px solid var(--selection-border);
   outline-offset: 2px;
 }
