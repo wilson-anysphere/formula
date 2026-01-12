@@ -21,6 +21,14 @@ function getMigrationsDir(): string {
   return path.resolve(here, "../../migrations");
 }
 
+async function createDb(): Promise<Pool> {
+  const mem = newDb({ autoCreateForeignKeyIndices: true });
+  const pgAdapter = mem.adapters.createPg();
+  const db = new pgAdapter.Pool();
+  await runMigrations(db, { migrationsDir: getMigrationsDir() });
+  return db;
+}
+
 function encryptV1(key: Buffer, plaintext: string): string {
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
@@ -40,6 +48,22 @@ describe("secretStore", () => {
 
     const decrypted = decryptSecretValue(keyring, "my-secret", encrypted);
     expect(decrypted).toBe("hello");
+  });
+
+  it("supports key rotation (decrypt old after adding key; encrypt uses newest)", () => {
+    const oldKey = crypto.randomBytes(32);
+    const newKey = crypto.randomBytes(32);
+
+    const oldKeyring: SecretStoreKeyring = { currentKeyId: "old", keys: { old: oldKey } };
+    const rotatedKeyring: SecretStoreKeyring = { currentKeyId: "new", keys: { old: oldKey, new: newKey } };
+
+    const encryptedOld = encryptSecretValue(oldKeyring, "rotating-secret", "value");
+    expect(encryptedOld.startsWith("v2:old:")).toBe(true);
+    expect(decryptSecretValue(rotatedKeyring, "rotating-secret", encryptedOld)).toBe("value");
+
+    const encryptedNew = encryptSecretValue(rotatedKeyring, "rotating-secret", "value");
+    expect(encryptedNew.startsWith("v2:new:")).toBe(true);
+    expect(decryptSecretValue(rotatedKeyring, "rotating-secret", encryptedNew)).toBe("value");
   });
 
   it("rejects key ids containing ':' (would make encoding ambiguous)", () => {
@@ -69,14 +93,6 @@ describe("secretStore", () => {
 });
 
 describe("secrets rotation (integration)", () => {
-  async function createDb(): Promise<Pool> {
-    const mem = newDb({ autoCreateForeignKeyIndices: true });
-    const pgAdapter = mem.adapters.createPg();
-    const db = new pgAdapter.Pool();
-    await runMigrations(db, { migrationsDir: getMigrationsDir() });
-    return db;
-  }
-
   it("re-encrypts legacy secrets into the latest encoding", async () => {
     const db = await createDb();
     try {
@@ -123,7 +139,7 @@ describe("secrets rotation (integration)", () => {
     }
   });
 
-  it("lists and deletes secrets", async () => {
+  it("lists and deletes secrets (prefix match is literal)", async () => {
     const db = await createDb();
     try {
       const key = crypto.randomBytes(32);
@@ -146,14 +162,19 @@ describe("secrets rotation (integration)", () => {
         encryptSecretValue(keyring, "prefix", "prefix")
       ]);
 
-      expect(await listSecrets(db)).toEqual(["alpha", "pre%fix", "pre_fix", "prefix"]);
-      expect(await listSecrets(db, "pre%")).toEqual(["pre%fix"]);
-      expect(await listSecrets(db, "pre_")).toEqual(["pre_fix"]);
+      const all = await listSecrets(db);
+      expect(all.map((row) => row.name)).toEqual(["alpha", "pre%fix", "pre_fix", "prefix"]);
+      expect(all[0]!.createdAt).toBeInstanceOf(Date);
+      expect(all[0]!.updatedAt).toBeInstanceOf(Date);
+
+      expect((await listSecrets(db, { prefix: "pre%" })).map((row) => row.name)).toEqual(["pre%fix"]);
+      expect((await listSecrets(db, { prefix: "pre_" })).map((row) => row.name)).toEqual(["pre_fix"]);
 
       await deleteSecret(db, "alpha");
-      expect(await listSecrets(db)).toEqual(["pre%fix", "pre_fix", "prefix"]);
+      expect((await listSecrets(db)).map((row) => row.name)).toEqual(["pre%fix", "pre_fix", "prefix"]);
     } finally {
       await db.end();
     }
   });
 });
+

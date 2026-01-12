@@ -21,13 +21,21 @@ export type SecretEncodingInfo =
       keyId: string;
     };
 
+export type SecretListEntry = {
+  name: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 export function deriveSecretStoreKey(secret: string): Buffer {
   // AES-256 requires a 32-byte key. Hash the configured secret into a fixed-length key.
   return crypto.createHash("sha256").update(secret, "utf8").digest();
 }
 
 function secretAad(name: string): Buffer {
-  // Cryptographic binding between ciphertext and the intended secret name.
+  // Cryptographic binding between ciphertext and the intended secret name. The
+  // `secret:` prefix serves as a fixed context string so ciphertext can't be
+  // replayed across other AES-GCM uses.
   return crypto.createHash("sha256").update(`secret:${name}`, "utf8").digest();
 }
 
@@ -153,14 +161,20 @@ export async function secretExists(db: Queryable, name: string): Promise<boolean
   const result = await db.query("SELECT 1 FROM secrets WHERE name = $1", [name]);
   return (result.rowCount ?? 0) > 0;
 }
+
 export async function deleteSecret(db: Queryable, name: string): Promise<void> {
   await db.query("DELETE FROM secrets WHERE name = $1", [name]);
 }
 
-export async function listSecrets(db: Queryable, prefix?: string): Promise<string[]> {
+export async function listSecrets(db: Queryable, options: { prefix?: string } = {}): Promise<SecretListEntry[]> {
+  const prefix = typeof options.prefix === "string" ? options.prefix : "";
   if (!prefix) {
-    const result = await db.query("SELECT name FROM secrets ORDER BY name ASC");
-    return result.rows.map((row: any) => String(row.name));
+    const result = await db.query("SELECT name, created_at, updated_at FROM secrets ORDER BY name ASC");
+    return (result.rows as Array<{ name: string; created_at: Date; updated_at: Date }>).map((row) => ({
+      name: String(row.name),
+      createdAt: new Date(row.created_at),
+      updatedAt: new Date(row.updated_at)
+    }));
   }
 
   // Use a literal prefix match rather than `LIKE`, so prefixes containing `%` or
@@ -170,8 +184,18 @@ export async function listSecrets(db: Queryable, prefix?: string): Promise<strin
   // implemented by pg-mem).
   const prefixLength = Array.from(prefix).length;
   const result = await db.query(
-    "SELECT name FROM secrets WHERE substring(name, 1, $2) = $1 ORDER BY name ASC",
+    `
+      SELECT name, created_at, updated_at
+      FROM secrets
+      WHERE substring(name, 1, $2) = $1
+      ORDER BY name ASC
+    `,
     [prefix, prefixLength]
   );
-  return result.rows.map((row: any) => String(row.name));
+  return (result.rows as Array<{ name: string; created_at: Date; updated_at: Date }>).map((row) => ({
+    name: String(row.name),
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at)
+  }));
 }
+

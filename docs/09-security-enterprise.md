@@ -621,6 +621,63 @@ ORG_ID="<org-uuid>" BATCH_SIZE=100 npm run versions:migrate-legacy
 
 Note: migrating rows that were encrypted with the legacy local KMS provider requires `LOCAL_KMS_MASTER_KEY` to be set.
 
+##### Database-backed secret store (`secrets` table)
+
+`services/api` uses a small database-backed secret store (`secrets` table) for sensitive configuration
+like per-org OIDC client secrets and SIEM auth tokens. Values are encrypted using **AES-256-GCM**.
+
+As of **secret store v2**, ciphertext is bound to the secret's metadata via **AAD**:
+
+- A fixed context string
+- The secret `name` (which often includes an org scope like `oidc:<orgId>:<providerId>`)
+
+This means secrets cannot be copied between rows (or renamed) without re-encrypting: decryption will
+fail if ciphertext is moved to a different `name`.
+
+###### Configuration / keyring
+
+For rotation, configure multiple keys and choose the "current" key for new writes:
+
+- `SECRET_STORE_KEYS` (recommended): comma-separated list of `<keyId>:<base64>` entries.
+  - The **last** entry is used for encryption; **all** entries are accepted for decryption.
+  - Example:
+
+    ```bash
+    SECRET_STORE_KEYS="v1:BASE64_32_BYTES,v2:BASE64_32_BYTES"
+    ```
+
+- `SECRET_STORE_KEYS_JSON`: JSON object containing `{ currentKeyId, keys }` (where `keys` maps keyId -> base64 key).
+
+The legacy `SECRET_STORE_KEY` is still supported for smooth upgrades; it is hashed with SHA-256 to
+derive a 32-byte AES-256 key.
+
+To generate a new 32-byte key:
+
+```bash
+node -e 'console.log(require("crypto").randomBytes(32).toString("base64"))'
+```
+
+###### Rotation / re-encryption
+
+After adding a new key (and making it the last entry / current key), re-encrypt existing rows with:
+
+```bash
+cd services/api
+npm run secrets:rotate
+```
+
+###### Migrating from legacy `SECRET_STORE_KEY` to `SECRET_STORE_KEYS`
+
+If you have existing `v1:` rows encrypted with the legacy passphrase, include the derived key bytes
+as one of the entries in `SECRET_STORE_KEYS`. You can compute the base64 key material with:
+
+```bash
+node -e 'const crypto=require("crypto"); console.log(crypto.createHash("sha256").update(process.env.SECRET_STORE_KEY,"utf8").digest("base64"))'
+```
+
+Then set `SECRET_STORE_KEYS` with that derived key plus your new key(s), deploy, and run
+`npm run secrets:rotate` to rewrite existing rows to the latest key.
+
 ### Encryption in Transit
 
 ```typescript

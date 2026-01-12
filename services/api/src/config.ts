@@ -46,9 +46,15 @@ export interface AppConfig {
    * Keyring used to encrypt values stored in the database-backed secret store
    * (`secrets` table).
    *
-   * Production deployments should use `SECRET_STORE_KEYS_JSON` so keys can be
-   * rotated without downtime. `SECRET_STORE_KEY` remains supported as a legacy
-   * single-key mode.
+   * Supported environment variables (highest priority first):
+   *
+   * - `SECRET_STORE_KEYS_JSON`: JSON object containing `{ currentKeyId, keys }`,
+   *   where `keys` is a map of keyId -> base64-encoded 32-byte AES key.
+   * - `SECRET_STORE_KEYS`: comma-separated list of `<keyId>:<base64>` entries.
+   *   The **last** key id is treated as current for encryption; all keys are
+   *   valid for decryption.
+   * - `SECRET_STORE_KEY`: legacy single secret (hashed with SHA-256 to derive a
+   *   32-byte AES-256 key). Still supported for smooth upgrades.
    */
   secretStoreKeys: SecretStoreKeyring;
   /**
@@ -241,6 +247,54 @@ function loadSecretStoreKeys(env: NodeJS.ProcessEnv, legacySecret: string): Secr
     return { currentKeyId, keys };
   }
 
+  const rawKeys = typeof env.SECRET_STORE_KEYS === "string" ? env.SECRET_STORE_KEYS.trim() : "";
+  if (rawKeys.length > 0) {
+    const parts = rawKeys
+      .split(",")
+      .map((part) => part.trim())
+      .filter((part) => part.length > 0);
+
+    if (parts.length === 0) {
+      throw new Error("SECRET_STORE_KEYS must contain at least one <keyId>:<base64> entry");
+    }
+
+    const keys: Record<string, Buffer> = {};
+    let currentKeyId: string | null = null;
+
+    for (const entry of parts) {
+      const idx = entry.indexOf(":");
+      if (idx <= 0) {
+        throw new Error(`SECRET_STORE_KEYS entries must be in the form <keyId>:<base64> (got "${entry}")`);
+      }
+      const keyId = entry.slice(0, idx).trim();
+      const value = entry.slice(idx + 1).trim();
+      if (!keyId) {
+        throw new Error(`SECRET_STORE_KEYS entry is missing keyId (got "${entry}")`);
+      }
+      if (keyId.includes(":")) {
+        throw new Error(`SECRET_STORE_KEYS keyId must not contain ':' (got "${keyId}")`);
+      }
+      if (!value) {
+        throw new Error(`SECRET_STORE_KEYS entry is missing base64 key for keyId=${keyId}`);
+      }
+      if (keys[keyId]) {
+        throw new Error(`SECRET_STORE_KEYS contains duplicate keyId=${keyId}`);
+      }
+
+      const raw = Buffer.from(value, "base64");
+      if (raw.byteLength !== 32) {
+        throw new Error(`SECRET_STORE_KEYS keyId=${keyId} must decode to 32 bytes (got ${raw.byteLength})`);
+      }
+      keys[keyId] = raw;
+      currentKeyId = keyId; // last entry is current
+    }
+
+    if (!currentKeyId) {
+      throw new Error("SECRET_STORE_KEYS must contain at least one key");
+    }
+    return { currentKeyId, keys };
+  }
+
   const legacyKey = deriveSecretStoreKey(legacySecret);
   return { currentKeyId: "legacy", keys: { legacy: legacyKey } };
 }
@@ -324,7 +378,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       (key) => Buffer.compare(key, devSecretStoreKey) === 0
     );
     if (usingDevSecretStoreKey) {
-      invalidSecrets.push(rawJsonIsEmpty(env) ? "SECRET_STORE_KEY" : "SECRET_STORE_KEYS_JSON");
+      invalidSecrets.push(secretStoreKeySource(env));
     }
     const rawLocalKmsMasterKey =
       typeof env.LOCAL_KMS_MASTER_KEY === "string" ? env.LOCAL_KMS_MASTER_KEY.trim() : "";
@@ -343,7 +397,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   return config;
 }
 
-function rawJsonIsEmpty(env: NodeJS.ProcessEnv): boolean {
+function secretStoreKeySource(env: NodeJS.ProcessEnv): string {
   const rawJson = typeof env.SECRET_STORE_KEYS_JSON === "string" ? env.SECRET_STORE_KEYS_JSON.trim() : "";
-  return rawJson.length === 0;
+  if (rawJson.length > 0) return "SECRET_STORE_KEYS_JSON";
+  const rawKeys = typeof env.SECRET_STORE_KEYS === "string" ? env.SECRET_STORE_KEYS.trim() : "";
+  if (rawKeys.length > 0) return "SECRET_STORE_KEYS";
+  return "SECRET_STORE_KEY";
 }

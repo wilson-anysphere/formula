@@ -576,10 +576,10 @@ export function registerSiemRoutes(app: FastifyInstance): void {
         [orgId, enabled, JSON.stringify(storedConfig), request.user!.id]
       );
 
-      if (!enabled) {
-        // Disabling SIEM should remove secrets from the store.
-        const names = await listSecrets(app.db, `siem:${orgId}:`);
-        for (const name of names) await deleteSecret(app.db, name);
+       if (!enabled) {
+         // Disabling SIEM should remove secrets from the store.
+        const entries = await listSecrets(app.db, { prefix: `siem:${orgId}:` });
+        for (const entry of entries) await deleteSecret(app.db, entry.name);
       } else {
         for (const name of oldRefs) {
           if (!newRefs.has(name)) await deleteSecret(app.db, name);
@@ -643,8 +643,8 @@ export function registerSiemRoutes(app: FastifyInstance): void {
 
       await app.db.query("DELETE FROM org_siem_configs WHERE org_id = $1", [orgId]);
 
-      const names = await listSecrets(app.db, `siem:${orgId}:`);
-      for (const name of names) await deleteSecret(app.db, name);
+      const entries = await listSecrets(app.db, { prefix: `siem:${orgId}:` });
+      for (const entry of entries) await deleteSecret(app.db, entry.name);
 
       if (existed) {
         await writeAuditEvent(
