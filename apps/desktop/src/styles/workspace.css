@@ -177,6 +177,10 @@
   color: var(--text-primary);
 }
 
+.dock-panel__tab:active {
+  background: var(--bg-tertiary);
+}
+
 .dock-panel__tab[aria-selected="true"] {
   background: var(--bg-primary);
   color: var(--text-primary);
@@ -217,6 +221,10 @@
 .dock-panel__control:hover {
   background: var(--bg-tertiary);
   color: var(--text-primary);
+}
+
+.dock-panel__control:active {
+  background: var(--bg-tertiary);
 }
 
 .dock-panel__control:focus-visible {
