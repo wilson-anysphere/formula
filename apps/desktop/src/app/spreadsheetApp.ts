@@ -256,6 +256,13 @@ export interface SpreadsheetAppStatusElements {
   activeValue: HTMLElement;
 }
 
+export type UndoRedoState = {
+  canUndo: boolean;
+  canRedo: boolean;
+  undoLabel: string | null;
+  redoLabel: string | null;
+};
+
 export class SpreadsheetApp {
   private sheetId = "Sheet1";
   private readonly idle = new IdleTracker();
@@ -1076,6 +1083,27 @@ export class SpreadsheetApp {
 
   getDocument(): DocumentController {
     return this.document;
+  }
+
+  undo(): boolean {
+    if (this.editor.isOpen()) return false;
+    if (this.formulaBar?.isEditing()) return false;
+    return this.applyUndoRedo("undo");
+  }
+
+  redo(): boolean {
+    if (this.editor.isOpen()) return false;
+    if (this.formulaBar?.isEditing()) return false;
+    return this.applyUndoRedo("redo");
+  }
+
+  getUndoRedoState(): UndoRedoState {
+    return {
+      canUndo: Boolean(this.document.canUndo),
+      canRedo: Boolean(this.document.canRedo),
+      undoLabel: (this.document.undoLabel as string | null) ?? null,
+      redoLabel: (this.document.redoLabel as string | null) ?? null,
+    };
   }
 
   getSearchWorkbook(): DocumentWorkbookAdapter {
@@ -3221,16 +3249,21 @@ export class SpreadsheetApp {
     }
 
     e.preventDefault();
-    const did = undo ? this.document.undo() : this.document.redo();
-    if (did) {
-      this.syncEngineNow();
-      // Undo/redo can affect sheet view state (e.g. frozen panes). Keep renderer + scrollbars in sync.
-      this.syncFrozenPanes();
-      if (this.sharedGrid) {
-        // Shared grid rendering is driven by CanvasGridRenderer, but we still need to refresh
-        // overlays (charts, auditing, etc) after changes.
-        this.refresh();
-      }
+    this.applyUndoRedo(undo ? "undo" : "redo");
+    return true;
+  }
+
+  private applyUndoRedo(kind: "undo" | "redo"): boolean {
+    const did = kind === "undo" ? this.document.undo() : this.document.redo();
+    if (!did) return false;
+
+    this.syncEngineNow();
+    // Undo/redo can affect sheet view state (e.g. frozen panes). Keep renderer + scrollbars in sync.
+    this.syncFrozenPanes();
+    if (this.sharedGrid) {
+      // Shared grid rendering is driven by CanvasGridRenderer, but we still need to refresh
+      // overlays (charts, auditing, etc) after changes.
+      this.refresh();
     }
     return true;
   }

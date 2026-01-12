@@ -15,7 +15,7 @@
       #app {
         height: 100%;
         display: grid;
-        grid-template-rows: auto 1fr auto auto;
+        grid-template-rows: auto auto 1fr auto auto;
       }
 
       .formula-bar {
@@ -333,6 +333,22 @@
   </head>
   <body>
     <div id="app">
+      <div id="titlebar" class="formula-titlebar">
+        <div class="formula-titlebar__quick-access" role="toolbar" aria-label="Quick access toolbar">
+          <button type="button" class="formula-titlebar__icon-button" data-testid="undo" aria-label="Undo">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M9 14 4 9l5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+              <path d="M4 9h10a6 6 0 0 1 0 12h-2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </button>
+          <button type="button" class="formula-titlebar__icon-button" data-testid="redo" aria-label="Redo">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M15 14 20 9l-5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+              <path d="M20 9H10a6 6 0 0 0 0 12h2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </button>
+        </div>
+      </div>
       <div id="formula-bar"></div>
       <div id="workspace">
         <div id="dock-left" data-testid="dock-left"></div>

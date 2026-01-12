@@ -93,6 +93,8 @@ const activeCell = document.querySelector<HTMLElement>('[data-testid="active-cel
 const selectionRange = document.querySelector<HTMLElement>('[data-testid="selection-range"]');
 const activeValue = document.querySelector<HTMLElement>('[data-testid="active-value"]');
 const sheetSwitcher = document.querySelector<HTMLSelectElement>('[data-testid="sheet-switcher"]');
+const undoButton = document.querySelector<HTMLButtonElement>('[data-testid="undo"]');
+const redoButton = document.querySelector<HTMLButtonElement>('[data-testid="redo"]');
 const openComments = document.querySelector<HTMLButtonElement>('[data-testid="open-comments-panel"]');
 const auditPrecedents = document.querySelector<HTMLButtonElement>('[data-testid="audit-precedents"]');
 const auditDependents = document.querySelector<HTMLButtonElement>('[data-testid="audit-dependents"]');
@@ -108,6 +110,9 @@ if (!openComments) {
 if (!auditPrecedents || !auditDependents || !auditTransitive) {
   throw new Error("Missing auditing toolbar buttons");
 }
+if (!undoButton || !redoButton) {
+  throw new Error("Missing undo/redo buttons");
+}
 
 const workbookId = "local-workbook";
 const app = new SpreadsheetApp(gridRoot, { activeCell, selectionRange, activeValue }, { formulaBar: formulaBarRoot, workbookId });
@@ -119,6 +124,28 @@ let activePanelWorkbookId = workbookId;
 // and Playwright tests aren't blocked by unsaved-changes prompts.
 app.getDocument().markSaved();
 app.focus();
+const syncUndoRedoButtons = () => {
+  const state = app.getUndoRedoState();
+  const undoTitle = state.undoLabel ? `Undo ${state.undoLabel}` : "Undo";
+  const redoTitle = state.redoLabel ? `Redo ${state.redoLabel}` : "Redo";
+  undoButton.title = undoTitle;
+  redoButton.title = redoTitle;
+  undoButton.setAttribute("aria-label", undoTitle);
+  redoButton.setAttribute("aria-label", redoTitle);
+  undoButton.disabled = !state.canUndo;
+  redoButton.disabled = !state.canRedo;
+};
+syncUndoRedoButtons();
+app.getDocument().on("history", () => syncUndoRedoButtons());
+
+undoButton.addEventListener("click", () => {
+  app.undo();
+  app.focus();
+});
+redoButton.addEventListener("click", () => {
+  app.redo();
+  app.focus();
+});
 openComments.addEventListener("click", () => app.toggleCommentsPanel());
 auditPrecedents.addEventListener("click", () => {
   app.toggleAuditingPrecedents();
