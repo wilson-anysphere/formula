@@ -488,6 +488,7 @@ Related frontend → backend events used as acknowledgements:
 - `close-prep-done` (token)
 - `close-handled` (token)
 - `open-file-ready` (signals that the frontend’s `open-file` listener is installed; causes the Rust host to flush queued open requests)
+- `oauth-redirect-ready` (signals that the frontend’s `oauth-redirect` listener is installed; causes the Rust host to flush queued deep-link redirects)
 - `updater-ui-ready` (signals the updater UI listeners are installed; triggers the startup update check)
 - `coi-check-result` (used by the packaged cross-origin isolation smoke check mode, e.g. `pnpm -C apps/desktop check:coi`)
 
