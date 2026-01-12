@@ -406,7 +406,8 @@ test.describe("clipboard shortcuts (copy/cut/paste)", () => {
     await gotoDesktop(page);
 
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
-    const sentinel = "SENTINEL";
+    // Use a unique sentinel in case multiple Playwright workers run clipboard tests concurrently.
+    const sentinel = `sentinel-${Date.now()}`;
 
     // Seed A1 = Secret.
     await page.evaluate(() => {
