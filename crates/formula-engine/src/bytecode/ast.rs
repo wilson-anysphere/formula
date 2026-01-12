@@ -471,6 +471,20 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
+            // Postfix call expression: `callee(args...)`.
+            //
+            // This is used for lambda invocation syntax (e.g. `LAMBDA(x, x+1)(3)` or `f(3)` where
+            // `f` is a LET-bound lambda).
+            if self.peek_byte() == Some(b'(') && postfix_bp >= min_bp {
+                self.pos += 1;
+                let args = self.parse_parenthesized_args()?;
+                lhs = Expr::Call {
+                    callee: Box::new(lhs),
+                    args,
+                };
+                continue;
+            }
+
             let op_pos = self.pos;
             let (op, l_bp, r_bp) = match self.peek_infix_op() {
                 Some(v) => v,
@@ -637,6 +651,57 @@ impl<'a> Parser<'a> {
         Err(ParseError::UnterminatedString)
     }
 
+    /// Parse an argument list after consuming the opening `(`.
+    ///
+    /// This is shared between function calls (`SUM(...)`) and call expressions (`expr(...)`).
+    fn parse_parenthesized_args(&mut self) -> Result<Vec<Expr>, ParseError> {
+        let mut args = Vec::new();
+        self.skip_ws();
+        if self.peek_byte() != Some(b')') {
+            loop {
+                if args.len() == crate::EXCEL_MAX_ARGS {
+                    return Err(ParseError::TooManyArguments(crate::EXCEL_MAX_ARGS));
+                }
+
+                // Excel allows omitted/missing arguments (e.g. `ADDRESS(1,1,,FALSE)` or
+                // `IF(FALSE,1,)`). Treat an empty slot between separators as
+                // `Expr::Literal(Value::Missing)` so the runtime can distinguish omitted args
+                // from blank cell values for functions with optional-argument semantics.
+                self.skip_ws();
+                match self.peek_byte() {
+                    Some(b',') => {
+                        args.push(Expr::Literal(Value::Missing));
+                        self.pos += 1; // consume comma and continue to the next argument
+                        continue;
+                    }
+                    Some(b')') => {
+                        // Trailing comma: implicit missing argument at the end.
+                        args.push(Expr::Literal(Value::Missing));
+                        break;
+                    }
+                    Some(_) => args.push(self.parse_bp(0)?),
+                    None => return Err(ParseError::UnexpectedEof),
+                }
+
+                self.skip_ws();
+                match self.peek_byte() {
+                    Some(b',') => {
+                        self.pos += 1;
+                        continue;
+                    }
+                    Some(b')') => break,
+                    _ => return Err(ParseError::UnexpectedToken(self.pos)),
+                }
+            }
+        }
+
+        if self.peek_byte() != Some(b')') {
+            return Err(ParseError::UnexpectedToken(self.pos));
+        }
+        self.pos += 1;
+        Ok(args)
+    }
+
     fn parse_ident_like(&mut self) -> Result<Expr, ParseError> {
         let start = self.pos;
         while let Some(b) = self.peek_byte() {
@@ -652,57 +717,43 @@ impl<'a> Parser<'a> {
             .map_err(|_| ParseError::UnexpectedToken(start))?;
         self.skip_ws();
 
+        let upper = ident.to_ascii_uppercase();
+        let base = upper.strip_prefix("_XLFN.").unwrap_or(upper.as_str());
+
         if self.peek_byte() == Some(b'(') {
             self.pos += 1;
-            let mut args = Vec::new();
-            self.skip_ws();
-            if self.peek_byte() != Some(b')') {
-                loop {
-                    if args.len() == crate::EXCEL_MAX_ARGS {
-                        return Err(ParseError::TooManyArguments(crate::EXCEL_MAX_ARGS));
-                    }
-
-                    // Excel allows omitted/missing arguments (e.g. `ADDRESS(1,1,,FALSE)` or
-                    // `IF(FALSE,1,)`). Treat an empty slot between separators as
-                    // `Expr::Literal(Value::Missing)` so the runtime can distinguish omitted args
-                    // from blank cell values for functions with optional-argument semantics.
-                    self.skip_ws();
-                    match self.peek_byte() {
-                        Some(b',') => {
-                            args.push(Expr::Literal(Value::Missing));
-                            self.pos += 1; // consume comma and continue to the next argument
-                            continue;
-                        }
-                        Some(b')') => {
-                            // Trailing comma: implicit missing argument at the end.
-                            args.push(Expr::Literal(Value::Missing));
-                            break;
-                        }
-                        Some(_) => args.push(self.parse_bp(0)?),
-                        None => return Err(ParseError::UnexpectedEof),
-                    }
-                    self.skip_ws();
-                    match self.peek_byte() {
-                        Some(b',') => {
-                            self.pos += 1;
-                            continue;
-                        }
-                        Some(b')') => break,
-                        _ => return Err(ParseError::UnexpectedToken(self.pos)),
+            let mut args = self.parse_parenthesized_args()?;
+            if base == "LAMBDA" {
+                if args.is_empty() {
+                    return Err(ParseError::UnexpectedToken(start));
+                }
+                let body = Box::new(args.pop().expect("checked len"));
+                let mut params = Vec::with_capacity(args.len());
+                for arg in args {
+                    match arg {
+                        Expr::NameRef(name) => params.push(name),
+                        _ => return Err(ParseError::UnexpectedToken(start)),
                     }
                 }
+                return Ok(Expr::Lambda {
+                    params: Arc::from(params.into_boxed_slice()),
+                    body,
+                });
             }
-            if self.peek_byte() != Some(b')') {
-                return Err(ParseError::UnexpectedToken(self.pos));
+
+            let func = Function::from_name(ident);
+            // If the name is not a known built-in function, interpret `name(args...)` as a call
+            // expression on a lexical name reference (used for LET/LAMBDA invocation syntax).
+            if matches!(func, Function::Unknown(_)) {
+                return Ok(Expr::Call {
+                    callee: Box::new(Expr::NameRef(Arc::from(upper))),
+                    args,
+                });
             }
-            self.pos += 1;
-            return Ok(Expr::FuncCall {
-                func: Function::from_name(ident),
-                args,
-            });
+
+            return Ok(Expr::FuncCall { func, args });
         }
 
-        let upper = ident.to_ascii_uppercase();
         match upper.as_str() {
             "TRUE" => return Ok(Expr::Literal(Value::Bool(true))),
             "FALSE" => return Ok(Expr::Literal(Value::Bool(false))),
@@ -1109,5 +1160,42 @@ mod tests {
                 args: vec![],
             }
         );
+    }
+
+    #[test]
+    fn parses_lambda_expressions() {
+        let origin = CellCoord::new(0, 0);
+        let expr = parse_formula("=LAMBDA(x, x+1)", origin).expect("parse");
+
+        let Expr::Lambda { params, body } = expr else {
+            panic!("expected lambda expression");
+        };
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].as_ref(), "X");
+
+        let Expr::Binary { op, left, right } = body.as_ref() else {
+            panic!("expected lambda body binary expression");
+        };
+        assert_eq!(*op, BinaryOp::Add);
+        assert!(matches!(left.as_ref(), Expr::NameRef(name) if name.as_ref() == "X"));
+        assert!(matches!(right.as_ref(), Expr::Literal(Value::Number(n)) if *n == 1.0));
+    }
+
+    #[test]
+    fn parses_lambda_call_expressions() {
+        let origin = CellCoord::new(0, 0);
+        let expr = parse_formula("=LAMBDA(x, x+1)(3)", origin).expect("parse");
+
+        let Expr::Call { callee, args } = expr else {
+            panic!("expected call expression");
+        };
+        assert_eq!(args.len(), 1);
+        assert!(matches!(args[0], Expr::Literal(Value::Number(n)) if n == 3.0));
+
+        let Expr::Lambda { params, .. } = callee.as_ref() else {
+            panic!("expected call callee to be a lambda");
+        };
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].as_ref(), "X");
     }
 }
