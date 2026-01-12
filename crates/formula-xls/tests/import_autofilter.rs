@@ -262,6 +262,6 @@ fn attaches_workbook_scoped_unqualified_filterdatabase_range_to_only_sheet_with_
         .workbook
         .get_defined_name(DefinedNameScope::Workbook, XLNM_FILTER_DATABASE)
         .expect("expected workbook-scoped _FilterDatabase defined name");
-    assert_parseable(&filter_db.refers_to);
+    assert_parseable_formula(&filter_db.refers_to);
     assert!(!filter_db.refers_to.contains('!'));
 }
