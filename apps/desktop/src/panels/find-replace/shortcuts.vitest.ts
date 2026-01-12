@@ -71,6 +71,10 @@ describe("find/replace shortcuts", () => {
     const commandRegistry = new CommandRegistry();
     const contextKeys = new ContextKeyService();
     contextKeys.set("workbench.commandPaletteOpen", false);
+    // Built-in keybindings intentionally fail closed while focus/edit context keys are
+    // uninitialized (capture-phase safe). Ensure this test opts into the "not in input"
+    // state so Find/Replace shortcuts are eligible to fire.
+    contextKeys.set("focus.inTextInput", false);
     const keybindingService = new KeybindingService({ commandRegistry, contextKeys, platform: "mac" });
     keybindingService.setBuiltinKeybindings(builtinKeybindings);
     const disposeKeybindings = keybindingService.installWindowListener(window);
