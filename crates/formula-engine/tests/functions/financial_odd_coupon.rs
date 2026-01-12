@@ -3461,61 +3461,97 @@ fn oddlprice_matches_excel_model_for_actual_day_bases_with_eom_last_interest() {
 fn oddfprice_matches_excel_model_for_30_360_bases() {
     let system = ExcelDateSystem::EXCEL_1900;
     // Month-end / Feb dates so 30/360 US vs EU diverge and exercise non-additive DAYS360 behavior.
-    // issue=2019-01-31, settlement=2019-02-28, first_coupon=2019-03-31, maturity=2019-09-30
-    let issue = ymd_to_serial(ExcelDate::new(2019, 1, 31), system).unwrap();
-    let settlement = ymd_to_serial(ExcelDate::new(2019, 2, 28), system).unwrap();
-    let first_coupon = ymd_to_serial(ExcelDate::new(2019, 3, 31), system).unwrap();
-    let maturity = ymd_to_serial(ExcelDate::new(2019, 9, 30), system).unwrap();
+    //
+    // Include two scenarios:
+    // - one where `E` is the "typical" semiannual 180 days for basis=4
+    // - one where basis=4's `E` differs from 360/frequency (because it uses DAYS360 between coupon dates)
+    let scenarios = [
+        // issue=2019-01-31, settlement=2019-02-28, first_coupon=2019-03-31, maturity=2019-09-30
+        (
+            ExcelDate::new(2019, 1, 31),
+            ExcelDate::new(2019, 2, 28),
+            ExcelDate::new(2019, 3, 31),
+            ExcelDate::new(2019, 9, 30),
+        ),
+        // maturity=2019-02-28 is EOM, so the maturity-anchored schedule is EOM-pinned:
+        // prev_coupon=2018-02-28, first_coupon=2018-08-31.
+        // For basis=4, coupon-period `E = DAYS360(2018-02-28, 2018-08-31, method=true) = 182` days (not 180).
+        (
+            ExcelDate::new(2018, 1, 31),
+            ExcelDate::new(2018, 2, 15),
+            ExcelDate::new(2018, 8, 31),
+            ExcelDate::new(2019, 2, 28),
+        ),
+    ];
 
     let rate = 0.05;
     let yld = 0.06;
     let redemption = 100.0;
     let frequency = 2;
 
-    for basis in [0, 4] {
-        let expected = oddf_price_excel_model(
-            settlement,
-            maturity,
-            issue,
-            first_coupon,
-            rate,
-            yld,
-            redemption,
-            frequency,
-            basis,
-            system,
-        );
+    for (issue, settlement, first_coupon, maturity) in scenarios {
+        let issue = ymd_to_serial(issue, system).unwrap();
+        let settlement = ymd_to_serial(settlement, system).unwrap();
+        let first_coupon = ymd_to_serial(first_coupon, system).unwrap();
+        let maturity = ymd_to_serial(maturity, system).unwrap();
 
-        let actual = oddfprice(
-            settlement,
-            maturity,
-            issue,
-            first_coupon,
-            rate,
-            yld,
-            redemption,
-            frequency,
-            basis,
-            system,
-        )
-        .unwrap();
+        // Guard: ensure this test actually covers a basis=4 schedule where `E != 360/frequency`.
+        if maturity == ymd_to_serial(ExcelDate::new(2019, 2, 28), system).unwrap() {
+            let months_per_period = 12 / frequency;
+            let eom = is_end_of_month(maturity, system);
+            assert!(eom, "expected maturity to be EOM for this scenario");
+            let coupon_dates = oddf_coupon_schedule(first_coupon, maturity, frequency, system);
+            let n = coupon_dates.len() as i32;
+            let prev_coupon = coupon_date_with_eom(maturity, -(n * months_per_period), eom, system);
+            let e4 = coupon_period_e(prev_coupon, first_coupon, 4, frequency, system);
+            assert_close(e4, 182.0, 0.0);
+        }
 
-        assert_close(actual, expected, 1e-10);
+        for basis in [0, 4] {
+            let expected = oddf_price_excel_model(
+                settlement,
+                maturity,
+                issue,
+                first_coupon,
+                rate,
+                yld,
+                redemption,
+                frequency,
+                basis,
+                system,
+            );
 
-        let recovered = oddfyield(
-            settlement,
-            maturity,
-            issue,
-            first_coupon,
-            rate,
-            expected,
-            redemption,
-            frequency,
-            basis,
-            system,
-        )
-        .unwrap();
-        assert_close(recovered, yld, 1e-9);
+            let actual = oddfprice(
+                settlement,
+                maturity,
+                issue,
+                first_coupon,
+                rate,
+                yld,
+                redemption,
+                frequency,
+                basis,
+                system,
+            )
+            .unwrap();
+
+            assert_close(actual, expected, 1e-10);
+
+            let recovered = oddfyield(
+                settlement,
+                maturity,
+                issue,
+                first_coupon,
+                rate,
+                expected,
+                redemption,
+                frequency,
+                basis,
+                system,
+            )
+            .unwrap();
+            assert_close(recovered, yld, 1e-9);
+        }
     }
 }
 
