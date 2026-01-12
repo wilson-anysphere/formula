@@ -1512,7 +1512,9 @@ mod tests {
         assert!(!expr.is_empty(), "decoded expression must be non-empty");
         let formula = format!("={expr}");
         parse_formula(&formula, ParseOptions::default()).unwrap_or_else(|err| {
-            panic!("expected decoded expression to be parseable, expr={expr:?}, err={err:?}");
+            panic!(
+                "expected decoded expression to be parseable, expr={expr:?}, err={err:?}, formula={formula:?}"
+            );
         });
 
         // BIFF decode can return a bare Excel error literal (`#REF!`, `#NAME?`, `#UNKNOWN!`, …).

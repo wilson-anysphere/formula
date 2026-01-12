@@ -268,9 +268,16 @@ pub fn build_unknown_builtin_numfmtid_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
-/// Build a BIFF8 `.xls` fixture containing a workbook-scoped defined name, a
-/// worksheet-scoped defined name, and a hidden name. The fixture also includes a
-/// minimal `EXTERNSHEET` table so 3D references can be decoded.
+/// Build a BIFF8 `.xls` fixture containing workbook- and sheet-scoped defined names.
+///
+/// The fixture includes:
+/// - A workbook-scoped name referencing `Sheet1!$A$1` via `PtgRef3d`
+/// - A sheet-scoped name (local scope / `itab`)
+/// - A built-in print area name (`_xlnm.Print_Area`) using a union of two areas
+///
+/// It also includes additional NAME records to exercise `rgce` decoding paths (union operators,
+/// function calls, missing args, hidden flags), and a minimal `EXTERNSHEET` table so 3D references
+/// can be rendered.
 pub fn build_defined_names_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_defined_names_workbook_stream();
 
@@ -1881,7 +1888,15 @@ fn build_defined_names_workbook_stream() -> Vec<u8> {
     );
 
     // NAME records.
-    // 1) Workbook-scoped name: ZedName -> Sheet1!$B$1
+    // 1) Workbook-scoped name referencing Sheet1!$A$1 via PtgRef3d.
+    let global_rgce = ptg_ref3d(0, 0, 0);
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &name_record("GlobalName", 0, false, None, &global_rgce),
+    );
+
+    // 2) Workbook-scoped name: ZedName -> Sheet1!$B$1
     let zed_rgce = ptg_ref3d(0, 0, 1);
     push_record(
         &mut globals,
@@ -1889,7 +1904,7 @@ fn build_defined_names_workbook_stream() -> Vec<u8> {
         &name_record("ZedName", 0, false, None, &zed_rgce),
     );
 
-    // 2) Sheet-scoped name: LocalName (scope Sheet1) -> Sheet1!$A$1
+    // 3) Sheet-scoped name: LocalName (scope Sheet1) -> Sheet1!$A$1
     let local_rgce = ptg_ref3d(0, 0, 0);
     push_record(
         &mut globals,
@@ -1903,7 +1918,7 @@ fn build_defined_names_workbook_stream() -> Vec<u8> {
         ),
     );
 
-    // 3) Hidden workbook-scoped name: HiddenName -> Sheet1!$A$1:$B$2
+    // 4) Hidden workbook-scoped name: HiddenName -> Sheet1!$A$1:$B$2
     let hidden_rgce = ptg_area3d(0, 0, 1, 0, 1);
     push_record(
         &mut globals,
@@ -1911,7 +1926,7 @@ fn build_defined_names_workbook_stream() -> Vec<u8> {
         &name_record("HiddenName", 0, true, None, &hidden_rgce),
     );
 
-    // 4) Union to exercise PtgUnion decoding.
+    // 5) Union to exercise PtgUnion decoding.
     let union_rgce = [ptg_ref3d(0, 0, 0), ptg_ref3d(0, 0, 1), vec![0x10u8]].concat();
     push_record(
         &mut globals,
@@ -1919,7 +1934,7 @@ fn build_defined_names_workbook_stream() -> Vec<u8> {
         &name_record("UnionName", 0, false, None, &union_rgce),
     );
 
-    // 5) Function call to exercise PtgFuncVar decoding: MyName -> SUM(Sheet1!$A$1:$A$3)
+    // 6) Function call to exercise PtgFuncVar decoding: MyName -> SUM(Sheet1!$A$1:$A$3)
     let mut sum_rgce = ptg_area3d(0, 0, 2, 0, 0);
     sum_rgce.extend_from_slice(&[0x22u8, 0x01, 0x04, 0x00]); // PtgFuncVar argc=1 iftab=4 (SUM)
     push_record(
@@ -1928,7 +1943,7 @@ fn build_defined_names_workbook_stream() -> Vec<u8> {
         &name_record("MyName", 0, false, None, &sum_rgce),
     );
 
-    // 6) Fixed-arity function to exercise PtgFunc decoding: AbsName -> ABS(1)
+    // 7) Fixed-arity function to exercise PtgFunc decoding: AbsName -> ABS(1)
     let abs_rgce = vec![0x1E, 0x01, 0x00, 0x21, 0x18, 0x00]; // PtgInt 1; PtgFunc iftab=24 (ABS)
     push_record(
         &mut globals,
@@ -1936,9 +1951,8 @@ fn build_defined_names_workbook_stream() -> Vec<u8> {
         &name_record("AbsName", 0, false, None, &abs_rgce),
     );
 
-    // 7) Union inside a function argument must be parenthesized: UnionFunc -> SUM((Sheet1!$A$1,Sheet1!$B$1))
-    let mut union_func_rgce =
-        [ptg_ref3d(0, 0, 0), ptg_ref3d(0, 0, 1), vec![0x10u8]].concat();
+    // 8) Union inside a function argument must be parenthesized: UnionFunc -> SUM((Sheet1!$A$1,Sheet1!$B$1))
+    let mut union_func_rgce = [ptg_ref3d(0, 0, 0), ptg_ref3d(0, 0, 1), vec![0x10u8]].concat();
     union_func_rgce.extend_from_slice(&[0x22u8, 0x01, 0x04, 0x00]); // SUM
     push_record(
         &mut globals,
@@ -1946,7 +1960,7 @@ fn build_defined_names_workbook_stream() -> Vec<u8> {
         &name_record("UnionFunc", 0, false, None, &union_func_rgce),
     );
 
-    // 8) Missing argument slot: MissingArgName -> IF(,1,2)
+    // 9) Missing argument slot: MissingArgName -> IF(,1,2)
     let miss_rgce = vec![
         0x16u8, // PtgMissArg
         0x1E, 0x01, 0x00, // PtgInt 1
@@ -1959,7 +1973,8 @@ fn build_defined_names_workbook_stream() -> Vec<u8> {
         &name_record("MissingArgName", 0, false, None, &miss_rgce),
     );
 
-    // 9) Built-in Print_Area (sheet-scoped, hidden) -> Sheet1!$A$1:$B$2,Sheet1!$D$4:$E$5
+    // 10) Built-in print area (`_xlnm.Print_Area`) on Sheet1 using a union of two 3D areas (hidden).
+    // Excel stores this as a built-in NAME record (fBuiltin=1, rgchName=builtin_id).
     let print_area_rgce = [
         ptg_area3d(0, 0, 1, 0, 1),
         ptg_area3d(0, 3, 4, 3, 4),
@@ -2833,7 +2848,6 @@ fn ptg_area3d(ixti: u16, row1: u16, row2: u16, col1: u16, col2: u16) -> Vec<u8> 
     out.extend_from_slice(&col2.to_le_bytes());
     out
 }
-
 fn build_outline_workbook_stream() -> Vec<u8> {
     let mut globals = Vec::<u8>::new();
 

@@ -26,121 +26,100 @@ fn assert_parseable_refers_to(expr: &str) {
 }
 
 #[test]
-fn imports_biff_defined_names_with_scope_and_3d_refs() {
+fn imports_defined_names_from_biff_name_records() {
     let bytes = xls_fixture_builder::build_defined_names_fixture_xls();
     let result = import_fixture(&bytes);
 
-    let sheet1_id = result
-        .workbook
-        .sheet_by_name("Sheet1")
-        .expect("Sheet1 missing")
-        .id;
+    let wb = &result.workbook;
+    let sheet1_id = wb.sheet_by_name("Sheet1").expect("Sheet1 missing").id;
 
-    let zed = result
-        .workbook
-        .defined_names
-        .iter()
-        .find(|n| n.name == "ZedName")
+    let global = wb
+        .get_defined_name(DefinedNameScope::Workbook, "GlobalName")
+        .expect("GlobalName missing");
+    assert_eq!(global.hidden, false);
+    assert_eq!(global.refers_to, "Sheet1!$A$1");
+    assert_eq!(global.xlsx_local_sheet_id, None);
+
+    let zed = wb
+        .get_defined_name(DefinedNameScope::Workbook, "ZedName")
         .expect("ZedName missing");
-    assert_eq!(zed.scope, DefinedNameScope::Workbook);
-    assert!(!zed.hidden);
+    assert_eq!(zed.hidden, false);
     assert_eq!(zed.refers_to, "Sheet1!$B$1");
     assert_eq!(zed.xlsx_local_sheet_id, None);
     assert_parseable_refers_to(&zed.refers_to);
 
-    let local = result
-        .workbook
-        .defined_names
-        .iter()
-        .find(|n| n.name == "LocalName")
+    let local = wb
+        .get_defined_name(DefinedNameScope::Sheet(sheet1_id), "LocalName")
         .expect("LocalName missing");
-    assert_eq!(local.scope, DefinedNameScope::Sheet(sheet1_id));
-    assert!(!local.hidden);
+    assert_eq!(local.hidden, false);
     assert_eq!(local.refers_to, "Sheet1!$A$1");
     assert_eq!(local.comment.as_deref(), Some("Local description"));
     assert_eq!(local.xlsx_local_sheet_id, Some(0));
     assert_parseable_refers_to(&local.refers_to);
 
-    let hidden = result
-        .workbook
-        .defined_names
-        .iter()
-        .find(|n| n.name == "HiddenName")
+    let hidden = wb
+        .get_defined_name(DefinedNameScope::Workbook, "HiddenName")
         .expect("HiddenName missing");
-    assert_eq!(hidden.scope, DefinedNameScope::Workbook);
     assert!(hidden.hidden);
     assert_eq!(hidden.refers_to, "Sheet1!$A$1:$B$2");
     assert_parseable_refers_to(&hidden.refers_to);
 
-    let union = result
-        .workbook
-        .defined_names
-        .iter()
-        .find(|n| n.name == "UnionName")
+    let union = wb
+        .get_defined_name(DefinedNameScope::Workbook, "UnionName")
         .expect("UnionName missing");
-    assert_eq!(union.scope, DefinedNameScope::Workbook);
     assert_eq!(union.refers_to, "Sheet1!$A$1,Sheet1!$B$1");
     assert_parseable_refers_to(&union.refers_to);
 
-    let my_name = result
-        .workbook
-        .defined_names
-        .iter()
-        .find(|n| n.name == "MyName")
+    let my_name = wb
+        .get_defined_name(DefinedNameScope::Workbook, "MyName")
         .expect("MyName missing");
-    assert_eq!(my_name.scope, DefinedNameScope::Workbook);
     assert!(!my_name.hidden);
     assert_eq!(my_name.refers_to, "SUM(Sheet1!$A$1:$A$3)");
     assert_parseable_refers_to(&my_name.refers_to);
 
-    let abs = result
-        .workbook
-        .defined_names
-        .iter()
-        .find(|n| n.name == "AbsName")
+    let abs = wb
+        .get_defined_name(DefinedNameScope::Workbook, "AbsName")
         .expect("AbsName missing");
-    assert_eq!(abs.scope, DefinedNameScope::Workbook);
     assert_eq!(abs.refers_to, "ABS(1)");
     assert_parseable_refers_to(&abs.refers_to);
 
-    let union_func = result
-        .workbook
-        .defined_names
-        .iter()
-        .find(|n| n.name == "UnionFunc")
+    let union_func = wb
+        .get_defined_name(DefinedNameScope::Workbook, "UnionFunc")
         .expect("UnionFunc missing");
-    assert_eq!(union_func.scope, DefinedNameScope::Workbook);
     assert_eq!(union_func.refers_to, "SUM((Sheet1!$A$1,Sheet1!$B$1))");
     assert_parseable_refers_to(&union_func.refers_to);
 
-    let miss = result
-        .workbook
-        .defined_names
-        .iter()
-        .find(|n| n.name == "MissingArgName")
+    let miss = wb
+        .get_defined_name(DefinedNameScope::Workbook, "MissingArgName")
         .expect("MissingArgName missing");
-    assert_eq!(miss.scope, DefinedNameScope::Workbook);
     assert_eq!(miss.refers_to, "IF(,1,2)");
     assert_parseable_refers_to(&miss.refers_to);
 
-    let print_area = result
-        .workbook
-        .defined_names
-        .iter()
-        .find(|n| n.name == XLNM_PRINT_AREA)
+    let print_area = wb
+        .get_defined_name(DefinedNameScope::Sheet(sheet1_id), XLNM_PRINT_AREA)
         .expect("Print_Area missing");
-    assert_eq!(print_area.scope, DefinedNameScope::Sheet(sheet1_id));
-    assert!(print_area.hidden);
+    assert!(print_area.hidden, "expected Print_Area to be hidden");
+    assert_eq!(print_area.xlsx_local_sheet_id, Some(0));
     assert_eq!(
         print_area.refers_to,
         "Sheet1!$A$1:$B$2,Sheet1!$D$4:$E$5"
     );
-    assert_eq!(print_area.xlsx_local_sheet_id, Some(0));
     assert_parseable_refers_to(&print_area.refers_to);
+
+    // All imported name formulas should be parseable by our formula parser (stored without `=`).
+    for name in &wb.defined_names {
+        let f = format!("={}", name.refers_to);
+        parse_formula(&f, ParseOptions::default()).unwrap_or_else(|err| {
+            panic!(
+                "failed to parse refers_to for defined name `{}` (scope={:?}): {err}; formula={f}",
+                name.name, name.scope
+            )
+        });
+    }
 }
 
 #[test]
-fn defined_name_formulas_quote_sheet_names() {
+fn defined_name_formulas_quote_sheet_names_and_are_parseable() {
     let bytes = xls_fixture_builder::build_defined_names_quoting_fixture_xls();
     let result = import_fixture(&bytes);
 
@@ -160,6 +139,16 @@ fn defined_name_formulas_quote_sheet_names() {
             .unwrap_or_else(|| panic!("{name} missing"));
         assert_eq!(dn.refers_to, expected_refers_to);
         assert_parseable_refers_to(&dn.refers_to);
+    }
+
+    for name in &result.workbook.defined_names {
+        let f = format!("={}", name.refers_to);
+        parse_formula(&f, ParseOptions::default()).unwrap_or_else(|err| {
+            panic!(
+                "failed to parse refers_to for defined name `{}` (scope={:?}): {err}; formula={f}",
+                name.name, name.scope
+            )
+        });
     }
 }
 
@@ -200,7 +189,7 @@ fn imports_workbook_defined_names_via_calamine_fallback_when_biff_unavailable() 
                 "TestName missing; defined_names={:?}; warnings={:?}",
                 result.workbook.defined_names, result.warnings
             )
-        });
+    });
     assert_eq!(name.scope, DefinedNameScope::Workbook);
     assert_eq!(name.refers_to, "Sheet1!$A$1:$A$1");
 }
