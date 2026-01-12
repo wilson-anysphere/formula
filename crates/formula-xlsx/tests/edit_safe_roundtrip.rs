@@ -14,7 +14,7 @@ fn direct_model_edits_write_correct_types_and_formulas() {
     let sheet_id = doc.workbook.sheets[0].id;
     let sheet = doc.workbook.sheet_mut(sheet_id).expect("sheet exists");
 
-    // Do not touch `doc.meta.cell_meta` to ensure writer fallbacks handle stale metadata.
+    // Do not touch `doc.xlsx_meta_mut().cell_meta` to ensure writer fallbacks handle stale metadata.
     sheet.set_value(CellRef::from_a1("A1").unwrap(), CellValue::Number(123.0));
     sheet.set_value(
         CellRef::from_a1("B1").unwrap(),
@@ -160,4 +160,3 @@ fn parse_shared_strings(xml: &[u8]) -> Vec<String> {
 
     strings
 }
-
