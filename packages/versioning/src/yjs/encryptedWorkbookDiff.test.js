@@ -3,7 +3,7 @@ import test from "node:test";
 
 import * as Y from "yjs";
 
-import { diffYjsWorkbookSnapshots } from "../index.js";
+import { diffYjsWorkbookSnapshots } from "./diffWorkbookSnapshots.js";
 
 function createWorkbookDoc() {
   const doc = new Y.Doc();
@@ -112,3 +112,40 @@ test("diffYjsWorkbookSnapshots: encrypted format-only changes are classified as 
   assert.equal(sheetDiff.modified.length, 0);
 });
 
+test("diffYjsWorkbookSnapshots: encrypted cells win over plaintext duplicates across legacy keys", () => {
+  const enc1 = { v: 1, alg: "AES-256-GCM", keyId: "k1", ivBase64: "iv1", tagBase64: "tag1", ciphertextBase64: "ct1" };
+  const enc2 = { v: 1, alg: "AES-256-GCM", keyId: "k1", ivBase64: "iv2", tagBase64: "tag2", ciphertextBase64: "ct2" };
+
+  const doc = createWorkbookDoc();
+  const cells = doc.getMap("cells");
+
+  doc.transact(() => {
+    const encrypted = new Y.Map();
+    encrypted.set("enc", enc1);
+    // Encrypted payload stored under a legacy key encoding.
+    cells.set("Sheet1:0,0", encrypted);
+
+    // Plaintext duplicate stored under the canonical key (should be ignored by diffs).
+    const plain = new Y.Map();
+    plain.set("value", "leaked");
+    cells.set("Sheet1:0:0", plain);
+  });
+
+  const beforeSnapshot = Y.encodeStateAsUpdate(doc);
+
+  doc.transact(() => {
+    const encrypted = cells.get("Sheet1:0,0");
+    assert.ok(encrypted instanceof Y.Map);
+    encrypted.set("enc", enc2);
+  });
+
+  const afterSnapshot = Y.encodeStateAsUpdate(doc);
+  const diff = diffYjsWorkbookSnapshots({ beforeSnapshot, afterSnapshot });
+  const sheetDiff = diff.cellsBySheet.find((entry) => entry.sheetId === "Sheet1")?.diff;
+  assert.ok(sheetDiff);
+
+  assert.equal(sheetDiff.modified.length, 1);
+  assert.deepEqual(sheetDiff.modified[0].cell, { row: 0, col: 0 });
+  assert.equal(sheetDiff.modified[0].oldValue, null);
+  assert.equal(sheetDiff.modified[0].newValue, null);
+});

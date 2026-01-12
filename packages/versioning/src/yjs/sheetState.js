@@ -139,7 +139,40 @@ export function sheetStateFromYjsDoc(doc, opts = {}) {
     const parsed = parseSpreadsheetCellKey(rawKey);
     if (!parsed) return;
     if (targetSheetId != null && parsed.sheetId !== targetSheetId) return;
-    cells.set(cellKey(parsed.row, parsed.col), extractCell(cellData));
+
+    const key = cellKey(parsed.row, parsed.col);
+    const cell = extractCell(cellData);
+    const existing = cells.get(key);
+
+    // If any representation of this coordinate is encrypted (e.g. stored under a
+    // legacy key encoding), treat the cell as encrypted and do not allow plaintext
+    // duplicates to overwrite the ciphertext.
+    const isCanonical = rawKey === `${parsed.sheetId}:${parsed.row}:${parsed.col}`;
+
+    const enc = cell?.enc;
+    const isEncrypted = enc !== null && enc !== undefined;
+    const existingEnc = existing?.enc;
+    const existingIsEncrypted = existingEnc !== null && existingEnc !== undefined;
+
+    if (isEncrypted) {
+      if (!existing || !existingIsEncrypted || isCanonical) {
+        cells.set(key, cell);
+      } else if (existing.format == null && cell.format != null) {
+        cells.set(key, { ...existing, format: cell.format });
+      }
+      return;
+    }
+
+    if (existingIsEncrypted) {
+      // Preserve ciphertext, but allow plaintext duplicates to contribute format
+      // metadata when the encrypted record lacks it.
+      if (existing.format == null && cell.format != null) {
+        cells.set(key, { ...existing, format: cell.format });
+      }
+      return;
+    }
+
+    cells.set(key, cell);
   });
 
   return { cells };
