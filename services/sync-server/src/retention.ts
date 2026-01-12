@@ -54,6 +54,7 @@ function coerceFiniteNumber(value: unknown): number | null {
 export class LeveldbRetentionManager {
   private readonly lastSeenWriteMs = new Map<string, number>();
   private readonly purgingDocs = new Set<string>();
+  private lastSeenWriteSweepAtMs = 0;
 
   constructor(
     private readonly ldb: LeveldbPersistenceLike,
@@ -72,6 +73,24 @@ export class LeveldbRetentionManager {
     { nowMs = Date.now(), force = false }: { nowMs?: number; force?: boolean } = {}
   ): Promise<void> {
     if (this.purgingDocs.has(docName)) return;
+
+    // Opportunistically clean up the throttling map so large numbers of one-off
+    // documents don't grow memory usage without bound.
+    const sweepIntervalMs = Math.max(this.throttleMs, 30_000);
+    const maxEntriesBeforeSweep = 10_000;
+    if (
+      this.lastSeenWriteMs.size > 0 &&
+      (this.lastSeenWriteMs.size > maxEntriesBeforeSweep ||
+        nowMs - this.lastSeenWriteSweepAtMs > sweepIntervalMs)
+    ) {
+      const staleAfterMs = Math.max(this.throttleMs * 2, sweepIntervalMs);
+      for (const [key, lastWrite] of this.lastSeenWriteMs) {
+        if (nowMs - lastWrite > staleAfterMs) {
+          this.lastSeenWriteMs.delete(key);
+        }
+      }
+      this.lastSeenWriteSweepAtMs = nowMs;
+    }
 
     const lastWrite = this.lastSeenWriteMs.get(docName) ?? 0;
     if (!force && nowMs - lastWrite < this.throttleMs) return;
@@ -167,4 +186,3 @@ export class LeveldbRetentionManager {
     return { scanned, purged, skippedActive, skippedNoMeta, errors };
   }
 }
-
