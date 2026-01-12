@@ -360,7 +360,7 @@ function resolveCollabOptionsFromUrl(): SpreadsheetAppCollabOptions | null {
     const defaultUserColor = resolveCssVar("--formula-grid-remote-presence-default", {
       fallback: resolveCssVar("--accent", { fallback: resolveCssVar("--text-primary", { fallback: "CanvasText" }) }),
     });
-    const userColor = params.get("userColor") ?? defaultUserColor;
+    const userColor = params.get("userColor") || defaultUserColor;
     return {
       wsUrl,
       docId,
@@ -1414,6 +1414,7 @@ export class SpreadsheetApp {
 
       const presence = this.collabSession.presence;
       if (presence) {
+        const defaultPresenceColor = resolveCssVar("--accent", { fallback: "blue" });
         // Publish local selection state.
         this.collabSelectionUnsubscribe = this.subscribeSelection((selection) => {
           presence.setCursor({ row: selection.active.row, col: selection.active.col });
@@ -1452,7 +1453,7 @@ export class SpreadsheetApp {
             return {
               id: String(p?.id ?? ""),
               name: String(p?.name ?? t("presence.anonymous")),
-              color: String(p?.color ?? defaultPresenceColor),
+              color: String(p?.color || defaultPresenceColor),
               cursor,
               selections,
             } satisfies GridPresence;
