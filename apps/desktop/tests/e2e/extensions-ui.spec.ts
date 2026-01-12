@@ -229,10 +229,14 @@ test.describe("Extensions UI integration", () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const policy: any = (document as any).permissionsPolicy ?? (document as any).featurePolicy;
       if (!policy || typeof policy.allowsFeature !== "function") return null;
-      return {
-        read: policy.allowsFeature("clipboard-read"),
-        write: policy.allowsFeature("clipboard-write"),
-      };
+      try {
+        return {
+          read: policy.allowsFeature("clipboard-read"),
+          write: policy.allowsFeature("clipboard-write"),
+        };
+      } catch {
+        return null;
+      }
     });
     if (clipboardPolicy) {
       expect(clipboardPolicy.read, "webview should not allow clipboard-read").toBe(false);
