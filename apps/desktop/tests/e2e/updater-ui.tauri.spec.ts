@@ -173,13 +173,28 @@ test.describe("desktop updater UI wiring (tauri)", () => {
     await expect(page.getByTestId("updater-body")).toContainText("Release notes");
 
     // Verify the dialog action wiring uses the Tauri shell open command.
+    const openBefore = await page.evaluate(() => {
+      const invokes = (window as any).__tauriInvokes ?? [];
+      if (!Array.isArray(invokes)) return 0;
+      return invokes.filter((entry: any) => entry?.cmd === "open_external_url").length;
+    });
     await page.getByTestId("updater-view-versions").click();
-    await page.waitForFunction(() =>
-      Array.isArray((window as any).__tauriInvokes) &&
-        (window as any).__tauriInvokes.some((entry: any) => entry?.cmd === "open_external_url"),
+    await page.waitForFunction(
+      (expectedCount) => {
+        const invokes = (window as any).__tauriInvokes ?? [];
+        if (!Array.isArray(invokes)) return false;
+        const count = invokes.filter((entry: any) => entry?.cmd === "open_external_url").length;
+        return count >= expectedCount;
+      },
+      openBefore + 1,
     );
     const openExternal = await page.evaluate(
-      () => (window as any).__tauriInvokes?.find((entry: any) => entry?.cmd === "open_external_url") ?? null,
+      () => {
+        const invokes = (window as any).__tauriInvokes ?? [];
+        if (!Array.isArray(invokes)) return null;
+        const matches = invokes.filter((entry: any) => entry?.cmd === "open_external_url");
+        return matches.length > 0 ? matches[matches.length - 1] : null;
+      },
     );
     expect(openExternal).not.toBeNull();
     expect(String(openExternal.args?.url ?? "")).toContain("github.com/wilson-anysphere/formula/releases");
