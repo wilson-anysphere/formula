@@ -195,6 +195,25 @@ test.describe("global keybindings", () => {
     await page.waitForTimeout(100);
     await expect(page.getByTestId("comments-panel")).not.toBeVisible();
 
+    // Some remote/VM keyboard setups emit both Ctrl+Meta on a single chord. Ensure the
+    // fallback `Ctrl+Cmd+Shift+M` binding also does not fire while typing in an input.
+    await page.evaluate(() => {
+      const target = document.activeElement ?? window;
+      target.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "M",
+          code: "KeyM",
+          ctrlKey: true,
+          metaKey: true,
+          shiftKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    await page.waitForTimeout(100);
+    await expect(page.getByTestId("comments-panel")).not.toBeVisible();
+
     // Extension keybinding should not fire while typing in an input.
     await page.keyboard.press(`${primary}+Shift+Y`);
     await page.waitForTimeout(250);
