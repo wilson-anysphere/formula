@@ -15,7 +15,7 @@
 .ribbon__tabs {
   display: flex;
   align-items: stretch;
-  height: 28px;
+  height: 26px;
   padding: 0 6px;
   gap: 2px;
   background: var(--bg-secondary);
@@ -35,7 +35,7 @@
   border-bottom: 2px solid transparent;
   cursor: pointer;
   flex: 0 0 auto;
-  line-height: 28px;
+  line-height: 26px;
   border-radius: 4px 4px 0 0;
   transition:
     background-color var(--motion-duration-fast) var(--motion-ease),
@@ -68,8 +68,8 @@
 }
 
 .ribbon__content {
-  padding: 6px 8px;
-  min-height: 76px;
+  padding: 4px 8px;
+  min-height: 70px;
   background: var(--bg-secondary);
   overflow-x: auto;
   overflow-y: hidden;
@@ -79,7 +79,7 @@
   display: inline-flex;
   align-items: stretch;
   gap: 12px;
-  min-height: 64px;
+  min-height: 62px;
 }
 
 .ribbon-group {
@@ -118,14 +118,14 @@
   background: transparent;
   color: var(--text-primary);
   border-radius: 4px;
-  padding: 4px 6px;
+  padding: 3px 6px;
   font-size: 11px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 4px;
   cursor: pointer;
-  min-height: 24px;
+  min-height: 22px;
   font-family: inherit;
   line-height: 1.1;
   white-space: nowrap;
@@ -185,7 +185,7 @@
   align-items: center;
   justify-content: center;
   padding: 6px 8px;
-  min-width: 66px;
+  min-width: 60px;
   gap: 6px;
 }
 
@@ -208,7 +208,7 @@
 }
 
 .ribbon-button--icon {
-  width: 32px;
+  width: 28px;
   padding: 0;
 }
 

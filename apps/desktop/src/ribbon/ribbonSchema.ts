@@ -72,6 +72,15 @@ export const defaultRibbonSchema: RibbonSchema = {
       isFile: true,
       groups: [
         {
+          id: "file.new",
+          label: "New",
+          buttons: [
+            { id: "file.new.new", label: "New", ariaLabel: "New", icon: "📄", kind: "dropdown", size: "large" },
+            { id: "file.new.blankWorkbook", label: "Blank workbook", ariaLabel: "Blank workbook", icon: "⬜" },
+            { id: "file.new.templates", label: "Templates", ariaLabel: "Templates", icon: "📑", kind: "dropdown" },
+          ],
+        },
+        {
           id: "file.info",
           label: "Info",
           buttons: [
@@ -161,9 +170,13 @@ export const defaultRibbonSchema: RibbonSchema = {
             { id: "home.font.bold", label: "Bold", ariaLabel: "Bold", icon: "B", kind: "toggle", size: "icon" },
             { id: "home.font.italic", label: "Italic", ariaLabel: "Italic", icon: "I", kind: "toggle", size: "icon" },
             { id: "home.font.underline", label: "Underline", ariaLabel: "Underline", icon: "U", kind: "toggle", size: "icon" },
+            { id: "home.font.strikethrough", label: "Strike", ariaLabel: "Strikethrough", icon: "S̶", kind: "toggle", size: "icon" },
+            { id: "home.font.subscript", label: "Subscript", ariaLabel: "Subscript", icon: "x₂", kind: "toggle", size: "icon" },
+            { id: "home.font.superscript", label: "Superscript", ariaLabel: "Superscript", icon: "x²", kind: "toggle", size: "icon" },
             { id: "home.font.borders", label: "Borders", ariaLabel: "Borders", icon: "▦", kind: "dropdown", size: "icon" },
             { id: "home.font.fillColor", label: "Fill", ariaLabel: "Fill Color", icon: "🪣", kind: "dropdown", size: "icon" },
             { id: "home.font.fontColor", label: "Color", ariaLabel: "Font Color", icon: "🎨", kind: "dropdown", size: "icon" },
+            { id: "home.font.clearFormatting", label: "Clear", ariaLabel: "Clear Formatting", icon: "🧼", kind: "dropdown", size: "icon" },
           ],
         },
         {
@@ -193,6 +206,7 @@ export const defaultRibbonSchema: RibbonSchema = {
             { id: "home.number.comma", label: "Comma", ariaLabel: "Comma Style", icon: ",", size: "icon" },
             { id: "home.number.increaseDecimal", label: "Inc Decimal", ariaLabel: "Increase Decimal", icon: ".0→", size: "icon" },
             { id: "home.number.decreaseDecimal", label: "Dec Decimal", ariaLabel: "Decrease Decimal", icon: "←.0", size: "icon" },
+            { id: "home.number.moreFormats", label: "More", ariaLabel: "More Number Formats", icon: "⋯", kind: "dropdown", size: "icon" },
           ],
         },
         {
@@ -501,6 +515,8 @@ export const defaultRibbonSchema: RibbonSchema = {
             { id: "data.outline.group", label: "Group", ariaLabel: "Group", icon: "➕", kind: "dropdown" },
             { id: "data.outline.ungroup", label: "Ungroup", ariaLabel: "Ungroup", icon: "➖", kind: "dropdown" },
             { id: "data.outline.subtotal", label: "Subtotal", ariaLabel: "Subtotal", icon: "Σ", kind: "dropdown" },
+            { id: "data.outline.showDetail", label: "Show Detail", ariaLabel: "Show Detail", icon: "＋" },
+            { id: "data.outline.hideDetail", label: "Hide Detail", ariaLabel: "Hide Detail", icon: "−" },
           ],
         },
       ],
@@ -560,6 +576,15 @@ export const defaultRibbonSchema: RibbonSchema = {
           buttons: [
             { id: "review.language.translate", label: "Translate", ariaLabel: "Translate", icon: "🌐", kind: "dropdown" },
             { id: "review.language.language", label: "Language", ariaLabel: "Language", icon: "🈯", kind: "dropdown" },
+          ],
+        },
+        {
+          id: "review.changes",
+          label: "Changes",
+          buttons: [
+            { id: "review.changes.trackChanges", label: "Track Changes", ariaLabel: "Track Changes", icon: "📝", kind: "dropdown", size: "large" },
+            { id: "review.changes.shareWorkbook", label: "Share Workbook", ariaLabel: "Share Workbook", icon: "👥", kind: "dropdown" },
+            { id: "review.changes.protectShareWorkbook", label: "Protect and Share Workbook", ariaLabel: "Protect and Share Workbook", icon: "🔒", kind: "dropdown" },
           ],
         },
       ],
@@ -689,4 +714,3 @@ export const defaultRibbonSchema: RibbonSchema = {
     },
   ],
 };
-

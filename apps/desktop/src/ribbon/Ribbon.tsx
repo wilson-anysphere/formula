@@ -28,12 +28,24 @@ export interface RibbonProps {
 
 export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: RibbonProps) {
   const tabs = schema.tabs;
-  const firstTabId = tabs[0]?.id ?? "home";
+  const defaultTabId = React.useMemo(() => {
+    if (initialTabId && tabs.some((tab) => tab.id === initialTabId)) {
+      return initialTabId;
+    }
 
-  const [activeTabId, setActiveTabId] = React.useState<string>(initialTabId ?? firstTabId);
+    return tabs.find((tab) => tab.id === "home")?.id ?? tabs[0]?.id ?? "home";
+  }, [initialTabId, tabs]);
+
+  const [activeTabId, setActiveTabId] = React.useState<string>(defaultTabId);
   const [pressedById, setPressedById] = React.useState<Record<string, boolean>>(() => computeInitialPressed(schema));
 
   const tabButtonRefs = React.useRef<Record<string, HTMLButtonElement | null>>({});
+
+  React.useEffect(() => {
+    if (!tabs.some((tab) => tab.id === activeTabId)) {
+      setActiveTabId(defaultTabId);
+    }
+  }, [activeTabId, defaultTabId, tabs]);
 
   const activateButton = React.useCallback(
     (button: RibbonButtonDefinition) => {
