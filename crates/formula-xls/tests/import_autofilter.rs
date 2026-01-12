@@ -21,15 +21,19 @@ fn import_fixture_without_biff(bytes: &[u8]) -> formula_xls::XlsImportResult {
 }
 
 fn assert_parseable(expr: &str) {
-    parse_formula(&format!("={expr}"), ParseOptions::default())
-        .unwrap_or_else(|e| panic!("expected expression to be parseable, expr={expr:?}, err={e:?}"));
+    parse_formula(&format!("={expr}"), ParseOptions::default()).unwrap_or_else(|e| {
+        panic!("expected expression to be parseable, expr={expr:?}, err={e:?}")
+    });
 }
 
 #[test]
 fn imports_autofilter_range_from_filterdatabase_defined_name() {
     let bytes = xls_fixture_builder::build_defined_names_builtins_fixture_xls();
     let result = import_fixture(&bytes);
-    let sheet = result.workbook.sheet_by_name("Sheet1").expect("Sheet1 missing");
+    let sheet = result
+        .workbook
+        .sheet_by_name("Sheet1")
+        .expect("Sheet1 missing");
 
     let auto_filter = sheet
         .auto_filter
@@ -50,7 +54,10 @@ fn imports_autofilter_fixture_range_and_empty_state() {
     let bytes = xls_fixture_builder::build_autofilter_fixture_xls();
     let result = import_fixture(&bytes);
 
-    let sheet = result.workbook.sheet_by_name("Filter").expect("Filter missing");
+    let sheet = result
+        .workbook
+        .sheet_by_name("Filter")
+        .expect("Filter missing");
     let auto_filter = sheet.auto_filter.as_ref().expect("auto_filter missing");
 
     assert_eq!(auto_filter.range, Range::from_a1("A1:C5").unwrap());
@@ -70,7 +77,10 @@ fn imports_autofilter_range_from_filterdatabase_defined_name_without_biff() {
     let bytes = xls_fixture_builder::build_autofilter_fixture_xls();
     let result = import_fixture_without_biff(&bytes);
 
-    let sheet = result.workbook.sheet_by_name("Filter").expect("Filter missing");
+    let sheet = result
+        .workbook
+        .sheet_by_name("Filter")
+        .expect("Filter missing");
 
     let auto_filter = sheet.auto_filter.as_ref().expect("auto_filter missing");
     assert_eq!(auto_filter.range, Range::from_a1("A1:C5").unwrap());
@@ -177,4 +187,33 @@ fn imports_autofilter_range_from_filterdatabase_alias_defined_name_without_biff(
     assert!(af.filter_columns.is_empty());
     assert!(af.sort_state.is_none());
     assert!(af.raw_xml.is_empty());
+}
+
+#[test]
+fn recovers_missing_autofilter_ranges_when_calamine_import_is_partial() {
+    let bytes = xls_fixture_builder::build_autofilter_mixed_calamine_and_builtin_fixture_xls();
+    let result = import_fixture_without_biff(&bytes);
+
+    let calamine_sheet = result
+        .workbook
+        .sheet_by_name("Calamine")
+        .expect("Calamine sheet missing");
+    let builtin_sheet = result
+        .workbook
+        .sheet_by_name("Builtin")
+        .expect("Builtin sheet missing");
+
+    let calamine_af = calamine_sheet
+        .auto_filter
+        .as_ref()
+        .expect("expected Calamine.auto_filter to be set");
+    assert_eq!(calamine_af.range, Range::from_a1("A1:C5").unwrap());
+
+    let builtin_af = builtin_sheet.auto_filter.as_ref().unwrap_or_else(|| {
+        panic!(
+            "expected Builtin.auto_filter to be set; defined_names={:?}; warnings={:?}",
+            result.workbook.defined_names, result.warnings
+        )
+    });
+    assert_eq!(builtin_af.range, Range::from_a1("A1:B3").unwrap());
 }

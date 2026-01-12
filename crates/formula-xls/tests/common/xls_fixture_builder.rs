@@ -650,7 +650,8 @@ pub fn build_note_comment_split_across_continues_fixture_xls() -> Vec<u8> {
 /// (`fHighByte=1`). This ensures our TXO parser respects the per-fragment option flags byte at the
 /// start of each continued-string fragment.
 pub fn build_note_comment_split_across_continues_mixed_encoding_fixture_xls() -> Vec<u8> {
-    let workbook_stream = build_note_comment_split_across_continues_mixed_encoding_workbook_stream();
+    let workbook_stream =
+        build_note_comment_split_across_continues_mixed_encoding_workbook_stream();
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -690,7 +691,8 @@ pub fn build_note_comment_split_across_continues_codepage_932_fixture_xls() -> V
 /// The fixture splits a 3-byte UTF-8 character (`"€"` = `0xE2 0x82 0xAC`) across separate CONTINUE
 /// fragments to ensure we buffer/decode compressed bytes across record boundaries.
 pub fn build_note_comment_split_across_continues_codepage_65001_fixture_xls() -> Vec<u8> {
-    let workbook_stream = build_note_comment_split_across_continues_codepage_65001_workbook_stream();
+    let workbook_stream =
+        build_note_comment_split_across_continues_codepage_65001_workbook_stream();
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -1432,6 +1434,29 @@ pub fn build_autofilter_calamine_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing two sheets:
+/// - `Calamine`: `_xlnm._FilterDatabase` stored as a *regular* workbook-scoped NAME (so calamine
+///   surfaces it via `Reader::defined_names()`), and
+/// - `Builtin`: `_xlnm._FilterDatabase` stored as a *built-in* sheet-scoped NAME (which calamine
+///   may omit or mis-decode).
+///
+/// This is used to validate that, when BIFF workbook-stream parsing is unavailable, we can still
+/// recover *missing* AutoFilter ranges from the workbook stream even if calamine surfaces some
+/// FilterDatabase names.
+pub fn build_autofilter_mixed_calamine_and_builtin_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_autofilter_mixed_calamine_and_builtin_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture that exercises rich style import (FONT/XF/PALETTE).
 ///
 /// The fixture contains a single sheet named `Styles` with a value cell (`A1`) that references
@@ -1519,7 +1544,11 @@ fn build_autofilter_workbook_scope_externsheet_workbook_stream() -> Vec<u8> {
     let boundsheet_offset_pos = boundsheet_start + 4;
 
     // Minimal EXTERNSHEET table with a single internal sheet entry.
-    push_record(&mut globals, RECORD_EXTERNSHEET, &externsheet_record(&[(0, 0)]));
+    push_record(
+        &mut globals,
+        RECORD_EXTERNSHEET,
+        &externsheet_record(&[(0, 0)]),
+    );
 
     // Workbook-scoped _FilterDatabase name: Sheet0!$A$1:$C$5 (hidden).
     let filter_db_rgce = ptg_area3d(0, 0, 4, 0, 2);
@@ -1631,8 +1660,109 @@ fn build_autofilter_calamine_filterdatabase_alias_sheet_stream(xf_general: u16) 
     push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
 
     push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
     // Ensure the sheet has at least one cell so calamine reports a non-empty range.
     push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_general, 0.0));
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn build_autofilter_mixed_calamine_and_builtin_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // XF table (style XFs + one cell XF).
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+    let xf_cell = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Two worksheets.
+    let boundsheet1_start = globals.len();
+    let mut boundsheet1 = Vec::<u8>::new();
+    boundsheet1.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet1.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet1, "Calamine");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet1);
+    let boundsheet1_offset_pos = boundsheet1_start + 4;
+
+    let boundsheet2_start = globals.len();
+    let mut boundsheet2 = Vec::<u8>::new();
+    boundsheet2.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet2.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet2, "Builtin");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet2);
+    let boundsheet2_offset_pos = boundsheet2_start + 4;
+
+    // External reference tables so calamine can decode 3D references in the NAME formula stream.
+    push_record(&mut globals, RECORD_SUPBOOK, &supbook_internal(2));
+    push_record(
+        &mut globals,
+        RECORD_EXTERNSHEET,
+        &externsheet_record(&[(0, 0), (1, 1)]),
+    );
+
+    // Workbook-scoped string name `_xlnm._FilterDatabase` referencing Calamine!$A$1:$C$5.
+    let calamine_rgce = ptg_area3d(0, 0, 4, 0, 2);
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &name_record(XLNM_FILTER_DATABASE, 0, false, None, &calamine_rgce),
+    );
+
+    // Built-in `_FilterDatabase` name scoped to the second sheet (itab=2): Builtin!$A$1:$B$3.
+    let builtin_rgce = ptg_area(0, 2, 0, 1);
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &builtin_name_record(true, 2, 0x0D, &builtin_rgce),
+    );
+
+    push_record(&mut globals, RECORD_EOF, &[]);
+
+    // -- Sheet substreams -------------------------------------------------------
+    let sheet1_offset = globals.len();
+    let sheet1 = build_autofilter_sheet_stream_with_dimensions(xf_cell, 5, 3); // A1:C5
+    let sheet2_offset = sheet1_offset + sheet1.len();
+    let sheet2 = build_autofilter_sheet_stream_with_dimensions(xf_cell, 3, 2); // A1:B3
+
+    globals[boundsheet1_offset_pos..boundsheet1_offset_pos + 4]
+        .copy_from_slice(&(sheet1_offset as u32).to_le_bytes());
+    globals[boundsheet2_offset_pos..boundsheet2_offset_pos + 4]
+        .copy_from_slice(&(sheet2_offset as u32).to_le_bytes());
+
+    globals.extend_from_slice(&sheet1);
+    globals.extend_from_slice(&sheet2);
+    globals
+}
+
+fn build_autofilter_sheet_stream_with_dimensions(
+    xf_cell: u16,
+    last_row_plus1: u32,
+    last_col_plus1: u16,
+) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, last_row_plus1) cols [0, last_col_plus1)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&last_row_plus1.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&last_col_plus1.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Provide at least one cell so calamine returns a non-empty range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
 
     push_record(&mut sheet, RECORD_EOF, &[]);
     sheet
@@ -1857,7 +1987,11 @@ fn build_note_comment_note_obj_id_swapped_workbook_stream() -> Vec<u8> {
     )
 }
 
-fn build_single_sheet_workbook_stream(sheet_name: &str, sheet_stream: &[u8], codepage: u16) -> Vec<u8> {
+fn build_single_sheet_workbook_stream(
+    sheet_name: &str,
+    sheet_stream: &[u8],
+    codepage: u16,
+) -> Vec<u8> {
     let mut globals = Vec::<u8>::new();
 
     push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
@@ -1939,7 +2073,12 @@ fn build_note_comment_sheet_stream(include_merged_region: bool) -> Vec<u8> {
     const TEXT: &str = "Hello from note";
 
     let segments: [&[u8]; 1] = [TEXT.as_bytes()];
-    build_note_comment_sheet_stream_with_compressed_txo(include_merged_region, OBJECT_ID, AUTHOR, &segments)
+    build_note_comment_sheet_stream_with_compressed_txo(
+        include_merged_region,
+        OBJECT_ID,
+        AUTHOR,
+        &segments,
+    )
 }
 
 fn build_note_comment_biff5_sheet_stream() -> Vec<u8> {
@@ -2504,7 +2643,11 @@ fn build_note_comment_note_obj_id_swapped_sheet_stream() -> Vec<u8> {
             AUTHOR,
         ),
     );
-    push_record(&mut sheet, RECORD_OBJ, &obj_record_with_ftcmo(OBJ_ID_IN_OBJ_TCO));
+    push_record(
+        &mut sheet,
+        RECORD_OBJ,
+        &obj_record_with_ftcmo(OBJ_ID_IN_OBJ_TCO),
+    );
     push_txo_logical_record(&mut sheet, TEXT);
 
     push_record(&mut sheet, RECORD_EOF, &[]);
@@ -2749,10 +2892,14 @@ fn build_rich_styles_workbook_stream() -> Vec<u8> {
     push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS)); // BOF: workbook globals
     push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes()); // CODEPAGE: Windows-1252
     push_record(&mut globals, RECORD_WINDOW1, &window1()); // WINDOW1
-    // Custom palette: indices start at 8.
-    // - 8 => red
-    // - 9 => green
-    push_record(&mut globals, RECORD_PALETTE, &palette(&[(255, 0, 0), (0, 255, 0)]));
+                                                           // Custom palette: indices start at 8.
+                                                           // - 8 => red
+                                                           // - 9 => green
+    push_record(
+        &mut globals,
+        RECORD_PALETTE,
+        &palette(&[(255, 0, 0), (0, 255, 0)]),
+    );
 
     // Font table: default + styled.
     push_record(&mut globals, RECORD_FONT, &font("Arial"));
@@ -2874,7 +3021,11 @@ fn build_formula_sheet_name_truncation_workbook_stream() -> Vec<u8> {
 
     // External reference tables used by 3D formula tokens.
     push_record(&mut globals, RECORD_SUPBOOK, &supbook_internal(2));
-    push_record(&mut globals, RECORD_EXTERNSHEET, &externsheet_record(&[(0, 0)]));
+    push_record(
+        &mut globals,
+        RECORD_EXTERNSHEET,
+        &externsheet_record(&[(0, 0)]),
+    );
 
     push_record(&mut globals, RECORD_EOF, &[]);
 
@@ -3584,7 +3735,11 @@ fn build_defined_names_external_workbook_refs_workbook_stream() -> Vec<u8> {
 
     // External names (EXTERNNAME) for PtgNameX references. These are attached to the preceding
     // SUPBOOK (the external workbook).
-    push_record(&mut globals, RECORD_EXTERNNAME, &externname_record("ExtDefined"));
+    push_record(
+        &mut globals,
+        RECORD_EXTERNNAME,
+        &externname_record("ExtDefined"),
+    );
     push_record(&mut globals, RECORD_EXTERNNAME, &externname_record("MyUdf"));
 
     // Additional external SUPBOOK without a corresponding EXTERNSHEET entry. Some writers appear to
@@ -3623,7 +3778,12 @@ fn build_defined_names_external_workbook_refs_workbook_stream() -> Vec<u8> {
     );
 
     // User-defined function call via PtgNameX + PtgFuncVar(0x00FF): should render as `MyUdf(1)`.
-    let udf_rgce = [vec![0x1E, 0x01, 0x00], ptg_namex(0, 2), vec![0x22, 0x02, 0xFF, 0x00]].concat();
+    let udf_rgce = [
+        vec![0x1E, 0x01, 0x00],
+        ptg_namex(0, 2),
+        vec![0x22, 0x02, 0xFF, 0x00],
+    ]
+    .concat();
     push_record(
         &mut globals,
         RECORD_NAME,
@@ -3693,7 +3853,11 @@ fn build_defined_name_calamine_workbook_stream_with_sheet_name(sheet_name: &str)
     push_record(&mut globals, RECORD_SUPBOOK, &supbook);
 
     // Minimal EXTERNSHEET table with a single internal sheet entry.
-    push_record(&mut globals, RECORD_EXTERNSHEET, &externsheet_record(&[(0, 0)]));
+    push_record(
+        &mut globals,
+        RECORD_EXTERNSHEET,
+        &externsheet_record(&[(0, 0)]),
+    );
 
     // One workbook-scoped defined name: TestName -> <sheet_name>!$A$1:$A$1.
     let rgce = ptg_area3d(0, 0, 0, 0, 0);
@@ -3754,7 +3918,11 @@ fn build_defined_name_sheet_name_sanitization_calamine_workbook_stream() -> Vec<
     push_record(&mut globals, RECORD_SUPBOOK, &supbook);
 
     // Minimal EXTERNSHEET table with a single internal sheet entry.
-    push_record(&mut globals, RECORD_EXTERNSHEET, &externsheet_record(&[(0, 0)]));
+    push_record(
+        &mut globals,
+        RECORD_EXTERNSHEET,
+        &externsheet_record(&[(0, 0)]),
+    );
 
     // Workbook-scoped defined name: BadRef -> Bad:Name!$A$1:$A$1
     let rgce = ptg_area3d(0, 0, 0, 0, 0);
@@ -4015,7 +4183,11 @@ fn build_print_settings_unicode_sheet_name_workbook_stream() -> Vec<u8> {
     let boundsheet_offset_pos = boundsheet_start + 4;
 
     // Minimal EXTERNSHEET table with one internal sheet entry so we can encode 3D references.
-    push_record(&mut globals, RECORD_EXTERNSHEET, &externsheet_record(&[(0, 0)]));
+    push_record(
+        &mut globals,
+        RECORD_EXTERNSHEET,
+        &externsheet_record(&[(0, 0)]),
+    );
 
     // Print_Area on the sheet: 'Ünicode Name'!$A$1:$A$2,'Ünicode Name'!$C$1:$C$2 (hidden).
     let print_area_rgce = [
@@ -4060,7 +4232,11 @@ fn build_empty_sheet_stream(xf_general: u16) -> Vec<u8> {
     push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
 
     // A1: a single General cell so calamine populates a range for the sheet.
-    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_general, 0.0));
+    push_record(
+        &mut sheet,
+        RECORD_NUMBER,
+        &number_cell(0, 0, xf_general, 0.0),
+    );
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
     sheet
 }
@@ -4147,10 +4323,7 @@ fn name_record(
         .expect("defined name too long for u8 length");
     out.push(cch);
 
-    let cce: u16 = rgce
-        .len()
-        .try_into()
-        .expect("rgce too long for u16 length");
+    let cce: u16 = rgce.len().try_into().expect("rgce too long for u16 length");
     out.extend_from_slice(&cce.to_le_bytes());
     out.extend_from_slice(&0u16.to_le_bytes()); // ixals
     out.extend_from_slice(&itab.to_le_bytes());
@@ -4198,10 +4371,7 @@ fn name_record_calamine_compat(name: &str, rgce: &[u8]) -> Vec<u8> {
     }
     let cch: u8 = cch.try_into().expect("defined name too long for u8 length");
     out.push(cch);
-    let cce: u16 = rgce
-        .len()
-        .try_into()
-        .expect("rgce too long for u16 length");
+    let cce: u16 = rgce.len().try_into().expect("rgce too long for u16 length");
     out.extend_from_slice(&cce.to_le_bytes());
     out.extend_from_slice(&0u16.to_le_bytes()); // ixals
     out.extend_from_slice(&0u16.to_le_bytes()); // itab (0 = workbook scoped)
@@ -4249,10 +4419,7 @@ fn continued_name_record_fragments(
         .expect("defined name too long for u8 length");
     header.push(cch);
 
-    let cce: u16 = rgce
-        .len()
-        .try_into()
-        .expect("rgce too long for u16 length");
+    let cce: u16 = rgce.len().try_into().expect("rgce too long for u16 length");
     header.extend_from_slice(&cce.to_le_bytes());
     header.extend_from_slice(&0u16.to_le_bytes()); // ixals
     header.extend_from_slice(&itab.to_le_bytes());
@@ -4458,7 +4625,11 @@ fn build_formula_sheet_name_sanitization_workbook_stream() -> Vec<u8> {
     // - SUPBOOK: one internal workbook entry (marker name = 0x01)
     // - EXTERNSHEET: one mapping for `Bad:Name` (sheet index 0)
     push_record(&mut globals, RECORD_SUPBOOK, &supbook_internal(3));
-    push_record(&mut globals, RECORD_EXTERNSHEET, &externsheet_record(&[(0, 0)]));
+    push_record(
+        &mut globals,
+        RECORD_EXTERNSHEET,
+        &externsheet_record(&[(0, 0)]),
+    );
 
     push_record(&mut globals, RECORD_EOF, &[]);
 
@@ -4777,7 +4948,11 @@ fn build_simple_ref3d_formula_sheet_stream(xf_cell: u16) -> Vec<u8> {
 
     // A1: FORMULA record referencing the first sheet's A1 (ixti=0, row=0, col=0).
     let rgce = ptg_ref3d(0, 0, 0);
-    push_record(&mut sheet, RECORD_FORMULA, &formula_cell(0, 0, xf_cell, 0.0, &rgce));
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(0, 0, xf_cell, 0.0, &rgce),
+    );
 
     push_record(&mut sheet, RECORD_EOF, &[]);
     sheet
@@ -4825,9 +5000,9 @@ fn build_protection_sheet_stream() -> Vec<u8> {
     // Worksheet protection with a legacy password hash.
     push_record(&mut sheet, RECORD_PROTECT, &1u16.to_le_bytes());
     push_record(&mut sheet, RECORD_PASSWORD, &0xCBEBu16.to_le_bytes()); // "test" hash
-    // Allow editing objects and scenarios while protection is enabled.
-    // This verifies we correctly map BIFF's "is protected" flags to our model's "is allowed"
-    // booleans.
+                                                                        // Allow editing objects and scenarios while protection is enabled.
+                                                                        // This verifies we correctly map BIFF's "is protected" flags to our model's "is allowed"
+                                                                        // booleans.
     push_record(&mut sheet, RECORD_OBJPROTECT, &0u16.to_le_bytes());
     push_record(&mut sheet, RECORD_SCENPROTECT, &0u16.to_le_bytes());
 
@@ -4965,7 +5140,15 @@ pub fn build_unc_file_hyperlink_fixture_xls() -> Vec<u8> {
 pub fn build_unicode_file_hyperlink_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_hyperlink_workbook_stream(
         "Unicode",
-        hlink_file_moniker(0, 0, 0, 0, r"C:\foo\日本.txt", "Unicode file", "Unicode tooltip"),
+        hlink_file_moniker(
+            0,
+            0,
+            0,
+            0,
+            r"C:\foo\日本.txt",
+            "Unicode file",
+            "Unicode tooltip",
+        ),
     );
 
     let cursor = Cursor::new(Vec::new());
@@ -5402,12 +5585,14 @@ fn hlink_external_url_with_location(
 
     // URL moniker CLSID: 79EAC9E0-BAF9-11CE-8C82-00AA004BA90B (COM GUID little-endian fields).
     const CLSID_URL_MONIKER: [u8; 16] = [
-        0xE0, 0xC9, 0xEA, 0x79, 0xF9, 0xBA, 0xCE, 0x11, 0x8C, 0x82, 0x00, 0xAA, 0x00, 0x4B,
-        0xA9, 0x0B,
+        0xE0, 0xC9, 0xEA, 0x79, 0xF9, 0xBA, 0xCE, 0x11, 0x8C, 0x82, 0x00, 0xAA, 0x00, 0x4B, 0xA9,
+        0x0B,
     ];
 
-    let link_opts =
-        LINK_OPTS_HAS_MONIKER | LINK_OPTS_HAS_LOCATION | LINK_OPTS_HAS_DISPLAY | LINK_OPTS_HAS_TOOLTIP;
+    let link_opts = LINK_OPTS_HAS_MONIKER
+        | LINK_OPTS_HAS_LOCATION
+        | LINK_OPTS_HAS_DISPLAY
+        | LINK_OPTS_HAS_TOOLTIP;
 
     let mut out = Vec::<u8>::new();
     out.extend_from_slice(&rw_first.to_le_bytes());
@@ -5456,8 +5641,8 @@ fn hlink_file_moniker(
 
     // File moniker CLSID: 00000303-0000-0000-C000-000000000046 (COM GUID little-endian fields).
     const CLSID_FILE_MONIKER: [u8; 16] = [
-        0x03, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x46,
+        0x03, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
     ];
 
     let link_opts = LINK_OPTS_HAS_MONIKER | LINK_OPTS_HAS_DISPLAY | LINK_OPTS_HAS_TOOLTIP;
@@ -5485,7 +5670,7 @@ fn hlink_file_moniker(
     // endServer + version/reserved.
     out.extend_from_slice(&0u16.to_le_bytes());
     out.extend_from_slice(&0u16.to_le_bytes());
- 
+
     // Unicode path (UTF-16LE) including a terminating NUL.
     let mut u16s: Vec<u16> = path.encode_utf16().collect();
     u16s.push(0);
@@ -5517,12 +5702,14 @@ fn hlink_file_moniker_with_location(
 
     // File moniker CLSID: 00000303-0000-0000-C000-000000000046 (COM GUID little-endian fields).
     const CLSID_FILE_MONIKER: [u8; 16] = [
-        0x03, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x46,
+        0x03, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
     ];
 
-    let link_opts =
-        LINK_OPTS_HAS_MONIKER | LINK_OPTS_HAS_LOCATION | LINK_OPTS_HAS_DISPLAY | LINK_OPTS_HAS_TOOLTIP;
+    let link_opts = LINK_OPTS_HAS_MONIKER
+        | LINK_OPTS_HAS_LOCATION
+        | LINK_OPTS_HAS_DISPLAY
+        | LINK_OPTS_HAS_TOOLTIP;
 
     let mut out = Vec::<u8>::new();
     out.extend_from_slice(&rw_first.to_le_bytes());
@@ -6272,7 +6459,11 @@ fn build_autofilter_workbook_stream() -> Vec<u8> {
     push_record(&mut sheet, RECORD_WINDOW2, &window2());
 
     // A1: a single General cell so calamine populates a range for the sheet.
-    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_general, 1.0));
+    push_record(
+        &mut sheet,
+        RECORD_NUMBER,
+        &number_cell(0, 0, xf_general, 1.0),
+    );
 
     // AUTOFILTERINFO: cEntries = 3 (A..C).
     push_record(&mut sheet, RECORD_AUTOFILTERINFO, &3u16.to_le_bytes());

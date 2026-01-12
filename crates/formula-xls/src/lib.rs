@@ -34,8 +34,8 @@ use calamine::{Data, Reader, Sheet, SheetType, SheetVisible, Xls};
 use formula_model::{
     normalize_formula_text, CellRef, CellValue, ColRange, Comment, CommentAuthor, CommentKind,
     DefinedNameScope, ErrorValue, HyperlinkTarget, PrintTitles, Range, RowRange, SheetAutoFilter,
-    SheetVisibility, Style, TabColor, Workbook, XLNM_FILTER_DATABASE, EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
-    EXCEL_MAX_SHEET_NAME_LEN,
+    SheetVisibility, Style, TabColor, Workbook, EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
+    EXCEL_MAX_SHEET_NAME_LEN, XLNM_FILTER_DATABASE,
 };
 use thiserror::Error;
 
@@ -199,7 +199,9 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
 ///
 /// This is intended for testing the importer's best-effort fallback paths.
 #[doc(hidden)]
-pub fn import_xls_path_without_biff(path: impl AsRef<Path>) -> Result<XlsImportResult, ImportError> {
+pub fn import_xls_path_without_biff(
+    path: impl AsRef<Path>,
+) -> Result<XlsImportResult, ImportError> {
     import_xls_path_with_biff_reader(path.as_ref(), |_| Err("BIFF parsing disabled".to_string()))
 }
 
@@ -720,7 +722,8 @@ fn import_xls_path_with_biff_reader(
 
         // Best-effort fallback when calamine does not surface any merged-cell ranges.
         if merge_ranges.is_empty() {
-            if let (Some(workbook_stream), Some(biff_idx)) = (workbook_stream.as_deref(), biff_idx) {
+            if let (Some(workbook_stream), Some(biff_idx)) = (workbook_stream.as_deref(), biff_idx)
+            {
                 if let Some(sheet_info) = biff_sheets.as_ref().and_then(|s| s.get(biff_idx)) {
                     if sheet_info.offset >= workbook_stream.len() {
                         warnings.push(ImportWarning::new(format!(
@@ -822,10 +825,14 @@ fn import_xls_path_with_biff_reader(
                             // entire merged region. When BIFF stores the hyperlink as a single-cell
                             // anchor inside a merge, expand it so `Worksheet::hyperlink_at` works
                             // for any cell inside the merged region.
-                            if !sheet.merged_regions.is_empty() && hyperlink_start < sheet.hyperlinks.len() {
+                            if !sheet.merged_regions.is_empty()
+                                && hyperlink_start < sheet.hyperlinks.len()
+                            {
                                 for link in sheet.hyperlinks[hyperlink_start..].iter_mut() {
                                     if link.range.is_single_cell() {
-                                        if let Some(merged) = sheet.merged_regions.containing_range(link.range.start) {
+                                        if let Some(merged) =
+                                            sheet.merged_regions.containing_range(link.range.start)
+                                        {
                                             link.range = merged;
                                         }
                                     }
@@ -1265,21 +1272,23 @@ fn import_xls_path_with_biff_reader(
                 for name in parsed.names.drain(..) {
                     let (scope, xlsx_local_sheet_id) = match name.scope_sheet {
                         None => (DefinedNameScope::Workbook, None),
-                        Some(biff_idx) => match sheet_ids_by_biff_idx.get(biff_idx).copied().flatten() {
-                            Some(sheet_id) => (
-                                DefinedNameScope::Sheet(sheet_id),
-                                local_sheet_ids_by_biff_idx.get(biff_idx).copied().flatten(),
-                            ),
-                            None => {
-                                warnings.push(ImportWarning::new(format!(
+                        Some(biff_idx) => {
+                            match sheet_ids_by_biff_idx.get(biff_idx).copied().flatten() {
+                                Some(sheet_id) => (
+                                    DefinedNameScope::Sheet(sheet_id),
+                                    local_sheet_ids_by_biff_idx.get(biff_idx).copied().flatten(),
+                                ),
+                                None => {
+                                    warnings.push(ImportWarning::new(format!(
                                     "defined name `{}` has out-of-range sheet scope itab={} (sheet count={}); importing as workbook-scoped",
                                     name.name,
                                     biff_idx.saturating_add(1),
                                     sheet_ids_by_biff_idx.len()
                                 )));
-                                (DefinedNameScope::Workbook, None)
+                                    (DefinedNameScope::Workbook, None)
+                                }
                             }
-                        },
+                        }
                     };
 
                     if let Err(err) = out.create_defined_name(
@@ -1317,10 +1326,7 @@ fn import_xls_path_with_biff_reader(
     for (name, refers_to) in calamine_defined_names {
         let name = normalize_calamine_defined_name_name(&name);
         let refers_to = refers_to.trim();
-        let refers_to = refers_to
-            .strip_prefix('=')
-            .unwrap_or(refers_to)
-            .to_string();
+        let refers_to = refers_to.strip_prefix('=').unwrap_or(refers_to).to_string();
 
         // Defined names can contain sheet references, and those can point at sheet names that were
         // later sanitized during import. Rewrite any sheet-qualified references using the same
@@ -1450,16 +1456,19 @@ fn import_xls_path_with_biff_reader(
     // text. This means AutoFilter ranges stored as `_xlnm._FilterDatabase` can be lost when BIFF
     // workbook-stream parsing is unavailable and we fall back to calamine for defined names.
     //
-    // Best-effort: if calamine surfaced (and we skipped) any invalid defined names, attempt to
-    // recover the AutoFilter range directly from the workbook stream via our BIFF parser.
-    // Try to recover the AutoFilter range directly from the workbook stream when:
+    // Best-effort: attempt to recover the AutoFilter range directly from the workbook stream via
+    // our BIFF parser.
+    //
+    // We do this when:
     // - BIFF parsing was unavailable (`workbook_stream=None`), or
-    // - calamine surfaced invalid/duplicate names (a strong signal that built-in names like
+    // - calamine surfaced invalid/duplicate defined names (a strong signal that built-in names like
     //   `_FilterDatabase` were not imported correctly).
     //
     // This keeps `.xls` AutoFilter import resilient to future calamine behavior changes (e.g. if it
     // stops returning malformed built-in names and instead omits them entirely).
-    if autofilters.is_empty() && (skipped_count > 0 || workbook_stream.is_none()) {
+    let should_recover_autofilter_from_workbook_stream =
+        workbook_stream.is_none() || (autofilters.is_empty() && skipped_count > 0);
+    if should_recover_autofilter_from_workbook_stream {
         let workbook_stream_fallback = if workbook_stream.is_none() {
             match biff::read_workbook_stream_from_xls(path) {
                 Ok(bytes) => Some(bytes),
@@ -1717,7 +1726,10 @@ fn apply_row_col_properties(
         }
     }
 }
-fn apply_outline_properties(sheet: &mut formula_model::Worksheet, props: &biff::SheetRowColProperties) {
+fn apply_outline_properties(
+    sheet: &mut formula_model::Worksheet,
+    props: &biff::SheetRowColProperties,
+) {
     sheet.outline.pr = props.outline_pr;
 
     for (&row, row_props) in &props.rows {
@@ -1882,15 +1894,17 @@ fn infer_sheet_name_from_workbook_scoped_defined_name(
     workbook.sheet_by_name(&inferred).map(|s| s.name.clone())
 }
 
-fn populate_print_settings_from_defined_names(workbook: &mut Workbook, warnings: &mut Vec<ImportWarning>) {
+fn populate_print_settings_from_defined_names(
+    workbook: &mut Workbook,
+    warnings: &mut Vec<ImportWarning>,
+) {
     // We need to snapshot the defined names up-front so we can mutably update print settings while
     // iterating.
     let builtins: Vec<(DefinedNameScope, String, String)> = workbook
         .defined_names
         .iter()
         .filter(|n| {
-            n.name
-                .eq_ignore_ascii_case(formula_model::XLNM_PRINT_AREA)
+            n.name.eq_ignore_ascii_case(formula_model::XLNM_PRINT_AREA)
                 || n.name
                     .eq_ignore_ascii_case(formula_model::XLNM_PRINT_TITLES)
         })
@@ -1902,7 +1916,9 @@ fn populate_print_settings_from_defined_names(workbook: &mut Workbook, warnings:
     for pass in 0u8..=1u8 {
         for (scope, name, refers_to) in &builtins {
             let sheet_name = match (pass, scope) {
-                (0, DefinedNameScope::Sheet(sheet_id)) => workbook.sheet(*sheet_id).map(|s| s.name.clone()),
+                (0, DefinedNameScope::Sheet(sheet_id)) => {
+                    workbook.sheet(*sheet_id).map(|s| s.name.clone())
+                }
                 (1, DefinedNameScope::Workbook) => infer_sheet_name_from_workbook_scoped_defined_name(
                     workbook,
                     name,
@@ -1935,7 +1951,8 @@ fn populate_print_settings_from_defined_names(workbook: &mut Workbook, warnings:
                 {
                     continue;
                 }
-                if let Some(titles) = parse_print_titles_refers_to(&sheet_name, refers_to, warnings) {
+                if let Some(titles) = parse_print_titles_refers_to(&sheet_name, refers_to, warnings)
+                {
                     workbook.set_sheet_print_titles_by_name(&sheet_name, Some(titles));
                 }
             }
@@ -2225,9 +2242,15 @@ fn parse_print_name_range(ref_str: &str) -> Result<ParsedA1Range, String> {
     let end = parse_print_name_endpoint(end)?;
 
     match (start, end) {
-        (ParsedEndpoint::Cell(a), ParsedEndpoint::Cell(b)) => Ok(ParsedA1Range::Cell(Range::new(a, b))),
-        (ParsedEndpoint::Row(a), ParsedEndpoint::Row(b)) => Ok(ParsedA1Range::Row(RowRange { start: a, end: b })),
-        (ParsedEndpoint::Col(a), ParsedEndpoint::Col(b)) => Ok(ParsedA1Range::Col(ColRange { start: a, end: b })),
+        (ParsedEndpoint::Cell(a), ParsedEndpoint::Cell(b)) => {
+            Ok(ParsedA1Range::Cell(Range::new(a, b)))
+        }
+        (ParsedEndpoint::Row(a), ParsedEndpoint::Row(b)) => {
+            Ok(ParsedA1Range::Row(RowRange { start: a, end: b }))
+        }
+        (ParsedEndpoint::Col(a), ParsedEndpoint::Col(b)) => {
+            Ok(ParsedA1Range::Col(ColRange { start: a, end: b }))
+        }
         _ => Err(format!("mismatched range endpoints in {ref_str:?}")),
     }
 }
@@ -2257,9 +2280,8 @@ fn parse_print_name_endpoint(s: &str) -> Result<ParsedEndpoint, String> {
     match (letters.is_empty(), digits.is_empty()) {
         (false, false) => {
             let cell_ref = format!("{letters}{digits}");
-            let cell = CellRef::from_a1(&cell_ref).map_err(|err| {
-                format!("invalid cell reference in endpoint {s:?}: {err}")
-            })?;
+            let cell = CellRef::from_a1(&cell_ref)
+                .map_err(|err| format!("invalid cell reference in endpoint {s:?}: {err}"))?;
             Ok(ParsedEndpoint::Cell(cell))
         }
         (false, true) => {
@@ -2569,7 +2591,8 @@ fn sanitize_biff8_continued_name_records_for_calamine(stream: &[u8]) -> Option<V
                 };
                 let is_builtin = (grbit & NAME_FLAG_BUILTIN) != 0;
                 let cch = stream[data_start + 3] as usize;
-                let cce = u16::from_le_bytes([stream[data_start + 4], stream[data_start + 5]]) as usize;
+                let cce =
+                    u16::from_le_bytes([stream[data_start + 4], stream[data_start + 5]]) as usize;
 
                 let mut needs_patch = false;
 
@@ -2855,7 +2878,10 @@ mod tests {
     fn write_short_unicode_string(out: &mut Vec<u8>, s: &str) {
         // BIFF8 ShortXLUnicodeString: [cch: u8][flags: u8][chars]
         let bytes = s.as_bytes();
-        let len: u8 = bytes.len().try_into().expect("string too long for u8 length");
+        let len: u8 = bytes
+            .len()
+            .try_into()
+            .expect("string too long for u8 length");
         out.push(len);
         out.push(0); // compressed
         out.extend_from_slice(bytes);
@@ -2953,7 +2979,11 @@ mod tests {
         dims.extend_from_slice(&0u16.to_le_bytes());
         push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
         push_record(&mut sheet, RECORD_WINDOW2, &window2());
-        push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_general, 0.0));
+        push_record(
+            &mut sheet,
+            RECORD_NUMBER,
+            &number_cell(0, 0, xf_general, 0.0),
+        );
         push_record(&mut sheet, RECORD_EOF, &[]);
 
         // Patch BoundSheet offset.
