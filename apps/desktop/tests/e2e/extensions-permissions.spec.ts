@@ -360,4 +360,75 @@ test.describe("Extensions permissions UI", () => {
       await page.unroute("http://allowed.example/**").catch(() => {});
     }
   });
+
+  test("revoked permissions persist across reload", async ({ page }) => {
+    const url = "http://allowed.example/";
+    const extensionId = "formula.sample-hello";
+
+    await page.route("http://allowed.example/**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/plain",
+        headers: { "Access-Control-Allow-Origin": "*" },
+        body: "hello",
+      });
+    });
+
+    try {
+      await gotoDesktop(page);
+
+      // Clear any prior grants for this browser context, but do it after boot so reload doesn't re-clear.
+      await page.evaluate(() => {
+        try {
+          localStorage.removeItem("formula.extensionHost.permissions");
+        } catch {
+          // ignore
+        }
+      });
+
+      await page.getByTestId("open-extensions-panel").click();
+      await expect(page.getByTestId("panel-extensions")).toBeVisible();
+
+      await expect(page.getByTestId(`permissions-empty-${extensionId}`)).toBeVisible();
+
+      // Grant permissions (ui.commands + network) by running fetchText once.
+      await page.getByTestId("run-command-with-args-sampleHello.fetchText").click();
+      await expect(page.getByTestId("input-box")).toBeVisible();
+      await page.getByTestId("input-box-field").fill(JSON.stringify([url]));
+      await page.getByTestId("input-box-ok").click();
+
+      await expect(page.getByTestId("extension-permission-prompt")).toBeVisible();
+      await page.getByTestId("extension-permission-allow").click();
+      await expect(page.getByTestId("extension-permission-prompt")).toBeVisible();
+      await page.getByTestId("extension-permission-allow").click();
+      await expect(page.getByTestId("toast-root")).toContainText("Fetched: hello");
+
+      // Revoke only network and ensure it stays revoked after reload.
+      await page.getByTestId(`revoke-permission-${extensionId}-network`).click();
+      await expect(page.getByTestId(`permission-${extensionId}-network`)).toHaveCount(0);
+
+      await page.reload();
+      await waitForDesktopReady(page);
+
+      await page.getByTestId("open-extensions-panel").click();
+      await expect(page.getByTestId("panel-extensions")).toBeVisible();
+
+      await expect(page.getByTestId(`permission-${extensionId}-network`)).toHaveCount(0);
+
+      // Network should prompt again (ui.commands should remain granted and not be re-requested).
+      await page.getByTestId("run-command-with-args-sampleHello.fetchText").click();
+      await expect(page.getByTestId("input-box")).toBeVisible();
+      await page.getByTestId("input-box-field").fill(JSON.stringify([url]));
+      await page.getByTestId("input-box-ok").click();
+
+      await expect(page.getByTestId("extension-permission-prompt")).toBeVisible();
+      await expect(page.getByTestId("extension-permission-ui.commands")).toHaveCount(0);
+      await expect(page.getByTestId("extension-permission-network")).toBeVisible();
+      await page.getByTestId("extension-permission-deny").click();
+      await expect(page.getByTestId("toast-root")).toContainText("Permission denied");
+      await expect(page.getByTestId(`permission-${extensionId}-network`)).toHaveCount(0);
+    } finally {
+      await page.unroute("http://allowed.example/**").catch(() => {});
+    }
+  });
 });
