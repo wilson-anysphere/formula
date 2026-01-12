@@ -244,6 +244,14 @@ export class FormulaBarView {
     return this.model.isEditing;
   }
 
+  commitEdit(): void {
+    this.#commit();
+  }
+
+  cancelEdit(): void {
+    this.#cancel();
+  }
+
   isFormulaEditing(): boolean {
     return this.model.isEditing && this.model.draft.trim().startsWith("=");
   }

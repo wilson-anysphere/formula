@@ -955,15 +955,17 @@ export class SpreadsheetApp {
         this.updateEditState();
         this.applyEdit(this.sheetId, commit.cell, commit.value);
 
-        const next = navigateSelectionByKey(
-          this.selection,
-          commit.reason === "enter" ? "Enter" : "Tab",
-          { shift: commit.shift, primary: false },
-          this.usedRangeProvider(),
-          this.limits
-        );
+        if (commit.reason !== "command") {
+          const next = navigateSelectionByKey(
+            this.selection,
+            commit.reason === "enter" ? "Enter" : "Tab",
+            { shift: commit.shift, primary: false },
+            this.usedRangeProvider(),
+            this.limits
+          );
 
-        if (next) this.selection = next;
+          if (next) this.selection = next;
+        }
         this.ensureActiveCellVisible();
         this.scrollCellIntoView(this.selection.active);
         if (this.sharedGrid) this.syncSharedGridSelectionFromState();
@@ -1807,6 +1809,21 @@ export class SpreadsheetApp {
 
   isEditing(): boolean {
     return this.isCellEditorOpen() || this.isFormulaBarEditing() || this.inlineEditController.isOpen();
+  }
+
+  /**
+   * Commit any in-progress edits (cell editor / formula bar) without moving selection.
+   *
+   * This is intended for "command" entry points like File → Save/New/Open/Close/Quit so:
+   * - unsaved-change prompts see the latest edit
+   * - saves include the latest edit
+   */
+  commitPendingEditsForCommand(): void {
+    if (this.disposed) return;
+    // Commit in-cell edits first; if the formula bar is also editing, its commit should
+    // win as the most explicit user intent.
+    this.editor.commit("command");
+    this.formulaBar?.commitEdit();
   }
 
   onEditStateChange(listener: (isEditing: boolean) => void): () => void {

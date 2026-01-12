@@ -2,7 +2,7 @@ import type { CellCoord } from "../selection/types";
 import type { Rect } from "../selection/renderer";
 import { toggleA1AbsoluteAtCursor } from "@formula/spreadsheet-frontend";
 
-export type EditorCommitReason = "enter" | "tab";
+export type EditorCommitReason = "enter" | "tab" | "command";
 
 export interface EditorCommit {
   cell: CellCoord;
@@ -48,6 +48,21 @@ export class CellEditorOverlay {
 
   isOpen(): boolean {
     return this.editingCell !== null;
+  }
+
+  commit(reason: EditorCommitReason = "enter", shift = false): void {
+    if (!this.editingCell) return;
+    const cell = this.editingCell;
+    const value = this.element.value;
+    this.close();
+    this.callbacks.onCommit({ cell, value, reason, shift });
+  }
+
+  cancel(): void {
+    if (!this.editingCell) return;
+    const cell = this.editingCell;
+    this.close();
+    this.callbacks.onCancel(cell);
   }
 
   open(cell: CellCoord, bounds: Rect, initialValue: string, opts: { cursor?: "end" | "all" } = {}): void {
@@ -134,29 +149,21 @@ export class CellEditorOverlay {
     if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
-      const cell = this.editingCell;
-      this.close();
-      this.callbacks.onCancel(cell);
+      this.cancel();
       return;
     }
 
     if (e.key === "Enter" && !e.altKey) {
       e.preventDefault();
       e.stopPropagation();
-      const cell = this.editingCell;
-      const value = this.element.value;
-      this.close();
-      this.callbacks.onCommit({ cell, value, reason: "enter", shift: e.shiftKey });
+      this.commit("enter", e.shiftKey);
       return;
     }
 
     if (e.key === "Tab") {
       e.preventDefault();
       e.stopPropagation();
-      const cell = this.editingCell;
-      const value = this.element.value;
-      this.close();
-      this.callbacks.onCommit({ cell, value, reason: "tab", shift: e.shiftKey });
+      this.commit("tab", e.shiftKey);
     }
   }
 }

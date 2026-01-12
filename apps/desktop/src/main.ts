@@ -7056,6 +7056,9 @@ function isCollabModeActive(): boolean {
 }
 
 async function confirmDiscardDirtyState(actionLabel: string): Promise<boolean> {
+  // If the user triggers File commands while editing, the document may not yet be dirty
+  // (the edit is still in the UI editor). Commit first so discard prompts are correct.
+  app.commitPendingEditsForCommand();
   const doc = app.getDocument();
   if (!doc.isDirty) return true;
   if (isCollabModeActive()) return true;
@@ -7438,6 +7441,7 @@ async function copyPowerQueryPersistence(fromWorkbookId: string, toWorkbookId: s
 }
 
 async function handleSave(options: { notifyExtensions?: boolean; throwOnCancel?: boolean } = {}): Promise<void> {
+  app.commitPendingEditsForCommand();
   if (!tauriBackend) return;
   if (!activeWorkbook) return;
   if (!workbookSync) return;
@@ -7460,6 +7464,7 @@ async function handleSave(options: { notifyExtensions?: boolean; throwOnCancel?:
 async function handleSaveAs(
   options: { previousPanelWorkbookId?: string; notifyExtensions?: boolean; throwOnCancel?: boolean } = {},
 ): Promise<void> {
+  app.commitPendingEditsForCommand();
   if (!tauriBackend) return;
   if (!activeWorkbook) return;
 
@@ -7485,6 +7490,7 @@ async function handleSaveAsPath(
   path: string,
   options: { previousPanelWorkbookId?: string; notifyExtensions?: boolean } = {},
 ): Promise<void> {
+  app.commitPendingEditsForCommand();
   if (!tauriBackend) return;
   if (!activeWorkbook) return;
   if (typeof path !== "string" || path.trim() === "") return;
@@ -7639,6 +7645,7 @@ try {
   registerAppQuitHandlers({
     isDirty: () => app.getDocument().isDirty && !isCollabModeActive(),
     runWorkbookBeforeClose: async () => {
+      app.commitPendingEditsForCommand();
       if (!queuedInvoke) return;
       await fireWorkbookBeforeCloseBestEffort({ app, workbookId, invoke: queuedInvoke, drainBackendSync });
     },
@@ -8296,6 +8303,10 @@ try {
     if (closeInFlight) return;
     closeInFlight = true;
     try {
+      // Ensure in-progress cell/formula edits are committed so `doc.isDirty` is accurate
+      // and Workbook_BeforeClose macros see the latest inputs.
+      app.commitPendingEditsForCommand();
+
       // The Rust host runs `Workbook_BeforeClose` when the user clicks the native window close
       // button (and then emits `close-requested` with any macro-driven updates). Other close
       // entry points (tray/menu) are handled entirely in the frontend.
