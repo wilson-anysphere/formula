@@ -777,7 +777,6 @@ export class SpreadsheetApp {
       }
     | null = null;
   private chartContentRefreshScheduled = false;
-  private windowKeyDownListener: ((e: KeyboardEvent) => void) | null = null;
   private clipboardProviderPromise: ReturnType<typeof createClipboardProvider> | null = null;
   private clipboardCopyContext:
     | {
@@ -1539,11 +1538,6 @@ export class SpreadsheetApp {
       );
     }
 
-    if (typeof window !== "undefined") {
-      this.windowKeyDownListener = (e) => this.onWindowKeyDown(e);
-      window.addEventListener("keydown", this.windowKeyDownListener);
-    }
-
     this.resizeObserver = new ResizeObserver(() => this.onResize());
     this.resizeObserver.observe(this.root);
 
@@ -2089,10 +2083,6 @@ export class SpreadsheetApp {
       if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(this.dragAutoScrollRaf);
       else globalThis.clearTimeout(this.dragAutoScrollRaf);
       this.dragAutoScrollRaf = null;
-    }
-    if (this.windowKeyDownListener && typeof window !== "undefined") {
-      window.removeEventListener("keydown", this.windowKeyDownListener);
-      this.windowKeyDownListener = null;
     }
     this.outlineButtons.clear();
     this.chartElements.clear();
@@ -5869,13 +5859,6 @@ export class SpreadsheetApp {
 
   private syncEngineNow(): void {
     (this.engine as unknown as { syncNow?: () => void }).syncNow?.();
-  }
-
-  private onWindowKeyDown(e: KeyboardEvent): void {
-    if (e.defaultPrevented) return;
-    if (this.handleShowFormulasShortcut(e)) return;
-    if (this.handleAuditingShortcut(e)) return;
-    this.handleUndoRedoShortcut(e);
   }
 
   private handleShowFormulasShortcut(e: KeyboardEvent): boolean {
