@@ -16,7 +16,7 @@ const LEGACY_OPENAI_API_KEY_STORAGE_KEY = joinStorageKey([STORAGE_PREFIX, "opena
 const LLM_SETTINGS_PREFIX = joinStorageKey([STORAGE_PREFIX, "llm", ""]);
 const LLM_PROVIDER_STORAGE_KEY = `${LLM_SETTINGS_PREFIX}provider`;
 // Legacy formula-bar tab completion local model settings.
-const AI_COMPLETION_SETTINGS_PREFIX = "formula:" + "aiCompletion:";
+const AI_COMPLETION_SETTINGS_PREFIX = joinStorageKey([STORAGE_PREFIX, "aiCompletion", ""]);
 
 function getLocalStorageOrNull(): Storage | null {
   // Prefer `window.localStorage` when available (jsdom + browser runtimes).
@@ -83,6 +83,7 @@ export function purgeLegacyDesktopLLMSettings(): void {
     // ignore
   }
 
+  // Best-effort: remove every legacy "formula llm" key, including provider + per-provider settings.
   // Best-effort: remove every legacy "formula llm" key, including provider + per-provider settings.
   try {
     const keysToRemove: string[] = [];
