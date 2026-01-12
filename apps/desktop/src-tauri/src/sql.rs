@@ -94,9 +94,8 @@ fn validate_sqlite_db_path(path: &str) -> Result<PathBuf> {
         Err(crate::fs_scope::CanonicalizeInAllowedRootsError::OutsideScope { .. }) => {
             Err(anyhow!(SQLITE_SCOPE_DENIED_ERROR))
         }
-        Err(crate::fs_scope::CanonicalizeInAllowedRootsError::Canonicalize { path, source }) => {
-            Err(anyhow::Error::new(source))
-                .context(format!("canonicalize sqlite path {}", path.display()))
+        Err(crate::fs_scope::CanonicalizeInAllowedRootsError::Canonicalize { source, .. }) => {
+            Err(anyhow::Error::new(source)).context("canonicalize sqlite database path")
         }
     }
 }

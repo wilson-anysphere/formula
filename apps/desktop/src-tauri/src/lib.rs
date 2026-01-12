@@ -19,7 +19,6 @@ pub mod macros;
 pub mod open_file;
 pub mod open_file_ipc;
 pub mod opened_urls;
-pub mod path_scope;
 pub mod persistence;
 #[cfg(any(feature = "desktop", test))]
 mod power_query_validation;

@@ -27,8 +27,7 @@ This document is a “what’s real in the repo” reference for contributors.
   - “Open file” path normalization: `apps/desktop/src-tauri/src/open_file.rs`
   - “Open file” IPC queue/handshake state machine: `apps/desktop/src-tauri/src/open_file_ipc.rs`
   - Filesystem scope helpers:
-    - `apps/desktop/src-tauri/src/path_scope.rs` (`PathScopePolicy`, used by path-taking commands like `open_workbook`)
-    - `apps/desktop/src-tauri/src/fs_scope.rs` (lower-level canonicalization + scope helpers used by some commands)
+    - `apps/desktop/src-tauri/src/fs_scope.rs` (canonicalization + scope enforcement for all path-taking IPC commands)
   - Custom `asset:` protocol handler (COEP/CORP): `apps/desktop/src-tauri/src/asset_protocol.rs`
   - Stable webview origin helper (used for `asset:` CORS hardening): `apps/desktop/src-tauri/src/tauri_origin.rs`
   - Tray: `apps/desktop/src-tauri/src/tray.rs`
@@ -941,7 +940,6 @@ These commands enforce a filesystem scope equivalent to the platform allowlist:
 
 - `$HOME/**`
 - `$DOCUMENT/**`
-- `$DOWNLOADS/**` (if the OS/user has a Downloads dir configured and it exists/canonicalizes successfully; notably on Linux this may be outside `$HOME` via XDG user dirs)
 
 Implementation notes:
 

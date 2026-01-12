@@ -6,12 +6,14 @@ use directories::{BaseDirs, UserDirs};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
+pub(crate) const ACCESS_DENIED_SCOPE: &str =
+    "Access denied: path is outside the allowed filesystem scope";
+
 /// Return the canonicalized filesystem roots that the desktop app is allowed to access.
 ///
 /// This mirrors the desktop filesystem scope policy used for local file access:
 /// - `$HOME/**`
 /// - `$DOCUMENT/**`
-/// - `$DOWNLOADS/**` (if the OS/user has a Downloads dir configured and it exists)
 pub(crate) fn desktop_allowed_roots() -> Result<Vec<PathBuf>> {
     let base_dirs =
         BaseDirs::new().ok_or_else(|| anyhow!("unable to determine home directory"))?;
@@ -20,9 +22,6 @@ pub(crate) fn desktop_allowed_roots() -> Result<Vec<PathBuf>> {
     if let Some(user_dirs) = UserDirs::new() {
         if let Some(documents) = user_dirs.document_dir() {
             roots.push(documents.to_path_buf());
-        }
-        if let Some(downloads) = user_dirs.download_dir() {
-            roots.push(downloads.to_path_buf());
         }
     }
 
@@ -46,13 +45,13 @@ pub(crate) fn path_in_allowed_roots(path: &Path, allowed_roots: &[PathBuf]) -> b
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum CanonicalizeInAllowedRootsError {
-    #[error("failed to canonicalize '{path}'")]
+    #[error("failed to canonicalize path: {source}")]
     Canonicalize {
         path: PathBuf,
         #[source]
         source: std::io::Error,
     },
-    #[error("path '{path}' is outside the allowed filesystem scope")]
+    #[error("{ACCESS_DENIED_SCOPE}")]
     OutsideScope { path: PathBuf },
 }
 
@@ -88,55 +87,45 @@ pub(crate) fn resolve_save_path_in_allowed_roots(
     allowed_roots: &[PathBuf],
 ) -> Result<PathBuf> {
     let Some(file_name) = path.file_name() else {
-        return Err(anyhow!(
-            "Invalid save path '{}': path must include a file name",
-            path.display()
-        ));
+        return Err(anyhow!("Invalid save path: path must include a file name"));
     };
     if file_name == OsStr::new(".") || file_name == OsStr::new("..") {
-        return Err(anyhow!(
-            "Invalid save path '{}': file name cannot be '.' or '..'",
-            path.display()
-        ));
+        return Err(anyhow!("Invalid save path: file name cannot be '.' or '..'"));
     }
 
-    let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) else {
-        return Err(anyhow!(
-            "Invalid save path '{}': path must include a parent directory",
-            path.display()
-        ));
+    // `Path::parent()` returns an empty path for single-component relative paths ("foo.xlsx").
+    // Canonicalize treats this inconsistently across platforms, so normalize to ".".
+    let parent = match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
     };
 
     let canonical_parent = match canonicalize_in_allowed_roots_with_error(parent, allowed_roots) {
         Ok(parent) => parent,
-        Err(CanonicalizeInAllowedRootsError::OutsideScope { path: canonical_parent }) => {
-            let candidate = canonical_parent.join(Path::new(file_name));
-            return Err(anyhow!(
-                "Refusing to save to '{}' because it is outside the allowed filesystem scope",
-                candidate.display()
-            ));
-        }
-        Err(CanonicalizeInAllowedRootsError::Canonicalize { path, source }) => {
-            return Err(anyhow::Error::new(source))
-                .context(format!("canonicalize {}", path.display()));
+        Err(CanonicalizeInAllowedRootsError::OutsideScope { .. }) => return Err(anyhow!(ACCESS_DENIED_SCOPE)),
+        Err(CanonicalizeInAllowedRootsError::Canonicalize { source, .. }) => {
+            return Err(anyhow::Error::new(source)).context("canonicalize path");
         }
     };
 
     let candidate = canonical_parent.join(Path::new(file_name));
 
-    // If the file already exists, ensure it doesn't resolve (via symlink) outside the scope.
-    if candidate.exists() {
+    // If the destination path already exists, ensure it doesn't resolve (via symlink) outside the
+    // scope.
+    //
+    // We intentionally treat dangling symlinks as existing entries (via `symlink_metadata`) since
+    // writing through a dangling symlink could create a new file outside the allowed scope.
+    if let Ok(meta) = std::fs::symlink_metadata(&candidate) {
         match canonicalize_in_allowed_roots_with_error(&candidate, allowed_roots) {
             Ok(_) => {}
-            Err(CanonicalizeInAllowedRootsError::OutsideScope { path }) => {
-                return Err(anyhow!(
-                    "Refusing to save to '{}' because it is outside the allowed filesystem scope",
-                    path.display()
-                ));
+            Err(CanonicalizeInAllowedRootsError::OutsideScope { .. }) => {
+                return Err(anyhow!(ACCESS_DENIED_SCOPE));
             }
-            Err(CanonicalizeInAllowedRootsError::Canonicalize { path, source }) => {
-                return Err(anyhow::Error::new(source))
-                    .context(format!("canonicalize {}", path.display()));
+            Err(CanonicalizeInAllowedRootsError::Canonicalize { source, .. }) => {
+                if meta.file_type().is_symlink() {
+                    return Err(anyhow!(ACCESS_DENIED_SCOPE));
+                }
+                return Err(anyhow::Error::new(source)).context("canonicalize path");
             }
         }
     }
@@ -152,12 +141,9 @@ pub(crate) fn resolve_save_path_in_allowed_roots(
 pub(crate) fn canonicalize_in_allowed_roots(path: &Path, allowed_roots: &[PathBuf]) -> Result<PathBuf> {
     match canonicalize_in_allowed_roots_with_error(path, allowed_roots) {
         Ok(path) => Ok(path),
-        Err(CanonicalizeInAllowedRootsError::OutsideScope { path }) => Err(anyhow!(
-            "Refusing to access '{}' because it is outside the allowed filesystem scope",
-            path.display()
-        )),
-        Err(CanonicalizeInAllowedRootsError::Canonicalize { path, source }) => {
-            Err(anyhow::Error::new(source)).context(format!("canonicalize {}", path.display()))
+        Err(CanonicalizeInAllowedRootsError::OutsideScope { .. }) => Err(anyhow!(ACCESS_DENIED_SCOPE)),
+        Err(CanonicalizeInAllowedRootsError::Canonicalize { source, .. }) => {
+            Err(anyhow::Error::new(source)).context("canonicalize path")
         }
     }
 }
@@ -266,6 +252,28 @@ mod tests {
 
         let allowed_roots = vec![dunce::canonicalize(&allowed_root).expect("canonicalize root")];
         let err = canonicalize_in_allowed_roots(&symlink_path, &allowed_roots).unwrap_err();
+        assert!(err.to_string().to_lowercase().contains("outside"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_save_path_in_allowed_roots_rejects_dangling_symlink_escape() {
+        use std::os::unix::fs as unix_fs;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let allowed_root = tmp.path().join("root");
+        let outside_root = tmp.path().join("outside");
+        fs::create_dir_all(&allowed_root).expect("create root");
+        fs::create_dir_all(&outside_root).expect("create outside root");
+
+        // A dangling symlink inside the allowed root pointing outside. Writing to this path would
+        // otherwise create a new file outside the scope.
+        let outside_target = outside_root.join("new.xlsx");
+        let symlink_path = allowed_root.join("dangling.xlsx");
+        unix_fs::symlink(&outside_target, &symlink_path).expect("symlink");
+
+        let allowed_roots = vec![dunce::canonicalize(&allowed_root).expect("canonicalize root")];
+        let err = resolve_save_path_in_allowed_roots(&symlink_path, &allowed_roots).unwrap_err();
         assert!(err.to_string().to_lowercase().contains("outside"));
     }
 
