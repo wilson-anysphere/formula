@@ -207,6 +207,10 @@ Indexing note:
 - Excel commonly uses **1-based** `vm` values, but some producers/fixtures use **0-based** `vm` values. For round-trip safety, treat `vm` as an opaque integer index and preserve it exactly.
 - Other common cell attributes (unrelated to the image binding) still apply, e.g. `r="A1"` (cell reference) and `s="…"` (style index).
 
+Note on `IMAGE()` vs “Place in Cell”:
+- “Place in Cell” pictures have been observed to use the `t="e"` / `#VALUE!` encoding above.
+- `IMAGE()` function results may instead be stored as a normal formula cell (e.g. `<f>_xlfn.IMAGE(...)</f>`) with `vm` metadata attached; preserve `vm`/`cm` and rich-data parts the same way.
+
 ##### Mapping chain (high-level)
 
 `sheetN.xml c@vm` → `xl/metadata.xml <valueMetadata>` → `xl/richData/rdrichvalue.xml` (or `xl/richData/richValue*.xml`) → `xl/richData/richValueRel.xml` → `xl/richData/_rels/richValueRel.xml.rels` → `xl/media/imageN.*`
