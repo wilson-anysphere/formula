@@ -123,6 +123,9 @@ export function PrintPreviewDialog({ pdfBytes, filename, autoPrint = false, onDo
         className="print-preview-dialog__viewer"
         src={pdfUrl}
         title="Print Preview"
+        // Keep the PDF viewer out of the Tab order so the dialog's keyboard focus trap
+        // remains reliable (PDF plugins often trap focus in ways that are hard to escape).
+        tabIndex={-1}
         onLoad={() => setViewerLoaded(true)}
       />
     </div>
