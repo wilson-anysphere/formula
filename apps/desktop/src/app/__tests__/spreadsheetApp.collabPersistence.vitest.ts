@@ -222,6 +222,33 @@ describe("SpreadsheetApp collab persistence", () => {
     root.remove();
   });
 
+  it("supports legacy offlineEnabled toggle (offlineEnabled=true enables persistence)", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, {
+      collab: {
+        wsUrl: "ws://example.invalid",
+        docId: "doc-legacy-offline-true",
+        offlineEnabled: true,
+        user: { id: "u4", name: "User 4", color: "#ff00ff" },
+      },
+    });
+
+    expect(mocks.createCollabSession).toHaveBeenCalledTimes(1);
+    const options = mocks.createCollabSession.mock.calls[0]?.[0] as any;
+    expect(options?.connection?.docId).toBe("doc-legacy-offline-true");
+    expect(options?.persistence).toBeInstanceOf(mocks.IndexedDbCollabPersistence);
+    expect(options?.offline).toBeUndefined();
+
+    app.destroy();
+    root.remove();
+  });
+
   it("disables persistence when collabOffline=0 is present in the URL", () => {
     // Exercise the `resolveCollabOptionsFromUrl()` path (no explicit `opts.collab`).
     history.replaceState(
