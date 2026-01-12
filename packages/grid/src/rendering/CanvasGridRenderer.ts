@@ -3621,47 +3621,62 @@ export class CanvasGridRenderer {
         horizontalKeySpace + (row - startRow) * (colSpan + 1) + (colBoundary - startCol);
 
       const winners = new Map<number, BorderWinner>();
-      const consider = (key: number, candidate: BorderWinner) => {
+      const consider = (
+        key: number,
+        spec: CellBorderSpec,
+        totalWidth: number,
+        styleRankValue: number,
+        sourceRow: number,
+        sourceCol: number,
+        segment: BorderSegment
+      ) => {
         const existing = winners.get(key);
         if (!existing) {
-          winners.set(key, candidate);
+          winners.set(key, { spec, totalWidth, styleRank: styleRankValue, sourceRow, sourceCol, segment });
           return;
         }
 
-        if (candidate.totalWidth !== existing.totalWidth) {
-          if (candidate.totalWidth > existing.totalWidth) winners.set(key, candidate);
+        if (totalWidth !== existing.totalWidth) {
+          if (totalWidth > existing.totalWidth) {
+            winners.set(key, { spec, totalWidth, styleRank: styleRankValue, sourceRow, sourceCol, segment });
+          }
           return;
         }
 
-        if (candidate.styleRank !== existing.styleRank) {
-          if (candidate.styleRank > existing.styleRank) winners.set(key, candidate);
+        if (styleRankValue !== existing.styleRank) {
+          if (styleRankValue > existing.styleRank) {
+            winners.set(key, { spec, totalWidth, styleRank: styleRankValue, sourceRow, sourceCol, segment });
+          }
           return;
         }
 
         // Final tie-breaker: prefer the bottom/right cell (deterministic).
-        const candidateTie =
-          candidate.segment.orientation === "h"
-            ? candidate.sourceRow // higher row is the bottom cell
-            : candidate.sourceCol; // higher col is the right cell
-        const existingTie =
-          existing.segment.orientation === "h" ? existing.sourceRow : existing.sourceCol;
-
+        const candidateTie = segment.orientation === "h" ? sourceRow /* bottom cell */ : sourceCol /* right cell */;
+        const existingTie = existing.segment.orientation === "h" ? existing.sourceRow : existing.sourceCol;
         if (candidateTie !== existingTie) {
-          if (candidateTie > existingTie) winners.set(key, candidate);
+          if (candidateTie > existingTie) {
+            winners.set(key, { spec, totalWidth, styleRank: styleRankValue, sourceRow, sourceCol, segment });
+          }
           return;
         }
 
         // Fully deterministic fallback (should rarely/never happen).
-        if (candidate.sourceRow !== existing.sourceRow) {
-          if (candidate.sourceRow > existing.sourceRow) winners.set(key, candidate);
+        if (sourceRow !== existing.sourceRow) {
+          if (sourceRow > existing.sourceRow) {
+            winners.set(key, { spec, totalWidth, styleRank: styleRankValue, sourceRow, sourceCol, segment });
+          }
           return;
         }
-        if (candidate.sourceCol !== existing.sourceCol) {
-          if (candidate.sourceCol > existing.sourceCol) winners.set(key, candidate);
+        if (sourceCol !== existing.sourceCol) {
+          if (sourceCol > existing.sourceCol) {
+            winners.set(key, { spec, totalWidth, styleRank: styleRankValue, sourceRow, sourceCol, segment });
+          }
           return;
         }
-        if (candidate.spec.color !== existing.spec.color) {
-          if (candidate.spec.color > existing.spec.color) winners.set(key, candidate);
+        if (spec.color !== existing.spec.color) {
+          if (spec.color > existing.spec.color) {
+            winners.set(key, { spec, totalWidth, styleRank: styleRankValue, sourceRow, sourceCol, segment });
+          }
         }
       };
 
@@ -3674,14 +3689,15 @@ export class CanvasGridRenderer {
       }) => {
         const totalWidth = options.spec.width * zoom;
         if (!Number.isFinite(totalWidth) || totalWidth <= 0) return;
-        consider(options.key, {
-          spec: options.spec,
+        consider(
+          options.key,
+          options.spec,
           totalWidth,
-          styleRank: styleRank(options.spec.style),
-          sourceRow: options.sourceRow,
-          sourceCol: options.sourceCol,
-          segment: options.segment
-        });
+          styleRank(options.spec.style),
+          options.sourceRow,
+          options.sourceCol,
+          options.segment
+        );
       };
 
       // 1) Collect per-cell borders (skip merged cells, which are handled separately below).
