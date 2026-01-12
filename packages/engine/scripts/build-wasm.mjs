@@ -217,7 +217,7 @@ if (outputExists) {
         "[formula] wasm-pack is required to build the Rust/WASM engine but was not found on PATH.",
         "",
         "Install it with one of:",
-        "  - cargo install wasm-pack",
+        "  - bash scripts/cargo_agent.sh install wasm-pack",
         "  - https://rustwasm.github.io/wasm-pack/installer/",
         "",
         `Original error: ${check.error?.message ?? "unknown"}`

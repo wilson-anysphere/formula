@@ -140,7 +140,7 @@ if command -v sccache &> /dev/null; then
   echo "✓ sccache already installed"
 else
   echo "ℹ️  sccache not installed. To enable shared compilation caching:"
-  echo "   cargo install sccache"
+  echo "   bash scripts/cargo_agent.sh install sccache"
   echo "   Then configure RUSTC_WRAPPER=sccache in agent-init.sh"
 fi
 

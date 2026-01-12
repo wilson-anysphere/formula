@@ -90,8 +90,8 @@ function assertPrereqs() {
   assertCommand("wasm-pack", ["--version"], `Missing \`wasm-pack\`.
 
 Install it from https://rustwasm.github.io/wasm-pack/installer/ (recommended),
-or via cargo:
-  cargo install wasm-pack
+or via the repo cargo wrapper (agent-safe):
+  bash scripts/cargo_agent.sh install wasm-pack
 `);
 
   // wasm-pack ultimately needs this rust target.
