@@ -112,11 +112,16 @@ fn oddfprice_basis1_uses_prev_coupon_period_for_e() {
 fn odd_coupon_settlement_equal_coupon_dates_are_rejected() {
     let system = ExcelDateSystem::EXCEL_1900;
 
-    let settlement = ymd_to_serial(ExcelDate::new(2023, 1, 31), system).unwrap();
+    // Confirmed via Excel oracle: settlement must fall strictly inside the odd coupon period.
+    // - ODDL*: last_interest < settlement < maturity
+    // - ODDF*: issue < settlement < first_coupon <= maturity
+
+    // ODDL*: settlement == last_interest => #NUM!
     let maturity = ymd_to_serial(ExcelDate::new(2023, 5, 15), system).unwrap();
     let last_interest = ymd_to_serial(ExcelDate::new(2023, 1, 31), system).unwrap();
+    let settlement_eq_last = last_interest;
     let result = oddlprice(
-        settlement,
+        settlement_eq_last,
         maturity,
         last_interest,
         0.05,
@@ -131,6 +136,34 @@ fn odd_coupon_settlement_equal_coupon_dates_are_rejected() {
         "expected #NUM! for ODDLPRICE when last_interest == settlement, got {result:?}"
     );
 
+    // ODDL*: settlement < last_interest => #NUM! (oracle case: fin_oddlprice_settle_before_last_b0_*)
+    let settlement_before_last = ymd_to_serial(ExcelDate::new(2022, 11, 1), system).unwrap();
+    let result = oddlprice(
+        settlement_before_last,
+        maturity,
+        last_interest,
+        0.05,
+        0.06,
+        100.0,
+        2,
+        0,
+        system,
+    );
+    assert_eq!(result, Err(ExcelError::Num));
+    let result = oddlyield(
+        settlement_before_last,
+        maturity,
+        last_interest,
+        0.05,
+        99.0,
+        100.0,
+        2,
+        0,
+        system,
+    );
+    assert_eq!(result, Err(ExcelError::Num));
+
+    // ODDF*: settlement == first_coupon => #NUM!
     let issue = ymd_to_serial(ExcelDate::new(2022, 12, 15), system).unwrap();
     let first_coupon = ymd_to_serial(ExcelDate::new(2023, 1, 31), system).unwrap();
     let maturity2 = ymd_to_serial(ExcelDate::new(2024, 7, 31), system).unwrap();
@@ -151,6 +184,35 @@ fn odd_coupon_settlement_equal_coupon_dates_are_rejected() {
         "expected #NUM! for ODDFPRICE when settlement == first_coupon, got {result:?}"
     );
 
+    // ODDF*: settlement > first_coupon => #NUM! (oracle case: fin_oddfprice_settle_after_first_b0_*)
+    let settlement_after_first = ymd_to_serial(ExcelDate::new(2023, 2, 1), system).unwrap();
+    let result = oddfprice(
+        settlement_after_first,
+        maturity2,
+        issue,
+        first_coupon,
+        0.05,
+        0.06,
+        100.0,
+        2,
+        0,
+        system,
+    );
+    assert_eq!(result, Err(ExcelError::Num));
+    let result = oddfyield(
+        settlement_after_first,
+        maturity2,
+        issue,
+        first_coupon,
+        0.05,
+        99.0,
+        100.0,
+        2,
+        0,
+        system,
+    );
+    assert_eq!(result, Err(ExcelError::Num));
+
     let mut sheet = TestSheet::new();
     let v =
         sheet.eval("=ODDLPRICE(DATE(2023,1,31),DATE(2023,5,15),DATE(2023,1,31),0.05,0.06,100,2,0)");
@@ -158,10 +220,31 @@ fn odd_coupon_settlement_equal_coupon_dates_are_rejected() {
         matches!(v, Value::Error(ErrorKind::Num)),
         "expected #NUM! for worksheet ODDLPRICE when last_interest == settlement, got {v:?}"
     );
+    let v =
+        sheet.eval("=ODDLPRICE(DATE(2022,11,1),DATE(2023,5,15),DATE(2023,1,31),0.05,0.06,100,2,0)");
+    assert!(
+        matches!(v, Value::Error(ErrorKind::Num)),
+        "expected #NUM! for worksheet ODDLPRICE when settlement < last_interest, got {v:?}"
+    );
+    let v = sheet.eval("=ODDLYIELD(DATE(2022,11,1),DATE(2023,5,15),DATE(2023,1,31),0.05,99,100,2,0)");
+    assert!(
+        matches!(v, Value::Error(ErrorKind::Num)),
+        "expected #NUM! for worksheet ODDLYIELD when settlement < last_interest, got {v:?}"
+    );
     let v = sheet.eval("=ODDFPRICE(DATE(2023,1,31),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,31),0.05,0.06,100,2,0)");
     assert!(
         matches!(v, Value::Error(ErrorKind::Num)),
         "expected #NUM! for worksheet ODDFPRICE when settlement == first_coupon, got {v:?}"
+    );
+    let v = sheet.eval("=ODDFPRICE(DATE(2023,2,1),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,31),0.05,0.06,100,2,0)");
+    assert!(
+        matches!(v, Value::Error(ErrorKind::Num)),
+        "expected #NUM! for worksheet ODDFPRICE when settlement > first_coupon, got {v:?}"
+    );
+    let v = sheet.eval("=ODDFYIELD(DATE(2023,2,1),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,31),0.05,99,100,2,0)");
+    assert!(
+        matches!(v, Value::Error(ErrorKind::Num)),
+        "expected #NUM! for worksheet ODDFYIELD when settlement > first_coupon, got {v:?}"
     );
 }
 
