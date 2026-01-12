@@ -45,6 +45,8 @@ vi.mock("../../ai/llm/desktopLLMClient.js", () => ({
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
+// Import the panel modules at file-evaluation time so Vite transform work does not
+// count toward the per-test timeout.
 const [{ createPanelBodyRenderer }, { PanelIds }] = await Promise.all([
   import("../panelBodyRenderer.js"),
   import("../panelRegistry.js"),
