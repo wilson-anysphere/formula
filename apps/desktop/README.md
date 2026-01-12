@@ -17,16 +17,20 @@ Preferred (runtime):
 
 - URL query params: `?loadMaxRows=<n>&loadMaxCols=<n>` (e.g. `?loadMaxRows=50000&loadMaxCols=1000`)
   - Backwards-compat: `?maxRows=<n>&maxCols=<n>` is still accepted.
+- Optional: control snapshot fetch chunk size with `?loadChunkRows=<n>` (back-compat: `?chunkRows=<n>`).
 
 Persistent (runtime):
 
 - localStorage keys:
   - `formula.desktop.workbookLoadMaxRows`
   - `formula.desktop.workbookLoadMaxCols`
+  - `formula.desktop.workbookLoadChunkRows` (optional)
 
 Fallback (build/dev-time):
 
-- Environment variables: `DESKTOP_LOAD_MAX_ROWS` / `DESKTOP_LOAD_MAX_COLS`
+- Environment variables:
+  - Vite/WebView runtime (recommended): `VITE_DESKTOP_LOAD_MAX_ROWS` / `VITE_DESKTOP_LOAD_MAX_COLS` (optional: `VITE_DESKTOP_LOAD_CHUNK_ROWS`)
+  - Node/tooling/tests: `DESKTOP_LOAD_MAX_ROWS` / `DESKTOP_LOAD_MAX_COLS` (optional: `DESKTOP_LOAD_CHUNK_ROWS`)
 
 Invalid / non-positive values are ignored and fall back to the defaults above.
 
