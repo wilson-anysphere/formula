@@ -226,6 +226,7 @@ fn save_as_is_lossless_with_minimal_open_options() {
         preserve_unknown_parts: false,
         preserve_parsed_parts: false,
         preserve_worksheets: false,
+        decode_formulas: true,
     };
     let wb = XlsbWorkbook::open_with_options(&input_path, options).expect("open variant xlsb");
     wb.save_as(&out_path).expect("save_as");
@@ -456,6 +457,7 @@ fn patch_writer_preserves_unknown_parts_with_minimal_open_options() {
         preserve_unknown_parts: false,
         preserve_parsed_parts: false,
         preserve_worksheets: false,
+        decode_formulas: true,
     };
     let wb = XlsbWorkbook::open_with_options(&input_path, options).expect("open variant xlsb");
 

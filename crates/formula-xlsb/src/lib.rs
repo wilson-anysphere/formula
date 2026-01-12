@@ -40,7 +40,7 @@ pub fn parse_sheet_bin<R: std::io::Read>(
     shared_strings: &[String],
 ) -> Result<SheetData, Error> {
     let ctx = workbook_context::WorkbookContext::default();
-    parser::parse_sheet(sheet_bin, shared_strings, &ctx, true)
+    parser::parse_sheet(sheet_bin, shared_strings, &ctx, true, true)
 }
 
 /// Parse a worksheet `.bin` stream (BIFF12) using the provided workbook context.
@@ -52,5 +52,5 @@ pub fn parse_sheet_bin_with_context<R: std::io::Read>(
     shared_strings: &[String],
     ctx: &workbook_context::WorkbookContext,
 ) -> Result<SheetData, Error> {
-    parser::parse_sheet(sheet_bin, shared_strings, ctx, true)
+    parser::parse_sheet(sheet_bin, shared_strings, ctx, true, true)
 }

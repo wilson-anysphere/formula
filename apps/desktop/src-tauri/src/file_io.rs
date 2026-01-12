@@ -1423,6 +1423,7 @@ fn write_xlsb_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[
                 preserve_unknown_parts: false,
                 preserve_parsed_parts: false,
                 preserve_worksheets: false,
+                decode_formulas: true,
             },
         )
         .with_context(|| format!("open xlsb {:?}", origin_path))?;
@@ -1655,6 +1656,7 @@ fn write_xlsb_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[
                     preserve_unknown_parts: false,
                     preserve_parsed_parts: false,
                     preserve_worksheets: false,
+                    decode_formulas: true,
                 },
             )
             .with_context(|| format!("open xlsb {:?}", source_path))?;

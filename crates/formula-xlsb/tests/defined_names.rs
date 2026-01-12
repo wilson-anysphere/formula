@@ -64,6 +64,7 @@ fn defined_names_do_not_require_preserve_parsed_parts() {
         preserve_unknown_parts: false,
         preserve_parsed_parts: false,
         preserve_worksheets: false,
+        decode_formulas: true,
     };
     let wb = XlsbWorkbook::open_with_options(path, opts).expect("open xlsb");
     assert!(

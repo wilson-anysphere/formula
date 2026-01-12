@@ -54,6 +54,15 @@ pub struct OpenOptions {
     /// Worksheet parts can be very large. If you only need fast read access,
     /// leave this off and rely on re-reading the source file when writing.
     pub preserve_worksheets: bool,
+    /// If true, decode `rgce` formula token streams into best-effort Excel
+    /// formula text during parsing.
+    ///
+    /// This is enabled by default to preserve historical behavior.
+    ///
+    /// For very large XLSB files, decoding every formula can be expensive in
+    /// both CPU and memory. Callers that only need raw `rgce` bytes (or plan to
+    /// decode later) can set this to `false` to skip decoding.
+    pub decode_formulas: bool,
 }
 
 impl Default for OpenOptions {
@@ -62,6 +71,7 @@ impl Default for OpenOptions {
             preserve_unknown_parts: true,
             preserve_parsed_parts: true,
             preserve_worksheets: false,
+            decode_formulas: true,
         }
     }
 }
@@ -86,6 +96,7 @@ pub struct XlsbWorkbook {
     styles_part: Option<String>,
     preserved_parts: HashMap<String, Vec<u8>>,
     preserve_parsed_parts: bool,
+    decode_formulas: bool,
 }
 
 impl XlsbWorkbook {
@@ -182,7 +193,11 @@ impl XlsbWorkbook {
         };
 
         let (mut sheets, workbook_context, workbook_properties, defined_names) =
-            parse_workbook(&mut Cursor::new(&workbook_bin), &workbook_rels)?;
+            parse_workbook(
+                &mut Cursor::new(&workbook_bin),
+                &workbook_rels,
+                options.decode_formulas,
+            )?;
         let mut workbook_context = workbook_context;
 
         load_table_definitions(&mut zip, &mut workbook_context)?;
@@ -280,6 +295,7 @@ impl XlsbWorkbook {
             styles_part,
             preserved_parts,
             preserve_parsed_parts: options.preserve_parsed_parts,
+            decode_formulas: options.decode_formulas,
         })
     }
 
@@ -359,6 +375,7 @@ impl XlsbWorkbook {
             &self.shared_strings,
             &self.workbook_context,
             self.preserve_parsed_parts,
+            self.decode_formulas,
         )
     }
 
@@ -428,6 +445,7 @@ impl XlsbWorkbook {
             &self.shared_strings,
             &self.workbook_context,
             self.preserve_parsed_parts,
+            self.decode_formulas,
             |cell| f(cell),
         )?;
         Ok(())
