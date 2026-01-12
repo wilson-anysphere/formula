@@ -1348,47 +1348,19 @@ fn maxifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     }
 
     let mut best: Option<f64> = None;
-    match &max_range {
-        Range2D::Reference(max_ref) => {
-            'cell: for addr in ctx.iter_reference_cells(max_ref) {
-                let row = (addr.row - max_ref.start.row) as usize;
-                let col = (addr.col - max_ref.start.col) as usize;
-
-                for (range, crit) in criteria_ranges.iter().zip(criteria.iter()) {
-                    let v = range.get(ctx, row, col);
-                    if !crit.matches(&v) {
-                        continue 'cell;
-                    }
-                }
-
-                match ctx.get_cell_value(&max_ref.sheet_id, addr) {
-                    Value::Number(n) => best = Some(best.map_or(n, |b| b.max(n))),
-                    Value::Error(e) => return Value::Error(e),
-                    _ => {}
+    for row in 0..rows {
+        'col: for col in 0..cols {
+            for (range, crit) in criteria_ranges.iter().zip(criteria.iter()) {
+                let v = range.get(ctx, row, col);
+                if !crit.matches(&v) {
+                    continue 'col;
                 }
             }
-        }
-        _ => {
-            for row in 0..rows {
-                for col in 0..cols {
-                    let mut matches = true;
-                    for (range, crit) in criteria_ranges.iter().zip(criteria.iter()) {
-                        let v = range.get(ctx, row, col);
-                        if !crit.matches(&v) {
-                            matches = false;
-                            break;
-                        }
-                    }
-                    if !matches {
-                        continue;
-                    }
 
-                    match max_range.get(ctx, row, col) {
-                        Value::Number(n) => best = Some(best.map_or(n, |b| b.max(n))),
-                        Value::Error(e) => return Value::Error(e),
-                        _ => {}
-                    }
-                }
+            match max_range.get(ctx, row, col) {
+                Value::Number(n) => best = Some(best.map_or(n, |b| b.max(n))),
+                Value::Error(e) => return Value::Error(e),
+                _ => {}
             }
         }
     }
@@ -1458,47 +1430,19 @@ fn minifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     }
 
     let mut best: Option<f64> = None;
-    match &min_range {
-        Range2D::Reference(min_ref) => {
-            'cell: for addr in ctx.iter_reference_cells(min_ref) {
-                let row = (addr.row - min_ref.start.row) as usize;
-                let col = (addr.col - min_ref.start.col) as usize;
-
-                for (range, crit) in criteria_ranges.iter().zip(criteria.iter()) {
-                    let v = range.get(ctx, row, col);
-                    if !crit.matches(&v) {
-                        continue 'cell;
-                    }
-                }
-
-                match ctx.get_cell_value(&min_ref.sheet_id, addr) {
-                    Value::Number(n) => best = Some(best.map_or(n, |b| b.min(n))),
-                    Value::Error(e) => return Value::Error(e),
-                    _ => {}
+    for row in 0..rows {
+        'col: for col in 0..cols {
+            for (range, crit) in criteria_ranges.iter().zip(criteria.iter()) {
+                let v = range.get(ctx, row, col);
+                if !crit.matches(&v) {
+                    continue 'col;
                 }
             }
-        }
-        _ => {
-            for row in 0..rows {
-                for col in 0..cols {
-                    let mut matches = true;
-                    for (range, crit) in criteria_ranges.iter().zip(criteria.iter()) {
-                        let v = range.get(ctx, row, col);
-                        if !crit.matches(&v) {
-                            matches = false;
-                            break;
-                        }
-                    }
-                    if !matches {
-                        continue;
-                    }
 
-                    match min_range.get(ctx, row, col) {
-                        Value::Number(n) => best = Some(best.map_or(n, |b| b.min(n))),
-                        Value::Error(e) => return Value::Error(e),
-                        _ => {}
-                    }
-                }
+            match min_range.get(ctx, row, col) {
+                Value::Number(n) => best = Some(best.map_or(n, |b| b.min(n))),
+                Value::Error(e) => return Value::Error(e),
+                _ => {}
             }
         }
     }

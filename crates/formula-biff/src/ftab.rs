@@ -623,6 +623,8 @@ const FUTURE_UDF_FUNCTIONS: &[&str] = &[
     "LET",
     "MAKEARRAY",
     "MAP",
+    "MAXIFS",
+    "MINIFS",
     "MODE.MULT",
     "MODE.SNGL",
     "NETWORKDAYS.INTL",
