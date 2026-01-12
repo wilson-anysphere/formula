@@ -3680,6 +3680,7 @@ if (
     async getCell(row: number, col: number) {
       const sheetId = app.getCurrentSheetId();
       const cell = app.getDocument().getCell(sheetId, { row, col }) as any;
+      recordLastExtensionSelection(sheetId, { startRow: row, startCol: col, endRow: row, endCol: col });
       return normalizeExtensionCellValue(cell?.value ?? null);
     },
     async setCell(row: number, col: number, value: unknown) {
@@ -3688,6 +3689,7 @@ if (
     },
     async getRange(ref: string) {
       const { sheetId, startRow, startCol, endRow, endCol } = parseSheetQualifiedRange(ref);
+      recordLastExtensionSelection(sheetId, { startRow, startCol, endRow, endCol });
       const values: Array<Array<string | number | boolean | null>> = [];
       for (let r = startRow; r <= endRow; r++) {
         const row: Array<string | number | boolean | null> = [];
