@@ -1197,6 +1197,9 @@ export class ToolExecutor {
      */
     maxAllowedRank: number | null;
     policyAllowsRestrictedContent: boolean;
+    restrictedOverrideAllowed: boolean;
+    restrictedAllowed: boolean;
+    canShortCircuitOverThreshold: boolean;
     policy: any;
     decision: any;
     selectionClassification: any;
@@ -1239,6 +1242,15 @@ export class ToolExecutor {
       dlp.policy?.rules?.[DLP_ACTION.AI_CLOUD_PROCESSING]?.allowRestrictedContent
     );
 
+    const restrictedOverrideAllowed = includeRestrictedContent && policyAllowsRestrictedContent;
+    const restrictedAllowed =
+      maxAllowedRank === null
+        ? false
+        : includeRestrictedContent
+          ? policyAllowsRestrictedContent
+          : maxAllowedRank >= RESTRICTED_CLASSIFICATION_RANK;
+    const canShortCircuitOverThreshold = !restrictedOverrideAllowed;
+
     return {
       documentId,
       sheetId,
@@ -1248,6 +1260,9 @@ export class ToolExecutor {
       includeRestrictedContent,
       maxAllowedRank,
       policyAllowsRestrictedContent,
+      restrictedOverrideAllowed,
+      restrictedAllowed,
+      canShortCircuitOverThreshold,
       policy: dlp.policy,
       decision,
       selectionClassification,
@@ -1408,15 +1423,9 @@ export class ToolExecutor {
     const row0 = row - 1;
     const col0 = col - 1;
 
-    // If we're explicitly including restricted content and policy allows it, a cell can become
-    // ALLOW even if its classification exceeds `maxAllowed` (because `evaluatePolicy` short-circuits
-    // on Restricted + includeRestrictedContent).
-    const restrictedOverrideAllowed = dlp.includeRestrictedContent && dlp.policyAllowsRestrictedContent;
-    const canShortCircuitOverThreshold = !restrictedOverrideAllowed;
     const maxAllowedRank = dlp.maxAllowedRank;
-    const restrictedAllowed = dlp.includeRestrictedContent
-      ? dlp.policyAllowsRestrictedContent
-      : maxAllowedRank >= RESTRICTED_CLASSIFICATION_RANK;
+    const restrictedAllowed = dlp.restrictedAllowed;
+    const canShortCircuitOverThreshold = dlp.canShortCircuitOverThreshold;
 
     let rank = index.baseRank;
 
