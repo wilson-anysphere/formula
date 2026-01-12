@@ -27,6 +27,24 @@ fn assert_embedded_image_parts_present(pkg: &XlsxPackage) {
     }
 }
 
+fn assert_embedded_image_parts_equal(before: &XlsxPackage, after: &XlsxPackage) {
+    for part in [
+        "xl/metadata.xml",
+        "xl/richData/rdrichvalue.xml",
+        "xl/richData/rdrichvaluestructure.xml",
+        "xl/richData/rdRichValueTypes.xml",
+        "xl/richData/richValueRel.xml",
+        "xl/richData/_rels/richValueRel.xml.rels",
+        "xl/media/image1.png",
+    ] {
+        assert_eq!(
+            before.part(part),
+            after.part(part),
+            "expected embedded image part {part} to be byte-for-byte preserved"
+        );
+    }
+}
+
 fn assert_sheet_cell_is_embedded_image(sheet_xml: &str, cell_a1: &str) {
     let doc = roxmltree::Document::parse(sheet_xml).expect("parse sheet XML");
     let cell = doc
@@ -102,10 +120,10 @@ fn xlsxdocument_roundtrip_preserves_embedded_images_in_cells() {
     // preserved.
     let output_pkg = XlsxPackage::from_bytes(&output).expect("open saved xlsx");
     assert_embedded_image_parts_present(&output_pkg);
+    assert_embedded_image_parts_equal(&input_pkg, &output_pkg);
 
     // Ensure the embedded image cell still has `vm="..."` and the `#VALUE!` cached value.
     let output_sheet_xml =
         std::str::from_utf8(output_pkg.part("xl/worksheets/sheet1.xml").unwrap()).unwrap();
     assert_sheet_cell_is_embedded_image(output_sheet_xml, "B2");
 }
-
