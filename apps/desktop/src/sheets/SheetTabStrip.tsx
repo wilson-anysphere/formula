@@ -194,7 +194,9 @@ export function SheetTabStrip({
     if (!sheet) return;
 
     const allSheets = store.listAll();
-    const hiddenSheets = allSheets.filter((s) => s.visibility !== "visible");
+    // Only allow unhiding "hidden" sheets. Excel does not offer UI affordances for
+    // "veryHidden" sheets (those are typically VBA-only), so keep them out of the menu.
+    const hiddenSheets = allSheets.filter((s) => s.visibility === "hidden");
 
     // Prevent deleting/hiding the last visible sheet.
     const canDelete = visibleSheets.length > 1;
