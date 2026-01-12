@@ -333,6 +333,11 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
                                     .and_then(|v| v.get("text"))
                                     .and_then(|v| v.as_str())
                                     .map(|s| CellValue::Text(s.to_string())),
+                                // Degrade nested rich values (e.g. records whose display field is
+                                // an entity/record) using the same logic as the main conversion.
+                                "entity" | "record" => serde_json::from_value(display_value.clone())
+                                    .ok()
+                                    .map(|v: ModelCellValue| model_cell_value_to_sort_value(&v)),
                                 _ => None,
                             };
 
@@ -510,7 +515,8 @@ mod tests {
             CellValue::Text("Nested entity".to_string())
         );
 
-        // Missing display field should fall back to blank.
+        // Invalid display field falls back to the record's display string (if present),
+        // otherwise blank.
         let record_missing_display_field: ModelCellValue = serde_json::from_value(json!({
             "type": "record",
             "value": {
@@ -524,6 +530,47 @@ mod tests {
         assert_eq!(
             model_cell_value_to_sort_value(&record_missing_display_field),
             CellValue::Blank
+        );
+
+        let Some(record_invalid_display_field_with_display) = from_json_or_skip_unknown_variant(json!({
+            "type": "record",
+            "value": {
+                "displayField": "missing",
+                "displayValue": "Fallback display",
+                "fields": {
+                    "name": { "type": "string", "value": "Alice" }
+                }
+            }
+        })) else {
+            return;
+        };
+        assert_eq!(
+            model_cell_value_to_sort_value(&record_invalid_display_field_with_display),
+            CellValue::Text("Fallback display".to_string())
+        );
+
+        // Records degrade nested records/entities to their display strings.
+        let record_record_display_field: ModelCellValue = serde_json::from_value(json!({
+            "type": "record",
+            "value": {
+                "displayField": "nested",
+                "fields": {
+                    "nested": {
+                        "type": "record",
+                        "value": {
+                            "displayField": "name",
+                            "fields": {
+                                "name": { "type": "string", "value": "Bob" }
+                            }
+                        }
+                    }
+                }
+            }
+        }))
+        .expect("record should deserialize");
+        assert_eq!(
+            model_cell_value_to_sort_value(&record_record_display_field),
+            CellValue::Text("Bob".to_string())
         );
 
         // Records without a display field fall back to their legacy display string.
