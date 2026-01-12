@@ -4,7 +4,7 @@ use super::value::{
     Array as ArrayValue, CellCoord, ErrorKind, MultiRangeRef, RangeRef, Ref, ResolvedRange,
     SheetRangeRef, Value,
 };
-use crate::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
+use crate::date::{serial_to_ymd, ymd_to_serial, ExcelDate, ExcelDateSystem};
 use crate::error::ExcelError;
 use crate::functions::lookup;
 use crate::functions::math::criteria::Criteria as EngineCriteria;
@@ -610,6 +610,10 @@ fn eval_ast_inner(
                     | Function::TbillEq
                     | Function::TbillPrice
                     | Function::TbillYield
+                    | Function::OddFPrice
+                    | Function::OddFYield
+                    | Function::OddLPrice
+                    | Function::OddLYield
                     | Function::Concat
                     | Function::Rand
                     | Function::RandBetween
@@ -789,11 +793,17 @@ fn datevalue_from_value(value: &Value) -> Result<i32, ErrorKind> {
     }
 }
 
+fn datevalue_from_value_validated(value: &Value) -> Result<i32, ErrorKind> {
+    let serial = datevalue_from_value(value)?;
+    serial_to_ymd(serial, thread_date_system()).map_err(excel_error_kind)?;
+    Ok(serial)
+}
+
 fn basis_from_optional_arg(arg: Option<&Value>) -> Result<i32, ErrorKind> {
     let Some(arg) = arg else {
         return Ok(0);
     };
-    if matches!(arg, Value::Empty) {
+    if matches!(arg, Value::Empty | Value::Missing) {
         return Ok(0);
     }
 
@@ -803,6 +813,14 @@ fn basis_from_optional_arg(arg: Option<&Value>) -> Result<i32, ErrorKind> {
         return Err(ErrorKind::Num);
     }
     Ok(basis)
+}
+
+fn frequency_from_value(arg: &Value) -> Result<i32, ErrorKind> {
+    let frequency = coerce_to_i32_trunc(arg)?;
+    match frequency {
+        1 | 2 | 4 => Ok(frequency),
+        _ => Err(ErrorKind::Num),
+    }
 }
 
 fn coerce_to_bool_finite(v: &Value) -> Result<bool, ErrorKind> {
@@ -1371,6 +1389,10 @@ pub fn call_function(
         Function::TbillEq => fn_tbilleq(args),
         Function::TbillPrice => fn_tbillprice(args),
         Function::TbillYield => fn_tbillyield(args),
+        Function::OddFPrice => fn_oddfprice(args),
+        Function::OddFYield => fn_oddfyield(args),
+        Function::OddLPrice => fn_oddlprice(args),
+        Function::OddLYield => fn_oddlyield(args),
         Function::Concat => fn_concat(args),
         Function::Rand => fn_rand(args, base),
         Function::RandBetween => fn_randbetween(args, base),
@@ -2426,6 +2448,220 @@ fn fn_tbilleq(args: &[Value]) -> Value {
 
     excel_result_number(crate::functions::financial::tbilleq(
         settlement, maturity, discount,
+    ))
+}
+
+fn fn_oddfprice(args: &[Value]) -> Value {
+    if args.len() != 8 && args.len() != 9 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let settlement = match datevalue_from_value_validated(&args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let maturity = match datevalue_from_value_validated(&args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let issue = match datevalue_from_value_validated(&args[2]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let first_coupon = match datevalue_from_value_validated(&args[3]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let rate = match coerce_to_finite_number(&args[4]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let yld = match coerce_to_finite_number(&args[5]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let redemption = match coerce_to_finite_number(&args[6]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let frequency = match frequency_from_value(&args[7]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let basis = match basis_from_optional_arg(args.get(8)) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    excel_result_number(crate::functions::financial::oddfprice(
+        settlement,
+        maturity,
+        issue,
+        first_coupon,
+        rate,
+        yld,
+        redemption,
+        frequency,
+        basis,
+        thread_date_system(),
+    ))
+}
+
+fn fn_oddfyield(args: &[Value]) -> Value {
+    if args.len() != 8 && args.len() != 9 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let settlement = match datevalue_from_value_validated(&args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let maturity = match datevalue_from_value_validated(&args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let issue = match datevalue_from_value_validated(&args[2]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let first_coupon = match datevalue_from_value_validated(&args[3]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let rate = match coerce_to_finite_number(&args[4]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let pr = match coerce_to_finite_number(&args[5]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let redemption = match coerce_to_finite_number(&args[6]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let frequency = match frequency_from_value(&args[7]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let basis = match basis_from_optional_arg(args.get(8)) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    excel_result_number(crate::functions::financial::oddfyield(
+        settlement,
+        maturity,
+        issue,
+        first_coupon,
+        rate,
+        pr,
+        redemption,
+        frequency,
+        basis,
+        thread_date_system(),
+    ))
+}
+
+fn fn_oddlprice(args: &[Value]) -> Value {
+    if args.len() != 7 && args.len() != 8 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let settlement = match datevalue_from_value_validated(&args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let maturity = match datevalue_from_value_validated(&args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let last_interest = match datevalue_from_value_validated(&args[2]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let rate = match coerce_to_finite_number(&args[3]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let yld = match coerce_to_finite_number(&args[4]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let redemption = match coerce_to_finite_number(&args[5]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let frequency = match frequency_from_value(&args[6]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let basis = match basis_from_optional_arg(args.get(7)) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    excel_result_number(crate::functions::financial::oddlprice(
+        settlement,
+        maturity,
+        last_interest,
+        rate,
+        yld,
+        redemption,
+        frequency,
+        basis,
+        thread_date_system(),
+    ))
+}
+
+fn fn_oddlyield(args: &[Value]) -> Value {
+    if args.len() != 7 && args.len() != 8 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let settlement = match datevalue_from_value_validated(&args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let maturity = match datevalue_from_value_validated(&args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let last_interest = match datevalue_from_value_validated(&args[2]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let rate = match coerce_to_finite_number(&args[3]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let pr = match coerce_to_finite_number(&args[4]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let redemption = match coerce_to_finite_number(&args[5]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let frequency = match frequency_from_value(&args[6]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let basis = match basis_from_optional_arg(args.get(7)) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    excel_result_number(crate::functions::financial::oddlyield(
+        settlement,
+        maturity,
+        last_interest,
+        rate,
+        pr,
+        redemption,
+        frequency,
+        basis,
+        thread_date_system(),
     ))
 }
 

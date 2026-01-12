@@ -7770,6 +7770,18 @@ fn bytecode_expr_is_eligible_inner(
                 }
                 args.iter().all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
             }
+            bytecode::ast::Function::OddFPrice | bytecode::ast::Function::OddFYield => {
+                if args.len() != 8 && args.len() != 9 {
+                    return false;
+                }
+                args.iter().all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
+            }
+            bytecode::ast::Function::OddLPrice | bytecode::ast::Function::OddLYield => {
+                if args.len() != 7 && args.len() != 8 {
+                    return false;
+                }
+                args.iter().all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
+            }
             bytecode::ast::Function::Abs
             | bytecode::ast::Function::Now
             | bytecode::ast::Function::Today

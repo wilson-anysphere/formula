@@ -1893,6 +1893,69 @@ fn bytecode_backend_matches_ast_for_discount_securities_and_tbill_functions() {
 }
 
 #[test]
+fn bytecode_backend_matches_ast_for_odd_coupon_bond_functions() {
+    let mut engine = Engine::new();
+
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "E1",
+            r#"=ODDFPRICE("2020-01-01","2025-01-01","2020-01-01","2020-07-01",0.05,0.04,100,2,)"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "E2",
+            r#"=ODDFYIELD("2020-03-01","2020-07-01","2020-01-01","2020-07-01",0.05,ODDFPRICE("2020-03-01","2020-07-01","2020-01-01","2020-07-01",0.05,0.04,100,2,),100,2,)"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "E3",
+            r#"=ODDLPRICE("2020-10-15","2021-03-01","2020-10-15",0.05,0.06,100,2,)"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "E4",
+            r#"=ODDLYIELD("2020-10-15","2021-03-01","2020-10-15",0.05,ODDLPRICE("2020-10-15","2021-03-01","2020-10-15",0.05,0.06,100,2,),100,2,)"#,
+        )
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 4);
+    assert_eq!(stats.compiled, 4);
+    assert_eq!(stats.fallback, 0);
+    assert_eq!(engine.bytecode_program_count(), 4);
+
+    engine.recalculate_single_threaded();
+
+    for (formula, cell) in [
+        (
+            r#"=ODDFPRICE("2020-01-01","2025-01-01","2020-01-01","2020-07-01",0.05,0.04,100,2,)"#,
+            "E1",
+        ),
+        (
+            r#"=ODDFYIELD("2020-03-01","2020-07-01","2020-01-01","2020-07-01",0.05,ODDFPRICE("2020-03-01","2020-07-01","2020-01-01","2020-07-01",0.05,0.04,100,2,),100,2,)"#,
+            "E2",
+        ),
+        (
+            r#"=ODDLPRICE("2020-10-15","2021-03-01","2020-10-15",0.05,0.06,100,2,)"#,
+            "E3",
+        ),
+        (
+            r#"=ODDLYIELD("2020-10-15","2021-03-01","2020-10-15",0.05,ODDLPRICE("2020-10-15","2021-03-01","2020-10-15",0.05,0.06,100,2,),100,2,)"#,
+            "E4",
+        ),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_concat_operator() {
     let mut engine = Engine::new();
 
