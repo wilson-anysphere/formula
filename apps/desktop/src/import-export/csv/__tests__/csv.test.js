@@ -84,3 +84,31 @@ test("CSV export respects layered column formats (styleId may be 0)", () => {
   const csv = exportDocumentRangeToCsv(doc, "Sheet1", "A1000");
   assert.equal(csv, "2024-01-31");
 });
+
+test("CSV export respects layered row formats (styleId may be 0)", () => {
+  const doc = new DocumentController();
+  const serial = dateToExcelSerial(new Date(Date.UTC(2024, 0, 31)));
+
+  // Apply a full-row format without enumerating every cell.
+  doc.setRangeFormat("Sheet1", "A10:XFD10", { numberFormat: "yyyy-mm-dd" });
+  doc.setCellValue("Sheet1", "C10", serial);
+
+  assert.equal(doc.getCell("Sheet1", "C10").styleId, 0);
+
+  const csv = exportDocumentRangeToCsv(doc, "Sheet1", "C10");
+  assert.equal(csv, "2024-01-31");
+});
+
+test("CSV export respects sheet default formats (styleId may be 0)", () => {
+  const doc = new DocumentController();
+  const serial = dateToExcelSerial(new Date(Date.UTC(2024, 0, 31)));
+
+  // Apply a full-sheet default format.
+  doc.setRangeFormat("Sheet1", "A1:XFD1048576", { numberFormat: "yyyy-mm-dd" });
+  doc.setCellValue("Sheet1", "B2", serial);
+
+  assert.equal(doc.getCell("Sheet1", "B2").styleId, 0);
+
+  const csv = exportDocumentRangeToCsv(doc, "Sheet1", "B2");
+  assert.equal(csv, "2024-01-31");
+});
