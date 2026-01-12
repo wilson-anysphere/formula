@@ -1,4 +1,4 @@
-//! Legacy Excel 97-2003 `.xls` (BIFF) import support.
+//! Legacy Excel `.xls` (BIFF5/BIFF8) import support.
 //!
 //! This importer is intentionally best-effort: BIFF contains many features that
 //! aren't representable in [`formula_model`]. We load sheets, cell values,

@@ -1,6 +1,6 @@
 //! BIFF NOTE/OBJ/TXO parsing for legacy cell comments ("notes").
 //!
-//! Excel 97-2003 `.xls` files store cell notes as a small record graph:
+//! Legacy `.xls` (BIFF5/BIFF8) files store cell notes as a small record graph:
 //! - `NOTE`: the cell anchor (row/col) + the displayed author string
 //! - `OBJ` (ftCmo): links the note to a drawing object id
 //! - `TXO` (+ `CONTINUE` records): stores the comment text payload
@@ -12,6 +12,12 @@
 //! - Modern threaded comments are an OOXML feature and are not supported in `.xls`.
 //! - Missing TXO payloads (text) are treated as a warning and the note may be
 //!   skipped by the importer.
+//!
+//! BIFF5 vs BIFF8 notes:
+//! - BIFF5 commonly stores `NOTE.stAuthor` as an ANSI short string (`CODEPAGE`), but some writers
+//!   use BIFF8-style string encodings; we attempt to decode both best-effort.
+//! - BIFF5 commonly stores TXO text continuation bytes as raw 8-bit codepage bytes (no per-fragment
+//!   string option flags), but some writers prefix each fragment with a BIFF8-style 0/1 flag byte.
 //!
 //! Note: anchoring to merged regions (top-left cell) is handled by the importer
 //! when inserting notes into the [`formula_model`] worksheet model.
