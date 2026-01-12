@@ -1631,7 +1631,7 @@ fn sumproduct_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         _ => (va, vb),
     };
 
-    match crate::functions::math::sumproduct(&[&va, &vb]) {
+    match crate::functions::math::sumproduct(&[&va, &vb], ctx.number_locale()) {
         Ok(v) => Value::Number(v),
         Err(e) => Value::Error(e),
     }

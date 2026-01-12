@@ -3,6 +3,7 @@ use chrono::{TimeZone, Utc};
 use formula_engine::coercion::ValueLocaleConfig;
 use formula_engine::functions::math;
 use formula_engine::date::ExcelDateSystem;
+use formula_engine::value::NumberLocale;
 use formula_engine::{ErrorKind, Value};
 
 #[test]
@@ -133,14 +134,20 @@ fn sumifs_length_mismatch_is_value_error() {
 fn sumproduct_multiplies_and_sums() {
     let a = vec![1.into(), 2.into(), 3.into()];
     let b = vec![4.into(), 5.into(), 6.into()];
-    assert_eq!(math::sumproduct(&[&a, &b]).unwrap(), 32.0);
+    assert_eq!(
+        math::sumproduct(&[&a, &b], NumberLocale::en_us()).unwrap(),
+        32.0
+    );
 }
 
 #[test]
 fn sumproduct_propagates_errors() {
     let a = vec![1.into(), Value::Error(ErrorKind::Div0)];
     let b = vec![2.into(), 3.into()];
-    assert_eq!(math::sumproduct(&[&a, &b]).unwrap_err(), ErrorKind::Div0);
+    assert_eq!(
+        math::sumproduct(&[&a, &b], NumberLocale::en_us()).unwrap_err(),
+        ErrorKind::Div0
+    );
 }
 
 #[test]

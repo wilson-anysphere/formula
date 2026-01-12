@@ -3,6 +3,7 @@ use chrono::{DateTime, Utc};
 use crate::coercion::ValueLocaleConfig;
 use crate::functions::math::criteria::Criteria;
 use crate::date::ExcelDateSystem;
+use crate::value::{parse_number, NumberLocale};
 use crate::{ErrorKind, Value};
 
 /// SUMIF(range, criteria, [sum_range])
@@ -292,7 +293,7 @@ pub fn minifs(
 }
 
 /// SUMPRODUCT(array1, [array2], ...)
-pub fn sumproduct(arrays: &[&[Value]]) -> Result<f64, ErrorKind> {
+pub fn sumproduct(arrays: &[&[Value]], locale: NumberLocale) -> Result<f64, ErrorKind> {
     if arrays.is_empty() {
         return Ok(0.0);
     }
@@ -308,7 +309,7 @@ pub fn sumproduct(arrays: &[&[Value]]) -> Result<f64, ErrorKind> {
     for idx in 0..len {
         let mut prod = 1.0;
         for arr in arrays {
-            let n = coerce_sumproduct_number(&arr[idx])?;
+            let n = coerce_sumproduct_number(&arr[idx], locale)?;
             prod *= n;
         }
         sum += prod;
@@ -317,11 +318,16 @@ pub fn sumproduct(arrays: &[&[Value]]) -> Result<f64, ErrorKind> {
     Ok(sum)
 }
 
-fn coerce_sumproduct_number(value: &Value) -> Result<f64, ErrorKind> {
+fn coerce_sumproduct_number(value: &Value, locale: NumberLocale) -> Result<f64, ErrorKind> {
     match value {
         Value::Number(n) => Ok(*n),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Text(s) => Ok(s.trim().parse::<f64>().unwrap_or(0.0)),
+        Value::Text(s) => match parse_number(s, locale) {
+            Ok(n) => Ok(n),
+            Err(crate::error::ExcelError::Value) => Ok(0.0),
+            Err(crate::error::ExcelError::Div0) => Err(ErrorKind::Div0),
+            Err(crate::error::ExcelError::Num) => Err(ErrorKind::Num),
+        },
         Value::Blank => Ok(0.0),
         Value::Error(e) => Err(*e),
         Value::Lambda(_) => Err(ErrorKind::Value),

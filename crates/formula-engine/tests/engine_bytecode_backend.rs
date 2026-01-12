@@ -3,6 +3,7 @@ use formula_engine::eval::{
 };
 use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
 use formula_engine::locale::ValueLocaleConfig;
+use formula_engine::value::NumberLocale;
 use formula_engine::{Engine, ErrorKind, ExternalValueProvider, Value};
 use proptest::prelude::*;
 use std::sync::Arc;
@@ -51,7 +52,10 @@ impl ValueResolver for EngineResolver<'_> {
 
 fn eval_via_ast(engine: &Engine, formula: &str, current_cell: &str) -> Value {
     let resolver = EngineResolver { engine };
-    let recalc_ctx = RecalcContext::new(0);
+    let mut recalc_ctx = RecalcContext::new(0);
+    let separators = engine.value_locale().separators;
+    recalc_ctx.number_locale =
+        NumberLocale::new(separators.decimal_sep, Some(separators.thousands_sep));
 
     let parsed = formula_engine::eval::Parser::parse(formula).unwrap();
     let compiled = {
@@ -187,6 +191,28 @@ fn sumproduct_coerces_bools_in_ranges() {
     // [1, TRUE, 3] is coerced to [1, 1, 3] for SUMPRODUCT.
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(11.0));
     assert!(engine.bytecode_program_count() > 0);
+}
+
+#[test]
+fn bytecode_backend_sumproduct_respects_engine_value_locale() {
+    let mut engine = Engine::new();
+    engine.set_value_locale(ValueLocaleConfig::de_de());
+
+    // Text numeric values should be coerced using the workbook locale.
+    engine.set_cell_value("Sheet1", "A1", "1,5").unwrap();
+    engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
+
+    engine.set_cell_value("Sheet1", "B1", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 2.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "C1", "=SUMPRODUCT(A1:A2,B1:B2)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.bytecode_program_count(), 1);
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(7.0));
+    assert_engine_matches_ast(&engine, "=SUMPRODUCT(A1:A2,B1:B2)", "C1");
 }
 
 #[test]
