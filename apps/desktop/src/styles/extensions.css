@@ -1,0 +1,263 @@
+/*
+  Extension-related UI styles (extension management panel + contributed panel webviews).
+
+  This file intentionally uses only design tokens from `tokens.css` and does not
+  hardcode colors (enforced by `noHardcodedColors.test.js`).
+*/
+
+.extension-webview {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  display: block;
+}
+
+.extensions-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.extensions-panel__toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.extensions-panel__button {
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+}
+
+.extensions-panel__button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.extensions-panel__toolbar-button {
+  background: var(--bg-secondary);
+}
+
+.extensions-panel__card {
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  background: var(--bg-primary);
+  padding: 12px;
+}
+
+.extensions-panel__card-title {
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.extensions-panel__card-id {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+
+.extensions-panel__error {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.extensions-panel__section {
+  margin-bottom: 12px;
+}
+
+.extensions-panel__section-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.extensions-panel__section-title--spaced {
+  margin-top: 12px;
+}
+
+.extensions-panel__permissions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.extensions-panel__empty {
+  color: var(--text-secondary);
+}
+
+.extensions-panel__installed-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.extensions-panel__installed-item {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--bg-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.extensions-panel__installed-item-id {
+  font-weight: 600;
+}
+
+.extensions-panel__installed-item-version {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.extensions-panel__installed-item-status {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.extensions-panel__installed-item-status--corrupted {
+  color: var(--error);
+}
+
+.extensions-panel__repair-button {
+  align-self: flex-start;
+}
+
+.extensions-panel__permission-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.extensions-panel__permission-meta {
+  min-width: 0;
+}
+
+.extensions-panel__permission-name {
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.extensions-panel__permission-declared {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.extensions-panel__permission-subtitle {
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.extensions-panel__revoke-button {
+  flex: 0 0 auto;
+  background: var(--bg-primary);
+}
+
+.extensions-panel__revoke-button:disabled {
+  color: var(--text-secondary);
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+.extensions-panel__reset-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+
+.extensions-panel__reset-button {
+  background: var(--bg-primary);
+}
+
+.extensions-panel__commands {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.extensions-panel__command-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.extensions-panel__command-button {
+  flex: 1 1 auto;
+  text-align: left;
+  padding: 10px 12px;
+  background: var(--bg-secondary);
+}
+
+.extensions-panel__command-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.extensions-panel__command-title {
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.extensions-panel__command-shortcut {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace;
+}
+
+.extensions-panel__command-id {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.extensions-panel__command-args-button {
+  padding: 10px 12px;
+  white-space: nowrap;
+  background: var(--bg-secondary);
+}
+
+.extensions-panel__panels {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.extensions-panel__panel-button {
+  text-align: left;
+  padding: 10px 12px;
+  background: var(--bg-secondary);
+}
+
+.extensions-panel__panel-title {
+  font-weight: 600;
+}
+
+.extensions-panel__panel-id {
+  font-size: 12px;
+  color: var(--text-secondary);
+}

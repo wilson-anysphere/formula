@@ -197,7 +197,7 @@ export function ExtensionPanelBody({ panelId, bridge }: { panelId: string; bridg
       sandbox="allow-scripts"
       referrerPolicy="no-referrer"
       src={src ?? undefined}
-      style={{ width: "100%", height: "100%", border: "0", background: "transparent" }}
+      className="extension-webview"
     />
   );
 }

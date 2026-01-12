@@ -200,42 +200,27 @@ export function ExtensionsPanel({
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+    <div className="extensions-panel">
       {webExtensionManager ? (
-        <div
-          style={{
-            border: "1px solid var(--panel-border)",
-            borderRadius: "10px",
-            background: "var(--bg-primary)",
-            padding: "12px",
-          }}
-        >
-          <div style={{ fontWeight: 700, marginBottom: "8px" }}>Installed (IndexedDB)</div>
+        <div className="extensions-panel__card">
+          <div className="extensions-panel__card-title">Installed (IndexedDB)</div>
           {installError ? (
-            <div style={{ color: "var(--text-secondary)" }}>Failed to read installed extensions: {installError}</div>
+            <div className="extensions-panel__empty">Failed to read installed extensions: {installError}</div>
           ) : installed && installed.length > 0 ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            <div className="extensions-panel__installed-list">
               {installed.map((item) => {
                 const isCorrupted = Boolean(item.corrupted);
                 return (
-                  <div
-                    key={item.id}
-                    data-testid={`installed-extension-${item.id}`}
-                    style={{
-                      border: "1px solid var(--border)",
-                      borderRadius: "10px",
-                      padding: "10px 12px",
-                      background: "var(--bg-secondary)",
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "6px",
-                    }}
-                  >
-                    <div style={{ fontWeight: 600 }}>{item.id}</div>
-                    <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>v{item.version}</div>
+                  <div key={item.id} data-testid={`installed-extension-${item.id}`} className="extensions-panel__installed-item">
+                    <div className="extensions-panel__installed-item-id">{item.id}</div>
+                    <div className="extensions-panel__installed-item-version">v{item.version}</div>
                     <div
                       data-testid={`installed-extension-status-${item.id}`}
-                      style={{ fontSize: "12px", color: isCorrupted ? "var(--text-error)" : "var(--text-secondary)" }}
+                      className={
+                        isCorrupted
+                          ? "extensions-panel__installed-item-status extensions-panel__installed-item-status--corrupted"
+                          : "extensions-panel__installed-item-status"
+                      }
                     >
                       {isCorrupted ? `Corrupted: ${item.corruptedReason ?? "unknown reason"}` : "OK"}
                     </div>
@@ -261,15 +246,7 @@ export function ExtensionsPanel({
                             }
                           })();
                         }}
-                        style={{
-                          alignSelf: "flex-start",
-                          padding: "8px 10px",
-                          borderRadius: "10px",
-                          border: "1px solid var(--border)",
-                          background: "var(--bg-primary)",
-                          color: "var(--text-primary)",
-                          cursor: "pointer",
-                        }}
+                        className="extensions-panel__button extensions-panel__reset-button extensions-panel__repair-button"
                       >
                         {repairingId === item.id ? "Repairing…" : "Repair"}
                       </button>
@@ -279,14 +256,14 @@ export function ExtensionsPanel({
               })}
             </div>
           ) : installed ? (
-            <div style={{ color: "var(--text-secondary)" }}>No marketplace extensions installed.</div>
+            <div className="extensions-panel__empty">No marketplace extensions installed.</div>
           ) : (
-            <div style={{ color: "var(--text-secondary)" }}>Loading installed extensions…</div>
+            <div className="extensions-panel__empty">Loading installed extensions…</div>
           )}
         </div>
       ) : null}
 
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+      <div className="extensions-panel__toolbar">
         <button
           type="button"
           data-testid="reset-all-extension-permissions"
@@ -306,14 +283,7 @@ export function ExtensionsPanel({
               // ignore
             });
           }}
-          style={{
-            padding: "8px 10px",
-            borderRadius: "10px",
-            border: "1px solid var(--border)",
-            background: "var(--bg-secondary)",
-            color: "var(--text-primary)",
-            cursor: "pointer",
-          }}
+          className="extensions-panel__button extensions-panel__toolbar-button"
         >
           Reset all extensions permissions
         </button>
@@ -335,21 +305,14 @@ export function ExtensionsPanel({
               // ignore
             });
           }}
-          style={{
-            padding: "8px 10px",
-            borderRadius: "10px",
-            border: "1px solid var(--border)",
-            background: "var(--bg-secondary)",
-            color: "var(--text-primary)",
-            cursor: "pointer",
-          }}
+          className="extensions-panel__button extensions-panel__toolbar-button"
         >
           Refresh
         </button>
       </div>
 
       {permissionsError ? (
-        <div style={{ color: "var(--text-secondary)", fontSize: "12px" }}>Failed to load permissions: {permissionsError}</div>
+        <div className="extensions-panel__error">Failed to load permissions: {permissionsError}</div>
       ) : null}
 
       {extensions.map((ext: any) => {
@@ -372,25 +335,16 @@ export function ExtensionsPanel({
         })();
 
         return (
-          <div
-            key={ext.id}
-            data-testid={`extension-card-${ext.id}`}
-            style={{
-              border: "1px solid var(--panel-border)",
-              borderRadius: "10px",
-              background: "var(--bg-primary)",
-              padding: "12px",
-            }}
-          >
-            <div style={{ fontWeight: 700, marginBottom: "8px" }}>{ext.manifest?.displayName ?? ext.id}</div>
-            <div style={{ fontSize: "12px", color: "var(--text-secondary)", marginBottom: "10px" }}>{ext.id}</div>
+          <div key={ext.id} data-testid={`extension-card-${ext.id}`} className="extensions-panel__card">
+            <div className="extensions-panel__card-title">{ext.manifest?.displayName ?? ext.id}</div>
+            <div className="extensions-panel__card-id">{ext.id}</div>
 
-            <div style={{ marginBottom: "12px" }}>
-              <div style={{ fontWeight: 600, marginBottom: "6px" }}>Permissions</div>
+            <div className="extensions-panel__section">
+              <div className="extensions-panel__section-title">Permissions</div>
 
-              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              <div className="extensions-panel__permissions">
                 {allPermissions.length === 0 ? (
-                  <div style={{ color: "var(--text-secondary)" }}>No permissions declared.</div>
+                  <div className="extensions-panel__empty">No permissions declared.</div>
                 ) : (
                   allPermissions.map((perm) => {
                     const declared = declaredSet.has(perm);
@@ -410,37 +364,13 @@ export function ExtensionsPanel({
                         : "not granted";
 
                     return (
-                      <div
-                        key={perm}
-                        data-testid={`permission-row-${ext.id}-${perm}`}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          gap: "10px",
-                          padding: "10px 12px",
-                          borderRadius: "10px",
-                          border: "1px solid var(--border)",
-                          background: "var(--bg-secondary)",
-                        }}
-                      >
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: "8px" }}>
+                      <div key={perm} data-testid={`permission-row-${ext.id}-${perm}`} className="extensions-panel__permission-row">
+                        <div className="extensions-panel__permission-meta">
+                          <div className="extensions-panel__permission-name">
                             <span>{perm}</span>
-                            <span style={{ fontSize: "11px", color: "var(--text-secondary)" }}>
-                              {declared ? "declared" : "not declared"}
-                            </span>
+                            <span className="extensions-panel__permission-declared">{declared ? "declared" : "not declared"}</span>
                           </div>
-                          <div
-                            style={{
-                              fontSize: "12px",
-                              color: "var(--text-secondary)",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                            }}
-                          >
-                            {subtitle}
-                          </div>
+                          <div className="extensions-panel__permission-subtitle">{subtitle}</div>
                         </div>
 
                         <button
@@ -466,15 +396,7 @@ export function ExtensionsPanel({
                               // ignore
                             });
                           }}
-                          style={{
-                            flex: "0 0 auto",
-                            padding: "8px 10px",
-                            borderRadius: "10px",
-                            border: "1px solid var(--border)",
-                            background: "var(--bg-primary)",
-                            color: grantedValue ? "var(--text-primary)" : "var(--text-secondary)",
-                            cursor: grantedValue ? "pointer" : "not-allowed",
-                          }}
+                          className="extensions-panel__button extensions-panel__revoke-button"
                         >
                           Revoke
                         </button>
@@ -483,7 +405,7 @@ export function ExtensionsPanel({
                   })
                 )}
 
-                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "6px" }}>
+                <div className="extensions-panel__reset-row">
                   <button
                     type="button"
                     data-testid={`reset-extension-permissions-${ext.id}`}
@@ -509,14 +431,7 @@ export function ExtensionsPanel({
                         // ignore
                       });
                     }}
-                    style={{
-                      padding: "8px 10px",
-                      borderRadius: "10px",
-                      border: "1px solid var(--border)",
-                      background: "var(--bg-primary)",
-                      color: "var(--text-primary)",
-                      cursor: "pointer",
-                    }}
+                    className="extensions-panel__button extensions-panel__reset-button"
                   >
                     Revoke all permissions
                   </button>
@@ -526,10 +441,10 @@ export function ExtensionsPanel({
 
             {extCommands.length > 0 ? (
               <>
-                <div style={{ fontWeight: 600, marginBottom: "6px" }}>Commands</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <div className="extensions-panel__section-title">Commands</div>
+                <div className="extensions-panel__commands">
                   {extCommands.map((cmd) => (
-                    <div key={cmd.command} style={{ display: "flex", gap: "8px", alignItems: "stretch" }}>
+                    <div key={cmd.command} className="extensions-panel__command-row">
                       <button
                         type="button"
                         data-testid={`run-command-${cmd.command}`}
@@ -538,21 +453,10 @@ export function ExtensionsPanel({
                             showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
                           });
                         }}
-                        style={{
-                          textAlign: "left",
-                          padding: "10px 12px",
-                          borderRadius: "10px",
-                          border: "1px solid var(--border)",
-                          background: "var(--bg-secondary)",
-                          color: "var(--text-primary)",
-                          cursor: "pointer",
-                          flex: "1 1 auto",
-                        }}
+                        className="extensions-panel__button extensions-panel__command-button"
                       >
-                        <div
-                          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}
-                        >
-                          <div style={{ fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+                        <div className="extensions-panel__command-header">
+                          <div className="extensions-panel__command-title">
                             {cmd.category ? `${cmd.category}: ` : ""}
                             {cmd.title}
                           </div>
@@ -560,36 +464,19 @@ export function ExtensionsPanel({
                             const shortcut = getPrimaryCommandKeybindingDisplay(cmd.command, keybindingIndex);
                             if (!shortcut) return null;
                             return (
-                              <div
-                                aria-hidden="true"
-                                style={{
-                                  fontSize: "12px",
-                                  color: "var(--text-secondary)",
-                                  whiteSpace: "nowrap",
-                                  fontFamily:
-                                    "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
-                                }}
-                              >
+                              <div aria-hidden="true" className="extensions-panel__command-shortcut">
                                 {shortcut}
                               </div>
                             );
                           })()}
                         </div>
-                        <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>{cmd.command}</div>
+                        <div className="extensions-panel__command-id">{cmd.command}</div>
                       </button>
                       <button
                         type="button"
                         data-testid={`run-command-with-args-${cmd.command}`}
                         onClick={() => runCommandWithArgs(String(ext.id), cmd.command)}
-                        style={{
-                          padding: "10px 12px",
-                          borderRadius: "10px",
-                          border: "1px solid var(--border)",
-                          background: "var(--bg-secondary)",
-                          color: "var(--text-primary)",
-                          cursor: "pointer",
-                          whiteSpace: "nowrap",
-                        }}
+                        className="extensions-panel__button extensions-panel__command-args-button"
                       >
                         Run…
                       </button>
@@ -598,31 +485,23 @@ export function ExtensionsPanel({
                 </div>
               </>
             ) : (
-              <div style={{ color: "var(--text-secondary)" }}>No commands contributed.</div>
+              <div className="extensions-panel__empty">No commands contributed.</div>
             )}
 
             {extPanels.length > 0 ? (
               <>
-                <div style={{ fontWeight: 600, marginTop: "12px", marginBottom: "6px" }}>Panels</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <div className="extensions-panel__section-title extensions-panel__section-title--spaced">Panels</div>
+                <div className="extensions-panel__panels">
                   {extPanels.map((panel) => (
                     <button
                       key={panel.id}
                       type="button"
                       data-testid={`open-panel-${panel.id}`}
                       onClick={() => onOpenPanel(panel.id)}
-                      style={{
-                        textAlign: "left",
-                        padding: "10px 12px",
-                        borderRadius: "10px",
-                        border: "1px solid var(--border)",
-                        background: "var(--bg-secondary)",
-                        color: "var(--text-primary)",
-                        cursor: "pointer",
-                      }}
+                      className="extensions-panel__button extensions-panel__panel-button"
                     >
-                      <div style={{ fontWeight: 600 }}>{panel.title}</div>
-                      <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>{panel.id}</div>
+                      <div className="extensions-panel__panel-title">{panel.title}</div>
+                      <div className="extensions-panel__panel-id">{panel.id}</div>
                     </button>
                   ))}
                 </div>
