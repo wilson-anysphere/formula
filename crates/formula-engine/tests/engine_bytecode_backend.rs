@@ -2263,6 +2263,64 @@ fn bytecode_backend_matches_ast_for_match() {
 }
 
 #[test]
+fn bytecode_backend_matches_ast_for_xlookup_and_xmatch() {
+    let mut engine = Engine::new();
+
+    engine.set_cell_value("Sheet1", "B1", "a").unwrap();
+    engine.set_cell_value("Sheet1", "B2", "b").unwrap();
+    engine.set_cell_value("Sheet1", "B3", "c").unwrap();
+    // Duplicate "b" to exercise last-to-first search mode.
+    engine.set_cell_value("Sheet1", "B4", "b").unwrap();
+
+    engine.set_cell_value("Sheet1", "C1", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "C2", 20.0).unwrap();
+    engine.set_cell_value("Sheet1", "C3", 30.0).unwrap();
+    engine.set_cell_value("Sheet1", "C4", 40.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "D1", r#"=XLOOKUP("b",B1:B3,C1:C3)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "D2", r#"=XLOOKUP("z",B1:B3,C1:C3)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "D3", r#"=XLOOKUP("z",B1:B3,C1:C3,"missing")"#)
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "D4", r#"=XMATCH("b",B1:B3)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "D5", r#"=XMATCH("z",B1:B3)"#)
+        .unwrap();
+
+    // Omit if_not_found (empty arg) while specifying match/search modes.
+    engine
+        .set_cell_formula("Sheet1", "D6", r#"=XLOOKUP("b",B1:B4,C1:C4,,0,-1)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "D7", r#"=XMATCH("b",B1:B4,0,-1)"#)
+        .unwrap();
+
+    // Ensure we're exercising the bytecode path for all of the above formulas.
+    assert_eq!(engine.bytecode_program_count(), 7);
+
+    engine.recalculate_single_threaded();
+
+    for (formula, cell) in [
+        (r#"=XLOOKUP("b",B1:B3,C1:C3)"#, "D1"),
+        (r#"=XLOOKUP("z",B1:B3,C1:C3)"#, "D2"),
+        (r#"=XLOOKUP("z",B1:B3,C1:C3,"missing")"#, "D3"),
+        (r#"=XMATCH("b",B1:B3)"#, "D4"),
+        (r#"=XMATCH("z",B1:B3)"#, "D5"),
+        (r#"=XLOOKUP("b",B1:B4,C1:C4,,0,-1)"#, "D6"),
+        (r#"=XMATCH("b",B1:B4,0,-1)"#, "D7"),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_common_logical_error_functions() {
     let mut engine = Engine::new();
 

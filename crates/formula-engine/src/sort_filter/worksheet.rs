@@ -358,8 +358,8 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
 mod tests {
     use super::model_cell_value_to_sort_value;
     use crate::sort_filter::CellValue;
-    use formula_model::CellValue as ModelCellValue;
     use formula_model::ErrorValue;
+    use formula_model::CellValue as ModelCellValue;
     use serde_json::json;
 
     #[test]

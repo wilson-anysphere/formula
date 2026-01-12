@@ -7736,6 +7736,73 @@ fn bytecode_expr_is_eligible_inner(
                 // TYPE is scalar even for multi-cell ranges/arrays (returns 64), so allow them.
                 bytecode_expr_is_eligible_inner(&args[0], true, true, lexical_scopes)
             }
+            bytecode::ast::Function::XMatch => {
+                if args.len() < 2 || args.len() > 4 {
+                    return false;
+                }
+                let lookup_ok =
+                    bytecode_expr_is_eligible_inner(&args[0], false, false, lexical_scopes);
+                // Restrict to reference-like lookup_array arguments; the bytecode runtime does not
+                // support implicit intersection on arbitrary arrays.
+                let lookup_array_ok = matches!(
+                    args[1],
+                    bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)
+                );
+                let match_mode_ok = args
+                    .get(2)
+                    .map_or(true, |arg| {
+                        bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
+                    });
+                let search_mode_ok = args
+                    .get(3)
+                    .map_or(true, |arg| {
+                        bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
+                    });
+                lookup_ok && lookup_array_ok && match_mode_ok && search_mode_ok
+            }
+            bytecode::ast::Function::XLookup => {
+                if args.len() < 3 || args.len() > 6 {
+                    return false;
+                }
+                let lookup_ok =
+                    bytecode_expr_is_eligible_inner(&args[0], false, false, lexical_scopes);
+                let lookup_array_ok = matches!(
+                    args[1],
+                    bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)
+                );
+                let return_array_ok = match &args[2] {
+                    bytecode::Expr::CellRef(_) => true,
+                    bytecode::Expr::RangeRef(r) => {
+                        // Bytecode currently supports only scalar XLOOKUP results, so require a
+                        // 1D return vector (single row or single column) to avoid dynamic-array
+                        // results that the bytecode backend cannot represent.
+                        (r.start.row == r.end.row && r.start.row_abs == r.end.row_abs)
+                            || (r.start.col == r.end.col && r.start.col_abs == r.end.col_abs)
+                    }
+                    _ => false,
+                };
+                let if_not_found_ok = args
+                    .get(3)
+                    .map_or(true, |arg| {
+                        bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
+                    });
+                let match_mode_ok = args
+                    .get(4)
+                    .map_or(true, |arg| {
+                        bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
+                    });
+                let search_mode_ok = args
+                    .get(5)
+                    .map_or(true, |arg| {
+                        bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
+                    });
+                lookup_ok
+                    && lookup_array_ok
+                    && return_array_ok
+                    && if_not_found_ok
+                     && match_mode_ok
+                     && search_mode_ok
+            }
             bytecode::ast::Function::Unknown(_) => false,
         },
     }

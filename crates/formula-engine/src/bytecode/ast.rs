@@ -85,6 +85,8 @@ pub enum Function {
     Rows,
     Columns,
     Address,
+    XLookup,
+    XMatch,
     Unknown(Arc<str>),
 }
 
@@ -133,6 +135,8 @@ impl Function {
             "VLOOKUP" => Function::VLookup,
             "HLOOKUP" => Function::HLookup,
             "MATCH" => Function::Match,
+            "XLOOKUP" => Function::XLookup,
+            "XMATCH" => Function::XMatch,
             "ABS" => Function::Abs,
             "INT" => Function::Int,
             "ROUND" => Function::Round,
@@ -219,6 +223,8 @@ impl Function {
             Function::Rows => "ROWS",
             Function::Columns => "COLUMNS",
             Function::Address => "ADDRESS",
+            Function::XLookup => "XLOOKUP",
+            Function::XMatch => "XMATCH",
             Function::Unknown(s) => s,
         }
     }

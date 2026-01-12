@@ -6,6 +6,7 @@ use super::value::{
 };
 use crate::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
 use crate::error::ExcelError;
+use crate::functions::lookup;
 use crate::functions::math::criteria::Criteria as EngineCriteria;
 use crate::functions::wildcard::WildcardPattern;
 use crate::locale::ValueLocaleConfig;
@@ -530,6 +531,8 @@ fn eval_ast_inner(
                     Function::CountIfs => arg_idx % 2 == 0,
                     Function::SumProduct => true,
                     Function::VLookup | Function::HLookup | Function::Match => arg_idx == 1,
+                    Function::XMatch => arg_idx == 1,
+                    Function::XLookup => arg_idx == 1 || arg_idx == 2,
                     Function::Row | Function::Column | Function::Rows | Function::Columns => true,
                     Function::If
                     | Function::Ifs
@@ -1216,6 +1219,8 @@ pub fn call_function(
         Function::Rows => fn_rows(args, base),
         Function::Columns => fn_columns(args, base),
         Function::Address => fn_address(args),
+        Function::XMatch => fn_xmatch(args, grid, base),
+        Function::XLookup => fn_xlookup(args, grid, base),
         Function::Unknown(_) => Value::Error(ErrorKind::Name),
     }
 }
@@ -4633,6 +4638,231 @@ fn fn_match(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         Some(idx) => Value::Number((idx + 1) as f64),
         None => Value::Error(ErrorKind::NA),
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XlookupVectorShape {
+    Horizontal,
+    Vertical,
+}
+
+fn resolved_range_1d_shape_len(range: ResolvedRange) -> Option<(XlookupVectorShape, usize)> {
+    let rows = range.rows();
+    let cols = range.cols();
+    if rows <= 0 || cols <= 0 {
+        return None;
+    }
+    if rows == 1 && cols == 1 {
+        // Match `builtins_lookup`: treat a single-cell lookup vector as vertical.
+        return Some((XlookupVectorShape::Vertical, 1));
+    }
+    if rows == 1 {
+        return Some((XlookupVectorShape::Horizontal, usize::try_from(cols).ok()?));
+    }
+    if cols == 1 {
+        return Some((XlookupVectorShape::Vertical, usize::try_from(rows).ok()?));
+    }
+    None
+}
+
+fn parse_xmatch_match_mode(arg: Option<&Value>) -> Result<lookup::MatchMode, ErrorKind> {
+    match arg {
+        None | Some(Value::Missing) => Ok(lookup::MatchMode::Exact),
+        Some(v) => {
+            let n = coerce_to_i64(v)?;
+            lookup::MatchMode::try_from(n).map_err(ErrorKind::from)
+        }
+    }
+}
+
+fn parse_xmatch_search_mode(arg: Option<&Value>) -> Result<lookup::SearchMode, ErrorKind> {
+    match arg {
+        None | Some(Value::Missing) => Ok(lookup::SearchMode::FirstToLast),
+        Some(v) => {
+            let n = coerce_to_i64(v)?;
+            lookup::SearchMode::try_from(n).map_err(ErrorKind::from)
+        }
+    }
+}
+
+fn fn_xmatch(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
+    if args.len() < 2 || args.len() > 4 {
+        return Value::Error(ErrorKind::Value);
+    }
+    let lookup_value = args[0].clone();
+    if let Value::Error(e) = lookup_value {
+        return Value::Error(e);
+    }
+    if matches!(
+        lookup_value,
+        Value::Array(_) | Value::Range(_) | Value::MultiRange(_)
+    ) {
+        return Value::Error(ErrorKind::Spill);
+    }
+
+    let lookup_array = match args[1] {
+        Value::Range(r) => r,
+        _ => return Value::Error(ErrorKind::Value),
+    };
+    let lookup_range = lookup_array.resolve(base);
+    if !range_in_bounds(grid, lookup_range) {
+        return Value::Error(ErrorKind::Ref);
+    }
+    let Some((shape, len)) = resolved_range_1d_shape_len(lookup_range) else {
+        return Value::Error(ErrorKind::Value);
+    };
+
+    let match_mode = match parse_xmatch_match_mode(args.get(2)) {
+        Ok(m) => m,
+        Err(e) => return Value::Error(e),
+    };
+    let search_mode = match parse_xmatch_search_mode(args.get(3)) {
+        Ok(m) => m,
+        Err(e) => return Value::Error(e),
+    };
+
+    let lookup_value = bytecode_value_to_engine(lookup_value);
+    let pos = lookup::xmatch_with_modes_accessor_with_locale(
+        &lookup_value,
+        len,
+        |idx| {
+            let coord = match shape {
+                XlookupVectorShape::Vertical => CellCoord {
+                    row: lookup_range.row_start + idx as i32,
+                    col: lookup_range.col_start,
+                },
+                XlookupVectorShape::Horizontal => CellCoord {
+                    row: lookup_range.row_start,
+                    col: lookup_range.col_start + idx as i32,
+                },
+            };
+            bytecode_value_to_engine(grid.get_value(coord))
+        },
+        match_mode,
+        search_mode,
+        thread_value_locale(),
+        thread_date_system(),
+        thread_now_utc(),
+    );
+
+    match pos {
+        Ok(p) => Value::Number(p as f64),
+        Err(e) => Value::Error(ErrorKind::from(e)),
+    }
+}
+
+fn fn_xlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
+    if args.len() < 3 || args.len() > 6 {
+        return Value::Error(ErrorKind::Value);
+    }
+    let lookup_value = args[0].clone();
+    if let Value::Error(e) = lookup_value {
+        return Value::Error(e);
+    }
+    if matches!(
+        lookup_value,
+        Value::Array(_) | Value::Range(_) | Value::MultiRange(_)
+    ) {
+        return Value::Error(ErrorKind::Spill);
+    }
+
+    let lookup_array = match args[1] {
+        Value::Range(r) => r,
+        _ => return Value::Error(ErrorKind::Value),
+    };
+    let return_array = match args[2] {
+        Value::Range(r) => r,
+        _ => return Value::Error(ErrorKind::Value),
+    };
+
+    let if_not_found = match args.get(3) {
+        None | Some(Value::Missing) => None,
+        Some(v) => Some(v.clone()),
+    };
+
+    let match_mode = match parse_xmatch_match_mode(args.get(4)) {
+        Ok(m) => m,
+        Err(e) => return Value::Error(e),
+    };
+    let search_mode = match parse_xmatch_search_mode(args.get(5)) {
+        Ok(m) => m,
+        Err(e) => return Value::Error(e),
+    };
+
+    let lookup_range = lookup_array.resolve(base);
+    let return_range = return_array.resolve(base);
+    if !range_in_bounds(grid, lookup_range) || !range_in_bounds(grid, return_range) {
+        return Value::Error(ErrorKind::Ref);
+    }
+
+    let Some((lookup_shape, lookup_len)) = resolved_range_1d_shape_len(lookup_range) else {
+        return Value::Error(ErrorKind::Value);
+    };
+
+    // Bytecode currently supports only scalar XLOOKUP results (return_array must be a vector).
+    // This matches the common spreadsheet pattern of looking up a value from a single column/row.
+    match lookup_shape {
+        XlookupVectorShape::Vertical => {
+            if return_range.cols() != 1 || return_range.rows() != lookup_len as i32 {
+                return Value::Error(ErrorKind::Value);
+            }
+        }
+        XlookupVectorShape::Horizontal => {
+            if return_range.rows() != 1 || return_range.cols() != lookup_len as i32 {
+                return Value::Error(ErrorKind::Value);
+            }
+        }
+    }
+
+    let lookup_value_engine = bytecode_value_to_engine(lookup_value.clone());
+    let match_pos = lookup::xmatch_with_modes_accessor_with_locale(
+        &lookup_value_engine,
+        lookup_len,
+        |idx| {
+            let coord = match lookup_shape {
+                XlookupVectorShape::Vertical => CellCoord {
+                    row: lookup_range.row_start + idx as i32,
+                    col: lookup_range.col_start,
+                },
+                XlookupVectorShape::Horizontal => CellCoord {
+                    row: lookup_range.row_start,
+                    col: lookup_range.col_start + idx as i32,
+                },
+            };
+            bytecode_value_to_engine(grid.get_value(coord))
+        },
+        match_mode,
+        search_mode,
+        thread_value_locale(),
+        thread_date_system(),
+        thread_now_utc(),
+    );
+
+    let match_pos = match match_pos {
+        Ok(p) => p,
+        Err(EngineErrorKind::NA) => {
+            return if_not_found.unwrap_or(Value::Error(ErrorKind::NA));
+        }
+        Err(e) => return Value::Error(ErrorKind::from(e)),
+    };
+
+    let idx = match match_pos.checked_sub(1).and_then(|v| usize::try_from(v).ok()) {
+        Some(v) if v < lookup_len => v,
+        _ => return Value::Error(ErrorKind::Value),
+    };
+
+    let result_coord = match lookup_shape {
+        XlookupVectorShape::Vertical => CellCoord {
+            row: return_range.row_start + idx as i32,
+            col: return_range.col_start,
+        },
+        XlookupVectorShape::Horizontal => CellCoord {
+            row: return_range.row_start,
+            col: return_range.col_start + idx as i32,
+        },
+    };
+
+    grid.get_value(result_coord)
 }
 
 fn wildcard_pattern_for_lookup(lookup: &Value) -> Option<WildcardPattern> {
