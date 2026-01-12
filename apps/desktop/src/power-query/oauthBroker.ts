@@ -81,6 +81,7 @@ export class DesktopOAuthBroker implements OAuthBroker {
   private pendingRedirects = new Map<string, Deferred<string>>();
   private observedRedirects: Array<{ url: string; observedAtMs: number }> = [];
   private lastAuthUrlOpenedAtMs: number | null = null;
+  private lastAuthRedirectUri: string | null = null;
 
   // Small buffer to avoid dropping redirects that arrive before `waitForRedirect(...)`
   // is registered (e.g. fast redirects, or deep-link events emitted at app startup).
@@ -119,6 +120,7 @@ export class DesktopOAuthBroker implements OAuthBroker {
     // links indefinitely if they're delivered at unrelated times.
     const redirectUri = parsed.searchParams.get("redirect_uri");
     this.lastAuthUrlOpenedAtMs = redirectUri ? Date.now() : null;
+    this.lastAuthRedirectUri = redirectUri || null;
 
     // Loopback redirect capture (RFC 8252). When the auth URL uses a redirect URI
     // like `http://127.0.0.1:<port>/callback`, start a local listener in the Rust
@@ -153,6 +155,7 @@ export class DesktopOAuthBroker implements OAuthBroker {
     // openAuthUrl(...) and waitForRedirect(...), so we can disable early-redirect
     // buffering for this flow.
     this.lastAuthUrlOpenedAtMs = null;
+    this.lastAuthRedirectUri = null;
 
     // If we observed a redirect before the caller registered the wait, resolve immediately.
     const observed = this.shiftObservedRedirect(redirectUri);
@@ -203,7 +206,13 @@ export class DesktopOAuthBroker implements OAuthBroker {
     // unrelated deep link (or a redirect from an old flow) from being consumed by
     // a future PKCE attempt.
     const lastOpen = this.lastAuthUrlOpenedAtMs;
-    if (typeof lastOpen !== "number" || Date.now() - lastOpen > DesktopOAuthBroker.OBSERVED_REDIRECT_TTL_MS) {
+    const expectedRedirect = this.lastAuthRedirectUri;
+    if (
+      typeof lastOpen !== "number" ||
+      Date.now() - lastOpen > DesktopOAuthBroker.OBSERVED_REDIRECT_TTL_MS ||
+      typeof expectedRedirect !== "string" ||
+      !matchesRedirectUri(expectedRedirect, redirectUrl)
+    ) {
       return false;
     }
 
