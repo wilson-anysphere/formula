@@ -992,6 +992,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       "data.queriesConnections.queriesConnections":
         ribbonLayoutController != null &&
         getPanelPlacement(ribbonLayoutController.layout, PanelIds.DATA_QUERIES).kind !== "closed",
+      "review.comments.showComments": app.isCommentsPanelVisible(),
     };
 
     const numberFormatLabel = (() => {
@@ -4680,6 +4681,10 @@ mountRibbon(ribbonRoot, {
         else ribbonLayoutController?.closePanel(PanelIds.DATA_QUERIES);
         app.focus();
         return;
+      case "review.comments.showComments":
+        if (pressed) app.openCommentsPanel();
+        else app.closeCommentsPanel();
+        return;
       case "view.show.showFormulas":
         app.toggleShowFormulas();
         app.focus();
@@ -5076,6 +5081,10 @@ mountRibbon(ribbonRoot, {
     }
 
     switch (commandId) {
+      case "review.comments.newComment":
+        app.openCommentsPanel();
+        return;
+
       case "file.new.new":
       case "file.new.blankWorkbook": {
         if (!tauriBackend) {

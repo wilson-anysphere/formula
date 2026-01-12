@@ -3000,12 +3000,21 @@ export class SpreadsheetApp {
   }
 
   /**
-   * Opens the comments panel (idempotent).
-   *
-   * NOTE: This intentionally does not close the panel if it's already open.
+   * Opens the comments panel (idempotent) and focuses the new-comment input.
    */
   openCommentsPanel(): void {
-    if (this.commentsPanelVisible) return;
+    if (!this.commentsPanelVisible) {
+      this.toggleCommentsPanel();
+      return;
+    }
+    this.focusNewCommentInput();
+  }
+
+  /**
+   * Closes the comments panel (idempotent).
+   */
+  closeCommentsPanel(): void {
+    if (!this.commentsPanelVisible) return;
     this.toggleCommentsPanel();
   }
 
@@ -3041,10 +3050,14 @@ export class SpreadsheetApp {
       this.focus();
     }
 
+    // Used by the Ribbon to sync pressed state for view toggles when opened/closed
+    // outside of Ribbon interactions (e.g. keyboard shortcuts, debug buttons).
+    this.dispatchViewChanged();
+
     // Broadcast for consumers like extension context keys (best-effort).
     if (typeof window !== "undefined") {
       window.dispatchEvent(
-        new CustomEvent("formula:comments-panel-visibility-changed", { detail: { visible: this.commentsPanelVisible } })
+        new CustomEvent("formula:comments-panel-visibility-changed", { detail: { visible: this.commentsPanelVisible } }),
       );
     }
   }
