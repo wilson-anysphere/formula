@@ -1,10 +1,13 @@
 # VBA Digital Signatures (vbaProject.bin)
 
 This document captures how Excel/VBA macro signatures are stored in `xl/vbaProject.bin`, and how we
-plan to *bind* (verify) those signatures against the MS-OVBA “VBA project digest”.
+*bind* (verify) those signatures against the MS-OVBA “VBA project digest”.
 
-The goal is to make the on-disk formats and verification steps explicit for future work, especially
-around MS-OVBA project digest verification.
+`formula-vba` implements best-effort:
+
+- PKCS#7/CMS internal signature verification (integrity of the signature blob), and
+- MS-OVBA-style **project digest** binding verification (signature is bound to the VBA project OLE
+  streams).
 
 ## Where signatures live
 
@@ -75,25 +78,33 @@ specific VBA project.
 | CMS `signedData` | `1.2.840.113549.1.7.2` |
 | Authenticode `SpcIndirectDataContent` | `1.3.6.1.4.1.311.2.1.4` |
 
-## Binding plan (MS-OVBA project digest verification)
+## Binding (MS-OVBA project digest verification)
 
 CMS signature verification alone answers “is this a valid CMS signature over *some bytes*?”, but it
 does not, by itself, prove that the signature is bound to the rest of the VBA project.
 
-To match Excel more closely, we plan to bind the signature to the project contents:
+To bind the signature to the VBA project contents, `formula-vba`:
 
-1. Extract `DigestInfo` from `SpcIndirectDataContent` (hash algorithm OID + digest bytes).
-2. Compute the **MS-OVBA VBA project digest** over the OLE streams that MS-OVBA specifies, excluding
-   the signature streams themselves.
-3. Use the hash algorithm indicated by the extracted `DigestInfo` when computing the MS-OVBA digest.
-4. Compare the computed digest bytes to the `DigestInfo` digest bytes.
+1. Extracts `DigestInfo` from `SpcIndirectDataContent` (hash algorithm OID + digest bytes).
+2. Computes a deterministic **project digest** over the VBA project's OLE streams, excluding any
+   `\x05DigitalSignature*` streams/storages.
+3. Uses the hash algorithm indicated by the extracted `DigestInfo` when computing the digest.
+4. Compares the computed digest bytes to the `DigestInfo` digest bytes.
 
-Result interpretation (proposed policy):
+Result interpretation (current behavior):
 
 - If CMS verification fails ⇒ signature invalid.
 - If CMS verification succeeds but digest comparison fails ⇒ signature present but **not bound** to
-  the current VBA project bytes (treat as invalid for `trusted_signed_only`).
-- If both succeed ⇒ signature is verified and bound.
+  the current VBA project bytes (reported as `VbaSignatureBinding::NotBound`).
+- If both succeed ⇒ signature is verified and bound (reported as `VbaSignatureBinding::Bound`).
+
+### Implementation notes / caveats
+
+- The project digest computation is currently **best-effort** and deterministic (to support stable
+  tests and predictable behavior), but may not match Excel's exact MS-OVBA transcript for all
+  real-world files (e.g. if Excel hashes decompressed module source, only parts of module streams,
+  etc.).
+- Callers should treat `VbaSignatureBinding::Unknown` as "could not verify binding", not as "bound".
 
 ## Specs / references
 
