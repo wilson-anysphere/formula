@@ -32365,6 +32365,33 @@
       "id": "fvschedule_bd22748f5227"
     },
     {
+      "formula": "=FVSCHEDULE(100,(A1:A2,B1:B2))",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 0.1
+        },
+        {
+          "cell": "A2",
+          "value": 0.2
+        },
+        {
+          "cell": "B1",
+          "value": 0.3
+        },
+        {
+          "cell": "B2",
+          "value": 0.4
+        }
+      ],
+      "tags": [
+        "financial",
+        "FVSCHEDULE"
+      ],
+      "id": "fvschedule_52861042a090"
+    },
+    {
       "formula": "=SLN(30, 0, 3)",
       "outputCell": "C1",
       "inputs": [],

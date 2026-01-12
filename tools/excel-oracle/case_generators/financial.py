@@ -166,6 +166,18 @@ def generate(
         formula="=FVSCHEDULE(100,A1:A2)",
         inputs=[CellInput("A1", 0.1), CellInput("A2", 0.2)],
     )
+    add_case(
+        cases,
+        prefix="fvschedule",
+        tags=["financial", "FVSCHEDULE"],
+        formula="=FVSCHEDULE(100,(A1:A2,B1:B2))",
+        inputs=[
+            CellInput("A1", 0.1),
+            CellInput("A2", 0.2),
+            CellInput("B1", 0.3),
+            CellInput("B2", 0.4),
+        ],
+    )
     add_case(cases, prefix="sln", tags=["financial", "SLN"], formula="=SLN(30, 0, 3)")
     add_case(cases, prefix="syd", tags=["financial", "SYD"], formula="=SYD(30, 0, 3, 1)")
     add_case(cases, prefix="ddb", tags=["financial", "DDB"], formula="=DDB(1000, 100, 5, 1)")
