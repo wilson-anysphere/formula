@@ -94,3 +94,75 @@ fn project_normalized_data_includes_host_extender_info_and_strips_nwln_and_exclu
         "expected NWLN to be removed from HostExtenderRef"
     );
 }
+
+#[test]
+fn project_normalized_data_host_extender_info_header_and_key_matching_is_case_insensitive() {
+    // Some producers may vary the casing of `[Host Extender Info]` and `HostExtenderRef=...`.
+    // For robustness we treat these case-insensitively, but must still preserve the raw line
+    // bytes in the transcript (only NWLN removed).
+
+    let host_extender_ref = "HOSTEXTENDERREF=MyHostExtender";
+
+    let project_stream = format!(
+        concat!(
+            "ID=\"{{11111111-2222-3333-4444-555555555555}}\"\r\n",
+            "Name=\"VBAProject\"\r\n",
+            "\r\n",
+            "[HOST EXTENDER INFO]\r\n",
+            "{host_extender_ref}\r\n",
+            "\r\n",
+            "[Workspace]\r\n",
+            "ThisWorkbook=SHOULD_NOT_APPEAR_IN_HASH\r\n",
+        ),
+        host_extender_ref = host_extender_ref,
+    );
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(project_stream.as_bytes())
+            .expect("write PROJECT stream");
+    }
+
+    // Include a minimal `VBA/dir` stream so `project_normalized_data()` can load it (contents are
+    // irrelevant for this test).
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let dir_container = compress_container(&[]);
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir stream");
+    }
+
+    let vba_project_bin = ole.into_inner().into_inner();
+    let normalized =
+        project_normalized_data(&vba_project_bin).expect("compute ProjectNormalizedData");
+
+    // Host Extender Info header is always emitted as the literal bytes `Host Extender Info`.
+    assert!(
+        contains_subslice(&normalized, b"Host Extender Info"),
+        "expected ProjectNormalizedData to include Host Extender Info header bytes"
+    );
+
+    // The HostExtenderRef line bytes must be present (with original casing preserved).
+    assert!(
+        contains_subslice(&normalized, host_extender_ref.as_bytes()),
+        "expected ProjectNormalizedData to include the HostExtenderRef line bytes"
+    );
+
+    // Newlines must be removed.
+    assert!(
+        !contains_subslice(
+            &normalized,
+            format!("{host_extender_ref}\r\n").as_bytes()
+        ),
+        "expected HostExtenderRef bytes to be appended without NWLN"
+    );
+
+    // Workspace section must be ignored.
+    assert!(
+        !contains_subslice(&normalized, b"ThisWorkbook=SHOULD_NOT_APPEAR_IN_HASH"),
+        "expected [Workspace] section lines to be ignored"
+    );
+}

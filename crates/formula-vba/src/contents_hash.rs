@@ -501,9 +501,16 @@ fn host_extender_info_normalized_bytes(project_stream_bytes: &[u8]) -> Vec<u8> {
 
     let mut in_section = false;
     for raw_line in split_nwln_lines(project_stream_bytes) {
-        let line = trim_ascii_whitespace(raw_line);
+        let mut line = trim_ascii_whitespace(raw_line);
 
-        if line == b"[Host Extender Info]" {
+        // Some producers may include a UTF-8 BOM at the start of the stream. Strip it for
+        // stable section parsing.
+        if line.starts_with(&[0xEF, 0xBB, 0xBF]) {
+            line = trim_ascii_whitespace(&line[3..]);
+        }
+
+        // Be permissive: match the section header case-insensitively.
+        if line.eq_ignore_ascii_case(b"[Host Extender Info]") {
             in_section = true;
             out.extend_from_slice(b"Host Extender Info");
             continue;
@@ -515,7 +522,7 @@ fn host_extender_info_normalized_bytes(project_stream_bytes: &[u8]) -> Vec<u8> {
                 break;
             }
 
-            if line.starts_with(b"HostExtenderRef=") {
+            if starts_with_ignore_ascii_case(line, b"HostExtenderRef=") {
                 // MS-OVBA pseudocode appends HostExtenderRef "without NWLN". Be robust even if
                 // newline bytes slip through by stripping both CR and LF explicitly.
                 out.extend(line.iter().copied().filter(|&b| b != b'\r' && b != b'\n'));
