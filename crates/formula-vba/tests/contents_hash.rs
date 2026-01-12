@@ -965,6 +965,60 @@ fn content_hash_md5_matches_md5_of_content_normalized_data() {
 }
 
 #[test]
+fn content_normalized_data_respects_module_text_offset_even_if_header_looks_like_container() {
+    // When MODULETEXTOFFSET is present, we should use it directly (rather than scanning for a
+    // compressed-container signature).
+    //
+    // This test prefixes the module stream with bytes that *look like* a CompressedContainer start
+    // (0x01 + chunk header with signature bits 0b011), but are intentionally incomplete/invalid so
+    // that attempting to decompress from offset 0 would fail.
+    let module_code = "Option Explicit\r\n";
+    let module_container = compress_container(module_code.as_bytes());
+
+    // False CompressedContainer signature (truncated chunk data):
+    // - 0x01 signature
+    // - u16 header 0x3000 (uncompressed, size_field=0 => expects 1 data byte after header)
+    // - missing that data byte => decompress_container would error if started here
+    let mut module_stream = vec![0x01, 0x00, 0x30];
+
+    // Pad up to the declared text offset.
+    let text_offset: u32 = 12;
+    while module_stream.len() < text_offset as usize {
+        module_stream.push(0xAA);
+    }
+    module_stream.extend_from_slice(&module_container);
+
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        push_record(&mut out, 0x0019, b"Module1");
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"Module1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes());
+        push_record(&mut out, 0x0031, &text_offset.to_le_bytes());
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        let mut s = ole.create_stream("VBA/Module1").expect("module stream");
+        s.write_all(&module_stream).expect("write module");
+    }
+    let vba_bin = ole.into_inner().into_inner();
+
+    let normalized = content_normalized_data(&vba_bin).expect("ContentNormalizedData");
+    assert_eq!(normalized, module_code.as_bytes());
+}
+
+#[test]
 fn agile_content_hash_md5_matches_content_hash_when_no_designers_present() {
     // Build a minimal project that includes a PROJECT stream (required for FormsNormalizedData) but
     // no `BaseClass=` lines, so `FormsNormalizedData` is the empty byte sequence.
