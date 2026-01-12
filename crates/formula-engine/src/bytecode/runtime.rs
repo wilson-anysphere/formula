@@ -7320,9 +7320,21 @@ fn fn_sumproduct(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         return Value::Error(ErrorKind::Value);
     }
 
-    // Fast path: both ranges, same shape, and we can use strict numeric slices for every column.
+    // Range fast paths:
+    // - When every column has strict-numeric slices we can use the SIMD-optimized `sumproduct_range`.
+    // - For huge ranges (e.g. `A:A`), `sumproduct_range` also has a sparse-iteration mode that avoids
+    //   scanning implicit blanks when the grid supports `iter_cells()`.
     if let (Operand::Range(ra), Operand::Range(rb)) = (&a, &b) {
         if len_a == len_b && len_a == len && ra.rows == rb.rows && ra.cols == rb.cols {
+            // Prefer the sparse-aware `sumproduct_range` implementation for huge ranges even when
+            // column slices are unavailable (e.g. because the column cache builder skipped `A:A`).
+            if ra.rows > (BYTECODE_SPARSE_RANGE_ROW_THRESHOLD as usize) {
+                return match sumproduct_range(grid, ra.range, rb.range) {
+                    Ok(v) => Value::Number(v),
+                    Err(e) => Value::Error(e),
+                };
+            }
+
             let all_slices = ra
                 .col_slices
                 .iter()
@@ -9862,6 +9874,80 @@ mod tests {
         assert_eq!(sumproduct_range(&grid, range, range), Err(ErrorKind::Ref));
     }
 
+    #[test]
+    fn sumproduct_uses_sparse_iteration_for_huge_ranges_without_column_slices() {
+        use std::collections::HashMap;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+ 
+        struct LimitedGetGrid {
+            bounds: (i32, i32),
+            max_get_calls: usize,
+            get_calls: AtomicUsize,
+            cells: HashMap<(i32, i32), Value>,
+            stored: Vec<(CellCoord, Value)>,
+        }
+ 
+        impl Grid for LimitedGetGrid {
+            fn get_value(&self, coord: CellCoord) -> Value {
+                let seen = self.get_calls.fetch_add(1, Ordering::Relaxed);
+                if seen >= self.max_get_calls {
+                    panic!("too many get_value calls (saw {seen}, max {})", self.max_get_calls);
+                }
+                self.cells
+                    .get(&(coord.row, coord.col))
+                    .cloned()
+                    .unwrap_or(Value::Empty)
+            }
+ 
+            fn get_value_on_sheet(&self, _sheet: usize, coord: CellCoord) -> Value {
+                self.get_value(coord)
+            }
+ 
+            fn column_slice(&self, _col: i32, _row_start: i32, _row_end: i32) -> Option<&[f64]> {
+                None
+            }
+ 
+            fn iter_cells(&self) -> Option<Box<dyn Iterator<Item = (CellCoord, Value)> + '_>> {
+                Some(Box::new(self.stored.iter().cloned()))
+            }
+ 
+            fn bounds(&self) -> (i32, i32) {
+                self.bounds
+            }
+        }
+ 
+        let row_end = BYTECODE_SPARSE_RANGE_ROW_THRESHOLD; // rows() == threshold + 1
+        let range_a = RangeRef::new(
+            Ref::new(0, 0, true, true),
+            Ref::new(row_end, 0, true, true),
+        );
+        let range_b = RangeRef::new(
+            Ref::new(0, 1, true, true),
+            Ref::new(row_end, 1, true, true),
+        );
+ 
+        let mut cells: HashMap<(i32, i32), Value> = HashMap::new();
+        let mut stored = Vec::new();
+        for (row, col, n) in [(0, 0, 2.0), (0, 1, 3.0), (1, 0, 4.0), (1, 1, 5.0)] {
+            let coord = CellCoord { row, col };
+            let value = Value::Number(n);
+            cells.insert((row, col), value.clone());
+            stored.push((coord, value));
+        }
+ 
+        let grid = LimitedGetGrid {
+            bounds: (row_end + 1, 2),
+            max_get_calls: 1024,
+            get_calls: AtomicUsize::new(0),
+            cells,
+            stored,
+        };
+ 
+        let args = [Value::Range(range_a), Value::Range(range_b)];
+        let out = fn_sumproduct(&args, &grid, CellCoord { row: 0, col: 0 });
+        assert_eq!(out, Value::Number(26.0));
+    }
+ 
     #[test]
     fn and_range_ignores_missing_in_sparse_refs() {
         let row_end = BYTECODE_SPARSE_RANGE_ROW_THRESHOLD; // rows() == threshold + 1
