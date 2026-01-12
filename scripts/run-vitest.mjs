@@ -5,7 +5,10 @@ import { spawn } from "node:child_process";
 // script. Vitest treats a bare `--` as a test pattern, which can accidentally cause the
 // full suite to run. Strip it so `pnpm test:vitest -- <file>` behaves as expected.
 let args = process.argv.slice(2);
-if (args[0] === "--") args = args.slice(1);
+const delimiterIdx = args.indexOf("--");
+if (delimiterIdx >= 0) {
+  args = [...args.slice(0, delimiterIdx), ...args.slice(delimiterIdx + 1)];
+}
 
 const child = spawn("vitest", ["run", ...args], {
   stdio: "inherit",
@@ -25,4 +28,3 @@ child.on("error", (err) => {
   console.error(err);
   process.exit(1);
 });
-

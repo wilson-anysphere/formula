@@ -5,7 +5,10 @@ import { spawn } from "node:child_process";
 // are interpreted as positional file patterns instead of options. Strip it so developers can
 // pass Playwright CLI flags through `pnpm test:e2e -- ...` reliably.
 let args = process.argv.slice(2);
-if (args[0] === "--") args = args.slice(1);
+const delimiterIdx = args.indexOf("--");
+if (delimiterIdx >= 0) {
+  args = [...args.slice(0, delimiterIdx), ...args.slice(delimiterIdx + 1)];
+}
 
 // Some callsites pass file paths rooted at the repo (e.g. `apps/web/tests/e2e/...`).
 // Normalize those to paths relative to the web package so Playwright can find them.

@@ -205,8 +205,8 @@ Prefer:
 pnpm test:vitest apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts
 ```
 
-(`pnpm test:vitest -- <file>` is also OK: the wrapper at `scripts/run-vitest.mjs` strips a
-leading `--` so Vitest doesn't accidentally treat it as a test pattern.)
+(`pnpm test:vitest -- <file>` is also OK: the wrapper at `scripts/run-vitest.mjs` strips the
+`--` delimiter pnpm forwards so Vitest doesn't accidentally treat it as a test pattern.)
 
 Or run Vitest directly:
 
@@ -227,7 +227,7 @@ Note: `apps/desktop` and `apps/web` wrap Playwright via:
 - `apps/desktop/scripts/run-playwright.mjs`
 - `apps/web/scripts/run-playwright.mjs`
 
-These wrappers strip a single leading `--` for compatibility. Other scripts may not.
+These wrappers strip a single `--` delimiter for compatibility. Other scripts may not.
 
 Prefer:
 

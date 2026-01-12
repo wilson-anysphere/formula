@@ -5,9 +5,13 @@ import { spawn } from "node:child_process";
 // Normalize those to paths relative to the desktop package so Vitest can find them.
 const PREFIX = "apps/desktop/";
 let args = process.argv.slice(2);
-// Unlike npm/yarn, pnpm forwards a literal `--` separator to the underlying command.
-// Strip it so `pnpm -C apps/desktop vitest -- run <file>` behaves as expected.
-if (args[0] === "--") args = args.slice(1);
+// pnpm forwards a literal `--` delimiter into scripts. Strip the first occurrence so:
+// - `pnpm -C apps/desktop vitest -- run <file>` behaves as expected
+// - wrappers still work if the script itself provides fixed args before the delimiter
+const delimiterIdx = args.indexOf("--");
+if (delimiterIdx >= 0) {
+  args = [...args.slice(0, delimiterIdx), ...args.slice(delimiterIdx + 1)];
+}
 
 const normalizedArgs = args.map((arg) => {
   if (typeof arg !== "string") return arg;
