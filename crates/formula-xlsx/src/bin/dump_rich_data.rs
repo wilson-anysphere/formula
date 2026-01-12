@@ -235,7 +235,7 @@ fn dump_workbook_relationships(pkg: &XlsxPackage) {
         eprintln!("  (missing)");
         return;
     };
-    eprintln!("  part: {rels_part_name}");
+    eprintln!("  part: {rels_part_name} ({} bytes)", rels_bytes.len());
 
     let relationships = match openxml::parse_relationships(rels_bytes) {
         Ok(r) => r,
@@ -259,22 +259,30 @@ fn dump_workbook_relationships(pkg: &XlsxPackage) {
             || type_lower.contains("richvalue")
         {
             matched += 1;
+            let resolved = openxml::resolve_target("xl/workbook.xml", &rel.target);
+            let resolved_size = find_part_bytes_case_insensitive(pkg, &resolved).map(|(_, b)| b.len());
             if let Some(mode) = rel.target_mode.as_deref() {
                 eprintln!(
-                    "  Id={} Type={} Target={} TargetMode={} (resolved: {})",
+                    "  Id={} Type={} Target={} TargetMode={} (resolved: {}, {})",
                     rel.id,
                     rel.type_uri,
                     rel.target,
                     mode,
-                    openxml::resolve_target("xl/workbook.xml", &rel.target)
+                    resolved,
+                    resolved_size
+                        .map(|n| format!("{n} bytes"))
+                        .unwrap_or_else(|| "missing".to_string())
                 );
             } else {
                 eprintln!(
-                    "  Id={} Type={} Target={} (resolved: {})",
+                    "  Id={} Type={} Target={} (resolved: {}, {})",
                     rel.id,
                     rel.type_uri,
                     rel.target,
-                    openxml::resolve_target("xl/workbook.xml", &rel.target)
+                    resolved,
+                    resolved_size
+                        .map(|n| format!("{n} bytes"))
+                        .unwrap_or_else(|| "missing".to_string())
                 );
             }
         }
