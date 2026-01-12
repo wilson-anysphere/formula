@@ -572,58 +572,286 @@ impl XlsxDocument {
         sheet_id: WorksheetId,
         cell: CellRef,
     ) -> Result<Option<u32>, XlsxError> {
-        let Some(vm) = self
-            .meta
-            .cell_meta
-            .get(&(sheet_id, cell))
-            .and_then(|m| m.vm)
-        else {
+        // Only report rich values for cells that still have stored `vm` metadata.
+        // (e.g. a cell cleared after load may retain a stale `rich_value_cells` entry.)
+        let Some(_vm) = self.meta.cell_meta.get(&(sheet_id, cell)).and_then(|m| m.vm) else {
             return Ok(None);
         };
 
-        let Some(metadata_xml) = self.parts.get("xl/metadata.xml") else {
-            return Ok(None);
-        };
-
-        let map =
-            parse_value_metadata_vm_to_rich_value_index_map(metadata_xml).map_err(|err| match err {
-                XmlDomError::Utf8(err) => {
-                    XlsxError::Invalid(format!("xl/metadata.xml is not valid UTF-8: {err}"))
-                }
-                XmlDomError::Parse(err) => XlsxError::RoXml(err),
-            })?;
-
-        Ok(map.get(&vm).copied())
+        Ok(self.meta.rich_value_cells.get(&(sheet_id, cell)).copied())
     }
 
     /// Resolve all cells with a stored `c/@vm` (value metadata index) to rich value indices.
     ///
     /// This is a best-effort helper that returns an empty map if `xl/metadata.xml` is missing.
     pub fn rich_value_indices(&self) -> Result<HashMap<(WorksheetId, CellRef), u32>, XlsxError> {
-        let Some(metadata_xml) = self.parts.get("xl/metadata.xml") else {
-            return Ok(HashMap::new());
-        };
-
-        let vm_to_rich_value_index =
-            parse_value_metadata_vm_to_rich_value_index_map(metadata_xml).map_err(|err| match err {
-                XmlDomError::Utf8(err) => {
-                    XlsxError::Invalid(format!("xl/metadata.xml is not valid UTF-8: {err}"))
-                }
-                XmlDomError::Parse(err) => XlsxError::RoXml(err),
-            })?;
-
         let mut out = HashMap::new();
-        for (&(worksheet_id, cell_ref), meta) in &self.meta.cell_meta {
-            let Some(vm) = meta.vm else {
+        for (&(worksheet_id, cell_ref), &idx) in &self.meta.rich_value_cells {
+            // Only include cells that still have stored `vm` metadata.
+            let has_vm = self
+                .meta
+                .cell_meta
+                .get(&(worksheet_id, cell_ref))
+                .and_then(|m| m.vm)
+                .is_some();
+            if !has_vm {
                 continue;
             };
-            let Some(rich_value_index) = vm_to_rich_value_index.get(&vm).copied() else {
-                continue;
-            };
-            out.insert((worksheet_id, cell_ref), rich_value_index);
+            out.insert((worksheet_id, cell_ref), idx);
         }
 
         Ok(out)
+    }
+
+    /// Resolve an "image in cell" rich value to the underlying `xl/media/*` target part.
+    ///
+    /// This is a best-effort helper:
+    /// - Returns `Ok(None)` when the cell has no rich value, or when the rich value is not an image
+    ///   (or cannot be resolved).
+    /// - Returns `Err(_)` only for invalid XML/UTF-8 in the relevant rich-data parts.
+    pub fn image_target_for_cell(
+        &self,
+        sheet_id: WorksheetId,
+        cell: CellRef,
+    ) -> Result<Option<String>, XlsxError> {
+        let Some(rich_value_index) = self.rich_value_index_for_cell(sheet_id, cell)? else {
+            return Ok(None);
+        };
+
+        // Resolve rich value index -> relationship index via `xl/richData/richValue*.xml`.
+        let Some(rel_index) = self.rich_value_rel_index(rich_value_index)? else {
+            return Ok(None);
+        };
+
+        // Resolve relationship index -> rId via `xl/richData/richValueRel*.xml`.
+        let Some((rich_value_rel_part, rel_id)) = self.rich_value_rel_id(rel_index)? else {
+            return Ok(None);
+        };
+
+        // Resolve rId -> target part via the richValueRel part's `.rels`.
+        let rels_part = crate::openxml::rels_part_name(&rich_value_rel_part);
+        let Some(rels_bytes) = self.parts.get(&rels_part) else {
+            return Ok(None);
+        };
+
+        for rel in crate::openxml::parse_relationships(rels_bytes)? {
+            if rel.id != rel_id {
+                continue;
+            }
+            if rel
+                .target_mode
+                .as_deref()
+                .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+            {
+                return Ok(None);
+            }
+            if rel.type_uri != crate::drawings::REL_TYPE_IMAGE {
+                return Ok(None);
+            }
+
+            let target_part = crate::path::resolve_target(&rich_value_rel_part, &rel.target);
+            if !self.parts.contains_key(&target_part) {
+                return Ok(None);
+            }
+            return Ok(Some(target_part));
+        }
+
+        Ok(None)
+    }
+
+    fn rich_value_rel_index(&self, rich_value_index: u32) -> Result<Option<u32>, XlsxError> {
+        #[derive(Debug, Clone)]
+        struct ParsedRv {
+            explicit_index: Option<u32>,
+            rel_index: Option<u32>,
+        }
+
+        fn is_rich_value_part(part_name: &str) -> bool {
+            const PREFIX: &str = "xl/richData/richValue";
+            const SUFFIX: &str = ".xml";
+            if !part_name.starts_with(PREFIX) || !part_name.ends_with(SUFFIX) {
+                return false;
+            }
+            let mid = &part_name[PREFIX.len()..part_name.len() - SUFFIX.len()];
+            mid.chars().all(|c| c.is_ascii_digit())
+        }
+
+        fn parse_rv_explicit_index(rv: roxmltree::Node<'_, '_>) -> Option<u32> {
+            rv.attribute("i")
+                .or_else(|| rv.attribute("id"))
+                .or_else(|| rv.attribute("idx"))
+                .and_then(|v| v.trim().parse::<u32>().ok())
+        }
+
+        fn parse_rv_rel_index(rv: roxmltree::Node<'_, '_>) -> Option<u32> {
+            let v_elems: Vec<_> = rv
+                .descendants()
+                .filter(|n| n.is_element() && n.tag_name().name() == "v")
+                .collect();
+
+            // Prefer `<v t="rel">` / `<v t="r">`.
+            for v in &v_elems {
+                let Some(t) = v.attribute("t") else {
+                    continue;
+                };
+                if t == "rel" || t == "r" {
+                    if let Some(text) = v.text() {
+                        if let Ok(idx) = text.trim().parse::<u32>() {
+                            return Some(idx);
+                        }
+                    }
+                }
+            }
+
+            // Fall back to a numeric `<v>` without a type marker.
+            for v in &v_elems {
+                if v.attribute("t").is_some() {
+                    continue;
+                }
+                if let Some(text) = v.text() {
+                    if let Ok(idx) = text.trim().parse::<u32>() {
+                        return Some(idx);
+                    }
+                }
+            }
+
+            // Last-ditch: any numeric `<v>`.
+            for v in &v_elems {
+                if let Some(text) = v.text() {
+                    if let Ok(idx) = text.trim().parse::<u32>() {
+                        return Some(idx);
+                    }
+                }
+            }
+
+            None
+        }
+
+        let mut parsed: Vec<ParsedRv> = Vec::new();
+
+        for (part_name, bytes) in self.parts.iter() {
+            if !is_rich_value_part(part_name) {
+                continue;
+            }
+
+            let xml = std::str::from_utf8(bytes).map_err(|e| {
+                XlsxError::Invalid(format!("{part_name} is not valid UTF-8: {e}"))
+            })?;
+            let doc = roxmltree::Document::parse(xml)?;
+
+            for rv in doc
+                .root_element()
+                .descendants()
+                .filter(|n| n.is_element() && n.tag_name().name() == "rv")
+            {
+                parsed.push(ParsedRv {
+                    explicit_index: parse_rv_explicit_index(rv),
+                    rel_index: parse_rv_rel_index(rv),
+                });
+            }
+        }
+
+        if parsed.is_empty() {
+            return Ok(None);
+        }
+
+        // Build a global index -> relationship index map that honors explicit `<rv id="...">` indices
+        // when present.
+        let mut out: HashMap<u32, Option<u32>> = HashMap::new();
+        let mut max_explicit: Option<u32> = None;
+        for rv in &parsed {
+            let Some(idx) = rv.explicit_index else {
+                continue;
+            };
+            if out.contains_key(&idx) {
+                // Deterministic: first wins.
+                continue;
+            }
+            max_explicit = Some(max_explicit.map(|m| m.max(idx)).unwrap_or(idx));
+            out.insert(idx, rv.rel_index);
+        }
+
+        let mut next = match max_explicit {
+            Some(max) => max.saturating_add(1),
+            None => 0,
+        };
+        for rv in &parsed {
+            if rv.explicit_index.is_some() {
+                continue;
+            }
+            while out.contains_key(&next) {
+                next = next.saturating_add(1);
+            }
+            out.insert(next, rv.rel_index);
+            next = next.saturating_add(1);
+        }
+
+        Ok(out.get(&rich_value_index).copied().flatten())
+    }
+
+    fn rich_value_rel_id(&self, rel_index: u32) -> Result<Option<(String, String)>, XlsxError> {
+        fn is_rich_value_rel_part(part_name: &str) -> bool {
+            const PREFIX: &str = "xl/richData/richValueRel";
+            const SUFFIX: &str = ".xml";
+            if !part_name.starts_with(PREFIX) || !part_name.ends_with(SUFFIX) {
+                return false;
+            }
+            if part_name.contains("/_rels/") {
+                return false;
+            }
+            let mid = &part_name[PREFIX.len()..part_name.len() - SUFFIX.len()];
+            mid.chars().all(|c| c.is_ascii_digit())
+        }
+
+        fn parse_rel_ids(xml: &str) -> Result<Vec<String>, XlsxError> {
+            let doc = roxmltree::Document::parse(xml)?;
+            let mut out = Vec::new();
+            for rel in doc
+                .descendants()
+                .filter(|n| n.is_element() && n.tag_name().name() == "rel")
+            {
+                let rid = rel
+                    .attribute((
+                        "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+                        "id",
+                    ))
+                    .or_else(|| rel.attribute("r:id"))
+                    .or_else(|| rel.attribute("id"));
+                let Some(rid) = rid else {
+                    continue;
+                };
+                out.push(rid.to_string());
+            }
+            Ok(out)
+        }
+
+        // Prefer the canonical name, but fall back to any `richValueRel*.xml`.
+        let rich_value_rel_part = if self.parts.contains_key("xl/richData/richValueRel.xml") {
+            "xl/richData/richValueRel.xml".to_string()
+        } else {
+            self.parts
+                .keys()
+                .find(|name| is_rich_value_rel_part(name))
+                .cloned()
+                .unwrap_or_default()
+        };
+
+        if rich_value_rel_part.is_empty() {
+            return Ok(None);
+        }
+
+        let Some(bytes) = self.parts.get(&rich_value_rel_part) else {
+            return Ok(None);
+        };
+        let xml = std::str::from_utf8(bytes).map_err(|e| {
+            XlsxError::Invalid(format!("{rich_value_rel_part} is not valid UTF-8: {e}"))
+        })?;
+        let rel_ids = parse_rel_ids(xml)?;
+        let Some(rel_id) = rel_ids.get(rel_index as usize).cloned() else {
+            return Ok(None);
+        };
+
+        Ok(Some((rich_value_rel_part, rel_id)))
     }
 }
 
