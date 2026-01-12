@@ -29,10 +29,8 @@ fn oddfprice_allows_issue_equal_settlement() {
 #[test]
 fn oddfyield_allows_issue_equal_settlement() {
     let v = eval_formula("=ODDFYIELD(DATE(2020,1,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,ODDFPRICE(DATE(2020,1,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0),100,2,0)");
-    assert!(
-        matches!(v, Value::Number(n) if (n - 0.04).abs() <= 1e-6),
-        "expected yield ~0.04, got {v:?}"
-    );
+    // Pinned by excel-oracle boundary cases.
+    assert_number_close(v, 0.04000000000000014, 1e-6);
 }
 
 #[test]
@@ -45,10 +43,8 @@ fn oddfprice_allows_settlement_equal_first_coupon() {
 #[test]
 fn oddfyield_allows_settlement_equal_first_coupon() {
     let v = eval_formula("=ODDFYIELD(DATE(2020,7,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,ODDFPRICE(DATE(2020,7,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0),100,2,0)");
-    assert!(
-        matches!(v, Value::Number(n) if (n - 0.04).abs() <= 1e-6),
-        "expected yield ~0.04, got {v:?}"
-    );
+    // Pinned by excel-oracle boundary cases.
+    assert_number_close(v, 0.039999999999979614, 1e-6);
 }
 
 #[test]
@@ -63,10 +59,8 @@ fn oddfprice_allows_first_coupon_equal_maturity() {
 #[test]
 fn oddfyield_allows_first_coupon_equal_maturity() {
     let v = eval_formula("=ODDFYIELD(DATE(2020,3,1),DATE(2020,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,ODDFPRICE(DATE(2020,3,1),DATE(2020,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0),100,2,0)");
-    assert!(
-        matches!(v, Value::Number(n) if (n - 0.04).abs() <= 1e-6),
-        "expected yield ~0.04, got {v:?}"
-    );
+    // Pinned by excel-oracle boundary cases.
+    assert_number_close(v, 0.03999999999999963, 1e-6);
 }
 
 #[test]
@@ -127,10 +121,8 @@ fn oddlprice_allows_settlement_equal_last_interest() {
 #[test]
 fn oddlyield_allows_settlement_equal_last_interest() {
     let v = eval_formula("=ODDLYIELD(DATE(2024,7,1),DATE(2025,1,1),DATE(2024,7,1),0.05,ODDLPRICE(DATE(2024,7,1),DATE(2025,1,1),DATE(2024,7,1),0.05,0.04,100,2,0),100,2,0)");
-    assert!(
-        matches!(v, Value::Number(n) if (n - 0.04).abs() <= 1e-6),
-        "expected yield ~0.04, got {v:?}"
-    );
+    // Pinned by excel-oracle boundary cases.
+    assert_number_close(v, 0.039999999999999813, 1e-6);
 }
 
 #[test]
