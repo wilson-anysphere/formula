@@ -257,6 +257,21 @@ dialog.page-setup-dialog::backdrop {
   white-space: nowrap;
 }
 
+.statusbar__collab [data-testid="collab-status"][data-collab-mode="collab"][data-collab-conn="connected"][data-collab-sync="synced"] {
+  color: var(--accent);
+}
+
+.statusbar__collab [data-testid="collab-status"][data-collab-conn="disconnected"],
+.statusbar__collab [data-testid="collab-status"][data-collab-conn="offline"] {
+  color: var(--error);
+}
+
+.statusbar__collab [data-testid="collab-status"][data-collab-conn="connecting"],
+.statusbar__collab [data-testid="collab-status"][data-collab-sync="syncing"],
+.statusbar__collab [data-testid="collab-status"][data-collab-conn="loading"] {
+  color: var(--warning);
+}
+
 .statusbar__spacer {
   flex: 1;
   min-width: 0;
