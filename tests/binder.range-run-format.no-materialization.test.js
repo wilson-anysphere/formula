@@ -363,3 +363,44 @@ test("binder: DocumentController→Yjs applies range-run formatting to duplicate
     remoteDoc.destroy();
   }
 });
+
+test("binder: hydrates range-run formatting from plain-object sheet entries", async () => {
+  const ydoc = new Y.Doc();
+  const cells = ydoc.getMap("cells");
+  const sheets = ydoc.getArray("sheets");
+
+  // Legacy/persistence payloads can store sheet entries as plain JS objects.
+  // Ensure the binder can still read `formatRunsByCol` and hydrate DocumentController.
+  ydoc.transact(() => {
+    sheets.push([
+      {
+        id: "Sheet1",
+        name: "Sheet1",
+        formatRunsByCol: {
+          "0": [{ startRow: 0, endRowExclusive: 3, format: { font: { bold: true } } }],
+        },
+      },
+    ]);
+  });
+
+  const documentController = new DocumentController();
+  const binder = bindYjsToDocumentController({ ydoc, documentController, defaultSheetId: "Sheet1", userId: "u-a" });
+
+  try {
+    await waitForCondition(() => Boolean(documentController.getCellFormat("Sheet1", "A1")?.font?.bold));
+    assert.equal(documentController.getCellFormat("Sheet1", "A1")?.font?.bold, true);
+
+    // Rows outside the run should not be styled (half-open interval).
+    assert.equal(documentController.getCellFormat("Sheet1", "A4")?.font?.bold, undefined);
+
+    const runs = documentController.model.sheets.get("Sheet1")?.formatRunsByCol?.get?.(0) ?? [];
+    assert.ok(Array.isArray(runs) && runs.length > 0, "expected range-run formatting to hydrate into the sheet model");
+
+    // No per-cell materialization should occur.
+    assert.equal(cells.size, 0);
+    assert.equal(documentController.model?.sheets?.get?.("Sheet1")?.cells?.size ?? 0, 0);
+  } finally {
+    binder.destroy();
+    ydoc.destroy();
+  }
+});
