@@ -1360,7 +1360,7 @@ pub fn verify_vba_project_signature_binding(
     // digest algorithm.
     let mut v3_digest: Option<(DigestAlg, Vec<u8>)> = None;
     for payload in payloads {
-        let signed = match extract_vba_signature_signed_digest(&payload) {
+        let signed = match extract_vba_signature_signed_digest(&payload.bytes) {
             Ok(Some(signed)) => signed,
             Ok(None) | Err(_) => continue,
         };
@@ -1377,11 +1377,16 @@ pub fn verify_vba_project_signature_binding(
 
         let signed_digest = signed.digest.as_slice();
 
-        // v3 signatures use a non-MD5 digest (typically 32-byte SHA-256). For signature payloads
-        // provided outside the main `vbaProject.bin` (e.g. `xl/vbaProjectSignature.bin`), we may not
-        // know the original signature stream name. Use the digest length to select between
-        // legacy (v1/v2) and v3 binding computation.
-        if signed_digest.len() != 16 {
+        // Prefer v3 digest computation when we know this signature was loaded from a
+        // `\x05DigitalSignatureExt` stream. When verifying signature payloads outside the main
+        // `vbaProject.bin` (e.g. `xl/vbaProjectSignature.bin`) we may not know the original stream
+        // name; in that case use the digest length to select between legacy (v1/v2, always 16-byte
+        // MD5 per MS-OSHARED §4.3) and v3 binding computation.
+        if matches!(
+            payload.stream_kind,
+            Some(VbaSignatureStreamKind::DigitalSignatureExt)
+        ) || signed_digest.len() != 16
+        {
             let Some(alg) = digest_alg_from_oid_str(&signed.digest_algorithm_oid) else {
                 continue;
             };
@@ -1480,7 +1485,13 @@ pub fn verify_vba_project_signature_binding(
     ))
 }
 
-fn signature_payload_candidates(signature_bytes: &[u8]) -> Vec<Vec<u8>> {
+#[derive(Debug, Clone)]
+struct SignaturePayloadCandidate {
+    stream_kind: Option<VbaSignatureStreamKind>,
+    bytes: Vec<u8>,
+}
+
+fn signature_payload_candidates(signature_bytes: &[u8]) -> Vec<SignaturePayloadCandidate> {
     // 1) If it looks like an OLE container, extract `\x05DigitalSignature*` streams.
     if let Ok(mut ole) = OleFile::open(signature_bytes) {
         if let Ok(streams) = ole.list_streams() {
@@ -1497,7 +1508,10 @@ fn signature_payload_candidates(signature_bytes: &[u8]) -> Vec<Vec<u8>> {
             let mut out = Vec::new();
             for path in candidates {
                 if let Ok(Some(bytes)) = ole.read_stream_opt(&path) {
-                    out.push(bytes);
+                    out.push(SignaturePayloadCandidate {
+                        stream_kind: signature_path_stream_kind(&path),
+                        bytes,
+                    });
                 }
             }
             if !out.is_empty() {
@@ -1507,5 +1521,8 @@ fn signature_payload_candidates(signature_bytes: &[u8]) -> Vec<Vec<u8>> {
     }
 
     // 2) Otherwise treat the whole buffer as a signature blob/stream payload.
-    vec![signature_bytes.to_vec()]
+    vec![SignaturePayloadCandidate {
+        stream_kind: None,
+        bytes: signature_bytes.to_vec(),
+    }]
 }
