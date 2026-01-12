@@ -432,7 +432,10 @@ fn cell_value_to_engine(value: &CellValue) -> EngineValue {
             formula_model::ErrorValue::GettingData => EngineValue::Error(ErrorKind::GettingData),
             formula_model::ErrorValue::Spill => EngineValue::Error(ErrorKind::Spill),
             formula_model::ErrorValue::Calc => EngineValue::Error(ErrorKind::Calc),
-            other => EngineValue::Text(other.as_str().to_string()),
+            formula_model::ErrorValue::Field => EngineValue::Error(ErrorKind::Field),
+            formula_model::ErrorValue::Connect => EngineValue::Error(ErrorKind::Connect),
+            formula_model::ErrorValue::Blocked => EngineValue::Error(ErrorKind::Blocked),
+            formula_model::ErrorValue::Unknown => EngineValue::Error(ErrorKind::Unknown),
         },
         CellValue::RichText(rt) => EngineValue::Text(rt.plain_text().to_string()),
         CellValue::Entity(entity) => EngineValue::Text(entity.display.clone()),
@@ -2147,6 +2150,22 @@ mod tests {
             ],
         );
         assert_eq!(engine_value_to_json(EngineValue::Array(arr)), json!(1.0));
+    }
+
+    #[test]
+    fn cell_value_to_engine_preserves_extended_error_field() {
+        let value = CellValue::Error(formula_model::ErrorValue::Field);
+        let engine_value = cell_value_to_engine(&value);
+        assert_eq!(engine_value, EngineValue::Error(ErrorKind::Field));
+        assert_eq!(engine_value_to_json(engine_value), json!("#FIELD!"));
+    }
+
+    #[test]
+    fn cell_value_to_engine_preserves_extended_error_connect() {
+        let value = CellValue::Error(formula_model::ErrorValue::Connect);
+        let engine_value = cell_value_to_engine(&value);
+        assert_eq!(engine_value, EngineValue::Error(ErrorKind::Connect));
+        assert_eq!(engine_value_to_json(engine_value), json!("#CONNECT!"));
     }
 
     #[test]
