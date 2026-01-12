@@ -9404,9 +9404,10 @@ try {
   // - shortcut-quick-open, shortcut-command-palette
   // - menu-open, menu-new, menu-save, menu-save-as, menu-export-pdf, menu-close-window, menu-quit,
   //   menu-undo, menu-redo, menu-cut, menu-copy, menu-paste, menu-paste-special, menu-select-all,
-  //   menu-zoom-in, menu-zoom-out, menu-zoom-reset, menu-about, menu-check-updates
+  //   menu-zoom-in, menu-zoom-out, menu-zoom-reset, menu-about, menu-check-updates, menu-open-release-page
   // - startup:window-visible, startup:webview-loaded, startup:tti, startup:metrics
   // - update-check-started, update-check-already-running, update-not-available, update-check-error, update-available
+  // - update-download-started, update-download-progress, update-downloaded, update-download-error
   // - oauth-redirect
   // JS -> Rust (`emit`):
   // - open-file-ready, oauth-redirect-ready
