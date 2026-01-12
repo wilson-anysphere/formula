@@ -44,4 +44,5 @@ export class DocumentController {
   applyExternalDeltas(deltas: any[], options?: unknown): void;
   applyExternalSheetViewDeltas(deltas: any[], options?: unknown): void;
   applyExternalFormatDeltas(deltas: any[], options?: unknown): void;
+  applyExternalRangeRunDeltas(deltas: any[], options?: unknown): void;
 }

@@ -3671,7 +3671,7 @@ export class DocumentController {
   /**
    * Apply a set of range-run formatting deltas that originated externally (e.g. collaboration sync).
    *
-   * Like {@link applyExternalDeltas}, these updates:
+   * Like {@link applyExternalFormatDeltas}, these updates:
    * - bypass `canEditCell` (permissions should be enforced at the collaboration layer)
    * - bypass undo/redo history (not user-editable)
    * - emit `change` + `update` events so UI + versioning layers can react
