@@ -5031,7 +5031,8 @@ mod tests {
         let mut model = formula_model::Workbook::new();
         let _ = model.add_sheet("Sheet1").expect("add sheet");
         let _ = model.add_sheet("Sheet2").expect("add sheet");
-        let _ = model.add_sheet("Sheet3").expect("add sheet");
+        let sheet3_id = model.add_sheet("Sheet3").expect("add sheet");
+        model.set_sheet_visibility(sheet3_id, SheetVisibility::VeryHidden);
 
         let mut buf = std::io::Cursor::new(Vec::new());
         formula_xlsx::write_workbook_to_writer(&model, &mut buf).expect("write xlsx bytes");
@@ -5047,9 +5048,6 @@ mod tests {
         state
             .set_sheet_visibility("Sheet2", SheetVisibility::Hidden)
             .expect("hide Sheet2");
-        state
-            .set_sheet_visibility("Sheet3", SheetVisibility::VeryHidden)
-            .expect("very-hide Sheet3");
         state
             .set_sheet_tab_color("Sheet2", Some(TabColor::rgb("FF00FF00")))
             .expect("set tab color");
@@ -5097,7 +5095,7 @@ mod tests {
             .set_sheet_visibility("Sheet2", SheetVisibility::Hidden)
             .expect("hide Sheet2");
         let err = state
-            .set_sheet_visibility("Sheet1", SheetVisibility::VeryHidden)
+            .set_sheet_visibility("Sheet1", SheetVisibility::Hidden)
             .expect_err("expected hiding last visible sheet to fail");
         assert!(
             err.to_string().contains("last visible"),

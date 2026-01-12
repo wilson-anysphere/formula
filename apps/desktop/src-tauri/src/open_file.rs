@@ -6,6 +6,8 @@ use url::Url;
 const SUPPORTED_EXTENSIONS: &[&str] = &[
     "xlsx",
     "xls",
+    "xlt",
+    "xla",
     "xlsm",
     "xltx",
     "xltm",
@@ -24,7 +26,7 @@ const SUPPORTED_EXTENSIONS: &[&str] = &[
 /// - macOS open-document events (converted to `file://...` strings)
 ///
 /// Normalization rules:
-/// - accepts: `xlsx`, `xls`, `xlsm`, `xltx`, `xltm`, `xlam`, `xlsb`, `csv` (case-insensitive)
+/// - accepts: `xlsx`, `xls`, `xlt`, `xla`, `xlsm`, `xltx`, `xltm`, `xlam`, `xlsb`, `csv` (case-insensitive)
 ///   - plus `parquet` when compiled with the `parquet` feature
 /// - if the extension is missing/unsupported, performs a lightweight file signature sniff to
 ///   detect valid workbooks (OLE `.xls`, ZIP-based `.xlsx`/`.xlsm`/`.xlsb`, plus Parquet when the
@@ -184,6 +186,8 @@ mod tests {
         let argv = vec![
             "formula-desktop".to_string(),
             "Report.XLSX".to_string(),
+            "Report.XLT".to_string(),
+            "Report.XLA".to_string(),
             "Report.XLTX".to_string(),
             "Report.XLTM".to_string(),
             "Report.XLAM".to_string(),
@@ -196,6 +200,8 @@ mod tests {
             paths,
             vec![
                 cwd.join("Report.XLSX"),
+                cwd.join("Report.XLT"),
+                cwd.join("Report.XLA"),
                 cwd.join("Report.XLTX"),
                 cwd.join("Report.XLTM"),
                 cwd.join("Report.XLAM"),

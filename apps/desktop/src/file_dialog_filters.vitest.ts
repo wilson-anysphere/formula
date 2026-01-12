@@ -7,10 +7,21 @@ describe("getOpenFileFilters", () => {
     const filters = getOpenFileFilters();
     const extensions = new Set(filters.flatMap((filter) => filter.extensions));
 
-    const expected = ["xlsx", "xlsm", "xltx", "xltm", "xlam", "xls", "xlsb", "csv", "parquet"];
+    const expected = [
+      "xlsx",
+      "xlsm",
+      "xltx",
+      "xltm",
+      "xlam",
+      "xls",
+      "xlt",
+      "xla",
+      "xlsb",
+      "csv",
+      "parquet",
+    ];
     for (const ext of expected) {
       expect(extensions.has(ext)).toBe(true);
     }
   });
 });
-

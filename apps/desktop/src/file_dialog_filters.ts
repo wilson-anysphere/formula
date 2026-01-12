@@ -4,7 +4,18 @@ export function getOpenFileFilters() {
   return [
     {
       name: t("fileDialog.filters.excelWorkbook"),
-      extensions: ["xlsx", "xlsm", "xltx", "xltm", "xlam", "xls", "csv", "parquet"],
+      extensions: [
+        "xlsx",
+        "xlsm",
+        "xltx",
+        "xltm",
+        "xlam",
+        "xls",
+        "xlt",
+        "xla",
+        "csv",
+        "parquet",
+      ],
     },
     {
       name: t("fileDialog.filters.excelBinaryWorkbook"),
