@@ -281,9 +281,6 @@ export class KeybindingService {
   }
 
   private isReservedForExtensions(event: KeyboardEvent): boolean {
-    // Fast path: most shortcuts won't be primary modifier combos.
-    if (!event.ctrlKey && !event.metaKey) return false;
-    if (event.altKey) return false;
     return this.reservedExtensionShortcuts.some((binding) => matchesKeybinding(binding, event));
   }
 

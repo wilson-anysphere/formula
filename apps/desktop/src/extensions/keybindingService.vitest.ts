@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { CommandRegistry } from "./commandRegistry.js";
 import { ContextKeyService } from "./contextKeys.js";
 import { KeybindingService } from "./keybindingService.js";
+import { parseKeybinding } from "./keybindings.js";
 
 function makeKeydownEvent(opts: {
   key: string;
@@ -117,6 +118,21 @@ describe("KeybindingService", () => {
       { extensionId: "ext", command: "ext.stealCopy", key: "cmd+h", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealCopy", key: "ctrl+cmd+h", mac: null, when: null },
     ]);
+
+    // Safety net: even if an extension keybinding for a reserved shortcut slips through filtering,
+    // it should never dispatch at runtime.
+    (service as any).extensions.push({
+      source: { kind: "extension", extensionId: "ext" },
+      binding: parseKeybinding("ext.stealCopy", "f2", null)!,
+      weight: 0,
+      order: 9999,
+    });
+    (service as any).extensions.push({
+      source: { kind: "extension", extensionId: "ext" },
+      binding: parseKeybinding("ext.stealCopy", "shift+f2", null)!,
+      weight: 0,
+      order: 10000,
+    });
 
     const event = makeKeydownEvent({ key: "c", ctrlKey: true });
     const handled = await service.dispatchKeydown(event);
