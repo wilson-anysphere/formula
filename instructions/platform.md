@@ -103,11 +103,16 @@ See `docs/11-desktop-shell.md` for details.
 Tauri v2 permissions are granted via **capabilities**:
 
 - `apps/desktop/src-tauri/capabilities/*.json`
-- capability files scope themselves to window labels via the capability file’s `"windows": [...]` list (matches `app.windows[].label` in `apps/desktop/src-tauri/tauri.conf.json`)
-  - the main window label is `main`, and `apps/desktop/src-tauri/capabilities/main.json` applies to it via `"windows": ["main"]`
+- Capabilities are scoped per window in **two** places (defense-in-depth):
+  - `apps/desktop/src-tauri/tauri.conf.json` opts a window into capability identifiers via `app.windows[].capabilities`
+    (the main window includes `"capabilities": ["main"]`).
+  - capability files scope themselves to window labels via the capability file’s `"windows": [...]` list (matches
+    `app.windows[].label` in `apps/desktop/src-tauri/tauri.conf.json`).
+    - the main window label is `main`, and `apps/desktop/src-tauri/capabilities/main.json` applies to it via
+      `"windows": ["main"]`
 
-Note: our current `tauri-build` toolchain does **not** support window-level opt-in via `app.windows[].capabilities` in
-`tauri.conf.json` (it causes a build error). Keep window scoping in the capability file (guardrailed by
+Keep `tauri.conf.json`’s `app.windows[].capabilities` mapping and each capability file’s `"windows": [...]` scoping in sync
+so adding a new window never implicitly grants it the main capability (guardrailed by
 `apps/desktop/src/tauri/__tests__/tauriSecurityConfig.vitest.ts`).
 
 Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the full allowlists):
@@ -167,7 +172,7 @@ generate the capability JSON schema and list the available permissions:
 ```bash
 # Generates `apps/desktop/src-tauri/gen/schemas/desktop-schema.json` (ignored by git).
 # On Linux this requires the system WebView toolchain (gtk/webkit2gtk) because it compiles the desktop feature set.
-bash scripts/cargo_agent.sh check -p formula-desktop-tauri --features desktop --lib
+bash scripts/cargo_agent.sh check -p desktop --features desktop --lib
 
 # Lists all permission identifiers available to this app (core + enabled plugins).
 cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri permission ls
