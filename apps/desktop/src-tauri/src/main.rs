@@ -8,9 +8,7 @@ mod tray;
 mod updater;
 
 use desktop::commands;
-use desktop::macro_trust::{
-    compute_macro_fingerprint, MacroTrustStore, SharedMacroTrustStore,
-};
+use desktop::macro_trust::{compute_macro_fingerprint, MacroTrustStore, SharedMacroTrustStore};
 use desktop::macros::MacroExecutionOptions;
 use desktop::open_file;
 use desktop::state::{AppState, CellUpdateData, SharedAppState};
@@ -20,7 +18,6 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tauri::http::header::{HeaderName, HeaderValue};
 use tauri::{Emitter, Listener, Manager};
 use tokio::sync::oneshot;
 use tokio::time::{timeout, Duration};
@@ -41,26 +38,6 @@ struct OpenFileState {
 
 type SharedOpenFileState = Arc<Mutex<OpenFileState>>;
 
-const CROSS_ORIGIN_OPENER_POLICY: HeaderName =
-    HeaderName::from_static("cross-origin-opener-policy");
-const CROSS_ORIGIN_EMBEDDER_POLICY: HeaderName =
-    HeaderName::from_static("cross-origin-embedder-policy");
-
-fn apply_cross_origin_isolation_headers(response: &mut tauri::http::Response<Vec<u8>>) {
-    // Match `apps/desktop/vite.config.ts`’s `crossOriginIsolationHeaders`.
-    //
-    // These are required for `globalThis.crossOriginIsolated === true` so Chromium enables
-    // `SharedArrayBuffer` (required by Pyodide's worker backend).
-    let headers = response.headers_mut();
-    headers.insert(
-        CROSS_ORIGIN_OPENER_POLICY,
-        HeaderValue::from_static("same-origin"),
-    );
-    headers.insert(
-        CROSS_ORIGIN_EMBEDDER_POLICY,
-        HeaderValue::from_static("require-corp"),
-    );
-}
 #[derive(Clone, Debug, Serialize)]
 struct CloseRequestedPayload {
     token: String,
@@ -222,27 +199,16 @@ fn main() {
     let open_file_state: SharedOpenFileState = Arc::new(Mutex::new(OpenFileState::default()));
     let initial_argv: Vec<String> = std::env::args().collect();
     let initial_cwd = std::env::current_dir().ok();
-    let initial_paths =
-        normalize_open_file_request_paths(extract_open_file_paths(&initial_argv, initial_cwd.as_deref()));
+    let initial_paths = normalize_open_file_request_paths(extract_open_file_paths(
+        &initial_argv,
+        initial_cwd.as_deref(),
+    ));
     if !initial_paths.is_empty() {
         let mut guard = open_file_state.lock().unwrap();
         guard.pending_paths.extend(initial_paths);
     }
 
     let app = tauri::Builder::default()
-        // In production builds, the webview loads `frontendDist` via Tauri's custom
-        // asset protocol (`tauri://...`). Unlike the Vite dev/preview servers, those
-        // responses don't include COOP/COEP headers by default, which prevents
-        // `globalThis.crossOriginIsolated` from becoming true and disables
-        // `SharedArrayBuffer` in Chromium.
-        //
-        // Wrap the built-in asset protocol handler and inject the required headers
-        // while preserving default behavior (MIME types, caching, CSP injection, etc).
-        .register_uri_scheme_protocol("tauri", |app, request| {
-            let mut response = tauri::protocol::asset::get(app, request)?;
-            apply_cross_origin_isolation_headers(&mut response);
-            Ok(response)
-        })
         .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
             let cwd = cwd_from_single_instance_callback(cwd);
             let paths = extract_open_file_paths(&argv, cwd.as_deref());
