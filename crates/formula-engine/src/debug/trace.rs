@@ -630,6 +630,8 @@ impl<'a> Lexer<'a> {
         debug_assert_eq!(self.peek_char(), Some('#'));
         self.pos += 1; // '#'
         while let Some(ch) = self.peek_char() {
+            // Keep the accepted body characters in sync with the canonical lexer:
+            // `parser/mod.rs:is_error_body_char`.
             if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '/' | '.') {
                 self.pos += ch.len_utf8();
             } else {
@@ -3048,6 +3050,25 @@ mod tests {
         assert!(
             err.to_string().contains("Too many arguments"),
             "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn lexes_getting_data_error_literal_as_single_token() {
+        let formula = "=#GETTING_DATA";
+        let mut lexer = Lexer::new(formula);
+        let tokens = lexer.tokenize().expect("tokenize should succeed");
+
+        // One error literal + implicit End token.
+        assert_eq!(tokens.len(), 2);
+        assert!(
+            matches!(tokens[0].kind, TokenKind::Error(_)),
+            "expected error token, got {:?}",
+            tokens[0].kind
+        );
+        assert_eq!(
+            &formula[tokens[0].span.start..tokens[0].span.end],
+            "#GETTING_DATA"
         );
     }
 }
