@@ -748,6 +748,65 @@ mod tests {
     }
 
     #[test]
+    fn parses_module_using_unicode_only_name_and_stream_records() {
+        use std::io::{Cursor, Write};
+
+        // Some `VBA/dir` encodings omit MODULENAME (0x0019) and emit only MODULENAMEUNICODE (0x0047),
+        // along with MODULESTREAMNAMEUNICODE (0x0032). Ensure we can still enumerate and open the
+        // module stream.
+        let module_name = "Модуль1"; // non-ASCII
+
+        let mut name_unicode = Vec::new();
+        for unit in module_name.encode_utf16() {
+            name_unicode.extend_from_slice(&unit.to_le_bytes());
+        }
+
+        let module_code = "Sub Hello()\r\nEnd Sub\r\n";
+        let module_container = compress_container(module_code.as_bytes());
+
+        let dir_decompressed = {
+            let mut out = Vec::new();
+
+            // PROJECTCODEPAGE (u16 LE): present in most real projects; not required for Unicode
+            // names, but keeps the overall encoding resolution deterministic.
+            push_record(&mut out, 0x0003, &1251u16.to_le_bytes());
+
+            // Unicode-only module identifier + stream name.
+            push_record(&mut out, 0x0047, &name_unicode); // MODULENAMEUNICODE
+            push_record(&mut out, 0x0032, &name_unicode); // MODULESTREAMNAMEUNICODE
+
+            // MODULETYPE (standard) + MODULETEXTOFFSET (0).
+            push_record(&mut out, 0x0021, &0u16.to_le_bytes());
+            push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+            out
+        };
+        let dir_container = compress_container(&dir_decompressed);
+
+        let cursor = Cursor::new(Vec::new());
+        let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+        ole.create_storage("VBA").expect("VBA storage");
+        {
+            let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+            s.write_all(&dir_container).expect("write dir");
+        }
+        {
+            let path = format!("VBA/{module_name}");
+            let mut s = ole.create_stream(&path).expect("module stream");
+            s.write_all(&module_container).expect("write module");
+        }
+
+        let vba_bin = ole.into_inner().into_inner();
+        let project = VBAProject::parse(&vba_bin).expect("parse");
+        let module = project
+            .modules
+            .iter()
+            .find(|m| m.name == module_name)
+            .expect("module present");
+        assert_eq!(module.stream_name, module_name);
+        assert!(module.code.contains("Sub Hello"));
+    }
+
+    #[test]
     fn parses_module_without_text_offset_using_signature_scan() {
         use std::io::{Cursor, Write};
 
