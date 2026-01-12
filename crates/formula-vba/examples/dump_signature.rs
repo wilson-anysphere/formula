@@ -72,6 +72,9 @@ fn run() -> Result<(), String> {
                 println!("    pkcs7_location: <unknown> (DigSigInfoSerialized not detected)");
             }
         }
+        if let Some(version) = sig.digsig_info_version {
+            println!("    digsig_info_version: {version}");
+        }
 
         match extract_vba_signature_signed_digest(&sig.signature) {
             Ok(Some(digest)) => {
