@@ -95,4 +95,72 @@ test.describe("Extensions permissions UI", () => {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
+
+  test("global reset clears extension permissions", async ({ page }) => {
+    const server = http.createServer((_req, res) => {
+      res.writeHead(200, {
+        "Content-Type": "text/plain",
+        "Access-Control-Allow-Origin": "*",
+      });
+      res.end("hello");
+    });
+
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    const port = typeof address === "object" && address ? address.port : null;
+    if (!port) throw new Error("Failed to allocate test port");
+
+    const url = `http://127.0.0.1:${port}/`;
+    const extensionId = "formula.sample-hello";
+
+    try {
+      await page.addInitScript(() => {
+        try {
+          localStorage.removeItem("formula.extensionHost.permissions");
+        } catch {
+          // ignore
+        }
+      });
+
+      await gotoDesktop(page);
+
+      await page.getByTestId("open-extensions-panel").click();
+      await expect(page.getByTestId("panel-extensions")).toBeVisible();
+
+      await expect(page.getByTestId(`extension-card-${extensionId}`)).toBeVisible();
+      await expect(page.getByTestId(`permissions-empty-${extensionId}`)).toBeVisible();
+
+      // First run: allow ui.commands + network so we have something to reset.
+      await page.getByTestId("run-command-with-args-sampleHello.fetchText").click();
+      await expect(page.getByTestId("input-box")).toBeVisible();
+      await page.getByTestId("input-box-field").fill(JSON.stringify([url]));
+      await page.getByTestId("input-box-ok").click();
+
+      await expect(page.getByTestId("extension-permission-prompt")).toBeVisible();
+      await page.getByTestId("extension-permission-allow").click();
+      await expect(page.getByTestId("extension-permission-prompt")).toBeVisible();
+      await page.getByTestId("extension-permission-allow").click();
+
+      await expect(page.getByTestId("toast-root")).toContainText("Fetched: hello");
+      await expect(page.getByTestId(`permission-${extensionId}-network`)).toBeVisible();
+
+      // Reset all extension permissions globally.
+      await page.getByTestId("reset-all-extension-permissions").click();
+      await expect(page.getByTestId(`permissions-empty-${extensionId}`)).toBeVisible();
+
+      // Next run: deny network permission.
+      await page.getByTestId("run-command-with-args-sampleHello.fetchText").click();
+      await expect(page.getByTestId("input-box")).toBeVisible();
+      await page.getByTestId("input-box-field").fill(JSON.stringify([url]));
+      await page.getByTestId("input-box-ok").click();
+
+      await expect(page.getByTestId("extension-permission-prompt")).toBeVisible();
+      await expect(page.getByTestId("extension-permission-network")).toBeVisible();
+      await page.getByTestId("extension-permission-deny").click();
+      await expect(page.getByTestId("toast-root")).toContainText("Permission denied");
+      await expect(page.getByTestId(`permissions-empty-${extensionId}`)).toBeVisible();
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
 });
