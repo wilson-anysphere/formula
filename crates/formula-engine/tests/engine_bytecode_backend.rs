@@ -1698,13 +1698,61 @@ fn bytecode_backend_let_xlookup_array_if_not_found_allows_concat_bytecode() {
 }
 
 #[test]
+fn bytecode_backend_row_array_result_allows_concat_bytecode() {
+    let mut engine = Engine::new();
+
+    // ROW over a multi-cell range yields a dynamic array. CONCAT should flatten it into a single
+    // scalar string value.
+    let formula = "=CONCAT(ROW(A1:A2))";
+    engine.set_cell_formula("Sheet1", "B1", formula).unwrap();
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text("12".into()));
+    assert_engine_matches_ast(&engine, formula, "B1");
+}
+
+#[test]
+fn bytecode_backend_if_array_result_allows_concat_bytecode() {
+    let mut engine = Engine::new();
+
+    // IF can return an array result when its condition is scalar. CONCAT should flatten that array
+    // into a scalar string value.
+    let formula = "=CONCAT(IF(TRUE, ROW(A1:A2), 0))";
+    engine.set_cell_formula("Sheet1", "B1", formula).unwrap();
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text("12".into()));
+    assert_engine_matches_ast(&engine, formula, "B1");
+}
+
+#[test]
+fn bytecode_backend_xlookup_array_result_allows_concat_bytecode() {
+    let mut engine = Engine::new();
+
+    // XLOOKUP can return a 1D row/column slice (spilled array) when `return_array` is 2D. CONCAT
+    // should flatten it into a scalar string value.
+    let formula = "=CONCAT(XLOOKUP(2,{1;2;3},{10,11;20,21;30,31}))";
+    engine.set_cell_formula("Sheet1", "B1", formula).unwrap();
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text("2021".into()));
+    assert_engine_matches_ast(&engine, formula, "B1");
+}
+
+#[test]
 fn bytecode_backend_let_single_cell_reference_local_is_scalar_safe_for_concat() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", "hello").unwrap();
 
     // LET binding values are evaluated in a reference context by the bytecode compiler, so `x`
-    // is stored as a single-cell reference. CONCAT should still be able to consume that local
-    // binding without forcing an AST fallback.
+    // is stored as a single-cell reference. CONCAT flattens range arguments, so consuming `x`
+    // should still produce a scalar string value.
     let formula = "=LET(x, A1, CONCAT(x))";
     engine.set_cell_formula("Sheet1", "B1", formula).unwrap();
     assert_eq!(engine.bytecode_program_count(), 1);
