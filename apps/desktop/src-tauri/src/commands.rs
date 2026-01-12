@@ -3595,6 +3595,7 @@ mod tests {
     use super::*;
     use crate::file_io::read_xlsx_blocking;
     use std::path::Path;
+    use tempfile::TempDir;
 
     #[test]
     fn coerce_save_path_to_xlsx_rewrites_non_workbook_origins() {
@@ -3750,8 +3751,15 @@ mod tests {
         use std::fs::{create_dir, File};
         use std::os::unix::fs::symlink;
 
-        let root = TempDir::new().expect("create root temp dir");
-        let outside = TempDir::new().expect("create outside temp dir");
+        let base_dirs = directories::BaseDirs::new().expect("base dirs");
+        let root = tempfile::Builder::new()
+            .prefix("formula-list-dir-symlink-root")
+            .tempdir_in(base_dirs.home_dir())
+            .expect("create root temp dir");
+        let outside = tempfile::Builder::new()
+            .prefix("formula-list-dir-symlink-outside")
+            .tempdir_in(base_dirs.home_dir())
+            .expect("create outside temp dir");
 
         // A file that should be discoverable via a real directory in the requested subtree.
         let real_dir = root.path().join("real");
