@@ -327,7 +327,7 @@ because they can “point” to image/rich-value structures elsewhere in the pac
 The repository already has fixtures/tests exercising preservation of these attributes:
 
 ```xml
-<!-- `vm` attribute example (fixtures/xlsx/metadata/rich-values-vm.xlsx) -->
+<!-- `vm` attribute example (synthetic fixture `fixtures/xlsx/metadata/rich-values-vm.xlsx`) -->
 <row r="1">
   <c r="A1" vm="1"><v>1</v></c>
 </row>
@@ -680,7 +680,8 @@ but we should still prefer the original file’s value when round-tripping.
 
 ### `xl/metadata.xml` content type override
 
-Observed in `fixtures/xlsx/metadata/rich-values-vm.xlsx`:
+Observed in the real Excel fixture `fixtures/xlsx/rich-data/images-in-cell.xlsx` and the synthetic
+fixture `fixtures/xlsx/metadata/rich-values-vm.xlsx`:
 
 - `application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml`
 
@@ -768,7 +769,7 @@ Partially known (fixture-driven details still recommended):
 
 - Workbook → `xl/metadata.xml` relationship:
   - Lives in `xl/_rels/workbook.xml.rels`.
-  - Observed in `fixtures/xlsx/metadata/rich-values-vm.xlsx`:
+  - Observed in the **synthetic** fixture `fixtures/xlsx/metadata/rich-values-vm.xlsx`:
     - `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata"`
   - Also observed in [`fixtures/xlsx/rich-data/images-in-cell.xlsx`](../fixtures/xlsx/rich-data/images-in-cell.xlsx):
     - `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata"`
@@ -794,16 +795,16 @@ Partially known (fixture-driven details still recommended):
       - `Target="richData/richValueRel.xml"`
     - `Type="http://schemas.microsoft.com/office/2017/relationships/richValue"`
       - `Target="richData/richValue.xml"`
-- Workbook → `xl/cellImages.xml` relationship:
+  - Workbook → `xl/cellImages.xml` relationship:
   - Lives in `xl/_rels/workbook.xml.rels`.
   - Excel uses a Microsoft-extension relationship `Type` URI that has been observed to vary.
   - **Confirmed in fixtures:**
     - `Type="http://schemas.microsoft.com/office/2019/relationships/cellimages"`
       - real Excel fixture: [`fixtures/xlsx/rich-data/images-in-cell.xlsx`](../fixtures/xlsx/rich-data/images-in-cell.xlsx)
     - `Type="http://schemas.microsoft.com/office/2023/02/relationships/cellImage"`
-      - fixture: `fixtures/xlsx/basic/cell-images.xlsx`
+      - synthetic fixture: `fixtures/xlsx/basic/cell-images.xlsx`
     - `Type="http://schemas.microsoft.com/office/2022/relationships/cellImages"`
-      - fixture: `fixtures/xlsx/basic/cellimages.xlsx`
+      - synthetic fixture: `fixtures/xlsx/basic/cellimages.xlsx`
   - Observed variants in tests/synthetic inputs:
     - `Type="http://schemas.microsoft.com/office/2020/relationships/cellImages"`
     - `Type="http://schemas.microsoft.com/office/2020/07/relationships/cellImages"`

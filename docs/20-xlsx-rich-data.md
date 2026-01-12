@@ -111,7 +111,7 @@ sheetN.xml: <c vm="VM_INDEX">…</c>
 ### Indexing notes (practical assumptions)
 
 - **`vm` is ambiguous (0-based or 1-based).** Both appear in this repo:
-  - 1-based: `fixtures/xlsx/metadata/rich-values-vm.xlsx` (see `crates/formula-xlsx/tests/metadata_rich_value_roundtrip.rs`)
+  - 1-based: `fixtures/xlsx/metadata/rich-values-vm.xlsx` (synthetic Formula fixture; see `crates/formula-xlsx/tests/metadata_rich_value_roundtrip.rs`)
   - 1-based: `fixtures/xlsx/basic/image-in-cell.xlsx` (Excel-generated “Place in Cell” fixture; `vm="1"`/`vm="2"`)
   - 0-based: `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`
 - Rich value indices are **0-based**.

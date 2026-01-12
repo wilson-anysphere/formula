@@ -638,7 +638,7 @@ Minimal representative shape for the `futureMetadata`/`rvb` variant (index bases
 
 All rich-value fixtures currently checked into this repo use the `futureMetadata`/`rvb` indirection (e.g.
 `fixtures/xlsx/basic/image-in-cell.xlsx`, `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`,
-`fixtures/xlsx/rich-data/richdata-minimal.xlsx`, `fixtures/xlsx/metadata/rich-values-vm.xlsx`). We have not
+`fixtures/xlsx/rich-data/richdata-minimal.xlsx`, `fixtures/xlsx/metadata/rich-values-vm.xlsx` (synthetic)). We have not
 yet checked in a fixture where `rc/@v` directly equals the rich value index without a `futureMetadata`
 table.
 
@@ -966,14 +966,14 @@ The workbook → metadata relationship uses a standard SpreadsheetML relationshi
 observed in this repo:
 
 * `http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata`
-  * Observed in `fixtures/xlsx/metadata/rich-values-vm.xlsx`
-  * Observed in `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`
+  * Observed in the synthetic fixture `fixtures/xlsx/metadata/rich-values-vm.xlsx`
+  * Observed in the synthetic fixture `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`
   * Observed in `fixtures/xlsx/rich-data/images-in-cell.xlsx`
 * `http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata`
   * Observed in `fixtures/xlsx/basic/image-in-cell.xlsx`
 
 Additionally, `xl/workbook.xml` may include a `<metadata r:id="..."/>` element pointing at the relationship
-ID for the metadata part (observed in `fixtures/xlsx/metadata/rich-values-vm.xlsx`). Some workbooks omit
+ID for the metadata part (observed in the synthetic fixture `fixtures/xlsx/metadata/rich-values-vm.xlsx`). Some workbooks omit
 this element and only include the relationship in `workbook.xml.rels` (observed in
 `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`). Preserve whichever representation the source workbook
 uses.
