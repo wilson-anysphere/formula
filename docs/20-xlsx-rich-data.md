@@ -458,6 +458,7 @@ For images-in-cell, the `<rv>` payload includes (at minimum) some reference to a
 <richValueRel
   xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata2"
   xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <!-- Root local-name and namespace are version-dependent; other variants exist (see above). -->
 
   <!-- Slot 0 (0-based) -->
   <rel r:id="rId1"/>
