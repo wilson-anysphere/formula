@@ -193,6 +193,48 @@ test.describe("split view", () => {
     expect(Math.abs(secondaryScrollAfter.y - secondaryScrollBefore.y)).toBeLessThan(0.1);
   });
 
+  test("primary keyboard navigation sync does not scroll the secondary pane", async ({ page }) => {
+    await gotoDesktop(page, "/?grid=shared");
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await waitForDesktopReady(page);
+    await waitForIdle(page);
+
+    await page.getByTestId("split-vertical").click();
+
+    const secondary = page.locator("#grid-secondary");
+    await expect(secondary).toBeVisible();
+    await expect(secondary.locator("canvas")).toHaveCount(3);
+
+    // Scroll the secondary pane away from the top-left so selection mirroring does not auto-scroll it.
+    await secondary.hover({ position: { x: 60, y: 40 } });
+    await page.mouse.wheel(100 * 100, 0);
+    await page.mouse.wheel(0, 200 * 24);
+    await expect.poll(async () => Number((await secondary.getAttribute("data-scroll-x")) ?? 0)).toBeGreaterThan(0);
+    await expect.poll(async () => Number((await secondary.getAttribute("data-scroll-y")) ?? 0)).toBeGreaterThan(0);
+
+    const secondaryScrollBefore = {
+      x: Number((await secondary.getAttribute("data-scroll-x")) ?? 0),
+      y: Number((await secondary.getAttribute("data-scroll-y")) ?? 0),
+    };
+
+    // Focus the primary pane and move selection via keyboard.
+    await page.click("#grid", { position: { x: 5, y: 5 } }); // A1
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+
+    await page.keyboard.press("ArrowDown");
+    await expect(page.getByTestId("active-cell")).toHaveText("A2");
+    await expect(page.getByTestId("formula-address")).toHaveValue("A2");
+    await expect(secondary.getByTestId("canvas-grid-a11y-active-cell")).toContainText("Cell A2");
+
+    const secondaryScrollAfter = {
+      x: Number((await secondary.getAttribute("data-scroll-x")) ?? 0),
+      y: Number((await secondary.getAttribute("data-scroll-y")) ?? 0),
+    };
+    expect(Math.abs(secondaryScrollAfter.x - secondaryScrollBefore.x)).toBeLessThan(0.1);
+    expect(Math.abs(secondaryScrollAfter.y - secondaryScrollBefore.y)).toBeLessThan(0.1);
+  });
+
   test("secondary drag selection preserves active cell semantics and does not scroll primary", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
     await page.evaluate(() => localStorage.clear());
