@@ -120,13 +120,17 @@ fn oddfyield_rejects_issue_equal_first_coupon() {
 fn oddlprice_allows_settlement_equal_last_interest() {
     let v =
         eval_formula("=ODDLPRICE(DATE(2024,7,1),DATE(2025,1,1),DATE(2024,7,1),0.05,0.04,100,2,0)");
-    assert!(matches!(v, Value::Number(n) if n.is_finite()), "got {v:?}");
+    // Pinned by excel-oracle boundary cases.
+    assert_number_close(v, 100.49019607843137, 1e-6);
 }
 
 #[test]
 fn oddlyield_allows_settlement_equal_last_interest() {
     let v = eval_formula("=ODDLYIELD(DATE(2024,7,1),DATE(2025,1,1),DATE(2024,7,1),0.05,ODDLPRICE(DATE(2024,7,1),DATE(2025,1,1),DATE(2024,7,1),0.05,0.04,100,2,0),100,2,0)");
-    assert!(matches!(v, Value::Number(n) if n.is_finite()), "got {v:?}");
+    assert!(
+        matches!(v, Value::Number(n) if (n - 0.04).abs() <= 1e-6),
+        "expected yield ~0.04, got {v:?}"
+    );
 }
 
 #[test]
