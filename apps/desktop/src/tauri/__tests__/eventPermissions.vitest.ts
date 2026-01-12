@@ -153,6 +153,7 @@ describe("tauri capability event permissions", () => {
       "menu-cut",
       "menu-copy",
       "menu-paste",
+      "menu-paste-special",
       "menu-select-all",
       "menu-zoom-in",
       "menu-zoom-out",

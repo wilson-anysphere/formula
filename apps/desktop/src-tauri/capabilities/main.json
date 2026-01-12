@@ -105,6 +105,7 @@
         { "event": "menu-cut" },
         { "event": "menu-copy" },
         { "event": "menu-paste" },
+        { "event": "menu-paste-special" },
         { "event": "menu-select-all" },
         { "event": "menu-zoom-in" },
         { "event": "menu-zoom-out" },
