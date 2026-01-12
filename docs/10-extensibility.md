@@ -54,6 +54,8 @@ The desktop implements a small, VS Code-inspired subset of `when` syntax for men
 - Operators: `&&`, `||`, `!`, parentheses
 - Identifiers (context keys): `sheetName`, `cellHasValue`, `selectionType`, `activeCellA1`, `commentsPanelVisible`, `cellHasComment`, …
 - Equality: `==` / `!=` against string/number/boolean literals
+  - When an identifier is used directly (e.g. `cellHasValue`), it is evaluated using truthiness:
+    `false`, `0`, `""`, `null`, and `undefined` are treated as false.
 
 Built-in keys (desktop UI):
 
@@ -121,6 +123,7 @@ Supported menu locations (desktop UI):
   - Extension-contributed items are appended after the built-in menu items, separated by a divider.
   - Extensions are lazy-loaded for performance; the first time you open the context menu, it may populate extension
     items asynchronously and update in-place once loading completes.
+    - While extensions are still loading (or if extension loading fails), the menu may show a disabled placeholder entry.
   - While the menu is open, the desktop re-evaluates `when` clauses as context keys change (e.g. selection changes),
     updating enabled/disabled state live.
 
