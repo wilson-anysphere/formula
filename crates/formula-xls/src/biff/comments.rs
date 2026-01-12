@@ -306,6 +306,7 @@ fn parse_txo_text_biff5(
         ));
     }
     trim_trailing_nuls(&mut out);
+    strip_embedded_nuls(&mut out);
     Some(out)
 }
 
@@ -364,6 +365,7 @@ fn parse_txo_text_biff8(
         ));
     }
     trim_trailing_nuls(&mut out);
+    strip_embedded_nuls(&mut out);
     Some(out)
 }
 
@@ -433,6 +435,7 @@ fn fallback_decode_first_continue(
         strings::decode_ansi(codepage, bytes)
     };
     trim_trailing_nuls(&mut out);
+    strip_embedded_nuls(&mut out);
     Some(out)
 }
 
@@ -604,6 +607,28 @@ mod tests {
             obj_with_id(1),
             txo_with_text("Hello\0"),
             continue_text_ascii("Hello\0"),
+            eof(),
+        ]
+        .concat();
+
+        let (notes, warnings) =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
+        assert!(
+            warnings.is_empty(),
+            "unexpected warnings: {warnings:?}"
+        );
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].text, "Hello");
+    }
+
+    #[test]
+    fn strips_embedded_nuls_from_text() {
+        let stream = [
+            bof(),
+            note(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            txo_with_text("H\0e\0l\0l\0o"),
+            continue_text_ascii("H\0e\0l\0l\0o"),
             eof(),
         ]
         .concat();
