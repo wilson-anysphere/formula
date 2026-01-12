@@ -1209,16 +1209,6 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
             removed_parts |= {n for n in names if n.startswith("xl/controls/")}
             removed_parts |= {n for n in names if n.startswith("xl/ctrlProps/")}
             removed_parts |= {n for n in names if n.startswith("xl/media/")}
-            # Excel "Images in Cell" feature (cellImages.xml) can reference raster parts in
-            # xl/media/**. When secrets are removed we drop media, so remove cellImages parts
-            # too to avoid leaving dangling image references.
-            #
-            # Use case-insensitive matching because some producers vary casing.
-            removed_parts |= {
-                n
-                for n in names
-                if n.lower().startswith(("xl/cellimages", "xl/_rels/cellimages"))
-            }
             removed_parts |= {n for n in names if n.startswith("xl/embeddings/")}
             removed_parts |= {n for n in names if n == "xl/vbaProject.bin"}
             removed_parts |= {n for n in names if n == "xl/vbaProjectSignature.bin"}
@@ -1226,18 +1216,16 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
             removed_parts |= {n for n in names if n.startswith("customUI/")}
             removed_parts |= {n for n in names if n.startswith("docProps/thumbnail")}
 
-            # `xl/**/cellimages.xml` can embed images via DrawingML `<a:blip r:embed="...">`
-            # relationship IDs that target `xl/media/**`. When media is removed we must also
-            # drop this part (and its rels) or else we leave dangling `r:embed` references.
-            cellimages_parts = {
-                n for n in names if n.lower().startswith("xl/") and n.lower().endswith("/cellimages.xml")
-            }
+            # Excel in-cell images parts (cellImages*.xml) can reference raster parts in
+            # `xl/media/**`. When secrets are removed we drop media, so remove cellImages*.xml
+            # parts too to avoid leaving dangling `r:embed` references.
+            cellimages_parts = {n for n in names if _is_cellimages_xml_part(n)}
             removed_parts |= cellimages_parts
             for part in cellimages_parts:
                 rels_lower = posixpath.join(
                     posixpath.dirname(part), "_rels", posixpath.basename(part) + ".rels"
-                ).lower()
-                removed_parts |= {n for n in names if n.lower() == rels_lower}
+                ).casefold()
+                removed_parts |= {n for n in names if n.casefold() == rels_lower}
 
         if options.scrub_metadata or options.remove_secrets:
             removed_parts |= {n for n in names if n == "docProps/custom.xml"}
