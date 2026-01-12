@@ -82,6 +82,10 @@ import { bindCollabSessionToDocumentController, createCollabSession, type Collab
 import { PresenceRenderer } from "../grid/presence-renderer/presenceRenderer.js";
 import { ConflictUiController } from "../collab/conflicts-ui/conflict-ui-controller.js";
 import { StructuralConflictUiController } from "../collab/conflicts-ui/structural-conflict-ui-controller.js";
+import {
+  createDesktopCellStructuralConflictMonitor,
+  createDesktopFormulaConflictMonitor,
+} from "../collab/conflict-monitors.js";
 
 type EngineCellRef = { sheetId?: string; sheet?: string; row?: number; col?: number; address?: string; value?: unknown };
 type AuditingCacheEntry = {
@@ -591,9 +595,15 @@ export class SpreadsheetApp {
   private collabBinder: { destroy: () => void } | null = null;
   private collabSelectionUnsubscribe: (() => void) | null = null;
   private collabPresenceUnsubscribe: (() => void) | null = null;
+  private formulaConflictMonitor: { dispose: () => void; resolveConflict: (id: string, chosen: unknown) => boolean } | null =
+    null;
+  private cellStructuralConflictMonitor:
+    | { dispose: () => void; resolveConflict: (id: string, resolution: unknown) => boolean }
+    | null = null;
   private conflictUi: ConflictUiController | null = null;
   private conflictUiContainer: HTMLDivElement | null = null;
   private structuralConflictUi: StructuralConflictUiController | null = null;
+  private pendingFormulaConflicts: any[] = [];
   private pendingStructuralConflicts: any[] = [];
 
   private readonly chartStore: ChartStore;
@@ -664,28 +674,6 @@ export class SpreadsheetApp {
       this.collabSession = createCollabSession({
         connection: { wsUrl: collab.wsUrl, docId: collab.docId, token: collab.token },
         presence: { user: collab.user, activeSheet: this.sheetId },
-        formulaConflicts: {
-          localUserId: collab.user.id,
-          mode: "formula+value",
-          onConflict: (conflict) => {
-            // Note: conflicts are surfaced via a minimal DOM UI (ConflictUiController).
-            // To exercise manually, edit the same formula concurrently in two clients.
-            this.conflictUi?.addConflict(conflict);
-          },
-        },
-        cellConflicts: {
-          localUserId: collab.user.id,
-          onConflict: (conflict) => {
-            // Structural move/delete-vs-edit/content/format conflicts.
-            if (this.structuralConflictUi) {
-              this.structuralConflictUi.addConflict(conflict);
-            } else {
-              // Conflicts can be detected during session construction (e.g. from persisted
-              // structural op logs). Queue them until the conflict UI overlay is mounted.
-              this.pendingStructuralConflicts.push(conflict);
-            }
-          },
-        },
       });
 
       const undoScope: Array<Y.AbstractType<any>> = [
@@ -724,6 +712,54 @@ export class SpreadsheetApp {
       for (const origin of undoService.localOrigins ?? []) {
         this.collabSession.localOrigins.add(origin);
       }
+
+      // Desktop wiring: create conflict monitors explicitly so we can use different
+      // local-origin policies for formula/value vs structural conflict tracking.
+      //
+      // In particular:
+      // - Version restore uses origin "versioning-restore" and should not surface
+      //   formula/value conflict UI.
+      // - Branch checkout/merge uses `session.origin` and should not be logged into
+      //   `cellStructuralOps` by the structural conflict monitor.
+      this.formulaConflictMonitor = createDesktopFormulaConflictMonitor({
+        doc: this.collabSession.doc,
+        cells: this.collabSession.cells as any,
+        localUserId: collab.user.id,
+        sessionOrigin: this.collabSession.origin,
+        binderOrigin,
+        undoLocalOrigins: undoService.localOrigins,
+        mode: "formula+value",
+        onConflict: (conflict) => {
+          // Conflicts are surfaced via a minimal DOM UI (ConflictUiController).
+          // To exercise manually, edit the same formula concurrently in two clients.
+          if (this.conflictUi) {
+            this.conflictUi.addConflict(conflict);
+          } else {
+            // Conflicts can be detected before the UI overlay is mounted (e.g. during
+            // initial sync). Queue until the UI is ready.
+            this.pendingFormulaConflicts.push(conflict);
+          }
+        },
+      });
+
+      this.cellStructuralConflictMonitor = createDesktopCellStructuralConflictMonitor({
+        doc: this.collabSession.doc,
+        cells: this.collabSession.cells as any,
+        localUserId: collab.user.id,
+        sessionOrigin: this.collabSession.origin,
+        binderOrigin,
+        undoLocalOrigins: undoService.localOrigins,
+        onConflict: (conflict) => {
+          // Structural move/delete-vs-edit/content/format conflicts.
+          if (this.structuralConflictUi) {
+            this.structuralConflictUi.addConflict(conflict);
+          } else {
+            // Conflicts can be detected before the UI overlay is mounted (e.g. from persisted
+            // structural op logs). Queue them until the conflict UI overlay is mounted.
+            this.pendingStructuralConflicts.push(conflict);
+          }
+        },
+      });
 
       // Comments sync through the shared collaborative Y.Doc when collab is enabled.
       this.commentsDoc = this.collabSession.doc;
@@ -1373,7 +1409,7 @@ export class SpreadsheetApp {
     }
 
     if (collabEnabled && this.collabSession) {
-      // Conflicts UI (mounted once; new conflicts stream in via the session callback).
+      // Conflicts UI (mounted once; new conflicts stream in via the monitor callbacks).
       this.conflictUiContainer = document.createElement("div");
       this.conflictUiContainer.style.position = "absolute";
       this.conflictUiContainer.style.inset = "0";
@@ -1386,7 +1422,7 @@ export class SpreadsheetApp {
         container: this.conflictUiContainer,
         monitor: {
           resolveConflict: (id: string, chosen: unknown) => {
-            const monitor = this.collabSession?.formulaConflictMonitor;
+            const monitor = this.formulaConflictMonitor;
             return monitor ? monitor.resolveConflict(id, chosen) : false;
           },
         },
@@ -1416,12 +1452,20 @@ export class SpreadsheetApp {
         dialogRoot.style.boxShadow = "var(--dialog-shadow)";
       }
 
+      if (this.pendingFormulaConflicts.length > 0) {
+        const queued = this.pendingFormulaConflicts;
+        this.pendingFormulaConflicts = [];
+        for (const conflict of queued) {
+          this.conflictUi.addConflict(conflict);
+        }
+      }
+
       this.structuralConflictUi = new StructuralConflictUiController({
         container: this.conflictUiContainer,
         monitor: {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           resolveConflict: (id: string, resolution: any) => {
-            const monitor = this.collabSession?.cellConflictMonitor;
+            const monitor = this.cellStructuralConflictMonitor;
             return monitor ? monitor.resolveConflict(id, resolution) : false;
           },
         },
@@ -1555,6 +1599,10 @@ export class SpreadsheetApp {
     this.collabPresenceUnsubscribe = null;
     this.collabBinder?.destroy();
     this.collabBinder = null;
+    this.formulaConflictMonitor?.dispose();
+    this.formulaConflictMonitor = null;
+    this.cellStructuralConflictMonitor?.dispose();
+    this.cellStructuralConflictMonitor = null;
     this.collabSession?.disconnect();
     this.collabSession?.destroy();
     this.collabSession = null;
@@ -1567,6 +1615,7 @@ export class SpreadsheetApp {
 
     this.structuralConflictUi?.destroy();
     this.structuralConflictUi = null;
+    this.pendingFormulaConflicts = [];
     this.pendingStructuralConflicts = [];
 
     this.formulaBarCompletion?.destroy();
