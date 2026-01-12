@@ -136,6 +136,14 @@ describe("resolveWorkbookLoadLimits", () => {
     expect(limits).toEqual({ maxRows: 10_000, maxCols: 1_000 });
   });
 
+  it("accepts whitespace separators in query params", () => {
+    const limits = resolveWorkbookLoadLimits({
+      queryString: "?loadMaxRows=10%20000&loadMaxCols=200",
+    });
+
+    expect(limits).toEqual({ maxRows: 10_000, maxCols: 200 });
+  });
+
   it("falls back to VITE_* env vars when DESKTOP_* values are invalid", () => {
     const limits = resolveWorkbookLoadLimits({
       env: {
@@ -188,6 +196,10 @@ describe("resolveWorkbookLoadChunkRows", () => {
 
   it("accepts digit separators in query params", () => {
     expect(resolveWorkbookLoadChunkRows({ queryString: "?loadChunkRows=1,000" })).toBe(1_000);
+  });
+
+  it("accepts whitespace separators in query params", () => {
+    expect(resolveWorkbookLoadChunkRows({ queryString: "?loadChunkRows=1%20000" })).toBe(1_000);
   });
 
   it("falls back to VITE_* env vars when DESKTOP_* value is invalid", () => {

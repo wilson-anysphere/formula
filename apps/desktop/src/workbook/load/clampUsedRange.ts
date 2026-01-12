@@ -30,7 +30,7 @@ function parsePositiveInt(value: unknown): number | null {
     if (!trimmed) return null;
     // Allow common digit separators ("10_000", "10,000") since limits are often
     // copy/pasted from UI strings.
-    const normalized = trimmed.replace(/[,_]/g, "");
+    const normalized = trimmed.replace(/[,_\s]/g, "");
     const parsed = Number(normalized);
     if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) return null;
     return parsed;
