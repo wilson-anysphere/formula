@@ -376,6 +376,43 @@ describe("KeybindingService", () => {
     expect(builtinRun).not.toHaveBeenCalled();
   });
 
+  it('dispatches builtins but not extensions in inputs when ignoreInputTargets is "extensions"', async () => {
+    const contextKeys = new ContextKeyService();
+    const commandRegistry = new CommandRegistry();
+
+    const builtinRun = vi.fn();
+    const extRun = vi.fn();
+    commandRegistry.registerBuiltinCommand("builtin.inputAllowed", "Builtin", builtinRun);
+    commandRegistry.setExtensionCommands(
+      [{ extensionId: "ext", command: "ext.inputBlocked", title: "Ext" }],
+      async () => extRun(),
+    );
+
+    const service = new KeybindingService({ commandRegistry, contextKeys, platform: "other", ignoreInputTargets: "extensions" });
+    service.setBuiltinKeybindings([{ command: "builtin.inputAllowed", key: "ctrl+j", when: "builtinEnabled" }]);
+    service.setExtensionKeybindings([{ extensionId: "ext", command: "ext.inputBlocked", key: "ctrl+j", mac: null, when: null }]);
+
+    const inputTarget = { tagName: "INPUT", isContentEditable: false };
+
+    // Builtins still dispatch from inputs when allowed by their when-clause.
+    contextKeys.set("builtinEnabled", true);
+    const event1 = makeKeydownEvent({ key: "j", ctrlKey: true, target: inputTarget });
+    const handled1 = await service.dispatchKeydown(event1);
+    expect(handled1).toBe(true);
+    expect(event1.defaultPrevented).toBe(true);
+    expect(builtinRun).toHaveBeenCalledTimes(1);
+    expect(extRun).not.toHaveBeenCalled();
+
+    // Extensions should never dispatch from inputs in this mode, even if the builtin does not match.
+    contextKeys.set("builtinEnabled", false);
+    const event2 = makeKeydownEvent({ key: "j", ctrlKey: true, target: inputTarget });
+    const handled2 = await service.dispatchKeydown(event2);
+    expect(handled2).toBe(false);
+    expect(event2.defaultPrevented).toBe(false);
+    expect(builtinRun).toHaveBeenCalledTimes(1);
+    expect(extRun).not.toHaveBeenCalled();
+  });
+
   it("respects weight when multiple built-in bindings match the same chord", async () => {
     const contextKeys = new ContextKeyService();
     const commandRegistry = new CommandRegistry();

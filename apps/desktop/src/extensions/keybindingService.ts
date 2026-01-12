@@ -37,7 +37,7 @@ function pickPlatformKeybinding(binding: { key: string; mac?: string | null }, p
   return binding.key;
 }
 
-function shouldIgnoreTarget(target: EventTarget | null): boolean {
+function isInputTarget(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
   if (!el) return false;
   const tag = el.tagName;
@@ -98,6 +98,7 @@ export const DEFAULT_RESERVED_EXTENSION_SHORTCUTS = [
 export class KeybindingService {
   private readonly platform: "mac" | "other";
   private readonly reservedExtensionShortcuts: ParsedKeybinding[];
+  private readonly ignoreInputTargets: "all" | "extensions" | "none";
 
   private builtinKeybindings: BuiltinKeybinding[] = [];
   private extensionKeybindings: ContributedKeybinding[] = [];
@@ -131,12 +132,21 @@ export class KeybindingService {
        */
       reservedShortcuts?: string[];
       platform?: "mac" | "other";
+      /**
+       * Determines whether keydown events originating from text input targets should be ignored.
+       *
+       * - "all" (default): ignore keybindings completely when the target is an INPUT/TEXTAREA/contenteditable.
+       * - "extensions": allow built-in keybindings, but prevent extensions from matching.
+       * - "none": allow both built-ins and extensions to match.
+       */
+      ignoreInputTargets?: "all" | "extensions" | "none";
     },
   ) {
     this.platform = params.platform ?? detectPlatform();
     this.reservedExtensionShortcuts = (params.reservedShortcuts ?? DEFAULT_RESERVED_EXTENSION_SHORTCUTS)
       .map((binding) => parseKeybinding("__reserved__", binding, null))
       .filter((binding): binding is ParsedKeybinding => binding != null);
+    this.ignoreInputTargets = params.ignoreInputTargets ?? "all";
   }
 
   setBuiltinKeybindings(bindings: BuiltinKeybinding[]): void {
@@ -230,9 +240,12 @@ export class KeybindingService {
   handleKeydown(event: KeyboardEvent): boolean {
     if (event.defaultPrevented) return false;
     if (event.repeat) return false;
-    if (shouldIgnoreTarget(event.target)) return false;
+    const inputTarget = isInputTarget(event.target);
+    if (inputTarget && this.ignoreInputTargets === "all") return false;
 
-    const match = this.findMatchingBinding(event);
+    const match = this.findMatchingBinding(event, {
+      allowExtensions: !(inputTarget && this.ignoreInputTargets === "extensions"),
+    });
     if (!match) return false;
 
     event.preventDefault();
@@ -252,9 +265,12 @@ export class KeybindingService {
     // Avoid repeatedly firing commands when the user holds a key down (e.g. toggles like
     // command palette / AI chat). Spreadsheet-style repeat behavior is handled by the grid.
     if (event.repeat) return false;
-    if (shouldIgnoreTarget(event.target)) return false;
+    const inputTarget = isInputTarget(event.target);
+    if (inputTarget && this.ignoreInputTargets === "all") return false;
 
-    const match = this.findMatchingBinding(event);
+    const match = this.findMatchingBinding(event, {
+      allowExtensions: !(inputTarget && this.ignoreInputTargets === "extensions"),
+    });
     if (!match) return false;
 
     event.preventDefault();
@@ -267,12 +283,20 @@ export class KeybindingService {
     return true;
   }
 
-  private findMatchingBinding(event: KeyboardEvent): StoredKeybinding | null {
+  private findMatchingBinding(
+    event: KeyboardEvent,
+    opts: {
+      allowExtensions?: boolean;
+    } = {},
+  ): StoredKeybinding | null {
+    const allowExtensions = opts.allowExtensions ?? true;
     const lookup = this.params.contextKeys.asLookup();
 
     // Built-ins always win.
     const builtin = this.findFirstMatch(this.builtin, event, lookup);
     if (builtin) return builtin;
+
+    if (!allowExtensions) return null;
 
     // Safety net: reserved shortcuts should never be claimed by extensions.
     if (this.isReservedForExtensions(event)) return null;
