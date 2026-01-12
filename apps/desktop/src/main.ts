@@ -44,7 +44,6 @@ import { fireWorkbookBeforeCloseBestEffort, installVbaEventMacros } from "./macr
 import { mountScriptEditorPanel } from "./panels/script-editor/index.js";
 import { installUnsavedChangesPrompt } from "./document/index.js";
 import { DocumentControllerWorkbookAdapter } from "./scripting/documentControllerWorkbookAdapter.js";
-import { applyNumberFormatPreset, toggleBold, toggleItalic, toggleUnderline } from "./formatting/toolbar.js";
 import { registerFindReplaceShortcuts, FindReplaceController } from "./panels/find-replace/index.js";
 import { t } from "./i18n/index.js";
 import { getOpenFileFilters } from "./file_dialog_filters.js";
@@ -301,6 +300,18 @@ let workbookSync: ReturnType<typeof startWorkbookSync> | null = null;
 let rerenderLayout: (() => void) | null = null;
 let vbaEventMacros: ReturnType<typeof installVbaEventMacros> | null = null;
 let ribbonLayoutController: LayoutController | null = null;
+let ensureExtensionsLoadedRef: (() => Promise<void>) | null = null;
+let syncContributedCommandsRef: (() => void) | null = null;
+let syncContributedPanelsRef: (() => void) | null = null;
+let updateKeybindingsRef: (() => void) | null = null;
+
+function toggleDockPanel(panelId: string): void {
+  const controller = ribbonLayoutController;
+  if (!controller) return;
+  const placement = getPanelPlacement(controller.layout, panelId);
+  if (placement.kind === "closed") controller.openPanel(panelId);
+  else controller.closePanel(panelId);
+}
 
 const gridRoot = document.getElementById("grid");
 if (!gridRoot) {
@@ -333,11 +344,6 @@ const statusMode = document.querySelector<HTMLElement>('[data-testid="status-mod
 const sheetSwitcher = document.querySelector<HTMLSelectElement>('[data-testid="sheet-switcher"]');
 const zoomControl = document.querySelector<HTMLSelectElement>('[data-testid="zoom-control"]');
 const sheetPosition = document.querySelector<HTMLElement>('[data-testid="sheet-position"]');
-const openComments = document.querySelector<HTMLButtonElement>('[data-testid="open-comments-panel"]');
-const auditPrecedents = document.querySelector<HTMLButtonElement>('[data-testid="audit-precedents"]');
-const auditDependents = document.querySelector<HTMLButtonElement>('[data-testid="audit-dependents"]');
-const auditTransitive = document.querySelector<HTMLButtonElement>('[data-testid="audit-transitive"]');
-const openVbaMigratePanel = document.querySelector<HTMLButtonElement>('[data-testid="open-vba-migrate-panel"]');
 if (
   !activeCell ||
   !selectionRange ||
@@ -355,12 +361,6 @@ if (
 const sheetSwitcherEl = sheetSwitcher;
 const zoomControlEl = zoomControl;
 const sheetPositionEl = sheetPosition;
-if (!openComments) {
-  throw new Error("Missing comments panel toggle button");
-}
-if (!auditPrecedents || !auditDependents || !auditTransitive) {
-  throw new Error("Missing auditing toolbar buttons");
-}
 
 const workbookId = "local-workbook";
 const app = new SpreadsheetApp(
@@ -644,20 +644,6 @@ window.addEventListener("keydown", (e) => {
       app.focus();
     }
   }
-});
-
-openComments.addEventListener("click", () => app.toggleCommentsPanel());
-auditPrecedents.addEventListener("click", () => {
-  app.toggleAuditingPrecedents();
-  app.focus();
-});
-auditDependents.addEventListener("click", () => {
-  app.toggleAuditingDependents();
-  app.focus();
-});
-auditTransitive.addEventListener("click", () => {
-  app.toggleAuditingTransitive();
-  app.focus();
 });
 
 function ensureZoomOption(percent: number): void {
@@ -1050,20 +1036,6 @@ const workspaceRoot = document.getElementById("workspace");
 const gridSplit = document.getElementById("grid-split");
 const gridSecondary = document.getElementById("grid-secondary");
 const gridSplitter = document.getElementById("grid-splitter");
-const openChatAiPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-panel-ai-chat"]');
-const openAuditAiPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-panel-ai-audit"]');
-const openDataQueriesPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-data-queries-panel"]');
-const openMacrosPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-macros-panel"]');
-const openScriptEditorPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-script-editor-panel"]');
-const openPythonPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-python-panel"]');
-const openExtensionsPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-extensions-panel"]');
-const splitVertical = document.querySelector<HTMLButtonElement>('[data-testid="split-vertical"]');
-const splitHorizontal = document.querySelector<HTMLButtonElement>('[data-testid="split-horizontal"]');
-const splitNone = document.querySelector<HTMLButtonElement>('[data-testid="split-none"]');
-const freezePanes = document.querySelector<HTMLButtonElement>('[data-testid="freeze-panes"]');
-const freezeTopRow = document.querySelector<HTMLButtonElement>('[data-testid="freeze-top-row"]');
-const freezeFirstColumn = document.querySelector<HTMLButtonElement>('[data-testid="freeze-first-column"]');
-const unfreezePanes = document.querySelector<HTMLButtonElement>('[data-testid="unfreeze-panes"]');
 
 if (
   dockLeft &&
@@ -1073,15 +1045,7 @@ if (
   workspaceRoot &&
   gridSplit &&
   gridSecondary &&
-  gridSplitter &&
-  openChatAiPanel &&
-  openAuditAiPanel &&
-  openDataQueriesPanel &&
-  openMacrosPanel &&
-  openScriptEditorPanel &&
-  splitVertical &&
-  splitHorizontal &&
-  splitNone
+  gridSplitter
 ) {
   const dockLeftEl = dockLeft;
   const dockRightEl = dockRight;
@@ -1758,6 +1722,12 @@ if (
   syncContributedCommands();
   syncContributedPanels();
   updateKeybindings();
+
+  // Expose extension-loading hooks so the ribbon can lazily open the Extensions panel.
+  ensureExtensionsLoadedRef = ensureExtensionsLoaded;
+  syncContributedCommandsRef = syncContributedCommands;
+  syncContributedPanelsRef = syncContributedPanels;
+  updateKeybindingsRef = updateKeybindings;
 
   window.addEventListener(
     "keydown",
@@ -2745,10 +2715,6 @@ if (
     }
   }
 
-  splitVertical.addEventListener("click", () => layoutController.setSplitDirection("vertical", 0.5));
-  splitHorizontal.addEventListener("click", () => layoutController.setSplitDirection("horizontal", 0.5));
-  splitNone.addEventListener("click", () => layoutController.setSplitDirection("none", 0.5));
-
   const setActivePane = (pane: "primary" | "secondary") => {
     if (layoutController.layout.splitView.activePane === pane) return;
     layoutController.setActiveSplitPane(pane);
@@ -2808,64 +2774,6 @@ if (
     window.addEventListener("pointercancel", onUp, { passive: false });
   });
 
-  openChatAiPanel.addEventListener("click", () => {
-    toggleAiChatPanel();
-  });
-
-  function toggleAiChatPanel(): void {
-    const placement = getPanelPlacement(layoutController.layout, PanelIds.AI_CHAT);
-    if (placement.kind === "closed") layoutController.openPanel(PanelIds.AI_CHAT);
-    else layoutController.closePanel(PanelIds.AI_CHAT);
-  }
-
-  openAuditAiPanel.addEventListener("click", () => {
-    const placement = getPanelPlacement(layoutController.layout, PanelIds.AI_AUDIT);
-    if (placement.kind === "closed") layoutController.openPanel(PanelIds.AI_AUDIT);
-    else layoutController.closePanel(PanelIds.AI_AUDIT);
-  });
-
-  openDataQueriesPanel.addEventListener("click", () => {
-    const placement = getPanelPlacement(layoutController.layout, PanelIds.DATA_QUERIES);
-    if (placement.kind === "closed") layoutController.openPanel(PanelIds.DATA_QUERIES);
-    else layoutController.closePanel(PanelIds.DATA_QUERIES);
-  });
-
-  openMacrosPanel.addEventListener("click", () => {
-    const placement = getPanelPlacement(layoutController.layout, PanelIds.MACROS);
-    if (placement.kind === "closed") layoutController.openPanel(PanelIds.MACROS);
-    else layoutController.closePanel(PanelIds.MACROS);
-  });
-
-  openScriptEditorPanel.addEventListener("click", () => {
-    const placement = getPanelPlacement(layoutController.layout, PanelIds.SCRIPT_EDITOR);
-    if (placement.kind === "closed") layoutController.openPanel(PanelIds.SCRIPT_EDITOR);
-    else layoutController.closePanel(PanelIds.SCRIPT_EDITOR);
-  });
-
-  openPythonPanel?.addEventListener("click", () => {
-    const placement = getPanelPlacement(layoutController.layout, PanelIds.PYTHON);
-    if (placement.kind === "closed") layoutController.openPanel(PanelIds.PYTHON);
-    else layoutController.closePanel(PanelIds.PYTHON);
-  });
-
-  openExtensionsPanel?.addEventListener("click", () => {
-    void ensureExtensionsLoaded().then(() => {
-      // Ensure registries are up-to-date once the host finishes loading.
-      updateKeybindings();
-      syncContributedCommands();
-      syncContributedPanels();
-    });
-    const placement = getPanelPlacement(layoutController.layout, PanelIds.EXTENSIONS);
-    if (placement.kind === "closed") layoutController.openPanel(PanelIds.EXTENSIONS);
-    else layoutController.closePanel(PanelIds.EXTENSIONS);
-  });
-
-  openVbaMigratePanel?.addEventListener("click", () => {
-    const placement = getPanelPlacement(layoutController.layout, PanelIds.VBA_MIGRATE);
-    if (placement.kind === "closed") layoutController.openPanel(PanelIds.VBA_MIGRATE);
-    else layoutController.closePanel(PanelIds.VBA_MIGRATE);
-  });
-
   // --- Command palette -----------------------------------------------------------
 
   commandRegistry.registerBuiltinCommand(
@@ -2915,7 +2823,7 @@ if (
     }
 
     e.preventDefault();
-    toggleAiChatPanel();
+    toggleDockPanel(PanelIds.AI_CHAT);
   });
 
   layoutController.on("change", () => renderLayout());
@@ -2931,23 +2839,6 @@ if (
     else if (placement.kind === "docked") layoutController.activateDockedPanel(panelId, placement.side);
   });
 }
-
-freezePanes?.addEventListener("click", () => {
-  app.freezePanes();
-  app.focus();
-});
-freezeTopRow?.addEventListener("click", () => {
-  app.freezeTopRow();
-  app.focus();
-});
-freezeFirstColumn?.addEventListener("click", () => {
-  app.freezeFirstColumn();
-  app.focus();
-});
-unfreezePanes?.addEventListener("click", () => {
-  app.unfreezePanes();
-  app.focus();
-});
 
 const workbook = app.getSearchWorkbook();
 
@@ -3720,6 +3611,87 @@ mountRibbon(ribbonRoot, {
         themeController.setThemePreference("high-contrast");
         app.focus();
         return;
+
+      // --- Debug / dev controls migrated from the legacy status bar ---------------
+      // Keep these command ids stable because Playwright e2e depends on their `data-testid`s.
+      case "open-ai-panel":
+      case "open-panel-ai-chat":
+        toggleDockPanel(PanelIds.AI_CHAT);
+        return;
+      case "open-ai-audit-panel":
+      case "open-panel-ai-audit":
+        toggleDockPanel(PanelIds.AI_AUDIT);
+        return;
+      case "open-data-queries-panel":
+        toggleDockPanel(PanelIds.DATA_QUERIES);
+        return;
+      case "open-macros-panel":
+        toggleDockPanel(PanelIds.MACROS);
+        return;
+      case "open-script-editor-panel":
+        toggleDockPanel(PanelIds.SCRIPT_EDITOR);
+        return;
+      case "open-python-panel":
+        toggleDockPanel(PanelIds.PYTHON);
+        return;
+      case "open-extensions-panel": {
+        // Extensions are lazy-loaded to keep startup light. Opening the Extensions panel
+        // should trigger the host to load + sync contributed panels/commands.
+        void ensureExtensionsLoadedRef?.()
+          .then(() => {
+            updateKeybindingsRef?.();
+            syncContributedCommandsRef?.();
+            syncContributedPanelsRef?.();
+          })
+          .catch(() => {
+            // ignore; panel open/close should still work
+          });
+        toggleDockPanel(PanelIds.EXTENSIONS);
+        return;
+      }
+      case "open-vba-migrate-panel":
+        toggleDockPanel(PanelIds.VBA_MIGRATE);
+        return;
+      case "open-comments-panel":
+        app.toggleCommentsPanel();
+        return;
+      case "audit-precedents":
+        app.toggleAuditingPrecedents();
+        app.focus();
+        return;
+      case "audit-dependents":
+        app.toggleAuditingDependents();
+        app.focus();
+        return;
+      case "audit-transitive":
+        app.toggleAuditingTransitive();
+        app.focus();
+        return;
+      case "split-vertical":
+        ribbonLayoutController?.setSplitDirection("vertical", 0.5);
+        return;
+      case "split-horizontal":
+        ribbonLayoutController?.setSplitDirection("horizontal", 0.5);
+        return;
+      case "split-none":
+        ribbonLayoutController?.setSplitDirection("none", 0.5);
+        return;
+      case "freeze-panes":
+        app.freezePanes();
+        app.focus();
+        return;
+      case "freeze-top-row":
+        app.freezeTopRow();
+        app.focus();
+        return;
+      case "freeze-first-column":
+        app.freezeFirstColumn();
+        app.focus();
+        return;
+      case "unfreeze-panes":
+        app.unfreezePanes();
+        app.focus();
+        return;
       case "view.zoom.zoom100":
         app.setZoom(1);
         syncZoomControl();
@@ -3751,7 +3723,7 @@ mountRibbon(ribbonRoot, {
         return;
     }
   },
-});
+}, { initialTabId: "view" });
 
 installUnsavedChangesPrompt(window, app.getDocument());
 

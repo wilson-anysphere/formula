@@ -1832,6 +1832,63 @@ export const defaultRibbonSchema: RibbonSchema = {
       label: "View",
       groups: [
         {
+          id: "view.debug.panels",
+          label: "Panels",
+          buttons: [
+            { id: "open-ai-panel", label: "AI panel", ariaLabel: "Toggle AI panel", icon: "🤖", testId: "open-ai-panel" },
+            {
+              id: "open-panel-ai-chat",
+              label: "AI chat",
+              ariaLabel: "Toggle AI chat panel",
+              icon: "🤖",
+              testId: "open-panel-ai-chat",
+            },
+            { id: "open-ai-audit-panel", label: "Audit log", ariaLabel: "Toggle AI audit log panel", icon: "🧾", testId: "open-ai-audit-panel" },
+            {
+              id: "open-panel-ai-audit",
+              label: "Audit log (alt)",
+              ariaLabel: "Toggle AI audit log panel",
+              icon: "🧾",
+              testId: "open-panel-ai-audit",
+            },
+            { id: "open-data-queries-panel", label: "Queries", ariaLabel: "Toggle Queries panel", icon: "🔎", testId: "open-data-queries-panel" },
+            { id: "open-macros-panel", label: "Macros", ariaLabel: "Toggle Macros panel", icon: "📜", testId: "open-macros-panel" },
+            { id: "open-script-editor-panel", label: "Scripts", ariaLabel: "Toggle Script editor panel", icon: "</>", testId: "open-script-editor-panel" },
+            { id: "open-python-panel", label: "Python", ariaLabel: "Toggle Python panel", icon: "🐍", testId: "open-python-panel" },
+            { id: "open-extensions-panel", label: "Extensions", ariaLabel: "Toggle Extensions panel", icon: "🧩", testId: "open-extensions-panel" },
+            { id: "open-vba-migrate-panel", label: "Migrate Macros", ariaLabel: "Toggle VBA migrate panel", icon: "🧰", testId: "open-vba-migrate-panel" },
+            { id: "open-comments-panel", label: "Comments", ariaLabel: "Toggle Comments panel", icon: "💬", testId: "open-comments-panel" },
+          ],
+        },
+        {
+          id: "view.debug.auditing",
+          label: "Auditing",
+          buttons: [
+            { id: "audit-precedents", label: "Trace precedents", ariaLabel: "Trace precedents", icon: "⬅", testId: "audit-precedents" },
+            { id: "audit-dependents", label: "Trace dependents", ariaLabel: "Trace dependents", icon: "➡", testId: "audit-dependents" },
+            { id: "audit-transitive", label: "Transitive", ariaLabel: "Toggle transitive auditing", icon: "🔁", testId: "audit-transitive" },
+          ],
+        },
+        {
+          id: "view.debug.split",
+          label: "Split view",
+          buttons: [
+            { id: "split-vertical", label: "Split vertical", ariaLabel: "Split vertically", icon: "⇵", testId: "split-vertical" },
+            { id: "split-horizontal", label: "Split horizontal", ariaLabel: "Split horizontally", icon: "⇆", testId: "split-horizontal" },
+            { id: "split-none", label: "Unsplit", ariaLabel: "Remove split", icon: "⨉", testId: "split-none" },
+          ],
+        },
+        {
+          id: "view.debug.freeze",
+          label: "Freeze",
+          buttons: [
+            { id: "freeze-panes", label: "Freeze Panes", ariaLabel: "Freeze Panes", icon: "❄️", testId: "freeze-panes" },
+            { id: "freeze-top-row", label: "Freeze Top Row", ariaLabel: "Freeze Top Row", icon: "⬆", testId: "freeze-top-row" },
+            { id: "freeze-first-column", label: "Freeze First Column", ariaLabel: "Freeze First Column", icon: "⬅", testId: "freeze-first-column" },
+            { id: "unfreeze-panes", label: "Unfreeze Panes", ariaLabel: "Unfreeze Panes", icon: "☀️", testId: "unfreeze-panes" },
+          ],
+        },
+        {
           id: "view.workbookViews",
           label: "Workbook Views",
           buttons: [
