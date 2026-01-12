@@ -72,7 +72,7 @@ export class LayoutController {
 
   /**
    * @param {any} nextLayout
-   * @param {{ persist?: boolean }} [options]
+   * @param {{ persist?: boolean, emit?: boolean }} [options]
    */
   #commit(nextLayout, options = {}) {
     this.layout = normalizeLayout(nextLayout, {
@@ -87,7 +87,9 @@ export class LayoutController {
       this.#needsPersist = true;
     }
 
-    this.#emit("change", { layout: this.layout });
+    if (options.emit ?? true) {
+      this.#emit("change", { layout: this.layout });
+    }
   }
 
   /**

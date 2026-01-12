@@ -31,13 +31,13 @@ export class LayoutController {
   setDockCollapsed(side: any, collapsed: boolean): void;
   setDockSize(side: any, sizePx: number): void;
 
-  setSplitDirection(direction: any, options?: { persist?: boolean }): void;
-  setSplitDirection(direction: any, ratio?: number, options?: { persist?: boolean }): void;
-  setSplitRatio(ratio: number, options?: { persist?: boolean }): void;
+  setSplitDirection(direction: any, options?: { persist?: boolean; emit?: boolean }): void;
+  setSplitDirection(direction: any, ratio?: number, options?: { persist?: boolean; emit?: boolean }): void;
+  setSplitRatio(ratio: number, options?: { persist?: boolean; emit?: boolean }): void;
   setActiveSplitPane(pane: any): void;
   setSplitPaneSheet(pane: any, sheetId: string): void;
-  setSplitPaneScroll(pane: any, scroll: any, options?: { persist?: boolean }): void;
-  setSplitPaneZoom(pane: any, zoom: any, options?: { persist?: boolean }): void;
+  setSplitPaneScroll(pane: any, scroll: any, options?: { persist?: boolean; emit?: boolean }): void;
+  setSplitPaneZoom(pane: any, zoom: any, options?: { persist?: boolean; emit?: boolean }): void;
 
   saveAsGlobalDefault(): void;
 }

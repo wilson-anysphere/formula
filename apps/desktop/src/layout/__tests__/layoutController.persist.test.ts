@@ -42,6 +42,36 @@ describe("LayoutController persistence", () => {
     expect(changeCount).toBe(2);
   });
 
+  test("ephemeral updates can be applied without emitting a change event (emit:false)", () => {
+    const storage = new MemoryStorage();
+    const keyPrefix = "test.layout";
+    const workspaceManager = new LayoutWorkspaceManager({ storage, keyPrefix });
+    const workbookId = "workbook-emit-false";
+    const controller = new LayoutController({ workbookId, workspaceManager });
+
+    const key = `${keyPrefix}.workbook.${encodeURIComponent(workbookId)}.v1`;
+
+    let changeCount = 0;
+    controller.on("change", () => {
+      changeCount += 1;
+    });
+
+    controller.setSplitPaneScroll("secondary", { scrollX: 0, scrollY: 0 });
+    const persistedBefore = storage.getItem(key);
+    expect(persistedBefore).not.toBeNull();
+    expect(changeCount).toBe(1);
+
+    controller.setSplitPaneScroll("secondary", { scrollX: 2, scrollY: 3 }, { persist: false, emit: false });
+    expect(changeCount).toBe(1);
+    expect(storage.getItem(key)).toBe(persistedBefore);
+    expect(controller.layout.splitView.panes.secondary.scrollX).toBe(2);
+    expect(controller.layout.splitView.panes.secondary.scrollY).toBe(3);
+
+    controller.persistNow();
+    expect(changeCount).toBe(1);
+    expect(storage.getItem(key)).not.toBe(persistedBefore);
+  });
+
   test("switching workspaces persists pending ephemeral updates before reloading", () => {
     const storage = new MemoryStorage();
     const keyPrefix = "test.layout";

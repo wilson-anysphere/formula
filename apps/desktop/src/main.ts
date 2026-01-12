@@ -2949,7 +2949,7 @@ if (
     const pane = layoutController.layout.splitView.panes.primary;
     const zoom = app.getZoom();
     if (pane.zoom === zoom) return;
-    layoutController.setSplitPaneZoom("primary", zoom, { persist: false });
+    layoutController.setSplitPaneZoom("primary", zoom, { persist: false, emit: false });
     scheduleSplitPanePersist();
   };
 
@@ -3111,7 +3111,7 @@ if (
       const pane = layoutController.layout.splitView.panes.primary;
       if (pane.scrollX === scroll.x && pane.scrollY === scroll.y) return;
 
-      layoutController.setSplitPaneScroll("primary", { scrollX: scroll.x, scrollY: scroll.y }, { persist: false });
+      layoutController.setSplitPaneScroll("primary", { scrollX: scroll.x, scrollY: scroll.y }, { persist: false, emit: false });
       scheduleSplitPanePersist();
     });
 
@@ -3121,7 +3121,7 @@ if (
       const pane = layoutController.layout.splitView.panes.primary;
       if (pane.zoom === zoom) return;
 
-      layoutController.setSplitPaneZoom("primary", zoom, { persist: false });
+      layoutController.setSplitPaneZoom("primary", zoom, { persist: false, emit: false });
       scheduleSplitPanePersist();
     });
 
@@ -3205,13 +3205,13 @@ if (
         persistScroll: (scroll) => {
           const pane = layoutController.layout.splitView.panes.secondary;
           if (pane.scrollX === scroll.scrollX && pane.scrollY === scroll.scrollY) return;
-          layoutController.setSplitPaneScroll("secondary", scroll, { persist: false });
+          layoutController.setSplitPaneScroll("secondary", scroll, { persist: false, emit: false });
           scheduleSplitPanePersist();
         },
         persistZoom: (zoom) => {
           const pane = layoutController.layout.splitView.panes.secondary;
           if (pane.zoom === zoom) return;
-          layoutController.setSplitPaneZoom("secondary", zoom, { persist: false });
+          layoutController.setSplitPaneZoom("secondary", zoom, { persist: false, emit: false });
           scheduleSplitPanePersist();
         },
       });
