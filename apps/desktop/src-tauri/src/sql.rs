@@ -19,6 +19,9 @@ pub const MAX_SQL_QUERY_CELLS: usize = 5_000_000;
 /// This is a secondary backstop against unexpectedly large cells (e.g. very long TEXT columns)
 /// even when row/cell counts are within bounds.
 pub const MAX_SQL_QUERY_BYTES: usize = 50 * 1024 * 1024; // 50 MiB
+/// Maximum size for any individual cell value (primarily to prevent allocating a single huge TEXT
+/// field into memory).
+pub const MAX_SQL_QUERY_CELL_BYTES: usize = 10 * 1024 * 1024; // 10 MiB
 pub const SQL_QUERY_TIMEOUT_MS: u64 = 10_000;
 
 fn sql_query_timeout_ms() -> u64 {
@@ -33,6 +36,13 @@ fn sql_query_max_bytes() -> usize {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(MAX_SQL_QUERY_BYTES)
+}
+
+fn sql_query_max_cell_bytes() -> usize {
+    std::env::var("FORMULA_SQL_QUERY_MAX_CELL_BYTES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(MAX_SQL_QUERY_CELL_BYTES)
 }
 
 fn sql_query_timeout_duration() -> Duration {
@@ -417,33 +427,59 @@ fn bind_postgres_param<'q>(
     }
 }
 
-fn sqlite_cell_to_json(row: &sqlx::sqlite::SqliteRow, idx: usize, ty: &SqlDataType) -> JsonValue {
+fn sqlite_cell_to_json(
+    row: &sqlx::sqlite::SqliteRow,
+    idx: usize,
+    ty: &SqlDataType,
+    max_cell_bytes: usize,
+) -> Result<JsonValue> {
     // SQLite uses dynamic typing; use the declared schema type as a hint.
     match ty {
         SqlDataType::Boolean => {
             if let Ok(v) = row.try_get::<Option<bool>, _>(idx) {
-                return v.map(JsonValue::from).unwrap_or(JsonValue::Null);
+                return Ok(v.map(JsonValue::from).unwrap_or(JsonValue::Null));
             }
             if let Ok(v) = row.try_get::<Option<i64>, _>(idx) {
-                return v
+                return Ok(v
                     .map(|n| JsonValue::Bool(n != 0))
-                    .unwrap_or(JsonValue::Null);
+                    .unwrap_or(JsonValue::Null));
             }
         }
         SqlDataType::Number => {
             if let Ok(v) = row.try_get::<Option<i64>, _>(idx) {
-                return v.map(JsonValue::from).unwrap_or(JsonValue::Null);
+                return Ok(v.map(JsonValue::from).unwrap_or(JsonValue::Null));
             }
             if let Ok(v) = row.try_get::<Option<f64>, _>(idx) {
-                return v
+                return Ok(v
                     .and_then(serde_json::Number::from_f64)
                     .map(JsonValue::Number)
-                    .unwrap_or(JsonValue::Null);
+                    .unwrap_or(JsonValue::Null));
             }
         }
         SqlDataType::String | SqlDataType::Date => {
+            if let Ok(v) = row.try_get::<Option<&str>, _>(idx) {
+                if let Some(s) = v {
+                    if s.len() > max_cell_bytes {
+                        return Err(anyhow!(
+                            "SQL query returned a cell larger than {max_cell_bytes} bytes. \
+                             Truncate large values (e.g. SUBSTR/LEFT) or select fewer columns."
+                        ));
+                    }
+                    return Ok(JsonValue::String(s.to_string()));
+                }
+                return Ok(JsonValue::Null);
+            }
             if let Ok(v) = row.try_get::<Option<String>, _>(idx) {
-                return v.map(JsonValue::from).unwrap_or(JsonValue::Null);
+                if let Some(s) = v {
+                    if s.len() > max_cell_bytes {
+                        return Err(anyhow!(
+                            "SQL query returned a cell larger than {max_cell_bytes} bytes. \
+                             Truncate large values (e.g. SUBSTR/LEFT) or select fewer columns."
+                        ));
+                    }
+                    return Ok(JsonValue::String(s));
+                }
+                return Ok(JsonValue::Null);
             }
         }
         SqlDataType::Any => {}
@@ -451,103 +487,185 @@ fn sqlite_cell_to_json(row: &sqlx::sqlite::SqliteRow, idx: usize, ty: &SqlDataTy
 
     // Fallback: attempt a few common decodes.
     if let Ok(v) = row.try_get::<Option<i64>, _>(idx) {
-        return v.map(JsonValue::from).unwrap_or(JsonValue::Null);
+        return Ok(v.map(JsonValue::from).unwrap_or(JsonValue::Null));
     }
     if let Ok(v) = row.try_get::<Option<f64>, _>(idx) {
-        return v
+        return Ok(v
             .and_then(serde_json::Number::from_f64)
             .map(JsonValue::Number)
-            .unwrap_or(JsonValue::Null);
+            .unwrap_or(JsonValue::Null));
     }
     if let Ok(v) = row.try_get::<Option<bool>, _>(idx) {
-        return v.map(JsonValue::from).unwrap_or(JsonValue::Null);
+        return Ok(v.map(JsonValue::from).unwrap_or(JsonValue::Null));
+    }
+    if let Ok(v) = row.try_get::<Option<&str>, _>(idx) {
+        if let Some(s) = v {
+            if s.len() > max_cell_bytes {
+                return Err(anyhow!(
+                    "SQL query returned a cell larger than {max_cell_bytes} bytes. \
+                     Truncate large values (e.g. SUBSTR/LEFT) or select fewer columns."
+                ));
+            }
+            return Ok(JsonValue::String(s.to_string()));
+        }
+        return Ok(JsonValue::Null);
     }
     if let Ok(v) = row.try_get::<Option<String>, _>(idx) {
-        return v.map(JsonValue::from).unwrap_or(JsonValue::Null);
+        if let Some(s) = v {
+            if s.len() > max_cell_bytes {
+                return Err(anyhow!(
+                    "SQL query returned a cell larger than {max_cell_bytes} bytes. \
+                     Truncate large values (e.g. SUBSTR/LEFT) or select fewer columns."
+                ));
+            }
+            return Ok(JsonValue::String(s));
+        }
+        return Ok(JsonValue::Null);
     }
-    JsonValue::Null
+    Ok(JsonValue::Null)
 }
 
-fn postgres_cell_to_json(row: &sqlx::postgres::PgRow, idx: usize, pg_type_name: &str) -> JsonValue {
+fn postgres_cell_to_json(
+    row: &sqlx::postgres::PgRow,
+    idx: usize,
+    pg_type_name: &str,
+    max_cell_bytes: usize,
+) -> Result<JsonValue> {
     // Prefer decoding based on the Postgres type name; fall back to a few generic attempts.
     match pg_type_name {
-        "BOOL" => row
+        "BOOL" => Ok(row
             .try_get::<Option<bool>, _>(idx)
             .ok()
             .flatten()
             .map(JsonValue::Bool)
-            .unwrap_or(JsonValue::Null),
-        "INT2" => row
+            .unwrap_or(JsonValue::Null)),
+        "INT2" => Ok(row
             .try_get::<Option<i16>, _>(idx)
             .ok()
             .flatten()
             .map(|v| JsonValue::from(i64::from(v)))
-            .unwrap_or(JsonValue::Null),
-        "INT4" => row
+            .unwrap_or(JsonValue::Null)),
+        "INT4" => Ok(row
             .try_get::<Option<i32>, _>(idx)
             .ok()
             .flatten()
             .map(|v| JsonValue::from(i64::from(v)))
-            .unwrap_or(JsonValue::Null),
-        "INT8" => row
+            .unwrap_or(JsonValue::Null)),
+        "INT8" => Ok(row
             .try_get::<Option<i64>, _>(idx)
             .ok()
             .flatten()
             .map(JsonValue::from)
-            .unwrap_or(JsonValue::Null),
-        "FLOAT4" => row
+            .unwrap_or(JsonValue::Null)),
+        "FLOAT4" => Ok(row
             .try_get::<Option<f32>, _>(idx)
             .ok()
             .flatten()
             .map(|v| v as f64)
             .and_then(serde_json::Number::from_f64)
             .map(JsonValue::Number)
-            .unwrap_or(JsonValue::Null),
-        "FLOAT8" => row
+            .unwrap_or(JsonValue::Null)),
+        "FLOAT8" => Ok(row
             .try_get::<Option<f64>, _>(idx)
             .ok()
             .flatten()
             .and_then(serde_json::Number::from_f64)
             .map(JsonValue::Number)
-            .unwrap_or(JsonValue::Null),
-        "DATE" => row
-            .try_get::<Option<sqlx::types::chrono::NaiveDate>, _>(idx)
-            .ok()
-            .flatten()
-            .map(|d| JsonValue::from(format!("{}T00:00:00.000Z", d.format("%Y-%m-%d"))))
-            .unwrap_or(JsonValue::Null),
-        "TIMESTAMP" => row
-            .try_get::<Option<sqlx::types::chrono::NaiveDateTime>, _>(idx)
-            .ok()
-            .flatten()
-            .map(|dt| JsonValue::from(format!("{}Z", dt.format("%Y-%m-%dT%H:%M:%S%.f"))))
-            .unwrap_or(JsonValue::Null),
-        "TIMESTAMPTZ" => row
-            .try_get::<Option<sqlx::types::chrono::DateTime<sqlx::types::chrono::Utc>>, _>(idx)
-            .ok()
-            .flatten()
-            .map(|dt| JsonValue::from(dt.to_rfc3339()))
-            .unwrap_or(JsonValue::Null),
+            .unwrap_or(JsonValue::Null)),
+        "DATE" => {
+            let Some(d) = row
+                .try_get::<Option<sqlx::types::chrono::NaiveDate>, _>(idx)
+                .ok()
+                .flatten()
+            else {
+                return Ok(JsonValue::Null);
+            };
+            let s = format!("{}T00:00:00.000Z", d.format("%Y-%m-%d"));
+            if s.len() > max_cell_bytes {
+                return Err(anyhow!(
+                    "SQL query returned a cell larger than {max_cell_bytes} bytes. \
+                     Truncate large values (e.g. SUBSTR/LEFT) or select fewer columns."
+                ));
+            }
+            Ok(JsonValue::String(s))
+        }
+        "TIMESTAMP" => {
+            let Some(dt) = row
+                .try_get::<Option<sqlx::types::chrono::NaiveDateTime>, _>(idx)
+                .ok()
+                .flatten()
+            else {
+                return Ok(JsonValue::Null);
+            };
+            let s = format!("{}Z", dt.format("%Y-%m-%dT%H:%M:%S%.f"));
+            if s.len() > max_cell_bytes {
+                return Err(anyhow!(
+                    "SQL query returned a cell larger than {max_cell_bytes} bytes. \
+                     Truncate large values (e.g. SUBSTR/LEFT) or select fewer columns."
+                ));
+            }
+            Ok(JsonValue::String(s))
+        }
+        "TIMESTAMPTZ" => {
+            let Some(dt) = row
+                .try_get::<Option<sqlx::types::chrono::DateTime<sqlx::types::chrono::Utc>>, _>(idx)
+                .ok()
+                .flatten()
+            else {
+                return Ok(JsonValue::Null);
+            };
+            let s = dt.to_rfc3339();
+            if s.len() > max_cell_bytes {
+                return Err(anyhow!(
+                    "SQL query returned a cell larger than {max_cell_bytes} bytes. \
+                     Truncate large values (e.g. SUBSTR/LEFT) or select fewer columns."
+                ));
+            }
+            Ok(JsonValue::String(s))
+        }
         _ => {
+            if let Ok(v) = row.try_get::<Option<&str>, _>(idx) {
+                if let Some(s) = v {
+                    if s.len() > max_cell_bytes {
+                        return Err(anyhow!(
+                            "SQL query returned a cell larger than {max_cell_bytes} bytes. \
+                             Truncate large values (e.g. SUBSTR/LEFT) or select fewer columns."
+                        ));
+                    }
+                    return Ok(JsonValue::String(s.to_string()));
+                }
+                return Ok(JsonValue::Null);
+            }
             if let Ok(v) = row.try_get::<Option<String>, _>(idx) {
-                return v.map(JsonValue::from).unwrap_or(JsonValue::Null);
+                if let Some(s) = v {
+                    if s.len() > max_cell_bytes {
+                        return Err(anyhow!(
+                            "SQL query returned a cell larger than {max_cell_bytes} bytes. \
+                             Truncate large values (e.g. SUBSTR/LEFT) or select fewer columns."
+                        ));
+                    }
+                    return Ok(JsonValue::String(s));
+                }
+                return Ok(JsonValue::Null);
             }
             if let Ok(v) = row.try_get::<Option<i64>, _>(idx) {
-                return v.map(JsonValue::from).unwrap_or(JsonValue::Null);
+                return Ok(v.map(JsonValue::from).unwrap_or(JsonValue::Null));
             }
             if let Ok(v) = row.try_get::<Option<i32>, _>(idx) {
-                return v.map(|n| JsonValue::from(i64::from(n))).unwrap_or(JsonValue::Null);
+                return Ok(v
+                    .map(|n| JsonValue::from(i64::from(n)))
+                    .unwrap_or(JsonValue::Null));
             }
             if let Ok(v) = row.try_get::<Option<f64>, _>(idx) {
-                return v
+                return Ok(v
                     .and_then(serde_json::Number::from_f64)
                     .map(JsonValue::Number)
-                    .unwrap_or(JsonValue::Null);
+                    .unwrap_or(JsonValue::Null));
             }
             if let Ok(v) = row.try_get::<Option<bool>, _>(idx) {
-                return v.map(JsonValue::from).unwrap_or(JsonValue::Null);
+                return Ok(v.map(JsonValue::from).unwrap_or(JsonValue::Null));
             }
-            JsonValue::Null
+            Ok(JsonValue::Null)
         }
     }
 }
@@ -596,6 +714,7 @@ async fn query_sqlite(
         let mut out_rows: Vec<Vec<JsonValue>> = Vec::new();
         let mut row_count: usize = 0;
         let max_bytes = sql_query_max_bytes();
+        let max_cell_bytes = sql_query_max_cell_bytes();
         let mut total_bytes: usize = 0;
 
         while let Some(row) = stream
@@ -638,7 +757,7 @@ async fn query_sqlite(
 
             let mut out = Vec::with_capacity(columns.len());
             for idx in 0..columns.len() {
-                let value = sqlite_cell_to_json(&row, idx, &column_types[idx]);
+                let value = sqlite_cell_to_json(&row, idx, &column_types[idx], max_cell_bytes)?;
                 total_bytes = total_bytes.saturating_add(sql_value_estimated_bytes(&value));
                 if total_bytes > max_bytes {
                     return Err(anyhow!(
@@ -694,6 +813,7 @@ async fn query_postgres(
         let mut out_rows: Vec<Vec<JsonValue>> = Vec::new();
         let mut row_count: usize = 0;
         let max_bytes = sql_query_max_bytes();
+        let max_cell_bytes = sql_query_max_cell_bytes();
         let mut total_bytes: usize = 0;
 
         while let Some(row) = stream
@@ -731,7 +851,7 @@ async fn query_postgres(
                     .get(idx)
                     .map(|c| c.type_info().name())
                     .unwrap_or("");
-                let value = postgres_cell_to_json(&row, idx, type_name);
+                let value = postgres_cell_to_json(&row, idx, type_name, max_cell_bytes)?;
                 total_bytes = total_bytes.saturating_add(sql_value_estimated_bytes(&value));
                 if total_bytes > max_bytes {
                     return Err(anyhow!(
@@ -1197,6 +1317,31 @@ mod tests {
         assert!(
             err.to_string().contains("maximum size"),
             "expected size limit error, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn sqlite_query_enforces_max_cell_bytes() {
+        // Keep env overrides (if any) isolated from other tests in this crate.
+        let _guard = env_mutex().lock().unwrap();
+
+        let key = "FORMULA_SQL_QUERY_MAX_CELL_BYTES";
+        let prev = std::env::var(key).ok();
+        std::env::set_var(key, "10");
+
+        let (opts, _keeper) = make_shared_in_memory_sqlite().await;
+        let sql = "SELECT replace(hex(zeroblob(20)), '00', 'a')";
+        let err = query_sqlite(&opts, sql, &[]).await.unwrap_err();
+
+        if let Some(prev) = prev {
+            std::env::set_var(key, prev);
+        } else {
+            std::env::remove_var(key);
+        }
+
+        assert!(
+            err.to_string().contains("cell larger"),
+            "expected per-cell size limit error, got: {err}"
         );
     }
 }
