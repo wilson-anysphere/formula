@@ -241,10 +241,8 @@ pub struct PivotTableSummary {
     pub destination: PivotDestination,
 }
 
-#[cfg(all(feature = "desktop", feature = "parquet"))]
-use crate::file_io::read_parquet;
 #[cfg(feature = "desktop")]
-use crate::file_io::{read_csv, read_xlsx};
+use crate::file_io::read_workbook;
 #[cfg(feature = "desktop")]
 use crate::persistence::{
     autosave_db_path_for_new_workbook, autosave_db_path_for_workbook, WorkbookPersistenceLocation,
@@ -338,27 +336,7 @@ pub async fn open_workbook(
     path: String,
     state: State<'_, SharedAppState>,
 ) -> Result<WorkbookInfo, String> {
-    let ext = PathBuf::from(&path)
-        .extension()
-        .and_then(|s| s.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    let workbook = match ext.as_str() {
-        "csv" => read_csv(path.clone()).await.map_err(|e| e.to_string())?,
-        "parquet" => {
-            #[cfg(feature = "parquet")]
-            {
-                read_parquet(path.clone())
-                    .await
-                    .map_err(|e| e.to_string())?
-            }
-            #[cfg(not(feature = "parquet"))]
-            {
-                return Err("parquet support is not enabled in this build".to_string());
-            }
-        }
-        _ => read_xlsx(path.clone()).await.map_err(|e| e.to_string())?,
-    };
+    let workbook = read_workbook(path.clone()).await.map_err(|e| e.to_string())?;
     let location = autosave_db_path_for_workbook(&path)
         .map(WorkbookPersistenceLocation::OnDisk)
         .unwrap_or(WorkbookPersistenceLocation::InMemory);

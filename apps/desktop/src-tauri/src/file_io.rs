@@ -394,6 +394,14 @@ pub async fn read_parquet(path: impl Into<PathBuf> + Send + 'static) -> anyhow::
         .map_err(|e| anyhow::anyhow!(e.to_string()))?
 }
 
+#[cfg(feature = "desktop")]
+pub async fn read_workbook(path: impl Into<PathBuf> + Send + 'static) -> anyhow::Result<Workbook> {
+    let path = path.into();
+    tauri::async_runtime::spawn_blocking(move || read_workbook_blocking(&path))
+        .await
+        .map_err(|e| anyhow::anyhow!(e.to_string()))?
+}
+
 fn cfb_stream_exists<R: std::io::Read + std::io::Write + std::io::Seek>(
     ole: &mut cfb::CompoundFile<R>,
     name: &str,
@@ -686,6 +694,63 @@ fn read_xls_blocking(path: &Path) -> anyhow::Result<Workbook> {
     }
 
     Ok(out)
+}
+
+pub fn read_workbook_blocking(path: &Path) -> anyhow::Result<Workbook> {
+    use std::io::Read;
+
+    const PARQUET_MAGIC: [u8; 4] = *b"PAR1";
+
+    let mut file =
+        std::fs::File::open(path).with_context(|| format!("open workbook {:?}", path))?;
+    let mut prefix = [0u8; 16];
+    let read = file
+        .read(&mut prefix)
+        .with_context(|| format!("read workbook header {:?}", path))?;
+    let prefix = &prefix[..read];
+
+    if prefix.starts_with(&PARQUET_MAGIC) {
+        #[cfg(feature = "parquet")]
+        {
+            return read_parquet_blocking(path);
+        }
+        #[cfg(not(feature = "parquet"))]
+        {
+            anyhow::bail!("parquet support is not enabled in this build");
+        }
+    }
+
+    // Encrypted OOXML workbooks live in an OLE container; ensure we surface a clear error instead
+    // of trying to route them through the legacy `.xls` importer.
+    if let Ok(true) = is_encrypted_ooxml_workbook(path) {
+        anyhow::bail!(
+            "encrypted workbook not supported: workbook `{}` is password-protected/encrypted; remove password protection in Excel and try again",
+            path.display()
+        );
+    }
+
+    if let Some(format) = sniff_workbook_format(path) {
+        return match format {
+            SniffedWorkbookFormat::Xls => read_xls_blocking(path),
+            SniffedWorkbookFormat::Xlsx => read_xlsx_or_xlsm_blocking(path),
+            SniffedWorkbookFormat::Xlsb => read_xlsb_blocking(path),
+        };
+    }
+
+    // Fall back to Calamine's extension-based readers for other spreadsheet formats (e.g. `.ods`).
+    let is_zip = prefix.len() >= 4
+        && prefix[0] == b'P'
+        && prefix[1] == b'K'
+        && matches!(prefix[2], 0x03 | 0x05 | 0x07)
+        && matches!(prefix[3], 0x04 | 0x06 | 0x08);
+    if is_zip {
+        if let Ok(workbook) = read_xlsx_blocking(path) {
+            return Ok(workbook);
+        }
+    }
+
+    // Default: treat as CSV text.
+    read_csv_blocking(path)
 }
 
 pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
@@ -2411,6 +2476,56 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
         ));
         let workbook = read_xlsx_blocking(fixture_path).expect("read xls workbook");
         assert_eq!(workbook.date_system, WorkbookDateSystem::Excel1904);
+    }
+
+    #[test]
+    fn read_workbook_sniffs_xlsx_even_with_csv_extension() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/basic/basic.xlsx"
+        ));
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let misnamed_path = tmp.path().join("basic.csv");
+        std::fs::copy(fixture_path, &misnamed_path).expect("copy fixture");
+
+        let workbook = read_workbook_blocking(&misnamed_path).expect("read workbook");
+        assert!(
+            workbook.origin_xlsx_bytes.is_some(),
+            "expected ZIP workbook to be parsed as XLSX"
+        );
+        assert_eq!(workbook.sheets.len(), 1);
+
+        let sheet = &workbook.sheets[0];
+        assert_eq!(sheet.get_cell(0, 0).computed_value, CellScalar::Number(1.0));
+        assert_eq!(
+            sheet.get_cell(0, 1).computed_value,
+            CellScalar::Text("Hello".to_string())
+        );
+    }
+
+    #[test]
+    fn read_workbook_sniffs_csv_even_with_xlsx_extension() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let misnamed_path = tmp.path().join("data.xlsx");
+        std::fs::write(&misnamed_path, "col1,col2\n1,Hello\n").expect("write csv");
+
+        let workbook = read_workbook_blocking(&misnamed_path).expect("read workbook");
+        assert!(
+            workbook.origin_xlsx_bytes.is_none(),
+            "expected text workbook to not be treated as XLSX"
+        );
+        assert_eq!(workbook.sheets.len(), 1);
+
+        let sheet = &workbook.sheets[0];
+        assert!(
+            sheet.columnar.is_some(),
+            "expected CSV import to create a columnar-backed sheet"
+        );
+        assert_eq!(sheet.get_cell(0, 0).computed_value, CellScalar::Number(1.0));
+        assert_eq!(
+            sheet.get_cell(0, 1).computed_value,
+            CellScalar::Text("Hello".to_string())
+        );
     }
 
     #[test]
