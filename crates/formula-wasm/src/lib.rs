@@ -673,9 +673,14 @@ fn scan_fallback_function_context(
                     match ch {
                         '[' => bracket_depth += 1,
                         ']' => {
-                            if bracket_depth > 0 {
-                                bracket_depth -= 1;
+                            // Excel escapes `]` inside structured references as `]]`. At the
+                            // outermost bracket depth, treat a double `]]` as a literal `]` rather
+                            // than the end of the bracket segment.
+                            if bracket_depth == 1 && formula_prefix[i..].starts_with("]]") {
+                                i += 2;
+                                continue;
                             }
+                            bracket_depth = bracket_depth.saturating_sub(1);
                         }
                         _ => {}
                     }
