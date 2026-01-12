@@ -52,20 +52,28 @@ impl XlsxPackage {
     pub fn extract_embedded_cell_images(
         &self,
     ) -> Result<HashMap<(String, CellRef), EmbeddedCellImage>, XlsxError> {
-        let Some(rich_value_rel_bytes) = self.part(RICH_VALUE_REL_PART) else {
+        let rich_value_rel_part = if self.part(RICH_VALUE_REL_PART).is_some() {
+            Some(RICH_VALUE_REL_PART.to_string())
+        } else {
+            find_lowest_numbered_part(self, "xl/richData/richValueRel", ".xml")
+        };
+        let Some(rich_value_rel_part) = rich_value_rel_part else {
             // Workbooks without in-cell images omit the entire `xl/richData/` tree.
+            return Ok(HashMap::new());
+        };
+        let Some(rich_value_rel_bytes) = self.part(&rich_value_rel_part) else {
             return Ok(HashMap::new());
         };
 
         let rich_value_rel_xml = std::str::from_utf8(rich_value_rel_bytes)
-            .map_err(|e| XlsxError::Invalid(format!("{RICH_VALUE_REL_PART} not utf-8: {e}")))?;
+            .map_err(|e| XlsxError::Invalid(format!("{rich_value_rel_part} not utf-8: {e}")))?;
         let rich_value_rel_ids = parse_rich_value_rel_ids(rich_value_rel_xml)?;
         if rich_value_rel_ids.is_empty() {
             return Ok(HashMap::new());
         }
 
         // Resolve relationship IDs (`rId*`) to concrete targets via the `.rels` part.
-        let rich_value_rels_part = rels_for_part(RICH_VALUE_REL_PART);
+        let rich_value_rels_part = rels_for_part(&rich_value_rel_part);
         let Some(rich_value_rel_rels_bytes) = self.part(&rich_value_rels_part) else {
             // If the richValueRel part exists, we expect its .rels as well. Be defensive and
             // treat a missing rels part as "no images" rather than erroring.
@@ -73,7 +81,7 @@ impl XlsxPackage {
         };
 
         let image_targets_by_rel_id =
-            parse_rich_value_rel_image_targets(rich_value_rel_rels_bytes)?;
+            parse_rich_value_rel_image_targets(&rich_value_rel_part, rich_value_rel_rels_bytes)?;
         if image_targets_by_rel_id.is_empty() {
             return Ok(HashMap::new());
         }
@@ -387,6 +395,40 @@ fn rich_value_part_suffix_index(part_path: &str) -> Option<u32> {
     suffix.parse::<u32>().ok()
 }
 
+fn find_lowest_numbered_part(pkg: &XlsxPackage, prefix: &str, suffix: &str) -> Option<String> {
+    let mut best: Option<(u32, String)> = None;
+
+    for part in pkg.part_names() {
+        let part = part.strip_prefix('/').unwrap_or(part);
+        let Some(num) = numeric_suffix(part, prefix, suffix) else {
+            continue;
+        };
+
+        match &mut best {
+            Some((best_num, best_name)) => {
+                if num < *best_num || (num == *best_num && part < best_name.as_str()) {
+                    *best_num = num;
+                    *best_name = part.to_string();
+                }
+            }
+            None => best = Some((num, part.to_string())),
+        }
+    }
+
+    best.map(|(_, name)| name)
+}
+
+fn numeric_suffix(part_name: &str, prefix: &str, suffix: &str) -> Option<u32> {
+    let mid = part_name.strip_prefix(prefix)?.strip_suffix(suffix)?;
+    if !mid.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    if mid.is_empty() {
+        return Some(0);
+    }
+    mid.parse::<u32>().ok()
+}
+
 fn parse_rich_value_rel_ids(xml: &str) -> Result<Vec<String>, XlsxError> {
     let mut reader = Reader::from_reader(Cursor::new(xml.as_bytes()));
     reader.config_mut().trim_text(true);
@@ -431,6 +473,7 @@ fn parse_rich_value_rel_ids(xml: &str) -> Result<Vec<String>, XlsxError> {
 }
 
 fn parse_rich_value_rel_image_targets(
+    source_part: &str,
     rels_xml: &[u8],
 ) -> Result<HashMap<String, String>, XlsxError> {
     let relationships = crate::openxml::parse_relationships(rels_xml)?;
@@ -459,7 +502,7 @@ fn parse_rich_value_rel_image_targets(
         } else if target.starts_with("xl/") {
             target.to_string()
         } else {
-            resolve_target(RICH_VALUE_REL_PART, target)
+            resolve_target(source_part, target)
         };
         out.insert(rel.id, resolved);
     }
