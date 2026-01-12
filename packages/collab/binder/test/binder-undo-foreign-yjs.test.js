@@ -148,13 +148,15 @@ test("binder normalizes foreign nested cell maps before mutating so collab undo 
 
   assert.equal(documentController.getCell("Sheet1", { row: 0, col: 0 }).value, "from-cjs");
 
-  documentController.setCellValue("Sheet1", { row: 0, col: 0 }, "edited");
+  // Clear the cell (null write). This exercises the case where the binder is about to
+  // mutate a foreign nested Y.Map even though the resulting value is empty.
+  documentController.setCellValue("Sheet1", { row: 0, col: 0 }, null);
   await flushAsync();
 
   const afterWrite = cellsRoot.get("Sheet1:0:0");
   assert.ok(afterWrite);
   assert.ok(afterWrite instanceof Y.Map, "cell map should be normalized to local Y.Map");
-  assert.equal(afterWrite.get("value"), "edited");
+  assert.equal(afterWrite.get("value"), null);
 
   undoService.undo();
   await flushAsync();
@@ -167,4 +169,3 @@ test("binder normalizes foreign nested cell maps before mutating so collab undo 
   binder.destroy();
   doc.destroy();
 });
-

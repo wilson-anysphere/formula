@@ -1370,8 +1370,6 @@ export function bindYjsToDocumentController(options) {
     /** @type {Set<string>} */
     const rawKeysToNormalize = new Set();
     for (const item of prepared) {
-      // Skip deletes: we don't mutate the nested map when removing the cell key.
-      if (item.value == null && item.formula == null && item.styleId === 0 && !item.encryptedPayload) continue;
       for (const rawKey of item.targets) {
         if (typeof rawKey === "string") rawKeysToNormalize.add(rawKey);
       }
