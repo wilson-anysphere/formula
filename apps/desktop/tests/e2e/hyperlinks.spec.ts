@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 import { gotoDesktop } from "./helpers";
 
 async function waitForIdle(page: import("@playwright/test").Page): Promise<void> {
-  await page.evaluate(() => (window as any).__formulaApp.whenIdle());
+  await page.evaluate(() => (window.__formulaApp as any).whenIdle());
 }
 
 type InvokeCall = [string, any];
@@ -51,13 +51,13 @@ test.describe("external hyperlink opening", () => {
       });
 
       await page.evaluate(async () => {
-        const app = (window as any).__formulaApp;
+        const app = window.__formulaApp as any;
         const sheetId = app.getCurrentSheetId();
         app.getDocument().setCellValue(sheetId, "A1", "https://example.com");
         await app.whenIdle();
       });
 
-      const a1Rect = await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("A1"));
+      const a1Rect = await page.evaluate(() => (window.__formulaApp as any).getCellRectA1("A1"));
       expect(a1Rect).not.toBeNull();
 
       const modifier = process.platform === "darwin" ? "Meta" : "Control";

@@ -7,8 +7,8 @@ async function waitForIdle(page: import("@playwright/test").Page): Promise<void>
   // Retry once if the execution context is destroyed mid-wait.
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      await page.waitForFunction(() => Boolean((window as any).__formulaApp?.whenIdle), null, { timeout: 10_000 });
-      await page.evaluate(() => (window as any).__formulaApp.whenIdle());
+      await page.waitForFunction(() => Boolean((window.__formulaApp as any)?.whenIdle), null, { timeout: 10_000 });
+      await page.evaluate(() => (window.__formulaApp as any).whenIdle());
       return;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -31,7 +31,7 @@ test.describe("status bar mode indicator", () => {
 
       // Avoid grid-mode-specific click coordinates by driving selection via the app API.
       await page.evaluate(() => {
-        const app = (window as any).__formulaApp;
+        const app = window.__formulaApp as any;
         app.focus();
         app.activateCell({ row: 0, col: 0 }); // A1
       });
@@ -48,4 +48,3 @@ test.describe("status bar mode indicator", () => {
     });
   }
 });
-

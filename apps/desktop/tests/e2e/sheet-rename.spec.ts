@@ -8,7 +8,7 @@ test.describe("sheet rename", () => {
 
     // Create Sheet2 and reset the dirty state so the rename is what marks the document dirty.
     await page.evaluate(() => {
-      const app = (window as any).__formulaApp;
+      const app = window.__formulaApp as any;
       app.getDocument().setCellValue("Sheet2", "A1", "x");
       app.getDocument().markSaved();
     });
@@ -29,12 +29,12 @@ test.describe("sheet rename", () => {
     await expect(sheet2Tab).toHaveAttribute("data-testid", "sheet-tab-Sheet2");
 
     await expect
-      .poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty))
+      .poll(() => page.evaluate(() => (window.__formulaApp as any).getDocument().isDirty))
       .toBe(true);
 
     await page.getByTestId("sheet-add").click();
     await expect
-      .poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty))
+      .poll(() => page.evaluate(() => (window.__formulaApp as any).getDocument().isDirty))
       .toBe(true);
   });
 });

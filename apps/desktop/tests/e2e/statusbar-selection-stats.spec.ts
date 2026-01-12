@@ -7,8 +7,8 @@ async function waitForIdle(page: import("@playwright/test").Page): Promise<void>
   // Retry once if the execution context is destroyed mid-wait.
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      await page.waitForFunction(() => Boolean((window as any).__formulaApp?.whenIdle), null, { timeout: 10_000 });
-      await page.evaluate(() => (window as any).__formulaApp.whenIdle());
+      await page.waitForFunction(() => Boolean((window.__formulaApp as any)?.whenIdle), null, { timeout: 10_000 });
+      await page.evaluate(() => (window.__formulaApp as any).whenIdle());
       return;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -30,7 +30,7 @@ test.describe("status bar selection stats", () => {
 
       await page.evaluate(() => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const app: any = (window as any).__formulaApp;
+        const app: any = window.__formulaApp as any;
         if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
 
         const sheetId = app.getCurrentSheetId();
@@ -52,4 +52,3 @@ test.describe("status bar selection stats", () => {
     });
   }
 });
-

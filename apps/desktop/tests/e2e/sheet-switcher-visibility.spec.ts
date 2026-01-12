@@ -9,7 +9,7 @@ test.describe("sheet switcher", () => {
     // Create Sheet2 + Sheet3.
     await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const app: any = (window as any).__formulaApp;
+      const app: any = window.__formulaApp as any;
       if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
       const doc = app.getDocument();
 
@@ -47,7 +47,7 @@ test.describe("sheet switcher", () => {
     }
     {
       // Hiding the active sheet should activate a visible sheet.
-      const activeSheetId = await page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId());
+      const activeSheetId = await page.evaluate(() => (window.__formulaApp as any).getCurrentSheetId());
       expect(activeSheetId).not.toEqual("Sheet2");
       expect(["Sheet1", "Sheet3"]).toContain(activeSheetId);
       await expect(switcher).toHaveValue(activeSheetId);
@@ -76,7 +76,7 @@ test.describe("sheet switcher", () => {
       expect(optionLabels).toEqual(["Sheet1", "Sheet2", "Sheet3"]);
     }
 
-    const activeAfterUnhide = await page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId());
+    const activeAfterUnhide = await page.evaluate(() => (window.__formulaApp as any).getCurrentSheetId());
     if (activeAfterUnhide === "Sheet1") {
       await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 3");
     } else if (activeAfterUnhide === "Sheet2") {
