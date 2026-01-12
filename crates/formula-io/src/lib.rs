@@ -819,10 +819,19 @@ fn materialize_columnar_tables_for_export(
     out
 }
 
+fn xlsb_error_code_to_model_error(code: u8) -> formula_model::ErrorValue {
+    use core::str::FromStr;
+    use formula_model::ErrorValue;
+
+    xlsb::errors::xlsb_error_literal(code)
+        .and_then(|lit| ErrorValue::from_str(lit).ok())
+        .unwrap_or(ErrorValue::Unknown)
+}
+
 fn xlsb_to_model_workbook(wb: &xlsb::XlsbWorkbook) -> Result<formula_model::Workbook, xlsb::Error> {
     use formula_model::{
         normalize_formula_text, CalculationMode, CellRef, CellValue, DateSystem, DefinedNameScope,
-        ErrorValue, SheetVisibility, Style, Workbook as ModelWorkbook,
+        SheetVisibility, Style, Workbook as ModelWorkbook,
     };
 
     let mut out = ModelWorkbook::new();
@@ -945,7 +954,7 @@ fn xlsb_to_model_workbook(wb: &xlsb::XlsbWorkbook) -> Result<formula_model::Work
                 xlsb::CellValue::Text(s) => sheet.set_value(cell_ref, CellValue::String(s)),
                 xlsb::CellValue::Error(code) => sheet.set_value(
                     cell_ref,
-                    CellValue::Error(ErrorValue::from_code(code).unwrap_or(ErrorValue::Unknown)),
+                    CellValue::Error(xlsb_error_code_to_model_error(code)),
                 ),
             };
 
@@ -1000,8 +1009,9 @@ fn xlsb_to_model_workbook(wb: &xlsb::XlsbWorkbook) -> Result<formula_model::Work
 
 #[cfg(test)]
 mod tests {
+    use super::xlsb_error_code_to_model_error;
     use super::xlsb_to_model_workbook;
-    use formula_model::{CellRef, DateSystem};
+    use formula_model::{CellRef, DateSystem, ErrorValue};
     use std::path::Path;
 
     #[test]
@@ -1058,5 +1068,25 @@ mod tests {
             .get(cell.style_id)
             .expect("style id should exist");
         assert_eq!(style.number_format.as_deref(), Some("m/d/yyyy"));
+    }
+
+    #[test]
+    fn xlsb_error_cell_values_map_to_model_error_values() {
+        for (code, expected) in [
+            (0x00, ErrorValue::Null),
+            (0x07, ErrorValue::Div0),
+            (0x0F, ErrorValue::Value),
+            (0x17, ErrorValue::Ref),
+            (0x1D, ErrorValue::Name),
+            (0x24, ErrorValue::Num),
+            (0x2A, ErrorValue::NA),
+            (0x2B, ErrorValue::GettingData),
+        ] {
+            assert_eq!(
+                xlsb_error_code_to_model_error(code),
+                expected,
+                "xlsb error code {code:#04x} should map to {expected:?}"
+            );
+        }
     }
 }
