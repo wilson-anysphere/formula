@@ -22,9 +22,11 @@ test("workbook-backend is importable under Node ESM when executing TS sources (s
   // Guardrail: repo-level typecheck can run with TS configs that do *not* enable
   // `allowImportingTsExtensions`. `.ts` specifiers in source imports/exports would
   // then fail the build, so keep the public entrypoint free of `.ts` specifiers.
+  const tsSpecifierRe =
+    /(?:\bfrom\s+|\bimport\s*\(\s*|\bimport\s+)\s*['"]\.\.?\/[^'"\n]+?\.(?:ts|tsx)(?:[?#][^'"\n]*)?['"]/;
   const indexSrc = readFileSync(new URL("../packages/workbook-backend/src/index.ts", import.meta.url), "utf8");
   assert.ok(
-    !/from\s+['"]\.\.?\/[^'"\n]+\.ts['"]/.test(indexSrc),
+    !tsSpecifierRe.test(indexSrc),
     "packages/workbook-backend/src/index.ts must not use .ts specifiers",
   );
 
