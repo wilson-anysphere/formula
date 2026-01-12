@@ -329,6 +329,11 @@ mod tests {
         assert_eq!(estimate_base64_decoded_len("Zm9v"), Some(3)); // "foo"
         assert_eq!(estimate_base64_decoded_len("AAAA"), Some(3));
         assert_eq!(
+            estimate_base64_decoded_len("data:image/png;base64"),
+            Some(0),
+            "malformed data URL without a comma should be treated as empty"
+        );
+        assert_eq!(
             estimate_base64_decoded_len("data:image/png;base64,Zm9v"),
             Some(3)
         );
@@ -444,6 +449,24 @@ mod tests {
             html: None,
             rtf: None,
             image_png_base64: Some("data:image/png;base64,".to_string()),
+        };
+
+        let err = payload.validate().expect_err("expected validation to fail");
+        match err {
+            ClipboardError::InvalidPayload(msg) => {
+                assert!(msg.contains("must include at least one of text"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_rejects_malformed_data_url_png_base64_missing_comma() {
+        let payload = ClipboardWritePayload {
+            text: None,
+            html: None,
+            rtf: None,
+            png_base64: Some("data:image/png;base64".to_string()),
         };
 
         let err = payload.validate().expect_err("expected validation to fail");
