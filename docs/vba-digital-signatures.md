@@ -285,6 +285,9 @@ Transcript construction (as defined by MS-OVBA pseudocode; see also
       verbatim to `ContentNormalizedData` (**in `VBA/dir` record order**).
     - For each **`PROJECTCONSTANTS.Constants`** record (`id == 0x000C`), append the record `data`
       bytes verbatim to `ContentNormalizedData` (**in `VBA/dir` record order**).
+    - For selected **`REFERENCE*`** records (MS-OVBA §2.4.2.1 allowlist), incorporate reference data in
+      `VBA/dir` record order. Not all reference-related records contribute (for example
+      `REFERENCENAME` (`0x0016`) must **not** be included).
     - For each **`REFERENCEREGISTERED`** record (`id == 0x000D`), append the record `data` bytes
       verbatim to `ContentNormalizedData`.
     - For each **`REFERENCEPROJECT`** record (`id == 0x000E`), append a *normalized* byte sequence:
@@ -292,9 +295,19 @@ Transcript construction (as defined by MS-OVBA pseudocode; see also
       2. Parse `MajorVersion` as `u32le` and `MinorVersion` as `u16le`.
       3. Build `TempBuffer = LibidAbsolute || LibidRelative || MajorVersion || MinorVersion`.
       4. Append bytes from `TempBuffer` up to (but not including) the first `0x00` byte.
-   - For each module (as described by the module record groups in `VBA/dir`), locate the module
-     stream name (`MODULESTREAMNAME` / `MODULENAME`) and `MODULETEXTOFFSET`. The **module ordering**
-     is the order of the module groups in `VBA/dir`, not alphabetical and not OLE directory order.
+    - For each **`REFERENCECONTROL`** record (`id == 0x002F`), append a *normalized* byte sequence:
+      1. Parse `LibidTwiddled` as `u32le length || bytes`.
+      2. Parse `Reserved1` as `u32le` and `Reserved2` as `u16le`.
+      3. Build `TempBuffer = LibidTwiddled || Reserved1 || Reserved2`.
+      4. Append bytes from `TempBuffer` up to (but not including) the first `0x00` byte.
+    - For each **`REFERENCEEXTENDED`** record (`id == 0x0030`), append the record `data` bytes
+      verbatim.
+    - For each **`REFERENCEORIGINAL`** record (`id == 0x0033`), append a *normalized* byte sequence:
+      1. Parse `LibidOriginal` as `u32le length || bytes`.
+      2. Append bytes from `LibidOriginal` up to (but not including) the first `0x00` byte.
+    - For each module (as described by the module record groups in `VBA/dir`), locate the module
+      stream name (`MODULESTREAMNAME` / `MODULENAME`) and `MODULETEXTOFFSET`. The **module ordering**
+      is the order of the module groups in `VBA/dir`, not alphabetical and not OLE directory order.
 6. For each module stream in that stored order:
    1. Read `VBA/<ModuleStreamName>` bytes.
    2. Find the compressed source container starting at `MODULETEXTOFFSET` (or, if missing, locate the
@@ -310,9 +323,12 @@ Transcript construction (as defined by MS-OVBA pseudocode; see also
 The resulting concatenated byte sequence is `ContentNormalizedData`.
 
 Tests in this repo:
-[`crates/formula-vba/tests/contents_hash.rs`](../crates/formula-vba/tests/contents_hash.rs)
-exercises record inclusion/order (including `PROJECTNAME`/`PROJECTCONSTANTS`), reference normalization,
-module ordering, and module source normalization.
+[`crates/formula-vba/tests/contents_hash.rs`](../crates/formula-vba/tests/contents_hash.rs) exercises
+record inclusion/order (including `PROJECTNAME`/`PROJECTCONSTANTS`), module ordering, and module
+source normalization. Reference record handling is covered more directly by:
+[`crates/formula-vba/tests/content_normalized_data_references.rs`](../crates/formula-vba/tests/content_normalized_data_references.rs)
+and
+[`crates/formula-vba/tests/contents_hash_reference_records.rs`](../crates/formula-vba/tests/contents_hash_reference_records.rs).
 
 #### §2.4.2.2 FormsNormalizedData
 
@@ -374,15 +390,13 @@ Transcript construction (MS-OVBA §2.4.2.5):
 
 1. Read and decompress `VBA/dir` as in §2.4.2.1.
 2. Parse it as a sequence of `(id, len, data)` records (same physical format as v1).
-3. Append the v3-included reference record payload bytes from `VBA/dir`:
-   - v1 reference types:
-     - **`REFERENCEREGISTERED`** (`0x000D`): append raw `data` bytes
-     - **`REFERENCEPROJECT`** (`0x000E`): append normalized bytes (same TempBuffer + “copy until NUL”
-       rule as §2.4.2.1)
-   - additional v3 reference types (raw `data` bytes):
-     - **`REFERENCECONTROL`** (`0x002F`)
-     - **`REFERENCEEXTENDED`** (`0x0030`)
-     - **`REFERENCEORIGINAL`** (`0x0033`)
+3. Append bytes derived from selected reference records from `VBA/dir` (same record-type allowlist and
+   normalization rules as §2.4.2.1):
+   - **`REFERENCEREGISTERED`** (`0x000D`): append raw `data` bytes
+   - **`REFERENCEPROJECT`** (`0x000E`): append normalized bytes (TempBuffer + “copy until NUL”)
+   - **`REFERENCECONTROL`** (`0x002F`): append normalized bytes (TempBuffer + “copy until NUL”)
+   - **`REFERENCEEXTENDED`** (`0x0030`): append raw `data` bytes
+   - **`REFERENCEORIGINAL`** (`0x0033`): append normalized bytes (“copy until NUL” over `LibidOriginal`)
 4. For each module record group (in `VBA/dir` stored order), append **module metadata bytes before
    the normalized source**:
    1. `MODULENAME` (`0x0019`) record `data` bytes
