@@ -306,7 +306,7 @@ mod tests {
         let e_coupdays =
             super::super::coupon_schedule::coupdays(settlement, ncd, frequency, basis, system)
                 .unwrap();
-        assert_eq!(e_coupdays, 180.0);
+        assert_eq!(e_coupdays, e);
     }
 }
 

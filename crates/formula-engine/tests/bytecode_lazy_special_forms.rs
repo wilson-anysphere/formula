@@ -467,6 +467,78 @@ fn bytecode_ifna_is_lazy_for_unused_fallback() {
 }
 
 #[test]
+fn bytecode_ifna_does_not_eval_fallback_for_non_na_errors() {
+    // IFNA should only treat #N/A as a recoverable error. For other error types, it should return
+    // the error without evaluating the fallback.
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=IFNA(1/0, A2)", origin).expect("parse");
+    let program = bytecode::Compiler::compile(Arc::from("ifna_non_na_error_lazy"), &expr);
+
+    let grid = PanicGrid {
+        // A2 relative to origin (A1) => (row=1, col=0)
+        panic_coord: CellCoord::new(1, 0),
+    };
+
+    let mut vm = bytecode::Vm::with_capacity(32);
+    let value = vm.eval(
+        &program,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Error(bytecode::ErrorKind::Div0));
+}
+
+#[test]
+fn bytecode_iferror_evaluates_fallback_for_errors() {
+    // IFERROR should evaluate its fallback when the first argument is an error.
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=IFERROR(1/0, A2)", origin).expect("parse");
+    let program = bytecode::Compiler::compile(Arc::from("iferror_error_fallback"), &expr);
+
+    let grid = TextGrid {
+        // A2 relative to origin (A1) => (row=1, col=0)
+        coord: CellCoord::new(1, 0),
+        value: Value::Number(7.0),
+    };
+
+    let mut vm = bytecode::Vm::with_capacity(32);
+    let value = vm.eval(
+        &program,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Number(7.0));
+}
+
+#[test]
+fn bytecode_ifna_evaluates_fallback_for_na_error() {
+    // IFNA should evaluate its fallback when the first argument is #N/A.
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=IFNA(NA(), A2)", origin).expect("parse");
+    let program = bytecode::Compiler::compile(Arc::from("ifna_na_fallback"), &expr);
+
+    let grid = TextGrid {
+        // A2 relative to origin (A1) => (row=1, col=0)
+        coord: CellCoord::new(1, 0),
+        value: Value::Number(7.0),
+    };
+
+    let mut vm = bytecode::Vm::with_capacity(32);
+    let value = vm.eval(
+        &program,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Number(7.0));
+}
+
+#[test]
 fn bytecode_switch_is_lazy_for_unused_default() {
     // SWITCH(1, 1, 7, <unused_default>) must not evaluate the default argument.
     let origin = CellCoord::new(0, 0);
