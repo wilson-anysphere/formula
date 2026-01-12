@@ -273,14 +273,14 @@ if [[ -n "${limit_as}" && "${limit_as}" != "0" && "${limit_as}" != "off" && "${l
   fi
 fi
 
-# Retry on transient rustc thread spawn failures (EAGAIN) that are common on multi-agent hosts.
+# Retry on transient EAGAIN failures that are common on multi-agent hosts.
 #
-# These failures show up as rustc panics like:
-# - "failed to create helper thread: Resource temporarily unavailable"
-# - "failed to spawn helper thread: Resource temporarily unavailable"
-# - "failed to spawn work thread: Resource temporarily unavailable"
+## Common symptoms
+# - rustc panic: "failed to spawn work/helper thread: Resource temporarily unavailable"
+# - linker (rust-lld/lld) abort: "std::system_error ... Resource temporarily unavailable"
+# - test execution failure: "could not execute process ... Resource temporarily unavailable (os error 11)"
 #
-# Retrying after a short backoff usually succeeds once other agents finish their compile bursts.
+# Retrying after a short backoff usually succeeds once other agents finish their compile/test bursts.
 max_attempts="${FORMULA_CARGO_RETRY_ATTEMPTS:-5}"
 attempt=1
 while true; do
@@ -296,8 +296,7 @@ while true; do
     exit 0
   fi
 
-  if grep -q "Resource temporarily unavailable" "${tmp_log}" \
-    && grep -q "compiler unexpectedly panicked" "${tmp_log}"; then
+  if grep -q "Resource temporarily unavailable" "${tmp_log}"; then
     if [[ "${attempt}" -ge "${max_attempts}" ]]; then
       rm -f "${tmp_log}"
       exit "${status}"
@@ -306,7 +305,7 @@ while true; do
     # Exponential-ish backoff with jitter.
     base=$(( 1 << (attempt - 1) ))
     sleep_s=$(( base + RANDOM % (base + 1) ))
-    echo "cargo_agent: rustc thread exhaustion (EAGAIN); retrying in ${sleep_s}s (attempt ${attempt}/${max_attempts})" >&2
+    echo "cargo_agent: transient resource exhaustion (EAGAIN); retrying in ${sleep_s}s (attempt ${attempt}/${max_attempts})" >&2
     rm -f "${tmp_log}"
     sleep "${sleep_s}"
     attempt=$(( attempt + 1 ))
