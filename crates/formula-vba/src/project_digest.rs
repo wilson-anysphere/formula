@@ -15,11 +15,15 @@ use crate::{
 /// Digest algorithm used by helper digest computations in this module.
 ///
 /// Notes:
-/// - For **VBA signatures**, Office stores a 16-byte **MD5** digest for binding even when
-///   `DigestInfo.digestAlgorithm` indicates SHA-256 (MS-OSHARED §4.3). This applies to all
-///   `\x05DigitalSignature*` variants, including `\x05DigitalSignatureExt`.
-/// - Other algorithms are supported here for legacy/debugging purposes only; they are not
-///   spec-correct for VBA signature *binding*.
+/// - For legacy VBA signature streams (`\x05DigitalSignature` / `\x05DigitalSignatureEx`), Office
+///   stores 16-byte **MD5** binding digest bytes even when `DigestInfo.digestAlgorithm` advertises
+///   SHA-256 (MS-OSHARED §4.3). In practice, digest *length* is often a more reliable indicator than
+///   the OID for these variants.
+/// - For v3 (`\x05DigitalSignatureExt`), MS-OVBA defines `ContentsHashV3` as a **SHA-256** over the
+///   v3 `ProjectNormalizedData` transcript; this is typically the binding digest bytes stored in the
+///   signature.
+/// - Other algorithms are supported here for debugging/compatibility checks; they are not expected
+///   for Office-produced VBA signature binding.
 ///
 /// https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/40c8dab3-e8db-4c66-a6be-8cec06351b1e
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,8 +82,8 @@ impl Hasher {
 /// so this digest is equivalent to the v1 "Content Hash" (`hash(ContentNormalizedData)`).
 ///
 /// The transcript is then hashed using the requested `alg` (MD5/SHA-1/SHA-256). Even though Office
-/// signature *binding* uses MD5 per MS-OSHARED §4.3, callers may request other algorithms for
-/// debugging or comparison.
+/// signature *binding* uses MD5 for legacy VBA signature streams per MS-OSHARED §4.3, callers may
+/// request other algorithms for debugging or comparison.
 ///
 /// This function is intentionally strict: if the transcript cannot be produced (missing or
 /// unparseable required streams), it returns an error rather than falling back to hashing raw OLE
@@ -100,17 +104,18 @@ pub fn compute_vba_project_digest(
 
 /// Compute a digest for v3 (`\x05DigitalSignatureExt`) signature binding.
 ///
-/// Spec reference (important):
+/// Spec reference:
 ///
-/// MS-OVBA §2.4.2.7 defines the **V3 Content Hash** used for VBA signature binding as:
+/// MS-OVBA §2.4.2.7 defines `ContentsHashV3` as:
 ///
-/// `V3ContentHash = MD5(V3ContentNormalizedData || ProjectNormalizedData)`
+/// `ContentsHashV3 = SHA-256(ProjectNormalizedDataV3)`
 ///
-/// And MS-OSHARED §4.3 specifies that the digest bytes embedded in VBA signatures are always a
-/// 16-byte **MD5** for binding, even when `DigestInfo.digestAlgorithm.algorithm` advertises SHA-256.
+/// Where `ProjectNormalizedDataV3` is the deterministic transcript produced by
+/// [`crate::project_normalized_data_v3`] (filtered `PROJECT` stream properties ||
+/// `V3ContentNormalizedData` || `FormsNormalizedData`).
 ///
-/// This helper accepts `alg` for legacy/debugging purposes; callers verifying Office-produced VBA
-/// signatures should use `DigestAlg::Md5`.
+/// This helper accepts `alg` for debugging/compatibility checks; callers verifying Office-produced
+/// VBA signatures should use `DigestAlg::Sha256`.
 pub fn compute_vba_project_digest_v3(
     vba_project_bin: &[u8],
     alg: DigestAlg,
