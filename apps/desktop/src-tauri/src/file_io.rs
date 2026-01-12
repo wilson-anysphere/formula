@@ -1037,7 +1037,7 @@ fn formula_model_value_to_scalar(value: &ModelCellValue) -> CellScalar {
         ModelCellValue::Error(e) => CellScalar::Error(e.to_string()),
         ModelCellValue::RichText(rt) => CellScalar::Text(rt.text.clone()),
         ModelCellValue::Entity(entity) => CellScalar::Text(entity.display_value.clone()),
-        ModelCellValue::Record(record) => CellScalar::Text(record.display_value.clone()),
+        ModelCellValue::Record(record) => CellScalar::Text(record.to_string()),
         ModelCellValue::Array(arr) => CellScalar::Text(format!("{:?}", arr.data)),
         ModelCellValue::Spill(_) => CellScalar::Error("#SPILL!".to_string()),
         _ => rich_model_cell_value_to_scalar(value).unwrap_or_else(|| CellScalar::Text(format!("{value:?}"))),

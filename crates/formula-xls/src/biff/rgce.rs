@@ -972,14 +972,12 @@ fn format_cell_ref(row: u16, col_with_flags: u16) -> String {
     out.push_str(&(row as u32 + 1).to_string());
     out
 }
-
 fn format_cell_ref_no_dollars(row0: u32, col0: u32) -> String {
     let mut out = String::new();
     push_column(col0, &mut out);
     out.push_str(&(row0 + 1).to_string());
     out
 }
-
 fn format_row_ref(row: u16, row_rel: bool) -> String {
     let mut out = String::new();
     if !row_rel {
