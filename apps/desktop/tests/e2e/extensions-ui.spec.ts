@@ -793,4 +793,140 @@ test.describe("Extensions UI integration", () => {
     const sumItemAfter = menu.getByRole("button", { name: "Sample Hello: Sum Selection" });
     await expect(sumItemAfter, "outside selection should collapse selection (hasSelection=false)").toBeDisabled();
   });
+
+  test("blocks extension clipboard writes after reading a Restricted cell via getCell()", async ({ page }) => {
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await gotoDesktop(page);
+
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+
+    // Grant the test extension the permissions it needs before we load it.
+    await page.evaluate(() => {
+      const extensionId = "e2e.dlp-test";
+      const key = "formula.extensionHost.permissions";
+      const existing = (() => {
+        try {
+          const raw = localStorage.getItem(key);
+          return raw ? JSON.parse(raw) : {};
+        } catch {
+          return {};
+        }
+      })();
+
+      existing[extensionId] = {
+        ...(existing[extensionId] ?? {}),
+        "ui.commands": true,
+        "cells.read": true,
+        clipboard: true,
+      };
+
+      localStorage.setItem(key, JSON.stringify(existing));
+    });
+
+    await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const app: any = (window as any).__formulaApp;
+      if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
+      const doc = app.getDocument();
+      const sheetId = app.getCurrentSheetId();
+
+      doc.beginBatch({ label: "Seed DLP cells" });
+      doc.setCellValue(sheetId, "A1", "SECRET");
+      doc.setCellValue(sheetId, "B1", "SAFE");
+      doc.endBatch();
+      app.refresh();
+
+      // Mark A1 Restricted via localStorage-backed DLP store.
+      const documentId = "local-workbook";
+      const record = {
+        selector: { scope: "cell", documentId, sheetId, row: 0, col: 0 },
+        classification: { level: "Restricted", labels: [] },
+        updatedAt: new Date().toISOString(),
+      };
+      localStorage.setItem(`dlp:classifications:${documentId}`, JSON.stringify([record]));
+    });
+    await page.evaluate(() => (window as any).__formulaApp.whenIdle());
+
+    // Copy B1 -> clipboard (baseline) using a real user gesture.
+    await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const app: any = (window as any).__formulaApp;
+      const sheetId = app.getCurrentSheetId();
+      app.activateCell({ sheetId, row: 0, col: 1 }); // B1
+    });
+    await expect(page.getByTestId("active-cell")).toHaveText("B1");
+    await page.keyboard.press(`${modifier}+C`);
+    await page.evaluate(() => (window as any).__formulaApp.whenIdle());
+
+    const result = await page.evaluate(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const host: any = (window as any).__formulaExtensionHost;
+      if (!host) throw new Error("Missing window.__formulaExtensionHost (desktop e2e harness)");
+
+      const extensionId = "e2e.dlp-test";
+      const commandId = "dlpTest.copyA1ToClipboard";
+      const mainSource = `
+        const api = globalThis[Symbol.for("formula.extensionApi.api")];
+        export async function activate(context) {
+          context.subscriptions.push(
+            await api.commands.registerCommand(${JSON.stringify(commandId)}, async () => {
+              try {
+                const value = await api.cells.getCell(0, 0);
+                await api.clipboard.writeText(String(value ?? ""));
+                await api.ui.showMessage("Copied A1 to clipboard");
+                return value;
+              } catch (err) {
+                const msg = String(err?.message ?? err);
+                await api.ui.showMessage(msg, "error");
+                throw err;
+              }
+            }),
+          );
+        }
+      `;
+
+      const mainUrl = URL.createObjectURL(new Blob([mainSource], { type: "text/javascript" }));
+      const manifest = {
+        name: "dlp-test",
+        publisher: "e2e",
+        version: "1.0.0",
+        engines: { formula: "^1.0.0" },
+        activationEvents: [`onCommand:${commandId}`],
+        contributes: { commands: [{ command: commandId, title: "Copy A1 to Clipboard", category: "DLP Test" }] },
+        permissions: ["cells.read", "clipboard", "ui.commands"],
+      };
+
+      try {
+        await host.unloadExtension(extensionId);
+      } catch {
+        // ignore
+      }
+
+      await host.loadExtension({ extensionId, extensionPath: "memory://e2e/dlp-test", manifest, mainUrl });
+
+      try {
+        await host.executeCommand(commandId);
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, message: String((err as any)?.message ?? err) };
+      }
+    });
+
+    expect(result.ok).toBe(false);
+    await expect(page.getByTestId("toast-root")).toContainText("Clipboard copy is blocked");
+
+    // Paste into C1: the clipboard should still contain the baseline "SAFE" value, not "SECRET".
+    await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const app: any = (window as any).__formulaApp;
+      const sheetId = app.getCurrentSheetId();
+      app.activateCell({ sheetId, row: 0, col: 2 }); // C1
+    });
+    await expect(page.getByTestId("active-cell")).toHaveText("C1");
+    await page.keyboard.press(`${modifier}+V`);
+    await page.evaluate(() => (window as any).__formulaApp.whenIdle());
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C1")))
+      .toBe("SAFE");
+  });
 });

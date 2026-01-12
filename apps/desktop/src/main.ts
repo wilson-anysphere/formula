@@ -133,6 +133,11 @@ import {
   setSeedPanelsForExtension,
 } from "./extensions/contributedPanelsSeedStore.js";
 import { builtinKeybindings as builtinKeybindingsCatalog } from "./commands/builtinKeybindings.js";
+import { DLP_ACTION } from "../../../packages/security/dlp/src/actions.js";
+import { maxClassification, DEFAULT_CLASSIFICATION } from "../../../packages/security/dlp/src/classification.js";
+import { DlpViolationError } from "../../../packages/security/dlp/src/errors.js";
+import { evaluatePolicy, DLP_DECISION } from "../../../packages/security/dlp/src/policyEngine.js";
+import { effectiveRangeClassification } from "../../../packages/security/dlp/src/selectors.js";
 
 import sampleHelloManifest from "../../../extensions/sample-hello/package.json";
 import { purgeLegacyDesktopLLMSettings } from "./ai/llm/desktopLLMClient.js";
@@ -3094,6 +3099,7 @@ if (
         app.getSelectionRanges()[0] ?? { startRow: 0, startCol: 0, endRow: 0, endCol: 0 },
       );
       recordLastExtensionSelection(sheetId, range);
+      extensionReadTaint.record({ sheetId, ...range });
       const values: Array<Array<string | number | boolean | null>> = [];
       for (let r = range.startRow; r <= range.endRow; r++) {
         const row: Array<string | number | boolean | null> = [];
@@ -3107,6 +3113,9 @@ if (
     },
     async getCell(row: number, col: number) {
       const sheetId = app.getCurrentSheetId();
+      if (Number.isFinite(row) && Number.isFinite(col)) {
+        extensionReadTaint.record({ sheetId, startRow: row, startCol: col, endRow: row, endCol: col });
+      }
       const cell = app.getDocument().getCell(sheetId, { row, col }) as any;
       return normalizeExtensionCellValue(cell?.value ?? null);
     },
@@ -3116,6 +3125,7 @@ if (
     },
     async getRange(ref: string) {
       const { sheetId, startRow, startCol, endRow, endCol } = parseSheetQualifiedRange(ref);
+      extensionReadTaint.record({ sheetId, startRow, startCol, endRow, endCol });
       const values: Array<Array<string | number | boolean | null>> = [];
       for (let r = startRow; r <= endRow; r++) {
         const row: Array<string | number | boolean | null> = [];
@@ -3206,6 +3216,89 @@ if (
 
   const clipboardProviderPromise = createClipboardProvider();
 
+  type ExtensionTaintRange = { sheetId: string; startRow: number; startCol: number; endRow: number; endCol: number };
+
+  const normalizeTaintRange = (range: ExtensionTaintRange): ExtensionTaintRange => {
+    const startRow = Math.min(range.startRow, range.endRow);
+    const endRow = Math.max(range.startRow, range.endRow);
+    const startCol = Math.min(range.startCol, range.endCol);
+    const endCol = Math.max(range.startCol, range.endCol);
+    return { sheetId: range.sheetId, startRow, startCol, endRow, endCol };
+  };
+
+  const taintRangesIntersect = (a: ExtensionTaintRange, b: ExtensionTaintRange): boolean => {
+    return a.startRow <= b.endRow && b.startRow <= a.endRow && a.startCol <= b.endCol && b.startCol <= a.endCol;
+  };
+
+  const mergeTaintRanges = (a: ExtensionTaintRange, b: ExtensionTaintRange): ExtensionTaintRange => {
+    return {
+      sheetId: a.sheetId,
+      startRow: Math.min(a.startRow, b.startRow),
+      startCol: Math.min(a.startCol, b.startCol),
+      endRow: Math.max(a.endRow, b.endRow),
+      endCol: Math.max(a.endCol, b.endCol),
+    };
+  };
+
+  class ExtensionReadTaintTracker {
+    private ranges: ExtensionTaintRange[] = [];
+    private clearTimer: number | null = null;
+    private lastTouchedAt = 0;
+
+    constructor(
+      private readonly opts: {
+        ttlMs: number;
+        maxRanges: number;
+      },
+    ) {}
+
+    record(range: ExtensionTaintRange): void {
+      const normalized = normalizeTaintRange(range);
+      this.lastTouchedAt = Date.now();
+
+      if (this.clearTimer != null) window.clearTimeout(this.clearTimer);
+      this.clearTimer = window.setTimeout(() => {
+        if (Date.now() - this.lastTouchedAt >= this.opts.ttlMs) {
+          this.clear();
+        }
+      }, this.opts.ttlMs);
+
+      let merged = normalized;
+      const next: ExtensionTaintRange[] = [];
+
+      for (const existing of this.ranges) {
+        if (existing.sheetId !== merged.sheetId) {
+          next.push(existing);
+          continue;
+        }
+        if (taintRangesIntersect(existing, merged)) {
+          merged = mergeTaintRanges(existing, merged);
+        } else {
+          next.push(existing);
+        }
+      }
+
+      next.push(merged);
+
+      // Keep the most recent ranges if the list grows beyond the cap.
+      while (next.length > this.opts.maxRanges) next.shift();
+      this.ranges = next;
+    }
+
+    list(): ExtensionTaintRange[] {
+      return [...this.ranges];
+    }
+
+    clear(): void {
+      this.ranges = [];
+      this.lastTouchedAt = 0;
+      if (this.clearTimer != null) window.clearTimeout(this.clearTimer);
+      this.clearTimer = null;
+    }
+  }
+
+  const extensionReadTaint = new ExtensionReadTaintTracker({ ttlMs: 2000, maxRanges: 25 });
+
   const extensionHostManager = new DesktopExtensionHostManager({
     engineVersion: "1.0.0",
     spreadsheetApi: extensionSpreadsheetApi,
@@ -3216,23 +3309,54 @@ if (
         return text ?? "";
       },
       writeText: async (text: string) => {
-        const selection = lastExtensionSelection;
-        if (selection && Date.now() - selection.timestampMs <= 2000) {
-          enforceClipboardCopy({
-            documentId: extensionClipboardDlp.documentId,
-            sheetId: selection.sheetId,
-            range: {
-              start: { row: selection.startRow, col: selection.startCol },
-              end: { row: selection.endRow, col: selection.endCol },
-            },
-            classificationStore: extensionClipboardDlp.classificationStore,
+        const taintedRanges = extensionReadTaint.list();
+        if (taintedRanges.length > 0) {
+          const records = extensionClipboardDlp.classificationStore.list(extensionClipboardDlp.documentId);
+          let classification = { ...DEFAULT_CLASSIFICATION };
+          for (const range of taintedRanges) {
+            const next = effectiveRangeClassification(
+              {
+                documentId: extensionClipboardDlp.documentId,
+                sheetId: range.sheetId,
+                range: {
+                  start: { row: range.startRow, col: range.startCol },
+                  end: { row: range.endRow, col: range.endCol },
+                },
+              },
+              records,
+            );
+            classification = maxClassification(classification, next);
+            if (classification.level === "Restricted") break;
+          }
+
+          const decision = evaluatePolicy({
+            action: DLP_ACTION.CLIPBOARD_COPY,
+            classification,
             policy: extensionClipboardDlp.policy,
           });
+          if (decision.decision === DLP_DECISION.BLOCK) {
+            throw new DlpViolationError(decision);
+          }
+        } else {
+          const selection = lastExtensionSelection;
+          if (selection && Date.now() - selection.timestampMs <= 2000) {
+            enforceClipboardCopy({
+              documentId: extensionClipboardDlp.documentId,
+              sheetId: selection.sheetId,
+              range: {
+                start: { row: selection.startRow, col: selection.startCol },
+                end: { row: selection.endRow, col: selection.endCol },
+              },
+              classificationStore: extensionClipboardDlp.classificationStore,
+              policy: extensionClipboardDlp.policy,
+            });
+          }
         }
 
         const provider = await clipboardProviderPromise;
         await provider.write({ text: String(text ?? "") });
         clearLastExtensionSelection();
+        extensionReadTaint.clear();
       },
     },
     uiApi: {
