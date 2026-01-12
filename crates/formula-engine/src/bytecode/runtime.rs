@@ -5379,6 +5379,13 @@ fn fn_countifs(
         return Value::Error(ErrorKind::Value);
     }
 
+    if args
+        .chunks_exact(2)
+        .any(|pair| matches!(pair[0], Value::Array(_)))
+    {
+        return countifs_with_array_ranges(args, grid, base, locale);
+    }
+
     let mut ranges: Vec<ResolvedRange> = Vec::with_capacity(args.len() / 2);
     let mut criteria: Vec<EngineCriteria> = Vec::with_capacity(args.len() / 2);
     let mut numeric: Vec<NumericCriteria> = Vec::with_capacity(args.len() / 2);
@@ -5546,6 +5553,114 @@ fn fn_countifs(
                     continue 'row;
                 }
             }
+            count += 1;
+        }
+    }
+
+    Value::Number(count as f64)
+}
+
+fn countifs_with_array_ranges(
+    args: &[Value],
+    grid: &dyn Grid,
+    base: CellCoord,
+    locale: &crate::LocaleConfig,
+) -> Value {
+    #[derive(Clone, Copy)]
+    enum CriteriaRange<'a> {
+        Range(ResolvedRange),
+        Array(&'a ArrayValue),
+    }
+
+    let mut ranges: Vec<CriteriaRange<'_>> = Vec::with_capacity(args.len() / 2);
+    let mut criteria: Vec<EngineCriteria> = Vec::with_capacity(args.len() / 2);
+    let mut shape: Option<(usize, usize)> = None;
+
+    for pair in args.chunks_exact(2) {
+        let range = match &pair[0] {
+            Value::Range(r) => {
+                let range = r.resolve(base);
+                if !range_in_bounds(grid, range) {
+                    return Value::Error(ErrorKind::Ref);
+                }
+                let rows = match usize::try_from(range.rows()) {
+                    Ok(v) => v,
+                    Err(_) => return Value::Error(ErrorKind::Num),
+                };
+                let cols = match usize::try_from(range.cols()) {
+                    Ok(v) => v,
+                    Err(_) => return Value::Error(ErrorKind::Num),
+                };
+                match shape {
+                    None => shape = Some((rows, cols)),
+                    Some((expected_rows, expected_cols)) => {
+                        if (rows, cols) != (expected_rows, expected_cols) {
+                            return Value::Error(ErrorKind::Value);
+                        }
+                    }
+                }
+                CriteriaRange::Range(range)
+            }
+            Value::Array(a) => {
+                let rows = a.rows;
+                let cols = a.cols;
+                match shape {
+                    None => shape = Some((rows, cols)),
+                    Some((expected_rows, expected_cols)) => {
+                        if (rows, cols) != (expected_rows, expected_cols) {
+                            return Value::Error(ErrorKind::Value);
+                        }
+                    }
+                }
+                CriteriaRange::Array(a)
+            }
+            _ => return Value::Error(ErrorKind::Value),
+        };
+
+        let crit = match parse_countif_criteria(&pair[1], locale) {
+            Ok(c) => c,
+            Err(e) => return Value::Error(e),
+        };
+
+        ranges.push(range);
+        criteria.push(crit);
+    }
+
+    let (rows, cols) = shape.unwrap_or((0, 0));
+    let len = match rows.checked_mul(cols) {
+        Some(v) => v,
+        None => return Value::Error(ErrorKind::Num),
+    };
+    if len == 0 {
+        return Value::Number(0.0);
+    }
+
+    let mut count = 0usize;
+    for idx in 0..len {
+        let row_off = idx / cols;
+        let col_off = idx % cols;
+
+        let mut matches = true;
+        for (range, crit) in ranges.iter().zip(criteria.iter()) {
+            let v = match range {
+                CriteriaRange::Range(r) => grid.get_value(CellCoord {
+                    row: r.row_start + row_off as i32,
+                    col: r.col_start + col_off as i32,
+                }),
+                CriteriaRange::Array(a) => a
+                    .values
+                    .get(idx)
+                    .cloned()
+                    .unwrap_or(Value::Empty),
+            };
+            let engine_value = bytecode_value_to_engine(v);
+            if !crit.matches(&engine_value) {
+                matches = false;
+                break;
+            }
+        }
+
+        if matches {
             count += 1;
         }
     }

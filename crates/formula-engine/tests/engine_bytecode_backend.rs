@@ -770,6 +770,64 @@ fn bytecode_backend_supports_countif_array_literal_locals_via_let() {
 }
 
 #[test]
+fn bytecode_backend_supports_countifs_array_literal_ranges() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=COUNTIFS({1,2,3}, \">1\")")
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A2",
+            "=COUNTIFS({\"A\",\"A\",\"B\",\"B\"},\"A\",{1,2,3,4},\">1\")",
+        )
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 2);
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(2.0));
+    assert_engine_matches_ast(&engine, "=COUNTIFS({1,2,3}, \">1\")", "A1");
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(1.0));
+    assert_engine_matches_ast(
+        &engine,
+        "=COUNTIFS({\"A\",\"A\",\"B\",\"B\"},\"A\",{1,2,3,4},\">1\")",
+        "A2",
+    );
+}
+
+#[test]
+fn bytecode_backend_supports_countifs_array_literal_locals_via_let() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LET(a, {1,2,3}, COUNTIFS(a, \">1\"))")
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A2",
+            "=LET(a,{\"A\",\"A\",\"B\",\"B\"},b,{1,2,3,4},COUNTIFS(a,\"A\",b,\">1\"))",
+        )
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 2);
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(2.0));
+    assert_engine_matches_ast(&engine, "=LET(a, {1,2,3}, COUNTIFS(a, \">1\"))", "A1");
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(1.0));
+    assert_engine_matches_ast(
+        &engine,
+        "=LET(a,{\"A\",\"A\",\"B\",\"B\"},b,{1,2,3,4},COUNTIFS(a,\"A\",b,\">1\"))",
+        "A2",
+    );
+}
+
+#[test]
 fn array_literal_errors_propagate_in_sum() {
     let mut engine = Engine::new();
     engine

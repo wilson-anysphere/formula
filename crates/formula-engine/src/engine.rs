@@ -7848,10 +7848,13 @@ fn bytecode_expr_is_eligible_inner(
                 }
                 for pair in args.chunks_exact(2) {
                     let range_ok = match &pair[0] {
-                        bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_) => true,
+                        bytecode::Expr::RangeRef(_)
+                        | bytecode::Expr::CellRef(_)
+                        | bytecode::Expr::SpillRange(_) => true,
+                        bytecode::Expr::Literal(bytecode::Value::Array(_)) => true,
                         bytecode::Expr::NameRef(name) => matches!(
                             local_binding_kind(lexical_scopes, name),
-                            Some(BytecodeLocalBindingKind::Range)
+                            Some(BytecodeLocalBindingKind::Range | BytecodeLocalBindingKind::ArrayLiteral)
                         ),
                         _ => false,
                     };
