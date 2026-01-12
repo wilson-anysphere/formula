@@ -233,8 +233,8 @@ At a high level:
 
 - **v1 / `DigitalSignature`**: `ContentHash = MD5(ContentNormalizedData)`
 - **v2 / `DigitalSignatureEx`**: `AgileContentHash = MD5(ContentNormalizedData || FormsNormalizedData)`
-- **v3 / `DigitalSignatureExt`**: `V3ContentHash = SHA-256(ProjectNormalizedData)` where
-  `ProjectNormalizedData = V3ContentNormalizedData || FormsNormalizedData`
+- **v3 / `DigitalSignatureExt`**: `V3ContentHash = SHA-256(ProjectNormalizedData)`
+  - where `ProjectNormalizedData = (filtered PROJECT stream properties) || V3ContentNormalizedData || FormsNormalizedData`
 
 Reference record normalization note:
 
@@ -254,7 +254,7 @@ V3 spec references:
 - §2.4.2.7 V3 Content Hash:
   https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-ovba/601a4412-00cc-46a0-b8e0-3001c011308e
 
-### ProjectNormalizedData (MS-OVBA §2.4.2, ContentsHashV3)
+### ProjectNormalizedData (v3) / ContentsHashV3 (MS-OVBA §2.4.2)
 
 For **v3 / `\x05DigitalSignatureExt`**, MS-OVBA defines the `ContentsHashV3` digest as SHA-256 over
 `ProjectNormalizedData`.
@@ -262,18 +262,27 @@ For **v3 / `\x05DigitalSignatureExt`**, MS-OVBA defines the `ContentsHashV3` dig
 At a high level:
 
 ```text
-ProjectNormalizedData = V3ContentNormalizedData || FormsNormalizedData
+ProjectNormalizedData = (filtered PROJECT stream properties) || V3ContentNormalizedData || FormsNormalizedData
 V3ContentHash         = SHA-256(ProjectNormalizedData)
 ```
 
 In this repo:
 
-- `formula_vba::v3_content_normalized_data` builds `V3ContentNormalizedData`.
-- `formula_vba::forms_normalized_data` builds `FormsNormalizedData`.
-- `formula_vba::project_normalized_data_v3` concatenates them into `ProjectNormalizedData`.
-- `formula_vba::contents_hash_v3` computes the spec-defined SHA-256 digest.
-- `formula_vba::project_normalized_data_v3_dir_records` exposes a dir-record-only project/module
-  metadata transcript derived from selected `VBA/dir` records (useful for debugging/spec work).
+- `formula_vba::v3_content_normalized_data` builds `V3ContentNormalizedData`
+  (`crates/formula-vba/src/contents_hash.rs`)
+- `formula_vba::forms_normalized_data` builds `FormsNormalizedData`
+  (`crates/formula-vba/src/normalized_data.rs`)
+- `formula_vba::project_normalized_data_v3` builds `ProjectNormalizedData`
+  (`crates/formula-vba/src/contents_hash.rs`)
+- `formula_vba::contents_hash_v3` computes the spec-defined `SHA-256(ProjectNormalizedData)`
+  (`crates/formula-vba/src/contents_hash.rs`)
+
+### Dir-record metadata transcript (`project_normalized_data_v3_dir_records`)
+
+`formula_vba::project_normalized_data_v3_dir_records` is a related helper that emits a
+**metadata-only** transcript derived from selected `VBA/dir` records (project/module metadata, but
+*not* module source normalization and *not* designer storage data). It is useful for debugging and
+for compatibility tests.
 
 #### Dir record format (record header excluded)
 
