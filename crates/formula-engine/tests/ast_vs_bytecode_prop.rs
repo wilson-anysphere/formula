@@ -125,9 +125,11 @@ fn arb_expr(base: CellCoord, rows: i32, cols: i32) -> impl Strategy<Value = Expr
                     right: Box::new(r),
                 }),
                 // IF(cond, t, f)
-                (inner.clone(), inner.clone(), inner.clone()).prop_map(|(c, t, f)| Expr::FuncCall {
-                    func: Function::If,
-                    args: vec![c, t, f],
+                (inner.clone(), inner.clone(), inner.clone()).prop_map(|(c, t, f)| {
+                    Expr::FuncCall {
+                        func: Function::If,
+                        args: vec![c, t, f],
+                    }
                 }),
                 // IF(cond, t)
                 (inner.clone(), inner.clone()).prop_map(|(c, t)| Expr::FuncCall {
@@ -173,6 +175,27 @@ fn arb_expr(base: CellCoord, rows: i32, cols: i32) -> impl Strategy<Value = Expr
                     func: Function::IfNa,
                     args: vec![a, b],
                 }),
+                // CHOOSE(idx, a, b)
+                (inner.clone(), inner.clone(), inner.clone()).prop_map(|(idx, a, b)| {
+                    Expr::FuncCall {
+                        func: Function::Choose,
+                        args: vec![idx, a, b],
+                    }
+                }),
+                // IFS(c1, v1, c2, v2)
+                (inner.clone(), inner.clone(), inner.clone(), inner.clone()).prop_map(
+                    |(c1, v1, c2, v2)| Expr::FuncCall {
+                        func: Function::Ifs,
+                        args: vec![c1, v1, c2, v2],
+                    },
+                ),
+                // SWITCH(expr, case, result, default)
+                (inner.clone(), inner.clone(), inner.clone(), inner.clone()).prop_map(
+                    |(expr, case, result, default)| Expr::FuncCall {
+                        func: Function::Switch,
+                        args: vec![expr, case, result, default],
+                    },
+                ),
                 // ISERROR(a)
                 inner.clone().prop_map(|a| Expr::FuncCall {
                     func: Function::IsError,
@@ -184,57 +207,63 @@ fn arb_expr(base: CellCoord, rows: i32, cols: i32) -> impl Strategy<Value = Expr
                     args: vec![a],
                 }),
                 // LET(x, value, x+extra)
-                (arb_local_name(), inner.clone(), inner.clone()).prop_map(|(name, value, extra)| {
+                (arb_local_name(), inner.clone(), inner.clone()).prop_map(
+                    |(name, value, extra)| {
+                        Expr::FuncCall {
+                            func: Function::Let,
+                            args: vec![
+                                Expr::NameRef(name.clone()),
+                                value,
+                                Expr::Binary {
+                                    op: BinaryOp::Add,
+                                    left: Box::new(Expr::NameRef(name)),
+                                    right: Box::new(extra),
+                                },
+                            ],
+                        }
+                    }
+                ),
+                // LET(X, v1, Y, X+v2, Y+v3) exercises sequential bindings and local resolution.
+                (inner.clone(), inner.clone(), inner.clone()).prop_map(|(v1, v2, v3)| {
                     Expr::FuncCall {
                         func: Function::Let,
                         args: vec![
-                            Expr::NameRef(name.clone()),
-                            value,
+                            Expr::NameRef(Arc::from("X")),
+                            v1,
+                            Expr::NameRef(Arc::from("Y")),
                             Expr::Binary {
                                 op: BinaryOp::Add,
-                                left: Box::new(Expr::NameRef(name)),
-                                right: Box::new(extra),
+                                left: Box::new(Expr::NameRef(Arc::from("X"))),
+                                right: Box::new(v2),
+                            },
+                            Expr::Binary {
+                                op: BinaryOp::Add,
+                                left: Box::new(Expr::NameRef(Arc::from("Y"))),
+                                right: Box::new(v3),
                             },
                         ],
                     }
                 }),
-                // LET(X, v1, Y, X+v2, Y+v3) exercises sequential bindings and local resolution.
-                (inner.clone(), inner.clone(), inner.clone()).prop_map(|(v1, v2, v3)| Expr::FuncCall {
-                    func: Function::Let,
-                    args: vec![
-                        Expr::NameRef(Arc::from("X")),
-                        v1,
-                        Expr::NameRef(Arc::from("Y")),
-                        Expr::Binary {
-                            op: BinaryOp::Add,
-                            left: Box::new(Expr::NameRef(Arc::from("X"))),
-                            right: Box::new(v2),
-                        },
-                        Expr::Binary {
-                            op: BinaryOp::Add,
-                            left: Box::new(Expr::NameRef(Arc::from("Y"))),
-                            right: Box::new(v3),
-                        },
-                    ],
-                }),
                 // LET(X, v1, X, X+v2, X+v3) exercises rebinding semantics in a single LET.
-                (inner.clone(), inner.clone(), inner.clone()).prop_map(|(v1, v2, v3)| Expr::FuncCall {
-                    func: Function::Let,
-                    args: vec![
-                        Expr::NameRef(Arc::from("X")),
-                        v1,
-                        Expr::NameRef(Arc::from("X")),
-                        Expr::Binary {
-                            op: BinaryOp::Add,
-                            left: Box::new(Expr::NameRef(Arc::from("X"))),
-                            right: Box::new(v2),
-                        },
-                        Expr::Binary {
-                            op: BinaryOp::Add,
-                            left: Box::new(Expr::NameRef(Arc::from("X"))),
-                            right: Box::new(v3),
-                        },
-                    ],
+                (inner.clone(), inner.clone(), inner.clone()).prop_map(|(v1, v2, v3)| {
+                    Expr::FuncCall {
+                        func: Function::Let,
+                        args: vec![
+                            Expr::NameRef(Arc::from("X")),
+                            v1,
+                            Expr::NameRef(Arc::from("X")),
+                            Expr::Binary {
+                                op: BinaryOp::Add,
+                                left: Box::new(Expr::NameRef(Arc::from("X"))),
+                                right: Box::new(v2),
+                            },
+                            Expr::Binary {
+                                op: BinaryOp::Add,
+                                left: Box::new(Expr::NameRef(Arc::from("X"))),
+                                right: Box::new(v3),
+                            },
+                        ],
+                    }
                 }),
                 // Percent postfix lowering: expr% -> expr / 100
                 inner.clone().prop_map(|e| Expr::Binary {

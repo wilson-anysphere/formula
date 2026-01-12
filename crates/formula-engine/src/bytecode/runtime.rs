@@ -363,9 +363,24 @@ fn eval_ast_inner(
             // Reference-algebra operators (union/intersection) must evaluate operands in a
             // reference context so `A1` behaves like a single-cell range.
             let allow_range = matches!(op, BinaryOp::Union | BinaryOp::Intersect);
-            let l = eval_ast_inner(left, grid, sheet_id, base, locale, lexical_scopes, allow_range);
-            let r =
-                eval_ast_inner(right, grid, sheet_id, base, locale, lexical_scopes, allow_range);
+            let l = eval_ast_inner(
+                left,
+                grid,
+                sheet_id,
+                base,
+                locale,
+                lexical_scopes,
+                allow_range,
+            );
+            let r = eval_ast_inner(
+                right,
+                grid,
+                sheet_id,
+                base,
+                locale,
+                lexical_scopes,
+                allow_range,
+            );
             apply_binary(*op, l, r, grid, sheet_id, base)
         }
         Expr::FuncCall { func, args } => {
@@ -634,11 +649,14 @@ fn eval_ast_inner(
                             lexical_scopes,
                             false,
                         );
-                        if let Value::Error(e) = case_val {
-                            return Value::Error(e);
-                        }
-                        let matches_val =
-                            apply_binary(BinaryOp::Eq, expr_val.clone(), case_val, grid, sheet_id, base);
+                        let matches_val = apply_binary(
+                            BinaryOp::Eq,
+                            expr_val.clone(),
+                            case_val,
+                            grid,
+                            sheet_id,
+                            base,
+                        );
                         let matches = match coerce_to_bool(&matches_val) {
                             Ok(b) => b,
                             Err(e) => return Value::Error(e),
@@ -1497,7 +1515,8 @@ fn reference_union(left: Value, right: Value, sheet_id: usize, base: CellCoord) 
         return Value::Error(ErrorKind::Ref);
     };
     let expected_sheet = first.sheet;
-    if left.iter().any(|r| r.sheet != expected_sheet) || right.iter().any(|r| r.sheet != expected_sheet)
+    if left.iter().any(|r| r.sheet != expected_sheet)
+        || right.iter().any(|r| r.sheet != expected_sheet)
     {
         return Value::Error(ErrorKind::Ref);
     }
@@ -1527,7 +1546,8 @@ fn reference_intersect(left: Value, right: Value, sheet_id: usize, base: CellCoo
         return Value::Error(ErrorKind::Ref);
     };
     let expected_sheet = first.sheet;
-    if left.iter().any(|r| r.sheet != expected_sheet) || right.iter().any(|r| r.sheet != expected_sheet)
+    if left.iter().any(|r| r.sheet != expected_sheet)
+        || right.iter().any(|r| r.sheet != expected_sheet)
     {
         return Value::Error(ErrorKind::Ref);
     }
@@ -5007,18 +5027,18 @@ fn fn_min(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                                     len = 0;
                                 }
                             }
-                             Value::Bool(_)
-                             | Value::Text(_)
-                             | Value::Entity(_)
-                             | Value::Record(_)
-                             | Value::Empty
-                             | Value::Missing
-                             | Value::Array(_)
-                             | Value::Range(_)
-                             | Value::MultiRange(_)
-                             | Value::Lambda(_) => {}
-                         }
-                     }
+                            Value::Bool(_)
+                            | Value::Text(_)
+                            | Value::Entity(_)
+                            | Value::Record(_)
+                            | Value::Empty
+                            | Value::Missing
+                            | Value::Array(_)
+                            | Value::Range(_)
+                            | Value::MultiRange(_)
+                            | Value::Lambda(_) => {}
+                        }
+                    }
 
                     if len > 0 {
                         if let Some(m) = simd::min_ignore_nan_f64(&buf[..len]) {
@@ -5039,20 +5059,20 @@ fn fn_min(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                                 }
                             }
                             Value::Error(e) => return Value::Error(*e),
-                             Value::Bool(_)
-                             | Value::Text(_)
-                             | Value::Entity(_)
-                             | Value::Record(_)
-                             | Value::Empty
-                             | Value::Missing
-                             | Value::Array(_)
-                             | Value::Range(_)
-                             | Value::MultiRange(_)
-                             | Value::Lambda(_) => {}
-                         }
-                     }
-                 }
-             }
+                            Value::Bool(_)
+                            | Value::Text(_)
+                            | Value::Entity(_)
+                            | Value::Record(_)
+                            | Value::Empty
+                            | Value::Missing
+                            | Value::Array(_)
+                            | Value::Range(_)
+                            | Value::MultiRange(_)
+                            | Value::Lambda(_) => {}
+                        }
+                    }
+                }
+            }
             Value::Range(r) => match min_range(grid, r.resolve(base)) {
                 Ok(Some(m)) => out = Some(out.map_or(m, |prev| prev.min(m))),
                 Ok(None) => {}
@@ -5133,18 +5153,18 @@ fn fn_max(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                                     len = 0;
                                 }
                             }
-                             Value::Bool(_)
-                             | Value::Text(_)
-                             | Value::Entity(_)
-                             | Value::Record(_)
-                             | Value::Empty
-                             | Value::Missing
-                             | Value::Array(_)
-                             | Value::Range(_)
-                             | Value::MultiRange(_)
-                             | Value::Lambda(_) => {}
-                         }
-                     }
+                            Value::Bool(_)
+                            | Value::Text(_)
+                            | Value::Entity(_)
+                            | Value::Record(_)
+                            | Value::Empty
+                            | Value::Missing
+                            | Value::Array(_)
+                            | Value::Range(_)
+                            | Value::MultiRange(_)
+                            | Value::Lambda(_) => {}
+                        }
+                    }
 
                     if len > 0 {
                         if let Some(m) = simd::max_ignore_nan_f64(&buf[..len]) {
@@ -5165,20 +5185,20 @@ fn fn_max(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                                 }
                             }
                             Value::Error(e) => return Value::Error(*e),
-                             Value::Bool(_)
-                             | Value::Text(_)
-                             | Value::Entity(_)
-                             | Value::Record(_)
-                             | Value::Empty
-                             | Value::Missing
-                             | Value::Array(_)
-                             | Value::Range(_)
-                             | Value::MultiRange(_)
-                             | Value::Lambda(_) => {}
-                         }
-                     }
-                 }
-             }
+                            Value::Bool(_)
+                            | Value::Text(_)
+                            | Value::Entity(_)
+                            | Value::Record(_)
+                            | Value::Empty
+                            | Value::Missing
+                            | Value::Array(_)
+                            | Value::Range(_)
+                            | Value::MultiRange(_)
+                            | Value::Lambda(_) => {}
+                        }
+                    }
+                }
+            }
             Value::Range(r) => match max_range(grid, r.resolve(base)) {
                 Ok(Some(m)) => out = Some(out.map_or(m, |prev| prev.max(m))),
                 Ok(None) => {}
@@ -7856,8 +7876,12 @@ fn fn_match(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                     return Value::Error(ErrorKind::NA);
                 }
                 let row = range.row_start;
-                let value_at =
-                    |idx: usize| grid.get_value(CellCoord { row, col: range.col_start + idx as i32 });
+                let value_at = |idx: usize| {
+                    grid.get_value(CellCoord {
+                        row,
+                        col: range.col_start + idx as i32,
+                    })
+                };
                 match match_type {
                     0 => exact_match_1d(lookup_value, len, &value_at),
                     1 => approximate_match_1d(lookup_value, len, &value_at, true),
@@ -7870,8 +7894,12 @@ fn fn_match(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                     return Value::Error(ErrorKind::NA);
                 }
                 let col = range.col_start;
-                let value_at =
-                    |idx: usize| grid.get_value(CellCoord { row: range.row_start + idx as i32, col });
+                let value_at = |idx: usize| {
+                    grid.get_value(CellCoord {
+                        row: range.row_start + idx as i32,
+                        col,
+                    })
+                };
                 match match_type {
                     0 => exact_match_1d(lookup_value, len, &value_at),
                     1 => approximate_match_1d(lookup_value, len, &value_at, true),
@@ -8237,9 +8265,7 @@ fn fn_xlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     let match_pos = match match_pos {
         Ok(p) => p,
         Err(EngineErrorKind::NA) => {
-            return if_not_found
-                .cloned()
-                .unwrap_or(Value::Error(ErrorKind::NA));
+            return if_not_found.cloned().unwrap_or(Value::Error(ErrorKind::NA));
         }
         Err(e) => return Value::Error(ErrorKind::from(e)),
     };
@@ -10395,7 +10421,7 @@ mod tests {
     fn sumproduct_uses_sparse_iteration_for_huge_ranges_without_column_slices() {
         use std::collections::HashMap;
         use std::sync::atomic::{AtomicUsize, Ordering};
- 
+
         struct LimitedGetGrid {
             bounds: (i32, i32),
             max_get_calls: usize,
@@ -10403,46 +10429,43 @@ mod tests {
             cells: HashMap<(i32, i32), Value>,
             stored: Vec<(CellCoord, Value)>,
         }
- 
+
         impl Grid for LimitedGetGrid {
             fn get_value(&self, coord: CellCoord) -> Value {
                 let seen = self.get_calls.fetch_add(1, Ordering::Relaxed);
                 if seen >= self.max_get_calls {
-                    panic!("too many get_value calls (saw {seen}, max {})", self.max_get_calls);
+                    panic!(
+                        "too many get_value calls (saw {seen}, max {})",
+                        self.max_get_calls
+                    );
                 }
                 self.cells
                     .get(&(coord.row, coord.col))
                     .cloned()
                     .unwrap_or(Value::Empty)
             }
- 
+
             fn get_value_on_sheet(&self, _sheet: usize, coord: CellCoord) -> Value {
                 self.get_value(coord)
             }
- 
+
             fn column_slice(&self, _col: i32, _row_start: i32, _row_end: i32) -> Option<&[f64]> {
                 None
             }
- 
+
             fn iter_cells(&self) -> Option<Box<dyn Iterator<Item = (CellCoord, Value)> + '_>> {
                 Some(Box::new(self.stored.iter().cloned()))
             }
- 
+
             fn bounds(&self) -> (i32, i32) {
                 self.bounds
             }
         }
- 
+
         let row_end = BYTECODE_SPARSE_RANGE_ROW_THRESHOLD; // rows() == threshold + 1
-        let range_a = RangeRef::new(
-            Ref::new(0, 0, true, true),
-            Ref::new(row_end, 0, true, true),
-        );
-        let range_b = RangeRef::new(
-            Ref::new(0, 1, true, true),
-            Ref::new(row_end, 1, true, true),
-        );
- 
+        let range_a = RangeRef::new(Ref::new(0, 0, true, true), Ref::new(row_end, 0, true, true));
+        let range_b = RangeRef::new(Ref::new(0, 1, true, true), Ref::new(row_end, 1, true, true));
+
         let mut cells: HashMap<(i32, i32), Value> = HashMap::new();
         let mut stored = Vec::new();
         for (row, col, n) in [(0, 0, 2.0), (0, 1, 3.0), (1, 0, 4.0), (1, 1, 5.0)] {
@@ -10451,7 +10474,7 @@ mod tests {
             cells.insert((row, col), value.clone());
             stored.push((coord, value));
         }
- 
+
         let grid = LimitedGetGrid {
             bounds: (row_end + 1, 2),
             max_get_calls: 1024,
@@ -10459,7 +10482,7 @@ mod tests {
             cells,
             stored,
         };
- 
+
         let args = [Value::Range(range_a), Value::Range(range_b)];
         let out = fn_sumproduct(&args, &grid, CellCoord { row: 0, col: 0 });
         assert_eq!(out, Value::Number(26.0));
@@ -10535,7 +10558,7 @@ mod tests {
         let out = fn_sumproduct(&args, &grid, CellCoord { row: 0, col: 0 });
         assert_eq!(out, Value::Error(ErrorKind::Div0));
     }
- 
+
     #[test]
     fn and_range_ignores_missing_in_sparse_refs() {
         let row_end = BYTECODE_SPARSE_RANGE_ROW_THRESHOLD; // rows() == threshold + 1
