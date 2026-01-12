@@ -357,6 +357,93 @@ test.describe("sheet tabs", () => {
     await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 3");
   });
 
+  test("drag reorder maps visible tab positions onto full sheet order with hidden sheets", async ({ page }) => {
+    await gotoDesktop(page);
+
+    // Create Sheet2 + Sheet3 via the UI so both the DocumentController and metadata store
+    // include them. (We need a hidden sheet in between two visible sheets.)
+    await page.getByTestId("sheet-add").click();
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+    await page.getByTestId("sheet-add").click();
+    await expect(page.getByTestId("sheet-tab-Sheet3")).toBeVisible();
+
+    // Hide Sheet2 so the visible tabs are [Sheet1, Sheet3] while the full order is
+    // [Sheet1, Sheet2(hidden), Sheet3].
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      app.getWorkbookSheetStore().hide("Sheet2");
+    });
+    await expect(page.locator('[data-testid="sheet-tab-Sheet2"]')).toHaveCount(0);
+
+    // Drag Sheet3 before Sheet1.
+    try {
+      await page
+        .getByTestId("sheet-tab-Sheet3")
+        .dragTo(page.getByTestId("sheet-tab-Sheet1"), { targetPosition: { x: 1, y: 1 } });
+    } catch {
+      // Ignore; we'll fall back to a synthetic drop below.
+    }
+
+    // As with other tab drag tests, use a synthetic drop if Playwright's dragTo doesn't take.
+    const desiredAll = [
+      { id: "Sheet3", visibility: "visible" },
+      { id: "Sheet1", visibility: "visible" },
+      { id: "Sheet2", visibility: "hidden" },
+    ];
+
+    const currentAll = await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      return app.getWorkbookSheetStore().listAll().map((s: any) => ({ id: s.id, visibility: s.visibility }));
+    });
+
+    if (JSON.stringify(currentAll) !== JSON.stringify(desiredAll)) {
+      await page.evaluate(() => {
+        const fromId = "Sheet3";
+        const target = document.querySelector('[data-testid="sheet-tab-Sheet1"]') as HTMLElement | null;
+        if (!target) throw new Error("Missing Sheet1 tab");
+        const rect = target.getBoundingClientRect();
+
+        const dt = new DataTransfer();
+        dt.setData("text/sheet-id", fromId);
+        dt.setData("text/plain", fromId);
+
+        const drop = new DragEvent("drop", {
+          bubbles: true,
+          cancelable: true,
+          clientX: rect.left + 1,
+          clientY: rect.top + rect.height / 2,
+        });
+        Object.defineProperty(drop, "dataTransfer", { value: dt });
+        target.dispatchEvent(drop);
+      });
+    }
+
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const app = (window as any).__formulaApp;
+          return app.getWorkbookSheetStore().listAll().map((s: any) => ({ id: s.id, visibility: s.visibility }));
+        }),
+      )
+      .toEqual(desiredAll);
+
+    // Unhide Sheet2 and ensure it lands at the end (i.e. hidden sheet moved as expected).
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      app.getWorkbookSheetStore().unhide("Sheet2");
+    });
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const app = (window as any).__formulaApp;
+          return app.getWorkbookSheetStore().listVisible().map((s: any) => s.id);
+        }),
+      )
+      .toEqual(["Sheet3", "Sheet1", "Sheet2"]);
+  });
+
   test("sheet position indicator uses visible sheets (hide/unhide)", async ({ page }) => {
     await gotoDesktop(page);
 
