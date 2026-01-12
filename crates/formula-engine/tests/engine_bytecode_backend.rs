@@ -2708,6 +2708,13 @@ fn bytecode_backend_financial_date_text_uses_datevalue_semantics() {
     assert_eq!(engine.bytecode_program_count(), 3);
 
     engine.recalculate_single_threaded();
+    for cell in ["A1", "A2", "A3"] {
+        assert_eq!(
+            engine.get_cell_value("Sheet1", cell),
+            Value::Error(ErrorKind::Value),
+            "expected {cell} to error for invalid text date input"
+        );
+    }
 
     for (formula, cell) in [
         (r#"=COUPDAYBS("1","2025-01-15",2)"#, "A1"),
