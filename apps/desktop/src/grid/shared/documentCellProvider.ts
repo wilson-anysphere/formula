@@ -325,26 +325,18 @@ export class DocumentCellProvider implements CellProvider {
     for (const listener of this.listeners) listener({ type: "cells", range: gridRange });
   }
 
-  prefetch(range: CellRange): void {
-    // Prefetch is a hint used by async providers. We use it to warm our in-memory cache
-    // but cap work so fast scrolls don't block the UI thread.
-    const maxCells = 2_000;
-    const rows = Math.max(0, range.endRow - range.startRow);
-    const cols = Math.max(0, range.endCol - range.startCol);
-    const total = rows * cols;
-    if (total === 0) return;
-
-    const budget = Math.max(0, Math.min(maxCells, total));
-    const step = total / budget;
-
-    let idx = 0;
-    while (idx < total) {
-      const i = Math.floor(idx);
-      const r = range.startRow + Math.floor(i / cols);
-      const c = range.startCol + (i % cols);
-      this.getCell(r, c);
-      idx += step;
-    }
+  prefetch(_range: CellRange): void {
+    // NOTE: `prefetch` is primarily a hint for *async* providers to begin fetching
+    // cell contents ahead of time.
+    //
+    // The desktop DocumentCellProvider is synchronous (it reads from the local
+    // DocumentController and formats values on-demand). Warming the cache here is
+    // redundant because CanvasGridRenderer will immediately call `getCell()` again
+    // for visible cells during the same scroll+render cycle, doubling work on the
+    // scroll critical path.
+    //
+    // Cache entries are still populated through normal `getCell()` calls during
+    // rendering.
   }
 
   getCell(row: number, col: number): CellData | null {
