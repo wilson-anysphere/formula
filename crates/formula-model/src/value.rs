@@ -111,7 +111,8 @@ pub struct LinkedEntityValue {
     /// Accept the legacy `"display"` key as an alias for backward compatibility.
     #[serde(default, alias = "display", alias = "display_value")]
     pub display_value: String,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    // Back-compat: earlier prototypes used `"fields"` to match the engine's internal naming.
+    #[serde(default, alias = "fields", skip_serializing_if = "BTreeMap::is_empty")]
     pub properties: BTreeMap<String, CellValue>,
 }
 
@@ -315,7 +316,7 @@ pub struct SpillValue {
 
 #[cfg(test)]
 mod tests {
-    use super::{EntityValue, RecordValue};
+    use super::{CellValue, EntityValue, RecordValue};
     use serde_json::json;
 
     #[test]
@@ -349,6 +350,22 @@ mod tests {
         assert_eq!(entity.entity_type, "stock");
         assert_eq!(entity.entity_id, "AAPL");
         assert_eq!(entity.display_value, "Apple");
+    }
+
+    #[test]
+    fn entity_value_deserializes_fields_alias_for_properties() {
+        let entity: EntityValue = serde_json::from_value(json!({
+            "display": "Entity display",
+            "fields": {
+                "Price": { "type": "number", "value": 178.5 }
+            }
+        }))
+        .expect("deserialize legacy entity fields");
+        assert_eq!(entity.display_value, "Entity display");
+        assert_eq!(
+            entity.properties.get("Price"),
+            Some(&CellValue::Number(178.5))
+        );
     }
 
     #[test]
