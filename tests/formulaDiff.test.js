@@ -135,9 +135,19 @@ test("diffFormula: normalize=true treats comma/semicolon argument separators as 
   assert.equal(result.equal, true);
 });
 
+test("diffFormula: normalize=false treats comma/semicolon argument separators as edits", () => {
+  const result = diffFormula("=SUM(A1;B1)", "=SUM(A1,B1)", { normalize: false });
+  assert.equal(result.equal, false);
+});
+
 test("diffFormula: normalize=true treats numeric formatting differences as equal", () => {
   const result = diffFormula("=1.0+2", "=1+2", { normalize: true });
   assert.equal(result.equal, true);
+});
+
+test("diffFormula: normalize=false treats numeric formatting differences as edits", () => {
+  const result = diffFormula("=1.0+2", "=1+2", { normalize: false });
+  assert.equal(result.equal, false);
 });
 
 test("diffFormula: does not throw on unterminated string literals", () => {
