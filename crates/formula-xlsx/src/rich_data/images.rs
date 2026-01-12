@@ -172,7 +172,7 @@ fn parse_rdrichvalue_parts_relationship_indices(
     Ok(out)
 }
 
-fn parse_rdrichvalue_relationship_indices(
+pub(super) fn parse_rdrichvalue_relationship_indices(
     xml_bytes: &[u8],
     structure_xml_bytes: Option<&[u8]>,
 ) -> Result<Vec<Option<usize>>, XlsxError> {

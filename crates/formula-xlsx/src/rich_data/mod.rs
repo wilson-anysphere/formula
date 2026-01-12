@@ -867,6 +867,30 @@ fn parse_rich_value_parts_rel_indices(
     pkg: &XlsxPackage,
     part_names: &[&str],
 ) -> Result<HashMap<u32, u32>, RichDataError> {
+    // Split part names by family so we can apply schema-aware parsing to `richValue*.xml` and
+    // structure-aware parsing to `rdrichvalue*.xml`.
+    //
+    // The `rdRichValue` schema stores positional `<v>` elements, with the member ordering described
+    // by `rdrichvaluestructure.xml`. In particular, embedded images use a `_rvRel:LocalImageIdentifier`
+    // field that points into `richValueRel.xml`. Some workbooks reorder fields so the relationship
+    // index is not the first numeric `<v>`, so we must consult the structure metadata when present.
+    let mut rich_value_parts: Vec<&str> = Vec::new();
+    let mut rd_rich_value_parts: Vec<&str> = Vec::new();
+    for part_name in part_names {
+        let Some((family, _idx)) = parse_rich_value_part_name(part_name) else {
+            continue;
+        };
+        match family {
+            RichValuePartFamily::RichValue | RichValuePartFamily::RichValues => {
+                rich_value_parts.push(*part_name)
+            }
+            RichValuePartFamily::RdRichValue => rd_rich_value_parts.push(*part_name),
+        }
+    }
+
+    rich_value_parts.sort_by(|a, b| cmp_rich_value_parts_by_numeric_suffix(a, b));
+    rd_rich_value_parts.sort_by(|a, b| cmp_rich_value_parts_by_numeric_suffix(a, b));
+
     let mut out: HashMap<u32, u32> = HashMap::new();
     let mut global_idx: u32 = 0;
 
@@ -878,16 +902,16 @@ fn parse_rich_value_parts_rel_indices(
     // heuristic `<v t="rel">` / first-numeric parsing.
     let rich_value_types = build_rich_value_type_schema_index_best_effort(pkg);
 
-    for part_name in part_names {
+    for part_name in rich_value_parts {
         let Some(bytes) = pkg.part(part_name) else {
             continue;
         };
         let xml = std::str::from_utf8(bytes).map_err(|source| RichDataError::XmlNonUtf8 {
-            part: (*part_name).to_string(),
+            part: part_name.to_string(),
             source,
         })?;
         let doc = roxmltree::Document::parse(xml).map_err(|source| RichDataError::XmlParse {
-            part: (*part_name).to_string(),
+            part: part_name.to_string(),
             source,
         })?;
 
@@ -899,6 +923,27 @@ fn parse_rich_value_parts_rel_indices(
                 out.insert(global_idx, rel_idx);
             }
             global_idx = global_idx.saturating_add(1);
+        }
+    }
+
+    if !rd_rich_value_parts.is_empty() {
+        let rd_structure_xml = pkg.part("xl/richData/rdrichvaluestructure.xml");
+
+        for part_name in rd_rich_value_parts {
+            let Some(bytes) = pkg.part(part_name) else {
+                continue;
+            };
+
+            let rel_indices =
+                images::parse_rdrichvalue_relationship_indices(bytes, rd_structure_xml)?;
+            for rel_idx in rel_indices {
+                if let Some(rel_idx) = rel_idx {
+                    if let Ok(rel_idx) = u32::try_from(rel_idx) {
+                        out.insert(global_idx, rel_idx);
+                    }
+                }
+                global_idx = global_idx.saturating_add(1);
+            }
         }
     }
 
