@@ -27,7 +27,7 @@ test.describe("grid keyboard navigation + in-place editing", () => {
     await waitForIdle(page);
 
     // Focus + select A1 (top-left).
-    await page.click("#grid", { position: { x: 5, y: 5 } });
+    await page.click("#grid", { position: { x: 80, y: 40 } });
 
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
 
@@ -42,7 +42,7 @@ test.describe("grid keyboard navigation + in-place editing", () => {
   test("typing begins in-place edit and commits", async ({ page }) => {
     await gotoDesktop(page);
     await waitForIdle(page);
-    await page.click("#grid", { position: { x: 5, y: 5 } });
+    await page.click("#grid", { position: { x: 80, y: 40 } });
 
     const recalcBefore = await page.evaluate(() => (window as any).__formulaApp.getRecalcCount());
 
@@ -70,7 +70,7 @@ test.describe("grid keyboard navigation + in-place editing", () => {
 
     await gotoDesktop(page);
     await waitForIdle(page);
-    await page.click("#grid", { position: { x: 5, y: 5 } });
+    await page.click("#grid", { position: { x: 80, y: 40 } });
 
     await page.keyboard.press("Control+End");
     await expect(page.getByTestId("active-cell")).toHaveText("D5");
@@ -98,7 +98,7 @@ test.describe("grid keyboard navigation + in-place editing", () => {
   test("F2 edit commits with Enter and cancels with Escape", async ({ page }) => {
     await gotoDesktop(page);
     await waitForIdle(page);
-    await page.click("#grid", { position: { x: 5, y: 5 } });
+    await page.click("#grid", { position: { x: 80, y: 40 } });
 
     const recalcBefore = await page.evaluate(() => (window as any).__formulaApp.getRecalcCount());
 
@@ -149,7 +149,7 @@ test.describe("grid keyboard navigation + in-place editing", () => {
   test("Ctrl/Cmd+Z undo + Ctrl/Cmd+Shift+Z / Ctrl/Cmd+Y redo update cells", async ({ page }) => {
     await gotoDesktop(page);
     await waitForIdle(page);
-    await page.click("#grid", { position: { x: 5, y: 5 } });
+    await page.click("#grid", { position: { x: 80, y: 40 } });
 
     // Clear any seeded value so undo returns to an empty cell.
     await page.keyboard.press("Delete");
@@ -225,7 +225,7 @@ test.describe("grid keyboard navigation + in-place editing", () => {
   test("Ctrl/Cmd+Z does not steal undo while editing a cell", async ({ page }) => {
     await gotoDesktop(page);
     await waitForIdle(page);
-    await page.click("#grid", { position: { x: 5, y: 5 } });
+    await page.click("#grid", { position: { x: 80, y: 40 } });
 
     // Clear any seeded value.
     await page.keyboard.press("Delete");
@@ -264,7 +264,7 @@ test.describe("grid keyboard navigation + in-place editing", () => {
   test("Ctrl/Cmd+Z does not steal undo while editing the formula bar", async ({ page }) => {
     await gotoDesktop(page);
     await waitForIdle(page);
-    await page.click("#grid", { position: { x: 5, y: 5 } });
+    await page.click("#grid", { position: { x: 80, y: 40 } });
 
     // Clear any seeded value.
     await page.keyboard.press("Delete");

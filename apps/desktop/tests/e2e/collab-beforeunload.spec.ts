@@ -11,7 +11,8 @@ test.describe("collab: beforeunload unsaved-changes prompt", () => {
     await gotoDesktop(page);
 
     // Create a user gesture + local edit so browsers are allowed to show a beforeunload prompt.
-    await page.click("#grid", { position: { x: 5, y: 5 } });
+    // Click inside A1 (avoid the shared-grid corner header/select-all region).
+    await page.click("#grid", { position: { x: 80, y: 40 } });
     await page.keyboard.press("h");
     await page.keyboard.type("ello");
     await page.keyboard.press("Enter");
@@ -38,4 +39,3 @@ test.describe("collab: beforeunload unsaved-changes prompt", () => {
     expect(beforeUnloadDialogs).toBe(0);
   });
 });
-

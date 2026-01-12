@@ -79,7 +79,8 @@ test.describe("sheet tabs", () => {
     await gotoDesktop(page);
 
     // Ensure A1 is active before switching sheets so the status bar reflects A1 values.
-    await page.click("#grid", { position: { x: 5, y: 5 } });
+    // Click inside A1 (avoid the shared-grid corner header/select-all region).
+    await page.click("#grid", { position: { x: 80, y: 40 } });
 
     // Lazily create Sheet2 by writing a value into it.
     await page.evaluate(() => {
@@ -534,7 +535,8 @@ test.describe("sheet tabs", () => {
     await gotoDesktop(page);
 
     // Start with focus on the grid.
-    await page.click("#grid", { position: { x: 5, y: 5 } });
+    // Click inside A1 (avoid the shared-grid corner header/select-all region).
+    await page.click("#grid", { position: { x: 80, y: 40 } });
 
     // Lazily create Sheet2 so there's another tab to switch to.
     await page.evaluate(() => {

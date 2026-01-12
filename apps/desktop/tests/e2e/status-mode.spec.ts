@@ -15,7 +15,8 @@ test.describe("status bar mode indicator", () => {
     await expect(page.getByTestId("status-mode")).toHaveText("Ready");
 
     // Focus the grid so keyboard shortcuts target the sheet.
-    await page.click("#grid", { position: { x: 5, y: 5 } });
+    // Click inside A1 (avoid the shared-grid corner header/select-all region).
+    await page.click("#grid", { position: { x: 80, y: 40 } });
 
     await page.keyboard.press("F2");
     await expect(page.getByTestId("status-mode")).toHaveText("Edit");
@@ -24,4 +25,3 @@ test.describe("status bar mode indicator", () => {
     await expect(page.getByTestId("status-mode")).toHaveText("Ready");
   });
 });
-

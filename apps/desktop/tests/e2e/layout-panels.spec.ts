@@ -128,6 +128,7 @@ test.describe("dockable panels layout persistence", () => {
     await waitForDesktopReady(page);
 
     // Ensure focus is on the grid (not an input) so the global shortcut should fire.
+    // Avoid clicking the shared-grid corner header (select-all), which can be slow/flaky under Playwright.
     await page.locator("#grid").focus();
 
     await page.keyboard.press("Meta+I");

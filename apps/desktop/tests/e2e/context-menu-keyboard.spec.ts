@@ -13,7 +13,8 @@ test.describe("grid context menu keyboard invocation", () => {
     await waitForIdle(page);
 
     // Ensure the grid is focused and has an active cell.
-    await page.click("#grid", { position: { x: 5, y: 5 } });
+    // Click inside A1 (avoid the shared-grid corner header/select-all region).
+    await page.click("#grid", { position: { x: 80, y: 40 } });
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
 
     await page.keyboard.press("Shift+F10");

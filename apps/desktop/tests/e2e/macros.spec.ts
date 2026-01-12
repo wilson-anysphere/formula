@@ -124,7 +124,8 @@ test.describe("macros panel", () => {
     expect(sheet2a1).toBe("OtherSheetA1");
 
     // Focus the grid to ensure keyboard shortcuts route to the SpreadsheetApp handler.
-    await page.click("#grid", { position: { x: 5, y: 5 } });
+    // Click inside A1 (avoid the shared-grid corner header/select-all region).
+    await page.click("#grid", { position: { x: 80, y: 40 } });
 
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
     await page.keyboard.press(`${modifier}+Z`);
