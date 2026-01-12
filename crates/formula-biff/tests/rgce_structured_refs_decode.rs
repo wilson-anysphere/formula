@@ -27,6 +27,16 @@ fn ptg_list(table_id: u32, flags: u16, col_first: u16, col_last: u16, ptg: u8) -
     out
 }
 
+fn ptg_int(n: u16) -> [u8; 3] {
+    let [lo, hi] = n.to_le_bytes();
+    [0x1E, lo, hi] // PtgInt
+}
+
+fn ptg_funcvar(argc: u8, iftab: u16) -> [u8; 4] {
+    let [lo, hi] = iftab.to_le_bytes();
+    [0x22, argc, lo, hi] // PtgFuncVar
+}
+
 #[test]
 fn decodes_structured_ref_table_column() {
     let rgce = ptg_list(1, 0x0000, 2, 2, 0x18);
@@ -149,6 +159,33 @@ fn decodes_structured_ref_value_class_emits_explicit_implicit_intersection() {
     let text = decode_rgce(&rgce).expect("decode");
     assert_eq!(text, "@Table1[Column2]");
     assert_eq!(normalize(&text), normalize("@Table1[Column2]"));
+}
+
+#[test]
+fn decodes_structured_ref_in_binary_expr() {
+    let mut rgce = ptg_list(1, 0x0000, 2, 2, 0x18);
+    rgce.extend_from_slice(&ptg_int(1));
+    rgce.push(0x03); // PtgAdd
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(normalize(&text), normalize("Table1[Column2]+1"));
+}
+
+#[test]
+fn decodes_value_class_structured_ref_in_binary_expr() {
+    let mut rgce = ptg_list(1, 0x0000, 2, 2, 0x38);
+    rgce.extend_from_slice(&ptg_int(1));
+    rgce.push(0x03); // PtgAdd
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(normalize(&text), normalize("@Table1[Column2]+1"));
+}
+
+#[test]
+fn decodes_structured_ref_used_as_function_arg() {
+    let mut rgce = ptg_list(1, 0x0000, 2, 2, 0x18);
+    // SUM is id=4 in Excel's function table.
+    rgce.extend_from_slice(&ptg_funcvar(1, 4));
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(normalize(&text), normalize("SUM(Table1[Column2])"));
 }
 
 #[test]
