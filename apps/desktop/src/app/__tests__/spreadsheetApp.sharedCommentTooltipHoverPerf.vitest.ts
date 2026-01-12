@@ -235,4 +235,52 @@ describe("SpreadsheetApp shared-grid comment tooltip hover perf", () => {
       else process.env.DESKTOP_GRID_MODE = prior;
     }
   });
+
+  it("shows a tooltip even when the first comment thread content is an empty string", async () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      expect(app.getGridMode()).toBe("shared");
+
+      // Empty comment content should still mark the cell as having a comment and show a tooltip.
+      (app as any).commentManager.addComment({
+        cellRef: "A1",
+        kind: "threaded",
+        content: "",
+        author: (app as any).currentUser,
+      });
+      (app as any).reindexCommentCells();
+
+      const tooltip = (app as any).commentTooltip as HTMLDivElement;
+      const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;
+
+      (app as any).onSharedPointerMove({
+        clientX: 60,
+        clientY: 30,
+        offsetX: 60,
+        offsetY: 30,
+        buttons: 0,
+        pointerType: "mouse",
+        target: selectionCanvas,
+      } as any);
+      await flushMicrotasks();
+
+      expect(tooltip.classList.contains("comment-tooltip--visible")).toBe(true);
+      expect(tooltip.textContent).toBe("");
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
 });
