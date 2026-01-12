@@ -569,6 +569,10 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
   const render = (): void => {
     if (abortController.signal.aborted) return;
 
+    // Best-effort hint for offline mode (Playwright `setOffline` toggles this).
+    const networkOnline =
+      typeof navigator !== "undefined" && typeof navigator.onLine === "boolean" ? navigator.onLine : true;
+
     const session = getSession();
     if (!session) {
       detachProviderListeners(currentProvider);
@@ -666,16 +670,24 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
 
     const syncLabel = connected ? (synced ? "Synced" : "Syncing…") : connecting ? "Syncing…" : hasEverSynced ? "Not synced" : "Syncing…";
 
-    setIndicatorText(`${docId} • ${connectionLabel} • ${syncLabel}`, {
+    setIndicatorText(`${docId} • ${networkOnline ? connectionLabel : "Offline"} • ${syncLabel}`, {
       mode: "collab",
-      conn: connected ? "connected" : connecting ? "connecting" : "disconnected",
+      conn: networkOnline ? (connected ? "connected" : connecting ? "connecting" : "disconnected") : "offline",
       sync: connected ? (synced ? "synced" : "syncing") : connecting ? "syncing" : hasEverSynced ? "unsynced" : "syncing",
       docId,
     });
   };
 
+  const onNetworkChange = (): void => render();
+  if (typeof window !== "undefined") {
+    window.addEventListener("online", onNetworkChange);
+    window.addEventListener("offline", onNetworkChange);
+  }
+
   abortController.signal.addEventListener("abort", () => {
     window.removeEventListener("unload", cleanup);
+    window.removeEventListener("online", onNetworkChange);
+    window.removeEventListener("offline", onNetworkChange);
     detachProviderListeners(currentProvider);
     stopOfflinePoll();
   });
