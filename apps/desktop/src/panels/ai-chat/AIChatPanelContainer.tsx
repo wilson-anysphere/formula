@@ -9,6 +9,7 @@ import { createSchemaProviderFromSearchWorkbook } from "../../ai/context/searchW
 import type { LLMToolCall } from "../../../../../packages/ai-tools/src/llm/integration.js";
 import type { ToolPlanPreview } from "../../../../../packages/ai-tools/src/preview/preview-engine.js";
 import type { SpreadsheetApi } from "../../../../../packages/ai-tools/src/spreadsheet/api.js";
+import { formatA1Range, parseA1Range } from "../../../../../packages/ai-tools/src/spreadsheet/a1.js";
 import { getDesktopAIAuditStore } from "../../ai/audit/auditStore.js";
 import { getDesktopLLMClient, getDesktopModel, purgeLegacyDesktopLLMSettings } from "../../ai/llm/desktopLLMClient.js";
 import type { SheetNameResolver } from "../../sheet/sheetNameResolver.js";
@@ -21,6 +22,32 @@ function generateSessionId(): string {
   const maybeCrypto = globalThis.crypto as Crypto | undefined;
   if (maybeCrypto && typeof maybeCrypto.randomUUID === "function") return maybeCrypto.randomUUID();
   return `session-${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+}
+
+function formatA1ForDisplay(reference: string, sheetNameResolver: SheetNameResolver | null): string {
+  const raw = String(reference ?? "");
+  if (!raw.includes("!")) return raw;
+  try {
+    const parsed = parseA1Range(raw);
+    const sheetId = sheetNameResolver?.getSheetIdByName(parsed.sheet) ?? parsed.sheet;
+    const displayName = sheetNameResolver?.getSheetNameById(sheetId) ?? parsed.sheet;
+    return formatA1Range({ ...parsed, sheet: displayName });
+  } catch {
+    return raw;
+  }
+}
+
+function formatToolCallForDisplay(call: LLMToolCall, sheetNameResolver: SheetNameResolver | null): LLMToolCall {
+  const args = call?.arguments;
+  if (!args || typeof args !== "object") return call;
+  const next: Record<string, unknown> = { ...(args as any) };
+  for (const key of ["range", "cell", "data_range", "position", "source_range", "destination"]) {
+    const value = next[key];
+    if (typeof value === "string") {
+      next[key] = formatA1ForDisplay(value, sheetNameResolver);
+    }
+  }
+  return { ...call, arguments: next };
 }
 
 export interface AIChatPanelContainerProps {
@@ -62,6 +89,8 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
   const [approvalRequest, setApprovalRequest] = useState<{ call: LLMToolCall; preview: ToolPlanPreview } | null>(null);
   const approvalResolver = useRef<((approved: boolean) => void) | null>(null);
 
+  const sheetNameResolver = props.sheetNameResolver ?? null;
+
   const onApprovalRequired = useCallback(async (request: { call: LLMToolCall; preview: ToolPlanPreview }) => {
     // If we're not in a browser DOM environment, fall back to a native dialog helper.
     if (typeof document === "undefined") return confirmPreviewApproval(request as any);
@@ -71,11 +100,11 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
       return false;
     }
 
-    setApprovalRequest(request);
+    setApprovalRequest({ call: formatToolCallForDisplay(request.call, sheetNameResolver), preview: request.preview });
     return new Promise<boolean>((resolve) => {
       approvalResolver.current = resolve;
     });
-  }, []);
+  }, [sheetNameResolver, setApprovalRequest]);
 
   const resolveApproval = useCallback((approved: boolean) => {
     const resolve = approvalResolver.current;
@@ -178,11 +207,14 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
       }
 
       try {
+        const onToolCallForDisplay = (call: LLMToolCall, meta: { requiresApproval: boolean }) => {
+          args.onToolCall(call ? formatToolCallForDisplay(call, sheetNameResolver) : call, meta);
+        };
         const result = await orchestrator.sendMessage({
           text: args.userText,
           attachments: args.attachments as any,
           history: llmHistory.current,
-          onToolCall: args.onToolCall as any,
+          onToolCall: onToolCallForDisplay as any,
           onToolResult: args.onToolResult as any,
           onStreamEvent: args.onStreamEvent as any,
           signal: args.signal,
@@ -196,7 +228,7 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
         }
       }
     };
-  }, [orchestrator, resolveApproval]);
+  }, [orchestrator, resolveApproval, sheetNameResolver]);
 
   const [agentGoal, setAgentGoal] = useState("");
   const [agentConstraints, setAgentConstraints] = useState("");
