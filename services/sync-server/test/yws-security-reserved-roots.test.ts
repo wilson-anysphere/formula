@@ -259,3 +259,62 @@ for (const innerType of [1, 2]) {
     );
   }
 }
+
+test("reservedRootGuard: truncates large keyPath segments in logs", () => {
+  const docName = "doc-reserved-roots-truncation";
+  const userId = "attacker";
+  const role = "editor";
+
+  const hugeKey = `v-${"x".repeat(2_000)}`;
+  const attackerDoc = new Y.Doc();
+  attackerDoc.getMap("versions").set(hugeKey, new Y.Map());
+  const update = Y.encodeStateAsUpdate(attackerDoc);
+
+  const message = concatUint8Arrays([
+    encodeVarUint(0), // sync outer message
+    encodeVarUint(2), // Update
+    encodeVarUint(update.length),
+    update,
+  ]);
+
+  const ws = new FakeWebSocket() as unknown as WebSocket;
+  const warnCalls: Array<{ obj: Record<string, unknown>; event: string }> = [];
+  const logger = {
+    warn(obj: Record<string, unknown>, event: string) {
+      warnCalls.push({ obj, event });
+    },
+  } as any;
+
+  installYwsSecurity(ws, {
+    docName,
+    auth: {
+      userId,
+      tokenType: "jwt",
+      docId: docName,
+      orgId: null,
+      role,
+    },
+    logger,
+    ydoc: new Y.Doc(),
+    limits: {
+      maxMessageBytes: 10_000_000,
+      maxAwarenessStateBytes: 10_000_000,
+      maxAwarenessEntries: 1_000,
+    },
+  });
+
+  ws.emit("message", message, true);
+
+  assert.ok((ws as any).closeCalls.length >= 1);
+  assert.equal((ws as any).closeCalls[0].code, 1008);
+  assert.equal((ws as any).closeCalls[0].reason, "reserved root mutation");
+
+  assert.equal(warnCalls.length, 1);
+  assert.equal(warnCalls[0].event, "reserved_root_mutation_rejected");
+  assert.equal(warnCalls[0].obj.root, "versions");
+  assert.ok(Array.isArray(warnCalls[0].obj.keyPath));
+  const loggedKey = (warnCalls[0].obj.keyPath as string[])[0];
+  assert.equal(typeof loggedKey, "string");
+  assert.ok(loggedKey.length < hugeKey.length);
+  assert.ok(loggedKey.endsWith("..."));
+});
