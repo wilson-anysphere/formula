@@ -4480,6 +4480,156 @@ mod tests {
     }
 
     #[test]
+    fn set_sheet_visibility_rejects_hiding_last_visible_sheet_and_preserves_state() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+
+        // Ensure there is exactly one visible sheet.
+        workbook.sheets[1].visibility = SheetVisibility::Hidden;
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let err = state
+            .set_sheet_visibility("Sheet1", SheetVisibility::Hidden)
+            .expect_err("expected hiding the last visible sheet to fail");
+
+        match err {
+            AppStateError::WhatIf(msg) => assert!(
+                msg.contains("cannot hide the last visible sheet"),
+                "unexpected error message: {msg}"
+            ),
+            other => panic!("expected AppStateError::WhatIf, got {other:?}"),
+        }
+
+        // Ensure the workbook was not modified after a failed update.
+        let info = state.workbook_info().expect("workbook info");
+        let sheet1 = info
+            .sheets
+            .iter()
+            .find(|s| s.id == "Sheet1")
+            .expect("Sheet1 exists");
+        assert_eq!(sheet1.visibility, SheetVisibility::Visible);
+    }
+
+    #[test]
+    fn set_sheet_tab_color_rejects_non_rgb_updates() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+
+        let mut state = AppState::new();
+        state
+            .load_workbook_persistent(workbook, WorkbookPersistenceLocation::InMemory)
+            .expect("load persistent workbook");
+
+        let err = state
+            .set_sheet_tab_color(
+                "Sheet1",
+                Some(TabColor {
+                    theme: Some(1),
+                    ..Default::default()
+                }),
+            )
+            .expect_err("expected non-RGB tab color update to fail");
+
+        match err {
+            AppStateError::WhatIf(msg) => assert!(
+                msg.contains("ARGB"),
+                "expected error message to mention ARGB, got: {msg}"
+            ),
+            other => panic!("expected AppStateError::WhatIf, got {other:?}"),
+        }
+
+        // Ensure failed update doesn't mutate in-memory state.
+        let info = state.workbook_info().expect("workbook info");
+        let sheet1 = info
+            .sheets
+            .iter()
+            .find(|s| s.id == "Sheet1")
+            .expect("Sheet1 exists");
+        assert_eq!(sheet1.tab_color, None);
+    }
+
+    #[test]
+    fn sheet_visibility_and_tab_color_survive_persistent_recovery() {
+        let mut model = formula_model::Workbook::new();
+        model.add_sheet("Sheet1").expect("add sheet");
+        model.add_sheet("Sheet2").expect("add sheet");
+
+        let mut buf = std::io::Cursor::new(Vec::new());
+        formula_xlsx::write_workbook_to_writer(&model, &mut buf).expect("write xlsx bytes");
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let xlsx_path = tmp.path().join("sheet-meta.xlsx");
+        std::fs::write(&xlsx_path, buf.into_inner()).expect("write xlsx file");
+
+        let db_path = tmp.path().join("autosave.sqlite");
+        let location = WorkbookPersistenceLocation::OnDisk(db_path);
+
+        {
+            let workbook = read_xlsx_blocking(&xlsx_path).expect("read xlsx workbook");
+            let mut state = AppState::new();
+            state
+                .load_workbook_persistent(workbook, location.clone())
+                .expect("load persistent workbook");
+
+            state
+                .set_sheet_visibility("Sheet2", SheetVisibility::Hidden)
+                .expect("hide Sheet2");
+            state
+                .set_sheet_tab_color(
+                    "Sheet1",
+                    Some(TabColor {
+                        rgb: Some("FFFF0000".to_string()),
+                        ..Default::default()
+                    }),
+                )
+                .expect("set Sheet1 tab color");
+
+            let info = state.workbook_info().expect("workbook info");
+            let sheet2 = info
+                .sheets
+                .iter()
+                .find(|s| s.id == "Sheet2")
+                .expect("Sheet2 exists");
+            assert_eq!(sheet2.visibility, SheetVisibility::Hidden);
+            let sheet1 = info
+                .sheets
+                .iter()
+                .find(|s| s.id == "Sheet1")
+                .expect("Sheet1 exists");
+            assert_eq!(
+                sheet1.tab_color.as_ref().and_then(|c| c.rgb.as_deref()),
+                Some("FFFF0000")
+            );
+        }
+
+        let workbook = read_xlsx_blocking(&xlsx_path).expect("re-read xlsx workbook");
+        let mut state = AppState::new();
+        state
+            .load_workbook_persistent(workbook, location)
+            .expect("recover workbook from autosave storage");
+
+        let info = state.workbook_info().expect("workbook info");
+        let sheet2 = info
+            .sheets
+            .iter()
+            .find(|s| s.id == "Sheet2")
+            .expect("Sheet2 exists");
+        assert_eq!(sheet2.visibility, SheetVisibility::Hidden);
+        let sheet1 = info
+            .sheets
+            .iter()
+            .find(|s| s.id == "Sheet1")
+            .expect("Sheet1 exists");
+        assert_eq!(
+            sheet1.tab_color.as_ref().and_then(|c| c.rgb.as_deref()),
+            Some("FFFF0000")
+        );
+    }
+
+    #[test]
     fn xlsb_provenance_survives_persistent_recovery() {
         let fixture_path = Path::new(concat!(
             env!("CARGO_MANIFEST_DIR"),
