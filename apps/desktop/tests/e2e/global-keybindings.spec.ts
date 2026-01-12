@@ -49,6 +49,22 @@ test.describe("global keybindings", () => {
     await page.keyboard.press("Escape");
     await expect(page.getByTestId("goto-dialog")).not.toBeVisible();
 
+    // Cmd+H is reserved for the system "Hide" shortcut on macOS and should never open Replace.
+    // Dispatch directly to avoid browser-level interception.
+    await page.evaluate(() => {
+      const target = document.activeElement ?? window;
+      target.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "h",
+          metaKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    await page.waitForTimeout(100);
+    await expect(page.getByTestId("replace-dialog")).not.toBeVisible();
+
     // Ctrl+H (Win/Linux) / Cmd+Option+F (macOS) opens Replace.
     // Avoid using Playwright's `keyboard.press()` here since Ctrl+H / Cmd+Option+F may be
     // intercepted by the browser shell (History, toolbar focus, etc.) in some environments.
