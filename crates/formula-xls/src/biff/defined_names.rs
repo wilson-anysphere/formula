@@ -553,6 +553,16 @@ impl<'a> FragmentCursor<'a> {
                         out.extend_from_slice(&extra);
                     }
                 }
+                // Ptg* token 0x18 (and class variants) has an opaque 5-byte payload.
+                //
+                // Excel uses this token in some formulas (calamine treats it as a 5-byte payload
+                // and skips it). We treat it as an uninterpreted fixed-size token so we can keep
+                // the token stream aligned and continue to correctly skip the continued-segment
+                // option flags byte injected when a later `PtgStr` crosses a `CONTINUE` boundary.
+                0x18 | 0x38 | 0x58 | 0x78 => {
+                    let bytes = self.read_bytes(5)?;
+                    out.extend_from_slice(&bytes);
+                }
                 // PtgAttr (evaluation hints / jump tables).
                 //
                 // Payload: [grbit: u8][wAttr: u16] + optional jump table for tAttrChoose.
@@ -1003,6 +1013,56 @@ mod tests {
         continue_payload.push(0); // continued segment option flags (fHighByte=0)
         continue_payload.extend_from_slice(second_chars);
         continue_payload.push(0x08); // PtgConcat
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_NAME, &[header, name_str, first_rgce.to_vec()].concat()),
+            record(records::RECORD_CONTINUE, &continue_payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let allows_continuation = |id: u16| id == RECORD_NAME;
+        let iter = records::LogicalBiffRecordIter::new(&stream, allows_continuation);
+        let record = iter
+            .filter_map(Result::ok)
+            .find(|r| r.record_id == RECORD_NAME)
+            .expect("NAME record");
+        let raw = parse_biff8_name_record(&record, 1252, &[]).expect("parse NAME");
+        assert_eq!(raw.name, name);
+        assert_eq!(raw.rgce, rgce);
+    }
+
+    #[test]
+    fn parses_name_record_with_ptg18_before_continued_ptgstr_token() {
+        let name = "Ptg18Str";
+        let literal = "ABCDE";
+
+        let rgce: Vec<u8> = [
+            vec![0x18, 0x11, 0x22, 0x33, 0x44, 0x55], // ptg=0x18 + 5-byte opaque payload
+            vec![0x17, literal.len() as u8, 0u8],      // PtgStr + cch + flags (compressed)
+            literal.as_bytes().to_vec(),
+        ]
+        .concat();
+
+        let mut header = Vec::new();
+        header.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        header.push(0); // chKey
+        header.push(name.len() as u8); // cch
+        header.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        header.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        header.extend_from_slice(&0u16.to_le_bytes()); // itab
+        header.extend_from_slice(&[0, 0, 0, 0]); // cchCustMenu, cchDescription, cchHelpTopic, cchStatusText
+
+        let name_str = xl_unicode_string_no_cch_compressed(name);
+
+        // Split the PtgStr character bytes across the CONTINUE boundary after "AB".
+        let first_rgce = &rgce[..(6 + 3 + 2)]; // ptg18 (6) + ptgstr header (3) + "AB" (2)
+        let second_chars = &literal.as_bytes()[2..]; // "CDE"
+
+        let mut continue_payload = Vec::new();
+        continue_payload.push(0); // continued segment option flags (fHighByte=0)
+        continue_payload.extend_from_slice(second_chars);
 
         let stream = [
             record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
