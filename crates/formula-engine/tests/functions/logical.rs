@@ -5,16 +5,32 @@ use super::harness::{assert_number, TestSheet};
 #[test]
 fn true_false_support_literal_and_zero_arg_function_forms() {
     let mut sheet = TestSheet::new();
+    assert_eq!(sheet.bytecode_program_count(), 0);
 
     assert_eq!(sheet.eval("=TRUE()"), Value::Bool(true));
     assert_eq!(sheet.eval("=FALSE()"), Value::Bool(false));
+    assert_eq!(
+        sheet.bytecode_program_count(),
+        2,
+        "expected TRUE()/FALSE() to compile to bytecode"
+    );
 
     // Literal forms still work.
     assert_eq!(sheet.eval("=TRUE"), Value::Bool(true));
     assert_eq!(sheet.eval("=FALSE"), Value::Bool(false));
+    assert_eq!(
+        sheet.bytecode_program_count(),
+        4,
+        "expected TRUE/FALSE literal forms to compile to bytecode"
+    );
 
     // Ensure `TRUE()` parses/executes as a function call (Excel-compatible).
     assert_number(&sheet.eval("=IF(TRUE(),1,2)"), 1.0);
+    assert_eq!(
+        sheet.bytecode_program_count(),
+        5,
+        "expected IF(TRUE(),...) to compile to bytecode"
+    );
 }
 
 #[test]
