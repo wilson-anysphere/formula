@@ -3,9 +3,11 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { builtinModules, createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-const repoRoot = path.resolve(new URL(".", import.meta.url).pathname, "..");
+// `import.meta.url` is a file URL; use `fileURLToPath` to avoid platform-specific quirks
+// (e.g. Windows drive letter handling) when turning it into a filesystem path.
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
 
 /**
