@@ -256,5 +256,59 @@ test.describe("Extension clipboard DLP (taint tracking)", () => {
       .poll(() => page.evaluate(async () => (await navigator.clipboard.readText()).trim()), { timeout: 10_000 })
       .toBe("hello-from-extension");
   });
-});
 
+  test("sampleHello.copySumToClipboard is blocked when the selection is Restricted", async ({ page }) => {
+    const extensionId = "formula.sample-hello";
+    await grantExtensionPermissions(page, extensionId, ["ui.commands", "cells.read", "clipboard"]);
+    await setRestrictedRangeClassification(page, {
+      documentId: "local-workbook",
+      sheetId: "Sheet1",
+      range: { start: { row: 0, col: 0 }, end: { row: 1, col: 1 } },
+    });
+
+    await gotoDesktop(page);
+    await assertClipboardSupportedOrSkip(page);
+
+    const marker = `__formula_clipboard_marker__${Math.random().toString(16).slice(2)}`;
+    await page.evaluate(async (marker) => {
+      await navigator.clipboard.writeText(marker);
+    }, marker);
+
+    const result = await page.evaluate(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const manager: any = (window as any).__formulaExtensionHostManager;
+      if (!manager) throw new Error("Missing window.__formulaExtensionHostManager (desktop e2e harness)");
+
+      // Ensure the host is booted (DesktopExtensionHostManager lazily loads extensions).
+      if (!manager.ready) {
+        await manager.loadBuiltInExtensions();
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const app: any = (window as any).__formulaApp;
+      if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
+      const sheetId = app.getCurrentSheetId();
+
+      app.getDocument().setCellValue(sheetId, { row: 0, col: 0 }, 1);
+      app.getDocument().setCellValue(sheetId, { row: 0, col: 1 }, 2);
+      app.getDocument().setCellValue(sheetId, { row: 1, col: 0 }, 3);
+      app.getDocument().setCellValue(sheetId, { row: 1, col: 1 }, 4);
+
+      app.selectRange({ sheetId, range: { startRow: 0, startCol: 0, endRow: 1, endCol: 1 } });
+
+      let errorMessage = "";
+      try {
+        await manager.host.executeCommand("sampleHello.copySumToClipboard");
+      } catch (err: any) {
+        errorMessage = String(err?.message ?? err);
+      }
+
+      return { errorMessage };
+    });
+
+    expect(result.errorMessage).toContain("Clipboard copy is blocked");
+
+    const clipboardText = await page.evaluate(async () => await navigator.clipboard.readText());
+    expect(clipboardText).toBe(marker);
+  });
+});
