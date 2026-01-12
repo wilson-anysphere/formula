@@ -85,6 +85,12 @@ over the VBA project streams in `xl/vbaProject.bin`. As a result:
   verifying/binding a signature stored in the signature part.
 - If you only have the signature-part bytes (no project bytes), you can still verify the PKCS#7/CMS
   signature, but binding cannot be evaluated and should be treated as `Unknown`.
+- When the signature-part payload is an **OLE/CFB container** containing a `\x05DigitalSignature*`
+  stream, `formula-vba` can inspect the contained stream name to select the correct binding rules
+  (`DigitalSignatureExt` => v3; `DigitalSignatureEx`/`DigitalSignature` => legacy).
+- When the signature-part payload is **raw PKCS#7/CMS bytes** (not an OLE container), the original
+  stream name is unknown; binding verification falls back to a digest-length heuristic (16 bytes =>
+  legacy MD5 binding; otherwise => v3).
 
 ## Signature stream payload variants (what the bytes look like)
 
@@ -166,8 +172,9 @@ That `(hash_oid, digest_bytes)` pair is the “signed digest” we extract from 
 - For v1/v2 signature streams (`\x05DigitalSignature` / `\x05DigitalSignatureEx`), the digest bytes
   we bind against are an **MD5 digest (16 bytes)** per MS-OSHARED §4.3, even if `hash_oid` indicates
   SHA-256.
-- For v3 signature streams (`\x05DigitalSignatureExt`), the digest bytes are a **SHA-256 digest (32
-  bytes)** over the v3 `ProjectNormalizedData` transcript (MS-OVBA §2.4.2.5/§2.4.2.6).
+- For v3 signature streams (`\x05DigitalSignatureExt`), the digest bytes are a hash over the v3
+  `ProjectNormalizedData` transcript (MS-OVBA §2.4.2.5/§2.4.2.6), using the digest algorithm OID
+  stored in `DigestInfo.digestAlgorithm.algorithm` (typically SHA-256 / 32 bytes).
 
 ### Relevant ASN.1 shapes (high level)
 
@@ -245,7 +252,7 @@ MS-OVBA has three on-disk signature stream names. Their **contents-hash version*
 |---|---:|---|---|---:|
 | `\x05DigitalSignature` | v1 | **Content Hash** (§2.4.2.3): `MD5(ContentNormalizedData)` | MD5 | 16 |
 | `\x05DigitalSignatureEx` | v2 | **Agile Content Hash** (§2.4.2.4): `MD5(ContentNormalizedData \|\| FormsNormalizedData)` | MD5 | 16 |
-| `\x05DigitalSignatureExt` | v3 | v3 digest (SHA-256 over `ProjectNormalizedData`; see §2.4.2.5/§2.4.2.6) | SHA-256 | 32 |
+| `\x05DigitalSignatureExt` | v3 | v3 digest (hash over `ProjectNormalizedData`; see §2.4.2.5/§2.4.2.6) | from `DigestInfo.algorithm` (typically SHA-256) | typically 32 |
 
 Important: for v1/v2, Office can store **MD5 digest bytes** even when
 `DigestInfo.digestAlgorithm.algorithm` is *not* the MD5 OID (see MS-OSHARED §4.3, and the comments
