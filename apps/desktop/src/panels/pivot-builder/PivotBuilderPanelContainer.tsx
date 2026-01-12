@@ -14,6 +14,7 @@ import type { PivotTableSummary } from "../../tauri/pivotBackend.js";
 import { TauriPivotBackend } from "../../tauri/pivotBackend.js";
 import { applyPivotCellUpdates } from "../../pivots/applyUpdates.js";
 import * as nativeDialogs from "../../tauri/nativeDialogs.js";
+import type { SheetNameResolver } from "../../sheet/sheetNameResolver";
 
 type RangeRect = { startRow: number; startCol: number; endRow: number; endCol: number };
 
@@ -28,10 +29,18 @@ type Props = {
   getSelection?: () => SelectionSnapshot | null;
   invoke?: TauriInvoke;
   drainBackendSync?: () => Promise<void>;
+  sheetNameResolver?: SheetNameResolver | null;
 };
 
 function cellToA1(row: number, col: number): string {
   return `${colToName(col)}${row + 1}`;
+}
+
+function formatSheetNameForA1(sheetName: string): string {
+  const name = String(sheetName ?? "").trim();
+  if (!name) return "";
+  if (/^[A-Za-z0-9_]+$/.test(name)) return name;
+  return `'${name.replace(/'/g, "''")}'`;
 }
 
 function rangeToA1(range: RangeRect): string {
@@ -167,6 +176,7 @@ function estimatePivotOutputRect(params: {
 
 export function PivotBuilderPanelContainer(props: Props) {
   const doc = props.getDocumentController();
+  const sheetNameResolver = props.sheetNameResolver ?? null;
 
   const activeSheetId = props.getActiveSheetId?.() ?? doc?.getSheetIds?.()?.[0] ?? "Sheet1";
 
@@ -192,6 +202,20 @@ export function PivotBuilderPanelContainer(props: Props) {
     const ids = doc?.getSheetIds?.() ?? [];
     return ids.length > 0 ? ids : ["Sheet1"];
   })();
+
+  const sheetDisplayName = useCallback(
+    (sheetId: string): string => {
+      const id = String(sheetId ?? "").trim();
+      if (!id) return "";
+      return sheetNameResolver?.getSheetNameById(id) ?? id;
+    },
+    [sheetNameResolver],
+  );
+
+  const existingSheetNames = useMemo(
+    () => sheetIds.map((id) => sheetDisplayName(id)).filter(Boolean),
+    [sheetDisplayName, sheetIds],
+  );
 
   const canEditCell: ((cell: { sheetId: string; row: number; col: number }) => boolean) | null =
     typeof (doc as any)?.canEditCell === "function" ? ((doc as any).canEditCell as any) : null;
@@ -380,15 +404,18 @@ export function PivotBuilderPanelContainer(props: Props) {
 
   const newSheetNameError = useMemo(() => {
     if (destinationKind !== "new") return null;
-    return getSheetNameValidationErrorMessage(newSheetName, { existingNames: sheetIds });
-  }, [destinationKind, newSheetName, sheetIds]);
+    return getSheetNameValidationErrorMessage(newSheetName, { existingNames: existingSheetNames });
+  }, [destinationKind, existingSheetNames, newSheetName]);
 
   const canCreate = !busy && !sourceError && !fieldsError && availableFields.length > 0 && !newSheetNameError;
 
   const destinationSummary = useMemo(() => {
-    if (destinationKind === "new") return `${newSheetName}!${destCellA1}`;
-    return `${destSheetId}!${destCellA1}`;
-  }, [destCellA1, destSheetId, destinationKind, newSheetName]);
+    if (destinationKind === "new") {
+      return `${formatSheetNameForA1(newSheetName)}!${destCellA1}`;
+    }
+    const sheetName = sheetDisplayName(destSheetId);
+    return `${formatSheetNameForA1(sheetName || destSheetId)}!${destCellA1}`;
+  }, [destCellA1, destSheetId, destinationKind, newSheetName, sheetDisplayName]);
 
   const guardDestination = useCallback(
     async (cfg: PivotTableConfig, dest: { sheetId: string; startRow: number; startCol: number }): Promise<boolean> => {
@@ -473,7 +500,7 @@ export function PivotBuilderPanelContainer(props: Props) {
       }
 
       if (destinationKind === "new") {
-        const sheetError = getSheetNameValidationErrorMessage(newSheetName, { existingNames: sheetIds });
+        const sheetError = getSheetNameValidationErrorMessage(newSheetName, { existingNames: existingSheetNames });
         if (sheetError) {
           setActionError(sheetError);
           return;
@@ -551,6 +578,7 @@ export function PivotBuilderPanelContainer(props: Props) {
       destSheetId,
       destinationKind,
       doc,
+      existingSheetNames,
       fieldsError,
       guardDestination,
       loadPivotList,
@@ -620,7 +648,7 @@ export function PivotBuilderPanelContainer(props: Props) {
               >
                 {sheetIds.map((id) => (
                   <option key={id} value={id}>
-                    {id}
+                    {sheetDisplayName(id) || id}
                   </option>
                 ))}
               </select>
@@ -691,7 +719,7 @@ export function PivotBuilderPanelContainer(props: Props) {
                 >
                   {sheetIds.map((id) => (
                     <option key={id} value={id}>
-                      {id}
+                      {sheetDisplayName(id) || id}
                     </option>
                   ))}
                 </select>
@@ -764,13 +792,13 @@ export function PivotBuilderPanelContainer(props: Props) {
                 <div style={{ display: "grid" }}>
                   <div style={{ fontWeight: 600 }}>{p.name}</div>
                   <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-                    {p.source_sheet_id}!{rangeToA1({
+                    {formatSheetNameForA1(sheetDisplayName(p.source_sheet_id) || p.source_sheet_id)}!{rangeToA1({
                       startRow: p.source_range.start_row,
                       startCol: p.source_range.start_col,
                       endRow: p.source_range.end_row,
                       endCol: p.source_range.end_col,
                     })}{" "}
-                    → {p.destination.sheet_id}!{cellToA1(p.destination.row, p.destination.col)}
+                    → {formatSheetNameForA1(sheetDisplayName(p.destination.sheet_id) || p.destination.sheet_id)}!{cellToA1(p.destination.row, p.destination.col)}
                   </div>
                 </div>
                 <button

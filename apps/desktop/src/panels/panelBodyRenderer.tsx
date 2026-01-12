@@ -566,6 +566,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
           getDocumentController={options.getDocumentController}
           getActiveSheetId={options.getActiveSheetId}
           getSelection={options.getSelection as any}
+          sheetNameResolver={options.sheetNameResolver ?? null}
           invoke={options.invoke as any}
           drainBackendSync={options.drainBackendSync}
         />,
