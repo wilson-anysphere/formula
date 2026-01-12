@@ -611,15 +611,10 @@ impl AppState {
                         .position(|sheet| sheet.id.eq_ignore_ascii_case(after_id))
                         .map(|idx| idx.saturating_add(1))
                 })
-                .unwrap_or_else(|| index.unwrap_or(workbook.sheets.len()))
-                .min(workbook.sheets.len());
+                .unwrap_or_else(|| index.unwrap_or(sheet_count_before))
+                .min(sheet_count_before);
 
-            (
-                sheet_id.to_string(),
-                trimmed.to_string(),
-                insert_index,
-                sheet_count_before,
-            )
+            (sheet_id.to_string(), trimmed.to_string(), insert_index, sheet_count_before)
         };
 
         if let Some(persistent) = self.persistent.as_mut() {
@@ -4583,6 +4578,63 @@ mod tests {
             )
             .expect("add sheet succeeds");
         let inserted_id = inserted.id;
+
+        state
+            .set_cell(&inserted_id, 0, 0, Some(JsonValue::from(10)), None)
+            .expect("set inserted A1");
+
+        let b1_after = state.get_cell(&sheet1_id, 0, 1).expect("read Sheet1!B1 after insert");
+        assert_eq!(b1_after.value, CellScalar::Number(16.0));
+    }
+
+    #[test]
+    fn add_sheet_with_id_rebuilds_engine_order_for_3d_references() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+        workbook.add_sheet("Sheet3".to_string());
+
+        let sheet1_id = workbook.sheets[0].id.clone();
+        let sheet2_id = workbook.sheets[1].id.clone();
+        let sheet3_id = workbook.sheets[2].id.clone();
+
+        workbook
+            .sheet_mut(&sheet1_id)
+            .unwrap()
+            .set_cell(0, 0, Cell::from_literal(Some(CellScalar::Number(1.0))));
+        workbook
+            .sheet_mut(&sheet2_id)
+            .unwrap()
+            .set_cell(0, 0, Cell::from_literal(Some(CellScalar::Number(2.0))));
+        workbook
+            .sheet_mut(&sheet3_id)
+            .unwrap()
+            .set_cell(0, 0, Cell::from_literal(Some(CellScalar::Number(3.0))));
+
+        workbook
+            .sheet_mut(&sheet1_id)
+            .unwrap()
+            .set_cell(
+                0,
+                1,
+                Cell::from_formula("=SUM(Sheet1:Sheet3!A1)".to_string()),
+            );
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let b1_before = state.get_cell(&sheet1_id, 0, 1).expect("read Sheet1!B1");
+        assert_eq!(b1_before.value, CellScalar::Number(6.0));
+
+        let inserted_id = "InsertedSheet".to_string();
+        state
+            .add_sheet_with_id(
+                inserted_id.clone(),
+                "Inserted".to_string(),
+                Some(sheet1_id.clone()),
+                None,
+            )
+            .expect("add sheet succeeds");
 
         state
             .set_cell(&inserted_id, 0, 0, Some(JsonValue::from(10)), None)
