@@ -214,6 +214,58 @@ fn oddfprice_zero_coupon_rate_reduces_to_discounted_redemption() {
 }
 
 #[test]
+fn oddfprice_eom_schedule_does_not_drift_off_maturity_basis1() {
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    // Regression: naive EDATE chaining from `first_coupon` drifts off maturity:
+    // 2020-04-30 + 3 months = 2020-07-30 (never hits 2020-07-31).
+    //
+    // Excel anchors the schedule on maturity and uses EOM stepping, producing:
+    // 2020-04-30, 2020-07-31.
+    let issue = serial(2020, 1, 15, system);
+    let settlement = serial(2020, 2, 15, system);
+    let first_coupon = serial(2020, 4, 30, system);
+    let maturity = serial(2020, 7, 31, system);
+
+    let rate = 0.0;
+    let yld = 0.1;
+    let redemption = 100.0;
+    let frequency = 4;
+    let basis = 1;
+
+    let price = oddfprice(
+        settlement,
+        maturity,
+        issue,
+        first_coupon,
+        rate,
+        yld,
+        redemption,
+        frequency,
+        basis,
+        system,
+    )
+    .expect("ODDFPRICE should accept EOM schedules without drifting");
+    assert!(price.is_finite());
+
+    // With rate=0, coupons and accrued interest are 0:
+    // P = redemption / (1 + yld/frequency)^((N-1) + DSC/E)
+    //
+    // For this schedule:
+    // - Coupon dates: 2020-04-30, 2020-07-31 => N = 2
+    // - prev_coupon(F) under EOM rule is 2020-01-31 => E = 90 (basis=1)
+    let prev_coupon = serial(2020, 1, 31, system);
+    let e = (first_coupon - prev_coupon) as f64;
+    assert_eq!(e, 90.0);
+    let dsc = (first_coupon - settlement) as f64;
+    let n = 2.0;
+    let exponent = (n - 1.0) + dsc / e;
+    let y = yld / (frequency as f64);
+    let expected = redemption / (1.0 + y).powf(exponent);
+    assert_close(price, expected, 1e-12);
+}
+
+#[test]
 fn oddlprice_zero_coupon_rate_reduces_to_discounted_redemption() {
     let system = ExcelDateSystem::EXCEL_1900;
 
@@ -248,6 +300,52 @@ fn oddlprice_zero_coupon_rate_reduces_to_discounted_redemption() {
     // Basis 0 (30/360), frequency=2: E=180, DSC=90 => exponent=0.5.
     let y = yld / (frequency as f64);
     let expected = redemption / (1.0 + y).powf(0.5);
+    assert_close(price, expected, 1e-12);
+}
+
+#[test]
+fn oddlprice_eom_prev_coupon_basis1_uses_month_end() {
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    // Regression: prev coupon for 2020-04-30 on a quarterly schedule should be 2020-01-31 under
+    // Excel's EOM rule. Naive EDATE stepping yields 2020-01-30, changing E for basis=1.
+    let last_interest = serial(2020, 4, 30, system);
+    let settlement = serial(2020, 5, 15, system);
+    let maturity = serial(2020, 7, 31, system);
+
+    let rate = 0.0;
+    let yld = 0.1;
+    let redemption = 100.0;
+    let frequency = 4;
+    let basis = 1;
+
+    let price = oddlprice(
+        settlement,
+        maturity,
+        last_interest,
+        rate,
+        yld,
+        redemption,
+        frequency,
+        basis,
+        system,
+    )
+    .expect("ODDLPRICE should use EOM-aware prev_coupon for basis=1");
+    assert!(price.is_finite());
+
+    // With rate=0, coupons and accrued interest are 0:
+    // P = redemption / (1 + yld/frequency)^(DSM/E)
+    //
+    // Under EOM rule:
+    // - prev_coupon(L) = 2020-01-31
+    // - E = 90 days (basis=1)
+    let prev_coupon = serial(2020, 1, 31, system);
+    let e = (last_interest - prev_coupon) as f64;
+    assert_eq!(e, 90.0);
+    let dsm = (maturity - settlement) as f64;
+    let exponent = dsm / e;
+    let y = yld / (frequency as f64);
+    let expected = redemption / (1.0 + y).powf(exponent);
     assert_close(price, expected, 1e-12);
 }
 

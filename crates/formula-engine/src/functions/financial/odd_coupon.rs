@@ -6,6 +6,7 @@ use crate::functions::financial::iterative::{newton_raphson, EXCEL_ITERATION_TOL
 const MAX_ITER_ODD_YIELD_NEWTON: usize = 50;
 const MAX_ITER_ODD_YIELD_BISECT: usize = 100;
 const MAX_BRACKET_EXPANSIONS: usize = 100;
+const MAX_COUPON_STEPS: usize = 50_000;
 const YIELD_UPPER_CAP: f64 = 1.0e6;
 const PRICE_RESIDUAL_TOLERANCE: f64 = 1.0e-6;
 
@@ -222,10 +223,9 @@ fn coupon_schedule_from_maturity(
     // not the first coupon date (which may be clamped in shorter months).
     let mut dates_rev = Vec::new();
 
-    // Hard cap to avoid pathological loops on invalid inputs. Excel itself errors in these cases.
-    const MAX_COUPON_DATES: usize = 1000;
-
-    for k in 0..MAX_COUPON_DATES {
+    // Hard cap to avoid pathological loops on invalid inputs. This must be large enough to cover
+    // Excel's full date range (1900..=9999) at quarterly frequency.
+    for k in 0..MAX_COUPON_STEPS {
         let months_back = i32::try_from(k).map_err(|_| ExcelError::Num)?;
         let offset = months_back
             .checked_mul(months_per_period)
