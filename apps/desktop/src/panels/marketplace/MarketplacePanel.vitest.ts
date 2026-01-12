@@ -346,7 +346,10 @@ describe("MarketplacePanel", () => {
     expect(extensionManager.update).toHaveBeenCalledWith("formula.sample-hello");
     expect(extensionManager.repair).not.toHaveBeenCalled();
 
-    await waitFor(() => container.textContent?.includes("Updated") ?? false);
+    await waitFor(() => container.textContent?.includes("v1.0.1") ?? false);
+    expect(Array.from(container.querySelectorAll(".marketplace-badge")).map((el) => el.textContent)).not.toContain(
+      "incompatible",
+    );
   });
 
   it("does not fall back to repair() when update() is a no-op for an engine mismatch", async () => {
@@ -426,6 +429,9 @@ describe("MarketplacePanel", () => {
     expect(extensionManager.update).toHaveBeenCalledWith("formula.sample-hello");
     expect(extensionManager.repair).not.toHaveBeenCalled();
 
-    await waitFor(() => container.textContent?.includes("No compatible update") ?? false);
+    // The panel rerenders after the attempt so buttons remain available even though nothing changed.
+    await waitFor(() => Array.from(container.querySelectorAll("button")).some((b) => b.textContent === "Uninstall"));
+    expect(Array.from(container.querySelectorAll(".marketplace-badge")).map((el) => el.textContent)).toContain("incompatible");
+    expect(Array.from(container.querySelectorAll("button")).some((b) => b.textContent === "Repair")).toBe(true);
   });
 });
