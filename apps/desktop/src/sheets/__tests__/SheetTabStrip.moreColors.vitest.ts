@@ -107,4 +107,63 @@ describe("SheetTabStrip tab color picker", () => {
 
     act(() => root.unmount());
   });
+
+  it("stores palette colors as Excel/OOXML ARGB even when CSS tokens are unavailable", async () => {
+    // In jsdom there are no real CSS variables; SheetTabStrip should fall back to
+    // hardcoded hex values and still be able to convert to ARGB.
+    const store = new WorkbookSheetStore([{ id: "s1", name: "Sheet1", visibility: "visible" }]);
+
+    const { container, root } = renderSheetTabStrip(store);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const tab = container.querySelector<HTMLButtonElement>('[data-testid="sheet-tab-s1"]');
+    expect(tab).toBeInstanceOf(HTMLButtonElement);
+
+    act(() => {
+      tab!.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: 10,
+          clientY: 10,
+        }),
+      );
+    });
+
+    const overlay = document.querySelector<HTMLDivElement>('[data-testid="sheet-tab-context-menu"]');
+    expect(overlay).toBeInstanceOf(HTMLDivElement);
+    expect(overlay?.hidden).toBe(false);
+
+    const tabColorButton = Array.from(overlay!.querySelectorAll<HTMLButtonElement>(".context-menu__item")).find(
+      (btn) => btn.querySelector(".context-menu__label")?.textContent === "Tab Color",
+    );
+    expect(tabColorButton).toBeInstanceOf(HTMLButtonElement);
+
+    act(() => {
+      tabColorButton!.click();
+    });
+
+    const submenu = overlay!.querySelector<HTMLDivElement>(".context-menu__submenu");
+    expect(submenu).toBeInstanceOf(HTMLDivElement);
+
+    const redButton = Array.from(submenu!.querySelectorAll<HTMLButtonElement>(".context-menu__item")).find(
+      (btn) => btn.querySelector(".context-menu__label")?.textContent === "Red",
+    );
+    expect(redButton).toBeInstanceOf(HTMLButtonElement);
+
+    act(() => {
+      redButton!.click();
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(store.getById("s1")?.tabColor?.rgb).toBe("FFFF0000");
+
+    act(() => root.unmount());
+  });
 });
