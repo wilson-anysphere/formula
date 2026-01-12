@@ -736,7 +736,11 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
             yCell.set("value", null);
           } else if (normalizedCell.value !== undefined) {
             yCell.set("value", normalizedCell.value);
-            yCell.delete("formula");
+            // When applying branch snapshots (global checkout/merge semantics),
+            // represent formula clears as an explicit `null` marker instead of a
+            // map delete. Map deletes don't create Yjs Items, which prevents
+            // later overwrites from deterministically referencing the clear.
+            yCell.set("formula", null);
           } else {
             yCell.delete("value");
             yCell.delete("formula");

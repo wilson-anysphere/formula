@@ -66,6 +66,14 @@ test("yjs document adapter: normalizes formulas + handles legacy cell keys", () 
   assert.equal(cells2.has("Sheet1:0,1"), false);
   assert.equal(cells2.has("r0c2"), false);
 
+  const a1 = /** @type {Y.Map<any>} */ (cells2.get("Sheet1:0:0"));
+  assert.ok(a1);
+  assert.equal(a1.get("value"), 123);
+  // Branch snapshot application uses an explicit `null` marker for formula clears
+  // so the operation is represented in the CRDT history (map deletes don't
+  // create items).
+  assert.equal(a1.get("formula"), null);
+
   const b1 = /** @type {Y.Map<any>} */ (cells2.get("Sheet1:0:1"));
   assert.ok(b1);
   assert.equal(b1.get("formula"), "=1+1");
