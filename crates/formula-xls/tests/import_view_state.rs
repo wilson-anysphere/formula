@@ -29,6 +29,9 @@ fn imports_workbook_and_sheet_view_state_from_biff() {
     // Workbook WINDOW1.activeTab (itabCur) selects the second sheet.
     assert_eq!(result.workbook.view.active_sheet_id, Some(sheet2.id));
     assert_ne!(sheet1.id, sheet2.id);
+    // The fixture's WINDOW1 does not set window geometry; ensure we don't persist a meaningless
+    // 0x0 Normal window.
+    assert!(result.workbook.view.window.is_none());
 
     // SCL zoom = 200% => 2.0
     assert!((sheet2.zoom - 2.0).abs() < f32::EPSILON);
@@ -53,4 +56,3 @@ fn imports_workbook_and_sheet_view_state_from_biff() {
     assert_eq!(selection.active_cell, CellRef::new(2, 2)); // C3
     assert_eq!(selection.ranges, vec![Range::new(CellRef::new(2, 2), CellRef::new(2, 2))]);
 }
-
