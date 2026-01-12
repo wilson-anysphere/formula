@@ -2253,7 +2253,7 @@ fn write_worksheet_xml(
         shared_lookup,
         style_to_xf,
         cell_meta_sheet_ids,
-        None,
+        Some(&sheet.outline),
         changed_formula_cells,
     );
 
@@ -2262,6 +2262,26 @@ fn write_worksheet_xml(
     xml.push_str(
         r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">"#,
     );
+    if sheet.outline != Outline::default() {
+        xml.push_str("<sheetPr>");
+        xml.push_str("<outlinePr");
+        xml.push_str(if sheet.outline.pr.summary_below {
+            r#" summaryBelow="1""#
+        } else {
+            r#" summaryBelow="0""#
+        });
+        xml.push_str(if sheet.outline.pr.summary_right {
+            r#" summaryRight="1""#
+        } else {
+            r#" summaryRight="0""#
+        });
+        xml.push_str(if sheet.outline.pr.show_outline_symbols {
+            r#" showOutlineSymbols="1""#
+        } else {
+            r#" showOutlineSymbols="0""#
+        });
+        xml.push_str("/></sheetPr>");
+    }
     xml.push_str(&format!(r#"<dimension ref="{dimension}"/>"#));
     if !cols_xml.is_empty() {
         xml.push_str(&cols_xml);
@@ -2532,22 +2552,70 @@ fn patch_worksheet_dimension(
     Ok(writer.into_inner())
 }
 
-fn render_cols(sheet: &Worksheet, prefix: Option<&str>) -> String {
-    if sheet.col_properties.is_empty() {
-        return String::new();
-    }
+#[derive(Clone, Debug, PartialEq)]
+struct ColXmlProps {
+    width: Option<f32>,
+    hidden: bool,
+    outline_level: u8,
+    collapsed: bool,
+}
 
+fn render_cols(sheet: &Worksheet, prefix: Option<&str>) -> String {
     let cols_tag = crate::xml::prefixed_tag(prefix, "cols");
     let col_tag = crate::xml::prefixed_tag(prefix, "col");
+
+    // OOXML column indices are 1-based. The model stores `col_properties` 0-based, and
+    // `outline.cols` 1-based.
+    let mut col_xml_props: BTreeMap<u32, ColXmlProps> = BTreeMap::new();
+    for (col0, props) in sheet.col_properties.iter() {
+        let col_1 = col0.saturating_add(1);
+        if col_1 == 0 || col_1 > formula_model::EXCEL_MAX_COLS {
+            continue;
+        }
+        col_xml_props.insert(
+            col_1,
+            ColXmlProps {
+                width: props.width,
+                hidden: props.hidden,
+                outline_level: 0,
+                collapsed: false,
+            },
+        );
+    }
+
+    for (col_1, entry) in sheet.outline.cols.iter() {
+        if col_1 == 0 || col_1 > formula_model::EXCEL_MAX_COLS {
+            continue;
+        }
+        if entry.level == 0 && !entry.hidden.is_hidden() && !entry.collapsed {
+            continue;
+        }
+        col_xml_props
+            .entry(col_1)
+            .and_modify(|props| {
+                props.outline_level = entry.level;
+                props.collapsed = entry.collapsed;
+                props.hidden |= entry.hidden.is_hidden();
+            })
+            .or_insert_with(|| ColXmlProps {
+                width: None,
+                hidden: entry.hidden.is_hidden(),
+                outline_level: entry.level,
+                collapsed: entry.collapsed,
+            });
+    }
+
+    if col_xml_props.is_empty() {
+        return String::new();
+    }
 
     let mut out = String::new();
     out.push('<');
     out.push_str(&cols_tag);
     out.push('>');
 
-    let mut current: Option<(u32, u32, formula_model::ColProperties)> = None;
-    for (col, props) in sheet.col_properties.iter() {
-        let col = *col;
+    let mut current: Option<(u32, u32, ColXmlProps)> = None;
+    for (&col, props) in col_xml_props.iter() {
         let props = props.clone();
         match current.take() {
             None => current = Some((col, col, props)),
@@ -2572,13 +2640,13 @@ fn render_cols(sheet: &Worksheet, prefix: Option<&str>) -> String {
 
 fn render_col_range(
     col_tag: &str,
-    start_col: u32,
-    end_col: u32,
-    props: &formula_model::ColProperties,
+    start_col_1: u32,
+    end_col_1: u32,
+    props: &ColXmlProps,
 ) -> String {
     let mut s = String::new();
-    let min = start_col + 1;
-    let max = end_col + 1;
+    let min = start_col_1;
+    let max = end_col_1;
     s.push_str(&format!(r#"<{col_tag} min="{min}" max="{max}""#));
     if let Some(width) = props.width {
         s.push_str(&format!(r#" width="{width}""#));
@@ -2586,6 +2654,12 @@ fn render_col_range(
     }
     if props.hidden {
         s.push_str(r#" hidden="1""#);
+    }
+    if props.outline_level > 0 {
+        s.push_str(&format!(r#" outlineLevel="{}""#, props.outline_level));
+    }
+    if props.collapsed {
+        s.push_str(r#" collapsed="1""#);
     }
     s.push_str("/>");
     s

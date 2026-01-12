@@ -66,7 +66,6 @@ use formula_model::CellRef;
 use thiserror::Error;
 
 use crate::{path, XlsxError, XlsxPackage};
-
 /// Cached lookup tables for resolving worksheet `c/@vm` indices into rich value + media targets.
 ///
 /// This is intended primarily for debugging tooling (like `dump_rich_data`) and is intentionally
@@ -154,6 +153,7 @@ impl RichDataVmIndex {
 // that returns raw `xl/media/*` parts referenced by the RichData graph.
 //
 // For per-cell in-cell image extraction, use `XlsxPackage::extract_rich_cell_images_by_cell`.
+
 /// Errors returned by rich-data parsing helpers.
 ///
 /// These parsers are intentionally "best effort": missing parts yield empty results, while
