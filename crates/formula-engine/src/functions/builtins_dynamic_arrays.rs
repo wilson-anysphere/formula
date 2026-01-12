@@ -2,7 +2,9 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use crate::eval::{CellAddr, CompiledExpr, Expr, NameRef, SheetReference};
-use crate::functions::{eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec};
+use crate::functions::{
+    eval_scalar_arg, volatile_rand_u64_below, ArgValue, ArraySupport, FunctionContext, FunctionSpec,
+};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
 use crate::value::{Array, ErrorKind, Lambda, Value};
 
@@ -1041,7 +1043,7 @@ fn randarray_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         };
 
         for _ in 0..total {
-            let offset = (ctx.volatile_rand_u64() % span) as i64;
+            let offset = volatile_rand_u64_below(ctx, span) as i64;
             values.push(Value::Number((low + offset) as f64));
         }
     } else {

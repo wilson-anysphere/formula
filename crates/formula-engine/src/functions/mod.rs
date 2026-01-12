@@ -256,6 +256,27 @@ pub fn call_function(ctx: &dyn FunctionContext, name: &str, args: &[CompiledExpr
     (spec.implementation)(ctx, args)
 }
 
+/// Generate an unbiased uniform integer in `[0, span)`, using the deterministic per-recalc RNG.
+///
+/// Excel's integer RNG helpers (RANDBETWEEN/RANDARRAY whole_number=TRUE) should be uniform across
+/// the integer interval. Using a simple `% span` introduces modulo bias when `span` is not a power
+/// of two. We avoid that by rejection sampling.
+pub(crate) fn volatile_rand_u64_below(ctx: &dyn FunctionContext, span: u64) -> u64 {
+    if span <= 1 {
+        return 0;
+    }
+
+    // Accept only values within a prefix of the u64 range whose length is a multiple of `span`.
+    // The resulting distribution of `value % span` is uniform.
+    let zone = (u64::MAX / span) * span;
+    loop {
+        let v = ctx.volatile_rand_u64();
+        if v < zone {
+            return v % span;
+        }
+    }
+}
+
 pub(crate) fn eval_scalar_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Value {
     match ctx.eval_arg(expr) {
         ArgValue::Scalar(v) => v,

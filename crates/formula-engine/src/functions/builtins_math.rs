@@ -1,7 +1,9 @@
 use crate::eval::{CellAddr, CompiledExpr};
 use crate::functions::array_lift;
 use crate::functions::math::criteria::Criteria;
-use crate::functions::{eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec};
+use crate::functions::{
+    eval_scalar_arg, volatile_rand_u64_below, ArgValue, ArraySupport, FunctionContext, FunctionSpec,
+};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
 use crate::value::{Array, ErrorKind, Value};
 
@@ -74,7 +76,7 @@ fn randbetween_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         _ => return Value::Error(ErrorKind::Num),
     };
 
-    let offset = (ctx.volatile_rand_u64() % span) as i64;
+    let offset = volatile_rand_u64_below(ctx, span) as i64;
     Value::Number((low + offset) as f64)
 }
 
