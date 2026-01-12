@@ -185,3 +185,63 @@ fn v3_content_normalized_data_skips_referenceoriginal_embedded_referencecontrol(
 
     assert_eq!(normalized, expected);
 }
+
+#[test]
+fn v3_content_normalized_data_skips_referenceoriginal_embedded_referencecontrol_without_name_record_extended(
+) {
+    // Variant of the previous regression test where the embedded REFERENCECONTROL record omits the
+    // optional NameRecordExtended (REFERENCENAME). We should still skip the embedded control record
+    // and its 0x0030 tail, and continue parsing subsequent top-level references correctly.
+    let dir_decompressed = {
+        let mut out = Vec::new();
+
+        // NameRecord for the reference.
+        push_record(&mut out, 0x0016, b"OrigName");
+        push_record(&mut out, 0x003E, &[b'O', 0x00, b'K', 0x00]);
+
+        // REFERENCEORIGINAL payload is just the libid bytes (spec form).
+        push_record(&mut out, 0x0033, b"OrigLib");
+
+        // Embedded REFERENCECONTROL (should be skipped).
+        let libid_twiddled = b"EmbeddedCtrl";
+        let reserved1: u32 = 1;
+        let reserved2: u16 = 0;
+        let mut embedded_control = Vec::new();
+        embedded_control.extend_from_slice(&(libid_twiddled.len() as u32).to_le_bytes());
+        embedded_control.extend_from_slice(libid_twiddled);
+        embedded_control.extend_from_slice(&reserved1.to_le_bytes());
+        embedded_control.extend_from_slice(&reserved2.to_le_bytes());
+        push_record(&mut out, 0x002F, &embedded_control);
+
+        // Embedded control tail / extended bytes (should be skipped).
+        push_record(&mut out, 0x0030, b"EMB_EXT");
+
+        // Next reference (registered) should still be incorporated.
+        push_record(&mut out, 0x000D, b"{REG}");
+
+        out
+    };
+
+    let vba_bin = build_vba_project_with_dir(&dir_decompressed);
+    let normalized = v3_content_normalized_data(&vba_bin).expect("V3ContentNormalizedData");
+
+    let mut expected = Vec::new();
+    // REFERENCENAME
+    expected.extend_from_slice(&0x0016u16.to_le_bytes());
+    expected.extend_from_slice(&(b"OrigName".len() as u32).to_le_bytes());
+    expected.extend_from_slice(b"OrigName");
+    // NameUnicode
+    expected.extend_from_slice(&0x003Eu16.to_le_bytes());
+    expected.extend_from_slice(&(4u32).to_le_bytes());
+    expected.extend_from_slice(&[b'O', 0x00, b'K', 0x00]);
+    // REFERENCEORIGINAL
+    expected.extend_from_slice(&0x0033u16.to_le_bytes());
+    expected.extend_from_slice(&(b"OrigLib".len() as u32).to_le_bytes());
+    expected.extend_from_slice(b"OrigLib");
+    // Embedded control is skipped.
+    // Next reference (registered)
+    expected.extend_from_slice(&0x000Du16.to_le_bytes());
+    expected.extend_from_slice(b"{REG}");
+
+    assert_eq!(normalized, expected);
+}
