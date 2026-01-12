@@ -72,12 +72,30 @@ test.describe("Extensions UI integration", () => {
       }
 
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const w = window as any;
-        if (!("__TAURI__" in w)) w.__TAURI__ = {};
-        if (!("__TAURI_IPC__" in w)) w.__TAURI_IPC__ = {};
-        if (!("__TAURI_INTERNALS__" in w)) w.__TAURI_INTERNALS__ = {};
-        if (!("__TAURI_METADATA__" in w)) w.__TAURI_METADATA__ = {};
+        // Extension webviews are loaded from a blob URL; avoid affecting other nested frames.
+        if (window.location?.protocol !== "blob:") return;
+      } catch {
+        // Ignore.
+      }
+
+      const injectTauriGlobals = () => {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const w = window as any;
+          w.__TAURI__ = {};
+          w.__TAURI_IPC__ = {};
+          w.__TAURI_INTERNALS__ = {};
+          w.__TAURI_METADATA__ = {};
+        } catch {
+          // Ignore.
+        }
+      };
+
+      // Inject globals later in the document lifecycle to ensure our hardening script scrubs both
+      // early and late injections.
+      try {
+        document.addEventListener("DOMContentLoaded", injectTauriGlobals, { once: true });
+        window.addEventListener("load", injectTauriGlobals, { once: true });
       } catch {
         // Ignore.
       }
