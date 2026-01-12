@@ -93,12 +93,30 @@ function buildGroupsForEmptyQuery(
 
   const remaining = allCommands.filter((cmd) => !recentSet.has(cmd.commandId));
 
+  // Empty query can include thousands of commands (builtins + extensions + functions).
+  // Avoid sorting enormous arrays per category by keeping only the alphabetically-best
+  // `maxResultsPerGroup` commands for each category as we scan.
   const categories = new Map<string, RenderableCommand[]>();
   for (const cmd of remaining) {
     const label = groupLabel(cmd.category);
     const list = categories.get(label) ?? [];
-    list.push({ ...cmd, score: 0, titleRanges: [] });
-    categories.set(label, list);
+
+    if (list.length < limits.maxResultsPerGroup) {
+      list.push({ ...cmd, score: 0, titleRanges: [] });
+      categories.set(label, list);
+      continue;
+    }
+
+    // Find the alphabetically-last command (worst) in this limited list and replace it
+    // if the new command sorts before it.
+    let worstIdx = 0;
+    for (let i = 1; i < list.length; i += 1) {
+      if (list[i]!.title.localeCompare(list[worstIdx]!.title) > 0) worstIdx = i;
+    }
+    if (cmd.title.localeCompare(list[worstIdx]!.title) < 0) {
+      list[worstIdx] = { ...cmd, score: 0, titleRanges: [] };
+      categories.set(label, list);
+    }
   }
 
   const groups: CommandGroup[] = [];
@@ -125,9 +143,12 @@ function buildGroupsForQuery(
   query: string,
   limits: { maxResults: number; maxResultsPerGroup: number },
 ): CommandGroup[] {
+  if (limits.maxResults <= 0) return [];
   const compiled = compileFuzzyQuery(query);
 
-  // Keep only top N matches to avoid sorting huge arrays (N = maxResults).
+  // Keep only top-N matches to avoid sorting huge arrays. We keep more than we
+  // ultimately render so that per-group caps still yield ~maxResults total items.
+  const maxRanked = Math.min(allCommands.length, limits.maxResults * 3);
   const top: RenderableCommand[] = [];
 
   const isBetter = (a: RenderableCommand, b: RenderableCommand): boolean => {
@@ -149,7 +170,7 @@ function buildGroupsForQuery(
     if (!match) continue;
 
     const candidate: RenderableCommand = { ...cmd, score: match.score, titleRanges: match.titleRanges };
-    if (top.length < limits.maxResults) {
+    if (top.length < maxRanked) {
       top.push(candidate);
       continue;
     }
@@ -168,29 +189,41 @@ function buildGroupsForQuery(
   const groupsByLabel = new Map<string, RenderableCommand[]>();
   const groupOrder: string[] = [];
 
+  let remainingSlots = limits.maxResults;
   for (const cmd of top) {
+    if (remainingSlots <= 0) break;
     const label = groupLabel(cmd.category);
     if (!groupsByLabel.has(label)) groupOrder.push(label);
     const list = groupsByLabel.get(label) ?? [];
     if (list.length < limits.maxResultsPerGroup) {
       list.push(cmd);
       groupsByLabel.set(label, list);
+      remainingSlots -= 1;
     }
   }
 
   return groupOrder.map((label) => ({ label, commands: groupsByLabel.get(label) ?? [] }));
 }
 
-function buildGroupsForShortcutMode(matches: Array<PreparedCommandForFuzzy<CommandContribution> & { shortcut: string }>): CommandGroup[] {
+function buildGroupsForShortcutMode(
+  matches: Array<PreparedCommandForFuzzy<CommandContribution> & { shortcut: string }>,
+  limits: { maxResults: number; maxResultsPerGroup: number },
+): CommandGroup[] {
+  if (limits.maxResults <= 0) return [];
   const groupsByLabel = new Map<string, RenderableCommand[]>();
   const order: string[] = [];
 
+  let remainingSlots = limits.maxResults;
   for (const cmd of matches) {
+    if (remainingSlots <= 0) break;
     const label = groupLabel(cmd.category);
     if (!groupsByLabel.has(label)) order.push(label);
     const list = groupsByLabel.get(label) ?? [];
-    list.push({ ...cmd, score: 0, titleRanges: [] });
-    groupsByLabel.set(label, list);
+    if (list.length < limits.maxResultsPerGroup) {
+      list.push({ ...cmd, score: 0, titleRanges: [] });
+      groupsByLabel.set(label, list);
+      remainingSlots -= 1;
+    }
   }
 
   return order.map((label) => ({ label, commands: groupsByLabel.get(label) ?? [] }));
@@ -280,6 +313,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   let visibleCommandEls: HTMLLIElement[] = [];
   let commandsCacheDirty = true;
   let cachedCommands: PreparedCommandForFuzzy<CommandContribution>[] = [];
+  let chunkSearchController: AbortController | null = null;
   let extensionLoadTimer: number | null = null;
 
   const executeCommand = (commandId: string): void => {
@@ -288,10 +322,16 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     });
   };
 
+  const abortChunkedSearch = (): void => {
+    chunkSearchController?.abort();
+    chunkSearchController = null;
+  };
+
   function close(): void {
     if (!isOpen) return;
     isOpen = false;
     debouncedRender.cancel();
+    abortChunkedSearch();
     overlay.style.display = "none";
     query = "";
     selectedIndex = 0;
@@ -306,13 +346,14 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
 
   function open(): void {
     debouncedRender.cancel();
+    abortChunkedSearch();
     query = "";
     selectedIndex = 0;
     input.value = "";
     overlay.style.display = "flex";
     isOpen = true;
 
-    renderResults();
+    renderResults("sync");
 
     input.focus();
     input.select();
@@ -345,26 +386,22 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     );
   }
 
-  function renderResults(): void {
-    ensureCommandsCache();
+  const commandRowCache = new Map<
+    string,
+    {
+      li: HTMLLIElement;
+      label: HTMLDivElement;
+      description: HTMLDivElement;
+      right: HTMLDivElement;
+      shortcutPill: HTMLSpanElement;
+    }
+  >();
 
-    const trimmed = query.trim();
-    const shortcutMode = trimmed.startsWith("/");
-    hint.hidden = !shortcutMode;
+  const CHUNK_SEARCH_MIN_COMMANDS = 5_000;
+  const CHUNK_SEARCH_MIN_QUERY_LEN = 4;
+  const CHUNK_SEARCH_CHUNK_SIZE = 500;
 
-    const shortcutQuery = shortcutMode ? trimmed.slice(1).trim() : "";
-    const groups = shortcutMode
-      ? buildGroupsForShortcutMode(
-          searchShortcutCommands({
-            commands: cachedCommands,
-            keybindingIndex,
-            query: shortcutQuery,
-          }),
-        )
-      : trimmed === ""
-        ? buildGroupsForEmptyQuery(cachedCommands, getRecentsForDisplay(cachedCommands), limits)
-        : buildGroupsForQuery(cachedCommands, query, limits);
-
+  function renderGroups(groups: CommandGroup[], emptyText: string): void {
     visibleCommands = groups.flatMap((g) => g.commands);
     if (selectedIndex >= visibleCommands.length) selectedIndex = Math.max(0, visibleCommands.length - 1);
 
@@ -374,15 +411,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     if (groups.length === 0 || visibleCommands.length === 0) {
       const empty = document.createElement("li");
       empty.className = "command-palette__empty";
-      if (shortcutMode) {
-        empty.textContent = shortcutQuery
-          ? t("commandPalette.empty.noMatchingShortcuts")
-          : t("commandPalette.empty.noShortcuts");
-      } else {
-        empty.textContent = trimmed
-          ? t("commandPalette.empty.noMatchingCommands")
-          : t("commandPalette.empty.noCommands");
-      }
+      empty.textContent = emptyText;
       list.appendChild(empty);
       return;
     }
@@ -398,53 +427,66 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
         const cmd = group.commands[i]!;
         const globalIndex = commandOffset + i;
 
-         const li = document.createElement("li");
-         li.className = "command-palette__item";
-         li.setAttribute("aria-selected", globalIndex === selectedIndex ? "true" : "false");
+        let cached = commandRowCache.get(cmd.commandId);
+        if (!cached) {
+          const li = document.createElement("li");
+          li.className = "command-palette__item";
 
-         const main = document.createElement("div");
-         main.className = "command-palette__item-main";
+          const main = document.createElement("div");
+          main.className = "command-palette__item-main";
 
-         const label = document.createElement("div");
-         label.className = "command-palette__item-label";
-         label.appendChild(renderHighlightedText(cmd.title, cmd.titleRanges));
-         main.appendChild(label);
+          const label = document.createElement("div");
+          label.className = "command-palette__item-label";
 
-         const descriptionText = typeof cmd.description === "string" ? cmd.description.trim() : "";
-         if (descriptionText) {
-           const description = document.createElement("div");
-           description.className = "command-palette__item-description";
-           description.textContent = descriptionText;
-           main.appendChild(description);
-         }
+          const description = document.createElement("div");
+          description.className = "command-palette__item-description";
+
+          main.appendChild(label);
+          main.appendChild(description);
+
+          const right = document.createElement("div");
+          right.className = "command-palette__item-right";
+
+          const shortcutPill = document.createElement("span");
+          shortcutPill.className = "command-palette__shortcut";
+          right.appendChild(shortcutPill);
+
+          li.appendChild(main);
+          li.appendChild(right);
+
+          li.addEventListener("mousedown", (e) => {
+            // Prevent focus leaving the input before we run the command.
+            e.preventDefault();
+          });
+          li.addEventListener("click", () => {
+            close();
+            executeCommand(cmd.commandId);
+          });
+
+          cached = { li, label, description, right, shortcutPill };
+          commandRowCache.set(cmd.commandId, cached);
+        }
+
+        cached.li.setAttribute("aria-selected", globalIndex === selectedIndex ? "true" : "false");
+        cached.label.replaceChildren(renderHighlightedText(cmd.title, cmd.titleRanges));
+
+        const descriptionText = typeof cmd.description === "string" ? cmd.description.trim() : "";
+        cached.description.textContent = descriptionText;
+        cached.description.style.display = descriptionText ? "" : "none";
 
         const kbValue = keybindingIndex.get(cmd.commandId);
         const shortcut =
           typeof kbValue === "string" ? kbValue : Array.isArray(kbValue) ? (kbValue[0] ?? null) : null;
         if (shortcut) {
-          const right = document.createElement("div");
-          right.className = "command-palette__item-right";
-          const pill = document.createElement("span");
-          pill.className = "command-palette__shortcut";
-          pill.textContent = shortcut;
-          right.appendChild(pill);
-          li.appendChild(main);
-          li.appendChild(right);
+          cached.shortcutPill.textContent = shortcut;
+          cached.right.style.display = "";
         } else {
-          li.appendChild(main);
+          cached.shortcutPill.textContent = "";
+          cached.right.style.display = "none";
         }
 
-        li.addEventListener("mousedown", (e) => {
-          // Prevent focus leaving the input before we run the command.
-          e.preventDefault();
-        });
-        li.addEventListener("click", () => {
-          close();
-          executeCommand(cmd.commandId);
-        });
-
-        list.appendChild(li);
-        visibleCommandEls[globalIndex] = li;
+        list.appendChild(cached.li);
+        visibleCommandEls[globalIndex] = cached.li;
       }
 
       commandOffset += group.commands.length;
@@ -454,13 +496,170 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     queueMicrotask(() => visibleCommandEls[selectedIndex]?.scrollIntoView({ block: "nearest" }));
   }
 
+  function startChunkedSearch(querySnapshot: string): void {
+    ensureCommandsCache();
+
+    abortChunkedSearch();
+    const controller = new AbortController();
+    chunkSearchController = controller;
+    const { signal } = controller;
+    const emptyText = t("commandPalette.empty.noMatchingCommands");
+
+    if (limits.maxResults <= 0) {
+      renderGroups([], emptyText);
+      chunkSearchController = null;
+      return;
+    }
+
+    const compiled = compileFuzzyQuery(querySnapshot);
+    const maxRanked = Math.min(cachedCommands.length, limits.maxResults * 3);
+    const top: RenderableCommand[] = [];
+    let cursor = 0;
+
+    const isBetter = (a: RenderableCommand, b: RenderableCommand): boolean => {
+      if (a.score !== b.score) return a.score > b.score;
+      return a.title.localeCompare(b.title) < 0;
+    };
+
+    const worstIndex = (): number => {
+      let worst = 0;
+      for (let i = 1; i < top.length; i += 1) {
+        if (isBetter(top[worst]!, top[i]!)) worst = i;
+      }
+      return worst;
+    };
+
+    const processChunk = (endExclusive: number): void => {
+      for (let i = cursor; i < endExclusive; i += 1) {
+        if (signal.aborted) return;
+        const cmd = cachedCommands[i]!;
+        const match = fuzzyMatchCommandPrepared(compiled, cmd);
+        if (!match) continue;
+        const candidate: RenderableCommand = { ...cmd, score: match.score, titleRanges: match.titleRanges };
+
+        if (top.length < maxRanked) {
+          top.push(candidate);
+          continue;
+        }
+
+        const idx = worstIndex();
+        if (isBetter(candidate, top[idx]!)) top[idx] = candidate;
+      }
+    };
+
+    const makeGroupsFromTop = (): CommandGroup[] => {
+      const ranked = [...top].sort((a, b) => {
+        if (a.score !== b.score) return b.score - a.score;
+        return a.title.localeCompare(b.title);
+      });
+
+      const groupsByLabel = new Map<string, RenderableCommand[]>();
+      const order: string[] = [];
+      let remainingSlots = limits.maxResults;
+      for (const cmd of ranked) {
+        if (remainingSlots <= 0) break;
+        const label = groupLabel(cmd.category);
+        if (!groupsByLabel.has(label)) order.push(label);
+        const list = groupsByLabel.get(label) ?? [];
+        if (list.length < limits.maxResultsPerGroup) {
+          list.push(cmd);
+          groupsByLabel.set(label, list);
+          remainingSlots -= 1;
+        }
+      }
+      return order.map((label) => ({ label, commands: groupsByLabel.get(label) ?? [] }));
+    };
+
+    const scheduleNext = () =>
+      new Promise<void>((resolve) => {
+        if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => resolve());
+        else setTimeout(resolve, 0);
+      });
+
+    const initialEnd = Math.min(cachedCommands.length, cursor + CHUNK_SEARCH_CHUNK_SIZE);
+    processChunk(initialEnd);
+    cursor = initialEnd;
+
+    if (!signal.aborted && isOpen && input.value === querySnapshot) {
+      renderGroups(makeGroupsFromTop(), emptyText);
+    }
+
+    void (async () => {
+      try {
+        while (!signal.aborted && cursor < cachedCommands.length) {
+          // Yield to the browser so we don't monopolize the main thread for huge lists.
+          await scheduleNext();
+          if (signal.aborted) return;
+          if (!isOpen) return;
+          if (input.value !== querySnapshot) return;
+
+          const end = Math.min(cachedCommands.length, cursor + CHUNK_SEARCH_CHUNK_SIZE);
+          processChunk(end);
+          cursor = end;
+        }
+
+        if (signal.aborted) return;
+        if (!isOpen) return;
+        if (input.value !== querySnapshot) return;
+        // Render final results.
+        renderGroups(makeGroupsFromTop(), emptyText);
+      } finally {
+        if (chunkSearchController === controller) {
+          chunkSearchController = null;
+        }
+      }
+    })();
+  }
+
+  function renderResults(mode: "sync" | "async"): void {
+    ensureCommandsCache();
+
+    const trimmed = query.trim();
+    const shortcutMode = trimmed.startsWith("/");
+    hint.hidden = !shortcutMode;
+
+    if (shortcutMode) {
+      abortChunkedSearch();
+      const shortcutQuery = trimmed.slice(1).trim();
+      const matches = searchShortcutCommands({ commands: cachedCommands, keybindingIndex, query: shortcutQuery });
+      renderGroups(
+        buildGroupsForShortcutMode(matches, limits),
+        shortcutQuery ? t("commandPalette.empty.noMatchingShortcuts") : t("commandPalette.empty.noShortcuts"),
+      );
+      return;
+    }
+
+    if (!trimmed) {
+      abortChunkedSearch();
+      renderGroups(buildGroupsForEmptyQuery(cachedCommands, getRecentsForDisplay(cachedCommands), limits), t("commandPalette.empty.noCommands"));
+      return;
+    }
+
+    const shouldChunk =
+      mode === "async" && trimmed.length >= CHUNK_SEARCH_MIN_QUERY_LEN && cachedCommands.length >= CHUNK_SEARCH_MIN_COMMANDS;
+    if (shouldChunk) {
+      startChunkedSearch(query);
+      return;
+    }
+
+    abortChunkedSearch();
+    renderGroups(buildGroupsForQuery(cachedCommands, query, limits), t("commandPalette.empty.noMatchingCommands"));
+  }
+
   const debouncedRender = debounce(
     () => {
       if (!isOpen) return;
-      renderResults();
+      renderResults("async");
     },
     inputDebounce,
   );
+
+  const ensureLatestResultsSync = (): void => {
+    if (!isOpen) return;
+    if (!debouncedRender.pending() && !chunkSearchController) return;
+    debouncedRender.cancel();
+    renderResults("sync");
+  };
 
   function updateSelection(nextIndex: number): void {
     if (visibleCommands.length === 0) {
@@ -493,7 +692,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     commandsCacheDirty = true;
     if (!isOpen) return;
     debouncedRender.cancel();
-    renderResults();
+    renderResults("async");
   });
 
   const disposeRecentsTracker = installCommandRecentsTracker(commandRegistry, localStorage, {
@@ -508,6 +707,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   const onInput = () => {
     query = input.value;
     selectedIndex = 0;
+    abortChunkedSearch();
     debouncedRender();
   };
   input.addEventListener("input", onInput);
@@ -521,21 +721,21 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
 
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      debouncedRender.flush();
+      ensureLatestResultsSync();
       updateSelection(selectedIndex + 1);
       return;
     }
 
     if (e.key === "ArrowUp") {
       e.preventDefault();
-      debouncedRender.flush();
+      ensureLatestResultsSync();
       updateSelection(selectedIndex - 1);
       return;
     }
 
     if (e.key === "Enter") {
       e.preventDefault();
-      debouncedRender.flush();
+      ensureLatestResultsSync();
       runSelected();
     }
   };
@@ -560,6 +760,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
 
   function dispose(): void {
     debouncedRender.cancel();
+    abortChunkedSearch();
     if (extensionLoadTimer != null) {
       window.clearTimeout(extensionLoadTimer);
       extensionLoadTimer = null;
