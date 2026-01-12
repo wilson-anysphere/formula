@@ -138,6 +138,15 @@ warnIfMissingCrossOriginIsolationInTauriProd();
 
 const workbookSheetNames = new Map<string, string>();
 
+// Cursor desktop no longer supports user-provided LLM settings, but legacy builds
+// persisted provider + API keys in localStorage. Best-effort purge on startup so
+// we don't leave stale secrets behind.
+try {
+  purgeLegacyDesktopLLMSettings();
+} catch {
+  // ignore
+}
+
 // Seed contributed panels early so layout persistence doesn't drop their ids before the
 // extension host finishes loading installed extensions.
 const contributedPanelsSeedStorage = getDefaultSeedStoreStorage();

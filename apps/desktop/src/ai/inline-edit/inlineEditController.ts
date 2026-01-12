@@ -4,7 +4,6 @@ import type { Range } from "../../selection/types";
 
 import { PreviewEngine, runChatWithToolsAudited } from "../../../../../packages/ai-tools/src/index.js";
 import { SpreadsheetLLMToolExecutor } from "../../../../../packages/ai-tools/src/llm/integration.js";
-
 import type { AIAuditStore } from "../../../../../packages/ai-audit/src/store.js";
 
 import { DLP_ACTION } from "../../../../../packages/security/dlp/src/actions.js";

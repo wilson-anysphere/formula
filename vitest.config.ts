@@ -10,11 +10,14 @@ export default defineConfig({
     include: [
       "packages/**/*.test.ts",
       "packages/**/*.test.tsx",
+      "packages/**/*.vitest.ts",
+      "packages/**/*.vitest.tsx",
       "apps/**/*.test.ts",
       "apps/**/*.test.tsx",
       "apps/**/*.vitest.ts",
       "apps/**/*.vitest.tsx",
-      "services/api/src/__tests__/**/*.test.ts"
+      "services/api/src/__tests__/**/*.test.ts",
+      "services/api/src/__tests__/**/*.vitest.ts"
     ],
     environment: "node",
     setupFiles: ["./vitest.setup.ts"],

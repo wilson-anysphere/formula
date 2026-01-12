@@ -13,6 +13,8 @@ import { CLASSIFICATION_LEVEL } from "../../../../../../packages/security/dlp/sr
 import { LocalClassificationStore } from "../../../../../../packages/security/dlp/src/classificationStore.js";
 import { LocalPolicyStore } from "../../../../../../packages/security/dlp/src/policyStore.js";
 
+const LEGACY_OPENAI_API_KEY_STORAGE_KEY = "formula:openaiApiKey";
+
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
   return {
@@ -368,6 +370,9 @@ describe("AI inline edit (Cmd/Ctrl+K)", () => {
   });
 
   it("uses the desktop LLM client fallback when no inlineEdit llmClient is injected", async () => {
+    // Legacy user API keys should be proactively purged (and never used for auth).
+    localStorage.setItem(LEGACY_OPENAI_API_KEY_STORAGE_KEY, "sk-test-inline-edit");
+
     let callCount = 0;
     const fetchMock = vi.fn(async (url: string, init: any) => {
       callCount++;
@@ -420,7 +425,7 @@ describe("AI inline edit (Cmd/Ctrl+K)", () => {
       activeValue: document.createElement("div"),
     };
 
-    // No inlineEdit config passed; controller should pick up localStorage key.
+    // No inlineEdit config passed; controller should use the Cursor-backed client.
     const app = new SpreadsheetApp(root, status);
 
     app.selectRange({ range: { startRow: 0, endRow: 2, startCol: 2, endCol: 2 } }); // C1:C3
@@ -436,6 +441,8 @@ describe("AI inline edit (Cmd/Ctrl+K)", () => {
       const el = overlay.querySelector<HTMLElement>('[data-testid="inline-edit-preview-summary"]');
       return el && el.textContent?.includes("Changes:") ? el : null;
     });
+
+    expect(localStorage.getItem(LEGACY_OPENAI_API_KEY_STORAGE_KEY)).toBeNull();
 
     overlay.querySelector<HTMLButtonElement>('[data-testid="inline-edit-approve"]')!.click();
 
