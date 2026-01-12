@@ -285,7 +285,7 @@ The `(filtered PROJECT stream properties)` prefix is derived from the textual `P
 
 In this repo:
 
-- `formula_vba::project_normalized_data_v3` builds `ProjectNormalizedData`
+- `formula_vba::project_normalized_data_v3_transcript` builds v3 `ProjectNormalizedData`
   (`crates/formula-vba/src/contents_hash.rs`)
 - `formula_vba::contents_hash_v3` computes `ContentsHashV3 = SHA-256(ProjectNormalizedData)`
   (`crates/formula-vba/src/contents_hash.rs`)
@@ -293,13 +293,13 @@ In this repo:
   (`crates/formula-vba/src/contents_hash.rs`)
 - `formula_vba::forms_normalized_data` builds `FormsNormalizedData`
   (`crates/formula-vba/src/normalized_data.rs`)
-- `formula_vba::project_normalized_data_v3_dir_records` builds a metadata-only dir-record transcript
-  derived from selected `VBA/dir` records (useful for debugging/spec work; not the full v3 binding transcript)
-  (`crates/formula-vba/src/project_normalized_data.rs`)
+- `formula_vba::project_normalized_data_v3` (alias: `project_normalized_data_v3_dir_records`) builds a
+  metadata-only dir-record transcript derived from selected `VBA/dir` records (useful for debugging/spec work;
+  not the full v3 binding transcript) (`crates/formula-vba/src/project_normalized_data.rs`)
 
-#### Dir-record metadata transcript (`project_normalized_data_v3_dir_records`)
+#### Dir-record metadata transcript (`project_normalized_data_v3`)
 
-`formula_vba::project_normalized_data_v3_dir_records` is a related helper that emits a
+`formula_vba::project_normalized_data_v3` (aka `project_normalized_data_v3_dir_records`) is a related helper that emits a
 **metadata-only** transcript derived from selected `VBA/dir` records (project/module metadata, but
 *not* module source normalization and *not* designer storage data). It is useful for debugging and
 for compatibility tests.

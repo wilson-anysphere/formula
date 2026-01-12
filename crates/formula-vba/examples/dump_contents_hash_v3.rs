@@ -49,7 +49,7 @@ fn run() -> Result<(), String> {
     let project = project_normalized_data_v3_transcript(&vba_project_bin)
         .map_err(|e| format!("failed to compute project_normalized_data_v3_transcript: {e}"))?;
     println!(
-        "project_normalized_data_v3: len={} head[0..{}]={}",
+        "project_normalized_data_v3_transcript: len={} head[0..{}]={}",
         project.len(),
         DEFAULT_HEAD_BYTES.min(project.len()),
         bytes_to_lower_hex(&project[..DEFAULT_HEAD_BYTES.min(project.len())])
@@ -64,8 +64,8 @@ fn run() -> Result<(), String> {
     //   `ContentsHashV3 = SHA-256(ProjectNormalizedData)`.
     //
     // This tool is a debugging helper that prints MD5/SHA-256 digests over the repo's
-    // v3 `project_normalized_data_v3` transcript. SHA-256 output corresponds to the spec-correct
-    // `ContentsHashV3`; MD5 output is provided for experimentation/debugging.
+    // v3 `project_normalized_data_v3_transcript` transcript. SHA-256 output corresponds to the
+    // spec-correct `ContentsHashV3`; MD5 output is provided for experimentation/debugging.
     let digest_md5 = {
         use md5::Digest as _;
         md5::Md5::digest(&project)
@@ -78,23 +78,23 @@ fn run() -> Result<(), String> {
     match alg {
         Some(Alg::Md5) => {
             println!(
-                "digest_md5(project_normalized_data_v3):    {}",
+                "digest_md5(project_normalized_data_v3_transcript):    {}",
                 bytes_to_lower_hex(digest_md5.as_slice())
             );
         }
         Some(Alg::Sha256) => {
             println!(
-                "digest_sha256(project_normalized_data_v3): {}",
+                "digest_sha256(project_normalized_data_v3_transcript): {}",
                 bytes_to_lower_hex(digest_sha256.as_slice())
             );
         }
         None => {
             println!(
-                "digest_md5(project_normalized_data_v3):    {}",
+                "digest_md5(project_normalized_data_v3_transcript):    {}",
                 bytes_to_lower_hex(digest_md5.as_slice())
             );
             println!(
-                "digest_sha256(project_normalized_data_v3): {}",
+                "digest_sha256(project_normalized_data_v3_transcript): {}",
                 bytes_to_lower_hex(digest_sha256.as_slice())
             );
         }
