@@ -26,8 +26,22 @@ test.describe("global keybindings", () => {
     await expect(page.getByTestId("goto-dialog")).not.toBeVisible();
 
     // Ctrl+H (Win/Linux) / Cmd+Option+F (macOS) opens Replace.
-    const replaceShortcut = process.platform === "darwin" ? "Meta+Alt+F" : "Control+H";
-    await page.keyboard.press(replaceShortcut);
+    // Avoid using Playwright's `keyboard.press()` here since Ctrl+H / Cmd+Option+F may be
+    // intercepted by the browser shell (History, toolbar focus, etc.) in some environments.
+    // Dispatching a keydown event on the active element still exercises our focus scoping logic.
+    await page.evaluate((isMac) => {
+      const target = document.activeElement ?? window;
+      target.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: isMac ? "f" : "h",
+          metaKey: isMac,
+          altKey: isMac,
+          ctrlKey: !isMac,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    }, process.platform === "darwin");
     await expect(page.getByTestId("replace-dialog")).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.getByTestId("replace-dialog")).not.toBeVisible();
@@ -83,7 +97,19 @@ test.describe("global keybindings", () => {
     await expect(page.getByTestId("goto-dialog")).not.toBeVisible();
 
     // Replace shortcut should not open Replace while typing in an input.
-    await page.keyboard.press(replaceShortcut);
+    await page.evaluate((isMac) => {
+      const target = document.activeElement ?? window;
+      target.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: isMac ? "f" : "h",
+          metaKey: isMac,
+          altKey: isMac,
+          ctrlKey: !isMac,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    }, process.platform === "darwin");
     await page.waitForTimeout(100);
     await expect(page.getByTestId("replace-dialog")).not.toBeVisible();
 
