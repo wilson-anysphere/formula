@@ -1,4 +1,5 @@
 import { formatA1, parseA1 } from "../../document/coords.js";
+import { applyStylePatch } from "../../formatting/styleTable.js";
 import { normalizeDocumentState } from "../../../../../packages/versioning/branches/src/state.js";
 
 /**
@@ -229,8 +230,67 @@ export function documentControllerToBranchState(doc) {
           outCell.value = cloneJsonish(cell.value);
         }
 
-        if (cell.styleId !== 0) {
-          outCell.format = cloneJsonish(doc.styleTable.get(cell.styleId));
+        // BranchService only has a single `Cell.format` field (cell-level formatting).
+        //
+        // DocumentController now supports an additional "range run" formatting layer that applies
+        // to arbitrary rectangles without materializing per-cell style overrides.
+        //
+        // To preserve formatting through the branching adapter (and keep merge conflict detection
+        // working), we merge the run + cell layers into the serialized `Cell.format` object.
+        //
+        // Note: we intentionally do *not* bake sheet/row/col defaults into `Cell.format` since
+        // those are stored separately in the sheet view state and should remain layered.
+        const runStyleId = (() => {
+          // Prefer the public DocumentController helper if present (future-proof against model changes).
+          try {
+            if (typeof doc.getCellFormatStyleIds === "function") {
+              const tuple = doc.getCellFormatStyleIds(sheetId, coord);
+              if (Array.isArray(tuple) && tuple.length >= 5) {
+                const id = Number(tuple[4]);
+                return Number.isInteger(id) && id >= 0 ? id : 0;
+              }
+              return 0;
+            }
+          } catch {
+            // Fall through to best-effort internal shape inspection.
+          }
+
+          // DocumentController internal sheet model (preferred).
+          const runsByCol = sheet?.formatRunsByCol ?? sheet?.formatRunsByColumn ?? sheet?.rangeRunsByCol;
+          const runs = (() => {
+            if (!runsByCol) return null;
+            if (typeof runsByCol.get === "function") return runsByCol.get(coord.col);
+            return runsByCol[String(coord.col)] ?? runsByCol[coord.col];
+          })();
+
+          if (Array.isArray(runs) && runs.length > 0) {
+            // Binary search for the containing run. Runs are half-open intervals:
+            // [startRow, endRowExclusive).
+            let lo = 0;
+            let hi = runs.length - 1;
+            while (lo <= hi) {
+              const mid = (lo + hi) >> 1;
+              const run = runs[mid];
+              const startRow = Number(run?.startRow);
+              const endRowExclusive = Number(run?.endRowExclusive);
+              const styleId = Number(run?.styleId);
+              if (!Number.isInteger(startRow) || !Number.isInteger(endRowExclusive) || !Number.isInteger(styleId)) return 0;
+              if (coord.row < startRow) hi = mid - 1;
+              else if (coord.row >= endRowExclusive) lo = mid + 1;
+              else return styleId;
+            }
+          }
+
+          // Legacy fallback: older controllers stored runs behind a helper object.
+          return sheet?.formatRunStore?.getStyleId?.(coord.row, coord.col) ?? 0;
+        })();
+        const runFormat = branchFormatFromDocFormat(doc, runStyleId);
+        const cellFormat = branchFormatFromDocFormat(doc, cell.styleId);
+        if (runFormat || cellFormat) {
+          let merged = {};
+          if (runFormat) merged = applyStylePatch(merged, runFormat);
+          if (cellFormat) merged = applyStylePatch(merged, cellFormat);
+          if (isNonEmptyPlainObject(merged)) outCell.format = merged;
         }
 
         if (Object.keys(outCell).length === 0) continue;

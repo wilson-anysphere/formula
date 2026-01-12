@@ -512,7 +512,15 @@ export function getCellGridFromRange(doc, sheetId, range) {
         const rowStyleId = normalizeStyleId(out.rowStyleId ?? out.rowDefaultStyleId ?? out.rowDefault);
         const colStyleId = normalizeStyleId(out.colStyleId ?? out.colDefaultStyleId ?? out.colDefault);
         const cellId = normalizeStyleId(out.cellStyleId ?? out.styleId ?? cellStyleId);
-        const runId = normalizeStyleId(out.rangeRunStyleId ?? out.runStyleId ?? out.rangeStyleId ?? out.rangeRun ?? 0);
+        const runId = normalizeStyleId(
+          out.rangeRunStyleId ??
+            out.rangeRun ??
+            out.runStyleId ??
+            out.formatRunStyleId ??
+            out.runDefaultStyleId ??
+            out.rangeStyleId ??
+            0
+        );
         return [sheetDefaultStyleId, rowStyleId, colStyleId, cellId, runId];
       }
     }
