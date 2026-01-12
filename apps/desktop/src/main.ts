@@ -1331,6 +1331,7 @@ const buildTitlebarProps = () => ({
   documentName: computeTitlebarDocumentName(),
   actions: [
     {
+      id: "save",
       label: "Save",
       ariaLabel: "Save document",
       onClick: () => {
@@ -1345,6 +1346,7 @@ const buildTitlebarProps = () => ({
       },
     },
     {
+      id: "share",
       label: "Share",
       ariaLabel: "Share document",
       variant: "primary" as const,
