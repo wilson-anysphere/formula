@@ -442,6 +442,12 @@ impl<'a> FragmentCursor<'a> {
             out.push(ptg);
 
             match ptg {
+                // PtgExp / PtgTbl: shared/array formula tokens (not expected in NAME, but consume
+                // payload to keep the stream aligned if they appear).
+                0x01 | 0x02 => {
+                    let bytes = self.read_bytes(4)?;
+                    out.extend_from_slice(&bytes);
+                }
                 // Binary operators.
                 0x03..=0x11
                 // Unary +/- and postfix/paren/missarg.
@@ -541,6 +547,14 @@ impl<'a> FragmentCursor<'a> {
                     let bytes = self.read_bytes(8)?;
                     out.extend_from_slice(&bytes);
                 }
+                // PtgArray (7 bytes) [MS-XLS 2.5.198.8]
+                //
+                // The actual array constant values live in `rgcb` (trailing data blocks), but the
+                // token itself contains a 7-byte header we must preserve to keep `rgce` aligned.
+                0x20 | 0x40 | 0x60 => {
+                    let bytes = self.read_bytes(7)?;
+                    out.extend_from_slice(&bytes);
+                }
                 // PtgFunc (2 bytes)
                 0x21 | 0x41 | 0x61 => {
                     let bytes = self.read_bytes(2)?;
@@ -551,7 +565,7 @@ impl<'a> FragmentCursor<'a> {
                     let bytes = self.read_bytes(3)?;
                     out.extend_from_slice(&bytes);
                 }
-                // PtgName (6 bytes)
+                // PtgName (defined name reference) (6 bytes).
                 0x23 | 0x43 | 0x63 => {
                     let bytes = self.read_bytes(6)?;
                     out.extend_from_slice(&bytes);
@@ -584,6 +598,11 @@ impl<'a> FragmentCursor<'a> {
                 // PtgAreaN (8 bytes)
                 0x2D | 0x4D | 0x6D => {
                     let bytes = self.read_bytes(8)?;
+                    out.extend_from_slice(&bytes);
+                }
+                // PtgNameX (external name) [MS-XLS 2.5.198.41]
+                0x39 | 0x59 | 0x79 => {
+                    let bytes = self.read_bytes(6)?;
                     out.extend_from_slice(&bytes);
                 }
                 // 3D references: PtgRef3d / PtgArea3d.
@@ -832,6 +851,120 @@ mod tests {
         assert_eq!(parsed.names[0].name, name);
         assert_eq!(parsed.names[0].refers_to, "A1&\"ABCDE\"");
         assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
+    }
+
+    #[test]
+    fn parses_defined_name_with_referr_before_continued_ptgstr_token() {
+        let name = "ErrStrName";
+        let literal = "ABCDE";
+
+        // rgce for `#REF!&"ABCDE"`.
+        let rgce: Vec<u8> = [
+            vec![0x2A, 0x00, 0x00, 0x00, 0x00], // PtgRefErr + payload
+            vec![0x17, literal.len() as u8, 0u8], // PtgStr + cch + flags (compressed)
+            literal.as_bytes().to_vec(),
+            vec![0x08], // PtgConcat
+        ]
+        .concat();
+
+        let mut header = Vec::new();
+        header.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        header.push(0); // chKey
+        header.push(name.len() as u8); // cch
+        header.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        header.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        header.extend_from_slice(&0u16.to_le_bytes()); // itab
+        header.extend_from_slice(&[0, 0, 0, 0]); // cchCustMenu, cchDescription, cchHelpTopic, cchStatusText
+
+        let mut name_str = Vec::new();
+        name_str.push(0); // flags (compressed)
+        name_str.extend_from_slice(name.as_bytes());
+
+        // Split the PtgStr character bytes across the CONTINUE boundary after "AB".
+        let first_rgce = &rgce[..10]; // PtgRefErr (5) + PtgStr header (3) + "AB" (2)
+        let second_chars = &literal.as_bytes()[2..]; // "CDE"
+
+        let mut continue_payload = Vec::new();
+        continue_payload.push(0); // continued segment option flags (fHighByte=0)
+        continue_payload.extend_from_slice(second_chars);
+        continue_payload.push(0x08); // PtgConcat
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_NAME, &[header, name_str, first_rgce.to_vec()].concat()),
+            record(records::RECORD_CONTINUE, &continue_payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed =
+            parse_biff_defined_names(&stream, BiffVersion::Biff8, 1252, &[]).expect("parse names");
+        assert_eq!(parsed.names.len(), 1);
+        assert_eq!(parsed.names[0].name, name);
+        assert_eq!(parsed.names[0].refers_to, "#REF!&\"ABCDE\"");
+        assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
+    }
+
+    #[test]
+    fn parses_name_record_with_namex_before_continued_ptgstr_token() {
+        let name = "NameXStr";
+        let literal = "ABCDE";
+
+        // `rgce` containing:
+        //   PtgNameX (6 bytes)
+        //   PtgStr (string literal)
+        //   PtgConcat
+        //
+        // If `PtgNameX` isn't recognized, the parser falls back to raw byte copying, which can
+        // corrupt a continued `PtgStr` by treating the continued-segment option flags byte as part
+        // of the formula payload.
+        let rgce: Vec<u8> = [
+            vec![0x39, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00], // PtgNameX + payload (ixti=0, iname=1)
+            vec![0x17, literal.len() as u8, 0u8],           // PtgStr + cch + flags (compressed)
+            literal.as_bytes().to_vec(),
+            vec![0x08], // PtgConcat
+        ]
+        .concat();
+
+        let mut header = Vec::new();
+        header.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        header.push(0); // chKey
+        header.push(name.len() as u8); // cch
+        header.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        header.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        header.extend_from_slice(&0u16.to_le_bytes()); // itab
+        header.extend_from_slice(&[0, 0, 0, 0]); // cchCustMenu, cchDescription, cchHelpTopic, cchStatusText
+
+        let mut name_str = Vec::new();
+        name_str.push(0); // flags (compressed)
+        name_str.extend_from_slice(name.as_bytes());
+
+        // Split the PtgStr character bytes across the CONTINUE boundary after "AB".
+        let first_rgce = &rgce[..12]; // PtgNameX (7) + PtgStr header (3) + "AB" (2)
+        let second_chars = &literal.as_bytes()[2..]; // "CDE"
+
+        let mut continue_payload = Vec::new();
+        continue_payload.push(0); // continued segment option flags (fHighByte=0)
+        continue_payload.extend_from_slice(second_chars);
+        continue_payload.push(0x08); // PtgConcat
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_NAME, &[header, name_str, first_rgce.to_vec()].concat()),
+            record(records::RECORD_CONTINUE, &continue_payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let allows_continuation = |id: u16| id == RECORD_NAME;
+        let iter = records::LogicalBiffRecordIter::new(&stream, allows_continuation);
+        let record = iter
+            .filter_map(Result::ok)
+            .find(|r| r.record_id == RECORD_NAME)
+            .expect("NAME record");
+        let raw = parse_biff8_name_record(&record, 1252, &[]).expect("parse NAME");
+        assert_eq!(raw.name, name);
+        assert_eq!(raw.rgce, rgce);
     }
 
     #[test]
