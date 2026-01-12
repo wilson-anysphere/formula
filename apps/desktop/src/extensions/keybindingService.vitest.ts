@@ -138,6 +138,10 @@ describe("KeybindingService", () => {
       { extensionId: "ext", command: "ext.stealSaveAs", key: "ctrl+shift+s", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealSaveAs", key: "cmd+shift+s", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealSaveAs", key: "ctrl+cmd+shift+s", mac: null, when: null },
+      // Print (core UX): Ctrl/Cmd+P.
+      { extensionId: "ext", command: "ext.stealPrint", key: "ctrl+p", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealPrint", key: "cmd+p", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealPrint", key: "ctrl+cmd+p", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealClose", key: "ctrl+w", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealClose", key: "cmd+w", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealClose", key: "ctrl+cmd+w", mac: null, when: null },
@@ -385,6 +389,16 @@ describe("KeybindingService", () => {
     expect(fileHandled8).toBe(false);
     expect(fileEvent8.defaultPrevented).toBe(false);
 
+    const fileEvent8b = makeKeydownEvent({ key: "p", ctrlKey: true });
+    const fileHandled8b = await service.dispatchKeydown(fileEvent8b);
+    expect(fileHandled8b).toBe(false);
+    expect(fileEvent8b.defaultPrevented).toBe(false);
+
+    const fileEvent8c = makeKeydownEvent({ key: "p", metaKey: true });
+    const fileHandled8c = await service.dispatchKeydown(fileEvent8c);
+    expect(fileHandled8c).toBe(false);
+    expect(fileEvent8c.defaultPrevented).toBe(false);
+
     const fileEvent9 = makeKeydownEvent({ key: "w", ctrlKey: true });
     const fileHandled9 = await service.dispatchKeydown(fileEvent9);
     expect(fileHandled9).toBe(false);
@@ -425,6 +439,11 @@ describe("KeybindingService", () => {
     const fileHandled16 = await service.dispatchKeydown(fileEvent16);
     expect(fileHandled16).toBe(false);
     expect(fileEvent16.defaultPrevented).toBe(false);
+
+    const fileEvent16b = makeKeydownEvent({ key: "p", ctrlKey: true, metaKey: true });
+    const fileHandled16b = await service.dispatchKeydown(fileEvent16b);
+    expect(fileHandled16b).toBe(false);
+    expect(fileEvent16b.defaultPrevented).toBe(false);
 
     const fileEvent17 = makeKeydownEvent({ key: "w", ctrlKey: true, metaKey: true });
     const fileHandled17 = await service.dispatchKeydown(fileEvent17);
@@ -490,6 +509,9 @@ describe("KeybindingService", () => {
       { extensionId: "ext", command: "ext.stealSaveAs", key: "ctrl+shift+s", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealSaveAs", key: "cmd+shift+s", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealSaveAs", key: "ctrl+cmd+shift+s", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealPrint", key: "ctrl+p", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealPrint", key: "cmd+p", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealPrint", key: "ctrl+cmd+p", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealClose", key: "ctrl+w", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealClose", key: "cmd+w", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealClose", key: "ctrl+cmd+w", mac: null, when: null },
@@ -521,6 +543,7 @@ describe("KeybindingService", () => {
     expect(index.get("ext.stealOpen")).toBeUndefined();
     expect(index.get("ext.stealSave")).toBeUndefined();
     expect(index.get("ext.stealSaveAs")).toBeUndefined();
+    expect(index.get("ext.stealPrint")).toBeUndefined();
     expect(index.get("ext.stealClose")).toBeUndefined();
     expect(index.get("ext.stealQuit")).toBeUndefined();
     expect(index.get("ext.stealContextMenu")).toBeUndefined();

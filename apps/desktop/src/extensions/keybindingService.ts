@@ -163,6 +163,11 @@ export const DEFAULT_RESERVED_EXTENSION_SHORTCUTS = [
   "cmd+shift+s",
   // Some keyboards emit both ctrl+meta on the same chord.
   "ctrl+cmd+shift+s",
+  // Print (Ctrl/Cmd+P).
+  "ctrl+p",
+  "cmd+p",
+  // Some keyboards emit both ctrl+meta on the same chord.
+  "ctrl+cmd+p",
   "ctrl+w",
   "cmd+w",
   // Some keyboards emit both ctrl+meta on the same chord.

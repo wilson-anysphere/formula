@@ -81,6 +81,18 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     when: "focus.inTextInput == false",
   },
   {
+    command: "workbench.print",
+    key: "ctrl+p",
+    mac: "cmd+p",
+    when: "focus.inTextInput == false",
+  },
+  {
+    // Some environments emit both Ctrl+Meta for a single chord (remote desktop / VM keyboard setups).
+    command: "workbench.print",
+    key: "ctrl+cmd+p",
+    when: "focus.inTextInput == false",
+  },
+  {
     command: "workbench.closeWorkbook",
     key: "ctrl+w",
     mac: "cmd+w",

@@ -13,6 +13,8 @@ describe("registerWorkbenchFileCommands", () => {
       openWorkbook: vi.fn(),
       saveWorkbook: vi.fn(),
       saveWorkbookAs: vi.fn(),
+      print: vi.fn(),
+      printPreview: vi.fn(),
       closeWorkbook: vi.fn(),
       quit: vi.fn(),
     };
@@ -35,6 +37,12 @@ describe("registerWorkbenchFileCommands", () => {
     await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.saveWorkbookAs);
     expect(handlers.saveWorkbookAs).toHaveBeenCalledTimes(1);
 
+    await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.print);
+    expect(handlers.print).toHaveBeenCalledTimes(1);
+
+    await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.printPreview);
+    expect(handlers.printPreview).toHaveBeenCalledTimes(1);
+
     await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.closeWorkbook);
     expect(handlers.closeWorkbook).toHaveBeenCalledTimes(1);
 
@@ -42,4 +50,3 @@ describe("registerWorkbenchFileCommands", () => {
     expect(handlers.quit).toHaveBeenCalledTimes(1);
   });
 });
-

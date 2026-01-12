@@ -166,6 +166,7 @@ describe("builtin keybinding catalog", () => {
     expect(getPrimaryCommandKeybindingDisplay("workbench.openWorkbook", otherIndex)).toBe("Ctrl+O");
     expect(getPrimaryCommandKeybindingDisplay("workbench.saveWorkbook", otherIndex)).toBe("Ctrl+S");
     expect(getPrimaryCommandKeybindingDisplay("workbench.saveWorkbookAs", otherIndex)).toBe("Ctrl+Shift+S");
+    expect(getPrimaryCommandKeybindingDisplay("workbench.print", otherIndex)).toBe("Ctrl+P");
     expect(getPrimaryCommandKeybindingDisplay("workbench.closeWorkbook", otherIndex)).toBe("Ctrl+W");
     expect(getPrimaryCommandKeybindingDisplay("workbench.quit", otherIndex)).toBe("Ctrl+Q");
     expect(getPrimaryCommandKeybindingDisplay("workbench.showCommandPalette", otherIndex)).toBe("Ctrl+Shift+P");
@@ -205,6 +206,7 @@ describe("builtin keybinding catalog", () => {
     expect(getPrimaryCommandKeybindingDisplay("workbench.openWorkbook", macIndex)).toBe("⌘O");
     expect(getPrimaryCommandKeybindingDisplay("workbench.saveWorkbook", macIndex)).toBe("⌘S");
     expect(getPrimaryCommandKeybindingDisplay("workbench.saveWorkbookAs", macIndex)).toBe("⇧⌘S");
+    expect(getPrimaryCommandKeybindingDisplay("workbench.print", macIndex)).toBe("⌘P");
     expect(getPrimaryCommandKeybindingDisplay("workbench.closeWorkbook", macIndex)).toBe("⌘W");
     expect(getPrimaryCommandKeybindingDisplay("workbench.quit", macIndex)).toBe("⌘Q");
     expect(getPrimaryCommandKeybindingDisplay("workbench.showCommandPalette", macIndex)).toBe("⇧⌘P");

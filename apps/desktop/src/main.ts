@@ -7273,6 +7273,28 @@ registerWorkbenchFileCommands({
         showToast(`Failed to save workbook: ${String(err)}`, "error");
       });
     },
+    print: () => {
+      const invokeAvailable = typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
+      if (!invokeAvailable) {
+        showDesktopOnlyToast("Print is available in the desktop app.");
+        return;
+      }
+      void handleRibbonPrintPreview({ autoPrint: true }).catch((err) => {
+        console.error("Failed to print:", err);
+        showToast(`Failed to print: ${String(err)}`, "error");
+      });
+    },
+    printPreview: () => {
+      const invokeAvailable = typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
+      if (!invokeAvailable) {
+        showDesktopOnlyToast("Print Preview is available in the desktop app.");
+        return;
+      }
+      void handleRibbonPrintPreview({ autoPrint: false }).catch((err) => {
+        console.error("Failed to open print preview:", err);
+        showToast(`Failed to open print preview: ${String(err)}`, "error");
+      });
+    },
     closeWorkbook: () => {
       if (!handleCloseRequestForRibbon) {
         showDesktopOnlyToast("Closing windows is available in the desktop app.");

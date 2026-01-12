@@ -6,6 +6,8 @@ export const WORKBENCH_FILE_COMMANDS = {
   openWorkbook: "workbench.openWorkbook",
   saveWorkbook: "workbench.saveWorkbook",
   saveWorkbookAs: "workbench.saveWorkbookAs",
+  print: "workbench.print",
+  printPreview: "workbench.printPreview",
   closeWorkbook: "workbench.closeWorkbook",
   quit: "workbench.quit",
 } as const;
@@ -15,6 +17,8 @@ export type WorkbenchFileCommandHandlers = {
   openWorkbook: () => void | Promise<void>;
   saveWorkbook: () => void | Promise<void>;
   saveWorkbookAs: () => void | Promise<void>;
+  print: () => void | Promise<void>;
+  printPreview: () => void | Promise<void>;
   closeWorkbook: () => void | Promise<void>;
   quit: () => void | Promise<void>;
 };
@@ -76,6 +80,30 @@ export function registerWorkbenchFileCommands(params: {
   );
 
   commandRegistry.registerBuiltinCommand(
+    WORKBENCH_FILE_COMMANDS.print,
+    t("command.workbench.print"),
+    () => handlers.print(),
+    {
+      category,
+      icon: null,
+      description: t("commandDescription.workbench.print"),
+      keywords: ["print", "pdf", "page setup"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    WORKBENCH_FILE_COMMANDS.printPreview,
+    t("command.workbench.printPreview"),
+    () => handlers.printPreview(),
+    {
+      category,
+      icon: null,
+      description: t("commandDescription.workbench.printPreview"),
+      keywords: ["print preview", "preview", "pdf", "page setup"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
     WORKBENCH_FILE_COMMANDS.closeWorkbook,
     t("command.workbench.closeWorkbook"),
     () => handlers.closeWorkbook(),
@@ -99,4 +127,3 @@ export function registerWorkbenchFileCommands(params: {
     },
   );
 }
-
