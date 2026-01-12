@@ -140,8 +140,14 @@ describe("SpreadsheetApp shared grid (large limits)", () => {
     expect(counts.rowCount).toBe(limits.maxRows + 1);
     expect(counts.colCount).toBe(limits.maxCols + 1);
 
+    // Smoke: programmatic navigation to near the bottom of the sheet should work
+    // without relying on legacy row/col visibility caches.
+    app.activateCell({ row: 999_999, col: 0 }); // A1000000
+    expect(app.getActiveCell().row).toBe(999_999);
+    expect(app.getScroll().y).toBeGreaterThan(0);
+    expect(((app as any).rowIndexByVisual as number[]).length).toBe(0);
+
     app.destroy();
     root.remove();
   });
 });
-
