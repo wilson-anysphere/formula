@@ -100,6 +100,32 @@ impl DirStream {
                         m.stream_name = decode_bytes(trim_reserved_u16(data), encoding);
                     }
                 }
+                0x0032 => {
+                    // MODULESTREAMNAMEUNICODE.
+                    //
+                    // Some real-world `VBA/dir` streams provide a UTF-16LE module stream name in a
+                    // separate record (ID 0x0032). Prefer it for OLE stream lookup.
+                    if let Some(m) = current_module.as_mut() {
+                        let mut utf16_bytes = data;
+
+                        // Some producers include an internal u32 length prefix. Accept both:
+                        // - length == remaining bytes (byte count), or
+                        // - length*2 == remaining bytes (UTF-16 code units).
+                        if data.len() >= 4 {
+                            let n = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
+                            let remaining = data.len() - 4;
+                            if n == remaining || n.saturating_mul(2) == remaining {
+                                utf16_bytes = &data[4..];
+                            }
+                        }
+
+                        let (cow, _) = UTF_16LE.decode_without_bom_handling(utf16_bytes);
+                        let mut s = cow.into_owned();
+                        // Stream names should not contain NULs; strip defensively.
+                        s.retain(|c| c != '\u{0000}');
+                        m.stream_name = s;
+                    }
+                }
                 0x0031 => {
                     // MODULETEXTOFFSET (u32 LE)
                     if let Some(m) = current_module.as_mut() {

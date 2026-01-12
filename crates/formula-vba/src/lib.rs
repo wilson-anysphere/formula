@@ -671,6 +671,70 @@ mod tests {
     }
 
     #[test]
+    fn parses_module_using_modulestreamnameunicode_record() {
+        use std::io::{Cursor, Write};
+
+        // Some `VBA/dir` streams include a separate MODULESTREAMNAMEUNICODE (0x0032) record that
+        // provides the UTF-16LE module stream name. Ensure we honor it for OLE lookup.
+        let module_stream_name = "Модуль1";
+        let mut stream_name_unicode = Vec::new();
+        for unit in module_stream_name.encode_utf16() {
+            stream_name_unicode.extend_from_slice(&unit.to_le_bytes());
+        }
+
+        let module_code = "Sub Hello()\r\nEnd Sub\r\n";
+        let module_container = compress_container(module_code.as_bytes());
+
+        let dir_decompressed = {
+            let mut out = Vec::new();
+
+            // PROJECTCODEPAGE (u16 LE) so the project encoding resolves deterministically.
+            push_record(&mut out, 0x0003, &1251u16.to_le_bytes());
+
+            // MODULENAME is the module identifier; keep it ASCII.
+            push_record(&mut out, 0x0019, b"Module1");
+
+            // Deliberately wrong MODULESTREAMNAME to prove we prefer MODULESTREAMNAMEUNICODE.
+            let mut stream_name = Vec::new();
+            stream_name.extend_from_slice(b"WrongName");
+            stream_name.extend_from_slice(&0u16.to_le_bytes());
+            push_record(&mut out, 0x001A, &stream_name);
+
+            // Correct Unicode stream name.
+            push_record(&mut out, 0x0032, &stream_name_unicode);
+
+            // MODULETYPE (standard) + MODULETEXTOFFSET (0).
+            push_record(&mut out, 0x0021, &0u16.to_le_bytes());
+            push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+            out
+        };
+        let dir_container = compress_container(&dir_decompressed);
+
+        let cursor = Cursor::new(Vec::new());
+        let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+        ole.create_storage("VBA").expect("VBA storage");
+        {
+            let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+            s.write_all(&dir_container).expect("write dir");
+        }
+        {
+            let path = format!("VBA/{module_stream_name}");
+            let mut s = ole.create_stream(&path).expect("module stream");
+            s.write_all(&module_container).expect("write module");
+        }
+
+        let vba_bin = ole.into_inner().into_inner();
+        let project = VBAProject::parse(&vba_bin).expect("parse");
+        let module = project
+            .modules
+            .iter()
+            .find(|m| m.name == "Module1")
+            .expect("Module1 present");
+        assert_eq!(module.stream_name, module_stream_name);
+        assert!(module.code.contains("Sub Hello"));
+    }
+
+    #[test]
     fn parses_module_without_text_offset_using_signature_scan() {
         use std::io::{Cursor, Write};
 
