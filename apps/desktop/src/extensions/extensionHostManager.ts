@@ -135,7 +135,6 @@ export class DesktopExtensionHostManager {
     try {
       await this.getMarketplaceExtensionManager().loadAllInstalled();
     } catch (err) {
-      error ??= err;
       // Fallback: if loading installed extensions fails (IndexedDB unavailable/corrupted),
       // still attempt to start the host so built-in extensions can run.
       try {

@@ -1013,8 +1013,14 @@ export class WebExtensionManager {
       // Avoid throwing if the caller invokes `loadAllInstalled()` multiple times.
       if (this.isLoaded(record.id) || this.host.listExtensions().some((e) => e.id === record.id)) continue;
       // eslint-disable-next-line no-await-in-loop
-      await this._loadInstalledInternal(record.id, { start: false });
-      newlyLoaded.push(record.id);
+      try {
+        await this._loadInstalledInternal(record.id, { start: false });
+        newlyLoaded.push(record.id);
+      } catch {
+        // Best-effort: a single bad/corrupted extension should not prevent other installed
+        // extensions from being loaded at startup. The failing install is expected to have been
+        // quarantined (corrupted/incompatible) by `_loadInstalledInternal` where possible.
+      }
     }
 
     // Preferred behavior: call host.startup() exactly once so existing extensions don't receive
@@ -1137,6 +1143,15 @@ export class WebExtensionManager {
       extensionPath,
       manifest,
       mainUrl
+    }).catch((error) => {
+      // If the host rejects the extension (duplicate id, invalid manifest, etc), ensure we revoke
+      // the in-memory module URL so we don't leak blob/data URLs across retries.
+      try {
+        revoke();
+      } catch {
+        // ignore
+      }
+      throw error;
     });
 
     this._loadedMainUrls.set(installed.id, { mainUrl, revoke });
