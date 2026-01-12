@@ -526,11 +526,11 @@ async fn oauth_loopback_listen(
     state: State<'_, SharedOauthLoopbackState>,
     redirect_uri: String,
 ) -> Result<(), String> {
-    // Restrict loopback listener startup to the main application window. This avoids
-    // accidental abuse if we ever embed untrusted content in secondary webviews.
-    if window.label() != "main" {
-        return Err("oauth loopback listeners are only allowed from the main window".to_string());
-    }
+    desktop::ipc_origin::ensure_main_window(
+        window.label(),
+        "oauth loopback listeners",
+        desktop::ipc_origin::Verb::Are,
+    )?;
 
     let url = window.url().map_err(|err| err.to_string())?;
     desktop::ipc_origin::ensure_trusted_origin(
