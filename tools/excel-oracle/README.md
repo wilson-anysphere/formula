@@ -342,8 +342,9 @@ powershell -ExecutionPolicy Bypass -File tools/excel-oracle/patch-pinned-dataset
   -IncludeTags odd_coupon_validation
 ```
 
-This script preserves existing results, updates the `caseSet.sha256`/`caseSet.count` metadata, and
-only evaluates missing cases via `crates/formula-excel-oracle`.
+This script patches the pinned dataset by invoking `update_pinned_dataset.py`, which preserves
+existing results and updates the `caseSet.sha256`/`caseSet.count` metadata. The patch flow uses
+`--no-engine`, so only the provided Excel results are merged/overwritten (no engine fallback).
 
 When you patch a synthetic baseline with **real Excel** results, `update_pinned_dataset.py` records
 a small provenance entry under `source.patches` in the pinned dataset so it’s clear which case IDs
