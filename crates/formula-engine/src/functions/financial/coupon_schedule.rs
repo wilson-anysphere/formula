@@ -235,9 +235,8 @@ pub fn coupdaysnc(
     // For 30/360 bases, Excel computes DSC as the remaining portion of the modeled coupon period:
     //   DSC = E - A
     //
-    // For basis=0 (US 30/360), this preserves the additivity invariant `A + DSC == E` even though
-    // `DAYS360(..., FALSE)` is not additive for some month-end schedules.
-    //
+    // This preserves the additivity invariant `A + DSC == E` even though DAYS360 is not additive
+    // for some month-end schedules.
     let dsc = match basis {
         0 | 4 => {
             let e = coupon_period_e(pcd, ncd, frequency, basis, system)?;

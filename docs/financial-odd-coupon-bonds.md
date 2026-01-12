@@ -87,11 +87,11 @@ The generator includes a small set of boundary-date equality cases (e.g. `issue 
 
 Current engine behavior:
 
-- **ODDF\*** allows equality boundaries like `issue == settlement` and `settlement == first_coupon`,
-  but still requires:
-  - `issue < first_coupon` (otherwise there is no odd first coupon period)
-  - `settlement < maturity`
-  - `first_coupon <= maturity`
+- **ODDF\*** permits boundary equalities like `issue == settlement` (zero accrued interest) and
+  `settlement == first_coupon` (settlement on the first coupon date), matching Excel’s observed
+  behavior (see `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`).
+  The enforced chronology is `issue <= settlement <= first_coupon <= maturity` with
+  `issue < first_coupon` and `settlement < maturity`.
 - **ODDL\*** requires `settlement < maturity` and `last_interest < maturity`, but allows settlement
   dates **on or before** `last_interest` (as well as inside the odd-last stub).
   - `settlement == last_interest` is allowed (it implies zero accrued interest).

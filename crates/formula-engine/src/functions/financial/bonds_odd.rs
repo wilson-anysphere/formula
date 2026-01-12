@@ -148,10 +148,11 @@
 //!
 //! Typical validation (Excel-style `#NUM!`):
 //!
-//! - Chronology: `I <= S <= F <= M` with `I < F` and `S < M`.
+//! - Chronology (Excel): `I <= S <= F <= M` with `I < F` and `S < M`.
 //!   - `F == M` is allowed (single odd coupon + redemption).
 //!   - Boundary equalities `I == S` (zero accrued interest) and `S == F` (settlement on first coupon)
 //!     are allowed (see `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`).
+//!   - The equality `I == F` is rejected with `#NUM!` (see the same test file).
 //! - `rate >= 0`, `yld` (or `pr`) finite, `redemption > 0`
 //! - `frequency ∈ {1,2,4}`, `basis ∈ 0..=4`
 //!
