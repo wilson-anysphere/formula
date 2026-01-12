@@ -257,7 +257,7 @@ export const defaultRibbonSchema: RibbonSchema = {
               menuItems: [
                 { id: "file.save.saveAs", label: "Save As…", ariaLabel: "Save As", iconId: "edit" },
                 { id: "file.save.saveAs.copy", label: "Save a Copy…", ariaLabel: "Save a Copy", iconId: "file" },
-                { id: "file.save.saveAs.download", label: "Download a Copy", ariaLabel: "Download a Copy", iconId: "arrowDown" },
+                { id: "file.save.saveAs.download", label: "Download a Copy", ariaLabel: "Download a Copy", iconId: "download" },
               ],
             },
             { id: "file.save.autoSave", label: "AutoSave", ariaLabel: "AutoSave", iconId: "cloud", kind: "toggle", defaultPressed: false },
