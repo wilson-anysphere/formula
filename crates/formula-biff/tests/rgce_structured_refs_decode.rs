@@ -117,6 +117,28 @@ fn decodes_structured_ref_item_only_data() {
 }
 
 #[test]
+fn decodes_structured_ref_data_flag_with_column_uses_simple_form() {
+    // `#Data` is the default row selector for a column reference, so Excel canonical text omits it.
+    let rgce = ptg_list(1, 0x0004, 2, 2, 0x18);
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "Table1[Column2]");
+    assert_eq!(normalize(&text), normalize("Table1[Column2]"));
+}
+
+#[test]
+fn decodes_structured_ref_data_flag_with_column_range_uses_simple_form() {
+    // `#Data` is the default row selector for a column range reference, so Excel canonical text
+    // omits it.
+    let rgce = ptg_list(1, 0x0004, 2, 4, 0x18);
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "Table1[[Column2]:[Column4]]");
+    assert_eq!(
+        normalize(&text),
+        normalize("Table1[[Column2]:[Column4]]")
+    );
+}
+
+#[test]
 fn decodes_structured_ref_default_data_when_no_item_and_no_columns() {
     // If both the row/item flags and the column selectors are absent, Excel treats the reference
     // as the table's data body.
