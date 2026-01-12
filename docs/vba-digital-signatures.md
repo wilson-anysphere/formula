@@ -20,8 +20,10 @@ API notes:
 - `formula_vba::verify_vba_digital_signature_bound` returns a [`VbaDigitalSignatureBound`] with a
   richer binding enum (`VbaProjectBindingVerification`) and best-effort debug info (the `DigestInfo`
   algorithm OID, signed digest bytes, computed digest bytes).
-  - Note: for VBA signatures the binding digest bytes are **always MD5**; the algorithm OID is not
-    authoritative (details below).
+  - Note: for legacy VBA signature streams (`DigitalSignature` / `DigitalSignatureEx`), Office uses
+    **MD5 digest bytes** for binding even when `DigestInfo.digestAlgorithm.algorithm` indicates
+    SHA-256 (MS-OSHARED §4.3). For the v3 `DigitalSignatureExt` stream, the digest algorithm OID is
+    meaningful (typically SHA-256) and the digest bytes are computed over the v3 MS-OVBA transcript.
 - PKCS#7/CMS verification is *internal* signature verification only: by default we do **not**
   validate the signer certificate chain (OpenSSL `NOVERIFY`). If you need opt-in “trusted publisher”
   evaluation, use `formula_vba::verify_vba_digital_signature_with_trust` with an explicit root
@@ -139,8 +141,9 @@ High-level extraction steps:
      `SigDataV1Serialized.sourceHash` (MS-OSHARED).
 
 That `(hash_oid, digest_bytes)` pair is the “signed digest” we use to bind a VBA signature to a
-specific VBA project. For VBA signatures, the `digest_bytes` are the *binding* value; the `hash_oid`
-is frequently misleading and should be treated as metadata only.
+specific VBA project. For VBA signatures, the `digest_bytes` are the *binding* value; for legacy
+v1/v2 streams the `hash_oid` is frequently misleading, but for v3 (`DigitalSignatureExt`) the OID is
+meaningful and should be honored when selecting the expected digest algorithm.
 
 ### Relevant ASN.1 shapes (high level)
 
@@ -191,9 +194,10 @@ For VBA binding, we ignore `SpcIndirectDataContent.data` and use only `messageDi
 CMS signature verification alone answers “is this a valid CMS signature over *some bytes*?”, but it
 does not, by itself, prove that the signature is bound to the rest of the VBA project.
 
-### MD5-always rule (important)
+### Legacy MD5-always rule (v1/v2) (important)
 
-For VBA signatures, the digest embedded in:
+For legacy VBA signature streams (`\x05DigitalSignature` / `\x05DigitalSignatureEx`), the digest
+embedded in:
 
 - classic `SpcIndirectDataContent.messageDigest.digest`, and
 - MS-OSHARED `SigDataV1Serialized.sourceHash`
@@ -204,8 +208,13 @@ is **always a 16-byte MD5** (the “VBA project source hash”), even when
 This behavior is specified in **MS-OSHARED §4.3**:
 https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/40c8dab3-e8db-4c66-a6be-8cec06351b1e
 
-Practical implication: the `DigestInfo` *algorithm OID* should be treated as informational only for
-VBA binding; the verifier must compute **MD5** and compare it to the 16 digest bytes.
+Practical implications:
+
+- For v1/v2 (`DigitalSignature` / `DigitalSignatureEx`), the `DigestInfo` *algorithm OID* should be
+  treated as informational only for VBA binding; the verifier must compute **MD5** and compare it to
+  the 16 digest bytes.
+- For v3 (`DigitalSignatureExt`), Office uses the MS-OVBA v3 transcript and the digest algorithm OID
+  is meaningful (expected SHA-256 in the wild).
 
 ### Spec-correct transcripts
 
@@ -216,7 +225,17 @@ At a high level:
 
 - **v1 / `DigitalSignature`**: `ContentHash = MD5(ContentNormalizedData)`
 - **v2 / `DigitalSignatureEx`**: `AgileContentHash = MD5(ContentNormalizedData || FormsNormalizedData)`
-- **v3 / `DigitalSignatureExt`**: `V3ContentHash = MD5(V3ContentNormalizedData || ProjectNormalizedData)`
+- **v3 / `DigitalSignatureExt`**: `V3ContentHash = SHA-256(ProjectNormalizedData)`
+  - where `ProjectNormalizedData = V3ContentNormalizedData || FormsNormalizedData`
+
+Reference record normalization note:
+
+- Both `ContentNormalizedData` and `V3ContentNormalizedData` incorporate only a subset of
+  reference-related `VBA/dir` records.
+- `REFERENCECONTROL` (`0x002F`) and `REFERENCEORIGINAL` (`0x0033`) are **not** included verbatim; they
+  are normalized via MS-OVBA’s TempBuffer + “copy until first NUL byte” rule.
+- `REFERENCEEXTENDED` (`0x0030`) is included verbatim.
+- Other reference-related record types (for example `REFERENCENAME` (`0x0016`)) MUST NOT contribute.
 
 V3 spec references:
 
@@ -233,7 +252,10 @@ To bind the signature to the VBA project contents, `formula-vba`:
 
 1. Extracts the signed digest bytes from the signature payload.
 2. Computes the appropriate MS-OVBA Contents Hash transcript (v1/v2/v3) for the current project.
-3. Computes **MD5** of that transcript (regardless of the signature's `DigestInfo` OID).
+3. Computes digest bytes for that transcript:
+   - v1/v2: compute **MD5** (per MS-OSHARED §4.3, regardless of the signature's `DigestInfo` OID)
+   - v3: compute the digest algorithm indicated by `DigestInfo.digestAlgorithm.algorithm` (typically
+     SHA-256)
 4. Compares the computed digest bytes to the signed digest bytes.
 
 Result interpretation:
