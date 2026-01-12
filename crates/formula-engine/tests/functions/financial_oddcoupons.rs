@@ -115,7 +115,8 @@ fn odd_coupon_settlement_equal_coupon_dates_are_rejected() {
     // Pinned by current engine behavior; verify against real Excel via
     // tools/excel-oracle/run-excel-oracle.ps1 (Task 393).
     //
-    // Settlement must be within the odd coupon period, but Excel allows certain boundary cases:
+    // Settlement must be within the odd coupon period. The engine currently allows certain
+    // boundary cases (not yet validated against real Excel):
     // - ODDL*: last_interest <= settlement < maturity
     // - ODDF*: issue <= settlement <= first_coupon <= maturity
     //   (with `issue < first_coupon` and `settlement < maturity`)
