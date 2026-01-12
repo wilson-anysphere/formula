@@ -77,3 +77,28 @@ fn rename_sheet_rejects_duplicate_name_case_insensitive() {
         other => panic!("expected WhatIf error, got {other:?}"),
     }
 }
+
+#[test]
+fn rename_sheet_rejects_duplicate_name_with_unicode_case_folding() {
+    let mut workbook = Workbook::new_empty(None);
+    workbook.add_sheet("é".to_string());
+    workbook.add_sheet("Sheet2".to_string());
+    let sheet2_id = workbook.sheets[1].id.clone();
+
+    let mut state = AppState::new();
+    state.load_workbook(workbook);
+
+    // `eq_ignore_ascii_case` would treat these as distinct; Excel compares sheet names
+    // case-insensitively across Unicode.
+    let err = state
+        .rename_sheet(&sheet2_id, "É".to_string())
+        .expect_err("expected duplicate sheet name error");
+
+    match err {
+        AppStateError::WhatIf(msg) => assert!(
+            msg.contains("already exists"),
+            "expected duplicate error, got {msg:?}"
+        ),
+        other => panic!("expected WhatIf error, got {other:?}"),
+    }
+}

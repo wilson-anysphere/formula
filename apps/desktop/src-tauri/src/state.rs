@@ -39,6 +39,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use uuid::Uuid;
 
+fn sheet_name_eq_case_insensitive(a: &str, b: &str) -> bool {
+    use unicode_normalization::UnicodeNormalization as _;
+
+    a.nfkc()
+        .flat_map(|c| c.to_uppercase())
+        .eq(b.nfkc().flat_map(|c| c.to_uppercase()))
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum AppStateError {
     #[error("no workbook loaded")]
@@ -347,7 +355,7 @@ impl AppState {
             if workbook
                 .sheets
                 .iter()
-                .any(|sheet| sheet.name.eq_ignore_ascii_case(trimmed))
+                .any(|sheet| sheet_name_eq_case_insensitive(&sheet.name, trimmed))
             {
                 return Err(AppStateError::WhatIf(
                     formula_model::SheetNameError::DuplicateName.to_string(),
@@ -357,7 +365,7 @@ impl AppState {
             let base_id = trimmed.to_string();
             let mut candidate = base_id.clone();
             let mut counter = 1usize;
-            while workbook.sheets.iter().any(|s| s.id == candidate) {
+            while workbook.sheets.iter().any(|s| s.id.eq_ignore_ascii_case(&candidate)) {
                 counter += 1;
                 candidate = format!("{base_id}-{counter}");
             }
@@ -415,7 +423,7 @@ impl AppState {
             while workbook
                 .sheets
                 .iter()
-                .any(|sheet| sheet.name.eq_ignore_ascii_case(&candidate_name))
+                .any(|sheet| sheet_name_eq_case_insensitive(&sheet.name, &candidate_name))
             {
                 counter += 1;
                 let suffix = format!(" {counter}");
@@ -511,7 +519,7 @@ impl AppState {
         {
             let workbook = self.get_workbook()?;
             if workbook.sheets.iter().any(|sheet| {
-                sheet.id != sheet_id && sheet.name.eq_ignore_ascii_case(trimmed)
+                sheet.id != sheet_id && sheet_name_eq_case_insensitive(&sheet.name, trimmed)
             }) {
                 return Err(AppStateError::WhatIf(
                     formula_model::SheetNameError::DuplicateName.to_string(),
