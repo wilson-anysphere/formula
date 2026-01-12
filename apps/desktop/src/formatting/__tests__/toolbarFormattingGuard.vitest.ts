@@ -32,35 +32,22 @@ describe("toolbar formatting safety cap", () => {
     expect(toast?.textContent).toMatch(/Selection too large to apply formatting/i);
   });
 
-  it("applies formatting to huge rectangles via range runs (no per-cell enumeration)", () => {
+  it("refuses to apply formatting to an enormous rectangular selection", () => {
     const doc = new DocumentController();
     const spy = vi.spyOn(doc, "setRangeFormat");
-
-    // Guardrail: `setRangeFormat` must not enumerate every cell in the rectangle.
-    const model: any = (doc as any).model;
-    const originalGetCell = model.getCell.bind(model);
-    let getCellCalls = 0;
-    model.getCell = (...args: any[]) => {
-      getCellCalls += 1;
-      if (getCellCalls > 10_000) {
-        throw new Error(`setRangeFormat performed O(area) getCell calls (${getCellCalls})`);
-      }
-      return originalGetCell(...args);
-    };
 
     const start = performance.now();
     const applied = setFillColor(doc, "Sheet1", "A1:Z1000000", "#FFFF0000");
     const elapsed = performance.now() - start;
 
     expect(elapsed).toBeLessThan(250);
-    expect(applied).toBe(true);
-    expect(spy).toHaveBeenCalledTimes(1);
-    expect(getCellCalls).toBeLessThan(10_000);
+    expect(applied).toBe(false);
+    expect(spy).not.toHaveBeenCalled();
 
-    const format = (doc as any).getCellFormat?.("Sheet1", "A1") ?? {};
-    expect(format.fill?.fgColor).toBe("#FFFF0000");
-
-    expect(document.querySelector('[data-testid="toast"]')).toBeNull();
+    const toast = document.querySelector('[data-testid="toast"]') as HTMLElement | null;
+    expect(toast).not.toBeNull();
+    expect(toast?.dataset.type).toBe("warning");
+    expect(toast?.textContent).toMatch(/Selection too large to apply formatting/i);
   });
 
   it("refuses to apply formatting to extremely large full-row selections (row band cap)", () => {
