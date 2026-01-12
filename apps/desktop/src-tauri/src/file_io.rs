@@ -1,4 +1,5 @@
 use crate::atomic_write::write_file_atomic;
+use crate::sheet_name::sheet_name_eq_case_insensitive;
 use crate::state::{Cell, CellScalar};
 use anyhow::Context;
 use calamine::{open_workbook_auto, Data, Reader};
@@ -1597,7 +1598,7 @@ fn workbook_xml_sheet_order_override(
             Some(part) => Some(part.to_string()),
             None => worksheet_parts
                 .iter()
-                .find(|p| p.name.eq_ignore_ascii_case(&sheet.name))
+                .find(|p| sheet_name_eq_case_insensitive(&p.name, &sheet.name))
                 .map(|p| p.worksheet_part.clone()),
         };
 
