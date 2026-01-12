@@ -69,19 +69,20 @@ Build the native desktop application shell using **Tauri**. Handle system integr
 6. **Global shortcuts:** Capture shortcuts even when unfocused
 7. **Notifications:** Native system notifications
 
-### Tauri Permissions (allowlist)
+### Tauri Security & Permissions (Tauri v2)
 
-```json
-{
-  "dialog": { "all": true },
-  "fs": { "readFile": true, "writeFile": true, "scope": ["$DOCUMENT/**", "$HOME/**"] },
-  "clipboard": { "all": true },
-  "window": { "all": true },
-  "globalShortcut": { "all": true },
-  "notification": { "all": true },
-  "shell": { "open": true }
-}
-```
+This repo is on **Tauri v2**. Config lives in `apps/desktop/src-tauri/tauri.conf.json`.
+
+Key config fields you'll touch most often:
+
+- `build.devUrl`: URL the desktop WebView loads in dev (Vite server)
+- `build.frontendDist`: path to built frontend assets for production builds
+- `app.security.csp`: Content Security Policy for the desktop WebView
+- `plugins.*`: plugin configuration (e.g. updater)
+
+> Note on permissions: Tauri v1 used a `tauri.allowlist` section. **Tauri v2 uses capabilities**
+> to grant access to core APIs and plugins. Once we wire capabilities into this repo, the
+> definitions should live under `apps/desktop/src-tauri/capabilities/` (Tauri's default location).
 
 ### Auto-Update
 
@@ -114,39 +115,58 @@ Build the native desktop application shell using **Tauri**. Handle system integr
 ### Development
 
 ```bash
+# Initialize safe defaults (required for agents)
+source scripts/agent-init.sh
+
 # Install dependencies
 pnpm install
 
 # Build WASM engine first
 pnpm build:wasm
-
-# Run web dev server (for Tauri webview)
-pnpm dev:desktop
-
-# Run native Tauri app (separate terminal)
-cd apps/desktop
-cargo tauri dev
 ```
+
+Run the desktop frontend (Vite):
+
+```bash
+# Vite dev server (matches `build.devUrl` in `apps/desktop/src-tauri/tauri.conf.json`)
+pnpm dev:desktop
+```
+
+Run the native desktop shell (Tauri):
+
+```bash
+# ALWAYS use the cargo wrapper (see `AGENTS.md`)
+cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri dev
+```
+
+> Tip: depending on `build.beforeDevCommand`, `tauri dev` may start Vite for you.
+> Avoid running two dev servers on the same port.
 
 ### Production Build
 
 ```bash
+# Initialize safe defaults (required for agents)
+source scripts/agent-init.sh
+
 # Build web assets
 pnpm build:desktop
+```
 
-# Build native app
-cd apps/desktop
-cargo tauri build
+Build the native app:
+
+```bash
+# ALWAYS use the cargo wrapper (see `AGENTS.md`)
+cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build
 ```
 
 ### Headless Testing
 
 ```bash
 # Tauri can build without display
-cargo tauri build
+cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build
 
 # Dev server needs virtual display
-xvfb-run cargo tauri dev
+cd apps/desktop && xvfb-run --auto-servernum bash ../../scripts/cargo_agent.sh tauri dev
 ```
 
 ---
@@ -170,9 +190,11 @@ async fn save_file(path: String, data: Vec<u8>) -> Result<(), String> {
 
 ```typescript
 // TypeScript side
-import { invoke } from "@tauri-apps/api/tauri";
+type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
+const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
+if (!invoke) throw new Error("Tauri invoke API not available");
 
-const data = await invoke<Uint8Array>("read_file", { path: "/path/to/file.xlsx" });
+const data = await invoke("read_file", { path: "/path/to/file.xlsx" });
 await invoke("save_file", { path: "/path/to/file.xlsx", data: newData });
 ```
 
@@ -213,5 +235,5 @@ await invoke("save_file", { path: "/path/to/file.xlsx", data: newData });
 ## Reference
 
 - Tauri documentation: https://tauri.app/
-- Tauri v1 API: https://tauri.app/v1/api/
+- Tauri v2: https://tauri.app/v2/
 - wry (WebView): https://github.com/nicklockwood/wry
