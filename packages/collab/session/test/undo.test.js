@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 
 import * as Y from "yjs";
 
-import { REMOTE_ORIGIN } from "@formula/collab-undo";
+import { REMOTE_ORIGIN, createUndoService } from "@formula/collab-undo";
 
 import { createCollabSession } from "../src/index.ts";
 
@@ -223,6 +223,14 @@ test("CollabSession undo scopeNames works when an additional root was created by
 test("CollabSession destroy cleans up UndoManager afterTransaction hooks", () => {
   const doc = new Y.Doc();
   const session = createCollabSession({ doc, undo: {} });
+
+  // Also install a second UndoManager (desktop-style binder origin) and attach it
+  // to `session.localOrigins` so teardown must clean up multiple instances.
+  const binderOrigin = { type: "binder" };
+  const binderUndo = createUndoService({ mode: "collab", doc, scope: [session.cells], origin: binderOrigin });
+  for (const origin of binderUndo.localOrigins ?? []) {
+    session.localOrigins.add(origin);
+  }
 
   // Sanity check: UndoManager is installed and registers doc afterTransaction observers.
   const observers = /** @type {any} */ (doc)._observers?.get?.("afterTransaction");

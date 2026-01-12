@@ -1379,8 +1379,10 @@ export class CollabSession {
     // Note: the UndoManager instance is stored inside `localOrigins` (see
     // @formula/collab-undo).
     try {
-      const undoManager = Array.from(this.localOrigins).find((origin) => origin instanceof Y.UndoManager);
-      if (undoManager) undoManager.destroy();
+      const undoManagers = Array.from(this.localOrigins).filter((origin) => origin instanceof Y.UndoManager);
+      for (const undoManager of undoManagers) {
+        undoManager.destroy();
+      }
     } catch {
       // ignore
     }
