@@ -3160,19 +3160,19 @@ window.addEventListener(
       return;
     }
 
-      const target = e.target as EventTarget | null;
-      if (target instanceof HTMLElement) {
-        const tabList = target.closest?.("#sheet-tabs .sheet-tabs");
-        if (tabList) {
-          // Let the sheet tab strip handle Ctrl/Cmd+PgUp/PgDn when focus is within the tab UI.
-          //
-          // Still call `preventDefault()` here so:
-          // - browser-level tab switching doesn't fire
-          // - KeybindingService's capture-phase builtins don't also dispatch and steal focus
-          //   away from the tab strip (which wants to preserve keyboard focus on the tabs).
-          e.preventDefault();
-          return;
-        }
+    const target = e.target as EventTarget | null;
+    if (target instanceof HTMLElement) {
+      const tabList = target.closest?.("#sheet-tabs .sheet-tabs");
+      if (tabList) {
+        // Let the sheet tab strip handle Ctrl/Cmd+PgUp/PgDn when focus is within the tab UI.
+        //
+        // Still call `preventDefault()` here so:
+        // - browser-level tab switching doesn't fire
+        // - KeybindingService's capture-phase builtins don't also dispatch and steal focus
+        //   away from the tab strip (which wants to preserve keyboard focus on the tabs).
+        e.preventDefault();
+        return;
+      }
 
       // Never steal the shortcut from text inputs / contenteditable surfaces.
       const tag = target.tagName;
