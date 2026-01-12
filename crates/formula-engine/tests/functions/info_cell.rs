@@ -73,3 +73,23 @@ fn cell_filename_is_empty_for_unsaved_workbooks() {
     // Excel returns "" until the workbook has been saved.
     assert_eq!(sheet.eval("=CELL(\"filename\")"), Value::Text(String::new()));
 }
+
+#[test]
+fn cell_implicit_reference_does_not_create_dynamic_dependency_cycles() {
+    let mut sheet = TestSheet::new();
+
+    // Including INDIRECT marks the formula as dynamic-deps even though the IF short-circuits
+    // and the INDIRECT branch is never evaluated.
+    //
+    // CELL("contents") with no explicit reference should not record a self-reference as a
+    // dynamic precedent; otherwise the engine's dynamic dependency update can introduce a
+    // self-edge and force the cell into circular-reference handling.
+    let formula = "=IF(FALSE,INDIRECT(\"A1\"),CELL(\"contents\"))";
+    assert_eq!(sheet.eval(formula), Value::Text(formula.to_string()));
+
+    // Same idea, but for CELL("type") which also consults the referenced cell.
+    assert_eq!(
+        sheet.eval("=IF(FALSE,INDIRECT(\"A1\"),CELL(\"type\"))"),
+        Value::Text("v".to_string())
+    );
+}

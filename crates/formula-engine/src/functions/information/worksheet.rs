@@ -133,6 +133,13 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
         return Value::Error(ErrorKind::NA);
     }
 
+    // Track whether the caller explicitly provided a reference argument.
+    //
+    // When `reference` is omitted, Excel uses the "current cell" as the implicit reference.
+    // That implicit self-reference should not be recorded as a dynamic dependency; otherwise,
+    // formulas that contain INDIRECT/OFFSET elsewhere (thus enabling dynamic tracing) can
+    // accidentally record a self-edge and become a circular reference.
+    let reference_provided = reference.is_some();
     let reference = reference.unwrap_or_else(|| Reference {
         sheet_id: SheetId::Local(ctx.current_sheet_id()),
         start: ctx.current_cell_addr(),
@@ -172,7 +179,9 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
                 start: addr,
                 end: addr,
             };
-            ctx.record_reference(&cell_ref);
+            if reference_provided {
+                ctx.record_reference(&cell_ref);
+            }
 
             if let Some(formula) = ctx.get_cell_formula(&cell_ref.sheet_id, addr) {
                 let mut out = formula.to_string();
@@ -194,7 +203,9 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
                 start: addr,
                 end: addr,
             };
-            ctx.record_reference(&cell_ref);
+            if reference_provided {
+                ctx.record_reference(&cell_ref);
+            }
 
             if ctx.get_cell_formula(&cell_ref.sheet_id, addr).is_some() {
                 return Value::Text("v".to_string());
