@@ -14,6 +14,11 @@ use std::time::Duration;
 // like `SELECT * FROM huge_table`) from consuming unbounded memory/CPU in the Rust process.
 pub const MAX_SQL_QUERY_ROWS: usize = 50_000;
 pub const MAX_SQL_QUERY_CELLS: usize = 5_000_000;
+/// Approximate total payload size guard (sum of string lengths + small overhead for scalars).
+///
+/// This is a secondary backstop against unexpectedly large cells (e.g. very long TEXT columns)
+/// even when row/cell counts are within bounds.
+pub const MAX_SQL_QUERY_BYTES: usize = 50 * 1024 * 1024; // 50 MiB
 pub const SQL_QUERY_TIMEOUT_MS: u64 = 10_000;
 
 fn sql_query_timeout_ms() -> u64 {
@@ -23,8 +28,30 @@ fn sql_query_timeout_ms() -> u64 {
         .unwrap_or(SQL_QUERY_TIMEOUT_MS)
 }
 
+fn sql_query_max_bytes() -> usize {
+    std::env::var("FORMULA_SQL_QUERY_MAX_BYTES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(MAX_SQL_QUERY_BYTES)
+}
+
 fn sql_query_timeout_duration() -> Duration {
     Duration::from_millis(sql_query_timeout_ms())
+}
+
+fn sql_value_estimated_bytes(value: &JsonValue) -> usize {
+    match value {
+        JsonValue::Null => 4,
+        JsonValue::Bool(true) => 4,
+        JsonValue::Bool(false) => 5,
+        JsonValue::Number(_) => 16,
+        JsonValue::String(s) => s.len(),
+        JsonValue::Array(arr) => arr.iter().map(sql_value_estimated_bytes).sum(),
+        JsonValue::Object(obj) => obj
+            .iter()
+            .map(|(k, v)| k.len() + sql_value_estimated_bytes(v))
+            .sum(),
+    }
 }
 
 async fn with_sql_query_timeout<T>(
@@ -568,6 +595,8 @@ async fn query_sqlite(
 
         let mut out_rows: Vec<Vec<JsonValue>> = Vec::new();
         let mut row_count: usize = 0;
+        let max_bytes = sql_query_max_bytes();
+        let mut total_bytes: usize = 0;
 
         while let Some(row) = stream
             .try_next()
@@ -609,7 +638,15 @@ async fn query_sqlite(
 
             let mut out = Vec::with_capacity(columns.len());
             for idx in 0..columns.len() {
-                out.push(sqlite_cell_to_json(&row, idx, &column_types[idx]));
+                let value = sqlite_cell_to_json(&row, idx, &column_types[idx]);
+                total_bytes = total_bytes.saturating_add(sql_value_estimated_bytes(&value));
+                if total_bytes > max_bytes {
+                    return Err(anyhow!(
+                        "SQL query result exceeded the maximum size ({max_bytes} bytes). \
+                         Please add a LIMIT clause or select fewer columns."
+                    ));
+                }
+                out.push(value);
             }
             out_rows.push(out);
         }
@@ -656,6 +693,8 @@ async fn query_postgres(
 
         let mut out_rows: Vec<Vec<JsonValue>> = Vec::new();
         let mut row_count: usize = 0;
+        let max_bytes = sql_query_max_bytes();
+        let mut total_bytes: usize = 0;
 
         while let Some(row) = stream
             .try_next()
@@ -692,7 +731,15 @@ async fn query_postgres(
                     .get(idx)
                     .map(|c| c.type_info().name())
                     .unwrap_or("");
-                out.push(postgres_cell_to_json(&row, idx, type_name));
+                let value = postgres_cell_to_json(&row, idx, type_name);
+                total_bytes = total_bytes.saturating_add(sql_value_estimated_bytes(&value));
+                if total_bytes > max_bytes {
+                    return Err(anyhow!(
+                        "SQL query result exceeded the maximum size ({max_bytes} bytes). \
+                         Please add a LIMIT clause or select fewer columns."
+                    ));
+                }
+                out.push(value);
             }
             out_rows.push(out);
         }
@@ -1067,8 +1114,7 @@ mod tests {
 
     #[tokio::test]
     async fn sqlite_query_enforces_max_rows() {
-        // This test reads `FORMULA_SQL_QUERY_TIMEOUT_MS` indirectly (via `query_sqlite`), so guard
-        // against other tests in this module temporarily overriding it.
+        // Prevent concurrent env var overrides (timeout/max-bytes) from affecting this test.
         let _guard = env_mutex().lock().unwrap();
 
         let (opts, mut keeper) = make_shared_in_memory_sqlite().await;
@@ -1086,8 +1132,7 @@ mod tests {
 
     #[tokio::test]
     async fn sqlite_query_allows_exact_limit() {
-        // This test reads `FORMULA_SQL_QUERY_TIMEOUT_MS` indirectly (via `query_sqlite`), so guard
-        // against other tests in this module temporarily overriding it.
+        // Prevent concurrent env var overrides (timeout/max-bytes) from affecting this test.
         let _guard = env_mutex().lock().unwrap();
 
         let (opts, mut keeper) = make_shared_in_memory_sqlite().await;
@@ -1126,6 +1171,32 @@ mod tests {
         assert!(
             err.to_string().contains("exceeded"),
             "expected timeout error message, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn sqlite_query_enforces_max_bytes() {
+        // Keep env overrides (if any) isolated from other tests in this crate.
+        let _guard = env_mutex().lock().unwrap();
+
+        let key = "FORMULA_SQL_QUERY_MAX_BYTES";
+        let prev = std::env::var(key).ok();
+        std::env::set_var(key, "1000");
+
+        let (opts, _keeper) = make_shared_in_memory_sqlite().await;
+        // Deterministically generate a ~2KiB string.
+        let sql = "SELECT replace(hex(zeroblob(2000)), '00', 'a')";
+        let err = query_sqlite(&opts, sql, &[]).await.unwrap_err();
+
+        if let Some(prev) = prev {
+            std::env::set_var(key, prev);
+        } else {
+            std::env::remove_var(key);
+        }
+
+        assert!(
+            err.to_string().contains("maximum size"),
+            "expected size limit error, got: {err}"
         );
     }
 }
