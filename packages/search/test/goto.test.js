@@ -42,6 +42,46 @@ test("parseGoTo throws for named ranges referring to an unknown sheet when workb
   assert.throws(() => parseGoTo("Bad", { workbook: wb, currentSheetName: "Sheet1" }), /Unknown sheet/i);
 });
 
+test("parseGoTo supports structured table references (Table1[#All])", () => {
+  const wb = new InMemoryWorkbook();
+  wb.addSheet("Sheet1");
+
+  wb.addTable({
+    name: "Table1",
+    sheetName: "sheet1", // intentionally wrong case to verify canonicalization
+    startRow: 0,
+    endRow: 9,
+    startCol: 0,
+    endCol: 1,
+    columns: ["Col1", "Col2"],
+  });
+
+  const parsed = parseGoTo("Table1[#All]", { workbook: wb, currentSheetName: "Sheet1" });
+  assert.equal(parsed.source, "table");
+  assert.equal(parsed.sheetName, "Sheet1");
+  assert.deepEqual(parsed.range, { startRow: 0, endRow: 9, startCol: 0, endCol: 1 });
+});
+
+test("parseGoTo supports structured table column references (Table1[Col2])", () => {
+  const wb = new InMemoryWorkbook();
+  wb.addSheet("Sheet1");
+
+  wb.addTable({
+    name: "Table1",
+    sheetName: "Sheet1",
+    startRow: 0,
+    endRow: 9,
+    startCol: 0,
+    endCol: 1,
+    columns: ["Col1", "Col2"],
+  });
+
+  const parsed = parseGoTo("Table1[Col2]", { workbook: wb, currentSheetName: "Sheet1" });
+  assert.equal(parsed.source, "table");
+  assert.equal(parsed.sheetName, "Sheet1");
+  assert.deepEqual(parsed.range, { startRow: 0, endRow: 9, startCol: 1, endCol: 1 });
+});
+
 test("parseGoTo throws for unknown sheet-qualified references when workbook.getSheet is available", () => {
   const wb = new InMemoryWorkbook();
   wb.addSheet("Sheet1");
