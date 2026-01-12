@@ -178,6 +178,15 @@ Downloads raw package bytes.
 
 Clients should compute sha256 over the downloaded bytes and reject the download if it does not match `X-Package-Sha256`.
 
+Clients must also verify the package signature using the publisher public key(s) returned by
+`GET /api/extensions/:id` (`publisherKeys` / `publisherPublicKeyPem`):
+
+- v1: `X-Package-Signature` is the detached signature over the raw package bytes.
+- v2: the signature is embedded in `signature.json` (the header is redundant/back-compat).
+- Web runtimes require WebCrypto Ed25519 support; Desktop/Tauri can fall back to a Rust-backed verifier via
+  Tauri IPC (`verify_ed25519_signature`) when the embedded WebView does not support Ed25519 in WebCrypto
+  (notably WKWebView/WebKitGTK).
+
 ### `POST /api/publishers/:publisher/keys/:id/revoke` (admin)
 
 Revoke a publisher signing key.
