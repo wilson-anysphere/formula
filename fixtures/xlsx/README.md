@@ -13,6 +13,7 @@ fixtures/xlsx/
   basic/
   metadata/
   rich-data/
+  richdata/
   formulas/
   styles/
   conditional-formatting/
@@ -57,6 +58,10 @@ types and images-in-cells) which require ground-truth workbooks saved by Excel.
   - See `rich-data/README.md` for how to generate fixtures that include
     `xl/metadata.xml`, `xl/richData/*`, and in-sheet `vm`/`cm` cell attributes
     (linked data types like Stocks/Geography, and images placed in cells).
+ - `richdata/`:
+   - `linked-data-types.xlsx` - minimal workbook exercising `xl/metadata.xml` + `xl/richData/*`
+     parts and `vm`/`cm` cell attributes (used by
+     `crates/formula-xlsx/tests/linked_data_types_fixture.rs`).
 - `conditional-formatting/`:
   - `conditional-formatting.xlsx` - simple `cfRule` example.
   - `conditional-formatting-2007.xlsx` - Excel 2007-style conditional formatting.

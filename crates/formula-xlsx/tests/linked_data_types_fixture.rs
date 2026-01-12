@@ -88,6 +88,27 @@ fn linked_data_types_fixture_roundtrips_richdata_parts() -> Result<(), Box<dyn s
         );
     }
 
+    // Optional: diff the full workbooks and ensure there are no critical diffs.
+    // This provides a stronger, real-world baseline than part-name existence checks alone.
+    let tmpdir = tempfile::tempdir()?;
+    let out_path = tmpdir.path().join("roundtripped.xlsx");
+    std::fs::write(&out_path, &saved)?;
+
+    let report = xlsx_diff::diff_workbooks(&fixture_path, &out_path)?;
+    if report.has_at_least(xlsx_diff::Severity::Critical) {
+        eprintln!(
+            "Critical diffs detected for linked data types fixture {}",
+            fixture_path.display()
+        );
+        for diff in report
+            .differences
+            .iter()
+            .filter(|d| d.severity == xlsx_diff::Severity::Critical)
+        {
+            eprintln!("{diff}");
+        }
+        panic!("fixture did not round-trip cleanly via XlsxDocument");
+    }
+
     Ok(())
 }
-

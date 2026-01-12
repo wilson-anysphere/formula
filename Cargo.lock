@@ -2241,6 +2241,7 @@ dependencies = [
  "formula-engine",
  "formula-format",
  "formula-model",
+ "formula-xlsx",
  "log",
  "tempfile",
  "thiserror 2.0.17",
