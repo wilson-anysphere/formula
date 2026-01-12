@@ -94,9 +94,19 @@ function normalizePermissionRecord(value) {
 }
 
 function normalizePermissionsStore(data) {
-  if (!data || typeof data !== "object" || Array.isArray(data)) return { store: {}, migrated: false };
-  const out = {};
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return { store: Object.create(null), migrated: false };
+  }
+  const out = Object.create(null);
   let migrated = false;
+
+  try {
+    if (Object.getPrototypeOf(data) !== Object.prototype) {
+      migrated = true;
+    }
+  } catch {
+    migrated = true;
+  }
 
   for (const [extensionId, record] of Object.entries(data)) {
     const normalized = normalizePermissionRecord(record);
@@ -181,7 +191,7 @@ class PermissionManager {
     this._storage = storage ?? getDefaultLocalStorage();
     this._storageKey = String(storageKey);
     this._loaded = false;
-    this._data = {};
+    this._data = Object.create(null);
     this._needsSave = false;
   }
 
@@ -201,7 +211,7 @@ class PermissionManager {
       this._data = store;
       this._needsSave = migrated;
     } catch {
-      this._data = {};
+      this._data = Object.create(null);
     }
     if (this._needsSave) {
       this._needsSave = false;

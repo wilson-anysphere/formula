@@ -399,3 +399,32 @@ test("browser PermissionManager: drops empty permission records during migration
   const stored = JSON.parse(storage.getItem(storageKey));
   assert.deepEqual(stored, { "pub.other": { clipboard: true } });
 });
+
+test("browser PermissionManager: rejects __proto__ prototype pollution entries on load", async () => {
+  const { PermissionManager } = await importBrowserPermissionManager();
+
+  const storage = createMemoryStorage();
+  const storageKey = "formula.test.permissions.proto";
+  storage.setItem(
+    storageKey,
+    JSON.stringify({
+      "__proto__": { clipboard: true },
+      "pub.other": { clipboard: true },
+    })
+  );
+
+  const pm = new PermissionManager({
+    storage,
+    storageKey,
+    prompt: async () => true,
+  });
+
+  assert.deepEqual(await pm.getGrantedPermissions("pub.other"), { clipboard: true });
+
+  assert.equal(Object.getPrototypeOf(pm._data), null);
+  assert.equal(pm._data.clipboard, undefined);
+  assert.equal({}.clipboard, undefined);
+
+  const stored = JSON.parse(storage.getItem(storageKey));
+  assert.deepEqual(stored, { "pub.other": { clipboard: true } });
+});

@@ -103,9 +103,23 @@ function normalizePermissionRecord(value) {
 }
 
 function normalizePermissionsStore(data) {
-  if (!data || typeof data !== "object" || Array.isArray(data)) return { store: {}, migrated: false };
-  const out = {};
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return { store: Object.create(null), migrated: false };
+  }
+  const out = Object.create(null);
   let migrated = false;
+
+  // Guard against prototype pollution. Some JS engines treat `__proto__` specially in JSON.parse,
+  // resulting in an object with a non-standard prototype. We only care about own enumerable
+  // properties in the store, and treat a non-default prototype as a migration so the next save
+  // rewrites the file without the polluted entry.
+  try {
+    if (Object.getPrototypeOf(data) !== Object.prototype) {
+      migrated = true;
+    }
+  } catch {
+    migrated = true;
+  }
 
   for (const [extensionId, record] of Object.entries(data)) {
     const normalized = normalizePermissionRecord(record);
@@ -187,7 +201,7 @@ class PermissionManager {
     this._storagePath = storagePath;
     this._prompt = typeof prompt === "function" ? prompt : async () => false;
     this._loaded = false;
-    this._data = {};
+    this._data = Object.create(null);
     this._needsSave = false;
   }
 
@@ -200,7 +214,7 @@ class PermissionManager {
       this._data = store;
       this._needsSave = migrated;
     } catch {
-      this._data = {};
+      this._data = Object.create(null);
     }
     this._loaded = true;
     if (this._needsSave) {

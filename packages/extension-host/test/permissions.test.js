@@ -365,3 +365,37 @@ test("permission storage: drops empty permission records during migration", asyn
   const stored = JSON.parse(await fs.readFile(storePath, "utf8"));
   assert.deepEqual(stored, { "pub.other": { clipboard: true } });
 });
+
+test("permission storage: rejects __proto__ prototype pollution entries on load", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-perms-proto-"));
+  const storePath = path.join(dir, "permissions.json");
+
+  await fs.writeFile(
+    storePath,
+    JSON.stringify(
+      {
+        "__proto__": { clipboard: true },
+        "pub.other": { clipboard: true },
+      },
+      null,
+      2
+    ),
+    "utf8"
+  );
+
+  const pm = new PermissionManager({
+    storagePath: storePath,
+    prompt: async () => true,
+  });
+
+  assert.deepEqual(await pm.getGrantedPermissions("pub.other"), { clipboard: true });
+
+  // Ensure the internal store is not prototype polluted by the `__proto__` key.
+  assert.equal(Object.getPrototypeOf(pm._data), null);
+  assert.equal(pm._data.clipboard, undefined);
+  assert.equal({}.clipboard, undefined);
+
+  // The store should be rewritten without the polluted key.
+  const stored = JSON.parse(await fs.readFile(storePath, "utf8"));
+  assert.deepEqual(stored, { "pub.other": { clipboard: true } });
+});
