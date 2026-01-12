@@ -52,7 +52,43 @@ def generate(
     add_case(cases, prefix="rate", tags=["financial", "RATE"], formula="=RATE(10, -100, 1000)")
     add_case(cases, prefix="rate", tags=["financial", "RATE"], formula="=RATE(12, -50, 500)")
     add_case(cases, prefix="effect", tags=["financial", "EFFECT"], formula="=EFFECT(0.1,12)")
+    # Integer-coercion variants for the `npery` argument (same shape as bond `frequency`).
+    add_case(
+        cases,
+        prefix="effect",
+        tags=["financial", "EFFECT", "coercion"],
+        formula="=EFFECT(0.1,2.9)",
+        description="npery=2.9",
+    )
+    add_case(
+        cases,
+        prefix="effect",
+        tags=["financial", "EFFECT", "coercion"],
+        formula="=EFFECT(0.1,1.1)",
+        description="npery=1.1",
+    )
+    add_case(
+        cases,
+        prefix="effect",
+        tags=["financial", "EFFECT", "coercion"],
+        formula="=EFFECT(0.1,1.999999999)",
+        description="npery=1.999999999",
+    )
     add_case(cases, prefix="nominal", tags=["financial", "NOMINAL"], formula="=NOMINAL(0.1,12)")
+    add_case(
+        cases,
+        prefix="nominal",
+        tags=["financial", "NOMINAL", "coercion"],
+        formula="=NOMINAL(0.1,2.9)",
+        description="npery=2.9",
+    )
+    add_case(
+        cases,
+        prefix="nominal",
+        tags=["financial", "NOMINAL", "coercion"],
+        formula="=NOMINAL(0.1,1.1)",
+        description="npery=1.1",
+    )
     add_case(cases, prefix="rri", tags=["financial", "RRI"], formula="=RRI(10,-100,200)")
     add_case(cases, prefix="pduration", tags=["financial", "PDURATION"], formula="=PDURATION(0.025,2000,2200)")
     add_case(
@@ -279,6 +315,78 @@ def generate(
         prefix="oddlyield",
         tags=["financial", "ODDLYIELD"],
         formula="=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,98,100,2,0)",
+    )
+
+    # Integer-coercion variants for `frequency` and `basis`.
+    add_case(
+        cases,
+        prefix="oddfprice",
+        tags=["financial", "ODDFPRICE", "coercion"],
+        formula="=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2.9,0)",
+        description="frequency=2.9",
+    )
+    add_case(
+        cases,
+        prefix="oddfprice",
+        tags=["financial", "ODDFPRICE", "coercion"],
+        formula="=ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,100,1.1,0)",
+        description="frequency=1.1",
+    )
+    add_case(
+        cases,
+        prefix="oddfprice",
+        tags=["financial", "ODDFPRICE", "coercion"],
+        formula="=ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,100,1.999999999,0)",
+        description="frequency=1.999999999",
+    )
+    add_case(
+        cases,
+        prefix="oddlprice",
+        tags=["financial", "ODDLPRICE", "coercion"],
+        formula="=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2.9,0)",
+        description="frequency=2.9",
+    )
+    add_case(
+        cases,
+        prefix="oddlyield",
+        tags=["financial", "ODDLYIELD", "coercion"],
+        formula="=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,98,100,2.9,0)",
+        description="frequency=2.9",
+    )
+    add_case(
+        cases,
+        prefix="oddfprice",
+        tags=["financial", "ODDFPRICE", "coercion"],
+        formula="=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,0.9)",
+        description="basis=0.9",
+    )
+    add_case(
+        cases,
+        prefix="oddfprice",
+        tags=["financial", "ODDFPRICE", "coercion"],
+        formula="=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,1.9)",
+        description="basis=1.9",
+    )
+    add_case(
+        cases,
+        prefix="oddfprice",
+        tags=["financial", "ODDFPRICE", "coercion"],
+        formula="=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,-0.1)",
+        description="basis=-0.1",
+    )
+    add_case(
+        cases,
+        prefix="oddlprice",
+        tags=["financial", "ODDLPRICE", "coercion"],
+        formula="=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,0.9)",
+        description="basis=0.9",
+    )
+    add_case(
+        cases,
+        prefix="oddlyield",
+        tags=["financial", "ODDLYIELD", "coercion"],
+        formula="=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,98,100,2,0.9)",
+        description="basis=0.9",
     )
 
     # Long odd-stub period cases (DFC/E > 1 or DSM/E > 1).

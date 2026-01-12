@@ -1136,6 +1136,20 @@ fn odd_coupon_functions_truncate_frequency_like_excel() {
         eval_number_or_skip(&mut sheet, oddf_1_9).expect("ODDFPRICE should truncate frequency");
     assert_close(oddf_1_9_value, oddf_baseline_1_value, 1e-9);
 
+    // ODDFPRICE: 1.1 truncates to 1.
+    let oddf_1_1 =
+        "=ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,100,1.1,0)";
+    let oddf_1_1_value =
+        eval_number_or_skip(&mut sheet, oddf_1_1).expect("ODDFPRICE should truncate frequency");
+    assert_close(oddf_1_1_value, oddf_baseline_1_value, 1e-9);
+
+    // Confirm truncation (not rounding): a value just below 2 should still truncate to 1.
+    let oddf_1_999999999 =
+        "=ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,100,1.999999999,0)";
+    let oddf_1_999999999_value = eval_number_or_skip(&mut sheet, oddf_1_999999999)
+        .expect("ODDFPRICE should truncate frequency");
+    assert_close(oddf_1_999999999_value, oddf_baseline_1_value, 1e-9);
+
     // ODDFPRICE: 4.1 truncates to 4.
     let oddf_baseline_4 =
         "=ODDFPRICE(DATE(2020,1,20),DATE(2021,8,15),DATE(2020,1,1),DATE(2020,2,15),0.08,0.07,100,4,0)";
@@ -2033,6 +2047,13 @@ fn odd_coupon_functions_truncate_basis_like_excel() {
     let oddf_basis_text_neg_0_9_value = eval_number_or_skip(&mut sheet, oddf_basis_text_neg_0_9)
         .expect("ODDFPRICE should truncate basis supplied as numeric text toward zero");
     assert_close(oddf_basis_text_neg_0_9_value, oddf_basis_0_value, 1e-9);
+
+    // basis=-0.1 truncates to 0 (towards zero).
+    let oddf_basis_neg_0_1 =
+        "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,-0.1)";
+    let oddf_basis_neg_0_1_value = eval_number_or_skip(&mut sheet, oddf_basis_neg_0_1)
+        .expect("ODDFPRICE should truncate basis");
+    assert_close(oddf_basis_neg_0_1_value, oddf_basis_0_value, 1e-9);
 
     let oddf_basis_1 =
         "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,1)";

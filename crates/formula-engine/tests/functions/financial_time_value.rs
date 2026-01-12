@@ -72,6 +72,19 @@ fn effect_and_nominal_roundtrip() {
     let back = nominal(eff, npery).unwrap();
     assert_close(back, nominal_rate, 1e-12);
 
+    // Excel-style integer coercion: `npery` is truncated toward zero before validation.
+    let eff_trunc_2 = effect(nominal_rate, 2.0).unwrap();
+    assert_close(effect(nominal_rate, 2.9).unwrap(), eff_trunc_2, 1e-12);
+
+    let eff_trunc_1 = effect(nominal_rate, 1.0).unwrap();
+    assert_close(effect(nominal_rate, 1.1).unwrap(), eff_trunc_1, 1e-12);
+    assert_close(effect(nominal_rate, 1.999999999).unwrap(), eff_trunc_1, 1e-12);
+
+    let nom_trunc_2 = nominal(eff, 2.0).unwrap();
+    assert_close(nominal(eff, 2.9).unwrap(), nom_trunc_2, 1e-12);
+    let nom_trunc_1 = nominal(eff, 1.0).unwrap();
+    assert_close(nominal(eff, 1.1).unwrap(), nom_trunc_1, 1e-12);
+
     assert_eq!(effect(nominal_rate, 0.0), Err(ExcelError::Num));
     assert_eq!(nominal(eff, 0.0), Err(ExcelError::Num));
 }

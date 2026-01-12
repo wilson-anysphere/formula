@@ -27408,6 +27408,42 @@
       "id": "yearfrac_851ce23b004d"
     },
     {
+      "formula": "=YEARFRAC(DATE(2020,1,1),DATE(2021,1,1),0.9)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "YEARFRAC",
+        "coercion"
+      ],
+      "description": "basis=0.9",
+      "id": "yearfrac_ba1354c3dc19"
+    },
+    {
+      "formula": "=YEARFRAC(DATE(2020,1,1),DATE(2021,1,1),1.9)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "YEARFRAC",
+        "coercion"
+      ],
+      "description": "basis=1.9",
+      "id": "yearfrac_78b8dd66cb86"
+    },
+    {
+      "formula": "=YEARFRAC(DATE(2020,1,1),DATE(2021,1,1),-0.1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "date",
+        "YEARFRAC",
+        "coercion"
+      ],
+      "description": "basis=-0.1",
+      "id": "yearfrac_65940c75b82e"
+    },
+    {
       "formula": "=ISO.WEEKNUM(DATE(2021,1,1))",
       "outputCell": "C1",
       "inputs": [],
@@ -31204,6 +31240,42 @@
       "id": "effect_b86978f4410f"
     },
     {
+      "formula": "=EFFECT(0.1,2.9)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "EFFECT",
+        "coercion"
+      ],
+      "description": "npery=2.9",
+      "id": "effect_16547c722a34"
+    },
+    {
+      "formula": "=EFFECT(0.1,1.1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "EFFECT",
+        "coercion"
+      ],
+      "description": "npery=1.1",
+      "id": "effect_1ba508dc7c2c"
+    },
+    {
+      "formula": "=EFFECT(0.1,1.999999999)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "EFFECT",
+        "coercion"
+      ],
+      "description": "npery=1.999999999",
+      "id": "effect_1650c200e327"
+    },
+    {
       "formula": "=NOMINAL(0.1,12)",
       "outputCell": "C1",
       "inputs": [],
@@ -31212,6 +31284,30 @@
         "NOMINAL"
       ],
       "id": "nominal_6217933336fb"
+    },
+    {
+      "formula": "=NOMINAL(0.1,2.9)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "NOMINAL",
+        "coercion"
+      ],
+      "description": "npery=2.9",
+      "id": "nominal_f63f8b09d19a"
+    },
+    {
+      "formula": "=NOMINAL(0.1,1.1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "NOMINAL",
+        "coercion"
+      ],
+      "description": "npery=1.1",
+      "id": "nominal_23b000f92d3f"
     },
     {
       "formula": "=RRI(10,-100,200)",
@@ -31703,6 +31799,126 @@
         "ODDLYIELD"
       ],
       "id": "oddlyield_aa53352d755f"
+    },
+    {
+      "formula": "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2.9,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDFPRICE",
+        "coercion"
+      ],
+      "description": "frequency=2.9",
+      "id": "oddfprice_c9dc779e35fe"
+    },
+    {
+      "formula": "=ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,100,1.1,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDFPRICE",
+        "coercion"
+      ],
+      "description": "frequency=1.1",
+      "id": "oddfprice_290c4c942c46"
+    },
+    {
+      "formula": "=ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,100,1.999999999,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDFPRICE",
+        "coercion"
+      ],
+      "description": "frequency=1.999999999",
+      "id": "oddfprice_cebf2b38f257"
+    },
+    {
+      "formula": "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2.9,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDLPRICE",
+        "coercion"
+      ],
+      "description": "frequency=2.9",
+      "id": "oddlprice_c39c844b3212"
+    },
+    {
+      "formula": "=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,98,100,2.9,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDLYIELD",
+        "coercion"
+      ],
+      "description": "frequency=2.9",
+      "id": "oddlyield_6c295f41d129"
+    },
+    {
+      "formula": "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,0.9)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDFPRICE",
+        "coercion"
+      ],
+      "description": "basis=0.9",
+      "id": "oddfprice_ae2720a4ce4e"
+    },
+    {
+      "formula": "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,1.9)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDFPRICE",
+        "coercion"
+      ],
+      "description": "basis=1.9",
+      "id": "oddfprice_353923122884"
+    },
+    {
+      "formula": "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,-0.1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDFPRICE",
+        "coercion"
+      ],
+      "description": "basis=-0.1",
+      "id": "oddfprice_7754bc28b438"
+    },
+    {
+      "formula": "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,0.9)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDLPRICE",
+        "coercion"
+      ],
+      "description": "basis=0.9",
+      "id": "oddlprice_c55ee6b33bc8"
+    },
+    {
+      "formula": "=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,98,100,2,0.9)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDLYIELD",
+        "coercion"
+      ],
+      "description": "basis=0.9",
+      "id": "oddlyield_f423e1e7fee1"
     },
     {
       "formula": "=ODDFPRICE(DATE(2019,6,1),DATE(2022,3,1),DATE(2019,1,1),DATE(2020,3,1),0.0785,0.0625,100,2,0)",

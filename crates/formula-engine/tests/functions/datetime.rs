@@ -280,6 +280,20 @@ fn yearfrac_matches_basis_conventions() {
         -(1.0 + 1.0 / 365.0),
     );
 
+    // Excel-style integer coercion: basis is truncated toward zero before validation.
+    assert_eq!(
+        sheet.eval("=YEARFRAC(DATE(2011,1,1),DATE(2011,12,31),0.9)"),
+        sheet.eval("=YEARFRAC(DATE(2011,1,1),DATE(2011,12,31),0)")
+    );
+    assert_eq!(
+        sheet.eval("=YEARFRAC(DATE(2011,1,1),DATE(2011,12,31),1.9)"),
+        sheet.eval("=YEARFRAC(DATE(2011,1,1),DATE(2011,12,31),1)")
+    );
+    assert_eq!(
+        sheet.eval("=YEARFRAC(DATE(2011,1,1),DATE(2011,12,31),-0.1)"),
+        sheet.eval("=YEARFRAC(DATE(2011,1,1),DATE(2011,12,31),0)")
+    );
+
     assert_eq!(
         sheet.eval("=YEARFRAC(DATE(2020,1,1),DATE(2020,12,31),9)"),
         Value::Error(ErrorKind::Num)

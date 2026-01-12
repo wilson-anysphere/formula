@@ -136,6 +136,27 @@ def generate(
     add_case(cases, prefix="days360", tags=["date", "DAYS360"], formula="=DAYS360(DATE(2020,1,1),DATE(2020,2,1))")
     add_case(cases, prefix="datedif", tags=["date", "DATEDIF"], formula='=DATEDIF(DATE(2020,1,1),DATE(2021,2,1),"y")')
     add_case(cases, prefix="yearfrac", tags=["date", "YEARFRAC"], formula="=YEARFRAC(DATE(2020,1,1),DATE(2021,1,1))")
+    # Integer-coercion variants for the `basis` argument.
+    add_case(
+        cases,
+        prefix="yearfrac",
+        tags=["date", "YEARFRAC", "coercion"],
+        formula="=YEARFRAC(DATE(2020,1,1),DATE(2021,1,1),0.9)",
+        description="basis=0.9",
+    )
+    add_case(
+        cases,
+        prefix="yearfrac",
+        tags=["date", "YEARFRAC", "coercion"],
+        formula="=YEARFRAC(DATE(2020,1,1),DATE(2021,1,1),1.9)",
+        description="basis=1.9",
+    )
+    add_case(
+        cases,
+        prefix="yearfrac",
+        tags=["date", "YEARFRAC", "coercion"],
+        formula="=YEARFRAC(DATE(2020,1,1),DATE(2021,1,1),-0.1)",
+        description="basis=-0.1",
+    )
     add_case(cases, prefix="iso_weeknum", tags=["date", "ISO.WEEKNUM"], formula="=ISO.WEEKNUM(DATE(2021,1,1))")
     add_case(cases, prefix="isoweeknum", tags=["date", "ISOWEEKNUM"], formula="=ISOWEEKNUM(DATE(2021,1,1))")
-
