@@ -15,7 +15,12 @@ test.describe("marketplace panel", () => {
     await expect(openMarketplacePanel).toBeVisible();
     await openMarketplacePanel.click();
 
-    await expect(page.getByTestId("panel-marketplace")).toBeVisible();
+    const panel = page.getByTestId("panel-marketplace");
+    await expect(panel).toBeVisible();
+
+    // The command is wired via `toggleDockPanel`, so clicking again should close it.
+    await openMarketplacePanel.click();
+    await expect(panel).toHaveCount(0);
   });
 
   test("can render search results (stubbed /api/search)", async ({ page }) => {
