@@ -182,7 +182,7 @@ Key components:
 - **`BrowserExtensionHost`** (`packages/extension-host/src/browser/index.mjs`)
   - Runs in the renderer and spawns one module `Worker` per extension (`extension-worker.mjs`).
   - Routes commands/panels/menus/keybindings to extensions and permission-checks API calls.
-- **`WebExtensionManager`** (`apps/web/src/marketplace/WebExtensionManager.ts`)
+- **`WebExtensionManager`** (`packages/extension-marketplace/src/WebExtensionManager.ts`)
   - Marketplace installer for browser/WebView runtimes.
   - Downloads signed `.fextpkg` blobs, verifies them in the WebView, stores verified bytes in IndexedDB, and loads
     them into `BrowserExtensionHost` via `blob:` module URLs.
@@ -1149,13 +1149,13 @@ Because `blob:`/`data:` module URLs cannot resolve relative imports, `manifest.b
 
 ### Marketplace base URL configuration (Desktop)
 
-The browser/WebView marketplace client is `MarketplaceClient` (`apps/web/src/marketplace/MarketplaceClient.ts`).
+The browser/WebView marketplace client is `MarketplaceClient` (`packages/extension-marketplace/src/MarketplaceClient.ts`).
 It defaults to a same-origin API at `"/api"`, but Desktop/Tauri builds typically point at an HTTPS marketplace origin:
 
 ```ts
-// See apps/web/src/marketplace/MarketplaceClient.ts and WebExtensionManager.ts
+// See packages/extension-marketplace/src/MarketplaceClient.ts and WebExtensionManager.ts
 const marketplace = new MarketplaceClient({ baseUrl: "https://marketplace.example.com/api" });
-const manager = new WebExtensionManager({ marketplaceClient: marketplace, host });
+const manager = new WebExtensionManager({ marketplaceClient: marketplace, host, engineVersion: "1.0.0" });
 ```
 
 **CSP constraint (Desktop):** marketplace installs are plain `fetch()` requests from the WebView, so they are subject
