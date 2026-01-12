@@ -447,14 +447,15 @@ impl<'a> Parser<'a> {
         self.skip_ws();
         let mut lhs = self.parse_prefix(stop_on_comma)?;
         loop {
-            self.skip_ws();
+            let had_ws = self.skip_ws_report();
 
             // Postfix percent operator (`expr%`).
             //
             // This lowers directly to `expr / 100` so we can reuse existing numeric coercion
             // semantics in `BinaryOp::Div` (including error propagation and spill behavior for
             // range/array-as-scalar cases).
-            let postfix_bp = 10;
+            // Postfix operators bind tighter than any infix operator.
+            let postfix_bp = 20;
             if self.peek_byte() == Some(b'%') && postfix_bp >= min_bp {
                 self.pos += 1;
                 lhs = Expr::Binary {
@@ -498,7 +499,36 @@ impl<'a> Parser<'a> {
             let op_pos = self.pos;
             let (op, l_bp, r_bp) = match self.peek_infix_op(stop_on_comma) {
                 Some(v) => v,
-                None => break,
+                None => {
+                    // Reference intersection operator (whitespace) is only syntactically visible
+                    // after whitespace has been consumed. If there was whitespace between two
+                    // expressions and we're not immediately followed by an infix operator or
+                    // delimiter, interpret it as the intersection operator.
+                    let Some(next) = self.peek_byte() else {
+                        break;
+                    };
+                    let starts_expr = matches!(
+                        next,
+                        b'+' | b'-' | b'@' | b'(' | b'"' | b'#' | b'.' | b'0'..=b'9'
+                            | b'A'..=b'Z'
+                            | b'a'..=b'z'
+                            | b'_' | b'$'
+                    );
+                    if had_ws && starts_expr {
+                        let (l_bp, r_bp) = (12, 13);
+                        if l_bp < min_bp {
+                            break;
+                        }
+                        let rhs = self.parse_bp(r_bp, stop_on_comma)?;
+                        lhs = Expr::Binary {
+                            op: BinaryOp::Intersect,
+                            left: Box::new(lhs),
+                            right: Box::new(rhs),
+                        };
+                        continue;
+                    }
+                    break;
+                }
             };
             if l_bp < min_bp {
                 break;
@@ -826,6 +856,12 @@ impl<'a> Parser<'a> {
                 break;
             }
         }
+    }
+
+    fn skip_ws_report(&mut self) -> bool {
+        let start = self.pos;
+        self.skip_ws();
+        self.pos != start
     }
 
     fn peek_byte(&self) -> Option<u8> {
