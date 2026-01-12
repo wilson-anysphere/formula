@@ -38,6 +38,26 @@ fn ptg_funcvar(argc: u8, iftab: u16) -> [u8; 4] {
 }
 
 #[test]
+fn decodes_structured_ref_ignores_reserved_field() {
+    let mut rgce = ptg_list(1, 0x0000, 2, 2, 0x18);
+    // Reserved u16 is the final 2 bytes of the fixed 12-byte payload.
+    let len = rgce.len();
+    rgce[len - 2] = 0x34;
+    rgce[len - 1] = 0x12;
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "Table1[Column2]");
+    assert_eq!(normalize(&text), normalize("Table1[Column2]"));
+}
+
+#[test]
+fn decodes_structured_ref_uses_stable_placeholder_names_for_unknown_ids() {
+    let rgce = ptg_list(42, 0x0000, 7, 7, 0x18);
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "Table42[Column7]");
+    assert_eq!(normalize(&text), normalize("Table42[Column7]"));
+}
+
+#[test]
 fn decodes_structured_ref_table_column() {
     let rgce = ptg_list(1, 0x0000, 2, 2, 0x18);
     let text = decode_rgce(&rgce).expect("decode");
