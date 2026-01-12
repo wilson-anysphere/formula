@@ -193,6 +193,7 @@ function buildDlpRangeIndex(ref, records, opts) {
   const maxAllowedRank = opts?.maxAllowedRank ?? DEFAULT_CLASSIFICATION_RANK;
   let docClassificationMax = { ...DEFAULT_CLASSIFICATION };
   let sheetClassificationMax = { ...DEFAULT_CLASSIFICATION };
+  let baseClassificationMax = { ...DEFAULT_CLASSIFICATION };
   const columnClassificationByIndex = new Map();
   const cellClassificationByCoord = new Map();
   const rangeRecords = [];
@@ -270,9 +271,12 @@ function buildDlpRangeIndex(ref, records, opts) {
     }
   }
 
+  baseClassificationMax = maxClassification(docClassificationMax, sheetClassificationMax);
+
   return {
     docClassificationMax,
     sheetClassificationMax,
+    baseClassificationMax,
     columnClassificationByIndex,
     cellClassificationByCoord,
     rangeRecords,
@@ -283,10 +287,7 @@ function buildDlpRangeIndex(ref, records, opts) {
 function effectiveCellClassificationFromIndex(index, cellRef) {
   let classification = { ...DEFAULT_CLASSIFICATION };
 
-  classification = maxClassification(classification, index.docClassificationMax);
-  if (classification.level !== CLASSIFICATION_LEVEL.RESTRICTED) {
-    classification = maxClassification(classification, index.sheetClassificationMax);
-  }
+  classification = maxClassification(classification, index.baseClassificationMax);
 
   if (classification.level !== CLASSIFICATION_LEVEL.RESTRICTED) {
     const colClassification = index.columnClassificationByIndex.get(cellRef.col);
