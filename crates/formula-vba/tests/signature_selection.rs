@@ -504,9 +504,72 @@ fn prefers_bound_verified_digital_signature_ext_when_signature_stream_is_nested_
     assert_eq!(chosen.verification, VbaSignatureVerification::SignedVerified);
     assert_eq!(chosen.binding, VbaSignatureBinding::Bound);
     assert_eq!(chosen.stream_kind, VbaSignatureStreamKind::DigitalSignatureExt);
+    assert_eq!(chosen.stream_path, "\u{0005}DigitalSignatureExt/sig");
+}
+
+#[test]
+fn prefers_digital_signature_ext_over_ex_when_both_verified_and_bound() {
+    // When multiple signature streams are present and *both* are verified+bound, we should still
+    // prefer the newest stream name (`DigitalSignatureExt`) per Excel-like precedence rules.
+    let project = build_minimal_vba_project_bin_v3_with_signature_streams(&[], b"ABC");
+
+    // Bound `DigitalSignatureExt` stream (v3 digest).
+    let digest_v3 = compute_vba_project_digest_v3(&project, DigestAlg::Sha256).expect("digest v3");
+    let ext_content = build_spc_indirect_data_content_sha256(&digest_v3);
+    let ext_pkcs7 = signature_test_utils::make_pkcs7_detached_signature(&ext_content);
+    let mut ext_stream = ext_content.clone();
+    ext_stream.extend_from_slice(&ext_pkcs7);
+
+    // Bound `DigitalSignatureEx` stream (legacy binding via Agile Content Hash MD5).
+    let content_normalized = content_normalized_data(&project).expect("content normalized data");
+    let forms = forms_normalized_data(&project).expect("forms normalized data");
     assert!(
-        chosen.stream_path.contains("DigitalSignatureExt") && chosen.stream_path.contains("/sig"),
-        "expected nested DigitalSignatureExt stream to be selected, got {}",
-        chosen.stream_path
+        !forms.is_empty(),
+        "expected FormsNormalizedData to be non-empty (designer payload should contribute)"
     );
+    let mut h = Md5::new();
+    h.update(&content_normalized);
+    h.update(&forms);
+    let agile_hash_md5: [u8; 16] = h.finalize().into();
+
+    let ex_content = build_spc_indirect_data_content_sha256(&agile_hash_md5);
+    let ex_pkcs7 = signature_test_utils::make_pkcs7_detached_signature(&ex_content);
+    let mut ex_stream = ex_content.clone();
+    ex_stream.extend_from_slice(&ex_pkcs7);
+
+    let signed = build_minimal_vba_project_bin_v3_with_signature_streams(
+        &[
+            ("\u{0005}DigitalSignatureEx", ex_stream.as_slice()),
+            ("\u{0005}DigitalSignatureExt", ext_stream.as_slice()),
+        ],
+        b"ABC",
+    );
+
+    // Sanity-check: both signature streams are verified and bound.
+    let listed = list_vba_digital_signatures(&signed).expect("list signatures");
+    assert_eq!(listed.len(), 2, "expected exactly two signature streams");
+    for sig in &listed {
+        assert_eq!(
+            sig.verification,
+            VbaSignatureVerification::SignedVerified,
+            "expected {} to be cryptographically verified",
+            sig.stream_path
+        );
+        let binding =
+            verify_vba_signature_binding_with_stream_path(&signed, &sig.stream_path, &sig.signature);
+        assert_eq!(
+            binding,
+            VbaSignatureBinding::Bound,
+            "expected {} to be bound",
+            sig.stream_path
+        );
+    }
+
+    // Assert selection prefers DigitalSignatureExt.
+    let chosen = verify_vba_digital_signature(&signed)
+        .expect("signature verification should succeed")
+        .expect("signature should be present");
+    assert_eq!(chosen.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(chosen.binding, VbaSignatureBinding::Bound);
+    assert_eq!(chosen.stream_kind, VbaSignatureStreamKind::DigitalSignatureExt);
 }
