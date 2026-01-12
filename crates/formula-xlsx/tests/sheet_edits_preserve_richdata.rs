@@ -367,3 +367,139 @@ fn sheet_edits_preserve_richdata_parts_and_relationships() {
         "expected [Content_Types].xml to include override for newly-added worksheet part: {added_override_name}"
     );
 }
+
+#[test]
+fn sheet_edits_preserve_richdata_when_deleting_first_sheet() {
+    let fixture = build_fixture_xlsx();
+
+    let original_metadata = zip_part(&fixture, "xl/metadata.xml");
+    let original_metadata_rels = zip_part(&fixture, "xl/_rels/metadata.xml.rels");
+    let original_rich_value_types = zip_part(&fixture, "xl/richData/richValueTypes.xml");
+    let original_rich_values = zip_part(&fixture, "xl/richData/richValues.xml");
+
+    let mut doc = load_from_bytes(&fixture).expect("load fixture");
+    assert_eq!(doc.workbook.sheets.len(), 2);
+
+    let sheet1_id = doc.workbook.sheets[0].id;
+    doc.workbook.delete_sheet(sheet1_id).expect("delete sheet1");
+    doc.workbook.add_sheet("Added").expect("add sheet");
+
+    let saved = doc.save_to_vec().expect("save");
+
+    // Sanity: ensure we actually exercised the sheet-structure rewrite path.
+    let workbook_xml = zip_part(&saved, "xl/workbook.xml");
+    let workbook_sheet_rids = workbook_sheets_with_rids(&workbook_xml);
+    assert!(
+        !workbook_sheet_rids.iter().any(|(name, _)| name == "Sheet1"),
+        "expected deleted sheet to be removed from xl/workbook.xml"
+    );
+    assert!(
+        workbook_sheet_rids.iter().any(|(name, _)| name == "Added"),
+        "expected newly-added sheet to be present in xl/workbook.xml"
+    );
+    let cursor = Cursor::new(&saved);
+    let mut archive = ZipArchive::new(cursor).expect("open zip");
+    assert!(
+        archive.by_name("xl/worksheets/sheet1.xml").is_err(),
+        "expected deleted sheet1 part to be removed from output package"
+    );
+
+    assert_eq!(
+        zip_part(&saved, "xl/metadata.xml"),
+        original_metadata,
+        "xl/metadata.xml must be preserved byte-for-byte across sheet edits"
+    );
+    assert_eq!(
+        zip_part(&saved, "xl/_rels/metadata.xml.rels"),
+        original_metadata_rels,
+        "xl/_rels/metadata.xml.rels must be preserved byte-for-byte across sheet edits"
+    );
+    assert_eq!(
+        zip_part(&saved, "xl/richData/richValueTypes.xml"),
+        original_rich_value_types,
+        "xl/richData/richValueTypes.xml must be preserved byte-for-byte across sheet edits"
+    );
+    assert_eq!(
+        zip_part(&saved, "xl/richData/richValues.xml"),
+        original_rich_values,
+        "xl/richData/richValues.xml must be preserved byte-for-byte across sheet edits"
+    );
+
+    let workbook_rels =
+        workbook_relationship_targets(&zip_part(&saved, "xl/_rels/workbook.xml.rels"));
+    assert_eq!(
+        workbook_rels.get("rId9").map(String::as_str),
+        Some("metadata.xml"),
+        "workbook.xml.rels must retain the metadata relationship (rId9 -> metadata.xml)"
+    );
+    assert!(
+        !workbook_rels
+            .values()
+            .any(|target| target == "worksheets/sheet1.xml"),
+        "workbook.xml.rels must remove relationship target for deleted sheet1"
+    );
+
+    let added_rid = workbook_sheet_rids
+        .iter()
+        .find(|(name, _)| name == "Added")
+        .map(|(_, rid)| rid.as_str())
+        .expect("Added sheet must have an r:id");
+    let added_target = workbook_rels
+        .get(added_rid)
+        .expect("Added sheet r:id must exist in workbook.xml.rels");
+    let added_part_name = workbook_target_to_part_name(added_target);
+    assert!(
+        added_part_name.contains("worksheets/"),
+        "expected Added sheet relationship to resolve to a worksheet part, got {added_part_name}"
+    );
+    assert!(
+        archive.by_name(&added_part_name).is_ok(),
+        "expected Added sheet backing part to exist in output package: {added_part_name}"
+    );
+
+    let sheet2_rid = workbook_sheet_rids
+        .iter()
+        .find(|(name, _)| name == "Sheet2")
+        .map(|(_, rid)| rid.as_str())
+        .expect("Sheet2 must have an r:id");
+    let sheet2_target = workbook_rels
+        .get(sheet2_rid)
+        .expect("Sheet2 r:id must exist in workbook.xml.rels");
+    let sheet2_part_name = workbook_target_to_part_name(sheet2_target);
+    assert!(
+        sheet2_part_name.contains("worksheets/"),
+        "expected Sheet2 relationship to resolve to a worksheet part, got {sheet2_part_name}"
+    );
+    assert!(
+        archive.by_name(&sheet2_part_name).is_ok(),
+        "expected Sheet2 backing part to exist in output package: {sheet2_part_name}"
+    );
+
+    let content_types = content_type_overrides(&zip_part(&saved, "[Content_Types].xml"));
+    assert!(
+        !content_types.contains("/xl/worksheets/sheet1.xml"),
+        "expected [Content_Types].xml to drop override for deleted /xl/worksheets/sheet1.xml"
+    );
+    assert!(
+        content_types.contains(&format!("/{sheet2_part_name}")),
+        "expected [Content_Types].xml to retain override for Sheet2 worksheet part"
+    );
+    assert!(
+        content_types.contains("/xl/metadata.xml"),
+        "[Content_Types].xml must retain override for /xl/metadata.xml"
+    );
+    assert!(
+        content_types.contains("/xl/richData/richValueTypes.xml"),
+        "[Content_Types].xml must retain override for /xl/richData/richValueTypes.xml"
+    );
+    assert!(
+        content_types.contains("/xl/richData/richValues.xml"),
+        "[Content_Types].xml must retain override for /xl/richData/richValues.xml"
+    );
+
+    let added_override_name = format!("/{added_part_name}");
+    assert!(
+        content_types.contains(&added_override_name),
+        "expected [Content_Types].xml to include override for newly-added worksheet part: {added_override_name}"
+    );
+}
