@@ -73,6 +73,62 @@ fn forecast_ets_accepts_monthly_date_timeline() {
     sheet.set("B5", may);
 
     assert_number(&sheet.eval("=FORECAST.ETS(B5,A1:A4,B1:B4,1)"), 10.0);
+    assert_number(
+        &sheet.eval("=FORECAST.ETS.CONFINT(B5,A1:A4,B1:B4,0.95,1)"),
+        0.0,
+    );
+    assert_number(&sheet.eval("=FORECAST.ETS.SEASONALITY(A1:A4,B1:B4)"), 1.0);
+    assert_number(
+        &sheet.eval("=FORECAST.ETS.STAT(A1:A4,B1:B4,1,1,1,8)"),
+        0.0,
+    );
+}
+
+#[test]
+fn forecast_ets_accepts_yearly_date_timeline_across_leap_years() {
+    let system = ExcelDateSystem::EXCEL_1900;
+    let mut sheet = TestSheet::new();
+    sheet.set_date_system(system);
+
+    let d2019 = ymd_to_serial(ExcelDate::new(2019, 1, 1), system).unwrap() as f64;
+    let d2020 = ymd_to_serial(ExcelDate::new(2020, 1, 1), system).unwrap() as f64;
+    let d2021 = ymd_to_serial(ExcelDate::new(2021, 1, 1), system).unwrap() as f64;
+    let d2022 = ymd_to_serial(ExcelDate::new(2022, 1, 1), system).unwrap() as f64;
+
+    sheet.set("A1", 10.0);
+    sheet.set("A2", 10.0);
+    sheet.set("A3", 10.0);
+
+    sheet.set("B1", d2019);
+    sheet.set("B2", d2020);
+    sheet.set("B3", d2021);
+    sheet.set("B4", d2022);
+
+    assert_number(&sheet.eval("=FORECAST.ETS(B4,A1:A3,B1:B3,1)"), 10.0);
+}
+
+#[test]
+fn forecast_ets_accepts_monthly_date_timeline_excel1904() {
+    let system = ExcelDateSystem::Excel1904;
+    let mut sheet = TestSheet::new();
+    sheet.set_date_system(system);
+
+    let jan = ymd_to_serial(ExcelDate::new(2020, 1, 1), system).unwrap() as f64;
+    let feb = ymd_to_serial(ExcelDate::new(2020, 2, 1), system).unwrap() as f64;
+    let mar = ymd_to_serial(ExcelDate::new(2020, 3, 1), system).unwrap() as f64;
+    let apr = ymd_to_serial(ExcelDate::new(2020, 4, 1), system).unwrap() as f64;
+    let may = ymd_to_serial(ExcelDate::new(2020, 5, 1), system).unwrap() as f64;
+
+    for row in 1..=4 {
+        sheet.set(&format!("A{row}"), 10.0);
+    }
+    sheet.set("B1", jan);
+    sheet.set("B2", feb);
+    sheet.set("B3", mar);
+    sheet.set("B4", apr);
+    sheet.set("B5", may);
+
+    assert_number(&sheet.eval("=FORECAST.ETS(B5,A1:A4,B1:B4,1)"), 10.0);
 }
 
 #[test]
