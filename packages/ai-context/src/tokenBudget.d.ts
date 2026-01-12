@@ -4,7 +4,7 @@ export interface TokenEstimator {
   estimateMessagesTokens(messages: any[]): number;
 }
 
-export function estimateTokens(text: string): number;
+export function estimateTokens(text: string, estimator?: TokenEstimator): number;
 
 export function stableJsonStringify(value: unknown): string;
 
@@ -19,10 +19,10 @@ export function estimateMessagesTokens(messages: any[], estimator?: TokenEstimat
 
 export function estimateToolDefinitionTokens(tools: any[] | null | undefined, estimator?: TokenEstimator): number;
 
-export function trimToTokenBudget(text: string, maxTokens: number): string;
+export function trimToTokenBudget(text: string, maxTokens: number, estimator?: TokenEstimator): string;
 
 export function packSectionsToTokenBudget(
   sections: Array<{ key: string; text: string; priority: number }>,
   maxTokens: number,
+  estimator?: TokenEstimator,
 ): Array<{ key: string; text: string }>;
-

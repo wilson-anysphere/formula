@@ -1,6 +1,6 @@
 import { extractSheetSchema } from "./schema.js";
 import { RagIndex } from "./rag.js";
-import { packSectionsToTokenBudget } from "./tokenBudget.js";
+import { DEFAULT_TOKEN_ESTIMATOR, packSectionsToTokenBudget } from "./tokenBudget.js";
 import { randomSampleRows, stratifiedSampleRows } from "./sampling.js";
 import { classifyText, redactText } from "./dlp.js";
 
@@ -31,7 +31,8 @@ export class ContextManager {
    *   tokenBudgetTokens?: number,
    *   ragIndex?: RagIndex,
    *   workbookRag?: WorkbookRagOptions,
-   *   redactor?: (text: string) => string
+   *   redactor?: (text: string) => string,
+   *   tokenEstimator?: import("./tokenBudget.js").TokenEstimator
    * }} [options]
    */
   constructor(options = {}) {
@@ -39,6 +40,7 @@ export class ContextManager {
     this.ragIndex = options.ragIndex ?? new RagIndex();
     this.workbookRag = options.workbookRag;
     this.redactor = options.redactor ?? redactText;
+    this.estimator = options.tokenEstimator ?? DEFAULT_TOKEN_ESTIMATOR;
   }
 
   /**
@@ -183,7 +185,7 @@ export class ContextManager {
       },
     ].filter((s) => s.text);
 
-    const packed = packSectionsToTokenBudget(sections, this.tokenBudgetTokens);
+    const packed = packSectionsToTokenBudget(sections, this.tokenBudgetTokens, this.estimator);
 
     if (dlp) {
       dlp.auditLogger?.log({
@@ -605,7 +607,7 @@ export class ContextManager {
       },
     ].filter((s) => s.text);
 
-    const packed = packSectionsToTokenBudget(sections, this.tokenBudgetTokens);
+    const packed = packSectionsToTokenBudget(sections, this.tokenBudgetTokens, this.estimator);
 
     if (dlp) {
       dlp.auditLogger?.log({

@@ -4,9 +4,10 @@
  * later behind the same interface.
  *
  * @param {string} text
+ * @param {TokenEstimator} [estimator]
  */
-export function estimateTokens(text) {
-  return DEFAULT_TOKEN_ESTIMATOR.estimateTextTokens(text);
+export function estimateTokens(text, estimator = DEFAULT_TOKEN_ESTIMATOR) {
+  return estimator.estimateTextTokens(text);
 }
 
 /**
@@ -169,22 +170,50 @@ export function estimateToolDefinitionTokens(tools, estimator = DEFAULT_TOKEN_ES
  * Trim a string to a maximum estimated token count.
  * @param {string} text
  * @param {number} maxTokens
+ * @param {TokenEstimator} [estimator]
  */
-export function trimToTokenBudget(text, maxTokens) {
+export function trimToTokenBudget(text, maxTokens, estimator = DEFAULT_TOKEN_ESTIMATOR) {
   if (maxTokens <= 0) return "";
-  const estimate = estimateTokens(text);
+  const estimate = estimateTokens(text, estimator);
   if (estimate <= maxTokens) return text;
 
-  const maxChars = Math.max(maxTokens * 4, 0);
-  if (text.length <= maxChars) return text;
-  return text.slice(0, maxChars) + "\n…(trimmed to fit token budget)…";
+  const suffix = "\n…(trimmed to fit token budget)…";
+  const suffixTokens = estimateTokens(suffix, estimator);
+
+  // If the suffix itself doesn't fit, return as much of it as possible.
+  if (suffixTokens >= maxTokens) {
+    let lo = 0;
+    let hi = suffix.length;
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      const candidate = suffix.slice(0, mid);
+      const tokens = estimateTokens(candidate, estimator);
+      if (tokens <= maxTokens) lo = mid;
+      else hi = mid - 1;
+    }
+    return suffix.slice(0, lo);
+  }
+
+  // Find the longest prefix that fits when we append the suffix.
+  let lo = 0;
+  let hi = text.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    const candidate = text.slice(0, mid) + suffix;
+    const tokens = estimateTokens(candidate, estimator);
+    if (tokens <= maxTokens) lo = mid;
+    else hi = mid - 1;
+  }
+
+  return text.slice(0, lo) + suffix;
 }
 
 /**
  * @param {{ key: string, text: string, priority: number }[]} sections
  * @param {number} maxTokens
+ * @param {TokenEstimator} [estimator]
  */
-export function packSectionsToTokenBudget(sections, maxTokens) {
+export function packSectionsToTokenBudget(sections, maxTokens, estimator = DEFAULT_TOKEN_ESTIMATOR) {
   const ordered = sections.slice().sort((a, b) => b.priority - a.priority);
   let remaining = maxTokens;
   /** @type {{ key: string, text: string }[]} */
@@ -192,8 +221,8 @@ export function packSectionsToTokenBudget(sections, maxTokens) {
 
   for (const section of ordered) {
     if (remaining <= 0) break;
-    const trimmed = trimToTokenBudget(section.text, remaining);
-    const used = estimateTokens(trimmed);
+    const trimmed = trimToTokenBudget(section.text, remaining, estimator);
+    const used = estimateTokens(trimmed, estimator);
     remaining -= used;
     packed.push({ key: section.key, text: trimmed });
   }

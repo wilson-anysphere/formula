@@ -14,12 +14,15 @@ export type WorkbookRagOptions = {
   sampleRows?: number;
 };
 
+import type { TokenEstimator } from "./tokenBudget.js";
+
 export class ContextManager {
   constructor(options?: {
     tokenBudgetTokens?: number;
     ragIndex?: any;
     workbookRag?: WorkbookRagOptions;
     redactor?: (text: string) => string;
+    tokenEstimator?: TokenEstimator;
   });
 
   buildContext(params: {

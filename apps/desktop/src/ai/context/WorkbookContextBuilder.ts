@@ -607,7 +607,7 @@ export class WorkbookContextBuilder {
       },
     ].filter((s) => s.text);
 
-    const packed = packSectionsToTokenBudget(sections as any, Math.max(0, params.maxTokens));
+    const packed = packSectionsToTokenBudget(sections as any, Math.max(0, params.maxTokens), this.estimator);
     return packed.map((s) => `## ${s.key}\n${s.text}`).join("\n\n");
   }
 
