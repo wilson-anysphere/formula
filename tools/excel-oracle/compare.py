@@ -486,6 +486,11 @@ def main() -> int:
             "topMissingFunctions": top_missing_functions,
             "topActualErrorKinds": top_actual_error_kinds,
             "casesSha256": cases_sha,
+            # Make reports self-contained: consumers (CI artifacts, local debugging) should be able
+            # to see exactly which datasets were compared without having to reconstruct CLI args.
+            "casesPath": str(cases_path),
+            "expectedPath": str(expected_path),
+            "actualPath": str(actual_path),
         },
         "expectedSource": expected.get("source"),
         "actualSource": actual_source,

@@ -89,6 +89,9 @@ class ComparePartialDatasetsTests(unittest.TestCase):
             self.assertEqual(report.get("expectedSource"), expected_payload["source"])
             self.assertEqual(report.get("actualSource"), actual_payload["source"])
             self.assertEqual(report["summary"]["reasonCounts"]["missing-expected"], 1)
+            self.assertEqual(report["summary"]["casesPath"], str(cases_path))
+            self.assertEqual(report["summary"]["expectedPath"], str(expected_path))
+            self.assertEqual(report["summary"]["actualPath"], str(actual_path))
 
 
 class CompareTagToleranceTests(unittest.TestCase):
@@ -203,6 +206,9 @@ class CompareTagToleranceTests(unittest.TestCase):
             self.assertEqual(report["summary"]["mismatches"], 0)
             self.assertEqual(report["summary"]["tagAbsTol"], {"loose": 1e-6})
             self.assertEqual(report["summary"]["tagRelTol"], {"loose": 1e-6})
+            self.assertEqual(report["summary"]["casesPath"], str(cases_path))
+            self.assertEqual(report["summary"]["expectedPath"], str(expected_path))
+            self.assertEqual(report["summary"]["actualPath"], str(actual_path))
 
 
 if __name__ == "__main__":
