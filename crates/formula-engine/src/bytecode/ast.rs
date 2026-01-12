@@ -643,7 +643,26 @@ impl<'a> Parser<'a> {
                     if args.len() == crate::EXCEL_MAX_ARGS {
                         return Err(ParseError::TooManyArguments(crate::EXCEL_MAX_ARGS));
                     }
-                    args.push(self.parse_bp(0)?);
+
+                    // Excel allows omitted/missing arguments (e.g. `ADDRESS(1,1,,FALSE)` or
+                    // `IF(FALSE,1,)`). Treat an empty slot between separators as
+                    // `Expr::Literal(Value::Missing)` so the runtime can distinguish omitted args
+                    // from blank cell values for functions with optional-argument semantics.
+                    self.skip_ws();
+                    match self.peek_byte() {
+                        Some(b',') => {
+                            args.push(Expr::Literal(Value::Missing));
+                            self.pos += 1; // consume comma and continue to the next argument
+                            continue;
+                        }
+                        Some(b')') => {
+                            // Trailing comma: implicit missing argument at the end.
+                            args.push(Expr::Literal(Value::Missing));
+                            break;
+                        }
+                        Some(_) => args.push(self.parse_bp(0)?),
+                        None => return Err(ParseError::UnexpectedEof),
+                    }
                     self.skip_ws();
                     match self.peek_byte() {
                         Some(b',') => {
@@ -989,5 +1008,59 @@ mod tests {
             parse_formula(&formula, origin),
             Err(ParseError::TooManyArguments(_))
         ));
+    }
+
+    #[test]
+    fn parses_missing_function_arguments_as_missing_literals() {
+        let origin = CellCoord::new(0, 0);
+
+        assert_eq!(
+            parse_formula("=IF(FALSE,1,)", origin).expect("parse"),
+            Expr::FuncCall {
+                func: Function::If,
+                args: vec![
+                    Expr::Literal(Value::Bool(false)),
+                    Expr::Literal(Value::Number(1.0)),
+                    Expr::Literal(Value::Missing),
+                ],
+            }
+        );
+
+        assert_eq!(
+            parse_formula("=ADDRESS(1,1,,FALSE)", origin).expect("parse"),
+            Expr::FuncCall {
+                func: Function::Address,
+                args: vec![
+                    Expr::Literal(Value::Number(1.0)),
+                    Expr::Literal(Value::Number(1.0)),
+                    Expr::Literal(Value::Missing),
+                    Expr::Literal(Value::Bool(false)),
+                ],
+            }
+        );
+
+        assert_eq!(
+            parse_formula("=IF(,1,2)", origin).expect("parse"),
+            Expr::FuncCall {
+                func: Function::If,
+                args: vec![
+                    Expr::Literal(Value::Missing),
+                    Expr::Literal(Value::Number(1.0)),
+                    Expr::Literal(Value::Number(2.0)),
+                ],
+            }
+        );
+
+        assert_eq!(
+            parse_formula("=IF(,,)", origin).expect("parse"),
+            Expr::FuncCall {
+                func: Function::If,
+                args: vec![
+                    Expr::Literal(Value::Missing),
+                    Expr::Literal(Value::Missing),
+                    Expr::Literal(Value::Missing),
+                ],
+            }
+        );
     }
 }
