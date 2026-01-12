@@ -9,7 +9,10 @@ test.describe("command palette: find/replace/go to", () => {
     const primary = process.platform === "darwin" ? "Meta" : "Control";
     await page.keyboard.press(`${primary}+Shift+P`);
     await expect(page.getByTestId("command-palette-input")).toBeVisible();
-    await page.getByTestId("command-palette-input").fill("Find");
+    // The palette also includes spreadsheet function results (e.g. `FIND()`), which can
+    // outrank the Find *command* for a naive "Find" query. Use the command id to ensure we
+    // execute the command rather than inserting a function template.
+    await page.getByTestId("command-palette-input").fill("edit.find");
     await page.keyboard.press("Enter");
 
     await expect(page.locator("dialog.find-replace-dialog[open]")).toBeVisible();
@@ -21,7 +24,8 @@ test.describe("command palette: find/replace/go to", () => {
     const primary = process.platform === "darwin" ? "Meta" : "Control";
     await page.keyboard.press(`${primary}+Shift+P`);
     await expect(page.getByTestId("command-palette-input")).toBeVisible();
-    await page.getByTestId("command-palette-input").fill("Replace");
+    // See note in the Find test: disambiguate from the spreadsheet `REPLACE()` function.
+    await page.getByTestId("command-palette-input").fill("edit.replace");
     await page.keyboard.press("Enter");
 
     const replaceDialog = page.locator("dialog.find-replace-dialog[open]");
