@@ -139,7 +139,7 @@ describe("DocumentControllerSpreadsheetApi", () => {
     expect(cell.format).toEqual({ bold: true, italic: true });
   });
 
-  it("returns 0 formatted_cells when DocumentController refuses to apply formatting (safety caps)", async () => {
+  it("returns an error when DocumentController refuses to apply formatting (safety caps)", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const controller = new DocumentController();
@@ -152,10 +152,10 @@ describe("DocumentControllerSpreadsheetApi", () => {
         parameters: { range: "A1:XFD60000", format: { bold: true } },
       });
 
-      expect(result.ok).toBe(true);
+      expect(result.ok).toBe(false);
       expect(result.tool).toBe("apply_formatting");
-      if (!result.ok || result.tool !== "apply_formatting") throw new Error("Unexpected tool result");
-      expect(result.data?.formatted_cells).toBe(0);
+      if (result.ok) throw new Error("Expected apply_formatting to fail");
+      expect(result.error?.message ?? "").toMatch(/Formatting could not be applied/i);
     } finally {
       warnSpy.mockRestore();
     }
@@ -660,7 +660,7 @@ describe("DocumentControllerSpreadsheetApi", () => {
     expect(controller.getCell("Sheet1", "D1").value).toBe(123);
   });
 
-  it("returns 0 formatted_cells when DocumentController refuses apply_formatting edits", async () => {
+  it("returns an error when DocumentController refuses apply_formatting edits", async () => {
     const controller = new DocumentController();
     const api = new DocumentControllerSpreadsheetApi(controller);
     const executor = new ToolExecutor(api, { default_sheet: "Sheet1" });
@@ -672,10 +672,10 @@ describe("DocumentControllerSpreadsheetApi", () => {
         parameters: { range: "A1", format: { bold: true } }
       });
 
-      expect(result.ok).toBe(true);
+      expect(result.ok).toBe(false);
       expect(result.tool).toBe("apply_formatting");
-      if (!result.ok || result.tool !== "apply_formatting") throw new Error("Unexpected tool result");
-      expect(result.data?.formatted_cells).toBe(0);
+      if (result.ok) throw new Error("Expected apply_formatting to fail");
+      expect(result.error?.message ?? "").toMatch(/Formatting could not be applied/i);
       expect(spy).toHaveBeenCalled();
     } finally {
       spy.mockRestore();

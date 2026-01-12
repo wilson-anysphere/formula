@@ -3,7 +3,7 @@ import { applyStylePatch } from "../../formatting/styleTable.js";
 
 import { normalizeFormulaTextOpt } from "@formula/engine";
 
-import type { CellAddress, RangeAddress } from "../../../../../packages/ai-tools/src/spreadsheet/a1.ts";
+import { formatA1Range, type CellAddress, type RangeAddress } from "../../../../../packages/ai-tools/src/spreadsheet/a1.ts";
 import type { CellEntry, SpreadsheetApi } from "../../../../../packages/ai-tools/src/spreadsheet/api.ts";
 import { isCellEmpty, type CellData, type CellFormat } from "../../../../../packages/ai-tools/src/spreadsheet/types.ts";
 import type { SheetNameResolver } from "../../sheet/sheetNameResolver.js";
@@ -726,7 +726,10 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
     if (!patch) return 0;
 
     const applied = this.controller.setRangeFormat(sheetId, toControllerRange(range), patch, { label: "AI apply_formatting" });
-    return applied ? rows * cols : 0;
+    if (applied === false) {
+      throw new Error(`Formatting could not be applied to ${formatA1Range(range)}. Try selecting fewer cells/rows.`);
+    }
+    return rows * cols;
   }
 
   getLastUsedRow(sheet: string): number {
