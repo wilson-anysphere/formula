@@ -93,3 +93,38 @@ fn cell_implicit_reference_does_not_create_dynamic_dependency_cycles() {
         Value::Text("v".to_string())
     );
 }
+
+#[test]
+fn cell_address_quotes_sheet_names_when_needed() {
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    engine.set_cell_value("My Sheet", "A1", 1.0).unwrap();
+    engine.set_cell_value("A1", "A1", 1.0).unwrap();
+    engine.set_cell_value("O'Brien", "A1", 1.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"address\",'My Sheet'!A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=CELL(\"address\",'A1'!A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B3", "=CELL(\"address\",'O''Brien'!A1)")
+        .unwrap();
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("'My Sheet'!$A$1".to_string())
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B2"),
+        Value::Text("'A1'!$A$1".to_string())
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B3"),
+        Value::Text("'O''Brien'!$A$1".to_string())
+    );
+}
