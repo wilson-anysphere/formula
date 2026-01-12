@@ -5101,14 +5101,14 @@ if (
     },
     goTo: {
       workbook: app.getSearchWorkbook(),
-      // `parseGoTo` operates on sheet display names (what the user sees/types), but the app
-      // must navigate using stable sheet ids. Use the sheet display name for parsing, then
-      // resolve back to an id on navigation.
-      getCurrentSheetName: () => workbookSheetStore.getName(app.getCurrentSheetId()) ?? app.getCurrentSheetId(),
+      // `parseGoTo` expects sheet names (what users type, and what formulas use),
+      // so we provide the current sheet display name and resolve back to a stable id
+      // at execution time.
+      getCurrentSheetName: () => currentSheetDisplayName(),
       onGoTo: (parsed) => {
-        const { range } = parsed;
         const sheetId = resolveSheetIdFromName(parsed.sheetName);
         if (!sheetId) return;
+        const { range } = parsed;
         if (range.startRow === range.endRow && range.startCol === range.endCol) {
           app.activateCell({ sheetId, row: range.startRow, col: range.startCol });
         } else {
