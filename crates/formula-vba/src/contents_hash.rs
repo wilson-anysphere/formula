@@ -275,6 +275,33 @@ fn peek_next_record_id(bytes: &[u8], offset: usize) -> Option<u16> {
     Some(u16::from_le_bytes([bytes[offset], bytes[offset + 1]]))
 }
 
+fn looks_like_dir_record_header(bytes: &[u8], offset: usize) -> bool {
+    if offset == bytes.len() {
+        return true;
+    }
+    if offset + 2 > bytes.len() {
+        return false;
+    }
+    let id = u16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
+
+    // PROJECTVERSION (0x0009) is a fixed-length record (12 bytes total) in many spec-compliant dir
+    // streams; v3 transcript parsing treats it as fixed-length.
+    if id == 0x0009 {
+        return offset + 12 <= bytes.len();
+    }
+
+    if offset + 6 > bytes.len() {
+        return false;
+    }
+    let len = u32::from_le_bytes([
+        bytes[offset + 2],
+        bytes[offset + 3],
+        bytes[offset + 4],
+        bytes[offset + 5],
+    ]) as usize;
+    offset + 6 + len <= bytes.len()
+}
+
 fn looks_like_projectversion_following_record(bytes: &[u8], offset: usize) -> bool {
     if offset == bytes.len() {
         return true;
@@ -1813,7 +1840,10 @@ fn append_v3_reference_registered(
     out.extend_from_slice(&dir_decompressed[payload_start..payload_end]);
     let minimal_len = payload_end.saturating_sub(payload_start);
     let record_end_by_size = payload_start.saturating_add(size_total);
-    *offset = if size_total >= minimal_len && record_end_by_size <= dir_decompressed.len() {
+    *offset = if size_total > minimal_len
+        && record_end_by_size <= dir_decompressed.len()
+        && looks_like_dir_record_header(dir_decompressed, record_end_by_size)
+    {
         record_end_by_size
     } else {
         payload_end
@@ -1851,7 +1881,10 @@ fn append_v3_reference_project(
     out.extend_from_slice(&dir_decompressed[payload_start..payload_end]);
     let minimal_len = payload_end.saturating_sub(payload_start);
     let record_end_by_size = payload_start.saturating_add(size_total);
-    *offset = if size_total >= minimal_len && record_end_by_size <= dir_decompressed.len() {
+    *offset = if size_total > minimal_len
+        && record_end_by_size <= dir_decompressed.len()
+        && looks_like_dir_record_header(dir_decompressed, record_end_by_size)
+    {
         record_end_by_size
     } else {
         payload_end
@@ -1888,7 +1921,10 @@ fn append_v3_reference_control(
     out.extend_from_slice(&dir_decompressed[payload_start..payload_end]);
     let minimal_len = payload_end.saturating_sub(payload_start);
     let record_end_by_size = payload_start.saturating_add(size_total);
-    *offset = if size_total >= minimal_len && record_end_by_size <= dir_decompressed.len() {
+    *offset = if size_total > minimal_len
+        && record_end_by_size <= dir_decompressed.len()
+        && looks_like_dir_record_header(dir_decompressed, record_end_by_size)
+    {
         record_end_by_size
     } else {
         payload_end
@@ -1927,7 +1963,10 @@ fn append_v3_reference_extended(
     out.extend_from_slice(&dir_decompressed[payload_start..payload_end]);
     let minimal_len = payload_end.saturating_sub(payload_start);
     let record_end_by_size = payload_start.saturating_add(size_total);
-    *offset = if size_total >= minimal_len && record_end_by_size <= dir_decompressed.len() {
+    *offset = if size_total > minimal_len
+        && record_end_by_size <= dir_decompressed.len()
+        && looks_like_dir_record_header(dir_decompressed, record_end_by_size)
+    {
         record_end_by_size
     } else {
         payload_end
@@ -1955,7 +1994,10 @@ fn skip_v3_reference_control(dir_decompressed: &[u8], offset: &mut usize) -> Res
     let payload_end = cur.offset;
     let minimal_len = payload_end.saturating_sub(payload_start);
     let record_end_by_size = payload_start.saturating_add(size_total);
-    *offset = if size_total >= minimal_len && record_end_by_size <= dir_decompressed.len() {
+    *offset = if size_total > minimal_len
+        && record_end_by_size <= dir_decompressed.len()
+        && looks_like_dir_record_header(dir_decompressed, record_end_by_size)
+    {
         record_end_by_size
     } else {
         payload_end
@@ -1984,7 +2026,10 @@ fn skip_v3_reference_extended(dir_decompressed: &[u8], offset: &mut usize) -> Re
     let payload_end = cur.offset;
     let minimal_len = payload_end.saturating_sub(payload_start);
     let record_end_by_size = payload_start.saturating_add(size_total);
-    *offset = if size_total >= minimal_len && record_end_by_size <= dir_decompressed.len() {
+    *offset = if size_total > minimal_len
+        && record_end_by_size <= dir_decompressed.len()
+        && looks_like_dir_record_header(dir_decompressed, record_end_by_size)
+    {
         record_end_by_size
     } else {
         payload_end

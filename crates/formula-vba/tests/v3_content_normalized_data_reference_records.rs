@@ -304,3 +304,67 @@ fn v3_content_normalized_data_reference_project_skips_trailing_bytes_after_versi
         "did not expect trailing REFERENCEPROJECT bytes to be included in transcript"
     );
 }
+
+#[test]
+fn v3_content_normalized_data_reference_records_do_not_trust_oversized_record_size_fields() {
+    // Robustness test: some inputs (especially synthetic/hand-crafted fixtures) may contain
+    // reference records whose outer size field is *larger* than the available bytes for that record.
+    //
+    // For v3 reference records, we ignore the outer size fields for transcript bytes, but we should
+    // also avoid using an obviously oversized size field to advance the cursor (otherwise we can
+    // skip into the middle of the next record and desynchronize parsing).
+    let mut dir_decompressed = Vec::new();
+    let mut expected = Vec::new();
+
+    // ---- REFERENCEPROJECT with an intentionally oversized Size field ----
+    push_reference_name(&mut dir_decompressed, &mut expected, "ProjectRef");
+
+    let libid_absolute = b"ABS-PATH";
+    let libid_relative = b"REL-PATH";
+    let major: u32 = 0x01020304;
+    let minor: u16 = 0x0506;
+    let mut reference_project = Vec::new();
+    reference_project.extend_from_slice(&(libid_absolute.len() as u32).to_le_bytes());
+    reference_project.extend_from_slice(libid_absolute);
+    reference_project.extend_from_slice(&(libid_relative.len() as u32).to_le_bytes());
+    reference_project.extend_from_slice(libid_relative);
+    reference_project.extend_from_slice(&major.to_le_bytes());
+    reference_project.extend_from_slice(&minor.to_le_bytes());
+
+    // Outer size is 10 bytes larger than the provided payload (malformed).
+    push_record_with_size(
+        &mut dir_decompressed,
+        0x000E,
+        (reference_project.len() as u32) + 10,
+        &reference_project,
+    );
+
+    expected.extend_from_slice(&0x000Eu16.to_le_bytes());
+    expected.extend_from_slice(&reference_project);
+
+    // ---- Follow-up reference to ensure parsing is still aligned ----
+    push_reference_name(&mut dir_decompressed, &mut expected, "RegisteredRef");
+    let libid_registered = b"LIBID-REGISTERED";
+    let mut reference_registered = Vec::new();
+    reference_registered.extend_from_slice(&(libid_registered.len() as u32).to_le_bytes());
+    reference_registered.extend_from_slice(libid_registered);
+    reference_registered.extend_from_slice(&0u32.to_le_bytes()); // Reserved1
+    reference_registered.extend_from_slice(&0u16.to_le_bytes()); // Reserved2
+    push_record(&mut dir_decompressed, 0x000D, &reference_registered);
+    expected.extend_from_slice(&0x000Du16.to_le_bytes());
+    expected.extend_from_slice(&reference_registered);
+
+    // ---- Build OLE with the `VBA/dir` stream ----
+    let dir_container = compress_container(&dir_decompressed);
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    let vba_bin = ole.into_inner().into_inner();
+
+    let actual = v3_content_normalized_data(&vba_bin).expect("V3ContentNormalizedData");
+    assert_eq!(actual, expected);
+}
