@@ -25,3 +25,20 @@ test("packaged Tauri config enables cross-origin isolation headers (COOP/COEP)",
   );
 });
 
+test("Tauri main capability allows emitting coi-check-result (used by pnpm check:coi)", () => {
+  const capPath = path.join(__dirname, "..", "src-tauri", "capabilities", "main.json");
+  const cap = JSON.parse(fs.readFileSync(capPath, "utf8"));
+
+  const perms = cap?.permissions;
+  assert.ok(Array.isArray(perms), "expected capabilities/main.json to have a permissions array");
+
+  const emitPerm = perms.find((p) => p && typeof p === "object" && p.identifier === "event:allow-emit");
+  assert.ok(emitPerm, "expected capabilities/main.json to include event:allow-emit permission");
+
+  const allowed = Array.isArray(emitPerm.allow) ? emitPerm.allow : [];
+  const allowedEvents = allowed.map((entry) => entry?.event).filter(Boolean);
+  assert.ok(
+    allowedEvents.includes("coi-check-result"),
+    "expected capabilities/main.json to allow emitting event 'coi-check-result' (required for the packaged cross-origin isolation smoke check)",
+  );
+});
