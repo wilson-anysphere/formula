@@ -96,7 +96,10 @@ pub fn eval_ast(expr: &Expr, grid: &dyn Grid, base: CellCoord, locale: &crate::L
         Expr::RangeRef(r) => Value::Range(*r),
         Expr::Unary { op, expr } => {
             let v = eval_ast(expr, grid, base, locale);
-            apply_unary(*op, v)
+            match op {
+                UnaryOp::ImplicitIntersection => apply_implicit_intersection(v, grid, base),
+                _ => apply_unary(*op, v),
+            }
         }
         Expr::Binary { op, left, right } => {
             let l = eval_ast(left, grid, base, locale);
@@ -213,6 +216,56 @@ fn coerce_countif_value_to_number(v: Value) -> Option<f64> {
     }
 }
 
+pub fn apply_implicit_intersection(v: Value, grid: &dyn Grid, base: CellCoord) -> Value {
+    match v {
+        Value::Error(e) => Value::Error(e),
+        Value::Range(r) => {
+            let range = r.resolve(base);
+
+            // Single-cell ranges return that cell.
+            if range.row_start == range.row_end && range.col_start == range.col_end {
+                return grid.get_value(CellCoord {
+                    row: range.row_start,
+                    col: range.col_start,
+                });
+            }
+
+            // 1D ranges intersect on the matching row/column.
+            if range.col_start == range.col_end {
+                if base.row >= range.row_start && base.row <= range.row_end {
+                    return grid.get_value(CellCoord {
+                        row: base.row,
+                        col: range.col_start,
+                    });
+                }
+                return Value::Error(ErrorKind::Value);
+            }
+
+            if range.row_start == range.row_end {
+                if base.col >= range.col_start && base.col <= range.col_end {
+                    return grid.get_value(CellCoord {
+                        row: range.row_start,
+                        col: base.col,
+                    });
+                }
+                return Value::Error(ErrorKind::Value);
+            }
+
+            // 2D ranges intersect only if the current cell is within the rectangle.
+            if base.row >= range.row_start
+                && base.row <= range.row_end
+                && base.col >= range.col_start
+                && base.col <= range.col_end
+            {
+                return grid.get_value(base);
+            }
+
+            Value::Error(ErrorKind::Value)
+        }
+        other => other,
+    }
+}
+
 pub fn apply_unary(op: UnaryOp, v: Value) -> Value {
     let n = match coerce_to_number(v) {
         Ok(n) => n,
@@ -221,6 +274,9 @@ pub fn apply_unary(op: UnaryOp, v: Value) -> Value {
     match op {
         UnaryOp::Plus => Value::Number(n),
         UnaryOp::Neg => Value::Number(-n),
+        UnaryOp::ImplicitIntersection => {
+            unreachable!("implicit intersection requires Grid + base context")
+        }
     }
 }
 

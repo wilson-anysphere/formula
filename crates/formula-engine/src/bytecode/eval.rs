@@ -1,6 +1,6 @@
 use super::ast::{BinaryOp, UnaryOp};
 use super::grid::Grid;
-use super::runtime::{apply_binary, apply_unary, call_function};
+use super::runtime::{apply_binary, apply_implicit_intersection, apply_unary, call_function};
 use super::value::{CellCoord, Value};
 use crate::date::ExcelDateSystem;
 use crate::locale::ValueLocaleConfig;
@@ -54,6 +54,11 @@ impl Vm {
                 OpCode::UnaryNeg => {
                     let v = self.stack.pop().unwrap_or(Value::Empty);
                     self.stack.push(apply_unary(UnaryOp::Neg, v));
+                }
+                OpCode::ImplicitIntersection => {
+                    let v = self.stack.pop().unwrap_or(Value::Empty);
+                    self.stack
+                        .push(apply_implicit_intersection(v, grid, base));
                 }
                 OpCode::Add
                 | OpCode::Sub

@@ -22,6 +22,7 @@ pub enum OpCode {
     Gt = 14,
     Ge = 15,
     CallFunc = 16,
+    ImplicitIntersection = 17,
 }
 
 /// Packed instruction:
@@ -59,6 +60,7 @@ impl Instruction {
             14 => OpCode::Gt,
             15 => OpCode::Ge,
             16 => OpCode::CallFunc,
+            17 => OpCode::ImplicitIntersection,
             _ => unreachable!("invalid opcode"),
         }
     }

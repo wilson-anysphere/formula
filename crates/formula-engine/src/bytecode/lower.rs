@@ -275,7 +275,15 @@ pub fn lower_canonical_expr(
                     resolve_sheet,
                 )?),
             }),
-            crate::UnaryOp::ImplicitIntersection => Err(LowerError::Unsupported),
+            crate::UnaryOp::ImplicitIntersection => Ok(BytecodeExpr::Unary {
+                op: UnaryOp::ImplicitIntersection,
+                expr: Box::new(lower_canonical_expr(
+                    &u.expr,
+                    origin,
+                    current_sheet,
+                    resolve_sheet,
+                )?),
+            }),
         },
         crate::Expr::FunctionCall(call) => {
             let func = Function::from_name(&call.name.name_upper);

@@ -5,6 +5,7 @@ use std::sync::Arc;
 pub enum UnaryOp {
     Plus,
     Neg,
+    ImplicitIntersection,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -193,6 +194,13 @@ impl<'a> Parser<'a> {
                 self.pos += 1;
                 Ok(Expr::Unary {
                     op: UnaryOp::Neg,
+                    expr: Box::new(self.parse_bp(10)?),
+                })
+            }
+            Some(b'@') => {
+                self.pos += 1;
+                Ok(Expr::Unary {
+                    op: UnaryOp::ImplicitIntersection,
                     expr: Box::new(self.parse_bp(10)?),
                 })
             }

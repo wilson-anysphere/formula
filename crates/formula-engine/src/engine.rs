@@ -4866,7 +4866,12 @@ fn bytecode_expr_is_eligible_inner(expr: &bytecode::Expr, allow_range: bool) -> 
         },
         bytecode::Expr::CellRef(_) => true,
         bytecode::Expr::RangeRef(_) => allow_range,
-        bytecode::Expr::Unary { expr, .. } => bytecode_expr_is_eligible_inner(expr, false),
+        bytecode::Expr::Unary { op, expr } => match op {
+            bytecode::ast::UnaryOp::Plus | bytecode::ast::UnaryOp::Neg => {
+                bytecode_expr_is_eligible_inner(expr, false)
+            }
+            bytecode::ast::UnaryOp::ImplicitIntersection => bytecode_expr_is_eligible_inner(expr, true),
+        },
         bytecode::Expr::Binary { op, left, right } => {
             matches!(
                 op,

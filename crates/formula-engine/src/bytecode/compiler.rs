@@ -45,6 +45,9 @@ impl Compiler {
                     UnaryOp::Neg => program
                         .instrs
                         .push(Instruction::new(OpCode::UnaryNeg, 0, 0)),
+                    UnaryOp::ImplicitIntersection => program
+                        .instrs
+                        .push(Instruction::new(OpCode::ImplicitIntersection, 0, 0)),
                 }
             }
             Expr::Binary { op, left, right } => {
@@ -190,6 +193,7 @@ fn expr_to_key(expr: &Expr, out: &mut String) {
             out.push_str(match op {
                 UnaryOp::Plus => "+",
                 UnaryOp::Neg => "-",
+                UnaryOp::ImplicitIntersection => "@",
             });
             out.push(',');
             expr_to_key(expr, out);

@@ -6,7 +6,7 @@ use formula_engine::locale::ValueLocaleConfig;
 use formula_engine::value::NumberLocale;
 use formula_engine::{
     BytecodeCompileReason, Engine, ErrorKind, ExternalValueProvider, NameDefinition, NameScope,
-    Value,
+    ParseOptions, ReferenceStyle, Value,
 };
 use proptest::prelude::*;
 use std::sync::Arc;
@@ -88,6 +88,29 @@ fn eval_via_ast(engine: &Engine, formula: &str, current_cell: &str) -> Value {
 fn assert_engine_matches_ast(engine: &Engine, formula: &str, cell: &str) {
     let expected = eval_via_ast(engine, formula, cell);
     assert_eq!(engine.get_cell_value("Sheet1", cell), expected);
+}
+
+fn bytecode_value_to_engine(value: formula_engine::bytecode::Value) -> Value {
+    use formula_engine::bytecode::{ErrorKind as ByteErrorKind, Value as ByteValue};
+    match value {
+        ByteValue::Number(n) => Value::Number(n),
+        ByteValue::Bool(b) => Value::Bool(b),
+        ByteValue::Text(s) => Value::Text(s.to_string()),
+        ByteValue::Empty => Value::Blank,
+        ByteValue::Error(e) => Value::Error(match e {
+            ByteErrorKind::Null => ErrorKind::Null,
+            ByteErrorKind::Div0 => ErrorKind::Div0,
+            ByteErrorKind::Ref => ErrorKind::Ref,
+            ByteErrorKind::Value => ErrorKind::Value,
+            ByteErrorKind::Name => ErrorKind::Name,
+            ByteErrorKind::Num => ErrorKind::Num,
+            ByteErrorKind::NA => ErrorKind::NA,
+            ByteErrorKind::Spill => ErrorKind::Spill,
+            ByteErrorKind::Calc => ErrorKind::Calc,
+        }),
+        // Array/range values are not valid scalar results for the engine API; treat them as spills.
+        ByteValue::Array(_) | ByteValue::Range(_) => Value::Error(ErrorKind::Spill),
+    }
 }
 
 #[test]
@@ -342,6 +365,96 @@ fn bytecode_backend_matches_ast_for_postfix_percent_with_locale_sensitive_numeri
     assert_eq!(engine.bytecode_program_count(), 1);
     engine.recalculate_single_threaded();
     assert_engine_matches_ast(&engine, r#"="1.234,56"%"#, "A1");
+}
+
+#[test]
+fn bytecode_backend_matches_ast_for_explicit_implicit_intersection_operator() {
+    let mut engine = Engine::new();
+
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 3.0).unwrap();
+
+    engine.set_cell_value("Sheet1", "B1", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "C1", 30.0).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 22.0).unwrap();
+
+    engine.set_cell_formula("Sheet1", "D1", "=@A1").unwrap();
+    engine.set_cell_formula("Sheet1", "D2", "=@A1:A3").unwrap();
+    engine.set_cell_formula("Sheet1", "B3", "=@A1:C1").unwrap();
+    engine.set_cell_formula("Sheet1", "C3", "=@A1:B2").unwrap();
+
+    // Ensure these formulas are compiled to bytecode (and aren't forcing AST fallback).
+    assert_eq!(engine.bytecode_program_count(), 4);
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "D1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "D2"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B3"), Value::Number(10.0));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "C3"),
+        Value::Error(ErrorKind::Value)
+    );
+
+    assert_engine_matches_ast(&engine, "=@A1", "D1");
+    assert_engine_matches_ast(&engine, "=@A1:A3", "D2");
+    assert_engine_matches_ast(&engine, "=@A1:C1", "B3");
+    assert_engine_matches_ast(&engine, "=@A1:B2", "C3");
+}
+
+#[test]
+fn bytecode_implicit_intersection_matches_ast_for_2d_range_inside_rectangle() {
+    use formula_engine::bytecode::{CellCoord, GridMut, SparseGrid, Vm};
+
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "B1", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 42.0).unwrap();
+
+    let mut grid = SparseGrid::new(10, 10);
+    grid.set_value(CellCoord::new(0, 0), formula_engine::bytecode::Value::Number(1.0));
+    grid.set_value(CellCoord::new(1, 0), formula_engine::bytecode::Value::Number(2.0));
+    grid.set_value(CellCoord::new(0, 1), formula_engine::bytecode::Value::Number(10.0));
+    grid.set_value(CellCoord::new(1, 1), formula_engine::bytecode::Value::Number(42.0));
+
+    let formula = "=@A1:B2";
+    let current_cell = "B2";
+    let expected = eval_via_ast(&engine, formula, current_cell);
+
+    let origin = parse_a1(current_cell).expect("parse current cell");
+    let origin = formula_engine::CellAddr::new(origin.row, origin.col);
+    let ast = formula_engine::parse_formula(
+        formula,
+        ParseOptions {
+            locale: formula_engine::LocaleConfig::en_us(),
+            reference_style: ReferenceStyle::A1,
+            normalize_relative_to: Some(origin),
+        },
+    )
+    .expect("parse canonical formula");
+
+    let mut resolve_sheet = |_name: &str| Some(0usize);
+    let bc_expr = formula_engine::bytecode::lower_canonical_expr(&ast.expr, origin, 0, &mut resolve_sheet)
+        .expect("lower to bytecode expr");
+
+    let cache = formula_engine::bytecode::BytecodeCache::new();
+    let program = cache.get_or_compile(&bc_expr);
+    assert_eq!(cache.program_count(), 1);
+    assert!(
+        program
+            .instrs()
+            .iter()
+            .any(|inst| inst.op() == formula_engine::bytecode::OpCode::ImplicitIntersection),
+        "bytecode program should contain ImplicitIntersection opcode"
+    );
+
+    let mut vm = Vm::with_capacity(32);
+    let base = CellCoord::new(origin.row as i32, origin.col as i32);
+    let bc_value = vm.eval(&program, &grid, base, &formula_engine::LocaleConfig::en_us());
+
+    assert_eq!(bytecode_value_to_engine(bc_value), expected);
 }
 
 proptest! {
