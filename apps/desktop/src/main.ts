@@ -8421,7 +8421,7 @@ try {
     });
   });
 
-  // Native menu bar integration (desktop shell emits `menu-*` events).
+  // Native menu bar integration (desktop shell emits menu-open/menu-save/... events).
   void listen("menu-open", () => {
     void promptOpenWorkbook().catch((err) => {
       console.error("Failed to open workbook:", err);
