@@ -90,4 +90,31 @@ test("fill handle shifts full-row/column references using engine semantics", asy
   await page.mouse.click(d4.x, d4.y);
   await expect(page.getByTestId("active-address")).toHaveText("D4");
   await expect(input).toHaveValue("=SUM(2:2)");
+
+  // Spill postfix: B6="=A6#" -> fill left to A6 should become "=#REF!" (spill range operator dropped).
+  const b6 = await cellCenter(5, 1);
+  const a6 = await cellCenter(5, 0);
+
+  await page.mouse.click(b6.x, b6.y);
+  await expect(page.getByTestId("active-address")).toHaveText("B6");
+  await expect(input).toHaveValue("");
+  await input.fill("=A6#");
+  await input.press("Enter");
+  await expect(input).toHaveValue("=A6#");
+
+  await page.getByTestId("engine-status").click();
+  await expect(input).not.toBeFocused();
+
+  await page.mouse.click(b6.x, b6.y);
+  await expect(page.getByTestId("active-address")).toHaveText("B6");
+
+  const b6Handle = await fillHandleCenter();
+  await page.mouse.move(b6Handle.x, b6Handle.y);
+  await page.mouse.down();
+  await page.mouse.move(a6.x, b6Handle.y);
+  await page.mouse.up();
+
+  await page.mouse.click(a6.x, a6.y);
+  await expect(page.getByTestId("active-address")).toHaveText("A6");
+  await expect(input).toHaveValue("=#REF!");
 });
