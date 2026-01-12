@@ -98,6 +98,7 @@ commentsPanelVisible && cellHasComment
 
 Notes:
 
+- A missing/empty `when` clause is treated as `true`.
 - Unknown/invalid clauses fail closed (treated as `false`).
 - In the current desktop context menu implementation, `when` controls whether an item is **enabled/disabled**
   (disabled items still render). For keybindings, `when` controls whether the binding is active.
@@ -108,7 +109,7 @@ Extensions can contribute menu items via `contributes.menus` in the manifest (an
 
 Supported menu locations (desktop UI):
 
-- `cell/context` — the grid (cell) context menu.
+- `cell/context` — the grid (cell) context menu (`contributes.menus["cell/context"]`).
 
 Reserved menu locations (not yet wired in the desktop UI, but reserved for future parity):
 
@@ -132,8 +133,26 @@ Sorting rules (current implementation):
 Separators:
 
 - The context menu renderer automatically inserts a separator when the **group name changes** between adjacent items
-  after sorting.
+  after sorting (VS Code-style).
 - Items with `group: null` / omitted are treated as the empty group name (`""`).
+
+Example (manifest snippet using `selectionType` + `activeCellA1`):
+
+```json
+{
+  "contributes": {
+    "menus": {
+      "cell/context": [
+        {
+          "command": "myExtension.processCell",
+          "when": "selectionType == 'range' && activeCellA1 == 'B2'",
+          "group": "extensions@1"
+        }
+      ]
+    }
+  }
+}
+```
 
 ## Keybindings
 
@@ -173,8 +192,8 @@ the `:` key on layouts where that shares the same physical key.
   overriding core editing shortcuts).
 - Some shortcuts are reserved by the desktop host and should not be used by extensions:
   - `Ctrl/Cmd+Shift+P` (command palette)
-  - `Ctrl/Cmd+Shift+O` (quick open)
   - `Ctrl/Cmd+K` (inline AI edit)
+  - `Ctrl/Cmd+Shift+M` (comments panel)
 
 ---
 
@@ -330,8 +349,8 @@ The repository still contains Node-only marketplace/host code paths that rely on
     "keybindings": [
       {
         "command": "myExtension.run",
-        "key": "ctrl+shift+m",
-        "mac": "cmd+shift+m",
+        "key": "ctrl+shift+y",
+        "mac": "cmd+shift+y",
         "when": "selectionType != 'cell'"
       }
     ],
