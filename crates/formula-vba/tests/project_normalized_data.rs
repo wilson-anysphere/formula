@@ -369,6 +369,38 @@ fn project_normalized_data_dir_bad_record_length_beyond_buffer_after_module_reco
 }
 
 #[test]
+fn project_normalized_data_stops_project_information_parsing_on_modulenameunicode() {
+    // Some projects/fixtures may omit MODULENAME (0x0019) and begin the module list with
+    // MODULENAMEUNICODE (0x0047). We must treat that as "modules have started" and stop
+    // incorporating ProjectInformation record IDs that can be ambiguous by context (notably 0x004A).
+    let dir_decompressed = {
+        let mut out = Vec::new();
+
+        // Start module records with MODULENAMEUNICODE (no prior MODULENAME).
+        push_record(&mut out, 0x0047, &utf16le_bytes("Module1"));
+
+        // This record ID is meaningful as PROJECTCOMPATVERSION only in ProjectInformation (before
+        // modules). Ensure it is ignored here.
+        push_record(&mut out, 0x004A, b"__COMPAT_SHOULD_NOT_APPEAR__");
+
+        out
+    };
+
+    let vba_bin = build_vba_bin_with_dir_decompressed(&dir_decompressed);
+    let normalized = project_normalized_data(&vba_bin).expect("ProjectNormalizedData");
+
+    assert_eq!(
+        normalized,
+        b"NameVBAProject",
+        "expected only PROJECT stream ProjectProperties tokens when dir records are module-only"
+    );
+    assert!(
+        find_subslice(&normalized, b"__COMPAT_SHOULD_NOT_APPEAR__").is_none(),
+        "expected 0x004A payload bytes to be ignored once module records start"
+    );
+}
+
+#[test]
 fn project_normalized_data_v3_missing_vba_dir_stream() {
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");

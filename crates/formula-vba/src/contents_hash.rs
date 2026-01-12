@@ -144,10 +144,14 @@ pub fn project_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
         // Stop *interpreting* records once we hit the first module record group, but keep parsing
         // to the end of the stream so truncation/length errors are still reported (strictness).
         //
-        // This avoids accidentally treating module-level Unicode records (some of which reuse the
-        // same numeric IDs, e.g. 0x004A) as ProjectInformation records while still validating the
-        // overall record framing.
-        if id == 0x0019 {
+        // Treat both MODULENAME (0x0019) and MODULENAMEUNICODE (0x0047) as the beginning of module
+        // records, since some simplified dir encodings may omit the ANSI record and begin directly
+        // with the Unicode variant.
+        //
+        // This avoids accidentally treating module-level records (some of which may reuse numeric
+        // IDs by context) as ProjectInformation records while still validating the overall record
+        // framing.
+        if id == 0x0019 || id == 0x0047 {
             in_project_information = false;
             continue;
         }
