@@ -420,12 +420,16 @@ pub(crate) fn load_data_model(
             Ok(schema) => schema,
             Err(_) => continue,
         };
-        let options = formula_columnar::TableOptions {
-            page_size_rows: schema.page_size_rows,
-            cache: formula_columnar::PageCacheConfig {
-                max_entries: schema.cache_max_entries,
-            },
-        };
+        // `page_size_rows` is persisted as part of the table schema so we can map a row index to
+        // its encoded chunk (`chunk_idx = row / page_size_rows`). If this value is corrupted (e.g.
+        // `0`), downstream accessors in `formula-columnar` will panic on division/modulo by zero.
+        //
+        // Prefer the persisted value when it looks valid, but fall back to the maximum encoded
+        // chunk length we observe while decoding columns. This keeps the loaded model usable even
+        // when `schema_json` has been corrupted, without silently shifting chunk boundaries.
+        let mut page_size_rows = schema.page_size_rows;
+        let cache_max_entries = schema.cache_max_entries;
+        let mut max_chunk_len: usize = 0;
 
         let mut col_stmt = conn.prepare(
             r#"
@@ -516,6 +520,7 @@ pub(crate) fn load_data_model(
                         break;
                     }
                 };
+                max_chunk_len = max_chunk_len.max(decoded.len());
                 chunks.push(decoded);
             }
             if chunk_failed {
@@ -538,6 +543,19 @@ pub(crate) fn load_data_model(
         if schema_out.is_empty() {
             continue;
         }
+
+        if max_chunk_len > 0 && (page_size_rows == 0 || page_size_rows < max_chunk_len) {
+            page_size_rows = max_chunk_len;
+        }
+        if page_size_rows == 0 {
+            page_size_rows = 1;
+        }
+        let options = formula_columnar::TableOptions {
+            page_size_rows,
+            cache: formula_columnar::PageCacheConfig {
+                max_entries: cache_max_entries,
+            },
+        };
 
         let table =
             formula_columnar::ColumnarTable::from_encoded(schema_out, columns_out, row_count, options);
