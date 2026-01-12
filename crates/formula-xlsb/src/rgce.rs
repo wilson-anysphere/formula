@@ -2406,8 +2406,9 @@ mod encode_ast {
         }
 
         if spec.starts_with('#') {
-            let flags = structured_ref_item_flag(spec)
-                .ok_or_else(|| EncodeError::Parse(format!("unsupported structured reference item: {spec}")))?;
+            let flags = structured_ref_item_flag(spec).ok_or_else(|| {
+                EncodeError::Parse(format!("unsupported structured reference item: {spec}"))
+            })?;
             return Ok((flags, 0, 0));
         }
 
@@ -2433,8 +2434,9 @@ mod encode_ast {
         for item_part in &parts[..parts.len().saturating_sub(1)] {
             let item_part = item_part.trim();
             let item_text = if item_part.starts_with('[') {
-                let (content, rest) = parse_bracketed_token(item_part)
-                    .ok_or_else(|| EncodeError::Parse(format!("invalid structured reference item: {item_part}")))?;
+                let (content, rest) = parse_bracketed_token(item_part).ok_or_else(|| {
+                    EncodeError::Parse(format!("invalid structured reference item: {item_part}"))
+                })?;
                 if !rest.trim().is_empty() {
                     return Err(EncodeError::Parse(format!(
                         "invalid structured reference item: {item_part}"
@@ -2446,7 +2448,9 @@ mod encode_ast {
             };
 
             let item_flag = structured_ref_item_flag(&item_text).ok_or_else(|| {
-                EncodeError::Parse(format!("unsupported structured reference item: {item_text}"))
+                EncodeError::Parse(format!(
+                    "unsupported structured reference item: {item_text}"
+                ))
             })?;
             flags |= item_flag;
         }
@@ -2470,7 +2474,9 @@ mod encode_ast {
 
         if selector.starts_with('[') {
             let (start, rest) = parse_bracketed_token(selector).ok_or_else(|| {
-                EncodeError::Parse(format!("invalid structured reference column selector: {selector}"))
+                EncodeError::Parse(format!(
+                    "invalid structured reference column selector: {selector}"
+                ))
             })?;
             let rest = rest.trim();
             if rest.is_empty() {
@@ -2485,7 +2491,9 @@ mod encode_ast {
             };
 
             let (end, tail) = parse_bracketed_token(rest.trim()).ok_or_else(|| {
-                EncodeError::Parse(format!("invalid structured reference column range: {selector}"))
+                EncodeError::Parse(format!(
+                    "invalid structured reference column range: {selector}"
+                ))
             })?;
             if !tail.trim().is_empty() {
                 return Err(EncodeError::Parse(format!(
@@ -2524,7 +2532,9 @@ mod encode_ast {
             .table_column_id_by_name(table_id, &name)
             .ok_or_else(|| EncodeError::Parse(format!("unknown table column: {name}")))?;
         u16::try_from(col_id).map_err(|_| {
-            EncodeError::Parse(format!("table column id {col_id} is out of range for BIFF12"))
+            EncodeError::Parse(format!(
+                "table column id {col_id} is out of range for BIFF12"
+            ))
         })
     }
 
@@ -3291,6 +3301,7 @@ const PTG_MUL: u8 = 0x05;
 const PTG_DIV: u8 = 0x06;
 const PTG_UPLUS: u8 = 0x12;
 const PTG_UMINUS: u8 = 0x13;
+const PTG_MISSARG: u8 = 0x16;
 const PTG_ERR: u8 = 0x1C;
 const PTG_INT: u8 = 0x1E;
 const PTG_NUM: u8 = 0x1F;
@@ -3327,6 +3338,7 @@ const COL_INDEX_MASK: u16 = 0x3FFF;
 
 #[derive(Clone, Debug, PartialEq)]
 enum Expr {
+    Missing,
     Number(f64),
     Error(u8),
     Ref(Ref),
@@ -3416,6 +3428,7 @@ fn emit_expr(
     rgcb: &mut Vec<u8>,
 ) -> Result<(), EncodeError> {
     match expr {
+        Expr::Missing => rgce.push(PTG_MISSARG),
         Expr::Number(n) => emit_number(*n, rgce),
         Expr::Error(code) => {
             rgce.push(PTG_ERR);
@@ -4028,7 +4041,13 @@ impl<'a> FormulaParser<'a> {
             self.skip_ws();
             if self.peek_char() != Some(')') {
                 loop {
-                    args.push(self.parse_add_sub()?);
+                    // Excel allows empty arguments, which are encoded as `PtgMissArg` in rgce.
+                    // For example: `DISC(...,)` leaves the optional `basis` argument blank.
+                    if matches!(self.peek_char(), Some(',') | Some(')')) {
+                        args.push(Expr::Missing);
+                    } else {
+                        args.push(self.parse_add_sub()?);
+                    }
                     self.skip_ws();
                     match self.peek_char() {
                         Some(',') => {
