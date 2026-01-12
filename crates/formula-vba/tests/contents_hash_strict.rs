@@ -180,6 +180,148 @@ fn build_dir_decompressed_spec_with_references(
     out
 }
 
+fn build_dir_decompressed_spec_with_references_and_stream_name(
+    project_name: &str,
+    project_constants: &str,
+    module_name: &str,
+    module_stream_name_ansi: &str,
+    module_stream_name_unicode_bytes: &[u8],
+    references: &[u8],
+) -> Vec<u8> {
+    let project_name_bytes = project_name.as_bytes();
+    let constants_bytes = project_constants.as_bytes();
+
+    let mut out = Vec::new();
+
+    // --- PROJECTINFORMATION (MS-OVBA §2.3.4.2.1) ---
+    //
+    // PROJECTSYSKIND
+    push_u16(&mut out, 0x0001);
+    push_u32(&mut out, 0x0000_0004);
+    push_u32(&mut out, 0x0000_0003); // SysKind: 64-bit Windows
+
+    // PROJECTLCID
+    push_u16(&mut out, 0x0002);
+    push_u32(&mut out, 0x0000_0004);
+    push_u32(&mut out, 0x0000_0409); // en-US
+
+    // PROJECTLCIDINVOKE
+    push_u16(&mut out, 0x0014);
+    push_u32(&mut out, 0x0000_0004);
+    push_u32(&mut out, 0x0000_0409);
+
+    // PROJECTCODEPAGE
+    push_u16(&mut out, 0x0003);
+    push_u32(&mut out, 0x0000_0002);
+    push_u16(&mut out, 1252);
+
+    // PROJECTNAME
+    push_u16(&mut out, 0x0004);
+    push_u32(&mut out, project_name_bytes.len() as u32);
+    out.extend_from_slice(project_name_bytes);
+
+    // PROJECTDOCSTRING (empty)
+    push_u16(&mut out, 0x0005);
+    push_u32(&mut out, 0);
+    push_u16(&mut out, 0x0040);
+    push_u32(&mut out, 0);
+
+    // PROJECTHELPFILEPATH (empty)
+    push_u16(&mut out, 0x0006);
+    push_u32(&mut out, 0);
+    push_u16(&mut out, 0x003D);
+    push_u32(&mut out, 0);
+
+    // PROJECTHELPCONTEXT
+    push_u16(&mut out, 0x0007);
+    push_u32(&mut out, 0x0000_0004);
+    push_u32(&mut out, 0);
+
+    // PROJECTLIBFLAGS
+    push_u16(&mut out, 0x0008);
+    push_u32(&mut out, 0x0000_0004);
+    push_u32(&mut out, 0);
+
+    // PROJECTVERSION
+    push_u16(&mut out, 0x0009);
+    push_u32(&mut out, 0); // Reserved
+    push_u32(&mut out, 1); // VersionMajor
+    push_u16(&mut out, 0); // VersionMinor
+
+    // PROJECTCONSTANTS (MBCS + Unicode)
+    push_u16(&mut out, 0x000C);
+    push_u32(&mut out, constants_bytes.len() as u32);
+    out.extend_from_slice(constants_bytes);
+    push_u16(&mut out, 0x003C);
+    let mut constants_unicode = Vec::new();
+    push_utf16le(&mut constants_unicode, project_constants);
+    push_u32(&mut out, constants_unicode.len() as u32);
+    out.extend_from_slice(&constants_unicode);
+
+    // --- PROJECTREFERENCES ---
+    out.extend_from_slice(references);
+
+    // --- PROJECTMODULES (MS-OVBA §2.3.4.2.3) ---
+    push_u16(&mut out, 0x000F);
+    push_u32(&mut out, 0x0000_0002); // Size of Count
+    push_u16(&mut out, 1); // Count (one module)
+
+    // PROJECTCOOKIE (0x0013)
+    push_u16(&mut out, 0x0013);
+    push_u32(&mut out, 0x0000_0002);
+    push_u16(&mut out, 0xFFFF);
+
+    // --- MODULE record (MS-OVBA §2.3.4.2.3.2) ---
+    //
+    // MODULENAME
+    push_u16(&mut out, 0x0019);
+    push_u32(&mut out, module_name.len() as u32);
+    out.extend_from_slice(module_name.as_bytes());
+
+    // MODULESTREAMNAME (with Reserved=0x0032 + StreamNameUnicode)
+    push_u16(&mut out, 0x001A);
+    push_u32(&mut out, module_stream_name_ansi.len() as u32);
+    out.extend_from_slice(module_stream_name_ansi.as_bytes());
+    push_u16(&mut out, 0x0032);
+    push_u32(&mut out, module_stream_name_unicode_bytes.len() as u32);
+    out.extend_from_slice(module_stream_name_unicode_bytes);
+
+    // MODULEDOCSTRING (empty)
+    push_u16(&mut out, 0x001C);
+    push_u32(&mut out, 0);
+    push_u16(&mut out, 0x0048);
+    push_u32(&mut out, 0);
+
+    // MODULEOFFSET (TextOffset = 0)
+    push_u16(&mut out, 0x0031);
+    push_u32(&mut out, 0x0000_0004);
+    push_u32(&mut out, 0);
+
+    // MODULEHELPCONTEXT
+    push_u16(&mut out, 0x001E);
+    push_u32(&mut out, 0x0000_0004);
+    push_u32(&mut out, 0);
+
+    // MODULECOOKIE
+    push_u16(&mut out, 0x002C);
+    push_u32(&mut out, 0x0000_0002);
+    push_u16(&mut out, 0xFFFF);
+
+    // MODULETYPE (procedural module)
+    push_u16(&mut out, 0x0021);
+    push_u32(&mut out, 0);
+
+    // Terminator + Reserved
+    push_u16(&mut out, 0x002B);
+    push_u32(&mut out, 0);
+
+    // --- dir stream terminator ---
+    push_u16(&mut out, 0x0010);
+    push_u32(&mut out, 0);
+
+    out
+}
+
 fn build_dir_decompressed_spec(project_name: &str, project_constants: &str, module_name: &str) -> Vec<u8> {
     build_dir_decompressed_spec_with_references(project_name, project_constants, module_name, &[])
 }
@@ -308,6 +450,72 @@ fn content_normalized_data_parses_spec_dir_stream() {
     let expected_module_normalized = b"Option ExplicitPrint \"Attribute\"Sub Foo()End Sub".to_vec();
     let expected = [b"VBAProject".as_slice(), b"Answer=42".as_slice(), expected_module_normalized.as_slice()].concat();
 
+    assert_eq!(normalized, expected);
+}
+
+#[test]
+fn content_normalized_data_parses_spec_dir_stream_with_unicode_module_stream_name() {
+    // Ensure the strict MS-OVBA dir-stream parser can resolve module streams when the
+    // MODULESTREAMNAME Unicode field is required (non-ASCII OLE stream name).
+    let project_name = "VBAProject";
+    let module_name = "Module1";
+    let project_constants = "Answer=42";
+
+    let module_stream_name_unicode = "МодульПоток"; // non-ASCII
+
+    // StreamNameUnicode bytes: `u32 byte_len || utf16le_bytes || trailing_nul`.
+    // This matches a pattern seen in real-world files and should still decode correctly.
+    let mut stream_name_utf16 = Vec::new();
+    push_utf16le(&mut stream_name_utf16, module_stream_name_unicode);
+    stream_name_utf16.extend_from_slice(&0u16.to_le_bytes()); // NUL terminator (defensive)
+    let mut module_stream_name_unicode_bytes =
+        (stream_name_utf16.len() as u32).to_le_bytes().to_vec();
+    module_stream_name_unicode_bytes.extend_from_slice(&stream_name_utf16);
+
+    let dir_decompressed = build_dir_decompressed_spec_with_references_and_stream_name(
+        project_name,
+        project_constants,
+        module_name,
+        "WrongStreamName",
+        &module_stream_name_unicode_bytes,
+        &[],
+    );
+
+    let module_source = b"Sub Foo()\r\nEnd Sub\r\n";
+    let dir_container = compress_container(&dir_decompressed);
+    let module_container = compress_container(module_source);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(b"Name=\"VBAProject\"\r\nModule=Module1\r\n")
+            .expect("write PROJECT");
+    }
+
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        let stream_path = format!("VBA/{module_stream_name_unicode}");
+        let mut s = ole.create_stream(&stream_path).expect("module stream");
+        // MODULEOFFSET.TextOffset is 0, so write a compressed container at offset 0.
+        s.write_all(&module_container).expect("write module bytes");
+    }
+
+    let vba_project_bin = ole.into_inner().into_inner();
+    let normalized = content_normalized_data(&vba_project_bin).expect("ContentNormalizedData");
+
+    let expected_module_normalized = b"Sub Foo()End Sub".as_slice();
+    let expected = [
+        project_name.as_bytes(),
+        project_constants.as_bytes(),
+        expected_module_normalized,
+    ]
+    .concat();
     assert_eq!(normalized, expected);
 }
 
