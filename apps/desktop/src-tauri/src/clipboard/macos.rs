@@ -15,7 +15,8 @@ use objc2::runtime::AnyObject;
 use std::ffi::{c_void, CStr};
 
 use super::{
-    ClipboardContent, ClipboardError, ClipboardWritePayload, MAX_IMAGE_BYTES, MAX_RICH_TEXT_BYTES,
+    normalize_base64_str, ClipboardContent, ClipboardError, ClipboardWritePayload, MAX_IMAGE_BYTES,
+    MAX_RICH_TEXT_BYTES,
 };
 
 // Ensure the framework crates are linked (and silence `unused_crate_dependencies`).
@@ -299,6 +300,7 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
     let png_bytes = payload
         .png_base64
         .as_deref()
+        .map(normalize_base64_str)
         .filter(|s| !s.is_empty())
         .map(|s| {
             STANDARD

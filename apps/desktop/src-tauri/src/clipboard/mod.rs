@@ -11,8 +11,18 @@ mod cf_html;
 const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024; // 10 MiB
 const MAX_RICH_TEXT_BYTES: usize = 2 * 1024 * 1024; // 2 MiB (HTML / RTF)
 
+fn normalize_base64_str(mut base64: &str) -> &str {
+    base64 = base64.trim();
+    if base64.starts_with("data:") {
+        if let Some(comma) = base64.find(',') {
+            base64 = &base64[comma + 1..];
+        }
+    }
+    base64.trim()
+}
+
 fn estimate_base64_decoded_len(base64: &str) -> Option<usize> {
-    let s = base64.trim();
+    let s = normalize_base64_str(base64);
     if s.is_empty() {
         return Some(0);
     }
@@ -116,13 +126,11 @@ impl ClipboardWritePayload {
         }
 
         if let Some(png_base64) = self.png_base64.as_deref() {
-            if !png_base64.trim().is_empty() {
-                let decoded_len = estimate_base64_decoded_len(png_base64).unwrap_or(usize::MAX);
-                if decoded_len > max_image_bytes {
-                    return Err(ClipboardError::InvalidPayload(format!(
-                        "pngBase64 exceeds maximum size ({decoded_len} > {max_image_bytes} bytes)"
-                    )));
-                }
+            let decoded_len = estimate_base64_decoded_len(png_base64).unwrap_or(usize::MAX);
+            if decoded_len > max_image_bytes {
+                return Err(ClipboardError::InvalidPayload(format!(
+                    "pngBase64 exceeds maximum size ({decoded_len} > {max_image_bytes} bytes)"
+                )));
             }
         }
         Ok(())
@@ -242,6 +250,10 @@ mod tests {
         assert_eq!(estimate_base64_decoded_len("Zm8="), Some(2)); // "fo"
         assert_eq!(estimate_base64_decoded_len("Zm9v"), Some(3)); // "foo"
         assert_eq!(estimate_base64_decoded_len("AAAA"), Some(3));
+        assert_eq!(
+            estimate_base64_decoded_len("data:image/png;base64,Zm9v"),
+            Some(3)
+        );
     }
 
     #[test]

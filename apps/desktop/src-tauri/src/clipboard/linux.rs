@@ -54,7 +54,7 @@ fn bytes_to_utf8(bytes: &[u8]) -> Option<String> {
 mod gtk_backend {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
 
-    use super::super::{estimate_base64_decoded_len, MAX_IMAGE_BYTES, MAX_RICH_TEXT_BYTES};
+    use super::super::{normalize_base64_str, MAX_IMAGE_BYTES, MAX_RICH_TEXT_BYTES};
     use super::{
         bytes_to_utf8, choose_best_target, ClipboardContent, ClipboardError, ClipboardWritePayload,
     };
@@ -263,45 +263,14 @@ mod gtk_backend {
         use std::sync::Arc;
 
         let text = payload.text.clone().map(Arc::new);
-        let html = payload
-            .html
-            .as_deref()
-            .map(|s| {
-                if s.as_bytes().len() > MAX_RICH_TEXT_BYTES {
-                    return Err(ClipboardError::InvalidPayload(format!(
-                        "html exceeds maximum size ({MAX_RICH_TEXT_BYTES} bytes)"
-                    )));
-                }
-                Ok(Arc::new(s.to_string()))
-            })
-            .transpose()?;
-        let rtf = payload
-            .rtf
-            .as_deref()
-            .map(|s| {
-                if s.as_bytes().len() > MAX_RICH_TEXT_BYTES {
-                    return Err(ClipboardError::InvalidPayload(format!(
-                        "rtf exceeds maximum size ({MAX_RICH_TEXT_BYTES} bytes)"
-                    )));
-                }
-                Ok(Arc::new(s.to_string()))
-            })
-            .transpose()?;
+        let html = payload.html.clone().map(Arc::new);
+        let rtf = payload.rtf.clone().map(Arc::new);
         let png_bytes = payload
             .png_base64
             .as_deref()
+            .map(normalize_base64_str)
             .filter(|s| !s.is_empty())
             .map(|s| {
-                let decoded_len = estimate_base64_decoded_len(s).ok_or_else(|| {
-                    ClipboardError::InvalidPayload(format!(
-                        "pngBase64 exceeds maximum size ({MAX_IMAGE_BYTES} bytes)"
-                    ))
-                })?;
-                if decoded_len > MAX_IMAGE_BYTES {
-                    return Err(ClipboardError::InvalidPayload(format!(
-                        "pngBase64 exceeds maximum size ({MAX_IMAGE_BYTES} bytes)"
-                    )));
-                }
                 STANDARD
                     .decode(s)
                     .map_err(|e| ClipboardError::InvalidPayload(format!("invalid pngBase64: {e}")))

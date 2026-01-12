@@ -14,7 +14,8 @@ use windows::Win32::System::Memory::{
 use super::cf_html::{build_cf_html_payload, extract_cf_html_fragment_best_effort};
 use super::windows_dib::{dibv5_to_png, png_to_dibv5};
 use super::{
-    ClipboardContent, ClipboardError, ClipboardWritePayload, MAX_IMAGE_BYTES, MAX_RICH_TEXT_BYTES,
+    normalize_base64_str, ClipboardContent, ClipboardError, ClipboardWritePayload, MAX_IMAGE_BYTES,
+    MAX_RICH_TEXT_BYTES,
 };
 
 // Built-in clipboard formats that we use directly. Keeping these as numeric constants avoids
@@ -301,6 +302,7 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
     let png_bytes = payload
         .png_base64
         .as_deref()
+        .map(normalize_base64_str)
         .filter(|s| !s.is_empty())
         .map(|s| {
             STANDARD
