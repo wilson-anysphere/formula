@@ -443,6 +443,7 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
 // keep behind the `desktop` feature. Provide a stub for unit tests so this module compiles under
 // `cfg(test)` without enabling the full desktop toolchain.
 #[cfg(not(feature = "desktop"))]
+#[cfg_attr(test, allow(dead_code))]
 pub fn read() -> Result<ClipboardContent, ClipboardError> {
     Err(ClipboardError::Unavailable(
         "GTK clipboard backend requires the `desktop` feature".to_string(),
@@ -450,6 +451,7 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
 }
 
 #[cfg(not(feature = "desktop"))]
+#[cfg_attr(test, allow(dead_code))]
 pub fn write(_payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
     Err(ClipboardError::Unavailable(
         "GTK clipboard backend requires the `desktop` feature".to_string(),
