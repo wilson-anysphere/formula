@@ -750,7 +750,7 @@ test("clipboard provider", async (t) => {
     );
   });
 
-  await t.test("tauri: write invokes core.invoke('clipboard_write') and then attempts ClipboardItem write", async () => {
+  await t.test("tauri: write invokes core.invoke('clipboard_write') and does not attempt ClipboardItem write", async () => {
     /** @type {any[]} */
     const invokeCalls = [];
     /** @type {any[]} */
@@ -803,15 +803,75 @@ test("clipboard provider", async (t) => {
           },
         });
 
+        // If the native `clipboard_write` command succeeds, avoid the Web Clipboard API
+        // write, since it can clobber other rich formats (RTF/image) that were written natively.
+        assert.equal(writes.length, 0);
+      }
+    );
+  });
+
+  await t.test("tauri: write attempts ClipboardItem write when native invoke fails and html is present", async () => {
+    /** @type {string[]} */
+    const writeTextCalls = [];
+    /** @type {any[]} */
+    const writes = [];
+
+    class MockClipboardItem {
+      /**
+       * @param {Record<string, Blob>} data
+       */
+      constructor(data) {
+        this.data = data;
+      }
+    }
+
+    await withGlobals(
+      {
+        __TAURI__: {
+          core: {
+            async invoke(cmd) {
+              if (cmd === "clipboard_write" || cmd === "write_clipboard") {
+                throw new Error("command not found");
+              }
+              throw new Error(`Unexpected command: ${cmd}`);
+            },
+          },
+          clipboard: {
+            async writeText(text) {
+              writeTextCalls.push(text);
+            },
+          },
+        },
+        ClipboardItem: MockClipboardItem,
+        navigator: {
+          clipboard: {
+            async write(items) {
+              writes.push(items);
+            },
+          },
+        },
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        await provider.write({ text: "plain", html: "<p>hello</p>" });
+
+        // Plain text fallback still happens via the legacy Tauri clipboard API.
+        assert.deepEqual(writeTextCalls, ["plain"]);
+
+        // And we still attempt an HTML write via the Web Clipboard API when native rich writes fail.
         assert.equal(writes.length, 1);
         assert.equal(writes[0].length, 1);
         const item = writes[0][0];
         assert.ok(item instanceof MockClipboardItem);
 
         const keys = Object.keys(item.data).sort();
-        // ClipboardItem writes are best-effort and intentionally omit RTF so we don't
-        // regress HTML clipboard writes on platforms that reject unsupported types.
         assert.deepEqual(keys, ["text/html", "text/plain"].sort());
+
+        assert.equal(item.data["text/plain"].type, "text/plain");
+        assert.equal(await item.data["text/plain"].text(), "plain");
+
+        assert.equal(item.data["text/html"].type, "text/html");
+        assert.equal(await item.data["text/html"].text(), "<p>hello</p>");
       }
     );
   });
