@@ -31,6 +31,13 @@ type Props = {
    */
   onPersistSheetRename?: (sheetId: string, name: string) => Promise<void> | void;
   /**
+   * Optional hook to persist sheet deletion before updating the local sheet metadata store.
+   *
+   * Used by the desktop (Tauri) shell to route deletes through the backend so the workbook
+   * stays consistent across reloads.
+   */
+  onPersistSheetDelete?: (sheetId: string) => Promise<void> | void;
+  /**
    * Called after a sheet tab reorder is committed (drag-and-drop).
    *
    * Used by `main.ts` to restore focus back to the grid so users can continue
@@ -61,6 +68,7 @@ export function SheetTabStrip({
   onActivateSheet,
   onAddSheet,
   onPersistSheetRename,
+  onPersistSheetDelete,
   onSheetsReordered,
   onSheetRenamed,
   onSheetDeleted,
@@ -431,6 +439,14 @@ export function SheetTabStrip({
     if (!ok) return;
 
     const deletedName = sheet.name;
+
+    try {
+      await onPersistSheetDelete?.(sheet.id);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      onError?.(message);
+      return;
+    }
 
     try {
       store.remove(sheet.id);
