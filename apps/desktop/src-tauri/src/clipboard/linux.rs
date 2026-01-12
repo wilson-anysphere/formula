@@ -177,6 +177,32 @@ mod gtk_backend {
         }
     }
 
+    fn estimate_base64_decoded_len(base64: &str) -> Option<usize> {
+        let s = base64.trim();
+        if s.is_empty() {
+            return Some(0);
+        }
+
+        let len = s.len();
+        let padding = if s.ends_with("==") {
+            2
+        } else if s.ends_with('=') {
+            1
+        } else {
+            0
+        };
+
+        // If the encoded length is well-formed, we can compute the exact decoded length. Otherwise,
+        // compute a conservative upper bound to avoid allocating huge buffers during base64 decode.
+        if len % 4 == 0 {
+            let groups = len / 4;
+            groups.checked_mul(3)?.checked_sub(padding)
+        } else {
+            let groups = (len + 3) / 4;
+            groups.checked_mul(3)
+        }
+    }
+
     pub(super) fn read() -> Result<ClipboardContent, ClipboardError> {
         with_gtk_main_thread(|| {
             ensure_gtk()?;
@@ -248,13 +274,45 @@ mod gtk_backend {
         use std::sync::Arc;
 
         let text = payload.text.clone().map(Arc::new);
-        let html = payload.html.clone().map(Arc::new);
-        let rtf = payload.rtf.clone().map(Arc::new);
+        let html = payload
+            .html
+            .as_deref()
+            .map(|s| {
+                if s.as_bytes().len() > MAX_RICH_TEXT_BYTES {
+                    return Err(ClipboardError::InvalidPayload(format!(
+                        "html exceeds maximum size ({MAX_RICH_TEXT_BYTES} bytes)"
+                    )));
+                }
+                Ok(Arc::new(s.to_string()))
+            })
+            .transpose()?;
+        let rtf = payload
+            .rtf
+            .as_deref()
+            .map(|s| {
+                if s.as_bytes().len() > MAX_RICH_TEXT_BYTES {
+                    return Err(ClipboardError::InvalidPayload(format!(
+                        "rtf exceeds maximum size ({MAX_RICH_TEXT_BYTES} bytes)"
+                    )));
+                }
+                Ok(Arc::new(s.to_string()))
+            })
+            .transpose()?;
         let png_bytes = payload
             .png_base64
             .as_deref()
             .filter(|s| !s.is_empty())
             .map(|s| {
+                let decoded_len = estimate_base64_decoded_len(s).ok_or_else(|| {
+                    ClipboardError::InvalidPayload(format!(
+                        "pngBase64 exceeds maximum size ({MAX_IMAGE_BYTES} bytes)"
+                    ))
+                })?;
+                if decoded_len > MAX_IMAGE_BYTES {
+                    return Err(ClipboardError::InvalidPayload(format!(
+                        "pngBase64 exceeds maximum size ({MAX_IMAGE_BYTES} bytes)"
+                    )));
+                }
                 STANDARD
                     .decode(s)
                     .map_err(|e| ClipboardError::InvalidPayload(format!("invalid pngBase64: {e}")))
