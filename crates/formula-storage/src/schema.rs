@@ -200,6 +200,32 @@ fn migrate_to_v3(tx: &Transaction<'_>) -> rusqlite::Result<()> {
     ensure_column(tx, "fills", "key", "key TEXT")?;
     ensure_column(tx, "borders", "key", "key TEXT")?;
 
+    // If a corrupted database contains duplicate style-component keys (or non-TEXT keys), creating
+    // the unique indexes below would fail and prevent the workbook from opening. Clear invalid
+    // keys and keep only the first occurrence of each non-NULL key.
+    for table in ["fonts", "fills", "borders"] {
+        tx.execute(
+            &format!("UPDATE {table} SET key = NULL WHERE key IS NOT NULL AND typeof(key) != 'text'"),
+            [],
+        )?;
+        tx.execute(
+            &format!(
+                r#"
+                UPDATE {table}
+                SET key = NULL
+                WHERE key IS NOT NULL
+                  AND id NOT IN (
+                    SELECT MIN(id)
+                    FROM {table}
+                    WHERE key IS NOT NULL
+                    GROUP BY key
+                  )
+                "#
+            ),
+            [],
+        )?;
+    }
+
     tx.execute_batch(
         r#"
         CREATE UNIQUE INDEX IF NOT EXISTS idx_fonts_key ON fonts(key);
