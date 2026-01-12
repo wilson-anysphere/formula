@@ -1143,6 +1143,62 @@ pub fn dibv5_to_png(dib_bytes: &[u8]) -> Result<Vec<u8>, String> {
 mod tests {
     use super::*;
 
+    fn crc32(bytes: &[u8]) -> u32 {
+        // PNG uses CRC-32 (IEEE) over the chunk type + chunk data.
+        let mut crc: u32 = 0xFFFF_FFFF;
+        for &b in bytes {
+            crc ^= b as u32;
+            for _ in 0..8 {
+                if crc & 1 != 0 {
+                    crc = (crc >> 1) ^ 0xEDB8_8320;
+                } else {
+                    crc >>= 1;
+                }
+            }
+        }
+        !crc
+    }
+
+    fn push_png_chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
+        out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+        out.extend_from_slice(kind);
+        out.extend_from_slice(data);
+
+        let mut crc_bytes = Vec::with_capacity(kind.len() + data.len());
+        crc_bytes.extend_from_slice(kind);
+        crc_bytes.extend_from_slice(data);
+        out.extend_from_slice(&crc32(&crc_bytes).to_be_bytes());
+    }
+
+    fn build_minimal_rgba_png(width: u32, height: u32) -> Vec<u8> {
+        // Minimal PNG: signature + IHDR + IDAT (zlib stream for empty payload) + IEND.
+        //
+        // This is *not* a valid image for non-zero dimensions because the decompressed scanline
+        // data is empty. That's fine for our purposes because the conversion routines should
+        // reject oversized dimensions before attempting to decode the frame.
+        let mut png = Vec::new();
+        png.extend_from_slice(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]);
+
+        let mut ihdr = Vec::with_capacity(13);
+        ihdr.extend_from_slice(&width.to_be_bytes());
+        ihdr.extend_from_slice(&height.to_be_bytes());
+        ihdr.extend_from_slice(&[
+            8, // bit depth
+            6, // color type (RGBA)
+            0, // compression
+            0, // filter
+            0, // interlace
+        ]);
+        push_png_chunk(&mut png, b"IHDR", &ihdr);
+
+        // zlib-compressed empty payload: `zlib.compress(b"")`.
+        let idat = [0x78, 0x9C, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01];
+        push_png_chunk(&mut png, b"IDAT", &idat);
+
+        push_png_chunk(&mut png, b"IEND", &[]);
+        png
+    }
+
     fn encode_test_png() -> Vec<u8> {
         // 2x2 RGBA image:
         // (0,0) red opaque
@@ -1694,5 +1750,43 @@ mod tests {
 
         let out = dibv5_to_png(&dib).expect("dibv5_to_png failed");
         assert_eq!(out, png);
+    }
+
+    #[test]
+    fn png_to_dibv5_rejects_oversized_images_without_allocating() {
+        // Construct a PNG whose decoded RGBA buffer would exceed our cap.
+        let width = (MAX_DECODED_RGBA_BYTES / 4) as u32 + 1;
+        let png = build_minimal_rgba_png(width, 1);
+        let err = png_to_dibv5(&png).expect_err("expected oversized PNG to be rejected");
+        assert!(
+            err.contains("png decoded buffer exceeds maximum size"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn dibv5_to_png_rejects_oversized_dimensions() {
+        let width = (MAX_DECODED_RGBA_BYTES / 4) as i32 + 1;
+
+        let mut dib = Vec::new();
+        push_u32_le(&mut dib, BITMAPINFOHEADER_SIZE as u32); // biSize
+        push_i32_le(&mut dib, width); // biWidth
+        push_i32_le(&mut dib, 1); // biHeight (bottom-up)
+        push_u16_le(&mut dib, 1); // biPlanes
+        push_u16_le(&mut dib, 32); // biBitCount
+        push_u32_le(&mut dib, BI_RGB); // biCompression
+        push_u32_le(&mut dib, 0); // biSizeImage
+        push_i32_le(&mut dib, 0); // biXPelsPerMeter
+        push_i32_le(&mut dib, 0); // biYPelsPerMeter
+        push_u32_le(&mut dib, 0); // biClrUsed
+        push_u32_le(&mut dib, 0); // biClrImportant
+
+        debug_assert_eq!(dib.len(), BITMAPINFOHEADER_SIZE);
+
+        let err = dibv5_to_png(&dib).expect_err("expected oversized DIB to be rejected");
+        assert!(
+            err.contains("dib decoded RGBA exceeds maximum size"),
+            "unexpected error: {err}"
+        );
     }
 }
