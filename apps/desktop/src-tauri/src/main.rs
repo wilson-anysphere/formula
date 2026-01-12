@@ -10,6 +10,7 @@ mod tray;
 
 use desktop::clipboard;
 use desktop::commands;
+use desktop::ed25519_verifier;
 use desktop::macro_trust::{compute_macro_fingerprint, MacroTrustStore, SharedMacroTrustStore};
 use desktop::macros::MacroExecutionOptions;
 use desktop::open_file;
@@ -803,6 +804,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             clipboard::clipboard_read,
             clipboard::clipboard_write,
+            ed25519_verifier::verify_ed25519_signature,
             commands::open_workbook,
             commands::new_workbook,
             commands::add_sheet,

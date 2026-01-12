@@ -23,6 +23,7 @@
         "open_external_url",
         "clipboard_read",
         "clipboard_write",
+        "verify_ed25519_signature",
         "read_clipboard",
         "write_clipboard",
         "power_query_cache_key_get_or_create",

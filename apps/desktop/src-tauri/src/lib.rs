@@ -1,5 +1,6 @@
 pub(crate) mod atomic_write;
 pub mod commands;
+pub mod ed25519_verifier;
 mod fs_scope;
 #[cfg(any(feature = "desktop", test))]
 pub mod clipboard;
