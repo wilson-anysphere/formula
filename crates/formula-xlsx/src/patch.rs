@@ -839,7 +839,7 @@ fn patch_worksheet_xml(
             }
             Event::Empty(e) if local_name(e.name().as_ref()) == b"sheetData" => {
                 saw_sheet_data = true;
-                if row_patches.is_empty() {
+                if row_patches.is_empty() || patch_bounds.is_none() {
                     writer.write_event(Event::Empty(e.into_owned()))?;
                 } else {
                     // Convert `<sheetData/>` into `<sheetData>...</sheetData>`.

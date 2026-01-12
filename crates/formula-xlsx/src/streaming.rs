@@ -1523,7 +1523,7 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
             }
             Event::Empty(ref e) if local_name(e.name().as_ref()) == b"sheetData" => {
                 saw_sheet_data = true;
-                if patches_by_row.is_empty() {
+                if patch_bounds.is_none() {
                     writer.write_event(Event::Empty(e.to_owned()))?;
                 } else {
                     if sheet_prefix.is_none() {
