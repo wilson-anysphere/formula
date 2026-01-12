@@ -75,6 +75,8 @@ export async function showInputBox(options: InputBoxOptions = {}): Promise<strin
   input.className = "dialog__field";
   input.value = options.value ?? "";
   if (options.placeHolder) input.placeholder = options.placeHolder;
+  // The dialog title doubles as the input label.
+  input.setAttribute("aria-labelledby", title.id);
   input.dataset.testid = "input-box-field";
 
   const controls = document.createElement("div");
@@ -179,11 +181,13 @@ export async function showQuickPick<T>(
       closeDialog(dialog, "");
     });
 
+    let firstBtn: HTMLButtonElement | null = null;
     for (const [idx, item] of items.entries()) {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "quick-pick__item";
       btn.dataset.testid = `quick-pick-item-${idx}`;
+      if (!firstBtn) firstBtn = btn;
 
       const label = document.createElement("div");
       label.textContent = item.label;
@@ -206,5 +210,10 @@ export async function showQuickPick<T>(
     }
 
     showModal(dialog);
+    try {
+      firstBtn?.focus();
+    } catch {
+      // Best-effort focus.
+    }
   });
 }
