@@ -143,6 +143,13 @@ fn unparseable_date_text_maps_to_value_error_in_bond_coupon_builtins() {
         assert_eq!(v, Value::Error(ErrorKind::Value));
     }
 
+    if let Some(v) = eval_or_skip(
+        &mut sheet,
+        r#"=ACCRINT("nope",DATE(2020,5,15),DATE(2020,4,15),0.1,1000,2,0)"#,
+    ) {
+        assert_eq!(v, Value::Error(ErrorKind::Value));
+    }
+
     if let Some(v) =
         eval_or_skip(&mut sheet, r#"=YIELD("nope",DATE(2017,11,15),0.0575,95.04287,100,2,0)"#)
     {
@@ -151,6 +158,19 @@ fn unparseable_date_text_maps_to_value_error_in_bond_coupon_builtins() {
 
     if let Some(v) = eval_or_skip(&mut sheet, r#"=DURATION("nope",DATE(2016,1,1),0.08,0.09,2,1)"#)
     {
+        assert_eq!(v, Value::Error(ErrorKind::Value));
+    }
+
+    if let Some(v) =
+        eval_or_skip(&mut sheet, r#"=MDURATION("nope",DATE(2016,1,1),0.08,0.09,2,1)"#)
+    {
+        assert_eq!(v, Value::Error(ErrorKind::Value));
+    }
+
+    if let Some(v) = eval_or_skip(
+        &mut sheet,
+        r#"=PRICE("nope",DATE(2017,11,15),0.0575,0.065,100,2,0)"#,
+    ) {
         assert_eq!(v, Value::Error(ErrorKind::Value));
     }
 }
