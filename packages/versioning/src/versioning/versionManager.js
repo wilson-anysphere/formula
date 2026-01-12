@@ -79,8 +79,7 @@ class SimpleEventEmitter {
       } catch (err) {
         // Avoid crashing the app due to a listener; surface the failure asynchronously
         // like many event emitter implementations do.
-        const enqueue =
-          typeof queueMicrotask === "function" ? queueMicrotask : (cb) => Promise.resolve().then(cb);
+        const enqueue = typeof queueMicrotask === "function" ? queueMicrotask : (cb) => Promise.resolve().then(cb);
         enqueue(() => {
           throw err;
         });
