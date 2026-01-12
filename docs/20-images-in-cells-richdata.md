@@ -23,10 +23,10 @@ When a workbook contains at least one RichData value (including images-in-cell),
 ```
 xl/
   richData/
-    richValue.xml
+    richValue.xml              # or: rdrichvalue.xml
     richValueRel.xml
-    richValueTypes.xml        # optional (not present in all workbooks)
-    richValueStructure.xml    # optional (not present in all workbooks)
+    richValueTypes.xml        # optional (not present in all workbooks); or: rdRichValueTypes.xml
+    richValueStructure.xml    # optional (not present in all workbooks); or: rdrichvaluestructure.xml
   richData/_rels/
     richValueRel.xml.rels   # required if richValueRel.xml contains r:id entries
 ```
@@ -43,7 +43,7 @@ Notes:
   “structure” tables; treat their presence as feature-dependent.
 * File naming varies across producers:
   * “Excel-like” naming: `richValue.xml`, `richValueTypes.xml`, `richValueStructure.xml`
-  * “rdRichValue” naming (observed from `rust_xlsxwriter` output in this repo):
+  * “rdRichValue” naming (observed in real Excel fixtures and from `rust_xlsxwriter` output in this repo):
     * `rdrichvalue.xml`
     * `rdrichvaluestructure.xml`
     * `rdRichValueTypes.xml` (note casing)
@@ -212,7 +212,8 @@ Minimal representative shape for the `futureMetadata`/`rvb` variant (index bases
     <bk>
       <extLst>
         <ext uri="{...}">
-          <!-- `i` is the 0-based index into xl/richData/richValue.xml -->
+          <!-- `i` is the 0-based index into the rich value instance table
+               (e.g. xl/richData/richValue.xml or xl/richData/rdrichvalue.xml depending on the naming scheme). -->
           <xlrd:rvb i="0"/>
         </ext>
       </extLst>
@@ -487,6 +488,56 @@ Notes:
   * directly (e.g. `rc/@v = richValueIndex`), or
   * indirectly via a `rvb/@i` lookup table.
 * The “relationship index” stored in the payload is 0-based and indexes into `richValueRel.xml`.
+
+### `rdRichValue*` variant skeletons (observed; `rdrichvalue.xml` / `rdrichvaluestructure.xml` / `rdRichValueTypes.xml`)
+
+Some producers (including modern Excel in `fixtures/xlsx/basic/image-in-cell.xlsx`) store rich values using the
+`rdRichValue*` naming scheme. The core concepts are the same (a rich value table plus a relationship-slot table),
+but the XML shapes differ from the unprefixed `richValue*.xml` parts.
+
+Minimal observed shapes (see [`fixtures/xlsx/basic/image-in-cell.md`](../fixtures/xlsx/basic/image-in-cell.md)):
+
+#### `xl/richData/rdrichvaluestructure.xml` (schema / key ordering)
+
+```xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvStructures xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata" count="1">
+  <!-- One structure definition; structure index is 0-based by order. -->
+  <s t="_localImage">
+    <!-- Keys define the positional ordering of <v> entries in rdrichvalue.xml. -->
+    <k n="_rvRel:LocalImageIdentifier" t="i"/>
+    <k n="CalcOrigin" t="i"/>
+  </s>
+</rvStructures>
+```
+
+#### `xl/richData/rdrichvalue.xml` (rich value instances; positional values)
+
+```xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata" count="1">
+  <!-- `s="0"` references structure index 0 in rdrichvaluestructure.xml. -->
+  <rv s="0">
+    <!-- `_rvRel:LocalImageIdentifier` (0-based index into richValueRel.xml <rel> list) -->
+    <v>0</v>
+    <!-- `CalcOrigin` (Excel flag; observed `5` for embedded local images) -->
+    <v>5</v>
+  </rv>
+</rvData>
+```
+
+#### `xl/richData/rdRichValueTypes.xml` (type/key flags; XML shape varies)
+
+This file can be present even for simple `_localImage` use cases and is observed to use a different root
+name + namespace:
+
+```xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvTypesInfo xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata2">
+  <!-- Contains flags/metadata about keys/types. Content varies; preserve unknown children. -->
+  <global/>
+</rvTypesInfo>
+```
 
 ---
 
