@@ -158,6 +158,25 @@ test("diffFormula: normalize=false treats numeric formatting differences as edit
   assert.equal(result.equal, false);
 });
 
+test("diffFormula: string literals remain case-sensitive under normalization", () => {
+  const result = diffFormula('=IF(A1="Hello",1,0)', '=IF(A1="hello",1,0)', { normalize: true });
+  assert.equal(result.equal, false);
+  assert.deepEqual(simplifyOps(result.ops), [
+    { type: "equal", tokens: ["op:=", "ident:IF", "punct:(", "ident:A1", "op:="] },
+    { type: "delete", tokens: ["string:Hello"] },
+    { type: "insert", tokens: ["string:hello"] },
+    { type: "equal", tokens: ["punct:,", "number:1", "punct:,", "number:0", "punct:)"] },
+  ]);
+});
+
+test("diffFormula: normalize=true treats quoted sheet-name case changes as equal", () => {
+  const result = diffFormula("='My Sheet'!A1", "='MY SHEET'!A1", { normalize: true });
+  assert.equal(result.equal, true);
+  assert.deepEqual(simplifyOps(result.ops), [
+    { type: "equal", tokens: ["op:=", "ident:MY SHEET", "op:!", "ident:A1"] },
+  ]);
+});
+
 test("diffFormula: does not throw on unterminated string literals", () => {
   assert.doesNotThrow(() => diffFormula('=IF(A1="Hello', '=IF(A1="Hello!")'));
   const result = diffFormula('=IF(A1="Hello', '=IF(A1="Hello!")');
