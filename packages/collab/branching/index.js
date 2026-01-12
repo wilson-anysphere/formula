@@ -18,10 +18,57 @@ function getYMap(value) {
   return maybe;
 }
 
+function isYAbstractType(value) {
+  if (value instanceof Y.AbstractType) return true;
+  if (!value || typeof value !== "object") return false;
+  const maybe = value;
+  if (typeof maybe.observeDeep !== "function") return false;
+  if (typeof maybe.unobserveDeep !== "function") return false;
+  return Boolean(maybe._map instanceof Map || maybe._start || maybe._item || maybe._length != null);
+}
+
+function replaceForeignRootType({ doc, name, existing, create }) {
+  const t = create();
+  t._map = existing?._map;
+  t._start = existing?._start;
+  t._length = existing?._length;
+
+  const map = existing?._map;
+  if (map instanceof Map) {
+    map.forEach((item) => {
+      for (let n = item; n !== null; n = n.left) {
+        n.parent = t;
+      }
+    });
+  }
+
+  for (let n = existing?._start ?? null; n !== null; n = n.right) {
+    n.parent = t;
+  }
+
+  doc.share.set(name, t);
+  t._integrate?.(doc, null);
+  return t;
+}
+
 function getMapRoot(doc, name) {
   const existing = doc.share.get(name);
+  if (!existing) return doc.getMap(name);
+
   const map = getYMap(existing);
-  if (map) return map;
+  if (map) {
+    if (map instanceof Y.Map) return map;
+    if (doc instanceof Y.Doc) {
+      return replaceForeignRootType({ doc, name, existing: map, create: () => new Y.Map() });
+    }
+    return map;
+  }
+
+  if (isYAbstractType(existing) && doc instanceof Y.Doc) {
+    return replaceForeignRootType({ doc, name, existing, create: () => new Y.Map() });
+  }
+  if (isYAbstractType(existing)) return doc.getMap(name);
+
   return doc.getMap(name);
 }
 

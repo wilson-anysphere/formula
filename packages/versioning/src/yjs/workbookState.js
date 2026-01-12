@@ -57,6 +57,39 @@ function isYText(value) {
   );
 }
 
+function isYAbstractType(value) {
+  if (value instanceof Y.AbstractType) return true;
+  if (!value || typeof value !== "object") return false;
+  const maybe = /** @type {any} */ (value);
+  if (typeof maybe.observeDeep !== "function") return false;
+  if (typeof maybe.unobserveDeep !== "function") return false;
+  return Boolean(maybe._map instanceof Map || maybe._start || maybe._item || maybe._length != null);
+}
+
+function replaceForeignRootType({ doc, name, existing, create }) {
+  const t = create();
+  t._map = existing?._map;
+  t._start = existing?._start;
+  t._length = existing?._length;
+
+  const map = existing?._map;
+  if (map instanceof Map) {
+    map.forEach((item) => {
+      for (let n = item; n !== null; n = n.left) {
+        n.parent = t;
+      }
+    });
+  }
+
+  for (let n = existing?._start ?? null; n !== null; n = n.right) {
+    n.parent = t;
+  }
+
+  doc.share.set(name, t);
+  t._integrate?.(doc, null);
+  return t;
+}
+
 /**
  * @param {Y.Doc} doc
  * @param {string} name
@@ -64,6 +97,10 @@ function isYText(value) {
 function getMapRoot(doc, name) {
   const existing = doc.share.get(name);
   if (isYMap(existing)) return existing;
+  if (isYAbstractType(existing) && doc instanceof Y.Doc) {
+    return replaceForeignRootType({ doc, name, existing, create: () => new Y.Map() });
+  }
+  if (isYAbstractType(existing)) return doc.getMap(name);
   return doc.getMap(name);
 }
 
@@ -74,6 +111,10 @@ function getMapRoot(doc, name) {
 function getArrayRoot(doc, name) {
   const existing = doc.share.get(name);
   if (isYArray(existing)) return existing;
+  if (isYAbstractType(existing) && doc instanceof Y.Doc) {
+    return replaceForeignRootType({ doc, name, existing, create: () => new Y.Array() });
+  }
+  if (isYAbstractType(existing)) return doc.getArray(name);
   return doc.getArray(name);
 }
 

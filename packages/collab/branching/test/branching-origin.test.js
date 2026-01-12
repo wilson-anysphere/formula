@@ -127,3 +127,39 @@ test("CollabBranchingWorkflow.getCurrentBranchName works when branching roots we
   session.destroy();
   doc.destroy();
 });
+
+test("CollabBranchingWorkflow.getCurrentBranchName works when branching roots were created by a different Yjs instance (CJS Doc.get placeholder)", () => {
+  const Ycjs = requireYjsCjs();
+
+  const doc = new Y.Doc();
+  const session = createCollabSession({ doc });
+
+  // Simulate another Yjs module instance touching the roots via `Doc.get(name)`
+  // (defaulting to `AbstractType`), leaving foreign placeholder constructors.
+  Ycjs.Doc.prototype.get.call(doc, "branching:meta");
+  Ycjs.Doc.prototype.get.call(doc, "branching:branches");
+
+  // Hydrate content via a CJS update so the placeholders have data.
+  const remote = new Ycjs.Doc();
+  remote.getMap("branching:meta").set("currentBranchName", "feature");
+  remote.getMap("branching:branches").set("feature", 1);
+  const update = Ycjs.encodeStateAsUpdate(remote);
+  Ycjs.applyUpdate(doc, update);
+
+  // Regression: `doc.getMap(...)` from the ESM build throws "different constructor"
+  // when the root placeholder was created by a different Yjs module instance.
+  assert.throws(() => doc.getMap("branching:meta"), /different constructor/);
+  assert.throws(() => doc.getMap("branching:branches"), /different constructor/);
+
+  /** @type {any} */
+  const branchService = {};
+  const workflow = new CollabBranchingWorkflow({ session, branchService });
+
+  assert.equal(workflow.getCurrentBranchName(), "feature");
+  assert.ok(doc.getMap("branching:meta") instanceof Y.Map);
+  assert.ok(doc.getMap("branching:branches") instanceof Y.Map);
+
+  session.destroy();
+  doc.destroy();
+  remote.destroy();
+});
