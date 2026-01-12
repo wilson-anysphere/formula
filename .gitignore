@@ -93,6 +93,8 @@ benchmark-details.json
 **/.tmp/
 **/.tmp-*/
 **/.tmp-*
+.tmp/
+_tmp/
 
 # Python
 /.venv
@@ -107,9 +109,6 @@ services/marketplace/data/
 
 # Desktop app runtime state
 apps/desktop/.formula/
-
-# Test runtime artifacts
-.tmp/
 
 # Compatibility corpus local/private data
 tools/corpus/private/
