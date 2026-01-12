@@ -46,6 +46,7 @@ types and images-in-cells) which require ground-truth workbooks saved by Excel.
 - `metadata/`:
   - `row-col-properties.xlsx` - custom row height + hidden row, custom column width + hidden column.
   - `data-validation-list.xlsx` - simple list data validation (`<dataValidations>`).
+  - `rich-values-vm.xlsx` - workbook-level `xl/metadata.xml` part + workbook relationship + worksheet cell `vm="..."` rich-value binding (`futureMetadata` / `rvb`).
   - `defined-names.xlsx` - workbook named ranges (`<definedNames>` in `xl/workbook.xml`).
   - `external-link.xlsx` - minimal external link parts (`xl/externalLinks/externalLink1.xml` + rels).
 - `styles/`:

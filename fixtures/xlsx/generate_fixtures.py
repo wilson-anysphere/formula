@@ -630,6 +630,54 @@ def sheet_date_iso_cell_xml() -> str:
 """
 
 
+def sheet_rich_values_vm_xml() -> str:
+    # Minimal sheet with a `vm="1"` attribute on a cell. This is used by newer Excel
+    # rich-value features (ex: images-in-cell) to bind a cell to a record in
+    # `xl/metadata.xml`.
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" vm="1"><v>1</v></c>
+      <c r="B1"><v>2</v></c>
+    </row>
+  </sheetData>
+</worksheet>
+"""
+
+
+def rich_values_metadata_xml() -> str:
+    # This is a deliberately tiny `xl/metadata.xml` that includes:
+    # - `<metadataTypes>` (type table)
+    # - `<futureMetadata>` carrying a rich-value binding (`rvb`)
+    # - `<valueMetadata>` used by worksheet cell `vm="..."` attributes
+    #
+    # The specific schema is future-facing; we only need this part to exist and be
+    # preserved byte-for-byte during round-trip edits.
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <metadataTypes count="1">
+    <metadataType name="XLRICHVALUE" minSupportedVersion="120000" maxSupportedVersion="120000"/>
+  </metadataTypes>
+  <futureMetadata name="XLRICHVALUE" count="1">
+    <bk>
+      <extLst>
+        <ext uri="{3E2803F5-59A4-4A43-8C86-93BA0C219F4F}">
+          <xlrd:rvb i="0"/>
+        </ext>
+      </extLst>
+    </bk>
+  </futureMetadata>
+  <valueMetadata count="1">
+    <bk>
+      <rc t="1" v="0"/>
+    </bk>
+  </valueMetadata>
+</metadata>
+"""
+
+
 def sheet_row_col_properties_xml() -> str:
     return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
@@ -1563,6 +1611,25 @@ def main() -> None:
         ROOT / "metadata" / "data-validation-list.xlsx",
         [sheet_data_validation_list_xml()],
         styles_minimal_xml(),
+    )
+    write_xlsx(
+        ROOT / "metadata" / "rich-values-vm.xlsx",
+        [sheet_rich_values_vm_xml()],
+        styles_minimal_xml(),
+        workbook_xml_override=workbook_xml_with_extra(
+            ["Sheet1"],
+            """  <metadata r:id="rId3"/>""",
+        ),
+        workbook_rels_extra=[
+            '  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata" Target="metadata.xml"/>'
+        ],
+        content_types_extra_overrides=[
+            '  <Override PartName="/xl/metadata.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"/>'
+        ],
+        extra_parts={
+            "xl/metadata.xml": rich_values_metadata_xml(),
+        },
+        sheet_names=["Sheet1"],
     )
     write_xlsx(
         ROOT / "metadata" / "defined-names.xlsx",
