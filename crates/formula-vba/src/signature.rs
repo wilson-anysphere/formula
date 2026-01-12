@@ -833,10 +833,19 @@ fn parse_pkcs7_with_offset(signature: &[u8]) -> Option<(openssl::pkcs7::Pkcs7, u
             continue;
         }
         let slice = &signature[start..];
-        if let Some(pkcs7) = parse_pkcs7_exact(slice) {
+
+        // Avoid repeatedly attempting full OpenSSL parses at every 0x30 byte offset. Instead, do
+        // a lightweight BER scan for a plausible PKCS#7 SignedData ContentInfo and only then hand
+        // the exact slice to OpenSSL.
+        let Some(len) = crate::offcrypto::pkcs7_signed_data_len(slice) else {
+            continue;
+        };
+        let candidate = &slice[..len];
+
+        if let Some(pkcs7) = parse_pkcs7_exact(candidate) {
             return Some((pkcs7, start));
         }
-        if let Ok(pkcs7) = Pkcs7::from_der(slice) {
+        if let Ok(pkcs7) = Pkcs7::from_der(candidate) {
             fallback = Some((pkcs7, start));
         }
     }

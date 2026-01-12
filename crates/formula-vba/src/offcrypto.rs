@@ -167,18 +167,9 @@ pub(crate) fn parse_digsig_info_serialized(stream: &[u8]) -> Option<DigSigInfoSe
                 }
 
                 let sig_slice = &stream[pkcs7_offset..sig_end];
-                let Some(pkcs7_len) = ber_total_len(sig_slice) else {
+                let Some(pkcs7_len) = pkcs7_signed_data_len(sig_slice) else {
                     continue;
                 };
-                if pkcs7_len == 0 || pkcs7_len > sig_slice.len() {
-                    continue;
-                }
-
-                // Ensure the candidate is plausibly a PKCS#7 SignedData `ContentInfo`:
-                // SEQUENCE { OID signedData, [0] EXPLICIT ... }.
-                if !looks_like_pkcs7_signed_data(sig_slice) {
-                    continue;
-                }
 
                 let padding = header.sig_len.saturating_sub(pkcs7_len);
                 let info = DigSigInfoSerialized {
@@ -289,6 +280,15 @@ fn ber_skip_any(bytes: &[u8]) -> Option<&[u8]> {
 fn ber_total_len(bytes: &[u8]) -> Option<usize> {
     let rem = ber_skip_any(bytes)?;
     Some(bytes.len().saturating_sub(rem.len()))
+}
+
+/// If `bytes` starts with a PKCS#7/CMS `ContentInfo` for `signedData`, return the total BER length
+/// of that object (including the tag/length header).
+pub(crate) fn pkcs7_signed_data_len(bytes: &[u8]) -> Option<usize> {
+    if !looks_like_pkcs7_signed_data(bytes) {
+        return None;
+    }
+    ber_total_len(bytes)
 }
 
 fn looks_like_pkcs7_signed_data(bytes: &[u8]) -> bool {
