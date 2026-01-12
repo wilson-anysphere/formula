@@ -95,12 +95,18 @@ mod gtk_backend {
             let _ = tx.send(res);
         });
 
-        rx.recv_timeout(std::time::Duration::from_secs(5))
-            .map_err(|_| {
-                ClipboardError::OperationFailed(
-                    "timed out waiting for GTK main thread clipboard operation".to_string(),
-                )
-            })?
+        use std::sync::mpsc::RecvTimeoutError;
+
+        match rx.recv_timeout(std::time::Duration::from_secs(5)) {
+            Ok(res) => res,
+            Err(RecvTimeoutError::Timeout) => Err(ClipboardError::OperationFailed(
+                "timed out waiting for GTK main thread clipboard operation (is the main loop running?)"
+                    .to_string(),
+            )),
+            Err(RecvTimeoutError::Disconnected) => Err(ClipboardError::OperationFailed(
+                "failed to receive result from GTK main thread".to_string(),
+            )),
+        }?
     }
 
     fn ensure_gtk() -> Result<(), ClipboardError> {
