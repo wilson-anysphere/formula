@@ -48,6 +48,11 @@ class PinnedDatasetSyncTests(unittest.TestCase):
             case_ids,
             "Pinned dataset must include results for every case ID in cases.json",
         )
+        self.assertEqual(
+            len(results),
+            len(case_ids),
+            "Pinned dataset results must have exactly one entry per case (no duplicates, no omissions)",
+        )
 
 
 if __name__ == "__main__":
