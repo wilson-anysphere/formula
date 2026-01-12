@@ -6772,6 +6772,10 @@ if (
     const pointerId = event.pointerId;
     gridSplitterEl.setPointerCapture(pointerId);
 
+    // Preserve the pointer's initial offset within the splitter handle so dragging
+    // doesn't "snap" the pointer to the edge of the splitter (keeps the grab point stable).
+    const pointerOffsetInSplitter = direction === "vertical" ? event.offsetX : event.offsetY;
+
     // `getBoundingClientRect()` can force layout; defer until the drag actually moves so
     // clicking the splitter without dragging stays cheap.
     let rect: DOMRect | null = null;
@@ -6787,7 +6791,10 @@ if (
       const splitRect = rect;
       const size = direction === "vertical" ? splitRect.width : splitRect.height;
       if (size <= 0) return;
-      const offset = direction === "vertical" ? latestClientX - splitRect.left : latestClientY - splitRect.top;
+      const offset =
+        direction === "vertical"
+          ? latestClientX - splitRect.left - pointerOffsetInSplitter
+          : latestClientY - splitRect.top - pointerOffsetInSplitter;
       const ratio = Math.max(0.1, Math.min(0.9, offset / size));
       // Dragging the splitter updates very frequently; keep updates cheap:
       // - update the in-memory layout without emitting (avoids full renderLayout() churn)
