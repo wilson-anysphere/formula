@@ -3805,6 +3805,37 @@ pub async fn open_external_url(window: tauri::Window, url: String) -> Result<(),
         return Err("external URL opening is only allowed from the main window".to_string());
     }
 
+    // Prevent arbitrary remote web content from using IPC to open external URLs. This is a
+    // defense-in-depth check: even though Tauri's security model should prevent remote origins
+    // from accessing the invoke API by default, keep the command itself resilient.
+    //
+    // Mirrors the trusted-origin checks used by other privileged commands in `main.rs`.
+    fn is_trusted_origin(url: &tauri::Url) -> bool {
+        match url.scheme() {
+            "data" => return false,
+            // Best-effort compatibility fallback.
+            "file" => return true,
+            _ => {}
+        }
+
+        let Some(host) = url.host_str() else {
+            return false;
+        };
+
+        host == "localhost" || host == "127.0.0.1" || host == "::1" || host.ends_with(".localhost")
+    }
+
+    {
+        use tauri::Manager as _;
+        let Some(webview) = window.app_handle().get_webview_window(window.label()) else {
+            return Err("main webview window not available".to_string());
+        };
+        let origin_url = webview.url().map_err(|err| err.to_string())?;
+        if !is_trusted_origin(&origin_url) {
+            return Err("external URL opening is not allowed from this origin".to_string());
+        }
+    }
+
     let parsed =
         tauri::Url::parse(url.trim()).map_err(|err| format!("Invalid URL: {err}"))?;
 
