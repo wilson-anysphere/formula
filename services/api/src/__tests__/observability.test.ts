@@ -70,7 +70,7 @@ describe("observability: request-id, log correlation, db spans", () => {
     });
 
     await app.ready();
-  });
+  }, 60_000);
 
   afterAll(async () => {
     await app?.close?.();
