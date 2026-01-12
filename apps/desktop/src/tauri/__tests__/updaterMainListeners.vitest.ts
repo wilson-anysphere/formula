@@ -29,5 +29,11 @@ describe("desktop updater listener consolidation", () => {
     expect(source).toMatch(
       /\blisten\(\s*['"]update-check-already-running['"]\s*,\s*recordManualUpdateCheckEvent\b/,
     );
+
+    // The `updater-ui-ready` handshake should be tied to the updater UI listeners being installed,
+    // without adding extra updater listeners (like a second `update-available` handler).
+    expect(source).toMatch(/\bemit\(\s*['"]updater-ui-ready['"]/);
+    expect(source).toMatch(/void\s+updaterUiListeners[\s\S]{0,600}emit\(\s*['"]updater-ui-ready['"]/);
+    expect(source).not.toMatch(/Promise\.all\(\s*\[\s*updaterUiListeners\s*,/);
   });
 });
