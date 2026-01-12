@@ -83,8 +83,8 @@ Function parity report (catalog ↔ BIFF FTAB)
 Catalog functions (shared/functionCatalog.json): 333
 FTAB functions (crates/formula-biff/src/ftab.rs): 478
 Catalog ∩ FTAB (case-insensitive name match): 248
-FTAB \\ Catalog (missing from catalog): 230
-Catalog \\ FTAB (not present in FTAB): 85
+FTAB \ Catalog (missing from catalog): 230
+Catalog \ FTAB (not present in FTAB): 85
 ```
 
 Run the script locally for the full, sorted “top N” lists.
