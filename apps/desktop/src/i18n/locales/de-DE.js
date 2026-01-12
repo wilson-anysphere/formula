@@ -8,6 +8,8 @@ export const deDE = {
   "prompt.unsavedChanges": "Sie haben ungespeicherte Änderungen.",
   "prompt.unsavedChangesDiscardConfirm": "Sie haben ungespeicherte Änderungen. Verwerfen?",
   "commandPalette.command.checkForUpdates": "Nach Updates suchen",
+  "commandPalette.group.commands": "BEFEHLE",
+  "commandPalette.group.functions": "FUNKTIONEN",
   "commandPalette.shortcutSearch.hint": "Tastenkürzel suchen",
   "commandPalette.empty.noMatchingShortcuts": "Keine passenden Tastenkürzel",
   "commandPalette.empty.noShortcuts": "Keine Tastenkürzel",
