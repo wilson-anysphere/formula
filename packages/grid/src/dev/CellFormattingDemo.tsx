@@ -5,6 +5,7 @@ import type {
   CellBorderSpec,
   CellBorders,
   CellData,
+  CellRange,
   CellProvider,
   CellRange,
   CellStyle
@@ -26,10 +27,19 @@ function cellKey(row: number, col: number): string {
   return `${row},${col}`;
 }
 
+function rangesIntersect(a: CellRange, b: CellRange): boolean {
+  return a.startRow < b.endRow && a.endRow > b.startRow && a.startCol < b.endCol && a.endCol > b.startCol;
+}
+
+function rangeContains(range: CellRange, row: number, col: number): boolean {
+  return row >= range.startRow && row < range.endRow && col >= range.startCol && col < range.endCol;
+}
+
 class CellFormattingDemoProvider implements CellProvider {
   private readonly rowCount: number;
   private readonly colCount: number;
   private readonly cells = new Map<string, CellData>();
+  private readonly mergedRanges: CellRange[] = [];
 
   private readonly headerStyle: CellStyle = { fontWeight: "600", textAlign: "center" };
   private readonly rowHeaderStyle: CellStyle = { fontWeight: "600", textAlign: "end" };
@@ -186,6 +196,17 @@ class CellFormattingDemoProvider implements CellProvider {
       borders: allBorders(mkBorder(2, "double", "#a855f7"))
     });
 
+    // Merged border example (anchor at E11, spans E11:F12).
+    const mergedBorderRange: CellRange = { startRow: 11, endRow: 13, startCol: 5, endCol: 7 };
+    this.mergedRanges.push(mergedBorderRange);
+    put(mergedBorderRange.startRow, mergedBorderRange.startCol, "Merged border\n(E11:F12)", {
+      ...borderCellBase,
+      fill: "rgba(168, 85, 247, 0.12)",
+      fontWeight: "700",
+      wrapMode: "word",
+      borders: allBorders(mkBorder(3, "double", "#a855f7"))
+    });
+
     // Conflicting adjacent borders (shared edge). The renderer should pick the correct winner.
     put(11, 1, "Conflict A", {
       ...borderCellBase,
@@ -295,6 +316,17 @@ class CellFormattingDemoProvider implements CellProvider {
     // Synchronous demo provider.
   }
 
+  getMergedRangeAt(row: number, col: number): CellRange | null {
+    for (const range of this.mergedRanges) {
+      if (rangeContains(range, row, col)) return range;
+    }
+    return null;
+  }
+
+  getMergedRangesInRange(range: CellRange): CellRange[] {
+    return this.mergedRanges.filter((merged) => rangesIntersect(merged, range));
+  }
+
   getCell(row: number, col: number): CellData | null {
     if (row < 0 || col < 0 || row >= this.rowCount || col >= this.colCount) return null;
 
@@ -392,6 +424,9 @@ export function CellFormattingDemo(): React.ReactElement {
               </li>
               <li>
                 <code>A8:C13</code>: borders (thin/medium/thick, dashed/dotted/double) + conflicts
+              </li>
+              <li>
+                <code>E11:F12</code>: merged cell borders
               </li>
               <li>
                 <code>A14:D17</code>: alignment, wrap on/off, rotation
