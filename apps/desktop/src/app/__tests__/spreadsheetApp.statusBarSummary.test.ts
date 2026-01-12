@@ -654,6 +654,68 @@ describe("SpreadsheetApp selection summary (status bar)", () => {
     root.remove();
   });
 
+  it("does not invalidate value-only selection summary cache on computed-value updates", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    clearSeededCells(app);
+    const sheetId = app.getCurrentSheetId();
+    const doc = app.getDocument();
+
+    doc.setCellValue(sheetId, "A1", 5);
+    // Force the implementation down the sparse-iteration path so we can spy on
+    // `forEachCellInSheet` for cache-hit assertions (avoids depending on sheet density).
+    (app as any).selection = buildSelection(
+      {
+        ranges: [{ startRow: 0, endRow: 399, startCol: 0, endCol: 25 }], // A1:Z400 (> 10k cells)
+        active: { row: 0, col: 0 },
+        anchor: { row: 0, col: 0 },
+        activeRangeIndex: 0,
+      },
+      (app as any).limits,
+    );
+
+    const getCellSpy = vi.spyOn(doc, "getCell");
+    const sparseSpy = vi.spyOn(doc as any, "forEachCellInSheet");
+
+    const first = app.getSelectionSummary();
+    expect(first).toEqual({
+      sum: 5,
+      average: 5,
+      count: 1,
+      numericCount: 1,
+      countNonEmpty: 1,
+    });
+    expect(sparseSpy).toHaveBeenCalledTimes(1);
+    expect(getCellSpy).not.toHaveBeenCalled();
+
+    getCellSpy.mockClear();
+    sparseSpy.mockClear();
+
+    const cacheRef = (app as any).selectionSummaryCache;
+    const versionBefore = (app as any).computedValuesVersion;
+
+    // Simulate an engine computed-value update for an unrelated cell. This should not invalidate
+    // the selection summary cache since the selection contains no formula cells.
+    (app as any).uiReady = false;
+    (app as any).applyComputedChanges([{ sheetId, row: 10, col: 10, value: 999 }]);
+    expect((app as any).computedValuesVersion).toBe(versionBefore + 1);
+
+    const second = app.getSelectionSummary();
+    expect(second).toEqual(first);
+    expect(getCellSpy).not.toHaveBeenCalled();
+    expect(sparseSpy).not.toHaveBeenCalled();
+    expect((app as any).selectionSummaryCache).toBe(cacheRef);
+
+    app.destroy();
+    root.remove();
+  });
+
   it("reuses in-process formula memoization across selection cells in multi-sheet mode", () => {
     const root = createRoot();
     const status = {
