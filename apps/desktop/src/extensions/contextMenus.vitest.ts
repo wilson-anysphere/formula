@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { resolveMenuItems, type ContributedMenuItem } from "./contextMenus.js";
 import type { ResolvedMenuItem } from "./contextMenus.js";
 import { buildContextMenuModel } from "./contextMenuModel.js";
+import type { ContextMenuModelItem } from "./contextMenuModel.js";
 import type { CommandContribution } from "./commandRegistry.js";
 
 describe("context menu resolution", () => {
@@ -59,6 +60,9 @@ describe("context menu resolution", () => {
       "cmd.beta",
     ]);
 
-    expect(model.find((e) => e.kind === "command" && e.commandId === "cmd.alpha1")?.label).toBe("Category: Alpha One");
+    const alpha = model.find(
+      (e): e is Extract<ContextMenuModelItem, { kind: "command" }> => e.kind === "command" && e.commandId === "cmd.alpha1"
+    );
+    expect(alpha?.label).toBe("Category: Alpha One");
   });
 });

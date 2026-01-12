@@ -401,7 +401,10 @@ describe("DocumentControllerSpreadsheetApi", () => {
     expect(controller.getCell("Sheet1", "A1").styleId).toBe(0);
 
     // Trigger the writeRange `hasAnyFormat` path by writing a supported ai-tools format.
-    api.writeRange({ sheet: "Sheet1", startRow: 1, startCol: 1, endRow: 1, endCol: 1 }, [[{ format: { italic: true } }]]);
+    api.writeRange(
+      { sheet: "Sheet1", startRow: 1, startCol: 1, endRow: 1, endCol: 1 },
+      [[{ value: null, format: { italic: true } }]]
+    );
 
     const after = controller.getCell("Sheet1", "A1");
     expect(after.styleId).toBeGreaterThan(0);

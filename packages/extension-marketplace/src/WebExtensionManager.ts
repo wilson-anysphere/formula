@@ -342,7 +342,9 @@ function deleteAllPackagesForExtension(packagesStore: IDBObjectStore, extensionI
       if (typeof openKeyCursor === "function") {
         req = openKeyCursor.call(packagesStore, range) as unknown as IDBRequest<AnyCursor | null>;
       } else {
-        req = packagesStore.openCursor(range);
+        // `IDBRequest` is invariant in its result type, so widen via `unknown` to treat
+        // `IDBCursorWithValue | null` as `AnyCursor | null`.
+        req = packagesStore.openCursor(range) as unknown as IDBRequest<AnyCursor | null>;
       }
     } catch (error) {
       reject(error);

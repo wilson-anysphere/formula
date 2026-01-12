@@ -20,7 +20,10 @@ afterEach(() => {
   }
 });
 
-function renderSheetTabStrip(opts: { store: WorkbookSheetStore; onRenameSheet: (sheetId: string, name: string) => unknown }) {
+function renderSheetTabStrip(opts: {
+  store: WorkbookSheetStore;
+  onRenameSheet: (sheetId: string, name: string) => Promise<void> | void;
+}) {
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
   // JSDOM doesn't implement scrollIntoView; SheetTabStrip uses it in an effect.
   if (typeof (HTMLElement.prototype as any).scrollIntoView !== "function") {
@@ -79,4 +82,3 @@ describe("SheetTabStrip rename", () => {
     act(() => root.unmount());
   });
 });
-

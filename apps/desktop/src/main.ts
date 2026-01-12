@@ -6848,7 +6848,12 @@ function decodeBase64ToBytes(data: string): Uint8Array {
 }
 
 function downloadBytes(bytes: Uint8Array, filename: string, mime: string): void {
-  const blob = new Blob([bytes], { type: mime });
+  // `Blob` expects ArrayBuffer-backed views. TypeScript models `Uint8Array` as possibly backed by a
+  // `SharedArrayBuffer` (`ArrayBufferLike`), so normalize for type safety.
+  const normalized: Uint8Array<ArrayBuffer> =
+    bytes.buffer instanceof ArrayBuffer ? (bytes as Uint8Array<ArrayBuffer>) : new Uint8Array(bytes);
+
+  const blob = new Blob([normalized], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -9255,7 +9260,7 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
       snapshotSheets.push({
         id: sheet.id,
         name: sheet.name,
-        visibility: sheet.visibility,
+        visibility: sheet.visibility ?? "visible",
         tabColor: sheet.tabColor,
         cells,
       });
@@ -9281,7 +9286,7 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
       snapshotSheets.push({
         id: sheet.id,
         name: sheet.name,
-        visibility: sheet.visibility,
+        visibility: sheet.visibility ?? "visible",
         tabColor: sheet.tabColor,
         cells,
       });
@@ -9334,7 +9339,7 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     snapshotSheets.push({
       id: sheet.id,
       name: sheet.name,
-      visibility: sheet.visibility,
+      visibility: sheet.visibility ?? "visible",
       tabColor: sheet.tabColor,
       cells,
     });

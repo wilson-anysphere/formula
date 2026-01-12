@@ -29,6 +29,7 @@ function renderSheetTabStrip(store: WorkbookSheetStore) {
         activeSheetId: store.listVisible()[0]?.id ?? "",
         onActivateSheet: () => {},
         onAddSheet: () => {},
+        onRenameSheet: () => {},
       }),
     );
   });

@@ -865,7 +865,7 @@ export class SpreadsheetApp {
         formulaConflicts: {
           localUserId: collab.user.id,
           mode: "formula+value",
-          onConflict: (conflict) => {
+          onConflict: (conflict: any) => {
             // Conflicts are surfaced via a minimal DOM UI (ConflictUiController).
             // To exercise manually, edit the same formula concurrently in two clients.
             if (this.conflictUi) {
@@ -880,7 +880,7 @@ export class SpreadsheetApp {
         // Enable structural conflict monitoring (move/delete-vs-edit/content/format) in collab mode.
         cellConflicts: {
           localUserId: collab.user.id,
-          onConflict: (conflict) => {
+          onConflict: (conflict: any) => {
             if (this.structuralConflictUi) {
               this.structuralConflictUi.addConflict(conflict);
             } else {
@@ -974,14 +974,14 @@ export class SpreadsheetApp {
         // can reason about delete-vs-overwrite concurrency deterministically.)
         formulaConflictsMode: "formula+value",
       })
-        .then((binder) => {
+        .then((binder: any) => {
           if (this.disposed) {
             binder.destroy();
             return;
           }
           this.collabBinder = binder;
         })
-        .catch((err) => {
+        .catch((err: any) => {
           console.error("Failed to bind collab session to DocumentController", err);
         });
     } else {
@@ -3562,7 +3562,7 @@ export class SpreadsheetApp {
       }
     } else {
       // Iterate only stored cells (value/formula/format-only), then filter by selection.
-      this.document.forEachCellInSheet(this.sheetId, ({ row, col, cell }) => {
+      this.document.forEachCellInSheet(this.sheetId, ({ row, col, cell }: any) => {
         if (!inSelection(row, col)) return;
 
         // Ignore format-only cells (styleId-only).

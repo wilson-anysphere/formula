@@ -37,7 +37,9 @@ export function createSchemaProviderFromSearchWorkbook(workbook: any): WorkbookS
   return {
     getSchemaVersion: () => (typeof workbook?.schemaVersion === "number" ? workbook.schemaVersion : 0),
     getNamedRanges: () => {
-      const values = typeof workbook?.names?.values === "function" ? Array.from(workbook.names.values()) : [];
+      // `DocumentWorkbookAdapter`'s `names` collection is intentionally loosely typed. Coerce to `any[]`
+      // so this adapter can use runtime guards without fighting structural `Map<string, {}>` inference.
+      const values: any[] = typeof workbook?.names?.values === "function" ? Array.from(workbook.names.values()) : [];
       const out: Array<{ name: string; sheetId: string; range: Range }> = [];
       for (const entry of values) {
         const name = typeof entry?.name === "string" ? entry.name.trim() : "";
@@ -49,7 +51,8 @@ export function createSchemaProviderFromSearchWorkbook(workbook: any): WorkbookS
       return out;
     },
     getTables: () => {
-      const values = typeof workbook?.tables?.values === "function" ? Array.from(workbook.tables.values()) : [];
+      // See note in `getNamedRanges`.
+      const values: any[] = typeof workbook?.tables?.values === "function" ? Array.from(workbook.tables.values()) : [];
       const out: Array<{ name: string; sheetId: string; range: Range }> = [];
       for (const table of values) {
         const name = typeof table?.name === "string" ? table.name.trim() : "";

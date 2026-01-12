@@ -169,9 +169,9 @@ export class DesktopExtensionHostManager {
       // Desktop also supports IndexedDB-installed extensions via WebExtensionManager. Use the
       // manager's `loadAllInstalled()` boot helper so `onStartupFinished` + the initial
       // `workbookOpened` event behave consistently for built-in *and* installed extensions.
-      try {
-        await this.getMarketplaceExtensionManager().loadAllInstalled({
-          onExtensionError: ({ id, version, error }) => {
+        try {
+          await this.getMarketplaceExtensionManager().loadAllInstalled({
+          onExtensionError: ({ id, version, error }: { id: string; version: string; error: unknown }) => {
             const message = `Failed to load extension ${id}@${version}: ${String((error as any)?.message ?? error)}`;
             // eslint-disable-next-line no-console
             console.error(`[formula][desktop] ${message}`);

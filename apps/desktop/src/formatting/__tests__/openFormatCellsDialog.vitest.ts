@@ -65,7 +65,7 @@ describe("openFormatCellsDialog formatting performance guards", () => {
 
   it("expands full-column selections to Excel bounds before applying", () => {
     const doc = new DocumentController();
-    const spy = vi.spyOn(doc, "setRangeFormat").mockImplementation(() => {});
+    const spy = vi.spyOn(doc, "setRangeFormat").mockImplementation(() => true);
 
     openFormatCellsDialog({
       isEditing: () => false,
@@ -94,7 +94,7 @@ describe("openFormatCellsDialog formatting performance guards", () => {
 
   it("expands full-row selections to Excel bounds before applying", () => {
     const doc = new DocumentController();
-    const spy = vi.spyOn(doc, "setRangeFormat").mockImplementation(() => {});
+    const spy = vi.spyOn(doc, "setRangeFormat").mockImplementation(() => true);
 
     openFormatCellsDialog({
       isEditing: () => false,
