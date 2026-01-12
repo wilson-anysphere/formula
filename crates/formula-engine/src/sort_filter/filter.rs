@@ -361,7 +361,7 @@ fn equals_value(cell: &CellValue, value: &FilterValue, value_locale: ValueLocale
     match value {
         FilterValue::Text(s) => {
             let cell_s = cell_to_string(cell);
-            cell_s.eq_ignore_ascii_case(s)
+            text_eq_case_insensitive(&cell_s, s)
         }
         FilterValue::Number(n) => coerce_number(cell, value_locale).is_some_and(|v| v == *n),
         FilterValue::Bool(b) => matches!(cell, CellValue::Bool(v) if v == b),
@@ -374,14 +374,22 @@ fn text_match(cell: &CellValue, m: &TextMatch) -> bool {
     let mut pattern = m.pattern.clone();
 
     if !m.case_sensitive {
-        cell_s = cell_s.to_lowercase();
-        pattern = pattern.to_lowercase();
+        cell_s = crate::value::casefold(&cell_s);
+        pattern = crate::value::casefold(&pattern);
     }
 
     match m.kind {
         TextMatchKind::Contains => cell_s.contains(&pattern),
         TextMatchKind::BeginsWith => cell_s.starts_with(&pattern),
         TextMatchKind::EndsWith => cell_s.ends_with(&pattern),
+    }
+}
+
+fn text_eq_case_insensitive(a: &str, b: &str) -> bool {
+    if a.is_ascii() && b.is_ascii() {
+        a.eq_ignore_ascii_case(b)
+    } else {
+        crate::value::casefold(a) == crate::value::casefold(b)
     }
 }
 
@@ -631,6 +639,30 @@ mod tests {
             apply_autofilter_with_value_locale(&data, &filter, ValueLocaleConfig::en_us());
         assert_eq!(result.visible_rows, vec![true, true, true, false]);
         assert_eq!(result.hidden_sheet_rows, vec![3]);
+    }
+
+    #[test]
+    fn equals_text_filter_is_unicode_case_insensitive() {
+        let data = range(vec![
+            vec![CellValue::Text("Val".into())],
+            vec![CellValue::Text("ω".into())],
+            vec![CellValue::Text("x".into())],
+        ]);
+
+        let filter = AutoFilter {
+            range: data.range,
+            columns: BTreeMap::from([(
+                0,
+                ColumnFilter {
+                    join: FilterJoin::Any,
+                    criteria: vec![FilterCriterion::Equals(FilterValue::Text("Ω".into()))],
+                },
+            )]),
+        };
+
+        let result = apply_autofilter(&data, &filter);
+        assert_eq!(result.visible_rows, vec![true, true, false]);
+        assert_eq!(result.hidden_sheet_rows, vec![2]);
     }
 
     #[test]
