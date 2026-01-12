@@ -35,19 +35,14 @@ test("diffDocumentSnapshots computes semantic diffs between two snapshots", () =
 });
 
 test("diffDocumentSnapshots detects formatOnly edits from column-default formatting", () => {
-  const encoder = new TextEncoder();
-  const decoder = new TextDecoder();
-
   const doc = new DocumentController();
   doc.setCellValue("Sheet1", "A1", 1);
   const beforeSnapshot = doc.encodeState();
 
-  const parsed = JSON.parse(decoder.decode(beforeSnapshot));
-  const sheet = parsed.sheets.find((s) => s?.id === "Sheet1");
-  assert.ok(sheet, "expected Sheet1 to exist in snapshot");
-  sheet.colFormats = { "0": { font: { bold: true } } };
-
-  const afterSnapshot = encoder.encode(JSON.stringify(parsed));
+  // Task 44 layered formatting: formatting a full column should update the column-default
+  // formatting layer, without enumerating the full column.
+  doc.setRangeFormat("Sheet1", "A1:A1048576", { font: { bold: true } });
+  const afterSnapshot = doc.encodeState();
 
   const diff = diffDocumentSnapshots({ beforeSnapshot, afterSnapshot, sheetId: "Sheet1" });
   assert.equal(diff.formatOnly.length, 1);
@@ -58,19 +53,14 @@ test("diffDocumentSnapshots detects formatOnly edits from column-default formatt
 });
 
 test("diffDocumentSnapshots detects formatOnly edits from sheet-default formatting", () => {
-  const encoder = new TextEncoder();
-  const decoder = new TextDecoder();
-
   const doc = new DocumentController();
   doc.setCellValue("Sheet1", "A1", 1);
   const beforeSnapshot = doc.encodeState();
 
-  const parsed = JSON.parse(decoder.decode(beforeSnapshot));
-  const sheet = parsed.sheets.find((s) => s?.id === "Sheet1");
-  assert.ok(sheet, "expected Sheet1 to exist in snapshot");
-  sheet.format = { font: { bold: true } };
-
-  const afterSnapshot = encoder.encode(JSON.stringify(parsed));
+  // Task 44 layered formatting: formatting the entire sheet should update the sheet-default
+  // formatting layer, without expanding the full sheet into per-cell styles.
+  doc.setRangeFormat("Sheet1", "A1:XFD1048576", { font: { bold: true } });
+  const afterSnapshot = doc.encodeState();
 
   const diff = diffDocumentSnapshots({ beforeSnapshot, afterSnapshot, sheetId: "Sheet1" });
   assert.equal(diff.formatOnly.length, 1);
@@ -78,4 +68,22 @@ test("diffDocumentSnapshots detects formatOnly edits from sheet-default formatti
   assert.equal(diff.modified.length, 0);
   assert.equal(diff.added.length, 0);
   assert.equal(diff.removed.length, 0);
+});
+
+test("exportSheetForSemanticDiff exports effective formats from column defaults", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", 1);
+  doc.setRangeFormat("Sheet1", "A1:A1048576", { font: { bold: true } });
+
+  const exported = doc.exportSheetForSemanticDiff("Sheet1");
+  assert.deepEqual(exported.cells.get(cellKey(0, 0))?.format, { font: { bold: true } });
+});
+
+test("exportSheetForSemanticDiff exports effective formats from sheet defaults", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", 1);
+  doc.setRangeFormat("Sheet1", "A1:XFD1048576", { font: { bold: true } });
+
+  const exported = doc.exportSheetForSemanticDiff("Sheet1");
+  assert.deepEqual(exported.cells.get(cellKey(0, 0))?.format, { font: { bold: true } });
 });
