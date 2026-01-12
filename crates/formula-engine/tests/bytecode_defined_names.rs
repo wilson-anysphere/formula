@@ -132,3 +132,48 @@ fn bytecode_does_not_inline_defined_name_constants_shadowed_by_let() {
     engine.recalculate_single_threaded();
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(2.0));
 }
+
+#[test]
+fn bytecode_inlines_defined_name_constants_under_percent_postfix() {
+    let mut engine = Engine::new();
+
+    engine
+        .define_name(
+            "Rate",
+            NameScope::Workbook,
+            NameDefinition::Constant(Value::Number(5.0)),
+        )
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "A1", "=Rate%")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(0.05));
+}
+
+#[test]
+fn bytecode_inlines_defined_name_constants_inside_array_literals() {
+    let mut engine = Engine::new();
+
+    engine
+        .define_name(
+            "X",
+            NameScope::Workbook,
+            NameDefinition::Constant(Value::Number(1.0)),
+        )
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "A1", "={X,2}")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(2.0));
+}

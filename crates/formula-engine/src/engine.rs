@@ -6261,7 +6261,14 @@ fn rewrite_defined_name_constants_for_bytecode(
                         expr: Box::new(inner),
                     })
                 }),
-            crate::Expr::Postfix(_) => None,
+            crate::Expr::Postfix(p) => {
+                rewrite_inner(&p.expr, current_sheet, workbook, lexical_scopes).map(|inner| {
+                    crate::Expr::Postfix(crate::PostfixExpr {
+                        op: p.op,
+                        expr: Box::new(inner),
+                    })
+                })
+            }
             crate::Expr::Binary(b) => {
                 if matches!(
                     b.op,
@@ -6277,7 +6284,25 @@ fn rewrite_defined_name_constants_for_bytecode(
                     right: Box::new(right.unwrap_or_else(|| (*b.right).clone())),
                 }))
             }
-            crate::Expr::Array(_) => None,
+            crate::Expr::Array(arr) => {
+                let mut changed = false;
+                let mut rows: Vec<Vec<crate::Expr>> = Vec::with_capacity(arr.rows.len());
+                for row in &arr.rows {
+                    let mut out_row = Vec::with_capacity(row.len());
+                    for el in row {
+                        if let Some(rewritten) =
+                            rewrite_inner(el, current_sheet, workbook, lexical_scopes)
+                        {
+                            out_row.push(rewritten);
+                            changed = true;
+                        } else {
+                            out_row.push(el.clone());
+                        }
+                    }
+                    rows.push(out_row);
+                }
+                changed.then_some(crate::Expr::Array(crate::ArrayLiteral { rows }))
+            }
             crate::Expr::Number(_)
             | crate::Expr::String(_)
             | crate::Expr::Boolean(_)
