@@ -254,14 +254,7 @@ fn model_cell_value_to_sort_value(value: &ModelCellValue) -> CellValue {
         ModelCellValue::Error(err) => CellValue::Error(*err),
         ModelCellValue::RichText(rt) => CellValue::Text(rt.plain_text().to_string()),
         ModelCellValue::Entity(entity) => CellValue::Text(entity.display_value.clone()),
-        ModelCellValue::Image(image) => {
-            let display = image
-                .alt_text
-                .as_deref()
-                .filter(|s| !s.is_empty())
-                .unwrap_or("[Image]");
-            CellValue::Text(display.to_string())
-        },
+        ModelCellValue::Image(image) => image_alt_text_to_sort_value(image.alt_text.as_deref()),
         ModelCellValue::Record(record) => {
             if let Some(display_field) = record.display_field.as_deref() {
                 if let Some(value) = record.fields.get(display_field) {
@@ -289,13 +282,8 @@ fn model_cell_value_to_sort_value(value: &ModelCellValue) -> CellValue {
                             }
                         },
                         ModelCellValue::Image(image) => {
-                            let display = image
-                                .alt_text
-                                .as_deref()
-                                .filter(|s| !s.is_empty())
-                                .unwrap_or("[Image]");
-                            Some(CellValue::Text(display.to_string()))
-                        },
+                            Some(image_alt_text_to_sort_value(image.alt_text.as_deref()))
+                        }
                         _ => None,
                     };
                     if let Some(value) = display_value {
@@ -321,15 +309,19 @@ fn model_cell_value_to_sort_value(value: &ModelCellValue) -> CellValue {
     }
 }
 
-fn image_payload_to_sort_value(value: Option<&serde_json::Value>) -> CellValue {
-    let alt_text = value.and_then(|value| {
+fn image_alt_text_to_sort_value(alt_text: Option<&str>) -> CellValue {
+    let display = alt_text.filter(|s| !s.is_empty()).unwrap_or("[Image]");
+    CellValue::Text(display.to_string())
+}
+
+fn image_payload_to_sort_value(payload: Option<&serde_json::Value>) -> CellValue {
+    let alt_text = payload.and_then(|value| {
         value
             .get("altText")
             .or_else(|| value.get("alt_text"))
             .and_then(|v| v.as_str())
     });
-    let display = alt_text.filter(|s| !s.is_empty()).unwrap_or("[Image]");
-    CellValue::Text(display.to_string())
+    image_alt_text_to_sort_value(alt_text)
 }
 
 fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellValue> {
@@ -415,9 +407,9 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
                                  _ => None,
                             };
 
-                             if parsed.is_some() {
-                                 return parsed;
-                             }
+                            if parsed.is_some() {
+                                return parsed;
+                            }
                         }
                     }
                 }
