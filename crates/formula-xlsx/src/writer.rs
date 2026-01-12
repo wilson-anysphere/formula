@@ -4,7 +4,7 @@ use crate::WorkbookKind;
 use formula_columnar::{ColumnType as ColumnarType, Value as ColumnarValue};
 use formula_model::{
     normalize_formula_text, Cell, CellRef, CellValue, DateSystem, DefinedNameScope, Hyperlink,
-    HyperlinkTarget, Outline, Range, SheetVisibility, Workbook, Worksheet,
+    HyperlinkTarget, Outline, Range, SheetVisibility, Workbook, WorkbookWindowState, Worksheet,
 };
 use formula_fs::{atomic_write_with_path, AtomicWriteError};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -158,6 +158,8 @@ fn workbook_xml(workbook: &Workbook) -> String {
         DateSystem::Excel1900 => r#"<workbookPr/>"#.to_string(),
         DateSystem::Excel1904 => r#"<workbookPr date1904="1"/>"#.to_string(),
     };
+    let workbook_protection = workbook_protection_xml(workbook);
+    let book_views = workbook_view_xml(workbook);
     let calc_pr = calc_pr_xml(workbook);
 
     let mut sheets_xml = String::new();
@@ -183,14 +185,75 @@ fn workbook_xml(workbook: &Workbook) -> String {
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   {}
+  {}
+  {}
   <sheets>
     {}
   </sheets>
   {}
   {}
 </workbook>"#,
-        workbook_pr, sheets_xml, defined_names_xml, calc_pr
+        workbook_pr, workbook_protection, book_views, sheets_xml, defined_names_xml, calc_pr
     )
+}
+
+fn workbook_protection_xml(workbook: &Workbook) -> String {
+    let prot = &workbook.workbook_protection;
+    if formula_model::WorkbookProtection::is_default(prot) {
+        return String::new();
+    }
+    let mut attrs = String::new();
+    if prot.lock_structure {
+        attrs.push_str(r#" lockStructure="1""#);
+    }
+    if prot.lock_windows {
+        attrs.push_str(r#" lockWindows="1""#);
+    }
+    if let Some(hash) = prot.password_hash {
+        attrs.push_str(&format!(r#" workbookPassword="{:04X}""#, hash));
+    }
+    format!(r#"<workbookProtection{attrs}/>"#)
+}
+
+fn workbook_view_xml(workbook: &Workbook) -> String {
+    let Some(window) = workbook.view.window.as_ref() else {
+        return String::new();
+    };
+
+    let mut attrs = String::new();
+
+    if let Some(active_sheet_id) = workbook.view.active_sheet_id {
+        if let Some(idx) = workbook.sheets.iter().position(|s| s.id == active_sheet_id) {
+            attrs.push_str(&format!(r#" activeTab="{idx}""#));
+        }
+    }
+
+    if let Some(x) = window.x {
+        attrs.push_str(&format!(r#" xWindow="{x}""#));
+    }
+    if let Some(y) = window.y {
+        attrs.push_str(&format!(r#" yWindow="{y}""#));
+    }
+    if let Some(width) = window.width {
+        attrs.push_str(&format!(r#" windowWidth="{width}""#));
+    }
+    if let Some(height) = window.height {
+        attrs.push_str(&format!(r#" windowHeight="{height}""#));
+    }
+    if let Some(state) = window.state {
+        let v = match state {
+            WorkbookWindowState::Normal => "normal",
+            WorkbookWindowState::Minimized => "minimized",
+            WorkbookWindowState::Maximized => "maximized",
+        };
+        attrs.push_str(&format!(r#" windowState="{v}""#));
+    }
+
+    if attrs.is_empty() {
+        return String::new();
+    }
+
+    format!(r#"<bookViews><workbookView{attrs}/></bookViews>"#)
 }
 
 fn calc_pr_xml(workbook: &Workbook) -> String {
@@ -716,6 +779,8 @@ fn sheet_xml(
         String::new()
     };
 
+    let sheet_protection_xml = sheet_protection_xml(sheet);
+
     let mut xml = String::new();
     xml.push_str(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#);
     xml.push('\n');
@@ -740,6 +805,11 @@ fn sheet_xml(
         xml.push('\n');
     }
     xml.push_str("  </sheetData>\n");
+    if !sheet_protection_xml.is_empty() {
+        xml.push_str("  ");
+        xml.push_str(&sheet_protection_xml);
+        xml.push('\n');
+    }
     if !auto_filter_xml.is_empty() {
         xml.push_str("  ");
         xml.push_str(&auto_filter_xml);
@@ -848,6 +918,74 @@ fn sheet_xml(
     };
 
     Ok((xml, rels_xml))
+}
+
+fn sheet_protection_xml(sheet: &Worksheet) -> String {
+    let prot = &sheet.sheet_protection;
+    if !prot.enabled {
+        return String::new();
+    }
+
+    let mut attrs = String::new();
+    attrs.push_str(r#" sheet="1""#);
+
+    // `objects` / `scenarios` are inverse semantics: 1 means "protected".
+    attrs.push_str(&format!(
+        r#" objects="{}""#,
+        if prot.edit_objects { 0 } else { 1 }
+    ));
+    attrs.push_str(&format!(
+        r#" scenarios="{}""#,
+        if prot.edit_scenarios { 0 } else { 1 }
+    ));
+
+    // For selectLocked/Unlocked, Excel defaults to allowing selection; set explicit 0 when disallowed.
+    if !prot.select_locked_cells {
+        attrs.push_str(r#" selectLockedCells="0""#);
+    }
+    if !prot.select_unlocked_cells {
+        attrs.push_str(r#" selectUnlockedCells="0""#);
+    }
+
+    if prot.format_cells {
+        attrs.push_str(r#" formatCells="1""#);
+    }
+    if prot.format_columns {
+        attrs.push_str(r#" formatColumns="1""#);
+    }
+    if prot.format_rows {
+        attrs.push_str(r#" formatRows="1""#);
+    }
+    if prot.insert_columns {
+        attrs.push_str(r#" insertColumns="1""#);
+    }
+    if prot.insert_rows {
+        attrs.push_str(r#" insertRows="1""#);
+    }
+    if prot.insert_hyperlinks {
+        attrs.push_str(r#" insertHyperlinks="1""#);
+    }
+    if prot.delete_columns {
+        attrs.push_str(r#" deleteColumns="1""#);
+    }
+    if prot.delete_rows {
+        attrs.push_str(r#" deleteRows="1""#);
+    }
+    if prot.sort {
+        attrs.push_str(r#" sort="1""#);
+    }
+    if prot.auto_filter {
+        attrs.push_str(r#" autoFilter="1""#);
+    }
+    if prot.pivot_tables {
+        attrs.push_str(r#" pivotTables="1""#);
+    }
+
+    if let Some(hash) = prot.password_hash {
+        attrs.push_str(&format!(r#" password="{:04X}""#, hash));
+    }
+
+    format!(r#"<sheetProtection{attrs}/>"#)
 }
 
 fn cell_xml(
