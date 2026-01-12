@@ -56,6 +56,27 @@ test("clipboard HTML DOM parser preserves <br> line breaks", () => {
   }
 });
 
+test("clipboard HTML DOM parser does not double-count whitespace newlines after <br>", () => {
+  const dom = new JSDOM("", { url: "http://localhost" });
+
+  const prevDomParser = globalThis.DOMParser;
+  globalThis.DOMParser = dom.window.DOMParser;
+
+  try {
+    const html =
+      "<!DOCTYPE html><html><body><table><tr><td>Line1<br>\nLine2</td></tr></table></body></html>";
+    const grid = parseHtmlToCellGrid(html);
+    assert.ok(grid);
+    assert.equal(grid[0][0].value, "Line1\nLine2");
+  } finally {
+    if (prevDomParser === undefined) {
+      delete globalThis.DOMParser;
+    } else {
+      globalThis.DOMParser = prevDomParser;
+    }
+  }
+});
+
 test("clipboard HTML DOM parser handles Windows CF_HTML payloads", () => {
   const dom = new JSDOM("", { url: "http://localhost" });
 

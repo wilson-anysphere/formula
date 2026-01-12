@@ -295,6 +295,7 @@ function parseGoogleSheetsValue(data) {
 function extractCellTextDom(cellEl) {
   /** @type {string[]} */
   const out = [];
+  let lastWasBreak = false;
 
   /**
    * @param {Node} node
@@ -302,7 +303,19 @@ function extractCellTextDom(cellEl) {
   const walk = (node) => {
     // Text node.
     if (node.nodeType === 3) {
-      out.push(node.nodeValue ?? "");
+      let text = node.nodeValue ?? "";
+
+      // Clipboard HTML sometimes includes literal newlines/indentation around `<br>` tags
+      // for readability (e.g. `<br>\nLine2`). Those newlines are not intended cell content,
+      // but `DOMParser` preserves them as text nodes. If we just append them, we'd end up
+      // with double line breaks (`\n` from `<br>` + `\n` from the text node).
+      if (lastWasBreak) {
+        if (text.startsWith("\r\n")) text = text.slice(2);
+        else if (text.startsWith("\n") || text.startsWith("\r")) text = text.slice(1);
+      }
+
+      out.push(text);
+      lastWasBreak = false;
       return;
     }
 
@@ -311,6 +324,7 @@ function extractCellTextDom(cellEl) {
       const el = /** @type {Element} */ (node);
       if (el.tagName.toLowerCase() === "br") {
         out.push("\n");
+        lastWasBreak = true;
         return;
       }
 
