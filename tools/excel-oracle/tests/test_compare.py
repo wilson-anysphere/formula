@@ -217,5 +217,110 @@ class CompareTagToleranceTests(unittest.TestCase):
             self.assertEqual(report["summary"]["actualPath"], str(actual_path))
 
 
+class CompareMismatchDetailTests(unittest.TestCase):
+    def test_number_mismatch_includes_tolerances_and_diffs(self) -> None:
+        compare_py = Path(__file__).resolve().parents[1] / "compare.py"
+        self.assertTrue(compare_py.is_file(), f"compare.py not found at {compare_py}")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            cases_path = tmp_path / "cases.json"
+            expected_path = tmp_path / "expected.json"
+            actual_path = tmp_path / "actual.json"
+            report_path = tmp_path / "report.json"
+
+            expected_value = 0.3333333333333333
+            actual_value = 0.333333
+
+            cases_payload = {
+                "schemaVersion": 1,
+                "cases": [
+                    {
+                        "id": "case-a",
+                        "formula": "=1/3",
+                        "inputs": [],
+                        "tags": ["num"],
+                    }
+                ],
+            }
+            cases_path.write_text(
+                json.dumps(cases_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            expected_payload = {
+                "schemaVersion": 1,
+                "generatedAt": "unit-test",
+                "source": {"kind": "excel", "note": "synthetic test fixture"},
+                "caseSet": {"path": str(cases_path), "count": 1},
+                "results": [{"caseId": "case-a", "result": {"t": "n", "v": expected_value}}],
+            }
+            expected_path.write_text(
+                json.dumps(expected_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            actual_payload = {
+                "schemaVersion": 1,
+                "generatedAt": "unit-test",
+                "source": {"kind": "engine", "note": "synthetic test fixture"},
+                "caseSet": {"path": str(cases_path), "count": 1},
+                "results": [{"caseId": "case-a", "result": {"t": "n", "v": actual_value}}],
+            }
+            actual_path.write_text(
+                json.dumps(actual_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(compare_py),
+                    "--cases",
+                    str(cases_path),
+                    "--expected",
+                    str(expected_path),
+                    "--actual",
+                    str(actual_path),
+                    "--report",
+                    str(report_path),
+                    # Allow mismatches so we can inspect the report.
+                    "--max-mismatch-rate",
+                    "1.0",
+                    "--abs-tol",
+                    "1e-9",
+                    "--rel-tol",
+                    "1e-9",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            if proc.returncode != 0:
+                self.fail(
+                    f"compare.py exited {proc.returncode}\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+                )
+
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            mismatches = report.get("mismatches", [])
+            self.assertIsInstance(mismatches, list)
+            self.assertEqual(len(mismatches), 1)
+
+            m = mismatches[0]
+            self.assertEqual(m.get("reason"), "number-mismatch")
+            self.assertEqual(m.get("tags"), ["num"])
+            self.assertEqual(m.get("absTol"), 1e-9)
+            self.assertEqual(m.get("relTol"), 1e-9)
+
+            abs_diff = abs(expected_value - actual_value)
+            denom = max(abs(expected_value), abs(actual_value))
+            rel_diff = abs_diff / denom if denom else None
+
+            self.assertAlmostEqual(m.get("absDiff"), abs_diff, places=15)
+            self.assertAlmostEqual(m.get("relDiff"), rel_diff, places=15)
+
+
 if __name__ == "__main__":
     unittest.main()

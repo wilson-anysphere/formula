@@ -412,17 +412,36 @@ def main() -> int:
             ok, reason = _compare_value(exp.get("result"), act.get("result"), cfg)
             if not ok:
                 mismatch_reason = reason
-                mismatches.append(
-                    {
-                        "caseId": case_id,
-                        "reason": mismatch_reason,
-                        "formula": case.get("formula"),
-                        "inputs": [_pretty_input(i) for i in case.get("inputs", [])],
-                        "tags": sorted(tag_set),
-                        "expected": exp.get("result"),
-                        "actual": act.get("result"),
-                    }
-                )
+                entry: dict[str, Any] = {
+                    "caseId": case_id,
+                    "reason": mismatch_reason,
+                    "formula": case.get("formula"),
+                    "inputs": [_pretty_input(i) for i in case.get("inputs", [])],
+                    "tags": sorted(tag_set),
+                    "expected": exp.get("result"),
+                    "actual": act.get("result"),
+                    # Record the effective numeric tolerance for this case after tag-specific
+                    # overrides. This makes mismatches easier to triage when some tags (e.g.
+                    # odd_coupon) intentionally use looser tolerances.
+                    "absTol": cfg.abs_tol,
+                    "relTol": cfg.rel_tol,
+                }
+
+                exp_result = exp.get("result")
+                act_result = act.get("result")
+                if (
+                    mismatch_reason == "number-mismatch"
+                    and _is_number(exp_result)
+                    and _is_number(act_result)
+                ):
+                    ev = float(exp_result.get("v"))
+                    av = float(act_result.get("v"))
+                    abs_diff = abs(ev - av)
+                    denom = max(abs(ev), abs(av))
+                    entry["absDiff"] = abs_diff
+                    entry["relDiff"] = (abs_diff / denom) if denom else None
+
+                mismatches.append(entry)
                 reason_counts[mismatch_reason] = reason_counts.get(mismatch_reason, 0) + 1
 
         # Per-tag accounting (a case can contribute to multiple tags).
