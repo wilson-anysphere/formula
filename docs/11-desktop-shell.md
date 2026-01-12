@@ -352,6 +352,10 @@ The window-close sequence is:
    - keeps the window open if the user cancels the close (e.g. cancels the unsaved-changes prompt)
 7. Frontend emits `close-handled` with the token so Rust can clear its “close in flight” guard.
 
+Other close entry points (e.g. **menu Close Window** / `Cmd/Ctrl+W`) are handled entirely in the frontend. In those cases, the
+frontend runs `Workbook_BeforeClose` as a best-effort (trusted-only, no permission escalation) via the `fire_workbook_before_close`
+command, applies any updates, and then follows the same “unsaved changes prompt → hide vs quit” decision.
+
 Implementation detail: `main.rs` uses an `AtomicBool` (`CLOSE_REQUEST_IN_FLIGHT`) to prevent overlapping close flows if the user clicks close repeatedly while a prompt is still open.
 
 #### Drag & drop → open file
@@ -430,7 +434,7 @@ The desktop UI intentionally avoids a hard dependency on `@tauri-apps/api` and i
 Desktop-specific listeners are set up near the bottom of `apps/desktop/src/main.ts`:
 
 - `oauth-redirect` → route deep-link redirects into the OAuth broker (buffers early redirects to avoid a rare PKCE race where the redirect arrives before `waitForRedirect` is registered); emits `oauth-redirect-ready` once the handler is installed (flushes queued redirects on the Rust side)
-- `close-prep` → `app.commitPendingEditsForCommand()` + flush pending workbook sync + call `set_macro_ui_context` → emit `close-prep-done`
+- `close-prep` → commit any in-progress edits (including split-view cell editors) + flush pending workbook sync + call `set_macro_ui_context` → emit `close-prep-done`
 - `close-requested` → run `handleCloseRequest(...)` (unsaved changes prompt + hide vs quit) → emit `close-handled`
 - `open-file` → queue workbook opens; then emits `open-file-ready` once the handler is installed (flushes any queued open-file requests on the Rust side; helper: `installOpenFileIpc` in `apps/desktop/src/tauri/openFileIpc.ts`)
 - `file-dropped` → open the first dropped path
