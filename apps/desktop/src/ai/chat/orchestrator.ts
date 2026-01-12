@@ -203,6 +203,15 @@ export interface AiChatOrchestratorOptions {
    * tokenizers.
    */
   tokenEstimator?: TokenEstimator;
+
+  /**
+   * Optional hook for workbook context build telemetry. When provided, this will
+   * enable `WorkbookContextBuilder` instrumentation and invoke this callback once
+   * per `sendMessage()` call.
+   *
+   * NOTE: By default, build stats are only logged in dev builds.
+   */
+  onWorkbookContextBuildStats?: (stats: WorkbookContextBuildStats) => void;
 }
 
 /**
@@ -221,7 +230,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
   const keepLastMessages = options.keepLastMessages ?? 40;
 
   const spreadsheet = new DocumentControllerSpreadsheetApi(options.documentController, { createChart: options.createChart });
-  const onBuildStats =
+  const devOnBuildStats =
     import.meta.env.MODE === "development"
       ? (stats: WorkbookContextBuildStats) => {
           try {
@@ -229,6 +238,13 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
           } catch {
             // ignore
           }
+        }
+      : undefined;
+  const onBuildStats =
+    devOnBuildStats || options.onWorkbookContextBuildStats
+      ? (stats: WorkbookContextBuildStats) => {
+          devOnBuildStats?.(stats);
+          options.onWorkbookContextBuildStats?.(stats);
         }
       : undefined;
 

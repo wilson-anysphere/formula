@@ -136,6 +136,15 @@ export interface RunAgentTaskParams {
   reserveForOutputTokens?: number;
   keepLastMessages?: number;
   tokenEstimator?: TokenEstimator;
+
+  /**
+   * Optional hook for workbook context build telemetry. When provided, this will
+   * enable `WorkbookContextBuilder` instrumentation and invoke this callback for
+   * each context build done by the agent loop.
+   *
+   * NOTE: By default, build stats are only logged in dev builds.
+   */
+  onWorkbookContextBuildStats?: (stats: WorkbookContextBuildStats) => void;
 }
 
 class AgentCancelledError extends Error {
@@ -265,7 +274,7 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
     const toolPolicy = getDesktopToolPolicy({ mode: "agent" });
 
     const dlp = maybeGetAiCloudDlpOptions({ documentId: params.workbookId, sheetId: defaultSheetId }) ?? undefined;
-    const onBuildStats =
+    const devOnBuildStats =
       import.meta.env.MODE === "development"
         ? (stats: WorkbookContextBuildStats) => {
             try {
@@ -273,6 +282,13 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
             } catch {
               // ignore
             }
+          }
+        : undefined;
+    const onBuildStats =
+      devOnBuildStats || params.onWorkbookContextBuildStats
+        ? (stats: WorkbookContextBuildStats) => {
+            devOnBuildStats?.(stats);
+            params.onWorkbookContextBuildStats?.(stats);
           }
         : undefined;
 

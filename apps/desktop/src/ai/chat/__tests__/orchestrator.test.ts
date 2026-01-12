@@ -111,6 +111,41 @@ function createMockLlmClientWithToolCall(call: { name: string; arguments: unknow
 }
 
 describe("ai chat orchestrator", () => {
+  it("invokes onWorkbookContextBuildStats when provided", async () => {
+    const controller = new DocumentController();
+    seed2x2(controller);
+
+    const llmClient = {
+      chat: vi.fn(async () => ({ message: { role: "assistant", content: "ok" }, usage: { promptTokens: 1, completionTokens: 1 } })),
+    };
+    const onWorkbookContextBuildStats = vi.fn();
+    const auditStore = new LocalStorageAIAuditStore({ key: "test_audit_context_stats_hook" });
+
+    const orchestrator = createAiChatOrchestrator({
+      documentController: controller,
+      workbookId: "wb_context_stats_hook",
+      llmClient: llmClient as any,
+      model: "mock-model",
+      getActiveSheetId: () => "Sheet1",
+      auditStore,
+      sessionId: "session_context_stats_hook",
+      previewOptions: { approval_cell_threshold: 0 },
+      onWorkbookContextBuildStats,
+    });
+
+    await orchestrator.sendMessage({ text: "Hello", history: [] });
+
+    expect(onWorkbookContextBuildStats).toHaveBeenCalledTimes(1);
+    const stats = onWorkbookContextBuildStats.mock.calls[0]![0];
+    expect(stats.mode).toBe("chat");
+    expect(stats.model).toBe("mock-model");
+    expect(stats.durationMs).toBeGreaterThanOrEqual(0);
+    expect(stats.promptContextChars).toBeGreaterThan(0);
+    expect(stats.promptContextTokens).toBeGreaterThan(0);
+
+    await orchestrator.dispose();
+  });
+
   it("does not re-index workbook RAG when document has not changed", async () => {
     const controller = new DocumentController();
     seed2x2(controller);
