@@ -135,23 +135,34 @@ pub enum ClipboardError {
     OperationFailed(String),
 }
 
-pub fn read() -> Result<ClipboardContent, ClipboardError> {
-    let mut content = platform::read()?;
-
-    if matches!(content.html, Some(ref s) if s.as_bytes().len() > MAX_RICH_TEXT_BYTES) {
+fn sanitize_clipboard_content_with_limits(
+    mut content: ClipboardContent,
+    max_rich_text_bytes: usize,
+    max_image_bytes: usize,
+) -> ClipboardContent {
+    if matches!(content.html, Some(ref s) if s.as_bytes().len() > max_rich_text_bytes) {
         content.html = None;
     }
-    if matches!(content.rtf, Some(ref s) if s.as_bytes().len() > MAX_RICH_TEXT_BYTES) {
+    if matches!(content.rtf, Some(ref s) if s.as_bytes().len() > max_rich_text_bytes) {
         content.rtf = None;
     }
     if let Some(ref s) = content.png_base64 {
         let decoded_len = estimate_base64_decoded_len(s).unwrap_or(usize::MAX);
-        if decoded_len > MAX_IMAGE_BYTES {
+        if decoded_len > max_image_bytes {
             content.png_base64 = None;
         }
     }
 
-    Ok(content)
+    content
+}
+
+pub fn read() -> Result<ClipboardContent, ClipboardError> {
+    let content = platform::read()?;
+    Ok(sanitize_clipboard_content_with_limits(
+        content,
+        MAX_RICH_TEXT_BYTES,
+        MAX_IMAGE_BYTES,
+    ))
 }
 
 pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
@@ -203,7 +214,8 @@ pub fn clipboard_write(app: tauri::AppHandle, payload: ClipboardWritePayload) ->
 #[cfg(test)]
 mod tests {
     use super::{
-        estimate_base64_decoded_len, ClipboardError, ClipboardWritePayload, MAX_RICH_TEXT_BYTES,
+        estimate_base64_decoded_len, sanitize_clipboard_content_with_limits, ClipboardContent,
+        ClipboardError, ClipboardWritePayload, MAX_RICH_TEXT_BYTES,
     };
 
     #[test]
@@ -219,6 +231,35 @@ mod tests {
     fn estimate_base64_decoded_len_is_conservative_for_malformed_lengths() {
         // Not a multiple of 4: use an upper bound (and let base64 decode validation reject it later).
         assert_eq!(estimate_base64_decoded_len("Zg"), Some(3));
+    }
+
+    #[test]
+    fn sanitize_clipboard_content_drops_oversized_fields() {
+        let content = ClipboardContent {
+            text: Some("hello".to_string()),
+            html: Some("123456".to_string()),      // 6 bytes
+            rtf: Some("123456".to_string()),       // 6 bytes
+            png_base64: Some("AAAA".to_string()),  // 3 decoded bytes
+        };
+
+        let sanitized = sanitize_clipboard_content_with_limits(content, 5, 2);
+        assert_eq!(sanitized.text, Some("hello".to_string()));
+        assert_eq!(sanitized.html, None);
+        assert_eq!(sanitized.rtf, None);
+        assert_eq!(sanitized.png_base64, None);
+    }
+
+    #[test]
+    fn sanitize_clipboard_content_keeps_fields_within_limits() {
+        let content = ClipboardContent {
+            text: Some("hello".to_string()),
+            html: Some("12345".to_string()),     // 5 bytes
+            rtf: Some("12345".to_string()),      // 5 bytes
+            png_base64: Some("AA==".to_string()), // 1 decoded byte
+        };
+
+        let sanitized = sanitize_clipboard_content_with_limits(content.clone(), 5, 2);
+        assert_eq!(sanitized, content);
     }
 
     #[test]
