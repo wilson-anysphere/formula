@@ -729,6 +729,10 @@ Permission model:
 
 CRDTs handle most conflicts automatically via last-writer-wins. For cases where we need smarter resolution:
 
+Note: conflict payloads include `remoteUserId` fields. These are best-effort and
+may be an empty string when the writer does not attach user attribution
+metadata (e.g. legacy/edge clients).
+
 ```typescript
 interface ConflictResolution {
   strategy: "last_write_wins" | "first_write_wins" | "merge" | "prompt_user";
