@@ -1,7 +1,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use chrono::{DateTime, Utc};
-use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
+use formula_engine::date::{serial_to_ymd, ymd_to_serial, ExcelDate, ExcelDateSystem};
 use formula_engine::eval::{
     parse_a1, EvalContext, Evaluator, RecalcContext, SheetReference, ValueResolver,
 };
@@ -4101,6 +4101,66 @@ fn bytecode_backend_financial_date_text_respects_engine_date_system() {
         Value::Error(ErrorKind::Value)
     );
     assert_engine_matches_ast(&engine, formula, "A1");
+}
+
+#[test]
+fn bytecode_backend_financial_numeric_dates_respect_engine_date_system() {
+    let mut engine = Engine::new();
+
+    // Numeric date serial arguments must be interpreted under the workbook's configured date
+    // system. For serial 60, this means:
+    // - Excel1900 (Lotus-compatible) => 1900-02-29
+    // - Excel1904 => 1904-03-01
+    //
+    // Use a maturity date whose coupon schedule is easy to reason about (semiannual Jan/Jul).
+    let settlement_serial = 60;
+    let maturity = "1905-01-01";
+
+    let pcd_formula = &format!(r#"=COUPPCD({settlement_serial},"{maturity}",2)"#);
+    let ncd_formula = &format!(r#"=COUPNCD({settlement_serial},"{maturity}",2)"#);
+
+    engine.set_cell_formula("Sheet1", "A1", pcd_formula).unwrap();
+    engine.set_cell_formula("Sheet1", "A2", ncd_formula).unwrap();
+
+    // Ensure we're exercising the bytecode path.
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 2);
+    assert_eq!(stats.compiled, 2);
+    assert_eq!(stats.fallback, 0);
+    assert_eq!(engine.bytecode_program_count(), 2);
+
+    // Excel1900: settlement serial 60 is the fictitious 1900-02-29, which falls in the Jan->Jul
+    // coupon period for maturity 1905-01-01.
+    engine.recalculate_single_threaded();
+
+    let system = engine.date_system();
+    let settlement_date = serial_to_ymd(settlement_serial, system).unwrap();
+    let expected_pcd =
+        ymd_to_serial(ExcelDate::new(settlement_date.year, 1, 1), system).unwrap() as f64;
+    let expected_ncd =
+        ymd_to_serial(ExcelDate::new(settlement_date.year, 7, 1), system).unwrap() as f64;
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(expected_pcd));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(expected_ncd));
+
+    assert_engine_matches_ast(&engine, pcd_formula, "A1");
+    assert_engine_matches_ast(&engine, ncd_formula, "A2");
+
+    // Flip date system after the formulas have been compiled to ensure the runtime context is used.
+    engine.set_date_system(ExcelDateSystem::Excel1904);
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.bytecode_program_count(), 2);
+
+    let system = engine.date_system();
+    let settlement_date = serial_to_ymd(settlement_serial, system).unwrap();
+    let expected_pcd =
+        ymd_to_serial(ExcelDate::new(settlement_date.year, 1, 1), system).unwrap() as f64;
+    let expected_ncd =
+        ymd_to_serial(ExcelDate::new(settlement_date.year, 7, 1), system).unwrap() as f64;
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(expected_pcd));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(expected_ncd));
+
+    assert_engine_matches_ast(&engine, pcd_formula, "A1");
+    assert_engine_matches_ast(&engine, ncd_formula, "A2");
 }
 
 #[test]
