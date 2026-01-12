@@ -550,7 +550,6 @@ export class FormulaBarView {
     } else {
       const address = this.model.activeCell.address;
       this.root.classList.toggle("formula-bar--has-error", true);
-      this.root.classList.toggle("formula-bar--has-error", true);
       this.#errorPanel.innerHTML = `
         <div class="formula-bar-error-title">${explanation.code} (${escapeHtml(address)}): ${explanation.title}</div>
         <div class="formula-bar-error-desc">${explanation.description}</div>

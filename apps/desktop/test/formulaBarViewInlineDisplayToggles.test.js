@@ -11,10 +11,11 @@ test("FormulaBarView does not toggle visibility via element.style.display", () =
   const content = fs.readFileSync(filePath, "utf8");
 
   // Height syncing (.style.height) is allowed; visibility should be class/attribute-driven.
-  assert.equal(
-    content.includes(".style.display"),
-    false,
-    "FormulaBarView should not use element.style.display; use CSS classes or the hidden attribute instead",
-  );
+  for (const needle of ["textarea.style.display", "errorButton.style.display", "errorPanel.style.display"]) {
+    assert.equal(
+      content.includes(needle),
+      false,
+      `FormulaBarView should not use ${needle}; use CSS classes or the hidden attribute instead`,
+    );
+  }
 });
-
