@@ -106,12 +106,13 @@ export default defineConfig({
     headers: crossOriginIsolationHeaders,
   },
   test: {
-    setupFiles: [resolve(repoRoot, "vitest.setup.ts")],
     environment: "node",
     // Desktop unit tests can incur a fair amount of Vite/React compilation overhead on
     // shared runners; keep timeouts generous so we don't flake on cold caches.
     testTimeout: 30_000,
     hookTimeout: 30_000,
+    // Node 22+ ships an experimental `localStorage` accessor that throws unless started with
+    // `--localstorage-file`. Provide a stable in-memory fallback for tests.
     setupFiles: ["./vitest.setup.ts"],
     environmentMatchGlobs: [
       ["src/panels/ai-audit/AIAuditPanel.vitest.ts", "jsdom"],
