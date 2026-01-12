@@ -39,6 +39,19 @@ fn randarray_spills_2_by_3() {
 }
 
 #[test]
+fn randarray_missing_rows_uses_default() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=RANDARRAY(,3)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "A1").expect("spill range");
+    assert_eq!(start, parse_a1("A1").unwrap());
+    assert_eq!(end, parse_a1("C1").unwrap());
+}
+
+#[test]
 fn randarray_whole_numbers_respect_min_max() {
     let mut engine = Engine::new();
     engine
