@@ -1022,7 +1022,7 @@ impl Engine {
             self.calc_graph.update_cell_dependencies(cell_id, deps);
 
             let (compiled_formula, bytecode_compile_reason) =
-                match self.try_compile_bytecode(&parsed.expr, key, volatile, thread_safe) {
+                match self.try_compile_bytecode(&parsed.expr, key, volatile, thread_safe, dynamic_deps) {
                     Ok(program) => (
                         CompiledFormula::Bytecode(BytecodeFormula {
                             ast: compiled_ast.clone(),
@@ -5416,31 +5416,11 @@ const EXCEL_MAX_COLS_I32: i32 = 16_384;
 const BYTECODE_MAX_RANGE_CELLS: i64 = 5_000_000;
 
 fn engine_error_to_bytecode(err: ErrorKind) -> bytecode::ErrorKind {
-    match err {
-        ErrorKind::Null => bytecode::ErrorKind::Null,
-        ErrorKind::Div0 => bytecode::ErrorKind::Div0,
-        ErrorKind::Value => bytecode::ErrorKind::Value,
-        ErrorKind::Ref => bytecode::ErrorKind::Ref,
-        ErrorKind::Name => bytecode::ErrorKind::Name,
-        ErrorKind::Num => bytecode::ErrorKind::Num,
-        ErrorKind::NA => bytecode::ErrorKind::NA,
-        ErrorKind::Spill => bytecode::ErrorKind::Spill,
-        ErrorKind::Calc => bytecode::ErrorKind::Calc,
-    }
+    err.into()
 }
 
 fn bytecode_error_to_engine(err: bytecode::ErrorKind) -> ErrorKind {
-    match err {
-        bytecode::ErrorKind::Null => ErrorKind::Null,
-        bytecode::ErrorKind::Div0 => ErrorKind::Div0,
-        bytecode::ErrorKind::Value => ErrorKind::Value,
-        bytecode::ErrorKind::Ref => ErrorKind::Ref,
-        bytecode::ErrorKind::Name => ErrorKind::Name,
-        bytecode::ErrorKind::Num => ErrorKind::Num,
-        bytecode::ErrorKind::NA => ErrorKind::NA,
-        bytecode::ErrorKind::Spill => ErrorKind::Spill,
-        bytecode::ErrorKind::Calc => ErrorKind::Calc,
-    }
+    err.into()
 }
 
 fn engine_value_to_bytecode(value: &Value) -> bytecode::Value {
