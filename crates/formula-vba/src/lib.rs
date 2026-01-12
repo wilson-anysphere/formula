@@ -7,11 +7,15 @@
 //! - Inspect and (best-effort) cryptographically verify VBA project digital signatures
 //!   (PKCS#7/CMS) for desktop Trust Center policy.
 
+mod authenticode;
 mod compression;
 mod dir;
 mod ole;
 mod signature;
 
+pub use authenticode::{
+    extract_vba_signature_signed_digest, VbaSignatureSignedDigestError, VbaSignedDigest,
+};
 pub use compression::{compress_container, decompress_container, CompressionError};
 pub use dir::{DirParseError, DirStream, ModuleRecord, ModuleType};
 pub use ole::{OleError, OleFile};
