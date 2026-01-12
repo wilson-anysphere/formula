@@ -190,11 +190,59 @@ export async function verifyAssistantClaims(params: VerifyAssistantClaimsParams)
 
   const hasTool = (name: string) => Array.isArray(params.toolExecutor.tools) && params.toolExecutor.tools.some((t) => t?.name === name);
 
+  // Precompute compute_statistics results per range to avoid repeated tool calls
+  // when multiple claims reference the same range.
+  const computeStatisticsByRange = new Map<
+    string,
+    { call: any; sanitizedResult?: unknown; rawResult?: any; error?: string }
+  >();
+
+  if (hasTool("compute_statistics")) {
+    const measuresByRange = new Map<string, Array<import("./claim-extraction.js").SpreadsheetClaimMeasure>>();
+    const rangesInOrder: string[] = [];
+
+    for (const claim of claimsToVerify) {
+      if (claim.kind !== "range_stat") continue;
+      const reference = claim.reference;
+      if (!reference) continue;
+
+      let measures = measuresByRange.get(reference);
+      if (!measures) {
+        measures = [];
+        measuresByRange.set(reference, measures);
+        rangesInOrder.push(reference);
+      }
+      if (!measures.includes(claim.measure)) {
+        measures.push(claim.measure);
+      }
+    }
+
+    for (const range of rangesInOrder) {
+      const measures = measuresByRange.get(range) ?? [];
+      const toolCall = { name: "compute_statistics", arguments: { range, measures } };
+      try {
+        const rawResult = await params.toolExecutor.execute(toolCall);
+        computeStatisticsByRange.set(range, {
+          call: toolCall,
+          rawResult,
+          sanitizedResult: sanitizeVerificationToolResult(rawResult)
+        });
+      } catch (error) {
+        computeStatisticsByRange.set(range, {
+          call: toolCall,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+  }
+
   const verifiedClaims: NonNullable<VerificationResult["claims"]> = [];
 
   for (const claim of claimsToVerify) {
     if (claim.kind === "range_stat") {
-      verifiedClaims.push(await verifyRangeStatClaim(claim, { toolExecutor: params.toolExecutor, hasTool }));
+      verifiedClaims.push(
+        await verifyRangeStatClaim(claim, { toolExecutor: params.toolExecutor, hasTool, computeStatisticsByRange })
+      );
       continue;
     }
     verifiedClaims.push(await verifyCellValueClaim(claim, { toolExecutor: params.toolExecutor, hasTool }));
@@ -223,7 +271,11 @@ function isVerifiedToolName(name: string): boolean {
 
 async function verifyRangeStatClaim(
   claim: import("./claim-extraction.js").ExtractedSpreadsheetClaim,
-  ctx: { toolExecutor: VerifyAssistantClaimsParams["toolExecutor"]; hasTool: (name: string) => boolean }
+  ctx: {
+    toolExecutor: VerifyAssistantClaimsParams["toolExecutor"];
+    hasTool: (name: string) => boolean;
+    computeStatisticsByRange: Map<string, { call: any; sanitizedResult?: unknown; rawResult?: any; error?: string }>;
+  }
 ): Promise<NonNullable<VerificationResult["claims"]>[number]> {
   if (claim.kind !== "range_stat") {
     return { claim: claim.source, verified: false, expected: null, actual: null };
@@ -252,14 +304,30 @@ async function verifyRangeStatClaim(
     };
   }
 
-  const toolCall = {
-    name: "compute_statistics",
-    arguments: {
-      range: reference,
-      measures: [claim.measure]
+  const cached = ctx.computeStatisticsByRange.get(reference);
+  if (cached) {
+    if (cached.error) {
+      return {
+        claim: claimLabel,
+        verified: false,
+        expected: claim.expected,
+        actual: null,
+        toolEvidence: { call: cached.call, error: cached.error }
+      };
     }
-  };
+    const actual = extractStatisticValue(cached.rawResult, claim.measure);
+    const verified = statisticMatchesExpected(claim.measure, actual, claim.expected);
+    return {
+      claim: claimLabel,
+      verified,
+      expected: claim.expected,
+      actual: actual ?? null,
+      toolEvidence: { call: cached.call, result: cached.sanitizedResult }
+    };
+  }
 
+  // Fallback: should be rare (e.g. missing cache entry). Verify via a single-measure call.
+  const toolCall = { name: "compute_statistics", arguments: { range: reference, measures: [claim.measure] } };
   try {
     const result = await ctx.toolExecutor.execute(toolCall);
     const sanitized = sanitizeVerificationToolResult(result);
