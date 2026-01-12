@@ -151,7 +151,7 @@ test.describe("sheet tab context menu (tauri persistence)", () => {
     await openSheetTabContextMenu(page, "Sheet2");
     await expect(menu).toBeVisible();
     await menu.getByRole("button", { name: "Tab Color", exact: true }).click();
-    await menu.getByRole("button", { name: "No Color" }).click();
+    await menu.getByRole("button", { name: "No Color", exact: true }).click();
     await expect(sheet2TabVisible).not.toHaveAttribute("data-tab-color");
 
     const invokes = await page.evaluate(() => (window as any).__tauriInvokes as Array<{ cmd: string; args: any }>);
