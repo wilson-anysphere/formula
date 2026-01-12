@@ -115,13 +115,14 @@ fn build_minimal_vba_project_bin_impl(module1: &[u8], signature_blob: Option<&[u
     }
 
     ole.create_storage("VBA").expect("VBA storage");
-
     {
         // Minimal `dir` stream (decompressed form) with a single module.
         let dir_decompressed = {
             let mut out = Vec::new();
             // PROJECTNAME
             push_record(&mut out, 0x0004, b"VBAProject");
+            // PROJECTCONSTANTS (empty)
+            push_record(&mut out, 0x000C, b"");
             // MODULENAME
             push_record(&mut out, 0x0019, b"Module1");
             // MODULESTREAMNAME + reserved u16
