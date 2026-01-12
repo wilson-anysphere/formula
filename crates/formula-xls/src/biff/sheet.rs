@@ -18,7 +18,11 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
 
     let mut iter = records::BiffRecordIter::from_offset(workbook_stream, start)?;
     while let Some(record) = iter.next() {
-        let record = record?;
+        let record = match record {
+            Ok(record) => record,
+            // Best-effort: treat malformed/truncated BIFF records as end-of-stream.
+            Err(_) => break,
+        };
 
         // Stop once we reach the BOF record for the next substream. This allows
         // us to recover row/col metadata even if the worksheet EOF record is
@@ -116,7 +120,11 @@ pub(crate) fn parse_biff_sheet_cell_xf_indices_filtered(
 
     let mut iter = records::BiffRecordIter::from_offset(workbook_stream, start)?;
     while let Some(record) = iter.next() {
-        let record = record?;
+        let record = match record {
+            Ok(record) => record,
+            // Best-effort: treat malformed/truncated BIFF records as end-of-stream.
+            Err(_) => break,
+        };
 
         // Stop once we reach the BOF record for the next substream. This allows
         // us to recover XF indices even if the worksheet EOF record is
@@ -210,6 +218,26 @@ mod tests {
         out.extend_from_slice(&(data.len() as u16).to_le_bytes());
         out.extend_from_slice(data);
         out
+    }
+
+    #[test]
+    fn sheet_row_col_scan_stops_on_truncated_record() {
+        let sheet_bof = record(0x0809, &[0u8; 16]);
+
+        // ROW 1 with explicit height = 20.0 points (400 twips).
+        let mut row_payload = [0u8; 16];
+        row_payload[0..2].copy_from_slice(&1u16.to_le_bytes());
+        row_payload[6..8].copy_from_slice(&400u16.to_le_bytes());
+        let row_record = record(0x0208, &row_payload);
+
+        let mut truncated = Vec::new();
+        truncated.extend_from_slice(&0x0001u16.to_le_bytes());
+        truncated.extend_from_slice(&4u16.to_le_bytes());
+        truncated.extend_from_slice(&[1, 2]); // missing 2 bytes
+
+        let stream = [sheet_bof, row_record, truncated].concat();
+        let props = parse_biff_sheet_row_col_properties(&stream, 0).expect("parse");
+        assert_eq!(props.rows.get(&1).and_then(|p| p.height), Some(20.0));
     }
 
     #[test]

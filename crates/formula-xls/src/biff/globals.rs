@@ -56,7 +56,11 @@ pub(crate) fn parse_biff_bound_sheets(
 
     let mut iter = records::BiffRecordIter::from_offset(workbook_stream, 0)?;
     while let Some(record) = iter.next() {
-        let record = record?;
+        let record = match record {
+            Ok(record) => record,
+            // Best-effort: treat malformed/truncated BIFF records as end-of-stream.
+            Err(_) => break,
+        };
 
         // Same rationale as `parse_biff_workbook_globals`: stop once we reach the
         // BOF record for the next substream.
@@ -344,6 +348,32 @@ mod tests {
         out.extend_from_slice(&(data.len() as u16).to_le_bytes());
         out.extend_from_slice(data);
         out
+    }
+
+    #[test]
+    fn boundsheet_scan_stops_on_truncated_record() {
+        // BoundSheet8 with a compressed 8-bit name (fHighByte=0).
+        let mut bs_payload = Vec::new();
+        bs_payload.extend_from_slice(&0x1234u32.to_le_bytes()); // sheet offset
+        bs_payload.extend_from_slice(&[0, 0]); // visibility/type
+        bs_payload.push(1); // cch
+        bs_payload.push(0); // flags (compressed)
+        bs_payload.push(b'A');
+
+        let mut truncated = Vec::new();
+        truncated.extend_from_slice(&0x0001u16.to_le_bytes());
+        truncated.extend_from_slice(&4u16.to_le_bytes());
+        truncated.extend_from_slice(&[1, 2]); // missing 2 bytes
+
+        let stream = [record(0x0085, &bs_payload), truncated].concat();
+        let sheets = parse_biff_bound_sheets(&stream, BiffVersion::Biff8).expect("parse");
+        assert_eq!(
+            sheets,
+            vec![BoundSheetInfo {
+                name: "A".to_string(),
+                offset: 0x1234
+            }]
+        );
     }
 
     #[test]
