@@ -241,6 +241,31 @@ fn ast_encoder_roundtrips_structured_ref_this_row_without_table_name() {
 }
 
 #[test]
+fn ast_encoder_roundtrips_structured_ref_this_row_all_columns_without_table_name() {
+    let ctx = ctx_table1();
+
+    let encoded =
+        encode_rgce_with_context_ast("=[@]", &ctx, CellCoord::new(0, 0)).expect("encode");
+    assert!(encoded.rgcb.is_empty());
+
+    assert_eq!(
+        encoded.rgce,
+        vec![
+            0x18, 0x19, // PtgExtend + etpg=PtgList
+            1, 0, 0, 0, // table id (inferred)
+            0x10, 0x00, // flags (#This Row)
+            0, 0, // col_first (all columns)
+            0, 0, // col_last (all columns)
+            0, 0, // reserved
+        ]
+    );
+
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "[@]");
+    assert_eq!(normalize_formula(&decoded), normalize_formula("[@]"));
+}
+
+#[test]
 fn ast_encoder_rejects_ambiguous_tableless_structured_ref() {
     let mut ctx = ctx_table1();
     ctx.add_table(2, "Table2");
