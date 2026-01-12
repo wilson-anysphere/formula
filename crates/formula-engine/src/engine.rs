@@ -7590,6 +7590,9 @@ fn bytecode_expr_is_eligible_inner(
 
                 let table_ok = match &args[1] {
                     bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_) => true,
+                    bytecode::Expr::SpillRange(inner) => {
+                        bytecode_expr_is_eligible_inner(inner, true, false, lexical_scopes)
+                    }
                     bytecode::Expr::NameRef(name) => matches!(
                         local_binding_kind(lexical_scopes, name),
                         Some(BytecodeLocalBindingKind::Range)
@@ -7613,6 +7616,9 @@ fn bytecode_expr_is_eligible_inner(
 
                 let array_ok = match &args[1] {
                     bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_) => true,
+                    bytecode::Expr::SpillRange(inner) => {
+                        bytecode_expr_is_eligible_inner(inner, true, false, lexical_scopes)
+                    }
                     bytecode::Expr::NameRef(name) => matches!(
                         local_binding_kind(lexical_scopes, name),
                         Some(BytecodeLocalBindingKind::Range)

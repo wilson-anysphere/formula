@@ -4444,6 +4444,7 @@ fn fn_vlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
 
     let table = match &args[1] {
         Value::Range(r) => r.resolve(base),
+        Value::Error(e) => return Value::Error(*e),
         _ => return Value::Error(ErrorKind::Value),
     };
     if !range_in_bounds(grid, table) {
@@ -4506,6 +4507,7 @@ fn fn_hlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
 
     let table = match &args[1] {
         Value::Range(r) => r.resolve(base),
+        Value::Error(e) => return Value::Error(*e),
         _ => return Value::Error(ErrorKind::Value),
     };
     if !range_in_bounds(grid, table) {
@@ -4577,6 +4579,7 @@ fn fn_match(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
 
     let range = match &args[1] {
         Value::Range(r) => r.resolve(base),
+        Value::Error(e) => return Value::Error(*e),
         _ => return Value::Error(ErrorKind::Value),
     };
     if !range_in_bounds(grid, range) {

@@ -717,6 +717,48 @@ fn lookup_functions_compile_to_bytecode_backend_with_let_bound_ranges() {
 }
 
 #[test]
+fn lookup_functions_compile_to_bytecode_backend_with_spill_range_tables() {
+    let mut sheet = TestSheet::new();
+
+    // Build spilled tables with dynamic array formulas; lookups refer to them via the `#` spill
+    // operator, which should still be eligible for bytecode lowering.
+    sheet.set_formula("A1", "=SEQUENCE(3,2)"); // spills into A1:B3.
+    sheet.set_formula("A5", "=SEQUENCE(2,3)"); // spills into A5:C6.
+    sheet.set_formula("A10", "=SEQUENCE(3)"); // spills into A10:A12.
+
+    let base_programs = sheet.bytecode_program_count();
+
+    sheet.set_formula("D1", "=VLOOKUP(3, A1#, 2, FALSE)");
+    sheet.set_formula("D2", "=HLOOKUP(2, A5#, 2, FALSE)");
+    sheet.set_formula("D3", "=MATCH(2, A10#, 0)");
+
+    assert_eq!(sheet.bytecode_program_count(), base_programs + 3);
+
+    sheet.recalculate();
+
+    assert_eq!(sheet.get("D1"), Value::Number(4.0));
+    assert_eq!(sheet.get("D2"), Value::Number(5.0));
+    assert_eq!(sheet.get("D3"), Value::Number(2.0));
+}
+
+#[test]
+fn vlookup_propagates_spill_range_errors_in_table_array_and_compiles_to_bytecode_backend() {
+    let mut sheet = TestSheet::new();
+
+    // A1 is not a spill origin, so `A1#` is a `#REF!` error. VLOOKUP should propagate it from the
+    // table_array argument.
+    sheet.set("A1", 1.0);
+
+    let base_programs = sheet.bytecode_program_count();
+    sheet.set_formula("B1", "=VLOOKUP(1, A1#, 1, FALSE)");
+
+    assert_eq!(sheet.bytecode_program_count(), base_programs + 1);
+
+    sheet.recalculate();
+    assert_eq!(sheet.get("B1"), Value::Error(ErrorKind::Ref));
+}
+
+#[test]
 fn match_and_vlookup_approximate_treat_blanks_like_zero_or_empty_string() {
     let mut sheet = TestSheet::new();
 
