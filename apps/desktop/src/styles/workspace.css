@@ -259,6 +259,8 @@
   padding: 0;
   display: flex;
   flex-direction: column;
+  /* Panel bodies should default to primary text color; individual panels can opt into secondary text tokens as needed. */
+  color: var(--text-primary);
 }
 
 .panel-body__container {
@@ -271,7 +273,6 @@
 
 .collab-panel__message {
   padding: 12px;
-  color: var(--text-primary);
 }
 
 .collab-panel__message--error {
@@ -281,7 +282,6 @@
 .collab-version-history {
   flex: 1;
   min-height: 0;
-  color: var(--text-primary);
   padding: 12px;
   overflow: auto;
 }
@@ -343,7 +343,6 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
-  color: var(--text-primary);
   padding: 12px;
 }
 
@@ -401,7 +400,6 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
-  color: var(--text-primary);
   padding: 12px;
 }
 

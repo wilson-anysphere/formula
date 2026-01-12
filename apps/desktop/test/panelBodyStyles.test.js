@@ -51,4 +51,5 @@ test("workspace.css defines panel body container/fill helpers (class-driven moun
   assert.match(fillBlock, /\bpadding\s*:\s*0\b/, "panel-body--fill should set padding: 0");
   assert.match(fillBlock, /\bdisplay\s*:\s*flex\b/, "panel-body--fill should set display: flex");
   assert.match(fillBlock, /\bflex-direction\s*:\s*column\b/, "panel-body--fill should set flex-direction: column");
+  assert.match(fillBlock, /\bcolor\s*:\s*var\(--text-primary\)/, "panel-body--fill should default text color to var(--text-primary)");
 });
