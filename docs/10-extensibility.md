@@ -29,7 +29,8 @@ Extension panels are rendered as a sandboxed `<iframe>` (currently via a `blob:`
   - Webview → extension: `window.parent.postMessage(message, "*")`
   - Extension → webview: `panel.webview.postMessage(message)` delivered to the iframe via `postMessage`
 
-This is a **best-effort** browser sandbox. The primary security boundary remains the Node host sandbox (vm + module restrictions).
+This is a **best-effort** browser sandbox. In the Tauri/WebView desktop runtime there is **no Node integration**;
+extensions run in a Web Worker (`BrowserExtensionHost`) with import/eval guardrails and CSP as the main defenses.
 
 ## `when` clauses + context keys (subset)
 
@@ -52,56 +53,58 @@ Unknown/invalid clauses fail closed (treated as `false`).
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  MAIN PROCESS                                                               │
-│  ├── Core Application                                                       │
-│  ├── Extension Host Manager                                                 │
-│  └── IPC Router                                                             │
+│  WEBVIEW MAIN THREAD (Tauri)                                                │
+│  ├── Spreadsheet UI + state                                                 │
+│  ├── BrowserExtensionHost                                                   │
+│  └── Panel/webview bridge (postMessage)                                     │
 ├──────────────────────────────────┬──────────────────────────────────────────┤
-│  EXTENSION HOST 1                │  EXTENSION HOST 2                        │
-│  (Isolated Process)              │  (Isolated Process)                      │
+│  EXTENSION WORKER 1              │  EXTENSION WORKER 2                      │
+│  (Web Worker)                    │  (Web Worker)                            │
 │  ├── Extension A                 │  ├── Extension C                         │
 │  ├── Extension B                 │  └── Extension D                         │
-│  └── API Proxy                   │                                          │
+│  └── API proxy + sandbox         │                                          │
 ├──────────────────────────────────┴──────────────────────────────────────────┤
 │  EXTENSION API                                                              │
 │  ├── Cell/Range Operations                                                  │
-│  ├── UI Extensions (Commands, Panels, Menus)                               │
+│  ├── UI Extensions (Commands, Panels, Menus)                                │
 │  ├── Event Subscriptions                                                    │
 │  ├── Custom Functions                                                       │
 │  └── Data Connectors                                                        │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Desktop runtime flow (current implementation)
+### Desktop runtime flow
 
-The desktop app wires marketplace installs into the Node extension host runtime:
+#### Tauri/WebView runtime (canonical, no Node)
 
-1. **Install/update/uninstall** via the marketplace UI (`apps/desktop/src/panels/marketplace/MarketplacePanel.js`)
-2. **Filesystem + state** via `ExtensionManager`
-   - Packages are extracted to `extensionsDir/<publisher>.<name>/`
-   - The installed set is tracked in `ExtensionManager.statePath` (JSON)
-3. **Runtime loading** via `ExtensionHostManager` (`apps/desktop/src/extensions/ExtensionHostManager.js`)
-    - Reads `statePath` and calls `ExtensionHost.loadExtension(...)` for each installed extension
-    - Exposes `executeCommand`, `invokeCustomFunction`, and `listContributions` for the app to route UI actions
-    - Verifies extracted extension integrity using the file manifest stored in `statePath` both on startup
-      and during subsequent syncs; corrupted/tampered installs are quarantined and require reinstall
-    - Emits `onDidChangeContributions()` events after reload/unload/sync so the app can refresh command palettes,
-      menus, and panels in response to extension changes
-4. **Execution + contributions** via `ExtensionHost` (`packages/extension-host`)
-    - Spawns an isolated worker per extension
-    - Registers contributions (commands, panels, menus, keybindings, custom functions, data connectors)
-5. **Hot reload + runtime syncing**
-    - `ExtensionHostManager.syncInstalledExtensions()` reconciles the runtime with `statePath`:
-      loads new installs, reloads updated versions, and unloads removed extensions.
-    - The runtime can **bind to installer change events** (`ExtensionManager.onDidChange`) so installs outside
-      the marketplace panel still hot-reload automatically.
-    - For out-of-process changes (another process writing `statePath`), the runtime can also watch the state file
-      on disk via `ExtensionHostManager.watchStateFile()`.
-    - `ExtensionHostManager` serializes host operations so `syncInstalledExtensions()`, reload/unload, and command
-      execution do not race each other.
-    - `syncInstalledExtensions()` is serialized/coalesced so multiple rapid install/update events coalesce into a
-      single sync run.
-    - Uninstall removes contributions and terminates the worker (via `ExtensionHost.unloadExtension`).
+Desktop uses the browser extension host + the web-style marketplace installer (no filesystem extraction and no Node
+APIs in the WebView):
+
+1. **Install/update/uninstall** via the desktop marketplace UI.
+2. **Verify + persist** via `WebExtensionManager`:
+   - Downloads a signed v2 `.fextpkg` package from the Marketplace.
+   - Verifies the package in the WebView (tar parsing + per-file SHA-256 + Ed25519 signature verification).
+     - Desktop builds may optionally use a Rust/Tauri verifier as an optimization/fallback, but verification is always
+       mandatory before persisting.
+   - Stores verified package bytes + metadata in IndexedDB (DB name: `formula.webExtensions`).
+3. **Load into the runtime**:
+   - `WebExtensionManager.loadInstalled(id)` reads the verified bytes from IndexedDB, creates a `blob:`/`data:` module URL
+     for the entrypoint, then calls `BrowserExtensionHost.loadExtension(...)`.
+   - `BrowserExtensionHost` runs each extension in a module `Worker`.
+
+**CSP requirements (desktop WebView):**
+
+- `script-src` must allow `blob:` and `data:` (extensions are loaded from in-memory module URLs).
+- `worker-src` must allow `blob:` (extensions run in module workers).
+- `connect-src` must allow the Marketplace origin (and any additional hosts you expect extensions to reach; extension
+  permissions apply on top of CSP).
+
+#### Legacy Node runtime (tests only)
+
+The repo still contains a Node-only marketplace installer/runtime used by integration tests and legacy tooling:
+
+- Installer: `apps/desktop/src/marketplace/extensionManager.js`
+- Runtime: `apps/desktop/src/extensions/ExtensionHostManager.js` (wraps the Node `ExtensionHost`)
 
 ---
 
@@ -969,19 +972,22 @@ extensions.
 
 Marketplace implementation details (HTTP endpoints, publish/download headers, caching) are documented in
 [`docs/marketplace.md`](./marketplace.md).
-### Web runtime install + update flow
+### Web + desktop (Tauri/WebView) install + update flow
 
-The browser/web runtime uses a different installation model than the desktop/Node runtime:
+The web runtime and the Tauri/WebView desktop runtime use the same **no-Node** installation model (implemented by
+`WebExtensionManager`):
 
 - Extensions are downloaded as signed v2 `.fextpkg` blobs from the Marketplace.
-- The client verifies the package **in the browser** (tar parsing + SHA-256 checksums + Ed25519
-  signature verification) before persisting anything.
-- Verified package bytes + metadata are stored in IndexedDB, and the extension is loaded into
-  `BrowserExtensionHost` via a `blob:` module URL (no remote module graph imports).
+- The client verifies the package (tar parsing + SHA-256 checksums + Ed25519 signature verification) before persisting
+  anything.
+  - Desktop builds may optionally delegate verification to a Rust/Tauri command as an optimization/fallback, but
+    verification is always mandatory.
+- Verified package bytes + metadata are stored in IndexedDB (`formula.webExtensions`), and the extension is loaded into
+  `BrowserExtensionHost` via a `blob:`/`data:` module URL (no remote module graph imports).
 - Updates replace the stored `{id, version}` atomically and reload the extension in the host if it is
   currently loaded.
 
-Because `blob:` module URLs cannot resolve relative imports, `manifest.browser` should point at a
+Because `blob:`/`data:` module URLs cannot resolve relative imports, `manifest.browser` should point at a
 **single-file ESM bundle**.
 
 ### Extension Discovery

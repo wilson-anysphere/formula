@@ -79,16 +79,37 @@ typeof SharedArrayBuffer !== "undefined"
 
 ## Extensions / Marketplace (current status)
 
-The repo contains a complete **extension runtime + marketplace installer** implementation, but it currently lives in
-**Node-only modules**:
+The desktop app’s canonical extension runtime is **no-Node** and runs entirely inside the WebView:
 
-- Installer: `apps/desktop/src/marketplace/extensionManager.js`
-- Runtime: `apps/desktop/src/extensions/ExtensionHostManager.js` (wraps `packages/extension-host`)
+- **Runtime:** `BrowserExtensionHost` (runs each extension in a module `Worker`)
+- **Installer + persistence:** `WebExtensionManager` (downloads + verifies signed v2 `.fextpkg` packages and stores them
+  in IndexedDB)
 
-These modules use `node:fs` and `worker_threads` and are **not wired into the Vite/WebView runtime yet**. They are
-used by Node integration tests and are intended to be bridged into the real desktop app via IPC/Tauri plumbing.
+Marketplace installs are loaded via:
+`WebExtensionManager.loadInstalled(...)` → `BrowserExtensionHost.loadExtension(...)` using a `blob:`/`data:` module URL
+(no filesystem extraction required).
 
-See `docs/10-extensibility.md` for the end-to-end flow and hot-reload behavior.
+### Where extensions are stored (and how to clear for dev)
+
+Installed packages + metadata are stored in IndexedDB database **`formula.webExtensions`**.
+
+To reset installed extensions during development:
+
+- DevTools → **Application** → **IndexedDB** → delete `formula.webExtensions`, then reload, or
+- run in the console: `indexedDB.deleteDatabase("formula.webExtensions")`
+
+Note: permission grants and per-extension storage are persisted separately in `localStorage` (keys under
+`formula.extensionHost.*`).
+
+### Legacy Node-only implementation (tests/legacy tooling)
+
+These Node-only modules are kept for legacy tooling + integration tests and are **not** used by the Tauri/WebView
+runtime:
+
+- `apps/desktop/src/marketplace/extensionManager.js`
+- `apps/desktop/src/extensions/ExtensionHostManager.js`
+
+See `docs/10-extensibility.md` for the end-to-end flow.
 
 ## Power Query caching + credentials (security)
 
