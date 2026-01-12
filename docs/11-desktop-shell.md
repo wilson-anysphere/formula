@@ -196,7 +196,15 @@ are still placeholders. You can validate locally with `node scripts/check-update
 ### `plugins.notification`
 
 Native system notifications are enabled via `plugins.notification` and are used for lightweight UX
-signals (e.g. “Update available”). The frontend wrapper lives in `apps/desktop/src/tauri/notifications.ts`.
+signals (e.g. “Update available”, “Power Query refresh complete”). The frontend wrapper lives in
+`apps/desktop/src/tauri/notifications.ts`.
+
+Security notes:
+
+- The Rust command `show_system_notification` (exposed via `__TAURI__.core.invoke(...)`) is restricted to the
+  main window and to trusted app-local origins.
+- The frontend `notify(...)` helper intentionally does **not** fall back to the Web Notification API when running
+  under Tauri (`__TAURI__` present), so remote/navigated content cannot bypass the Rust-side checks.
 
 Minimal excerpt (not copy/pasteable; see the full file for everything):
 
