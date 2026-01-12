@@ -300,7 +300,9 @@ The repository still contains Node-only marketplace/host code paths that rely on
         "command": "myExtension.run",
         "title": "Run My Extension",
         "category": "My Extension",
-        "icon": "$(play)"
+        "icon": "$(play)",
+        "description": "Run the extension's main workflow",
+        "keywords": ["run", "execute", "workflow"]
       },
       {
         "command": "myExtension.processCell",
@@ -386,6 +388,42 @@ The repository still contains Node-only marketplace/host code paths that rely on
   "repository": {
     "type": "git",
     "url": "https://github.com/mycompany/my-extension"
+  }
+}
+```
+
+### Commands (`contributes.commands`)
+
+Extensions can contribute commands to the desktop UI via `contributes.commands`.
+
+Supported fields:
+
+- `command` (string, required): the **command id** (must be unique).
+- `title` (string, required): the human-readable label shown in the UI.
+- `category` (string, optional): a group label used by the command palette.
+- `icon` (string, optional): an icon identifier (VS Code-style `$(...)`).
+- `description` (string, optional): additional context for the command.
+  - In the desktop command palette, `description` may be rendered as secondary text under the command title.
+- `keywords` (string[], optional): extra search terms/synonyms for the command.
+
+Command palette search:
+
+- The command palette fuzzy-matches your query against the command **id**, **title**, **category**, **description**, and **keywords**.
+
+Example:
+
+```json
+{
+  "contributes": {
+    "commands": [
+      {
+        "command": "myExtension.runReport",
+        "title": "Run report",
+        "category": "My Extension",
+        "description": "Fetch data and write a summary table into the current sheet.",
+        "keywords": ["report", "summary", "fetch", "table"]
+      }
+    ]
   }
 }
 ```
