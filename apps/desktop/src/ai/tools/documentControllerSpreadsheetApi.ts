@@ -673,7 +673,8 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
     const sheetId = this.resolveSheetIdOrThrow(range.sheet);
     const patch = cellFormatToStylePatch(format);
     if (patch) {
-      this.controller.setRangeFormat(sheetId, toControllerRange(range), patch, { label: "AI apply_formatting" });
+      const applied = this.controller.setRangeFormat(sheetId, toControllerRange(range), patch, { label: "AI apply_formatting" });
+      if (applied === false) return 0;
     }
     const rows = range.endRow - range.startRow + 1;
     const cols = range.endCol - range.startCol + 1;
