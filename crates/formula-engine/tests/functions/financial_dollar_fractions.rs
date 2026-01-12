@@ -1,5 +1,8 @@
 use formula_engine::functions::financial::{dollarde, dollarfr};
+use formula_engine::value::{ErrorKind, Value};
 use formula_engine::ExcelError;
+
+use super::harness::{assert_number, TestSheet};
 
 fn assert_close(actual: f64, expected: f64, tol: f64) {
     assert!(
@@ -62,4 +65,23 @@ fn error_cases() {
     assert_eq!(dollarde(1.0, f64::NAN), Err(ExcelError::Num));
     assert_eq!(dollarfr(f64::NEG_INFINITY, 16.0), Err(ExcelError::Num));
     assert_eq!(dollarfr(1.0, f64::INFINITY), Err(ExcelError::Num));
+}
+
+#[test]
+fn builtins_evaluate_doc_examples() {
+    let mut sheet = TestSheet::new();
+
+    assert_number(&sheet.eval("=DOLLARDE(1.02, 16)"), 1.125);
+    assert_number(&sheet.eval("=DOLLARFR(1.125, 16)"), 1.02);
+
+    assert_number(&sheet.eval("=DOLLARDE(-1.02, 16)"), -1.125);
+    assert_number(&sheet.eval("=DOLLARFR(-1.125, 16)"), -1.02);
+
+    // Fraction is truncated to an integer.
+    assert_number(&sheet.eval("=DOLLARDE(1.02, 16.9)"), 1.125);
+    assert_number(&sheet.eval("=DOLLARFR(1.125, 16.9)"), 1.02);
+
+    // fraction==0 -> #DIV/0!
+    assert_eq!(sheet.eval("=DOLLARDE(1.02, 0)"), Value::Error(ErrorKind::Div0));
+    assert_eq!(sheet.eval("=DOLLARFR(1.125, 0)"), Value::Error(ErrorKind::Div0));
 }
