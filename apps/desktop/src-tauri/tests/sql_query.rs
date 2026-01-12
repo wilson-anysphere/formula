@@ -290,6 +290,61 @@ async fn sqlite_symlink_escape_is_denied() {
     );
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn sqlite_dotdot_traversal_escape_is_denied() {
+    use std::path::Component;
+
+    let roots = desktop_allowed_roots();
+    assert!(!roots.is_empty(), "expected at least one allowed root");
+
+    // Create a real database file outside the allowed roots.
+    let outside_dir = tempfile::tempdir().expect("tempdir");
+    let outside_dir_canon = std::fs::canonicalize(outside_dir.path()).expect("canonicalize");
+    if is_in_roots(&outside_dir_canon, &roots) {
+        eprintln!(
+            "skipping .. traversal sqlite test: tempdir {} is within allowed roots {roots:?}",
+            outside_dir_canon.display()
+        );
+        return;
+    }
+    let outside_db = outside_dir.path().join("outside.sqlite");
+    create_sqlite_db(&outside_db).await;
+
+    // Craft a path that *appears* under the allowed root but uses `..` components to reach the
+    // outside db path.
+    let allowed_root = roots[0].clone();
+    let mut escape_path = allowed_root.clone();
+    let mut depth = 0usize;
+    for comp in allowed_root.components() {
+        if matches!(comp, Component::Normal(_)) {
+            depth += 1;
+        }
+    }
+    for _ in 0..depth {
+        escape_path.push("..");
+    }
+    for comp in outside_db.components() {
+        if matches!(comp, Component::Normal(_)) {
+            escape_path.push(comp.as_os_str());
+        }
+    }
+
+    let err = sql::sql_query(
+        json!({ "kind": "sqlite", "path": escape_path }),
+        "SELECT 1".to_string(),
+        Vec::new(),
+        None,
+    )
+    .await
+    .expect_err("expected .. traversal escape to error");
+
+    assert!(
+        err.to_string().contains("Access denied: SQLite database path is outside the allowed filesystem scope"),
+        "unexpected error: {err}"
+    );
+}
+
 #[tokio::test]
 async fn odbc_sqlite_file_path_outside_scope_is_denied() {
     let roots = desktop_allowed_roots();
