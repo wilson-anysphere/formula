@@ -105,6 +105,22 @@ fn detect_workbook_format_sniffs_extensionless_csv() {
 }
 
 #[test]
+fn detect_workbook_format_sniffs_utf16le_tab_delimited_text() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("data.xlsx");
+
+    let tsv = "col1\tcol2\n1\thello\n2\tworld\n";
+    let mut bytes = vec![0xFF, 0xFE];
+    for unit in tsv.encode_utf16() {
+        bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+    std::fs::write(&path, &bytes).expect("write utf16 tsv");
+
+    let fmt = detect_workbook_format(&path).expect("detect format");
+    assert_eq!(fmt, WorkbookFormat::Csv);
+}
+
+#[test]
 fn detect_workbook_format_does_not_misclassify_binary_as_csv() {
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("blob");
