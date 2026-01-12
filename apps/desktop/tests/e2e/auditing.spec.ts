@@ -323,5 +323,35 @@ test.describe("formula auditing overlays", () => {
     const highlightsC1Transitive = await page.evaluate(() => (window as any).__formulaApp.getAuditingHighlights());
     expect(highlightsC1Transitive.transitive).toBe(true);
     expect(highlightsC1Transitive.precedents.sort()).toEqual(["A1", "B1"]);
+
+    // Ribbon wiring: Formulas → Formula Auditing commands should mirror the same spreadsheet
+    // auditing capabilities (precedents/dependents + clear).
+    await page.keyboard.press("ArrowLeft"); // back to B1 (has both precedents and dependents)
+    await waitForIdle(page);
+
+    const formulasTab = page.getByRole("tab", { name: "Formulas", exact: true });
+    await expect(formulasTab).toBeVisible();
+    await formulasTab.click();
+
+    await page.locator('button[data-command-id="formulas.formulaAuditing.tracePrecedents"]').click();
+    await waitForIdle(page);
+    const ribbonPrecedents = await page.evaluate(() => (window as any).__formulaApp.getAuditingHighlights());
+    expect(ribbonPrecedents.mode).toBe("precedents");
+    expect(ribbonPrecedents.precedents).toEqual(["A1"]);
+    expect(ribbonPrecedents.dependents).toEqual([]);
+
+    await page.locator('button[data-command-id="formulas.formulaAuditing.traceDependents"]').click();
+    await waitForIdle(page);
+    const ribbonDependents = await page.evaluate(() => (window as any).__formulaApp.getAuditingHighlights());
+    expect(ribbonDependents.mode).toBe("dependents");
+    expect(ribbonDependents.precedents).toEqual([]);
+    expect(ribbonDependents.dependents).toEqual(["C1"]);
+
+    await page.locator('button[data-command-id="formulas.formulaAuditing.removeArrows"]').click();
+    await waitForIdle(page);
+    const ribbonCleared = await page.evaluate(() => (window as any).__formulaApp.getAuditingHighlights());
+    expect(ribbonCleared.mode).toBe("off");
+    expect(ribbonCleared.precedents).toEqual([]);
+    expect(ribbonCleared.dependents).toEqual([]);
   });
 });
