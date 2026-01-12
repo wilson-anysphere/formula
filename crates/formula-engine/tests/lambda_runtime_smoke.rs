@@ -196,3 +196,26 @@ fn engine_coerces_top_level_lambda_results_to_calc_error() {
         Value::Error(ErrorKind::Calc)
     );
 }
+
+#[test]
+fn engine_coerces_lambda_values_inside_spilled_arrays_to_calc_error() {
+    let mut engine = Engine::new();
+
+    // IF is array-enabled and can produce a spilled array result. Ensure any lambda element is
+    // stored as #CALC! rather than a callable Value::Lambda.
+    engine
+        // Use numeric truthy/falsy values inside the array literal to avoid locale/parser
+        // differences in boolean literal handling.
+        .set_cell_formula("Sheet1", "A1", "=IF({1,0}, LAMBDA(x,x), 0)")
+        .unwrap();
+
+    engine.recalculate_single_threaded();
+
+    // Spill origin: lambda coerced to #CALC!.
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Calc)
+    );
+    // Spill output: scalar branch preserved.
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(0.0));
+}

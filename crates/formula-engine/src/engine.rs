@@ -1901,7 +1901,7 @@ impl Engine {
         };
 
         match value {
-            Value::Array(array) => {
+            Value::Array(mut array) => {
                 if array.rows == 0 || array.cols == 0 {
                     self.apply_eval_result(
                         key,
@@ -1911,6 +1911,15 @@ impl Engine {
                         value_changes,
                     );
                     return;
+                }
+
+                // Excel treats bare lambda values (not invoked) as `#CALC!`.
+                // This applies to each spilled cell as well, so coerce any lambda elements in a
+                // dynamic array result to `#CALC!` before the spill is materialized.
+                for value in &mut array.values {
+                    if matches!(value, Value::Lambda(_)) {
+                        *value = Value::Error(ErrorKind::Calc);
+                    }
                 }
 
                 let mut spill_too_big = || {
