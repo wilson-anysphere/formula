@@ -175,12 +175,17 @@ describe("sheetStoreDocumentSync", () => {
 
   test("syncs sheet metadata (name/visibility/tabColor) from the doc on applyState", async () => {
     const doc = new MockDoc();
-    doc.sheetIds = ["Sheet1"];
+    doc.sheetIds = ["Sheet1", "Sheet2"];
     doc.sheetMetaById = {
       Sheet1: { name: "Budget", visibility: "hidden", tabColor: { rgb: "FF0000" } },
+      // Keep at least one visible sheet (Excel invariant; WorkbookSheetStore enforces this too).
+      Sheet2: { name: "Sheet2", visibility: "visible" },
     };
 
-    const store = new WorkbookSheetStore([{ id: "Sheet1", name: "Sheet1", visibility: "visible" }]);
+    const store = new WorkbookSheetStore([
+      { id: "Sheet1", name: "Sheet1", visibility: "visible" },
+      { id: "Sheet2", name: "Sheet2", visibility: "visible" },
+    ]);
     let activeSheetId = "Sheet1";
 
     const handle = startSheetStoreDocumentSync(
