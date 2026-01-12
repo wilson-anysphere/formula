@@ -7656,7 +7656,15 @@ fn bytecode_expr_is_eligible_inner(
                 | Function::IsErr
                 | Function::ErrorType
                 | Function::N
-                | Function::T => {
+                | Function::T
+                | Function::Abs
+                | Function::Int
+                | Function::Round
+                | Function::RoundUp
+                | Function::RoundDown
+                | Function::Mod
+                | Function::Sign
+                | Function::Not => {
                     let mut all_scalar = true;
                     for arg in args {
                         if !matches!(
@@ -8115,20 +8123,28 @@ fn bytecode_expr_is_eligible_inner(
                     .all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
             }
             bytecode::ast::Function::Abs
-            | bytecode::ast::Function::Now
-            | bytecode::ast::Function::Today
             | bytecode::ast::Function::Int
             | bytecode::ast::Function::Round
             | bytecode::ast::Function::RoundUp
             | bytecode::ast::Function::RoundDown
             | bytecode::ast::Function::Mod
             | bytecode::ast::Function::Sign
+            | bytecode::ast::Function::Not => args
+                .iter()
+                .all(|arg| {
+                    if allow_array_literals {
+                        bytecode_expr_is_eligible_inner(arg, true, true, lexical_scopes)
+                    } else {
+                        bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
+                    }
+                }),
+            bytecode::ast::Function::Now
+            | bytecode::ast::Function::Today
             | bytecode::ast::Function::Db
             | bytecode::ast::Function::Vdb
             | bytecode::ast::Function::Concat
             | bytecode::ast::Function::Rand
-            | bytecode::ast::Function::RandBetween
-            | bytecode::ast::Function::Not => args
+            | bytecode::ast::Function::RandBetween => args
                 .iter()
                 .all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)),
             bytecode::ast::Function::IsBlank

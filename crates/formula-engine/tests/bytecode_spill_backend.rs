@@ -175,16 +175,16 @@ fn bytecode_spills_match_ast_for_row_and_column_functions_over_spill_ranges() {
         let mut engine = Engine::new();
         engine.set_bytecode_enabled(bytecode_enabled);
 
-        // Use scalar-only functions (ABS) to ensure the spill origins are evaluated by the AST
-        // backend even when bytecode is enabled; this isolates the test to the `A1#` spill-range
-        // reference handling in the ROW/COLUMN bytecode programs.
+        // Use functions that are not bytecode-eligible (SEQUENCE) to ensure the spill origins are
+        // evaluated by the AST backend even when bytecode is enabled; this isolates the test to
+        // the `A1#` spill-range reference handling in the ROW/COLUMN bytecode programs.
         engine
-            .set_cell_formula("Sheet1", "A1", "=ABS({1;2;3})")
+            .set_cell_formula("Sheet1", "A1", "=SEQUENCE(3)")
             .unwrap();
         engine.set_cell_formula("Sheet1", "C1", "=ROW(A1#)").unwrap();
 
         engine
-            .set_cell_formula("Sheet1", "A10", "=ABS({1,2,3})")
+            .set_cell_formula("Sheet1", "A10", "=SEQUENCE(1,3)")
             .unwrap();
         engine
             .set_cell_formula("Sheet1", "E10", "=COLUMN(A10#)")

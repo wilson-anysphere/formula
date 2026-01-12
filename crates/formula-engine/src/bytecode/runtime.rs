@@ -1207,6 +1207,116 @@ fn elementwise_binary(left: &Value, right: &Value, f: impl Fn(&Value, &Value) ->
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct LiftShape {
+    rows: usize,
+    cols: usize,
+}
+
+impl LiftShape {
+    fn is_1x1(self) -> bool {
+        self.rows == 1 && self.cols == 1
+    }
+
+    fn len(self) -> usize {
+        self.rows.saturating_mul(self.cols)
+    }
+}
+
+fn lift_shape(value: &Value) -> Option<LiftShape> {
+    match value {
+        Value::Array(arr) => Some(LiftShape {
+            rows: arr.rows,
+            cols: arr.cols,
+        }),
+        _ => None,
+    }
+}
+
+/// Excel-style array-lifting shape inference used by many scalar functions:
+/// - Scalars broadcast over arrays.
+/// - 1x1 arrays broadcast over larger arrays.
+/// - Other array shapes must match exactly.
+fn lift_dominant_shape(values: &[&Value]) -> Result<Option<LiftShape>, ErrorKind> {
+    let mut dominant: Option<LiftShape> = None;
+    let mut saw_array = false;
+
+    for value in values {
+        let Some(shape) = lift_shape(value) else {
+            continue;
+        };
+        saw_array = true;
+
+        if shape.is_1x1() {
+            continue;
+        }
+
+        match dominant {
+            None => dominant = Some(shape),
+            Some(existing) if existing == shape => {}
+            Some(_) => return Err(ErrorKind::Value),
+        }
+    }
+
+    if dominant.is_some() {
+        return Ok(dominant);
+    }
+
+    if saw_array {
+        return Ok(Some(LiftShape { rows: 1, cols: 1 }));
+    }
+
+    Ok(None)
+}
+
+fn lift_broadcast_compatible(value: &Value, target: LiftShape) -> bool {
+    match value {
+        Value::Array(arr) => {
+            (arr.rows == target.rows && arr.cols == target.cols) || (arr.rows == 1 && arr.cols == 1)
+        }
+        _ => true,
+    }
+}
+
+fn lift_element_at<'a>(value: &'a Value, target: LiftShape, idx: usize) -> &'a Value {
+    match value {
+        Value::Array(arr) => {
+            if arr.rows == 1 && arr.cols == 1 {
+                return arr.values.get(0).unwrap_or(&Value::Empty);
+            }
+            debug_assert_eq!(arr.rows, target.rows);
+            debug_assert_eq!(arr.cols, target.cols);
+            arr.values.get(idx).unwrap_or(&Value::Empty)
+        }
+        other => other,
+    }
+}
+
+fn lift2(a: Value, b: Value, f: impl Fn(&Value, &Value) -> Value) -> Value {
+    let Some(shape) = (match lift_dominant_shape(&[&a, &b]) {
+        Ok(shape) => shape,
+        Err(e) => return Value::Error(e),
+    }) else {
+        return f(&a, &b);
+    };
+
+    if !lift_broadcast_compatible(&a, shape) || !lift_broadcast_compatible(&b, shape) {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let len = shape.len();
+    let mut out = Vec::new();
+    if out.try_reserve_exact(len).is_err() {
+        return Value::Error(ErrorKind::Num);
+    }
+    for idx in 0..len {
+        let av = lift_element_at(&a, shape, idx);
+        let bv = lift_element_at(&b, shape, idx);
+        out.push(f(av, bv));
+    }
+    Value::Array(ArrayValue::new(shape.rows, shape.cols, out))
+}
+
 fn deref_range_dynamic(grid: &dyn Grid, range: ResolvedRange) -> Value {
     if !range_in_bounds(grid, range) {
         return Value::Error(ErrorKind::Ref);
@@ -1454,13 +1564,13 @@ pub fn call_function(
         Function::VLookup => fn_vlookup(args, grid, base),
         Function::HLookup => fn_hlookup(args, grid, base),
         Function::Match => fn_match(args, grid, base),
-        Function::Abs => fn_abs(args),
-        Function::Int => fn_int(args),
-        Function::Round => fn_round(args),
-        Function::RoundUp => fn_roundup(args),
-        Function::RoundDown => fn_rounddown(args),
-        Function::Mod => fn_mod(args),
-        Function::Sign => fn_sign(args),
+        Function::Abs => fn_abs(args, grid, base),
+        Function::Int => fn_int(args, grid, base),
+        Function::Round => fn_round(args, grid, base),
+        Function::RoundUp => fn_roundup(args, grid, base),
+        Function::RoundDown => fn_rounddown(args, grid, base),
+        Function::Mod => fn_mod(args, grid, base),
+        Function::Sign => fn_sign(args, grid, base),
         Function::Db => fn_db(args),
         Function::Vdb => fn_vdb(args),
         Function::CoupDayBs => fn_coupdaybs(args),
@@ -2763,24 +2873,26 @@ fn fn_oddlyield(args: &[Value]) -> Value {
     ))
 }
 
-fn fn_abs(args: &[Value]) -> Value {
+fn fn_abs(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if args.len() != 1 {
         return Value::Error(ErrorKind::Value);
     }
-    match coerce_to_number(&args[0]) {
+    let v = deref_value_dynamic(args[0].clone(), grid, base);
+    elementwise_unary(&v, |elem| match coerce_to_number(elem) {
         Ok(n) => Value::Number(n.abs()),
         Err(e) => Value::Error(e),
-    }
+    })
 }
 
-fn fn_int(args: &[Value]) -> Value {
+fn fn_int(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if args.len() != 1 {
         return Value::Error(ErrorKind::Value);
     }
-    match coerce_to_number(&args[0]) {
+    let v = deref_value_dynamic(args[0].clone(), grid, base);
+    elementwise_unary(&v, |elem| match coerce_to_number(elem) {
         Ok(n) => Value::Number(n.floor()),
         Err(e) => Value::Error(e),
-    }
+    })
 }
 
 fn coerce_to_i64(v: &Value) -> Result<i64, ErrorKind> {
@@ -2830,69 +2942,80 @@ fn round_with_mode(n: f64, digits: i32, mode: RoundMode) -> f64 {
     }
 }
 
-fn fn_round_impl(args: &[Value], mode: RoundMode) -> Value {
+fn fn_round_impl(args: &[Value], mode: RoundMode, grid: &dyn Grid, base: CellCoord) -> Value {
     if args.len() != 2 {
         return Value::Error(ErrorKind::Value);
     }
-    let number = match coerce_to_number(&args[0]) {
-        Ok(n) => n,
-        Err(e) => return Value::Error(e),
-    };
-    let digits = match coerce_to_i64(&args[1]) {
-        Ok(n) => n,
-        Err(e) => return Value::Error(e),
-    };
-    Value::Number(round_with_mode(number, digits as i32, mode))
+    let number = deref_value_dynamic(args[0].clone(), grid, base);
+    let digits = deref_value_dynamic(args[1].clone(), grid, base);
+    lift2(number, digits, |number, digits| {
+        let number = match coerce_to_number(number) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let digits = match coerce_to_i64(digits) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        Value::Number(round_with_mode(number, digits as i32, mode))
+    })
 }
 
-fn fn_round(args: &[Value]) -> Value {
-    fn_round_impl(args, RoundMode::Nearest)
+fn fn_round(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
+    fn_round_impl(args, RoundMode::Nearest, grid, base)
 }
 
-fn fn_roundup(args: &[Value]) -> Value {
-    fn_round_impl(args, RoundMode::Up)
+fn fn_roundup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
+    fn_round_impl(args, RoundMode::Up, grid, base)
 }
 
-fn fn_rounddown(args: &[Value]) -> Value {
-    fn_round_impl(args, RoundMode::Down)
+fn fn_rounddown(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
+    fn_round_impl(args, RoundMode::Down, grid, base)
 }
 
-fn fn_mod(args: &[Value]) -> Value {
+fn fn_mod(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if args.len() != 2 {
         return Value::Error(ErrorKind::Value);
     }
-    let n = match coerce_to_number(&args[0]) {
-        Ok(n) => n,
-        Err(e) => return Value::Error(e),
-    };
-    let d = match coerce_to_number(&args[1]) {
-        Ok(n) => n,
-        Err(e) => return Value::Error(e),
-    };
-    if d == 0.0 {
-        return Value::Error(ErrorKind::Div0);
-    }
-    Value::Number(n - d * (n / d).floor())
+    let n = deref_value_dynamic(args[0].clone(), grid, base);
+    let d = deref_value_dynamic(args[1].clone(), grid, base);
+    lift2(n, d, |n, d| {
+        let n = match coerce_to_number(n) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let d = match coerce_to_number(d) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        if d == 0.0 {
+            return Value::Error(ErrorKind::Div0);
+        }
+        Value::Number(n - d * (n / d).floor())
+    })
 }
 
-fn fn_sign(args: &[Value]) -> Value {
+fn fn_sign(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if args.len() != 1 {
         return Value::Error(ErrorKind::Value);
     }
-    let number = match coerce_to_number(&args[0]) {
-        Ok(n) => n,
-        Err(e) => return Value::Error(e),
-    };
-    if !number.is_finite() {
-        return Value::Error(ErrorKind::Num);
-    }
-    if number > 0.0 {
-        Value::Number(1.0)
-    } else if number < 0.0 {
-        Value::Number(-1.0)
-    } else {
-        Value::Number(0.0)
-    }
+    let v = deref_value_dynamic(args[0].clone(), grid, base);
+    elementwise_unary(&v, |elem| {
+        let number = match coerce_to_number(elem) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        if !number.is_finite() {
+            return Value::Error(ErrorKind::Num);
+        }
+        if number > 0.0 {
+            Value::Number(1.0)
+        } else if number < 0.0 {
+            Value::Number(-1.0)
+        } else {
+            Value::Number(0.0)
+        }
+    })
 }
 
 fn fn_not(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {

@@ -1635,7 +1635,7 @@ fn bytecode_backend_supports_spill_range_operator() {
 }
 
 #[test]
-fn bytecode_backend_let_spill_range_locals_do_not_enable_scalar_functions() {
+fn bytecode_backend_let_spill_range_locals_allow_abs_to_spill_via_bytecode() {
     let mut engine = Engine::new();
 
     // Create a spilled dynamic array (A1:A2).
@@ -1643,13 +1643,13 @@ fn bytecode_backend_let_spill_range_locals_do_not_enable_scalar_functions() {
         .set_cell_formula("Sheet1", "A1", "=SEQUENCE(2)")
         .unwrap();
 
-    // Scalar functions like ABS lift over arrays in the AST backend, but the bytecode backend does
-    // not support that yet. Ensure LET locals don't "smuggle" a spill-range reference into a
-    // scalar-only bytecode context.
+    // ABS supports array-lifting semantics in bytecode, so spill-range locals should be bytecode
+    // eligible and spill correctly.
     engine
         .set_cell_formula("Sheet1", "B1", "=ABS(LET(r, A1#, r))")
         .unwrap();
 
+    assert_eq!(engine.bytecode_program_count(), 1);
     engine.recalculate_single_threaded();
 
     assert_eq!(
@@ -1661,18 +1661,18 @@ fn bytecode_backend_let_spill_range_locals_do_not_enable_scalar_functions() {
 }
 
 #[test]
-fn bytecode_backend_let_range_arithmetic_locals_do_not_enable_scalar_functions() {
+fn bytecode_backend_let_range_arithmetic_locals_allow_abs_to_spill_via_bytecode() {
     let mut engine = Engine::new();
 
     engine.set_cell_value("Sheet1", "A1", -1.0).unwrap();
     engine.set_cell_value("Sheet1", "A2", -2.0).unwrap();
 
-    // `A1:A2+0` produces a dynamic array result. Ensure that binding it to a LET local does not
-    // allow the bytecode backend to compile `ABS(...)` (which does not yet lift over arrays).
+    // `A1:A2+0` produces an array result. ABS should lift over it and spill in bytecode mode.
     engine
         .set_cell_formula("Sheet1", "B1", "=ABS(LET(x, A1:A2+0, x))")
         .unwrap();
 
+    assert_eq!(engine.bytecode_program_count(), 1);
     engine.recalculate_single_threaded();
 
     assert_eq!(
@@ -1684,15 +1684,16 @@ fn bytecode_backend_let_range_arithmetic_locals_do_not_enable_scalar_functions()
 }
 
 #[test]
-fn bytecode_backend_let_array_literal_arithmetic_locals_do_not_enable_scalar_functions() {
+fn bytecode_backend_let_array_literal_arithmetic_locals_allow_abs_to_spill_via_bytecode() {
     let mut engine = Engine::new();
 
-    // `{-1;-2}+0` produces a dynamic array result (not a plain array literal). Ensure LET locals
-    // don't allow scalar-only bytecode functions to accept it.
+    // `{-1;-2}+0` produces a dynamic array result (not a plain array literal). ABS should lift over
+    // it and spill in bytecode mode.
     engine
         .set_cell_formula("Sheet1", "A1", "=ABS(LET(x, {-1;-2}+0, x))")
         .unwrap();
 
+    assert_eq!(engine.bytecode_program_count(), 1);
     engine.recalculate_single_threaded();
 
     assert_eq!(
@@ -1704,17 +1705,19 @@ fn bytecode_backend_let_array_literal_arithmetic_locals_do_not_enable_scalar_fun
 }
 
 #[test]
-fn bytecode_backend_let_nested_let_range_result_locals_do_not_enable_scalar_functions() {
+fn bytecode_backend_let_nested_let_range_result_locals_allow_abs_to_spill_via_bytecode() {
     let mut engine = Engine::new();
 
     engine.set_cell_value("Sheet1", "A1", -1.0).unwrap();
     engine.set_cell_value("Sheet1", "A2", -2.0).unwrap();
 
-    // Nested LETs should propagate range/array-typed locals through the kind inference logic.
+    // Nested LETs should propagate range/array-typed locals through the kind inference logic and
+    // remain bytecode-eligible now that ABS lifts over arrays.
     engine
         .set_cell_formula("Sheet1", "B1", "=ABS(LET(x, LET(r, A1:A2, r)+0, x))")
         .unwrap();
 
+    assert_eq!(engine.bytecode_program_count(), 1);
     engine.recalculate_single_threaded();
 
     assert_eq!(
@@ -1766,19 +1769,19 @@ fn bytecode_backend_let_choose_single_cell_reference_locals_are_scalar_safe() {
 }
 
 #[test]
-fn bytecode_backend_let_choose_range_locals_do_not_enable_scalar_functions() {
+fn bytecode_backend_let_choose_range_locals_allow_abs_to_spill_via_bytecode() {
     let mut engine = Engine::new();
 
     engine.set_cell_value("Sheet1", "A1", -1.0).unwrap();
     engine.set_cell_value("Sheet1", "A2", -2.0).unwrap();
 
-    // CHOOSE can also return multi-cell ranges. Ensure LET locals don't allow scalar-only bytecode
-    // functions to accept those reference values (bytecode ABS does not lift over arrays/ranges).
+    // CHOOSE can also return multi-cell ranges. ABS should be able to lift over those ranges and
+    // spill in bytecode mode.
     engine
         .set_cell_formula("Sheet1", "C1", "=ABS(LET(x, CHOOSE(1, A1:A2, A1:A2), x))")
         .unwrap();
 
-    assert_eq!(engine.bytecode_program_count(), 0);
+    assert_eq!(engine.bytecode_program_count(), 1);
 
     engine.recalculate_single_threaded();
 
@@ -1791,20 +1794,18 @@ fn bytecode_backend_let_choose_range_locals_do_not_enable_scalar_functions() {
 }
 
 #[test]
-fn bytecode_backend_let_array_returning_function_locals_do_not_enable_scalar_functions() {
+fn bytecode_backend_let_array_returning_function_locals_allow_abs_to_spill_via_bytecode() {
     let mut engine = Engine::new();
 
     engine.set_cell_value("Sheet1", "A1", -1.0).unwrap();
     engine.set_cell_value("Sheet1", "A2", -2.0).unwrap();
 
-    // N(A1:A2) returns an array result. Ensure binding it to a LET local does not allow scalar-only
-    // bytecode functions like ABS to compile (they do not yet lift over arrays in bytecode).
+    // N(A1:A2) returns an array result. ABS should lift over it and spill in bytecode mode.
     engine
         .set_cell_formula("Sheet1", "B1", "=ABS(LET(x, N(A1:A2), x))")
         .unwrap();
 
-    // ABS should be evaluated via the AST backend, so this formula should not compile to bytecode.
-    assert_eq!(engine.bytecode_program_count(), 0);
+    assert_eq!(engine.bytecode_program_count(), 1);
 
     engine.recalculate_single_threaded();
 
