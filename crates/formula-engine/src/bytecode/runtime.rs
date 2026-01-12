@@ -1051,20 +1051,21 @@ fn or_range(
 }
 
 fn format_number_general(n: f64) -> String {
+    // Match the engine's number-to-text coercion semantics used by the AST evaluator. The AST
+    // path uses `Value::coerce_to_string_with_ctx`, which relies on `formula-format` for locale-
+    // aware "General" formatting.
+    //
+    // Using the same logic here avoids backend divergence in bytecode-eligible formulas like
+    // `=A1&B1` and locale-specific cases like `=CONCAT(1.5)` under `de-DE` (`1,5`).
     let options = FormatOptions {
         locale: thread_value_locale().separators,
         date_system: match thread_date_system() {
-            // `formula-format` always uses the Lotus 1-2-3 leap-year bug behavior
-            // for the 1900 date system (Excel compatibility).
+            // `formula-format` always uses the Lotus 1-2-3 leap-year bug behavior for the 1900
+            // date system (Excel compatibility).
             ExcelDateSystem::Excel1900 { .. } => DateSystem::Excel1900,
             ExcelDateSystem::Excel1904 => DateSystem::Excel1904,
         },
     };
-
-    // Match the engine's number-to-text coercion semantics used by the AST evaluator (Excel's
-    // "General" format), including locale-specific decimal separators. This avoids divergence in
-    // bytecode-eligible formulas like `=1.5&""` / `=CONCAT(1.5)` under `de-DE`, which Excel formats
-    // as `1,5`.
     formula_format::format_value(FmtValue::Number(n), None, &options).text
 }
 

@@ -363,6 +363,27 @@ fn array_literal_errors_propagate_in_sum() {
 }
 
 #[test]
+fn array_literals_do_not_enable_bytecode_for_typed_array_functions_yet() {
+    // The bytecode backend currently only supports array literals as *numeric* arrays (NaN for
+    // non-numeric elements) for numeric aggregate functions. Functions like AND/OR have typed
+    // semantics over booleans within array literals, so keep them on the AST backend until the
+    // bytecode Value representation can preserve mixed element types.
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=AND({TRUE,FALSE})")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=OR({TRUE,FALSE})")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 0);
+
+    engine.recalculate_single_threaded();
+    assert_engine_matches_ast(&engine, "=AND({TRUE,FALSE})", "A1");
+    assert_engine_matches_ast(&engine, "=OR({TRUE,FALSE})", "A2");
+}
+
+#[test]
 fn bytecode_backend_inlines_defined_name_static_ranges() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
