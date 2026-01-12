@@ -60,6 +60,40 @@ fn info_recalc_and_unknown_keys() {
 }
 
 #[test]
+fn info_recalc_reflects_calc_settings() {
+    use formula_engine::calc_settings::{CalcSettings, CalculationMode};
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    engine.set_calc_settings(CalcSettings {
+        calculation_mode: CalculationMode::Automatic,
+        ..CalcSettings::default()
+    });
+    engine
+        .set_cell_formula("Sheet1", "A1", "=INFO(\"recalc\")")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Text("Automatic".to_string())
+    );
+
+    let mut engine = Engine::new();
+    engine.set_calc_settings(CalcSettings {
+        calculation_mode: CalculationMode::AutomaticNoTable,
+        ..CalcSettings::default()
+    });
+    engine
+        .set_cell_formula("Sheet1", "A1", "=INFO(\"recalc\")")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Text("Automatic except for tables".to_string())
+    );
+}
+
+#[test]
 fn info_numfile_counts_sheets() {
     use formula_engine::Engine;
 
