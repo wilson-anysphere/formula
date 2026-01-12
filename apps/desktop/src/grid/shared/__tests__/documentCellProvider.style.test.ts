@@ -37,7 +37,7 @@ describe("DocumentCellProvider (shared grid) style mapping", () => {
     const style = (cell as any).style as any;
     expect(style).toBeTruthy();
 
-    expect(style.fill).toBe("rgba(255,255,0,1)");
+    expect(style.fill).toBe("#ffff00");
     expect(style.fontWeight).toBe("700");
     expect(style.fontStyle).toBe("italic");
     expect(style.underline).toBe(true);
@@ -45,11 +45,10 @@ describe("DocumentCellProvider (shared grid) style mapping", () => {
     expect(style.wrapMode).toBe("word");
 
     expect(style.borders).toEqual({
-      left: { width: 1, style: "solid", color: "rgba(0,0,0,1)" },
-      right: { width: 1, style: "solid", color: "rgba(0,0,0,1)" },
-      top: { width: 1, style: "solid", color: "rgba(0,0,0,1)" },
-      bottom: { width: 1, style: "solid", color: "rgba(0,0,0,1)" }
+      left: { width: 1, style: "solid", color: "#000000" },
+      right: { width: 1, style: "solid", color: "#000000" },
+      top: { width: 1, style: "solid", color: "#000000" },
+      bottom: { width: 1, style: "solid", color: "#000000" }
     });
   });
 });
-

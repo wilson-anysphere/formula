@@ -3,6 +3,7 @@ import { LruCache } from "@formula/grid";
 import type { DocumentController } from "../../document/documentController.js";
 import { resolveCssVar } from "../../theme/cssVars.js";
 import { formatValueWithNumberFormat } from "../../formatting/numberFormat.js";
+import { normalizeExcelColorToCss } from "../../shared/colors.js";
 
 type RichTextValue = { text: string; runs?: Array<{ start: number; end: number; style?: Record<string, unknown> }> };
 
@@ -15,56 +16,8 @@ function isPlainObject(value: unknown): value is Record<string, any> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-/**
- * Normalize a hex color to a CSS color string.
- *
- * This intentionally matches the clipboard’s permissive behavior:
- * - accepts `#RGB` / `RGB`
- * - accepts `#RRGGBB` / `RRGGBB`
- * - accepts Excel/OOXML ARGB `#AARRGGBB` / `AARRGGBB` (converts to `#RRGGBB` or `rgba(r,g,b,a)`)
- */
-function normalizeHexToCssColor(hex: string): string | null {
-  const normalized = hex.trim().replace(/^#/, "");
-  if (!/^[0-9a-fA-F]+$/.test(normalized)) return null;
-
-  // #RGB
-  if (normalized.length === 3) {
-    const [r, g, b] = normalized.split("");
-    return `#${r}${r}${g}${g}${b}${b}`;
-  }
-
-  // #RRGGBB
-  if (normalized.length === 6) return `#${normalized}`;
-
-  // Excel/OOXML commonly stores colors as ARGB (AARRGGBB).
-  if (normalized.length === 8) {
-    const a = Number.parseInt(normalized.slice(0, 2), 16);
-    const r = Number.parseInt(normalized.slice(2, 4), 16);
-    const g = Number.parseInt(normalized.slice(4, 6), 16);
-    const b = Number.parseInt(normalized.slice(6, 8), 16);
-    if (![a, r, g, b].every((n) => Number.isFinite(n))) return null;
-
-    if (a >= 255) {
-      return `#${normalized.slice(2)}`;
-    }
-
-    const alpha = Math.max(0, Math.min(1, a / 255));
-    const rounded = Math.round(alpha * 1000) / 1000;
-    return `rgba(${r},${g},${b},${rounded})`;
-  }
-
-  return null;
-}
-
 function normalizeCssColor(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-
-  // Accept plain CSS colors as-is.
-  if (!/^[0-9a-fA-F#]+$/.test(trimmed)) return trimmed;
-
-  return normalizeHexToCssColor(trimmed) ?? trimmed;
+  return normalizeExcelColorToCss(value) ?? null;
 }
 
 function isRichTextValue(value: unknown): value is RichTextValue {

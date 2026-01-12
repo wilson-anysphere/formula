@@ -97,7 +97,7 @@ describe("DocumentCellProvider formatting integration", () => {
     const cell = provider.getCell(headerRows, headerCols);
     expect(cell).not.toBeNull();
     expect(cell?.style?.fontWeight).toBe("700");
-    expect(cell?.style?.fill).toBe("#FFFF00");
+    expect(cell?.style?.fill).toBe("#ffff00");
   });
 
   it("maps diagonal border flags from DocumentController styles into grid CellStyle.diagonalBorders", () => {
