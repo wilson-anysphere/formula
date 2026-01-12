@@ -2,7 +2,10 @@ use std::io::{Cursor, Write};
 
 use formula_model::drawings::ImageId;
 
-fn build_minimal_cellimages_xlsx(cellimages_rel_target: &str, image_bytes: &[u8]) -> Vec<u8> {
+fn build_minimal_cellimages_xlsx(
+    cellimages_rel_target: &str,
+    image_bytes: Option<&[u8]>,
+) -> Vec<u8> {
     let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
@@ -57,8 +60,10 @@ fn build_minimal_cellimages_xlsx(cellimages_rel_target: &str, image_bytes: &[u8]
         .unwrap();
     zip.write_all(cellimages_rels.as_bytes()).unwrap();
 
-    zip.start_file("xl/media/image1.png", options).unwrap();
-    zip.write_all(image_bytes).unwrap();
+    if let Some(image_bytes) = image_bytes {
+        zip.start_file("xl/media/image1.png", options).unwrap();
+        zip.write_all(image_bytes).unwrap();
+    }
 
     zip.finish().unwrap().into_inner()
 }
@@ -67,7 +72,7 @@ fn build_minimal_cellimages_xlsx(cellimages_rel_target: &str, image_bytes: &[u8]
 fn load_from_bytes_populates_workbook_images_from_cellimages() -> Result<(), Box<dyn std::error::Error>>
 {
     let expected = b"png-bytes";
-    let bytes = build_minimal_cellimages_xlsx("media/image1.png", expected);
+    let bytes = build_minimal_cellimages_xlsx("media/image1.png", Some(expected));
     let doc = formula_xlsx::load_from_bytes(&bytes)?;
 
     let image = doc
@@ -87,7 +92,7 @@ fn cellimages_load_from_bytes_tolerates_parent_dir_media_target_for_lightweight_
     // from workbook-level `xl/cellimages.xml.rels`, even though the actual media parts live under
     // `xl/media/*`. We should resolve this best-effort rather than dropping the image.
     let expected = b"png-bytes-from-parent-dir-target";
-    let bytes = build_minimal_cellimages_xlsx("../media/image1.png", expected);
+    let bytes = build_minimal_cellimages_xlsx("../media/image1.png", Some(expected));
     let doc = formula_xlsx::load_from_bytes(&bytes)?;
 
     let image = doc
@@ -97,5 +102,15 @@ fn cellimages_load_from_bytes_tolerates_parent_dir_media_target_for_lightweight_
         .expect("expected Workbook.images to contain image1.png");
     assert_eq!(image.bytes.as_slice(), expected);
 
+    Ok(())
+}
+
+#[test]
+fn cellimages_missing_media_is_best_effort() -> Result<(), Box<dyn std::error::Error>> {
+    // Missing referenced media should not fail workbook load; we should just skip that image.
+    let bytes = build_minimal_cellimages_xlsx("media/image1.png", None);
+    let doc = formula_xlsx::load_from_bytes(&bytes)?;
+
+    assert!(doc.workbook.images.get(&ImageId::new("image1.png")).is_none());
     Ok(())
 }
