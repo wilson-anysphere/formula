@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -70,7 +71,10 @@ test("CollabVersioning integration: restore syncs + persists (sync-server)", asy
     env: { SYNC_SERVER_PERSISTENCE_BACKEND: "file" },
   });
 
-  const docId = "collab-versioning-test-doc";
+  // Use a unique doc id to avoid cross-test collisions when running multiple
+  // suites against the same sync-server data dir (or when reusing tmp dirs in
+  // local debugging).
+  const docId = `collab-versioning-test-doc-${randomUUID()}`;
   const wsUrl = server.wsUrl;
 
   // Create sessions sequentially. This test is about versioning + restore behavior,

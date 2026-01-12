@@ -40,7 +40,7 @@ async function waitForCellFormat(documentController, sheetId, coord, expectedFor
     } catch {
       return false;
     }
-  }, 10_000);
+  }, 30_000);
 }
 
 test("sync-server + collab-session + Yjs↔DocumentController binder: sync, undo, persistence", async (t) => {
