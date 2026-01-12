@@ -2457,13 +2457,18 @@ fn reconcile_biff_sheet_mapping(
 fn sanitize_biff8_continued_name_records_for_calamine(stream: &[u8]) -> Option<Vec<u8>> {
     const RECORD_NAME: u16 = 0x0018;
     const RECORD_CONTINUE: u16 = 0x003C;
+    const NAME_FLAG_BUILTIN: u16 = 0x0020;
 
     // Calamine's NAME parser reads:
     // - cch (u8) at offset 3 in the NAME payload
     // - cce (u16) at offset 4 in the NAME payload
     //
-    // It can panic when `cce` exceeds the first physical fragment length. To avoid that, patch
-    // `cce` to 0 for any NAME record that is continued.
+    // It can panic when:
+    // - the NAME record is continued and `cce` exceeds the first physical fragment length, or
+    // - `cch` / `cce` claims bytes that don't fit in the physical record payload (corrupt files).
+    //
+    // To avoid this, patch `cce` to 0 (and clamp `cch` best-effort) for any NAME record that is
+    // continued *or* appears malformed.
     //
     // This keeps the name string available (so `PtgName` tokens can still resolve) while making
     // calamine skip parsing the formula payload.
@@ -2486,10 +2491,60 @@ fn sanitize_biff8_continued_name_records_for_calamine(stream: &[u8]) -> Option<V
             break;
         }
 
-        if record_id == RECORD_NAME && next + 4 <= stream.len() {
-            let next_id = u16::from_le_bytes([stream[next], stream[next + 1]]);
-            if next_id == RECORD_CONTINUE {
-                name_header_offsets.push(offset);
+        if record_id == RECORD_NAME {
+            // Best-effort bounds checks; if we can't even read the fields calamine depends on,
+            // there's nothing useful we can do here.
+            if len >= 6 && data_start + 6 <= stream.len() {
+                let grbit = if len >= 2 && data_start + 2 <= stream.len() {
+                    u16::from_le_bytes([stream[data_start], stream[data_start + 1]])
+                } else {
+                    0
+                };
+                let is_builtin = (grbit & NAME_FLAG_BUILTIN) != 0;
+                let cch = stream[data_start + 3] as usize;
+                let cce = u16::from_le_bytes([stream[data_start + 4], stream[data_start + 5]]) as usize;
+
+                let mut needs_patch = false;
+
+                // Continued NAME records are known to trigger calamine panics when `cce` spans
+                // fragments.
+                if next + 4 <= stream.len() {
+                    let next_id = u16::from_le_bytes([stream[next], stream[next + 1]]);
+                    if next_id == RECORD_CONTINUE {
+                        needs_patch = true;
+                    }
+                }
+
+                // Best-effort: for non-built-in names, detect obviously out-of-bounds `cch`/`cce`
+                // values that would cause calamine slice panics even without CONTINUE records.
+                //
+                // Built-in NAME records have a different payload layout and are not required for
+                // `PtgName` decoding, so avoid guessing for them here.
+                if !is_builtin {
+                    // Calamine slices `&payload[14..]` and expects at least:
+                    // - 1 flags byte (buf[0])
+                    // - `cch` bytes of name data (buf[1..=cch])
+                    // - `cce` bytes of formula tokens after the name bytes.
+                    if len < 14 {
+                        needs_patch = true;
+                    } else {
+                        let available = len.saturating_sub(14);
+                        // `available > cch` is required for `buf[1..=cch]`.
+                        if available <= cch {
+                            needs_patch = true;
+                        } else {
+                            // Remaining bytes after flags+name.
+                            let remaining = available.saturating_sub(cch + 1);
+                            if cce > remaining {
+                                needs_patch = true;
+                            }
+                        }
+                    }
+                }
+
+                if needs_patch {
+                    name_header_offsets.push(offset);
+                }
             }
         }
 
@@ -2612,4 +2667,201 @@ fn parse_autofilter_range_from_defined_name(refers_to: &str) -> Result<Range, St
         .trim();
 
     Range::from_a1(a1).map_err(|err| format!("invalid A1 range `{a1}`: {err}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::io::Cursor;
+
+    use calamine::Xls;
+
+    const RECORD_BOF: u16 = 0x0809;
+    const RECORD_EOF: u16 = 0x000A;
+    const RECORD_CODEPAGE: u16 = 0x0042;
+    const RECORD_WINDOW1: u16 = 0x003D;
+    const RECORD_FONT: u16 = 0x0031;
+    const RECORD_XF: u16 = 0x00E0;
+    const RECORD_BOUNDSHEET: u16 = 0x0085;
+    const RECORD_NAME: u16 = 0x0018;
+
+    const RECORD_DIMENSIONS: u16 = 0x0200;
+    const RECORD_WINDOW2: u16 = 0x023E;
+    const RECORD_NUMBER: u16 = 0x0203;
+
+    const BOF_VERSION_BIFF8: u16 = 0x0600;
+    const BOF_DT_WORKBOOK_GLOBALS: u16 = 0x0005;
+    const BOF_DT_WORKSHEET: u16 = 0x0010;
+
+    const XF_FLAG_LOCKED: u16 = 0x0001;
+    const XF_FLAG_STYLE: u16 = 0x0004;
+
+    fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
+        out.extend_from_slice(&id.to_le_bytes());
+        out.extend_from_slice(&(data.len() as u16).to_le_bytes());
+        out.extend_from_slice(data);
+    }
+
+    fn bof(dt: u16) -> [u8; 16] {
+        let mut out = [0u8; 16];
+        out[0..2].copy_from_slice(&BOF_VERSION_BIFF8.to_le_bytes());
+        out[2..4].copy_from_slice(&dt.to_le_bytes());
+        out[4..6].copy_from_slice(&0x0DBBu16.to_le_bytes()); // build
+        out[6..8].copy_from_slice(&0x07CCu16.to_le_bytes()); // year (1996)
+        out
+    }
+
+    fn window1() -> [u8; 18] {
+        let mut out = [0u8; 18];
+        out[14..16].copy_from_slice(&1u16.to_le_bytes()); // cTabSel
+        out[16..18].copy_from_slice(&600u16.to_le_bytes()); // wTabRatio
+        out
+    }
+
+    fn window2() -> [u8; 18] {
+        let mut out = [0u8; 18];
+        let grbit: u16 = 0x02B6;
+        out[0..2].copy_from_slice(&grbit.to_le_bytes());
+        out
+    }
+
+    fn write_short_unicode_string(out: &mut Vec<u8>, s: &str) {
+        // BIFF8 ShortXLUnicodeString: [cch: u8][flags: u8][chars]
+        let bytes = s.as_bytes();
+        let len: u8 = bytes.len().try_into().expect("string too long for u8 length");
+        out.push(len);
+        out.push(0); // compressed
+        out.extend_from_slice(bytes);
+    }
+
+    fn font_arial() -> Vec<u8> {
+        // Minimal BIFF8 FONT record payload.
+        const COLOR_AUTOMATIC: u16 = 0x7FFF;
+        let mut out = Vec::<u8>::new();
+        out.extend_from_slice(&200u16.to_le_bytes()); // height
+        out.extend_from_slice(&0u16.to_le_bytes()); // option flags
+        out.extend_from_slice(&COLOR_AUTOMATIC.to_le_bytes()); // color
+        out.extend_from_slice(&400u16.to_le_bytes()); // weight
+        out.extend_from_slice(&0u16.to_le_bytes()); // escapement
+        out.push(0); // underline
+        out.push(0); // family
+        out.push(0); // charset
+        out.push(0); // reserved
+        write_short_unicode_string(&mut out, "Arial");
+        out
+    }
+
+    fn xf_record(is_style_xf: bool) -> [u8; 20] {
+        let mut out = [0u8; 20];
+        out[0..2].copy_from_slice(&0u16.to_le_bytes()); // font
+        out[2..4].copy_from_slice(&0u16.to_le_bytes()); // fmt
+        let flags: u16 = XF_FLAG_LOCKED | if is_style_xf { XF_FLAG_STYLE } else { 0 };
+        out[4..6].copy_from_slice(&flags.to_le_bytes());
+        out
+    }
+
+    fn number_cell(row: u16, col: u16, xf: u16, v: f64) -> [u8; 14] {
+        let mut out = [0u8; 14];
+        out[0..2].copy_from_slice(&row.to_le_bytes());
+        out[2..4].copy_from_slice(&col.to_le_bytes());
+        out[4..6].copy_from_slice(&xf.to_le_bytes());
+        out[6..14].copy_from_slice(&v.to_le_bytes());
+        out
+    }
+
+    fn build_minimal_workbook_stream_with_corrupt_name_oob_cch() -> Vec<u8> {
+        // Build a minimal, calamine-parseable BIFF8 workbook stream that contains a malformed NAME
+        // record where `cch` claims more bytes than exist in the physical record payload.
+        //
+        // Historically, such malformed records can panic calamine due to unchecked slice indexing.
+        let mut globals = Vec::<u8>::new();
+
+        push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+        push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+        push_record(&mut globals, RECORD_WINDOW1, &window1());
+        push_record(&mut globals, RECORD_FONT, &font_arial());
+
+        for _ in 0..16 {
+            push_record(&mut globals, RECORD_XF, &xf_record(true));
+        }
+        let xf_general = 16u16;
+        push_record(&mut globals, RECORD_XF, &xf_record(false));
+
+        // Single worksheet.
+        let boundsheet_start = globals.len();
+        let mut boundsheet = Vec::<u8>::new();
+        boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+        boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+        write_short_unicode_string(&mut boundsheet, "Sheet1");
+        push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+        let boundsheet_offset_pos = boundsheet_start + 4;
+
+        // Malformed NAME record:
+        // - cch=200, but we only provide flags byte + one character byte.
+        let mut name_payload = Vec::<u8>::new();
+        name_payload.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        name_payload.push(0); // chKey
+        name_payload.push(200); // cch (declared)
+        name_payload.extend_from_slice(&0u16.to_le_bytes()); // cce
+        name_payload.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        name_payload.extend_from_slice(&0u16.to_le_bytes()); // itab
+        name_payload.extend_from_slice(&[0, 0, 0, 0]); // cchCustMenu, cchDescription, cchHelpTopic, cchStatusText
+        name_payload.push(0); // name string flags (compressed)
+        name_payload.push(b'A'); // only 1 byte of name data
+        push_record(&mut globals, RECORD_NAME, &name_payload);
+
+        push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+        // -- Sheet substream ----------------------------------------------------
+        let sheet_offset = globals.len();
+        let mut sheet = Vec::<u8>::new();
+        push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+        // DIMENSIONS: rows [0, 1) cols [0, 1)
+        let mut dims = Vec::<u8>::new();
+        dims.extend_from_slice(&0u32.to_le_bytes());
+        dims.extend_from_slice(&1u32.to_le_bytes());
+        dims.extend_from_slice(&0u16.to_le_bytes());
+        dims.extend_from_slice(&1u16.to_le_bytes());
+        dims.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+        push_record(&mut sheet, RECORD_WINDOW2, &window2());
+        push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_general, 0.0));
+        push_record(&mut sheet, RECORD_EOF, &[]);
+
+        // Patch BoundSheet offset.
+        globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+            .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+        globals.extend_from_slice(&sheet);
+        globals
+    }
+
+    fn calamine_can_open_workbook_stream(workbook_stream: &[u8]) -> bool {
+        std::panic::catch_unwind(|| {
+            let xls_bytes = build_in_memory_xls(workbook_stream).expect("cfb");
+            let workbook: Xls<_> = Xls::new(Cursor::new(xls_bytes)).expect("open xls");
+            // Force defined-name parsing.
+            let _ = workbook.defined_names();
+        })
+        .is_ok()
+    }
+
+    #[test]
+    fn sanitizes_malformed_name_record_out_of_bounds_cch_for_calamine() {
+        let stream = build_minimal_workbook_stream_with_corrupt_name_oob_cch();
+
+        assert!(
+            !calamine_can_open_workbook_stream(&stream),
+            "expected calamine to fail/panic on malformed NAME record"
+        );
+
+        let sanitized =
+            sanitize_biff8_continued_name_records_for_calamine(&stream).expect("expected sanitize");
+
+        assert!(
+            calamine_can_open_workbook_stream(&sanitized),
+            "expected calamine to open after sanitizing malformed NAME record"
+        );
+    }
 }
