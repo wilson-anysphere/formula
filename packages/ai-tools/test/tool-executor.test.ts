@@ -23,6 +23,31 @@ describe("ToolExecutor", () => {
     expect(workbook.getCell(parseA1Cell("Sheet1!A1")).value).toBe(42);
   });
 
+  it("resolves display sheet names to stable sheet ids when sheet_name_resolver is provided", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet2"]);
+    const sheetNameResolver = {
+      getSheetIdByName(name: string) {
+        return name.toLowerCase() === "budget" ? "Sheet2" : null;
+      },
+      getSheetNameById(id: string) {
+        return id === "Sheet2" ? "Budget" : null;
+      }
+    };
+
+    const executor = new ToolExecutor(workbook, { default_sheet: "Sheet2", sheet_name_resolver: sheetNameResolver });
+    const result = await executor.execute({
+      name: "write_cell",
+      parameters: { cell: "Budget!A1", value: 99 }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("write_cell");
+    if (!result.ok || result.tool !== "write_cell") throw new Error("Unexpected tool result");
+    expect(result.data?.cell).toBe("Budget!A1");
+    expect(workbook.getCell(parseA1Cell("Sheet2!A1")).value).toBe(99);
+    expect(workbook.listSheets()).toEqual(["Sheet2"]);
+  });
+
   it("write_cell writes a formula when value starts with '='", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const executor = new ToolExecutor(workbook);
