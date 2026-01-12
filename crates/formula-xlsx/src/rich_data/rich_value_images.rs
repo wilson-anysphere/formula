@@ -1,4 +1,4 @@
-//! Helpers for working with `xl/richData/richValue*.xml` rich value parts.
+//! Helpers for working with `xl/richData/richValue*.xml` / `xl/richData/richValues*.xml` rich value parts.
 //!
 //! Currently used for best-effort extraction of images referenced by rich values.
 
@@ -11,7 +11,7 @@ use quick_xml::Reader;
 use crate::openxml;
 use crate::{XlsxError, XlsxPackage};
 
-/// A parsed `<rv>` entry from a `xl/richData/richValue*.xml` part.
+/// A parsed `<rv>` entry from a `xl/richData/richValue*.xml` / `xl/richData/richValues*.xml` part.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RichValueEntry {
     /// The rich value part this entry came from (e.g. `xl/richData/richValue1.xml`).

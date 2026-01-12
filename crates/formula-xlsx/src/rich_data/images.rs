@@ -130,7 +130,9 @@ fn split_rich_value_part_names<'a>(
             continue;
         };
         match family {
-            super::RichValuePartFamily::RichValue => rich_value_parts.push(name.as_str()),
+            super::RichValuePartFamily::RichValue | super::RichValuePartFamily::RichValues => {
+                rich_value_parts.push(name.as_str())
+            }
             super::RichValuePartFamily::RdRichValue => rd_rich_value_parts.push(name.as_str()),
         }
     }

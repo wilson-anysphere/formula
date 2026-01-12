@@ -3,7 +3,7 @@
 //! Excel stores cell-level rich values (data types, images-in-cells, etc.) via:
 //! - `xl/worksheets/sheet*.xml` `c/@vm` (value-metadata index)
 //! - `xl/metadata.xml` `<valueMetadata>` + rich-data extension payloads
-//! - `xl/richData/richValue*.xml` (rich-value records)
+//! - `xl/richData/richValue*.xml` / `xl/richData/richValues*.xml` (rich-value records)
 //! - `xl/richData/richValueRel.xml` + `xl/richData/_rels/richValueRel.xml.rels` (relationship indirection)
 //!
 //! This module exposes best-effort parsing helpers without integrating into `formula-model` yet.
@@ -465,6 +465,7 @@ fn build_rich_value_rel_index_to_target_part(
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum RichValuePartFamily {
     RichValue,
+    RichValues,
     RdRichValue,
 }
 
@@ -473,6 +474,8 @@ enum RichValuePartFamily {
 /// Examples:
 /// - `xl/richData/richValue.xml` -> (`RichValue`, 0)
 /// - `xl/richData/richValue2.xml` -> (`RichValue`, 2)
+/// - `xl/richData/richValues.xml` -> (`RichValues`, 0)
+/// - `xl/richData/richValues2.xml` -> (`RichValues`, 2)
 /// - `xl/richData/rdrichvalue10.xml` -> (`RdRichValue`, 10)
 ///
 /// This is case-insensitive for the filename (but not the containing directory).
@@ -490,7 +493,10 @@ fn parse_rich_value_part_name(part_path: &str) -> Option<(RichValuePartFamily, u
     let stem = &file_name[..file_name.len() - ".xml".len()];
     let stem_lower = stem.to_ascii_lowercase();
 
-    let (family, suffix) = if let Some(rest) = stem_lower.strip_prefix("richvalue") {
+    // Check the plural prefix first: `richvalues` starts with `richvalue`.
+    let (family, suffix) = if let Some(rest) = stem_lower.strip_prefix("richvalues") {
+        (RichValuePartFamily::RichValues, rest)
+    } else if let Some(rest) = stem_lower.strip_prefix("richvalue") {
         (RichValuePartFamily::RichValue, rest)
     } else if let Some(rest) = stem_lower.strip_prefix("rdrichvalue") {
         (RichValuePartFamily::RdRichValue, rest)
