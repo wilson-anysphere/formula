@@ -778,8 +778,9 @@ export class CellStructuralConflictMonitor {
     } else {
       cellMap.delete("enc");
       // Represent formula clears as an explicit marker rather than deleting the
-      // key entirely. Deletions can erase causal history in the shared CRDT and
-      // make formula/value conflict ordering nondeterministic.
+      // key entirely. Map deletes don't create Yjs Items, which can erase causal
+      // history and make delete-vs-overwrite ordering nondeterministic across
+      // mixed client configurations.
       cellMap.set("formula", null);
       cellMap.set("value", normalized.value ?? null);
     }
