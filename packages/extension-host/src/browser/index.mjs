@@ -1177,29 +1177,44 @@ class BrowserExtensionHost {
             workbookPathStr == null || workbookPathStr.trim().length === 0
               ? "MockWorkbook"
               : workbookPathStr.split(/[/\\]/).pop() ?? workbookPathStr;
+          const prev = this._workbook;
           this._workbook = { name, path: workbookPathStr };
 
-          await this._spreadsheet.openWorkbook(workbookPathStr);
-          const workbook = await this._getActiveWorkbook();
-          this._broadcastEvent("workbookOpened", { workbook });
-          return workbook;
+          try {
+            await this._spreadsheet.openWorkbook(workbookPathStr);
+            const workbook = await this._getActiveWorkbook();
+            this._broadcastEvent("workbookOpened", { workbook });
+            return workbook;
+          } catch (err) {
+            this._workbook = prev;
+            throw err;
+          }
         }
         return this.openWorkbook(args[0]);
       case "workbook.createWorkbook":
         if (typeof this._spreadsheet.createWorkbook === "function") {
           // Mirror the browser-host stub: reset workbook metadata before creation so
           // consumers relying on the in-memory snapshot get deterministic fields.
+          const prev = this._workbook;
           this._workbook = { name: "MockWorkbook", path: null };
-          await this._spreadsheet.createWorkbook();
-          const workbook = await this._getActiveWorkbook();
-          this._broadcastEvent("workbookOpened", { workbook });
-          return workbook;
+          try {
+            await this._spreadsheet.createWorkbook();
+            const workbook = await this._getActiveWorkbook();
+            this._broadcastEvent("workbookOpened", { workbook });
+            return workbook;
+          } catch (err) {
+            this._workbook = prev;
+            throw err;
+          }
         }
         return this.openWorkbook(null);
       case "workbook.save":
         if (typeof this._spreadsheet.saveWorkbook === "function") {
           this._broadcastEvent("beforeSave", { workbook: await this._getActiveWorkbook() });
           await this._spreadsheet.saveWorkbook();
+          // Saving can update the workbook path/name (e.g. Save prompting for a path).
+          // Refresh internal workbook metadata so subsequent snapshots are accurate.
+          await this._getActiveWorkbook();
           return null;
         }
         this.saveWorkbook();
@@ -1211,10 +1226,17 @@ class BrowserExtensionHost {
             throw new Error("Workbook path must be a non-empty string");
           }
           const name = workbookPathStr.split(/[/\\]/).pop() ?? workbookPathStr;
+          const prev = this._workbook;
           this._workbook = { name, path: workbookPathStr };
           this._broadcastEvent("beforeSave", { workbook: this._getWorkbookSnapshot() });
-          await this._spreadsheet.saveWorkbookAs(workbookPathStr);
-          return null;
+          try {
+            await this._spreadsheet.saveWorkbookAs(workbookPathStr);
+            await this._getActiveWorkbook();
+            return null;
+          } catch (err) {
+            this._workbook = prev;
+            throw err;
+          }
         }
         this.saveWorkbookAs(args[0]);
         return null;
@@ -1222,11 +1244,17 @@ class BrowserExtensionHost {
         if (typeof this._spreadsheet.closeWorkbook === "function") {
           // Mirror browser-host semantics: after close, treat the session as a fresh workbook
           // (close is modeled as "open empty workbook").
+          const prev = this._workbook;
           this._workbook = { name: "MockWorkbook", path: null };
-          await this._spreadsheet.closeWorkbook();
-          const workbook = await this._getActiveWorkbook();
-          this._broadcastEvent("workbookOpened", { workbook });
-          return null;
+          try {
+            await this._spreadsheet.closeWorkbook();
+            const workbook = await this._getActiveWorkbook();
+            this._broadcastEvent("workbookOpened", { workbook });
+            return null;
+          } catch (err) {
+            this._workbook = prev;
+            throw err;
+          }
         }
         this.closeWorkbook();
         return null;
