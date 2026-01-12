@@ -1264,8 +1264,12 @@ mod macro_strip_streaming {
         for attr in e.attributes().with_checks(false) {
             let attr = attr?;
             match crate::openxml::local_name(attr.key.as_ref()) {
-                b"PartName" => part_name = Some(attr.unescape_value()?.into_owned()),
-                b"ContentType" => content_type = Some(attr.unescape_value()?.into_owned()),
+                key if key.eq_ignore_ascii_case(b"PartName") => {
+                    part_name = Some(attr.unescape_value()?.into_owned())
+                }
+                key if key.eq_ignore_ascii_case(b"ContentType") => {
+                    content_type = Some(attr.unescape_value()?.into_owned())
+                }
                 _ => {}
             }
         }
@@ -1279,22 +1283,36 @@ mod macro_strip_streaming {
             return Ok(Some(None));
         }
 
-        let Some(content_type) = content_type else {
-            return Ok(None);
-        };
+        if content_type
+            .as_deref()
+            .is_some_and(|ty| ty.contains("macroEnabled.main+xml"))
+        {
+            const WORKBOOK_MAIN: &str =
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml";
 
-        if content_type.contains("macroEnabled.main+xml") {
-            // Preserve the original element name (including any namespace prefix) so we don't
-            // produce namespace-less `<Override>` elements when stripping macros from prefix-only
-            // `[Content_Types].xml` documents (e.g. `<ct:Types xmlns:ct="...">`).
+            // Preserve the original element's qualified name (including any namespace prefix).
             let tag_name = e.name();
             let tag_name = std::str::from_utf8(tag_name.as_ref()).unwrap_or("Override");
             let mut updated = BytesStart::new(tag_name);
-            updated.push_attribute(("PartName", part_name.as_str()));
-            updated.push_attribute((
-                "ContentType",
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
-            ));
+
+            // Preserve all attributes verbatim (including any prefixes/ordering), except for
+            // `ContentType`, which is rewritten to the non-macro workbook content type.
+            let mut saw_content_type = false;
+            for attr in e.attributes().with_checks(false) {
+                let attr = attr?;
+                if crate::openxml::local_name(attr.key.as_ref())
+                    .eq_ignore_ascii_case(b"ContentType")
+                {
+                    saw_content_type = true;
+                    updated.push_attribute((attr.key.as_ref(), WORKBOOK_MAIN.as_bytes()));
+                } else {
+                    updated.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
+                }
+            }
+            if !saw_content_type {
+                updated.push_attribute(("ContentType", WORKBOOK_MAIN));
+            }
+
             return Ok(Some(Some(updated.into_owned())));
         }
 

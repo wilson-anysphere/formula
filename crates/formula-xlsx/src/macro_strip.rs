@@ -563,8 +563,12 @@ fn patched_override(
     for attr in e.attributes().with_checks(false) {
         let attr = attr?;
         match crate::openxml::local_name(attr.key.as_ref()) {
-            b"PartName" => part_name = Some(attr.unescape_value()?.into_owned()),
-            b"ContentType" => content_type = Some(attr.unescape_value()?.into_owned()),
+            key if key.eq_ignore_ascii_case(b"PartName") => {
+                part_name = Some(attr.unescape_value()?.into_owned())
+            }
+            key if key.eq_ignore_ascii_case(b"ContentType") => {
+                content_type = Some(attr.unescape_value()?.into_owned())
+            }
             _ => {}
         }
     }
@@ -578,26 +582,100 @@ fn patched_override(
         return Ok(Some(None));
     }
 
-    let Some(content_type) = content_type else {
-        return Ok(None);
-    };
+    if content_type
+        .as_deref()
+        .is_some_and(|ty| ty.contains("macroEnabled.main+xml"))
+    {
+        const WORKBOOK_MAIN: &str =
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml";
 
-    if content_type.contains("macroEnabled.main+xml") {
-        // Preserve the original element name (including any namespace prefix) so we don't produce
-        // namespace-less `<Override>` elements when stripping macros from prefix-only
-        // `[Content_Types].xml` documents (e.g. `<ct:Types xmlns:ct=\"...\">`).
+        // Preserve the original element's qualified name (including any namespace prefix).
         let tag_name = e.name();
         let tag_name = std::str::from_utf8(tag_name.as_ref()).unwrap_or("Override");
         let mut updated = BytesStart::new(tag_name);
-        updated.push_attribute(("PartName", part_name.as_str()));
-        updated.push_attribute((
-            "ContentType",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
-        ));
+
+        // Preserve all attributes verbatim (including any prefixes/ordering), except for
+        // `ContentType`, which is rewritten to the non-macro workbook content type.
+        let mut saw_content_type = false;
+        for attr in e.attributes().with_checks(false) {
+            let attr = attr?;
+            if crate::openxml::local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"ContentType") {
+                saw_content_type = true;
+                updated.push_attribute((attr.key.as_ref(), WORKBOOK_MAIN.as_bytes()));
+            } else {
+                updated.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
+            }
+        }
+        if !saw_content_type {
+            updated.push_attribute(("ContentType", WORKBOOK_MAIN));
+        }
+
         return Ok(Some(Some(updated.into_owned())));
     }
 
     Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn strip_content_types_preserves_prefix_only_override_qname() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ct:Types xmlns:ct="http://schemas.openxmlformats.org/package/2006/content-types">
+  <ct:Override PartName="/xl/workbook.xml" ContentType="application/vnd.ms-excel.sheet.macroEnabled.main+xml" CustomAttr="yes"/>
+  <ct:Override PartName="/xl/vbaProject.bin" ContentType="application/vnd.ms-office.vbaProject"/>
+</ct:Types>"#;
+
+        let mut delete_parts = BTreeSet::new();
+        delete_parts.insert("xl/vbaProject.bin".to_string());
+
+        let updated = strip_content_types(xml, &delete_parts)
+            .expect("strip_content_types ok")
+            .expect("expected content types update");
+
+        let updated_str = String::from_utf8(updated).expect("utf8 xml");
+        roxmltree::Document::parse(&updated_str).expect("valid xml");
+
+        // Ensure we didn't introduce an unprefixed `<Override>` tag.
+        assert!(updated_str.contains("<ct:Override"));
+        assert!(!updated_str.contains("<Override"));
+
+        // Ensure we downgraded the workbook override.
+        assert!(updated_str.contains(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"
+        ));
+        assert!(!updated_str.contains("macroEnabled.main+xml"));
+
+        // Ensure extra attributes are preserved.
+        assert!(updated_str.contains(r#"CustomAttr="yes""#));
+
+        // Ensure deleted part overrides are removed.
+        assert!(!updated_str.contains("vbaProject.bin"));
+    }
+
+    #[test]
+    fn strip_content_types_handles_non_empty_override_with_prefix() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ct:Types xmlns:ct="http://schemas.openxmlformats.org/package/2006/content-types">
+  <ct:Override PartName="/xl/workbook.xml" ContentType="application/vnd.ms-excel.sheet.macroEnabled.main+xml"></ct:Override>
+</ct:Types>"#;
+
+        let delete_parts = BTreeSet::new();
+        let updated = strip_content_types(xml, &delete_parts)
+            .expect("strip_content_types ok")
+            .expect("expected content types update");
+
+        let updated_str = String::from_utf8(updated).expect("utf8 xml");
+        roxmltree::Document::parse(&updated_str).expect("valid xml");
+
+        // Ensure we didn't introduce mismatched `<Override>` / `</ct:Override>` tags.
+        assert!(updated_str.contains("<ct:Override"));
+        assert!(updated_str.contains("</ct:Override>"));
+        assert!(!updated_str.contains("<Override"));
+    }
 }
 
 fn parse_internal_relationship_targets(
