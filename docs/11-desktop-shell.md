@@ -100,7 +100,7 @@ The CSP is set in `app.security.csp` (see `apps/desktop/src-tauri/tauri.conf.jso
 Current policy (exact):
 
 ```text
-default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' blob: data:; worker-src 'self' blob: data:; child-src 'self' blob: data:; connect-src 'self' blob: data:
+default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' blob: data:; worker-src 'self' blob: data:; child-src 'self' blob: data:; connect-src 'self' https: wss: blob: data:
 ```
 
 Rationale:
@@ -113,25 +113,32 @@ Rationale:
 - Extension panels are rendered as sandboxed **`blob:` iframes**, so CSP must allow `child-src blob:` (or `frame-src blob:`)
   to avoid blocking the iframe load.
 - We also rely on `script-src 'unsafe-eval'` for the scripting sandbox (`new Function`-based evaluation in a Worker).
-- `connect-src` stays locked down (`'self' blob: data:`). Outbound HTTP(S) is performed by the Rust backend and exposed to the
-  WebView via Tauri IPC (see “Network strategy” below).
+- `connect-src` is intentionally restrictive (no `http:`/`ws:`), but allows `https:` + `wss:` so the extension host and
+  Marketplace client can make network requests in worker contexts where the Tauri invoke bridge may not be available.
+  Where possible, we still prefer routing Marketplace and `formula.network.fetch(...)` through Rust IPC (see “Network strategy” below).
 
 ### Network strategy (extensions + marketplace)
 
-We keep a strict desktop CSP that blocks the WebView from making arbitrary outbound `fetch()` / `WebSocket` requests so:
+In packaged desktop builds we keep a restrictive CSP that avoids enabling `http:`/`ws:` and only permits `https:`/`wss:`
+plus app-local (`'self'`) and in-memory (`blob:`/`data:`) URLs.
 
-- extensions cannot bypass the extension host permission system by directly calling browser networking primitives
-- the Marketplace UI does not depend on the Marketplace service setting permissive CORS headers for the Tauri origin
+Network access is mediated at two layers:
 
-Instead, outbound HTTP(S) is performed by the Rust backend and exposed to the WebView via Tauri IPC commands:
+- **Extensions:** the extension worker runtime (`packages/extension-host/src/browser/extension-worker.mjs`) hides
+  `__TAURI__` and replaces browser networking primitives (`fetch`, `WebSocket`, `XMLHttpRequest`, etc) with
+  permission-gated wrappers. This makes the `network` permission checks in `BrowserExtensionHost` the enforcement point
+  (not CSP).
+  - `formula.network.fetch(...)` (and `fetch(...)` inside extensions) is implemented by:
+    - **Tauri desktop**: `invoke("network_fetch", ...)` (Rust/reqwest; avoids CORS and enforces an `http(s)` scheme allowlist).
+    - **Web / non-Tauri**: a `fetch(...)` fallback.
+  - `formula.network.openWebSocket(...)` is a permission check; the actual socket is opened directly in the extension
+    worker via `new WebSocket(...)` (hence `wss:` in `connect-src`).
+- **Marketplace:** `MarketplaceClient` prefers Rust IPC (`marketplace_search`, `marketplace_get_extension`,
+  `marketplace_download_package`) when running under Tauri with an absolute `http(s)` base URL, so the desktop UI does
+  not rely on the Marketplace service setting permissive CORS headers for the `tauri://…` origin. In other contexts it
+  falls back to `fetch(...)`.
 
-- `network_fetch` — used by the browser extension host to implement `formula.network.fetch(...)` under CSP
-- `marketplace_search`, `marketplace_get_extension`, `marketplace_download_package` — used by the Marketplace client
-
-This pattern keeps `connect-src` locked down in production while still enabling:
-
-- installing extensions from a remote Marketplace
-- running extensions that have been granted the `network` permission
+Rust IPC implementations live in `apps/desktop/src-tauri/src/commands.rs`.
 
 ### Tauri v2 capabilities (permissions)
 
