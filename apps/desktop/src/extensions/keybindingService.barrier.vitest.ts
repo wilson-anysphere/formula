@@ -34,18 +34,34 @@ describe("KeybindingService keybinding barrier", () => {
     const contextKeys = new ContextKeyService();
     const commandRegistry = new CommandRegistry();
 
-    const run = vi.fn();
-    commandRegistry.registerBuiltinCommand("builtin.test", "Test", run);
+    const runBuiltin = vi.fn();
+    commandRegistry.registerBuiltinCommand("builtin.test", "Test", runBuiltin);
+
+    const runExtension = vi.fn();
+    commandRegistry.setExtensionCommands(
+      [{ extensionId: "ext.test", command: "extension.test", title: "Extension Test" }],
+      async () => {
+        runExtension();
+      },
+    );
 
     const service = new KeybindingService({ commandRegistry, contextKeys, platform: "other" });
     service.setBuiltinKeybindings([{ command: "builtin.test", key: "ctrl+j" }]);
+    service.setExtensionKeybindings([{ extensionId: "ext.test", command: "extension.test", key: "arrowdown", mac: null, when: null }]);
 
     // Sanity check: outside a barrier, the binding should fire.
     const outsideEvent = makeKeydownEvent({ key: "j", ctrlKey: true, target: document.body });
     const outsideHandled = await service.dispatchKeydown(outsideEvent);
     expect(outsideHandled).toBe(true);
     expect(outsideEvent.defaultPrevented).toBe(true);
-    expect(run).toHaveBeenCalledTimes(1);
+    expect(runBuiltin).toHaveBeenCalledTimes(1);
+
+    // Sanity check: extension keybindings also fire outside a barrier.
+    const outsideExtEvent = makeKeydownEvent({ key: "ArrowDown", target: document.body });
+    const outsideExtHandled = await service.dispatchKeydown(outsideExtEvent);
+    expect(outsideExtHandled).toBe(true);
+    expect(outsideExtEvent.defaultPrevented).toBe(true);
+    expect(runExtension).toHaveBeenCalledTimes(1);
 
     const barrierRoot = document.createElement("div");
     barrierRoot.setAttribute("data-keybinding-barrier", "true");
@@ -58,7 +74,13 @@ describe("KeybindingService keybinding barrier", () => {
 
     expect(insideHandled).toBe(false);
     expect(insideEvent.defaultPrevented).toBe(false);
-    expect(run).toHaveBeenCalledTimes(1);
+    expect(runBuiltin).toHaveBeenCalledTimes(1);
+
+    const insideExtEvent = makeKeydownEvent({ key: "ArrowDown", target: inner });
+    const insideExtHandled = await service.dispatchKeydown(insideExtEvent);
+    expect(insideExtHandled).toBe(false);
+    expect(insideExtEvent.defaultPrevented).toBe(false);
+    expect(runExtension).toHaveBeenCalledTimes(1);
 
     // Also ensure the synchronous helper respects the barrier and does not schedule execution.
     const insideSyncEvent = makeKeydownEvent({ key: "j", ctrlKey: true, target: inner });
@@ -66,9 +88,15 @@ describe("KeybindingService keybinding barrier", () => {
     expect(syncHandled).toBe(false);
     expect(insideSyncEvent.defaultPrevented).toBe(false);
     await flushMicrotasks();
-    expect(run).toHaveBeenCalledTimes(1);
+    expect(runBuiltin).toHaveBeenCalledTimes(1);
+
+    const insideSyncExtEvent = makeKeydownEvent({ key: "ArrowDown", target: inner });
+    const syncExtHandled = service.handleKeydown(insideSyncExtEvent);
+    expect(syncExtHandled).toBe(false);
+    expect(insideSyncExtEvent.defaultPrevented).toBe(false);
+    await flushMicrotasks();
+    expect(runExtension).toHaveBeenCalledTimes(1);
 
     barrierRoot.remove();
   });
 });
-
