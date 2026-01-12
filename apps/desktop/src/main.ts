@@ -2331,7 +2331,11 @@ async function handleSaveAs(): Promise<void> {
   // Ensure any pending microtask-batched workbook edits are flushed before saving.
   await new Promise<void>((resolve) => queueMicrotask(resolve));
   await drainBackendSync();
-  await tauriBackend.saveWorkbook(path);
+  if (queuedInvoke) {
+    await queuedInvoke("save_workbook", { path });
+  } else {
+    await tauriBackend.saveWorkbook(path);
+  }
   activeWorkbook = { ...activeWorkbook, path };
   app.getDocument().markSaved();
 
