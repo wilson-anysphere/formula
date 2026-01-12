@@ -185,14 +185,16 @@ update the relevant allowlists in `capabilities/main.json`.
 
 When adding a new Rust `#[tauri::command]` invoked from the frontend, also update the invoke allowlists in:
 
-- `apps/desktop/src-tauri/permissions/allow-invoke.json` (`allow-invoke` permission; guardrailed by `src-tauri/tests/tauri_ipc_allowlist.rs`)
+- `apps/desktop/src-tauri/permissions/allow-invoke.json` (`allow-invoke` permission; guardrailed by `apps/desktop/src-tauri/tests/tauri_ipc_allowlist.rs`)
+- `apps/desktop/src-tauri/capabilities/main.json` (`core:allow-invoke`; must match frontend `invoke("...")` usage, guardrailed by `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts`)
 
 The `allow-invoke` permission is granted to the `main` window via `apps/desktop/src-tauri/capabilities/main.json` by
 including `"allow-invoke"` in that capability’s `"permissions"` list.
 
 This is guardrailed by `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts`, which ensures the command
 allowlist is explicit (no wildcards/duplicates) and matches actual frontend `invoke("...")` usage. It also asserts we do
-not rely on a `core:allow-invoke` permission identifier (not present in this repo’s Tauri toolchain).
+not rely on the unscoped string form `core:allow-invoke` (default allowlist); instead we use the object form with an
+explicit per-command allowlist.
 
 See “Tauri v2 Capabilities & Permissions” below for the concrete `main.json` contents.
 
