@@ -7,10 +7,21 @@ import os
 import sys
 import tempfile
 import unittest
+import io
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from pathlib import Path
 
 
 class UpdatePinnedDatasetTests(unittest.TestCase):
+    @contextmanager
+    def _patched_argv(self, argv: list[str]):
+        old = sys.argv[:]
+        sys.argv = argv
+        try:
+            yield
+        finally:
+            sys.argv = old
+
     def _load_update_module(self):
         tool = Path(__file__).resolve().parents[1] / "update_pinned_dataset.py"
         self.assertTrue(tool.is_file(), f"update_pinned_dataset.py not found at {tool}")
@@ -81,6 +92,116 @@ class UpdatePinnedDatasetTests(unittest.TestCase):
             )
             versioned_payload = json.loads(versioned_path.read_text(encoding="utf-8"))
             self.assertEqual(versioned_payload["caseSet"]["sha256"], cases_sha)
+
+    def test_cli_writes_versioned_copy_by_default(self) -> None:
+        update = self._load_update_module()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp = Path(tmp_dir)
+
+            cases_path = tmp / "cases.json"
+            cases_payload = {
+                "schemaVersion": 1,
+                "caseSet": "test",
+                "defaultSheet": "Sheet1",
+                "cases": [
+                    {"id": "case1", "formula": "=1+1", "outputCell": "C1", "inputs": [], "tags": []},
+                    {"id": "case2", "formula": "=2+2", "outputCell": "C1", "inputs": [], "tags": []},
+                ],
+            }
+            cases_path.write_text(json.dumps(cases_payload, indent=2) + "\n", encoding="utf-8", newline="\n")
+            cases_sha = hashlib.sha256(cases_path.read_bytes()).hexdigest()
+
+            pinned_path = tmp / "pinned.json"
+            pinned_payload = {
+                "schemaVersion": 1,
+                "generatedAt": "2026-01-01T00:00:00Z",
+                "source": {
+                    "kind": "excel",
+                    "version": "unknown",
+                    "build": "unknown",
+                    "operatingSystem": "unknown",
+                },
+                "caseSet": {"path": "cases.json", "sha256": "old", "count": 2},
+                "results": [{"caseId": "case1"}, {"caseId": "case2"}],
+            }
+            pinned_path.write_text(json.dumps(pinned_payload, indent=2) + "\n", encoding="utf-8", newline="\n")
+
+            versioned_dir = tmp / "versioned"
+            argv = [
+                str(Path(update.__file__)),
+                "--cases",
+                str(cases_path),
+                "--pinned",
+                str(pinned_path),
+                "--no-engine",
+                "--versioned-dir",
+                str(versioned_dir),
+            ]
+            with self._patched_argv(argv):
+                buf = io.StringIO()
+                with redirect_stdout(buf), redirect_stderr(buf):
+                    rc = update.main()
+            self.assertEqual(rc, 0)
+
+            expected_versioned = versioned_dir / f"excel-unknown-build-unknown-cases-{cases_sha[:8]}.json"
+            self.assertTrue(expected_versioned.is_file())
+
+            pinned_updated = json.loads(pinned_path.read_text(encoding="utf-8"))
+            versioned_payload = json.loads(expected_versioned.read_text(encoding="utf-8"))
+            self.assertEqual(versioned_payload, pinned_updated)
+
+    def test_cli_no_versioned_skips_copy(self) -> None:
+        update = self._load_update_module()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp = Path(tmp_dir)
+
+            cases_path = tmp / "cases.json"
+            cases_payload = {
+                "schemaVersion": 1,
+                "caseSet": "test",
+                "defaultSheet": "Sheet1",
+                "cases": [
+                    {"id": "case1", "formula": "=1+1", "outputCell": "C1", "inputs": [], "tags": []},
+                    {"id": "case2", "formula": "=2+2", "outputCell": "C1", "inputs": [], "tags": []},
+                ],
+            }
+            cases_path.write_text(json.dumps(cases_payload, indent=2) + "\n", encoding="utf-8", newline="\n")
+
+            pinned_path = tmp / "pinned.json"
+            pinned_payload = {
+                "schemaVersion": 1,
+                "generatedAt": "2026-01-01T00:00:00Z",
+                "source": {
+                    "kind": "excel",
+                    "version": "unknown",
+                    "build": "unknown",
+                    "operatingSystem": "unknown",
+                },
+                "caseSet": {"path": "cases.json", "sha256": "old", "count": 2},
+                "results": [{"caseId": "case1"}, {"caseId": "case2"}],
+            }
+            pinned_path.write_text(json.dumps(pinned_payload, indent=2) + "\n", encoding="utf-8", newline="\n")
+
+            versioned_dir = tmp / "versioned"
+            argv = [
+                str(Path(update.__file__)),
+                "--cases",
+                str(cases_path),
+                "--pinned",
+                str(pinned_path),
+                "--no-engine",
+                "--no-versioned",
+                "--versioned-dir",
+                str(versioned_dir),
+            ]
+            with self._patched_argv(argv):
+                buf = io.StringIO()
+                with redirect_stdout(buf), redirect_stderr(buf):
+                    rc = update.main()
+            self.assertEqual(rc, 0)
+            self.assertFalse(versioned_dir.exists(), "--no-versioned should avoid creating the dir")
 
     def test_overwrite_existing_replaces_case_results(self) -> None:
         update = self._load_update_module()
