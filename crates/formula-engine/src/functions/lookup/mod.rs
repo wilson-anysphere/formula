@@ -657,6 +657,58 @@ mod tests {
     }
 
     #[test]
+    fn xmatch_approximate_modes_use_insertion_points_for_duplicates() {
+        let array = vec![
+            Value::Number(1.0),
+            Value::Number(2.0),
+            Value::Number(2.0),
+            Value::Number(2.0),
+            Value::Number(3.0),
+        ];
+
+        assert_eq!(
+            xmatch_with_modes(
+                &Value::Number(2.0),
+                &array,
+                MatchMode::ExactOrNextSmaller,
+                SearchMode::FirstToLast
+            )
+            .unwrap(),
+            4
+        );
+        assert_eq!(
+            xmatch_with_modes(
+                &Value::Number(2.0),
+                &array,
+                MatchMode::ExactOrNextLarger,
+                SearchMode::FirstToLast
+            )
+            .unwrap(),
+            2
+        );
+        assert_eq!(
+            xmatch_with_modes(
+                &Value::Number(2.0),
+                &array,
+                MatchMode::ExactOrNextSmaller,
+                SearchMode::BinaryAscending
+            )
+            .unwrap(),
+            4
+        );
+        assert_eq!(
+            xmatch_with_modes(
+                &Value::Number(2.0),
+                &array,
+                MatchMode::ExactOrNextLarger,
+                SearchMode::BinaryAscending
+            )
+            .unwrap(),
+            2
+        );
+    }
+
+    #[test]
     fn xmatch_wildcard_reverse_search_returns_last_match() {
         let array = vec![Value::from("apple"), Value::from("banana"), Value::from("apricot")];
         assert_eq!(
