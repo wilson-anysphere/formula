@@ -51,18 +51,22 @@ pnpm -C apps/desktop dev
 
 ### Open two clients
 
-Open two browser windows pointing at the same `docId` with different user info:
+Each desktop client gets a **stable collaboration identity** (`id`/`name`/`color`) persisted in localStorage
+(`formula:collab:user`). For local testing, you can override the identity per-window via URL query params
+(`collabUserId`, `collabUserName`, `collabUserColor`).
+
+Open two browser windows pointing at the same `docId` with different user identities:
 
 Window 1:
 
 ```
-http://localhost:4174/?collab=1&wsUrl=ws://127.0.0.1:1234&docId=demo&token=dev-token&userId=u1&userName=Alice&userColor=%234c8bf5
+http://localhost:4174/?collab=1&wsUrl=ws://127.0.0.1:1234&docId=demo&token=dev-token&collabUserId=u1&collabUserName=Alice&collabUserColor=%234c8bf5
 ```
 
 Window 2:
 
 ```
-http://localhost:4174/?collab=1&wsUrl=ws://127.0.0.1:1234&docId=demo&token=dev-token&userId=u2&userName=Bob&userColor=%23f97316
+http://localhost:4174/?collab=1&wsUrl=ws://127.0.0.1:1234&docId=demo&token=dev-token&collabUserId=u2&collabUserName=Bob&collabUserColor=%23f97316
 ```
 
 Edits and comments should sync in real-time.
