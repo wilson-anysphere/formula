@@ -31,13 +31,44 @@ function findDuplicateTestIdsInIndexHtml(html) {
     .sort((a, b) => a.localeCompare(b));
 }
 
-function extractTestIdsFromRibbonSchema(schema) {
+function extractRibbonTestIdsFromSource(source) {
   const testIdRegex = /\btestId\s*:\s*(["'])(.*?)\1/g;
+  const dataTestIdRegex = /\bdata-testid\s*=\s*(["'])(.*?)\1/g;
   /** @type {string[]} */
   const ids = [];
-  for (const match of schema.matchAll(testIdRegex)) {
+  for (const match of source.matchAll(testIdRegex)) {
     ids.push(match[2]);
   }
+  for (const match of source.matchAll(dataTestIdRegex)) {
+    ids.push(match[2]);
+  }
+  return ids;
+}
+
+function collectRibbonTestIds() {
+  const ribbonDir = path.join(__dirname, "..", "src", "ribbon");
+  /** @type {string[]} */
+  const ids = [];
+
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      // Skip tests; they often embed `data-testid="..."` strings for snapshots.
+      if (entry.isDirectory() && entry.name === "__tests__") continue;
+
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(fullPath);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      if (!/\.(ts|tsx)$/.test(entry.name)) continue;
+
+      const source = fs.readFileSync(fullPath, "utf8");
+      ids.push(...extractRibbonTestIdsFromSource(source));
+    }
+  };
+
+  walk(ribbonDir);
   return ids;
 }
 
@@ -54,11 +85,8 @@ test("desktop index.html does not hardcode ribbon action testids (avoid Playwrig
       .join("\\n")}`,
   );
 
-  const schemaPath = path.join(__dirname, "..", "src", "ribbon", "ribbonSchema.ts");
-  const schema = fs.readFileSync(schemaPath, "utf8");
-
   const indexTestIds = extractTestIdsFromIndexHtml(html);
-  const ribbonTestIds = extractTestIdsFromRibbonSchema(schema);
+  const ribbonTestIds = collectRibbonTestIds();
 
   // Ensure Ribbon itself does not ship duplicate test IDs (Playwright strict mode would
   // fail even without any static HTML collisions).
@@ -73,7 +101,7 @@ test("desktop index.html does not hardcode ribbon action testids (avoid Playwrig
   assert.deepEqual(
     ribbonTestIdDuplicates,
     [],
-    `Ribbon schema contains duplicate testId values (should be unique):\\n${ribbonTestIdDuplicates
+    `Ribbon contains duplicate test id values (should be unique):\\n${ribbonTestIdDuplicates
       .map((id) => `- ${id}`)
       .join("\\n")}`,
   );
