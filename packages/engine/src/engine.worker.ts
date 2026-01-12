@@ -30,6 +30,7 @@ type WasmModule = {
   default?: (module_or_path?: unknown) => Promise<void> | void;
   lexFormula: (formula: string, options?: FormulaParseOptions) => unknown;
   parseFormulaPartial: (formula: string, cursor?: number, options?: FormulaParseOptions) => unknown;
+  rewriteFormulasForCopyDelta?: (requests: unknown) => unknown;
   WasmWorkbook: {
     new (): WasmWorkbookInstance;
     fromJson(json: string): WasmWorkbookInstance;
@@ -275,6 +276,16 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
             throw new Error("parseFormulaPartial: wasm module does not export parseFormulaPartial()");
           }
           result = cloneToPlainData(parseFormulaPartial(params.formula, params.cursor, params.options));
+        }
+        break;
+      case "rewriteFormulasForCopyDelta":
+        {
+          const rewrite = mod.rewriteFormulasForCopyDelta;
+          if (typeof rewrite !== "function") {
+            throw new Error("rewriteFormulasForCopyDelta: wasm module does not export rewriteFormulasForCopyDelta()");
+          }
+          // This RPC can return large arrays (e.g. paste/fill), so avoid JSON clone overhead.
+          result = rewrite(params.requests);
         }
         break;
       case "newWorkbook":

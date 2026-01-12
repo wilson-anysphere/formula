@@ -10,6 +10,7 @@ import type {
   FormulaParseOptions,
   FormulaToken,
   InitMessage,
+  RewriteFormulaForCopyDeltaRequest,
   RpcCancel,
   RpcOptions,
   RpcRequest,
@@ -233,6 +234,19 @@ export class EngineWorker {
   async applyOperation(op: EditOp, options?: RpcOptions): Promise<EditResult> {
     await this.flush();
     return (await this.invoke("applyOperation", { op }, options)) as EditResult;
+  }
+
+  /**
+   * Rewrite formulas as if they were copied by `(deltaRow, deltaCol)`.
+   *
+   * Note: this RPC is independent of workbook state and intentionally does NOT
+   * flush pending `setCell` batches.
+   */
+  async rewriteFormulasForCopyDelta(
+    requests: RewriteFormulaForCopyDeltaRequest[],
+    rpcOptions?: RpcOptions
+  ): Promise<string[]> {
+    return (await this.invoke("rewriteFormulasForCopyDelta", { requests }, rpcOptions)) as string[];
   }
 
   /**

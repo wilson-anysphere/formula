@@ -7,7 +7,9 @@ use wasm_bindgen::JsValue;
 use wasm_bindgen_test::wasm_bindgen_test;
 
 use formula_model::CellValue as ModelCellValue;
-use formula_wasm::{lex_formula, parse_formula_partial, WasmWorkbook, DEFAULT_SHEET};
+use formula_wasm::{
+    lex_formula, parse_formula_partial, rewrite_formulas_for_copy_delta, WasmWorkbook, DEFAULT_SHEET,
+};
 
 #[derive(Debug, serde::Deserialize, PartialEq, Eq)]
 struct Span {
@@ -260,6 +262,19 @@ fn lex_formula_accepts_full_parse_options_struct() {
         tokens.iter().any(|t| t.kind == "R1C1Cell"),
         "expected full ParseOptions R1C1 lexing to emit R1C1Cell tokens, got {tokens:?}"
     );
+}
+
+#[wasm_bindgen_test]
+fn rewrite_formulas_for_copy_delta_shifts_a1_references() {
+    let requests = vec![json!({
+        "formula": "=A2",
+        "deltaRow": 1,
+        "deltaCol": 1,
+    })];
+    let requests_js = serde_wasm_bindgen::to_value(&requests).unwrap();
+    let out_js = rewrite_formulas_for_copy_delta(requests_js).unwrap();
+    let out: Vec<String> = serde_wasm_bindgen::from_value(out_js).unwrap();
+    assert_eq!(out, vec!["=B3".to_string()]);
 }
 
 #[wasm_bindgen_test]

@@ -1,10 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use formula_engine::{
-    Coord, EditError as EngineEditError, EditOp as EngineEditOp, EditResult as EngineEditResult,
-    Engine, ErrorKind, NameDefinition, NameScope, ParseOptions, Span as EngineSpan, Token,
-    TokenKind, Value as EngineValue,
+    CellAddr, Coord, EditError as EngineEditError, EditOp as EngineEditOp,
+    EditResult as EngineEditResult, Engine, ErrorKind, NameDefinition, NameScope, ParseOptions,
+    Span as EngineSpan, Token, TokenKind, Value as EngineValue,
 };
+use formula_engine::editing::rewrite::rewrite_formula_for_copy_delta;
 use formula_engine::locale::{
     canonicalize_formula, get_locale, FormulaLocale, ValueLocaleConfig, EN_US,
 };
@@ -396,6 +397,35 @@ pub fn lex_formula(formula: &str, opts: Option<JsValue>) -> Result<JsValue, JsVa
         .into_iter()
         .map(|tok| token_to_dto(tok, byte_offset, &utf16_map))
         .collect();
+
+    serde_wasm_bindgen::to_value(&out).map_err(|err| js_err(err.to_string()))
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RewriteFormulaForCopyDeltaRequestDto {
+    formula: String,
+    delta_row: i32,
+    delta_col: i32,
+}
+
+/// Rewrite a batch of formulas as if they were copied by `(deltaRow, deltaCol)`.
+///
+/// This is used by UI layers (clipboard paste, fill handle) that need the engine's formula
+/// shifting semantics without mutating workbook state.
+#[wasm_bindgen(js_name = "rewriteFormulasForCopyDelta")]
+pub fn rewrite_formulas_for_copy_delta(requests: JsValue) -> Result<JsValue, JsValue> {
+    ensure_rust_constructors_run();
+    let requests: Vec<RewriteFormulaForCopyDeltaRequestDto> =
+        serde_wasm_bindgen::from_value(requests).map_err(|err| js_err(err.to_string()))?;
+
+    let origin = CellAddr::new(0, 0);
+    let mut out: Vec<String> = Vec::with_capacity(requests.len());
+    for req in requests {
+        let (rewritten, _) =
+            rewrite_formula_for_copy_delta(&req.formula, DEFAULT_SHEET, origin, req.delta_row, req.delta_col);
+        out.push(rewritten);
+    }
 
     serde_wasm_bindgen::to_value(&out).map_err(|err| js_err(err.to_string()))
 }

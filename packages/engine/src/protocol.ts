@@ -165,6 +165,21 @@ export interface EditResult {
 }
 
 /**
+ * Request item for `rewriteFormulasForCopyDelta`.
+ *
+ * This mirrors the Rust `rewrite_formula_for_copy_delta` helper used by structural edits
+ * (copy/fill) so UI code can shift formulas using engine semantics without applying a
+ * full workbook edit.
+ */
+export interface RewriteFormulaForCopyDeltaRequest {
+  formula: string;
+  /** Row delta in 0-based engine coordinates. */
+  deltaRow: number;
+  /** Column delta in 0-based engine coordinates. */
+  deltaCol: number;
+}
+
+/**
  * Span in a formula string.
  *
  * Offsets are expressed as **UTF-16 code unit** indices (the same indexing used

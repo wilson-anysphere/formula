@@ -19,6 +19,7 @@ export type {
   FormulaSpan,
   FormulaToken,
   FunctionContext,
+  RewriteFormulaForCopyDeltaRequest,
   RpcOptions,
 } from "./protocol.ts";
 export { defaultWasmBinaryUrl, defaultWasmModuleUrl } from "./wasm.ts";

@@ -9,6 +9,7 @@ import type {
   FormulaPartialParseResult,
   FormulaParseOptions,
   FormulaToken,
+  RewriteFormulaForCopyDeltaRequest,
   RpcOptions,
 } from "./protocol.ts";
 import { defaultWasmBinaryUrl, defaultWasmModuleUrl } from "./wasm.ts";
@@ -99,6 +100,14 @@ export interface EngineClient {
    * update cached formula results.
    */
   applyOperation(op: EditOp, options?: RpcOptions): Promise<EditResult>;
+
+  /**
+   * Rewrite formulas as if they were copied by `(deltaRow, deltaCol)`.
+   *
+   * This is intended for UI layers (clipboard paste, fill handle) that need the
+   * engine's shifting semantics without mutating workbook state.
+   */
+  rewriteFormulasForCopyDelta(requests: RewriteFormulaForCopyDeltaRequest[], options?: RpcOptions): Promise<string[]>;
 
   /**
    * Tokenize a formula string for editor tooling (syntax highlighting, etc).
@@ -226,6 +235,8 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
     getSheetDimensions: async (sheet, rpcOptions) =>
       await withEngine((connected) => connected.getSheetDimensions(sheet, rpcOptions)),
     applyOperation: async (op, rpcOptions) => await withEngine((connected) => connected.applyOperation(op, rpcOptions)),
+    rewriteFormulasForCopyDelta: async (requests, rpcOptions) =>
+      await withEngine((connected) => connected.rewriteFormulasForCopyDelta(requests, rpcOptions)),
     lexFormula: async (formula, options, rpcOptions) =>
       await withEngine((connected) => connected.lexFormula(formula, options, rpcOptions)),
     parseFormulaPartial: async (

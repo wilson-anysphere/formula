@@ -8850,15 +8850,53 @@ export class SpreadsheetApp {
         deltaCol = start.col - ctx.range.startCol;
       }
 
+      const rewrittenInternalFormulas = new Map<number, string>();
+      if (
+        isInternalPaste &&
+        internalCells &&
+        (deltaRow !== 0 || deltaCol !== 0) &&
+        (mode === "all" || mode === "formulas")
+      ) {
+        const requests: Array<{ formula: string; deltaRow: number; deltaCol: number }> = [];
+        const keys: number[] = [];
+        for (let r = 0; r < internalCells.length; r++) {
+          const row = internalCells[r] ?? [];
+          for (let c = 0; c < row.length; c++) {
+            const rawFormula = row[c]?.formula;
+            if (typeof rawFormula !== "string") continue;
+            requests.push({ formula: rawFormula, deltaRow, deltaCol });
+            keys.push(r * colCount + c);
+          }
+        }
+
+        if (requests.length > 0 && this.wasmEngine) {
+          try {
+            const rewritten = await this.wasmEngine.rewriteFormulasForCopyDelta(requests);
+            if (Array.isArray(rewritten) && rewritten.length === requests.length) {
+              for (let i = 0; i < rewritten.length; i++) {
+                const key = keys[i];
+                if (typeof key !== "number") continue;
+                const next = rewritten[i];
+                if (typeof next === "string") {
+                  rewrittenInternalFormulas.set(key, next);
+                }
+              }
+            }
+          } catch {
+            // Ignore and fall back to best-effort shifting.
+          }
+        }
+      }
+
       const values = (() => {
         if (mode === "all") {
           if (isInternalPaste) {
-            return internalCells!.map((row) =>
-              row.map((cell) => {
+            return internalCells!.map((row, r) =>
+              row.map((cell, c) => {
                 const rawFormula = cell.formula;
                 const formula =
-                  rawFormula != null && (deltaRow !== 0 || deltaCol !== 0)
-                    ? shiftA1References(rawFormula, deltaRow, deltaCol)
+                  typeof rawFormula === "string" && (deltaRow !== 0 || deltaCol !== 0)
+                    ? (rewrittenInternalFormulas.get(r * colCount + c) ?? shiftA1References(rawFormula, deltaRow, deltaCol))
                     : rawFormula;
                 if (formula != null) {
                   return { formula, styleId: cell.styleId };
@@ -8897,12 +8935,12 @@ export class SpreadsheetApp {
 
         if (mode === "formulas") {
           if (isInternalPaste) {
-            return internalCells!.map((row) =>
-              row.map((cell) => {
+            return internalCells!.map((row, r) =>
+              row.map((cell, c) => {
                 const rawFormula = cell.formula;
                 const formula =
-                  rawFormula != null && (deltaRow !== 0 || deltaCol !== 0)
-                    ? shiftA1References(rawFormula, deltaRow, deltaCol)
+                  typeof rawFormula === "string" && (deltaRow !== 0 || deltaCol !== 0)
+                    ? (rewrittenInternalFormulas.get(r * colCount + c) ?? shiftA1References(rawFormula, deltaRow, deltaCol))
                     : rawFormula;
                 if (formula != null) return { formula };
                 return { value: cell.value ?? null };
