@@ -175,3 +175,16 @@ fn bytecode_coercion_respects_excel_1904_date_system() {
     assert_number_close(&bc_val, expected);
     assert_eq!(bc_val, ast_val);
 }
+
+#[test]
+fn bytecode_coercion_number_to_text_matches_ast() {
+    // Excel's "General" formatting switches to scientific notation for large magnitudes.
+    let formula = "=CONCAT(100000000000)";
+
+    let (ast_val, _) = eval_single_cell(formula, false, ValueLocaleConfig::en_us());
+    assert_eq!(ast_val, Value::Text("1E+11".to_string()));
+
+    let (bc_val, bc_programs) = eval_single_cell(formula, true, ValueLocaleConfig::en_us());
+    assert!(bc_programs > 0, "expected formula to compile to bytecode");
+    assert_eq!(bc_val, ast_val);
+}

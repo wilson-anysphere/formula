@@ -583,18 +583,12 @@ fn fn_not(args: &[Value]) -> Value {
 }
 
 fn format_number_general(n: f64) -> String {
-    if n == 0.0 {
-        return "0".to_string();
-    }
-    if n.fract() == 0.0 {
-        return format!("{:.0}", n);
-    }
-    let s = n.to_string();
-    if s == "-0" || s == "-0.0" {
-        "0".to_string()
-    } else {
-        s
-    }
+    // Match the engine's number-to-text coercion semantics used by the AST evaluator (Excel's
+    // "General" format). This avoids divergence in bytecode-eligible formulas like
+    // `=CONCAT(100000000000)` which Excel formats as scientific notation.
+    EngineValue::Number(n)
+        .coerce_to_string()
+        .unwrap_or_else(|_| n.to_string())
 }
 
 fn coerce_to_string(v: Value) -> Result<String, ErrorKind> {
