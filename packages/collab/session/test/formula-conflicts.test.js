@@ -108,6 +108,64 @@ test("CollabSession formula conflict monitor detects true offline concurrent edi
   docB.destroy();
 });
 
+test("CollabSession formula conflict monitor surfaces content conflicts for concurrent formula vs value edits when the value writer has no monitor (formula+value mode)", async () => {
+  // Deterministic tie-break: higher clientID wins map entry overwrites. Ensure the
+  // writer without a monitor wins so the monitor side observes the overwrite and
+  // can deterministically surface a content conflict.
+  const docA = new Y.Doc();
+  docA.clientID = 1;
+  const docB = new Y.Doc();
+  docB.clientID = 2;
+
+  let disconnect = connectDocs(docA, docB);
+
+  /** @type {Array<any>} */
+  const conflictsA = [];
+
+  const sessionA = createCollabSession({
+    doc: docA,
+    formulaConflicts: {
+      localUserId: "user-a",
+      mode: "formula+value",
+      onConflict: (c) => conflictsA.push(c),
+    },
+  });
+  // Remote session without any conflict monitor enabled.
+  const sessionB = createCollabSession({ doc: docB });
+
+  // Establish base cell map.
+  await sessionA.setCellValue("Sheet1:0:0", "base");
+  assert.equal((await sessionB.getCell("Sheet1:0:0"))?.value, "base");
+
+  // Offline concurrent edits: A writes a formula, B writes a value. B wins, so A
+  // should see a content conflict (formula vs value).
+  disconnect();
+  await sessionA.setCellFormula("Sheet1:0:0", "=1");
+  await sessionB.setCellValue("Sheet1:0:0", "bob");
+
+  disconnect = connectDocs(docA, docB);
+
+  const conflict = conflictsA.find((c) => c.kind === "content") ?? null;
+  assert.ok(conflict, "expected a content conflict to be detected");
+  assert.equal(conflict.local.type, "formula");
+  assert.equal(conflict.remote.type, "value");
+  assert.equal(conflict.remote.value, "bob");
+
+  // Choosing the remote value is a no-op (already applied) and should converge.
+  assert.ok(sessionA.formulaConflictMonitor?.resolveConflict(conflict.id, conflict.remote));
+
+  assert.equal((await sessionA.getCell("Sheet1:0:0"))?.formula, null);
+  assert.equal((await sessionB.getCell("Sheet1:0:0"))?.formula, null);
+  assert.equal((await sessionA.getCell("Sheet1:0:0"))?.value, "bob");
+  assert.equal((await sessionB.getCell("Sheet1:0:0"))?.value, "bob");
+
+  sessionA.destroy();
+  sessionB.destroy();
+  disconnect();
+  docA.destroy();
+  docB.destroy();
+});
+
 test("CollabSession formula conflict monitor still detects conflicts after recreating the session (restart)", async () => {
   // For concurrent map-entry overwrites, Yjs deterministically breaks ties using
   // clientID (higher wins). Ensure the remote writer wins so the restarted
