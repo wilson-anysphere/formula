@@ -1271,18 +1271,20 @@ fn rich_values_support_field_access_formulas() {
 
     let entity = json!({
         "type": "entity",
-        "entityType": "stock",
-        "entityId": "AAPL",
-        "displayValue": "Apple Inc.",
-        "properties": {
-            "Price": 12.5
+        "value": {
+            "entityType": "stock",
+            "entityId": "AAPL",
+            "displayValue": "Apple Inc.",
+            "properties": {
+                "Price": { "type": "number", "value": 12.5 }
+            }
         }
     });
 
     wb.set_cell_rich(
-        DEFAULT_SHEET.to_string(),
         "A1".to_string(),
         serde_wasm_bindgen::to_value(&entity).unwrap(),
+        Some(DEFAULT_SHEET.to_string()),
     )
     .unwrap();
     wb.set_cell("B1".to_string(), JsValue::from_str("=A1.Price"), None)
@@ -1295,10 +1297,18 @@ fn rich_values_support_field_access_formulas() {
     assert_json_number(&b1.value, 12.5);
 
     let got_js = wb
-        .get_cell_rich(DEFAULT_SHEET.to_string(), "A1".to_string())
+        .get_cell_rich("A1".to_string(), Some(DEFAULT_SHEET.to_string()))
         .unwrap();
     let got: JsonValue = serde_wasm_bindgen::from_value(got_js).unwrap();
-    assert_eq!(got, entity);
+    assert_eq!(
+        got,
+        json!({
+            "sheet": DEFAULT_SHEET,
+            "address": "A1",
+            "input": entity.clone(),
+            "value": entity.clone(),
+        })
+    );
 }
 
 #[wasm_bindgen_test]
@@ -1307,18 +1317,20 @@ fn rich_values_support_bracketed_field_access_formulas() {
 
     let entity = json!({
         "type": "entity",
-        "entityType": "stock",
-        "entityId": "AAPL",
-        "displayValue": "Apple Inc.",
-        "properties": {
-            "Change%": 0.0133
+        "value": {
+            "entityType": "stock",
+            "entityId": "AAPL",
+            "displayValue": "Apple Inc.",
+            "properties": {
+                "Change%": { "type": "number", "value": 0.0133 }
+            }
         }
     });
 
     wb.set_cell_rich(
-        DEFAULT_SHEET.to_string(),
         "A1".to_string(),
         serde_wasm_bindgen::to_value(&entity).unwrap(),
+        Some(DEFAULT_SHEET.to_string()),
     )
     .unwrap();
     wb.set_cell(
@@ -1341,22 +1353,29 @@ fn rich_values_support_nested_field_access_formulas() {
 
     let entity = json!({
         "type": "entity",
-        "entityType": "stock",
-        "entityId": "AAPL",
-        "displayValue": "Apple Inc.",
-        "properties": {
-            "Owner": {
-                "type": "record",
-                "displayField": "Name",
-                "fields": { "Name": "Alice", "Age": 42.0 }
+        "value": {
+            "entityType": "stock",
+            "entityId": "AAPL",
+            "displayValue": "Apple Inc.",
+            "properties": {
+                "Owner": {
+                    "type": "record",
+                    "value": {
+                        "displayField": "Name",
+                        "fields": {
+                            "Name": { "type": "string", "value": "Alice" },
+                            "Age": { "type": "number", "value": 42.0 }
+                        }
+                    }
+                }
             }
         }
     });
 
     wb.set_cell_rich(
-        DEFAULT_SHEET.to_string(),
         "A1".to_string(),
         serde_wasm_bindgen::to_value(&entity).unwrap(),
+        Some(DEFAULT_SHEET.to_string()),
     )
     .unwrap();
     wb.set_cell("B1".to_string(), JsValue::from_str("=A1.Owner.Age"), None)
@@ -1375,18 +1394,20 @@ fn rich_values_missing_field_access_returns_field_error() {
 
     let entity = json!({
         "type": "entity",
-        "entityType": "stock",
-        "entityId": "AAPL",
-        "displayValue": "Apple Inc.",
-        "properties": {
-            "Price": 12.5
+        "value": {
+            "entityType": "stock",
+            "entityId": "AAPL",
+            "displayValue": "Apple Inc.",
+            "properties": {
+                "Price": { "type": "number", "value": 12.5 }
+            }
         }
     });
 
     wb.set_cell_rich(
-        DEFAULT_SHEET.to_string(),
         "A1".to_string(),
         serde_wasm_bindgen::to_value(&entity).unwrap(),
+        Some(DEFAULT_SHEET.to_string()),
     )
     .unwrap();
     wb.set_cell("B1".to_string(), JsValue::from_str("=A1.Nope"), None)
@@ -1405,36 +1426,52 @@ fn rich_values_roundtrip_through_wasm_exports() {
 
     let entity = json!({
         "type": "entity",
-        "entityType": "stock",
-        "entityId": "AAPL",
-        "displayValue": "Apple Inc.",
-        "properties": {
-            "Price": 178.5,
-            "Owner": {
-                "type": "record",
-                "displayField": "Name",
-                "fields": { "Name": "Alice", "Age": 42.0 }
+        "value": {
+            "entityType": "stock",
+            "entityId": "AAPL",
+            "displayValue": "Apple Inc.",
+            "properties": {
+                "Price": { "type": "number", "value": 178.5 },
+                "Owner": {
+                    "type": "record",
+                    "value": {
+                        "displayField": "Name",
+                        "displayValue": "Alice",
+                        "fields": {
+                            "Name": { "type": "string", "value": "Alice" },
+                            "Age": { "type": "number", "value": 42.0 }
+                        }
+                    }
+                }
             }
         }
     });
 
     wb.set_cell_rich(
-        DEFAULT_SHEET.to_string(),
         "A1".to_string(),
         serde_wasm_bindgen::to_value(&entity).unwrap(),
+        Some(DEFAULT_SHEET.to_string()),
     )
     .unwrap();
 
     let got_js = wb
-        .get_cell_rich(DEFAULT_SHEET.to_string(), "A1".to_string())
+        .get_cell_rich("A1".to_string(), Some(DEFAULT_SHEET.to_string()))
         .unwrap();
     let got: JsonValue = serde_wasm_bindgen::from_value(got_js).unwrap();
     // `serde_wasm_bindgen` may canonicalize JS numbers that are whole integers (e.g. `42.0`) into
     // integer JSON numbers (`42`). Normalize the expected payload through the same JS round-trip so
     // this assertion reflects the actual wasm boundary behavior.
-    let expected_js = serde_wasm_bindgen::to_value(&entity).unwrap();
-    let expected: JsonValue = serde_wasm_bindgen::from_value(expected_js).unwrap();
-    assert_eq!(got, expected);
+    let expected_entity_js = serde_wasm_bindgen::to_value(&entity).unwrap();
+    let expected_entity: JsonValue = serde_wasm_bindgen::from_value(expected_entity_js).unwrap();
+    assert_eq!(
+        got,
+        json!({
+            "sheet": DEFAULT_SHEET,
+            "address": "A1",
+            "input": expected_entity.clone(),
+            "value": expected_entity,
+        })
+    );
 
     // Scalar API remains scalar-only.
     let cell_js = wb.get_cell("A1".to_string(), None).unwrap();
@@ -1445,6 +1482,8 @@ fn rich_values_roundtrip_through_wasm_exports() {
 
 #[wasm_bindgen_test]
 fn rich_values_accept_formula_model_cell_value_schema() {
+    use formula_wasm::CellDataRich as WasmCellDataRich;
+
     let mut wb = WasmWorkbook::new();
 
     let typed = ModelCellValue::Entity(
@@ -1455,9 +1494,9 @@ fn rich_values_accept_formula_model_cell_value_schema() {
     );
 
     wb.set_cell_rich(
-        DEFAULT_SHEET.to_string(),
         "A1".to_string(),
         serde_wasm_bindgen::to_value(&typed).unwrap(),
+        Some(DEFAULT_SHEET.to_string()),
     )
     .unwrap();
     wb.set_cell("B1".to_string(), JsValue::from_str("=A1.Price"), None)
@@ -1469,10 +1508,13 @@ fn rich_values_accept_formula_model_cell_value_schema() {
     assert_json_number(&b1.value, 12.5);
 
     let got_js = wb
-        .get_cell_rich(DEFAULT_SHEET.to_string(), "A1".to_string())
+        .get_cell_rich("A1".to_string(), Some(DEFAULT_SHEET.to_string()))
         .unwrap();
-    let got: ModelCellValue = serde_wasm_bindgen::from_value(got_js).unwrap();
-    assert_eq!(got, typed);
+    let got: WasmCellDataRich = serde_wasm_bindgen::from_value(got_js).unwrap();
+    assert_eq!(got.sheet, DEFAULT_SHEET);
+    assert_eq!(got.address, "A1");
+    assert_eq!(got.input, typed);
+    assert_eq!(got.value, got.input);
 }
 
 #[wasm_bindgen_test]
@@ -1482,9 +1524,9 @@ fn rich_values_reject_invalid_payloads() {
     let invalid = json!({ "foo": "bar" });
     let err = wb
         .set_cell_rich(
-            DEFAULT_SHEET.to_string(),
             "A1".to_string(),
             serde_wasm_bindgen::to_value(&invalid).unwrap(),
+            Some(DEFAULT_SHEET.to_string()),
         )
         .unwrap_err();
 
