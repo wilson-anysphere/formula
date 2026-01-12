@@ -41,6 +41,15 @@ impl<E: std::error::Error + 'static> std::error::Error for AtomicWriteError<E> {
     }
 }
 
+fn parent_dir_or_dot(path: &Path) -> &Path {
+    // `Path::parent` returns `Some("")` for bare relative file names like `foo.xlsx`.
+    // Treat that as the current directory so callers can use relative paths without
+    // having to prepend `./`.
+    path.parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+}
+
 /// Atomically write a file by:
 /// - creating parent directories (if needed)
 /// - writing to a temp file in the same directory
@@ -53,7 +62,7 @@ pub fn atomic_write<T, E>(
     write_fn: impl FnOnce(&mut File) -> Result<T, E>,
 ) -> Result<T, AtomicWriteError<E>> {
     let dest = dest.as_ref();
-    let dir = dest.parent().unwrap_or_else(|| Path::new("."));
+    let dir = parent_dir_or_dot(dest);
     fs::create_dir_all(dir).map_err(AtomicWriteError::Io)?;
 
     let mut tmp = NamedTempFile::new_in(dir).map_err(AtomicWriteError::Io)?;
@@ -83,7 +92,7 @@ pub fn atomic_write_with_path<T, E>(
     write_fn: impl FnOnce(&Path) -> Result<T, E>,
 ) -> Result<T, AtomicWriteError<E>> {
     let dest = dest.as_ref();
-    let dir = dest.parent().unwrap_or_else(|| Path::new("."));
+    let dir = parent_dir_or_dot(dest);
     fs::create_dir_all(dir).map_err(AtomicWriteError::Io)?;
 
     let tmp = NamedTempFile::new_in(dir).map_err(AtomicWriteError::Io)?;
@@ -112,9 +121,7 @@ pub fn atomic_write_bytes(dest: impl AsRef<Path>, bytes: &[u8]) -> io::Result<()
 }
 
 fn sync_parent_dir(path: &Path) -> io::Result<()> {
-    let Some(parent) = path.parent() else {
-        return Ok(());
-    };
+    let parent = parent_dir_or_dot(path);
     // On most Unix platforms, opening a directory as a file is supported.
     // On others (or on Windows), this may fail; callers treat it as best-effort.
     let dir = File::open(parent)?;
@@ -154,7 +161,48 @@ fn replace_file(from: &Path, to: &Path) -> io::Result<()> {
 /// This is mostly useful for tests that want a deterministic-but-unique temp path.
 pub fn sibling_path_with_suffix(path: impl AsRef<Path>, suffix: &str) -> PathBuf {
     let path = path.as_ref();
-    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let dir = parent_dir_or_dot(path);
     let file_name = path.file_name().unwrap_or_default();
     dir.join(format!("{}{}", file_name.to_string_lossy(), suffix))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    static CWD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct CwdGuard {
+        old: std::path::PathBuf,
+    }
+
+    impl CwdGuard {
+        fn chdir(path: &Path) -> Self {
+            let old = std::env::current_dir().expect("current_dir");
+            std::env::set_current_dir(path).expect("set_current_dir");
+            Self { old }
+        }
+    }
+
+    impl Drop for CwdGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.old);
+        }
+    }
+
+    #[test]
+    fn atomic_write_supports_relative_dest_in_current_directory() {
+        let _guard = CWD_LOCK.lock().expect("lock");
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let _cwd = CwdGuard::chdir(tmp.path());
+
+        // `file.bin` has an empty `Path::parent()`; this should still work.
+        atomic_write_bytes("file.bin", b"hello").expect("atomic write");
+        assert_eq!(
+            std::fs::read(tmp.path().join("file.bin")).expect("read file"),
+            b"hello"
+        );
+
+    }
 }
