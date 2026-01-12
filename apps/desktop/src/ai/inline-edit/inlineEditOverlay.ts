@@ -30,12 +30,7 @@ export class InlineEditOverlay {
   constructor(private readonly parent: HTMLElement) {
     const root = document.createElement("div");
     root.className = "ai-inline-edit-overlay dialog";
-    root.style.position = "absolute";
-    root.style.display = "none";
-    root.style.zIndex = "20";
-    root.style.top = "16px";
-    root.style.left = "16px";
-    root.style.width = "min(520px, calc(100% - 32px))";
+    root.hidden = true;
     root.dataset.testid = "inline-edit-overlay";
     root.setAttribute("role", "dialog");
     root.setAttribute("aria-label", "AI inline edit");
@@ -100,7 +95,7 @@ export class InlineEditOverlay {
     const error = document.createElement("div");
     error.className = "ai-inline-edit-error";
     error.dataset.testid = "inline-edit-error";
-    error.style.display = "none";
+    error.hidden = true;
 
     const actions = document.createElement("div");
     actions.className = "ai-inline-edit-actions";
@@ -123,7 +118,7 @@ export class InlineEditOverlay {
     const preview = document.createElement("div");
     preview.className = "ai-inline-edit-preview";
     preview.dataset.testid = "inline-edit-preview";
-    preview.style.display = "none";
+    preview.hidden = true;
 
     const previewSummary = document.createElement("div");
     previewSummary.className = "ai-inline-edit-preview-summary";
@@ -180,7 +175,7 @@ export class InlineEditOverlay {
   }
 
   isOpen(): boolean {
-    return this.element.style.display !== "none";
+    return !this.element.hidden;
   }
 
   open(selection: string, callbacks: InlineEditOverlayCallbacks): void {
@@ -188,13 +183,13 @@ export class InlineEditOverlay {
     this.selectionLabel.textContent = selection;
     this.promptInput.value = "";
     this.errorLabel.textContent = "";
-    this.errorLabel.style.display = "none";
+    this.errorLabel.hidden = true;
     this.statusLabel.textContent = "";
-    this.previewContainer.style.display = "none";
+    this.previewContainer.hidden = true;
     this.runButton.disabled = false;
     this.cancelButton.disabled = false;
     this.mode = "prompt";
-    this.element.style.display = "block";
+    this.element.hidden = false;
     this.promptInput.disabled = false;
     this.promptInput.focus();
   }
@@ -209,9 +204,9 @@ export class InlineEditOverlay {
     }
     this.callbacks = null;
     this.mode = "prompt";
-    this.element.style.display = "none";
+    this.element.hidden = true;
     this.promptInput.value = "";
-    this.previewContainer.style.display = "none";
+    this.previewContainer.hidden = true;
   }
 
   getPrompt(): string {
@@ -221,7 +216,7 @@ export class InlineEditOverlay {
   setRunning(message: string): void {
     this.mode = "running";
     this.statusLabel.textContent = message;
-    this.errorLabel.style.display = "none";
+    this.errorLabel.hidden = true;
     this.promptInput.disabled = true;
     this.runButton.disabled = true;
     this.cancelButton.disabled = false;
@@ -231,11 +226,11 @@ export class InlineEditOverlay {
     this.mode = "error";
     this.statusLabel.textContent = "";
     this.errorLabel.textContent = message;
-    this.errorLabel.style.display = "block";
+    this.errorLabel.hidden = false;
     this.promptInput.disabled = false;
     this.runButton.disabled = false;
     this.cancelButton.disabled = false;
-    this.previewContainer.style.display = "none";
+    this.previewContainer.hidden = true;
     this.promptInput.focus();
   }
 
@@ -252,7 +247,7 @@ export class InlineEditOverlay {
 
     this.mode = "preview";
     this.statusLabel.textContent = "Preview changes and approve to apply.";
-    this.errorLabel.style.display = "none";
+    this.errorLabel.hidden = true;
 
     this.previewSummary.textContent = formatPreviewSummary(preview);
     this.previewList.replaceChildren();
@@ -262,7 +257,7 @@ export class InlineEditOverlay {
       this.previewList.appendChild(item);
     }
 
-    this.previewContainer.style.display = "block";
+    this.previewContainer.hidden = false;
     this.approveButton.disabled = false;
     this.previewCancelButton.disabled = false;
     this.approveButton.focus();

@@ -448,6 +448,16 @@
   font-weight: 700;
 }
 
+/* --- AI inline edit ------------------------------------------------------- */
+
+.ai-inline-edit-overlay {
+  position: absolute;
+  z-index: 20;
+  top: 16px;
+  left: 16px;
+  width: min(520px, calc(100% - 32px));
+}
+
 .command-palette {
   background: var(--cmdk-bg);
   border: 1px solid var(--cmdk-border);

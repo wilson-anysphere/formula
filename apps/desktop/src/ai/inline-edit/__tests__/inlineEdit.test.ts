@@ -177,7 +177,7 @@ describe("AI inline edit (Cmd/Ctrl+K)", () => {
     root.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }));
 
     const overlay = await waitFor(() => document.querySelector<HTMLElement>('[data-testid="inline-edit-overlay"]'));
-    expect(overlay.style.display).not.toBe("none");
+    expect(overlay.hidden).toBe(false);
 
     const input = overlay.querySelector<HTMLInputElement>('[data-testid="inline-edit-prompt"]');
     expect(input).toBeTruthy();
@@ -287,7 +287,7 @@ describe("AI inline edit (Cmd/Ctrl+K)", () => {
 
     const errorLabel = await waitFor(() => {
       const el = overlay.querySelector<HTMLElement>('[data-testid="inline-edit-error"]');
-      return el && el.style.display !== "none" && el.textContent ? el : null;
+      return el && !el.hidden && el.textContent ? el : null;
     });
 
     expect(errorLabel.textContent).toMatch(/Sending data to cloud AI is restricted/i);
@@ -371,7 +371,7 @@ describe("AI inline edit (Cmd/Ctrl+K)", () => {
     await waitFor(() => (llmClient.chat.mock.calls.length > 0 ? overlay : null));
     expect(llmClient.chat).toHaveBeenCalledTimes(1);
 
-    await waitFor(() => (overlay.style.display === "none" ? overlay : null));
+    await waitFor(() => (overlay.hidden ? overlay : null));
     // No tool calls were issued; the sheet should remain unchanged.
     expect(doc.getCell("Sheet1", "C1").value).toBe("TOP SECRET");
   });
@@ -614,7 +614,7 @@ describe("AI inline edit (Cmd/Ctrl+K)", () => {
 
     // Cancel while the tool loop is still waiting for the model response.
     overlay.querySelector<HTMLButtonElement>('[data-testid="inline-edit-cancel"]')!.click();
-    await waitFor(() => (overlay.style.display === "none" ? overlay : null));
+    await waitFor(() => (overlay.hidden ? overlay : null));
 
     // Let the model respond after cancellation (previously this would hang waiting
     // for an approval UI that was no longer visible).
@@ -631,7 +631,7 @@ describe("AI inline edit (Cmd/Ctrl+K)", () => {
     await waitFor(() => {
       root.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }));
       const el = document.querySelector<HTMLElement>('[data-testid="inline-edit-overlay"]');
-      return el && el.style.display !== "none" ? el : null;
+      return el && !el.hidden ? el : null;
     });
 
     const doc = app.getDocument();
