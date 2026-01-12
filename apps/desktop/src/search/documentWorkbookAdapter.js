@@ -97,7 +97,15 @@ export class DocumentWorkbookAdapter {
   }
 
   #resolveSheetIdByName(sheetName) {
-    const trimmed = String(sheetName ?? "").trim();
+    const trimmed = (() => {
+      const raw = String(sheetName ?? "").trim();
+      // Excel-style sheet-qualified references may be quoted, e.g. `'My Sheet'!A1`.
+      // When callers pass the sheet token through directly, normalize it back to
+      // the display name before resolving.
+      const quoted = /^'((?:[^']|'')+)'$/.exec(raw);
+      if (quoted) return quoted[1].replace(/''/g, "'").trim();
+      return raw;
+    })();
     if (!trimmed) return null;
 
     const resolved = this.sheetNameResolver?.getSheetIdByName?.(trimmed);

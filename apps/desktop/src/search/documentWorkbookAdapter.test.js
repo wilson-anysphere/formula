@@ -40,7 +40,7 @@ test("DocumentWorkbookAdapter resolves sheets by display name via sheetNameResol
   const doc = { getSheetIds: () => ["Sheet1", "Sheet2"] };
   const namesById = new Map([
     ["Sheet1", "Sheet1"],
-    ["Sheet2", "Budget"],
+    ["Sheet2", "My Sheet"],
   ]);
   const sheetNameResolver = {
     getSheetNameById: (id) => namesById.get(id) ?? null,
@@ -57,13 +57,17 @@ test("DocumentWorkbookAdapter resolves sheets by display name via sheetNameResol
   const workbook = new DocumentWorkbookAdapter({ document: doc, sheetNameResolver });
 
   const sheetNames = workbook.sheets.map((s) => s.name);
-  assert.deepEqual(sheetNames, ["Sheet1", "Budget"]);
+  assert.deepEqual(sheetNames, ["Sheet1", "My Sheet"]);
 
-  const budget = workbook.getSheet("Budget");
-  assert.equal(budget.sheetId, "Sheet2");
+  const sheet = workbook.getSheet("My Sheet");
+  assert.equal(sheet.sheetId, "Sheet2");
 
-  const budgetLower = workbook.getSheet("budget");
-  assert.equal(budgetLower.sheetId, "Sheet2");
+  const sheetLower = workbook.getSheet("my sheet");
+  assert.equal(sheetLower.sheetId, "Sheet2");
+
+  // Accept Excel-style quoting for sheet tokens (e.g. from sheet-qualified references).
+  const sheetQuoted = workbook.getSheet("'My Sheet'");
+  assert.equal(sheetQuoted.sheetId, "Sheet2");
 
   assert.throws(() => workbook.getSheet("MissingSheet"), /Unknown sheet/i);
 });

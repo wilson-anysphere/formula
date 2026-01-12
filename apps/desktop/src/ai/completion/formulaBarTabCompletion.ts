@@ -12,6 +12,13 @@ import type { FormulaBarView } from "../../formula-bar/FormulaBarView.js";
 import type { SheetNameResolver } from "../../sheet/sheetNameResolver";
 import { evaluateFormula, type SpreadsheetValue } from "../../spreadsheet/evaluateFormula.js";
 
+function normalizeSheetNameToken(sheetName: string): string {
+  const raw = String(sheetName ?? "").trim();
+  const quoted = /^'((?:[^']|'')+)'$/.exec(raw);
+  if (quoted) return quoted[1]!.replace(/''/g, "'").trim();
+  return raw;
+}
+
 export interface FormulaBarTabCompletionControllerOptions {
   formulaBar: FormulaBarView;
   document: DocumentController;
@@ -181,7 +188,7 @@ export class FormulaBarTabCompletionController {
         : [];
 
     const resolveSheetId = (name: string): string | null => {
-      const trimmed = name.trim();
+      const trimmed = normalizeSheetNameToken(name);
       if (!trimmed) return null;
 
       const resolved = sheetNameResolver?.getSheetIdByName(trimmed) ?? null;
@@ -399,7 +406,7 @@ function createPreviewEvaluator(params: {
         : [];
 
     const resolveSheetId = (name: string): string | null => {
-      const trimmed = name.trim();
+      const trimmed = normalizeSheetNameToken(name);
       if (!trimmed) return null;
 
       const resolved = sheetNameResolver?.getSheetIdByName(trimmed) ?? null;

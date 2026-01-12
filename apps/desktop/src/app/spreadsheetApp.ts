@@ -7332,7 +7332,15 @@ export class SpreadsheetApp {
   }
 
   private resolveSheetIdByName(name: string): string | null {
-    const trimmed = name.trim();
+    const trimmed = (() => {
+      const raw = name.trim();
+      // Sheet-qualified references can be quoted using Excel syntax: `'My Sheet'!A1`.
+      // When we split on "!" we receive the quoted token (`'My Sheet'`) and need to
+      // unquote it before resolving the display name -> stable id mapping.
+      const quoted = /^'((?:[^']|'')+)'$/.exec(raw);
+      if (quoted) return quoted[1]!.replace(/''/g, "'").trim();
+      return raw;
+    })();
     if (!trimmed) return null;
 
     const resolved = this.sheetNameResolver?.getSheetIdByName(trimmed);

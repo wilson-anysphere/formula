@@ -214,4 +214,48 @@ describe("SpreadsheetApp fallback evaluator", () => {
     app.destroy();
     root.remove();
   });
+
+  it("resolves quoted sheet-qualified references (supports spaces and escaped apostrophes)", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const namesById = new Map<string, string>([
+      ["Sheet1", "Sheet1"],
+      ["Sheet2", "My Sheet"],
+    ]);
+    const resolver = {
+      getSheetNameById: (id: string) => namesById.get(id) ?? null,
+      getSheetIdByName: (name: string) => {
+        const needle = name.trim().toLowerCase();
+        if (!needle) return null;
+        for (const [id, sheetName] of namesById.entries()) {
+          if (sheetName.toLowerCase() === needle) return id;
+        }
+        return null;
+      },
+    };
+
+    const app = new SpreadsheetApp(root, status, { sheetNameResolver: resolver });
+    const doc = app.getDocument();
+
+    doc.setCellValue("Sheet2", { row: 0, col: 0 }, 123);
+    doc.setCellFormula("Sheet1", { row: 0, col: 1 }, "='My Sheet'!A1+1");
+    expect((app as any).getCellComputedValue({ row: 0, col: 1 })).toBe(124);
+
+    // Also support Excel-style escaping of apostrophes inside the quoted sheet name.
+    namesById.set("Sheet2", "O'Brien");
+    doc.setCellFormula("Sheet1", { row: 0, col: 2 }, "='O''Brien'!A1+1");
+    expect((app as any).getCellComputedValue({ row: 0, col: 2 })).toBe(124);
+
+    // Must not create new sheets for display names.
+    expect(doc.getSheetIds()).not.toContain("My Sheet");
+    expect(doc.getSheetIds()).not.toContain("O'Brien");
+
+    app.destroy();
+    root.remove();
+  });
 });
