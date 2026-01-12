@@ -1247,6 +1247,47 @@ fn bytecode_backend_inlines_defined_name_union_static_refs() {
 }
 
 #[test]
+fn bytecode_backend_inlines_defined_name_spill_range_refs() {
+    let mut engine = Engine::new();
+
+    // Create a spill on Sheet1 starting at A1 (spills into B1).
+    engine
+        .set_cell_formula("Sheet1", "A1", "={1,2}")
+        .unwrap();
+    engine
+        .define_name(
+            "MySpill",
+            NameScope::Workbook,
+            NameDefinition::Reference("Sheet1!A1#".to_string()),
+        )
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C1", "=SUM(MySpill)")
+        .unwrap();
+
+    // Ensure the dependent formula compiled to bytecode (even if the spill origin formula did too).
+    let report = engine.bytecode_compile_report(usize::MAX);
+    let c1 = parse_a1("C1").unwrap();
+    assert!(
+        report
+            .iter()
+            .find(|e| e.sheet == "Sheet1" && e.addr == c1)
+            .is_none(),
+        "expected C1 to compile to bytecode"
+    );
+
+    engine.recalculate_single_threaded();
+    let via_bytecode = engine.get_cell_value("Sheet1", "C1");
+    assert_eq!(via_bytecode, Value::Number(3.0));
+
+    engine.set_bytecode_enabled(false);
+    engine.recalculate_single_threaded();
+    let via_ast = engine.get_cell_value("Sheet1", "C1");
+
+    assert_eq!(via_bytecode, via_ast);
+}
+
+#[test]
 fn bytecode_backend_does_not_inline_dynamic_defined_name_formulas() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();

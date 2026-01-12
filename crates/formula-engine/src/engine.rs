@@ -3554,6 +3554,15 @@ impl Engine {
                             lexical_scopes,
                         )
                     }
+                    crate::Expr::Postfix(p) if p.op == crate::PostfixOp::SpillRange => {
+                        // Spill-range references (e.g. `A1#`) can be lowered to bytecode.
+                        self.extract_static_ref_expr_for_bytecode(
+                            &ast.expr,
+                            sheet_id,
+                            visiting,
+                            lexical_scopes,
+                        )
+                    }
                     crate::Expr::Binary(b) if b.op == crate::BinaryOp::Union => {
                         // Multi-area reference definitions (e.g. `Sheet1!A1,Sheet1!B1`) can be
                         // lowered to a bytecode `MultiRangeRef`.
@@ -3630,6 +3639,18 @@ impl Engine {
             crate::Expr::CellRef(r) => Some(crate::Expr::CellRef(
                 self.normalize_cell_ref_for_bytecode(r, current_sheet)?,
             )),
+            crate::Expr::Postfix(p) if p.op == crate::PostfixOp::SpillRange => {
+                let inner = self.extract_static_ref_expr_for_bytecode(
+                    &p.expr,
+                    current_sheet,
+                    visiting,
+                    lexical_scopes,
+                )?;
+                Some(crate::Expr::Postfix(crate::PostfixExpr {
+                    op: crate::PostfixOp::SpillRange,
+                    expr: Box::new(inner),
+                }))
+            }
             crate::Expr::Binary(b) if b.op == crate::BinaryOp::Union => {
                 let left = self.extract_static_ref_expr_for_bytecode(
                     &b.left,
