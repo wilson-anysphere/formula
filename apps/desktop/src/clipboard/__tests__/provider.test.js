@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { Buffer as NodeBuffer } from "node:buffer";
 
 import { createClipboardProvider } from "../platform/provider.js";
 
@@ -270,6 +271,7 @@ test("clipboard provider: rich MIME handling", async (t) => {
     await withGlobals(
       {
         Buffer: undefined,
+        atob: (base64) => NodeBuffer.from(base64, "base64").toString("binary"),
         __TAURI__: {
           core: {
             async invoke(cmd) {
@@ -387,6 +389,7 @@ test("clipboard provider: rich MIME handling", async (t) => {
     await withGlobals(
       {
         Buffer: undefined,
+        btoa: (binary) => NodeBuffer.from(binary, "binary").toString("base64"),
         __TAURI__: {
           core: {
             async invoke(cmd, args) {
