@@ -1,4 +1,14 @@
-export type SpreadsheetClaimMeasure = "mean" | "sum" | "median" | "stdev" | "variance" | "count" | "min" | "max";
+export type SpreadsheetClaimMeasure =
+  | "mean"
+  | "sum"
+  | "count"
+  | "median"
+  | "mode"
+  | "stdev"
+  | "variance"
+  | "min"
+  | "max"
+  | "correlation";
 
 export type ExtractedSpreadsheetClaim =
   | {
@@ -47,6 +57,7 @@ const KEYWORD_TO_MEASURE: Record<string, SpreadsheetClaimMeasure> = {
   avg: "mean",
   mean: "mean",
   median: "median",
+  mode: "mode",
   sum: "sum",
   total: "sum",
   stdev: "stdev",
@@ -60,7 +71,9 @@ const KEYWORD_TO_MEASURE: Record<string, SpreadsheetClaimMeasure> = {
   min: "min",
   minimum: "min",
   max: "max",
-  maximum: "max"
+  maximum: "max",
+  correlation: "correlation",
+  corr: "correlation"
 };
 
 function escapeRegexLiteral(text: string): string {

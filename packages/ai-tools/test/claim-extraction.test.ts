@@ -104,6 +104,40 @@ describe("extractVerifiableClaims", () => {
     ]);
   });
 
+  it("extracts mode claims", () => {
+    const claims = extractVerifiableClaims({
+      assistantText: "The mode of Sheet1!A1:A5 is 2.",
+      userText: ""
+    });
+
+    expect(claims).toEqual([
+      {
+        kind: "range_stat",
+        measure: "mode",
+        reference: "Sheet1!A1:A5",
+        expected: 2,
+        source: "mode of Sheet1!A1:A5 is 2"
+      }
+    ]);
+  });
+
+  it("extracts correlation claims", () => {
+    const claims = extractVerifiableClaims({
+      assistantText: "Correlation of Sheet1!A1:B3 is 1.",
+      userText: ""
+    });
+
+    expect(claims).toEqual([
+      {
+        kind: "range_stat",
+        measure: "correlation",
+        reference: "Sheet1!A1:B3",
+        expected: 1,
+        source: "Correlation of Sheet1!A1:B3 is 1"
+      }
+    ]);
+  });
+
   it("extracts stdev claims (std. dev punctuation)", () => {
     const claims = extractVerifiableClaims({
       assistantText: "Std. dev for Sheet1!B2:B100 = 12.3.",
