@@ -151,6 +151,17 @@ fn sumproduct_propagates_errors() {
 }
 
 #[test]
+fn sumproduct_treats_non_numeric_text_as_zero() {
+    let a = vec![Value::from("x"), 2.into()];
+    let b = vec![3.into(), 4.into()];
+    // "x" coerces to 0, so SUMPRODUCT is 0*3 + 2*4.
+    assert_eq!(
+        math::sumproduct(&[&a, &b], NumberLocale::en_us()).unwrap(),
+        8.0
+    );
+}
+
+#[test]
 fn subtotal_implements_common_function_nums() {
     let values = vec![1.into(), 2.into(), 3.into(), Value::from("x"), Value::Blank];
     assert_eq!(math::subtotal(9, &values).unwrap(), 6.0);

@@ -73,6 +73,7 @@ pub fn sum_count_ignore_nan_f64(values: &[f64]) -> (f64, usize) {
 
 pub fn min_ignore_nan_f64(values: &[f64]) -> Option<f64> {
     let mut acc = f64x4::from([f64::INFINITY; 4]);
+    let mut saw_value = false;
 
     let mut i = 0usize;
     while i + 4 <= values.len() {
@@ -80,6 +81,8 @@ pub fn min_ignore_nan_f64(values: &[f64]) -> Option<f64> {
         for lane in &mut lanes {
             if lane.is_nan() {
                 *lane = f64::INFINITY;
+            } else {
+                saw_value = true;
             }
         }
         let v = f64x4::from(lanes);
@@ -93,18 +96,16 @@ pub fn min_ignore_nan_f64(values: &[f64]) -> Option<f64> {
         if v.is_nan() {
             continue;
         }
+        saw_value = true;
         best = best.min(v);
     }
 
-    if best.is_infinite() {
-        None
-    } else {
-        Some(best)
-    }
+    saw_value.then_some(best)
 }
 
 pub fn max_ignore_nan_f64(values: &[f64]) -> Option<f64> {
     let mut acc = f64x4::from([f64::NEG_INFINITY; 4]);
+    let mut saw_value = false;
 
     let mut i = 0usize;
     while i + 4 <= values.len() {
@@ -112,6 +113,8 @@ pub fn max_ignore_nan_f64(values: &[f64]) -> Option<f64> {
         for lane in &mut lanes {
             if lane.is_nan() {
                 *lane = f64::NEG_INFINITY;
+            } else {
+                saw_value = true;
             }
         }
         let v = f64x4::from(lanes);
@@ -125,14 +128,11 @@ pub fn max_ignore_nan_f64(values: &[f64]) -> Option<f64> {
         if v.is_nan() {
             continue;
         }
+        saw_value = true;
         best = best.max(v);
     }
 
-    if best.is_infinite() {
-        None
-    } else {
-        Some(best)
-    }
+    saw_value.then_some(best)
 }
 
 pub fn count_if_f64(values: &[f64], criteria: NumericCriteria) -> usize {

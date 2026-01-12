@@ -5,9 +5,11 @@ use crate::functions::{
     eval_scalar_arg, volatile_rand_u64_below, ArgValue, ArraySupport, FunctionContext, FunctionSpec,
 };
 use crate::functions::{ThreadSafety, ValueType, Volatility};
-use crate::value::{Array, ErrorKind, Value};
+use crate::simd;
+use crate::value::{parse_number, Array, ErrorKind, Value};
 
 const VAR_ARGS: usize = 255;
+const SIMD_AGGREGATE_BLOCK: usize = 1024;
 
 inventory::submit! {
     FunctionSpec {
@@ -109,10 +111,26 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                     Err(e) => return Value::Error(e),
                 },
                 Value::Array(arr) => {
+                    let mut buf = [0.0_f64; SIMD_AGGREGATE_BLOCK];
+                    let mut len = 0usize;
+                    let mut sum = 0.0;
+                    let mut saw_nan = false;
+
                     for v in arr.iter() {
                         match v {
                             Value::Error(e) => return Value::Error(*e),
-                            Value::Number(n) => acc += n,
+                            Value::Number(n) => {
+                                if n.is_nan() {
+                                    saw_nan = true;
+                                } else if !saw_nan {
+                                    buf[len] = *n;
+                                    len += 1;
+                                    if len == SIMD_AGGREGATE_BLOCK {
+                                        sum += simd::sum_ignore_nan_f64(&buf);
+                                        len = 0;
+                                    }
+                                }
+                            }
                             Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                             Value::Bool(_)
                             | Value::Text(_)
@@ -123,6 +141,15 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::ReferenceUnion(_) => {}
                         }
                     }
+
+                    if saw_nan {
+                        acc += f64::NAN;
+                    } else {
+                        if len > 0 {
+                            sum += simd::sum_ignore_nan_f64(&buf[..len]);
+                        }
+                        acc += sum;
+                    }
                 }
                 Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                 Value::Spill { .. } => return Value::Error(ErrorKind::Value),
@@ -131,11 +158,27 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 }
             },
             ArgValue::Reference(r) => {
+                let mut buf = [0.0_f64; SIMD_AGGREGATE_BLOCK];
+                let mut len = 0usize;
+                let mut sum = 0.0;
+                let mut saw_nan = false;
+
                 for addr in ctx.iter_reference_cells(&r) {
                     let v = ctx.get_cell_value(&r.sheet_id, addr);
                     match v {
                         Value::Error(e) => return Value::Error(e),
-                        Value::Number(n) => acc += n,
+                        Value::Number(n) => {
+                            if n.is_nan() {
+                                saw_nan = true;
+                            } else if !saw_nan {
+                                buf[len] = n;
+                                len += 1;
+                                if len == SIMD_AGGREGATE_BLOCK {
+                                    sum += simd::sum_ignore_nan_f64(&buf);
+                                    len = 0;
+                                }
+                            }
+                        }
                         Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                         // Excel quirk: logicals/text in references are ignored by SUM.
                         Value::Bool(_)
@@ -147,9 +190,22 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         | Value::ReferenceUnion(_) => {}
                     }
                 }
+
+                if saw_nan {
+                    acc += f64::NAN;
+                } else {
+                    if len > 0 {
+                        sum += simd::sum_ignore_nan_f64(&buf[..len]);
+                    }
+                    acc += sum;
+                }
             }
             ArgValue::ReferenceUnion(ranges) => {
                 let mut seen = std::collections::HashSet::new();
+                let mut buf = [0.0_f64; SIMD_AGGREGATE_BLOCK];
+                let mut len = 0usize;
+                let mut sum = 0.0;
+                let mut saw_nan = false;
                 for r in ranges {
                     for addr in ctx.iter_reference_cells(&r) {
                         if !seen.insert((r.sheet_id.clone(), addr)) {
@@ -158,7 +214,18 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         let v = ctx.get_cell_value(&r.sheet_id, addr);
                         match v {
                             Value::Error(e) => return Value::Error(e),
-                            Value::Number(n) => acc += n,
+                            Value::Number(n) => {
+                                if n.is_nan() {
+                                    saw_nan = true;
+                                } else if !saw_nan {
+                                    buf[len] = n;
+                                    len += 1;
+                                    if len == SIMD_AGGREGATE_BLOCK {
+                                        sum += simd::sum_ignore_nan_f64(&buf);
+                                        len = 0;
+                                    }
+                                }
+                            }
                             Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                             // Excel quirk: logicals/text in references are ignored by SUM.
                             Value::Bool(_)
@@ -170,6 +237,15 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::ReferenceUnion(_) => {}
                         }
                     }
+                }
+
+                if saw_nan {
+                    acc += f64::NAN;
+                } else {
+                    if len > 0 {
+                        sum += simd::sum_ignore_nan_f64(&buf[..len]);
+                    }
+                    acc += sum;
                 }
             }
         }
@@ -314,15 +390,34 @@ inventory::submit! {
 
 fn min_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let mut best: Option<f64> = None;
+    let mut saw_nan_number = false;
 
     for arg in args {
         match ctx.eval_arg(arg) {
             ArgValue::Scalar(v) => match v {
                 Value::Array(arr) => {
+                    let mut buf = [0.0_f64; SIMD_AGGREGATE_BLOCK];
+                    let mut len = 0usize;
+                    let mut local_best: Option<f64> = None;
+
                     for v in arr.iter() {
                         match v {
                             Value::Error(e) => return Value::Error(*e),
-                            Value::Number(n) => best = Some(best.map(|b| b.min(*n)).unwrap_or(*n)),
+                            Value::Number(n) => {
+                                if n.is_nan() {
+                                    saw_nan_number = true;
+                                    continue;
+                                }
+
+                                buf[len] = *n;
+                                len += 1;
+                                if len == SIMD_AGGREGATE_BLOCK {
+                                    if let Some(m) = simd::min_ignore_nan_f64(&buf) {
+                                        local_best = Some(local_best.map_or(m, |b| b.min(m)));
+                                    }
+                                    len = 0;
+                                }
+                            }
                             Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                             Value::Bool(_)
                             | Value::Text(_)
@@ -333,21 +428,52 @@ fn min_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::ReferenceUnion(_) => {}
                         }
                     }
+
+                    if len > 0 {
+                        if let Some(m) = simd::min_ignore_nan_f64(&buf[..len]) {
+                            local_best = Some(local_best.map_or(m, |b| b.min(m)));
+                        }
+                    }
+                    if let Some(m) = local_best {
+                        best = Some(best.map_or(m, |b| b.min(m)));
+                    }
                 }
                 other => {
                     let n = match other.coerce_to_number_with_ctx(ctx) {
                         Ok(n) => n,
                         Err(e) => return Value::Error(e),
                     };
-                    best = Some(best.map(|b| b.min(n)).unwrap_or(n));
+                    if n.is_nan() {
+                        saw_nan_number = true;
+                    } else {
+                        best = Some(best.map_or(n, |b| b.min(n)));
+                    }
                 }
             },
             ArgValue::Reference(r) => {
+                let mut buf = [0.0_f64; SIMD_AGGREGATE_BLOCK];
+                let mut len = 0usize;
+                let mut local_best: Option<f64> = None;
+
                 for addr in ctx.iter_reference_cells(&r) {
                     let v = ctx.get_cell_value(&r.sheet_id, addr);
                     match v {
                         Value::Error(e) => return Value::Error(e),
-                        Value::Number(n) => best = Some(best.map(|b| b.min(n)).unwrap_or(n)),
+                        Value::Number(n) => {
+                            if n.is_nan() {
+                                saw_nan_number = true;
+                                continue;
+                            }
+
+                            buf[len] = n;
+                            len += 1;
+                            if len == SIMD_AGGREGATE_BLOCK {
+                                if let Some(m) = simd::min_ignore_nan_f64(&buf) {
+                                    local_best = Some(local_best.map_or(m, |b| b.min(m)));
+                                }
+                                len = 0;
+                            }
+                        }
                         Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                         Value::Bool(_)
                         | Value::Text(_)
@@ -358,9 +484,21 @@ fn min_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         | Value::ReferenceUnion(_) => {}
                     }
                 }
+
+                if len > 0 {
+                    if let Some(m) = simd::min_ignore_nan_f64(&buf[..len]) {
+                        local_best = Some(local_best.map_or(m, |b| b.min(m)));
+                    }
+                }
+                if let Some(m) = local_best {
+                    best = Some(best.map_or(m, |b| b.min(m)));
+                }
             }
             ArgValue::ReferenceUnion(ranges) => {
                 let mut seen = std::collections::HashSet::new();
+                let mut buf = [0.0_f64; SIMD_AGGREGATE_BLOCK];
+                let mut len = 0usize;
+                let mut local_best: Option<f64> = None;
                 for r in ranges {
                     for addr in ctx.iter_reference_cells(&r) {
                         if !seen.insert((r.sheet_id.clone(), addr)) {
@@ -369,7 +507,21 @@ fn min_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         let v = ctx.get_cell_value(&r.sheet_id, addr);
                         match v {
                             Value::Error(e) => return Value::Error(e),
-                            Value::Number(n) => best = Some(best.map(|b| b.min(n)).unwrap_or(n)),
+                            Value::Number(n) => {
+                                if n.is_nan() {
+                                    saw_nan_number = true;
+                                    continue;
+                                }
+
+                                buf[len] = n;
+                                len += 1;
+                                if len == SIMD_AGGREGATE_BLOCK {
+                                    if let Some(m) = simd::min_ignore_nan_f64(&buf) {
+                                        local_best = Some(local_best.map_or(m, |b| b.min(m)));
+                                    }
+                                    len = 0;
+                                }
+                            }
                             Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                             Value::Bool(_)
                             | Value::Text(_)
@@ -381,11 +533,24 @@ fn min_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         }
                     }
                 }
+
+                if len > 0 {
+                    if let Some(m) = simd::min_ignore_nan_f64(&buf[..len]) {
+                        local_best = Some(local_best.map_or(m, |b| b.min(m)));
+                    }
+                }
+                if let Some(m) = local_best {
+                    best = Some(best.map_or(m, |b| b.min(m)));
+                }
             }
         }
     }
 
-    Value::Number(best.unwrap_or(0.0))
+    match best {
+        Some(n) => Value::Number(n),
+        None if saw_nan_number => Value::Number(f64::NAN),
+        None => Value::Number(0.0),
+    }
 }
 
 inventory::submit! {
@@ -404,15 +569,34 @@ inventory::submit! {
 
 fn max_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let mut best: Option<f64> = None;
+    let mut saw_nan_number = false;
 
     for arg in args {
         match ctx.eval_arg(arg) {
             ArgValue::Scalar(v) => match v {
                 Value::Array(arr) => {
+                    let mut buf = [0.0_f64; SIMD_AGGREGATE_BLOCK];
+                    let mut len = 0usize;
+                    let mut local_best: Option<f64> = None;
+
                     for v in arr.iter() {
                         match v {
                             Value::Error(e) => return Value::Error(*e),
-                            Value::Number(n) => best = Some(best.map(|b| b.max(*n)).unwrap_or(*n)),
+                            Value::Number(n) => {
+                                if n.is_nan() {
+                                    saw_nan_number = true;
+                                    continue;
+                                }
+
+                                buf[len] = *n;
+                                len += 1;
+                                if len == SIMD_AGGREGATE_BLOCK {
+                                    if let Some(m) = simd::max_ignore_nan_f64(&buf) {
+                                        local_best = Some(local_best.map_or(m, |b| b.max(m)));
+                                    }
+                                    len = 0;
+                                }
+                            }
                             Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                             Value::Bool(_)
                             | Value::Text(_)
@@ -423,21 +607,52 @@ fn max_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::ReferenceUnion(_) => {}
                         }
                     }
+
+                    if len > 0 {
+                        if let Some(m) = simd::max_ignore_nan_f64(&buf[..len]) {
+                            local_best = Some(local_best.map_or(m, |b| b.max(m)));
+                        }
+                    }
+                    if let Some(m) = local_best {
+                        best = Some(best.map_or(m, |b| b.max(m)));
+                    }
                 }
                 other => {
                     let n = match other.coerce_to_number_with_ctx(ctx) {
                         Ok(n) => n,
                         Err(e) => return Value::Error(e),
                     };
-                    best = Some(best.map(|b| b.max(n)).unwrap_or(n));
+                    if n.is_nan() {
+                        saw_nan_number = true;
+                    } else {
+                        best = Some(best.map_or(n, |b| b.max(n)));
+                    }
                 }
             },
             ArgValue::Reference(r) => {
+                let mut buf = [0.0_f64; SIMD_AGGREGATE_BLOCK];
+                let mut len = 0usize;
+                let mut local_best: Option<f64> = None;
+
                 for addr in ctx.iter_reference_cells(&r) {
                     let v = ctx.get_cell_value(&r.sheet_id, addr);
                     match v {
                         Value::Error(e) => return Value::Error(e),
-                        Value::Number(n) => best = Some(best.map(|b| b.max(n)).unwrap_or(n)),
+                        Value::Number(n) => {
+                            if n.is_nan() {
+                                saw_nan_number = true;
+                                continue;
+                            }
+
+                            buf[len] = n;
+                            len += 1;
+                            if len == SIMD_AGGREGATE_BLOCK {
+                                if let Some(m) = simd::max_ignore_nan_f64(&buf) {
+                                    local_best = Some(local_best.map_or(m, |b| b.max(m)));
+                                }
+                                len = 0;
+                            }
+                        }
                         Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                         Value::Bool(_)
                         | Value::Text(_)
@@ -448,9 +663,21 @@ fn max_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         | Value::ReferenceUnion(_) => {}
                     }
                 }
+
+                if len > 0 {
+                    if let Some(m) = simd::max_ignore_nan_f64(&buf[..len]) {
+                        local_best = Some(local_best.map_or(m, |b| b.max(m)));
+                    }
+                }
+                if let Some(m) = local_best {
+                    best = Some(best.map_or(m, |b| b.max(m)));
+                }
             }
             ArgValue::ReferenceUnion(ranges) => {
                 let mut seen = std::collections::HashSet::new();
+                let mut buf = [0.0_f64; SIMD_AGGREGATE_BLOCK];
+                let mut len = 0usize;
+                let mut local_best: Option<f64> = None;
                 for r in ranges {
                     for addr in ctx.iter_reference_cells(&r) {
                         if !seen.insert((r.sheet_id.clone(), addr)) {
@@ -459,7 +686,21 @@ fn max_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         let v = ctx.get_cell_value(&r.sheet_id, addr);
                         match v {
                             Value::Error(e) => return Value::Error(e),
-                            Value::Number(n) => best = Some(best.map(|b| b.max(n)).unwrap_or(n)),
+                            Value::Number(n) => {
+                                if n.is_nan() {
+                                    saw_nan_number = true;
+                                    continue;
+                                }
+
+                                buf[len] = n;
+                                len += 1;
+                                if len == SIMD_AGGREGATE_BLOCK {
+                                    if let Some(m) = simd::max_ignore_nan_f64(&buf) {
+                                        local_best = Some(local_best.map_or(m, |b| b.max(m)));
+                                    }
+                                    len = 0;
+                                }
+                            }
                             Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                             Value::Bool(_)
                             | Value::Text(_)
@@ -471,11 +712,24 @@ fn max_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         }
                     }
                 }
+
+                if len > 0 {
+                    if let Some(m) = simd::max_ignore_nan_f64(&buf[..len]) {
+                        local_best = Some(local_best.map_or(m, |b| b.max(m)));
+                    }
+                }
+                if let Some(m) = local_best {
+                    best = Some(best.map_or(m, |b| b.max(m)));
+                }
             }
         }
     }
 
-    Value::Number(best.unwrap_or(0.0))
+    match best {
+        Some(n) => Value::Number(n),
+        None if saw_nan_number => Value::Number(f64::NAN),
+        None => Value::Number(0.0),
+    }
 }
 
 inventory::submit! {
@@ -552,6 +806,21 @@ inventory::submit! {
 }
 
 fn countif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    fn coerce_candidate_to_number(value: &Value, locale: crate::value::NumberLocale) -> Option<f64> {
+        match value {
+            Value::Number(n) => Some(*n),
+            Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
+            Value::Blank => Some(0.0),
+            Value::Text(s) => parse_number(s, locale).ok(),
+            Value::Array(arr) => coerce_candidate_to_number(&arr.top_left(), locale),
+            Value::Error(_)
+            | Value::Reference(_)
+            | Value::ReferenceUnion(_)
+            | Value::Lambda(_)
+            | Value::Spill { .. } => None,
+        }
+    }
+
     let criteria_value = eval_scalar_arg(ctx, &args[1]);
     if let Value::Error(e) = criteria_value {
         return Value::Error(e);
@@ -570,9 +839,47 @@ fn countif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     // `iter_reference_cells` is sparse when the backend supports it. COUNTIF must still account
     // for implicit blanks, but only when the criteria can actually match blank cells.
     let blank_matches = criteria.matches(&Value::Blank);
+    let numeric = criteria.as_numeric_criteria();
+    let number_locale = ctx.number_locale();
 
     match ctx.eval_arg(&args[0]) {
         ArgValue::Reference(r) => {
+            if let Some(numeric) = numeric {
+                let mut count: u64 = 0;
+                let mut seen_count: u64 = 0;
+                let mut buf = [0.0_f64; SIMD_AGGREGATE_BLOCK];
+                let mut len = 0usize;
+
+                for addr in ctx.iter_reference_cells(&r) {
+                    seen_count += 1;
+                    let v = ctx.get_cell_value(&r.sheet_id, addr);
+                    let Some(n) = coerce_candidate_to_number(&v, number_locale) else {
+                        continue;
+                    };
+                    if n.is_nan() {
+                        let tmp = Value::Number(n);
+                        if criteria.matches(&tmp) {
+                            count += 1;
+                        }
+                        continue;
+                    }
+
+                    buf[len] = n;
+                    len += 1;
+                    if len == SIMD_AGGREGATE_BLOCK {
+                        count += simd::count_if_f64(&buf, numeric) as u64;
+                        len = 0;
+                    }
+                }
+                if len > 0 {
+                    count += simd::count_if_f64(&buf[..len], numeric) as u64;
+                }
+                if blank_matches {
+                    count += r.size().saturating_sub(seen_count);
+                }
+                return Value::Number(count as f64);
+            }
+
             let mut count: u64 = 0;
             let mut seen_count: u64 = 0;
             for addr in ctx.iter_reference_cells(&r) {
@@ -589,6 +896,49 @@ fn countif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             Value::Number(count as f64)
         }
         ArgValue::ReferenceUnion(ranges) => {
+            if let Some(numeric) = numeric {
+                let union_size = blank_matches.then(|| reference_union_size(&ranges));
+                let mut count: u64 = 0;
+                let mut seen_count: u64 = 0;
+                let mut seen = std::collections::HashSet::new();
+                let mut buf = [0.0_f64; SIMD_AGGREGATE_BLOCK];
+                let mut len = 0usize;
+
+                for r in ranges {
+                    for addr in ctx.iter_reference_cells(&r) {
+                        if !seen.insert((r.sheet_id.clone(), addr)) {
+                            continue;
+                        }
+                        seen_count += 1;
+                        let v = ctx.get_cell_value(&r.sheet_id, addr);
+                        let Some(n) = coerce_candidate_to_number(&v, number_locale) else {
+                            continue;
+                        };
+                        if n.is_nan() {
+                            let tmp = Value::Number(n);
+                            if criteria.matches(&tmp) {
+                                count += 1;
+                            }
+                            continue;
+                        }
+
+                        buf[len] = n;
+                        len += 1;
+                        if len == SIMD_AGGREGATE_BLOCK {
+                            count += simd::count_if_f64(&buf, numeric) as u64;
+                            len = 0;
+                        }
+                    }
+                }
+                if len > 0 {
+                    count += simd::count_if_f64(&buf[..len], numeric) as u64;
+                }
+                if let Some(union_size) = union_size {
+                    count += union_size.saturating_sub(seen_count);
+                }
+                return Value::Number(count as f64);
+            }
+
             let union_size = blank_matches.then(|| reference_union_size(&ranges));
             let mut count: u64 = 0;
             let mut seen_count: u64 = 0;
@@ -611,6 +961,38 @@ fn countif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             Value::Number(count as f64)
         }
         ArgValue::Scalar(Value::Array(arr)) => {
+            if let Some(numeric) = numeric {
+                let mut count: u64 = 0;
+                let mut buf = [0.0_f64; SIMD_AGGREGATE_BLOCK];
+                let mut len = 0usize;
+
+                for v in arr.iter() {
+                    let Some(n) = coerce_candidate_to_number(v, number_locale) else {
+                        continue;
+                    };
+                    if n.is_nan() {
+                        let tmp = Value::Number(n);
+                        if criteria.matches(&tmp) {
+                            count += 1;
+                        }
+                        continue;
+                    }
+
+                    buf[len] = n;
+                    len += 1;
+                    if len == SIMD_AGGREGATE_BLOCK {
+                        count += simd::count_if_f64(&buf, numeric) as u64;
+                        len = 0;
+                    }
+                }
+
+                if len > 0 {
+                    count += simd::count_if_f64(&buf[..len], numeric) as u64;
+                }
+
+                return Value::Number(count as f64);
+            }
+
             let mut count: u64 = 0;
             for v in arr.iter() {
                 if criteria.matches(v) {

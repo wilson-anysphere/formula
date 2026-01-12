@@ -3,6 +3,7 @@ use chrono::{DateTime, Utc};
 use crate::coercion::ValueLocaleConfig;
 use crate::date::ExcelDateSystem;
 use crate::functions::math::criteria::Criteria;
+use crate::simd;
 use crate::value::{parse_number, NumberLocale};
 use crate::{ErrorKind, Value};
 
@@ -309,6 +310,52 @@ pub fn sumproduct(arrays: &[&[Value]], locale: NumberLocale) -> Result<f64, Erro
         if arr.len() != len {
             return Err(ErrorKind::Value);
         }
+    }
+
+    // Hot path: SUMPRODUCT over two arrays is common, and can be SIMD-accelerated once the
+    // Value -> f64 coercions are done.
+    if arrays.len() == 2 {
+        const BLOCK: usize = 1024;
+
+        let a = arrays[0];
+        let b = arrays[1];
+        let mut buf_a = [0.0_f64; BLOCK];
+        let mut buf_b = [0.0_f64; BLOCK];
+        let mut buf_len = 0usize;
+
+        let mut sum = 0.0;
+        let mut saw_nan = false;
+
+        for idx in 0..len {
+            // Preserve Excel-like error precedence: first array is coerced before the second.
+            let xa = coerce_sumproduct_number(&a[idx], locale)?;
+            let xb = coerce_sumproduct_number(&b[idx], locale)?;
+
+            if xa.is_nan() || xb.is_nan() {
+                saw_nan = true;
+            }
+
+            if !saw_nan {
+                buf_a[buf_len] = xa;
+                buf_b[buf_len] = xb;
+                buf_len += 1;
+
+                if buf_len == BLOCK {
+                    sum += simd::sumproduct_ignore_nan_f64(&buf_a, &buf_b);
+                    buf_len = 0;
+                }
+            }
+        }
+
+        if saw_nan {
+            return Ok(f64::NAN);
+        }
+
+        if buf_len > 0 {
+            sum += simd::sumproduct_ignore_nan_f64(&buf_a[..buf_len], &buf_b[..buf_len]);
+        }
+
+        return Ok(sum);
     }
 
     let mut sum = 0.0;
