@@ -6723,6 +6723,34 @@ fn bytecode_expr_is_eligible_inner(
             | bytecode::ast::Function::Today => args
                 .iter()
                 .all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)),
+            bytecode::ast::Function::IsBlank
+            | bytecode::ast::Function::IsNumber
+            | bytecode::ast::Function::IsText
+            | bytecode::ast::Function::IsLogical
+            | bytecode::ast::Function::IsErr
+            | bytecode::ast::Function::ErrorType
+            | bytecode::ast::Function::N
+            | bytecode::ast::Function::T => {
+                if args.len() != 1 {
+                    return false;
+                }
+                match &args[0] {
+                    // These functions support arrays in the AST evaluator; a multi-cell range
+                    // argument would spill. Only allow single-cell ranges in bytecode for now.
+                    bytecode::Expr::RangeRef(r) => r.start == r.end,
+                    other => bytecode_expr_is_eligible_inner(other, false, false, lexical_scopes),
+                }
+            }
+            bytecode::ast::Function::Type => {
+                if args.len() != 1 {
+                    return false;
+                }
+                match &args[0] {
+                    // TYPE is scalar even for multi-cell ranges (returns 64), so allow ranges.
+                    bytecode::Expr::RangeRef(_) => true,
+                    other => bytecode_expr_is_eligible_inner(other, false, false, lexical_scopes),
+                }
+            }
             bytecode::ast::Function::Unknown(_) => false,
         },
     }

@@ -308,6 +308,15 @@ fn eval_ast_inner(
                     | Function::Sign
                     | Function::Concat
                     | Function::Not
+                    | Function::IsBlank
+                    | Function::IsNumber
+                    | Function::IsText
+                    | Function::IsLogical
+                    | Function::IsErr
+                    | Function::Type
+                    | Function::ErrorType
+                    | Function::N
+                    | Function::T
                     | Function::Now
                     | Function::Today
                     | Function::Unknown(_) => false,
@@ -695,6 +704,15 @@ pub fn call_function(
         Function::Sign => fn_sign(args),
         Function::Concat => fn_concat(args),
         Function::Not => fn_not(args),
+        Function::IsBlank => fn_isblank(args, grid, base),
+        Function::IsNumber => fn_isnumber(args, grid, base),
+        Function::IsText => fn_istext(args, grid, base),
+        Function::IsLogical => fn_islogical(args, grid, base),
+        Function::IsErr => fn_iserr(args, grid, base),
+        Function::Type => fn_type(args, grid, base),
+        Function::ErrorType => fn_error_type(args, grid, base),
+        Function::N => fn_n(args, grid, base),
+        Function::T => fn_t(args, grid, base),
         Function::Now => fn_now(args),
         Function::Today => fn_today(args),
         Function::Unknown(_) => Value::Error(ErrorKind::Name),
@@ -1180,6 +1198,184 @@ fn or_range(
         }
     }
     None
+}
+
+fn deref_single_cell_range(grid: &dyn Grid, range: RangeRef, base: CellCoord) -> Result<Value, ErrorKind> {
+    let resolved = range.resolve(base);
+    if resolved.rows() == 1 && resolved.cols() == 1 {
+        Ok(grid.get_value(CellCoord {
+            row: resolved.row_start,
+            col: resolved.col_start,
+        }))
+    } else {
+        Err(ErrorKind::Spill)
+    }
+}
+
+fn scalar_or_single_cell_range(arg: Value, grid: &dyn Grid, base: CellCoord) -> Result<Value, ErrorKind> {
+    match arg {
+        Value::Range(r) => deref_single_cell_range(grid, r, base),
+        Value::Array(_) => Err(ErrorKind::Spill),
+        // Multi-sheet ranges (3D sheet spans) are lowered to a MultiRange value, which matches the
+        // evaluator's "reference union" behavior. Information functions treat these as invalid
+        // arguments (#VALUE!) rather than spilling arrays.
+        Value::MultiRange(_) => Err(ErrorKind::Value),
+        other => Ok(other),
+    }
+}
+
+fn fn_isblank(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
+    if args.len() != 1 {
+        return Value::Error(ErrorKind::Value);
+    }
+    let v = match scalar_or_single_cell_range(args[0].clone(), grid, base) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    Value::Bool(matches!(v, Value::Empty))
+}
+
+fn fn_isnumber(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
+    if args.len() != 1 {
+        return Value::Error(ErrorKind::Value);
+    }
+    let v = match scalar_or_single_cell_range(args[0].clone(), grid, base) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    Value::Bool(matches!(v, Value::Number(n) if n.is_finite()))
+}
+
+fn fn_istext(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
+    if args.len() != 1 {
+        return Value::Error(ErrorKind::Value);
+    }
+    let v = match scalar_or_single_cell_range(args[0].clone(), grid, base) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    Value::Bool(matches!(v, Value::Text(_)))
+}
+
+fn fn_islogical(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
+    if args.len() != 1 {
+        return Value::Error(ErrorKind::Value);
+    }
+    let v = match scalar_or_single_cell_range(args[0].clone(), grid, base) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    Value::Bool(matches!(v, Value::Bool(_)))
+}
+
+fn fn_iserr(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
+    if args.len() != 1 {
+        return Value::Error(ErrorKind::Value);
+    }
+    let v = match scalar_or_single_cell_range(args[0].clone(), grid, base) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    Value::Bool(matches!(v, Value::Error(e) if e != ErrorKind::NA))
+}
+
+fn type_code_for_scalar(value: &Value) -> i32 {
+    match value {
+        Value::Number(_) | Value::Empty => 1,
+        Value::Text(_) => 2,
+        Value::Bool(_) => 4,
+        Value::Error(_) => 16,
+        Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => 64,
+    }
+}
+
+fn fn_type(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
+    if args.len() != 1 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let code = match &args[0] {
+        Value::Range(r) => {
+            let resolved = r.resolve(base);
+            if resolved.rows() == 1 && resolved.cols() == 1 {
+                let v = grid.get_value(CellCoord {
+                    row: resolved.row_start,
+                    col: resolved.col_start,
+                });
+                type_code_for_scalar(&v)
+            } else {
+                64
+            }
+        }
+        // Discontiguous unions (e.g. 3D sheet spans) are not valid TYPE arguments.
+        Value::MultiRange(_) => return Value::Error(ErrorKind::Value),
+        other => type_code_for_scalar(other),
+    };
+
+    Value::Number(code as f64)
+}
+
+fn error_type_code(kind: ErrorKind) -> i32 {
+    match kind {
+        ErrorKind::Null => 1,
+        ErrorKind::Div0 => 2,
+        ErrorKind::Value => 3,
+        ErrorKind::Ref => 4,
+        ErrorKind::Name => 5,
+        ErrorKind::Num => 6,
+        ErrorKind::NA => 7,
+        ErrorKind::Spill => 9,
+        ErrorKind::Calc => 10,
+    }
+}
+
+fn fn_error_type(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
+    if args.len() != 1 {
+        return Value::Error(ErrorKind::Value);
+    }
+    let v = match scalar_or_single_cell_range(args[0].clone(), grid, base) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    match v {
+        Value::Error(e) => Value::Number(error_type_code(e) as f64),
+        _ => Value::Error(ErrorKind::NA),
+    }
+}
+
+fn fn_n(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
+    if args.len() != 1 {
+        return Value::Error(ErrorKind::Value);
+    }
+    let v = match scalar_or_single_cell_range(args[0].clone(), grid, base) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    match v {
+        Value::Error(e) => Value::Error(e),
+        Value::Number(n) => Value::Number(n),
+        Value::Bool(b) => Value::Number(if b { 1.0 } else { 0.0 }),
+        Value::Empty | Value::Text(_) => Value::Number(0.0),
+        Value::MultiRange(_) => Value::Error(ErrorKind::Value),
+        Value::Array(_) | Value::Range(_) => Value::Error(ErrorKind::Spill),
+    }
+}
+
+fn fn_t(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
+    if args.len() != 1 {
+        return Value::Error(ErrorKind::Value);
+    }
+    let v = match scalar_or_single_cell_range(args[0].clone(), grid, base) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    match v {
+        Value::Error(e) => Value::Error(e),
+        Value::Text(s) => Value::Text(s),
+        Value::Number(_) | Value::Bool(_) | Value::Empty => Value::Text(Arc::from("")),
+        Value::MultiRange(_) => Value::Error(ErrorKind::Value),
+        Value::Array(_) | Value::Range(_) => Value::Error(ErrorKind::Spill),
+    }
 }
 
 fn format_number_general(n: f64) -> String {

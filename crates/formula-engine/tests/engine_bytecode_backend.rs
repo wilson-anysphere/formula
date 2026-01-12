@@ -1536,6 +1536,155 @@ fn bytecode_backend_and_or_reference_semantics_match_ast() {
     }
 }
 
+#[test]
+fn bytecode_backend_matches_ast_for_information_functions_scalar() {
+    let mut engine = Engine::new();
+
+    // Inputs for the information functions.
+    // A1 left blank.
+    engine.set_cell_value("Sheet1", "A2", "").unwrap(); // empty string is not blank
+
+    engine.set_cell_value("Sheet1", "A3", 123.0).unwrap();
+    engine.set_cell_value("Sheet1", "A4", "123").unwrap();
+
+    engine.set_cell_value("Sheet1", "A5", "foo").unwrap();
+    engine.set_cell_value("Sheet1", "A6", 1.0).unwrap();
+
+    engine.set_cell_value("Sheet1", "A7", true).unwrap();
+    engine.set_cell_value("Sheet1", "A8", 0.0).unwrap();
+
+    engine
+        .set_cell_value("Sheet1", "A9", Value::Error(ErrorKind::NA))
+        .unwrap();
+    engine
+        .set_cell_value("Sheet1", "A10", Value::Error(ErrorKind::Div0))
+        .unwrap();
+
+    engine.set_cell_value("Sheet1", "A12", 1.0).unwrap();
+    engine
+        .set_cell_value("Sheet1", "A13", Value::Error(ErrorKind::Ref))
+        .unwrap();
+
+    engine.set_cell_value("Sheet1", "A14", true).unwrap();
+    engine.set_cell_value("Sheet1", "A15", "5").unwrap();
+    engine
+        .set_cell_value("Sheet1", "A16", Value::Error(ErrorKind::Div0))
+        .unwrap();
+
+    engine.set_cell_value("Sheet1", "A18", "hi").unwrap();
+    engine.set_cell_value("Sheet1", "A19", 1.0).unwrap();
+    engine
+        .set_cell_value("Sheet1", "A20", Value::Error(ErrorKind::Div0))
+        .unwrap();
+
+    // TYPE inputs.
+    // A21 left blank.
+    engine.set_cell_value("Sheet1", "A22", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A23", "x").unwrap();
+    engine.set_cell_value("Sheet1", "A24", true).unwrap();
+    engine
+        .set_cell_value("Sheet1", "A25", Value::Error(ErrorKind::Value))
+        .unwrap();
+    engine.set_cell_value("Sheet1", "A26", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A27", 2.0).unwrap();
+
+    // Formulas are all placed in column B so they share the same relative reference pattern; the
+    // bytecode cache should compile one program per distinct function pattern.
+    engine
+        .set_cell_formula("Sheet1", "B1", "=ISBLANK(A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=ISBLANK(A2)")
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B3", "=ISNUMBER(A3)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B4", "=ISNUMBER(A4)")
+        .unwrap();
+
+    engine.set_cell_formula("Sheet1", "B5", "=ISTEXT(A5)").unwrap();
+    engine.set_cell_formula("Sheet1", "B6", "=ISTEXT(A6)").unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B7", "=ISLOGICAL(A7)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B8", "=ISLOGICAL(A8)")
+        .unwrap();
+
+    engine.set_cell_formula("Sheet1", "B9", "=ISERR(A9)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B10", "=ISERR(A10)")
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B12", "=ERROR.TYPE(A12)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B13", "=ERROR.TYPE(A13)")
+        .unwrap();
+
+    engine.set_cell_formula("Sheet1", "B14", "=N(A14)").unwrap();
+    engine.set_cell_formula("Sheet1", "B15", "=N(A15)").unwrap();
+    engine.set_cell_formula("Sheet1", "B16", "=N(A16)").unwrap();
+
+    engine.set_cell_formula("Sheet1", "B18", "=T(A18)").unwrap();
+    engine.set_cell_formula("Sheet1", "B19", "=T(A19)").unwrap();
+    engine.set_cell_formula("Sheet1", "B20", "=T(A20)").unwrap();
+
+    engine.set_cell_formula("Sheet1", "B21", "=TYPE(A21)").unwrap();
+    engine.set_cell_formula("Sheet1", "B22", "=TYPE(A22)").unwrap();
+    engine.set_cell_formula("Sheet1", "B23", "=TYPE(A23)").unwrap();
+    engine.set_cell_formula("Sheet1", "B24", "=TYPE(A24)").unwrap();
+    engine.set_cell_formula("Sheet1", "B25", "=TYPE(A25)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B26", "=TYPE(A26:A27)")
+        .unwrap();
+
+    // 9 information functions + TYPE has 2 distinct shapes (scalar vs multi-cell range).
+    assert_eq!(engine.bytecode_program_count(), 10);
+
+    engine.recalculate_single_threaded();
+
+    // ISBLANK: blank vs empty-string.
+    assert_engine_matches_ast(&engine, "=ISBLANK(A1)", "B1");
+    assert_engine_matches_ast(&engine, "=ISBLANK(A2)", "B2");
+
+    // ISNUMBER/ISTEXT/ISLOGICAL scalar behavior.
+    assert_engine_matches_ast(&engine, "=ISNUMBER(A3)", "B3");
+    assert_engine_matches_ast(&engine, "=ISNUMBER(A4)", "B4");
+    assert_engine_matches_ast(&engine, "=ISTEXT(A5)", "B5");
+    assert_engine_matches_ast(&engine, "=ISTEXT(A6)", "B6");
+    assert_engine_matches_ast(&engine, "=ISLOGICAL(A7)", "B7");
+    assert_engine_matches_ast(&engine, "=ISLOGICAL(A8)", "B8");
+
+    // ISERR distinguishes #N/A.
+    assert_engine_matches_ast(&engine, "=ISERR(A9)", "B9");
+    assert_engine_matches_ast(&engine, "=ISERR(A10)", "B10");
+
+    // ERROR.TYPE returns #N/A for non-errors; returns a numeric code for errors.
+    assert_engine_matches_ast(&engine, "=ERROR.TYPE(A12)", "B12");
+    assert_engine_matches_ast(&engine, "=ERROR.TYPE(A13)", "B13");
+
+    // N/T propagate errors.
+    assert_engine_matches_ast(&engine, "=N(A14)", "B14");
+    assert_engine_matches_ast(&engine, "=N(A15)", "B15");
+    assert_engine_matches_ast(&engine, "=N(A16)", "B16");
+    assert_engine_matches_ast(&engine, "=T(A18)", "B18");
+    assert_engine_matches_ast(&engine, "=T(A19)", "B19");
+    assert_engine_matches_ast(&engine, "=T(A20)", "B20");
+
+    // TYPE on scalar values + multi-cell range (64).
+    assert_engine_matches_ast(&engine, "=TYPE(A21)", "B21");
+    assert_engine_matches_ast(&engine, "=TYPE(A22)", "B22");
+    assert_engine_matches_ast(&engine, "=TYPE(A23)", "B23");
+    assert_engine_matches_ast(&engine, "=TYPE(A24)", "B24");
+    assert_engine_matches_ast(&engine, "=TYPE(A25)", "B25");
+    assert_engine_matches_ast(&engine, "=TYPE(A26:A27)", "B26");
+}
+
 proptest! {
     #![proptest_config(ProptestConfig { cases: 32, .. ProptestConfig::default() })]
     #[test]

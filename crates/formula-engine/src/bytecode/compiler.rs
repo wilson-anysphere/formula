@@ -453,6 +453,15 @@ impl<'a> CompileCtx<'a> {
             | Function::Sign
             | Function::Concat
             | Function::Not
+            | Function::IsBlank
+            | Function::IsNumber
+            | Function::IsText
+            | Function::IsLogical
+            | Function::IsErr
+            | Function::Type
+            | Function::ErrorType
+            | Function::N
+            | Function::T
             | Function::Now
             | Function::Today
             | Function::Unknown(_) => false,
