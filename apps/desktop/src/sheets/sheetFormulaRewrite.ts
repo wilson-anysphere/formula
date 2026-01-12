@@ -52,11 +52,7 @@ function collectFormulaEdits(params: {
   return edits;
 }
 
-export function rewriteDocumentFormulasForSheetRename(
-  doc: DocumentControllerLike,
-  oldName: string,
-  newName: string,
-): void {
+export function rewriteDocumentFormulasForSheetRename(doc: DocumentControllerLike, oldName: string, newName: string): void {
   const edits = collectFormulaEdits({
     doc,
     rewrite: (formula) => rewriteSheetNamesInFormula(formula, oldName, newName),
@@ -67,11 +63,7 @@ export function rewriteDocumentFormulasForSheetRename(
   doc.setCellInputs(edits, { label: "Rename Sheet", source: "sheetRename" });
 }
 
-export function rewriteDocumentFormulasForSheetDelete(
-  doc: DocumentControllerLike,
-  deletedName: string,
-  sheetOrder: string[],
-): void {
+export function rewriteDocumentFormulasForSheetDelete(doc: DocumentControllerLike, deletedName: string, sheetOrder: string[]): void {
   const edits = collectFormulaEdits({
     doc,
     rewrite: (formula) => rewriteDeletedSheetReferencesInFormula(formula, deletedName, sheetOrder),

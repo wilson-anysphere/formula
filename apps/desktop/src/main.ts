@@ -2434,6 +2434,20 @@ function renderSheetTabs(): void {
     sheetTabsReactRoot = createRoot(sheetTabsRootEl);
   }
 
+  const handleSheetDeletedFromTabs = (event: { sheetId: string; name: string; sheetOrder: string[] }) => {
+    const { name, sheetOrder } = event;
+    const doc = app.getDocument() as any;
+
+    try {
+      // `installSheetStoreSubscription()` routes the sheet removal into `DocumentController.deleteSheet(...)`
+      // and keeps the batch open through the end of the current task. Rewrite formulas synchronously here
+      // so the delete + rewrites become a single undo step (Excel-like).
+      rewriteDocumentFormulasForSheetDelete(doc, name, sheetOrder);
+    } catch (err) {
+      showToast(`Failed to update formulas after delete: ${String((err as any)?.message ?? err)}`, "error");
+    }
+  };
+
   sheetTabsReactRoot.render(
     React.createElement(SheetTabStrip, {
       store: workbookSheetStore,
@@ -2498,14 +2512,7 @@ function renderSheetTabs(): void {
         await invoke("set_sheet_tab_color", { sheet_id: sheetId, tab_color: tabColor ?? null });
       },
       onSheetsReordered: () => restoreFocusAfterSheetNavigation(),
-      onSheetDeleted: ({ sheetId: _sheetId, name, sheetOrder }) => {
-        const doc = app.getDocument() as any;
-        try {
-          rewriteDocumentFormulasForSheetDelete(doc, name, sheetOrder);
-        } catch (err) {
-          showToast(`Failed to update formulas after delete: ${String((err as any)?.message ?? err)}`, "error");
-        }
-      },
+      onSheetDeleted: handleSheetDeletedFromTabs,
       onSheetMoved: async ({ sheetId, toIndex }) => {
         const collabSession = app.getCollabSession?.() ?? null;
         if (collabSession) return;
@@ -2977,7 +2984,7 @@ function installSheetStoreSubscription(): void {
         }
         for (const sheetId of removed) {
           try {
-            doc.deleteSheet(sheetId);
+            doc.deleteSheet(sheetId, { label: "Delete Sheet", source: "sheetTabs" });
           } catch {
             // ignore
           }

@@ -343,6 +343,42 @@ test.describe("sheet tabs", () => {
     ).toEqual(["Sheet1", sheet3, sheet2]);
   });
 
+  test("deleting a sheet via the tab context menu removes it from the DocumentController", async ({ page }) => {
+    // Stub out the native confirm dialog (which `nativeDialogs.confirm` avoids) so the
+    // delete flow can proceed deterministically in Playwright without interacting with
+    // the quick-pick fallback UI.
+    await page.addInitScript(() => {
+      window.confirm = () => true;
+    });
+    await gotoDesktop(page);
+
+    // Create Sheet2 via the UI so both the metadata store and DocumentController include it.
+    await page.getByTestId("sheet-add").click();
+    const sheet2Tab = page.getByTestId("sheet-tab-Sheet2");
+    await expect(sheet2Tab).toBeVisible();
+    await expect(sheet2Tab).toHaveAttribute("data-active", "true");
+
+    // The tab strip only enables destructive sheet operations when the Tauri workbook bridge is present.
+    // Stub a minimal `__TAURI__.core.invoke` for this test without forcing the app into full Tauri mode.
+    await page.evaluate(() => {
+      (window as any).__TAURI__ = { core: { invoke: async () => null } };
+    });
+
+    await sheet2Tab.click({ button: "right" });
+    const menu = page.getByTestId("sheet-tab-context-menu");
+    await expect(menu).toBeVisible();
+    await menu.getByRole("button", { name: "Delete" }).click();
+
+    // Tab should disappear, and the app should fall back to Sheet1.
+    await expect(page.locator('[data-testid="sheet-tab-Sheet2"]')).toHaveCount(0);
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet1");
+
+    // DocumentController sheet ids should no longer include the deleted sheet.
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().getSheetIds().includes("Sheet2")))
+      .toBe(false);
+  });
+
   test("keyboard navigation activates the focused sheet tab", async ({ page }) => {
     await gotoDesktop(page);
 
@@ -359,7 +395,7 @@ test.describe("sheet tabs", () => {
     });
     await expect(page.getByRole("tab", { name: "Sheet2" })).toBeVisible();
 
-    // Focus the tab strip. Tab is used for in-grid navigation, so focus it directly for this test.
+    // Focus the tab strip directly. (Tab is reserved for Excel-style cell navigation.)
     const sheet1Tab = page.getByRole("tab", { name: "Sheet1" });
     await sheet1Tab.focus();
     await expect(sheet1Tab).toBeFocused();
@@ -471,6 +507,11 @@ test.describe("sheet tabs", () => {
     await input.press("Enter");
 
     await expect(tab.locator(".sheet-tab__name")).toHaveText("Budget2");
+
+    // Double-click rename activates the tab under the pointer; switch back to Sheet1 so
+    // the display-value assertion reads from the sheet containing the formula.
+    await page.getByTestId("sheet-tab-Sheet1").click();
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet1");
 
     const after = await page.evaluate(async () => {
       const app = (window as any).__formulaApp;
@@ -854,8 +895,7 @@ test.describe("sheet tabs", () => {
     await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 3");
 
     // Focus the grid: Ctrl/Cmd+PgUp/PgDn must work when the grid is focused (real workflow).
-    // Click inside A1 (avoid the shared-grid corner header/select-all region).
-    await page.click("#grid", { position: { x: 80, y: 40 } });
+    await page.locator("#grid").focus();
     await expect
       .poll(() => page.evaluate(() => (document.activeElement as HTMLElement | null)?.id))
       .toBe("grid");

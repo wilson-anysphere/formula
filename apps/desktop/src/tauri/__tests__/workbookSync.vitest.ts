@@ -94,6 +94,31 @@ describe("workbookSync", () => {
     sync.stop();
   });
 
+  it("does not mirror DocumentController.deleteSheet sparse cell clears to the backend", async () => {
+    const document = new DocumentController();
+    const sync = startWorkbookSync({ document: document as any });
+    const invoke = (globalThis as any).__TAURI__?.core?.invoke as ReturnType<typeof vi.fn>;
+
+    // DocumentController creates sheets lazily; ensure Sheet1 exists so we can delete Sheet2
+    // without tripping the "Cannot delete the last sheet" guard.
+    document.getCell("Sheet1", { row: 0, col: 0 });
+
+    // Create a second sheet with a value so deletion would normally produce a cell-clear delta.
+    document.setCellValue("Sheet2", { row: 0, col: 0 }, "hello");
+    await flushMicrotasks();
+
+    invoke.mockClear();
+
+    // Deleting Sheet2 emits per-cell deltas for the removed sheet. Those should be skipped by
+    // the workbook sync bridge because the desktop shell persists deletions via `delete_sheet`.
+    document.deleteSheet("Sheet2");
+    await flushMicrotasks();
+
+    expect(invoke).not.toHaveBeenCalled();
+
+    sync.stop();
+  });
+
   it("ignores document changes tagged as macro updates (already applied in the backend)", async () => {
     const document = createMaterializedDocument();
     const sync = startWorkbookSync({ document: document as any });

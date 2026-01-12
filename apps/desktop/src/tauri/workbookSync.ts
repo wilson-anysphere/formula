@@ -445,7 +445,25 @@ export function startWorkbookSync(args: {
     // back to the backend via set_cell/set_range.
     if (source === "macro" || source === "python" || source === "pivot" || source === "backend") return;
     if (!Array.isArray(deltas) || deltas.length === 0) return;
+
+    // Sheet deletion emits per-cell deltas that clear the deleted sheet's sparse cell map.
+    // Those should NOT be mirrored to the backend via `set_cell`/`set_range` because:
+    // - the desktop shell persists deletions via the dedicated `delete_sheet` command
+    // - mirroring sparse clears can be extremely expensive (N-per-cell IPC)
+    // - it can race with `delete_sheet` and fail with UnknownSheet errors
+    const deletedSheets = new Set<string>();
+    const metaDeltas = Array.isArray(sheetMetaDeltas) ? sheetMetaDeltas : [];
+    for (const delta of metaDeltas) {
+      const sheetId = typeof delta?.sheetId === "string" ? String(delta.sheetId) : "";
+      if (!sheetId) continue;
+      if ((delta as any)?.after == null) {
+        deletedSheets.add(sheetId);
+      }
+    }
+
+    let didEnqueue = false;
     for (const delta of deltas) {
+      if (deletedSheets.has(delta.sheetId)) continue;
       // Ignore format-only deltas (we can't mirror those over set_cell/set_range yet).
       if (inputEquals(delta.before, delta.after)) continue;
 
@@ -456,8 +474,9 @@ export function startWorkbookSync(args: {
         edit: toRangeCellEdit(delta.after)
       };
       pendingCellEdits.set(cellKey(delta.sheetId, delta.row, delta.col), edit);
+      didEnqueue = true;
     }
-    scheduleFlush();
+    if (didEnqueue) scheduleFlush();
   });
 
   function scheduleFlush(): void {
