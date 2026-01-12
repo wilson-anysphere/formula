@@ -122,6 +122,11 @@ impl ImportSource {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// Non-fatal warning emitted during `.xls` import.
+///
+/// The legacy BIFF importer is best-effort and continues when it encounters
+/// malformed or unsupported records. These warnings are intended for user
+/// visibility / diagnostics (for example, partial NOTE/OBJ/TXO comment records).
 pub struct ImportWarning {
     pub message: String,
 }
@@ -146,6 +151,12 @@ pub struct MergedRange {
 }
 
 #[derive(Debug)]
+/// Result of importing a legacy `.xls` workbook.
+///
+/// The returned [`Workbook`] contains the successfully imported data (values,
+/// formulas, merged regions, row/column metadata, hyperlinks, and legacy
+/// comments/notes where available). Any non-fatal issues encountered during
+/// import are returned in [`XlsImportResult::warnings`].
 pub struct XlsImportResult {
     pub workbook: Workbook,
     pub source: ImportSource,
@@ -162,6 +173,12 @@ pub enum ImportError {
 }
 
 /// Import a legacy `.xls` workbook from disk.
+///
+/// The importer is intentionally best-effort and attempts to load a subset of
+/// BIFF features into [`formula_model`], including legacy cell notes/comments
+/// (`NOTE/OBJ/TXO`, imported as [`formula_model::CommentKind::Note`]). Any
+/// malformed or unsupported records may produce warnings rather than failing
+/// the import.
 pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, ImportError> {
     let path = path.as_ref();
     let mut workbook: Xls<_> = open_workbook(path)?;
