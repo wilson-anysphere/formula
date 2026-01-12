@@ -1,9 +1,12 @@
 use crate::eval::CompiledExpr;
 use crate::functions::{eval_scalar_arg, ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
-use crate::value::{ErrorKind, Value};
+use crate::value::Value;
 
-use super::builtins_helpers::{coerce_to_finite_number, datevalue_from_value, excel_error_kind};
+use super::builtins_helpers::{
+    basis_from_optional_arg, coerce_to_bool_finite, coerce_to_finite_number, coerce_to_i32_trunc,
+    datevalue_from_value, excel_result_number,
+};
 
 inventory::submit! {
     FunctionSpec {
@@ -24,10 +27,9 @@ fn accrintm_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let settlement = eval_scalar_arg(ctx, &args[1]);
     let rate = eval_scalar_arg(ctx, &args[2]);
     let par = eval_scalar_arg(ctx, &args[3]);
-    let basis = if args.len() == 5 {
-        eval_scalar_arg(ctx, &args[4])
-    } else {
-        Value::Blank
+    let basis = match basis_from_optional_arg(ctx, args.get(4)) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
     };
 
     let system = ctx.date_system();
@@ -51,23 +53,7 @@ fn accrintm_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
-    let basis = if matches!(basis, Value::Blank) {
-        0
-    } else {
-        match coerce_to_i32_trunc(ctx, &basis) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        }
-    };
-    let basis = match super::coupon_schedule::validate_basis(basis) {
-        Ok(v) => v,
-        Err(e) => return Value::Error(excel_error_kind(e)),
-    };
-
-    match super::accrintm(issue, settlement, rate, par, basis, system) {
-        Ok(v) => Value::Number(v),
-        Err(e) => Value::Error(excel_error_kind(e)),
-    }
+    excel_result_number(super::accrintm(issue, settlement, rate, par, basis, system))
 }
 
 inventory::submit! {
@@ -101,10 +87,9 @@ fn accrint_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let par = eval_scalar_arg(ctx, &args[4]);
     let frequency = eval_scalar_arg(ctx, &args[5]);
 
-    let basis = if args.len() >= 7 {
-        eval_scalar_arg(ctx, &args[6])
-    } else {
-        Value::Blank
+    let basis = match basis_from_optional_arg(ctx, args.get(6)) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
     };
     let calc_method = if args.len() == 8 {
         eval_scalar_arg(ctx, &args[7])
@@ -140,23 +125,6 @@ fn accrint_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let frequency = match super::coupon_schedule::validate_frequency(frequency) {
-        Ok(v) => v,
-        Err(e) => return Value::Error(excel_error_kind(e)),
-    };
-
-    let basis = if matches!(basis, Value::Blank) {
-        0
-    } else {
-        match coerce_to_i32_trunc(ctx, &basis) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        }
-    };
-    let basis = match super::coupon_schedule::validate_basis(basis) {
-        Ok(v) => v,
-        Err(e) => return Value::Error(excel_error_kind(e)),
-    };
 
     let calc_method = if matches!(calc_method, Value::Blank) {
         false
@@ -167,33 +135,15 @@ fn accrint_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         }
     };
 
-    match super::accrint(issue, first_interest, settlement, rate, par, frequency, basis, calc_method, system) {
-        Ok(v) => Value::Number(v),
-        Err(e) => Value::Error(excel_error_kind(e)),
-    }
-}
-
-fn coerce_number_to_i32_trunc(n: f64) -> Result<i32, ErrorKind> {
-    let t = n.trunc();
-    if t < (i32::MIN as f64) || t > (i32::MAX as f64) {
-        return Err(ErrorKind::Num);
-    }
-    Ok(t as i32)
-}
-
-fn coerce_to_i32_trunc(ctx: &dyn FunctionContext, v: &Value) -> Result<i32, ErrorKind> {
-    let n = coerce_to_finite_number(ctx, v)?;
-    coerce_number_to_i32_trunc(n)
-}
-
-fn coerce_to_bool_finite(ctx: &dyn FunctionContext, v: &Value) -> Result<bool, ErrorKind> {
-    match v {
-        Value::Number(n) => {
-            if !n.is_finite() {
-                return Err(ErrorKind::Num);
-            }
-            Ok(*n != 0.0)
-        }
-        _ => v.coerce_to_bool_with_ctx(ctx),
-    }
+    excel_result_number(super::accrint(
+        issue,
+        first_interest,
+        settlement,
+        rate,
+        par,
+        frequency,
+        basis,
+        calc_method,
+        system,
+    ))
 }

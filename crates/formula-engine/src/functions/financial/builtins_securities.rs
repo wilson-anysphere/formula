@@ -50,7 +50,9 @@ fn disc_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
-    excel_result_number(super::disc(settlement, maturity, pr, redemption, basis, system))
+    excel_result_number(super::disc(
+        settlement, maturity, pr, redemption, basis, system,
+    ))
 }
 
 inventory::submit! {
@@ -144,7 +146,9 @@ fn yielddisc_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
-    excel_result_number(super::yielddisc(settlement, maturity, pr, redemption, basis, system))
+    excel_result_number(super::yielddisc(
+        settlement, maturity, pr, redemption, basis, system,
+    ))
 }
 
 inventory::submit! {

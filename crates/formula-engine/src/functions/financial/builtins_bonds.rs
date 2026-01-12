@@ -1,59 +1,12 @@
-use crate::error::ExcelResult;
 use crate::eval::CompiledExpr;
-use crate::functions::{eval_scalar_arg, ArraySupport, FunctionContext, FunctionSpec};
+use crate::functions::{ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
-use crate::value::{ErrorKind, Value};
+use crate::value::Value;
 
 use super::builtins_helpers::{
-    coerce_to_finite_number, datevalue_from_value, excel_error_kind, excel_result_number,
+    basis_from_optional_arg, eval_date_arg, eval_finite_number_arg, eval_i32_trunc_arg,
+    excel_result_number, excel_result_serial,
 };
-
-fn excel_result_serial(res: ExcelResult<i32>) -> Value {
-    match res {
-        Ok(n) => Value::Number(n as f64),
-        Err(e) => Value::Error(excel_error_kind(e)),
-    }
-}
-
-fn coerce_number_to_i32_trunc(n: f64) -> Result<i32, ErrorKind> {
-    let t = n.trunc();
-    if t < (i32::MIN as f64) || t > (i32::MAX as f64) {
-        return Err(ErrorKind::Num);
-    }
-    Ok(t as i32)
-}
-
-fn coerce_to_i32_trunc(ctx: &dyn FunctionContext, v: &Value) -> Result<i32, ErrorKind> {
-    let n = coerce_to_finite_number(ctx, v)?;
-    coerce_number_to_i32_trunc(n)
-}
-
-fn eval_date_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<i32, ErrorKind> {
-    let v = eval_scalar_arg(ctx, expr);
-    match v {
-        Value::Error(e) => Err(e),
-        other => datevalue_from_value(ctx, &other, ctx.date_system(), ctx.now_utc()),
-    }
-}
-
-fn eval_finite_number_arg(
-    ctx: &dyn FunctionContext,
-    expr: &CompiledExpr,
-) -> Result<f64, ErrorKind> {
-    let v = eval_scalar_arg(ctx, expr);
-    match v {
-        Value::Error(e) => Err(e),
-        other => coerce_to_finite_number(ctx, &other),
-    }
-}
-
-fn eval_i32_trunc_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<i32, ErrorKind> {
-    let v = eval_scalar_arg(ctx, expr);
-    match v {
-        Value::Error(e) => Err(e),
-        other => coerce_to_i32_trunc(ctx, &other),
-    }
-}
 
 // ---------------------------------------------------------------------
 // COUP* schedule functions
@@ -86,13 +39,9 @@ fn coupdaybs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-
-    let basis = match args.get(3) {
-        Some(expr) => match eval_i32_trunc_arg(ctx, expr) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        },
-        None => 0,
+    let basis = match basis_from_optional_arg(ctx, args.get(3)) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
     };
 
     excel_result_number(super::coupdaybs(
@@ -131,13 +80,9 @@ fn coupdays_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-
-    let basis = match args.get(3) {
-        Some(expr) => match eval_i32_trunc_arg(ctx, expr) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        },
-        None => 0,
+    let basis = match basis_from_optional_arg(ctx, args.get(3)) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
     };
 
     excel_result_number(super::coupdays(
@@ -176,13 +121,9 @@ fn coupdaysnc_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-
-    let basis = match args.get(3) {
-        Some(expr) => match eval_i32_trunc_arg(ctx, expr) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        },
-        None => 0,
+    let basis = match basis_from_optional_arg(ctx, args.get(3)) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
     };
 
     excel_result_number(super::coupdaysnc(
@@ -221,13 +162,9 @@ fn coupncd_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-
-    let basis = match args.get(3) {
-        Some(expr) => match eval_i32_trunc_arg(ctx, expr) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        },
-        None => 0,
+    let basis = match basis_from_optional_arg(ctx, args.get(3)) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
     };
 
     excel_result_serial(super::coupncd(
@@ -266,13 +203,9 @@ fn coupnum_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-
-    let basis = match args.get(3) {
-        Some(expr) => match eval_i32_trunc_arg(ctx, expr) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        },
-        None => 0,
+    let basis = match basis_from_optional_arg(ctx, args.get(3)) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
     };
 
     excel_result_number(super::coupnum(
@@ -311,13 +244,9 @@ fn couppcd_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-
-    let basis = match args.get(3) {
-        Some(expr) => match eval_i32_trunc_arg(ctx, expr) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        },
-        None => 0,
+    let basis = match basis_from_optional_arg(ctx, args.get(3)) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
     };
 
     excel_result_serial(super::couppcd(
@@ -379,13 +308,9 @@ fn price_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-
-    let basis = match args.get(6) {
-        Some(expr) => match eval_i32_trunc_arg(ctx, expr) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        },
-        None => 0,
+    let basis = match basis_from_optional_arg(ctx, args.get(6)) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
     };
 
     excel_result_number(super::price(
@@ -450,13 +375,9 @@ fn yield_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-
-    let basis = match args.get(6) {
-        Some(expr) => match eval_i32_trunc_arg(ctx, expr) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        },
-        None => 0,
+    let basis = match basis_from_optional_arg(ctx, args.get(6)) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
     };
 
     excel_result_number(super::yield_rate(
@@ -516,13 +437,9 @@ fn duration_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-
-    let basis = match args.get(5) {
-        Some(expr) => match eval_i32_trunc_arg(ctx, expr) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        },
-        None => 0,
+    let basis = match basis_from_optional_arg(ctx, args.get(5)) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
     };
 
     excel_result_number(super::duration(
@@ -581,13 +498,9 @@ fn mduration_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-
-    let basis = match args.get(5) {
-        Some(expr) => match eval_i32_trunc_arg(ctx, expr) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        },
-        None => 0,
+    let basis = match basis_from_optional_arg(ctx, args.get(5)) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
     };
 
     excel_result_number(super::mduration(
