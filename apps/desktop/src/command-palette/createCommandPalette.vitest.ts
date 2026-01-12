@@ -122,9 +122,11 @@ describe("createCommandPalette recents integration", () => {
     vi.unstubAllGlobals();
   });
 
-  it("does not record ignored clipboard commands, but does record normal commands", async () => {
+  it("does not record ignored noisy commands, but does record normal commands", async () => {
     const commandRegistry = new CommandRegistry();
     commandRegistry.registerBuiltinCommand("clipboard.copy", "Copy", () => {});
+    commandRegistry.registerBuiltinCommand("clipboard.pasteSpecial", "Paste Special", () => {});
+    commandRegistry.registerBuiltinCommand("edit.undo", "Undo", () => {});
     commandRegistry.registerBuiltinCommand("cmd.normal", "Normal", () => {});
 
     const controller = createCommandPalette({
@@ -137,6 +139,8 @@ describe("createCommandPalette recents integration", () => {
     });
 
     await commandRegistry.executeCommand("clipboard.copy");
+    await commandRegistry.executeCommand("clipboard.pasteSpecial");
+    await commandRegistry.executeCommand("edit.undo");
     expect(readCommandRecents(localStorage)).toEqual([]);
 
     await commandRegistry.executeCommand("cmd.normal");
@@ -167,7 +171,10 @@ describe("createCommandPalette recents integration", () => {
   });
 
   it("migrates legacy recents key on install (and filters ignored entries)", () => {
-    localStorage.setItem(LEGACY_COMMAND_RECENTS_STORAGE_KEY, JSON.stringify(["clipboard.copy", "cmd.normal"]));
+    localStorage.setItem(
+      LEGACY_COMMAND_RECENTS_STORAGE_KEY,
+      JSON.stringify(["clipboard.copy", "clipboard.pasteSpecial", "edit.undo", "cmd.normal"]),
+    );
     expect(localStorage.getItem(COMMAND_RECENTS_STORAGE_KEY)).toBeNull();
 
     const commandRegistry = new CommandRegistry();
