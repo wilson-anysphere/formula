@@ -407,6 +407,47 @@ describe("OIDC SSO", () => {
     20_000
   );
 
+  it("fails /start when the OIDC client secret is missing (avoid redirecting to the IdP)", async () => {
+    const { db, app } = await createTestApp();
+    try {
+      const ownerRegister = await app.inject({
+        method: "POST",
+        url: "/auth/register",
+        payload: {
+          email: "sso-missing-secret-owner@example.com",
+          password: "password1234",
+          name: "Owner",
+          orgName: "SSO Missing Secret Org"
+        }
+      });
+      expect(ownerRegister.statusCode).toBe(200);
+      const orgId = (ownerRegister.json() as any).organization.id as string;
+
+      await db.query("UPDATE org_settings SET allowed_auth_methods = $2::jsonb WHERE org_id = $1", [
+        orgId,
+        JSON.stringify(["password", "oidc"])
+      ]);
+
+      await db.query(
+        `
+          INSERT INTO org_oidc_providers (org_id, provider_id, issuer_url, client_id, scopes, enabled)
+          VALUES ($1,$2,$3,$4,$5::jsonb,$6)
+        `,
+        [orgId, "mock", provider.issuerUrl, provider.clientId, JSON.stringify(["openid", "email"]), true]
+      );
+
+      const startRes = await app.inject({
+        method: "GET",
+        url: `/auth/oidc/${orgId}/mock/start`
+      });
+      expect(startRes.statusCode).toBe(500);
+      expect((startRes.json() as any).error).toBe("oidc_not_configured");
+    } finally {
+      await app.close();
+      await db.end();
+    }
+  });
+
   it("derives redirect_uri from request headers only when PUBLIC_BASE_URL is unset and TRUST_PROXY=true (allowlisted)", async () => {
     const { db, config, app } = await createTestApp();
     let noBaseUrlApp: ReturnType<typeof buildApp> | null = null;
@@ -789,6 +830,7 @@ describe("OIDC SSO", () => {
         `,
         [orgId, "mock", provider.issuerUrl, provider.clientId, JSON.stringify(["openid", "email"]), true]
       );
+      await putSecret(db, config.secretStoreKeys, `oidc:${orgId}:mock`, provider.clientSecret);
 
       const staleCreatedAt = new Date(Date.now() - 11 * 60 * 1000);
       await db.query(

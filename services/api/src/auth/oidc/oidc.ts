@@ -438,6 +438,22 @@ export async function oidcStart(request: FastifyRequest, reply: FastifyReply): P
     return;
   }
 
+  // Ensure the provider has a client secret configured before starting the flow.
+  // Otherwise we'd redirect the user to the IdP only to fail the callback during
+  // token exchange.
+  const secretName = `oidc:${orgId}:${providerId}`;
+  try {
+    const secret = await getSecret(request.server.db, request.server.config.secretStoreKeys, secretName);
+    if (!secret) {
+      reply.code(500).send({ error: "oidc_not_configured" });
+      return;
+    }
+  } catch (err) {
+    request.server.log.warn({ err, orgId, providerId }, "oidc_client_secret_load_failed");
+    reply.code(500).send({ error: "oidc_not_configured" });
+    return;
+  }
+
   const discovery = await getOidcDiscovery(provider.issuerUrl);
 
   const state = randomBase64Url(32);
