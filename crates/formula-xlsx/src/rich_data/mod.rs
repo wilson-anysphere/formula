@@ -77,6 +77,7 @@ pub struct RichDataVmIndex {
     vm_to_rich_value_index: HashMap<u32, u32>,
     rich_value_index_to_rel_index: HashMap<u32, u32>,
     rel_index_to_target_part: Vec<Option<String>>,
+    vm_offset: u32,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -97,6 +98,38 @@ impl RichDataVmIndex {
             .transpose()?
             .unwrap_or_default();
 
+        // If the metadata mapping appears to be 1-based (no key 0), detect whether the workbook's
+        // worksheets use 0-based `c/@vm` values (by scanning for any `vm="0"` cells) and record the
+        // offset needed to resolve those sheet values against the metadata map.
+        let vm_offset: u32 = if !vm_to_rich_value_index.is_empty()
+            && !vm_to_rich_value_index.contains_key(&0)
+        {
+            let worksheet_parts: Vec<String> = match pkg.worksheet_parts() {
+                Ok(infos) => infos.into_iter().map(|info| info.worksheet_part).collect(),
+                // Best-effort fallback when workbook sheet discovery fails.
+                Err(_) => pkg
+                    .part_names()
+                    .filter(|name| name.starts_with("xl/worksheets/") && name.ends_with(".xml"))
+                    .map(str::to_string)
+                    .collect(),
+            };
+
+            let mut saw_zero = false;
+            for worksheet_part in worksheet_parts {
+                let Some(sheet_bytes) = pkg.part(&worksheet_part) else {
+                    continue;
+                };
+                let cells = scan_cells_with_metadata_indices(sheet_bytes)?;
+                if cells.iter().any(|(_, vm, _)| *vm == Some(0)) {
+                    saw_zero = true;
+                    break;
+                }
+            }
+            if saw_zero { 1 } else { 0 }
+        } else {
+            0
+        };
+
         let mut rich_value_parts: Vec<&str> = pkg
             .part_names()
             .filter(|name| is_rich_value_part(name))
@@ -115,11 +148,13 @@ impl RichDataVmIndex {
             vm_to_rich_value_index,
             rich_value_index_to_rel_index,
             rel_index_to_target_part,
+            vm_offset,
         })
     }
 
     /// Resolve a worksheet `c/@vm` value into rich value + relationship indices and a target part.
     pub fn resolve_vm(&self, vm: u32) -> RichDataVmResolution {
+        let vm = vm.saturating_add(self.vm_offset);
         let rich_value_index = self.vm_to_rich_value_index.get(&vm).copied();
         let rel_index = rich_value_index.and_then(|idx| {
             self.rich_value_index_to_rel_index
@@ -255,7 +290,16 @@ fn extract_rich_data_images_via_rel_table(
             continue;
         };
         let cells = parse_worksheet_vm_cells(sheet_bytes)?;
+        let vm_offset: u32 = if !vm_to_rich_value.is_empty()
+            && !vm_to_rich_value.contains_key(&0)
+            && cells.iter().any(|(_, vm)| *vm == 0)
+        {
+            1
+        } else {
+            0
+        };
         for (cell, vm) in cells {
+            let vm = vm.saturating_add(vm_offset);
             let Some(&rich_value_idx) = vm_to_rich_value.get(&vm) else {
                 continue;
             };
@@ -310,7 +354,24 @@ pub fn extract_rich_cell_images(
             continue;
         };
         let cells = parse_worksheet_vm_cells(sheet_bytes)?;
+        // Excel has been observed to encode worksheet `c/@vm` as both 0-based and 1-based indices
+        // into `xl/metadata.xml`'s `<valueMetadata>` `<bk>` list. When a workbook uses 0-based `vm`
+        // values and has multiple `<valueMetadata>` records, inserting both `vm` and `vm-1` into a
+        // single `HashMap` creates ambiguous collisions (e.g. `vm="1"` could refer to the first
+        // record in a 1-based scheme or the second record in a 0-based scheme).
+        //
+        // Instead, infer a per-sheet offset by checking whether any cell uses `vm="0"` and adjust
+        // the sheet values before lookup.
+        let vm_offset: u32 = if !vm_to_rich_value.is_empty()
+            && !vm_to_rich_value.contains_key(&0)
+            && cells.iter().any(|(_, vm)| *vm == 0)
+        {
+            1
+        } else {
+            0
+        };
         for (cell, vm) in cells {
+            let vm = vm.saturating_add(vm_offset);
             let Some(&rich_value_idx) = vm_to_rich_value.get(&vm) else {
                 continue;
             };
@@ -542,26 +603,13 @@ fn parse_vm_to_rich_value_index_map(
     let primary = metadata::parse_value_metadata_vm_to_rich_value_index_map(bytes)
         .map_err(|e| map_xml_dom_error(part_name, e))?;
     if !primary.is_empty() {
-        // Excel's `vm` appears in the wild as both 0-based and 1-based. To be tolerant, insert
-        // both the original key and its 0-based equivalent.
+        // The structured metadata parser returns a canonical mapping keyed by the `<valueMetadata>`
+        // `<bk>` record index, which is **1-based**.
         //
-        // Note: `primary` is a `HashMap`, so iteration order is not deterministic. Insert in two
-        // passes so the canonical (1-based) `vm` keys always win when the shifted `vm-1` entries
-        // collide (e.g. vm=1 and vm=2 both attempt to populate key 1).
-        let mut out = HashMap::new();
-
-        // Pass 1: canonical keys.
-        for (&vm, &rv) in primary.iter() {
-            out.entry(vm).or_insert(rv);
-        }
-
-        // Pass 2: tolerate 0-based vm indices.
-        for (vm, rv) in primary {
-            if vm > 0 {
-                out.entry(vm - 1).or_insert(rv);
-            }
-        }
-        return Ok(out);
+        // Some worksheets encode `c/@vm` as 0-based in the wild. Callers that have access to the
+        // worksheet cells should infer that offset (e.g. by checking for any `vm="0"` cells) and
+        // adjust the sheet values before using this map.
+        return Ok(primary);
     }
 
     // Fallback parser: find all `<rvb i="...">` in document order and treat `<rc v="...">` as an
