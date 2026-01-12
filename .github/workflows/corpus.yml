@@ -28,8 +28,32 @@ on:
   workflow_dispatch:
 
 jobs:
+  conflict-marker-guard:
+    name: "Guard: no merge conflict markers"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail if merge conflict markers are present
+        run: |
+          set -euo pipefail
+          pattern='^(<{7}|\|{7}|={7}$|>{7})'
+          set +e
+          git grep -n -E -I "$pattern"
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo "Merge conflict markers detected. Resolve conflicts and remove conflict markers before pushing." >&2
+            exit 1
+          elif [ "$status" -eq 1 ]; then
+            exit 0
+          else
+            echo "git grep failed with status $status" >&2
+            exit "$status"
+          fi
+
   public-corpus:
     name: Public corpus triage
+    needs: conflict-marker-guard
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -65,6 +89,7 @@ jobs:
 
   private-corpus:
     name: Private corpus triage (scheduled)
+    needs: conflict-marker-guard
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     steps:

@@ -7,7 +7,7 @@ on:
 
 jobs:
   conflict-marker-guard:
-    name: Guard: no merge conflict markers
+    name: "Guard: no merge conflict markers"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
