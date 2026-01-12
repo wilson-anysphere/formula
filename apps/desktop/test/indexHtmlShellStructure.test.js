@@ -41,9 +41,31 @@ test("desktop index.html exposes required shell containers and testids", () => {
     "active-cell",
     "selection-range",
     "active-value",
+    "collab-status",
     "sheet-switcher",
     "zoom-control",
     "sheet-position",
+
+    // Debug/test controls (kept in static HTML for Playwright)
+    "audit-precedents",
+    "audit-dependents",
+    "audit-transitive",
+    "split-vertical",
+    "split-horizontal",
+    "split-none",
+    "freeze-panes",
+    "freeze-top-row",
+    "freeze-first-column",
+    "unfreeze-panes",
+    "open-panel-ai-chat",
+    "open-panel-ai-audit",
+    "open-data-queries-panel",
+    "open-macros-panel",
+    "open-script-editor-panel",
+    "open-python-panel",
+    "open-extensions-panel",
+    "open-vba-migrate-panel",
+    "open-comments-panel",
   ];
 
   const missingIds = requiredIds

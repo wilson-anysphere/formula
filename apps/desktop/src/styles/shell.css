@@ -222,14 +222,19 @@ dialog.page-setup-dialog::backdrop {
 
 .statusbar__debug {
   /*
-    Keep debug/test status elements in the DOM for Playwright + SpreadsheetApp bindings,
-    but hide them from the production status bar so the UI matches an Excel-like layout.
+    Debug/test controls used by Playwright e2e (splits, auditing, panel toggles, etc).
+    Keep them visible so tests can interact with them without forcing clicks.
   */
-  display: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
 }
 
 .statusbar__debug > div {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
 }
