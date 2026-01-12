@@ -221,6 +221,19 @@ powershell -ExecutionPolicy Bypass -File tools/excel-oracle/run-excel-oracle.ps1
 
 Tip: pass `-DryRun` to preview how many cases would be run (after tag filtering / MaxCases) without launching Excel.
 
+To generate only a subset of cases (by tag):
+
+- `-IncludeTags` uses **OR semantics** (a case is included if it matches *any* of the tags)
+- `-RequireTags` uses **AND semantics** (a case is included only if it matches *all* tags)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/excel-oracle/run-excel-oracle.ps1 `
+  -CasesPath tests/compatibility/excel-oracle/cases.json `
+  -OutPath  tests/compatibility/excel-oracle/datasets/excel-oracle.json `
+  -IncludeTags SUM,IF,cmp `
+  -RequireTags odd_coupon,basis4
+```
+
 Then pin the dataset for CI (and optionally write a version-tagged copy):
 
 ```bash
