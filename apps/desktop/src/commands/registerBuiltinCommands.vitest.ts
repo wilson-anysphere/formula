@@ -222,6 +222,7 @@ describe("registerBuiltinCommands: core editing/view/audit commands", () => {
       toggleShowFormulas: vi.fn(),
       toggleAuditingPrecedents: vi.fn(),
       toggleAuditingDependents: vi.fn(),
+      selectCurrentRegion: vi.fn(),
     } as any;
 
     registerBuiltinCommands({ commandRegistry, app, layoutController });
@@ -232,6 +233,7 @@ describe("registerBuiltinCommands: core editing/view/audit commands", () => {
       "view.toggleShowFormulas",
       "audit.togglePrecedents",
       "audit.toggleDependents",
+      "edit.selectCurrentRegion",
     ]) {
       expect(commandRegistry.getCommand(id)).toBeDefined();
     }
@@ -244,18 +246,22 @@ describe("registerBuiltinCommands: core editing/view/audit commands", () => {
     await commandRegistry.executeCommand("view.toggleShowFormulas");
     await commandRegistry.executeCommand("audit.togglePrecedents");
     await commandRegistry.executeCommand("audit.toggleDependents");
+    await commandRegistry.executeCommand("edit.selectCurrentRegion");
     expect(app.toggleShowFormulas).toHaveBeenCalledTimes(1);
     expect(app.toggleAuditingPrecedents).toHaveBeenCalledTimes(1);
     expect(app.toggleAuditingDependents).toHaveBeenCalledTimes(1);
+    expect(app.selectCurrentRegion).toHaveBeenCalledTimes(1);
 
     // When editing, these commands should no-op (Excel-like behavior).
     app.isEditing.mockReturnValue(true);
     await commandRegistry.executeCommand("view.toggleShowFormulas");
     await commandRegistry.executeCommand("audit.togglePrecedents");
     await commandRegistry.executeCommand("audit.toggleDependents");
+    await commandRegistry.executeCommand("edit.selectCurrentRegion");
     expect(app.toggleShowFormulas).toHaveBeenCalledTimes(1);
     expect(app.toggleAuditingPrecedents).toHaveBeenCalledTimes(1);
     expect(app.toggleAuditingDependents).toHaveBeenCalledTimes(1);
+    expect(app.selectCurrentRegion).toHaveBeenCalledTimes(1);
   });
 
   it("uses document.execCommand for undo/redo when a text input is focused", async () => {
