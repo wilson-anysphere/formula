@@ -489,6 +489,8 @@ export class SpreadsheetApp {
   private dpr = 1;
   private width = 0;
   private height = 0;
+  private rootLeft = 0;
+  private rootTop = 0;
 
   // Scroll offsets in CSS pixels relative to the sheet data origin (A1 at 0,0).
   private scrollX = 0;
@@ -594,6 +596,7 @@ export class SpreadsheetApp {
   private commentCells = new Set<string>();
   private commentsPanelVisible = false;
   private stopCommentPersistence: (() => void) | null = null;
+  private lastHoveredCommentCellKey: number | null = null;
 
   private collabSession: CollabSession | null = null;
   private collabBinder: { destroy: () => void } | null = null;
@@ -3095,18 +3098,14 @@ export class SpreadsheetApp {
       return;
     }
 
-    const rootRect = this.root.getBoundingClientRect();
-    const x = e.clientX - rootRect.left;
-    const y = e.clientY - rootRect.top;
-    if (x < 0 || y < 0 || x > rootRect.width || y > rootRect.height) {
+    const x = e.clientX - this.rootLeft;
+    const y = e.clientY - this.rootTop;
+    if (x < 0 || y < 0 || x > this.width || y > this.height) {
       this.hideCommentTooltip();
       return;
     }
 
-    const canvasRect = this.selectionCanvas.getBoundingClientRect();
-    const vx = e.clientX - canvasRect.left;
-    const vy = e.clientY - canvasRect.top;
-    const picked = this.sharedGrid.renderer.pickCellAt(vx, vy);
+    const picked = this.sharedGrid.renderer.pickCellAt(x, y);
     if (!picked) {
       this.hideCommentTooltip();
       return;
@@ -3119,18 +3118,26 @@ export class SpreadsheetApp {
     }
 
     const docCell = this.docCellFromGridCell(picked);
-    const metaKey = docCell.row * COMMENT_COORD_COL_STRIDE + docCell.col;
-    if (!this.commentMetaByCoord.get(metaKey)) {
+    const cellKey = docCell.row * COMMENT_COORD_COL_STRIDE + docCell.col;
+    if (!this.commentMetaByCoord.has(cellKey)) {
       this.hideCommentTooltip();
       return;
     }
 
-    const preview = this.commentPreviewByCoord.get(metaKey) ?? "";
+    if (
+      this.lastHoveredCommentCellKey === cellKey &&
+      this.commentTooltip.classList.contains("comment-tooltip--visible")
+    ) {
+      return;
+    }
+
+    const preview = this.commentPreviewByCoord.get(cellKey) ?? "";
     if (!preview) {
       this.hideCommentTooltip();
       return;
     }
 
+    this.lastHoveredCommentCellKey = cellKey;
     this.commentTooltip.textContent = preview;
     this.commentTooltip.style.setProperty("--comment-tooltip-x", `${x + 12}px`);
     this.commentTooltip.style.setProperty("--comment-tooltip-y", `${y + 12}px`);
@@ -3492,6 +3499,7 @@ export class SpreadsheetApp {
   }
 
   private hideCommentTooltip(): void {
+    this.lastHoveredCommentCellKey = null;
     this.commentTooltip.classList.remove("comment-tooltip--visible");
   }
 
@@ -3664,6 +3672,8 @@ export class SpreadsheetApp {
     const rect = this.root.getBoundingClientRect();
     this.width = rect.width;
     this.height = rect.height;
+    this.rootLeft = rect.left;
+    this.rootTop = rect.top;
     this.dpr = window.devicePixelRatio || 1;
 
     if (this.sharedGrid) {
