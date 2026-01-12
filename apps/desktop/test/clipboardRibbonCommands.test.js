@@ -52,6 +52,7 @@ test("Desktop main.ts wires Home → Clipboard ribbon commands to SpreadsheetApp
   const expects = [
     { id: "home.clipboard.cut", pattern: /\bclipboardCut\(\)/ },
     { id: "home.clipboard.copy", pattern: /\bclipboardCopy\(\)/ },
+    { id: "home.clipboard.paste", pattern: /\bclipboardPaste\(\)/ },
     { id: "home.clipboard.paste.default", pattern: /\bclipboardPaste\(\)/ },
     { id: "home.clipboard.paste.values", pattern: /\bclipboardPasteSpecial\(\s*["']values["']\s*\)/ },
     { id: "home.clipboard.paste.formulas", pattern: /\bclipboardPasteSpecial\(\s*["']formulas["']\s*\)/ },

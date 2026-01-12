@@ -7361,6 +7361,7 @@ mountRibbon(ribbonReactRoot, {
         void app.clipboardCopy();
         app.focus();
         return;
+      case "home.clipboard.paste":
       case "home.clipboard.paste.default":
         void app.clipboardPaste();
         // Ribbon dropdown menu items restore focus to the trigger button after dispatching the
