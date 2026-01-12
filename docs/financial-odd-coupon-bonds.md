@@ -85,10 +85,14 @@ When adding odd-coupon coverage to the oracle corpus, prefer:
 The generator includes a small set of boundary-date equality cases (e.g. `issue == settlement`,
 `settlement == first_coupon`, `settlement == last_interest`).
 
-- For **ODDF\***, the engine currently enforces strict chronology like `issue < settlement < first_coupon`.
-- For **ODDL\***, the engine allows settlement dates **on or before** `last_interest` (as well as inside
-  the odd-last stub), matching Excel’s ability to price/yield an odd-last bond even when traded before
-  the final regular coupon date.
+Current engine behavior:
+
+- **ODDF\*** enforces strict chronology like `issue < settlement < first_coupon <= maturity`; boundary
+  equalities like `issue == settlement` and `settlement == first_coupon` are rejected with `#NUM!`.
+- **ODDL\*** requires `settlement < maturity` and `last_interest < maturity`, but allows settlement
+  dates **on or before** `last_interest` (as well as inside the odd-last stub).
+  - `settlement == last_interest` is allowed (it implies zero accrued interest).
+  - `settlement == maturity` and `last_interest == maturity` are rejected with `#NUM!`.
 
 See `crates/formula-engine/tests/odd_coupon_date_boundaries.rs` and
 `crates/formula-engine/tests/functions/financial_oddcoupons.rs`.
@@ -155,7 +159,8 @@ Our implementation follows the standard Excel-style model:
     - Discount exponent: `t = DSM/E`
   - If `settlement < last_interest`, pricing must include the remaining regular coupon payments through
     `last_interest` (inclusive) plus the final odd-stub payment at maturity. Accrued interest is
-    computed from the regular coupon period containing settlement.
+    computed from the regular coupon period containing settlement (see
+    `crates/formula-engine/src/functions/financial/odd_coupon.rs::oddl_equation`).
 
 ### Where the long-stub cases live
 
@@ -181,7 +186,8 @@ date-like inputs are truncated to integers before validation:
 The current engine implementation enforces:
 
 - ODDF\*: `issue < settlement < first_coupon <= maturity`
-- ODDL\*: `settlement < maturity` and `last_interest < maturity` (settlement may be before/at/after `last_interest`)
+- ODDL\*: `settlement < maturity` and `last_interest < maturity` (settlement may be before, on, or
+  after `last_interest`; see `odd_coupon.rs::oddl_equation`).
 
 These boundaries are covered by:
 

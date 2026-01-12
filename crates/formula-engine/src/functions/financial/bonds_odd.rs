@@ -222,12 +222,17 @@
 //!
 //! Typical validation (Excel-style `#NUM!`):
 //!
-//! - Chronology: `S < M` and `L < M` (settlement may be **before, on, or after** `L`).
-//!   - `S == M` and `L == M` are rejected with `#NUM!`.
+//! - Chronology:
+//!   - `S < M` and `L < M` (both strict; settlement may be **before, on, or after** `L`).
+//!   - Boundary equalities `S == M` and `L == M` are rejected with `#NUM!` (see
+//!     `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`). The equality `S == L` is allowed.
 //! - `rate >= 0`, `yld` (or `pr`) finite, `redemption > 0`
 //! - `frequency ∈ {1,2,4}`, `basis ∈ 0..=4`
 //!
 //! ### Pricing model (clean price)
+//!
+//! Note: the formulas below describe the common case `S >= L`. For `S < L`, see
+//! `crates/formula-engine/src/functions/financial/odd_coupon.rs::oddl_equation`.
 //!
 //! Day-count quantities:
 //!

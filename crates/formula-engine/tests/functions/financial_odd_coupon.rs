@@ -63,6 +63,8 @@ fn coupon_period_e(
 ) -> f64 {
     let freq = frequency as f64;
     match basis {
+        // Keep in sync with the source-of-truth:
+        // `crates/formula-engine/src/functions/financial/coupon_schedule.rs::coupon_period_e`.
         1 => (ncd - pcd) as f64,
         0 | 2 => 360.0 / freq,
         // basis=4: European 30/360 day-count between coupon dates (DAYS360(..., TRUE)).
@@ -4047,6 +4049,8 @@ fn oddfprice_matches_excel_model_for_30_360_bases() {
             let days360_eu =
                 date_time::days360(prev_coupon, first_coupon, true, system).unwrap() as f64;
             assert_close(days360_eu, 182.0, 0.0);
+            let e4 = coupon_period_e(prev_coupon, first_coupon, 4, frequency, system);
+            assert_close(e4, 182.0, 0.0);
         }
 
         for basis in [0, 4] {
@@ -4112,8 +4116,8 @@ fn oddlprice_matches_excel_model_for_30_360_bases() {
     let redemption = 100.0;
     let frequency = 2;
 
-    // Guard: ensure this scenario actually distinguishes "European DAYS360 between coupon dates"
-    // from the modeled coupon-period length `E = 360/frequency` for basis=4.
+    // Guard: ensure this scenario actually exercises basis=4's coupon-period length
+    // `E = DAYS360(PCD, NCD, TRUE)` (European 30/360; can differ from `360/frequency`).
     //
     // last_interest is EOM Feb 28, so the EOM-pinned prior coupon date is Aug 31.
     // DAYS360_EU(Aug 31, Feb 28) = 178 != 180 (=360/frequency).

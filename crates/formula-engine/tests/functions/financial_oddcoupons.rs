@@ -117,7 +117,9 @@ fn odd_coupon_settlement_boundary_behavior() {
     //
     // Settlement ordering rules:
     //
-    // - ODDL*: settlement < maturity, maturity > last_interest (settlement may be <= last_interest)
+    // - ODDL*: settlement < maturity, maturity > last_interest (settlement may be <= last_interest).
+    //   If settlement < last_interest, the engine PVs remaining regular coupons through last_interest
+    //   plus the final odd stub cashflow at maturity.
     // - ODDF*: issue < settlement < first_coupon <= maturity
     //
     // ODDF* still enforces strict `settlement < first_coupon` boundaries (see
