@@ -1245,9 +1245,7 @@ fn import_xls_path_with_biff_reader(
     let mut imported_count: usize = 0;
     let mut skipped_count: usize = 0;
     for (name, refers_to) in calamine_defined_names {
-        // Calamine may surface BIFF8 Unicode strings with embedded NUL bytes; strip them so the
-        // imported name matches Excel’s visible name semantics.
-        let name = name.replace('\0', "");
+        let name = normalize_calamine_defined_name_name(&name);
         let refers_to = refers_to.trim();
         let refers_to = refers_to
             .strip_prefix('=')
@@ -1320,21 +1318,178 @@ fn import_xls_path_with_biff_reader(
             continue;
         }
 
-        let DefinedNameScope::Sheet(sheet_id) = name.scope else {
-            // AutoFilter names are expected to be sheet-scoped.
-            warnings.push(ImportWarning::new(format!(
-                "skipping `.xls` AutoFilter defined name `{}`: workbook-scoped",
-                name.name
-            )));
+        let range = match parse_autofilter_range_from_defined_name(&name.refers_to) {
+            Ok(range) => range,
+            Err(err) => {
+                warnings.push(ImportWarning::new(format!(
+                    "failed to parse `.xls` AutoFilter range `{}` from defined name `{}`: {err}",
+                    name.refers_to, name.name
+                )));
+                continue;
+            }
+        };
+
+        // AutoFilter ranges are expected to be sheet-scoped. When BIFF scope metadata is
+        // unavailable (calamine fallback), attempt to infer the owning sheet from a sheet-qualified
+        // `refers_to` string like `Sheet1!$A$1:$C$10`.
+        let sheet_id = match name.scope {
+            DefinedNameScope::Sheet(sheet_id) => Some(sheet_id),
+            DefinedNameScope::Workbook => {
+                let mut refers_to = name.refers_to.trim();
+                if let Some(rest) = refers_to.strip_prefix('=') {
+                    refers_to = rest.trim();
+                }
+                if let Some(rest) = refers_to.strip_prefix('@') {
+                    refers_to = rest.trim();
+                }
+                match refers_to.rsplit_once('!') {
+                    Some((lhs, _)) => {
+                        // Best-effort parse of sheet name, handling quoted identifiers (`'My Sheet'!A1`)
+                        // and external-workbook prefixes (`[Book]Sheet1!A1`).
+                        let mut sheet_name = lhs.trim();
+                        if let Some((_, rest)) = sheet_name.rsplit_once(']') {
+                            sheet_name = rest.trim();
+                        }
+                        let mut sheet_name = if let Some(inner) = sheet_name
+                            .strip_prefix('\'')
+                            .and_then(|s| s.strip_suffix('\''))
+                        {
+                            inner.replace("''", "'")
+                        } else {
+                            sheet_name.to_string()
+                        };
+                        if let Some((first, _)) = sheet_name.split_once(':') {
+                            // Excel forbids `:` in sheet names, so this can only be a 3D sheet span.
+                            sheet_name = first.to_string();
+                        }
+
+                        let sheet_id = out
+                            .sheets
+                            .iter()
+                            .find(|s| sheet_name_eq_case_insensitive(&s.name, &sheet_name))
+                            .map(|s| s.id);
+                        if sheet_id.is_none() {
+                            warnings.push(ImportWarning::new(format!(
+                                "skipping `.xls` AutoFilter defined name `{}`: unknown sheet `{}` in `{}`",
+                                name.name, sheet_name, name.refers_to
+                            )));
+                        }
+
+                        sheet_id
+                    }
+                    None => {
+                        if out.sheets.len() == 1 {
+                            Some(out.sheets[0].id)
+                        } else {
+                            warnings.push(ImportWarning::new(format!(
+                                "skipping `.xls` AutoFilter defined name `{}`: expected sheet-qualified range, got `{}`",
+                                name.name, name.refers_to
+                            )));
+                            None
+                        }
+                    }
+                }
+            }
+        };
+
+        let Some(sheet_id) = sheet_id else {
             continue;
         };
 
-        match parse_autofilter_range_from_defined_name(&name.refers_to) {
-            Ok(range) => autofilters.push((sheet_id, range)),
-            Err(err) => warnings.push(ImportWarning::new(format!(
-                "failed to parse `.xls` AutoFilter range `{}` from defined name `{}`: {err}",
-                name.refers_to, name.name
-            ))),
+        autofilters.push((sheet_id, range));
+    }
+
+    // Calamine's `.xls` defined-name support does not handle BIFF8 built-in `NAME` records (the
+    // `fBuiltin` flag) correctly and also cannot decode non-3D area refs like `PtgArea` into A1
+    // text. This means AutoFilter ranges stored as `_xlnm._FilterDatabase` can be lost when BIFF
+    // workbook-stream parsing is unavailable and we fall back to calamine for defined names.
+    //
+    // Best-effort: if calamine surfaced (and we skipped) any invalid defined names, attempt to
+    // recover the AutoFilter range directly from the workbook stream via our BIFF parser.
+    if autofilters.is_empty() && skipped_count > 0 {
+        let workbook_stream_fallback = if workbook_stream.is_none() {
+            match biff::read_workbook_stream_from_xls(path) {
+                Ok(bytes) => Some(bytes),
+                Err(err) => {
+                    warnings.push(ImportWarning::new(format!(
+                        "failed to recover `.xls` AutoFilter ranges from workbook stream: {err}"
+                    )));
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let workbook_stream_bytes = workbook_stream
+            .as_deref()
+            .or(workbook_stream_fallback.as_deref());
+
+        if let Some(workbook_stream_bytes) = workbook_stream_bytes {
+            let biff_version = biff::detect_biff_version(workbook_stream_bytes);
+            let codepage = biff::parse_biff_codepage(workbook_stream_bytes);
+
+            let sheet_names_by_biff_idx =
+                biff::parse_biff_bound_sheets(workbook_stream_bytes, biff_version, codepage)
+                    .ok()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|s| s.name)
+                    .collect::<Vec<_>>();
+
+            let sheet_names_by_biff_idx = if sheet_names_by_biff_idx.is_empty() {
+                sheets.iter().map(|s| s.name.clone()).collect::<Vec<_>>()
+            } else {
+                sheet_names_by_biff_idx
+            };
+
+            match biff::parse_biff_defined_names(
+                workbook_stream_bytes,
+                biff_version,
+                codepage,
+                &sheet_names_by_biff_idx,
+            ) {
+                Ok(mut parsed) => {
+                    for name in parsed.names.drain(..) {
+                        if name.name != XLNM_FILTER_DATABASE {
+                            continue;
+                        }
+                        let Some(biff_sheet_idx) = name.scope_sheet else {
+                            continue;
+                        };
+                        let Some(&sheet_id) = sheet_ids_by_calamine_idx.get(biff_sheet_idx) else {
+                            warnings.push(ImportWarning::new(format!(
+                                "skipping `.xls` AutoFilter defined name `{}`: out-of-range sheet index {} (sheet count={})",
+                                name.name,
+                                biff_sheet_idx.saturating_add(1),
+                                sheet_ids_by_calamine_idx.len()
+                            )));
+                            continue;
+                        };
+
+                        let mut a1 = name.refers_to.trim();
+                        if let Some(rest) = a1.strip_prefix('=') {
+                            a1 = rest.trim();
+                        }
+                        if let Some(rest) = a1.strip_prefix('@') {
+                            a1 = rest.trim();
+                        }
+                        if let Some((_, rhs)) = a1.rsplit_once('!') {
+                            a1 = rhs;
+                        }
+
+                        match Range::from_a1(a1) {
+                            Ok(range) => autofilters.push((sheet_id, range)),
+                            Err(err) => warnings.push(ImportWarning::new(format!(
+                                "failed to parse `.xls` AutoFilter range `{}` from defined name `{}`: {err}",
+                                name.refers_to, name.name
+                            ))),
+                        }
+                    }
+                }
+                Err(err) => warnings.push(ImportWarning::new(format!(
+                    "failed to recover `.xls` AutoFilter ranges from workbook stream: {err}"
+                ))),
+            }
         }
     }
 
@@ -1537,6 +1692,12 @@ fn truncate_to_utf16_len(value: &str, max_len: usize) -> String {
         used = used.saturating_add(ch_len);
     }
     out
+}
+
+fn normalize_calamine_defined_name_name(name: &str) -> String {
+    // Calamine can surface BIFF8 Unicode strings with embedded NUL bytes; strip them so the
+    // imported name matches Excel’s visible name semantics.
+    name.replace('\0', "")
 }
 
 fn sheet_name_eq_case_insensitive(a: &str, b: &str) -> bool {
