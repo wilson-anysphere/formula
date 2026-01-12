@@ -14,6 +14,21 @@ Depending on the caller, the configurable “base URL” differs:
 - **Publisher tooling** (`tools/extension-publisher`) takes the marketplace **origin** and appends `/api/...` internally,
   e.g. `https://marketplace.formula.app`. (Passing a URL that ends with `/api` is also accepted and will be normalized.)
 
+## CORS (browser clients)
+
+Read-only endpoints are CORS-enabled so browser/WebView clients can call the marketplace cross-origin:
+
+- `GET /api/search`
+- `GET /api/extensions/:id`
+- `GET /api/extensions/:id/download/:version`
+
+These responses include:
+
+- `Access-Control-Allow-Origin: *`
+- `Access-Control-Expose-Headers: ETag, X-Package-Sha256, X-Package-Signature, X-Package-Scan-Status, X-Package-Files-Sha256, X-Package-Format-Version, X-Package-Published-At, X-Publisher, X-Publisher-Key-Id, ...`
+
+Mutation endpoints (publish/admin) are intentionally **not** CORS-enabled.
+
 ## Content types
 
 - Extension package bytes: `application/vnd.formula.extension-package`
