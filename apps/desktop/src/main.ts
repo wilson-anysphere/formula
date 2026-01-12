@@ -1670,17 +1670,18 @@ if (
   // The primary grid wires clipboard + delete via SpreadsheetApp.onKeyDown, which only
   // runs when `#grid` is focused. When focus is in the secondary pane we need to map
   // Excel-style shortcuts back into SpreadsheetApp command APIs.
-  const isEditableTarget = (target: HTMLElement | null): boolean => {
-    if (!target) return false;
-    const tag = target.tagName;
-    return tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable;
+  const isEditableTarget = (target: EventTarget | null): boolean => {
+    const el = target as HTMLElement | null;
+    if (!el) return false;
+    const tag = el.tagName;
+    return tag === "INPUT" || tag === "TEXTAREA" || el.isContentEditable;
   };
 
   gridSecondaryEl.addEventListener("keydown", (e) => {
     if (e.defaultPrevented) return;
 
     // Match SpreadsheetApp guards: never steal shortcuts from active text editing.
-    if (isEditableTarget(e.target as HTMLElement | null)) return;
+    if (isEditableTarget(e.target)) return;
     if (app.isEditing()) return;
 
     const primary = e.ctrlKey || e.metaKey;

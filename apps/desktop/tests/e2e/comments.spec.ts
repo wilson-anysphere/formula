@@ -6,11 +6,28 @@ test.describe("comments", () => {
   test("add comment, reply, resolve", async ({ page }) => {
     await gotoDesktop(page);
 
-    // Focus + select A1 (top-left).
-    await page.click("#grid", { position: { x: 5, y: 5 } });
+    // Focus + select A1. Avoid clicking the header corner (which can select the
+    // whole sheet) by using the runtime's computed cell rect.
+    await page.waitForFunction(() => {
+      const app = (window as any).__formulaApp;
+      const rect = app?.getCellRectA1?.("A1");
+      return rect && rect.width > 0 && rect.height > 0;
+    });
+
+    const a1 = (await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("A1"))) as {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    };
+
+    const grid = page.locator("#grid");
+    await grid.click({ position: { x: a1.x + a1.width / 2, y: a1.y + a1.height / 2 } });
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
 
-    await page.getByTestId("open-comments-panel").click();
+    // There are multiple comments toggles in the shell (e.g. ribbon + debug/statusbar).
+    // Scope to the ribbon control to avoid Playwright strict-mode ambiguity.
+    await page.getByTestId("ribbon-root").getByTestId("open-comments-panel").click();
     const panel = page.getByTestId("comments-panel");
     await expect(panel).toBeVisible();
 
