@@ -74,4 +74,91 @@ test.describe("sheet tabs", () => {
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
     await expect(page.getByTestId("active-value")).toHaveText(`Hello from ${nextSheetId}`);
   });
+
+  test("drag reordering sheet tabs updates Ctrl+PgUp/PgDn navigation order", async ({ page }) => {
+    await gotoDesktop(page);
+
+    // Ensure A1 is active so Ctrl+PgUp/PgDn starts from a deterministic sheet/cell.
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      app.activateCell({ row: 0, col: 0 });
+    });
+
+    // Create Sheet2 + Sheet3 via the UI.
+    await page.getByTestId("sheet-add").click();
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+    await page.getByTestId("sheet-add").click();
+    await expect(page.getByTestId("sheet-tab-Sheet3")).toBeVisible();
+    await expect(page.getByTestId("sheet-tab-Sheet3")).toHaveAttribute("data-active", "true");
+
+    // Move Sheet3 before Sheet1.
+    try {
+      await page
+        .getByTestId("sheet-tab-Sheet3")
+        .dragTo(page.getByTestId("sheet-tab-Sheet1"), { targetPosition: { x: 1, y: 1 } });
+    } catch {
+      // Ignore; we'll fall back to a synthetic drop below.
+    }
+
+    // Playwright drag/drop can be flaky with HTML5 DataTransfer. If the order doesn't match,
+    // dispatch a synthetic drop event that exercises the sheet tab DnD plumbing.
+    const desiredOrder = ["Sheet3", "Sheet1", "Sheet2"];
+    const orderKey = (order: Array<string | null>) => order.filter(Boolean).slice(0, 3).join(",");
+    const didReorder = orderKey(
+      await page.evaluate(() =>
+        Array.from(document.querySelectorAll("#sheet-tabs .sheet-tabs [data-sheet-id]")).map((el) =>
+          (el as HTMLElement).getAttribute("data-sheet-id"),
+        ),
+      ),
+    );
+
+    if (didReorder !== desiredOrder.join(",")) {
+      await page.evaluate(() => {
+        const fromId = "Sheet3";
+        const target = document.querySelector('[data-testid="sheet-tab-Sheet1"]') as HTMLElement | null;
+        if (!target) throw new Error("Missing Sheet1 tab");
+        const rect = target.getBoundingClientRect();
+
+        const dt = new DataTransfer();
+        dt.setData("text/sheet-id", fromId);
+
+        const drop = new DragEvent("drop", {
+          bubbles: true,
+          cancelable: true,
+          clientX: rect.left + 1,
+          clientY: rect.top + rect.height / 2,
+        });
+        Object.defineProperty(drop, "dataTransfer", { value: dt });
+        target.dispatchEvent(drop);
+      });
+    }
+
+    await expect.poll(() =>
+      page.evaluate(() =>
+        Array.from(document.querySelectorAll("#sheet-tabs .sheet-tabs [data-sheet-id]")).map((el) =>
+          (el as HTMLElement).getAttribute("data-sheet-id"),
+        ),
+      ),
+    ).toEqual(desiredOrder);
+
+    // Ctrl+PgDn should follow the new order. We dispatch the key event directly to avoid
+    // platform/browser-specific tab switching behavior.
+    await page.evaluate(() => {
+      const evt = new KeyboardEvent("keydown", { key: "PageDown", ctrlKey: true, bubbles: true, cancelable: true });
+      window.dispatchEvent(evt);
+    });
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet1");
+
+    await page.evaluate(() => {
+      const evt = new KeyboardEvent("keydown", { key: "PageDown", ctrlKey: true, bubbles: true, cancelable: true });
+      window.dispatchEvent(evt);
+    });
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet2");
+
+    await page.evaluate(() => {
+      const evt = new KeyboardEvent("keydown", { key: "PageDown", ctrlKey: true, bubbles: true, cancelable: true });
+      window.dispatchEvent(evt);
+    });
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet3");
+  });
 });
