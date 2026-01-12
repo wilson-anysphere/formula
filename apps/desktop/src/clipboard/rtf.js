@@ -593,13 +593,6 @@ export function extractPlainTextFromRtf(rtf) {
           inTable = false;
         }
         out += "\n";
-      } else if (word === "cell") {
-        out += "\t";
-      } else if (word === "row") {
-        // RTF tables usually emit a trailing `\cell` for the last column and then `\row`.
-        // Drop the trailing tab so TSV parsing doesn't add a spurious empty column.
-        if (out.endsWith("\t")) out = out.slice(0, -1);
-        out += "\n";
       } else if (word === "u" && typeof param === "number") {
         // `\uN` is a signed 16-bit integer; map negatives back into [0, 65535].
         let code = param;
