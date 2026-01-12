@@ -49,6 +49,7 @@ import * as nativeDialogs from "./tauri/nativeDialogs";
 import { setTrayStatus } from "./tauri/trayStatus";
 import { installUpdaterUi } from "./tauri/updaterUi";
 import { notify } from "./tauri/notifications";
+import { registerAppQuitHandlers, requestAppQuit } from "./tauri/appQuit";
 import type { WorkbookInfo } from "@formula/workbook-backend";
 import { chartThemeFromWorkbookPalette } from "./charts/theme";
 import { parseA1Range, splitSheetQualifier } from "../../../packages/search/index.js";
@@ -3381,6 +3382,24 @@ try {
 
   installUpdaterUi(listen);
 
+  registerAppQuitHandlers({
+    isDirty: () => app.getDocument().isDirty,
+    runWorkbookBeforeClose: async () => {
+      if (!queuedInvoke) return;
+      await fireWorkbookBeforeCloseBestEffort({ app, workbookId, invoke: queuedInvoke, drainBackendSync });
+    },
+    drainBackendSync,
+    quitApp: async () => {
+      if (!invoke) {
+        window.close();
+        return;
+      }
+      // Exit the desktop shell. The backend command hard-exits the process so this promise
+      // will never resolve in the success path.
+      await invoke("quit_app");
+    },
+  });
+
   // When the Rust host receives a close request, it asks the frontend to flush any pending
   // workbook-sync operations and to sync macro UI context before it runs `Workbook_BeforeClose`.
   void listen("close-prep", async (event) => {
@@ -3474,7 +3493,7 @@ try {
   });
 
   void listen("tray-quit", () => {
-    void handleCloseRequest({ quit: true }).catch((err) => {
+    void requestAppQuit().catch((err) => {
       console.error("Failed to quit app:", err);
     });
   });

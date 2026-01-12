@@ -1,10 +1,9 @@
-import { showToast } from "../extensions/ui";
+import { showToast } from "../extensions/ui.js";
 
-type UpdaterEventName =
-  | "update-check-started"
-  | "update-not-available"
-  | "update-check-error"
-  | "update-available";
+import { requestAppRestart } from "./appQuit";
+import { installUpdateAndRestart } from "./updater";
+
+type UpdaterEventName = "update-check-started" | "update-not-available" | "update-check-error" | "update-available";
 
 type UpdaterEventPayload = {
   source?: string;
@@ -112,3 +111,17 @@ export function installUpdaterUi(listenArg?: TauriListen): void {
     });
   }
 }
+
+/**
+ * Called by the updater UI when the user confirms "Restart now".
+ *
+ * This routes through the normal quit flow (Workbook_BeforeClose macros, backend-sync drain,
+ * and the unsaved-changes confirm prompt) before triggering the updater install step.
+ */
+export async function restartToInstallUpdate(): Promise<boolean> {
+  return await requestAppRestart({
+    beforeQuit: installUpdateAndRestart,
+    beforeQuitErrorToast: "Failed to restart to install the update.",
+  });
+}
+
