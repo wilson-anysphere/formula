@@ -49,6 +49,11 @@ test("semanticDiff: modified cell (value)", () => {
   assert.deepEqual(diff.modified[0].cell, { row: 0, col: 0 });
   assert.equal(diff.modified[0].oldValue, 1);
   assert.equal(diff.modified[0].newValue, 2);
+  // Backwards-compat: non-encrypted cells should not include encryption metadata fields.
+  assert.equal("oldEncrypted" in diff.modified[0], false);
+  assert.equal("newEncrypted" in diff.modified[0], false);
+  assert.equal("oldKeyId" in diff.modified[0], false);
+  assert.equal("newKeyId" in diff.modified[0], false);
 });
 
 test("semanticDiff: format-only change", () => {
@@ -75,6 +80,9 @@ test("semanticDiff: moved cell detection", () => {
   assert.equal(diff.moved.length, 1);
   assert.deepEqual(diff.moved[0].oldLocation, { row: 0, col: 0 });
   assert.deepEqual(diff.moved[0].newLocation, { row: 2, col: 3 });
+  // Backwards-compat: non-encrypted moves should not include encryption metadata fields.
+  assert.equal("encrypted" in diff.moved[0], false);
+  assert.equal("keyId" in diff.moved[0], false);
   assert.equal(diff.added.length, 0);
   assert.equal(diff.removed.length, 0);
 });
