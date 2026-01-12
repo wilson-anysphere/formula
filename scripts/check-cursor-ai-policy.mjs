@@ -130,7 +130,21 @@ const CONFIG_FILE_EXTENSIONS = new Set([".json", ".toml", ".yaml", ".yml", ".loc
 
 // Some important config/build files have no extension. Scan these by basename so
 // they can't be used to smuggle provider integrations into the repo.
-const SCANNED_BASENAMES_WITHOUT_EXTENSION = new Set(["dockerfile"]);
+//
+// Keep this list intentionally small; prefer adding explicit basenames over
+// scanning *all* extensionless files (which increases false positives).
+const SCANNED_BASENAMES_WITHOUT_EXTENSION = new Set([
+  "dockerfile",
+  "makefile",
+  "license",
+  "notice",
+  ".gitignore",
+  ".gitattributes",
+  ".dockerignore",
+  ".npmrc",
+  ".yarnrc",
+  ".editorconfig",
+]);
 
 /**
  * @typedef {{ file: string, ruleId: string, message: string, line?: number, column?: number }} Violation
