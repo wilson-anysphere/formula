@@ -1,5 +1,7 @@
 use std::io::{Cursor, Write};
 
+use formula_model::Workbook;
+use formula_xlsx::cell_images::CellImages;
 use formula_xlsx::XlsxPackage;
 use zip::write::FileOptions;
 use zip::ZipWriter;
@@ -31,11 +33,8 @@ fn discovers_cell_images_part_and_resolves_image_targets() {
 
     let cellimages_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <cellImages xmlns="http://schemas.microsoft.com/office/spreadsheetml/2019/cellimages"
- xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <cellImage>
-    <a:blip r:embed="rId1"/>
-  </cellImage>
+  <cellImage r:embed="rId1"/>
 </cellImages>"#;
 
     let cellimages_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -54,15 +53,22 @@ fn discovers_cell_images_part_and_resolves_image_targets() {
     ]);
 
     let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
-    let info = pkg
-        .cell_images_part_info()
-        .expect("parse cell images")
-        .expect("expected cellimages part");
+    let mut workbook = Workbook::default();
+    let images = CellImages::parse_from_parts(pkg.parts_map(), &mut workbook)
+        .expect("parse cell images parts");
 
-    assert_eq!(info.part_path, "xl/cellimages.xml");
-    assert_eq!(info.rels_path, "xl/_rels/cellimages.xml.rels");
-    assert_eq!(info.embeds.len(), 1);
-    assert_eq!(info.embeds[0].embed_rid, "rId1");
-    assert_eq!(info.embeds[0].target_part, "xl/media/image1.png");
-    assert_eq!(info.embeds[0].target_bytes.as_slice(), png_bytes);
+    assert_eq!(images.parts.len(), 1, "expected cellimages part");
+    let part = &images.parts[0];
+
+    assert_eq!(part.path, "xl/cellimages.xml");
+    assert_eq!(part.rels_path, "xl/_rels/cellimages.xml.rels");
+    assert_eq!(part.images.len(), 1);
+    assert_eq!(part.images[0].embed_rel_id, "rId1");
+    assert_eq!(part.images[0].target_path, "xl/media/image1.png");
+
+    let image_data = workbook
+        .images
+        .get(&part.images[0].image_id)
+        .expect("expected image bytes to be loaded into workbook image store");
+    assert_eq!(image_data.bytes.as_slice(), png_bytes);
 }
