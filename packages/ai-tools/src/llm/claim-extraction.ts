@@ -34,7 +34,13 @@ const CELL_PATTERN = "\\$?[A-Za-z]{1,3}\\$?[1-9]\\d*";
 const A1_REFERENCE_PATTERN = `(?:(?:${SHEET_NAME_PATTERN})!\\s*)?${CELL_PATTERN}(?:\\s*:\\s*${CELL_PATTERN})?`;
 const A1_CELL_REFERENCE_PATTERN = `(?:(?:${SHEET_NAME_PATTERN})!\\s*)?${CELL_PATTERN}`;
 
-const NUMBER_PATTERN = "[-+]?\\d+(?:,\\d{3})*(?:\\.\\d+)?(?:e[-+]?\\d+)?%?";
+// Supports:
+// - comma-separated thousands ("1,234")
+// - decimals ("12.34")
+// - leading-decimal floats (".5")
+// - scientific notation ("1e-3")
+// - optional percent suffix ("10%")
+const NUMBER_PATTERN = "[-+]?(?:\\d+(?:,\\d{3})*(?:\\.\\d+)?|\\.\\d+)(?:e[-+]?\\d+)?%?";
 
 const KEYWORD_TO_MEASURE: Record<string, SpreadsheetClaimMeasure> = {
   average: "mean",
@@ -44,8 +50,11 @@ const KEYWORD_TO_MEASURE: Record<string, SpreadsheetClaimMeasure> = {
   sum: "sum",
   total: "sum",
   stdev: "stdev",
+  stddev: "stdev",
   "std dev": "stdev",
+  "std. dev": "stdev",
   "standard deviation": "stdev",
+  var: "variance",
   variance: "variance",
   count: "count",
   min: "min",
@@ -54,9 +63,16 @@ const KEYWORD_TO_MEASURE: Record<string, SpreadsheetClaimMeasure> = {
   maximum: "max"
 };
 
+function escapeRegexLiteral(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 const KEYWORD_PATTERN = Object.keys(KEYWORD_TO_MEASURE)
   .slice()
   .sort((a, b) => b.length - a.length)
+  // Treat keyword spaces as flexible whitespace and escape regex metacharacters so
+  // we can safely support shorthands like "std. dev".
+  .map((keyword) => escapeRegexLiteral(keyword).replace(/\s+/g, "\\s+"))
   .join("|");
 
 const RANGE_STAT_WITH_REF_RE_1 = new RegExp(
@@ -127,7 +143,7 @@ function collectRangeStatWithRef(
   const out: Array<MatchSpan<ExtractedSpreadsheetClaim>> = [];
   for (const match of text.matchAll(regex)) {
     const groups = match.groups ?? {};
-    const keywordRaw = String(groups.keyword ?? "").trim().toLowerCase();
+    const keywordRaw = String(groups.keyword ?? "").trim().toLowerCase().replace(/\s+/g, " ");
     const measure = KEYWORD_TO_MEASURE[keywordRaw];
     if (!measure) continue;
 
@@ -156,7 +172,7 @@ function collectRangeStatNoRef(text: string): Array<MatchSpan<ExtractedSpreadshe
   const out: Array<MatchSpan<ExtractedSpreadsheetClaim>> = [];
   for (const match of text.matchAll(RANGE_STAT_NO_REF_RE)) {
     const groups = match.groups ?? {};
-    const keywordRaw = String(groups.keyword ?? "").trim().toLowerCase();
+    const keywordRaw = String(groups.keyword ?? "").trim().toLowerCase().replace(/\s+/g, " ");
     const measure = KEYWORD_TO_MEASURE[keywordRaw];
     if (!measure) continue;
 
