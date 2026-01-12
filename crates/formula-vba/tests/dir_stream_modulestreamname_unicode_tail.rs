@@ -65,7 +65,7 @@ fn vba_project_parse_uses_modulestreamname_unicode_tail_for_stream_lookup() {
     }
     {
         let mut s = ole
-            .create_stream(&format!("VBA/{module_stream_name_unicode}"))
+            .create_stream(format!("VBA/{module_stream_name_unicode}"))
             .expect("module stream");
         s.write_all(&module_container).expect("write module");
     }
@@ -83,4 +83,3 @@ fn vba_project_parse_uses_modulestreamname_unicode_tail_for_stream_lookup() {
     );
     assert!(module.code.contains("Sub Hello"));
 }
-

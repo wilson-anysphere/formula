@@ -840,7 +840,7 @@ pub fn verify_vba_signature_binding_with_stream_path(
     #[cfg(target_arch = "wasm32")]
     {
         let _ = (vba_project_bin, signature_stream_path, signature);
-        return VbaSignatureBinding::Unknown;
+        VbaSignatureBinding::Unknown
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1416,7 +1416,7 @@ fn verify_signature_blob(signature: &[u8]) -> VbaSignatureVerification {
         let _ = signature;
         // `openssl` isn't available on wasm targets. Keep the signature blob available to callers,
         // but don't treat it as verified.
-        return VbaSignatureVerification::SignedButUnverified;
+        VbaSignatureVerification::SignedButUnverified
     }
 
     #[cfg(not(target_arch = "wasm32"))]
