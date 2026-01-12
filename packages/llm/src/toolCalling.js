@@ -2,8 +2,8 @@
  * Provider-agnostic tool calling loop.
  *
  * The LLM client is responsible for translating `ToolDefinition`s + messages
- * into provider-specific APIs (OpenAI, Anthropic, etc). This module implements
- * the generic loop: call LLM -> execute tools -> call LLM -> …
+ * into the underlying inference API. This module implements the generic loop:
+ * call LLM -> execute tools -> call LLM -> …
  *
  * SECURITY NOTE: Tool results are appended to the conversation as `role: "tool"`
  * messages and are sent back to the model on the next iteration. Any sensitive
