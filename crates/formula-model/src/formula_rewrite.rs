@@ -925,34 +925,34 @@ mod tests {
     }
 
     #[test]
-    fn rewrite_external_workbook_reference() {
+    fn does_not_rewrite_external_workbook_reference() {
         assert_eq!(
             rewrite_sheet_names_in_formula("='[Book1.xlsx]Sheet1'!A1", "Sheet1", "Data"),
-            "='[Book1.xlsx]Data'!A1"
+            "='[Book1.xlsx]Sheet1'!A1"
         );
     }
 
     #[test]
-    fn rewrite_unquoted_external_workbook_reference() {
+    fn does_not_rewrite_unquoted_external_workbook_reference() {
         assert_eq!(
             rewrite_sheet_names_in_formula("=[Book1.xlsx]Sheet1!A1", "Sheet1", "Data"),
-            "='[Book1.xlsx]Data'!A1"
+            "=[Book1.xlsx]Sheet1!A1"
         );
     }
 
     #[test]
-    fn rewrite_external_reference_with_path() {
+    fn does_not_rewrite_external_reference_with_path() {
         assert_eq!(
             rewrite_sheet_names_in_formula("='C:\\path\\[Book1.xlsx]Sheet1'!A1", "Sheet1", "Data",),
-            "='C:\\path\\[Book1.xlsx]Data'!A1"
+            "='C:\\path\\[Book1.xlsx]Sheet1'!A1"
         );
     }
 
     #[test]
-    fn rewrite_external_reference_with_brackets_in_path() {
+    fn does_not_rewrite_external_reference_with_brackets_in_path() {
         assert_eq!(
             rewrite_sheet_names_in_formula("='C:\\[foo]\\[Book1.xlsx]Sheet1'!A1", "Sheet1", "Data",),
-            "='C:\\[foo]\\[Book1.xlsx]Data'!A1"
+            "='C:\\[foo]\\[Book1.xlsx]Sheet1'!A1"
         );
     }
 
