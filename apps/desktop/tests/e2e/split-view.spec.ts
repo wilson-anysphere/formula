@@ -438,6 +438,47 @@ test.describe("split view", () => {
     await expect(editor).toBeFocused();
   });
 
+  test("Delete/Backspace do not clear sheet contents while secondary in-cell editing is active", async ({ page }) => {
+    await gotoDesktop(page, "/?grid=shared");
+    await page.evaluate(() => localStorage.clear());
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await waitForDesktopReady(page);
+    await waitForIdle(page);
+
+    await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
+
+    const secondary = page.locator("#grid-secondary");
+    await expect(secondary).toBeVisible();
+    await waitForGridCanvasesToBeSized(page, "#grid-secondary");
+
+    // Focus/select A1 in secondary pane.
+    await secondary.click({ position: { x: 48 + 12, y: 24 + 12 } }); // A1
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+
+    const valueBefore = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
+
+    // Enter edit mode and ensure the editor has focus.
+    await page.keyboard.press("F2");
+    const editor = secondary.locator("textarea.cell-editor");
+    await expect(editor).toBeVisible();
+    await expect(editor).toBeFocused();
+
+    // While editing, Delete/Backspace should apply to the editor text and should not clear the underlying cell.
+    await page.keyboard.press("Delete");
+    await expect(editor).toBeVisible();
+    expect(await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"))).toBe(valueBefore);
+
+    await page.keyboard.press("Backspace");
+    await expect(editor).toBeVisible();
+    expect(await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"))).toBe(valueBefore);
+
+    // Cancel out of editing so later tests aren't affected.
+    await page.keyboard.press("Escape");
+    await waitForIdle(page);
+    await expect(editor).toBeHidden();
+    expect(await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"))).toBe(valueBefore);
+  });
+
   test("primary in-cell edits commit on blur when clicking another cell (shared grid)", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
     await page.evaluate(() => localStorage.clear());
