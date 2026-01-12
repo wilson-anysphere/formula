@@ -277,8 +277,15 @@ export class LayoutController {
       const existing = this.layout?.splitView?.panes?.[pane];
       if (!existing) return;
 
-      const nextX = typeof scroll?.scrollX === "number" && Number.isFinite(scroll.scrollX) ? scroll.scrollX : existing.scrollX;
-      const nextY = typeof scroll?.scrollY === "number" && Number.isFinite(scroll.scrollY) ? scroll.scrollY : existing.scrollY;
+      const clampScroll = (value) => Math.max(-1e12, Math.min(1e12, value));
+      const nextX =
+        typeof scroll?.scrollX === "number" && Number.isFinite(scroll.scrollX)
+          ? clampScroll(scroll.scrollX)
+          : existing.scrollX;
+      const nextY =
+        typeof scroll?.scrollY === "number" && Number.isFinite(scroll.scrollY)
+          ? clampScroll(scroll.scrollY)
+          : existing.scrollY;
       if (existing.scrollX === nextX && existing.scrollY === nextY) return;
 
       existing.scrollX = nextX;
