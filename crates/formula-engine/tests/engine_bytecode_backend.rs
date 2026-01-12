@@ -1931,6 +1931,45 @@ fn bytecode_backend_matches_ast_for_common_logical_error_functions() {
 }
 
 #[test]
+fn bytecode_backend_if_two_arg_default_false_branch_matches_ast() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=IF(FALSE,1/0)")
+        .unwrap();
+    engine.set_cell_formula("Sheet1", "A2", "=IF(TRUE,7)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A3", "=IF(TRUE,1/0)")
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(
+        stats.fallback,
+        0,
+        "expected all formulas to compile to bytecode (report={:?})",
+        engine.bytecode_compile_report(100)
+    );
+    assert_eq!(stats.total_formula_cells, 3);
+    assert_eq!(stats.compiled, 3);
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Bool(false));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(7.0));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A3"),
+        Value::Error(ErrorKind::Div0)
+    );
+
+    for (formula, cell) in [
+        ("=IF(FALSE,1/0)", "A1"),
+        ("=IF(TRUE,7)", "A2"),
+        ("=IF(TRUE,1/0)", "A3"),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_logical_error_functions_with_error_literals() {
     let mut engine = Engine::new();
     engine
