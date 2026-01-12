@@ -65,6 +65,73 @@ See also: [20-images-in-cells-richdata.md](./20-images-in-cells-richdata.md) for
 best-effort) description of the `richValue*` part set and how `richValueRel.xml` is used to resolve
 media relationships.
 
+### Quick reference: `cellImages` part graph (OPC + XML)
+
+This section is a “what to look for” summary for the core **cell image store** parts. Details and
+variant shapes are documented further below.
+
+#### Parts
+
+- `xl/cellImages.xml` (**preferred**, but casing can vary; see note above)
+- `xl/_rels/cellImages.xml.rels`
+- image binaries: `xl/media/imageN.<ext>`
+
+#### XML namespace + structure (likely)
+
+- Root element local name: `<cellImages>` in namespace:
+  - `http://schemas.microsoft.com/office/spreadsheetml/2019/cellimages`
+- Some files may use newer versions like:
+  - `http://schemas.microsoft.com/office/spreadsheetml/2022/cellimages`
+- The root contains one or more `<cellImage>` entries, each containing a DrawingML picture subtree
+  (typically `<xdr:pic>`) and a blip like:
+  - `<a:blip r:embed="rIdX"/>`
+- `r:embed="rIdX"` is resolved via `xl/_rels/cellImages.xml.rels` to a `Target` under `xl/media/*`.
+
+#### Content types (expected)
+
+- `[Content_Types].xml` override (expected, but verify against real Excel):
+
+```xml
+<Override PartName="/xl/cellImages.xml"
+          ContentType="application/vnd.ms-excel.cellimages+xml"/>
+```
+
+#### Relationship types
+
+- Image relationship type (standard OOXML):
+  - `http://schemas.openxmlformats.org/officeDocument/2006/relationships/image`
+- Relationship type for “workbook/worksheet → `cellImages.xml`”: **unknown** (likely Microsoft-specific);
+  discover from a real Excel-generated file and preserve byte-for-byte until verified.
+
+#### Minimal example (`xl/cellImages.xml`) (synthetic)
+
+```xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cellImages xmlns="http://schemas.microsoft.com/office/spreadsheetml/2019/cellimages"
+            xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+            xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <cellImage>
+    <xdr:pic>
+      <xdr:blipFill>
+        <a:blip r:embed="rId1"/>
+      </xdr:blipFill>
+    </xdr:pic>
+  </cellImage>
+</cellImages>
+```
+
+#### Minimal example (`xl/_rels/cellImages.xml.rels`) (synthetic)
+
+```xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+                Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+                Target="media/image1.png"/>
+</Relationships>
+```
+
 ## Worksheet cell references (`c/@vm`, `c/@cm`, `<extLst>`)
 
 SpreadsheetML’s `<c>` (cell) element can carry metadata indices:
@@ -401,6 +468,32 @@ TODO (confirm via real Excel fixture, then harden parsers/writers):
   - `xl/cellImages.xml`
 
 Until confirmed, Formula must preserve any such relationships byte-for-byte rather than regenerating.
+
+## TODO: verify with real Excel sample
+
+This doc is partially derived from **synthetic fixtures** in this repository plus best-effort reverse
+engineering. Before we hardcode any remaining assumptions, validate them against a real Excel-generated
+workbook that uses both:
+
+- Insert → Pictures → **Place in Cell**
+- a formula cell containing `=IMAGE(...)`
+
+Checklist:
+
+1. Confirm the canonical part name(s) and casing:
+   - `xl/cellImages.xml` vs `xl/cellimages.xml` and whether numbered parts (`cellImages1.xml`) are used.
+2. Confirm the `cellImages` namespace versions used by current Excel builds:
+   - `.../2019/cellimages` vs `.../2022/cellimages`
+3. Confirm the exact `cellImages` XML shape:
+   - whether `<cellImage>` wrappers are always present
+   - required attributes/elements on `<cellImage>` (if any)
+4. Confirm `[Content_Types].xml` override(s) used by real Excel:
+   - whether it is consistently `application/vnd.ms-excel.cellimages+xml` or varies.
+5. Discover the workbook/worksheet relationship to `cellImages.xml`:
+   - owning part (`xl/workbook.xml` vs per-sheet)
+   - relationship `Type` URI (likely Microsoft-specific)
+6. Confirm how the worksheet cell references an image:
+   - the exact `vm` / `metadata.xml` / `richData/*` path and any `<extLst>` hooks used in `sheetN.xml`.
 
 ## Round-trip constraints for Formula
 
