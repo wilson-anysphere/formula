@@ -107,8 +107,8 @@ export function installKeyboardContextKeys(params: KeyboardContextKeysParams): K
 
   // Focus changes drive most "should shortcuts run?" decisions.
   // Use capture so we see focus changes before other handlers potentially stop propagation.
-  document.addEventListener("focusin", onFocusEvent, { capture: true });
-  document.addEventListener("focusout", onFocusEvent, { capture: true });
+  document.addEventListener("focusin", onFocusEvent, true);
+  document.addEventListener("focusout", onFocusEvent, true);
 
   // Spreadsheet editing state (cell editor, formula bar, inline edit controller).
   const unsubscribeEditState = app.onEditStateChange(() => recompute());
@@ -122,8 +122,8 @@ export function installKeyboardContextKeys(params: KeyboardContextKeysParams): K
   const dispose = (() => {
     if (disposed) return;
     disposed = true;
-    document.removeEventListener("focusin", onFocusEvent, { capture: true } as any);
-    document.removeEventListener("focusout", onFocusEvent, { capture: true } as any);
+    document.removeEventListener("focusin", onFocusEvent, true);
+    document.removeEventListener("focusout", onFocusEvent, true);
     unsubscribeEditState();
     unsubscribeFormulaOverlay();
   }) as KeyboardContextKeysDisposer;
