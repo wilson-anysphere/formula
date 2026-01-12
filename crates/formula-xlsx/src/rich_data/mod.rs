@@ -652,18 +652,22 @@ fn numeric_suffix(part_name: &str, prefix: &str, suffix: &str) -> Option<u32> {
 fn build_rich_value_rel_index_to_target_part(
     pkg: &XlsxPackage,
 ) -> Result<Vec<Option<String>>, RichDataError> {
-    const SOURCE_PART: &str = "xl/richData/richValueRel.xml";
-
-    let Some(rich_value_rel_bytes) = pkg.part(SOURCE_PART) else {
+    // `richValueRel.xml` is the canonical name for the relationship-slot table, but in the wild/tests
+    // it may be numbered/custom (e.g. `richValueRel1.xml`, `customRichValueRel.xml`). Prefer the
+    // canonical name when present and fall back to best-effort discovery.
+    let Some(source_part) = find_any_rich_value_rel_part(pkg) else {
         return Ok(Vec::new());
     };
-    let rel_index_to_rid =
-        rich_value_rel::parse_rich_value_rel_table(rich_value_rel_bytes).map_err(RichDataError::from)?;
+    let Some(rich_value_rel_bytes) = pkg.part(&source_part) else {
+        return Ok(Vec::new());
+    };
+    let rel_index_to_rid = rich_value_rel::parse_rich_value_rel_table(rich_value_rel_bytes)
+        .map_err(RichDataError::from)?;
     if rel_index_to_rid.is_empty() {
         return Ok(Vec::new());
     }
 
-    let rels_part_name = crate::openxml::rels_part_name(SOURCE_PART);
+    let rels_part_name = path::rels_for_part(&source_part);
     let Some(rels_bytes) = pkg.part(&rels_part_name) else {
         return Ok(vec![None; rel_index_to_rid.len()]);
     };
@@ -684,10 +688,24 @@ fn build_rich_value_rel_index_to_target_part(
             continue;
         }
 
-        // Some producers emit `Target="media/image1.png"` (relative to `xl/`) rather than the more
-        // common `Target="../media/image1.png"` (relative to `xl/richData/`). Make a best-effort
-        // guess for this case.
-        let target_part = resolve_rich_value_rel_target_part(SOURCE_PART, target);
+        let mut target_part = resolve_rich_value_rel_target_part(&source_part, target);
+
+        // Additional tolerance: if the resolved target does not exist in the package, attempt to
+        // correct common relative-path mistakes.
+        if pkg.part(&target_part).is_none() {
+            if let Some(rest) = target_part.strip_prefix("xl/richData/") {
+                if rest.starts_with("media/") {
+                    let alt = format!("xl/{rest}");
+                    if pkg.part(&alt).is_some() {
+                        target_part = alt;
+                    }
+                } else if rest.starts_with("xl/") {
+                    if pkg.part(rest).is_some() {
+                        target_part = rest.to_string();
+                    }
+                }
+            }
+        }
 
         rid_to_target_part.insert(rel.id, target_part);
     }
@@ -705,9 +723,9 @@ fn build_rich_value_rel_index_to_target_part(
 }
 
 fn resolve_rich_value_rel_target_part(source_part: &str, target: &str) -> String {
-    // Relationship targets in `xl/richData/_rels/richValueRel.xml.rels` are typically relative to
-    // `xl/richData/` (e.g. `../media/image1.png`). Some producers instead emit targets relative to
-    // `xl/` (e.g. `media/image1.png`), or emit `Target="xl/..."` without a leading `/` (which would
+    // Relationship targets in `xl/richData/_rels/*.rels` are typically relative to `xl/richData/`
+    // (e.g. `../media/image1.png`). Some producers instead emit targets relative to `xl/`
+    // (e.g. `media/image1.png`), or emit `Target="xl/..."` without a leading `/` (which would
     // otherwise resolve to `xl/richData/xl/...`). Handle these as special-cases for robust
     // extraction.
     let target = strip_fragment(target);
@@ -719,6 +737,51 @@ fn resolve_rich_value_rel_target_part(source_part: &str, target: &str) -> String
     } else {
         path::resolve_target(source_part, target)
     }
+}
+
+fn find_any_rich_value_rel_part(pkg: &XlsxPackage) -> Option<String> {
+    // Canonical first.
+    if pkg.part("xl/richData/richValueRel.xml").is_some() {
+        return Some("xl/richData/richValueRel.xml".to_string());
+    }
+
+    // Next, prefer numbered variants like `xl/richData/richValueRel1.xml`.
+    if let Some(part) = find_lowest_numbered_part(pkg, "xl/richData/richValueRel", ".xml") {
+        return Some(part);
+    }
+
+    // Last-ditch fallback: any XML part under `xl/richData/` whose filename contains `richValueRel`
+    // (case-insensitive). Some tests use custom names like `customRichValueRel.xml`.
+    let mut candidates: Vec<&str> = pkg
+        .part_names()
+        .filter(|name| name.starts_with("xl/richData/") && name.to_ascii_lowercase().ends_with(".xml"))
+        .filter(|name| name.to_ascii_lowercase().contains("richvaluerel"))
+        .collect();
+    if candidates.is_empty() {
+        return None;
+    }
+
+    candidates.sort_by(|a, b| {
+        fn rank(name: &str) -> (u8, usize) {
+            let file = name.rsplit('/').next().unwrap_or(name);
+            let file_lower = file.to_ascii_lowercase();
+            let prefix_rank = if file_lower.starts_with("richvaluerel") {
+                0
+            } else {
+                1
+            };
+            (prefix_rank, file.len())
+        }
+
+        let (a_rank, a_len) = rank(a);
+        let (b_rank, b_len) = rank(b);
+        a_rank
+            .cmp(&b_rank)
+            .then(a_len.cmp(&b_len))
+            .then_with(|| a.cmp(b))
+    });
+
+    Some(candidates[0].to_string())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

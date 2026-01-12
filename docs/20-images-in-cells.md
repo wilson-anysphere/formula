@@ -49,9 +49,9 @@ xl/
     ├── rdrichvaluestructure.xml      # rdRichValue structure table (defines <v> positions)
     ├── rdRichValueTypes.xml          # rdRichValue types table
     # Shared relationship-slot table (used by both variants):
-    ├── richValueRel.xml              # integer slot -> r:id mapping
+    ├── richValueRel.xml              # integer slot -> r:id mapping (name may be numbered/custom in some producers/tests)
     └── _rels/
-        └── richValueRel.xml.rels
+        └── richValueRel.xml.rels     # `.rels` for the slot-table part (e.g. `richValueRel.xml.rels` or `richValueRel1.xml.rels`)
 ```
 
 Notes:
@@ -62,7 +62,7 @@ Notes:
   - readers should handle both variants, and
   - writers should preserve the original casing when round-tripping an existing file.
 - **`cellimages.xml` may be absent:** Some workbooks store image-in-cell values entirely via
-  `xl/metadata.xml` + `xl/richData/*` (especially `richValueRel.xml` → `.rels` → `xl/media/*`) without a
+  `xl/metadata.xml` + `xl/richData/*` (especially the `richValueRel*` relationship-slot table → `.rels` → `xl/media/*`) without a
   separate `xl/cellimages.xml` / `xl/cellImages.xml` part.
   - Observed in the real Excel fixture [`fixtures/xlsx/basic/image-in-cell.xlsx`](../fixtures/xlsx/basic/image-in-cell.xlsx) (notes in
     [`fixtures/xlsx/basic/image-in-cell.md`](../fixtures/xlsx/basic/image-in-cell.md)).
@@ -87,8 +87,8 @@ Notes:
   Formula should preserve these relationships byte-for-byte for safe round-trips.
 
 See also: [20-images-in-cells-richdata.md](./20-images-in-cells-richdata.md) for a deeper (still
-best-effort) description of the `richValue*`/**`rdRichValue*`** part sets and how `richValueRel.xml` is
-used to resolve media relationships.
+best-effort) description of the `richValue*`/**`rdRichValue*`** part sets and how the `richValueRel*`
+relationship-slot table is used to resolve media relationships.
 
 For a concrete, fixture-backed “Place in Cell” schema walkthrough (including the `rdrichvalue*` keys
 `_rvRel:LocalImageIdentifier` and `CalcOrigin`), see:
@@ -260,7 +260,7 @@ variant shapes are documented further below.
 - The exact “cell → image” mapping mechanism across **all** Excel scenarios.
   - Confirmed for a rust_xlsxwriter-generated **“Place in Cell”** workbook (used for schema verification in this repo):
     - worksheet cell is `t="e"` with cached `#VALUE!` and `vm="1"`
-    - image bytes are resolved via `xl/metadata.xml` + `xl/richData/rd*` + `xl/richData/richValueRel.xml(.rels)` → `xl/media/*`
+    - image bytes are resolved via `xl/metadata.xml` + `xl/richData/rd*` + `xl/richData/richValueRel*.xml(.rels)` → `xl/media/*`
     - no `xl/cellimages.xml`/`xl/cellImages.xml` part is used in that case
     - see: [`docs/xlsx-embedded-images-in-cells.md`](./xlsx-embedded-images-in-cells.md)
   - Confirmed for a real Excel-generated fixture workbook checked into this repo:
@@ -663,15 +663,15 @@ but there are multiple packaging patterns in the ecosystem:
      - `fixtures/xlsx/basic/image-in-cell.xlsx` (real Excel “Place in Cell” fixture; notes in `fixtures/xlsx/basic/image-in-cell.md`), and
      - `crates/formula-xlsx/tests/embedded_images_place_in_cell_roundtrip.rs`
        (generated with `rust_xlsxwriter::Worksheet::embed_image_with_format`).
-   - The image bytes are resolved via:
-     - `xl/richData/richValueRel.xml` → `xl/richData/_rels/richValueRel.xml.rels` → `xl/media/*`
+    - The image bytes are resolved via:
+      - `xl/richData/richValueRel*.xml` → `xl/richData/_rels/richValueRel*.xml.rels` → `xl/media/*`
 2. **RichData → RichValueRel → media (and a `cellimages.xml` store part is also present)**
    - Observed in the real Excel fixture:
      - [`fixtures/xlsx/rich-data/images-in-cell.xlsx`](../fixtures/xlsx/rich-data/images-in-cell.xlsx) (notes in
        [`fixtures/xlsx/rich-data/images-in-cell.md`](../fixtures/xlsx/rich-data/images-in-cell.md))
-   - In this file:
-     - `xl/richData/richValueRel.xml` → `xl/richData/_rels/richValueRel.xml.rels` → `xl/media/*` resolves the image bytes, and
-     - `xl/cellimages.xml` → `xl/_rels/cellimages.xml.rels` → `xl/media/*` also references the same image bytes.
+    - In this file:
+      - `xl/richData/richValueRel*.xml` → `xl/richData/_rels/richValueRel*.xml.rels` → `xl/media/*` resolves the image bytes, and
+      - `xl/cellimages.xml` → `xl/_rels/cellimages.xml.rels` → `xl/media/*` also references the same image bytes.
    - The exact semantic role of `xl/cellimages.xml` in this variant (whether it is a cache, a parallel lookup
      table, or is referenced by rich value payloads) is not fully characterized. Treat the `cellimages` part as
      **opaque** and preserve it byte-for-byte for safe round-trips.
@@ -705,7 +705,7 @@ Because the exact file set and schemas vary across Excel builds, Formula’s sho
 Common file names (Excel version-dependent; treat as “expected shape”, not a strict schema):
 
 - `xl/richData/richValue.xml`
-- `xl/richData/richValueRel.xml` (+ `xl/richData/_rels/richValueRel.xml.rels`)
+- `xl/richData/richValueRel.xml` (relationship-slot table; may be numbered/custom) + its `.rels` under `xl/richData/_rels/`
 - `xl/richData/richValueTypes.xml`
 - `xl/richData/richValueStructure.xml`
 
@@ -896,8 +896,8 @@ Partially known (fixture-driven details still recommended):
     - `Type="http://schemas.microsoft.com/office/2020/07/relationships/cellImages"`
   - **Round-trip / detection rule:** identify the relationship by resolved `Target`
     (`/xl/cellimages.xml` or `/xl/cellImages.xml`) rather than hardcoding a single `Type`.
-- RichData relationship indirection (images referenced via `richValueRel.xml`):
-  - `xl/richData/_rels/richValueRel.xml.rels` is expected to contain standard image relationships:
+- RichData relationship indirection (images referenced via the `richValueRel*` relationship-slot table):
+  - `xl/richData/_rels/richValueRel*.xml.rels` is expected to contain standard image relationships:
     - `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"`
   - Observed in the **synthetic** fixture `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` and the unit test
     `crates/formula-xlsx/tests/rich_data_cell_images.rs`.
@@ -932,7 +932,7 @@ Current status:
 - **Confirmed** for real Excel-generated “Place in Cell” workbooks in this repo:
   - RichData-only wiring (no `xl/cellimages.xml`):
     - [`fixtures/xlsx/basic/image-in-cell.xlsx`](../fixtures/xlsx/basic/image-in-cell.xlsx) (notes in [`fixtures/xlsx/basic/image-in-cell.md`](../fixtures/xlsx/basic/image-in-cell.md))
-    - error cell `t="e"` / cached `#VALUE!` + `vm="…"` → `xl/metadata.xml` → `xl/richData/rd*` → `richValueRel.xml` → `xl/media/*`
+    - error cell `t="e"` / cached `#VALUE!` + `vm="…"` → `xl/metadata.xml` → `xl/richData/rd*` → `richValueRel*` → `xl/media/*`
   - RichData + cell image store wiring (`xl/cellimages.xml` present):
     - [`fixtures/xlsx/rich-data/images-in-cell.xlsx`](../fixtures/xlsx/rich-data/images-in-cell.xlsx) (notes in [`fixtures/xlsx/rich-data/images-in-cell.md`](../fixtures/xlsx/rich-data/images-in-cell.md))
     - cell `A1` uses `vm="1" cm="1"` with cached `<v>0</v>` (image binding still comes from `vm` + `xl/metadata.xml`)

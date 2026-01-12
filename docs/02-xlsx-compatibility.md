@@ -226,13 +226,15 @@ Note on `IMAGE()` vs “Place in Cell”:
 
 ##### Mapping chain (high-level)
 
-`sheetN.xml c@vm` → `xl/metadata.xml <valueMetadata>` → `xl/richData/rdrichvalue.xml` (or `xl/richData/richValue*.xml`) → `xl/richData/richValueRel.xml` → `xl/richData/_rels/richValueRel.xml.rels` → `xl/media/imageN.*`
+`sheetN.xml c@vm` → `xl/metadata.xml <valueMetadata>` → `xl/richData/rdrichvalue.xml` (or `xl/richData/richValue*.xml`) → `xl/richData/richValueRel*.xml` → `xl/richData/_rels/richValueRel*.xml.rels` → `xl/media/imageN.*`
 
 ##### `xl/richData/rdrichvalue.xml` (rich value instances)
 
 `xl/richData/rdrichvalue.xml` is the workbook-level table of rich value *instances*. The `i="…"` from `xlrd:rvb` selects a record from this table.
 
-The exact element vocabulary inside each rich value varies by Excel version and feature, but for in-cell images the rich value ultimately encodes a **relationship slot index** (an integer) that points into `xl/richData/richValueRel.xml`.
+The exact element vocabulary inside each rich value varies by Excel version and feature, but for in-cell
+images the rich value ultimately encodes a **relationship slot index** (an integer) that points into the
+RichData relationship-slot table part (often named `xl/richData/richValueRel.xml`).
 
 Representative shape (observed in the real Excel fixture `fixtures/xlsx/basic/image-in-cell.xlsx`):
 

@@ -12,6 +12,7 @@ fn build_synthetic_rich_data_xlsx_impl(
     include_metadata: bool,
     include_rd_rich_value_parts: bool,
     include_hyperlink: bool,
+    cell_vm: u32,
 ) -> Vec<u8> {
     let rich_value_override = if include_rich_value_part {
         r#"  <Override PartName="/xl/richData/richValue.xml" ContentType="application/vnd.ms-excel.richvalue+xml"/>
@@ -86,27 +87,31 @@ fn build_synthetic_rich_data_xlsx_impl(
     );
 
     let sheet1_xml = if include_hyperlink {
-        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <sheetData>
     <row r="1">
-      <c r="A1" vm="1"><v>0</v></c>
+      <c r="A1" vm="{cell_vm}"><v>0</v></c>
     </row>
   </sheetData>
   <hyperlinks>
     <hyperlink ref="A1" r:id="rId1"/>
   </hyperlinks>
 </worksheet>"#
+        )
     } else {
-        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <sheetData>
     <row r="1">
-      <c r="A1" vm="1"><v>0</v></c>
+      <c r="A1" vm="{cell_vm}"><v>0</v></c>
     </row>
   </sheetData>
 </worksheet>"#
+        )
     };
 
     // vm=1 (1-based) -> futureMetadata bk 0 -> rv index 0.
@@ -246,23 +251,27 @@ fn build_synthetic_rich_data_xlsx_impl(
 }
 
 fn build_synthetic_rich_data_xlsx() -> Vec<u8> {
-    build_synthetic_rich_data_xlsx_impl(true, true, false, false)
+    build_synthetic_rich_data_xlsx_impl(true, true, false, false, 1)
 }
 
 fn build_synthetic_rich_data_xlsx_without_rich_value_part() -> Vec<u8> {
-    build_synthetic_rich_data_xlsx_impl(false, true, false, false)
+    build_synthetic_rich_data_xlsx_impl(false, true, false, false, 1)
 }
 
 fn build_synthetic_rich_data_xlsx_without_metadata() -> Vec<u8> {
-    build_synthetic_rich_data_xlsx_impl(false, false, false, false)
+    build_synthetic_rich_data_xlsx_impl(false, false, false, false, 1)
 }
 
 fn build_synthetic_rich_data_xlsx_with_rd_rich_value_parts() -> Vec<u8> {
-    build_synthetic_rich_data_xlsx_impl(false, true, true, false)
+    build_synthetic_rich_data_xlsx_impl(false, true, true, false, 1)
 }
 
 fn build_synthetic_rich_data_xlsx_with_hyperlink() -> Vec<u8> {
-    build_synthetic_rich_data_xlsx_impl(true, true, false, true)
+    build_synthetic_rich_data_xlsx_impl(true, true, false, true, 1)
+}
+
+fn build_synthetic_rich_data_xlsx_with_zero_based_vm() -> Vec<u8> {
+    build_synthetic_rich_data_xlsx_impl(true, true, false, false, 0)
 }
 
 #[test]
@@ -284,6 +293,31 @@ fn dump_rich_data_cli_prints_resolved_mapping() -> Result<(), Box<dyn std::error
     let stdout = String::from_utf8(output.stdout)?;
     assert!(
         stdout.contains("Sheet1!A1 vm=1 -> rv=0 -> xl/media/image1.png"),
+        "unexpected stdout:\n{stdout}"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn dump_rich_data_cli_resolves_zero_based_vm() -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = build_synthetic_rich_data_xlsx_with_zero_based_vm();
+    let dir = tempdir()?;
+    let path = dir.path().join("fixture.xlsx");
+    std::fs::write(&path, bytes)?;
+
+    let bin = env!("CARGO_BIN_EXE_dump_rich_data");
+    let output = Command::new(bin).arg(&path).output()?;
+    assert!(
+        output.status.success(),
+        "dump_rich_data failed: status={:?} stderr={}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout)?;
+    assert!(
+        stdout.contains("Sheet1!A1 vm=0 -> rv=0 -> xl/media/image1.png"),
         "unexpected stdout:\n{stdout}"
     );
 
