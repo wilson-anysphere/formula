@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
+import { fileURLToPath } from "node:url";
 
 import extensionHostPkg from "../packages/extension-host/src/index.js";
 
@@ -31,7 +32,7 @@ test("ExtensionHost.unloadExtension removes contributed commands/custom function
   const permissionsStoragePath = path.join(tmpRoot, "permissions.json");
   const extensionStoragePath = path.join(tmpRoot, "storage.json");
 
-  const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const sampleExtensionSrc = path.join(repoRoot, "extensions", "sample-hello");
   const extensionDir = path.join(tmpRoot, "sample-hello");
   await copyDir(sampleExtensionSrc, extensionDir);
