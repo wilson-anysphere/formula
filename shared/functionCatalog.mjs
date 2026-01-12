@@ -836,6 +836,26 @@ export default {
       ]
     },
     {
+      "name": "DOLLARDE",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "DOLLARFR",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
       "name": "DPRODUCT",
       "min_args": 3,
       "max_args": 3,
@@ -1480,6 +1500,16 @@ export default {
       "name": "ISOWEEKNUM",
       "min_args": 1,
       "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "ISPMT",
+      "min_args": 4,
+      "max_args": 4,
       "volatility": "non_volatile",
       "return_type": "number",
       "arg_types": [

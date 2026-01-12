@@ -5,6 +5,7 @@ mod builtins_accrint;
 mod builtins_amortization;
 mod builtins_depreciation_ext;
 mod builtins_french_depreciation;
+mod builtins_misc;
 mod builtins_securities;
 mod bonds_odd;
 mod builtins_pduration;
@@ -13,6 +14,7 @@ mod depreciation;
 mod duration;
 mod french_depreciation;
 mod iterative;
+mod misc;
 mod odd_coupon;
 mod securities;
 mod time_value;
@@ -23,6 +25,7 @@ pub use cashflows::{irr, mirr, npv, xirr, xnpv};
 pub use depreciation::{db, ddb, sln, syd, vdb};
 pub use duration::pduration;
 pub use french_depreciation::{amordegrec, amorlinc};
+pub use misc::{dollarde, dollarfr, ispmt};
 pub use odd_coupon::{oddfprice, oddfyield, oddlprice, oddlyield};
 pub use securities::{
     disc, intrate, pricedisc, pricemat, received, tbilleq, tbillprice, tbillyield, yielddisc,

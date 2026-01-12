@@ -30516,6 +30516,36 @@
       "id": "ddb_b4f989ebe2ae"
     },
     {
+      "formula": "=ISPMT(0.1, 1, 3, 300)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ISPMT"
+      ],
+      "id": "ispmt_187492fd4858"
+    },
+    {
+      "formula": "=DOLLARDE(1.02, 16)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "DOLLARDE"
+      ],
+      "id": "dollarde_02a9fd3a9287"
+    },
+    {
+      "formula": "=DOLLARFR(1.125, 16)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "DOLLARFR"
+      ],
+      "id": "dollarfr_d904dbe65e01"
+    },
+    {
       "formula": "=DB(10000, 1000, 5, 1)",
       "outputCell": "C1",
       "inputs": [],
