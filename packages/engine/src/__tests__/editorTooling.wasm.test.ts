@@ -272,6 +272,28 @@ describeWasm("EngineWorker editor tooling RPCs (wasm)", () => {
     }
   });
 
+  it("parseFormulaPartial honors referenceStyle options (R1C1 vs A1)", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      const r1c1 = await engine.parseFormulaPartial("=R1C1", { referenceStyle: "R1C1" });
+      expect(r1c1.error).toBeNull();
+      expect((r1c1.ast as any)?.expr?.CellRef).toBeTruthy();
+
+      const defaultResult = await engine.parseFormulaPartial("=R1C1");
+      expect(defaultResult.error).toBeNull();
+      expect((defaultResult.ast as any)?.expr?.NameRef).toBeTruthy();
+    } finally {
+      engine.terminate();
+    }
+  });
+
   it("surfaces a clear error when the options object has an unexpected shape", async () => {
     const wasm = await loadFormulaWasm();
     const worker = new WasmBackedWorker(wasm);
