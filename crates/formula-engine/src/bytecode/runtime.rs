@@ -380,8 +380,8 @@ fn eval_ast_inner(
                         );
                     }
                     // Engine behavior: missing false branch defaults to FALSE (not blank).
-                     return Value::Bool(false);
-                 }
+                    return Value::Bool(false);
+                }
                 Function::Choose => {
                     if args.len() < 2 {
                         return Value::Error(ErrorKind::Value);
