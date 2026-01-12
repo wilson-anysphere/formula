@@ -100,6 +100,50 @@ test("Typing =SUM(A suggests a contiguous range above the current cell", async (
   );
 });
 
+test("Typing =TAKE(A suggests a contiguous range above the current cell", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) {
+    values[`A${r}`] = r; // A1..A10 contain numbers
+  }
+
+  const suggestions = await engine.getSuggestions({
+    currentInput: "=TAKE(A",
+    cursorPosition: 7,
+    // Pretend we're on row 11 (0-based 10), below the data.
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some(s => s.text === "=TAKE(A1:A10)"),
+    `Expected a TAKE range suggestion, got: ${suggestions.map(s => s.text).join(", ")}`
+  );
+});
+
+test("Typing =DROP(A suggests a contiguous range above the current cell", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) {
+    values[`A${r}`] = r; // A1..A10 contain numbers
+  }
+
+  const suggestions = await engine.getSuggestions({
+    currentInput: "=DROP(A",
+    cursorPosition: 7,
+    // Pretend we're on row 11 (0-based 10), below the data.
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some(s => s.text === "=DROP(A1:A10)"),
+    `Expected a DROP range suggestion, got: ${suggestions.map(s => s.text).join(", ")}`
+  );
+});
+
 test("Typing =SUM($A suggests an absolute-column contiguous range above the current cell", async () => {
   const engine = new TabCompletionEngine();
 
