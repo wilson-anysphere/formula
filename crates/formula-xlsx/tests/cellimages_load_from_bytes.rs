@@ -89,9 +89,12 @@ fn load_from_bytes_populates_workbook_images_from_cellimages() -> Result<(), Box
 #[test]
 fn cellimages_load_from_bytes_tolerates_parent_dir_media_target_for_lightweight_schema(
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Some producers (including older/newer Excel variants) appear to emit `../media/*` targets
-    // from workbook-level `xl/cellimages.xml.rels`, even though the actual media parts live under
-    // `xl/media/*`. We should resolve this best-effort rather than dropping the image.
+    // Some inputs use `../media/*` targets from workbook-level `xl/_rels/cellimages.xml.rels`.
+    // Since the source part is `xl/cellimages.xml`, the typical relative `Target` is `media/*`,
+    // but we resolve this best-effort rather than dropping the image.
+    //
+    // Note: this exact `../media/*` variant is not currently observed in this repo's fixtures,
+    // but the resolver is intentionally tolerant.
     let expected = b"png-bytes-from-parent-dir-target";
     let bytes = build_minimal_cellimages_xlsx("../media/image1.png", Some(expected));
     let doc = formula_xlsx::load_from_bytes(&bytes)?;
