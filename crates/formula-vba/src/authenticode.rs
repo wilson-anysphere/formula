@@ -39,28 +39,54 @@ const OID_PKCS7_SIGNED_DATA: &[u8] = b"\x2A\x86\x48\x86\xF7\x0D\x01\x07\x02"; //
 pub fn extract_vba_signature_signed_digest(
     signature_stream: &[u8],
 ) -> Result<Option<VbaSignedDigest>, VbaSignatureSignedDigestError> {
-    let mut candidates = Vec::new();
+    // Track which offsets we've already attempted so we don't retry them during scanning.
+    let mut attempted_offsets = [None::<usize>; 2];
+    let mut attempted_count = 0usize;
+    let mut any_candidate = false;
+    let mut last_err = None;
 
     // Prefer a deterministic MS-OFFCRYPTO DigSigInfoSerialized location when present.
     if let Some(info) = crate::offcrypto::parse_digsig_info_serialized(signature_stream) {
         let end = info.pkcs7_offset.saturating_add(info.pkcs7_len);
         if end <= signature_stream.len() {
-            candidates.push(Pkcs7Location {
-                der: &signature_stream[info.pkcs7_offset..end],
-                offset: info.pkcs7_offset,
-            });
+            any_candidate = true;
+            attempted_offsets[attempted_count] = Some(info.pkcs7_offset);
+            attempted_count += 1;
+            match extract_signed_digest_from_pkcs7_location(
+                signature_stream,
+                Pkcs7Location {
+                    der: &signature_stream[info.pkcs7_offset..end],
+                    offset: info.pkcs7_offset,
+                },
+            ) {
+                Ok(digest) => return Ok(Some(digest)),
+                Err(err) => last_err = Some(err),
+            }
         }
     }
 
     // Fast path: raw ContentInfo at the start.
     if signature_stream.first() == Some(&0x30)
         && looks_like_pkcs7_signed_data_content_info(signature_stream)
-        && !candidates.iter().any(|c| c.offset == 0)
+        && !attempted_offsets[..attempted_count]
+            .iter()
+            .any(|&o| o == Some(0))
     {
-        candidates.push(Pkcs7Location {
-            der: signature_stream,
-            offset: 0,
-        });
+        any_candidate = true;
+        if attempted_count < attempted_offsets.len() {
+            attempted_offsets[attempted_count] = Some(0);
+            attempted_count += 1;
+        }
+        match extract_signed_digest_from_pkcs7_location(
+            signature_stream,
+            Pkcs7Location {
+                der: signature_stream,
+                offset: 0,
+            },
+        ) {
+            Ok(digest) => return Ok(Some(digest)),
+            Err(err) => last_err = Some(err),
+        }
     }
 
     // Fallback: scan for embedded SignedData ContentInfo sequences. This is best-effort: signature
@@ -71,32 +97,38 @@ pub fn extract_vba_signature_signed_digest(
         if signature_stream[offset] != 0x30 {
             continue;
         }
-        if candidates.iter().any(|c| c.offset == offset) {
+        if attempted_offsets[..attempted_count]
+            .iter()
+            .any(|&o| o == Some(offset))
+        {
             continue;
         }
-        if looks_like_pkcs7_signed_data_content_info(&signature_stream[offset..]) {
-            candidates.push(Pkcs7Location {
+        if !looks_like_pkcs7_signed_data_content_info(&signature_stream[offset..]) {
+            continue;
+        }
+
+        any_candidate = true;
+        match extract_signed_digest_from_pkcs7_location(
+            signature_stream,
+            Pkcs7Location {
                 der: &signature_stream[offset..],
                 offset,
-            });
-        }
-    }
-
-    if candidates.is_empty() {
-        return Ok(None);
-    }
-
-    let mut last_err = None;
-    for pkcs7 in candidates {
-        match extract_signed_digest_from_pkcs7_location(signature_stream, pkcs7) {
+            },
+        ) {
             Ok(digest) => return Ok(Some(digest)),
             Err(err) => last_err = Some(err),
         }
     }
 
-    Err(last_err.unwrap_or_else(|| VbaSignatureSignedDigestError::Der(
-        "no SpcIndirectDataContent digest found in PKCS#7 SignedData candidates".to_owned(),
-    )))
+    if !any_candidate {
+        return Ok(None);
+    }
+
+    Err(last_err.unwrap_or_else(|| {
+        VbaSignatureSignedDigestError::Der(
+            "no SpcIndirectDataContent digest found in PKCS#7 SignedData candidates".to_owned(),
+        )
+    }))
 }
 
 /// Locate the BER/DER-encoded PKCS#7/CMS SignedData `ContentInfo` inside a VBA signature stream.
@@ -115,6 +147,14 @@ pub(crate) fn locate_pkcs7_signed_data_bounds(signature_stream: &[u8]) -> Option
     // certificate store followed by the actual signature). The signature payload typically comes
     // last, so selecting the final candidate avoids treating the cert store as the signature.
     let mut best: Option<(usize, usize)> = None;
+
+    if signature_stream.first() == Some(&0x30)
+        && looks_like_pkcs7_signed_data_content_info(signature_stream)
+    {
+        let rem = skip_element(signature_stream).ok()?;
+        let len = signature_stream.len().saturating_sub(rem.len());
+        best = Some((0, len));
+    }
     for offset in 0..signature_stream.len() {
         if signature_stream[offset] != 0x30 {
             continue;
