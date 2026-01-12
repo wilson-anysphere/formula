@@ -7873,6 +7873,25 @@ fn resolved_range_1d_shape_len(range: ResolvedRange) -> Option<(XlookupVectorSha
     None
 }
 
+fn array_1d_shape_len(array: &ArrayValue) -> Option<(XlookupVectorShape, usize)> {
+    let rows = array.rows;
+    let cols = array.cols;
+    if rows == 0 || cols == 0 {
+        return None;
+    }
+    if rows == 1 && cols == 1 {
+        // Match `builtins_lookup`: treat a single-cell lookup vector as vertical.
+        return Some((XlookupVectorShape::Vertical, 1));
+    }
+    if rows == 1 {
+        return Some((XlookupVectorShape::Horizontal, cols));
+    }
+    if cols == 1 {
+        return Some((XlookupVectorShape::Vertical, rows));
+    }
+    None
+}
+
 fn parse_xmatch_match_mode(arg: Option<&Value>) -> Result<lookup::MatchMode, ErrorKind> {
     match arg {
         None | Some(Value::Missing) => Ok(lookup::MatchMode::Exact),
@@ -7910,19 +7929,6 @@ fn fn_xmatch(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         return Value::Error(ErrorKind::Spill);
     }
 
-    let lookup_array = match args[1] {
-        Value::Range(r) => r,
-        Value::Error(e) => return Value::Error(e),
-        _ => return Value::Error(ErrorKind::Value),
-    };
-    let lookup_range = lookup_array.resolve(base);
-    if !range_in_bounds(grid, lookup_range) {
-        return Value::Error(ErrorKind::Ref);
-    }
-    let Some((shape, len)) = resolved_range_1d_shape_len(lookup_range) else {
-        return Value::Error(ErrorKind::Value);
-    };
-
     let match_mode = match parse_xmatch_match_mode(args.get(2)) {
         Ok(m) => m,
         Err(e) => return Value::Error(e),
@@ -7933,28 +7939,65 @@ fn fn_xmatch(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     };
 
     let lookup_value = bytecode_value_to_engine(lookup_value);
-    let pos = lookup::xmatch_with_modes_accessor_with_locale(
-        &lookup_value,
-        len,
-        |idx| {
-            let coord = match shape {
-                XlookupVectorShape::Vertical => CellCoord {
-                    row: lookup_range.row_start + idx as i32,
-                    col: lookup_range.col_start,
-                },
-                XlookupVectorShape::Horizontal => CellCoord {
-                    row: lookup_range.row_start,
-                    col: lookup_range.col_start + idx as i32,
-                },
+    let pos = match &args[1] {
+        Value::Range(r) => {
+            let lookup_range = r.resolve(base);
+            if !range_in_bounds(grid, lookup_range) {
+                return Value::Error(ErrorKind::Ref);
+            }
+            let Some((shape, len)) = resolved_range_1d_shape_len(lookup_range) else {
+                return Value::Error(ErrorKind::Value);
             };
-            bytecode_value_to_engine(grid.get_value(coord))
-        },
-        match_mode,
-        search_mode,
-        thread_value_locale(),
-        thread_date_system(),
-        thread_now_utc(),
-    );
+
+            lookup::xmatch_with_modes_accessor_with_locale(
+                &lookup_value,
+                len,
+                |idx| {
+                    let coord = match shape {
+                        XlookupVectorShape::Vertical => CellCoord {
+                            row: lookup_range.row_start + idx as i32,
+                            col: lookup_range.col_start,
+                        },
+                        XlookupVectorShape::Horizontal => CellCoord {
+                            row: lookup_range.row_start,
+                            col: lookup_range.col_start + idx as i32,
+                        },
+                    };
+                    bytecode_value_to_engine(grid.get_value(coord))
+                },
+                match_mode,
+                search_mode,
+                thread_value_locale(),
+                thread_date_system(),
+                thread_now_utc(),
+            )
+        }
+        Value::Array(arr) => {
+            let Some((shape, len)) = array_1d_shape_len(arr) else {
+                return Value::Error(ErrorKind::Value);
+            };
+
+            lookup::xmatch_with_modes_accessor_with_locale(
+                &lookup_value,
+                len,
+                |idx| {
+                    let raw_idx = match shape {
+                        XlookupVectorShape::Vertical => idx.saturating_mul(arr.cols),
+                        XlookupVectorShape::Horizontal => idx,
+                    };
+                    let v = arr.values.get(raw_idx).unwrap_or(&Value::Empty);
+                    bytecode_value_to_engine_ref(v)
+                },
+                match_mode,
+                search_mode,
+                thread_value_locale(),
+                thread_date_system(),
+                thread_now_utc(),
+            )
+        }
+        Value::Error(e) => return Value::Error(*e),
+        _ => return Value::Error(ErrorKind::Value),
+    };
 
     match pos {
         Ok(p) => Value::Number(p as f64),
@@ -7979,17 +8022,6 @@ fn fn_xlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         return Value::Error(ErrorKind::Spill);
     }
 
-    let lookup_array = match args[1] {
-        Value::Range(r) => r,
-        Value::Error(e) => return Value::Error(e),
-        _ => return Value::Error(ErrorKind::Value),
-    };
-    let return_array = match args[2] {
-        Value::Range(r) => r,
-        Value::Error(e) => return Value::Error(e),
-        _ => return Value::Error(ErrorKind::Value),
-    };
-
     let if_not_found = match args.get(3) {
         None | Some(Value::Missing) => None,
         Some(v) => Some(v),
@@ -8004,52 +8036,115 @@ fn fn_xlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         Err(e) => return Value::Error(e),
     };
 
-    let lookup_range = lookup_array.resolve(base);
-    let return_range = return_array.resolve(base);
-    if !range_in_bounds(grid, lookup_range) || !range_in_bounds(grid, return_range) {
-        return Value::Error(ErrorKind::Ref);
+    #[derive(Clone, Copy)]
+    enum LookupVector<'a> {
+        Range(ResolvedRange),
+        Array(&'a ArrayValue),
+    }
+    #[derive(Clone, Copy)]
+    enum ReturnArray<'a> {
+        Range(ResolvedRange),
+        Array(&'a ArrayValue),
     }
 
-    let Some((lookup_shape, lookup_len)) = resolved_range_1d_shape_len(lookup_range) else {
-        return Value::Error(ErrorKind::Value);
+    let lookup_vector = match &args[1] {
+        Value::Range(r) => {
+            let lookup_range = r.resolve(base);
+            if !range_in_bounds(grid, lookup_range) {
+                return Value::Error(ErrorKind::Ref);
+            }
+            LookupVector::Range(lookup_range)
+        }
+        Value::Array(arr) => LookupVector::Array(arr),
+        Value::Error(e) => return Value::Error(*e),
+        _ => return Value::Error(ErrorKind::Value),
+    };
+    let return_array = match &args[2] {
+        Value::Range(r) => {
+            let return_range = r.resolve(base);
+            if !range_in_bounds(grid, return_range) {
+                return Value::Error(ErrorKind::Ref);
+            }
+            ReturnArray::Range(return_range)
+        }
+        Value::Array(arr) => ReturnArray::Array(arr),
+        Value::Error(e) => return Value::Error(*e),
+        _ => return Value::Error(ErrorKind::Value),
+    };
+
+    let (lookup_shape, lookup_len) = match lookup_vector {
+        LookupVector::Range(range) => match resolved_range_1d_shape_len(range) {
+            Some(v) => v,
+            None => return Value::Error(ErrorKind::Value),
+        },
+        LookupVector::Array(arr) => match array_1d_shape_len(arr) {
+            Some(v) => v,
+            None => return Value::Error(ErrorKind::Value),
+        },
     };
 
     // Validate return_array shape:
     // - vertical lookup_array (Nx1) requires return_array.rows == N; result spills horizontally.
     // - horizontal lookup_array (1xN) requires return_array.cols == N; result spills vertically.
-    let lookup_len_i32 = match i32::try_from(lookup_len) {
-        Ok(v) => v,
-        Err(_) => return Value::Error(ErrorKind::Value),
-    };
-    match lookup_shape {
-        XlookupVectorShape::Vertical => {
-            if return_range.rows() != lookup_len_i32 {
-                return Value::Error(ErrorKind::Value);
+    match return_array {
+        ReturnArray::Range(r) => {
+            let lookup_len_i32 = match i32::try_from(lookup_len) {
+                Ok(v) => v,
+                Err(_) => return Value::Error(ErrorKind::Value),
+            };
+            match lookup_shape {
+                XlookupVectorShape::Vertical => {
+                    if r.rows() != lookup_len_i32 {
+                        return Value::Error(ErrorKind::Value);
+                    }
+                }
+                XlookupVectorShape::Horizontal => {
+                    if r.cols() != lookup_len_i32 {
+                        return Value::Error(ErrorKind::Value);
+                    }
+                }
             }
         }
-        XlookupVectorShape::Horizontal => {
-            if return_range.cols() != lookup_len_i32 {
-                return Value::Error(ErrorKind::Value);
+        ReturnArray::Array(arr) => match lookup_shape {
+            XlookupVectorShape::Vertical => {
+                if arr.rows != lookup_len {
+                    return Value::Error(ErrorKind::Value);
+                }
             }
-        }
+            XlookupVectorShape::Horizontal => {
+                if arr.cols != lookup_len {
+                    return Value::Error(ErrorKind::Value);
+                }
+            }
+        },
     };
 
     let lookup_value_engine = bytecode_value_to_engine(lookup_value);
     let match_pos = lookup::xmatch_with_modes_accessor_with_locale(
         &lookup_value_engine,
         lookup_len,
-        |idx| {
-            let coord = match lookup_shape {
-                XlookupVectorShape::Vertical => CellCoord {
-                    row: lookup_range.row_start + idx as i32,
-                    col: lookup_range.col_start,
-                },
-                XlookupVectorShape::Horizontal => CellCoord {
-                    row: lookup_range.row_start,
-                    col: lookup_range.col_start + idx as i32,
-                },
-            };
-            bytecode_value_to_engine(grid.get_value(coord))
+        |idx| match lookup_vector {
+            LookupVector::Range(range) => {
+                let coord = match lookup_shape {
+                    XlookupVectorShape::Vertical => CellCoord {
+                        row: range.row_start + idx as i32,
+                        col: range.col_start,
+                    },
+                    XlookupVectorShape::Horizontal => CellCoord {
+                        row: range.row_start,
+                        col: range.col_start + idx as i32,
+                    },
+                };
+                bytecode_value_to_engine(grid.get_value(coord))
+            }
+            LookupVector::Array(arr) => {
+                let raw_idx = match lookup_shape {
+                    XlookupVectorShape::Vertical => idx.saturating_mul(arr.cols),
+                    XlookupVectorShape::Horizontal => idx,
+                };
+                let v = arr.values.get(raw_idx).unwrap_or(&Value::Empty);
+                bytecode_value_to_engine_ref(v)
+            }
         },
         match_mode,
         search_mode,
@@ -8079,47 +8174,90 @@ fn fn_xlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     match lookup_shape {
         XlookupVectorShape::Vertical => {
             // Return the matched row from return_array.
-            let row = return_range.row_start + idx as i32;
-            let cols = match usize::try_from(return_range.cols()) {
-                Ok(v) => v,
-                Err(_) => return Value::Error(ErrorKind::Value),
-            };
-            if cols == 1 {
-                return grid.get_value(CellCoord {
-                    row,
-                    col: return_range.col_start,
-                });
+            match return_array {
+                ReturnArray::Range(return_range) => {
+                    let row = return_range.row_start + idx as i32;
+                    let cols = match usize::try_from(return_range.cols()) {
+                        Ok(v) => v,
+                        Err(_) => return Value::Error(ErrorKind::Value),
+                    };
+                    if cols == 1 {
+                        return grid.get_value(CellCoord {
+                            row,
+                            col: return_range.col_start,
+                        });
+                    }
+                    let mut values = Vec::with_capacity(cols);
+                    for col_offset in 0..cols {
+                        values.push(grid.get_value(CellCoord {
+                            row,
+                            col: return_range.col_start + col_offset as i32,
+                        }));
+                    }
+                    Value::Array(ArrayValue::new(1, cols, values))
+                }
+                ReturnArray::Array(arr) => {
+                    let cols = arr.cols;
+                    if cols == 1 {
+                        return arr
+                            .values
+                            .get(idx.saturating_mul(cols))
+                            .cloned()
+                            .unwrap_or(Value::Empty);
+                    }
+                    let mut values = Vec::with_capacity(cols);
+                    let row_start = idx.saturating_mul(cols);
+                    for col_offset in 0..cols {
+                        values.push(
+                            arr.values
+                                .get(row_start + col_offset)
+                                .cloned()
+                                .unwrap_or(Value::Empty),
+                        );
+                    }
+                    Value::Array(ArrayValue::new(1, cols, values))
+                }
             }
-            let mut values = Vec::with_capacity(cols);
-            for col_offset in 0..cols {
-                values.push(grid.get_value(CellCoord {
-                    row,
-                    col: return_range.col_start + col_offset as i32,
-                }));
-            }
-            Value::Array(ArrayValue::new(1, cols, values))
         }
         XlookupVectorShape::Horizontal => {
             // Return the matched column from return_array.
-            let col = return_range.col_start + idx as i32;
-            let rows = match usize::try_from(return_range.rows()) {
-                Ok(v) => v,
-                Err(_) => return Value::Error(ErrorKind::Value),
-            };
-            if rows == 1 {
-                return grid.get_value(CellCoord {
-                    row: return_range.row_start,
-                    col,
-                });
+            match return_array {
+                ReturnArray::Range(return_range) => {
+                    let col = return_range.col_start + idx as i32;
+                    let rows = match usize::try_from(return_range.rows()) {
+                        Ok(v) => v,
+                        Err(_) => return Value::Error(ErrorKind::Value),
+                    };
+                    if rows == 1 {
+                        return grid.get_value(CellCoord {
+                            row: return_range.row_start,
+                            col,
+                        });
+                    }
+                    let mut values = Vec::with_capacity(rows);
+                    for row_offset in 0..rows {
+                        values.push(grid.get_value(CellCoord {
+                            row: return_range.row_start + row_offset as i32,
+                            col,
+                        }));
+                    }
+                    Value::Array(ArrayValue::new(rows, 1, values))
+                }
+                ReturnArray::Array(arr) => {
+                    let rows = arr.rows;
+                    if rows == 1 {
+                        return arr.values.get(idx).cloned().unwrap_or(Value::Empty);
+                    }
+                    let mut values = Vec::with_capacity(rows);
+                    for row_offset in 0..rows {
+                        let raw_idx = row_offset
+                            .saturating_mul(arr.cols)
+                            .saturating_add(idx);
+                        values.push(arr.values.get(raw_idx).cloned().unwrap_or(Value::Empty));
+                    }
+                    Value::Array(ArrayValue::new(rows, 1, values))
+                }
             }
-            let mut values = Vec::with_capacity(rows);
-            for row_offset in 0..rows {
-                values.push(grid.get_value(CellCoord {
-                    row: return_range.row_start + row_offset as i32,
-                    col,
-                }));
-            }
-            Value::Array(ArrayValue::new(rows, 1, values))
         }
     }
 }

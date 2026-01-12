@@ -3937,6 +3937,41 @@ fn bytecode_backend_xlookup_xmatch_accept_spill_ranges_and_let_range_locals() {
 }
 
 #[test]
+fn bytecode_backend_xlookup_xmatch_accept_array_literals() {
+    let mut engine = Engine::new();
+
+    engine
+        .set_cell_formula("Sheet1", "A1", "=XMATCH(2,{1;2;3})")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=XLOOKUP(2,{1;2;3},{10;20;30})")
+        .unwrap();
+
+    // 2D return array should spill horizontally (row slice).
+    engine
+        .set_cell_formula("Sheet1", "A3", "=XLOOKUP(2,{1;2;3},{10,11;20,21;30,31})")
+        .unwrap();
+
+    // Horizontal lookup vector + 2D return array should spill vertically (column slice).
+    engine
+        .set_cell_formula("Sheet1", "A5", "=XLOOKUP(2,{1,2,3},{10,20,30;40,50,60})")
+        .unwrap();
+
+    assert_eq!(
+        engine.bytecode_program_count(),
+        4,
+        "expected all formulas to compile to bytecode"
+    );
+
+    engine.recalculate_single_threaded();
+
+    assert_engine_matches_ast(&engine, "=XMATCH(2,{1;2;3})", "A1");
+    assert_engine_matches_ast(&engine, "=XLOOKUP(2,{1;2;3},{10;20;30})", "A2");
+    assert_engine_spill_matches_ast(&engine, "=XLOOKUP(2,{1;2;3},{10,11;20,21;30,31})", "A3");
+    assert_engine_spill_matches_ast(&engine, "=XLOOKUP(2,{1,2,3},{10,20,30;40,50,60})", "A5");
+}
+
+#[test]
 fn bytecode_backend_xlookup_xmatch_accept_let_single_cell_reference_locals() {
     let mut engine = Engine::new();
 
