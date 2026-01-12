@@ -1,4 +1,5 @@
 use formula_engine::pivot::PivotConfig;
+use formula_model::{SheetVisibility as ModelSheetVisibility, TabColor};
 use serde::{de, Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::fmt;
@@ -112,7 +113,11 @@ pub struct RangeData {
     pub start_col: usize,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+/// Excel-compatible sheet visibility values used over IPC.
+///
+/// This intentionally uses camelCase serialization to match the frontend contract
+/// (`"veryHidden"`).
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum SheetVisibility {
     Visible,
@@ -120,22 +125,22 @@ pub enum SheetVisibility {
     VeryHidden,
 }
 
-impl From<formula_model::SheetVisibility> for SheetVisibility {
-    fn from(value: formula_model::SheetVisibility) -> Self {
+impl From<ModelSheetVisibility> for SheetVisibility {
+    fn from(value: ModelSheetVisibility) -> Self {
         match value {
-            formula_model::SheetVisibility::Visible => SheetVisibility::Visible,
-            formula_model::SheetVisibility::Hidden => SheetVisibility::Hidden,
-            formula_model::SheetVisibility::VeryHidden => SheetVisibility::VeryHidden,
+            ModelSheetVisibility::Visible => SheetVisibility::Visible,
+            ModelSheetVisibility::Hidden => SheetVisibility::Hidden,
+            ModelSheetVisibility::VeryHidden => SheetVisibility::VeryHidden,
         }
     }
 }
 
-impl From<SheetVisibility> for formula_model::SheetVisibility {
+impl From<SheetVisibility> for ModelSheetVisibility {
     fn from(value: SheetVisibility) -> Self {
         match value {
-            SheetVisibility::Visible => formula_model::SheetVisibility::Visible,
-            SheetVisibility::Hidden => formula_model::SheetVisibility::Hidden,
-            SheetVisibility::VeryHidden => formula_model::SheetVisibility::VeryHidden,
+            SheetVisibility::Visible => ModelSheetVisibility::Visible,
+            SheetVisibility::Hidden => ModelSheetVisibility::Hidden,
+            SheetVisibility::VeryHidden => ModelSheetVisibility::VeryHidden,
         }
     }
 }
@@ -147,7 +152,7 @@ pub struct SheetInfo {
     pub name: String,
     pub visibility: SheetVisibility,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tab_color: Option<formula_model::TabColor>,
+    pub tab_color: Option<TabColor>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
