@@ -2143,7 +2143,7 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                         })
                         .map(|(_, v)| v.clone())
                         .unwrap_or(Value::Error(ErrorKind::Field)),
-                    _ => Value::Error(ErrorKind::Value),
+                    _ => Value::Error(ErrorKind::Field),
                 });
 
                 (
