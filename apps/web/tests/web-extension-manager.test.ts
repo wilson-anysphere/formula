@@ -1389,6 +1389,83 @@ test("verifyInstalled clears incompatible flag when the manifest becomes compati
   await fs.rm(tmpRoot, { recursive: true, force: true });
 });
 
+test("verifyInstalled quarantines and unloads an extension when its stored manifest becomes incompatible", async () => {
+  const keys = generateEd25519KeyPair();
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-web-ext-incompatible-unload-"));
+  const extDir = path.join(tmpRoot, "ext");
+  await fs.mkdir(path.join(extDir, "dist"), { recursive: true });
+
+  const manifest = {
+    name: "incompatible-unload-ext",
+    publisher: "test",
+    version: "1.0.0",
+    main: "./dist/extension.js",
+    browser: "./dist/extension.mjs",
+    engines: { formula: "^1.0.0" }
+  };
+
+  await fs.writeFile(path.join(extDir, "package.json"), JSON.stringify(manifest, null, 2));
+  const source = `export async function activate() {}\n`;
+  await fs.writeFile(path.join(extDir, "dist", "extension.mjs"), source);
+  await fs.writeFile(path.join(extDir, "dist", "extension.js"), source);
+
+  const pkgBytes = await createExtensionPackageV2(extDir, { privateKeyPem: keys.privateKeyPem });
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "test.incompatible-unload-ext",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes }
+  });
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: new TestSpreadsheetApi(),
+    permissionPrompt: async () => true
+  });
+  const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
+
+  await manager.install("test.incompatible-unload-ext");
+  await manager.loadInstalled("test.incompatible-unload-ext");
+  expect(manager.isLoaded("test.incompatible-unload-ext")).toBe(true);
+  expect(host.listExtensions().some((e: any) => e.id === "test.incompatible-unload-ext")).toBe(true);
+
+  // Tamper the stored manifest to make it incompatible with the current engine.
+  const db = await requestToPromise(indexedDB.open("formula.webExtensions"));
+  try {
+    const tx = db.transaction(["packages"], "readwrite");
+    const store = tx.objectStore("packages");
+    const record: any = await requestToPromise(store.get("test.incompatible-unload-ext@1.0.0"));
+    expect(record).toBeTruthy();
+    record.verified = {
+      ...record.verified,
+      manifest: {
+        ...record.verified.manifest,
+        engines: { formula: "^2.0.0" }
+      }
+    };
+    store.put(record);
+    await txDone(tx);
+  } finally {
+    db.close();
+  }
+
+  const verification = await manager.verifyInstalled("test.incompatible-unload-ext");
+  expect(verification.ok).toBe(false);
+  expect(String(verification.reason ?? "")).toMatch(/engine mismatch/i);
+
+  const stored = await manager.getInstalled("test.incompatible-unload-ext");
+  expect(stored?.incompatible).toBe(true);
+  expect(String(stored?.incompatibleReason ?? "")).toMatch(/engine mismatch/i);
+
+  // The incompatible quarantine should proactively unload the running extension.
+  expect(manager.isLoaded("test.incompatible-unload-ext")).toBe(false);
+  expect(host.listExtensions().some((e: any) => e.id === "test.incompatible-unload-ext")).toBe(false);
+
+  await manager.dispose();
+  await host.dispose();
+  await fs.rm(tmpRoot, { recursive: true, force: true });
+});
+
 test("update flow replaces installed version and reloads when loaded", async () => {
   const keys = generateEd25519KeyPair();
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-web-ext-update-"));

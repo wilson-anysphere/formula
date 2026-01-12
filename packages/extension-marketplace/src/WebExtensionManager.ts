@@ -1695,6 +1695,14 @@ export class WebExtensionManager {
     } finally {
       db.close();
     }
+
+    // Best-effort: if this manager (or another shared instance) has the extension loaded,
+    // proactively unload it so incompatible/invalid code cannot continue executing.
+    try {
+      await this.unload(installed.id);
+    } catch {
+      // ignore
+    }
   }
 
   private async _clearIncompatibleInstall(installed: InstalledExtensionRecord): Promise<void> {
