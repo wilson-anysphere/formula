@@ -12,6 +12,12 @@ fn import_fixture(bytes: &[u8]) -> formula_xls::XlsImportResult {
     formula_xls::import_xls_path(tmp.path()).expect("import xls")
 }
 
+fn import_fixture_without_biff(bytes: &[u8]) -> formula_xls::XlsImportResult {
+    let mut tmp = tempfile::NamedTempFile::new().expect("temp file");
+    tmp.write_all(bytes).expect("write xls bytes");
+    formula_xls::import_xls_path_without_biff(tmp.path()).expect("import xls")
+}
+
 #[test]
 fn imports_biff_defined_names_with_scope_and_3d_refs() {
     let bytes = xls_fixture_builder::build_defined_names_fixture_xls();
@@ -124,4 +130,24 @@ fn defined_name_formulas_quote_sheet_names() {
             .unwrap_or_else(|| panic!("{name} missing"));
         assert_eq!(dn.refers_to, expected_refers_to);
     }
+}
+
+#[test]
+fn imports_workbook_defined_names_via_calamine_fallback_when_biff_unavailable() {
+    let bytes = xls_fixture_builder::build_defined_name_calamine_fixture_xls();
+    let result = import_fixture_without_biff(&bytes);
+
+    let name = result
+        .workbook
+        .defined_names
+        .iter()
+        .find(|n| n.name == "TestName")
+        .unwrap_or_else(|| {
+            panic!(
+                "TestName missing; defined_names={:?}; warnings={:?}",
+                result.workbook.defined_names, result.warnings
+            )
+        });
+    assert_eq!(name.scope, DefinedNameScope::Workbook);
+    assert_eq!(name.refers_to, "Sheet1!$A$1:$A$1");
 }

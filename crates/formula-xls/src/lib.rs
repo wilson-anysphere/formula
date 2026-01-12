@@ -24,9 +24,9 @@ use std::path::{Path, PathBuf};
 
 use calamine::{open_workbook, Data, Reader, Sheet, SheetType, SheetVisible, Xls};
 use formula_model::{
-    normalize_formula_text, CellRef, CellValue, Comment, CommentAuthor, CommentKind, DefinedNameScope,
-    ErrorValue, HyperlinkTarget, Range, SheetVisibility, Style, TabColor, Workbook, EXCEL_MAX_COLS,
-    EXCEL_MAX_ROWS, EXCEL_MAX_SHEET_NAME_LEN,
+    normalize_formula_text, CellRef, CellValue, Comment, CommentAuthor, CommentKind,
+    DefinedNameScope, ErrorValue, HyperlinkTarget, Range, SheetVisibility, Style, TabColor,
+    Workbook, EXCEL_MAX_COLS, EXCEL_MAX_ROWS, EXCEL_MAX_SHEET_NAME_LEN,
 };
 use thiserror::Error;
 
@@ -201,6 +201,9 @@ fn import_xls_path_with_biff_reader(
     // We need to snapshot metadata (names, visibility, type) up-front because we
     // need mutable access to the workbook while iterating over ranges.
     let sheets: Vec<Sheet> = workbook.sheets_metadata().to_vec();
+    // Snapshot defined names up-front because we need mutable access to the workbook while
+    // iterating over ranges.
+    let calamine_defined_names = workbook.defined_names().to_vec();
 
     let mut out = Workbook::new();
     let mut used_sheet_names: Vec<String> = Vec::new();
@@ -1149,38 +1152,47 @@ fn import_xls_path_with_biff_reader(
         }
     }
 
-    // If BIFF workbook parsing is unavailable (or didn't yield any defined names), fall back to
-    // calamine's best-effort string representation.
-    if out.defined_names.is_empty() {
-        let mut skipped_count: usize = 0;
-        for (name, refers_to) in workbook.defined_names() {
-            let name = name.replace('\0', "");
-            let refers_to = refers_to.trim();
-            let refers_to = refers_to
-                .strip_prefix('=')
-                .unwrap_or(refers_to)
-                .to_string();
+    // Calamine fallback: defined names.
+    //
+    // Calamine can surface defined names even when BIFF workbook parsing isn't available (or the
+    // BIFF NAME parser fails). The `.xls` API does not expose sheet scope metadata (itab), so we
+    // treat these names as workbook-scoped.
+    //
+    // Deterministic precedence: if a name already exists (e.g. imported via BIFF), skip the
+    // calamine definition.
+    let mut skipped_count: usize = 0;
+    for (name, refers_to) in calamine_defined_names {
+        // Calamine may surface BIFF8 Unicode strings with embedded NUL bytes; strip them so the
+        // imported name matches Excel’s visible name semantics.
+        let name = name.replace('\0', "");
 
-            if out
-                .create_defined_name(
-                    DefinedNameScope::Workbook,
-                    name,
-                    refers_to,
-                    None,
-                    false,
-                    None,
-                )
-                .is_err()
-            {
-                skipped_count = skipped_count.saturating_add(1);
-            }
+        if out
+            .defined_names
+            .iter()
+            .any(|existing| existing.name.eq_ignore_ascii_case(&name))
+        {
+            continue;
         }
 
-        if skipped_count > 0 {
-            warnings.push(ImportWarning::new(format!(
-                "skipped {skipped_count} `.xls` defined names from calamine fallback due to invalid/duplicate names"
-            )));
+        if out
+            .create_defined_name(
+                DefinedNameScope::Workbook,
+                name,
+                refers_to,
+                None,
+                false,
+                None,
+            )
+            .is_err()
+        {
+            skipped_count = skipped_count.saturating_add(1);
         }
+    }
+
+    if skipped_count > 0 {
+        warnings.push(ImportWarning::new(format!(
+            "skipped {skipped_count} `.xls` defined names from calamine fallback due to invalid/duplicate names"
+        )));
     }
 
     Ok(XlsImportResult {

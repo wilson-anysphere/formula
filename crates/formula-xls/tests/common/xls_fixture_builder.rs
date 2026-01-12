@@ -25,6 +25,7 @@ const RECORD_OBJ: u16 = 0x005D;
 const RECORD_TXO: u16 = 0x01B6;
 const RECORD_XF: u16 = 0x00E0;
 const RECORD_BOUNDSHEET: u16 = 0x0085;
+const RECORD_SUPBOOK: u16 = 0x01AE;
 const RECORD_EXTERNSHEET: u16 = 0x0017;
 const RECORD_NAME: u16 = 0x0018;
 const RECORD_SAVERECALC: u16 = 0x005F;
@@ -251,6 +252,24 @@ pub fn build_defined_names_fixture_xls() -> Vec<u8> {
 /// - parseable by `formula-engine`.
 pub fn build_defined_names_quoting_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_defined_names_quoting_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a minimal BIFF8 `.xls` fixture containing a single workbook-scoped defined name.
+///
+/// This fixture is intended to validate the importer’s calamine `Reader::defined_names()` fallback
+/// path (i.e. when BIFF workbook parsing is unavailable).
+pub fn build_defined_name_calamine_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_defined_name_calamine_workbook_stream();
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -1407,6 +1426,68 @@ fn build_defined_names_quoting_workbook_stream() -> Vec<u8> {
     globals
 }
 
+fn build_defined_name_calamine_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS)); // BOF: workbook globals
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes()); // CODEPAGE: Windows-1252
+    push_record(&mut globals, RECORD_WINDOW1, &window1()); // WINDOW1
+    push_record(&mut globals, RECORD_FONT, &font("Arial")); // FONT
+
+    // XF table. Many readers expect at least 16 style XFs before cell XFs.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+
+    // One General cell XF.
+    let xf_general = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "Sheet1");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    // Minimal SUPBOOK entry for internal workbook references.
+    let supbook = {
+        let mut data = Vec::<u8>::new();
+        data.extend_from_slice(&1u16.to_le_bytes()); // ctab (sheet count)
+        data.extend_from_slice(&1u16.to_le_bytes()); // cch
+        data.push(0); // flags (compressed)
+        data.push(0); // virtPath = "\0" (internal workbook marker)
+        data
+    };
+    push_record(&mut globals, RECORD_SUPBOOK, &supbook);
+
+    // Minimal EXTERNSHEET table with a single internal sheet entry.
+    push_record(&mut globals, RECORD_EXTERNSHEET, &externsheet_record(&[(0, 0)]));
+
+    // One workbook-scoped defined name: TestName -> Sheet1!$A$1:$A$1.
+    let rgce = ptg_area3d(0, 0, 0, 0, 0);
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &name_record_calamine_compat("TestName", &rgce),
+    );
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    // -- Sheet -------------------------------------------------------------------
+    let sheet_offset = globals.len();
+    let sheet = build_empty_sheet_stream(xf_general);
+
+    // Patch BoundSheet offset.
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+
+    globals.extend_from_slice(&sheet);
+    globals
+}
+
 fn build_empty_sheet_stream(xf_general: u16) -> Vec<u8> {
     let mut sheet = Vec::<u8>::new();
 
@@ -1495,6 +1576,40 @@ fn name_record(
         write_unicode_string_no_cch(&mut out, desc);
     }
 
+    out
+}
+
+fn name_record_calamine_compat(name: &str, rgce: &[u8]) -> Vec<u8> {
+    // Like `name_record`, but encodes the name string in a way calamine's `.xls` defined-name
+    // parser accepts (avoids embedded NULs in the returned name).
+    //
+    // This is intentionally scoped to a single fixture used to test the calamine fallback path.
+    let mut out = Vec::<u8>::new();
+
+    out.extend_from_slice(&0u16.to_le_bytes()); // grbit
+    out.push(0); // chKey
+    let cch: u8 = name
+        .len()
+        .try_into()
+        .expect("defined name too long for u8 length");
+    out.push(cch);
+    let cce: u16 = rgce
+        .len()
+        .try_into()
+        .expect("rgce too long for u16 length");
+    out.extend_from_slice(&cce.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes()); // ixals
+    out.extend_from_slice(&0u16.to_le_bytes()); // itab (0 = workbook scoped)
+    out.push(0); // cchCustMenu
+    out.push(0); // cchDescription
+    out.push(0); // cchHelpTopic
+    out.push(0); // cchStatusText
+
+    // XLUnicodeStringNoCch with "high byte" flag set (calamine expects this for NAME strings).
+    out.push(1);
+    out.extend_from_slice(name.as_bytes());
+
+    out.extend_from_slice(rgce);
     out
 }
 
