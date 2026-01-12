@@ -206,6 +206,13 @@ pub fn lower_canonical_expr(
             crate::BinaryOp::Range => {
                 lower_range_ref(&b.left, &b.right, origin, current_sheet, resolve_sheet)
             }
+            crate::BinaryOp::Concat => Ok(BytecodeExpr::FuncCall {
+                func: Function::Concat,
+                args: vec![
+                    lower_canonical_expr(&b.left, origin, current_sheet, resolve_sheet)?,
+                    lower_canonical_expr(&b.right, origin, current_sheet, resolve_sheet)?,
+                ],
+            }),
             crate::BinaryOp::Add
             | crate::BinaryOp::Sub
             | crate::BinaryOp::Mul
@@ -247,9 +254,7 @@ pub fn lower_canonical_expr(
                     )?),
                 })
             }
-            crate::BinaryOp::Union | crate::BinaryOp::Intersect | crate::BinaryOp::Concat => {
-                Err(LowerError::Unsupported)
-            }
+            crate::BinaryOp::Union | crate::BinaryOp::Intersect => Err(LowerError::Unsupported),
         },
         crate::Expr::Unary(u) => match u.op {
             crate::UnaryOp::Plus => Ok(BytecodeExpr::Unary {
@@ -282,7 +287,19 @@ pub fn lower_canonical_expr(
             Ok(BytecodeExpr::FuncCall { func, args })
         }
         crate::Expr::Call(_) => Err(LowerError::Unsupported),
-        crate::Expr::Postfix(_) => Err(LowerError::Unsupported),
+        crate::Expr::Postfix(p) => match p.op {
+            crate::PostfixOp::Percent => Ok(BytecodeExpr::Binary {
+                op: BinaryOp::Div,
+                left: Box::new(lower_canonical_expr(
+                    &p.expr,
+                    origin,
+                    current_sheet,
+                    resolve_sheet,
+                )?),
+                right: Box::new(BytecodeExpr::Literal(Value::Number(100.0))),
+            }),
+            crate::PostfixOp::SpillRange => Err(LowerError::Unsupported),
+        },
         crate::Expr::NameRef(_)
         | crate::Expr::ColRef(_)
         | crate::Expr::RowRef(_)

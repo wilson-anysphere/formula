@@ -263,6 +263,84 @@ fn bytecode_backend_matches_ast_for_scalar_math_and_comparisons() {
     }
 }
 
+#[test]
+fn bytecode_backend_matches_ast_for_concat_operator() {
+    let mut engine = Engine::new();
+
+    engine
+        .set_cell_formula("Sheet1", "A1", "=\"a\"&\"b\"")
+        .unwrap();
+
+    // Ensure number-to-text coercion uses "General" formatting (scientific notation for large
+    // magnitudes).
+    engine
+        .set_cell_value("Sheet1", "A2", 100000000000.0)
+        .unwrap();
+    engine.set_cell_value("Sheet1", "B2", "x").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C2", "=A2&B2")
+        .unwrap();
+
+    // Ensure we're exercising the bytecode path for both formulas.
+    assert_eq!(engine.bytecode_program_count(), 2);
+
+    engine.recalculate_single_threaded();
+
+    assert_engine_matches_ast(&engine, "=\"a\"&\"b\"", "A1");
+    assert_engine_matches_ast(&engine, "=A2&B2", "C2");
+}
+
+#[test]
+fn bytecode_cache_reuses_filled_formula_patterns_for_concat_operator() {
+    let mut engine = Engine::new();
+
+    engine.set_cell_formula("Sheet1", "C1", "=A1&B1").unwrap();
+    engine.set_cell_formula("Sheet1", "C2", "=A2&B2").unwrap();
+    engine.set_cell_formula("Sheet1", "C3", "=A3&B3").unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 1);
+}
+
+#[test]
+fn bytecode_backend_matches_ast_for_postfix_percent_operator() {
+    let mut engine = Engine::new();
+
+    engine.set_cell_formula("Sheet1", "A1", "=10%").unwrap();
+
+    engine.set_cell_value("Sheet1", "A2", 50.0).unwrap();
+    engine.set_cell_formula("Sheet1", "B2", "=A2%").unwrap();
+
+    // Ensure we're exercising the bytecode path.
+    assert_eq!(engine.bytecode_program_count(), 2);
+
+    engine.recalculate_single_threaded();
+
+    assert_engine_matches_ast(&engine, "=10%", "A1");
+    assert_engine_matches_ast(&engine, "=A2%", "B2");
+}
+
+#[test]
+fn bytecode_backend_matches_ast_for_postfix_percent_with_locale_sensitive_numeric_text() {
+    // en-US: comma thousands separator.
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", r#"="1,234"%"#)
+        .unwrap();
+    assert_eq!(engine.bytecode_program_count(), 1);
+    engine.recalculate_single_threaded();
+    assert_engine_matches_ast(&engine, r#"="1,234"%"#, "A1");
+
+    // de-DE: '.' thousands separator, ',' decimal separator.
+    let mut engine = Engine::new();
+    engine.set_value_locale(ValueLocaleConfig::de_de());
+    engine
+        .set_cell_formula("Sheet1", "A1", r#"="1.234,56"%"#)
+        .unwrap();
+    assert_eq!(engine.bytecode_program_count(), 1);
+    engine.recalculate_single_threaded();
+    assert_engine_matches_ast(&engine, r#"="1.234,56"%"#, "A1");
+}
+
 proptest! {
     #![proptest_config(ProptestConfig { cases: 32, .. ProptestConfig::default() })]
     #[test]
@@ -270,7 +348,7 @@ proptest! {
         a in -1000f64..1000f64,
         b in -1000f64..1000f64,
         digits in -6i32..6i32,
-        choice in 0u8..12u8,
+        choice in 0u8..14u8,
     ) {
         let formula = match choice {
             0 => "=A1+B1".to_string(),
@@ -285,6 +363,8 @@ proptest! {
             9 => format!("=ROUND(A1, {digits})"),
             10 => "=MOD(A1, B1)".to_string(),
             11 => "=SIGN(A1)".to_string(),
+            12 => "=A1&B1".to_string(),
+            13 => "=A1%".to_string(),
             _ => unreachable!(),
         };
 
