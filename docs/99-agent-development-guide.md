@@ -220,8 +220,11 @@ it will be forwarded to the underlying command as a literal argument.
 For Playwright, a literal `--` is particularly problematic because it terminates option parsing,
 so flags like `-g/--grep` stop working (and `--` can accidentally match additional spec file names).
 
-Note: `apps/desktop` wraps Playwright via `apps/desktop/scripts/run-playwright.mjs`, which strips a
-single leading `--` for compatibility. Other scripts may not.
+Note: `apps/desktop` and `apps/web` wrap Playwright via:
+- `apps/desktop/scripts/run-playwright.mjs`
+- `apps/web/scripts/run-playwright.mjs`
+
+These wrappers strip a single leading `--` for compatibility. Other scripts may not.
 
 Prefer:
 
