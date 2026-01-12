@@ -17,5 +17,55 @@ test.describe("marketplace panel", () => {
 
     await expect(page.getByTestId("panel-marketplace")).toBeVisible();
   });
-});
 
+  test("can render search results (stubbed /api/search)", async ({ page }) => {
+    await page.route("**/api/search**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          total: 1,
+          results: [
+            {
+              id: "acme.hello",
+              name: "hello",
+              displayName: "Hello Extension",
+              publisher: "acme",
+              description: "A test extension returned by Playwright stubs.",
+              latestVersion: "1.0.0",
+              verified: false,
+              featured: false,
+              categories: [],
+              tags: [],
+              screenshots: [],
+              downloadCount: 0,
+              updatedAt: new Date().toISOString(),
+            },
+          ],
+          nextCursor: null,
+        }),
+      });
+    });
+
+    // The panel does a best-effort per-item details fetch (`/api/extensions/:id`). In Vite dev
+    // servers this could return HTML; stub it to a clean 404 so the panel consistently falls
+    // back to the summary response.
+    await page.route("**/api/extensions/**", async (route) => {
+      await route.fulfill({ status: 404, body: "" });
+    });
+
+    await gotoDesktop(page);
+    await waitForDesktopReady(page);
+
+    await page.getByRole("tab", { name: "View", exact: true }).click();
+    await page.getByTestId("open-marketplace-panel").click();
+
+    const panel = page.getByTestId("panel-marketplace");
+    await expect(panel).toBeVisible();
+
+    await panel.getByPlaceholder("Search extensions…").fill("hello");
+    await panel.getByRole("button", { name: "Search", exact: true }).click();
+
+    await expect(panel).toContainText("Hello Extension (acme.hello)");
+  });
+});
