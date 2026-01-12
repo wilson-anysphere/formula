@@ -159,6 +159,8 @@
 //! Discounting:
 //!
 //! - Per-period discount base: `1 + y` where `y = yld / frequency`
+//!   - Domain: require `1 + y > 0` (equivalently `yld > -frequency`).
+//!   - Excel-style errors: `yld == -frequency` → `#DIV/0!`, `yld < -frequency` → `#NUM!`.
 //! - Exponent for a cashflow `j` regular periods after `F` is:
 //!   - `j + (DSC / E)` (so the first coupon uses `j=0`)
 //!
@@ -225,7 +227,10 @@
 //!
 //! Discounting exponent:
 //!
-//! - `DSM / E` (fraction of a regular period remaining)
+//! - `DSM / E` (fraction of a regular period remaining), using the same per-period discount base
+//!   `1 + y` where `y = yld / frequency`:
+//!   - Domain: require `1 + y > 0` (equivalently `yld > -frequency`).
+//!   - Excel-style errors: `yld == -frequency` → `#DIV/0!`, `yld < -frequency` → `#NUM!`.
 //!
 //! Clean price per 100 face:
 //!
