@@ -118,6 +118,106 @@ test("BrowserExtensionHost: workbook.createWorkbook delegates to spreadsheetApi 
   });
 });
 
+test("BrowserExtensionHost: workbook.createWorkbook cancellation does not emit workbookOpened", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  let createCalls = 0;
+  let active = { name: "Initial", path: "/tmp/initial.xlsx" };
+  const sheets = [{ id: "sheet1", name: "Sheet1" }];
+  const activeSheet = sheets[0];
+
+  /** @type {any} */
+  let apiError;
+  /** @type {any} */
+  let workbookOpened;
+
+  /** @type {(value?: unknown) => void} */
+  let resolveDone;
+  const done = new Promise((resolve) => {
+    resolveDone = resolve;
+  });
+
+  const scenarios = [
+    {
+      onPostMessage(msg) {
+        if (msg?.type === "event" && msg.event === "workbookOpened") {
+          workbookOpened = msg.data;
+          return;
+        }
+        if (msg?.type === "api_error" && msg.id === "req1") {
+          apiError = msg.error;
+          resolveDone();
+        }
+      },
+    },
+  ];
+
+  installFakeWorker(t, scenarios);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      async getActiveWorkbook() {
+        return active;
+      },
+      listSheets() {
+        return sheets;
+      },
+      getActiveSheet() {
+        return activeSheet;
+      },
+      async createWorkbook() {
+        createCalls += 1;
+        throw { name: "AbortError", message: "Create workbook cancelled" };
+      },
+    },
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  // Ensure host has a stable baseline to restore to if create fails.
+  await host._getActiveWorkbook();
+
+  const extensionId = "test.workbook-create-cancel";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "memory://workbook-create-cancel/",
+    mainUrl: "memory://workbook-create-cancel/main.mjs",
+    manifest: {
+      name: "workbook-create-cancel",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: ["workbook.manage"],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension?.worker);
+  extension.active = true;
+
+  extension.worker.emitMessage({
+    type: "api_call",
+    id: "req1",
+    namespace: "workbook",
+    method: "createWorkbook",
+    args: [],
+  });
+
+  await done;
+
+  assert.equal(createCalls, 1);
+  assert.equal(apiError?.name, "AbortError");
+  assert.equal(apiError?.message, "Create workbook cancelled");
+  assert.equal(workbookOpened, undefined);
+  assert.equal(host._workbook.path, "/tmp/initial.xlsx");
+});
+
 test("BrowserExtensionHost: workbook.saveAs delegates to spreadsheetApi and emits beforeSave with updated path", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
 
@@ -966,6 +1066,106 @@ test("BrowserExtensionHost: workbook.close delegates to spreadsheetApi and emits
       activeSheet,
     },
   });
+});
+
+test("BrowserExtensionHost: workbook.close cancellation does not emit workbookOpened", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  let closeCalls = 0;
+  let active = { name: "Initial", path: "/tmp/initial.xlsx" };
+  const sheets = [{ id: "sheet1", name: "Sheet1" }];
+  const activeSheet = sheets[0];
+
+  /** @type {any} */
+  let apiError;
+  /** @type {any} */
+  let workbookOpened;
+
+  /** @type {(value?: unknown) => void} */
+  let resolveDone;
+  const done = new Promise((resolve) => {
+    resolveDone = resolve;
+  });
+
+  const scenarios = [
+    {
+      onPostMessage(msg) {
+        if (msg?.type === "event" && msg.event === "workbookOpened") {
+          workbookOpened = msg.data;
+          return;
+        }
+        if (msg?.type === "api_error" && msg.id === "req1") {
+          apiError = msg.error;
+          resolveDone();
+        }
+      },
+    },
+  ];
+
+  installFakeWorker(t, scenarios);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      async getActiveWorkbook() {
+        return active;
+      },
+      listSheets() {
+        return sheets;
+      },
+      getActiveSheet() {
+        return activeSheet;
+      },
+      async closeWorkbook() {
+        closeCalls += 1;
+        throw { name: "AbortError", message: "Close workbook cancelled" };
+      },
+    },
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  // Ensure host has a stable baseline to restore to if close fails.
+  await host._getActiveWorkbook();
+
+  const extensionId = "test.workbook-close-cancel";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "memory://workbook-close-cancel/",
+    mainUrl: "memory://workbook-close-cancel/main.mjs",
+    manifest: {
+      name: "workbook-close-cancel",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: ["workbook.manage"],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension?.worker);
+  extension.active = true;
+
+  extension.worker.emitMessage({
+    type: "api_call",
+    id: "req1",
+    namespace: "workbook",
+    method: "close",
+    args: [],
+  });
+
+  await done;
+
+  assert.equal(closeCalls, 1);
+  assert.equal(apiError?.name, "AbortError");
+  assert.equal(apiError?.message, "Close workbook cancelled");
+  assert.equal(workbookOpened, undefined);
+  assert.equal(host._workbook.path, "/tmp/initial.xlsx");
 });
 
 test("BrowserExtensionHost: workbook.save delegates to spreadsheetApi and emits beforeSave", async (t) => {
