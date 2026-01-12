@@ -4,7 +4,8 @@ use std::io::{Cursor, Write};
 
 use formula_vba::{
     compress_container, content_normalized_data, forms_normalized_data, verify_vba_digital_signature,
-    VbaSignatureBinding, VbaSignatureVerification,
+    verify_vba_digital_signature_bound, verify_vba_project_signature_binding,
+    VbaProjectBindingVerification, VbaSignatureBinding, VbaSignatureVerification,
 };
 use md5::{Digest as _, Md5};
 
@@ -180,6 +181,7 @@ fn binding_is_unknown_when_forms_normalized_data_is_unavailable() {
     // Sign a digest that does NOT match ContentHash, and ensure binding is reported as Unknown
     // (we can't rule out an Agile binding when FormsNormalizedData is unavailable).
     let content = content_normalized_data(&unsigned).expect("ContentNormalizedData");
+    let expected_content_hash: [u8; 16] = Md5::digest(&content).into();
     let mut wrong_digest: [u8; 16] = Md5::digest(&content).into();
     wrong_digest[0] ^= 0xFF;
 
@@ -191,6 +193,36 @@ fn binding_is_unknown_when_forms_normalized_data_is_unavailable() {
         .expect("signature should be present");
     assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
     assert_eq!(sig.binding, VbaSignatureBinding::Unknown);
+
+    // The richer helper should also treat this as unknown (we can't compute FormsNormalizedData so
+    // we can't definitively say "NotBound").
+    let bound = verify_vba_digital_signature_bound(&signed)
+        .expect("bound verify")
+        .expect("signature should be present");
+    match bound.binding {
+        VbaProjectBindingVerification::BoundUnknown(info) => {
+            assert_eq!(info.signed_digest.as_deref(), Some(wrong_digest.as_slice()));
+            assert_eq!(
+                info.computed_digest.as_deref(),
+                Some(expected_content_hash.as_slice())
+            );
+        }
+        other => panic!("expected BoundUnknown, got {other:?}"),
+    }
+
+    // And the signature-part binding helper should behave consistently.
+    let binding =
+        verify_vba_project_signature_binding(&signed, &sig_stream).expect("binding verification");
+    match binding {
+        VbaProjectBindingVerification::BoundUnknown(info) => {
+            assert_eq!(info.signed_digest.as_deref(), Some(wrong_digest.as_slice()));
+            assert_eq!(
+                info.computed_digest.as_deref(),
+                Some(expected_content_hash.as_slice())
+            );
+        }
+        other => panic!("expected BoundUnknown, got {other:?}"),
+    }
 }
 
 #[test]
@@ -213,4 +245,25 @@ fn binding_is_bound_when_content_hash_matches_even_if_forms_normalized_data_is_u
         .expect("signature should be present");
     assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
     assert_eq!(sig.binding, VbaSignatureBinding::Bound);
+
+    let bound = verify_vba_digital_signature_bound(&signed)
+        .expect("bound verify")
+        .expect("signature should be present");
+    match bound.binding {
+        VbaProjectBindingVerification::BoundVerified(info) => {
+            assert_eq!(info.signed_digest.as_deref(), Some(digest.as_slice()));
+            assert_eq!(info.computed_digest.as_deref(), Some(digest.as_slice()));
+        }
+        other => panic!("expected BoundVerified, got {other:?}"),
+    }
+
+    let binding =
+        verify_vba_project_signature_binding(&signed, &sig_stream).expect("binding verification");
+    match binding {
+        VbaProjectBindingVerification::BoundVerified(info) => {
+            assert_eq!(info.signed_digest.as_deref(), Some(digest.as_slice()));
+            assert_eq!(info.computed_digest.as_deref(), Some(digest.as_slice()));
+        }
+        other => panic!("expected BoundVerified, got {other:?}"),
+    }
 }
