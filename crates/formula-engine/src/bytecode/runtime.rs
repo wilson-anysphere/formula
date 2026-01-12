@@ -2683,7 +2683,7 @@ fn coerce_to_string_for_lookup(v: &Value) -> Result<String, ErrorKind> {
     let engine_value = bytecode_value_to_engine(v.clone());
     engine_value
         .coerce_to_string()
-        .map_err(engine_error_to_bytecode)
+        .map_err(ErrorKind::from)
 }
 
 fn exact_match_in_first_col(grid: &dyn Grid, lookup: &Value, table: ResolvedRange) -> Option<i32> {
@@ -2879,41 +2879,13 @@ enum RangeArg<'a> {
     Array(&'a ArrayValue),
 }
 
-fn bytecode_error_to_engine(err: ErrorKind) -> EngineErrorKind {
-    match err {
-        ErrorKind::Null => EngineErrorKind::Null,
-        ErrorKind::Div0 => EngineErrorKind::Div0,
-        ErrorKind::Ref => EngineErrorKind::Ref,
-        ErrorKind::Value => EngineErrorKind::Value,
-        ErrorKind::Name => EngineErrorKind::Name,
-        ErrorKind::Num => EngineErrorKind::Num,
-        ErrorKind::NA => EngineErrorKind::NA,
-        ErrorKind::Spill => EngineErrorKind::Spill,
-        ErrorKind::Calc => EngineErrorKind::Calc,
-    }
-}
-
-fn engine_error_to_bytecode(err: EngineErrorKind) -> ErrorKind {
-    match err {
-        EngineErrorKind::Null => ErrorKind::Null,
-        EngineErrorKind::Div0 => ErrorKind::Div0,
-        EngineErrorKind::Ref => ErrorKind::Ref,
-        EngineErrorKind::Value => ErrorKind::Value,
-        EngineErrorKind::Name => ErrorKind::Name,
-        EngineErrorKind::Num => ErrorKind::Num,
-        EngineErrorKind::NA => ErrorKind::NA,
-        EngineErrorKind::Spill => ErrorKind::Spill,
-        EngineErrorKind::Calc => ErrorKind::Calc,
-    }
-}
-
 fn bytecode_value_to_engine(value: Value) -> EngineValue {
     match value {
         Value::Number(n) => EngineValue::Number(n),
         Value::Bool(b) => EngineValue::Bool(b),
         Value::Text(s) => EngineValue::Text(s.to_string()),
         Value::Empty => EngineValue::Blank,
-        Value::Error(e) => EngineValue::Error(bytecode_error_to_engine(e)),
+        Value::Error(e) => EngineValue::Error(e.into()),
         // Array/range values are not valid scalar values, but the bytecode runtime uses `#SPILL!`
         // for "range-as-scalar" cases elsewhere.
         Value::Array(_) | Value::Range(_) => EngineValue::Error(EngineErrorKind::Spill),
@@ -2944,7 +2916,7 @@ fn parse_countif_criteria(
         thread_now_utc(),
         locale.clone(),
     )
-    .map_err(engine_error_to_bytecode)
+    .map_err(ErrorKind::from)
 }
 
 fn count_if_range_criteria(
