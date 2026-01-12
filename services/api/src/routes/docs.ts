@@ -1045,7 +1045,11 @@ export function registerDocRoutes(app: FastifyInstance): void {
       }
 
       await app.db.query(
-        "INSERT INTO org_members (org_id, user_id, role) VALUES ($1,$2,'member')",
+        `
+          INSERT INTO org_members (org_id, user_id, role)
+          VALUES ($1,$2,'member')
+          ON CONFLICT (org_id, user_id) DO NOTHING
+        `,
         [orgId, request.user!.id]
       );
     }
