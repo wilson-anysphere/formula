@@ -61,6 +61,8 @@ fixtures/xlsx/
   - `bar.xlsx`, `line.xlsx`, `pie.xlsx`, `scatter.xlsx` - small fixtures for common chart types.
 - `macros/`:
   - `basic.xlsm` - minimal VBA project preservation fixture.
+  - `signed-basic.xlsm` - `basic.xlsm` with a `\x05DigitalSignature` stream containing an
+    Authenticode-like PKCS#7/CMS `SignedData` blob (self-signed fixture cert; no private key).
 
 ## Regenerating the initial fixtures
 
