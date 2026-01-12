@@ -12,7 +12,11 @@ const mocks = vi.hoisted(() => {
 
   return {
     sentinelClient,
-    createAiChatOrchestrator: vi.fn((_options: any) => ({ sendMessage: vi.fn(), sessionId: "test-session" })),
+    createAiChatOrchestrator: vi.fn((_options: any) => ({
+      sendMessage: vi.fn(),
+      sessionId: "test-session",
+      dispose: vi.fn(async () => {}),
+    })),
     getDesktopAIAuditStore: vi.fn(() => ({
       logEntry: vi.fn(async () => {}),
       listEntries: vi.fn(async () => []),
@@ -93,11 +97,13 @@ describe("AI chat panel", () => {
       expect(lastCall?.llmClient).toBe(mocks.sentinelClient);
       expect(lastCall?.model).toBe("test-model");
 
+      const orchestrator = mocks.createAiChatOrchestrator.mock.results.at(-1)?.value as any;
       act(() => {
         renderer.cleanup([]);
       });
+
+      expect(orchestrator.dispose).toHaveBeenCalled();
     },
     TEST_TIMEOUT_MS,
   );
 });
-
