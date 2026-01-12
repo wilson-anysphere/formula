@@ -526,8 +526,8 @@ describe("WorkbookContextBuilder", () => {
       onBuildStats,
     });
 
-    await builder.build({ activeSheetId: "Sheet1" });
-    await builder.build({ activeSheetId: "Sheet1" });
+    const ctx1 = await builder.build({ activeSheetId: "Sheet1" });
+    const ctx2 = await builder.build({ activeSheetId: "Sheet1" });
 
     expect(onBuildStats).toHaveBeenCalledTimes(2);
     const first = onBuildStats.mock.calls[0]![0];
@@ -538,6 +538,8 @@ describe("WorkbookContextBuilder", () => {
     expect(first.durationMs).toBeGreaterThanOrEqual(0);
     expect(first.sheetCountSummarized).toBe(1);
     expect(first.blockCount).toBe(1);
+    expect(first.promptContextChars).toBe(ctx1.promptContext.length);
+    expect(first.promptContextTokens).toBe(ctx1.payload.budget.usedPromptContextTokens);
     expect(first.cache.schema.misses).toBeGreaterThanOrEqual(1);
     expect(first.cache.block.misses).toBeGreaterThanOrEqual(1);
     expect(first.rag.enabled).toBe(false);
@@ -546,6 +548,8 @@ describe("WorkbookContextBuilder", () => {
     // Second build should reuse cached schema + sampled blocks.
     expect(second.cache.schema.hits).toBeGreaterThanOrEqual(1);
     expect(second.cache.block.hits).toBeGreaterThanOrEqual(1);
+    expect(second.promptContextChars).toBe(ctx2.promptContext.length);
+    expect(second.promptContextTokens).toBe(ctx2.payload.budget.usedPromptContextTokens);
   });
 
   it("builds a deterministic, human-readable promptContext", async () => {
