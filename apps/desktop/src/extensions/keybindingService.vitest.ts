@@ -97,7 +97,9 @@ describe("KeybindingService", () => {
     const service = new KeybindingService({ commandRegistry, contextKeys, platform: "other" });
     service.setExtensionKeybindings([
       { extensionId: "ext", command: "ext.stealCopy", key: "ctrl+c", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealCopy", key: "ctrl+cmd+c", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealPasteSpecial", key: "ctrl+shift+v", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealPasteSpecial", key: "ctrl+cmd+shift+v", mac: null, when: null },
     ]);
 
     const event = makeKeydownEvent({ key: "c", ctrlKey: true });
@@ -111,6 +113,18 @@ describe("KeybindingService", () => {
     const handled2 = await service.dispatchKeydown(event2);
     expect(handled2).toBe(false);
     expect(event2.defaultPrevented).toBe(false);
+    expect(extRun).not.toHaveBeenCalled();
+
+    const event3 = makeKeydownEvent({ key: "c", ctrlKey: true, metaKey: true });
+    const handled3 = await service.dispatchKeydown(event3);
+    expect(handled3).toBe(false);
+    expect(event3.defaultPrevented).toBe(false);
+    expect(extRun).not.toHaveBeenCalled();
+
+    const event4 = makeKeydownEvent({ key: "v", ctrlKey: true, metaKey: true, shiftKey: true });
+    const handled4 = await service.dispatchKeydown(event4);
+    expect(handled4).toBe(false);
+    expect(event4.defaultPrevented).toBe(false);
     expect(extRun).not.toHaveBeenCalled();
   });
 
