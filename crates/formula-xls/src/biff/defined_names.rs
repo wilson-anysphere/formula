@@ -88,8 +88,8 @@ pub(crate) fn parse_biff_defined_names(
     // Parse `SUPBOOK` records so `PtgRef3d` / `PtgArea3d` can resolve external workbook references
     // (iSupBook != 0) into Excel-style text like `'[Book.xlsx]Sheet1'!A1`.
     //
-    // Best-effort: if SUPBOOK data is missing/malformed, the decoder will fall back to
-    // `'#SHEET(ixti=...)'!` placeholders with warnings.
+    // Best-effort: if SUPBOOK data is missing/malformed, the rgce decoder will fall back to a
+    // parseable Excel error literal (typically `#REF!`) and include details in warnings.
     let supbook::SupBookTable {
         supbooks,
         warnings: supbook_warnings,
