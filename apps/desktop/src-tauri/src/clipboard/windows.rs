@@ -93,10 +93,6 @@ fn try_get_clipboard_bytes(format: u32) -> Result<Option<Vec<u8>>, ClipboardErro
         let _ = GlobalUnlock(hglobal);
     }
 
-    while out.last() == Some(&0) {
-        out.pop();
-    }
-
     Ok(Some(out))
 }
 
