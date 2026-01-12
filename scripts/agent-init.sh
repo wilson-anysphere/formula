@@ -12,8 +12,39 @@ set -e
 export NODE_OPTIONS="--max-old-space-size=3072"
 
 # Rust: Limit parallel compilation jobs (each can use 1-2GB).
-# Prefer the wrapper-specific override (`FORMULA_CARGO_JOBS`) when provided.
-export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-${FORMULA_CARGO_JOBS:-4}}"
+#
+# Prefer the wrapper-specific override (`FORMULA_CARGO_JOBS`) when provided. Otherwise respect any
+# explicit `CARGO_BUILD_JOBS` override (useful for CI/global setups).
+#
+# When neither is set, default to conservative parallelism. On very high core-count machines, lld
+# (and other toolchain components) can spawn many threads per invocation; combining that with
+# Cargo-level parallelism can exceed sandbox process/thread limits and cause flaky
+# "Resource temporarily unavailable" failures.
+_formula_cpu_count=""
+if command -v nproc >/dev/null 2>&1; then
+  _formula_cpu_count="$(nproc 2>/dev/null || true)"
+fi
+if [ -z "${_formula_cpu_count}" ]; then
+  _formula_cpu_count="$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
+fi
+if [ -z "${_formula_cpu_count}" ] && command -v sysctl >/dev/null 2>&1; then
+  _formula_cpu_count="$(sysctl -n hw.logicalcpu 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || true)"
+fi
+case "${_formula_cpu_count}" in
+  ''|*[!0-9]*) _formula_cpu_count=0 ;;
+esac
+_formula_default_cargo_jobs=4
+if [ "${_formula_cpu_count}" -ge 64 ]; then
+  _formula_default_cargo_jobs=2
+fi
+unset _formula_cpu_count
+
+if [ -n "${FORMULA_CARGO_JOBS:-}" ]; then
+  export CARGO_BUILD_JOBS="${FORMULA_CARGO_JOBS}"
+elif [ -z "${CARGO_BUILD_JOBS:-}" ]; then
+  export CARGO_BUILD_JOBS="${_formula_default_cargo_jobs}"
+fi
+unset _formula_default_cargo_jobs
 
 # Make: Limit parallel jobs
 export MAKEFLAGS="${MAKEFLAGS:--j${CARGO_BUILD_JOBS}}"
