@@ -31,6 +31,11 @@ declare module "@formula/extension-host/browser" {
       manifest: Record<string, any>;
     }>;
 
+    getGrantedPermissions(extensionId: string): Promise<any>;
+    revokePermissions(extensionId: string, permissions?: string[]): Promise<void>;
+    resetPermissions(extensionId: string): Promise<void>;
+    resetAllPermissions(): Promise<void>;
+
     executeCommand(commandId: string, ...args: any[]): Promise<any>;
 
     getMessages(): Array<{ message: string; type: string }>;
