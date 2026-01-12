@@ -1,12 +1,15 @@
 use crate::eval::CompiledExpr;
-use crate::coercion::number::parse_number_strict;
+use crate::coercion::datetime::parse_value_text;
+use crate::date::ExcelDateSystem;
 use crate::functions::lookup;
 use crate::functions::wildcard::WildcardPattern;
 use crate::functions::{
     eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec, Reference, SheetId,
 };
 use crate::functions::{ThreadSafety, ValueType, Volatility};
+use crate::locale::ValueLocaleConfig;
 use crate::value::{Array, ErrorKind, Value};
+use chrono::Utc;
 use std::borrow::Cow;
 use std::collections::HashMap;
 
@@ -1673,7 +1676,18 @@ fn excel_eq(a: &Value, b: &Value) -> bool {
         (Value::Blank, Value::Blank) => true,
         (Value::Error(x), Value::Error(y)) => x == y,
         (Value::Number(num), Value::Text(text)) | (Value::Text(text), Value::Number(num)) => {
-            parse_number_strict(text, '.', Some(',')).is_ok_and(|parsed| parsed == *num)
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                false
+            } else {
+                parse_value_text(
+                    trimmed,
+                    ValueLocaleConfig::en_us(),
+                    Utc::now(),
+                    ExcelDateSystem::EXCEL_1900,
+                )
+                .is_ok_and(|parsed| parsed == *num)
+            }
         }
         (Value::Bool(b), Value::Number(n)) | (Value::Number(n), Value::Bool(b)) => {
             (*n == 0.0 && !b) || (*n == 1.0 && *b)

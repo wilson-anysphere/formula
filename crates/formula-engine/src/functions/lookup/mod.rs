@@ -1,6 +1,9 @@
 use crate::{ErrorKind, Value};
+use crate::coercion::datetime::parse_value_text;
+use crate::date::ExcelDateSystem;
 use crate::functions::wildcard::WildcardPattern;
-use crate::coercion::number::parse_number_strict;
+use crate::locale::ValueLocaleConfig;
+use chrono::Utc;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 
@@ -21,7 +24,18 @@ fn values_equal_for_lookup(lookup_value: &Value, candidate: &Value) -> bool {
         (Value::Bool(a), Value::Bool(b)) => a == b,
         (Value::Error(a), Value::Error(b)) => a == b,
         (Value::Number(a), Value::Text(b)) | (Value::Text(b), Value::Number(a)) => {
-            parse_number_strict(b, '.', Some(',')).is_ok_and(|parsed| parsed == *a)
+            let trimmed = b.trim();
+            if trimmed.is_empty() {
+                false
+            } else {
+                parse_value_text(
+                    trimmed,
+                    ValueLocaleConfig::en_us(),
+                    Utc::now(),
+                    ExcelDateSystem::EXCEL_1900,
+                )
+                .is_ok_and(|parsed| parsed == *a)
+            }
         }
         (Value::Bool(a), Value::Number(b)) | (Value::Number(b), Value::Bool(a)) => {
             (*b == 0.0 && !a) || (*b == 1.0 && *a)
@@ -660,6 +674,19 @@ mod tests {
     fn xmatch_matches_numeric_text_via_value_parsing() {
         let array = vec![Value::from("1,234.5")];
         assert_eq!(xmatch(&Value::Number(1234.5), &array).unwrap(), 1);
+    }
+
+    #[test]
+    fn xmatch_matches_date_text_via_value_parsing() {
+        let array = vec![Value::from("2020-01-01")];
+        let serial = parse_value_text(
+            "2020-01-01",
+            ValueLocaleConfig::en_us(),
+            Utc::now(),
+            ExcelDateSystem::EXCEL_1900,
+        )
+        .unwrap();
+        assert_eq!(xmatch(&Value::Number(serial), &array).unwrap(), 1);
     }
 
     #[test]
