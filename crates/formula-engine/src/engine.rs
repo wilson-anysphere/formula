@@ -5466,6 +5466,21 @@ fn rewrite_structured_refs_for_bytecode(
         })
     }
 
+    fn build_union_expr(mut parts: Vec<crate::Expr>) -> crate::Expr {
+        let mut iter = parts.drain(..);
+        let mut acc = iter
+            .next()
+            .expect("caller must provide at least one union operand");
+        for expr in iter {
+            acc = crate::Expr::Binary(crate::BinaryExpr {
+                op: crate::BinaryOp::Union,
+                left: Box::new(acc),
+                right: Box::new(expr),
+            });
+        }
+        acc
+    }
+
     match expr {
         crate::Expr::StructuredRef(r) => {
             // External workbook structured references are accepted syntactically but not supported.
@@ -5496,14 +5511,6 @@ fn rewrite_structured_refs_for_bytecode(
             )
             .ok()?;
 
-            // Bytecode lowering currently only supports single-area references on the current sheet.
-            let [(sheet_id, start, end)] = ranges.as_slice() else {
-                return None;
-            };
-            if *sheet_id != origin_sheet {
-                return None;
-            }
-
             // `[@Col]`/`Table1[@Col]` depends on the current row, so represent it as a row-relative
             // reference (row offset = 0) with an absolute column coordinate. This keeps the
             // compiled bytecode program reusable across table rows, while still producing the
@@ -5512,30 +5519,52 @@ fn rewrite_structured_refs_for_bytecode(
                 sref.item,
                 Some(crate::structured_refs::StructuredRefItem::ThisRow)
             ) {
-                if start.row != origin_cell.row || end.row != origin_cell.row {
+                let mut parts = Vec::with_capacity(ranges.len());
+                for (sheet_id, start, end) in &ranges {
+                    if *sheet_id != origin_sheet {
+                        return None;
+                    }
+                    if start.row != origin_cell.row || end.row != origin_cell.row {
+                        return None;
+                    }
+                    if start == end {
+                        parts.push(this_row_cell_ref(start.col));
+                    } else {
+                        parts.push(crate::Expr::Binary(crate::BinaryExpr {
+                            op: crate::BinaryOp::Range,
+                            left: Box::new(this_row_cell_ref(start.col)),
+                            right: Box::new(this_row_cell_ref(end.col)),
+                        }));
+                    }
+                }
+
+                return if parts.len() == 1 {
+                    parts.pop()
+                } else {
+                    Some(build_union_expr(parts))
+                };
+            }
+
+            let mut parts = Vec::with_capacity(ranges.len());
+            for (sheet_id, start, end) in &ranges {
+                if *sheet_id != origin_sheet {
                     return None;
                 }
-
                 if start == end {
-                    return Some(this_row_cell_ref(start.col));
+                    parts.push(abs_cell_ref(*start));
+                } else {
+                    parts.push(crate::Expr::Binary(crate::BinaryExpr {
+                        op: crate::BinaryOp::Range,
+                        left: Box::new(abs_cell_ref(*start)),
+                        right: Box::new(abs_cell_ref(*end)),
+                    }));
                 }
-
-                return Some(crate::Expr::Binary(crate::BinaryExpr {
-                    op: crate::BinaryOp::Range,
-                    left: Box::new(this_row_cell_ref(start.col)),
-                    right: Box::new(this_row_cell_ref(end.col)),
-                }));
             }
-
-            if start == end {
-                return Some(abs_cell_ref(*start));
+            if parts.len() == 1 {
+                parts.pop()
+            } else {
+                Some(build_union_expr(parts))
             }
-
-            Some(crate::Expr::Binary(crate::BinaryExpr {
-                op: crate::BinaryOp::Range,
-                left: Box::new(abs_cell_ref(*start)),
-                right: Box::new(abs_cell_ref(*end)),
-            }))
         }
         crate::Expr::FieldAccess(access) => Some(crate::Expr::FieldAccess(crate::FieldAccessExpr {
             base: Box::new(rewrite_structured_refs_for_bytecode(
@@ -6152,6 +6181,9 @@ fn bytecode_value_to_engine(value: bytecode::Value) -> Value {
             }
             Value::Array(Array::new(arr.rows, arr.cols, values))
         }
+        // Discontiguous reference unions (e.g. `=A1,B1`) cannot be returned as a spillable array
+        // result; treat them as a scalar #VALUE! like the AST evaluator.
+        bytecode::Value::MultiRange(_) => Value::Error(ErrorKind::Value),
         // Bytecode arrays/refs are "spill" markers in the engine layer; other (future) rich values
         // should also degrade safely rather than panicking.
         _ => Value::Error(ErrorKind::Spill),
@@ -9422,9 +9454,9 @@ mod tests {
     #[test]
     fn bytecode_compile_report_classifies_unsupported_operators() {
         let mut engine = Engine::new();
-        // The union operator (`,`) is not supported by the bytecode backend.
-        // (Note: argument separators inside function calls are lexed separately.)
-        engine.set_cell_formula("Sheet1", "B1", "=A1,C1").unwrap();
+        // The intersection operator (space) is not supported by the bytecode backend.
+        // (Note: ordinary whitespace is ignored; it is only parsed as intersection between refs.)
+        engine.set_cell_formula("Sheet1", "B1", "=A1 C1").unwrap();
 
         let report = engine.bytecode_compile_report(10);
         assert_eq!(report.len(), 1);
@@ -10012,6 +10044,78 @@ mod tests {
         assert_eq!(engine.bytecode_program_count(), 2);
         engine.recalculate_single_threaded();
         assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(6.0));
+    }
+
+    #[test]
+    fn bytecode_supports_multi_area_structured_refs() {
+        use formula_model::table::TableColumn;
+
+        fn table_fixture(range: &str) -> Table {
+            Table {
+                id: 1,
+                name: "Table1".into(),
+                display_name: "Table1".into(),
+                range: Range::from_a1(range).unwrap(),
+                header_row_count: 1,
+                totals_row_count: 0,
+                columns: vec![
+                    TableColumn {
+                        id: 1,
+                        name: "Col1".into(),
+                        formula: None,
+                        totals_formula: None,
+                    },
+                    TableColumn {
+                        id: 2,
+                        name: "Col2".into(),
+                        formula: None,
+                        totals_formula: None,
+                    },
+                    TableColumn {
+                        id: 3,
+                        name: "Col3".into(),
+                        formula: None,
+                        totals_formula: None,
+                    },
+                ],
+                style: None,
+                auto_filter: None,
+                relationship_id: None,
+                part_path: None,
+            }
+        }
+
+        let mut engine = Engine::new();
+        engine.ensure_sheet("Sheet1");
+        engine.set_sheet_tables("Sheet1", vec![table_fixture("A1:C3")]);
+
+        engine.set_cell_value("Sheet1", "A2", 1.0).unwrap();
+        engine.set_cell_value("Sheet1", "A3", 2.0).unwrap();
+        engine.set_cell_value("Sheet1", "C2", 3.0).unwrap();
+        engine.set_cell_value("Sheet1", "C3", 4.0).unwrap();
+
+        engine
+            .set_cell_formula("Sheet1", "D1", "=SUM(Table1[[Col1],[Col3]])")
+            .unwrap();
+
+        let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
+        let addr_d1 = parse_a1("D1").unwrap();
+        let cell_d1 = engine.workbook.sheets[sheet_id]
+            .cells
+            .get(&addr_d1)
+            .expect("D1 stored");
+        assert!(
+            matches!(cell_d1.compiled, Some(CompiledFormula::Bytecode(_))),
+            "multi-area structured refs should be eligible for bytecode after lowering"
+        );
+
+        engine.recalculate_single_threaded();
+        let d1_bc = engine.get_cell_value("Sheet1", "D1");
+        assert_eq!(d1_bc, Value::Number(10.0));
+
+        engine.set_bytecode_enabled(false);
+        engine.recalculate_single_threaded();
+        assert_eq!(engine.get_cell_value("Sheet1", "D1"), d1_bc);
     }
 
     #[test]

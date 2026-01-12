@@ -300,6 +300,50 @@ fn lower_range_ref(
     }
 }
 
+fn ref_expr_to_areas(
+    expr: &crate::Expr,
+    origin: crate::CellAddr,
+    current_sheet: usize,
+    resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
+) -> Result<Vec<SheetRangeRef>, LowerError> {
+    match expr {
+        crate::Expr::Binary(b) if b.op == crate::BinaryOp::Union => {
+            let mut left = ref_expr_to_areas(&b.left, origin, current_sheet, resolve_sheet)?;
+            let mut right = ref_expr_to_areas(&b.right, origin, current_sheet, resolve_sheet)?;
+            left.append(&mut right);
+            Ok(left)
+        }
+        crate::Expr::CellRef(r) => match lower_cell_ref_expr(r, origin, current_sheet, resolve_sheet)? {
+            BytecodeExpr::CellRef(cell) => Ok(vec![SheetRangeRef::new(
+                current_sheet,
+                RangeRef::new(cell, cell),
+            )]),
+            BytecodeExpr::MultiRangeRef(multi) => Ok(multi.areas.iter().copied().collect()),
+            _ => Err(LowerError::Unsupported),
+        },
+        crate::Expr::Binary(b) if b.op == crate::BinaryOp::Range => {
+            match lower_range_ref(&b.left, &b.right, origin, current_sheet, resolve_sheet)? {
+                BytecodeExpr::RangeRef(range) => {
+                    Ok(vec![SheetRangeRef::new(current_sheet, range)])
+                }
+                BytecodeExpr::MultiRangeRef(multi) => Ok(multi.areas.iter().copied().collect()),
+                _ => Err(LowerError::Unsupported),
+            }
+        }
+        _ => Err(LowerError::Unsupported),
+    }
+}
+
+fn lower_union_ref(
+    expr: &crate::Expr,
+    origin: crate::CellAddr,
+    current_sheet: usize,
+    resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
+) -> Result<BytecodeExpr, LowerError> {
+    let areas = ref_expr_to_areas(expr, origin, current_sheet, resolve_sheet)?;
+    Ok(BytecodeExpr::MultiRangeRef(MultiRangeRef::new(areas.into())))
+}
+
 fn parse_number(raw: &str) -> Result<f64, LowerError> {
     match raw.parse::<f64>() {
         Ok(n) if n.is_finite() => Ok(n),
@@ -429,6 +473,7 @@ pub fn lower_canonical_expr(
             crate::BinaryOp::Range => {
                 lower_range_ref(&b.left, &b.right, origin, current_sheet, resolve_sheet)
             }
+            crate::BinaryOp::Union => lower_union_ref(expr, origin, current_sheet, resolve_sheet),
             crate::BinaryOp::Concat => {
                 // Flatten `a&b&c` into a single CONCAT call so we avoid intermediate allocations
                 // during evaluation and maximize cache sharing between equivalent concat chains.
@@ -485,7 +530,7 @@ pub fn lower_canonical_expr(
                     )?),
                 })
             }
-            crate::BinaryOp::Union | crate::BinaryOp::Intersect => Err(LowerError::Unsupported),
+            crate::BinaryOp::Intersect => Err(LowerError::Unsupported),
         },
         crate::Expr::Unary(u) => match u.op {
             crate::UnaryOp::Plus => Ok(BytecodeExpr::Unary {
