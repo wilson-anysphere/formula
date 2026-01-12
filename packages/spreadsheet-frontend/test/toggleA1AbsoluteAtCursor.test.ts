@@ -7,23 +7,24 @@ describe("toggleA1AbsoluteAtCursor", () => {
     const step1 = toggleA1AbsoluteAtCursor("=A1", 2, 2);
     expect(step1).not.toBeNull();
     expect(step1?.text).toBe("=$A$1");
-    expect(step1?.cursorStart).toBe(4);
-    expect(step1?.cursorEnd).toBe(4);
+    // Excel-style: selecting the updated token keeps repeated F4 presses cycling it.
+    expect(step1?.cursorStart).toBe(1);
+    expect(step1?.cursorEnd).toBe(5);
 
     const step2 = toggleA1AbsoluteAtCursor(step1!.text, step1!.cursorStart, step1!.cursorEnd);
     expect(step2?.text).toBe("=A$1");
-    expect(step2?.cursorStart).toBe(3);
-    expect(step2?.cursorEnd).toBe(3);
+    expect(step2?.cursorStart).toBe(1);
+    expect(step2?.cursorEnd).toBe(4);
 
     const step3 = toggleA1AbsoluteAtCursor(step2!.text, step2!.cursorStart, step2!.cursorEnd);
     expect(step3?.text).toBe("=$A1");
-    expect(step3?.cursorStart).toBe(3);
-    expect(step3?.cursorEnd).toBe(3);
+    expect(step3?.cursorStart).toBe(1);
+    expect(step3?.cursorEnd).toBe(4);
 
     const step4 = toggleA1AbsoluteAtCursor(step3!.text, step3!.cursorStart, step3!.cursorEnd);
     expect(step4?.text).toBe("=A1");
-    expect(step4?.cursorStart).toBe(2);
-    expect(step4?.cursorEnd).toBe(2);
+    expect(step4?.cursorStart).toBe(1);
+    expect(step4?.cursorEnd).toBe(3);
   });
 
   it("cycles a range ref and applies the mode to both endpoints", () => {
@@ -31,9 +32,9 @@ describe("toggleA1AbsoluteAtCursor", () => {
     // Caret inside the range (before "B").
     const step1 = toggleA1AbsoluteAtCursor(input, 8, 8);
     expect(step1?.text).toBe("=SUM($A$1:$B$2)");
-    // Cursor should still be inside the reference token (before "B").
-    expect(step1?.cursorStart).toBe(11);
-    expect(step1?.cursorEnd).toBe(11);
+    // Selecting the updated token enables repeated F4 presses to keep cycling it.
+    expect(step1?.cursorStart).toBe(5);
+    expect(step1?.cursorEnd).toBe(14);
   });
 
   it("preserves sheet qualifiers (unquoted + quoted)", () => {
@@ -51,4 +52,3 @@ describe("toggleA1AbsoluteAtCursor", () => {
     expect(res?.cursorEnd).toBe(5);
   });
 });
-

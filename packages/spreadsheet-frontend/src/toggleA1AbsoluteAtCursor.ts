@@ -53,6 +53,10 @@ export function toggleA1AbsoluteAtCursor(
   const selMin = Math.min(start, end);
   const selMax = Math.max(start, end);
   const selectionCoversToken = selMin !== selMax && selMin === active.start && selMax === active.end;
+  // Excel-style behavior: when the caret is inside a reference token, pressing F4 toggles
+  // absolute/relative mode and selects the entire updated token so repeated presses keep
+  // cycling the same reference (and range-drag insertion can replace it).
+  const selectionIsCaret = selMin === selMax;
 
   const delta = toggled.text.length - oldTokenText.length;
 
@@ -68,7 +72,7 @@ export function toggleA1AbsoluteAtCursor(
 
   let nextCursorStart: number;
   let nextCursorEnd: number;
-  if (selectionCoversToken) {
+  if (selectionCoversToken || selectionIsCaret) {
     const tokenStart = active.start;
     const tokenEnd = active.start + toggled.text.length;
     if (start <= end) {
