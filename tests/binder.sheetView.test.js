@@ -622,3 +622,35 @@ test("binder: syncs layered full-column formatting via sheet metadata (no per-ce
     ydoc.destroy();
   }
 });
+
+test("binder: syncs range-run formatting via sheet metadata (no per-cell materialization)", async () => {
+  const ydoc = new Y.Doc();
+  const documentControllerA = new DocumentController();
+  const documentControllerB = new DocumentController();
+
+  const binderA = bindYjsToDocumentController({ ydoc, documentController: documentControllerA, defaultSheetId: "Sheet1" });
+  const binderB = bindYjsToDocumentController({ ydoc, documentController: documentControllerB, defaultSheetId: "Sheet1" });
+
+  try {
+    // Use a large range that exceeds the range-run threshold so DocumentController stores
+    // the patch in `formatRunsByCol` instead of per-cell styles.
+    documentControllerA.setRangeFormat("Sheet1", "A1:A50001", { font: { italic: true } });
+
+    await waitForCondition(() => {
+      const entry = findSheetEntry(ydoc, "Sheet1");
+      const runsByCol = entry?.get?.("formatRunsByCol") ?? entry?.formatRunsByCol;
+      const col0 = runsByCol?.get?.("0") ?? runsByCol?.["0"];
+      return Array.isArray(col0) && col0[0]?.format?.font?.italic === true;
+    });
+
+    await waitForCondition(() => documentControllerB.getCellFormat("Sheet1", "A1")?.font?.italic === true);
+
+    assert.equal(documentControllerB.getCell("Sheet1", "A1").styleId, 0);
+    assert.equal(documentControllerB.getCellFormat("Sheet1", "A1")?.font?.italic, true);
+    assert.equal(documentControllerB.getCellFormat("Sheet1", "A50002")?.font?.italic, undefined);
+  } finally {
+    binderA.destroy();
+    binderB.destroy();
+    ydoc.destroy();
+  }
+});

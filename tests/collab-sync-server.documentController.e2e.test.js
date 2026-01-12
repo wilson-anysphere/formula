@@ -384,6 +384,11 @@ test("sync-server + Yjs↔DocumentController binder: sync format-only cells", as
   await waitForCellFormat(clientB.documentController, "Sheet1", "A1", { font: { bold: true } });
   assert.equal(clientB.documentController.getCell("Sheet1", "A1").styleId, 0);
 
+  // Apply range-run formatting (large range, not a full column) and ensure it syncs + persists.
+  clientA.documentController.setRangeFormat("Sheet1", "B1:B50001", { font: { italic: true } });
+  await waitForCellFormat(clientB.documentController, "Sheet1", "B1", { font: { italic: true } });
+  assert.equal(clientB.documentController.getCell("Sheet1", "B1").styleId, 0);
+
   // Tear down clients and restart the server to validate persistence.
   clientA.destroy();
   clientB.destroy();
@@ -415,6 +420,9 @@ test("sync-server + Yjs↔DocumentController binder: sync format-only cells", as
   await waitForCell(clientC.documentController, "Sheet1", "A1", { value: "hello", formula: null });
   await waitForCellFormat(clientC.documentController, "Sheet1", "A1", { font: { bold: true } });
   assert.equal(clientC.documentController.getCell("Sheet1", "A1").styleId, 0);
+
+  await waitForCellFormat(clientC.documentController, "Sheet1", "B1", { font: { italic: true } });
+  assert.equal(clientC.documentController.getCell("Sheet1", "B1").styleId, 0);
 });
 
 test("sync-server + Yjs↔DocumentController binder: permission-masked cells are unreadable and uneditable", async (t) => {

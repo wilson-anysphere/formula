@@ -568,6 +568,16 @@ export function bindYjsToDocumentController(options) {
   }
 
   /**
+   * @param {any[]} deltas
+   */
+  function enqueueSheetRangeRunWrite(deltas) {
+    const snapshot = Array.from(deltas ?? []);
+    sheetWriteChain = sheetWriteChain.then(() => applyDocumentRangeRunDeltas(snapshot)).catch((err) => {
+      console.error(err);
+    });
+  }
+
+  /**
    * @param {string} canonicalKey
    * @param {string} rawKey
    */
@@ -977,6 +987,111 @@ export function bindYjsToDocumentController(options) {
   }
 
   /**
+   * Compare two arrays of range-run FormatRuns (by value).
+   *
+   * @param {any[]} a
+   * @param {any[]} b
+   * @returns {boolean}
+   */
+  function formatRunsEqual(a, b) {
+    if (a === b) return true;
+    if (!Array.isArray(a) || !Array.isArray(b)) return false;
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) {
+      const ar = a[i];
+      const br = b[i];
+      if (!ar || !br) return false;
+      if (ar.startRow !== br.startRow) return false;
+      if (ar.endRowExclusive !== br.endRowExclusive) return false;
+      if (ar.styleId !== br.styleId) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Normalize sparse `formatRunsByCol` encodings from Yjs into a `Map<col, FormatRun[]>`.
+   *
+   * Supported encodings:
+   * - Y.Map / object: `{ "12": [{ startRow, endRowExclusive, format }, ...] }`
+   * - array: `[{ col: 12, runs: [...] }, ...]`
+   * - tuple array: `[[12, [...]], ...]`
+   *
+   * Note: the returned runs are not guaranteed to be fully normalized (non-overlapping),
+   * but DocumentController will normalize when applying them.
+   *
+   * @param {any} raw
+   * @returns {Map<number, any[]>}
+   */
+  function readSparseFormatRunsByCol(raw) {
+    /** @type {Map<number, any[]>} */
+    const out = new Map();
+    const json = yjsValueToJson(raw);
+    if (!json) return out;
+
+    /**
+     * @param {any} colKey
+     * @param {any} rawRuns
+     */
+    const addColRuns = (colKey, rawRuns) => {
+      const col = Number(colKey);
+      if (!Number.isInteger(col) || col < 0) return;
+
+      const list = Array.isArray(rawRuns)
+        ? rawRuns
+        : isRecord(rawRuns)
+          ? rawRuns.runs ?? rawRuns.formatRuns ?? rawRuns.segments ?? []
+          : [];
+
+      if (!Array.isArray(list) || list.length === 0) return;
+
+      /** @type {any[]} */
+      const runs = [];
+      for (const entry of list) {
+        if (!entry || typeof entry !== "object") continue;
+        const startRow = Number(entry.startRow);
+        const endRowExclusiveNum = Number(entry.endRowExclusive);
+        const endRowNum = Number(entry.endRow);
+        const endRowExclusive = Number.isInteger(endRowExclusiveNum)
+          ? endRowExclusiveNum
+          : Number.isInteger(endRowNum)
+            ? endRowNum + 1
+            : NaN;
+        if (!Number.isInteger(startRow) || startRow < 0) continue;
+        if (!Number.isInteger(endRowExclusive) || endRowExclusive <= startRow) continue;
+
+        const styleId = styleIdFromYjsFormat(entry.format ?? entry.style ?? entry.value ?? null);
+        if (styleId === 0) continue;
+
+        runs.push({ startRow, endRowExclusive, styleId });
+      }
+
+      runs.sort((a, b) => a.startRow - b.startRow);
+      if (runs.length > 0) out.set(col, runs);
+    };
+
+    if (Array.isArray(json)) {
+      for (const entry of json) {
+        if (Array.isArray(entry)) {
+          addColRuns(entry[0], entry[1]);
+          continue;
+        }
+        if (isRecord(entry)) {
+          addColRuns(entry.col ?? entry.index, entry.runs ?? entry.formatRuns ?? entry.segments);
+        }
+      }
+      return out;
+    }
+
+    if (isRecord(json)) {
+      for (const [key, value] of Object.entries(json)) {
+        addColRuns(key, value);
+      }
+    }
+
+    return out;
+  }
+
+  /** 
    * @param {string} sheetId
    * @returns {Array<{ index: number, entry: any, isLocal: boolean }>}
    */
@@ -1034,6 +1149,8 @@ export function bindYjsToDocumentController(options) {
     const sheetViewDeltas = [];
     /** @type {any[]} */
     const formatDeltas = [];
+    /** @type {any[]} */
+    const rangeRunDeltas = [];
 
     for (const sheetId of changedSheetIds) {
       if (!sheetId) continue;
@@ -1091,9 +1208,43 @@ export function bindYjsToDocumentController(options) {
         if (beforeStyleId === afterStyleId) continue;
         formatDeltas.push({ sheetId, layer: "col", index: col, beforeStyleId, afterStyleId });
       }
+
+      // Range-run formatting (compressed rectangular formatting).
+      const beforeRunsByCol = sheetModel?.formatRunsByCol instanceof Map ? sheetModel.formatRunsByCol : new Map();
+      const rawRunsByCol = readSheetEntryField(sheetEntry, "formatRunsByCol");
+      const viewRaw = readSheetEntryField(sheetEntry, "view");
+      const viewJson = viewRaw !== undefined ? yjsValueToJson(viewRaw) : null;
+      const viewRunsByCol = isRecord(viewJson) ? viewJson.formatRunsByCol : null;
+      const afterRunsByCol = readSparseFormatRunsByCol(rawRunsByCol !== undefined ? rawRunsByCol : viewRunsByCol);
+
+      const runCols = new Set([...beforeRunsByCol.keys(), ...afterRunsByCol.keys()]);
+      for (const col of runCols) {
+        const beforeRuns = beforeRunsByCol.get(col) ?? [];
+        const afterRuns = afterRunsByCol.get(col) ?? [];
+        if (formatRunsEqual(beforeRuns, afterRuns)) continue;
+
+        let startRow = Infinity;
+        let endRowExclusive = -Infinity;
+        for (const run of [...beforeRuns, ...afterRuns]) {
+          if (!run) continue;
+          startRow = Math.min(startRow, run.startRow);
+          endRowExclusive = Math.max(endRowExclusive, run.endRowExclusive);
+        }
+        if (startRow === Infinity) startRow = 0;
+        if (endRowExclusive === -Infinity) endRowExclusive = 0;
+
+        rangeRunDeltas.push({
+          sheetId,
+          col,
+          startRow,
+          endRowExclusive,
+          beforeRuns,
+          afterRuns,
+        });
+      }
     }
 
-    if (sheetViewDeltas.length === 0 && formatDeltas.length === 0) return;
+    if (sheetViewDeltas.length === 0 && formatDeltas.length === 0 && rangeRunDeltas.length === 0) return;
 
     applyingRemote = true;
     try {
@@ -1118,6 +1269,10 @@ export function bindYjsToDocumentController(options) {
 
       if (formatDeltas.length > 0 && typeof documentController.applyExternalFormatDeltas === "function") {
         documentController.applyExternalFormatDeltas(formatDeltas, { source: "collab" });
+      }
+
+      if (rangeRunDeltas.length > 0 && typeof documentController.applyExternalRangeRunDeltas === "function") {
+        documentController.applyExternalRangeRunDeltas(rangeRunDeltas, { source: "collab" });
       }
     } finally {
       applyingRemote = false;
@@ -1764,6 +1919,157 @@ export function bindYjsToDocumentController(options) {
   }
 
   /**
+   * Apply DocumentController range-run deltas (compressed rectangular formatting) into Yjs.
+   *
+   * Storage format:
+   *   sheets[i].get("formatRunsByCol") is a `Y.Map<string, any>` where each key is a
+   *   0-based column index string and each value is an array of runs:
+   *     [{ startRow, endRowExclusive, format }, ...]
+   *
+   * Runs store style objects (not style ids) because style ids are local to each
+   * DocumentController instance.
+   *
+   * @param {any[]} deltas
+   */
+  function applyDocumentRangeRunDeltas(deltas) {
+    if (!deltas || deltas.length === 0) return;
+
+    /**
+     * @type {Map<string, Array<{ col: number, runs: any[] }>>}
+     */
+    const preparedBySheet = new Map();
+
+    const cloneJson = (value) => {
+      try {
+        return structuredClone(value);
+      } catch {
+        return value;
+      }
+    };
+
+    for (const delta of deltas) {
+      const sheetId = delta?.sheetId;
+      if (typeof sheetId !== "string" || sheetId === "") continue;
+      const col = Number(delta?.col);
+      if (!Number.isInteger(col) || col < 0) continue;
+
+      const afterRuns = Array.isArray(delta?.afterRuns) ? delta.afterRuns : [];
+      const runs = afterRuns
+        .map((run) => {
+          const startRow = Number(run?.startRow);
+          const endRowExclusive = Number(run?.endRowExclusive);
+          const styleId = Number(run?.styleId);
+          if (!Number.isInteger(startRow) || startRow < 0) return null;
+          if (!Number.isInteger(endRowExclusive) || endRowExclusive <= startRow) return null;
+          if (!Number.isInteger(styleId) || styleId <= 0) return null;
+          return {
+            startRow,
+            endRowExclusive,
+            format: cloneJson(documentController.styleTable.get(styleId)),
+          };
+        })
+        .filter(Boolean);
+
+      let list = preparedBySheet.get(sheetId);
+      if (!list) {
+        list = [];
+        preparedBySheet.set(sheetId, list);
+      }
+      list.push({ col, runs });
+    }
+
+    if (preparedBySheet.size === 0) return;
+
+    /**
+     * @param {Y.Map<any>} sheetMap
+     * @returns {Y.Map<any>}
+     */
+    const ensureFormatRunsMap = (sheetMap) => {
+      const existing = sheetMap.get("formatRunsByCol");
+      const existingMap = getYMap(existing);
+      if (existingMap) return existingMap;
+      const next = new Y.Map();
+      if (isRecord(existing)) {
+        const keys = Object.keys(existing).sort();
+        for (const key of keys) {
+          next.set(key, cloneJson(existing[key]));
+        }
+      }
+      sheetMap.set("formatRunsByCol", next);
+      return next;
+    };
+
+    const apply = () => {
+      for (const [sheetId, items] of preparedBySheet.entries()) {
+        // Apply to all matching entries when duplicate sheet ids exist.
+        let foundEntries = findYjsSheetEntriesById(sheetId);
+        if (foundEntries.length === 0) {
+          const sheetMap = new Y.Map();
+          sheetMap.set("id", sheetId);
+          sheetMap.set("name", sheetId);
+          sheets.push([sheetMap]);
+          foundEntries = [{ index: sheets.length - 1, entry: sheetMap, isLocal: true }];
+        }
+
+        for (const found of foundEntries) {
+          let sheetMap = getYMap(found?.entry);
+          if (!sheetMap) {
+            sheetMap = new Y.Map();
+            sheetMap.set("id", sheetId);
+            const name = coerceString(found?.entry?.get?.("name") ?? found?.entry?.name) ?? sheetId;
+            sheetMap.set("name", name);
+
+            if (isRecord(found?.entry)) {
+              const keys = Object.keys(found.entry).sort();
+              for (const key of keys) {
+                if (key === "id" || key === "name") continue;
+                sheetMap.set(key, cloneJson(found.entry[key]));
+              }
+            }
+
+            sheets.delete(found.index, 1);
+            sheets.insert(found.index, [sheetMap]);
+          }
+
+          for (const item of items) {
+            const colKey = String(item.col);
+            const existingMap = getYMap(sheetMap.get("formatRunsByCol"));
+
+            if (item.runs.length === 0) {
+              if (existingMap) {
+                existingMap.delete(colKey);
+                if (existingMap.size === 0) sheetMap.delete("formatRunsByCol");
+              }
+              continue;
+            }
+
+            const map = existingMap ?? ensureFormatRunsMap(sheetMap);
+            map.set(colKey, item.runs);
+          }
+        }
+      }
+    };
+
+    if (typeof undoService?.transact === "function") {
+      const prevApplyingLocal = applyingLocal;
+      applyingLocal = true;
+      try {
+        undoService.transact(apply);
+      } finally {
+        applyingLocal = prevApplyingLocal;
+      }
+    } else {
+      const prevApplyingLocal = applyingLocal;
+      applyingLocal = true;
+      try {
+        ydoc.transact(apply, binderOrigin);
+      } finally {
+        applyingLocal = prevApplyingLocal;
+      }
+    }
+  }
+
+  /**
    * Determine whether a local DocumentController change should be allowed to propagate
    * into Yjs when encryption is enabled (or encrypted cells exist in the doc).
    *
@@ -1870,6 +2176,58 @@ export function bindYjsToDocumentController(options) {
   }
 
   /**
+   * Determine whether a range-run formatting edit should be allowed to propagate into Yjs.
+   *
+   * @param {any} delta
+   * @returns {boolean}
+   */
+  function canEditRangeRunDelta(delta) {
+    if (!editGuard) return true;
+    const sheetId = typeof delta?.sheetId === "string" ? delta.sheetId : null;
+    if (!sheetId) return false;
+
+    const col = Number(delta?.col);
+    const startRow = Number(delta?.startRow);
+    const endRowExclusive = Number(delta?.endRowExclusive);
+    if (!Number.isInteger(col) || col < 0) return false;
+    if (!Number.isInteger(startRow) || startRow < 0) return false;
+    if (!Number.isInteger(endRowExclusive) || endRowExclusive <= startRow) return false;
+
+    const restrictions =
+      permissions && typeof permissions === "object" && Array.isArray(permissions.restrictions) ? permissions.restrictions : null;
+
+    // Role-based restrictions: ensure we don't touch any protected ranges.
+    if (restrictions && restrictions.length > 0) {
+      for (const restriction of restrictions) {
+        const range = restriction?.range ?? restriction;
+        const restrictionSheetId = coerceString(
+          range?.sheetId ?? range?.sheetName ?? restriction?.sheetId ?? restriction?.sheetName,
+        );
+        if (restrictionSheetId && restrictionSheetId !== sheetId) continue;
+
+        const startRowR = Number(range?.startRow);
+        const endRowR = Number(range?.endRow);
+        const startColR = Number(range?.startCol);
+        const endColR = Number(range?.endCol);
+        if (!Number.isInteger(startRowR) || !Number.isInteger(endRowR) || startRowR < 0 || endRowR < startRowR) continue;
+        if (!Number.isInteger(startColR) || !Number.isInteger(endColR) || startColR < 0 || endColR < startColR) continue;
+
+        const intersectsCol = col >= startColR && col <= endColR;
+        const intersectsRow = startRow <= endRowR && endRowExclusive - 1 >= startRowR;
+        if (!intersectsCol || !intersectsRow) continue;
+
+        // Probe any cell in the overlap.
+        const probeRow = Math.max(startRow, startRowR);
+        if (!editGuard({ sheetId, row: probeRow, col })) return false;
+      }
+      return true;
+    }
+
+    // Fallback for custom permission functions: probe the start cell.
+    return editGuard({ sheetId, row: startRow, col });
+  }
+
+  /**
    * Extract layered-format deltas from a DocumentController change payload.
    *
    * Prefer the unified `payload.formatDeltas` stream, but accept the split
@@ -1953,16 +2311,18 @@ export function bindYjsToDocumentController(options) {
     const deltas = Array.isArray(payload?.deltas) ? payload.deltas : [];
     const sheetViewDeltas = Array.isArray(payload?.sheetViewDeltas) ? payload.sheetViewDeltas : [];
     const formatDeltas = readFormatDeltasFromDocumentChange(payload);
+    const rangeRunDeltas = Array.isArray(payload?.rangeRunDeltas) ? payload.rangeRunDeltas : [];
 
     if (sheetViewDeltas.length > 0) {
       enqueueSheetViewWrite(sheetViewDeltas);
     }
 
-    if (deltas.length === 0 && formatDeltas.length === 0) return;
+    if (deltas.length === 0 && formatDeltas.length === 0 && rangeRunDeltas.length === 0) return;
 
     const needsEncryptionGuard = Boolean(encryption || hasEncryptedCells);
     if (!editGuard && !needsEncryptionGuard) {
       if (formatDeltas.length > 0) enqueueSheetFormatWrite(formatDeltas);
+      if (rangeRunDeltas.length > 0) enqueueSheetRangeRunWrite(rangeRunDeltas);
       if (deltas.length > 0) enqueueWrite(deltas);
       return;
     }
@@ -1972,11 +2332,15 @@ export function bindYjsToDocumentController(options) {
     /** @type {any[]} */
     const allowedFormatDeltas = [];
     /** @type {any[]} */
+    const allowedRangeRunDeltas = [];
+    /** @type {any[]} */
     const rejected = [];
     /** @type {any[]} */
     const deniedInverse = [];
     /** @type {any[]} */
     const deniedInverseFormats = [];
+    /** @type {any[]} */
+    const deniedInverseRangeRuns = [];
 
     for (const delta of deltas) {
       const cellRef = { sheetId: delta.sheetId, row: delta.row, col: delta.col };
@@ -2019,8 +2383,25 @@ export function bindYjsToDocumentController(options) {
       }
     }
 
+    for (const delta of rangeRunDeltas) {
+      if (canEditRangeRunDelta(delta)) {
+        allowedRangeRunDeltas.push(delta);
+      } else {
+        rejected.push(delta);
+        deniedInverseRangeRuns.push({
+          sheetId: delta.sheetId,
+          col: delta.col,
+          startRow: delta.startRow,
+          endRowExclusive: delta.endRowExclusive,
+          beforeRuns: delta.afterRuns,
+          afterRuns: delta.beforeRuns,
+        });
+      }
+    }
+
     if (allowed.length > 0) enqueueWrite(allowed);
     if (allowedFormatDeltas.length > 0) enqueueSheetFormatWrite(allowedFormatDeltas);
+    if (allowedRangeRunDeltas.length > 0) enqueueSheetRangeRunWrite(allowedRangeRunDeltas);
 
     if (rejected.length > 0 && typeof onEditRejected === "function") {
       try {
@@ -2030,7 +2411,7 @@ export function bindYjsToDocumentController(options) {
       }
     }
 
-    if (deniedInverse.length > 0 || deniedInverseFormats.length > 0) {
+    if (deniedInverse.length > 0 || deniedInverseFormats.length > 0 || deniedInverseRangeRuns.length > 0) {
       // Keep local UI state aligned with the shared document when a user attempts to
       // edit a restricted cell.
       applyingRemote = true;
@@ -2057,6 +2438,10 @@ export function bindYjsToDocumentController(options) {
 
         if (deniedInverseFormats.length > 0 && typeof documentController.applyExternalFormatDeltas === "function") {
           documentController.applyExternalFormatDeltas(deniedInverseFormats, { source: "collab" });
+        }
+
+        if (deniedInverseRangeRuns.length > 0 && typeof documentController.applyExternalRangeRunDeltas === "function") {
+          documentController.applyExternalRangeRunDeltas(deniedInverseRangeRuns, { source: "collab" });
         }
       } finally {
         applyingRemote = false;
