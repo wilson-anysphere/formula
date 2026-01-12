@@ -1,4 +1,6 @@
-use formula_engine::{Engine, Value};
+use formula_engine::eval::AddressParseError;
+use formula_engine::{Engine, EngineError, Value};
+use formula_model::EXCEL_MAX_COLS;
 use pretty_assertions::assert_eq;
 
 #[test]
@@ -59,3 +61,25 @@ fn indirect_can_resolve_rows_beyond_excel_max() {
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(9.0));
 }
 
+#[test]
+fn row_limit_is_capped_at_i32_max() {
+    let mut engine = Engine::new();
+
+    // The largest allowed 1-indexed row is `i32::MAX` (because internal row arithmetic relies on
+    // i32 offsets).
+    engine
+        .set_cell_value("Sheet1", "A2147483647", 1.0)
+        .unwrap();
+    assert_eq!(
+        engine.sheet_dimensions("Sheet1"),
+        Some((i32::MAX as u32, EXCEL_MAX_COLS))
+    );
+
+    let err = engine
+        .set_cell_value("Sheet1", "A2147483648", 1.0)
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        EngineError::Address(AddressParseError::RowOutOfRange)
+    ));
+}

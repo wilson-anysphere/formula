@@ -823,6 +823,15 @@ impl Engine {
     ) -> Result<(), EngineError> {
         let sheet_id = self.workbook.ensure_sheet(sheet);
         let addr = parse_a1(addr)?;
+        // The engine supports rows beyond Excel's default 1,048,576 limit, but some internal
+        // evaluation paths (notably the bytecode engine and reference rewriting) use 32-bit
+        // coordinates. Keep sheet growth bounded to `i32::MAX` rows so all row/offset conversions
+        // remain sound.
+        if addr.row >= i32::MAX as u32 {
+            return Err(EngineError::Address(
+                crate::eval::AddressParseError::RowOutOfRange,
+            ));
+        }
         if self.workbook.grow_sheet_dimensions(sheet_id, addr) {
             // Sheet dimensions affect out-of-bounds `#REF!` semantics for references. If the sheet
             // grows, formulas that previously evaluated to `#REF!` may now become valid (and vice
@@ -1264,6 +1273,11 @@ impl Engine {
     ) -> Result<(), EngineError> {
         let sheet_id = self.workbook.ensure_sheet(sheet);
         let addr = parse_a1(addr)?;
+        if addr.row >= i32::MAX as u32 {
+            return Err(EngineError::Address(
+                crate::eval::AddressParseError::RowOutOfRange,
+            ));
+        }
         if self.workbook.grow_sheet_dimensions(sheet_id, addr) {
             self.mark_all_compiled_cells_dirty();
         }
@@ -1936,6 +1950,11 @@ impl Engine {
         if max_col >= EXCEL_MAX_COLS {
             return Err(EditError::Engine(
                 crate::eval::AddressParseError::ColumnOutOfRange.to_string(),
+            ));
+        }
+        if max_row >= i32::MAX as u32 {
+            return Err(EditError::Engine(
+                crate::eval::AddressParseError::RowOutOfRange.to_string(),
             ));
         }
 
