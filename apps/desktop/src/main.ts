@@ -1286,15 +1286,11 @@ if (
     if (target.sheetId && target.sheetId !== prevSheet) invalidateSecondaryProvider();
   };
 
-  window.addEventListener("keydown", (event) => {
-    if (!secondaryGridView) return;
-    const primary = event.ctrlKey || event.metaKey;
-    if (!primary) return;
-    if (event.code !== "Backquote") return;
-    // Only invalidate when SpreadsheetApp actually handled the shortcut.
-    if (!event.defaultPrevented) return;
+  const setShowFormulasWithSplitSync = app.setShowFormulas.bind(app);
+  app.setShowFormulas = (enabled: boolean): void => {
+    setShowFormulasWithSplitSync(enabled);
     invalidateSecondaryProvider();
-  });
+  };
 
   // --- Split-view selection synchronization (primary SpreadsheetApp ↔ secondary grid) ---
 
@@ -1404,7 +1400,7 @@ if (
         getSheetId: () => app.getCurrentSheetId(),
         rowCount,
         colCount,
-        showFormulas: () => Boolean((app as any).showFormulas),
+        showFormulas: () => app.getShowFormulas(),
         getComputedValue: (cell) => (app as any).getCellComputedValue(cell),
         onSelectionChange: () => syncPrimarySelectionFromSecondary(),
         onSelectionRangeChange: () => syncPrimarySelectionFromSecondary(),

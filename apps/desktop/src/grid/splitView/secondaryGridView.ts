@@ -38,6 +38,7 @@ export class SecondaryGridView {
   private scrollPersistTimer: number | null = null;
   private pendingZoom: number | null = null;
   private zoomPersistTimer: number | null = null;
+  private lastZoom = 1;
 
   private readonly persistScroll?: (scroll: ScrollState) => void;
   private readonly persistZoom?: (zoom: number) => void;
@@ -149,6 +150,13 @@ export class SecondaryGridView {
           this.container.dataset.scrollX = String(scroll.x);
           this.container.dataset.scrollY = String(scroll.y);
           this.schedulePersistScroll({ scrollX: scroll.x, scrollY: scroll.y });
+
+          const zoom = this.grid.renderer.getZoom();
+          this.container.dataset.zoom = String(zoom);
+          if (Math.abs(zoom - this.lastZoom) > 1e-6) {
+            this.lastZoom = zoom;
+            this.schedulePersistZoom(zoom);
+          }
         },
         onAxisSizeChange: (change) => this.onAxisSizeChange(change),
         onSelectionChange: options.onSelectionChange,
@@ -168,7 +176,8 @@ export class SecondaryGridView {
       this.grid.renderer.setZoom(initialZoom);
       this.grid.syncScrollbars();
     }
-    this.container.dataset.zoom = String(this.grid.renderer.getZoom());
+    this.lastZoom = this.grid.renderer.getZoom();
+    this.container.dataset.zoom = String(this.lastZoom);
 
     // Apply frozen panes + axis overrides from the DocumentController sheet view.
     this.syncSheetViewFromDocument();
@@ -183,8 +192,6 @@ export class SecondaryGridView {
       this.container.dataset.scrollY = String(scroll.y);
     }
 
-    this.installZoomHandler();
-
     // Re-apply view state when the document emits sheet view deltas (freeze panes, row/col sizes).
     const unsubscribeSheetView = this.document.on("change", (payload: any) => {
       const deltas = Array.isArray(payload?.sheetViewDeltas) ? payload.sheetViewDeltas : [];
@@ -194,7 +201,6 @@ export class SecondaryGridView {
       this.syncSheetViewFromDocument();
     });
     this.disposeFns.push(() => unsubscribeSheetView());
-
     this.resizeObserver = new ResizeObserver(() => this.resizeToContainer());
     this.resizeObserver.observe(this.container);
   }
@@ -207,46 +213,6 @@ export class SecondaryGridView {
     this.grid.destroy();
     // Remove any DOM we created (the container stays in place).
     this.container.replaceChildren();
-  }
-
-  private installZoomHandler(): void {
-    const onWheel = (event: WheelEvent) => {
-      const primary = event.ctrlKey || event.metaKey;
-      if (!primary) return;
-      // Prevent browser page zoom.
-      event.preventDefault();
-      event.stopPropagation();
-
-      let deltaY = event.deltaY;
-      if (event.deltaMode === 1) {
-        deltaY *= 16;
-      } else if (event.deltaMode === 2) {
-        // Pages -> approximate with the viewport height.
-        deltaY *= Math.max(1, this.container.getBoundingClientRect().height);
-      }
-
-      // Smooth exponential scale: ~10% per wheel "notch" (deltaY=100).
-      const factor = Math.pow(1.001, -deltaY);
-      const current = this.grid.renderer.getZoom();
-      const next = clamp(current * factor, 0.25, 4);
-
-      const rect = this.container.getBoundingClientRect();
-      const anchorX = event.clientX - rect.left;
-      const anchorY = event.clientY - rect.top;
-
-      this.grid.renderer.setZoom(next, { anchorX, anchorY });
-      this.grid.syncScrollbars();
-
-      this.container.dataset.zoom = String(this.grid.renderer.getZoom());
-      const scroll = this.grid.getScroll();
-      this.container.dataset.scrollX = String(scroll.x);
-      this.container.dataset.scrollY = String(scroll.y);
-
-      this.schedulePersistZoom(this.grid.renderer.getZoom());
-    };
-
-    this.container.addEventListener("wheel", onWheel, { passive: false });
-    this.disposeFns.push(() => this.container.removeEventListener("wheel", onWheel));
   }
 
   private resizeToContainer(): void {
