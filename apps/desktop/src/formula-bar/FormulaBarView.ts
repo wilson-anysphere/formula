@@ -326,24 +326,13 @@ export class FormulaBarView {
       // (the selection may have changed without triggering our keyup/select listeners yet).
       this.model.updateDraft(prevText, cursorStart, cursorEnd);
 
-      const activeIndex = this.model.activeReferenceIndex();
-      const active = activeIndex == null ? null : this.model.coloredReferences()[activeIndex] ?? null;
-      if (!active) return;
-
       const toggled = toggleA1AbsoluteAtCursor(prevText, cursorStart, cursorEnd);
       if (!toggled) return;
 
-      // Excel UX: after toggling, keep the full reference token selected so repeated
-      // F4 presses continue cycling the same reference.
-      const delta = toggled.text.length - prevText.length;
-      const oldTokenLen = active.end - active.start;
-      const nextStart = active.start;
-      const nextEnd = Math.max(nextStart, Math.min(nextStart + oldTokenLen + delta, toggled.text.length));
-
       this.textarea.value = toggled.text;
-      this.textarea.setSelectionRange(nextStart, nextEnd);
-      this.model.updateDraft(toggled.text, nextStart, nextEnd);
-      this.#selectedReferenceIndex = activeIndex;
+      this.textarea.setSelectionRange(toggled.cursorStart, toggled.cursorEnd);
+      this.model.updateDraft(toggled.text, toggled.cursorStart, toggled.cursorEnd);
+      this.#selectedReferenceIndex = this.#inferSelectedReferenceIndex(toggled.cursorStart, toggled.cursorEnd);
       this.#render({ preserveTextareaValue: true });
       this.#emitOverlays();
       return;
