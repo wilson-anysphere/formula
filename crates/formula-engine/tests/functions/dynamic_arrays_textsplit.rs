@@ -90,3 +90,24 @@ fn textsplit_match_mode_case_insensitive() {
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::from("b"));
 }
 
+#[test]
+fn textsplit_keeps_rows_that_become_empty_after_column_split() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A1",
+            "=TEXTSPLIT(\"a,b;,,\",\",\",\";\",TRUE,0,\"x\")",
+        )
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "A1").expect("spill range");
+    assert_eq!(start, parse_a1("A1").unwrap());
+    assert_eq!(end, parse_a1("B2").unwrap());
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::from("a"));
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::from("b"));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::from("x"));
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::from("x"));
+}

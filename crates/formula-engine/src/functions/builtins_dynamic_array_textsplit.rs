@@ -92,9 +92,6 @@ fn textsplit_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let mut rows: Vec<Vec<String>> = Vec::new();
     for row in row_segments {
         let cols = split_on_any(&row, &col_delimiters, ignore_empty, match_mode);
-        if ignore_empty && cols.is_empty() {
-            continue;
-        }
         rows.push(cols);
     }
 
