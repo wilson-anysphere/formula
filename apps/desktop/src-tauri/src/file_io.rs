@@ -1260,7 +1260,7 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
         }
 
         let wants_drop_vba =
-            matches!(extension.as_deref(), Some("xlsx")) && workbook.vba_project_bin.is_some();
+            matches!(extension.as_deref(), Some("xlsx") | Some("xltx")) && workbook.vba_project_bin.is_some();
 
         if patches.is_empty() && !print_settings_changed && !wants_drop_vba && !power_query_changed {
             std::fs::write(path, origin_bytes)
@@ -4060,6 +4060,61 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
             report.count(Severity::Critical),
             0,
             "unexpected critical diffs after macro stripping + power query override: {report:?}"
+        );
+    }
+
+    #[test]
+    fn saving_xlsm_as_xltx_drops_vba_project() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/macros/basic.xlsm"
+        ));
+        let workbook = read_xlsx_blocking(fixture_path).expect("read fixture workbook");
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("converted.xltx");
+        let _ = write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
+
+        let written_bytes = std::fs::read(&out_path).expect("read written xltx");
+        let written_pkg = XlsxPackage::from_bytes(&written_bytes).expect("parse written package");
+
+        assert!(
+            written_pkg.vba_project_bin().is_none(),
+            "expected vbaProject.bin to be removed when saving as .xltx"
+        );
+
+        let ct = std::str::from_utf8(written_pkg.part("[Content_Types].xml").unwrap()).unwrap();
+        assert!(
+            !ct.contains("vbaProject.bin"),
+            "expected [Content_Types].xml to drop vbaProject.bin override"
+        );
+        assert!(
+            !ct.contains("macroEnabled.main+xml"),
+            "expected workbook content type to be converted to a macro-free variant"
+        );
+
+        let rels =
+            std::str::from_utf8(written_pkg.part("xl/_rels/workbook.xml.rels").unwrap()).unwrap();
+        assert!(
+            !rels.contains("relationships/vbaProject"),
+            "expected workbook.xml.rels to drop the vbaProject relationship"
+        );
+
+        // Ensure macro stripping doesn't perturb unrelated parts.
+        let mut ignore_parts = BTreeSet::new();
+        ignore_parts.insert("xl/vbaProject.bin".to_string());
+        ignore_parts.insert("[Content_Types].xml".to_string());
+        ignore_parts.insert("xl/_rels/workbook.xml.rels".to_string());
+        let options = DiffOptions {
+            ignore_parts,
+            ignore_globs: Vec::new(),
+        };
+        let report =
+            diff_workbooks_with_options(fixture_path, &out_path, &options).expect("diff workbooks");
+        assert_eq!(
+            report.count(Severity::Critical),
+            0,
+            "unexpected critical diffs after macro stripping: {report:?}"
         );
     }
 
