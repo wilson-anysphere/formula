@@ -274,6 +274,56 @@ fn writes_cell_vm_cm_attributes_from_cell_meta_when_rendering_sheet_data() {
 }
 
 #[test]
+fn writer_drops_vm_when_raw_value_no_longer_matches_cell_value() {
+    let mut workbook = formula_model::Workbook::new();
+    let sheet_id = workbook.add_sheet("Sheet1".to_string()).unwrap();
+    let sheet = workbook.sheet_mut(sheet_id).expect("sheet exists");
+    let a1 = formula_model::CellRef::from_a1("A1").unwrap();
+    sheet.set_value(a1, formula_model::CellValue::Number(1.0));
+
+    // Attach a vm/cm pointer plus the raw `<v>` payload captured on read. When the in-memory cell
+    // value changes, the writer should drop `vm` to avoid leaving a dangling metadata pointer.
+    let mut doc = crate::XlsxDocument::new(workbook);
+    doc.meta.cell_meta.insert(
+        (sheet_id, a1),
+        crate::CellMeta {
+            vm: Some("1".to_string()),
+            cm: Some("2".to_string()),
+            raw_value: Some("1".to_string()),
+            ..Default::default()
+        },
+    );
+
+    // Change the cell value without updating the corresponding metadata records.
+    doc.workbook
+        .sheet_mut(sheet_id)
+        .expect("sheet exists")
+        .set_value(a1, formula_model::CellValue::Number(2.0));
+
+    let bytes = write_to_vec(&doc).expect("write doc");
+    let cursor = std::io::Cursor::new(&bytes);
+    let mut archive = ZipArchive::new(cursor).expect("open zip");
+    let mut file = archive
+        .by_name("xl/worksheets/sheet1.xml")
+        .expect("worksheet part missing");
+    let mut xml = String::new();
+    file.read_to_string(&mut xml).expect("read worksheet xml");
+
+    let doc = roxmltree::Document::parse(&xml).expect("parse sheet xml");
+    let cell = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "c" && n.attribute("r") == Some("A1"))
+        .expect("expected A1 cell");
+
+    assert_eq!(cell.attribute("vm"), None, "vm should be dropped: {xml}");
+    assert_eq!(
+        cell.attribute("cm"),
+        Some("2"),
+        "cm should be preserved: {xml}"
+    );
+}
+
+#[test]
 fn ensure_content_types_default_inserts_png() {
     let mut parts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     let minimal = concat!(
