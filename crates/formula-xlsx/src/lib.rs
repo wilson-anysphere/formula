@@ -287,7 +287,7 @@ impl XlsxDocument {
     }
 
     pub fn rich_value_index(&self, sheet: WorksheetId, cell: CellRef) -> Option<u32> {
-        self.meta.rich_value_cells.get(&(sheet, cell)).copied()
+        self.rich_value_index_for_cell(sheet, cell).ok().flatten()
     }
 
     pub fn save_to_vec(&self) -> Result<Vec<u8>, write::WriteError> {
