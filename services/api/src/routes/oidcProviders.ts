@@ -6,7 +6,7 @@ import { requireOrgMfaSatisfied } from "../auth/mfa";
 import { withTransaction } from "../db/tx";
 import { getClientIp, getUserAgent } from "../http/request-meta";
 import { isOrgAdmin, type OrgRole } from "../rbac/roles";
-import { deleteSecret, putSecret } from "../secrets/secretStore";
+import { deleteSecret, listSecrets, putSecret } from "../secrets/secretStore";
 import { requireAuth } from "./auth";
 
 type OrgOidcProviderRow = {
@@ -146,10 +146,8 @@ export function registerOidcProviderRoutes(app: FastifyInstance): void {
     );
 
     const prefix = `oidc:${orgId}:`;
-    const secretsRes = await app.db.query<{ name: string }>("SELECT name FROM secrets WHERE name LIKE $1", [
-      `${prefix}%`
-    ]);
-    const configured = new Set(secretsRes.rows.map((row) => String(row.name)));
+    const secretEntries = await listSecrets(app.db, { prefix });
+    const configured = new Set(secretEntries.map((entry) => entry.name));
 
     return reply.send({
       providers: providersRes.rows.map((row) => {
