@@ -1,7 +1,7 @@
 import type { GridViewportState } from "../virtualization/VirtualScrollManager";
 
-export const MIN_GRID_ZOOM = 0.5;
-export const MAX_GRID_ZOOM = 3.0;
+export const MIN_GRID_ZOOM = 0.25;
+export const MAX_GRID_ZOOM = 4.0;
 
 export function clampZoom(value: number, min = MIN_GRID_ZOOM, max = MAX_GRID_ZOOM): number {
   if (!Number.isFinite(value)) return 1;
@@ -64,4 +64,3 @@ export function computeAnchoredScrollAfterZoom(options: {
 
   return { x, y };
 }
-

@@ -203,8 +203,8 @@ function clampIndex(value: number, min: number, max: number): number {
   return clamp(Math.trunc(value), min, max);
 }
 
-const MIN_ZOOM = 0.5;
-const MAX_ZOOM = 3.0;
+const MIN_ZOOM = 0.25;
+const MAX_ZOOM = 4.0;
 
 function clampZoom(zoom: number): number {
   if (!Number.isFinite(zoom)) return 1;

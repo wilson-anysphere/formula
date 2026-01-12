@@ -461,8 +461,36 @@ export class DesktopSharedGrid {
   private installWheelHandler(): void {
     const onWheel = (event: WheelEvent) => {
       const target = event.target as HTMLElement | null;
-      if (target?.closest?.('[data-testid="comments-panel"]')) return;
-      if (event.ctrlKey) return;
+      const renderer = this.renderer;
+      const isZoomGesture = event.ctrlKey || event.metaKey;
+
+      // Let the comments panel handle regular scrolling without affecting the grid.
+      if (target?.closest?.('[data-testid="comments-panel"]') && !isZoomGesture) return;
+
+      if (isZoomGesture) {
+        const viewport = renderer.scroll.getViewportState();
+        const startZoom = renderer.getZoom();
+
+        let delta = event.deltaY;
+        if (event.deltaMode === 1) {
+          const lineHeight = 16 * startZoom;
+          delta *= lineHeight;
+        } else if (event.deltaMode === 2) {
+          delta *= viewport.height;
+        }
+
+        if (delta === 0) return;
+        event.preventDefault();
+
+        const point = this.getViewportPoint(event);
+        const zoomFactor = Math.exp(-delta * 0.001);
+        const nextZoom = startZoom * zoomFactor;
+
+        renderer.setZoom(nextZoom, { anchorX: point.x, anchorY: point.y });
+        this.syncScrollbars();
+        this.emitScroll();
+        return;
+      }
 
       let deltaX = event.deltaX;
       let deltaY = event.deltaY;
@@ -472,7 +500,7 @@ export class DesktopSharedGrid {
         deltaX *= line;
         deltaY *= line;
       } else if (event.deltaMode === 2) {
-        const viewport = this.renderer.scroll.getViewportState();
+        const viewport = renderer.scroll.getViewportState();
         deltaX *= viewport.width;
         deltaY *= viewport.height;
       }
@@ -485,7 +513,7 @@ export class DesktopSharedGrid {
       if (deltaX === 0 && deltaY === 0) return;
 
       event.preventDefault();
-      this.renderer.scrollBy(deltaX, deltaY);
+      renderer.scrollBy(deltaX, deltaY);
       this.syncScrollbars();
       this.emitScroll();
     };

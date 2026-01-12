@@ -63,6 +63,29 @@ describe("CanvasGridRenderer zoom", () => {
     vi.unstubAllGlobals();
   });
 
+  it("clamps zoom to the supported 0.25-4.0 range", () => {
+    const provider: CellProvider = { getCell: () => null };
+
+    const renderer = new CanvasGridRenderer({ provider, rowCount: 10, colCount: 10, defaultRowHeight: 10, defaultColWidth: 20 });
+    const grid = document.createElement("canvas");
+    const content = document.createElement("canvas");
+    const selection = document.createElement("canvas");
+    renderer.attach({ grid, content, selection });
+    renderer.resize(200, 200, 1);
+
+    renderer.setZoom(0.25);
+    expect(renderer.getZoom()).toBe(0.25);
+
+    renderer.setZoom(4.0);
+    expect(renderer.getZoom()).toBe(4.0);
+
+    renderer.setZoom(0.1);
+    expect(renderer.getZoom()).toBe(0.25);
+
+    renderer.setZoom(10);
+    expect(renderer.getZoom()).toBe(4.0);
+  });
+
   it("scales default sizes, preserves overrides, and anchors scroll", () => {
     const provider: CellProvider = {
       getCell: (row, col) => ({ row, col, value: null })

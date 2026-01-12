@@ -117,8 +117,8 @@ export function MergedCellsDemo(): React.ReactElement {
           Zoom
           <input
             type="range"
-            min={0.5}
-            max={3}
+            min={0.25}
+            max={4}
             step={0.1}
             value={zoom}
             onChange={(event) => setZoom(event.currentTarget.valueAsNumber)}
