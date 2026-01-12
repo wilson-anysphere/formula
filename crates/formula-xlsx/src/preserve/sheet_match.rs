@@ -62,8 +62,15 @@ pub(crate) fn workbook_sheet_parts(
         };
 
         let target = match rel_map.get(sheet_rid) {
-            Some(rel) => Some(resolve_target(workbook_part, &rel.target)),
-            None => sheet_id
+            Some(rel)
+                if !rel
+                    .target_mode
+                    .as_deref()
+                    .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External")) =>
+            {
+                Some(resolve_target(workbook_part, &rel.target))
+            }
+            _ => sheet_id
                 .map(|sheet_id| format!("xl/worksheets/sheet{sheet_id}.xml"))
                 .filter(|candidate| pkg.part(candidate).is_some()),
         };

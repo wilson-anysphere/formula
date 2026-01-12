@@ -171,6 +171,13 @@ impl XlsxPackage {
             };
 
             for rel in &rels {
+                if rel
+                    .target_mode
+                    .as_deref()
+                    .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+                {
+                    continue;
+                }
                 let resolved = resolve_target(&sheet.part_name, &rel.target);
                 if is_drawing_adjacent_relationship(rel.type_.as_str(), &resolved)
                     && self.part(&resolved).is_some()
@@ -269,7 +276,12 @@ impl XlsxPackage {
                 let mut drawings = Vec::new();
                 for rid in drawing_rids {
                     if let Some(rel) = rel_map.get(&rid) {
-                        if rel.type_ == DRAWING_REL_TYPE {
+                        if rel.type_ == DRAWING_REL_TYPE
+                            && !rel
+                                .target_mode
+                                .as_deref()
+                                .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+                        {
                             drawings.push(SheetDrawingRelationship {
                                 rel_id: rid.clone(),
                                 target: rel.target.clone(),
@@ -292,7 +304,12 @@ impl XlsxPackage {
 
             if let Some((rid, picture_xml)) = picture {
                 if let Some(rel) = rel_map.get(&rid) {
-                    if rel.type_ == IMAGE_REL_TYPE {
+                    if rel.type_ == IMAGE_REL_TYPE
+                        && !rel
+                            .target_mode
+                            .as_deref()
+                            .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+                    {
                         sheet_pictures.insert(
                             sheet.name.clone(),
                             PreservedSheetPicture {
@@ -315,7 +332,12 @@ impl XlsxPackage {
                     let mut missing_rel = false;
                     for rid in &rids {
                         match rel_map.get(rid) {
-                            Some(rel) if rel.type_ == OLE_OBJECT_REL_TYPE => {
+                            Some(rel)
+                                if rel.type_ == OLE_OBJECT_REL_TYPE
+                                    && !rel.target_mode.as_deref().is_some_and(|mode| {
+                                        mode.trim().eq_ignore_ascii_case("External")
+                                    }) =>
+                            {
                                 rels.push(SheetRelationshipStub {
                                     rel_id: rid.clone(),
                                     target: rel.target.clone(),
@@ -347,12 +369,18 @@ impl XlsxPackage {
                 let mut missing_rel = false;
                 for rid in &rids {
                     match rel_map.get(rid) {
-                        Some(rel) => rels.push(SheetRelationshipStubWithType {
-                            rel_id: rid.clone(),
-                            type_: rel.type_.clone(),
-                            target: rel.target.clone(),
-                        }),
-                        None => {
+                        Some(rel)
+                            if !rel.target_mode.as_deref().is_some_and(|mode| {
+                                mode.trim().eq_ignore_ascii_case("External")
+                            }) =>
+                        {
+                            rels.push(SheetRelationshipStubWithType {
+                                rel_id: rid.clone(),
+                                type_: rel.type_.clone(),
+                                target: rel.target.clone(),
+                            })
+                        }
+                        _ => {
                             missing_rel = true;
                             break;
                         }
@@ -377,12 +405,18 @@ impl XlsxPackage {
                 let mut missing_rel = false;
                 for rid in &rids {
                     match rel_map.get(rid) {
-                        Some(rel) => rels.push(SheetRelationshipStubWithType {
-                            rel_id: rid.clone(),
-                            type_: rel.type_.clone(),
-                            target: rel.target.clone(),
-                        }),
-                        None => {
+                        Some(rel)
+                            if !rel.target_mode.as_deref().is_some_and(|mode| {
+                                mode.trim().eq_ignore_ascii_case("External")
+                            }) =>
+                        {
+                            rels.push(SheetRelationshipStubWithType {
+                                rel_id: rid.clone(),
+                                type_: rel.type_.clone(),
+                                target: rel.target.clone(),
+                            })
+                        }
+                        _ => {
                             missing_rel = true;
                             break;
                         }
@@ -731,6 +765,13 @@ fn extract_workbook_chart_sheets(
         let Some(rel) = rel_map.get(rel_id) else {
             continue;
         };
+        if rel
+            .target_mode
+            .as_deref()
+            .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+        {
+            continue;
+        }
         if rel.type_ != CHARTSHEET_REL_TYPE {
             continue;
         }
@@ -1482,6 +1523,48 @@ mod tests {
         assert!(
             preserved.is_empty(),
             "malformed sheet rels should result in skipping drawing preservation"
+        );
+    }
+
+    #[test]
+    fn preserve_drawing_parts_ignores_external_relationships() {
+        let content_types = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>"#;
+
+        let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+        let sheet_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData/>
+  <drawing r:id="rId1"/>
+</worksheet>"#;
+
+        // The target happens to look like a valid package part, but TargetMode=External means it
+        // should not be traversed/preserved.
+        let sheet_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="/xl/drawings/drawing1.xml" TargetMode="External"/>
+</Relationships>"#;
+
+        let pkg = build_package(&[
+            ("[Content_Types].xml", content_types),
+            ("xl/workbook.xml", workbook_xml),
+            ("xl/worksheets/sheet1.xml", sheet_xml),
+            ("xl/worksheets/_rels/sheet1.xml.rels", sheet_rels),
+            ("xl/drawings/drawing1.xml", br#"<xdr:wsDr/>"#),
+        ]);
+
+        let preserved = pkg.preserve_drawing_parts().expect("best-effort preserve");
+        assert!(
+            preserved.is_empty(),
+            "TargetMode=External relationships should not be preserved"
         );
     }
 
