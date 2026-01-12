@@ -297,6 +297,10 @@ test("CollabSession legacy `options.offline` binds before load so edits during l
     await rm(dir, { recursive: true, force: true });
   });
 
+  // Warm the module cache so the legacy offline compatibility path's dynamic
+  // imports are less timing-sensitive in CI.
+  await import("@formula/collab-persistence/file");
+
   // Artificially slow down FileCollabPersistence.load() so we can reliably make
   // edits while load is still in flight.
   const docHash = createHash("sha256").update(filePath).digest("hex");
