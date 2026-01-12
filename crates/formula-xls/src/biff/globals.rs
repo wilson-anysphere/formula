@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use encoding_rs::Encoding;
 use formula_model::DateSystem;
 
 use super::{records, strings, BiffVersion};
@@ -51,7 +50,7 @@ pub(crate) fn parse_biff_bound_sheets(
     workbook_stream: &[u8],
     biff: BiffVersion,
 ) -> Result<Vec<BoundSheetInfo>, String> {
-    let encoding = strings::encoding_for_codepage(biff_codepage(workbook_stream));
+    let codepage = biff_codepage(workbook_stream);
     let mut out = Vec::new();
 
     let mut iter = records::BiffRecordIter::from_offset(workbook_stream, 0)?;
@@ -78,7 +77,8 @@ pub(crate) fn parse_biff_bound_sheets(
                 let sheet_offset =
                     u32::from_le_bytes([record.data[0], record.data[1], record.data[2], record.data[3]])
                         as usize;
-                let Ok((name, _)) = strings::parse_biff_short_string(&record.data[6..], biff, encoding)
+                let Ok((name, _)) =
+                    strings::parse_biff_short_string(&record.data[6..], biff, codepage)
                 else {
                     continue;
                 };
@@ -168,7 +168,7 @@ pub(crate) fn parse_biff_workbook_globals(
     workbook_stream: &[u8],
     biff: BiffVersion,
 ) -> Result<BiffWorkbookGlobals, String> {
-    let encoding = strings::encoding_for_codepage(biff_codepage(workbook_stream));
+    let codepage = biff_codepage(workbook_stream);
 
     let mut out = BiffWorkbookGlobals::default();
 
@@ -212,14 +212,14 @@ pub(crate) fn parse_biff_workbook_globals(
                 }
             }
             // FORMAT / FORMAT2 [MS-XLS 2.4.90]
-            0x041E | 0x001E => match parse_biff_format_record_strict(&record, encoding) {
+            0x041E | 0x001E => match parse_biff_format_record_strict(&record, codepage) {
                 Ok((num_fmt_id, code)) => {
                     out.formats.insert(num_fmt_id, code);
                 }
                 Err(_) if record.is_continued() => {
                     continuation_parse_failed = true;
                     if let Some((num_fmt_id, code)) =
-                        parse_biff_format_record_best_effort(&record, encoding)
+                        parse_biff_format_record_best_effort(&record, codepage)
                     {
                         out.formats.insert(num_fmt_id, code);
                     }
@@ -292,7 +292,7 @@ fn parse_biff_xf_record(data: &[u8]) -> Result<BiffXf, String> {
 
 fn parse_biff_format_record_strict(
     record: &records::LogicalBiffRecord<'_>,
-    encoding: &'static Encoding,
+    codepage: u16,
 ) -> Result<(u16, String), String> {
     let record_id = record.record_id;
     let data = record.data.as_ref();
@@ -309,13 +309,13 @@ fn parse_biff_format_record_strict(
         0x041E => {
             if record.is_continued() {
                 let fragments: Vec<&[u8]> = record.fragments().collect();
-                strings::parse_biff8_unicode_string_continued(&fragments, 2, encoding)?
+                strings::parse_biff8_unicode_string_continued(&fragments, 2, codepage)?
             } else {
-                strings::parse_biff8_unicode_string(rest, encoding)?.0
+                strings::parse_biff8_unicode_string(rest, codepage)?.0
             }
         }
         // BIFF5 FORMAT2 uses a short ANSI string (8-bit length).
-        0x001E => strings::parse_biff5_short_string(rest, encoding)?.0,
+        0x001E => strings::parse_biff5_short_string(rest, codepage)?.0,
         _ => return Err(format!("unexpected FORMAT record id 0x{record_id:04X}")),
     };
 
@@ -326,7 +326,7 @@ fn parse_biff_format_record_strict(
 
 fn parse_biff_format_record_best_effort(
     record: &records::LogicalBiffRecord<'_>,
-    encoding: &'static Encoding,
+    codepage: u16,
 ) -> Option<(u16, String)> {
     let first = record.first_fragment();
     if first.len() < 2 {
@@ -336,8 +336,8 @@ fn parse_biff_format_record_best_effort(
     let rest = first.get(2..).unwrap_or_default();
 
     let mut code = match record.record_id {
-        0x041E => strings::parse_biff8_unicode_string_best_effort(rest, encoding)?,
-        0x001E => strings::parse_biff5_short_string_best_effort(rest, encoding)?,
+        0x041E => strings::parse_biff8_unicode_string_best_effort(rest, codepage)?,
+        0x001E => strings::parse_biff5_short_string_best_effort(rest, codepage)?,
         _ => return None,
     };
     code = code.replace('\0', "");
@@ -402,6 +402,31 @@ mod tests {
             sheets,
             vec![BoundSheetInfo {
                 name: "Ђ".to_string(),
+                offset: 0x1234
+            }]
+        );
+    }
+
+    #[test]
+    fn decodes_boundsheet_names_using_codepage_1252_currency_symbol() {
+        // CODEPAGE=1252 (Windows Western).
+        let r_codepage = record(0x0042, &1252u16.to_le_bytes());
+
+        // BoundSheet8 with a compressed 8-bit name (fHighByte=0): 0xA3 => '£' in cp1252.
+        let mut bs_payload = Vec::new();
+        bs_payload.extend_from_slice(&0x1234u32.to_le_bytes()); // sheet offset
+        bs_payload.extend_from_slice(&[0, 0]); // visibility/type
+        bs_payload.push(1); // cch
+        bs_payload.push(0); // flags (compressed)
+        bs_payload.push(0xA3); // "£" in cp1252
+        let r_bs = record(0x0085, &bs_payload);
+
+        let stream = [r_codepage, r_bs, record(0x000A, &[])].concat();
+        let sheets = parse_biff_bound_sheets(&stream, BiffVersion::Biff8).expect("parse");
+        assert_eq!(
+            sheets,
+            vec![BoundSheetInfo {
+                name: "£".to_string(),
                 offset: 0x1234
             }]
         );

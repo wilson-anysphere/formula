@@ -1887,6 +1887,7 @@ dependencies = [
  "encoding_rs",
  "formula-format",
  "formula-model",
+ "log",
  "tempfile",
  "thiserror 2.0.17",
 ]

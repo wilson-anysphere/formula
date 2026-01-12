@@ -1,3 +1,6 @@
+use std::collections::BTreeSet;
+use std::sync::{Mutex, OnceLock};
+
 use encoding_rs::{
     Encoding, BIG5, EUC_KR, GBK, SHIFT_JIS, UTF_8, WINDOWS_1250, WINDOWS_1251, WINDOWS_1252,
     WINDOWS_1253, WINDOWS_1254, WINDOWS_1255, WINDOWS_1256, WINDOWS_1257, WINDOWS_1258,
@@ -6,8 +9,8 @@ use encoding_rs::{
 
 use super::BiffVersion;
 
-pub(crate) fn encoding_for_codepage(codepage: u16) -> &'static Encoding {
-    match codepage as u32 {
+pub(crate) fn encoding_for_codepage(codepage: u16) -> Option<&'static Encoding> {
+    Some(match codepage as u32 {
         874 => WINDOWS_874,
         932 => SHIFT_JIS,
         936 => GBK,
@@ -23,30 +26,54 @@ pub(crate) fn encoding_for_codepage(codepage: u16) -> &'static Encoding {
         1257 => WINDOWS_1257,
         1258 => WINDOWS_1258,
         65001 => UTF_8,
-        _ => WINDOWS_1252,
-    }
+        _ => return None,
+    })
 }
 
-pub(crate) fn decode_ansi(bytes: &[u8], encoding: &'static Encoding) -> String {
-    let (cow, _, _) = encoding.decode(bytes);
-    cow.into_owned()
+pub(crate) fn decode_ansi(codepage: u16, bytes: &[u8]) -> String {
+    if let Some(encoding) = encoding_for_codepage(codepage) {
+        let (cow, _, _) = encoding.decode(bytes);
+        return cow.into_owned();
+    }
+
+    warn_unsupported_codepage(codepage);
+
+    // Lossless byte-to-Unicode mapping (ISO-8859-1-ish): preserve the original BIFF payload and
+    // keep ASCII intact even when the codepage isn't supported by `encoding_rs`.
+    bytes.iter().copied().map(char::from).collect()
+}
+
+fn warn_unsupported_codepage(codepage: u16) {
+    static WARNED: OnceLock<Mutex<BTreeSet<u16>>> = OnceLock::new();
+
+    let warned = WARNED.get_or_init(|| Mutex::new(BTreeSet::new()));
+    let mut warned = match warned.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+
+    if warned.insert(codepage) {
+        log::warn!(
+            "unsupported BIFF CODEPAGE {codepage}; decoding 8-bit strings using lossless byte-to-Unicode mapping"
+        );
+    }
 }
 
 pub(crate) fn parse_biff_short_string(
     input: &[u8],
     biff: BiffVersion,
-    encoding: &'static Encoding,
+    codepage: u16,
 ) -> Result<(String, usize), String> {
     match biff {
-        BiffVersion::Biff5 => parse_biff5_short_string(input, encoding),
-        BiffVersion::Biff8 => parse_biff8_short_string(input, encoding),
+        BiffVersion::Biff5 => parse_biff5_short_string(input, codepage),
+        BiffVersion::Biff8 => parse_biff8_short_string(input, codepage),
     }
 }
 
 /// BIFF5 "short string": 8-bit length prefix followed by ANSI bytes.
 pub(crate) fn parse_biff5_short_string(
     input: &[u8],
-    encoding: &'static Encoding,
+    codepage: u16,
 ) -> Result<(String, usize), String> {
     let Some((&len, rest)) = input.split_first() else {
         return Err("unexpected end of string".to_string());
@@ -55,13 +82,13 @@ pub(crate) fn parse_biff5_short_string(
     let bytes = rest
         .get(0..len)
         .ok_or_else(|| "unexpected end of string".to_string())?;
-    Ok((decode_ansi(bytes, encoding), 1 + len))
+    Ok((decode_ansi(codepage, bytes), 1 + len))
 }
 
 /// BIFF8 `ShortXLUnicodeString` [MS-XLS 2.5.293].
 pub(crate) fn parse_biff8_short_string(
     input: &[u8],
-    encoding: &'static Encoding,
+    codepage: u16,
 ) -> Result<(String, usize), String> {
     if input.len() < 2 {
         return Err("unexpected end of string".to_string());
@@ -117,7 +144,7 @@ pub(crate) fn parse_biff8_short_string(
         }
         String::from_utf16_lossy(&u16s)
     } else {
-        decode_ansi(chars, encoding)
+        decode_ansi(codepage, chars)
     };
 
     let richtext_bytes = richtext_runs
@@ -134,7 +161,7 @@ pub(crate) fn parse_biff8_short_string(
 /// BIFF8 `XLUnicodeString` [MS-XLS 2.5.268] (16-bit length).
 pub(crate) fn parse_biff8_unicode_string(
     input: &[u8],
-    encoding: &'static Encoding,
+    codepage: u16,
 ) -> Result<(String, usize), String> {
     if input.len() < 3 {
         return Err("unexpected end of string".to_string());
@@ -191,7 +218,7 @@ pub(crate) fn parse_biff8_unicode_string(
         }
         String::from_utf16_lossy(&u16s)
     } else {
-        decode_ansi(chars, encoding)
+        decode_ansi(codepage, chars)
     };
 
     let richtext_bytes = richtext_runs
@@ -207,16 +234,16 @@ pub(crate) fn parse_biff8_unicode_string(
 
 pub(crate) fn parse_biff5_short_string_best_effort(
     input: &[u8],
-    encoding: &'static Encoding,
+    codepage: u16,
 ) -> Option<String> {
     let (&len, rest) = input.split_first()?;
     let take = (len as usize).min(rest.len());
-    Some(decode_ansi(&rest[..take], encoding))
+    Some(decode_ansi(codepage, &rest[..take]))
 }
 
 pub(crate) fn parse_biff8_unicode_string_best_effort(
     input: &[u8],
-    encoding: &'static Encoding,
+    codepage: u16,
 ) -> Option<String> {
     if input.len() < 3 {
         return None;
@@ -257,17 +284,17 @@ pub(crate) fn parse_biff8_unicode_string_best_effort(
         }
         String::from_utf16_lossy(&u16s)
     } else {
-        decode_ansi(bytes, encoding)
+        decode_ansi(codepage, bytes)
     })
 }
 
 pub(crate) fn parse_biff8_unicode_string_continued(
     fragments: &[&[u8]],
     start_offset: usize,
-    encoding: &'static Encoding,
+    codepage: u16,
 ) -> Result<String, String> {
     let mut cursor = FragmentCursor::new(fragments, 0, start_offset);
-    cursor.read_biff8_unicode_string(encoding)
+    cursor.read_biff8_unicode_string(codepage)
 }
 
 struct FragmentCursor<'a> {
@@ -364,7 +391,7 @@ impl<'a> FragmentCursor<'a> {
         Ok(())
     }
 
-    fn read_biff8_unicode_string(&mut self, encoding: &'static Encoding) -> Result<String, String> {
+    fn read_biff8_unicode_string(&mut self, codepage: u16) -> Result<String, String> {
         // XLUnicodeString [MS-XLS 2.5.268]
         let cch = self.read_u16_le()? as usize;
         let flags = self.read_u8()?;
@@ -413,7 +440,7 @@ impl<'a> FragmentCursor<'a> {
                 }
                 out.push_str(&String::from_utf16_lossy(&u16s));
             } else {
-                out.push_str(&decode_ansi(bytes, encoding));
+                out.push_str(&decode_ansi(codepage, bytes));
             }
 
             remaining_chars -= take_chars;
@@ -434,7 +461,6 @@ mod tests {
 
     #[test]
     fn parses_biff8_unicode_string_continued_across_fragments() {
-        let encoding = encoding_for_codepage(1252);
         let s = "ABCDE";
 
         // First fragment contains XLUnicodeString header + partial character data.
@@ -449,8 +475,17 @@ mod tests {
         frag2.extend_from_slice(&s.as_bytes()[2..]);
 
         let fragments: [&[u8]; 2] = [&frag1, &frag2];
-        let out = parse_biff8_unicode_string_continued(&fragments, 0, encoding).expect("parse");
+        let out = parse_biff8_unicode_string_continued(&fragments, 0, 1252).expect("parse");
         assert_eq!(out, s);
     }
-}
 
+    #[test]
+    fn parses_biff8_short_string_compressed_uses_codepage() {
+        // BIFF8 ShortXLUnicodeString with `fHighByte=0` stores 8-bit bytes encoded using the
+        // workbook code page (CODEPAGE record). In Windows-1251, 0xC0 is Cyrillic 'А' (U+0410).
+        let input = [1u8, 0u8, 0xC0];
+        let (s, consumed) = parse_biff8_short_string(&input, 1251).expect("parse");
+        assert_eq!(consumed, input.len());
+        assert_eq!(s, "А");
+    }
+}
