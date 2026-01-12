@@ -289,8 +289,13 @@ Key components:
       checks `X-Package-Files-Sha256` against the verified package file inventory.
 3. **Persist**: verified package bytes + verification metadata are stored in IndexedDB (`formula.webExtensions`).
 4. **Load into runtime**:
-   - `WebExtensionManager.loadInstalled(id)` materializes the verified browser entrypoint as a `blob:` module URL.
-   - The extension is loaded into `BrowserExtensionHost`, which spawns `extension-worker.mjs` for execution.
+   - **Boot:** `WebExtensionManager.loadAllInstalled()` loads all installed extensions and then calls `host.startup()`
+     once (when supported) so extensions with `activationEvents: ["onStartupFinished"]` activate and receive the initial
+     `workbookOpened` event.
+   - **Incremental load:** `WebExtensionManager.loadInstalled(id)` materializes the verified browser entrypoint as a
+     `blob:` module URL, loads it into `BrowserExtensionHost`, and (when supported) calls `host.startupExtension(id)` so
+     newly loaded `onStartupFinished` extensions also activate + get the initial workbook snapshot without re-broadcasting
+     startup events to already-running extensions.
 5. **Execution + sandboxing**:
    - Extensions run in a Web Worker with sandbox guardrails (permission-gated `fetch`/`WebSocket`, no XHR, no nested
      workers, best-effort import restrictions, optional `eval` lockdown).

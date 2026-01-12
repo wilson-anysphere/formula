@@ -20,6 +20,10 @@ declare module "@formula/extension-host/browser" {
       mainUrl: string;
     }): Promise<string>;
 
+    startup(): Promise<void>;
+
+    startupExtension(extensionId: string): Promise<void>;
+
     listExtensions(): Array<{
       id: string;
       path: string;
