@@ -394,15 +394,16 @@ def _sanitize_drawing(xml: bytes, *, options: SanitizeOptions) -> bytes:
 
 
 def _sanitize_cell_images(xml: bytes, *, options: SanitizeOptions) -> bytes:
-    """Best-effort scrubber for `xl/cellimages.xml` (in-cell images).
+    """Best-effort scrubber for `xl/cellImages.xml` (in-cell images).
 
     The schema for this part is not stable across Excel versions. We treat it as a
-    DrawingML-adjacent XML blob and defensively scrub common text and descriptive
-    attributes that can contain user-provided metadata.
+    DrawingML-adjacent XML blob and defensively scrub common DrawingML text runs and
+    descriptive attributes that can contain user-provided metadata.
     """
 
     root = ET.fromstring(xml)
     if options.scrub_metadata or options.hash_strings:
+        # Cell images store shape metadata using DrawingML too.
         _sanitize_xml_text_elements(root, options=options, local_names={"t"})
         _sanitize_xml_attributes(root, options=options, attr_names={"name", "descr", "title"})
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
@@ -1448,6 +1449,9 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
                             table_column_rename_map=table_column_rename_map,
                             sheet_rename_map=sheet_rename_map or None,
                         )
+                        rewritten.append(name)
+                    elif name.lower() == "xl/cellimages.xml" and (options.scrub_metadata or options.hash_strings):
+                        new = _sanitize_cell_images(raw, options=options)
                         rewritten.append(name)
                     elif name.startswith("xl/drawings/") and name.endswith(".xml") and (
                         options.scrub_metadata or options.hash_strings or options.remove_secrets

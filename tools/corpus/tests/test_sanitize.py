@@ -115,6 +115,37 @@ def _make_minimal_xlsx_with_secrets() -> bytes:
     return buf.getvalue()
 
 
+def _make_minimal_xlsx_with_cell_images_metadata() -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
+        z.writestr(
+            "[Content_Types].xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/cellImages.xml" ContentType="application/vnd.ms-excel.cellImages+xml"/>
+</Types>
+""",
+        )
+        z.writestr(
+            "xl/cellImages.xml",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cellImages xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+            xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <xdr:pic>
+    <xdr:nvPicPr>
+      <xdr:cNvPr id="1" name="Alice" descr="alice@example.com"/>
+    </xdr:nvPicPr>
+  </xdr:pic>
+  <a:txBody>
+    <a:p><a:r><a:t>Secret</a:t></a:r></a:p>
+  </a:txBody>
+</cellImages>
+""",
+        )
+    return buf.getvalue()
+
+
 def _make_minimal_xlsx_for_sheet_rename() -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
@@ -747,6 +778,19 @@ class SanitizeTests(unittest.TestCase):
             sst = z.read("xl/sharedStrings.xml").decode("utf-8")
             self.assertNotIn("SecretValue", sst)
             self.assertIn("REDACTED", sst)
+
+    def test_sanitize_scrubs_cell_images_metadata(self) -> None:
+        original = _make_minimal_xlsx_with_cell_images_metadata()
+        sanitized, _ = sanitize_xlsx_bytes(
+            original, options=SanitizeOptions(scrub_metadata=True, remove_secrets=False)
+        )
+
+        with zipfile.ZipFile(io.BytesIO(sanitized), "r") as z:
+            self.assertIn("xl/cellImages.xml", z.namelist())
+            cell_images = z.read("xl/cellImages.xml").decode("utf-8", errors="ignore")
+            self.assertNotIn("Alice", cell_images)
+            self.assertNotIn("alice@example.com", cell_images)
+            self.assertNotIn("Secret", cell_images)
 
     def test_sanitize_scrubs_pii_surfaces_and_leak_scan_passes(self) -> None:
         fixture_path = Path(__file__).parent / "fixtures" / "pii-surfaces.xlsx.b64"
