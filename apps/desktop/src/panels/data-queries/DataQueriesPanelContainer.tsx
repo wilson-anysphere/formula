@@ -191,6 +191,19 @@ export function DataQueriesPanelContainer(props: Props) {
   const [pendingDeviceCode, setPendingDeviceCode] = useState<PendingDeviceCode | null>(null);
   const [globalError, setGlobalError] = useState<string | null>(null);
 
+  const normalizeOAuthScopes = useCallback(
+    (providerId: string, scopes: string[] | undefined) => {
+      // Keep our credential store keying consistent with OAuth2Manager behavior:
+      // if the query does not explicitly specify scopes, fall back to the provider's
+      // configured defaultScopes (if any). Otherwise the UI may incorrectly show
+      // "signed out" and sign-out may delete the wrong credential entry.
+      const provider = oauthProviders.find((p) => p.id === providerId);
+      const resolvedScopes = scopes ?? (provider as any)?.defaultScopes;
+      return normalizeScopes(resolvedScopes as any);
+    },
+    [oauthProviders],
+  );
+
   const activeRefreshHandleByQueryId = useRef(new Map<string, { jobId: string; cancel: () => void }>());
   const [activeRefreshAll, setActiveRefreshAll] = useState<{ sessionId: string; cancel: () => void } | null>(null);
 
@@ -397,13 +410,13 @@ export function DataQueriesPanelContainer(props: Props) {
   const isOAuthSignedIn = useCallback(
     async (providerId: string, scopes: string[] | undefined): Promise<boolean> => {
       if (!credentialStore) return false;
-      const normalized = normalizeScopes(scopes);
+      const normalized = normalizeOAuthScopes(providerId, scopes);
       const scope = oauth2Scope({ providerId, scopesHash: normalized.scopesHash });
       const entry = await credentialStore.get(scope as any);
       const secret = entry?.secret as any;
       return typeof secret?.refreshToken === "string" && secret.refreshToken.length > 0;
     },
-    [credentialStore],
+    [credentialStore, normalizeOAuthScopes],
   );
 
   const [oauthSignedInByKey, setOauthSignedInByKey] = useState<Record<string, boolean>>({});
@@ -429,7 +442,7 @@ export function DataQueriesPanelContainer(props: Props) {
         const providerId = String(source.auth.providerId ?? "");
         if (!providerId) continue;
         const scopes = Array.isArray(source.auth.scopes) ? source.auth.scopes : undefined;
-        const key = `${providerId}:${normalizeScopes(scopes).scopesHash}`;
+        const key = `${providerId}:${normalizeOAuthScopes(providerId, scopes).scopesHash}`;
         updates[key] = await isOAuthSignedIn(providerId, scopes);
       }
       for (const query of queries) {
@@ -468,26 +481,38 @@ export function DataQueriesPanelContainer(props: Props) {
     return () => {
       cancelled = true;
     };
-  }, [credentialStore, isOAuthSignedIn, queries, resolveSqlScope]);
+  }, [credentialStore, isOAuthSignedIn, normalizeOAuthScopes, queries, resolveSqlScope]);
 
   const signOutOAuth = useCallback(
     async (providerId: string, scopes: string[] | undefined) => {
       if (!credentialStore) return;
       setGlobalError(null);
-      const normalized = normalizeScopes(scopes);
+      const normalized = normalizeOAuthScopes(providerId, scopes);
       const scope = oauth2Scope({ providerId, scopesHash: normalized.scopesHash });
       try {
         await credentialStore.delete(scope as any);
       } catch (err) {
         setGlobalError(err instanceof Error ? err.message : String(err));
       }
+
+      // Ensure sign-out takes effect immediately by evicting any cached tokens in
+      // the in-memory OAuth2Manager. Otherwise the engine may continue using a
+      // cached refresh/access token until the app reloads.
+      try {
+        const key = `${providerId}:${normalized.scopesHash}`;
+        (oauth2Manager as any)?.cache?.delete?.(key);
+        (oauth2Manager as any)?.inFlight?.delete?.(key);
+      } catch {
+        // ignore
+      }
+
       setOauthSignedInByKey((prev) => {
         const next = { ...prev };
         delete next[`${providerId}:${normalized.scopesHash}`];
         return next;
       });
     },
-    [credentialStore],
+    [credentialStore, normalizeOAuthScopes, oauth2Manager],
   );
 
   const setHttpHeaderCredential = useCallback(
@@ -655,7 +680,7 @@ export function DataQueriesPanelContainer(props: Props) {
           return;
         }
 
-        const normalized = normalizeScopes(scopes);
+        const normalized = normalizeScopes(scopes ?? (config as any)?.defaultScopes);
         setOauthSignedInByKey((prev) => ({ ...prev, [`${providerId}:${normalized.scopesHash}`]: true }));
       } catch (err) {
         setGlobalError(err instanceof Error ? err.message : String(err));
@@ -884,7 +909,7 @@ export function DataQueriesPanelContainer(props: Props) {
                       }
                     : null;
 
-                const oauthKey = oauth ? `${oauth.providerId}:${normalizeScopes(oauth.scopes).scopesHash}` : null;
+                const oauthKey = oauth ? `${oauth.providerId}:${normalizeOAuthScopes(oauth.providerId, oauth.scopes).scopesHash}` : null;
                 const signedIn = oauthKey ? oauthSignedInByKey[oauthKey] : false;
 
                 const canCancel = row.status === "queued" || row.status === "refreshing" || row.status === "applying";
