@@ -877,4 +877,44 @@ mod tests {
             "expected relationship elements to keep their prefix, got: {updated}"
         );
     }
+
+    #[test]
+    fn workbook_rels_remove_calc_chain_preserves_richdata_relationships() {
+        // Regression test: Excel embedded images-in-cells rely on Office richData relationships.
+        // Our recalc-policy rewrite must only remove the calcChain relationship.
+        let rels_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain" Target="calcChain.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata" Target="sheetMetadata.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.microsoft.com/office/2022/10/relationships/richValueRel" Target="richData/richValueRel.xml"/>
+  <Relationship Id="rId4" Type="http://schemas.microsoft.com/office/2017/06/relationships/rdRichValue" Target="richData/rdRichValue.xml"/>
+  <Relationship Id="rId5" Type="http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueStructure" Target="richData/rdRichValueStructure.xml"/>
+  <Relationship Id="rId6" Type="http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueTypes" Target="richData/rdRichValueTypes.xml"/>
+</Relationships>"#;
+
+        let updated = workbook_rels_remove_calc_chain(rels_xml.as_bytes()).expect("rewrite rels");
+        let updated = String::from_utf8(updated).expect("xml utf-8");
+
+        assert!(
+            !updated.contains("relationships/calcChain"),
+            "expected calcChain relationship to be removed, got:\n{updated}"
+        );
+        assert!(
+            !updated.contains("calcChain.xml"),
+            "expected calcChain Target to be removed, got:\n{updated}"
+        );
+
+        for rel_type in [
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata",
+            "http://schemas.microsoft.com/office/2022/10/relationships/richValueRel",
+            "http://schemas.microsoft.com/office/2017/06/relationships/rdRichValue",
+            "http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueStructure",
+            "http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueTypes",
+        ] {
+            assert!(
+                updated.contains(rel_type),
+                "expected relationship Type to be preserved: {rel_type}, got:\n{updated}"
+            );
+        }
+    }
 }
