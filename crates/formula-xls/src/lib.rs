@@ -37,6 +37,7 @@ use formula_model::{
 use thiserror::Error;
 
 mod biff;
+mod formula_rewrite;
 
 #[derive(Clone, Copy, Debug)]
 struct DateTimeStyleIds {
@@ -1033,6 +1034,7 @@ fn import_xls_path_with_biff_reader(
         }
 
         if !resolved_sheet_names.is_empty() {
+            // Rewrite internal hyperlink targets that refer to source sheet names.
             for sheet in &mut out.sheets {
                 for link in &mut sheet.hyperlinks {
                     let HyperlinkTarget::Internal { sheet, .. } = &mut link.target else {
@@ -1045,37 +1047,13 @@ fn import_xls_path_with_biff_reader(
                 }
             }
         }
+        }
+
         if !sheet_rename_pairs.is_empty() {
-            for sheet in &mut out.sheets {
-                for (_, cell) in sheet.iter_cells_mut() {
-                    let Some(formula) = cell.formula.as_mut() else {
-                        continue;
-                    };
-
-                    let mut rewritten = formula.clone();
-                    // Apply rename pairs in reverse order so we don't cascade rewrites when a
-                    // sanitized name collides with another sheet's original name.
-                    //
-                    // Example:
-                    // - Sheet A: `Bad:Name` -> `Bad_Name`
-                    // - Sheet B: `Bad_Name` -> `Bad_Name (2)`
-                    //
-                    // A forward pass would rewrite `Bad:Name!A1` -> `Bad_Name!A1` -> `Bad_Name (2)!A1`,
-                    // incorrectly pointing at Sheet B. Reversing ensures each original name is
-                    // rewritten at most once.
-                    for (old_name, new_name) in sheet_rename_pairs.iter().rev() {
-                        rewritten = formula_model::rewrite_sheet_names_in_formula(
-                            &rewritten,
-                            old_name,
-                            new_name,
-                        );
-                    }
-
-                    if rewritten != *formula {
-                        *formula = rewritten;
-                    }
-                }
-            }
+            formula_rewrite::rewrite_workbook_formulas_for_sheet_renames(
+                &mut out,
+                &sheet_rename_pairs,
+            );
         }
     }
 
