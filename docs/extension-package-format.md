@@ -35,8 +35,8 @@ Formula extensions are distributed as a single binary “package” blob downloa
 ## Browser/WebView installation model (Web + Desktop/Tauri)
 
 The Web runtime and the Desktop/Tauri WebView runtime do **not** load extension module graphs directly from the network.
-Instead they use the `WebExtensionManager` install flow (`packages/extension-marketplace/src/WebExtensionManager.ts`)
-which keeps the initial code load fully verified:
+Instead they use the `WebExtensionManager` install flow (`packages/extension-marketplace/src/WebExtensionManager.ts`,
+exported as `@formula/extension-marketplace`) which keeps the initial code load fully verified:
 
 1. Download the `.fextpkg` bytes from the Marketplace (`/api/extensions/:id/download/:version`).
 2. Verify the v2 package **client-side**:
@@ -46,7 +46,7 @@ which keeps the initial code load fully verified:
    - verify the Ed25519 signature (WebCrypto Ed25519)
 3. Persist the verified package bytes + verification metadata in IndexedDB (keyed by `{id, version}`).
 4. Extract the entrypoint (`manifest.browser`, falling back to `module`/`main`) from the archive, create a `blob:` URL
-   for that module, and load it into `BrowserExtensionHost`.
+   for that module, and load it into `BrowserExtensionHost` (exported as `@formula/extension-host/browser`).
 
 This same model is used in Desktop/Tauri builds: verified packages persist in IndexedDB
 (`formula.webExtensions`) and are loaded from in-memory `blob:`/`data:` module URLs (no Node runtime, no extracted

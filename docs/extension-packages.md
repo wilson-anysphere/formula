@@ -23,10 +23,11 @@ persist package contents (disk extraction or IndexedDB installs) unless the pack
 
 The production Web + Desktop/Tauri runtime installs extensions without Node/`fs`:
 
-- `WebExtensionManager` (`packages/extension-marketplace/src/WebExtensionManager.ts`) downloads `.fextpkg` bytes,
-  verifies them client-side (SHA-256 + Ed25519), and persists verified packages in IndexedDB (`formula.webExtensions`).
-- Extensions are loaded into `BrowserExtensionHost` from in-memory `blob:`/`data:` module URLs (no extracted extension
-  directory on disk).
+- `WebExtensionManager` (`packages/extension-marketplace/src/WebExtensionManager.ts`, exported as `@formula/extension-marketplace`)
+  downloads `.fextpkg` bytes, verifies them client-side (SHA-256 + Ed25519), and persists verified packages in IndexedDB
+  (`formula.webExtensions`).
+- Extensions are loaded into `BrowserExtensionHost` (exported as `@formula/extension-host/browser`) from in-memory
+  `blob:`/`data:` module URLs (no extracted extension directory on disk).
 
 For details, see:
 
