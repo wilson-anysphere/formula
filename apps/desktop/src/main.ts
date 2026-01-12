@@ -6037,24 +6037,43 @@ if (
     gridSplitterEl.setPointerCapture(pointerId);
 
     const rect = gridSplitEl.getBoundingClientRect();
-    const updateRatio = (clientX: number, clientY: number, { emit }: { emit: boolean }) => {
+    let latestClientX = event.clientX;
+    let latestClientY = event.clientY;
+    let lastRatio: number | null = null;
+    let rafHandle: number | null = null;
+
+    const applyRatio = (emit: boolean) => {
       const size = direction === "vertical" ? rect.width : rect.height;
       if (size <= 0) return;
-      const offset = direction === "vertical" ? clientX - rect.left : clientY - rect.top;
+      const offset = direction === "vertical" ? latestClientX - rect.left : latestClientY - rect.top;
       const ratio = Math.max(0.1, Math.min(0.9, offset / size));
       // Dragging the splitter updates very frequently; keep updates cheap:
       // - update the in-memory layout without emitting (avoids full renderLayout() churn)
       // - update CSS variables directly so the UI stays live while dragging
+      // - rAF-throttle updates so we don't structuredClone+normalize on every pointermove
+      if (!emit && lastRatio != null && Math.abs(lastRatio - ratio) < 1e-6) return;
+      lastRatio = ratio;
       layoutController.setSplitRatio(ratio, { persist: false, emit });
       applySplitRatioCss(ratio);
     };
 
-    updateRatio(event.clientX, event.clientY, { emit: false });
+    const scheduleDragApply = () => {
+      if (rafHandle != null) return;
+      rafHandle = window.requestAnimationFrame(() => {
+        rafHandle = null;
+        applyRatio(false);
+      });
+    };
+
+    // Apply the initial click point immediately (no need to wait for rAF).
+    applyRatio(false);
 
     const onMove = (move: PointerEvent) => {
       if (move.pointerId !== pointerId) return;
       move.preventDefault();
-      updateRatio(move.clientX, move.clientY, { emit: false });
+      latestClientX = move.clientX;
+      latestClientY = move.clientY;
+      scheduleDragApply();
     };
 
     const onUp = (up: PointerEvent) => {
@@ -6062,6 +6081,10 @@ if (
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
+      if (rafHandle != null) {
+        window.cancelAnimationFrame(rafHandle);
+        rafHandle = null;
+      }
       try {
         gridSplitterEl.releasePointerCapture(pointerId);
       } catch {
@@ -6069,7 +6092,9 @@ if (
       }
 
       // Emit a final layout change (one-time) and persist it so split ratio restores after reload.
-      updateRatio(up.clientX, up.clientY, { emit: true });
+      latestClientX = up.clientX;
+      latestClientY = up.clientY;
+      applyRatio(true);
       persistLayoutNow();
     };
 
