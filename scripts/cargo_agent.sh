@@ -18,6 +18,7 @@ set -euo pipefail
 #   FORMULA_CARGO_JOBS       cargo build jobs (default: 4)
 #   FORMULA_CARGO_LIMIT_AS   Address-space cap (default: 12G)
 #   FORMULA_RUST_TEST_THREADS  Default RUST_TEST_THREADS for cargo test (default: min(nproc, 16))
+#   FORMULA_RAYON_NUM_THREADS  Default RAYON_NUM_THREADS (default: FORMULA_CARGO_JOBS)
 #
 # Based on fastrender's cargo_agent.sh (simpler than cgroups/systemd-run).
 
@@ -35,6 +36,7 @@ Environment:
   FORMULA_CARGO_JOBS         cargo -j value (default: 4)
   FORMULA_CARGO_LIMIT_AS     Address-space cap (default: 12G)
   FORMULA_RUST_TEST_THREADS  RUST_TEST_THREADS for cargo test (default: min(nproc, 16))
+  FORMULA_RAYON_NUM_THREADS  RAYON_NUM_THREADS (default: FORMULA_CARGO_JOBS)
 EOF
 }
 
@@ -86,6 +88,22 @@ fi
 # Defaults
 jobs="${FORMULA_CARGO_JOBS:-4}"
 limit_as="${FORMULA_CARGO_LIMIT_AS:-12G}"
+
+# Rayon: default to a small thread pool on high-core agent hosts.
+#
+# Rayon defaults to spawning one worker per core. On our multi-agent machines this can
+# lead to very large per-test-process thread pools which are both wasteful and can
+# fail to initialize (e.g. "Resource temporarily unavailable") under load.
+#
+# Allow callers to override via either RAYON_NUM_THREADS (Rayon's standard env var),
+# or the wrapper-specific FORMULA_RAYON_NUM_THREADS.
+if [[ -z "${RAYON_NUM_THREADS:-}" ]]; then
+  rayon_threads="${FORMULA_RAYON_NUM_THREADS:-}"
+  if [[ -z "${rayon_threads}" ]]; then
+    rayon_threads="${jobs}"
+  fi
+  export RAYON_NUM_THREADS="${rayon_threads}"
+fi
 
 # Subcommand
 subcommand="$1"

@@ -66,7 +66,8 @@ The wrapper script:
 1. Enforces a **12GB address space limit** via `RLIMIT_AS`
 2. Limits parallelism to **-j4** by default
 3. Caps **RUST_TEST_THREADS** to avoid spawning hundreds of threads
-4. Uses a **repo-local CARGO_HOME** to avoid lock contention
+4. Caps **RAYON_NUM_THREADS** (defaults to `FORMULA_CARGO_JOBS`) to avoid huge per-process Rayon thread pools on high-core agent hosts
+5. Uses a **repo-local CARGO_HOME** to avoid lock contention
 
 ### Environment Setup (Optional but Recommended)
 
@@ -105,6 +106,7 @@ Environment variables to tune behavior:
 - `FORMULA_CARGO_JOBS` - parallelism (default: 4)
 - `FORMULA_CARGO_LIMIT_AS` - address space limit (default: 12G)
 - `FORMULA_RUST_TEST_THREADS` - test parallelism (default: min(nproc, 16))
+- `FORMULA_RAYON_NUM_THREADS` - Rayon thread pool size (`RAYON_NUM_THREADS`) (default: `FORMULA_CARGO_JOBS`)
 
 #### npm/pnpm/yarn
 
