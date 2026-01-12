@@ -186,8 +186,9 @@ Notes:
 ```
 
 * Namespace is **`…/2017/richdata`** for `richValue.xml` and **`…/2017/richdata2`** for `richValueRel.xml`.
-* The image payload is a single integer `<v>`; in this fixture the value is `0` and it is the 0-based index
-  into the `<rel>` list.
+* The image payload is a single integer `<v>` and it is the 0-based index into the `<rel>` list.
+  * Shape: `<rv t="image"><v>REL_SLOT</v></rv>`
+  * In this fixture: `REL_SLOT = 0`
 
 ### Fixture: `fixtures/xlsx/basic/image-in-cell.xlsx` (`rdrichvalue.xml` + `richValueRel.xml` 2022 variant)
 

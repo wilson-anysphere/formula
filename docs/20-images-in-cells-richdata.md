@@ -135,6 +135,8 @@ Notes:
 * Namespace is **`…/2017/richdata`**.
 * The payload `<v>` is an integer **relationship-slot index** (0-based) into
   `xl/richData/richValueRel.xml`.
+  * In general the shape is: `<rv t="image"><v>REL_SLOT</v></rv>`.
+  * In this fixture, `REL_SLOT = 0`.
 
 **`xl/richData/richValueRel.xml` namespace**
 
