@@ -1,6 +1,9 @@
 use std::io::Read;
 
-use formula_vba::{extract_vba_signature_signed_digest, parse_vba_digital_signature};
+use formula_vba::{
+    extract_vba_signature_signed_digest, parse_vba_digital_signature, verify_vba_digital_signature,
+    VbaSignatureVerification,
+};
 
 fn load_fixture_vba_bin() -> Vec<u8> {
     let fixture_path = concat!(
@@ -85,4 +88,35 @@ fn extracts_digest_even_when_digsig_header_is_corrupt() {
         "2.16.840.1.101.3.4.2.1"
     );
     assert_eq!(signed_digest.digest, (0u8..32).collect::<Vec<_>>());
+}
+
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn verifies_signature_even_when_digsig_header_is_corrupt() {
+    use std::io::{Cursor, Write};
+
+    let vba_bin = load_fixture_vba_bin();
+    let sig = parse_vba_digital_signature(&vba_bin)
+        .expect("signature parse should succeed")
+        .expect("signature should be present");
+
+    // Corrupt DigSigInfoSerialized sizes so we exercise the fallback scanning logic in PKCS#7
+    // verification.
+    let mut corrupted = sig.signature.clone();
+    corrupted[0..4].copy_from_slice(&0xFFFF_FFFFu32.to_le_bytes());
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole
+            .create_stream("\u{0005}DigitalSignature")
+            .expect("create signature stream");
+        stream.write_all(&corrupted).expect("write signature");
+    }
+    let vba_project_bin = ole.into_inner().into_inner();
+
+    let verified = verify_vba_digital_signature(&vba_project_bin)
+        .expect("verification should succeed")
+        .expect("signature should be present");
+    assert_eq!(verified.verification, VbaSignatureVerification::SignedVerified);
 }
