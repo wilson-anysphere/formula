@@ -236,6 +236,46 @@ test.describe("split view", () => {
     const scrollAfter = await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
     expect(Math.abs(scrollAfter - scrollBefore)).toBeLessThan(0.1);
   });
+
+  test("primary multi-range selection sync does not scroll the secondary pane", async ({ page }) => {
+    await gotoDesktop(page, "/?grid=shared");
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await waitForDesktopReady(page);
+    await waitForIdle(page);
+
+    await page.getByTestId("split-vertical").click();
+
+    const secondary = page.locator("#grid-secondary");
+    await expect(secondary).toBeVisible();
+    await expect(secondary.locator("canvas")).toHaveCount(3);
+
+    // Scroll the secondary pane so A1 is offscreen; syncing selection from primary should not scroll it back.
+    await secondary.hover({ position: { x: 60, y: 40 } });
+    await page.mouse.wheel(0, 200 * 24);
+    await expect.poll(async () => Number((await secondary.getAttribute("data-scroll-y")) ?? 0)).toBeGreaterThan(0);
+
+    const secondaryScrollBefore = Number((await secondary.getAttribute("data-scroll-y")) ?? 0);
+
+    const primary = page.locator("#grid");
+    const rectA1 = await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("A1"));
+    const rectC3 = await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("C3"));
+    if (!rectA1 || !rectC3) throw new Error("Missing cell rects for primary multi-range selection");
+
+    await primary.click({ position: { x: rectA1.x + rectA1.width / 2, y: rectA1.y + rectA1.height / 2 } });
+    const modifier: "Control" | "Meta" = process.platform === "darwin" ? "Meta" : "Control";
+    await primary.click({
+      position: { x: rectC3.x + rectC3.width / 2, y: rectC3.y + rectC3.height / 2 },
+      modifiers: [modifier],
+    });
+
+    await expect(page.getByTestId("selection-range")).toHaveText("2 ranges");
+    await expect(page.getByTestId("active-cell")).toHaveText("C3");
+    await expect(page.getByTestId("formula-address")).toHaveValue("C3");
+
+    const secondaryScrollAfter = Number((await secondary.getAttribute("data-scroll-y")) ?? 0);
+    expect(Math.abs(secondaryScrollAfter - secondaryScrollBefore)).toBeLessThan(0.1);
+  });
 });
 
 test.describe("split view / shared grid zoom", () => {
