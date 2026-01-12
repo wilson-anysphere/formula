@@ -2147,6 +2147,25 @@ function renderSheetTabs(): void {
           showToast(`Failed to update formulas after delete: ${String((err as any)?.message ?? err)}`, "error");
         }
       },
+      onSheetMoved: async ({ sheetId, toIndex }) => {
+        const collabSession = app.getCollabSession?.() ?? null;
+        if (collabSession) return;
+
+        const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
+        if (typeof baseInvoke !== "function") return;
+
+        // Prefer the queued invoke (it sequences behind pending `set_cell` / `set_range` sync work).
+        const invoke = queuedInvoke ?? ((cmd: string, args?: any) => queueBackendOp(() => baseInvoke(cmd, args)));
+
+        // Allow any microtask-batched workbook edits to enqueue before we move the sheet.
+        await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+        try {
+          await invoke("move_sheet", { sheet_id: sheetId, to_index: toIndex });
+        } catch (err) {
+          showToast(`Failed to move sheet: ${String((err as any)?.message ?? err)}`, "error");
+        }
+      },
       onError: (message: string) => showToast(message, "error"),
     }),
   );

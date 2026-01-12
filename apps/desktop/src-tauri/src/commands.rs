@@ -599,6 +599,23 @@ pub async fn rename_sheet(
 
 #[cfg(feature = "desktop")]
 #[tauri::command]
+pub async fn move_sheet(
+    sheet_id: String,
+    to_index: usize,
+    state: State<'_, SharedAppState>,
+) -> Result<(), String> {
+    let shared = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut state = shared.lock().unwrap();
+        state.move_sheet(&sheet_id, to_index).map_err(app_error)?;
+        Ok::<_, String>(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
 pub async fn delete_sheet(sheet_id: String, state: State<'_, SharedAppState>) -> Result<(), String> {
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {

@@ -809,6 +809,7 @@ fn main() {
             commands::new_workbook,
             commands::add_sheet,
             commands::rename_sheet,
+            commands::move_sheet,
             commands::delete_sheet,
             commands::read_text_file,
             commands::read_binary_file,

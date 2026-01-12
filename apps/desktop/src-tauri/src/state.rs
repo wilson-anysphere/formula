@@ -769,6 +769,52 @@ impl AppState {
         self.rebuild_engine_from_workbook()?;
         self.engine.recalculate();
         let _ = self.refresh_computed_values()?;
+        self.dirty = true;
+        self.redo_stack.clear();
+        Ok(())
+    }
+
+    pub fn move_sheet(&mut self, sheet_id: &str, to_index: usize) -> Result<(), AppStateError> {
+        // When the workbook is backed by SQLite persistence, reorder the sheet in storage first so
+        // we don't leave the in-memory workbook in a partially updated state if persistence fails.
+        if let Some(persistent) = self.persistent.as_mut() {
+            // Best-effort: some workbook states (e.g. newly-created sheets) may not have been
+            // assigned a persistence UUID yet. In that case, still allow reordering the in-memory
+            // workbook so the UI behaves correctly.
+            if let Some(sheet_uuid) = persistent.sheet_uuid(sheet_id) {
+                persistent
+                    .storage
+                    .reorder_sheet(sheet_uuid, to_index as i64)
+                    .map_err(|e| match e {
+                        formula_storage::StorageError::SheetNotFound(_) => {
+                            AppStateError::UnknownSheet(sheet_id.to_string())
+                        }
+                        other => AppStateError::Persistence(other.to_string()),
+                    })?;
+            }
+        }
+
+        let workbook = self.get_workbook_mut()?;
+        let from_index = workbook
+            .sheets
+            .iter()
+            .position(|sheet| sheet.id == sheet_id)
+            .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
+
+        if workbook.sheets.len() <= 1 {
+            return Ok(());
+        }
+
+        // Clamp to the valid insertion range after removal. This matches the remove+insert
+        // semantics used by the frontend sheet store and the SQLite persistence layer.
+        let sheet = workbook.sheets.remove(from_index);
+        let clamped = to_index.min(workbook.sheets.len());
+        workbook.sheets.insert(clamped, sheet);
+
+        // Reordering sheets is a structural XLSX edit. The patch-based save path cannot rewrite
+        // workbook.xml sheet ordering, so drop origin bytes to force regeneration from storage.
+        workbook.origin_xlsx_bytes = None;
+        workbook.origin_xlsb_path = None;
 
         self.dirty = true;
         self.redo_stack.clear();

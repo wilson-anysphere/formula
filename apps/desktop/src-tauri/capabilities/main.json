@@ -13,6 +13,7 @@
         "new_workbook",
         "add_sheet",
         "rename_sheet",
+        "move_sheet",
         "delete_sheet",
         "read_text_file",
         "read_binary_file",

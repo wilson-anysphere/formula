@@ -57,6 +57,12 @@ type Props = {
    */
   onSheetDeleted?: (event: { sheetId: string; name: string }) => void;
   /**
+   * Called after a sheet move is successfully applied to the metadata store.
+   *
+   * The desktop shell can use this to persist the new sheet order to the backend.
+   */
+  onSheetMoved?: (event: { sheetId: string; toIndex: number }) => Promise<void> | void;
+  /**
    * Optional toast/error surface (used by the desktop shell).
    */
   onError?: (message: string) => void;
@@ -72,6 +78,7 @@ export function SheetTabStrip({
   onSheetsReordered,
   onSheetRenamed,
   onSheetDeleted,
+  onSheetMoved,
   onError,
 }: Props) {
   const [sheets, setSheets] = useState<SheetMeta[]>(() => store.listAll());
@@ -249,15 +256,23 @@ export function SheetTabStrip({
   const moveSheet = (sheetId: string, dropTarget: Parameters<typeof computeWorkbookSheetMoveIndex>[0]["dropTarget"]) => {
     const all = store.listAll();
     const fromIndex = all.findIndex((s) => s.id === sheetId);
+    if (fromIndex < 0) return;
     const toIndex = computeWorkbookSheetMoveIndex({ sheets: all, fromSheetId: sheetId, dropTarget });
     if (toIndex == null) return;
-    if (fromIndex === -1 || fromIndex === toIndex) return;
+    if (toIndex === fromIndex) return;
     try {
       store.move(sheetId, toIndex);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       onError?.(message);
       return;
+    }
+    if (onSheetMoved) {
+      void Promise.resolve()
+        .then(() => onSheetMoved({ sheetId, toIndex }))
+        .catch((err) => {
+          onError?.(err instanceof Error ? err.message : String(err));
+        });
     }
     onSheetsReordered?.();
   };
