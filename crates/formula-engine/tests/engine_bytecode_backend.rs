@@ -3038,6 +3038,48 @@ fn bytecode_backend_financial_date_text_uses_datevalue_semantics() {
 }
 
 #[test]
+fn bytecode_backend_financial_date_text_uses_datevalue_semantics_for_accrint() {
+    let mut engine = Engine::new();
+
+    engine
+        .set_cell_formula("Sheet1", "A1", r#"=ACCRINTM("1","2020-03-31",0.05,1000)"#)
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A2",
+            r#"=ACCRINT("1","2020-06-30","2020-03-31",0.05,1000,2)"#,
+        )
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 2);
+    assert_eq!(stats.compiled, 2);
+    assert_eq!(stats.fallback, 0);
+    assert_eq!(engine.bytecode_program_count(), 2);
+
+    engine.recalculate_single_threaded();
+
+    for cell in ["A1", "A2"] {
+        assert_eq!(
+            engine.get_cell_value("Sheet1", cell),
+            Value::Error(ErrorKind::Value),
+            "expected {cell} to error for invalid text date input"
+        );
+    }
+
+    for (formula, cell) in [
+        (r#"=ACCRINTM("1","2020-03-31",0.05,1000)"#, "A1"),
+        (
+            r#"=ACCRINT("1","2020-06-30","2020-03-31",0.05,1000,2)"#,
+            "A2",
+        ),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
 fn bytecode_backend_financial_date_text_respects_value_locale() {
     let mut engine = Engine::new();
     let formula = r#"=DISC("01/02/2020","01/03/2020",97,100)"#;
