@@ -1067,10 +1067,11 @@ stream (e.g. `\x05DigitalSignature/sig`). When searching for signatures, match o
 component, not just root-level streams.
 
 Common signature stream payload shapes we must handle:
-
+ 
 1. **Raw PKCS#7/CMS DER** (`ContentInfo`, usually begins with ASN.1 `SEQUENCE (0x30)`).
-2. **MS-OSHARED `DigSigInfoSerialized` wrapper/prefix**, which contains (or precedes) the
-   DER-encoded PKCS#7/CMS payload.
+2. **Office DigSig wrapper**, which contains (or points to) the DER-encoded PKCS#7/CMS payload:
+   - MS-OSHARED `DigSigBlob` / `DigSigInfoSerialized` (offset-based), or
+   - a length-prefixed DigSigInfoSerialized-like header commonly seen in the wild.
 3. **Detached `content || pkcs7`**, where the stream is `signed_content_bytes` followed by a
    detached PKCS#7 signature over those bytes.
 

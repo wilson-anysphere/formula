@@ -75,7 +75,8 @@ pub fn extract_vba_signature_signed_digest(
         }
     }
 
-    // Prefer a deterministic MS-OSHARED DigSigInfoSerialized location when present.
+    // Prefer a deterministic DigSigInfoSerialized-like prefix location when present (the
+    // length-prefixed wrapper commonly found at the start of `\x05DigitalSignature*` streams).
     if let Some(info) = crate::offcrypto::parse_digsig_info_serialized(signature_stream) {
         let end = info.pkcs7_offset.saturating_add(info.pkcs7_len);
         if end <= signature_stream.len() {

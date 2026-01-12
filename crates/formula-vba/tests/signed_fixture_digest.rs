@@ -42,7 +42,8 @@ fn extracts_spc_indirect_data_digest_from_signed_vba_fixture() {
         sig.signer_subject
     );
 
-    // Many real-world files wrap the PKCS#7 blob in a [MS-OSHARED] DigSigInfoSerialized header.
+    // Many real-world files wrap the PKCS#7 blob in a length-prefixed DigSigInfoSerialized-like
+    // header (distinct from the MS-OSHARED DigSigBlob/offset-based wrapper).
     assert_ne!(sig.signature.first(), Some(&0x30));
     assert!(
         sig.signature.len() >= 12,
@@ -59,7 +60,7 @@ fn extracts_spc_indirect_data_digest_from_signed_vba_fixture() {
 
     // The fixture intentionally includes a *decoy* PKCS#7 blob inside the certificate store bytes
     // so that naive scanning would pick the wrong payload. Correct handling should use the
-    // DigSigInfoSerialized length fields to locate the real signature.
+    // DigSigInfoSerialized-like length fields to locate the real signature.
     assert_eq!(sig.signature.get(cert_store_offset), Some(&0x30));
     assert_eq!(sig.signature.get(pkcs7_offset), Some(&0x30));
     assert_eq!(cb_signature, sig.signature.len().saturating_sub(pkcs7_offset));
@@ -94,8 +95,9 @@ fn extracts_digest_even_when_digsig_header_is_corrupt() {
         .expect("signature parse should succeed")
         .expect("signature should be present");
 
-    // Corrupt the DigSigInfoSerialized header length fields so the deterministic unwrapping logic
-    // can't apply, forcing the extractor to fall back to scanning for an embedded CMS SignedData.
+    // Corrupt the length-prefixed DigSigInfoSerialized-like header length fields so the
+    // deterministic unwrapping logic can't apply, forcing the extractor to fall back to scanning for
+    // an embedded CMS SignedData.
     let mut corrupted = sig.signature.clone();
     corrupted[0..4].copy_from_slice(&0xFFFF_FFFFu32.to_le_bytes());
 
@@ -120,7 +122,7 @@ fn verifies_signature_even_when_digsig_header_is_corrupt() {
         .expect("signature parse should succeed")
         .expect("signature should be present");
 
-    // Corrupt DigSigInfoSerialized sizes so we exercise the fallback scanning logic in PKCS#7
+    // Corrupt DigSigInfoSerialized-like sizes so we exercise the fallback scanning logic in PKCS#7
     // verification.
     let mut corrupted = sig.signature.clone();
     corrupted[0..4].copy_from_slice(&0xFFFF_FFFFu32.to_le_bytes());
