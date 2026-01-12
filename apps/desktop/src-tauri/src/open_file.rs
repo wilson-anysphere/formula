@@ -143,8 +143,9 @@ mod tests {
         let argv = vec![
             "formula-desktop".to_string(),
             "Report.XLSX".to_string(),
-            "Template.XLTX".to_string(),
-            "Addin.XLAM".to_string(),
+            "Report.XLTX".to_string(),
+            "Report.XLTM".to_string(),
+            "Report.XLAM".to_string(),
             "data.csv".to_string(),
             "ignore.md".to_string(),
         ];
@@ -154,8 +155,9 @@ mod tests {
             paths,
             vec![
                 cwd.join("Report.XLSX"),
-                cwd.join("Template.XLTX"),
-                cwd.join("Addin.XLAM"),
+                cwd.join("Report.XLTX"),
+                cwd.join("Report.XLTM"),
+                cwd.join("Report.XLAM"),
                 cwd.join("data.csv")
             ]
         );
