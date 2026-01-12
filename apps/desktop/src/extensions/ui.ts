@@ -165,6 +165,8 @@ export async function showQuickPick<T>(
   };
 
   return await new Promise<T | null>((resolve) => {
+    const buttons: HTMLButtonElement[] = [];
+
     dialog.addEventListener(
       "close",
       () => {
@@ -188,6 +190,7 @@ export async function showQuickPick<T>(
       btn.className = "quick-pick__item";
       btn.dataset.testid = `quick-pick-item-${idx}`;
       if (!firstBtn) firstBtn = btn;
+      buttons.push(btn);
 
       const label = document.createElement("div");
       label.textContent = item.label;
@@ -208,6 +211,41 @@ export async function showQuickPick<T>(
 
       list.appendChild(btn);
     }
+
+    dialog.addEventListener("keydown", (e) => {
+      if (e.defaultPrevented) return;
+
+      // Arrow-key navigation between list items (VS Code-like quick pick behavior).
+      if (buttons.length === 0) return;
+      const active = document.activeElement;
+      const currentIndex = active ? buttons.indexOf(active as HTMLButtonElement) : -1;
+
+      const focusIndex = (idx: number) => {
+        const clamped = Math.max(0, Math.min(idx, buttons.length - 1));
+        const btn = buttons[clamped];
+        if (!btn) return;
+        try {
+          btn.focus();
+          btn.scrollIntoView({ block: "nearest" });
+        } catch {
+          // Best-effort focus/scroll.
+        }
+      };
+
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        focusIndex(currentIndex === -1 ? 0 : currentIndex + 1);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        focusIndex(currentIndex <= 0 ? 0 : currentIndex - 1);
+      } else if (e.key === "Home") {
+        e.preventDefault();
+        focusIndex(0);
+      } else if (e.key === "End") {
+        e.preventDefault();
+        focusIndex(buttons.length - 1);
+      }
+    });
 
     showModal(dialog);
     try {
