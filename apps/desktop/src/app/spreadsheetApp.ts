@@ -1379,7 +1379,7 @@ export class SpreadsheetApp {
         structuralDialogRoot.style.border = "1px solid var(--dialog-border)";
         structuralDialogRoot.style.borderRadius = "10px";
         structuralDialogRoot.style.padding = "12px";
-        structuralDialogRoot.style.boxShadow = "0 6px 24px rgba(0,0,0,0.18)";
+        structuralDialogRoot.style.boxShadow = "var(--dialog-shadow)";
       }
 
       const presence = this.collabSession.presence;
