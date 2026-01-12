@@ -34,3 +34,55 @@ fn normalize(path: &str) -> String {
     }
     out.join("/")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rels_for_part_in_root() {
+        assert_eq!(rels_for_part("workbook.xml"), "_rels/workbook.xml.rels");
+    }
+
+    #[test]
+    fn rels_for_part_in_subdir() {
+        assert_eq!(rels_for_part("xl/workbook.xml"), "xl/_rels/workbook.xml.rels");
+    }
+
+    #[test]
+    fn resolve_target_relative_to_source_dir() {
+        assert_eq!(
+            resolve_target("xl/worksheets/sheet1.xml", "../media/image1.png"),
+            "xl/media/image1.png"
+        );
+    }
+
+    #[test]
+    fn resolve_target_strips_fragments() {
+        assert_eq!(
+            resolve_target("xl/workbook.xml", "worksheets/sheet1.xml#rId1"),
+            "xl/worksheets/sheet1.xml"
+        );
+    }
+
+    #[test]
+    fn resolve_target_hash_only_refs_source_part() {
+        assert_eq!(resolve_target("xl/workbook.xml", "#rId1"), "xl/workbook.xml");
+    }
+
+    #[test]
+    fn resolve_target_absolute_paths_are_normalized() {
+        assert_eq!(
+            resolve_target("xl/workbook.xml", "/xl/../docProps/core.xml"),
+            "docProps/core.xml"
+        );
+    }
+
+    #[test]
+    fn resolve_target_handles_dot_segments() {
+        assert_eq!(
+            resolve_target("xl/worksheets/sheet1.xml", "./../worksheets/./sheet2.xml"),
+            "xl/worksheets/sheet2.xml"
+        );
+    }
+}
