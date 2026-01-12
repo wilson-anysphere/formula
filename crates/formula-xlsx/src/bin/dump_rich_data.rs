@@ -832,6 +832,9 @@ fn dump_rich_cell_images_by_cell(pkg: &XlsxPackage, out_dir: Option<&Path>) {
             return;
         }
 
+        let mut manifest: Vec<String> = Vec::with_capacity(images_by_cell.len() + 1);
+        manifest.push("sheet\tcell\tbytes\tfile".to_string());
+
         let mut written = 0usize;
         let mut failed = 0usize;
 
@@ -854,9 +857,27 @@ fn dump_rich_cell_images_by_cell(pkg: &XlsxPackage, out_dir: Option<&Path>) {
             }
 
             match fs::write(&path, bytes) {
-                Ok(()) => written += 1,
+                Ok(()) => {
+                    written += 1;
+                    manifest.push(format!(
+                        "{}\t{}\t{}\t{}",
+                        tsv_escape(sheet),
+                        cell_a1,
+                        bytes.len(),
+                        file_name
+                    ));
+                }
                 Err(_) => failed += 1,
             }
+        }
+
+        let manifest_path = out_dir.join("manifest.tsv");
+        if let Err(err) = fs::write(&manifest_path, manifest.join("\n") + "\n") {
+            println!();
+            println!(
+                "rich-data in-cell images (by cell): failed to write manifest {}: {err}",
+                manifest_path.display()
+            );
         }
 
         println!();
@@ -1233,6 +1254,12 @@ fn guess_image_extension(bytes: &[u8]) -> Option<&'static str> {
         }
     }
     None
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn tsv_escape(value: &str) -> String {
+    // Sheet names are user-controlled; keep the manifest format robust.
+    value.replace(['\t', '\r', '\n'], " ")
 }
 
 #[cfg(not(target_arch = "wasm32"))]
