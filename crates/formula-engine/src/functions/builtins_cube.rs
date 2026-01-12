@@ -24,18 +24,18 @@ fn rtd_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(ErrorKind::NA);
     };
 
-    let prog_id = match eval_scalar_arg(ctx, &args[0]).coerce_to_string() {
+    let prog_id = match eval_scalar_arg(ctx, &args[0]).coerce_to_string_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let server = match eval_scalar_arg(ctx, &args[1]).coerce_to_string() {
+    let server = match eval_scalar_arg(ctx, &args[1]).coerce_to_string_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
 
     let mut topics = Vec::with_capacity(args.len().saturating_sub(2));
     for expr in &args[2..] {
-        match eval_scalar_arg(ctx, expr).coerce_to_string() {
+        match eval_scalar_arg(ctx, expr).coerce_to_string_with_ctx(ctx) {
             Ok(v) => topics.push(v),
             Err(e) => return Value::Error(e),
         }
@@ -63,14 +63,14 @@ fn cubevalue_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(ErrorKind::NA);
     };
 
-    let connection = match eval_scalar_arg(ctx, &args[0]).coerce_to_string() {
+    let connection = match eval_scalar_arg(ctx, &args[0]).coerce_to_string_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
 
     let mut tuples = Vec::with_capacity(args.len().saturating_sub(1));
     for expr in &args[1..] {
-        match eval_scalar_arg(ctx, expr).coerce_to_string() {
+        match eval_scalar_arg(ctx, expr).coerce_to_string_with_ctx(ctx) {
             Ok(v) => tuples.push(v),
             Err(e) => return Value::Error(e),
         }
@@ -98,17 +98,17 @@ fn cubemember_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(ErrorKind::NA);
     };
 
-    let connection = match eval_scalar_arg(ctx, &args[0]).coerce_to_string() {
+    let connection = match eval_scalar_arg(ctx, &args[0]).coerce_to_string_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let member_expression = match eval_scalar_arg(ctx, &args[1]).coerce_to_string() {
+    let member_expression = match eval_scalar_arg(ctx, &args[1]).coerce_to_string_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
 
     let caption = if args.len() >= 3 {
-        match eval_scalar_arg(ctx, &args[2]).coerce_to_string() {
+        match eval_scalar_arg(ctx, &args[2]).coerce_to_string_with_ctx(ctx) {
             Ok(v) => Some(v),
             Err(e) => return Value::Error(e),
         }
@@ -142,15 +142,15 @@ fn cubememberproperty_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Va
         return Value::Error(ErrorKind::NA);
     };
 
-    let connection = match eval_scalar_arg(ctx, &args[0]).coerce_to_string() {
+    let connection = match eval_scalar_arg(ctx, &args[0]).coerce_to_string_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let member_expression_or_handle = match eval_scalar_arg(ctx, &args[1]).coerce_to_string() {
+    let member_expression_or_handle = match eval_scalar_arg(ctx, &args[1]).coerce_to_string_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let property = match eval_scalar_arg(ctx, &args[2]).coerce_to_string() {
+    let property = match eval_scalar_arg(ctx, &args[2]).coerce_to_string_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
@@ -177,11 +177,11 @@ fn cuberankedmember_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Valu
         return Value::Error(ErrorKind::NA);
     };
 
-    let connection = match eval_scalar_arg(ctx, &args[0]).coerce_to_string() {
+    let connection = match eval_scalar_arg(ctx, &args[0]).coerce_to_string_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let set_expression_or_handle = match eval_scalar_arg(ctx, &args[1]).coerce_to_string() {
+    let set_expression_or_handle = match eval_scalar_arg(ctx, &args[1]).coerce_to_string_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
@@ -191,7 +191,7 @@ fn cuberankedmember_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Valu
     };
 
     let caption = if args.len() >= 4 {
-        match eval_scalar_arg(ctx, &args[3]).coerce_to_string() {
+        match eval_scalar_arg(ctx, &args[3]).coerce_to_string_with_ctx(ctx) {
             Ok(v) => Some(v),
             Err(e) => return Value::Error(e),
         }
@@ -226,17 +226,17 @@ fn cubeset_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(ErrorKind::NA);
     };
 
-    let connection = match eval_scalar_arg(ctx, &args[0]).coerce_to_string() {
+    let connection = match eval_scalar_arg(ctx, &args[0]).coerce_to_string_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let set_expression = match eval_scalar_arg(ctx, &args[1]).coerce_to_string() {
+    let set_expression = match eval_scalar_arg(ctx, &args[1]).coerce_to_string_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
 
     let caption = if args.len() >= 3 {
-        match eval_scalar_arg(ctx, &args[2]).coerce_to_string() {
+        match eval_scalar_arg(ctx, &args[2]).coerce_to_string_with_ctx(ctx) {
             Ok(v) => Some(v),
             Err(e) => return Value::Error(e),
         }
@@ -254,7 +254,7 @@ fn cubeset_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
 
     let sort_by = if args.len() >= 5 {
-        match eval_scalar_arg(ctx, &args[4]).coerce_to_string() {
+        match eval_scalar_arg(ctx, &args[4]).coerce_to_string_with_ctx(ctx) {
             Ok(v) => Some(v),
             Err(e) => return Value::Error(e),
         }
@@ -290,7 +290,7 @@ fn cubesetcount_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(ErrorKind::NA);
     };
 
-    let set_expression_or_handle = match eval_scalar_arg(ctx, &args[0]).coerce_to_string() {
+    let set_expression_or_handle = match eval_scalar_arg(ctx, &args[0]).coerce_to_string_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
@@ -317,21 +317,21 @@ fn cubekpimember_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(ErrorKind::NA);
     };
 
-    let connection = match eval_scalar_arg(ctx, &args[0]).coerce_to_string() {
+    let connection = match eval_scalar_arg(ctx, &args[0]).coerce_to_string_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let kpi_name = match eval_scalar_arg(ctx, &args[1]).coerce_to_string() {
+    let kpi_name = match eval_scalar_arg(ctx, &args[1]).coerce_to_string_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let kpi_property = match eval_scalar_arg(ctx, &args[2]).coerce_to_string() {
+    let kpi_property = match eval_scalar_arg(ctx, &args[2]).coerce_to_string_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
 
     let caption = if args.len() >= 4 {
-        match eval_scalar_arg(ctx, &args[3]).coerce_to_string() {
+        match eval_scalar_arg(ctx, &args[3]).coerce_to_string_with_ctx(ctx) {
             Ok(v) => Some(v),
             Err(e) => return Value::Error(e),
         }
@@ -346,4 +346,3 @@ fn cubekpimember_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         caption.as_deref(),
     )
 }
-

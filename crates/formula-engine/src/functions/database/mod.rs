@@ -80,7 +80,7 @@ fn parse_database_range(ctx: &dyn FunctionContext, database: ArgValue) -> Result
     let mut header_map: HashMap<String, usize> = HashMap::new();
     let mut saw_header = false;
     for col in 0..array.cols {
-        let label = header_label(array.get(0, col).unwrap_or(&Value::Blank))?;
+        let label = header_label(ctx, array.get(0, col).unwrap_or(&Value::Blank))?;
         if let Some(label) = label {
             saw_header = true;
             header_map.entry(casefold(label.trim())).or_insert(col);
@@ -142,7 +142,7 @@ fn parse_criteria_range(
     let mut col_map: Vec<Option<usize>> = Vec::with_capacity(array.cols);
     for col in 0..array.cols {
         let header_cell = array.get(0, col).unwrap_or(&Value::Blank);
-        let label = header_label(header_cell)?;
+        let label = header_label(ctx, header_cell)?;
         let Some(label) = label else {
             // Excel uses blank criteria headers for "computed criteria" (criteria formulas).
             // We do not currently implement that behavior. Allow entirely blank columns (no
@@ -219,7 +219,7 @@ fn row_matches(table: &DatabaseTable, row: usize, criteria: &[CriteriaClause]) -
     false
 }
 
-fn header_label(value: &Value) -> Result<Option<String>, ErrorKind> {
+fn header_label(ctx: &dyn FunctionContext, value: &Value) -> Result<Option<String>, ErrorKind> {
     match value {
         Value::Blank => Ok(None),
         Value::Text(s) => {
@@ -230,7 +230,7 @@ fn header_label(value: &Value) -> Result<Option<String>, ErrorKind> {
             }
         }
         Value::Number(_) | Value::Bool(_) => {
-            let s = value.coerce_to_string()?;
+            let s = value.coerce_to_string_with_ctx(ctx)?;
             if s.trim().is_empty() {
                 Ok(None)
             } else {

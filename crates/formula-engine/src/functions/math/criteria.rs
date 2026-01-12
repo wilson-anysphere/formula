@@ -7,6 +7,7 @@ use crate::functions::wildcard::WildcardPattern;
 use crate::simd::{CmpOp, NumericCriteria};
 use crate::value::{parse_number, NumberLocale};
 use crate::{ErrorKind, LocaleConfig, Value};
+use formula_format::{DateSystem, FormatOptions, Value as FmtValue};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CriteriaOp {
@@ -51,6 +52,7 @@ impl TextCriteria {
 pub struct Criteria {
     op: CriteriaOp,
     rhs: CriteriaRhs,
+    value_locale: ValueLocaleConfig,
     number_locale: NumberLocale,
 }
 
@@ -107,21 +109,25 @@ impl Criteria {
             Value::Number(n) => Ok(Criteria {
                 op: CriteriaOp::Eq,
                 rhs: CriteriaRhs::Number(*n),
+                value_locale,
                 number_locale,
             }),
             Value::Bool(b) => Ok(Criteria {
                 op: CriteriaOp::Eq,
                 rhs: CriteriaRhs::Bool(*b),
+                value_locale,
                 number_locale,
             }),
             Value::Error(e) => Ok(Criteria {
                 op: CriteriaOp::Eq,
                 rhs: CriteriaRhs::Error(*e),
+                value_locale,
                 number_locale,
             }),
             Value::Blank => Ok(Criteria {
                 op: CriteriaOp::Eq,
                 rhs: CriteriaRhs::Blank,
+                value_locale,
                 number_locale,
             }),
             Value::Text(s) => parse_criteria_string(s, system, value_locale, now_utc, number_locale, &locale),
@@ -191,7 +197,7 @@ impl Criteria {
                 self.number_locale,
             ),
             CriteriaRhs::Number(n) => matches_numeric_criteria(self.op, *n, value, self.number_locale),
-            CriteriaRhs::Text(pattern) => matches_text_criteria(self.op, pattern, value),
+            CriteriaRhs::Text(pattern) => matches_text_criteria(self.op, pattern, value, self.value_locale),
         }
     }
 }
@@ -230,8 +236,13 @@ fn matches_numeric_criteria(op: CriteriaOp, rhs: f64, value: &Value, locale: Num
     }
 }
 
-fn matches_text_criteria(op: CriteriaOp, pattern: &TextCriteria, value: &Value) -> bool {
-    let Some(value_text) = coerce_to_text(value) else {
+fn matches_text_criteria(
+    op: CriteriaOp,
+    pattern: &TextCriteria,
+    value: &Value,
+    value_locale: ValueLocaleConfig,
+) -> bool {
+    let Some(value_text) = coerce_to_text(value, value_locale) else {
         // Excel criteria functions treat blanks as "not text" for text-pattern matching (e.g.
         // COUNTIF(range,"*") does not count truly empty cells). For `<>` text criteria, non-text
         // values still satisfy the predicate because they are not equal to the text pattern.
@@ -276,6 +287,7 @@ fn parse_criteria_string(
             CriteriaOp::Eq | CriteriaOp::Ne => Ok(Criteria {
                 op,
                 rhs: CriteriaRhs::Blank,
+                value_locale,
                 number_locale,
             }),
             _ => Err(ErrorKind::Value),
@@ -291,6 +303,7 @@ fn parse_criteria_string(
                 CriteriaOp::Eq | CriteriaOp::Ne => Ok(Criteria {
                     op,
                     rhs: CriteriaRhs::Blank,
+                    value_locale,
                     number_locale,
                 }),
                 _ => Err(ErrorKind::Value),
@@ -300,6 +313,7 @@ fn parse_criteria_string(
         return Ok(Criteria {
             op,
             rhs: CriteriaRhs::Text(TextCriteria::new(&text_literal)),
+            value_locale,
             number_locale,
         });
     }
@@ -308,6 +322,7 @@ fn parse_criteria_string(
         return Ok(Criteria {
             op,
             rhs: CriteriaRhs::Error(err),
+            value_locale,
             number_locale,
         });
     }
@@ -316,6 +331,7 @@ fn parse_criteria_string(
         return Ok(Criteria {
             op,
             rhs: CriteriaRhs::Bool(true),
+            value_locale,
             number_locale,
         });
     }
@@ -323,6 +339,7 @@ fn parse_criteria_string(
         return Ok(Criteria {
             op,
             rhs: CriteriaRhs::Bool(false),
+            value_locale,
             number_locale,
         });
     }
@@ -333,6 +350,7 @@ fn parse_criteria_string(
         return Ok(Criteria {
             op,
             rhs: CriteriaRhs::Number(num),
+            value_locale,
             number_locale,
         });
     }
@@ -342,6 +360,7 @@ fn parse_criteria_string(
         return Ok(Criteria {
             op,
             rhs: CriteriaRhs::Number(serial),
+            value_locale,
             number_locale,
         });
     }
@@ -349,6 +368,7 @@ fn parse_criteria_string(
     Ok(Criteria {
         op,
         rhs: CriteriaRhs::Text(TextCriteria::new(rhs_str)),
+        value_locale,
         number_locale,
     })
 }
@@ -430,16 +450,25 @@ fn coerce_to_number(value: &Value, locale: NumberLocale) -> Option<f64> {
     }
 }
 
-fn coerce_to_text(value: &Value) -> Option<String> {
+fn coerce_to_text(value: &Value, value_locale: ValueLocaleConfig) -> Option<String> {
     match value {
         Value::Blank => None,
-        Value::Number(_) | Value::Text(_) | Value::Bool(_) => value.coerce_to_string().ok(),
+        Value::Text(_) | Value::Bool(_) => value.coerce_to_string().ok(),
+        Value::Number(n) => {
+            let options = FormatOptions {
+                locale: value_locale.separators,
+                // Criteria text matching always treats numbers as numbers under the "General"
+                // format; the date system is irrelevant.
+                date_system: DateSystem::Excel1900,
+            };
+            Some(formula_format::format_value(FmtValue::Number(*n), None, &options).text)
+        }
         Value::Error(_)
         | Value::Reference(_)
         | Value::ReferenceUnion(_)
         | Value::Lambda(_)
         | Value::Spill { .. } => None,
-        Value::Array(arr) => coerce_to_text(&arr.top_left()),
+        Value::Array(arr) => coerce_to_text(&arr.top_left(), value_locale),
     }
 }
 

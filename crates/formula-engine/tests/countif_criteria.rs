@@ -191,6 +191,23 @@ fn countif_criteria_parses_numbers_using_value_locale_equality() {
 }
 
 #[test]
+fn countif_text_wildcards_coerce_numbers_using_value_locale() {
+    let mut engine = Engine::new();
+    engine.set_value_locale(ValueLocaleConfig::de_de());
+    engine.set_cell_value("Sheet1", "A1", 1.5).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 1.6).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "Z1", r#"=COUNTIF(A1:A2, "*,5")"#)
+        .unwrap();
+    assert!(
+        engine.bytecode_program_count() > 0,
+        "expected COUNTIF formula to compile to bytecode for this test"
+    );
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "Z1"), Value::Number(1.0));
+}
+
+#[test]
 fn countif_criteria_parses_dates_using_value_locale_date_order() {
     let mut engine = Engine::new();
     engine.set_date_system(ExcelDateSystem::EXCEL_1900);
