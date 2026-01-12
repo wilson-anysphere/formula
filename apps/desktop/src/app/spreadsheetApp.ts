@@ -422,8 +422,6 @@ export class SpreadsheetApp {
   private readonly commentThreadsByCellRef = new Map<string, Comment[]>();
   private sharedGridSelectionSyncInProgress = false;
   private sharedGridZoom = 1;
-  private readonly sharedGridAxisCols = new Set<number>();
-  private readonly sharedGridAxisRows = new Set<number>();
 
   private wasmEngine: EngineClient | null = null;
   private wasmSyncSuspended = false;
@@ -2313,11 +2311,6 @@ export class SpreadsheetApp {
     }
 
     this.sharedGrid.renderer.applyAxisSizeOverrides({ rows: rowSizes, cols: colSizes }, { resetUnspecified: true });
-
-    this.sharedGridAxisCols.clear();
-    for (const col of nextCols.keys()) this.sharedGridAxisCols.add(col);
-    this.sharedGridAxisRows.clear();
-    for (const row of nextRows.keys()) this.sharedGridAxisRows.add(row);
   }
 
   freezePanes(): void {
@@ -3005,10 +2998,8 @@ export class SpreadsheetApp {
       const label = change.source === "autoFit" ? "Autofit Column Width" : "Resize Column";
       if (isDefault) {
         this.document.resetColWidth(this.sheetId, docCol, { label });
-        this.sharedGridAxisCols.delete(docCol);
       } else {
         this.document.setColWidth(this.sheetId, docCol, baseSize, { label });
-        this.sharedGridAxisCols.add(docCol);
       }
       return;
     }
@@ -3018,10 +3009,8 @@ export class SpreadsheetApp {
     const label = change.source === "autoFit" ? "Autofit Row Height" : "Resize Row";
     if (isDefault) {
       this.document.resetRowHeight(this.sheetId, docRow, { label });
-      this.sharedGridAxisRows.delete(docRow);
     } else {
       this.document.setRowHeight(this.sheetId, docRow, baseSize, { label });
-      this.sharedGridAxisRows.add(docRow);
     }
   }
 
