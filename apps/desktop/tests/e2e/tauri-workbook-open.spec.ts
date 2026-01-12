@@ -239,7 +239,7 @@ test.describe("tauri workbook integration", () => {
       usedRange: { start_row: 0, end_row: 10, start_col: 0, end_col: 0 },
     });
 
-    await gotoDesktop(page, "/?maxRows=5&maxCols=6");
+    await gotoDesktop(page, "/?loadMaxRows=5&loadMaxCols=6");
 
     await page.evaluate(() => {
       document.getElementById("toast-root")?.replaceChildren();
