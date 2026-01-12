@@ -529,12 +529,13 @@ test.describe("sheet tabs", () => {
     // Sheet name remains unchanged.
     await expect(sheet1Tab.locator(".sheet-tab__name")).toHaveText("Sheet1");
 
-    // Invalid rename should not wedge sheet navigation; switching via the status-bar sheet switcher should still work.
+    // Attempt to switch via the status-bar sheet switcher. Invalid rename should not block it.
     const switcher = page.getByTestId("sheet-switcher");
     await switcher.selectOption("Sheet2", { force: true });
 
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet2");
     await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveAttribute("data-active", "true");
+    await expect(switcher).toHaveValue("Sheet2");
   });
 
   test("drag reordering sheet tabs updates Ctrl+PgUp/PgDn navigation order", async ({ page }) => {
