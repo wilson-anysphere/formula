@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { JSDOM } from "jsdom";
 
-import { parseHtmlToCellGrid } from "../html.js";
+import { parseHtmlToCellGrid, serializeCellGridToHtml } from "../html.js";
 
 test("clipboard HTML DOM parser preserves <br> line breaks", () => {
   const dom = new JSDOM("", { url: "http://localhost" });
@@ -26,3 +26,42 @@ test("clipboard HTML DOM parser preserves <br> line breaks", () => {
   }
 });
 
+test("clipboard HTML DOM parser normalizes NBSP to spaces", () => {
+  const dom = new JSDOM("", { url: "http://localhost" });
+
+  const prevDomParser = globalThis.DOMParser;
+  globalThis.DOMParser = dom.window.DOMParser;
+
+  try {
+    const html = `<!DOCTYPE html><html><body><table><tr><td>Hello&nbsp;world</td></tr></table></body></html>`;
+    const grid = parseHtmlToCellGrid(html);
+    assert.ok(grid);
+    assert.equal(grid[0][0].value, "Hello world");
+  } finally {
+    if (prevDomParser === undefined) {
+      delete globalThis.DOMParser;
+    } else {
+      globalThis.DOMParser = prevDomParser;
+    }
+  }
+});
+
+test("clipboard HTML DOM parser round-trips multiline content", () => {
+  const dom = new JSDOM("", { url: "http://localhost" });
+
+  const prevDomParser = globalThis.DOMParser;
+  globalThis.DOMParser = dom.window.DOMParser;
+
+  try {
+    const html = serializeCellGridToHtml([[{ value: "Line1\nLine2" }]]);
+    const grid = parseHtmlToCellGrid(html);
+    assert.ok(grid);
+    assert.equal(grid[0][0].value, "Line1\nLine2");
+  } finally {
+    if (prevDomParser === undefined) {
+      delete globalThis.DOMParser;
+    } else {
+      globalThis.DOMParser = prevDomParser;
+    }
+  }
+});
