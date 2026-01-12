@@ -583,6 +583,7 @@ describe("WorkbookContextBuilder", () => {
     expect(first.mode).toBe("chat");
     expect(first.model).toBe("unit-test-model");
     expect(first.durationMs).toBeGreaterThanOrEqual(0);
+    expect(first.ok).toBe(true);
     expect(first.sheetCountSummarized).toBe(1);
     expect(first.blockCount).toBe(1);
     expect(first.blockCountByKind).toEqual({ selection: 0, sheet_sample: 1, retrieved: 0 });
@@ -605,6 +606,7 @@ describe("WorkbookContextBuilder", () => {
     // Second build should reuse cached schema + sampled blocks.
     expect(second.cache.schema.hits).toBeGreaterThanOrEqual(1);
     expect(second.cache.block.hits).toBeGreaterThanOrEqual(1);
+    expect(second.ok).toBe(true);
     expect(second.cache.schema.entries).toBeGreaterThanOrEqual(1);
     expect(second.cache.block.entries).toBeGreaterThanOrEqual(1);
     expect(second.cache.block.entriesByKind.sheet_sample).toBeGreaterThanOrEqual(1);
@@ -617,6 +619,38 @@ describe("WorkbookContextBuilder", () => {
     expect(second.promptContextTokens).toBe(ctx2.payload.budget.usedPromptContextTokens);
     expect(second.promptContextBudgetTokens).toBe(ctx2.payload.budget.maxPromptContextTokens);
     expect(second.promptContextTrimmedSectionCount).toBeGreaterThanOrEqual(0);
+  });
+
+  it("invokes onBuildStats when build throws (rag error)", async () => {
+    const documentController = new DocumentController();
+    documentController.setRangeValues("Sheet1", "A1", [["A"]]);
+
+    const spreadsheet = new DocumentControllerSpreadsheetApi(documentController);
+    const onBuildStats = vi.fn();
+    const ragService = {
+      async buildWorkbookContextFromSpreadsheetApi() {
+        throw new Error("boom");
+      },
+    };
+
+    const builder = new WorkbookContextBuilder({
+      workbookId: "wb_stats_error",
+      documentController,
+      spreadsheet,
+      ragService: ragService as any,
+      mode: "chat",
+      model: "unit-test-model",
+      maxSheets: 1,
+      onBuildStats,
+    });
+
+    await expect(builder.build({ activeSheetId: "Sheet1", focusQuestion: "test query" })).rejects.toThrow(/boom/);
+
+    expect(onBuildStats).toHaveBeenCalledTimes(1);
+    const stats = onBuildStats.mock.calls[0]![0];
+    expect(stats.ok).toBe(false);
+    expect(stats.error?.message).toMatch(/boom/);
+    expect(stats.rag.enabled).toBe(true);
   });
 
   it("builds a deterministic promptContext with compact stable JSON", async () => {

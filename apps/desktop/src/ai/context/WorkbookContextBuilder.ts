@@ -73,6 +73,21 @@ export interface WorkbookContextBuildStats {
    * Total wall-clock duration of `build()` in ms (same clock source as `startedAtMs`).
    */
   durationMs: number;
+  /**
+   * True when `build()` returned successfully.
+   *
+   * When false, the builder threw an error (e.g. DLP violation from the underlying
+   * RAG service). In that case, other fields may be partially populated (reflecting
+   * work done before the error was thrown).
+   */
+  ok: boolean;
+  /**
+   * Shallow error info captured when `ok` is false.
+   *
+   * Note: This intentionally excludes stack traces to keep this payload safe for
+   * logging/telemetry by default.
+   */
+  error?: { name: string; message: string };
   mode: ContextBudgetMode;
   model: string;
   /**
@@ -438,6 +453,7 @@ export class WorkbookContextBuilder {
       ? {
           startedAtMs: nowMs(),
           durationMs: 0,
+          ok: false,
           mode: this.options.mode,
           model: this.options.model,
           sheetCountSummarized: 0,
@@ -467,96 +483,100 @@ export class WorkbookContextBuilder {
           },
         }
       : null;
-    const selection = input.selectedRange;
-    const schemaProvider = this.options.schemaProvider ?? null;
+    try {
+      const selection = input.selectedRange;
+      const schemaProvider = this.options.schemaProvider ?? null;
 
-    const dlp = input.dlp ?? this.options.dlp ?? undefined;
-    const dlpCacheKey = computeDlpCacheKey(dlp);
+      const dlp = input.dlp ?? this.options.dlp ?? undefined;
+      const dlpCacheKey = computeDlpCacheKey(dlp);
 
-    const schemaMetadata = this.getSchemaMetadata(schemaProvider);
-    const schemaNamedRangesBySheet = schemaMetadata.schemaNamedRangesBySheet;
-    const schemaTablesBySheet = schemaMetadata.schemaTablesBySheet;
-    const namedRanges = schemaMetadata.namedRanges;
+      const schemaMetadata = this.getSchemaMetadata(schemaProvider);
+      const schemaNamedRangesBySheet = schemaMetadata.schemaNamedRangesBySheet;
+      const schemaTablesBySheet = schemaMetadata.schemaTablesBySheet;
+      const namedRanges = schemaMetadata.namedRanges;
 
-    // Reuse a single ToolExecutor per build() invocation to avoid repeated schema
-    // validation + option normalization on the hot path. All `read_range` calls
-    // use explicit sheet-prefixed A1 ranges, so `default_sheet` can be stable.
-    // Align `default_sheet` with any provided DLP sheet_id so DLP evaluation for
-    // cross-sheet reads uses the actual range sheet name.
-    const maxReadRangeCells = Math.max(
-      1,
-      this.options.maxSchemaRows * this.options.maxSchemaCols,
-      this.options.maxBlockRows * this.options.maxBlockCols,
-    );
-    const defaultSheetForTools =
-      typeof (dlp as any)?.sheet_id === "string" && String((dlp as any).sheet_id).trim()
-        ? String((dlp as any).sheet_id).trim()
-        : input.activeSheetId;
-    const executor = new ToolExecutor(this.options.spreadsheet, {
-      default_sheet: defaultSheetForTools,
-      dlp,
-      max_read_range_cells: maxReadRangeCells,
-      max_read_range_chars: 200_000,
-    });
-
-    // Retrieval (semantic search) is optional and query-driven.
-    const ragEnabled = Boolean(input.focusQuestion && this.options.ragService);
-    if (stats) stats.rag.enabled = ragEnabled;
-    let ragResult: any = null;
-    if (ragEnabled) {
-      const startedAt = stats ? nowMs() : 0;
-      ragResult = await this.options.ragService!.buildWorkbookContextFromSpreadsheetApi({
-        spreadsheet: this.options.spreadsheet,
-        workbookId: this.options.workbookId,
-        query: input.focusQuestion!,
-        attachments: input.attachments,
-        // WorkbookContextBuilder builds its own promptContext; avoid redundant string formatting
-        // + token estimation work inside the underlying RAG service.
-        includePromptContext: false,
+      // Reuse a single ToolExecutor per build() invocation to avoid repeated schema
+      // validation + option normalization on the hot path. All `read_range` calls
+      // use explicit sheet-prefixed A1 ranges, so `default_sheet` can be stable.
+      // Align `default_sheet` with any provided DLP sheet_id so DLP evaluation for
+      // cross-sheet reads uses the actual range sheet name.
+      const maxReadRangeCells = Math.max(
+        1,
+        this.options.maxSchemaRows * this.options.maxSchemaCols,
+        this.options.maxBlockRows * this.options.maxBlockCols,
+      );
+      const defaultSheetForTools =
+        typeof (dlp as any)?.sheet_id === "string" && String((dlp as any).sheet_id).trim()
+          ? String((dlp as any).sheet_id).trim()
+          : input.activeSheetId;
+      const executor = new ToolExecutor(this.options.spreadsheet, {
+        default_sheet: defaultSheetForTools,
         dlp,
+        max_read_range_cells: maxReadRangeCells,
+        max_read_range_chars: 200_000,
       });
-      if (stats) stats.timingsMs.ragMs += nowMs() - startedAt;
-    }
 
-    const retrieved: unknown[] = Array.isArray(ragResult?.retrieved) ? ragResult.retrieved : [];
-    const indexStats = ragResult?.indexStats;
-    if (stats) stats.rag.retrievedCount = retrieved.length;
-
-    const retrievalEnabled = Boolean(input.focusQuestion && this.options.ragService);
-    const retrievedSheetIds = retrievalEnabled ? extractRetrievedSheetIds(retrieved) : [];
-
-    const selectionBlock = selection
-      ? await this.readBlock(
-          executor,
-          {
-            dlpCacheKey,
-            kind: "selection",
-            sheetId: selection.sheetId,
-            range: selection.range,
-            // Selection-first: inline edit should prefer showing selection content even if large.
-            maxRows: this.options.maxBlockRows,
-            maxCols: this.options.maxBlockCols,
-          },
-          stats,
-        )
-      : null;
-
-    const sheetsToSummarize =
-      this.options.mode === "inline_edit"
-        ? [input.activeSheetId]
-        : this.resolveSheetsToSummarize({
-            activeSheetId: input.activeSheetId,
-            // Selection prioritization only applies when retrieval is enabled (chat/agent surfaces).
-            selectionSheetId: retrievalEnabled ? selection?.sheetId : null,
-            retrievedSheetIds,
-            // When retrieval yields relevant sheets, summarize only those (active/selection/retrieved) for latency.
-            // When retrieval is disabled or yields no sheets, fall back to the legacy behavior of filling up to maxSheets.
-            includeFallbackSheets: !retrievalEnabled || retrievedSheetIds.length === 0,
+      // Retrieval (semantic search) is optional and query-driven.
+      const ragEnabled = Boolean(input.focusQuestion && this.options.ragService);
+      if (stats) stats.rag.enabled = ragEnabled;
+      let ragResult: any = null;
+      if (ragEnabled) {
+        const startedAt = stats ? nowMs() : 0;
+        try {
+          ragResult = await this.options.ragService!.buildWorkbookContextFromSpreadsheetApi({
+            spreadsheet: this.options.spreadsheet,
+            workbookId: this.options.workbookId,
+            query: input.focusQuestion!,
+            attachments: input.attachments,
+            // WorkbookContextBuilder builds its own promptContext; avoid redundant string formatting
+            // + token estimation work inside the underlying RAG service.
+            includePromptContext: false,
+            dlp,
           });
+        } finally {
+          if (stats) stats.timingsMs.ragMs += nowMs() - startedAt;
+        }
+      }
 
-    const sheetSummaries: WorkbookContextSheetSummary[] = [];
-    const blocks: WorkbookContextDataBlock[] = [];
-    if (selectionBlock) blocks.push(selectionBlock);
+      const retrieved: unknown[] = Array.isArray(ragResult?.retrieved) ? ragResult.retrieved : [];
+      const indexStats = ragResult?.indexStats;
+      if (stats) stats.rag.retrievedCount = retrieved.length;
+
+      const retrievalEnabled = Boolean(input.focusQuestion && this.options.ragService);
+      const retrievedSheetIds = retrievalEnabled ? extractRetrievedSheetIds(retrieved) : [];
+
+      const selectionBlock = selection
+        ? await this.readBlock(
+            executor,
+            {
+              dlpCacheKey,
+              kind: "selection",
+              sheetId: selection.sheetId,
+              range: selection.range,
+              // Selection-first: inline edit should prefer showing selection content even if large.
+              maxRows: this.options.maxBlockRows,
+              maxCols: this.options.maxBlockCols,
+            },
+            stats,
+          )
+        : null;
+
+      const sheetsToSummarize =
+        this.options.mode === "inline_edit"
+          ? [input.activeSheetId]
+          : this.resolveSheetsToSummarize({
+              activeSheetId: input.activeSheetId,
+              // Selection prioritization only applies when retrieval is enabled (chat/agent surfaces).
+              selectionSheetId: retrievalEnabled ? selection?.sheetId : null,
+              retrievedSheetIds,
+              // When retrieval yields relevant sheets, summarize only those (active/selection/retrieved) for latency.
+              // When retrieval is disabled or yields no sheets, fall back to the legacy behavior of filling up to maxSheets.
+              includeFallbackSheets: !retrievalEnabled || retrievedSheetIds.length === 0,
+            });
+
+      const sheetSummaries: WorkbookContextSheetSummary[] = [];
+      const blocks: WorkbookContextDataBlock[] = [];
+      if (selectionBlock) blocks.push(selectionBlock);
 
     for (const sheetId of sheetsToSummarize) {
       const summary = await this.buildSheetSummary(executor, sheetId, {
@@ -622,7 +642,7 @@ export class WorkbookContextBuilder {
       return ak.localeCompare(bk);
     });
 
-    const budget = this.computeBudget();
+      const budget = this.computeBudget();
 
     const payload: WorkbookContextPayload = {
       version: 1,
@@ -663,6 +683,7 @@ export class WorkbookContextBuilder {
 
     if (stats) {
       stats.durationMs = nowMs() - stats.startedAtMs;
+      stats.ok = true;
       stats.sheetCountSummarized = sheetSummaries.length;
       stats.blockCount = blocks.length;
       const blockCountByKind: Record<WorkbookContextBlockKind, number> = { selection: 0, sheet_sample: 0, retrieved: 0 };
@@ -696,7 +717,38 @@ export class WorkbookContextBuilder {
       }
     }
 
-    return { payload, promptContext, retrieved, indexStats };
+      return { payload, promptContext, retrieved, indexStats };
+    } catch (error) {
+      if (stats) {
+        stats.durationMs = nowMs() - stats.startedAtMs;
+        stats.ok = false;
+        if (error instanceof Error) {
+          stats.error = { name: error.name || "Error", message: error.message };
+        } else {
+          stats.error = { name: "Error", message: String(error) };
+        }
+        // Best-effort: expose current cache sizes even on failure.
+        stats.cache.schema.entries = this.sheetSummaryCache.size;
+        stats.cache.block.entries = this.blockCache.size;
+        const cacheEntriesByKind: Record<WorkbookContextBlockKind, number> = { selection: 0, sheet_sample: 0, retrieved: 0 };
+        for (const entry of this.blockCache.values()) {
+          cacheEntriesByKind[entry.block.kind] += 1;
+        }
+        stats.cache.block.entriesByKind = cacheEntriesByKind;
+        // Prompt budget is deterministic; report it even if the build fails before packing.
+        try {
+          stats.promptContextBudgetTokens = this.computeBudget().maxPromptContextTokens;
+        } catch {
+          // ignore
+        }
+        try {
+          onBuildStats?.(stats);
+        } catch {
+          // Ignore instrumentation failures; build errors should still propagate.
+        }
+      }
+      throw error;
+    }
   }
 
   static serializePayload(payload: WorkbookContextPayload): string {
