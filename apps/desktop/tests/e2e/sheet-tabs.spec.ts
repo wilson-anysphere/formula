@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { expectSheetPosition, gotoDesktop, openSheetTabContextMenu } from "./helpers";
+import { expectSheetPosition, gotoDesktop, openSheetTabContextMenu, openSheetTabStripContextMenu } from "./helpers";
 
 function installTauriStubForSheetTabDelete() {
   const listeners: Record<string, any> = {};
@@ -1410,21 +1410,7 @@ test.describe("sheet tabs", () => {
     // The last tab stretches to fill the strip width (so drag/drop after it remains targetable),
     // which makes it hard to right-click the strip background with a trusted mouse event. Instead,
     // dispatch a deterministic contextmenu event directly on the strip container element.
-    const strip = page.locator("#sheet-tabs .sheet-tabs");
-    await strip.evaluate((el) => {
-      const rect = el.getBoundingClientRect();
-      el.dispatchEvent(
-        new MouseEvent("contextmenu", {
-          bubbles: true,
-          cancelable: true,
-          button: 2,
-          clientX: rect.left + rect.width - 4,
-          clientY: rect.top + rect.height / 2,
-        }),
-      );
-    });
-
-    await expect(tabMenu).toBeVisible();
+    await openSheetTabStripContextMenu(page);
     await tabMenu
       .getByRole("button", { name: "Unhide…", exact: true })
       .evaluate((el) => (el as HTMLButtonElement).click());

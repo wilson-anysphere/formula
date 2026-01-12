@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { expectSheetPosition, gotoDesktop, openSheetTabContextMenu } from "./helpers";
+import { expectSheetPosition, gotoDesktop, openSheetTabContextMenu, openSheetTabStripContextMenu } from "./helpers";
 
 function installTauriStubForTests(
   options: {
@@ -290,22 +290,7 @@ test.describe("tauri workbook integration", () => {
     await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveCount(0);
 
     // Open the tab strip background menu (Excel-like "Unhide..." entry point).
-    await page.evaluate(() => {
-      const strip = document.querySelector<HTMLElement>("#sheet-tabs .sheet-tabs");
-      if (!strip) throw new Error("Missing sheet tab strip");
-      const rect = strip.getBoundingClientRect();
-      strip.dispatchEvent(
-        new MouseEvent("contextmenu", {
-          bubbles: true,
-          cancelable: true,
-          clientX: rect.left + rect.width - 4,
-          clientY: rect.top + rect.height / 2,
-        }),
-      );
-    });
-
-    const menu = page.getByTestId("sheet-tab-context-menu");
-    await expect(menu).toBeVisible();
+    const menu = await openSheetTabStripContextMenu(page);
     await menu.getByRole("button", { name: "Unhide…" }).click();
     await page.getByTestId("quick-pick").getByRole("button", { name: "Sheet2" }).click();
 

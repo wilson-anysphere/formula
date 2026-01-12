@@ -298,6 +298,28 @@ export async function openSheetTabContextMenu(page: Page, sheetId: string): Prom
   return menu;
 }
 
+export async function openSheetTabStripContextMenu(page: Page): Promise<Locator> {
+  await page.evaluate(() => {
+    const strip = document.querySelector<HTMLElement>("#sheet-tabs .sheet-tabs");
+    if (!strip) throw new Error("Missing sheet tab strip");
+    const rect = strip.getBoundingClientRect();
+    strip.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        button: 2,
+        // Aim near the end of the strip so the menu isn't rendered on top of the first tab.
+        clientX: rect.left + rect.width - 4,
+        clientY: rect.top + rect.height / 2,
+      }),
+    );
+  });
+
+  const menu = page.getByTestId("sheet-tab-context-menu");
+  await menu.waitFor({ state: "visible", timeout: 10_000 });
+  return menu;
+}
+
 export async function expectSheetPosition(
   page: Page,
   { position, total }: { position: number; total: number },
