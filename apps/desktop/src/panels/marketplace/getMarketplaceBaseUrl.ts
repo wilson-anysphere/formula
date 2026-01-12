@@ -8,27 +8,39 @@ function normalizeBaseUrl(value: string): string | null {
   const trimmed = String(value ?? "").trim();
   if (!trimmed) return null;
 
+  // A convenience: treat "/" as the default API base.
+  if (trimmed === "/") return "/api";
+
   // A convenience: users/tests may provide a marketplace *origin* instead of the full
   // API base path (e.g. "https://marketplace.formula.app" vs ".../api"). In that case,
   // default the path to `/api` to match the MarketplaceClient contract.
-  try {
-    // Absolute URL.
-    if (/^https?:\/\//i.test(trimmed)) {
-      const url = new URL(trimmed);
-      if (!url.pathname || url.pathname === "/") {
-        url.pathname = "/api";
-      }
-      // Normalize trailing slash (MarketplaceClient expects no trailing slash).
-      return url.toString().replace(/\/$/, "");
+  if (/^https?:\/\//i.test(trimmed)) {
+    let url: URL;
+    try {
+      url = new URL(trimmed);
+    } catch {
+      // Treat invalid absolute URL overrides as unset so we fall back to safe defaults.
+      return null;
     }
-  } catch {
-    // Ignore URL parsing errors and fall through to the string-based normalization.
+
+    // Base URL should not carry query/hash.
+    url.search = "";
+    url.hash = "";
+
+    let pathname = url.pathname.replace(/\/+$/, "");
+    if (!pathname || pathname === "/") pathname = "/api";
+    url.pathname = pathname;
+
+    // MarketplaceClient expects no trailing slash.
+    return `${url.origin}${url.pathname}`;
   }
 
-  // Relative path (same-origin).
-  if (trimmed === "/") return "/api";
-
-  return trimmed.endsWith("/") ? trimmed.slice(0, -1) : trimmed;
+  // Relative path (same-origin). Keep it tolerant; MarketplaceClient will normalize further.
+  let out = trimmed.replace(/\/+$/, "");
+  while (out.startsWith("./")) out = out.slice(2);
+  if (!out) return null;
+  if (!out.startsWith("/")) out = `/${out}`;
+  return out;
 }
 
 function tryReadLocalStorage(storage: Pick<Storage, "getItem"> | undefined): string | null {
