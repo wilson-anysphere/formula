@@ -93,6 +93,40 @@ mod tests {
     }
 
     #[test]
+    fn missing_rels_part_is_ignored() {
+        let pkg = build_package(&[("xl/worksheets/sheet1.xml", br#"<worksheet/>"#)]);
+
+        let parts = collect_transitive_related_parts(&pkg, ["xl/worksheets/sheet1.xml".to_string()])
+            .expect("traverse");
+
+        assert_eq!(
+            keys(parts),
+            BTreeSet::from(["xl/worksheets/sheet1.xml".to_string()])
+        );
+    }
+
+    #[test]
+    fn malformed_rels_xml_is_ignored() {
+        // Rel targets a valid part, but the rels XML is malformed, so traversal should not follow it.
+        let pkg = build_package(&[
+            ("xl/drawings/drawing1.xml", br#"<wsDr/>"#),
+            ("xl/drawings/_rels/drawing1.xml.rels", br#"<Relationships><Relationship"#),
+            ("xl/media/image1.png", b"png-bytes"),
+        ]);
+
+        let parts = collect_transitive_related_parts(&pkg, ["xl/drawings/drawing1.xml".to_string()])
+            .expect("traverse");
+
+        assert_eq!(
+            keys(parts),
+            BTreeSet::from([
+                "xl/drawings/drawing1.xml".to_string(),
+                "xl/drawings/_rels/drawing1.xml.rels".to_string(),
+            ])
+        );
+    }
+
+    #[test]
     fn external_relationship_is_ignored() {
         let rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
@@ -171,4 +205,3 @@ mod tests {
         );
     }
 }
-
