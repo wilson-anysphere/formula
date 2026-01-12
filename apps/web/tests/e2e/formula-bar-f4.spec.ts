@@ -52,6 +52,25 @@ test("formula bar F4 expands full-token selections to cover the toggled token", 
   await expect(input).toHaveJSProperty("selectionEnd", 5);
 });
 
+test("formula bar F4 is a no-op when the selection is not contained within a reference token", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("engine-status")).toContainText("ready", { timeout: 30_000 });
+
+  const input = page.getByTestId("formula-input");
+  await input.click();
+  await input.fill("=A1+B1");
+
+  // Select across A1 and the "+" operator (not fully contained within a reference).
+  await input.evaluate((el) => {
+    const inputEl = el as HTMLInputElement;
+    inputEl.focus();
+    inputEl.setSelectionRange(1, 4);
+  });
+
+  await input.press("F4");
+  await expect(input).toHaveValue("=A1+B1");
+});
+
 test("formula bar F4 preserves sheet qualifiers and toggles range endpoints", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("engine-status")).toContainText("ready", { timeout: 30_000 });
