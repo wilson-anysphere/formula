@@ -128,6 +128,52 @@ describe("updaterUi (events)", () => {
     expect(toastSpy).not.toHaveBeenCalled();
   });
 
+  it("does not show toasts or focus the window for startup update-not-available events", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '<div id="toast-root"></div>';
+
+    const show = vi.fn(async () => {});
+    const setFocus = vi.fn(async () => {});
+    const handle = { show, setFocus };
+
+    vi.stubGlobal("__TAURI__", {
+      window: {
+        getCurrentWindow: () => handle,
+      },
+    });
+
+    const toastSpy = vi.spyOn(ui, "showToast");
+
+    await handleUpdaterEvent("update-not-available", { source: "startup" });
+
+    expect(show).not.toHaveBeenCalled();
+    expect(setFocus).not.toHaveBeenCalled();
+    expect(toastSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not show toasts or focus the window for startup update-check-error events", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '<div id="toast-root"></div>';
+
+    const show = vi.fn(async () => {});
+    const setFocus = vi.fn(async () => {});
+    const handle = { show, setFocus };
+
+    vi.stubGlobal("__TAURI__", {
+      window: {
+        getCurrentWindow: () => handle,
+      },
+    });
+
+    const toastSpy = vi.spyOn(ui, "showToast");
+
+    await handleUpdaterEvent("update-check-error", { source: "startup", message: "network down" });
+
+    expect(show).not.toHaveBeenCalled();
+    expect(setFocus).not.toHaveBeenCalled();
+    expect(toastSpy).not.toHaveBeenCalled();
+  });
+
   it("shows toasts for manual update-check-started and update-check-error events", async () => {
     vi.useFakeTimers();
     document.body.innerHTML = '<div id="toast-root"></div>';
