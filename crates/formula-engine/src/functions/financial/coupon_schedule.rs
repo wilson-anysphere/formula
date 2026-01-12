@@ -70,11 +70,10 @@ pub(crate) fn coupon_pcd_ncd_num(
     let eom = is_eom(maturity, system)?;
     // IMPORTANT: Coupon schedules are anchored to `maturity` (not stepped iteratively).
     //
-    // `EDATE` month-stepping is not invertible due to end-of-month clamping; if we step
-    // backwards one period at a time, the day-of-month can "drift" (e.g. 31st -> 30th)
-    // and coupon dates computed as `EDATE(maturity, -k*m)` will no longer be recognized
-    // as coupon dates. Excel's COUP* functions behave as if each coupon date is computed
-    // as an offset from maturity, so we do the same here.
+    // `EDATE` month-stepping is not additive due to end-of-month clamping; stepping backwards one
+    // period at a time can "drift" away from month-end coupon schedules (e.g. Aug 31 -> Feb 28 ->
+    // Aug 28). Excel's COUP* functions behave as if each coupon date is computed directly as an
+    // offset from maturity, so we do the same here.
     for n in 1..=MAX_COUPON_STEPS {
         let n_i32 = n as i32;
         let months_back = n_i32.checked_mul(months).ok_or(ExcelError::Num)?;
