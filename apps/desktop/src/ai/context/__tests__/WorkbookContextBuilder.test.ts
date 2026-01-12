@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { DocumentController } from "../../../document/documentController.js";
 
@@ -276,6 +276,35 @@ describe("WorkbookContextBuilder", () => {
 
     // Compact JSON should not include pretty-print indentation.
     expect(ctx1.promptContext).not.toContain('\n  "');
+  });
+
+  it("reuses cached sheet samples when only sheet view changes (no extra read_range calls)", async () => {
+    const documentController = new DocumentController();
+    documentController.setRangeValues("Sheet1", "A1", [
+      ["Header"],
+      ["Value"],
+    ]);
+
+    const spreadsheet = new DocumentControllerSpreadsheetApi(documentController);
+    const readSpy = vi.spyOn(spreadsheet, "readRange");
+
+    const builder = new WorkbookContextBuilder({
+      workbookId: "wb_cache",
+      documentController,
+      spreadsheet,
+      ragService: null,
+      mode: "chat",
+      model: "unit-test-model",
+    });
+
+    await builder.build({ activeSheetId: "Sheet1" });
+    const readsAfterFirst = readSpy.mock.calls.length;
+
+    // Sheet view only: should not bump DocumentController.contentVersion, so context cache stays valid.
+    documentController.setFrozen("Sheet1", 1, 0);
+
+    await builder.build({ activeSheetId: "Sheet1" });
+    expect(readSpy.mock.calls.length).toBe(readsAfterFirst);
   });
 });
 

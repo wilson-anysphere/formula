@@ -210,6 +210,14 @@ export class WorkbookContextBuilder {
     >;
   private readonly estimator: TokenEstimator;
 
+  // Context caching:
+  // - Keyed off DocumentController `contentVersion` so view-only edits (frozen panes,
+  //   row/col sizing) do not invalidate caches.
+  // - Cleared whenever contentVersion changes.
+  private cachedContentVersion: number | null = null;
+  private readonly blockCache = new Map<string, WorkbookContextDataBlock>();
+  private readonly sheetSummaryCache = new Map<string, WorkbookContextSheetSummary>();
+
   constructor(options: WorkbookContextBuilderOptions) {
     const isInlineEdit = options.mode === "inline_edit";
     this.options = {
@@ -225,6 +233,7 @@ export class WorkbookContextBuilder {
   }
 
   async build(input: BuildWorkbookContextInput): Promise<BuildWorkbookContextResult> {
+    this.ensureCacheVersion();
     const sheetIds =
       this.options.mode === "inline_edit" ? [input.activeSheetId] : this.resolveSheetIds({ activeSheetId: input.activeSheetId });
 
@@ -470,9 +479,17 @@ export class WorkbookContextBuilder {
     sheetId: string,
     extras?: { namedRanges?: Array<{ name: string; range: string }>; tables?: Array<{ name: string; range: string }> },
   ): Promise<WorkbookContextSheetSummary> {
+    this.ensureCacheVersion();
+    const extrasKey = extras ? stableJsonStringify(extras) : "";
+    const cacheKey = `${sheetId}\u0000${extrasKey}`;
+    const cached = this.sheetSummaryCache.get(cacheKey);
+    if (cached) return cached;
+
     const used = this.options.documentController.getUsedRange(sheetId);
     if (!used) {
-      return { sheetId, schema: { name: sheetId, tables: [], namedRanges: [], dataRegions: [] } };
+      const summary = { sheetId, schema: { name: sheetId, tables: [], namedRanges: [], dataRegions: [] } };
+      this.sheetSummaryCache.set(cacheKey, summary);
+      return summary;
     }
 
     const analyzedRange = clampRange(
@@ -504,7 +521,9 @@ export class WorkbookContextBuilder {
       ...(extras?.tables?.length ? { tables: extras.tables } : {}),
     } as any);
 
-    return { sheetId, analyzedRange, schema };
+    const summary = { sheetId, analyzedRange, schema };
+    this.sheetSummaryCache.set(cacheKey, summary);
+    return summary;
   }
 
   private async blocksFromRetrievedChunks(retrieved: unknown[], maxBlocks: number): Promise<WorkbookContextDataBlock[]> {
@@ -635,8 +654,13 @@ export class WorkbookContextBuilder {
     maxRows: number;
     maxCols: number;
   }): Promise<WorkbookContextDataBlock> {
+    this.ensureCacheVersion();
     const clamped = clampRange(params.range, { maxRows: params.maxRows, maxCols: params.maxCols });
     const rangeRef = this.rangeRef(params.sheetId, clamped);
+
+    const cacheKey = `${params.kind}\u0000${rangeRef}`;
+    const cached = this.blockCache.get(cacheKey);
+    if (cached) return cached;
 
     const executor = new ToolExecutor(this.options.spreadsheet, {
       default_sheet: params.sheetId,
@@ -655,7 +679,7 @@ export class WorkbookContextBuilder {
 
     if (toolResult.ok && toolResult.data && (toolResult.data as any).values) {
       const values = ((toolResult.data as any).values ?? []) as CellScalar[][];
-      return {
+      const block: WorkbookContextDataBlock = {
         kind: params.kind,
         sheetId: params.sheetId,
         range: rangeRef,
@@ -663,12 +687,14 @@ export class WorkbookContextBuilder {
         colHeaders: colHeaders(clamped),
         values,
       };
+      this.blockCache.set(cacheKey, block);
+      return block;
     }
 
     // Never leak restricted content: fall back to a deterministic placeholder matrix.
     const error = toolResult.error ?? { code: "runtime_error", message: "Unknown error reading range." };
     const placeholder = String(error.code) === "permission_denied" ? "[POLICY_DENIED]" : "[UNAVAILABLE]";
-    return {
+    const block: WorkbookContextDataBlock = {
       kind: params.kind,
       sheetId: params.sheetId,
       range: rangeRef,
@@ -677,6 +703,8 @@ export class WorkbookContextBuilder {
       values: [[placeholder]],
       error: { code: String(error.code ?? "runtime_error"), message: String(error.message ?? "Unknown error") },
     };
+    this.blockCache.set(cacheKey, block);
+    return block;
   }
 
   private rangeRef(sheetId: string, range: Range): string {
@@ -687,6 +715,23 @@ export class WorkbookContextBuilder {
     // `packages/ai-context`'s A1 parser does not implement Excel-style quoted sheet names.
     // Keep sheet names unquoted here so schema extraction can safely parse its own ranges.
     return `${sheetId}!${rangeToA1Selection(range)}`;
+  }
+
+  private getContentVersionForCache(): number {
+    const controller = this.options.documentController as any;
+    const contentVersion = controller?.contentVersion;
+    if (typeof contentVersion === "number" && Number.isFinite(contentVersion)) return contentVersion;
+    const updateVersion = controller?.updateVersion;
+    if (typeof updateVersion === "number" && Number.isFinite(updateVersion)) return updateVersion;
+    return 0;
+  }
+
+  private ensureCacheVersion(): void {
+    const version = this.getContentVersionForCache();
+    if (this.cachedContentVersion === version) return;
+    this.cachedContentVersion = version;
+    this.blockCache.clear();
+    this.sheetSummaryCache.clear();
   }
 }
 

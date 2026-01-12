@@ -213,6 +213,24 @@ test("undo/redo of sheet view changes does not trigger engine recalc", () => {
   assert.equal(engine.recalcCount, 0);
 });
 
+test("sheet view updates increment updateVersion but not contentVersion", () => {
+  const doc = new DocumentController();
+  assert.equal(doc.updateVersion, 0);
+  assert.equal(doc.contentVersion, 0);
+
+  doc.setFrozen("Sheet1", 2, 1);
+  assert.equal(doc.updateVersion, 1);
+  assert.equal(doc.contentVersion, 0);
+
+  doc.setColWidth("Sheet1", 0, 120);
+  assert.equal(doc.updateVersion, 2);
+  assert.equal(doc.contentVersion, 0);
+
+  doc.setCellValue("Sheet1", "A1", "hello");
+  assert.equal(doc.updateVersion, 3);
+  assert.equal(doc.contentVersion, 1);
+});
+
 test("setColWidth/setRowHeight are undoable", () => {
   const doc = new DocumentController();
 

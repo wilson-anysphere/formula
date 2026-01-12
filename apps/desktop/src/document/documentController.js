@@ -65,6 +65,39 @@ const EXCEL_MAX_ROW = EXCEL_MAX_ROWS - 1;
 const EXCEL_MAX_COL = EXCEL_MAX_COLS - 1;
 
 /**
+ * @param {any} a
+ * @param {any} b
+ * @returns {boolean}
+ */
+function cellValueEquals(a, b) {
+  if (a === b) return true;
+  if (a == null || b == null) return a === b;
+  if (typeof a !== typeof b) return false;
+  if (typeof a === "object") {
+    try {
+      return JSON.stringify(a) === JSON.stringify(b);
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+/**
+ * Compare only the *content* portion of a cell state (value/formula), ignoring styleId.
+ *
+ * This is intentionally aligned with how we construct AI workbook context: formatting-only
+ * changes should not invalidate caches.
+ *
+ * @param {CellState} a
+ * @param {CellState} b
+ * @returns {boolean}
+ */
+function cellContentEquals(a, b) {
+  return cellValueEquals(a?.value ?? null, b?.value ?? null) && (a?.formula ?? null) === (b?.formula ?? null);
+}
+
+/**
  * Canonicalize formula text for storage.
  *
  * Invariant: `CellState.formula` is either `null` or a string starting with "=".
@@ -550,6 +583,22 @@ export class DocumentController {
     this.lastMergeKey = null;
     this.lastMergeTime = 0;
 
+    /**
+     * Monotonic counters for downstream caching adapters.
+     *
+     * `updateVersion` increments after every successful `#applyEdits` (cell deltas or sheet-view deltas).
+     * `contentVersion` increments only when workbook *content* changes (value/formula) or when the set
+     * of sheets changes via `applyState`.
+     *
+     * These are kept separate so view-only interactions (frozen panes, row/col sizing) do not churn
+     * AI workbook context caches.
+     *
+     * @type {number}
+     */
+    this._updateVersion = 0;
+    /** @type {number} */
+    this._contentVersion = 0;
+
     /** @type {Map<string, Set<(payload: any) => void>>} */
     this.listeners = new Map();
   }
@@ -638,6 +687,30 @@ export class DocumentController {
       return true;
     }
     return false;
+  }
+
+  /**
+   * Monotonic version that increments after every successful workbook mutation (cell or sheet-view).
+   *
+   * Useful for coarse invalidation of UI layers that care about any update.
+   *
+   * @returns {number}
+   */
+  get updateVersion() {
+    return this._updateVersion;
+  }
+
+  /**
+   * Monotonic version that increments only when workbook content changes:
+   * - at least one cell delta changes `value` or `formula` (format-only changes ignored)
+   * - sheet ids are added/removed via `applyState`
+   *
+   * This is intended for AI context caching (schema + sampled data blocks).
+   *
+   * @returns {number}
+   */
+  get contentVersion() {
+    return this._contentVersion;
   }
 
   /**
@@ -1524,6 +1597,8 @@ export class DocumentController {
     const nextSheetIds = new Set(nextSheets.keys());
     const allSheetIds = new Set([...existingSheetIds, ...nextSheetIds]);
     const removedSheetIds = Array.from(existingSheetIds).filter((id) => !nextSheetIds.has(id));
+    const addedSheetIds = Array.from(nextSheetIds).filter((id) => !existingSheetIds.has(id));
+    const sheetStructureChanged = removedSheetIds.length > 0 || addedSheetIds.length > 0;
 
     /** @type {CellDelta[]} */
     const deltas = [];
@@ -1608,7 +1683,12 @@ export class DocumentController {
 
     // Apply changes as a single engine batch.
     this.engine?.beginBatch?.();
-    this.#applyEdits(deltas, sheetViewDeltas, formatDeltas, { recalc: false, emitChange: true, source: "applyState" });
+    this.#applyEdits(deltas, sheetViewDeltas, formatDeltas, {
+      recalc: false,
+      emitChange: true,
+      source: "applyState",
+      sheetStructureChanged,
+    });
     this.engine?.endBatch?.();
     this.engine?.recalculate();
 
@@ -2223,6 +2303,9 @@ export class DocumentController {
    * @param {{ recalc: boolean, emitChange: boolean, source?: string }} options
    */
   #applyEdits(cellDeltas, sheetViewDeltas, formatDeltas, options) {
+    const shouldBumpContentVersion =
+      Boolean(options?.sheetStructureChanged) || cellDeltas.some((d) => !cellContentEquals(d.before, d.after));
+
     // Apply to the canonical model first.
     for (const delta of formatDeltas) {
       // Ensure sheet exists for format-only changes.
@@ -2296,6 +2379,10 @@ export class DocumentController {
       }
       throw err;
     }
+
+    // Update versions before emitting events so observers can synchronously read the latest value.
+    this._updateVersion += 1;
+    if (shouldBumpContentVersion) this._contentVersion += 1;
 
     if (options.emitChange) {
       /** @type {any[]} */
