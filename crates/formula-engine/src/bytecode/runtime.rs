@@ -4962,6 +4962,8 @@ fn fn_sumif(
                     Value::Error(e) => record_error_row_major(&mut earliest_error, coord, e),
                     Value::Bool(_)
                     | Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::Empty
                     | Value::Missing
                     | Value::Array(_)
@@ -5131,6 +5133,8 @@ fn fn_sumifs(
                     Value::Error(e) => record_error_row_major(&mut earliest_error, coord, e),
                     Value::Bool(_)
                     | Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::Empty
                     | Value::Missing
                     | Value::Array(_)
@@ -5539,6 +5543,8 @@ fn fn_averageif(
                     Value::Error(e) => record_error_row_major(&mut earliest_error, coord, e),
                     Value::Bool(_)
                     | Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::Empty
                     | Value::Missing
                     | Value::Array(_)
@@ -5731,6 +5737,8 @@ fn fn_averageifs(
                     Value::Error(e) => record_error_row_major(&mut earliest_error, coord, e),
                     Value::Bool(_)
                     | Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::Empty
                     | Value::Missing
                     | Value::Array(_)
@@ -5987,6 +5995,8 @@ fn fn_minifs(
                     Value::Error(e) => record_error_row_major(&mut earliest_error, coord, e),
                     Value::Bool(_)
                     | Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::Empty
                     | Value::Missing
                     | Value::Array(_)
@@ -6201,6 +6211,8 @@ fn fn_maxifs(
                     Value::Error(e) => record_error_row_major(&mut earliest_error, coord, e),
                     Value::Bool(_)
                     | Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::Empty
                     | Value::Missing
                     | Value::Array(_)
