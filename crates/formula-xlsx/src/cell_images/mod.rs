@@ -1,7 +1,7 @@
-//! Workbook-level "images in cells" (`xl/cellimages.xml`) parsing.
+//! Workbook-level "images in cells" (`xl/cellimages*.xml`) parsing.
 //!
 //! Modern Excel features like "Place in Cell" images and the `IMAGE()` function
-//! appear to rely on a workbook-level `xl/cellimages.xml` part containing
+//! appear to rely on a workbook-level `xl/cellimages*.xml` part containing
 //! DrawingML `<pic>` payloads that reference media via relationships.
 
 use std::collections::{BTreeMap, HashMap};
@@ -9,8 +9,7 @@ use std::collections::{BTreeMap, HashMap};
 use formula_model::drawings::{ImageData, ImageId};
 use roxmltree::Document;
 
-use crate::drawings::content_type_for_extension;
-use crate::drawings::REL_TYPE_IMAGE;
+use crate::drawings::{content_type_for_extension, REL_TYPE_IMAGE};
 use crate::path::resolve_target;
 use crate::XlsxError;
 
@@ -177,7 +176,10 @@ fn parse_cell_images_part(
             continue;
         }
 
-        let target_path = resolve_target_best_effort(path, &rels_path, &rel.target, parts)?;
+        let target_path = match resolve_target_best_effort(path, &rels_path, &rel.target, parts) {
+            Ok(path) => path,
+            Err(_) => continue,
+        };
         let image_id = image_id_from_target_path(&target_path);
 
         if workbook.images.get(&image_id).is_none() {
@@ -225,11 +227,9 @@ fn parse_cell_images_part(
             continue;
         }
 
-        let rel = rels_by_id.get(&embed_rel_id).ok_or_else(|| {
-            XlsxError::Invalid(format!(
-                "cellimages.xml references missing image relationship {embed_rel_id}"
-            ))
-        })?;
+        let Some(rel) = rels_by_id.get(&embed_rel_id) else {
+            continue;
+        };
         if rel
             .target_mode
             .as_deref()
@@ -241,14 +241,17 @@ fn parse_cell_images_part(
             continue;
         }
 
-        let target_path = resolve_target_best_effort(path, &rels_path, &rel.target, parts)?;
+        let target_path = match resolve_target_best_effort(path, &rels_path, &rel.target, parts) {
+            Ok(path) => path,
+            Err(_) => continue,
+        };
         let image_id = image_id_from_target_path(&target_path);
 
         if workbook.images.get(&image_id).is_none() {
-            let bytes = parts
-                .get(&target_path)
-                .ok_or_else(|| XlsxError::MissingPart(target_path.clone()))?
-                .clone();
+            let Some(bytes) = parts.get(&target_path) else {
+                continue;
+            };
+            let bytes = bytes.clone();
             let ext = image_id
                 .as_str()
                 .rsplit_once('.')
@@ -375,3 +378,4 @@ fn slice_node_xml(node: &roxmltree::Node<'_, '_>, doc: &str) -> Option<String> {
     let range = node.range();
     doc.get(range).map(|s| s.to_string())
 }
+
