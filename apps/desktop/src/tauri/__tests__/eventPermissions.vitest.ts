@@ -11,7 +11,7 @@ type CapabilityPermission =
     };
 
 describe("tauri capability event permissions", () => {
-  it("is wired to the main window via tauri.conf.json", () => {
+  it("is scoped to the main window label via the capability file", () => {
     const tauriConfUrl = new URL("../../../src-tauri/tauri.conf.json", import.meta.url);
     const tauriConf = JSON.parse(readFileSync(tauriConfUrl, "utf8")) as any;
 
