@@ -183,7 +183,13 @@ pub(crate) fn parse_biff_workbook_globals(
     let iter = records::LogicalBiffRecordIter::new(workbook_stream, allows_continuation);
 
     for record in iter {
-        let record = record?;
+        let record = match record {
+            Ok(record) => record,
+            Err(err) => {
+                out.warnings.push(format!("malformed BIFF record: {err}"));
+                break;
+            }
+        };
         let record_id = record.record_id;
         let data = record.data.as_ref();
 

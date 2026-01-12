@@ -36,6 +36,10 @@ pub(crate) struct BiffRecordIter<'a> {
 }
 
 impl<'a> BiffRecordIter<'a> {
+    pub(crate) fn new(stream: &'a [u8]) -> Self {
+        Self { stream, offset: 0 }
+    }
+
     pub(crate) fn from_offset(stream: &'a [u8], offset: usize) -> Result<Self, String> {
         if offset > stream.len() {
             return Err(format!(
@@ -166,22 +170,16 @@ impl<'a> Iterator for FragmentIter<'a> {
 /// Iterates over BIFF records, combining `CONTINUE` fragments for record ids for
 /// which `allows_continuation(record_id) == true`.
 pub(crate) struct LogicalBiffRecordIter<'a> {
-    workbook_stream: &'a [u8],
-    offset: usize,
+    iter: std::iter::Peekable<BiffRecordIter<'a>>,
     allows_continuation: fn(u16) -> bool,
 }
 
 impl<'a> LogicalBiffRecordIter<'a> {
     pub(crate) fn new(workbook_stream: &'a [u8], allows_continuation: fn(u16) -> bool) -> Self {
         Self {
-            workbook_stream,
-            offset: 0,
+            iter: BiffRecordIter::new(workbook_stream).peekable(),
             allows_continuation,
         }
-    }
-
-    fn read_next_physical(&self, offset: usize) -> Option<(u16, &'a [u8])> {
-        read_biff_record(self.workbook_stream, offset)
     }
 }
 
@@ -189,22 +187,16 @@ impl<'a> Iterator for LogicalBiffRecordIter<'a> {
     type Item = Result<LogicalBiffRecord<'a>, String>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let start_offset = self.offset;
-        let (record_id, data) = self.read_next_physical(start_offset)?;
-
-        let mut next_offset = match start_offset
-            .checked_add(4)
-            .and_then(|o| o.checked_add(data.len()))
-        {
-            Some(offset) => offset,
-            None => {
-                self.offset = self.workbook_stream.len();
-                return Some(Err("BIFF record offset overflow".to_string()));
-            }
+        let first = match self.iter.next()? {
+            Ok(record) => record,
+            Err(err) => return Some(Err(err)),
         };
 
+        let start_offset = first.offset;
+        let record_id = first.record_id;
+        let data = first.data;
+
         if !(self.allows_continuation)(record_id) {
-            self.offset = next_offset;
             return Some(Ok(LogicalBiffRecord {
                 offset: start_offset,
                 record_id,
@@ -214,49 +206,44 @@ impl<'a> Iterator for LogicalBiffRecordIter<'a> {
         }
 
         // Only allocate/copy when we actually see a CONTINUE record.
-        let Some((peek_id, _)) = self.read_next_physical(next_offset) else {
-            self.offset = next_offset;
-            return Some(Ok(LogicalBiffRecord {
-                offset: start_offset,
-                record_id,
-                data: Cow::Borrowed(data),
-                fragment_sizes: vec![data.len()],
-            }));
+        match self.iter.peek() {
+            Some(Ok(next)) if next.record_id == RECORD_CONTINUE => {}
+            _ => {
+                return Some(Ok(LogicalBiffRecord {
+                    offset: start_offset,
+                    record_id,
+                    data: Cow::Borrowed(data),
+                    fragment_sizes: vec![data.len()],
+                }))
+            }
         };
-        if peek_id != RECORD_CONTINUE {
-            self.offset = next_offset;
-            return Some(Ok(LogicalBiffRecord {
-                offset: start_offset,
-                record_id,
-                data: Cow::Borrowed(data),
-                fragment_sizes: vec![data.len()],
-            }));
-        }
 
         let mut fragment_sizes = vec![data.len()];
         let mut combined: Vec<u8> = data.to_vec();
 
         // Collect subsequent CONTINUE records into one logical payload.
-        while let Some((next_id, next_data)) = self.read_next_physical(next_offset) {
-            if next_id != RECORD_CONTINUE {
+        while let Some(peek) = self.iter.peek() {
+            let next = match peek {
+                Ok(next) => next,
+                // Leave the malformed record to be surfaced on the next iteration.
+                Err(_) => break,
+            };
+            if next.record_id != RECORD_CONTINUE {
                 break;
             }
 
-            fragment_sizes.push(next_data.len());
-            combined.extend_from_slice(next_data);
-            next_offset = match next_offset
-                .checked_add(4)
-                .and_then(|o| o.checked_add(next_data.len()))
+            let next = match self
+                .iter
+                .next()
+                .expect("peek verified there is another record")
             {
-                Some(offset) => offset,
-                None => {
-                    self.offset = self.workbook_stream.len();
-                    return Some(Err("BIFF record offset overflow".to_string()));
-                }
+                Ok(record) => record,
+                Err(err) => return Some(Err(err)),
             };
+            fragment_sizes.push(next.data.len());
+            combined.extend_from_slice(next.data);
         }
 
-        self.offset = next_offset;
         Some(Ok(LogicalBiffRecord {
             offset: start_offset,
             record_id,
