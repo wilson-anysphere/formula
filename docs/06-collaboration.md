@@ -240,6 +240,21 @@ type SheetFormatDefaults = {
   // but BranchService-style snapshots may store these as plain objects.
   rowFormats?: Y.Map<any> | Record<string, Record<string, any>>;
   colFormats?: Y.Map<any> | Record<string, Record<string, any>>;
+  // Optional compressed formatting runs for large rectangular ranges.
+  // Stored as a sparse per-column map.
+  // In Yjs, this may be stored either as:
+  // - a top-level key on the sheet entry (`formatRunsByCol`), or
+  // - nested inside `sheets[].view` in some BranchService-style snapshots.
+  //
+  // Each run covers the half-open row interval `[startRow, endRowExclusive)`.
+  formatRunsByCol?: Y.Map<any> | Record<
+    string,
+    Array<{
+      startRow: number;
+      endRowExclusive: number;
+      format: Record<string, any>;
+    }>
+  >;
 };
 
 type Sheet = {
@@ -419,6 +434,9 @@ It synchronizes:
 - **Layered formatting defaults** (sheet/row/col formats):
   - `Y.Doc` → `sheets[].defaultFormat`, `sheets[].rowFormats`, `sheets[].colFormats` (with legacy fallback from `sheets[].view`)
   - Desktop `DocumentController` format state (`applyExternalFormatDeltas` / `formatDeltas`)
+- **Range-run formatting** (compressed rectangular formats):
+  - `Y.Doc` → `sheets[].formatRunsByCol` (with legacy fallback from `sheets[].view`)
+  - Desktop `DocumentController` range-run state (`applyExternalRangeRunDeltas` / `rangeRunDeltas`)
 
 > Note: the binder syncs **cell contents** (`cells`) *and* **sheet view state**
 > (`sheets[].view`), but it does **not** implement full sheet list semantics

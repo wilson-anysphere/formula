@@ -77,7 +77,7 @@ export {
   getSheetNameValidationErrorMessage,
   type SheetNameValidationError,
   type SheetNameValidationOptions,
-} from "./sheetNameValidation";
+} from "./sheetNameValidation.ts";
 
 /**
  * WorkbookBackend v1
