@@ -253,6 +253,102 @@ test.describe("Content Security Policy (Tauri parity)", () => {
     expect(cspViolations, `Unexpected CSP violations:\\n${cspViolations.join("\n")}`).toEqual([]);
   });
 
+  test("DesktopExtensionHostManager loads the bundled built-in extension (blob module URL) under CSP", async ({ page }) => {
+    const cspViolations: string[] = [];
+
+    page.on("console", (msg) => {
+      if (msg.type() !== "error" && msg.type() !== "warning") {
+        return;
+      }
+      const text = msg.text();
+      if (/content security policy/i.test(text)) {
+        cspViolations.push(text);
+      }
+    });
+
+    const response = await page.goto("/");
+    const cspHeader = response?.headers()["content-security-policy"];
+    expect(cspHeader, "E2E server should emit Content-Security-Policy header").toBeTruthy();
+
+    await expect(page.locator("#grid")).toHaveCount(1);
+
+    const managerModuleUrl = viteFsUrl(path.join(repoRoot, "apps/desktop/src/extensions/extensionHostManager.ts"));
+
+    const result = await page.evaluate(
+      async ({ managerModuleUrl }) => {
+        const { DesktopExtensionHostManager } = await import(managerModuleUrl);
+
+        const originalFetch = typeof fetch === "function" ? fetch.bind(globalThis) : null;
+        if (originalFetch) {
+          // Built-in extensions should be bundled into the app and loaded via blob/data module URLs.
+          // They must not fetch the repo/workspace manifest at runtime (no Vite `/@fs` dependency).
+          // Guard against regressions back to `loadExtensionFromUrl(...)`.
+          globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+            const url =
+              typeof input === "string"
+                ? input
+                : input instanceof URL
+                  ? input.toString()
+                  : typeof (input as any)?.url === "string"
+                    ? String((input as any).url)
+                    : String(input);
+            if (url.includes("extensions/sample-hello/") && url.includes("package.json")) {
+              throw new Error(`Blocked fetch for built-in extension asset: ${url}`);
+            }
+            return originalFetch(input, init);
+          };
+        }
+
+        const writes: Array<{ row: number; col: number; value: unknown }> = [];
+        const messages: Array<{ message: string; type?: string }> = [];
+
+        const spreadsheetApi = {
+          async getSelection() {
+            return {
+              startRow: 0,
+              startCol: 0,
+              endRow: 1,
+              endCol: 1,
+              values: [
+                [1, 2],
+                [3, 4],
+              ],
+            };
+          },
+          async getCell() {
+            return null;
+          },
+          async setCell(row: number, col: number, value: unknown) {
+            writes.push({ row, col, value });
+          },
+        };
+
+        const manager = new DesktopExtensionHostManager({
+          engineVersion: "1.0.0",
+          spreadsheetApi,
+          uiApi: {
+            showMessage: async (message: string, type?: string) => {
+              messages.push({ message: String(message ?? ""), type: type ? String(type) : undefined });
+            },
+          },
+          permissionPrompt: async () => true,
+        });
+
+        await manager.loadBuiltInExtensions();
+        const sum = await manager.executeCommand("sampleHello.sumSelection");
+        await manager.host.dispose();
+
+        return { sum, writes, messages };
+      },
+      { managerModuleUrl },
+    );
+
+    expect(result.sum).toBe(10);
+    expect(result.writes).toEqual([{ row: 2, col: 0, value: 10 }]);
+    expect(result.messages.some((m: any) => String(m.message).includes("Sum: 10"))).toBe(true);
+    expect(cspViolations, `Unexpected CSP violations:\\n${cspViolations.join("\n")}`).toEqual([]);
+  });
+
   test("WebExtensionManager can install and load a v2 marketplace extension (blob/data module URL) without CSP violations", async ({
     page
   }) => {
@@ -551,7 +647,6 @@ test.describe("Content Security Policy (Tauri parity)", () => {
     expect(requestCount).toBe(0);
     expect(cspViolations, `Unexpected CSP violations:\\n${cspViolations.join("\n")}`).toEqual([]);
   });
-
   test("extension panels are sandboxed with connect-src 'none' (no network bypass) under CSP", async ({
     page
   }) => {
