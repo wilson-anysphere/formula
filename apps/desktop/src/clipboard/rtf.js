@@ -454,7 +454,8 @@ export function extractPlainTextFromRtf(rtf) {
   let ignorable = false;
   let ucSkip = 1;
   let atStart = true;
-  /** @type {{ ignorable: boolean, ucSkip: number, atStart: boolean }[]} */
+  let inTable = false;
+  /** @type {{ ignorable: boolean, ucSkip: number, atStart: boolean, inTable: boolean }[]} */
   const stack = [];
 
   const len = rtf.length;
@@ -464,7 +465,7 @@ export function extractPlainTextFromRtf(rtf) {
     const ch = rtf[i];
 
     if (ch === "{") {
-      stack.push({ ignorable, ucSkip, atStart });
+      stack.push({ ignorable, ucSkip, atStart, inTable });
       atStart = true;
       i += 1;
       continue;
@@ -476,6 +477,7 @@ export function extractPlainTextFromRtf(rtf) {
         ignorable = prev.ignorable;
         ucSkip = prev.ucSkip;
         atStart = prev.atStart;
+        inTable = prev.inTable;
       }
       i += 1;
       continue;
@@ -571,13 +573,22 @@ export function extractPlainTextFromRtf(rtf) {
     }
 
     if (!ignorable) {
-      if (word === "tab" || word === "cell") {
+      if (word === "intbl" || word === "trowd") {
+        inTable = true;
+      }
+
+      if (word === "tab") {
+        // Treat \tab inside RTF tables as a literal tab/indentation, not as a TSV delimiter.
+        // Cell boundaries are represented by \cell in table-mode.
+        out += inTable ? " " : "\t";
+      } else if (word === "cell") {
         out += "\t";
       } else if (word === "par" || word === "line" || word === "row") {
         if (word === "row") {
           // RTF tables end each cell with \cell, including the last cell in the row.
           // Trim the trailing tab so we don't create a phantom empty column in TSV.
           if (out.endsWith("\t")) out = out.slice(0, -1);
+          inTable = false;
         }
         out += "\n";
       } else if (word === "u" && typeof param === "number") {
