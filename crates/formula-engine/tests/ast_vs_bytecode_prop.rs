@@ -221,8 +221,8 @@ proptest! {
         let program = cache.get_or_compile(&expr);
         let mut vm = Vm::with_capacity(32);
         let locale = LocaleConfig::en_us();
-        let ast_val = eval_ast(&expr, &grid, base, &locale);
-        let bc_val = vm.eval(&program, &grid, base, &locale);
+        let ast_val = eval_ast(&expr, &grid, 0, base, &locale);
+        let bc_val = vm.eval(&program, &grid, 0, base, &locale);
 
         prop_assert_eq!(ast_val, bc_val);
     }

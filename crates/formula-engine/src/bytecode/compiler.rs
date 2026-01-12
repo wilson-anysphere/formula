@@ -94,6 +94,12 @@ impl<'a> CompileCtx<'a> {
                     self.push_error_const(ErrorKind::Name);
                 }
             }
+            Expr::SpillRange(inner) => {
+                self.compile_expr(inner);
+                self.program
+                    .instrs
+                    .push(Instruction::new(OpCode::SpillRange, 0, 0));
+            }
             Expr::Unary { op, expr } => {
                 self.compile_expr(expr);
                 match op {
@@ -551,6 +557,11 @@ fn expr_to_key(expr: &Expr, out: &mut String) {
                 sheet_range_to_key(*area, out);
                 out.push(',');
             }
+            out.push(')');
+        }
+        Expr::SpillRange(inner) => {
+            out.push_str("SPILL#(");
+            expr_to_key(inner, out);
             out.push(')');
         }
         Expr::Unary { op, expr } => {

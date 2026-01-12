@@ -99,6 +99,30 @@ pub trait Grid: Sync {
         let (rows, cols) = self.bounds_on_sheet(sheet);
         coord.row >= 0 && coord.col >= 0 && coord.row < rows && coord.col < cols
     }
+
+    /// If `addr` is part of a spilled array, returns the spill origin cell.
+    ///
+    /// This mirrors the semantics of [`crate::eval::ValueResolver::spill_origin`]. Bytecode
+    /// backends that don't support dynamic arrays can leave the default implementation, which
+    /// behaves as if there are no spills.
+    #[inline]
+    fn spill_origin(&self, _sheet_id: usize, _addr: crate::eval::CellAddr) -> Option<crate::eval::CellAddr> {
+        None
+    }
+
+    /// If `origin` is the origin of a spilled array, returns the full spill range (inclusive).
+    ///
+    /// This mirrors the semantics of [`crate::eval::ValueResolver::spill_range`]. Bytecode
+    /// backends that don't support dynamic arrays can leave the default implementation, which
+    /// behaves as if there are no spills.
+    #[inline]
+    fn spill_range(
+        &self,
+        _sheet_id: usize,
+        _origin: crate::eval::CellAddr,
+    ) -> Option<(crate::eval::CellAddr, crate::eval::CellAddr)> {
+        None
+    }
 }
 
 pub trait GridMut: Grid {

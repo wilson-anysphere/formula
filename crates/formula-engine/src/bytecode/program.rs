@@ -38,6 +38,7 @@ pub enum OpCode {
     /// Otherwise (it is `#N/A`), pop it and continue.
     JumpIfNotNaError = 23,
     LoadMultiRange = 24,
+    SpillRange = 25,
 }
 
 /// Packed instruction:
@@ -83,6 +84,7 @@ impl Instruction {
             22 => OpCode::JumpIfNotError,
             23 => OpCode::JumpIfNotNaError,
             24 => OpCode::LoadMultiRange,
+            25 => OpCode::SpillRange,
             _ => unreachable!("invalid opcode"),
         }
     }

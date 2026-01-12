@@ -312,6 +312,33 @@ fn collect_concat_operands<'a>(expr: &'a crate::Expr, out: &mut Vec<&'a crate::E
     }
 }
 
+fn lower_canonical_reference_expr(
+    expr: &crate::Expr,
+    origin: crate::CellAddr,
+    current_sheet: usize,
+    resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
+) -> Result<BytecodeExpr, LowerError> {
+    match expr {
+        crate::Expr::CellRef(r) => {
+            let r = lower_cell_ref(r, origin, current_sheet, resolve_sheet)?;
+            Ok(BytecodeExpr::RangeRef(RangeRef::new(r, r)))
+        }
+        crate::Expr::Binary(b) if b.op == crate::BinaryOp::Range => {
+            lower_range_ref(&b.left, &b.right, origin, current_sheet, resolve_sheet)
+        }
+        crate::Expr::Postfix(p) if p.op == crate::PostfixOp::SpillRange => Ok(BytecodeExpr::SpillRange(
+            Box::new(lower_canonical_reference_expr(
+                &p.expr,
+                origin,
+                current_sheet,
+                resolve_sheet,
+            )?),
+        )),
+        // Fall back to normal lowering for non-reference expressions; runtime will surface #VALUE!.
+        _ => lower_canonical_expr(expr, origin, current_sheet, resolve_sheet),
+    }
+}
+
 pub fn lower_canonical_expr(
     expr: &crate::Expr,
     origin: crate::CellAddr,
@@ -440,7 +467,9 @@ pub fn lower_canonical_expr(
                 )?),
                 right: Box::new(BytecodeExpr::Literal(Value::Number(100.0))),
             }),
-            crate::PostfixOp::SpillRange => Err(LowerError::Unsupported),
+            crate::PostfixOp::SpillRange => Ok(BytecodeExpr::SpillRange(Box::new(
+                lower_canonical_reference_expr(&p.expr, origin, current_sheet, resolve_sheet)?,
+            ))),
         },
         crate::Expr::NameRef(nref) => {
             // Bytecode locals (LET) only support unqualified identifiers.

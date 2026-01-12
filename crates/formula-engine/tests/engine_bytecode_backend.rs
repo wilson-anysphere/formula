@@ -74,6 +74,31 @@ impl ValueResolver for EngineResolver<'_> {
     > {
         None
     }
+
+    fn spill_origin(
+        &self,
+        sheet_id: usize,
+        addr: formula_engine::eval::CellAddr,
+    ) -> Option<formula_engine::eval::CellAddr> {
+        let sheet = match sheet_id {
+            0 => "Sheet1",
+            _ => return None,
+        };
+        let (_origin_sheet, origin) = self.engine.spill_origin(sheet, &cell_addr_to_a1(addr))?;
+        Some(origin)
+    }
+
+    fn spill_range(
+        &self,
+        sheet_id: usize,
+        origin: formula_engine::eval::CellAddr,
+    ) -> Option<(formula_engine::eval::CellAddr, formula_engine::eval::CellAddr)> {
+        let sheet = match sheet_id {
+            0 => "Sheet1",
+            _ => return None,
+        };
+        self.engine.spill_range(sheet, &cell_addr_to_a1(origin))
+    }
 }
 
 fn eval_via_ast(engine: &Engine, formula: &str, current_cell: &str) -> Value {
@@ -892,6 +917,25 @@ fn bytecode_backend_counta_and_countblank_respect_non_numeric_reference_cells() 
 }
 
 #[test]
+fn bytecode_backend_supports_spill_range_operator() {
+    let mut engine = Engine::new();
+
+    // Create a spilled dynamic array (A1:A3).
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SEQUENCE(3)")
+        .unwrap();
+    // Consume the spill range via `#` in a bytecode-eligible formula.
+    engine
+        .set_cell_formula("Sheet1", "B1", "=SUM(A1#)")
+        .unwrap();
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.bytecode_program_count(), 1);
+    assert_engine_matches_ast(&engine, "=SUM(A1#)", "B1");
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_countif_grouped_numeric_criteria() {
     let mut engine = Engine::new();
     engine
@@ -1301,7 +1345,7 @@ fn bytecode_implicit_intersection_matches_ast_for_2d_range_inside_rectangle() {
 
     let mut vm = Vm::with_capacity(32);
     let base = CellCoord::new(origin.row as i32, origin.col as i32);
-    let bc_value = vm.eval(&program, &grid, base, &formula_engine::LocaleConfig::en_us());
+    let bc_value = vm.eval(&program, &grid, 0, base, &formula_engine::LocaleConfig::en_us());
 
     assert_eq!(bytecode_value_to_engine(bc_value), expected);
 }
@@ -2858,6 +2902,7 @@ fn bytecode_backend_matches_ast_for_conditional_aggregates_shape_mismatch_and_ou
     let v = vm.eval(
         &program,
         &grid,
+        0,
         bytecode::CellCoord::new(0, 0),
         &formula_engine::LocaleConfig::en_us(),
     );

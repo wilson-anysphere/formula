@@ -1999,7 +1999,7 @@ impl Engine {
                                 row: k.addr.row as i32,
                                 col: k.addr.col as i32,
                             };
-                            let v = vm.eval(&bc.program, &grid, base, &locale_config);
+                            let v = vm.eval(&bc.program, &grid, k.sheet, base, &locale_config);
                             bytecode_value_to_engine(v)
                         }
                     };
@@ -2059,7 +2059,13 @@ impl Engine {
                                                 row: k.addr.row as i32,
                                                 col: k.addr.col as i32,
                                             };
-                                            let v = vm.eval(&bc.program, &grid, base, &locale_config);
+                                            let v = vm.eval(
+                                                &bc.program,
+                                                &grid,
+                                                k.sheet,
+                                                base,
+                                                &locale_config,
+                                            );
                                             (*k, bytecode_value_to_engine(v))
                                         }
                                     }
@@ -2115,7 +2121,7 @@ impl Engine {
                             row: k.addr.row as i32,
                             col: k.addr.col as i32,
                         };
-                        let v = vm.eval(&bc.program, &grid, base, &locale_config);
+                        let v = vm.eval(&bc.program, &grid, k.sheet, base, &locale_config);
                         bytecode_value_to_engine(v)
                     }
                 };
@@ -2173,7 +2179,7 @@ impl Engine {
                             row: k.addr.row as i32,
                             col: k.addr.col as i32,
                         };
-                        let v = vm.eval(&bc.program, &grid, base, &locale_config);
+                        let v = vm.eval(&bc.program, &grid, k.sheet, base, &locale_config);
                         bytecode_value_to_engine(v)
                     }
                 };
@@ -5828,7 +5834,8 @@ impl BytecodeColumnCache {
                     }
                     bytecode::OpCode::UnaryPlus
                     | bytecode::OpCode::UnaryNeg
-                    | bytecode::OpCode::ImplicitIntersection => {
+                    | bytecode::OpCode::ImplicitIntersection
+                    | bytecode::OpCode::SpillRange => {
                         let _ = stack.pop();
                         stack.push(StackValue::Other);
                     }
@@ -6326,6 +6333,14 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
         let cols = i32::try_from(cols).unwrap_or(i32::MAX);
         (rows, cols)
     }
+
+    fn spill_origin(&self, sheet_id: usize, addr: CellAddr) -> Option<CellAddr> {
+        self.snapshot.spill_origin(sheet_id, addr)
+    }
+
+    fn spill_range(&self, sheet_id: usize, origin: CellAddr) -> Option<(CellAddr, CellAddr)> {
+        self.snapshot.spill_range(sheet_id, origin)
+    }
 }
 
 fn bytecode_expr_is_eligible(expr: &bytecode::Expr) -> bool {
@@ -6386,6 +6401,7 @@ fn bytecode_expr_within_grid_limits(
             }
             Ok(())
         }
+        bytecode::Expr::SpillRange(inner) => bytecode_expr_within_grid_limits(inner, origin),
         bytecode::Expr::NameRef(_) => Ok(()),
         bytecode::Expr::Unary { op, expr } => match op {
             bytecode::ast::UnaryOp::Plus | bytecode::ast::UnaryOp::Neg => {
@@ -6465,6 +6481,9 @@ fn bytecode_expr_is_eligible_inner(
         },
         bytecode::Expr::CellRef(_) => true,
         bytecode::Expr::RangeRef(_) => allow_range,
+        bytecode::Expr::SpillRange(inner) => {
+            allow_range && bytecode_expr_is_eligible_inner(inner, true, false, lexical_scopes)
+        }
         bytecode::Expr::NameRef(name) => name_is_local(lexical_scopes, name),
         bytecode::Expr::MultiRangeRef(_) => allow_range,
         bytecode::Expr::Unary { op, expr } => match op {
@@ -6681,6 +6700,7 @@ fn bytecode_expr_is_eligible_inner(
                     bytecode::Expr::RangeRef(_)
                         | bytecode::Expr::MultiRangeRef(_)
                         | bytecode::Expr::CellRef(_)
+                        | bytecode::Expr::SpillRange(_)
                 );
                 let criteria_ok =
                     bytecode_expr_is_eligible_inner(&args[1], false, false, lexical_scopes);
@@ -6708,10 +6728,13 @@ fn bytecode_expr_is_eligible_inner(
                 if args.len() != 2 {
                     return false;
                 }
-                (matches!(args[0], bytecode::Expr::RangeRef(_))
-                    || matches!(args[0], bytecode::Expr::CellRef(_)))
-                    && (matches!(args[1], bytecode::Expr::RangeRef(_))
-                        || matches!(args[1], bytecode::Expr::CellRef(_)))
+                (matches!(
+                    args[0],
+                    bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_) | bytecode::Expr::SpillRange(_)
+                )) && (matches!(
+                    args[1],
+                    bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_) | bytecode::Expr::SpillRange(_)
+                ))
             }
             bytecode::ast::Function::VLookup | bytecode::ast::Function::HLookup => {
                 if args.len() < 3 || args.len() > 4 {

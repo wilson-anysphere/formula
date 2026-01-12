@@ -1,6 +1,6 @@
 use super::ast::{BinaryOp, Expr, Function, UnaryOp};
 use super::grid::Grid;
-use super::value::{Array as ArrayValue, CellCoord, ErrorKind, RangeRef, ResolvedRange, Value};
+use super::value::{Array as ArrayValue, CellCoord, ErrorKind, RangeRef, Ref, ResolvedRange, Value};
 use crate::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
 use crate::error::ExcelError;
 use crate::functions::math::criteria::Criteria as EngineCriteria;
@@ -101,14 +101,21 @@ fn parse_value_from_text(s: &str) -> Result<f64, ErrorKind> {
     })
 }
 
-pub fn eval_ast(expr: &Expr, grid: &dyn Grid, base: CellCoord, locale: &crate::LocaleConfig) -> Value {
+pub fn eval_ast(
+    expr: &Expr,
+    grid: &dyn Grid,
+    sheet_id: usize,
+    base: CellCoord,
+    locale: &crate::LocaleConfig,
+) -> Value {
     let mut lexical_scopes: Vec<HashMap<Arc<str>, Value>> = Vec::new();
-    eval_ast_inner(expr, grid, base, locale, &mut lexical_scopes)
+    eval_ast_inner(expr, grid, sheet_id, base, locale, &mut lexical_scopes)
 }
 
 fn eval_ast_inner(
     expr: &Expr,
     grid: &dyn Grid,
+    sheet_id: usize,
     base: CellCoord,
     locale: &crate::LocaleConfig,
     lexical_scopes: &mut Vec<HashMap<Arc<str>, Value>>,
@@ -118,6 +125,10 @@ fn eval_ast_inner(
         Expr::CellRef(r) => grid.get_value(r.resolve(base)),
         Expr::RangeRef(r) => Value::Range(*r),
         Expr::MultiRangeRef(r) => Value::MultiRange(r.clone()),
+        Expr::SpillRange(inner) => {
+            let v = eval_ast_inner(inner, grid, sheet_id, base, locale, lexical_scopes);
+            apply_spill_range(v, grid, sheet_id, base)
+        }
         Expr::NameRef(name) => {
             for scope in lexical_scopes.iter().rev() {
                 if let Some(v) = scope.get(name) {
@@ -127,15 +138,15 @@ fn eval_ast_inner(
             Value::Error(ErrorKind::Name)
         }
         Expr::Unary { op, expr } => {
-            let v = eval_ast_inner(expr, grid, base, locale, lexical_scopes);
+            let v = eval_ast_inner(expr, grid, sheet_id, base, locale, lexical_scopes);
             match op {
                 UnaryOp::ImplicitIntersection => apply_implicit_intersection(v, grid, base),
                 _ => apply_unary(*op, v),
             }
         }
         Expr::Binary { op, left, right } => {
-            let l = eval_ast_inner(left, grid, base, locale, lexical_scopes);
-            let r = eval_ast_inner(right, grid, base, locale, lexical_scopes);
+            let l = eval_ast_inner(left, grid, sheet_id, base, locale, lexical_scopes);
+            let r = eval_ast_inner(right, grid, sheet_id, base, locale, lexical_scopes);
             apply_binary(*op, l, r)
         }
         Expr::FuncCall { func, args } => {
@@ -151,13 +162,13 @@ fn eval_ast_inner(
                         lexical_scopes.pop();
                         return Value::Error(ErrorKind::Value);
                     };
-                    let value = eval_ast_inner(&pair[1], grid, base, locale, lexical_scopes);
+                    let value = eval_ast_inner(&pair[1], grid, sheet_id, base, locale, lexical_scopes);
                     lexical_scopes
                         .last_mut()
                         .expect("pushed scope")
                         .insert(name.clone(), value);
                 }
-                let result = eval_ast_inner(&args[last], grid, base, locale, lexical_scopes);
+                let result = eval_ast_inner(&args[last], grid, sheet_id, base, locale, lexical_scopes);
                 lexical_scopes.pop();
                 return result;
             }
@@ -170,16 +181,31 @@ fn eval_ast_inner(
                     if args.len() < 2 || args.len() > 3 {
                         return Value::Error(ErrorKind::Value);
                     }
-                    let cond_val = eval_ast_inner(&args[0], grid, base, locale, lexical_scopes);
+                    let cond_val =
+                        eval_ast_inner(&args[0], grid, sheet_id, base, locale, lexical_scopes);
                     let cond = match coerce_to_bool(cond_val) {
                         Ok(b) => b,
                         Err(e) => return Value::Error(e),
                     };
                     if cond {
-                        return eval_ast_inner(&args[1], grid, base, locale, lexical_scopes);
+                        return eval_ast_inner(
+                            &args[1],
+                            grid,
+                            sheet_id,
+                            base,
+                            locale,
+                            lexical_scopes,
+                        );
                     }
                     if args.len() == 3 {
-                        return eval_ast_inner(&args[2], grid, base, locale, lexical_scopes);
+                        return eval_ast_inner(
+                            &args[2],
+                            grid,
+                            sheet_id,
+                            base,
+                            locale,
+                            lexical_scopes,
+                        );
                     }
                     // Engine behavior: missing false branch defaults to FALSE (not blank).
                     return Value::Bool(false);
@@ -193,13 +219,21 @@ fn eval_ast_inner(
                     }
 
                     for pair in args.chunks_exact(2) {
-                        let cond_val = eval_ast_inner(&pair[0], grid, base, locale, lexical_scopes);
+                        let cond_val =
+                            eval_ast_inner(&pair[0], grid, sheet_id, base, locale, lexical_scopes);
                         let cond = match coerce_to_bool(cond_val) {
                             Ok(b) => b,
                             Err(e) => return Value::Error(e),
                         };
                         if cond {
-                            return eval_ast_inner(&pair[1], grid, base, locale, lexical_scopes);
+                            return eval_ast_inner(
+                                &pair[1],
+                                grid,
+                                sheet_id,
+                                base,
+                                locale,
+                                lexical_scopes,
+                            );
                         }
                     }
                     return Value::Error(ErrorKind::NA);
@@ -208,9 +242,17 @@ fn eval_ast_inner(
                     if args.len() != 2 {
                         return Value::Error(ErrorKind::Value);
                     }
-                    let first = eval_ast_inner(&args[0], grid, base, locale, lexical_scopes);
+                    let first =
+                        eval_ast_inner(&args[0], grid, sheet_id, base, locale, lexical_scopes);
                     if matches!(first, Value::Error(_)) {
-                        return eval_ast_inner(&args[1], grid, base, locale, lexical_scopes);
+                        return eval_ast_inner(
+                            &args[1],
+                            grid,
+                            sheet_id,
+                            base,
+                            locale,
+                            lexical_scopes,
+                        );
                     }
                     return first;
                 }
@@ -218,9 +260,17 @@ fn eval_ast_inner(
                     if args.len() != 2 {
                         return Value::Error(ErrorKind::Value);
                     }
-                    let first = eval_ast_inner(&args[0], grid, base, locale, lexical_scopes);
+                    let first =
+                        eval_ast_inner(&args[0], grid, sheet_id, base, locale, lexical_scopes);
                     if matches!(first, Value::Error(ErrorKind::NA)) {
-                        return eval_ast_inner(&args[1], grid, base, locale, lexical_scopes);
+                        return eval_ast_inner(
+                            &args[1],
+                            grid,
+                            sheet_id,
+                            base,
+                            locale,
+                            lexical_scopes,
+                        );
                     }
                     return first;
                 }
@@ -229,7 +279,8 @@ fn eval_ast_inner(
                         return Value::Error(ErrorKind::Value);
                     }
 
-                    let expr_val = eval_ast_inner(&args[0], grid, base, locale, lexical_scopes);
+                    let expr_val =
+                        eval_ast_inner(&args[0], grid, sheet_id, base, locale, lexical_scopes);
                     if let Value::Error(e) = expr_val {
                         return Value::Error(e);
                     }
@@ -244,14 +295,22 @@ fn eval_ast_inner(
                     }
 
                     for pair in pairs.chunks_exact(2) {
-                        let case_val = eval_ast_inner(&pair[0], grid, base, locale, lexical_scopes);
+                        let case_val =
+                            eval_ast_inner(&pair[0], grid, sheet_id, base, locale, lexical_scopes);
                         if let Value::Error(e) = case_val {
                             return Value::Error(e);
                         }
                         let matches = apply_binary(BinaryOp::Eq, expr_val.clone(), case_val);
                         match matches {
                             Value::Bool(true) => {
-                                return eval_ast_inner(&pair[1], grid, base, locale, lexical_scopes);
+                                return eval_ast_inner(
+                                    &pair[1],
+                                    grid,
+                                    sheet_id,
+                                    base,
+                                    locale,
+                                    lexical_scopes,
+                                );
                             }
                             Value::Bool(false) => continue,
                             Value::Error(e) => return Value::Error(e),
@@ -260,7 +319,14 @@ fn eval_ast_inner(
                     }
 
                     if let Some(default_expr) = default {
-                        return eval_ast_inner(default_expr, grid, base, locale, lexical_scopes);
+                        return eval_ast_inner(
+                            default_expr,
+                            grid,
+                            sheet_id,
+                            base,
+                            locale,
+                            lexical_scopes,
+                        );
                     }
                     return Value::Error(ErrorKind::NA);
                 }
@@ -332,10 +398,48 @@ fn eval_ast_inner(
                     }
                 }
 
-                evaluated.push(eval_ast_inner(arg, grid, base, locale, lexical_scopes));
+                evaluated.push(eval_ast_inner(arg, grid, sheet_id, base, locale, lexical_scopes));
             }
             call_function(func, &evaluated, grid, base, locale)
         }
+    }
+}
+
+pub(crate) fn apply_spill_range(
+    v: Value,
+    grid: &dyn Grid,
+    sheet_id: usize,
+    base: CellCoord,
+) -> Value {
+    match v {
+        Value::Error(e) => Value::Error(e),
+        Value::Range(r) => {
+            let start = r.start.resolve(base);
+            let end = r.end.resolve(base);
+            if start.row != end.row || start.col != end.col {
+                return Value::Error(ErrorKind::Value);
+            }
+            if !grid.in_bounds(start) {
+                return Value::Error(ErrorKind::Ref);
+            }
+
+            let addr = crate::eval::CellAddr {
+                row: start.row as u32,
+                col: start.col as u32,
+            };
+            let Some(origin) = grid.spill_origin(sheet_id, addr) else {
+                return Value::Error(ErrorKind::Ref);
+            };
+            let Some((spill_start, spill_end)) = grid.spill_range(sheet_id, origin) else {
+                return Value::Error(ErrorKind::Ref);
+            };
+
+            Value::Range(RangeRef::new(
+                Ref::new(spill_start.row as i32, spill_start.col as i32, true, true),
+                Ref::new(spill_end.row as i32, spill_end.col as i32, true, true),
+            ))
+        }
+        _ => Value::Error(ErrorKind::Value),
     }
 }
 

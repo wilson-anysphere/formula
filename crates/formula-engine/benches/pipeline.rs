@@ -65,9 +65,11 @@ fn bench_eval_single(c: &mut Criterion) {
     let locale = LocaleConfig::en_us();
     let mut vm = Vm::with_capacity(32);
     c.bench_function("eval_bytecode_single", |b| {
-        b.iter(|| vm.eval(&program, &grid, origin, &locale))
+        b.iter(|| vm.eval(&program, &grid, 0, origin, &locale))
     });
-    c.bench_function("eval_ast_single", |b| b.iter(|| eval_ast(&expr, &grid, origin, &locale)));
+    c.bench_function("eval_ast_single", |b| {
+        b.iter(|| eval_ast(&expr, &grid, 0, origin, &locale))
+    });
 }
 
 #[cfg(not(target_arch = "wasm32"))]

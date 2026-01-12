@@ -133,22 +133,25 @@ impl RecalcEngine {
                 let g: &dyn Grid = &*grid;
                 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
                 {
-                    results.par_iter_mut().zip(level.par_iter()).for_each_init(
-                        || {
-                            (
-                                Vm::with_capacity(32),
-                                super::runtime::set_thread_eval_context(
-                                    date_system,
-                                    value_locale,
-                                    now_utc.clone(),
-                                ),
-                            )
-                        },
-                        |(vm, _guard), (out, &idx)| {
-                            let node = &graph.nodes[idx];
-                            *out = vm.eval(&node.program, g, node.coord, &locale);
-                        },
-                    );
+                    results
+                        .par_iter_mut()
+                        .zip(level.par_iter())
+                        .for_each_init(
+                            || {
+                                (
+                                    Vm::with_capacity(32),
+                                    super::runtime::set_thread_eval_context(
+                                        date_system,
+                                        value_locale,
+                                        now_utc.clone(),
+                                    ),
+                                )
+                            },
+                            |(vm, _guard), (out, &idx)| {
+                                let node = &graph.nodes[idx];
+                                *out = vm.eval(&node.program, g, 0, node.coord, &locale);
+                            },
+                        );
                 }
                 #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
                 {
@@ -160,7 +163,7 @@ impl RecalcEngine {
                     );
                     for (out, &idx) in results.iter_mut().zip(level.iter()) {
                         let node = &graph.nodes[idx];
-                        *out = vm.eval(&node.program, g, node.coord, &locale);
+                        *out = vm.eval(&node.program, g, 0, node.coord, &locale);
                     }
                 }
             }
@@ -209,6 +212,7 @@ fn collect_deps_inner(expr: &Expr, base: CellCoord, out: &mut AHashSet<(i32, i32
                 }
             }
         }
+        Expr::SpillRange(inner) => collect_deps_inner(inner, base, out),
         Expr::Literal(_) => {}
         Expr::NameRef(_) => {}
         Expr::Unary { expr, .. } => collect_deps_inner(expr, base, out),
@@ -244,15 +248,15 @@ mod tests {
             ValueLocaleConfig::de_de(),
             now_utc.clone(),
         );
-
         // Keep the bytecode function runtime's locale config in sync with the value-locale
         // configured above so any criteria parsing inside quoted strings matches Excel.
         let locale_config = crate::LocaleConfig::de_de();
         let mut vm = Vm::with_capacity(32);
-        let de_de_value = vm.eval(&program, &empty_grid, origin, &locale_config);
+        let de_de_value = vm.eval(&program, &empty_grid, 0, origin, &locale_config);
         let en_us_value = vm.eval_with_coercion_context(
             &program,
             &empty_grid,
+            0,
             origin,
             ExcelDateSystem::EXCEL_1900,
             ValueLocaleConfig::en_us(),
@@ -278,7 +282,7 @@ mod tests {
         );
  
         // Ensure `recalc` restores the thread-local context after it finishes.
-        let after_value = vm.eval(&program, &empty_grid, origin, &locale_config);
+        let after_value = vm.eval(&program, &empty_grid, 0, origin, &locale_config);
         assert_eq!(
             after_value, de_de_value,
             "recalc should restore any prior thread-local eval context"

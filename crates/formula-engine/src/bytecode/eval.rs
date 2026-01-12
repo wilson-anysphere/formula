@@ -34,6 +34,7 @@ impl Vm {
         &mut self,
         program: &Program,
         grid: &dyn Grid,
+        sheet_id: usize,
         base: CellCoord,
         locale: &crate::LocaleConfig,
     ) -> Value {
@@ -124,6 +125,11 @@ impl Vm {
                     self.stack.truncate(start);
                     self.stack.push(result);
                 }
+                OpCode::SpillRange => {
+                    let v = self.stack.pop().unwrap_or(Value::Empty);
+                    self.stack
+                        .push(super::runtime::apply_spill_range(v, grid, sheet_id, base));
+                }
                 OpCode::Jump => {
                     pc = inst.a() as usize;
                     continue;
@@ -169,6 +175,7 @@ impl Vm {
         &mut self,
         program: &Program,
         grid: &dyn Grid,
+        sheet_id: usize,
         base: CellCoord,
         value_locale: ValueLocaleConfig,
     ) -> Value {
@@ -178,6 +185,7 @@ impl Vm {
         self.eval_with_coercion_context(
             program,
             grid,
+            sheet_id,
             base,
             ExcelDateSystem::EXCEL_1900,
             value_locale,
@@ -189,6 +197,7 @@ impl Vm {
         &mut self,
         program: &Program,
         grid: &dyn Grid,
+        sheet_id: usize,
         base: CellCoord,
         date_system: ExcelDateSystem,
         value_locale: ValueLocaleConfig,
@@ -200,7 +209,7 @@ impl Vm {
         let mut locale_config = crate::LocaleConfig::en_us();
         locale_config.decimal_separator = value_locale.separators.decimal_sep;
         locale_config.thousands_separator = Some(value_locale.separators.thousands_sep);
-        self.eval(program, grid, base, &locale_config)
+        self.eval(program, grid, sheet_id, base, &locale_config)
     }
 }
 
@@ -223,6 +232,7 @@ mod tests {
         let value = vm.eval_with_value_locale(
             &program,
             &grid,
+            0,
             origin,
             ValueLocaleConfig::de_de(),
         );
@@ -248,6 +258,7 @@ mod tests {
         let value = vm.eval_with_coercion_context(
             &program,
             &grid,
+            0,
             origin,
             ExcelDateSystem::Excel1904,
             ValueLocaleConfig::en_us(),
@@ -276,6 +287,7 @@ mod tests {
         let value = vm.eval_with_coercion_context(
             &program,
             &grid,
+            0,
             origin,
             ExcelDateSystem::EXCEL_1900,
             ValueLocaleConfig::en_us(),
@@ -330,7 +342,7 @@ mod tests {
         let grid = CountingGrid::new(10, 10);
         let mut vm = Vm::with_capacity(32);
         let locale = crate::LocaleConfig::en_us();
-        let value = vm.eval(&program, &grid, origin, &locale);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
 
         assert_eq!(value, Value::Number(1.0));
         assert_eq!(grid.reads(), 0, "unused IF branch should not be evaluated");
@@ -346,7 +358,7 @@ mod tests {
         let program = super::super::BytecodeCache::new().get_or_compile(&expr);
         let grid = CountingGrid::new(10, 10);
         let mut vm = Vm::with_capacity(32);
-        let value = vm.eval(&program, &grid, origin, &locale);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
         assert_eq!(value, Value::Number(1.0));
         assert_eq!(grid.reads(), 0, "unused IFERROR fallback should not be evaluated");
 
@@ -355,7 +367,7 @@ mod tests {
         let program = super::super::BytecodeCache::new().get_or_compile(&expr);
         let grid = CountingGrid::new(10, 10);
         let mut vm = Vm::with_capacity(32);
-        let value = vm.eval(&program, &grid, origin, &locale);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
         assert_eq!(value, Value::Number(1.0));
         assert_eq!(grid.reads(), 0, "unused IFNA fallback should not be evaluated");
 
@@ -364,7 +376,7 @@ mod tests {
         let program = super::super::BytecodeCache::new().get_or_compile(&expr);
         let grid = CountingGrid::new(10, 10);
         let mut vm = Vm::with_capacity(32);
-        let value = vm.eval(&program, &grid, origin, &locale);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
         assert_eq!(value, Value::Empty); // A1 is empty.
         assert_eq!(grid.reads(), 1, "IFNA fallback should be evaluated for #N/A");
     }
@@ -379,7 +391,7 @@ mod tests {
         let program = super::super::BytecodeCache::new().get_or_compile(&expr);
         let grid = CountingGrid::new(10, 10);
         let mut vm = Vm::with_capacity(32);
-        let value = vm.eval(&program, &grid, origin, &locale);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
         assert_eq!(value, Value::Number(1.0));
         assert_eq!(grid.reads(), 0, "unused IFS condition should not be evaluated");
 
@@ -388,7 +400,7 @@ mod tests {
         let program = super::super::BytecodeCache::new().get_or_compile(&expr);
         let grid = CountingGrid::new(10, 10);
         let mut vm = Vm::with_capacity(32);
-        let value = vm.eval(&program, &grid, origin, &locale);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
         assert_eq!(value, Value::Number(2.0));
         assert_eq!(
             grid.reads(),
@@ -408,7 +420,7 @@ mod tests {
         let program = super::super::BytecodeCache::new().get_or_compile(&expr);
         let grid = CountingGrid::new(10, 10);
         let mut vm = Vm::with_capacity(32);
-        let value = vm.eval(&program, &grid, origin, &locale);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
         assert_eq!(value, Value::Number(10.0));
         assert_eq!(grid.reads(), 0, "unused SWITCH case value should not be evaluated");
 
@@ -418,7 +430,7 @@ mod tests {
         let program = super::super::BytecodeCache::new().get_or_compile(&expr);
         let grid = CountingGrid::new(10, 10);
         let mut vm = Vm::with_capacity(32);
-        let value = vm.eval(&program, &grid, origin, &locale);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
         assert_eq!(value, Value::Number(20.0));
         assert_eq!(
             grid.reads(),
@@ -432,7 +444,7 @@ mod tests {
         let program = super::super::BytecodeCache::new().get_or_compile(&expr);
         let grid = CountingGrid::new(10, 10);
         let mut vm = Vm::with_capacity(32);
-        let value = vm.eval(&program, &grid, origin, &locale);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
         assert_eq!(value, Value::Error(super::super::value::ErrorKind::Div0));
         assert_eq!(
             grid.reads(),

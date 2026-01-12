@@ -216,6 +216,12 @@ pub enum Expr {
     RangeRef(RangeRef),
     MultiRangeRef(MultiRangeRef),
     NameRef(Arc<str>),
+    /// Excel spill-range reference operator (`#`), e.g. `A1#`.
+    ///
+    /// The inner expression is evaluated in a "reference context" (cell references are lowered
+    /// to single-cell ranges). At runtime this resolves the spill origin and expands to the full
+    /// spill footprint as a `Value::Range`.
+    SpillRange(Box<Expr>),
     Unary {
         op: UnaryOp,
         expr: Box<Expr>,
