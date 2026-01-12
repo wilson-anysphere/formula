@@ -4,9 +4,9 @@ import { createRequire } from "node:module";
 
 import * as Y from "yjs";
 
-import { REMOTE_ORIGIN, createCollabUndoService } from "@formula/collab-undo";
+import { REMOTE_ORIGIN, createCollabUndoService, createUndoService } from "@formula/collab-undo";
 
-import { createCommentManagerForDoc, createCommentManagerForSession, createYComment } from "../../comments/src/manager.ts";
+import { createCommentManagerForDoc, createCommentManagerForSession, createYComment, getCommentsRoot } from "../../comments/src/manager.ts";
 import { createCollabSession } from "../src/index.ts";
 
 function requireYjsCjs() {
@@ -459,6 +459,60 @@ test("Binder-origin collaborative undo captures comment add/edit when using a tr
   assert.equal(undo.canRedo(), true);
   undo.redo();
   assert.equal(get()?.resolved ?? null, true);
+
+  doc.destroy();
+});
+
+test("Binder-origin undo captures comment edits when comments root is added to UndoManager scope lazily (desktop-style)", () => {
+  const doc = new Y.Doc();
+
+  const binderOrigin = { type: "document-controller:binder" };
+
+  // Desktop creates the UndoManager before the comments root exists in many cases.
+  // Start with a scope that does *not* include comments.
+  const cellsRoot = doc.getMap("cells");
+  const undoService = createUndoService({ mode: "collab", doc, scope: [cellsRoot], origin: binderOrigin });
+
+  // Find the underlying UndoManager (exposed via localOrigins).
+  const undoManager = Array.from(undoService.localOrigins ?? []).find((origin) => origin instanceof Y.UndoManager);
+  assert.ok(undoManager);
+
+  let commentsScopeAdded = false;
+  const ensureCommentsScope = () => {
+    if (commentsScopeAdded) return;
+    const root = getCommentsRoot(doc);
+    undoManager.addToScope(root.kind === "map" ? root.map : root.array);
+    commentsScopeAdded = true;
+  };
+
+  const comments = createCommentManagerForDoc({
+    doc,
+    transact: (fn) => {
+      ensureCommentsScope();
+      undoService.transact(fn);
+    },
+  });
+
+  const commentId = comments.addComment({
+    id: "c1",
+    cellRef: "Sheet1:0:0",
+    kind: "threaded",
+    content: "hello",
+    author: { id: "u1", name: "Alice" },
+    now: 1,
+  });
+  undoService.stopCapturing();
+
+  comments.setCommentContent({ commentId, content: "hello (edited)", now: 2 });
+  assert.equal(comments.listAll().find((c) => c.id === commentId)?.content ?? null, "hello (edited)");
+
+  assert.equal(undoService.canUndo(), true);
+  undoService.undo();
+  assert.equal(comments.listAll().find((c) => c.id === commentId)?.content ?? null, "hello");
+
+  assert.equal(undoService.canUndo(), true);
+  undoService.undo();
+  assert.equal(comments.listAll().find((c) => c.id === commentId)?.content ?? null, null);
 
   doc.destroy();
 });
