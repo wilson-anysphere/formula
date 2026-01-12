@@ -15,7 +15,16 @@ import test from "node:test";
 const require = createRequire(import.meta.url);
 const extensionMarketplaceDir = fileURLToPath(new URL("../packages/extension-marketplace", import.meta.url));
 let hasWorkspaceDeps = true;
-for (const specifier of ["@formula/marketplace-shared/package.json", "@formula/extension-host/package.json"]) {
+for (const specifier of [
+  // extension-host uses an `exports` map and does not expose `./package.json`,
+  // so probe the public entrypoint instead.
+  "@formula/extension-host",
+  // marketplace-shared is a workspace package (at `./shared/`) that is not always linked
+  // into `node_modules` in cached/stale installs. Probe a concrete file that
+  // WebExtensionManager imports.
+  "@formula/marketplace-shared/extension-package/v2-browser.mjs",
+  "@formula/marketplace-shared/extension-manifest/index.mjs",
+]) {
   try {
     require.resolve(specifier, { paths: [extensionMarketplaceDir] });
   } catch {
