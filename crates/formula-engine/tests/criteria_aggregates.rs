@@ -284,6 +284,122 @@ fn sumif_indirect_records_dynamic_dependencies() {
 }
 
 #[test]
+fn countifs_indirect_records_dynamic_dependencies() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 2).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 3).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "Z1", r#"=COUNTIFS(INDIRECT("A1:A3"),">0")"#)
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "Z1"), Value::Number(3.0));
+
+    let precedents = engine.precedents("Sheet1", "Z1").unwrap();
+    assert!(
+        precedents.iter().any(|node| matches!(
+            node,
+            PrecedentNode::Range {
+                sheet: 0,
+                start: CellAddr { row: 0, col: 0 },
+                end: CellAddr { row: 2, col: 0 },
+            }
+        )),
+        "expected Z1 precedents to include Sheet1!A1:A3, got: {precedents:?}"
+    );
+
+    let dependents = engine.dependents("Sheet1", "A1").unwrap();
+    assert!(
+        dependents.iter().any(|node| matches!(
+            node,
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 0, col: 25 },
+            }
+        )),
+        "expected A1 dependents to include Sheet1!Z1, got: {dependents:?}"
+    );
+}
+
+#[test]
+fn maxifs_and_minifs_indirect_record_dynamic_dependencies() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 1).unwrap();
+    engine.set_cell_value("Sheet1", "B1", 10).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 20).unwrap();
+    engine.set_cell_value("Sheet1", "B3", 30).unwrap();
+
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "Z1",
+            r#"=MAXIFS(INDIRECT("B1:B3"),INDIRECT("A1:A3"),">0")"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "Z2",
+            r#"=MINIFS(INDIRECT("B1:B3"),INDIRECT("A1:A3"),">0")"#,
+        )
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "Z1"), Value::Number(30.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "Z2"), Value::Number(10.0));
+
+    let precedents = engine.precedents("Sheet1", "Z1").unwrap();
+    assert!(
+        precedents.iter().any(|node| matches!(
+            node,
+            PrecedentNode::Range {
+                sheet: 0,
+                start: CellAddr { row: 0, col: 0 },
+                end: CellAddr { row: 2, col: 0 },
+            }
+        )),
+        "expected Z1 precedents to include Sheet1!A1:A3, got: {precedents:?}"
+    );
+    assert!(
+        precedents.iter().any(|node| matches!(
+            node,
+            PrecedentNode::Range {
+                sheet: 0,
+                start: CellAddr { row: 0, col: 1 },
+                end: CellAddr { row: 2, col: 1 },
+            }
+        )),
+        "expected Z1 precedents to include Sheet1!B1:B3, got: {precedents:?}"
+    );
+
+    let dependents = engine.dependents("Sheet1", "A1").unwrap();
+    assert!(
+        dependents.iter().any(|node| matches!(
+            node,
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 0, col: 25 },
+            }
+        )),
+        "expected A1 dependents to include Sheet1!Z1, got: {dependents:?}"
+    );
+    let dependents = engine.dependents("Sheet1", "B1").unwrap();
+    assert!(
+        dependents.iter().any(|node| matches!(
+            node,
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 0, col: 25 },
+            }
+        )),
+        "expected B1 dependents to include Sheet1!Z1, got: {dependents:?}"
+    );
+}
+
+#[test]
 fn maxifs_and_minifs_require_matching_shapes() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", 1);
