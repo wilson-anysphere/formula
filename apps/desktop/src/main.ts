@@ -3697,9 +3697,6 @@ if (
 
   const extensionClipboardWriteGuard = async (params: { extensionId: string; taintedRanges: any[] }) => {
     try {
-      const selection = getClipboardDlpSelection();
-      enforceExtensionClipboardDlpForRange({ sheetId: selection.sheetId, range: selection.range });
-
       const taintedRanges = Array.isArray(params.taintedRanges) ? params.taintedRanges : [];
       for (const raw of taintedRanges) {
         if (!raw || typeof raw !== "object") continue;
