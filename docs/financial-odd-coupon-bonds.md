@@ -82,10 +82,11 @@ When adding odd-coupon coverage to the oracle corpus, prefer:
 - cases that cover both Excel 1900 and 1904 date systems (the engine should match in both)
 
 The generator includes a small set of boundary-date equality cases (e.g. `issue == settlement`,
-`settlement == first_coupon`, `settlement == last_interest`). In Excel these are expected to return
-`#NUM!`, but this has not yet been validated against a real Excel oracle dataset. Today, these cases
-are pinned in the synthetic CI dataset to catch regressions in engine date validation rules over
-time; once a real Excel dataset is pinned, they should serve as true parity checks.
+`settlement == first_coupon`, `settlement == last_interest`). The engine currently **allows** these
+for odd-coupon bonds (i.e. they can return finite numbers), but this has not yet been validated
+against a real Excel oracle dataset. Today, these cases are pinned in the synthetic CI dataset to
+catch regressions in engine date validation rules over time; once a real Excel dataset is pinned,
+they should serve as true parity checks.
 
 ## High-risk compatibility areas
 
