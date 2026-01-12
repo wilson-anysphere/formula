@@ -2,6 +2,7 @@
  * @vitest-environment jsdom
  */
 
+// This file uses the `.vitest.ts` suffix so it runs under the desktop Vitest include globs.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SpreadsheetApp } from "../spreadsheetApp";
