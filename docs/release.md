@@ -164,3 +164,36 @@ After the workflow completes:
 2. Download/install on each platform.
 3. Publish the release to make it visible to users and (if your updater endpoint references
    GitHub) available for auto-update.
+
+## 6) Bundle size reporting + (optional) size gate
+
+The release workflow reports the size of each generated installer/bundle (DMG / MSI / EXE /
+AppImage / DEB / etc) in the GitHub Actions **step summary**.
+
+There is also an optional size gate (off by default):
+
+- `FORMULA_ENFORCE_BUNDLE_SIZE=1` → fail the workflow if any artifact exceeds the limit
+- `FORMULA_BUNDLE_SIZE_LIMIT_MB=50` → override the default **50 MB** per artifact budget
+
+### Run the size check locally
+
+1. Build the desktop bundles for your platform:
+
+   ```bash
+   cargo install cargo-tauri --locked
+   cd apps/desktop/src-tauri
+   cargo tauri build
+   ```
+
+2. From the repo root, print a bundle size table:
+
+   ```bash
+   python scripts/desktop_bundle_size_report.py
+   ```
+
+3. (Optional) enforce the budget locally:
+
+   ```bash
+   FORMULA_ENFORCE_BUNDLE_SIZE=1 FORMULA_BUNDLE_SIZE_LIMIT_MB=50 \
+     python scripts/desktop_bundle_size_report.py
+   ```
