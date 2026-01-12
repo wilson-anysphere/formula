@@ -443,6 +443,21 @@ impl<'a> Lexer<'a> {
         if end_pos <= start {
             return None;
         }
+
+        // Disambiguate between structured refs (`Table1[Col]`) and record field access using a
+        // bracket selector (`A1.["Field"]`).
+        //
+        // The structured ref parser allows `.` in table names; however Excel's field-access syntax
+        // uses the `.` immediately before a bracket selector. When the parsed table name ends with
+        // a `.`, treat it as field access and let the identifier lexer split it into `Ident("A1.")`
+        // + `StructuredRef(["Field"])`.
+        if sref
+            .table_name
+            .as_ref()
+            .is_some_and(|table_name| table_name.ends_with('.'))
+        {
+            return None;
+        }
         self.pos = end_pos;
         Some(TokenKind::StructuredRef(sref))
     }
@@ -3481,5 +3496,32 @@ mod tests {
         let expr = parse_spanned_formula(formula).expect("parse should succeed");
         assert_eq!(expr.span, Span::new(1, 14));
         assert_eq!(expr.kind, SpannedExprKind::Error(ErrorKind::GettingData));
+    }
+
+    #[test]
+    fn parse_spanned_formula_supports_field_access() {
+        let expr = parse_spanned_formula("=A1.Price").expect("field access should parse");
+
+        match expr.kind {
+            SpannedExprKind::FieldAccess { base, field } => {
+                assert_eq!(field, "Price");
+                assert!(matches!(base.kind, SpannedExprKind::CellRef(_)));
+            }
+            other => panic!("expected FieldAccess, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_spanned_formula_supports_bracket_field_access() {
+        let expr =
+            parse_spanned_formula(r#"=A1.["Change%"]"#).expect("bracket field access should parse");
+
+        match expr.kind {
+            SpannedExprKind::FieldAccess { base, field } => {
+                assert_eq!(field, "Change%");
+                assert!(matches!(base.kind, SpannedExprKind::CellRef(_)));
+            }
+            other => panic!("expected FieldAccess, got {other:?}"),
+        }
     }
 }
