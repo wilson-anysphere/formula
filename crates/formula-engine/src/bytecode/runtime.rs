@@ -21,7 +21,7 @@ use smallvec::SmallVec;
 use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 thread_local! {
@@ -4939,6 +4939,43 @@ fn fn_sumif(
         return Value::Number(0.0);
     }
 
+    if rows > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        if let Some(iter) = grid.iter_cells() {
+            let row_delta = crit_range.row_start - sum_range.row_start;
+            let col_delta = crit_range.col_start - sum_range.col_start;
+            let mut sum = 0.0;
+            let mut earliest_error: Option<(i32, i32, ErrorKind)> = None;
+            for (coord, v) in iter {
+                if !coord_in_range(coord, sum_range) {
+                    continue;
+                }
+                let crit_cell = CellCoord {
+                    row: coord.row + row_delta,
+                    col: coord.col + col_delta,
+                };
+                let engine_value = bytecode_value_to_engine(grid.get_value(crit_cell));
+                if !criteria.matches(&engine_value) {
+                    continue;
+                }
+                match v {
+                    Value::Number(n) => sum += n,
+                    Value::Error(e) => record_error_row_major(&mut earliest_error, coord, e),
+                    Value::Bool(_)
+                    | Value::Text(_)
+                    | Value::Empty
+                    | Value::Missing
+                    | Value::Array(_)
+                    | Value::Range(_)
+                    | Value::MultiRange(_) => {}
+                }
+            }
+            if let Some((_, _, e)) = earliest_error {
+                return Value::Error(e);
+            }
+            return Value::Number(sum);
+        }
+    }
+
     if let Some(numeric) = criteria.as_numeric_criteria() {
         // Only use the numeric SIMD fast path when *all* required slices are available across the
         // full range. When any slice is missing (blocked rows, errors, etc.) we fall back to the
@@ -5068,6 +5105,45 @@ fn fn_sumifs(
     }
 
     let all_numeric = !numeric_crits.is_empty() && numeric_crits.len() == crits.len();
+
+    if rows > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        if let Some(iter) = grid.iter_cells() {
+            let mut sum = 0.0;
+            let mut earliest_error: Option<(i32, i32, ErrorKind)> = None;
+            'cell: for (coord, v) in iter {
+                if !coord_in_range(coord, sum_range) {
+                    continue;
+                }
+                let row_off = coord.row - sum_range.row_start;
+                let col_off = coord.col - sum_range.col_start;
+                for (range, crit) in crit_ranges.iter().zip(crits.iter()) {
+                    let cell = CellCoord {
+                        row: range.row_start + row_off,
+                        col: range.col_start + col_off,
+                    };
+                    let engine_value = bytecode_value_to_engine(grid.get_value(cell));
+                    if !crit.matches(&engine_value) {
+                        continue 'cell;
+                    }
+                }
+                match v {
+                    Value::Number(n) => sum += n,
+                    Value::Error(e) => record_error_row_major(&mut earliest_error, coord, e),
+                    Value::Bool(_)
+                    | Value::Text(_)
+                    | Value::Empty
+                    | Value::Missing
+                    | Value::Array(_)
+                    | Value::Range(_)
+                    | Value::MultiRange(_) => {}
+                }
+            }
+            if let Some((_, _, e)) = earliest_error {
+                return Value::Error(e);
+            }
+            return Value::Number(sum);
+        }
+    }
 
     if all_numeric {
         // Like MINIFS/MAXIFS, only take the numeric slice fast path when all slices are available
@@ -5258,6 +5334,58 @@ fn fn_countifs(
 
     let all_numeric = !numeric.is_empty() && numeric.len() == criteria.len();
 
+    if rows > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        if let Some(iter) = grid.iter_cells() {
+            let implicit_matches_all = criteria.iter().all(|c| c.matches(&EngineValue::Blank));
+            let total_cells = (rows as i64) * (cols as i64);
+
+            // Track the set of (row_off, col_off) offsets where at least one input range contains a
+            // stored (non-implicit-blank) cell. Offsets not present in this set are implicit blanks
+            // across *all* criteria ranges and can be accounted for in one shot.
+            let mut offsets: HashSet<i64> = HashSet::new();
+            for (coord, _) in iter {
+                for range in &ranges {
+                    if !coord_in_range(coord, *range) {
+                        continue;
+                    }
+                    let row_off = coord.row - range.row_start;
+                    let col_off = coord.col - range.col_start;
+                    let key = ((row_off as i64) << 32) | (col_off as u32 as i64);
+                    offsets.insert(key);
+                }
+            }
+
+            let mut count: i64 = if implicit_matches_all { total_cells } else { 0 };
+
+            for key in offsets {
+                let row_off = (key >> 32) as i32;
+                let col_off = (key as u32) as i32;
+                let mut matches = true;
+                for (range, crit) in ranges.iter().zip(criteria.iter()) {
+                    let cell = CellCoord {
+                        row: range.row_start + row_off,
+                        col: range.col_start + col_off,
+                    };
+                    let engine_value = bytecode_value_to_engine(grid.get_value(cell));
+                    if !crit.matches(&engine_value) {
+                        matches = false;
+                        break;
+                    }
+                }
+
+                if implicit_matches_all {
+                    if !matches {
+                        count -= 1;
+                    }
+                } else if matches {
+                    count += 1;
+                }
+            }
+
+            return Value::Number(count as f64);
+        }
+    }
+
     let mut count = 0usize;
     for col_off in 0..cols {
         if all_numeric {
@@ -5382,6 +5510,51 @@ fn fn_averageif(
     let cols = crit_range.cols();
     if rows <= 0 || cols <= 0 {
         return Value::Error(ErrorKind::Div0);
+    }
+
+    if rows > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        if let Some(iter) = grid.iter_cells() {
+            let row_delta = crit_range.row_start - avg_range.row_start;
+            let col_delta = crit_range.col_start - avg_range.col_start;
+            let mut sum = 0.0;
+            let mut count = 0usize;
+            let mut earliest_error: Option<(i32, i32, ErrorKind)> = None;
+            for (coord, v) in iter {
+                if !coord_in_range(coord, avg_range) {
+                    continue;
+                }
+                let crit_cell = CellCoord {
+                    row: coord.row + row_delta,
+                    col: coord.col + col_delta,
+                };
+                let engine_value = bytecode_value_to_engine(grid.get_value(crit_cell));
+                if !criteria.matches(&engine_value) {
+                    continue;
+                }
+                match v {
+                    Value::Number(n) => {
+                        sum += n;
+                        count += 1;
+                    }
+                    Value::Error(e) => record_error_row_major(&mut earliest_error, coord, e),
+                    Value::Bool(_)
+                    | Value::Text(_)
+                    | Value::Empty
+                    | Value::Missing
+                    | Value::Array(_)
+                    | Value::Range(_)
+                    | Value::MultiRange(_) => {}
+                }
+            }
+
+            if let Some((_, _, e)) = earliest_error {
+                return Value::Error(e);
+            }
+            if count == 0 {
+                return Value::Error(ErrorKind::Div0);
+            }
+            return Value::Number(sum / count as f64);
+        }
     }
 
     if let Some(numeric) = criteria.as_numeric_criteria() {
@@ -5527,6 +5700,54 @@ fn fn_averageifs(
     }
 
     let all_numeric = !numeric_crits.is_empty() && numeric_crits.len() == crits.len();
+
+    if rows > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        if let Some(iter) = grid.iter_cells() {
+            let mut sum = 0.0;
+            let mut count = 0usize;
+            let mut earliest_error: Option<(i32, i32, ErrorKind)> = None;
+            'cell: for (coord, v) in iter {
+                if !coord_in_range(coord, avg_range) {
+                    continue;
+                }
+                let row_off = coord.row - avg_range.row_start;
+                let col_off = coord.col - avg_range.col_start;
+                for (range, crit) in crit_ranges.iter().zip(crits.iter()) {
+                    let cell = CellCoord {
+                        row: range.row_start + row_off,
+                        col: range.col_start + col_off,
+                    };
+                    let engine_value = bytecode_value_to_engine(grid.get_value(cell));
+                    if !crit.matches(&engine_value) {
+                        continue 'cell;
+                    }
+                }
+
+                match v {
+                    Value::Number(n) => {
+                        sum += n;
+                        count += 1;
+                    }
+                    Value::Error(e) => record_error_row_major(&mut earliest_error, coord, e),
+                    Value::Bool(_)
+                    | Value::Text(_)
+                    | Value::Empty
+                    | Value::Missing
+                    | Value::Array(_)
+                    | Value::Range(_)
+                    | Value::MultiRange(_) => {}
+                }
+            }
+
+            if let Some((_, _, e)) = earliest_error {
+                return Value::Error(e);
+            }
+            if count == 0 {
+                return Value::Error(ErrorKind::Div0);
+            }
+            return Value::Number(sum / count as f64);
+        }
+    }
 
     if all_numeric {
         // Like MINIFS/MAXIFS, only take the numeric slice fast path when all slices are available
@@ -5740,6 +5961,47 @@ fn fn_minifs(
 
     let all_numeric = !numeric_crits.is_empty() && numeric_crits.len() == crits.len();
 
+    if rows > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        if let Some(iter) = grid.iter_cells() {
+            let mut best: Option<f64> = None;
+            let mut earliest_error: Option<(i32, i32, ErrorKind)> = None;
+            'cell: for (coord, v) in iter {
+                if !coord_in_range(coord, min_range) {
+                    continue;
+                }
+                let row_off = coord.row - min_range.row_start;
+                let col_off = coord.col - min_range.col_start;
+                for (range, crit) in crit_ranges.iter().zip(crits.iter()) {
+                    let cell = CellCoord {
+                        row: range.row_start + row_off,
+                        col: range.col_start + col_off,
+                    };
+                    let engine_value = bytecode_value_to_engine(grid.get_value(cell));
+                    if !crit.matches(&engine_value) {
+                        continue 'cell;
+                    }
+                }
+
+                match v {
+                    Value::Number(n) => best = Some(best.map_or(n, |b| b.min(n))),
+                    Value::Error(e) => record_error_row_major(&mut earliest_error, coord, e),
+                    Value::Bool(_)
+                    | Value::Text(_)
+                    | Value::Empty
+                    | Value::Missing
+                    | Value::Array(_)
+                    | Value::Range(_)
+                    | Value::MultiRange(_) => {}
+                }
+            }
+
+            if let Some((_, _, e)) = earliest_error {
+                return Value::Error(e);
+            }
+            return Value::Number(best.unwrap_or(0.0));
+        }
+    }
+
     if all_numeric {
         // Only use the numeric fast path when all required slices are available (no blocked rows).
         let mut slices_ok = true;
@@ -5912,6 +6174,47 @@ fn fn_maxifs(
     }
 
     let all_numeric = !numeric_crits.is_empty() && numeric_crits.len() == crits.len();
+
+    if rows > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        if let Some(iter) = grid.iter_cells() {
+            let mut best: Option<f64> = None;
+            let mut earliest_error: Option<(i32, i32, ErrorKind)> = None;
+            'cell: for (coord, v) in iter {
+                if !coord_in_range(coord, max_range) {
+                    continue;
+                }
+                let row_off = coord.row - max_range.row_start;
+                let col_off = coord.col - max_range.col_start;
+                for (range, crit) in crit_ranges.iter().zip(crits.iter()) {
+                    let cell = CellCoord {
+                        row: range.row_start + row_off,
+                        col: range.col_start + col_off,
+                    };
+                    let engine_value = bytecode_value_to_engine(grid.get_value(cell));
+                    if !crit.matches(&engine_value) {
+                        continue 'cell;
+                    }
+                }
+
+                match v {
+                    Value::Number(n) => best = Some(best.map_or(n, |b| b.max(n))),
+                    Value::Error(e) => record_error_row_major(&mut earliest_error, coord, e),
+                    Value::Bool(_)
+                    | Value::Text(_)
+                    | Value::Empty
+                    | Value::Missing
+                    | Value::Array(_)
+                    | Value::Range(_)
+                    | Value::MultiRange(_) => {}
+                }
+            }
+
+            if let Some((_, _, e)) = earliest_error {
+                return Value::Error(e);
+            }
+            return Value::Number(best.unwrap_or(0.0));
+        }
+    }
 
     if all_numeric {
         // Only use the numeric fast path when all required slices are available (no blocked rows).
@@ -7069,8 +7372,9 @@ fn record_error_row_major(
     coord: CellCoord,
     err: ErrorKind,
 ) {
-    // The dense AND/OR reference paths scan rows outermost and columns innermost. Preserve that
-    // precedence by selecting the error with the smallest (row, col) coordinate.
+    // The dense AND/OR reference paths (and criteria-aggregate fallbacks) scan rows outermost and
+    // columns innermost. Preserve that precedence by selecting the error with the smallest
+    // (row, col) coordinate.
     match best {
         None => *best = Some((coord.row, coord.col, err)),
         Some((best_row, best_col, _)) => {

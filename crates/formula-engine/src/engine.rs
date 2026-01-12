@@ -10064,6 +10064,150 @@ mod tests {
     }
 
     #[test]
+    fn bytecode_sparse_iteration_matches_ast_for_huge_sparse_criteria_aggregates() {
+        fn setup(engine: &mut Engine) {
+            // Sparse values spread across a full Excel column.
+            engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+            engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
+            engine.set_cell_value("Sheet1", "A500000", 0.0).unwrap();
+            engine.set_cell_value("Sheet1", "A1048576", 3.0).unwrap();
+
+            engine.set_cell_value("Sheet1", "B1", 10.0).unwrap();
+            engine.set_cell_value("Sheet1", "B2", 20.0).unwrap();
+            // Row 3 has a number in the sum range but a blank criteria cell (implicit blank).
+            engine.set_cell_value("Sheet1", "B3", 7.0).unwrap();
+            engine.set_cell_value("Sheet1", "B500000", 5.0).unwrap();
+            engine.set_cell_value("Sheet1", "B1048576", 30.0).unwrap();
+
+            engine
+                .set_cell_formula("Sheet1", "C1", r#"=SUMIF(A:A,">1",B:B)"#)
+                .unwrap();
+            engine
+                .set_cell_formula("Sheet1", "C2", r#"=AVERAGEIF(A:A,">0",B:B)"#)
+                .unwrap();
+            engine
+                .set_cell_formula("Sheet1", "C3", r#"=SUMIFS(B:B,A:A,">0")"#)
+                .unwrap();
+            engine
+                .set_cell_formula("Sheet1", "C4", r#"=AVERAGEIFS(B:B,A:A,">0")"#)
+                .unwrap();
+            engine
+                .set_cell_formula("Sheet1", "C5", r#"=COUNTIFS(A:A,">0")"#)
+                .unwrap();
+            engine
+                .set_cell_formula("Sheet1", "C6", r#"=COUNTIFS(A:A,0)"#)
+                .unwrap();
+            engine
+                .set_cell_formula("Sheet1", "C7", r#"=MINIFS(B:B,A:A,">0")"#)
+                .unwrap();
+            engine
+                .set_cell_formula("Sheet1", "C8", r#"=MAXIFS(B:B,A:A,">0")"#)
+                .unwrap();
+
+            // Multiple-criteria variants.
+            engine
+                .set_cell_formula("Sheet1", "C9", r#"=SUMIFS(B:B,A:A,">0",B:B,">15")"#)
+                .unwrap();
+            engine
+                .set_cell_formula("Sheet1", "C10", r#"=AVERAGEIFS(B:B,A:A,">0",B:B,">15")"#)
+                .unwrap();
+            engine
+                .set_cell_formula("Sheet1", "C11", r#"=COUNTIFS(A:A,">0",B:B,">15")"#)
+                .unwrap();
+            engine
+                .set_cell_formula("Sheet1", "C12", r#"=MINIFS(B:B,A:A,">0",B:B,">15")"#)
+                .unwrap();
+            engine
+                .set_cell_formula("Sheet1", "C13", r#"=MAXIFS(B:B,A:A,">0",B:B,">15")"#)
+                .unwrap();
+
+            // Blank-criteria cases: criteria range is mostly implicit blanks.
+            engine
+                .set_cell_formula("Sheet1", "C14", r#"=SUMIF(A:A,"",B:B)"#)
+                .unwrap();
+            engine
+                .set_cell_formula("Sheet1", "C15", r#"=COUNTIFS(A:A,"")"#)
+                .unwrap();
+        }
+
+        let mut bytecode_engine = Engine::new();
+        setup(&mut bytecode_engine);
+
+        let sheet_id = bytecode_engine.workbook.sheet_id("Sheet1").unwrap();
+
+        // Ensure formulas are bytecode-compiled.
+        let addrs = [
+            "C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9", "C10", "C11", "C12", "C13",
+            "C14", "C15",
+        ];
+
+        let mut tasks: Vec<(CellKey, CompiledFormula)> = Vec::new();
+        for a1 in addrs {
+            let addr = parse_a1(a1).unwrap();
+            let compiled = bytecode_engine.workbook.sheets[sheet_id]
+                .cells
+                .get(&addr)
+                .and_then(|c| c.compiled.clone())
+                .expect("compiled formula");
+            assert!(
+                matches!(compiled, CompiledFormula::Bytecode(_)),
+                "expected {a1} to compile to bytecode"
+            );
+            tasks.push((CellKey { sheet: sheet_id, addr }, compiled));
+        }
+
+        // Column caches should *not* allocate full-column buffers for `A:A` / `B:B`.
+        let snapshot = Snapshot::from_workbook(
+            &bytecode_engine.workbook,
+            &bytecode_engine.spills,
+            bytecode_engine.external_value_provider.clone(),
+            bytecode_engine.external_data_provider.clone(),
+        );
+        let column_cache =
+            BytecodeColumnCache::build(bytecode_engine.workbook.sheets.len(), &snapshot, &tasks);
+        assert!(
+            !column_cache
+                .by_sheet
+                .get(sheet_id)
+                .map(|cols| cols.contains_key(&0) || cols.contains_key(&1))
+                .unwrap_or(false),
+            "expected full-column criteria aggregates to skip column-slice cache allocation"
+        );
+
+        bytecode_engine.recalculate_single_threaded();
+
+        let mut ast_engine = Engine::new();
+        ast_engine.set_bytecode_enabled(false);
+        setup(&mut ast_engine);
+        ast_engine.recalculate_single_threaded();
+
+        let expected = [
+            ("C1", Value::Number(50.0)),
+            ("C2", Value::Number(20.0)),
+            ("C3", Value::Number(60.0)),
+            ("C4", Value::Number(20.0)),
+            ("C5", Value::Number(3.0)),
+            ("C6", Value::Number(1_048_573.0)),
+            ("C7", Value::Number(10.0)),
+            ("C8", Value::Number(30.0)),
+            ("C9", Value::Number(50.0)),
+            ("C10", Value::Number(25.0)),
+            ("C11", Value::Number(2.0)),
+            ("C12", Value::Number(20.0)),
+            ("C13", Value::Number(30.0)),
+            ("C14", Value::Number(7.0)),
+            ("C15", Value::Number(1_048_572.0)),
+        ];
+
+        for (addr, value) in expected {
+            let bc = bytecode_engine.get_cell_value("Sheet1", addr);
+            let ast = ast_engine.get_cell_value("Sheet1", addr);
+            assert_eq!(bc, ast, "mismatch at {addr}");
+            assert_eq!(bc, value, "unexpected value at {addr}");
+        }
+    }
+
+    #[test]
     fn recalculate_with_value_changes_clears_shrunk_spill_cells() {
         let mut engine = Engine::new();
         engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
