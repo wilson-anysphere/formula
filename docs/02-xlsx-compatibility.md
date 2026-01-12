@@ -28,7 +28,7 @@ workbook.xlsx (ZIP archive)
 │   ├── workbook.xml             # Workbook structure, sheet refs
 │   ├── styles.xml               # All cell formatting
 │   ├── sharedStrings.xml        # Deduplicated text strings
-│   ├── cellImages.xml           # Excel “image in cell” definitions (in-cell pictures; name/casing varies in the wild)
+│   ├── cellImages.xml           # (optional) workbook-level cell image store (alternate mechanism; name/casing varies; not observed in inspected Excel 365 “Place in Cell” fixtures)
 │   ├── calcChain.xml            # Calculation order hints
 │   ├── metadata.xml             # Cell/value metadata (Excel "Rich Data")
 │   ├── richData/                # Excel 365+ rich values (data types, in-cell images)
@@ -65,8 +65,8 @@ workbook.xlsx (ZIP archive)
 │   └── vbaProject.bin           # VBA macros (binary)
 └── xl/_rels/
     ├── workbook.xml.rels        # Workbook relationships
-    ├── cellImages.xml.rels      # Relationships for in-cell images (to xl/media/*; name/casing varies in the wild)
-    └── metadata.xml.rels        # Relationships from metadata.xml to xl/richData/*
+    ├── cellImages.xml.rels      # (optional) relationships for cellImages.xml -> xl/media/* (name/casing varies in the wild)
+    └── metadata.xml.rels        # (optional) relationships from metadata.xml -> xl/richData/*
 ```
 
 See also:
