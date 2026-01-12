@@ -10,7 +10,6 @@
       "identifier": "core:allow-invoke",
       "allow": [
         { "command": "add_sheet" },
-        { "command": "add_sheet_with_id" },
         { "command": "check_for_updates" },
         { "command": "clipboard_read" },
         { "command": "clipboard_write" },
@@ -40,6 +39,7 @@
         { "command": "marketplace_get_extension" },
         { "command": "marketplace_search" },
         { "command": "move_sheet" },
+        { "command": "reorder_sheets" },
         { "command": "network_fetch" },
         { "command": "new_workbook" },
         { "command": "open_external_url" },

@@ -36,6 +36,7 @@
           "marketplace_get_extension",
           "marketplace_search",
           "move_sheet",
+          "reorder_sheets",
           "network_fetch",
           "new_workbook",
           "open_external_url",

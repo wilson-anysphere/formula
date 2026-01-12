@@ -160,7 +160,12 @@ describe("Tauri capabilities", () => {
     // - args.invoke("...") (the `.invoke` segment still matches)
     const invokeCall = /\b[\w$]*invoke[\w$]*\s*\(\s*(["'])([^"']+)\1/gim;
     for (const match of runtimeText.matchAll(invokeCall)) {
-      invokedCommands.add(match[2]);
+      const cmd = match[2].trim();
+      // Tauri `#[tauri::command]` names in this repo are snake_case.
+      // Filter out unrelated `*invoke*("...")` calls that happen to appear in runtime code.
+      if (/^[a-z0-9_]+$/.test(cmd)) {
+        invokedCommands.add(cmd);
+      }
     }
 
     // Some code uses indirection (e.g. VBA event macros pass the command name into a helper).
@@ -169,7 +174,10 @@ describe("Tauri capabilities", () => {
       const eventMacrosText = readFileSync(eventMacrosPath, "utf8");
       const runEventMacroCall = /runEventMacro\s*\(\s*[^,]+,\s*(["'])([^"']+)\1/gm;
       for (const match of eventMacrosText.matchAll(runEventMacroCall)) {
-        invokedCommands.add(match[2]);
+        const cmd = match[2].trim();
+        if (/^[a-z0-9_]+$/.test(cmd)) {
+          invokedCommands.add(cmd);
+        }
       }
     }
 
