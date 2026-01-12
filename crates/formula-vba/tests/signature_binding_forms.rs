@@ -4,7 +4,8 @@ use std::io::{Cursor, Write};
 
 use formula_vba::{
     compress_container, content_normalized_data, extract_vba_signature_signed_digest,
-    forms_normalized_data, verify_vba_digital_signature, VbaSignatureBinding,
+    forms_normalized_data, verify_vba_digital_signature, verify_vba_project_signature_binding,
+    verify_vba_signature_binding, VbaProjectBindingVerification, VbaSignatureBinding,
     VbaSignatureVerification,
 };
 use md5::{Digest as _, Md5};
@@ -218,6 +219,20 @@ fn signature_binding_accepts_content_only_or_content_plus_forms_transcripts() {
         .expect("signature should be present");
     assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
     assert_eq!(sig.binding, VbaSignatureBinding::Bound);
+    assert_eq!(
+        verify_vba_signature_binding(&signed, &sig_stream),
+        VbaSignatureBinding::Bound
+    );
+    match verify_vba_project_signature_binding(&signed, &sig_stream).expect("binding verification") {
+        VbaProjectBindingVerification::BoundVerified(info) => {
+            assert_eq!(info.signed_digest.as_deref(), Some(digest_content_only.as_slice()));
+            assert_eq!(
+                info.computed_digest.as_deref(),
+                Some(digest_content_only.as_slice())
+            );
+        }
+        other => panic!("expected BoundVerified, got {other:?}"),
+    }
 
     // ---- Case 2: content + forms digest ----
     let sig_stream = make_signature_stream_detached(&digest_content_plus_forms);
@@ -238,6 +253,23 @@ fn signature_binding_accepts_content_only_or_content_plus_forms_transcripts() {
     let computed_digest = md5_content_plus_forms(&content2, &forms2);
     assert_eq!(computed_digest, digest_content_plus_forms);
     assert_eq!(sig.binding, VbaSignatureBinding::Bound);
+    assert_eq!(
+        verify_vba_signature_binding(&signed, &sig_stream),
+        VbaSignatureBinding::Bound
+    );
+    match verify_vba_project_signature_binding(&signed, &sig_stream).expect("binding verification") {
+        VbaProjectBindingVerification::BoundVerified(info) => {
+            assert_eq!(
+                info.signed_digest.as_deref(),
+                Some(digest_content_plus_forms.as_slice())
+            );
+            assert_eq!(
+                info.computed_digest.as_deref(),
+                Some(digest_content_plus_forms.as_slice())
+            );
+        }
+        other => panic!("expected BoundVerified, got {other:?}"),
+    }
 
     // ---- Case 3: wrong digest ----
     let mut wrong_digest = digest_content_plus_forms.clone();
@@ -249,4 +281,18 @@ fn signature_binding_accepts_content_only_or_content_plus_forms_transcripts() {
         .expect("signature should be present");
     assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
     assert_eq!(sig.binding, VbaSignatureBinding::NotBound);
+    assert_eq!(
+        verify_vba_signature_binding(&signed, &sig_stream),
+        VbaSignatureBinding::NotBound
+    );
+    match verify_vba_project_signature_binding(&signed, &sig_stream).expect("binding verification") {
+        VbaProjectBindingVerification::BoundMismatch(info) => {
+            assert_eq!(info.signed_digest.as_deref(), Some(wrong_digest.as_slice()));
+            assert!(
+                matches!(info.computed_digest.as_deref(), Some(d) if d == digest_content_only.as_slice() || d == digest_content_plus_forms.as_slice()),
+                "expected computed_digest to be one of the candidate digests"
+            );
+        }
+        other => panic!("expected BoundMismatch, got {other:?}"),
+    }
 }
