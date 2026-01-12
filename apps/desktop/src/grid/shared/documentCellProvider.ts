@@ -1,11 +1,11 @@
-import type { CellData, CellProvider, CellProviderUpdate, CellRange, CellStyle } from "@formula/grid/node";
+import type { CellData, CellProvider, CellProviderUpdate, CellRange, CellRichText, CellStyle } from "@formula/grid/node";
 import { LruCache } from "@formula/grid/node";
 import type { DocumentController } from "../../document/documentController.js";
 import { resolveCssVar } from "../../theme/cssVars.js";
 import { formatValueWithNumberFormat } from "../../formatting/numberFormat.ts";
 import { normalizeExcelColorToCss } from "../../shared/colors.js";
 
-type RichTextValue = { text: string; runs?: Array<{ start: number; end: number; style?: Record<string, unknown> }> };
+type RichTextValue = CellRichText;
 
 type DocStyle = Record<string, any>;
 

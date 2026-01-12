@@ -10,6 +10,8 @@ export type {
   CellRange,
   MergedCellRange,
   CellData,
+  CellRichText,
+  CellRichTextRun,
   CellStyle
 } from "./model/CellProvider.ts";
 
@@ -23,4 +25,3 @@ export { DEFAULT_GRID_THEME, resolveGridTheme } from "./theme/GridTheme.ts";
 
 export { VirtualScrollManager } from "./virtualization/VirtualScrollManager.ts";
 export type { GridViewportState } from "./virtualization/VirtualScrollManager.ts";
-
