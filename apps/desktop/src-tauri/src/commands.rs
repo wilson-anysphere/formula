@@ -664,7 +664,7 @@ pub async fn set_sheet_visibility(
     .map_err(|e| e.to_string())?
 }
 
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", test))]
 fn normalize_tab_color_rgb(raw: &str) -> Result<String, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -4655,6 +4655,33 @@ mod tests {
                 "expected wants_origin_bytes_for_save_path to reject {ext}"
             );
         }
+    }
+
+    #[test]
+    fn normalize_tab_color_rgb_accepts_rgb_and_argb_hex() {
+        assert_eq!(normalize_tab_color_rgb("ff00ff").expect("normalize RRGGBB"), "FFFF00FF");
+        assert_eq!(
+            normalize_tab_color_rgb("#ff00ff").expect("normalize #RRGGBB"),
+            "FFFF00FF"
+        );
+        assert_eq!(
+            normalize_tab_color_rgb("80ff00ff").expect("normalize AARRGGBB"),
+            "80FF00FF"
+        );
+        assert_eq!(
+            normalize_tab_color_rgb("  #FF00FF  ").expect("normalize trims whitespace"),
+            "FFFF00FF"
+        );
+    }
+
+    #[test]
+    fn normalize_tab_color_rgb_rejects_invalid_inputs() {
+        assert!(normalize_tab_color_rgb("").is_err());
+        assert!(normalize_tab_color_rgb("#").is_err());
+        assert!(normalize_tab_color_rgb("GG00FF").is_err());
+        assert!(normalize_tab_color_rgb("12345").is_err());
+        assert!(normalize_tab_color_rgb("1234567").is_err());
+        assert!(normalize_tab_color_rgb("123456789").is_err());
     }
 
     #[test]
