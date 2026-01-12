@@ -69,6 +69,7 @@ test("exposes Prometheus metrics in text format", async (t) => {
   const res = await fetch(`${server.httpUrl}/metrics`);
   assert.equal(res.status, 200);
   assert.match(res.headers.get("content-type") ?? "", /text\/plain/);
+  assert.equal(res.headers.get("cache-control"), "no-store");
   const body = await res.text();
   assert.match(body, /sync_server_ws_connections_total/);
   assert.match(body, /sync_server_ws_closes_total/);
@@ -88,6 +89,7 @@ test("exposes Prometheus metrics in text format", async (t) => {
   });
   assert.equal(internalOk.status, 200);
   assert.match(internalOk.headers.get("content-type") ?? "", /text\/plain/);
+  assert.equal(internalOk.headers.get("cache-control"), "no-store");
   const internalBody = await internalOk.text();
   assert.match(internalBody, /sync_server_ws_connections_total/);
 });

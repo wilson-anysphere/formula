@@ -990,6 +990,7 @@ export function createSyncServer(
           sendText(res, 404, "not_found", "text/plain; charset=utf-8");
           return;
         }
+        res.setHeader("cache-control", "no-store");
         const body = await metrics.metricsText();
         sendText(res, 200, body, metrics.registry.contentType);
         return;
@@ -1045,6 +1046,7 @@ export function createSyncServer(
         }
 
         if (req.method === "GET" && pathname === "/internal/metrics") {
+          res.setHeader("cache-control", "no-store");
           const body = await metrics.metricsText();
           sendText(res, 200, body, metrics.registry.contentType);
           return;
