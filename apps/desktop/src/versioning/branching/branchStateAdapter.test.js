@@ -113,10 +113,14 @@ test("documentControllerToBranchState/applyBranchStateToDocumentController: incl
 
   doc.setCellValue("Sheet1", "A1", 1);
   doc.setSheetMeta("Sheet1", { name: "Summary", visibility: "hidden", tabColor: "FF00FF00" });
+  doc.setCellValue("Sheet2", "A1", 2);
+  doc.setSheetMeta("Sheet2", { name: "Data", visibility: "visible", tabColor: null });
 
   const state = documentControllerToBranchState(doc);
   assert.equal(state.sheets.metaById.Sheet1?.visibility, "hidden");
   assert.equal(state.sheets.metaById.Sheet1?.tabColor, "FF00FF00");
+  assert.equal(state.sheets.metaById.Sheet2?.visibility, "visible");
+  assert.equal(state.sheets.metaById.Sheet2?.tabColor, null);
 
   const restored = new DocumentController();
   const { metaById } = attachSheetMetadataShim(restored);
@@ -124,8 +128,12 @@ test("documentControllerToBranchState/applyBranchStateToDocumentController: incl
   applyBranchStateToDocumentController(restored, state);
   assert.equal(metaById.get("Sheet1")?.visibility, "hidden");
   assert.equal(metaById.get("Sheet1")?.tabColor, "FF00FF00");
+  assert.equal(metaById.get("Sheet2")?.visibility, "visible");
+  assert.equal(metaById.get("Sheet2")?.tabColor, null);
 
   const roundTrip = documentControllerToBranchState(restored);
   assert.equal(roundTrip.sheets.metaById.Sheet1?.visibility, "hidden");
   assert.equal(roundTrip.sheets.metaById.Sheet1?.tabColor, "FF00FF00");
+  assert.equal(roundTrip.sheets.metaById.Sheet2?.visibility, "visible");
+  assert.equal(roundTrip.sheets.metaById.Sheet2?.tabColor, null);
 });
