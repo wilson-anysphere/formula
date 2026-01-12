@@ -5,7 +5,11 @@ import type { AIAuditEntry, AuditListFilters } from "../../../../../packages/ai-
 
 import { ContextManager } from "../../../../../packages/ai-context/src/contextManager.js";
 import type { TokenEstimator } from "../../../../../packages/ai-context/src/tokenBudget.js";
-import { createHeuristicTokenEstimator, estimateToolDefinitionTokens } from "../../../../../packages/ai-context/src/tokenBudget.js";
+import {
+  createHeuristicTokenEstimator,
+  estimateToolDefinitionTokens,
+  stableJsonStringify,
+} from "../../../../../packages/ai-context/src/tokenBudget.js";
 import { trimMessagesToBudget } from "../../../../../packages/ai-context/src/trimMessagesToBudget.js";
 
 import { rectToA1 } from "../../../../../packages/ai-rag/src/workbook/rect.js";
@@ -34,6 +38,36 @@ import { maybeGetAiCloudDlpOptions } from "../dlp/aiDlp.js";
 import { getDefaultReserveForOutputTokens, getModeContextWindowTokens } from "../contextBudget.js";
 import { getDesktopToolPolicy } from "../toolPolicy.js";
 import { WorkbookContextBuilder, type WorkbookContextBuildStats, type WorkbookSchemaProvider } from "../context/WorkbookContextBuilder.js";
+
+function normalizeClassificationRecordsForCacheKey(
+  records: unknown,
+): Array<{ selector: unknown; classification: unknown }> {
+  const list = Array.isArray(records) ? records : [];
+  const normalized = list.map((record) => ({
+    selector: (record as any)?.selector ?? null,
+    classification: (record as any)?.classification ?? null,
+  }));
+
+  // Make the cache key stable even if callers return records in different orders.
+  const keyed = normalized.map((r) => ({ key: stableJsonStringify(r), value: r }));
+  keyed.sort((a, b) => a.key.localeCompare(b.key));
+  return keyed.map((r) => r.value);
+}
+
+function workbookContextBuilderDlpKey(params: { dlp: any }): string {
+  const dlp = params.dlp;
+  if (!dlp) return "dlp:none";
+
+  const includeRestrictedContent = Boolean(dlp?.includeRestrictedContent ?? false);
+  const classificationRecords =
+    dlp?.classificationRecords ?? dlp?.classificationStore?.list?.(dlp?.documentId) ?? [];
+
+  return stableJsonStringify({
+    includeRestrictedContent,
+    policy: dlp?.policy ?? null,
+    classificationRecords: normalizeClassificationRecordsForCacheKey(classificationRecords),
+  });
+}
 
 export type AiChatAttachment =
   | { type: "range"; reference: string; data?: unknown }
@@ -265,28 +299,38 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
     options.systemPrompt ??
     "You are an AI assistant inside a spreadsheet app. Prefer using tools to read data before making claims.";
 
-  // Reuse a single WorkbookContextBuilder instance across messages so it can cache
-  // schema + sampled blocks and avoid expensive re-scans when the workbook hasn't changed.
-  // DLP is still supplied per-message via `build({ dlp })`.
-  const contextBuilder = new WorkbookContextBuilder({
-    workbookId: options.workbookId,
-    documentController: options.documentController,
-    spreadsheet,
-    ragService: contextProvider as any,
-    schemaProvider: options.schemaProvider ?? null,
-    mode: "chat",
-    model: options.model,
-    contextWindowTokens,
-    reserveForOutputTokens,
-    tokenEstimator: estimator as any,
-    onBuildStats,
-  });
+  // Cache WorkbookContextBuilder across sendMessage calls so its per-sheet schema/block caches
+  // actually reduce latency for multi-turn chats.
+  //
+  // DLP safety: only reuse the builder when the DLP inputs (policy/classifications/includeRestrictedContent)
+  // are unchanged. If the user changes policy/classifications during a session we recreate the builder so
+  // data cached under a less-restrictive setting can't leak under a stricter one.
+  let cachedContextBuilder: WorkbookContextBuilder | null = null;
+  let cachedContextBuilderDlpKey: string | null = null;
+
+  function createContextBuilder(): WorkbookContextBuilder {
+    return new WorkbookContextBuilder({
+      workbookId: options.workbookId,
+      documentController: options.documentController,
+      spreadsheet,
+      ragService: contextProvider as any,
+      schemaProvider: options.schemaProvider ?? null,
+      mode: "chat",
+      model: options.model,
+      contextWindowTokens,
+      reserveForOutputTokens,
+      tokenEstimator: estimator as any,
+      onBuildStats,
+    });
+  }
 
   let disposePromise: Promise<void> | null = null;
   async function dispose(): Promise<void> {
     if (disposePromise) return disposePromise;
     disposePromise = (async () => {
-      // Future: clear any long-lived workbook context caches kept by the orchestrator.
+      // Clear any long-lived workbook context caches kept by the orchestrator.
+      cachedContextBuilder = null;
+      cachedContextBuilderDlpKey = null;
       try {
         await ownedRagService?.dispose();
       } catch {
@@ -348,9 +392,14 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
     let workbookContext: any;
     try {
       throwIfAborted(signal);
+      const dlpKey = workbookContextBuilderDlpKey({ dlp });
+      if (!cachedContextBuilder || cachedContextBuilderDlpKey !== dlpKey) {
+        cachedContextBuilder = createContextBuilder();
+        cachedContextBuilderDlpKey = dlpKey;
+      }
       workbookContext = await withAbort(
         signal,
-        contextBuilder.build({
+        cachedContextBuilder.build({
           activeSheetId,
           dlp,
           ...(selectedRange ? { selectedRange } : {}),

@@ -384,6 +384,155 @@ describe("ai chat orchestrator", () => {
     }
   });
 
+  it("reuses WorkbookContextBuilder across chat messages to reduce SpreadsheetApi.readRange calls", async () => {
+    const controller = new DocumentController();
+    seed2x2(controller);
+
+    const readRangeSpy = vi.spyOn(DocumentControllerSpreadsheetApi.prototype as any, "readRange");
+    try {
+      const ragService = {
+        async getContextManager() {
+          return new ContextManager({ tokenBudgetTokens: 800 });
+        },
+        async buildWorkbookContextFromSpreadsheetApi() {
+          // Keep the test focused on WorkbookContextBuilder's own sheet/block reads.
+          return { retrieved: [] };
+        },
+        async dispose() {}
+      };
+
+      const llmClient = {
+        chat: vi.fn(async () => ({ message: { role: "assistant", content: "ok" }, usage: { promptTokens: 1, completionTokens: 1 } })),
+      };
+
+      const auditStore = new LocalStorageAIAuditStore({ key: "test_audit_workbook_context_builder_cache" });
+
+      const orchestrator = createAiChatOrchestrator({
+        documentController: controller,
+        workbookId: "wb_workbook_context_builder_cache",
+        llmClient: llmClient as any,
+        model: "mock-model",
+        getActiveSheetId: () => "Sheet1",
+        auditStore,
+        sessionId: "session_workbook_context_builder_cache",
+        ragService: ragService as any,
+        previewOptions: { approval_cell_threshold: 0 }
+      });
+
+      const before1 = readRangeSpy.mock.calls.length;
+      await orchestrator.sendMessage({ text: "Hello", history: [] });
+      const after1 = readRangeSpy.mock.calls.length;
+      const calls1 = after1 - before1;
+
+      const before2 = readRangeSpy.mock.calls.length;
+      await orchestrator.sendMessage({ text: "Hello again", history: [] });
+      const after2 = readRangeSpy.mock.calls.length;
+      const calls2 = after2 - before2;
+
+      expect(calls1).toBeGreaterThan(0);
+      expect(calls2).toBeLessThan(calls1);
+      // Second message should hit WorkbookContextBuilder's sheet/block caches.
+      expect(calls2).toBe(0);
+    } finally {
+      readRangeSpy.mockRestore();
+    }
+  });
+
+  it("recreates WorkbookContextBuilder when DLP inputs change (prevents cache reuse across policy/classification changes)", async () => {
+    const storage = createInMemoryLocalStorage();
+    const original = (globalThis as any).localStorage;
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
+    const readRangeSpy = vi.spyOn(DocumentControllerSpreadsheetApi.prototype as any, "readRange");
+    try {
+      storage.clear();
+
+      const workbookId = "wb_dlp_workbook_context_builder_cache";
+
+      const policyStore = new LocalPolicyStore({ storage: storage as any });
+      policyStore.setDocumentPolicy(workbookId, {
+        version: 1,
+        allowDocumentOverrides: true,
+        rules: {
+          [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+            maxAllowed: "Confidential",
+            allowRestrictedContent: false,
+            redactDisallowed: true,
+          },
+        },
+      });
+
+      const classificationStore = new LocalClassificationStore({ storage: storage as any });
+
+      const controller = new DocumentController();
+      seed2x2(controller);
+
+      const ragService = {
+        async getContextManager() {
+          return new ContextManager({ tokenBudgetTokens: 800 });
+        },
+        async buildWorkbookContextFromSpreadsheetApi() {
+          return { retrieved: [] };
+        },
+        async dispose() {}
+      };
+
+      const llmClient = {
+        chat: vi.fn(async () => ({ message: { role: "assistant", content: "ok" }, usage: { promptTokens: 1, completionTokens: 1 } })),
+      };
+
+      const auditStore = new LocalStorageAIAuditStore({ key: "test_audit_dlp_workbook_context_builder_cache" });
+
+      const orchestrator = createAiChatOrchestrator({
+        documentController: controller,
+        workbookId,
+        llmClient: llmClient as any,
+        model: "mock-model",
+        getActiveSheetId: () => "Sheet1",
+        auditStore,
+        sessionId: "session_dlp_workbook_context_builder_cache",
+        ragService: ragService as any,
+        previewOptions: { approval_cell_threshold: 0 }
+      });
+
+      const before1 = readRangeSpy.mock.calls.length;
+      await orchestrator.sendMessage({ text: "Hello", history: [] });
+      const after1 = readRangeSpy.mock.calls.length;
+      const calls1 = after1 - before1;
+
+      const before2 = readRangeSpy.mock.calls.length;
+      await orchestrator.sendMessage({ text: "Hello again", history: [] });
+      const after2 = readRangeSpy.mock.calls.length;
+      const calls2 = after2 - before2;
+
+      expect(calls1).toBeGreaterThan(0);
+      expect(calls2).toBe(0);
+
+      // Mutate DLP inputs: add a (still-allowed) classification record.
+      classificationStore.upsert(
+        workbookId,
+        { scope: "cell", documentId: workbookId, sheetId: "Sheet1", row: 0, col: 0 },
+        { level: CLASSIFICATION_LEVEL.CONFIDENTIAL, labels: ["test"] },
+      );
+
+      const before3 = readRangeSpy.mock.calls.length;
+      await orchestrator.sendMessage({ text: "After DLP change", history: [] });
+      const after3 = readRangeSpy.mock.calls.length;
+      const calls3 = after3 - before3;
+
+      // DLP inputs changed => cached builder must be dropped, so we re-read sheet context.
+      expect(calls3).toBeGreaterThan(0);
+      expect(calls3).toBeGreaterThan(calls2);
+    } finally {
+      readRangeSpy.mockRestore();
+      if (original === undefined) {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete (globalThis as any).localStorage;
+      } else {
+        Object.defineProperty(globalThis, "localStorage", { configurable: true, value: original });
+      }
+    }
+  });
+
   it("blocks before calling the LLM when DLP policy forbids cloud AI processing", async () => {
     resetAiDlpAuditLoggerForTests();
 
