@@ -9878,6 +9878,11 @@ mod tests {
     }
 
     #[test]
+    fn bytecode_ifna_is_lazy_in_fallback() {
+        assert_bytecode_matches_ast("=IFNA(1, 1/0)", Value::Number(1.0));
+    }
+
+    #[test]
     fn bytecode_ifna_evaluates_fallback_on_na() {
         assert_bytecode_matches_ast("=IFNA(NA(), 7)", Value::Number(7.0));
     }
