@@ -131,4 +131,67 @@ describe("SpreadsheetApp collab presence", () => {
     app.destroy();
     root.remove();
   });
+
+  it("publishes cursor + selections when switching sheets via activateCell", () => {
+    const hub = new InMemoryAwarenessHub();
+    const awareness = hub.createAwareness(1);
+    const presence = new PresenceManager(awareness, {
+      user: { id: "u1", name: "User 1", color: "#ff0000" },
+      activeSheet: "Sheet1",
+      throttleMs: 0,
+    });
+
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    (app as any).collabSession = { presence };
+    app.getDocument().setCellValue("Sheet2", { row: 0, col: 0 }, "X");
+
+    app.activateCell({ sheetId: "Sheet2", row: 2, col: 3 }, { scrollIntoView: false, focus: false });
+
+    expect(presence.localPresence.activeSheet).toBe("Sheet2");
+    expect(presence.localPresence.cursor).toEqual({ row: 2, col: 3 });
+    expect(presence.localPresence.selections).toEqual([{ startRow: 2, startCol: 3, endRow: 2, endCol: 3 }]);
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("publishes cursor + selections when switching sheets via selectRange", () => {
+    const hub = new InMemoryAwarenessHub();
+    const awareness = hub.createAwareness(1);
+    const presence = new PresenceManager(awareness, {
+      user: { id: "u1", name: "User 1", color: "#ff0000" },
+      activeSheet: "Sheet1",
+      throttleMs: 0,
+    });
+
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    (app as any).collabSession = { presence };
+    app.getDocument().setCellValue("Sheet2", { row: 0, col: 0 }, "X");
+
+    app.selectRange(
+      { sheetId: "Sheet2", range: { startRow: 1, startCol: 1, endRow: 2, endCol: 3 } },
+      { scrollIntoView: false, focus: false },
+    );
+
+    expect(presence.localPresence.activeSheet).toBe("Sheet2");
+    expect(presence.localPresence.cursor).toEqual({ row: 1, col: 1 });
+    expect(presence.localPresence.selections).toEqual([{ startRow: 1, startCol: 1, endRow: 2, endCol: 3 }]);
+
+    app.destroy();
+    root.remove();
+  });
 });
