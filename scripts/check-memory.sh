@@ -56,4 +56,13 @@ else
 fi
 
 echo ""
-echo "Suggested -j value: $(./scripts/smart-jobs.sh 2>/dev/null || echo 4)"
+
+# Prefer explicitly configured job counts when present, otherwise fall back to a best-effort
+# recommendation based on current memory pressure.
+if [ -n "${FORMULA_CARGO_JOBS:-}" ]; then
+  echo "Suggested -j value: ${FORMULA_CARGO_JOBS} (from FORMULA_CARGO_JOBS)"
+elif [ -n "${CARGO_BUILD_JOBS:-}" ]; then
+  echo "Suggested -j value: ${CARGO_BUILD_JOBS} (from CARGO_BUILD_JOBS)"
+else
+  echo "Suggested -j value: $(./scripts/smart-jobs.sh 2>/dev/null || echo 4)"
+fi
