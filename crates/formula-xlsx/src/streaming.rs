@@ -206,7 +206,10 @@ pub fn patch_xlsx_streaming_with_recalc_policy<R: Read + Seek, W: Write + Seek>(
             .to_string();
         let mut patch = patch.clone();
         patch.worksheet_part = worksheet_part.clone();
-        patches_by_part.entry(worksheet_part).or_default().push(patch);
+        patches_by_part
+            .entry(worksheet_part)
+            .or_default()
+            .push(patch);
     }
     // Deterministic patching within a worksheet.
     for patches in patches_by_part.values_mut() {
@@ -259,7 +262,11 @@ pub fn strip_vba_project_streaming_with_kind<R: Read + Seek, W: Write + Seek>(
     target_kind: WorkbookKind,
 ) -> Result<(), StreamingPatchError> {
     let mut archive = ZipArchive::new(input)?;
-    macro_strip_streaming::strip_vba_project_streaming_with_archive(&mut archive, output, target_kind)?;
+    macro_strip_streaming::strip_vba_project_streaming_with_archive(
+        &mut archive,
+        output,
+        target_kind,
+    )?;
     Ok(())
 }
 
@@ -1349,9 +1356,7 @@ mod macro_strip_streaming {
             .as_deref()
             .is_some_and(|ty| ty.contains("macroEnabled.main+xml"))
         {
-            let workbook_main_type = target_kind
-                .macro_free_kind()
-                .workbook_content_type();
+            let workbook_main_type = target_kind.macro_free_kind().workbook_content_type();
 
             // Preserve the original element's qualified name (including any namespace prefix).
             let tag_name = e.name();
