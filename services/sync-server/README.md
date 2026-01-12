@@ -19,7 +19,7 @@ pnpm --filter @formula/sync-server dev
 Required environment variables:
 
 - `SYNC_SERVER_HOST` (default: `127.0.0.1`)
-- `SYNC_SERVER_PORT` (default: `1234`)
+- `SYNC_SERVER_PORT` (default: `1234`; must be between `0` and `65535`)
 - `SYNC_SERVER_TRUST_PROXY` (default: `false`) – when running behind a reverse proxy, set this to
   `true` so rate limiting and per-IP connection limits use the `x-forwarded-for` header.
   **Only enable this when the proxy is trusted** (otherwise clients can spoof their IP).
@@ -237,6 +237,7 @@ Endpoints:
 The server exposes Prometheus text format at:
 
 - `GET /metrics` (public by default; set `SYNC_SERVER_DISABLE_PUBLIC_METRICS=1` to disable)
+- Metrics responses include `Cache-Control: no-store` to discourage caching by proxies/CDNs.
 
 Notable metrics (prefix `sync_server_`):
 
