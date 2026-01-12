@@ -58,6 +58,10 @@ fn build_minimal_vba_project_bin_with_signature_streams(
     }
 
     for (path, bytes) in signature_streams {
+        if let Some((parent, _)) = path.rsplit_once('/') {
+            ole.create_storage_all(parent)
+                .expect("create signature parent storage");
+        }
         let mut s = ole.create_stream(path).expect("signature stream");
         s.write_all(bytes).expect("write signature");
     }
@@ -157,6 +161,10 @@ fn build_minimal_vba_project_bin_v3_with_signature_streams(
     }
 
     for (path, bytes) in signature_streams {
+        if let Some((parent, _)) = path.rsplit_once('/') {
+            ole.create_storage_all(parent)
+                .expect("create signature parent storage");
+        }
         let mut s = ole.create_stream(path).expect("signature stream");
         s.write_all(bytes).expect("write signature");
     }
@@ -435,4 +443,70 @@ fn prefers_bound_verified_digital_signature_ext_when_signatures_are_in_separate_
     assert_eq!(chosen.verification, VbaSignatureVerification::SignedVerified);
     assert_eq!(chosen.binding, VbaSignatureBinding::Bound);
     assert_eq!(chosen.stream_kind, VbaSignatureStreamKind::DigitalSignatureExt);
+}
+
+#[test]
+fn prefers_bound_verified_digital_signature_ext_when_signature_stream_is_nested_under_storage() {
+    // Some producers store signature streams inside a storage (e.g. `\x05DigitalSignatureExt/sig`).
+    // Ensure the selection logic (including v3 binding for `DigitalSignatureExt`) remains correct.
+    let project = build_minimal_vba_project_bin_v3_with_signature_streams(&[], b"ABC");
+    let digest = compute_vba_project_digest_v3(&project, DigestAlg::Sha256).expect("digest v3");
+
+    // Bound v3 `DigitalSignatureExt` stream.
+    let bound_content = build_spc_indirect_data_content_sha256(&digest);
+    let bound_pkcs7 = signature_test_utils::make_pkcs7_detached_signature(&bound_content);
+    let mut bound_stream = bound_content.clone();
+    bound_stream.extend_from_slice(&bound_pkcs7);
+
+    // Verified but unbound legacy `DigitalSignatureEx` stream (wrong MD5 digest).
+    let content_normalized = content_normalized_data(&project).expect("content normalized data");
+    let content_hash_md5: [u8; 16] = Md5::digest(&content_normalized).into();
+    let forms = forms_normalized_data(&project).expect("forms normalized data");
+    assert!(
+        !forms.is_empty(),
+        "expected FormsNormalizedData to be non-empty (designer payload should contribute)"
+    );
+    let mut h = Md5::new();
+    h.update(&content_normalized);
+    h.update(&forms);
+    let agile_hash_md5: [u8; 16] = h.finalize().into();
+    assert_ne!(
+        content_hash_md5, agile_hash_md5,
+        "expected designer payload to affect the legacy Agile Content Hash transcript"
+    );
+
+    let mut wrong_md5 = content_hash_md5;
+    wrong_md5[0] = wrong_md5[0].wrapping_add(1);
+    if wrong_md5 == content_hash_md5 || wrong_md5 == agile_hash_md5 {
+        wrong_md5[1] ^= 0xFF;
+    }
+    if wrong_md5[0] == 0x30 {
+        wrong_md5[0] = 0x31;
+    }
+
+    let unbound_content = build_spc_indirect_data_content_sha256(&wrong_md5);
+    let unbound_pkcs7 = signature_test_utils::make_pkcs7_detached_signature(&unbound_content);
+    let mut unbound_stream = unbound_content.clone();
+    unbound_stream.extend_from_slice(&unbound_pkcs7);
+
+    let signed = build_minimal_vba_project_bin_v3_with_signature_streams(
+        &[
+            ("\u{0005}DigitalSignatureEx/sig", unbound_stream.as_slice()),
+            ("\u{0005}DigitalSignatureExt/sig", bound_stream.as_slice()),
+        ],
+        b"ABC",
+    );
+
+    let chosen = verify_vba_digital_signature(&signed)
+        .expect("signature verification should succeed")
+        .expect("signature should be present");
+
+    assert_eq!(chosen.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(chosen.binding, VbaSignatureBinding::Bound);
+    assert_eq!(chosen.stream_kind, VbaSignatureStreamKind::DigitalSignatureExt);
+    assert!(
+        chosen.stream_path.contains("DigitalSignatureExt") && chosen.stream_path.contains("/sig"),
+        "expected nested DigitalSignatureExt stream to be selected, got {}",
+        chosen.stream_path
+    );
 }
