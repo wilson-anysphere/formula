@@ -1185,6 +1185,20 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
                 }
             }
 
+            // MODULESTREAMNAMEUNICODE (UTF-16LE).
+            //
+            // MS-OVBA `VBA/dir` streams can provide a Unicode variant immediately following
+            // MODULESTREAMNAME. Prefer it when present since the stream name is used for OLE lookup.
+            0x0032 => {
+                if let Some(m) = current_module.as_mut() {
+                    let (cow, _had_errors) = UTF_16LE.decode_without_bom_handling(data);
+                    let mut s = cow.into_owned();
+                    // Stream names should not contain NUL; strip just in case a producer emits them.
+                    s.retain(|c| c != '\u{0000}');
+                    m.stream_name = s;
+                }
+            }
+
             // MODULETYPE
             //
             // MS-OVBA defines MODULETYPE records with an `Id` of either:

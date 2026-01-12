@@ -18,6 +18,14 @@ fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         .position(|window| window == needle)
 }
 
+fn utf16le_bytes(s: &str) -> Vec<u8> {
+    let mut out = Vec::new();
+    for unit in s.encode_utf16() {
+        out.extend_from_slice(&unit.to_le_bytes());
+    }
+    out
+}
+
 #[test]
 fn v3_content_normalized_data_decodes_module_stream_name_using_project_codepage() {
     let module_stream_name = "Модуль1";
@@ -68,6 +76,58 @@ fn v3_content_normalized_data_decodes_module_stream_name_using_project_codepage(
     assert!(
         normalized.ends_with(expected_suffix),
         "expected V3ContentNormalizedData to end with the v3-normalized module transcript"
+    );
+}
+
+#[test]
+fn v3_content_normalized_data_prefers_module_stream_name_unicode_record_for_lookup() {
+    let module_stream_name = "Модуль1";
+    let module_stream_name_unicode = utf16le_bytes(module_stream_name);
+
+    let module_code = b"Sub Hello()\r\nEnd Sub\r\n";
+    let module_container = compress_container(module_code);
+
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        // PROJECTCODEPAGE = 1251
+        push_record(&mut out, 0x0003, &1251u16.to_le_bytes());
+
+        push_record(&mut out, 0x0019, b"Module1"); // MODULENAME
+
+        // Intentionally wrong ANSI stream name to prove we use MODULESTREAMNAMEUNICODE (0x0032).
+        let mut wrong_stream_name_record = Vec::new();
+        wrong_stream_name_record.extend_from_slice(b"WrongName");
+        wrong_stream_name_record.extend_from_slice(&0u16.to_le_bytes()); // reserved u16
+        push_record(&mut out, 0x001A, &wrong_stream_name_record); // MODULESTREAMNAME
+        push_record(&mut out, 0x0032, &module_stream_name_unicode); // MODULESTREAMNAMEUNICODE
+
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes()); // MODULETYPE (standard)
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes()); // MODULETEXTOFFSET
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        let mut s = ole
+            .create_stream(&format!("VBA/{module_stream_name}"))
+            .expect("module stream");
+        s.write_all(&module_container).expect("write module");
+    }
+
+    let vba_bin = ole.into_inner().into_inner();
+    let normalized = v3_content_normalized_data(&vba_bin).expect("V3ContentNormalizedData");
+
+    let expected_suffix = b"Sub Hello()\nEnd Sub\n\nModule1\n";
+    assert!(
+        normalized.ends_with(expected_suffix),
+        "expected V3ContentNormalizedData to read the module stream using MODULESTREAMNAMEUNICODE (0x0032)"
     );
 }
 
