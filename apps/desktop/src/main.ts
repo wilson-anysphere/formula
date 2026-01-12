@@ -4352,6 +4352,18 @@ if (
     ensureExtensionsLoaded,
     onCloseFocus: () => app.focus(),
     placeholder: t("commandPalette.placeholder"),
+    goTo: {
+      workbook: app.getSearchWorkbook(),
+      getCurrentSheetName: () => app.getCurrentSheetId(),
+      onGoTo: (parsed) => {
+        const { range } = parsed;
+        if (range.startRow === range.endRow && range.startCol === range.endCol) {
+          app.activateCell({ sheetId: parsed.sheetName, row: range.startRow, col: range.startCol });
+        } else {
+          app.selectRange({ sheetId: parsed.sheetName, range });
+        }
+      },
+    },
   });
 
   openCommandPalette = commandPalette.open;

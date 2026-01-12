@@ -11,8 +11,9 @@ import {
   type MatchRange,
   type PreparedCommandForFuzzy,
 } from "./fuzzy.js";
-import { getRecentCommandIdsForDisplay, installCommandRecentsTracker } from "./recents.js";
+import { getRecentCommandIdsForDisplay, installCommandRecentsTracker, type StorageLike } from "./recents.js";
 import { searchShortcutCommands } from "./shortcutSearch.js";
+import { formatA1Range, parseGoTo, type GoToParseResult, type GoToWorkbookLookup } from "../../../../packages/search/index.js";
 
 type RenderableCommand = PreparedCommandForFuzzy<CommandContribution> & {
   score: number;
@@ -23,6 +24,15 @@ type CommandGroup = {
   label: string;
   commands: RenderableCommand[];
 };
+
+type GoToSuggestion = {
+  kind: "goTo";
+  label: string;
+  resolved: string;
+  parsed: GoToParseResult;
+};
+
+type RenderableItem = { kind: "command"; command: RenderableCommand } | GoToSuggestion;
 
 export type CreateCommandPaletteOptions = {
   commandRegistry: CommandRegistry;
@@ -35,6 +45,13 @@ export type CreateCommandPaletteOptions = {
   ensureExtensionsLoaded: () => Promise<void>;
   onCloseFocus: () => void;
   placeholder?: string;
+  goTo?:
+    | {
+        workbook: GoToWorkbookLookup;
+        getCurrentSheetName: () => string;
+        onGoTo: (parsed: GoToParseResult) => void;
+      }
+    | null;
   /**
    * How long to wait after opening before we kick off extension loading.
    * Defaults to 600ms to avoid paying the extension-worker cost for "quick" palette usage
@@ -258,6 +275,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     ensureExtensionsLoaded,
     onCloseFocus,
     placeholder = t("commandPalette.placeholder"),
+    goTo = null,
     extensionLoadDelayMs = 600,
     maxResults = 100,
     maxResultsPerGroup = 20,
@@ -300,6 +318,17 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   overlay.appendChild(palette);
   document.body.appendChild(overlay);
 
+  const storage: StorageLike = (() => {
+    try {
+      return localStorage;
+    } catch {
+      return {
+        getItem: () => null,
+        setItem: () => {},
+      };
+    }
+  })();
+
   const limits = {
     maxResults: Math.max(0, Math.floor(maxResults)),
     maxResultsPerGroup: Math.max(1, Math.floor(maxResultsPerGroup)),
@@ -309,8 +338,8 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   let isOpen = false;
   let query = "";
   let selectedIndex = 0;
-  let visibleCommands: RenderableCommand[] = [];
-  let visibleCommandEls: HTMLLIElement[] = [];
+  let visibleItems: RenderableItem[] = [];
+  let visibleItemEls: HTMLLIElement[] = [];
   let commandsCacheDirty = true;
   let cachedCommands: PreparedCommandForFuzzy<CommandContribution>[] = [];
   let chunkSearchController: AbortController | null = null;
@@ -335,8 +364,8 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     overlay.style.display = "none";
     query = "";
     selectedIndex = 0;
-    visibleCommands = [];
-    visibleCommandEls = [];
+    visibleItems = [];
+    visibleItemEls = [];
     if (extensionLoadTimer != null) {
       window.clearTimeout(extensionLoadTimer);
       extensionLoadTimer = null;
@@ -381,7 +410,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
 
   function getRecentsForDisplay(allCommands: Array<{ commandId: string }>): string[] {
     return getRecentCommandIdsForDisplay(
-      localStorage,
+      storage,
       allCommands.map((cmd) => cmd.commandId),
     );
   }
@@ -402,13 +431,43 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   const CHUNK_SEARCH_CHUNK_SIZE = 500;
 
   function renderGroups(groups: CommandGroup[], emptyText: string): void {
-    visibleCommands = groups.flatMap((g) => g.commands);
-    if (selectedIndex >= visibleCommands.length) selectedIndex = Math.max(0, visibleCommands.length - 1);
+    const trimmed = query.trim();
+    const shortcutMode = trimmed.startsWith("/");
+
+    const goToSuggestion: GoToSuggestion | null =
+      !shortcutMode && trimmed !== "" && goTo
+        ? (() => {
+            try {
+              const parsed = parseGoTo(trimmed, {
+                workbook: goTo.workbook,
+                currentSheetName: goTo.getCurrentSheetName(),
+              });
+              return {
+                kind: "goTo" as const,
+                label: `Go to ${trimmed}`,
+                resolved: `${parsed.sheetName}!${formatA1Range(parsed.range)}`,
+                parsed,
+              };
+            } catch {
+              return null;
+            }
+          })()
+        : null;
+
+    visibleItems = [];
+    if (goToSuggestion) visibleItems.push(goToSuggestion);
+    for (const group of groups) {
+      for (const cmd of group.commands) {
+        visibleItems.push({ kind: "command", command: cmd });
+      }
+    }
+
+    if (selectedIndex >= visibleItems.length) selectedIndex = Math.max(0, visibleItems.length - 1);
 
     list.replaceChildren();
-    visibleCommandEls = [];
+    visibleItemEls = [];
 
-    if (groups.length === 0 || visibleCommands.length === 0) {
+    if (visibleItems.length === 0) {
       const empty = document.createElement("li");
       empty.className = "command-palette__empty";
       empty.textContent = emptyText;
@@ -416,6 +475,39 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
       return;
     }
 
+    if (goToSuggestion) {
+      const li = document.createElement("li");
+      li.className = "command-palette__item";
+      li.setAttribute("aria-selected", selectedIndex === 0 ? "true" : "false");
+
+      const main = document.createElement("div");
+      main.className = "command-palette__item-main";
+
+      const label = document.createElement("div");
+      label.className = "command-palette__item-label";
+      label.textContent = goToSuggestion.label;
+      main.appendChild(label);
+
+      const description = document.createElement("div");
+      description.className = "command-palette__item-description";
+      description.textContent = goToSuggestion.resolved;
+      main.appendChild(description);
+
+      li.appendChild(main);
+
+      li.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+      });
+      li.addEventListener("click", () => {
+        close();
+        goTo?.onGoTo(goToSuggestion.parsed);
+      });
+
+      list.appendChild(li);
+      visibleItemEls[0] = li;
+    }
+
+    const commandIndexOffset = goToSuggestion ? 1 : 0;
     let commandOffset = 0;
     for (const group of groups) {
       const header = document.createElement("li");
@@ -425,7 +517,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
 
       for (let i = 0; i < group.commands.length; i += 1) {
         const cmd = group.commands[i]!;
-        const globalIndex = commandOffset + i;
+        const globalIndex = commandIndexOffset + commandOffset + i;
 
         let cached = commandRowCache.get(cmd.commandId);
         if (!cached) {
@@ -486,14 +578,17 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
         }
 
         list.appendChild(cached.li);
-        visibleCommandEls[globalIndex] = cached.li;
+        visibleItemEls[globalIndex] = cached.li;
       }
 
       commandOffset += group.commands.length;
     }
 
     // Keep selection in view after re-render.
-    queueMicrotask(() => visibleCommandEls[selectedIndex]?.scrollIntoView({ block: "nearest" }));
+    queueMicrotask(() => {
+      const el = visibleItemEls[selectedIndex];
+      if (el && typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "nearest" });
+    });
   }
 
   function startChunkedSearch(querySnapshot: string): void {
@@ -671,30 +766,34 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   };
 
   function updateSelection(nextIndex: number): void {
-    if (visibleCommands.length === 0) {
+    if (visibleItems.length === 0) {
       selectedIndex = 0;
       return;
     }
 
     const prev = selectedIndex;
-    selectedIndex = Math.max(0, Math.min(nextIndex, visibleCommands.length - 1));
+    selectedIndex = Math.max(0, Math.min(nextIndex, visibleItems.length - 1));
     if (prev === selectedIndex) return;
 
-    const prevEl = visibleCommandEls[prev];
+    const prevEl = visibleItemEls[prev];
     if (prevEl) prevEl.setAttribute("aria-selected", "false");
 
-    const nextEl = visibleCommandEls[selectedIndex];
+    const nextEl = visibleItemEls[selectedIndex];
     if (nextEl) {
       nextEl.setAttribute("aria-selected", "true");
-      nextEl.scrollIntoView({ block: "nearest" });
+      if (typeof nextEl.scrollIntoView === "function") nextEl.scrollIntoView({ block: "nearest" });
     }
   }
 
   function runSelected(): void {
-    const cmd = visibleCommands[selectedIndex];
-    if (!cmd) return;
+    const item = visibleItems[selectedIndex];
+    if (!item) return;
     close();
-    executeCommand(cmd.commandId);
+    if (item.kind === "goTo") {
+      goTo?.onGoTo(item.parsed);
+      return;
+    }
+    executeCommand(item.command.commandId);
   }
 
   const disposeRegistrySub = commandRegistry.subscribe(() => {
@@ -704,7 +803,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     renderResults("async");
   });
 
-  const disposeRecentsTracker = installCommandRecentsTracker(commandRegistry, localStorage, {
+  const disposeRecentsTracker = installCommandRecentsTracker(commandRegistry, storage, {
     ignoreCommandIds: ["workbench.showCommandPalette"],
   });
 
