@@ -1,0 +1,61 @@
+use formula_engine::bytecode::{parse_formula, CellCoord, ErrorKind, Expr, ParseError, Value};
+use formula_engine::bytecode::ast::Function;
+
+#[test]
+fn parses_excel_error_literals() {
+    let origin = CellCoord::new(0, 0);
+
+    let cases: [(&str, ErrorKind); 14] = [
+        ("#NULL!", ErrorKind::Null),
+        ("#DIV/0!", ErrorKind::Div0),
+        ("#VALUE!", ErrorKind::Value),
+        ("#REF!", ErrorKind::Ref),
+        ("#NAME?", ErrorKind::Name),
+        ("#NUM!", ErrorKind::Num),
+        ("#N/A", ErrorKind::NA),
+        ("#GETTING_DATA", ErrorKind::GettingData),
+        ("#SPILL!", ErrorKind::Spill),
+        ("#CALC!", ErrorKind::Calc),
+        ("#FIELD!", ErrorKind::Field),
+        ("#CONNECT!", ErrorKind::Connect),
+        ("#BLOCKED!", ErrorKind::Blocked),
+        ("#UNKNOWN!", ErrorKind::Unknown),
+    ];
+
+    for (lit, expected) in cases {
+        let formula = format!("={lit}");
+        let expr = parse_formula(&formula, origin).unwrap();
+        assert_eq!(
+            expr,
+            Expr::Literal(Value::Error(expected)),
+            "failed to parse literal {lit}"
+        );
+    }
+}
+
+#[test]
+fn parses_error_literal_in_function_call() {
+    let origin = CellCoord::new(0, 0);
+    let expr = parse_formula("=IF(1,#DIV/0!,0)", origin).unwrap();
+
+    assert_eq!(
+        expr,
+        Expr::FuncCall {
+            func: Function::If,
+            args: vec![
+                Expr::Literal(Value::Number(1.0)),
+                Expr::Literal(Value::Error(ErrorKind::Div0)),
+                Expr::Literal(Value::Number(0.0)),
+            ],
+        }
+    );
+}
+
+#[test]
+fn rejects_unknown_error_literals() {
+    let origin = CellCoord::new(0, 0);
+    assert_eq!(
+        parse_formula("=#NOT_A_REAL_ERROR!", origin),
+        Err(ParseError::UnexpectedToken(1))
+    );
+}

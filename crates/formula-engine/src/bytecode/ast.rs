@@ -378,8 +378,8 @@ impl<'a> Parser<'a> {
                 Ok(expr)
             }
             Some(b'"') => self.parse_string(),
-            Some(b'#') => self.parse_error_literal(),
             Some(b'0'..=b'9') | Some(b'.') => self.parse_number(),
+            Some(b'#') => self.parse_error_literal(),
             Some(_) => self.parse_ident_like(),
             None => Err(ParseError::UnexpectedEof),
         }
@@ -388,23 +388,50 @@ impl<'a> Parser<'a> {
     fn parse_error_literal(&mut self) -> Result<Expr, ParseError> {
         debug_assert_eq!(self.peek_byte(), Some(b'#'));
         let start = self.pos;
-        self.pos += 1; // '#'
-        while let Some(b) = self.peek_byte() {
-            if matches!(b, b'_' | b'/' | b'.' | b'0'..=b'9' | b'A'..=b'Z' | b'a'..=b'z') {
-                self.pos += 1;
-            } else {
-                break;
+        let remaining = &self.input[start..];
+
+        // Excel error literals are case-insensitive and start with `#`.
+        //
+        // We accept the canonical 14-error set (including newer Excel error codes) for parity
+        // with the main parser. Error codes the bytecode engine does not model are lowered as
+        // `#VALUE!`, but unknown `#...` sequences are rejected.
+        const ERROR_LITERALS: &[&str] = &[
+            "#NULL!",
+            "#DIV/0!",
+            "#VALUE!",
+            "#REF!",
+            "#NAME?",
+            "#NUM!",
+            "#N/A",
+            "#GETTING_DATA",
+            "#SPILL!",
+            "#CALC!",
+            "#FIELD!",
+            "#CONNECT!",
+            "#BLOCKED!",
+            "#UNKNOWN!",
+        ];
+
+        let mut best: Option<usize> = None;
+        for &lit in ERROR_LITERALS {
+            let lit_bytes = lit.as_bytes();
+            if remaining.len() < lit_bytes.len() {
+                continue;
+            }
+            let matches = remaining[..lit_bytes.len()]
+                .iter()
+                .zip(lit_bytes.iter())
+                .all(|(a, b)| a.to_ascii_uppercase() == b.to_ascii_uppercase());
+            if matches {
+                best = Some(best.map_or(lit_bytes.len(), |cur| cur.max(lit_bytes.len())));
             }
         }
 
-        if self.pos == start + 1 {
+        let Some(len) = best else {
             return Err(ParseError::UnexpectedToken(start));
-        }
+        };
 
-        if matches!(self.peek_byte(), Some(b'!' | b'?')) {
-            self.pos += 1;
-        }
-
+        self.pos = start + len;
         let raw = std::str::from_utf8(&self.input[start..self.pos])
             .map_err(|_| ParseError::UnexpectedToken(start))?;
         let kind = ErrorKind::from_code(raw).unwrap_or(ErrorKind::Value);
@@ -684,12 +711,12 @@ mod tests {
     }
 
     #[test]
-    fn parses_unknown_error_literals_as_value_error() {
+    fn rejects_unknown_error_literals() {
         let origin = CellCoord::new(0, 0);
 
         assert_eq!(
-            parse_formula("=#NOT_A_REAL_ERROR", origin).expect("parse"),
-            Expr::Literal(Value::Error(ErrorKind::Value))
+            parse_formula("=#NOT_A_REAL_ERROR", origin),
+            Err(ParseError::UnexpectedToken(1))
         );
     }
 

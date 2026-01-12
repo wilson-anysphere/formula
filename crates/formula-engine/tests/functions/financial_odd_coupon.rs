@@ -170,7 +170,6 @@ fn oddl_price_excel_model(
     let t = dsm / e;
     (amount / base.powf(t)) - accrued_interest
 }
-
 #[test]
 fn oddfprice_zero_coupon_rate_reduces_to_discounted_redemption() {
     let system = ExcelDateSystem::EXCEL_1900;
