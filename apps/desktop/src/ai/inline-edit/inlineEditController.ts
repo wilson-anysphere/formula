@@ -39,7 +39,8 @@ export interface InlineEditControllerOptions {
   workbookId?: string;
   getSheetId: () => string;
   /**
-   * Optional sheet display-name resolver used for user-facing labels (UI only).
+   * Optional sheet display-name resolver used for user-facing A1 references
+   * (UI labels and LLM prompt context).
    */
   sheetNameResolver?: SheetNameResolver | null;
   getSelectionRange: () => Range | null;
@@ -89,8 +90,9 @@ export class InlineEditController {
     if (!range) return;
 
     const sheetId = this.options.getSheetId();
-    const sheetLabel = this.options.sheetNameResolver?.getSheetNameById(sheetId) ?? sheetId;
-    const selectionLabel = `${sheetLabel}!${rangeToA1(range)}`;
+    const sheetLabel = sheetDisplayName(sheetId, this.options.sheetNameResolver);
+    const sheetPrefix = formatSheetNameForA1(sheetLabel || sheetId);
+    const selectionLabel = `${sheetPrefix}!${rangeToA1(range)}`;
 
     this.overlay.open(selectionLabel, {
       onCancel: () => {
@@ -165,7 +167,8 @@ export class InlineEditController {
       });
       const api = createAbortableSpreadsheetApi(baseApi, signal);
 
-      const selectionRef = `${params.sheetId}!${rangeToA1(params.range)}`;
+      const selectionSheetLabel = sheetDisplayName(params.sheetId, this.options.sheetNameResolver);
+      const selectionRef = `${formatSheetNameForA1(selectionSheetLabel || params.sheetId)}!${rangeToA1(params.range)}`;
 
       this.overlay.setRunning("Building context…");
       throwIfAborted(signal);
@@ -192,6 +195,7 @@ export class InlineEditController {
         spreadsheet: api,
         ragService: null,
         schemaProvider: this.options.schemaProvider ?? null,
+        sheetNameResolver: this.options.sheetNameResolver ?? null,
         dlp,
         mode: "inline_edit",
         model,
@@ -208,7 +212,7 @@ export class InlineEditController {
       throwIfAborted(signal);
 
       const messages = buildMessages({
-        sheetId: params.sheetId,
+        sheet: selectionSheetLabel || params.sheetId,
         selection: selectionRef,
         workbookContext: ctx.promptContext,
         prompt: params.prompt
@@ -414,7 +418,7 @@ function createAbortableSpreadsheetApi(api: any, signal: AbortSignal): any {
 }
 
 function buildMessages(options: {
-  sheetId: string;
+  sheet: string;
   selection: string;
   workbookContext: string;
   prompt: string;
@@ -432,7 +436,7 @@ function buildMessages(options: {
   ].join("\n");
 
   const user = [
-    `Sheet: ${options.sheetId}`,
+    `Sheet: ${options.sheet}`,
     `Selection: ${options.selection}`,
     "",
     "Workbook context:",
@@ -445,4 +449,17 @@ function buildMessages(options: {
     { role: "system", content: system },
     { role: "user", content: user }
   ];
+}
+
+function formatSheetNameForA1(sheetName: string): string {
+  const name = String(sheetName ?? "").trim();
+  if (!name) return "";
+  if (/^[A-Za-z0-9_]+$/.test(name)) return name;
+  return `'${name.replace(/'/g, "''")}'`;
+}
+
+function sheetDisplayName(sheetId: string, sheetNameResolver?: SheetNameResolver | null): string {
+  const id = String(sheetId ?? "").trim();
+  if (!id) return "";
+  return sheetNameResolver?.getSheetNameById(id) ?? id;
 }

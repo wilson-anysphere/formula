@@ -347,6 +347,7 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
       spreadsheet,
       ragService,
       schemaProvider: params.schemaProvider ?? null,
+      sheetNameResolver: params.sheetNameResolver ?? null,
       mode: "agent",
       model: modelName,
       contextWindowTokens,

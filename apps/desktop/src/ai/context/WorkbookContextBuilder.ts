@@ -1,6 +1,7 @@
 import type { DocumentController } from "../../document/documentController.js";
 import { rangeToA1 as rangeToA1Selection } from "../../selection/a1";
 import type { Range } from "../../selection/types";
+import type { SheetNameResolver } from "../../sheet/sheetNameResolver.js";
 
 import type { SheetSchema } from "../../../../../packages/ai-context/src/schema.js";
 import { extractSheetSchema } from "../../../../../packages/ai-context/src/schema.js";
@@ -288,6 +289,13 @@ export interface WorkbookSchemaProvider {
 
 type NormalizedWorkbookSchemaMetadata = {
   schemaVersion: number;
+  /**
+   * Cache key for the current sheet id -> display name mapping.
+   *
+   * This ensures we rebuild sheet-qualified metadata (named ranges / tables) when sheets
+   * are renamed, even if the schemaProvider's schemaVersion does not change.
+   */
+  sheetNameKey: string;
   schemaNamedRangesBySheet: Map<string, Array<{ name: string; range: string }>>;
   schemaTablesBySheet: Map<string, Array<{ name: string; range: string }>>;
   namedRanges: Array<{ name: string; range: string }>;
@@ -305,6 +313,15 @@ export interface WorkbookContextBuilderOptions {
   workbookId: string;
   documentController: DocumentController;
   spreadsheet: SpreadsheetApi;
+  /**
+   * Optional resolver that maps stable sheet ids to user-facing display names
+   * (and reverse).
+   *
+   * When provided, workbook context:
+   * - Formats sheet-qualified A1 references using display names (Excel quoting rules).
+   * - Resolves retrieved sheet names (from RAG) back to stable sheet ids for DocumentController reads.
+   */
+  sheetNameResolver?: SheetNameResolver | null;
   /**
    * Optional schema metadata provider for workbook-level objects that are not
    * currently exposed via the `SpreadsheetApi` tool surface (named ranges,
@@ -377,6 +394,7 @@ export class WorkbookContextBuilder {
       WorkbookContextBuilderOptions,
       | "ragService"
       | "dlp"
+      | "sheetNameResolver"
       | "tokenEstimator"
       | "maxPromptContextTokens"
       | "contextWindowTokens"
@@ -389,6 +407,7 @@ export class WorkbookContextBuilder {
       WorkbookContextBuilderOptions,
       | "ragService"
       | "dlp"
+      | "sheetNameResolver"
       | "tokenEstimator"
       | "maxPromptContextTokens"
       | "contextWindowTokens"
@@ -408,6 +427,7 @@ export class WorkbookContextBuilder {
     | {
         provider: WorkbookSchemaProvider | null;
         schemaVersion: number;
+        sheetNameKey: string;
         schemaNamedRangesBySheet: Map<string, Array<{ name: string; range: string }>>;
         schemaTablesBySheet: Map<string, Array<{ name: string; range: string }>>;
         namedRanges: Array<{ name: string; range: string }>;
@@ -419,6 +439,7 @@ export class WorkbookContextBuilder {
     const isInlineEdit = options.mode === "inline_edit";
     this.options = {
       ...options,
+      sheetNameResolver: options.sheetNameResolver ?? null,
       maxSheets: Math.max(1, options.maxSheets ?? 10),
       maxSchemaRows: Math.max(1, options.maxSchemaRows ?? (isInlineEdit ? 100 : 200)),
       maxSchemaCols: Math.max(1, options.maxSchemaCols ?? (isInlineEdit ? 30 : 50)),
@@ -445,6 +466,36 @@ export class WorkbookContextBuilder {
     if (typeof updateVersion === "number" && Number.isFinite(updateVersion)) return Math.trunc(updateVersion);
 
     return 0;
+  }
+
+  private sheetDisplayName(sheetId: string): string {
+    const id = String(sheetId ?? "").trim();
+    if (!id) return "";
+    return this.options.sheetNameResolver?.getSheetNameById(id) ?? id;
+  }
+
+  private resolveSheetId(nameOrId: string): string {
+    const raw = String(nameOrId ?? "").trim();
+    if (!raw) return "";
+    return this.options.sheetNameResolver?.getSheetIdByName(raw) ?? raw;
+  }
+
+  private computeSheetNameKey(): string {
+    const resolver = this.options.sheetNameResolver ?? null;
+    if (!resolver) return "no_sheet_name_resolver";
+    const ids = this.listSheetIdsSortedUnique();
+    const entries: Array<{ id: string; name: string }> = [];
+    for (const id of ids) {
+      let name = id;
+      try {
+        name = resolver.getSheetNameById(id) ?? id;
+      } catch {
+        name = id;
+      }
+      entries.push({ id, name });
+    }
+    const json = safeStableJsonStringify(entries);
+    return `${json.length}:${hashString(json)}`;
   }
 
   async build(input: BuildWorkbookContextInput): Promise<BuildWorkbookContextResult> {
@@ -511,6 +562,7 @@ export class WorkbookContextBuilder {
           : input.activeSheetId;
       const executor = new ToolExecutor(this.options.spreadsheet, {
         default_sheet: defaultSheetForTools,
+        sheet_name_resolver: this.options.sheetNameResolver ?? null,
         dlp,
         max_read_range_cells: maxReadRangeCells,
         max_read_range_chars: 200_000,
@@ -543,7 +595,9 @@ export class WorkbookContextBuilder {
       if (stats) stats.rag.retrievedCount = retrieved.length;
 
       const retrievalEnabled = Boolean(input.focusQuestion && this.options.ragService);
-      const retrievedSheetIds = retrievalEnabled ? extractRetrievedSheetIds(retrieved) : [];
+      const retrievedSheetIds = retrievalEnabled
+        ? extractRetrievedSheetIds(retrieved, this.options.sheetNameResolver ?? null)
+        : [];
 
       const selectionBlock = selection
         ? await this.readBlock(
@@ -660,7 +714,7 @@ export class WorkbookContextBuilder {
             retrieval: {
               query: input.focusQuestion,
               retrievedChunkIds: extractedRetrievedChunkIds(retrieved),
-              retrievedRanges: extractRetrievedRanges(retrieved),
+              retrievedRanges: extractRetrievedRanges(retrieved, this.options.sheetNameResolver ?? null),
             },
           }
         : {}),
@@ -867,7 +921,7 @@ export class WorkbookContextBuilder {
   }
 
   private listSheetIdsSortedUnique(): string[] {
-    const ids = Array.isArray(this.options.spreadsheet.listSheets?.()) ? this.options.spreadsheet.listSheets() : [];
+    const ids = safeList(() => this.options.documentController.getSheetIds?.() ?? []);
     const unique = Array.from(new Set(ids.map((s) => String(s).trim()))).filter(Boolean);
     unique.sort((a, b) => a.localeCompare(b));
     return unique;
@@ -922,7 +976,7 @@ export class WorkbookContextBuilder {
     const used = this.options.documentController.getUsedRange(sheetId);
     if (!used) {
       const schema = extractSheetSchema({
-        name: sheetId,
+        name: this.sheetDisplayName(sheetId) || sheetId,
         values: [],
         ...(extras?.namedRanges?.length ? { namedRanges: extras.namedRanges } : {}),
         ...(extras?.tables?.length ? { tables: extras.tables } : {}),
@@ -954,7 +1008,7 @@ export class WorkbookContextBuilder {
     // schema extraction from placeholder values (it would create misleading fake tables).
     if (block.error) {
       const schema = extractSheetSchema({
-        name: sheetId,
+        name: this.sheetDisplayName(sheetId) || sheetId,
         values: [],
         ...(extras?.namedRanges?.length ? { namedRanges: extras.namedRanges } : {}),
         ...(extras?.tables?.length ? { tables: extras.tables } : {}),
@@ -967,7 +1021,7 @@ export class WorkbookContextBuilder {
     const schemaValues: unknown[][] = block.values;
     const schemaStart = stats ? nowMs() : 0;
     const schema = extractSheetSchema({
-      name: sheetId,
+      name: this.sheetDisplayName(sheetId) || sheetId,
       values: schemaValues,
       // When schema is built from a capped window, preserve the original coordinates.
       origin: { row: analyzedRange.startRow, col: analyzedRange.startCol },
@@ -1059,9 +1113,11 @@ export class WorkbookContextBuilder {
       if (out.length >= maxBlocks) break;
       const meta = (chunk as any)?.metadata;
       if (!meta) continue;
-      const sheetId = typeof meta.sheetName === "string" ? meta.sheetName : null;
+      const sheetName = typeof meta.sheetName === "string" ? meta.sheetName.trim() : "";
       const rect = meta.rect;
-      if (!sheetId || !rect) continue;
+      if (!sheetName || !rect) continue;
+      const sheetId = this.resolveSheetId(sheetName);
+      if (!sheetId) continue;
 
       const range = rectToRange(rect);
       if (!range) continue;
@@ -1269,7 +1325,8 @@ export class WorkbookContextBuilder {
   }
 
   private rangeRef(sheetId: string, range: Range): string {
-    return `${formatSheetNameForA1(sheetId)}!${rangeToA1Selection(range)}`;
+    const sheetName = this.sheetDisplayName(sheetId) || sheetId;
+    return `${formatSheetNameForA1(sheetName)}!${rangeToA1Selection(range)}`;
   }
 
   private getSchemaProviderVersion(schemaProvider: WorkbookSchemaProvider | null): number {
@@ -1284,9 +1341,20 @@ export class WorkbookContextBuilder {
 
   private getSchemaMetadata(schemaProvider: WorkbookSchemaProvider | null): NonNullable<typeof this.cachedSchemaMetadata> {
     const schemaVersion = this.getSchemaProviderVersion(schemaProvider);
+    const sheetNameKey = this.computeSheetNameKey();
     const cached = this.cachedSchemaMetadata;
-    if (cached && cached.provider === schemaProvider && cached.schemaVersion === schemaVersion) return cached;
-    if (cached && (cached.provider !== schemaProvider || cached.schemaVersion !== schemaVersion)) {
+    if (
+      cached &&
+      cached.provider === schemaProvider &&
+      cached.schemaVersion === schemaVersion &&
+      cached.sheetNameKey === sheetNameKey
+    ) {
+      return cached;
+    }
+    if (
+      cached &&
+      (cached.provider !== schemaProvider || cached.schemaVersion !== schemaVersion || cached.sheetNameKey !== sheetNameKey)
+    ) {
       // Sheet schemas incorporate named ranges / explicit tables. If workbook-level schema
       // metadata changes, invalidate the sheet summary cache even if workbook content
       // didn't change.
@@ -1298,7 +1366,7 @@ export class WorkbookContextBuilder {
     // workbook's named ranges/tables on every message.
     if (schemaProvider?.getSchemaVersion) {
       const shared = GLOBAL_SCHEMA_METADATA_CACHE.get(schemaProvider);
-      if (shared && shared.schemaVersion === schemaVersion) {
+      if (shared && shared.schemaVersion === schemaVersion && shared.sheetNameKey === sheetNameKey) {
         const out = { provider: schemaProvider, ...shared };
         this.cachedSchemaMetadata = out;
         return out;
@@ -1368,6 +1436,7 @@ export class WorkbookContextBuilder {
 
     const normalized: NormalizedWorkbookSchemaMetadata = {
       schemaVersion,
+      sheetNameKey,
       schemaNamedRangesBySheet,
       schemaTablesBySheet,
       namedRanges,
@@ -1387,7 +1456,8 @@ export class WorkbookContextBuilder {
   }
 
   private schemaRangeRef(sheetId: string, range: Range): string {
-    return `${formatSheetNameForA1(sheetId)}!${rangeToA1Selection(range)}`;
+    const sheetName = this.sheetDisplayName(sheetId) || sheetId;
+    return `${formatSheetNameForA1(sheetName)}!${rangeToA1Selection(range)}`;
   }
 }
 
@@ -1560,8 +1630,10 @@ function columnIndexToA1(columnIndex: number): string {
 }
 
 function formatSheetNameForA1(sheetName: string): string {
-  if (/^[A-Za-z0-9_]+$/.test(sheetName)) return sheetName;
-  return `'${sheetName.replace(/'/g, "''")}'`;
+  const name = String(sheetName ?? "").trim();
+  if (!name) return "";
+  if (/^[A-Za-z0-9_]+$/.test(name)) return name;
+  return `'${name.replace(/'/g, "''")}'`;
 }
 
 function rectToRange(rect: any): Range | null {
@@ -1578,16 +1650,18 @@ function extractedRetrievedChunkIds(retrieved: unknown[]): string[] {
     .sort() as string[];
 }
 
-function extractRetrievedRanges(retrieved: unknown[]): string[] {
+function extractRetrievedRanges(retrieved: unknown[], sheetNameResolver?: SheetNameResolver | null): string[] {
+  const resolver = sheetNameResolver ?? null;
   const out: string[] = [];
   for (const chunk of retrieved) {
     const meta = (chunk as any)?.metadata;
     if (!meta) continue;
-    const sheetName = typeof meta.sheetName === "string" ? meta.sheetName : null;
+    const rawSheet = typeof meta.sheetName === "string" ? meta.sheetName.trim() : "";
     const rect = meta.rect;
-    if (!sheetName || !rect) continue;
+    if (!rawSheet || !rect) continue;
     try {
       const range = rectToA1(rect);
+      const sheetName = resolver?.getSheetNameById(rawSheet) ?? rawSheet;
       out.push(`${formatSheetNameForA1(sheetName)}!${range}`);
     } catch {
       // ignore malformed rect metadata
@@ -1596,14 +1670,16 @@ function extractRetrievedRanges(retrieved: unknown[]): string[] {
   return out.sort();
 }
 
-function extractRetrievedSheetIds(retrieved: unknown[]): string[] {
+function extractRetrievedSheetIds(retrieved: unknown[], sheetNameResolver?: SheetNameResolver | null): string[] {
+  const resolver = sheetNameResolver ?? null;
   const sheetIds: string[] = [];
   for (const chunk of retrieved) {
     const meta = (chunk as any)?.metadata;
     if (!meta) continue;
     const sheetName = typeof meta.sheetName === "string" ? meta.sheetName.trim() : "";
     if (!sheetName) continue;
-    sheetIds.push(sheetName);
+    const resolved = resolver?.getSheetIdByName(sheetName) ?? sheetName;
+    sheetIds.push(resolved);
   }
   const unique = Array.from(new Set(sheetIds));
   unique.sort((a, b) => a.localeCompare(b));

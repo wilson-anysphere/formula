@@ -330,6 +330,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
       spreadsheet,
       ragService: contextProvider as any,
       schemaProvider: options.schemaProvider ?? null,
+      sheetNameResolver: options.sheetNameResolver ?? null,
       mode: "chat",
       model: options.model,
       contextWindowTokens,
@@ -569,7 +570,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
             attachments,
             workbookId: options.workbookId,
             sheetId: activeSheetId,
-            context: summarizeContextForAudit(workbookContext),
+            context: summarizeContextForAudit(workbookContext, options.sheetNameResolver ?? null),
             offered_tools: offeredTools
           }
         }
@@ -584,7 +585,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
           workbookId: options.workbookId,
           promptContext: workbookContext.promptContext ?? "",
           retrievedChunkIds: (workbookContext.retrieved ?? []).map((c: any) => c.id).filter(Boolean),
-          retrievedRanges: extractRetrievedRanges(workbookContext.retrieved ?? []),
+          retrievedRanges: extractRetrievedRanges(workbookContext.retrieved ?? [], options.sheetNameResolver ?? null),
           retrieved: workbookContext.retrieved ?? [],
           indexStats: workbookContext.indexStats,
           tokenBudgetTokens:
@@ -679,11 +680,11 @@ function formatPromptContext(promptContext: string): string {
   return `WORKBOOK_CONTEXT:\n${trimmed}`;
 }
 
-function summarizeContextForAudit(workbookContext: any) {
+function summarizeContextForAudit(workbookContext: any, sheetNameResolver?: SheetNameResolver | null) {
   const retrieved = workbookContext?.retrieved ?? [];
   return {
     retrieved_chunk_ids: retrieved.map((c: any) => c.id).filter(Boolean),
-    retrieved_ranges: extractRetrievedRanges(retrieved),
+    retrieved_ranges: extractRetrievedRanges(retrieved, sheetNameResolver ?? null),
     retrieved_count: retrieved.length,
     index_stats: workbookContext?.indexStats
   };
@@ -713,16 +714,18 @@ function sanitizeHistory(history: LLMMessage[] | undefined): LLMMessage[] {
   return history.filter((m) => m.role !== "system");
 }
 
-function extractRetrievedRanges(retrieved: any[]): string[] {
+function extractRetrievedRanges(retrieved: any[], sheetNameResolver?: SheetNameResolver | null): string[] {
+  const resolver = sheetNameResolver ?? null;
   const out: string[] = [];
   for (const chunk of retrieved) {
     const meta = chunk?.metadata;
     if (!meta) continue;
-    const sheetName = typeof meta.sheetName === "string" ? meta.sheetName : null;
+    const rawSheet = typeof meta.sheetName === "string" ? meta.sheetName.trim() : "";
     const rect = meta.rect;
-    if (!sheetName || !rect) continue;
+    if (!rawSheet || !rect) continue;
     try {
       const range = rectToA1(rect);
+      const sheetName = resolver?.getSheetNameById(rawSheet) ?? rawSheet;
       out.push(`${formatSheetNameForA1(sheetName)}!${range}`);
     } catch {
       // Ignore malformed rect metadata.
@@ -733,6 +736,8 @@ function extractRetrievedRanges(retrieved: any[]): string[] {
 
 function formatSheetNameForA1(sheetName: string): string {
   // Quote when needed (Excel style): 'Sheet Name'!A1
-  if (/^[A-Za-z0-9_]+$/.test(sheetName)) return sheetName;
-  return `'${sheetName.replace(/'/g, "''")}'`;
+  const name = String(sheetName ?? "").trim();
+  if (!name) return "";
+  if (/^[A-Za-z0-9_]+$/.test(name)) return name;
+  return `'${name.replace(/'/g, "''")}'`;
 }
