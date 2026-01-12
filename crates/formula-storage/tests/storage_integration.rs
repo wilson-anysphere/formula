@@ -607,6 +607,36 @@ fn sheet_metadata_persists_visibility_tab_color_and_xlsx_ids() {
 }
 
 #[test]
+fn sheet_metadata_persists_non_rgb_tab_color_via_model_export() {
+    let storage = Storage::open_in_memory().expect("open storage");
+    let workbook = storage
+        .create_workbook("Book", None)
+        .expect("create workbook");
+    let sheet = storage
+        .create_sheet(workbook.id, "Sheet1", 0, None)
+        .expect("create sheet");
+
+    let tab_color = TabColor {
+        theme: Some(3),
+        tint: Some(0.25),
+        ..Default::default()
+    };
+    storage
+        .set_sheet_tab_color(sheet.id, Some(&tab_color))
+        .expect("set tab color");
+
+    let exported = storage
+        .export_model_workbook(workbook.id)
+        .expect("export workbook");
+    let sheet = exported
+        .sheets
+        .iter()
+        .find(|s| s.name == "Sheet1")
+        .expect("Sheet1 exists");
+    assert_eq!(sheet.tab_color, Some(tab_color));
+}
+
+#[test]
 fn sheet_reorder_and_delete_renormalize_positions() {
     let storage = Storage::open_in_memory().expect("open storage");
     let workbook = storage
