@@ -1,0 +1,112 @@
+import { describe, expect, it, vi } from "vitest";
+
+import { DocumentCellProvider } from "../documentCellProvider.js";
+
+type CellState = { value: unknown; formula: string | null };
+
+function createProvider(options: {
+  getSheetId: () => string;
+  getCell: (sheetId: string, coord: { row: number; col: number }) => CellState | null;
+  headerRows?: number;
+  headerCols?: number;
+}) {
+  const headerRows = options.headerRows ?? 1;
+  const headerCols = options.headerCols ?? 1;
+  const doc = {
+    getCell: vi.fn(options.getCell),
+  };
+
+  const provider = new DocumentCellProvider({
+    document: doc as any,
+    getSheetId: options.getSheetId,
+    headerRows,
+    headerCols,
+    rowCount: headerRows + 10,
+    colCount: headerCols + 10,
+    showFormulas: () => false,
+    getComputedValue: () => null,
+  });
+
+  return { provider, doc };
+}
+
+describe("DocumentCellProvider (shared grid)", () => {
+  it("caches within a sheet (hit/miss correctness)", () => {
+    const { provider, doc } = createProvider({
+      getSheetId: () => "sheet-1",
+      getCell: () => ({ value: "hello", formula: null }),
+    });
+
+    const first = provider.getCell(1, 1);
+    expect(first?.value).toBe("hello");
+    expect(doc.getCell).toHaveBeenCalledTimes(1);
+
+    const second = provider.getCell(1, 1);
+    expect(second).toBe(first);
+    expect(doc.getCell).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not collide across sheets", () => {
+    let activeSheet = "sheet-1";
+    const values = new Map<string, string>([
+      ["sheet-1", "one"],
+      ["sheet-2", "two"],
+    ]);
+
+    const { provider, doc } = createProvider({
+      getSheetId: () => activeSheet,
+      getCell: (sheetId) => ({ value: values.get(sheetId)!, formula: null }),
+    });
+
+    const sheet1Cell = provider.getCell(1, 1);
+    expect(sheet1Cell?.value).toBe("one");
+    expect(doc.getCell).toHaveBeenCalledTimes(1);
+
+    activeSheet = "sheet-2";
+    const sheet2Cell = provider.getCell(1, 1);
+    expect(sheet2Cell?.value).toBe("two");
+    // If caches collided, this would still be 1 and we'd get the sheet-1 cell back.
+    expect(doc.getCell).toHaveBeenCalledTimes(2);
+  });
+
+  it("invalidateDocCells evicts only impacted keys for small ranges", () => {
+    let activeSheet = "sheet-1";
+    const state = new Map<string, string>();
+    state.set("0,0", "A");
+    state.set("0,1", "B");
+
+    const { provider, doc } = createProvider({
+      getSheetId: () => activeSheet,
+      getCell: (_sheetId, coord) => {
+        return { value: state.get(`${coord.row},${coord.col}`) ?? null, formula: null };
+      },
+    });
+
+    const a1 = provider.getCell(1, 1);
+    const b1 = provider.getCell(1, 2);
+    expect(a1?.value).toBe("A");
+    expect(b1?.value).toBe("B");
+    expect(doc.getCell).toHaveBeenCalledTimes(2);
+
+    // Update backing state for only A1 and invalidate just that doc cell.
+    state.set("0,0", "A2");
+    provider.invalidateDocCells({ startRow: 0, endRow: 1, startCol: 0, endCol: 1 });
+
+    const a1After = provider.getCell(1, 1);
+    const b1After = provider.getCell(1, 2);
+
+    expect(a1After?.value).toBe("A2");
+    expect(b1After).toBe(b1);
+    expect(b1After?.value).toBe("B");
+
+    // A1 was re-fetched, B1 was served from cache.
+    expect(doc.getCell).toHaveBeenCalledTimes(3);
+
+    // Sanity: switching sheets shouldn't affect the invalidation we just performed.
+    activeSheet = "sheet-2";
+    state.set("0,0", "S2");
+    const sheet2 = provider.getCell(1, 1);
+    expect(sheet2?.value).toBe("S2");
+  });
+});
+

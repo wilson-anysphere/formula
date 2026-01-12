@@ -8,6 +8,9 @@ type RichTextValue = { text: string; runs?: Array<{ start: number; end: number; 
 
 type DocStyle = Record<string, any>;
 
+const CACHE_KEY_COL_STRIDE = 65_536;
+const SHEET_CACHE_MAX_SIZE = 50_000;
+
 function isPlainObject(value: unknown): value is Record<string, any> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -58,7 +61,14 @@ export class DocumentCellProvider implements CellProvider {
   private readonly headerStyle: CellStyle = { fontWeight: "600", textAlign: "center" };
   private readonly rowHeaderStyle: CellStyle = { fontWeight: "600", textAlign: "end" };
 
-  private readonly cache: LruCache<string, CellData | null>;
+  /**
+   * Per-sheet caches avoid `${sheetId}:${row},${col}` string allocations in the hot
+   * `getCell` path. Keys are encoded as `row * 65536 + col` which is safe for Excel's
+   * maxes (col <= 16_384; rows ~1M) and leaves ample headroom below MAX_SAFE_INTEGER.
+   */
+  private readonly sheetCaches = new Map<string, LruCache<number, CellData | null>>();
+  private lastSheetId: string | null = null;
+  private lastSheetCache: LruCache<number, CellData | null> | null = null;
   private readonly styleCache = new Map<number, CellStyle | undefined>();
   private readonly resolvedStyleCache = new WeakMap<object, CellStyle | undefined>();
   private readonly listeners = new Set<(update: CellProviderUpdate) => void>();
@@ -83,9 +93,8 @@ export class DocumentCellProvider implements CellProvider {
       getCommentMeta?: (cellRef: string) => { resolved: boolean } | null;
     }
   ) {
-    // Cache covers cell metadata + value formatting work. Keep it bounded to avoid
-    // memory blow-ups on huge scrolls.
-    this.cache = new LruCache<string, CellData | null>(50_000);
+    // Caches cover cell metadata + value formatting work. Keep each sheet bounded to
+    // avoid memory blow-ups on huge scrolls.
   }
 
   private resolveStyle(styleId: unknown): CellStyle | undefined {
@@ -208,7 +217,9 @@ export class DocumentCellProvider implements CellProvider {
   }
 
   invalidateAll(): void {
-    this.cache.clear();
+    this.sheetCaches.clear();
+    this.lastSheetId = null;
+    this.lastSheetCache = null;
     for (const listener of this.listeners) listener({ type: "invalidateAll" });
   }
 
@@ -225,15 +236,22 @@ export class DocumentCellProvider implements CellProvider {
     const cellCount = Math.max(0, gridRange.endRow - gridRange.startRow) * Math.max(0, gridRange.endCol - gridRange.startCol);
     if (cellCount <= 1000) {
       const sheetId = this.options.getSheetId();
-      for (let r = gridRange.startRow; r < gridRange.endRow; r++) {
-        for (let c = gridRange.startCol; c < gridRange.endCol; c++) {
-          this.cache.delete(`${sheetId}:${r},${c}`);
+      const cache = this.sheetCaches.get(sheetId);
+      if (cache) {
+        for (let r = gridRange.startRow; r < gridRange.endRow; r++) {
+          const base = r * CACHE_KEY_COL_STRIDE;
+          for (let c = gridRange.startCol; c < gridRange.endCol; c++) {
+            cache.delete(base + c);
+          }
         }
       }
     } else {
-      // If the range is large, clear the whole cache to avoid spending too much time
-      // iterating keys.
-      this.cache.clear();
+      // If the range is large, clear the caches to avoid spending too much time
+      // iterating keys. This mirrors the legacy behavior where a large invalidation
+      // cleared the provider-wide cache.
+      this.sheetCaches.clear();
+      this.lastSheetId = null;
+      this.lastSheetCache = null;
     }
 
     for (const listener of this.listeners) listener({ type: "cells", range: gridRange });
@@ -266,8 +284,9 @@ export class DocumentCellProvider implements CellProvider {
     if (row < 0 || col < 0 || row >= rowCount || col >= colCount) return null;
 
     const sheetId = this.options.getSheetId();
-    const key = `${sheetId}:${row},${col}`;
-    const cached = this.cache.get(key);
+    const cache = this.getSheetCache(sheetId);
+    const key = row * CACHE_KEY_COL_STRIDE + col;
+    const cached = cache.get(key);
     if (cached !== undefined) return cached;
 
     const headerRow = row < headerRows;
@@ -290,7 +309,7 @@ export class DocumentCellProvider implements CellProvider {
       }
 
       const cell: CellData = { row, col, value, style };
-      this.cache.set(key, cell);
+      cache.set(key, cell);
       return cell;
     }
 
@@ -303,7 +322,7 @@ export class DocumentCellProvider implements CellProvider {
       styleId?: number;
     };
     if (!state) {
-      this.cache.set(key, null);
+      cache.set(key, null);
       return null;
     }
 
@@ -363,8 +382,22 @@ export class DocumentCellProvider implements CellProvider {
     })();
 
     const cell: CellData = richText ? { row, col, value, richText, style, comment } : { row, col, value, style, comment };
-    this.cache.set(key, cell);
+    cache.set(key, cell);
     return cell;
+  }
+
+  private getSheetCache(sheetId: string): LruCache<number, CellData | null> {
+    if (this.lastSheetId === sheetId && this.lastSheetCache) return this.lastSheetCache;
+
+    let cache = this.sheetCaches.get(sheetId);
+    if (!cache) {
+      cache = new LruCache<number, CellData | null>(SHEET_CACHE_MAX_SIZE);
+      this.sheetCaches.set(sheetId, cache);
+    }
+
+    this.lastSheetId = sheetId;
+    this.lastSheetCache = cache;
+    return cache;
   }
 
   subscribe(listener: (update: CellProviderUpdate) => void): () => void {
