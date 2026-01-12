@@ -1426,9 +1426,15 @@ export class WebExtensionManager {
         // for extensions already started via `startupExtension()` (e.g. desktop flows that load
         // an extension before the app's main `loadAllInstalled()` boot hook runs).
         this._didHostStartup = true;
-      } else if (this.host.startup && !hadOtherExtensions && !this._didHostStartup) {
+      } else if (this.host.startup && !hadOtherExtensions) {
         // Fallback for older hosts: only call startup() when we're confident it won't
         // re-emit startup events to extensions that were already running.
+        //
+        // Note: we intentionally *don't* guard this with `_didHostStartup`. In older hosts without
+        // `startupExtension()`, the safest way to start an extension that needs
+        // `onStartupFinished` is to call `startup()` when it's the only loaded extension. If the
+        // host previously ran `startup()` with *zero* extensions loaded, `_didHostStartup` may be
+        // true but re-running startup now is still safe (and required) for newly loaded extensions.
         await this.host.startup();
         this._didHostStartup = true;
       }
