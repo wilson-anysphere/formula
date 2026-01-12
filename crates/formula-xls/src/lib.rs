@@ -2490,6 +2490,9 @@ fn sanitize_biff8_continued_name_records_for_calamine(stream: &[u8]) -> Option<V
     const RECORD_NAME: u16 = 0x0018;
     const RECORD_CONTINUE: u16 = 0x003C;
     const NAME_FLAG_BUILTIN: u16 = 0x0020;
+    // BIFF record id reserved for "unknown" sanitization. Any value that calamine doesn't treat as
+    // a special record is fine; we use 0xFFFF which is not a defined BIFF record id.
+    const RECORD_MASKED: u16 = 0xFFFF;
 
     // Calamine's NAME parser reads:
     // - cch (u8) at offset 3 in the NAME payload
@@ -2505,6 +2508,7 @@ fn sanitize_biff8_continued_name_records_for_calamine(stream: &[u8]) -> Option<V
     // This keeps the name string available (so `PtgName` tokens can still resolve) while making
     // calamine skip parsing the formula payload.
     let mut name_header_offsets: Vec<usize> = Vec::new();
+    let mut name_mask_offsets: Vec<usize> = Vec::new();
     let mut offset: usize = 0;
 
     while offset + 4 <= stream.len() {
@@ -2524,6 +2528,28 @@ fn sanitize_biff8_continued_name_records_for_calamine(stream: &[u8]) -> Option<V
         }
 
         if record_id == RECORD_NAME {
+            // Calamine unconditionally slices `&r.data[14..]` for NAME parsing. If the physical
+            // record payload is shorter than 14 bytes (or exactly 14 bytes with no following
+            // CONTINUE record), calamine can panic via out-of-bounds slice indexing.
+            //
+            // For these truncated cases, we can't safely "fix" the record without consuming bytes
+            // from unrelated subsequent records (which would corrupt the workbook stream). Instead,
+            // best-effort: mask the record id so calamine ignores it.
+            if len < 14 {
+                name_mask_offsets.push(offset);
+                offset = next;
+                continue;
+            }
+            if len == 14 {
+                if next + 4 > stream.len()
+                    || u16::from_le_bytes([stream[next], stream[next + 1]]) != RECORD_CONTINUE
+                {
+                    name_mask_offsets.push(offset);
+                    offset = next;
+                    continue;
+                }
+            }
+
             // Best-effort bounds checks; if we can't even read the fields calamine depends on,
             // there's nothing useful we can do here.
             if len >= 6 && data_start + 6 <= stream.len() {
@@ -2590,7 +2616,7 @@ fn sanitize_biff8_continued_name_records_for_calamine(stream: &[u8]) -> Option<V
         offset = next;
     }
 
-    if name_header_offsets.is_empty() {
+    if name_header_offsets.is_empty() && name_mask_offsets.is_empty() {
         return None;
     }
 
@@ -2663,6 +2689,10 @@ fn sanitize_biff8_continued_name_records_for_calamine(stream: &[u8]) -> Option<V
                 out[header_offset + 2..header_offset + 4].copy_from_slice(&new_len.to_le_bytes());
             }
         }
+    }
+
+    for mask_offset in name_mask_offsets {
+        out[mask_offset..mask_offset + 2].copy_from_slice(&RECORD_MASKED.to_le_bytes());
     }
 
     Some(out)
@@ -3020,6 +3050,24 @@ mod tests {
         None
     }
 
+    fn first_record_header_offset(stream: &[u8], record_id: u16) -> Option<usize> {
+        let mut offset = 0usize;
+        while offset + 4 <= stream.len() {
+            let id = u16::from_le_bytes([stream[offset], stream[offset + 1]]);
+            let len = u16::from_le_bytes([stream[offset + 2], stream[offset + 3]]) as usize;
+            let data_start = offset.checked_add(4)?;
+            let next = data_start.checked_add(len)?;
+            if next > stream.len() {
+                return None;
+            }
+            if id == record_id {
+                return Some(offset);
+            }
+            offset = next;
+        }
+        None
+    }
+
     #[test]
     fn sanitizes_malformed_name_record_out_of_bounds_cch_for_calamine() {
         let stream = build_minimal_workbook_stream_with_corrupt_name_oob_cch();
@@ -3084,6 +3132,97 @@ mod tests {
         assert!(
             calamine_can_open_workbook_stream(&sanitized),
             "expected calamine to open after sanitizing continued built-in NAME record"
+        );
+    }
+
+    fn build_minimal_workbook_stream_with_truncated_name_record(payload_len: usize) -> Vec<u8> {
+        // Build a minimal BIFF8 workbook stream containing a NAME record whose physical record
+        // payload is too short for calamine's `&r.data[14..]` indexing.
+        let mut globals = Vec::<u8>::new();
+
+        push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+        push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+        push_record(&mut globals, RECORD_WINDOW1, &window1());
+        push_record(&mut globals, RECORD_FONT, &font_arial());
+
+        for _ in 0..16 {
+            push_record(&mut globals, RECORD_XF, &xf_record(true));
+        }
+        let xf_general = 16u16;
+        push_record(&mut globals, RECORD_XF, &xf_record(false));
+
+        // Single worksheet.
+        let boundsheet_start = globals.len();
+        let mut boundsheet = Vec::<u8>::new();
+        boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+        boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+        write_short_unicode_string(&mut boundsheet, "Sheet1");
+        push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+        let boundsheet_offset_pos = boundsheet_start + 4;
+
+        // Truncated NAME record payload (all zeros is fine; the sanitizer will mask the record id
+        // so calamine ignores it).
+        push_record(&mut globals, RECORD_NAME, &vec![0u8; payload_len]);
+
+        push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+        // -- Sheet substream ----------------------------------------------------
+        let sheet_offset = globals.len();
+        let mut sheet = Vec::<u8>::new();
+        push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+        // DIMENSIONS: rows [0, 1) cols [0, 1)
+        let mut dims = Vec::<u8>::new();
+        dims.extend_from_slice(&0u32.to_le_bytes());
+        dims.extend_from_slice(&1u32.to_le_bytes());
+        dims.extend_from_slice(&0u16.to_le_bytes());
+        dims.extend_from_slice(&1u16.to_le_bytes());
+        dims.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+        push_record(&mut sheet, RECORD_WINDOW2, &window2());
+        push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_general, 0.0));
+        push_record(&mut sheet, RECORD_EOF, &[]);
+
+        // Patch BoundSheet offset.
+        globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+            .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+        globals.extend_from_slice(&sheet);
+        globals
+    }
+
+    #[test]
+    fn masks_truncated_name_records_so_calamine_does_not_panic() {
+        let stream = build_minimal_workbook_stream_with_truncated_name_record(10);
+
+        // If calamine fixes the underlying panic in the future, this should still pass.
+        let _ = calamine_can_open_workbook_stream(&stream);
+
+        let name_header_offset =
+            first_record_header_offset(&stream, RECORD_NAME).expect("expected NAME record");
+        assert_eq!(
+            u16::from_le_bytes([stream[name_header_offset], stream[name_header_offset + 1]]),
+            RECORD_NAME
+        );
+        assert_eq!(
+            u16::from_le_bytes([stream[name_header_offset + 2], stream[name_header_offset + 3]]),
+            10
+        );
+
+        let sanitized =
+            sanitize_biff8_continued_name_records_for_calamine(&stream).expect("expected sanitize");
+
+        // Sanitizer should mask the record id so calamine ignores it.
+        assert_eq!(
+            u16::from_le_bytes([
+                sanitized[name_header_offset],
+                sanitized[name_header_offset + 1]
+            ]),
+            0xFFFF
+        );
+
+        assert!(
+            calamine_can_open_workbook_stream(&sanitized),
+            "expected calamine to open after masking truncated NAME record"
         );
     }
 }
