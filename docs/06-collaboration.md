@@ -420,8 +420,13 @@ const binder = await bindCollabSessionToDocumentController({
   documentController,
   userId,
 
-  // Optional: pass an explicit undoService (not defaulted by the helper).
-  // undoService: session.undo,
+  // Optional: override how DocumentController-driven writes are transacted into Yjs.
+  //
+  // By default, the helper uses `session.transactLocal(...)` (so edits use
+  // `session.origin` and participate in collaborative undo/conflict detection when enabled).
+  //
+  // To opt out and use the binder’s internal origin token instead, pass:
+  // undoService: null,
 });
 ```
 
@@ -459,7 +464,7 @@ This is implemented by filtering `undoService.localOrigins` and excluding any va
 Practical rule of thumb:
 
 - When the binder is active, treat `DocumentController` as the “source of truth” for local edits.
-- If you also call `session.setCellValue` / `session.setCellFormula` directly, be careful when passing `undoService: session.undo`: those direct session writes use the same origin token and may be echo-suppressed from applying back into `DocumentController`. (This is why the helper `bindCollabSessionToDocumentController` does **not** default to `session.undo`.)
+- If you also call `session.setCellValue` / `session.setCellFormula` directly, be aware those are local-origin writes (`session.origin`). When the binder is configured to treat `session.origin` as “local” (the default for `bindCollabSessionToDocumentController`, and typical when passing `undoService.localOrigins`), those direct session writes will be **echo-suppressed** from applying back into `DocumentController`.
 
 ### Undo/redo semantics in collaborative mode
 
