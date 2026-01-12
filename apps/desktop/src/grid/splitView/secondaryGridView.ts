@@ -670,8 +670,9 @@ export class SecondaryGridView {
       nextCol = Math.max(dataStartCol, Math.min(colCount - 1, nextCol));
 
       const updatedRanges = ranges.length === 0 ? [range] : ranges;
+      const safeIndex = Math.max(0, Math.min(updatedRanges.length - 1, activeIndex));
       this.grid.setSelectionRanges(updatedRanges, {
-        activeIndex,
+        activeIndex: safeIndex,
         activeCell: { row: nextRow, col: nextCol },
       });
       return;
