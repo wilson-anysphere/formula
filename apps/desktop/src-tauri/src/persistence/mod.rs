@@ -225,7 +225,6 @@ fn scalar_to_model_value(value: &CellScalar) -> ModelCellValue {
 }
 
 fn model_value_to_scalar(value: &ModelCellValue) -> CellScalar {
-    #[allow(unreachable_patterns)]
     match value {
         ModelCellValue::Empty => CellScalar::Empty,
         ModelCellValue::Number(n) => CellScalar::Number(*n),
@@ -244,6 +243,7 @@ fn model_value_to_scalar(value: &ModelCellValue) -> CellScalar {
         ),
         ModelCellValue::Array(arr) => CellScalar::Text(format!("{:?}", arr.data)),
         ModelCellValue::Spill(_) => CellScalar::Error("#SPILL!".to_string()),
+        #[allow(unreachable_patterns)]
         _ => rich_model_cell_value_to_scalar(value).unwrap_or_else(|| CellScalar::Text(format!("{value:?}"))),
     }
 }

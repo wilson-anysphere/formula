@@ -1080,7 +1080,6 @@ fn formula_model_sheet_to_app_sheet(
 }
 
 fn formula_model_value_to_scalar(value: &ModelCellValue) -> CellScalar {
-    #[allow(unreachable_patterns)]
     match value {
         ModelCellValue::Empty => CellScalar::Empty,
         ModelCellValue::Number(n) => CellScalar::Number(*n),
@@ -1099,6 +1098,7 @@ fn formula_model_value_to_scalar(value: &ModelCellValue) -> CellScalar {
         ),
         ModelCellValue::Array(arr) => CellScalar::Text(format!("{:?}", arr.data)),
         ModelCellValue::Spill(_) => CellScalar::Error("#SPILL!".to_string()),
+        #[allow(unreachable_patterns)]
         _ => rich_model_cell_value_to_scalar(value)
             .unwrap_or_else(|| CellScalar::Text(format!("{value:?}"))),
     }
