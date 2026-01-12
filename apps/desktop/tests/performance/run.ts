@@ -104,6 +104,13 @@ async function main(): Promise<void> {
     ...createCollaborationBenchmarks(),
   ];
 
+  if (process.env.FORMULA_BENCH_DOCUMENT_CELL_PROVIDER === '1') {
+    const { createDocumentCellProviderCacheKeyBenchmarks } = await import(
+      './benchmarks/documentCellProviderCacheKey.bench.ts'
+    );
+    benchmarks.push(...createDocumentCellProviderCacheKeyBenchmarks());
+  }
+
   const results: BenchmarkResult[] = [];
   for (const bench of benchmarks) {
     results.push(
