@@ -21,9 +21,9 @@ Excel has (at least) two distinct storage mechanisms:
    - Already covered by the general DrawingML preservation strategy.
 2. **Images in cells** (newer Excel / Microsoft 365)
    - Primarily stored via the workbook-level **Rich Data** system (`xl/metadata.xml` + `xl/richData/*`).
-   - Some producers (and possibly some Excel builds) additionally emit a dedicated **cell image store**
-     part (`xl/cellImages.xml` / `xl/cellimages.xml`). Treat this as an alternate/legacy store and
-     preserve **both** graphs when present.
+   - Some workbooks (including real Excel fixtures in this repo) additionally include a dedicated **cell image store**
+      part (`xl/cellImages.xml` / `xl/cellimages.xml`). Treat this as an alternate/legacy store and
+      preserve **both** graphs when present.
    - The rest of this document focuses on this second mechanism.
 
 ## Expected OOXML parts
