@@ -4074,6 +4074,38 @@ mod tests {
     }
 
     #[test]
+    fn move_sheet_reorders_workbook_info() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+        workbook.add_sheet("Sheet3".to_string());
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let before = state.workbook_info().expect("workbook_info before move");
+        let before_order = before
+            .sheets
+            .iter()
+            .map(|s| s.id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(before_order, vec!["Sheet1", "Sheet2", "Sheet3"]);
+
+        state
+            .move_sheet("Sheet3", 0)
+            .expect("move Sheet3 to front");
+
+        let after = state.workbook_info().expect("workbook_info after move");
+        let after_order = after
+            .sheets
+            .iter()
+            .map(|s| s.id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(after_order, vec!["Sheet3", "Sheet1", "Sheet2"]);
+        assert!(state.has_unsaved_changes());
+    }
+
+    #[test]
     fn add_sheet_inserts_at_index_and_persists_order() {
         let tmp = tempfile::tempdir().expect("temp dir");
         let db_path = tmp.path().join("autosave.sqlite");

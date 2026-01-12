@@ -1438,6 +1438,11 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
     };
 
     if let Some(origin_bytes) = workbook.origin_xlsx_bytes.as_deref() {
+        // NOTE: This patch-based save path intentionally preserves most workbook-level parts
+        // from the original package (e.g. `xl/workbook.xml`). As a result, workbook-structure
+        // edits like sheet reorder/rename are not currently reflected in the saved
+        // `workbook.xml` when `origin_xlsx_bytes` is present. Sheet order *is* persisted in the
+        // autosave SQLite storage and round-trips through reopen within the app.
         let print_settings_changed = workbook.print_settings != workbook.original_print_settings;
         let power_query_changed = workbook.power_query_xml != workbook.original_power_query_xml;
 

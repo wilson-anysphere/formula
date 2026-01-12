@@ -57,9 +57,10 @@ type Props = {
    */
   onSheetDeleted?: (event: { sheetId: string; name: string }) => void;
   /**
-   * Called after a sheet move is successfully applied to the metadata store.
+   * Optional hook invoked when a sheet tab reorder is committed (drag-and-drop).
    *
    * The desktop shell can use this to persist the new sheet order to the backend.
+   * If this throws/rejects, the reorder is aborted.
    */
   onSheetMoved?: (event: { sheetId: string; toIndex: number }) => Promise<void> | void;
   /**
@@ -253,26 +254,31 @@ export function SheetTabStrip({
     return promise;
   };
 
-  const moveSheet = (sheetId: string, dropTarget: Parameters<typeof computeWorkbookSheetMoveIndex>[0]["dropTarget"]) => {
+  const moveSheet = async (
+    sheetId: string,
+    dropTarget: Parameters<typeof computeWorkbookSheetMoveIndex>[0]["dropTarget"],
+  ) => {
     const all = store.listAll();
     const fromIndex = all.findIndex((s) => s.id === sheetId);
     if (fromIndex < 0) return;
     const toIndex = computeWorkbookSheetMoveIndex({ sheets: all, fromSheetId: sheetId, dropTarget });
     if (toIndex == null) return;
     if (toIndex === fromIndex) return;
+    if (onSheetMoved) {
+      try {
+        await onSheetMoved({ sheetId, toIndex });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        onError?.(message);
+        return;
+      }
+    }
     try {
       store.move(sheetId, toIndex);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       onError?.(message);
       return;
-    }
-    if (onSheetMoved) {
-      void Promise.resolve()
-        .then(() => onSheetMoved({ sheetId, toIndex }))
-        .catch((err) => {
-          onError?.(err instanceof Error ? err.message : String(err));
-        });
     }
     onSheetsReordered?.();
   };
@@ -672,7 +678,7 @@ export function SheetTabStrip({
             return;
           }
           // Dropping on the container inserts at the end of the visible list.
-          moveSheet(fromId, { kind: "end" });
+          void moveSheet(fromId, { kind: "end" });
           clearDragIndicators();
         }}
         onDragLeave={(e) => {
@@ -746,7 +752,7 @@ export function SheetTabStrip({
 
               const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
               const shouldInsertAfter = e.clientX > rect.left + rect.width / 2;
-              moveSheet(fromId, {
+              void moveSheet(fromId, {
                 kind: shouldInsertAfter ? "after" : "before",
                 targetSheetId: sheet.id,
               });

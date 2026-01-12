@@ -2173,12 +2173,7 @@ function renderSheetTabs(): void {
 
         // Allow any microtask-batched workbook edits to enqueue before we move the sheet.
         await new Promise<void>((resolve) => queueMicrotask(resolve));
-
-        try {
-          await invoke("move_sheet", { sheet_id: sheetId, to_index: toIndex });
-        } catch (err) {
-          showToast(`Failed to move sheet: ${String((err as any)?.message ?? err)}`, "error");
-        }
+        await invoke("move_sheet", { sheet_id: sheetId, to_index: toIndex });
       },
       onError: (message: string) => showToast(message, "error"),
     }),

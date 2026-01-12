@@ -49,6 +49,10 @@ export class TauriWorkbookBackend implements WorkbookBackend {
     return info as WorkbookInfo;
   }
 
+  async moveSheet(sheetId: string, toIndex: number): Promise<void> {
+    await this.invoke("move_sheet", { sheet_id: sheetId, to_index: toIndex });
+  }
+
   async getWorkbookThemePalette(): Promise<WorkbookThemePalette | null> {
     const palette = await this.invoke("get_workbook_theme_palette");
     return (palette as WorkbookThemePalette | null) ?? null;
