@@ -653,6 +653,9 @@ const metadata = createMetadataManagerForSession(session);
 sheets.addSheet({ id: "Sheet2", name: "Plan", index: 1 });
 sheets.renameSheet("Sheet2", "Plan v2");
 sheets.moveSheet("Sheet2", 0);
+// Optional sheet metadata (Excel-like semantics)
+sheets.setVisibility("Sheet2", "hidden");
+sheets.setTabColor("Sheet2", "FFFF0000");
 
 // Metadata / named ranges
 metadata.set("locale", "en-US");
