@@ -435,7 +435,34 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
   let providerSynced: boolean | null = null;
   let hasEverSynced = false;
   let currentOffline: unknown = null;
-  let offlineWaitStarted = false;
+  let offlinePollTimer: number | null = null;
+
+  const stopOfflinePoll = (): void => {
+    if (offlinePollTimer == null) return;
+    globalThis.clearTimeout(offlinePollTimer);
+    offlinePollTimer = null;
+  };
+
+  const startOfflinePoll = (offline: unknown): void => {
+    if (offlinePollTimer != null) return;
+    // Polling is a last resort (offline persistence does not currently expose events).
+    // Keep the interval modest and only run while the indicator is in Loading… state.
+    const tick = (): void => {
+      if (abortController.signal.aborted) {
+        stopOfflinePoll();
+        return;
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const loaded = (offline as any)?.isLoaded;
+      if (loaded === true) {
+        stopOfflinePoll();
+        render();
+        return;
+      }
+      offlinePollTimer = globalThis.setTimeout(tick, 1000) as unknown as number;
+    };
+    offlinePollTimer = globalThis.setTimeout(tick, 250) as unknown as number;
+  };
 
   const setIndicatorText = (
     text: string,
@@ -525,12 +552,12 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
     const session = getSession();
     if (!session) {
       detachProviderListeners(currentProvider);
+      stopOfflinePoll();
       currentProvider = null;
       providerStatus = null;
       providerSynced = null;
       hasEverSynced = false;
       currentOffline = null;
-      offlineWaitStarted = false;
       setIndicatorText("Local", { mode: "local" });
       return;
     }
@@ -550,23 +577,13 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
     const offlineLoading = offlineLoaded === false;
     if (offline !== currentOffline) {
       currentOffline = offline;
-      offlineWaitStarted = false;
+      stopOfflinePoll();
     }
 
-    if (offlineLoading && offline && typeof offline === "object" && !offlineWaitStarted) {
-      offlineWaitStarted = true;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const whenLoaded = (offline as any).whenLoaded as (() => Promise<void>) | undefined;
-      if (typeof whenLoaded === "function") {
-        void Promise.resolve()
-          .then(() => whenLoaded.call(offline))
-          .catch(() => {
-            // Offline persistence load failures should not crash the UI.
-          })
-          .finally(() => {
-            if (!abortController.signal.aborted) render();
-          });
-      }
+    if (offlineLoading && offline && typeof offline === "object") {
+      startOfflinePoll(offline);
+    } else {
+      stopOfflinePoll();
     }
 
     const provider = (s?.provider as unknown) ?? null;
@@ -639,6 +656,7 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
   abortController.signal.addEventListener("abort", () => {
     window.removeEventListener("unload", cleanup);
     detachProviderListeners(currentProvider);
+    stopOfflinePoll();
   });
 
   render();
