@@ -1249,7 +1249,7 @@ fn main() {
                 let listener_for_listener = listener.clone();
                 let handle_for_listener = handle.clone();
 
-                let id = handle.listen_global("updater-ui-ready", move |_| {
+                let id = handle.listen("updater-ui-ready", move |_| {
                     if started_for_listener.swap(true, Ordering::SeqCst) {
                         return;
                     }
