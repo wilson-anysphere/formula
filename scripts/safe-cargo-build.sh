@@ -59,4 +59,11 @@ export CARGO_PROFILE_RELEASE_CODEGEN_UNITS="${CARGO_PROFILE_RELEASE_CODEGEN_UNIT
 export RAYON_NUM_THREADS="${RAYON_NUM_THREADS:-${FORMULA_RAYON_NUM_THREADS:-${JOBS}}}"
 
 echo "🦀 Building with -j${JOBS} (based on available memory)..."
-cargo build -j"$JOBS" "$@"
+
+limit_as="${FORMULA_CARGO_LIMIT_AS:-14G}"
+cargo_cmd=(cargo build -j"$JOBS" "$@")
+if [ -x "$SCRIPT_DIR/run_limited.sh" ] && [ -n "${limit_as}" ] && [ "${limit_as}" != "0" ] && [ "${limit_as}" != "off" ] && [ "${limit_as}" != "unlimited" ]; then
+  bash "$SCRIPT_DIR/run_limited.sh" --as "${limit_as}" -- "${cargo_cmd[@]}"
+else
+  "${cargo_cmd[@]}"
+fi

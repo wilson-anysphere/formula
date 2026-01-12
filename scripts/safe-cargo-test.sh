@@ -88,4 +88,11 @@ if [ -z "${RUST_TEST_THREADS:-}" ]; then
 fi
 
 echo "🧪 Testing with -j${JOBS} (based on available memory)..."
-cargo test -j"$JOBS" "$@"
+
+limit_as="${FORMULA_CARGO_LIMIT_AS:-14G}"
+cargo_cmd=(cargo test -j"$JOBS" "$@")
+if [ -x "$SCRIPT_DIR/run_limited.sh" ] && [ -n "${limit_as}" ] && [ "${limit_as}" != "0" ] && [ "${limit_as}" != "off" ] && [ "${limit_as}" != "unlimited" ]; then
+  bash "$SCRIPT_DIR/run_limited.sh" --as "${limit_as}" -- "${cargo_cmd[@]}"
+else
+  "${cargo_cmd[@]}"
+fi
