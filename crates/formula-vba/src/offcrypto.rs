@@ -3,15 +3,15 @@
 //! Excel stores a signed VBA project in an OLE stream named `\x05DigitalSignature*` (see MS-OVBA).
 //! In many real-world files the PKCS#7/CMS `SignedData` payload is wrapped in a
 //! `[MS-OFFCRYPTO] DigSigInfoSerialized` header. The header contains size fields for the
-//! surrounding metadata, making it possible to locate the DER blob deterministically instead of
-//! scanning the whole stream.
+//! surrounding metadata, making it possible to locate the PKCS#7 blob deterministically instead of
+//! scanning the whole stream (and works for both strict DER and BER/indefinite encodings).
 
 /// Parsed information from a `[MS-OFFCRYPTO] DigSigInfoSerialized` prefix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct DigSigInfoSerialized {
-    /// Offset (from the start of the stream) where the DER-encoded PKCS#7 `ContentInfo` begins.
+    /// Offset (from the start of the stream) where the PKCS#7 `ContentInfo` begins.
     pub(crate) pkcs7_offset: usize,
-    /// Length (in bytes) of the DER-encoded PKCS#7 `ContentInfo`.
+    /// Length (in bytes) of the PKCS#7 `ContentInfo` TLV.
     pub(crate) pkcs7_len: usize,
     /// Best-effort version field when present.
     pub(crate) version: Option<u32>,

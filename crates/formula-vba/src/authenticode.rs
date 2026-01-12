@@ -93,7 +93,9 @@ pub fn extract_vba_signature_signed_digest(
     // streams can contain *multiple* SignedData blobs (e.g. certificate stores + signature), so we
     // keep searching until we find one whose signed content parses as Authenticode
     // `SpcIndirectDataContent`.
-    for offset in 0..signature_stream.len() {
+    //
+    // Prefer later candidates: the actual signature payload is typically stored last.
+    for offset in (0..signature_stream.len()).rev() {
         if signature_stream[offset] != 0x30 {
             continue;
         }
