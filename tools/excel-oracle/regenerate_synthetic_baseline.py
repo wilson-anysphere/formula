@@ -70,15 +70,26 @@ def _tool_env(repo_root: Path) -> dict[str, str]:
 
     # Some environments configure Cargo to use `sccache` via a global config file. Prefer
     # compiling locally for determinism/reliability unless the user explicitly opted in.
-    env.setdefault("RUSTC_WRAPPER", "")
-    env.setdefault("RUSTC_WORKSPACE_WRAPPER", "")
-    # Cargo can also read wrapper config via `CARGO_BUILD_RUSTC_WRAPPER`. Set it explicitly so a
-    # global Cargo config cannot unexpectedly re-enable a flaky wrapper when `RUSTC_WRAPPER` is
-    # unset.
-    env.setdefault("CARGO_BUILD_RUSTC_WRAPPER", env.get("RUSTC_WRAPPER", ""))
-    env.setdefault(
-        "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER", env.get("RUSTC_WORKSPACE_WRAPPER", "")
-    )
+    #
+    # Cargo respects both `RUSTC_WRAPPER` and the config/env-var equivalent
+    # `CARGO_BUILD_RUSTC_WRAPPER`. Unify them with nullish precedence (treating empty strings as
+    # an explicit override) so wrapper config cannot leak in unexpectedly.
+    rustc_wrapper = env.get("RUSTC_WRAPPER")
+    if rustc_wrapper is None:
+        rustc_wrapper = env.get("CARGO_BUILD_RUSTC_WRAPPER")
+    if rustc_wrapper is None:
+        rustc_wrapper = ""
+
+    rustc_workspace_wrapper = env.get("RUSTC_WORKSPACE_WRAPPER")
+    if rustc_workspace_wrapper is None:
+        rustc_workspace_wrapper = env.get("CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER")
+    if rustc_workspace_wrapper is None:
+        rustc_workspace_wrapper = ""
+
+    env["RUSTC_WRAPPER"] = rustc_wrapper
+    env["RUSTC_WORKSPACE_WRAPPER"] = rustc_workspace_wrapper
+    env["CARGO_BUILD_RUSTC_WRAPPER"] = rustc_wrapper
+    env["CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER"] = rustc_workspace_wrapper
 
     # Concurrency defaults: keep Rust builds stable on high-core-count multi-agent hosts.
     #
