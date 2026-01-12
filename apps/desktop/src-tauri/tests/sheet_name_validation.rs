@@ -468,6 +468,25 @@ fn rename_sheet_allows_unicode_case_only_change_on_same_sheet() {
 }
 
 #[test]
+fn rename_sheet_allows_unicode_case_folding_expansion_on_same_sheet() {
+    let mut workbook = Workbook::new_empty(None);
+    workbook.add_sheet("straße".to_string());
+    workbook.add_sheet("Sheet2".to_string());
+    let sheet1_id = workbook.sheets[0].id.clone();
+    let mut state = AppState::new();
+    state.load_workbook(workbook);
+
+    // German ß uppercases to "SS". This is a "case-only" rename under Excel-like Unicode
+    // case-insensitive matching and should be allowed on the same sheet.
+    state
+        .rename_sheet(&sheet1_id, "STRASSE".to_string())
+        .expect("expected rename to unicode case-folding expansion to succeed");
+    let workbook = state.get_workbook().expect("workbook loaded");
+    let sheet1 = workbook.sheet(&sheet1_id).expect("sheet exists");
+    assert_eq!(sheet1.name, "STRASSE");
+}
+
+#[test]
 fn rename_sheet_rejects_duplicate_name_with_unicode_case_folding() {
     let mut workbook = Workbook::new_empty(None);
     workbook.add_sheet("é".to_string());

@@ -1110,6 +1110,27 @@ mod tests {
     }
 
     #[test]
+    fn python_rpc_rename_sheet_allows_unicode_case_folding_expansion_on_same_sheet() {
+        let mut workbook = crate::file_io::Workbook::new_empty(None);
+        workbook.add_sheet("straße".to_string());
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let mut host = PythonRpcHost::new(&mut state, None).expect("host should init");
+        let res = host
+            .handle_rpc(
+                "rename_sheet",
+                Some(json!({ "sheet_id": "straße", "name": "STRASSE" })),
+            )
+            .expect("expected rename_sheet to succeed");
+        assert_eq!(res, JsonValue::Null);
+
+        let workbook = host.state.get_workbook().expect("workbook should exist");
+        let sheet = workbook.sheet("straße").expect("sheet should exist");
+        assert_eq!(sheet.name, "STRASSE");
+    }
+
+    #[test]
     fn python_rpc_rename_sheet_rejects_invalid_character_with_canonical_error() {
         let mut workbook = crate::file_io::Workbook::new_empty(None);
         workbook.add_sheet("Sheet1".to_string());
