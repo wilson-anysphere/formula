@@ -290,7 +290,8 @@ From a **packaging / round-trip** perspective, the important thing is the relati
 1. `xl/workbook.xml` (via `xl/_rels/workbook.xml.rels`) contains a relationship that targets `cellimages.xml`:
    - The relationship **Type URI is a Microsoft extension** and has been observed to vary across Excel builds.
    - **Detection strategy**: treat any relationship whose `Target` resolves to `/xl/cellimages.xml` as authoritative, rather than hardcoding a single `Type` URI.
-2. `xl/cellimages.xml.rels` contains relationships of type `…/relationships/image` pointing at `xl/media/*` files.
+2. `xl/_rels/cellimages.xml.rels` contains relationships of type `…/relationships/image` pointing at `xl/media/*` files.
+   - The relationship `Id` values (e.g. `rId1`) are referenced from within `xl/cellimages.xml` via `r:embed`, so they must be preserved (or updated consistently if rewriting).
 
 #### `[Content_Types].xml` requirements
 
@@ -306,7 +307,7 @@ Excel uses a **Microsoft-specific** content type string for this part (the exact
 
 #### Relationship type URIs
 
-- `xl/cellimages.xml.rels` → `xl/media/*`:
+- `xl/_rels/cellimages.xml.rels` → `xl/media/*`:
   - **High confidence**: `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"`
 - `xl/workbook.xml.rels` → `xl/cellimages.xml`:
   - **Microsoft extension** (variable). Prefer detection by `Target`/part name.
