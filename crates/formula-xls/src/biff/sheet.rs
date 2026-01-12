@@ -218,8 +218,7 @@ pub(crate) struct SheetHyperlinks {
 // combinations depending on link type.
 const HLINK_FLAG_HAS_MONIKER: u32 = 0x0000_0001;
 const HLINK_FLAG_HAS_LOCATION: u32 = 0x0000_0008;
-// Some writers set two bits when a display string is present; treat 0x14 as "has display".
-const HLINK_FLAG_HAS_DISPLAY: u32 = 0x0000_0014;
+const HLINK_FLAG_HAS_DISPLAY: u32 = 0x0000_0010;
 const HLINK_FLAG_HAS_TOOLTIP: u32 = 0x0000_0020;
 const HLINK_FLAG_HAS_TARGET_FRAME: u32 = 0x0000_0080;
 
@@ -254,9 +253,12 @@ pub(crate) fn parse_biff_sheet_hyperlinks(
     for record in iter {
         let record = match record {
             Ok(record) => record,
-            // Best-effort: stop scanning on malformed record boundaries, but keep any successfully
-            // decoded hyperlinks.
-            Err(_) => break,
+            Err(err) => {
+                // Best-effort: stop scanning on malformed record boundaries, but keep any
+                // successfully decoded hyperlinks and surface a warning.
+                out.warnings.push(format!("malformed BIFF record: {err}"));
+                break;
+            }
         };
 
         // BOF indicates the start of a new substream; stop before consuming the next section so we

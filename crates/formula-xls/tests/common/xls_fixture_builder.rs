@@ -688,7 +688,7 @@ fn hlink_internal_location(
     // ref8 (8) + guid (16) + streamVersion (4) + linkOpts (4) + variable data.
     const STREAM_VERSION: u32 = 2;
     const LINK_OPTS_HAS_LOCATION: u32 = 0x0000_0008;
-    const LINK_OPTS_HAS_DISPLAY: u32 = 0x0000_0014;
+    const LINK_OPTS_HAS_DISPLAY: u32 = 0x0000_0010;
     const LINK_OPTS_HAS_TOOLTIP: u32 = 0x0000_0020;
 
     let link_opts = LINK_OPTS_HAS_LOCATION | LINK_OPTS_HAS_DISPLAY | LINK_OPTS_HAS_TOOLTIP;
@@ -724,7 +724,7 @@ fn hlink_external_url(
     // ref8 (8) + guid (16) + streamVersion (4) + linkOpts (4) + variable data.
     const STREAM_VERSION: u32 = 2;
     const LINK_OPTS_HAS_MONIKER: u32 = 0x0000_0001;
-    const LINK_OPTS_HAS_DISPLAY: u32 = 0x0000_0014;
+    const LINK_OPTS_HAS_DISPLAY: u32 = 0x0000_0010;
     const LINK_OPTS_HAS_TOOLTIP: u32 = 0x0000_0020;
 
     // URL moniker CLSID: 79EAC9E0-BAF9-11CE-8C82-00AA004BA90B (COM GUID little-endian fields).
