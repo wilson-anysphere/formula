@@ -184,6 +184,26 @@ FORMULA_NODE_TEST_CONCURRENCY=4 pnpm test:node
 # (or: NODE_TEST_CONCURRENCY=4)
 ```
 
+### Vitest: run single files without accidentally running the full suite
+
+When debugging a specific Vitest file, **avoid** passing a bare `--` before the
+file path (Vitest treats a literal `--` as a pattern and will end up running the
+entire suite).
+
+Prefer:
+
+```bash
+# Run a single Vitest file (no `--` delimiter)
+pnpm test:vitest apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts
+```
+
+Or run Vitest directly:
+
+```bash
+# Skip the WASM build in Vitest global setup (often unnecessary for unit tests)
+FORMULA_SKIP_WASM_BUILD=1 node_modules/.bin/vitest run apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts
+```
+
 
 ### Adaptive Parallelism Script
 
