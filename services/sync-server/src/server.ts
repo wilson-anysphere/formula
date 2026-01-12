@@ -129,8 +129,11 @@ function sendUpgradeRejection(
     body,
   ].join("\r\n");
 
-  socket.write(headers);
-  socket.destroy();
+  try {
+    socket.end(headers);
+  } catch {
+    socket.destroy();
+  }
 }
 
 function sendJson(
