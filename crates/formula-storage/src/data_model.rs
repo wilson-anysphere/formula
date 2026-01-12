@@ -405,8 +405,8 @@ pub(crate) fn load_data_model(
         Ok((
             row.get::<_, i64>(0)?,
             row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, i64>(3)?,
+            row.get::<_, Option<String>>(2).ok().flatten(),
+            row.get::<_, Option<i64>>(3).ok().flatten(),
         ))
     })?;
 
@@ -414,13 +414,10 @@ pub(crate) fn load_data_model(
         let Ok((table_id, table_name, schema_json, row_count)) = table_row else {
             continue;
         };
-        let Ok(row_count) = usize::try_from(row_count) else {
-            continue;
-        };
-        let schema: TableSchemaV1 = match serde_json::from_str(&schema_json) {
-            Ok(schema) => schema,
-            Err(_) => continue,
-        };
+        let row_count = row_count.and_then(|count| usize::try_from(count).ok()).unwrap_or(0);
+        let schema = schema_json
+            .as_deref()
+            .and_then(|raw| serde_json::from_str::<TableSchemaV1>(raw).ok());
         // `page_size_rows` is persisted as part of the table schema so we can map a row index to
         // its encoded chunk (`chunk_idx = row / page_size_rows`). If this value is corrupted (e.g.
         // `0` or mismatched with the persisted chunks), downstream accessors in `formula-columnar`
@@ -428,8 +425,11 @@ pub(crate) fn load_data_model(
         //
         // Prefer inferring a usable page size from the persisted chunks (best-effort), falling
         // back to the schema value when no chunks are available.
-        let mut page_size_rows = schema.page_size_rows;
-        let cache_max_entries = schema.cache_max_entries;
+        let mut page_size_rows = schema.as_ref().map(|s| s.page_size_rows).unwrap_or(0);
+        let cache_max_entries = schema
+            .as_ref()
+            .map(|s| s.cache_max_entries)
+            .unwrap_or(formula_columnar::PageCacheConfig::default().max_entries);
 
         let mut col_stmt = conn.prepare(
             r#"
@@ -453,23 +453,21 @@ pub(crate) fn load_data_model(
             Ok((
                 row.get::<_, i64>(0)?,
                 row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, Option<Vec<u8>>>(5)?,
+                row.get::<_, Option<String>>(2).ok().flatten(),
+                row.get::<_, Option<String>>(4).ok().flatten(),
+                row.get::<_, Option<Vec<u8>>>(5).ok().flatten(),
             ))
         })?;
 
         for col_row in cols {
-            let Ok((
-                column_id,
-                name,
-                column_type_raw,
-                _encoding_json,
-                stats_json,
-                dictionary_blob,
-            )) = col_row
+            let Ok((column_id, name, column_type_raw, stats_json, dictionary_blob)) = col_row
             else {
+                continue;
+            };
+            let Some(column_type_raw) = column_type_raw else {
+                continue;
+            };
+            let Some(stats_json) = stats_json else {
                 continue;
             };
             let column_type: ColumnTypeV1 = match serde_json::from_str(&column_type_raw) {
