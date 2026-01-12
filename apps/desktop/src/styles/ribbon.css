@@ -1,0 +1,213 @@
+/*
+  Ribbon UI (Excel-style)
+  - Colors are sourced exclusively from tokens.css.
+  - Keep selectors scoped to `.ribbon` to avoid leaking styles into the app.
+*/
+
+.ribbon {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  user-select: none;
+}
+
+.ribbon__tabs {
+  display: flex;
+  align-items: stretch;
+  height: 28px;
+  padding: 0 6px;
+  gap: 2px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.ribbon__tab {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 0 10px;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  flex: 0 0 auto;
+  line-height: 28px;
+  border-radius: 4px 4px 0 0;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease);
+}
+
+.ribbon__tab:hover {
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+}
+
+.ribbon__tab.is-active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  background: transparent;
+}
+
+.ribbon__tab.ribbon__tab--file {
+  background: var(--accent);
+  color: var(--text-on-accent);
+  border-bottom-color: transparent;
+  border-radius: 4px;
+  padding: 0 12px;
+}
+
+.ribbon__tab.ribbon__tab--file:hover {
+  background: var(--accent);
+  filter: brightness(1.05);
+}
+
+.ribbon__content {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  padding: 6px 8px;
+  min-height: 76px;
+  background: var(--bg-secondary);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.ribbon-group {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-right: 12px;
+  border-right: 1px solid var(--border);
+}
+
+.ribbon-group:last-child {
+  border-right: none;
+  padding-right: 0;
+}
+
+.ribbon-group__content {
+  display: grid;
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+  grid-auto-flow: column;
+  grid-auto-columns: max-content;
+  gap: 2px 6px;
+  align-items: start;
+}
+
+.ribbon-group__label {
+  font-size: 10px;
+  color: var(--text-secondary);
+  opacity: 0.9;
+  text-align: center;
+}
+
+.ribbon-button {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-primary);
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  cursor: pointer;
+  min-height: 24px;
+  font-family: inherit;
+  line-height: 1.1;
+  white-space: nowrap;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease);
+}
+
+.ribbon-button:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+  border-color: var(--border);
+}
+
+.ribbon-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ribbon-button:focus-visible {
+  outline: 2px solid var(--selection-border);
+  outline-offset: 1px;
+}
+
+.ribbon-button.is-pressed {
+  background: var(--selection-bg);
+  border-color: var(--selection-border);
+}
+
+.ribbon-button__icon {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  flex: 0 0 auto;
+}
+
+.ribbon-button__label {
+  display: inline-flex;
+  align-items: center;
+}
+
+.ribbon-button__caret {
+  font-size: 10px;
+  color: var(--text-secondary);
+  margin-left: 2px;
+}
+
+/* Sizes */
+
+.ribbon-button--large {
+  grid-row: span 3;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 8px;
+  min-width: 66px;
+  gap: 6px;
+}
+
+.ribbon-button--large .ribbon-button__icon {
+  width: 24px;
+  height: 24px;
+  font-size: 18px;
+}
+
+.ribbon-button--large .ribbon-button__label {
+  text-align: center;
+  font-size: 10px;
+  color: var(--text-primary);
+  white-space: normal;
+}
+
+.ribbon-button--small {
+  justify-content: flex-start;
+  padding-right: 8px;
+}
+
+.ribbon-button--icon {
+  width: 28px;
+  padding: 0;
+}
+
+.ribbon-button--icon .ribbon-button__label {
+  display: none;
+}
+

@@ -1,0 +1,692 @@
+export type RibbonButtonKind = "button" | "toggle" | "dropdown";
+export type RibbonButtonSize = "large" | "small" | "icon";
+
+export interface RibbonButtonDefinition {
+  /**
+   * Stable command identifier (used for wiring actions).
+   *
+   * Convention: `{tab}.{group}.{command}` (e.g. `home.clipboard.paste`).
+   */
+  id: string;
+  label: string;
+  ariaLabel: string;
+  /**
+   * Small text glyph used as a placeholder until a real icon system exists.
+   */
+  icon?: string;
+  kind?: RibbonButtonKind;
+  size?: RibbonButtonSize;
+  /**
+   * Optional E2E hook.
+   */
+  testId?: string;
+  /**
+   * Initial pressed state for toggle buttons (purely UI; can be replaced with
+   * app-driven state later).
+   */
+  defaultPressed?: boolean;
+  disabled?: boolean;
+}
+
+export interface RibbonGroupDefinition {
+  id: string;
+  label: string;
+  buttons: RibbonButtonDefinition[];
+}
+
+export interface RibbonTabDefinition {
+  id: string;
+  label: string;
+  groups: RibbonGroupDefinition[];
+  /**
+   * File tab is typically styled as a primary pill and may later open a
+   * backstage view.
+   */
+  isFile?: boolean;
+}
+
+export interface RibbonSchema {
+  tabs: RibbonTabDefinition[];
+}
+
+export interface RibbonActions {
+  /**
+   * Called for any command-like activation (including dropdown buttons).
+   */
+  onCommand?: (commandId: string) => void;
+  /**
+   * Called when a toggle button changes state.
+   */
+  onToggle?: (commandId: string, pressed: boolean) => void;
+  /**
+   * Called when a tab is selected.
+   */
+  onTabChange?: (tabId: string) => void;
+}
+
+export const defaultRibbonSchema: RibbonSchema = {
+  tabs: [
+    {
+      id: "file",
+      label: "File",
+      isFile: true,
+      groups: [
+        {
+          id: "file.info",
+          label: "Info",
+          buttons: [
+            { id: "file.info.protectWorkbook", label: "Protect Workbook", ariaLabel: "Protect Workbook", icon: "🔒", kind: "dropdown", size: "large" },
+            { id: "file.info.inspectWorkbook", label: "Inspect Workbook", ariaLabel: "Inspect Workbook", icon: "🔍", kind: "dropdown" },
+            { id: "file.info.manageWorkbook", label: "Manage Workbook", ariaLabel: "Manage Workbook", icon: "🗂", kind: "dropdown" },
+          ],
+        },
+        {
+          id: "file.open",
+          label: "Open",
+          buttons: [
+            { id: "file.open.open", label: "Open", ariaLabel: "Open", icon: "📂", size: "large" },
+            { id: "file.open.recent", label: "Recent", ariaLabel: "Recent", icon: "🕘", kind: "dropdown" },
+            { id: "file.open.pinned", label: "Pinned", ariaLabel: "Pinned", icon: "📌", kind: "dropdown" },
+          ],
+        },
+        {
+          id: "file.save",
+          label: "Save",
+          buttons: [
+            { id: "file.save.save", label: "Save", ariaLabel: "Save", icon: "💾", size: "large", testId: "ribbon-save" },
+            { id: "file.save.saveAs", label: "Save As", ariaLabel: "Save As", icon: "📝", kind: "dropdown" },
+            { id: "file.save.autoSave", label: "AutoSave", ariaLabel: "AutoSave", icon: "⏱", kind: "toggle", defaultPressed: false },
+          ],
+        },
+        {
+          id: "file.export",
+          label: "Export",
+          buttons: [
+            { id: "file.export.export", label: "Export", ariaLabel: "Export", icon: "📤", kind: "dropdown", size: "large" },
+            { id: "file.export.createPdf", label: "Create PDF/XPS", ariaLabel: "Create PDF or XPS", icon: "📄" },
+            { id: "file.export.changeFileType", label: "Change File Type", ariaLabel: "Change File Type", icon: "🔁", kind: "dropdown" },
+          ],
+        },
+        {
+          id: "file.print",
+          label: "Print",
+          buttons: [
+            { id: "file.print.print", label: "Print", ariaLabel: "Print", icon: "🖨", size: "large", testId: "ribbon-print" },
+            { id: "file.print.printPreview", label: "Print Preview", ariaLabel: "Print Preview", icon: "👁" },
+            { id: "file.print.pageSetup", label: "Page Setup", ariaLabel: "Page Setup", icon: "📐", kind: "dropdown" },
+          ],
+        },
+        {
+          id: "file.share",
+          label: "Share",
+          buttons: [
+            { id: "file.share.share", label: "Share", ariaLabel: "Share", icon: "🔗", size: "large" },
+            { id: "file.share.email", label: "Email", ariaLabel: "Email", icon: "✉️", kind: "dropdown" },
+            { id: "file.share.presentOnline", label: "Present Online", ariaLabel: "Present Online", icon: "🌐" },
+          ],
+        },
+        {
+          id: "file.options",
+          label: "Options",
+          buttons: [
+            { id: "file.options.options", label: "Options", ariaLabel: "Options", icon: "⚙️", size: "large" },
+            { id: "file.options.account", label: "Account", ariaLabel: "Account", icon: "👤" },
+            { id: "file.options.close", label: "Close", ariaLabel: "Close", icon: "❌", testId: "ribbon-close" },
+          ],
+        },
+      ],
+    },
+    {
+      id: "home",
+      label: "Home",
+      groups: [
+        {
+          id: "home.clipboard",
+          label: "Clipboard",
+          buttons: [
+            { id: "home.clipboard.paste", label: "Paste", ariaLabel: "Paste", icon: "📋", kind: "dropdown", size: "large", testId: "ribbon-paste" },
+            { id: "home.clipboard.cut", label: "Cut", ariaLabel: "Cut", icon: "✂️", size: "icon" },
+            { id: "home.clipboard.copy", label: "Copy", ariaLabel: "Copy", icon: "📄", size: "icon" },
+            { id: "home.clipboard.formatPainter", label: "Format Painter", ariaLabel: "Format Painter", icon: "🖌", size: "small" },
+          ],
+        },
+        {
+          id: "home.font",
+          label: "Font",
+          buttons: [
+            { id: "home.font.fontName", label: "Font", ariaLabel: "Font", icon: "A", kind: "dropdown", size: "small" },
+            { id: "home.font.fontSize", label: "Size", ariaLabel: "Font Size", icon: "↕", kind: "dropdown", size: "small" },
+            { id: "home.font.increaseFont", label: "Grow Font", ariaLabel: "Increase Font Size", icon: "A+", size: "icon" },
+            { id: "home.font.decreaseFont", label: "Shrink Font", ariaLabel: "Decrease Font Size", icon: "A-", size: "icon" },
+            { id: "home.font.bold", label: "Bold", ariaLabel: "Bold", icon: "B", kind: "toggle", size: "icon" },
+            { id: "home.font.italic", label: "Italic", ariaLabel: "Italic", icon: "I", kind: "toggle", size: "icon" },
+            { id: "home.font.underline", label: "Underline", ariaLabel: "Underline", icon: "U", kind: "toggle", size: "icon" },
+            { id: "home.font.borders", label: "Borders", ariaLabel: "Borders", icon: "▦", kind: "dropdown", size: "icon" },
+            { id: "home.font.fillColor", label: "Fill", ariaLabel: "Fill Color", icon: "🪣", kind: "dropdown", size: "icon" },
+            { id: "home.font.fontColor", label: "Color", ariaLabel: "Font Color", icon: "🎨", kind: "dropdown", size: "icon" },
+          ],
+        },
+        {
+          id: "home.alignment",
+          label: "Alignment",
+          buttons: [
+            { id: "home.alignment.topAlign", label: "Top", ariaLabel: "Top Align", icon: "⬆", size: "icon" },
+            { id: "home.alignment.middleAlign", label: "Middle", ariaLabel: "Middle Align", icon: "↕", size: "icon" },
+            { id: "home.alignment.bottomAlign", label: "Bottom", ariaLabel: "Bottom Align", icon: "⬇", size: "icon" },
+            { id: "home.alignment.alignLeft", label: "Left", ariaLabel: "Align Left", icon: "⬅", size: "icon" },
+            { id: "home.alignment.center", label: "Center", ariaLabel: "Center", icon: "↔", size: "icon" },
+            { id: "home.alignment.alignRight", label: "Right", ariaLabel: "Align Right", icon: "➡", size: "icon" },
+            { id: "home.alignment.orientation", label: "Orientation", ariaLabel: "Orientation", icon: "↻", kind: "dropdown", size: "icon" },
+            { id: "home.alignment.wrapText", label: "Wrap Text", ariaLabel: "Wrap Text", icon: "↩", kind: "toggle", size: "small" },
+            { id: "home.alignment.mergeCenter", label: "Merge & Center", ariaLabel: "Merge and Center", icon: "⊞", kind: "dropdown", size: "small" },
+            { id: "home.alignment.increaseIndent", label: "Indent", ariaLabel: "Increase Indent", icon: "⇥", size: "icon" },
+            { id: "home.alignment.decreaseIndent", label: "Outdent", ariaLabel: "Decrease Indent", icon: "⇤", size: "icon" },
+          ],
+        },
+        {
+          id: "home.number",
+          label: "Number",
+          buttons: [
+            { id: "home.number.numberFormat", label: "General", ariaLabel: "Number Format", icon: "123", kind: "dropdown", size: "small" },
+            { id: "home.number.accounting", label: "Accounting", ariaLabel: "Accounting Number Format", icon: "$", kind: "dropdown", size: "icon" },
+            { id: "home.number.percent", label: "Percent", ariaLabel: "Percent Style", icon: "%", size: "icon" },
+            { id: "home.number.comma", label: "Comma", ariaLabel: "Comma Style", icon: ",", size: "icon" },
+            { id: "home.number.increaseDecimal", label: "Inc Decimal", ariaLabel: "Increase Decimal", icon: ".0→", size: "icon" },
+            { id: "home.number.decreaseDecimal", label: "Dec Decimal", ariaLabel: "Decrease Decimal", icon: "←.0", size: "icon" },
+          ],
+        },
+        {
+          id: "home.styles",
+          label: "Styles",
+          buttons: [
+            {
+              id: "home.styles.conditionalFormatting",
+              label: "Conditional Formatting",
+              ariaLabel: "Conditional Formatting",
+              icon: "📊",
+              kind: "dropdown",
+              size: "large",
+            },
+            { id: "home.styles.formatAsTable", label: "Format as Table", ariaLabel: "Format as Table", icon: "📋", kind: "dropdown", size: "large" },
+            { id: "home.styles.cellStyles", label: "Cell Styles", ariaLabel: "Cell Styles", icon: "🎨", kind: "dropdown", size: "large" },
+          ],
+        },
+        {
+          id: "home.cells",
+          label: "Cells",
+          buttons: [
+            { id: "home.cells.insert", label: "Insert", ariaLabel: "Insert Cells", icon: "⊕", kind: "dropdown" },
+            { id: "home.cells.delete", label: "Delete", ariaLabel: "Delete Cells", icon: "⊖", kind: "dropdown" },
+            { id: "home.cells.format", label: "Format", ariaLabel: "Format Cells", icon: "⊡", kind: "dropdown" },
+          ],
+        },
+        {
+          id: "home.editing",
+          label: "Editing",
+          buttons: [
+            { id: "home.editing.autoSum", label: "AutoSum", ariaLabel: "AutoSum", icon: "Σ", kind: "dropdown" },
+            { id: "home.editing.fill", label: "Fill", ariaLabel: "Fill", icon: "↓", kind: "dropdown" },
+            { id: "home.editing.clear", label: "Clear", ariaLabel: "Clear", icon: "⌫", kind: "dropdown" },
+            { id: "home.editing.sortFilter", label: "Sort & Filter", ariaLabel: "Sort and Filter", icon: "⇅", kind: "dropdown" },
+            { id: "home.editing.findSelect", label: "Find & Select", ariaLabel: "Find and Select", icon: "⌕", kind: "dropdown" },
+          ],
+        },
+      ],
+    },
+    {
+      id: "insert",
+      label: "Insert",
+      groups: [
+        {
+          id: "insert.tables",
+          label: "Tables",
+          buttons: [
+            { id: "insert.tables.pivotTable", label: "PivotTable", ariaLabel: "PivotTable", icon: "📊", kind: "dropdown", size: "large" },
+            { id: "insert.tables.recommendedPivotTables", label: "Recommended PivotTables", ariaLabel: "Recommended PivotTables", icon: "✨", kind: "dropdown" },
+            { id: "insert.tables.table", label: "Table", ariaLabel: "Table", icon: "▦", size: "large" },
+          ],
+        },
+        {
+          id: "insert.illustrations",
+          label: "Illustrations",
+          buttons: [
+            { id: "insert.illustrations.pictures", label: "Pictures", ariaLabel: "Pictures", icon: "🖼", kind: "dropdown" },
+            { id: "insert.illustrations.onlinePictures", label: "Online Pictures", ariaLabel: "Online Pictures", icon: "🌐", kind: "dropdown" },
+            { id: "insert.illustrations.shapes", label: "Shapes", ariaLabel: "Shapes", icon: "⬛", kind: "dropdown" },
+            { id: "insert.illustrations.icons", label: "Icons", ariaLabel: "Icons", icon: "⭐", kind: "dropdown" },
+            { id: "insert.illustrations.smartArt", label: "SmartArt", ariaLabel: "SmartArt", icon: "🧩", kind: "dropdown" },
+            { id: "insert.illustrations.screenshot", label: "Screenshot", ariaLabel: "Screenshot", icon: "📸", kind: "dropdown" },
+          ],
+        },
+        {
+          id: "insert.addins",
+          label: "Add-ins",
+          buttons: [
+            { id: "insert.addins.getAddins", label: "Get Add-ins", ariaLabel: "Get Add-ins", icon: "➕", kind: "dropdown" },
+            { id: "insert.addins.myAddins", label: "My Add-ins", ariaLabel: "My Add-ins", icon: "🧩", kind: "dropdown" },
+          ],
+        },
+        {
+          id: "insert.charts",
+          label: "Charts",
+          buttons: [
+            { id: "insert.charts.recommendedCharts", label: "Recommended Charts", ariaLabel: "Recommended Charts", icon: "✨", kind: "dropdown", size: "large" },
+            { id: "insert.charts.column", label: "Column", ariaLabel: "Insert Column or Bar Chart", icon: "▮▮", kind: "dropdown" },
+            { id: "insert.charts.line", label: "Line", ariaLabel: "Insert Line or Area Chart", icon: "📈", kind: "dropdown" },
+            { id: "insert.charts.pie", label: "Pie", ariaLabel: "Insert Pie or Doughnut Chart", icon: "◔", kind: "dropdown" },
+            { id: "insert.charts.bar", label: "Bar", ariaLabel: "Insert Bar Chart", icon: "▭", kind: "dropdown" },
+            { id: "insert.charts.area", label: "Area", ariaLabel: "Insert Area Chart", icon: "⛰", kind: "dropdown" },
+            { id: "insert.charts.scatter", label: "Scatter", ariaLabel: "Insert Scatter (X, Y) Chart", icon: "⋯", kind: "dropdown" },
+            { id: "insert.charts.map", label: "Map", ariaLabel: "Insert Map Chart", icon: "🗺", kind: "dropdown" },
+            { id: "insert.charts.pivotChart", label: "PivotChart", ariaLabel: "PivotChart", icon: "📊", kind: "dropdown" },
+          ],
+        },
+        {
+          id: "insert.sparklines",
+          label: "Sparklines",
+          buttons: [
+            { id: "insert.sparklines.line", label: "Line", ariaLabel: "Insert Line Sparkline", icon: "╱", kind: "dropdown" },
+            { id: "insert.sparklines.column", label: "Column", ariaLabel: "Insert Column Sparkline", icon: "▮", kind: "dropdown" },
+            { id: "insert.sparklines.winLoss", label: "Win/Loss", ariaLabel: "Insert Win/Loss Sparkline", icon: "±", kind: "dropdown" },
+          ],
+        },
+        {
+          id: "insert.filters",
+          label: "Filters",
+          buttons: [
+            { id: "insert.filters.slicer", label: "Slicer", ariaLabel: "Insert Slicer", icon: "🔪", kind: "dropdown" },
+            { id: "insert.filters.timeline", label: "Timeline", ariaLabel: "Insert Timeline", icon: "🕒", kind: "dropdown" },
+          ],
+        },
+        {
+          id: "insert.links",
+          label: "Links",
+          buttons: [{ id: "insert.links.link", label: "Link", ariaLabel: "Insert Link", icon: "🔗", kind: "dropdown", size: "large" }],
+        },
+        {
+          id: "insert.text",
+          label: "Text",
+          buttons: [
+            { id: "insert.text.textBox", label: "Text Box", ariaLabel: "Insert Text Box", icon: "📝", kind: "dropdown" },
+            { id: "insert.text.headerFooter", label: "Header & Footer", ariaLabel: "Header and Footer", icon: "📄", kind: "dropdown" },
+            { id: "insert.text.wordArt", label: "WordArt", ariaLabel: "WordArt", icon: "𝒜", kind: "dropdown" },
+            { id: "insert.text.signatureLine", label: "Signature Line", ariaLabel: "Signature Line", icon: "✍️", kind: "dropdown" },
+            { id: "insert.text.object", label: "Object", ariaLabel: "Object", icon: "🧱", kind: "dropdown" },
+          ],
+        },
+        {
+          id: "insert.symbols",
+          label: "Symbols",
+          buttons: [
+            { id: "insert.symbols.equation", label: "Equation", ariaLabel: "Insert Equation", icon: "∑", kind: "dropdown" },
+            { id: "insert.symbols.symbol", label: "Symbol", ariaLabel: "Insert Symbol", icon: "Ω", kind: "dropdown" },
+          ],
+        },
+      ],
+    },
+    {
+      id: "pageLayout",
+      label: "Page Layout",
+      groups: [
+        {
+          id: "pageLayout.themes",
+          label: "Themes",
+          buttons: [
+            { id: "pageLayout.themes.themes", label: "Themes", ariaLabel: "Themes", icon: "🎛", kind: "dropdown", size: "large" },
+            { id: "pageLayout.themes.colors", label: "Colors", ariaLabel: "Colors", icon: "🎨", kind: "dropdown" },
+            { id: "pageLayout.themes.fonts", label: "Fonts", ariaLabel: "Fonts", icon: "🔤", kind: "dropdown" },
+            { id: "pageLayout.themes.effects", label: "Effects", ariaLabel: "Effects", icon: "✨", kind: "dropdown" },
+          ],
+        },
+        {
+          id: "pageLayout.pageSetup",
+          label: "Page Setup",
+          buttons: [
+            { id: "pageLayout.pageSetup.margins", label: "Margins", ariaLabel: "Margins", icon: "📏", kind: "dropdown" },
+            { id: "pageLayout.pageSetup.orientation", label: "Orientation", ariaLabel: "Orientation", icon: "↔", kind: "dropdown" },
+            { id: "pageLayout.pageSetup.size", label: "Size", ariaLabel: "Size", icon: "📄", kind: "dropdown" },
+            { id: "pageLayout.pageSetup.printArea", label: "Print Area", ariaLabel: "Print Area", icon: "🖨", kind: "dropdown" },
+            { id: "pageLayout.pageSetup.breaks", label: "Breaks", ariaLabel: "Breaks", icon: "⤶", kind: "dropdown" },
+            { id: "pageLayout.pageSetup.background", label: "Background", ariaLabel: "Background", icon: "🖼", kind: "dropdown" },
+            { id: "pageLayout.pageSetup.printTitles", label: "Print Titles", ariaLabel: "Print Titles", icon: "🏷", kind: "dropdown" },
+          ],
+        },
+        {
+          id: "pageLayout.scaleToFit",
+          label: "Scale to Fit",
+          buttons: [
+            { id: "pageLayout.scaleToFit.width", label: "Width", ariaLabel: "Width", icon: "↔", kind: "dropdown" },
+            { id: "pageLayout.scaleToFit.height", label: "Height", ariaLabel: "Height", icon: "↕", kind: "dropdown" },
+            { id: "pageLayout.scaleToFit.scale", label: "Scale", ariaLabel: "Scale", icon: "🔍", kind: "dropdown" },
+          ],
+        },
+        {
+          id: "pageLayout.sheetOptions",
+          label: "Sheet Options",
+          buttons: [
+            { id: "pageLayout.sheetOptions.gridlinesView", label: "Gridlines View", ariaLabel: "View Gridlines", icon: "▦", kind: "toggle", size: "small", defaultPressed: true },
+            { id: "pageLayout.sheetOptions.gridlinesPrint", label: "Gridlines Print", ariaLabel: "Print Gridlines", icon: "🖨", kind: "toggle", size: "small", defaultPressed: false },
+            { id: "pageLayout.sheetOptions.headingsView", label: "Headings View", ariaLabel: "View Headings", icon: "A1", kind: "toggle", size: "small", defaultPressed: true },
+            { id: "pageLayout.sheetOptions.headingsPrint", label: "Headings Print", ariaLabel: "Print Headings", icon: "🖨", kind: "toggle", size: "small", defaultPressed: false },
+          ],
+        },
+        {
+          id: "pageLayout.arrange",
+          label: "Arrange",
+          buttons: [
+            { id: "pageLayout.arrange.bringForward", label: "Bring Forward", ariaLabel: "Bring Forward", icon: "⬆", kind: "dropdown" },
+            { id: "pageLayout.arrange.sendBackward", label: "Send Backward", ariaLabel: "Send Backward", icon: "⬇", kind: "dropdown" },
+            { id: "pageLayout.arrange.selectionPane", label: "Selection Pane", ariaLabel: "Selection Pane", icon: "📋" },
+            { id: "pageLayout.arrange.align", label: "Align", ariaLabel: "Align", icon: "📐", kind: "dropdown" },
+            { id: "pageLayout.arrange.group", label: "Group", ariaLabel: "Group", icon: "🔗", kind: "dropdown" },
+            { id: "pageLayout.arrange.rotate", label: "Rotate", ariaLabel: "Rotate", icon: "↻", kind: "dropdown" },
+          ],
+        },
+      ],
+    },
+    {
+      id: "formulas",
+      label: "Formulas",
+      groups: [
+        {
+          id: "formulas.functionLibrary",
+          label: "Function Library",
+          buttons: [
+            { id: "formulas.functionLibrary.insertFunction", label: "Insert Function", ariaLabel: "Insert Function", icon: "fx", kind: "dropdown", size: "large" },
+            { id: "formulas.functionLibrary.autoSum", label: "AutoSum", ariaLabel: "AutoSum", icon: "Σ", kind: "dropdown" },
+            { id: "formulas.functionLibrary.recentlyUsed", label: "Recently Used", ariaLabel: "Recently Used", icon: "🕘", kind: "dropdown" },
+            { id: "formulas.functionLibrary.financial", label: "Financial", ariaLabel: "Financial", icon: "$", kind: "dropdown" },
+            { id: "formulas.functionLibrary.logical", label: "Logical", ariaLabel: "Logical", icon: "∧", kind: "dropdown" },
+            { id: "formulas.functionLibrary.text", label: "Text", ariaLabel: "Text", icon: "Aa", kind: "dropdown" },
+            { id: "formulas.functionLibrary.dateTime", label: "Date & Time", ariaLabel: "Date and Time", icon: "📅", kind: "dropdown" },
+            { id: "formulas.functionLibrary.lookupReference", label: "Lookup & Reference", ariaLabel: "Lookup and Reference", icon: "🔎", kind: "dropdown" },
+            { id: "formulas.functionLibrary.mathTrig", label: "Math & Trig", ariaLabel: "Math and Trig", icon: "π", kind: "dropdown" },
+            { id: "formulas.functionLibrary.moreFunctions", label: "More Functions", ariaLabel: "More Functions", icon: "➕", kind: "dropdown" },
+          ],
+        },
+        {
+          id: "formulas.definedNames",
+          label: "Defined Names",
+          buttons: [
+            { id: "formulas.definedNames.nameManager", label: "Name Manager", ariaLabel: "Name Manager", icon: "🏷", kind: "dropdown", size: "large" },
+            { id: "formulas.definedNames.defineName", label: "Define Name", ariaLabel: "Define Name", icon: "➕", kind: "dropdown" },
+            { id: "formulas.definedNames.useInFormula", label: "Use in Formula", ariaLabel: "Use in Formula", icon: "fx", kind: "dropdown" },
+            { id: "formulas.definedNames.createFromSelection", label: "Create from Selection", ariaLabel: "Create from Selection", icon: "▦", kind: "dropdown" },
+          ],
+        },
+        {
+          id: "formulas.formulaAuditing",
+          label: "Formula Auditing",
+          buttons: [
+            { id: "formulas.formulaAuditing.tracePrecedents", label: "Trace Precedents", ariaLabel: "Trace Precedents", icon: "⬅", size: "small" },
+            { id: "formulas.formulaAuditing.traceDependents", label: "Trace Dependents", ariaLabel: "Trace Dependents", icon: "➡", size: "small" },
+            { id: "formulas.formulaAuditing.removeArrows", label: "Remove Arrows", ariaLabel: "Remove Arrows", icon: "✖", kind: "dropdown", size: "small" },
+            { id: "formulas.formulaAuditing.showFormulas", label: "Show Formulas", ariaLabel: "Show Formulas", icon: "ƒx", kind: "toggle", size: "small" },
+            { id: "formulas.formulaAuditing.errorChecking", label: "Error Checking", ariaLabel: "Error Checking", icon: "⚠", kind: "dropdown", size: "small" },
+            { id: "formulas.formulaAuditing.evaluateFormula", label: "Evaluate Formula", ariaLabel: "Evaluate Formula", icon: "🧮", kind: "dropdown", size: "small" },
+            { id: "formulas.formulaAuditing.watchWindow", label: "Watch Window", ariaLabel: "Watch Window", icon: "👁", kind: "dropdown", size: "small" },
+          ],
+        },
+        {
+          id: "formulas.calculation",
+          label: "Calculation",
+          buttons: [
+            { id: "formulas.calculation.calculationOptions", label: "Calculation Options", ariaLabel: "Calculation Options", icon: "⚙️", kind: "dropdown", size: "large" },
+            { id: "formulas.calculation.calculateNow", label: "Calculate Now", ariaLabel: "Calculate Now", icon: "⟳", size: "small" },
+            { id: "formulas.calculation.calculateSheet", label: "Calculate Sheet", ariaLabel: "Calculate Sheet", icon: "⟲", size: "small" },
+          ],
+        },
+      ],
+    },
+    {
+      id: "data",
+      label: "Data",
+      groups: [
+        {
+          id: "data.getTransform",
+          label: "Get & Transform Data",
+          buttons: [
+            { id: "data.getTransform.getData", label: "Get Data", ariaLabel: "Get Data", icon: "⬇", kind: "dropdown", size: "large" },
+            { id: "data.getTransform.recentSources", label: "Recent Sources", ariaLabel: "Recent Sources", icon: "🕘", kind: "dropdown" },
+            { id: "data.getTransform.existingConnections", label: "Existing Connections", ariaLabel: "Existing Connections", icon: "🔗", kind: "dropdown" },
+          ],
+        },
+        {
+          id: "data.queriesConnections",
+          label: "Queries & Connections",
+          buttons: [
+            { id: "data.queriesConnections.refreshAll", label: "Refresh All", ariaLabel: "Refresh All", icon: "⟳", kind: "dropdown", size: "large" },
+            { id: "data.queriesConnections.queriesConnections", label: "Queries & Connections", ariaLabel: "Queries and Connections", icon: "🗂", kind: "toggle", defaultPressed: false },
+            { id: "data.queriesConnections.properties", label: "Properties", ariaLabel: "Properties", icon: "⚙️", kind: "dropdown" },
+          ],
+        },
+        {
+          id: "data.sortFilter",
+          label: "Sort & Filter",
+          buttons: [
+            { id: "data.sortFilter.sortAtoZ", label: "Sort A to Z", ariaLabel: "Sort A to Z", icon: "A→Z" },
+            { id: "data.sortFilter.sortZtoA", label: "Sort Z to A", ariaLabel: "Sort Z to A", icon: "Z→A" },
+            { id: "data.sortFilter.sort", label: "Sort", ariaLabel: "Sort", icon: "⇅", kind: "dropdown" },
+            { id: "data.sortFilter.filter", label: "Filter", ariaLabel: "Filter", icon: "⏷", kind: "toggle" },
+            { id: "data.sortFilter.clear", label: "Clear", ariaLabel: "Clear", icon: "✖" },
+            { id: "data.sortFilter.reapply", label: "Reapply", ariaLabel: "Reapply", icon: "⟳" },
+            { id: "data.sortFilter.advanced", label: "Advanced", ariaLabel: "Advanced", icon: "⚙️", kind: "dropdown" },
+          ],
+        },
+        {
+          id: "data.dataTools",
+          label: "Data Tools",
+          buttons: [
+            { id: "data.dataTools.textToColumns", label: "Text to Columns", ariaLabel: "Text to Columns", icon: "⇥", kind: "dropdown" },
+            { id: "data.dataTools.flashFill", label: "Flash Fill", ariaLabel: "Flash Fill", icon: "⚡" },
+            { id: "data.dataTools.removeDuplicates", label: "Remove Duplicates", ariaLabel: "Remove Duplicates", icon: "🗑", kind: "dropdown" },
+            { id: "data.dataTools.dataValidation", label: "Data Validation", ariaLabel: "Data Validation", icon: "✅", kind: "dropdown" },
+            { id: "data.dataTools.consolidate", label: "Consolidate", ariaLabel: "Consolidate", icon: "🧩", kind: "dropdown" },
+            { id: "data.dataTools.relationships", label: "Relationships", ariaLabel: "Relationships", icon: "🔗", kind: "dropdown" },
+            { id: "data.dataTools.manageDataModel", label: "Manage Data Model", ariaLabel: "Manage Data Model", icon: "🧠", kind: "dropdown" },
+          ],
+        },
+        {
+          id: "data.forecast",
+          label: "Forecast",
+          buttons: [
+            { id: "data.forecast.whatIfAnalysis", label: "What-If Analysis", ariaLabel: "What-If Analysis", icon: "❓", kind: "dropdown", size: "large" },
+            { id: "data.forecast.forecastSheet", label: "Forecast Sheet", ariaLabel: "Forecast Sheet", icon: "📈", kind: "dropdown" },
+          ],
+        },
+        {
+          id: "data.outline",
+          label: "Outline",
+          buttons: [
+            { id: "data.outline.group", label: "Group", ariaLabel: "Group", icon: "➕", kind: "dropdown" },
+            { id: "data.outline.ungroup", label: "Ungroup", ariaLabel: "Ungroup", icon: "➖", kind: "dropdown" },
+            { id: "data.outline.subtotal", label: "Subtotal", ariaLabel: "Subtotal", icon: "Σ", kind: "dropdown" },
+          ],
+        },
+      ],
+    },
+    {
+      id: "review",
+      label: "Review",
+      groups: [
+        {
+          id: "review.proofing",
+          label: "Proofing",
+          buttons: [
+            { id: "review.proofing.spelling", label: "Spelling", ariaLabel: "Spelling", icon: "✔", kind: "dropdown", size: "large" },
+            { id: "review.proofing.accessibility", label: "Check Accessibility", ariaLabel: "Check Accessibility", icon: "♿", kind: "dropdown" },
+            { id: "review.proofing.smartLookup", label: "Smart Lookup", ariaLabel: "Smart Lookup", icon: "🔎", kind: "dropdown" },
+          ],
+        },
+        {
+          id: "review.comments",
+          label: "Comments",
+          buttons: [
+            { id: "review.comments.newComment", label: "New Comment", ariaLabel: "New Comment", icon: "💬", size: "large" },
+            { id: "review.comments.deleteComment", label: "Delete", ariaLabel: "Delete Comment", icon: "🗑", kind: "dropdown" },
+            { id: "review.comments.previous", label: "Previous", ariaLabel: "Previous Comment", icon: "⬆" },
+            { id: "review.comments.next", label: "Next", ariaLabel: "Next Comment", icon: "⬇" },
+            { id: "review.comments.showComments", label: "Show Comments", ariaLabel: "Show Comments", icon: "👁", kind: "toggle" },
+          ],
+        },
+        {
+          id: "review.notes",
+          label: "Notes",
+          buttons: [
+            { id: "review.notes.newNote", label: "New Note", ariaLabel: "New Note", icon: "🗒", kind: "dropdown", size: "large" },
+            { id: "review.notes.showAllNotes", label: "Show All Notes", ariaLabel: "Show All Notes", icon: "👁", kind: "toggle" },
+            { id: "review.notes.showHideNote", label: "Show/Hide Note", ariaLabel: "Show or Hide Note", icon: "🙈", kind: "toggle" },
+          ],
+        },
+        {
+          id: "review.protect",
+          label: "Protect",
+          buttons: [
+            { id: "review.protect.protectSheet", label: "Protect Sheet", ariaLabel: "Protect Sheet", icon: "🔒", kind: "dropdown", size: "large" },
+            { id: "review.protect.protectWorkbook", label: "Protect Workbook", ariaLabel: "Protect Workbook", icon: "🧰", kind: "dropdown" },
+            { id: "review.protect.allowEditRanges", label: "Allow Edit Ranges", ariaLabel: "Allow Edit Ranges", icon: "✅", kind: "dropdown" },
+          ],
+        },
+        {
+          id: "review.ink",
+          label: "Ink",
+          buttons: [
+            { id: "review.ink.startInking", label: "Start Inking", ariaLabel: "Start Inking", icon: "✒️", kind: "toggle", size: "large" },
+          ],
+        },
+        {
+          id: "review.language",
+          label: "Language",
+          buttons: [
+            { id: "review.language.translate", label: "Translate", ariaLabel: "Translate", icon: "🌐", kind: "dropdown" },
+            { id: "review.language.language", label: "Language", ariaLabel: "Language", icon: "🈯", kind: "dropdown" },
+          ],
+        },
+      ],
+    },
+    {
+      id: "view",
+      label: "View",
+      groups: [
+        {
+          id: "view.workbookViews",
+          label: "Workbook Views",
+          buttons: [
+            { id: "view.workbookViews.normal", label: "Normal", ariaLabel: "Normal View", icon: "▦", kind: "toggle", defaultPressed: true, size: "large" },
+            { id: "view.workbookViews.pageBreakPreview", label: "Page Break Preview", ariaLabel: "Page Break Preview", icon: "⤶", kind: "toggle", size: "large" },
+            { id: "view.workbookViews.pageLayout", label: "Page Layout", ariaLabel: "Page Layout View", icon: "📄", kind: "toggle", size: "large" },
+            { id: "view.workbookViews.customViews", label: "Custom Views", ariaLabel: "Custom Views", icon: "👁", kind: "dropdown" },
+          ],
+        },
+        {
+          id: "view.show",
+          label: "Show",
+          buttons: [
+            { id: "view.show.ruler", label: "Ruler", ariaLabel: "Ruler", icon: "📏", kind: "toggle", defaultPressed: false },
+            { id: "view.show.gridlines", label: "Gridlines", ariaLabel: "Gridlines", icon: "▦", kind: "toggle", defaultPressed: true },
+            { id: "view.show.formulaBar", label: "Formula Bar", ariaLabel: "Formula Bar", icon: "fx", kind: "toggle", defaultPressed: true },
+            { id: "view.show.headings", label: "Headings", ariaLabel: "Headings", icon: "A1", kind: "toggle", defaultPressed: true },
+          ],
+        },
+        {
+          id: "view.zoom",
+          label: "Zoom",
+          buttons: [
+            { id: "view.zoom.zoom", label: "Zoom", ariaLabel: "Zoom", icon: "🔍", kind: "dropdown", size: "large" },
+            { id: "view.zoom.zoom100", label: "100%", ariaLabel: "Zoom to 100%", icon: "100%" },
+            { id: "view.zoom.zoomToSelection", label: "Zoom to Selection", ariaLabel: "Zoom to Selection", icon: "🎯" },
+          ],
+        },
+        {
+          id: "view.window",
+          label: "Window",
+          buttons: [
+            { id: "view.window.newWindow", label: "New Window", ariaLabel: "New Window", icon: "🪟", kind: "dropdown", size: "large" },
+            { id: "view.window.arrangeAll", label: "Arrange All", ariaLabel: "Arrange All", icon: "🗔", kind: "dropdown" },
+            { id: "view.window.freezePanes", label: "Freeze Panes", ariaLabel: "Freeze Panes", icon: "❄️", kind: "dropdown" },
+            { id: "view.window.split", label: "Split", ariaLabel: "Split", icon: "➗", kind: "toggle" },
+            { id: "view.window.hide", label: "Hide", ariaLabel: "Hide", icon: "🙈" },
+            { id: "view.window.unhide", label: "Unhide", ariaLabel: "Unhide", icon: "👁" },
+            { id: "view.window.viewSideBySide", label: "View Side by Side", ariaLabel: "View Side by Side", icon: "⧉", kind: "toggle" },
+            { id: "view.window.synchronousScrolling", label: "Synchronous Scrolling", ariaLabel: "Synchronous Scrolling", icon: "⇵", kind: "toggle" },
+            { id: "view.window.resetWindowPosition", label: "Reset Window Position", ariaLabel: "Reset Window Position", icon: "↺" },
+            { id: "view.window.switchWindows", label: "Switch Windows", ariaLabel: "Switch Windows", icon: "🔁", kind: "dropdown" },
+          ],
+        },
+        {
+          id: "view.macros",
+          label: "Macros",
+          buttons: [
+            { id: "view.macros.viewMacros", label: "View Macros", ariaLabel: "View Macros", icon: "📜", kind: "dropdown", size: "large" },
+            { id: "view.macros.recordMacro", label: "Record Macro", ariaLabel: "Record Macro", icon: "⏺", kind: "dropdown" },
+            { id: "view.macros.useRelativeReferences", label: "Use Relative References", ariaLabel: "Use Relative References", icon: "📍", kind: "toggle" },
+          ],
+        },
+      ],
+    },
+    {
+      id: "developer",
+      label: "Developer",
+      groups: [
+        {
+          id: "developer.code",
+          label: "Code",
+          buttons: [
+            { id: "developer.code.visualBasic", label: "Visual Basic", ariaLabel: "Visual Basic", icon: "VB", size: "large" },
+            { id: "developer.code.macros", label: "Macros", ariaLabel: "Macros", icon: "📜", kind: "dropdown", size: "large" },
+            { id: "developer.code.recordMacro", label: "Record Macro", ariaLabel: "Record Macro", icon: "⏺", kind: "dropdown" },
+            { id: "developer.code.useRelativeReferences", label: "Use Relative References", ariaLabel: "Use Relative References", icon: "📍", kind: "toggle" },
+            { id: "developer.code.macroSecurity", label: "Macro Security", ariaLabel: "Macro Security", icon: "🔒", kind: "dropdown" },
+          ],
+        },
+        {
+          id: "developer.addins",
+          label: "Add-ins",
+          buttons: [
+            { id: "developer.addins.addins", label: "Add-ins", ariaLabel: "Add-ins", icon: "🧩", kind: "dropdown", size: "large" },
+            { id: "developer.addins.comAddins", label: "COM Add-ins", ariaLabel: "COM Add-ins", icon: "🔌", kind: "dropdown" },
+          ],
+        },
+        {
+          id: "developer.controls",
+          label: "Controls",
+          buttons: [
+            { id: "developer.controls.insert", label: "Insert", ariaLabel: "Insert Control", icon: "➕", kind: "dropdown", size: "large" },
+            { id: "developer.controls.designMode", label: "Design Mode", ariaLabel: "Design Mode", icon: "🎛", kind: "toggle" },
+            { id: "developer.controls.properties", label: "Properties", ariaLabel: "Properties", icon: "⚙️", kind: "dropdown" },
+            { id: "developer.controls.viewCode", label: "View Code", ariaLabel: "View Code", icon: "</>" },
+            { id: "developer.controls.runDialog", label: "Run Dialog", ariaLabel: "Run Dialog", icon: "▶" },
+          ],
+        },
+        {
+          id: "developer.xml",
+          label: "XML",
+          buttons: [
+            { id: "developer.xml.source", label: "Source", ariaLabel: "XML Source", icon: "XML", kind: "dropdown", size: "large" },
+            { id: "developer.xml.mapProperties", label: "Map Properties", ariaLabel: "Map Properties", icon: "🗺", kind: "dropdown" },
+            { id: "developer.xml.import", label: "Import", ariaLabel: "Import XML", icon: "⬇" },
+            { id: "developer.xml.export", label: "Export", ariaLabel: "Export XML", icon: "⬆" },
+            { id: "developer.xml.refreshData", label: "Refresh Data", ariaLabel: "Refresh Data", icon: "⟳" },
+          ],
+        },
+      ],
+    },
+    {
+      id: "help",
+      label: "Help",
+      groups: [
+        {
+          id: "help.support",
+          label: "Support",
+          buttons: [
+            { id: "help.support.help", label: "Help", ariaLabel: "Help", icon: "❓", kind: "dropdown", size: "large" },
+            { id: "help.support.training", label: "Training", ariaLabel: "Training", icon: "🎓", kind: "dropdown" },
+            { id: "help.support.contactSupport", label: "Contact Support", ariaLabel: "Contact Support", icon: "☎️", kind: "dropdown" },
+            { id: "help.support.feedback", label: "Feedback", ariaLabel: "Feedback", icon: "📝", kind: "dropdown" },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
