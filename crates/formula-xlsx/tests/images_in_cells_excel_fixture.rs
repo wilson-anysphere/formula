@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{Cursor, Read};
 
+use formula_model::CellRef;
 use formula_model::drawings::ImageId;
+use formula_xlsx::XlsxPackage;
 use roxmltree::Document;
 use zip::ZipArchive;
 
@@ -194,6 +196,30 @@ fn excel_images_in_cells_fixture_loads_images_and_metadata_mappings() {
                 map.keys().collect::<Vec<_>>()
             );
         }
+    }
+}
+
+#[test]
+fn excel_images_in_cells_fixture_extracts_embedded_cell_images() {
+    let pkg = XlsxPackage::from_bytes(FIXTURE).expect("open xlsx");
+    let images = pkg
+        .extract_embedded_cell_images()
+        .expect("extract embedded cell images");
+
+    // This fixture includes:
+    // - A1: a Place-in-Cell embedded image value
+    // - B1: an _xlfn.IMAGE(...) formula cell that is also wired to a rich value pointing at the
+    //       same embedded image payload (Excel's cached value representation).
+    for cell in ["A1", "B1"] {
+        let key = ("xl/worksheets/sheet1.xml".to_string(), CellRef::from_a1(cell).unwrap());
+        let img = images
+            .get(&key)
+            .unwrap_or_else(|| panic!("expected embedded image at Sheet1!{cell}"));
+        assert_eq!(img.image_part, "xl/media/image1.png");
+        assert_eq!(
+            img.image_bytes.as_slice(),
+            pkg.part("xl/media/image1.png").unwrap()
+        );
     }
 }
 
