@@ -6190,6 +6190,19 @@ mountRibbon(ribbonReactRoot, {
       }
     };
 
+    const focusScriptEditorPanel = () => {
+      requestAnimationFrame(() => {
+        const el =
+          document.querySelector<HTMLElement>('[data-testid="script-editor-code"]') ??
+          document.querySelector<HTMLElement>('[data-testid="script-editor-run"]');
+        try {
+          el?.focus();
+        } catch {
+          // Best-effort: ignore focus errors (e.g. element not focusable in headless environments).
+        }
+      });
+    };
+
     const openCustomZoomQuickPick = async (): Promise<void> => {
       if (!app.supportsZoom()) return;
       // Keep the custom zoom picker aligned with the shared-grid zoom clamp
@@ -6814,10 +6827,12 @@ mountRibbon(ribbonReactRoot, {
       case "view.macros.viewMacros.delete":
         if (commandId === "view.macros.viewMacros") pendingMacrosPanelFocus = "runner-select";
         if (commandId.endsWith(".run")) pendingMacrosPanelFocus = "runner-run";
+        if (commandId.endsWith(".delete")) pendingMacrosPanelFocus = "runner-select";
         openRibbonPanel(PanelIds.MACROS);
         // "Edit…" in Excel normally opens an editor; best-effort surface our Script Editor panel too.
         if (commandId.endsWith(".edit")) {
           openRibbonPanel(PanelIds.SCRIPT_EDITOR);
+          focusScriptEditorPanel();
         }
         return;
 
@@ -6845,6 +6860,7 @@ mountRibbon(ribbonReactRoot, {
         openRibbonPanel(PanelIds.MACROS);
         if (commandId.endsWith(".edit")) {
           openRibbonPanel(PanelIds.SCRIPT_EDITOR);
+          focusScriptEditorPanel();
         }
         return;
 
