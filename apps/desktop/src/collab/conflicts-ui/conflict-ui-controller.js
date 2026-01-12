@@ -89,8 +89,7 @@ export class ConflictUiController {
     dialog.appendChild(title);
 
     const body = document.createElement("div");
-    body.style.display = "flex";
-    body.style.gap = "16px";
+    body.className = "conflict-dialog__body";
 
     const left = this._renderConflictSide({
       testid: "conflict-local",
@@ -110,9 +109,7 @@ export class ConflictUiController {
     dialog.appendChild(body);
 
     const actions = document.createElement("div");
-    actions.style.display = "flex";
-    actions.style.gap = "8px";
-    actions.style.marginTop = "12px";
+    actions.className = "conflict-dialog__actions";
 
     actions.appendChild(
       this._button("Keep yours", "conflict-choose-local", () => {
@@ -208,11 +205,11 @@ export class ConflictUiController {
   _renderFormulaPanel(input) {
     const panel = document.createElement("div");
     panel.dataset.testid = input.testid;
-    panel.style.flex = "1";
+    panel.className = "conflict-dialog__panel";
 
     const label = document.createElement("div");
     label.textContent = input.label;
-    label.style.fontWeight = "bold";
+    label.className = "conflict-dialog__panel-label";
     panel.appendChild(label);
 
     const pre = document.createElement("pre");
@@ -237,11 +234,11 @@ export class ConflictUiController {
   _renderValuePanel(input) {
     const panel = document.createElement("div");
     panel.dataset.testid = input.testid;
-    panel.style.flex = "1";
+    panel.className = "conflict-dialog__panel";
 
     const label = document.createElement("div");
     label.textContent = input.label;
-    label.style.fontWeight = "bold";
+    label.className = "conflict-dialog__panel-label";
     panel.appendChild(label);
 
     const pre = document.createElement("pre");
@@ -261,7 +258,7 @@ export class ConflictUiController {
 
     const editor = document.createElement("div");
     editor.dataset.testid = "conflict-manual-editor";
-    editor.style.marginTop = "12px";
+    editor.className = "conflict-dialog__manual-editor";
 
     const textarea = document.createElement("textarea");
     textarea.rows = 4;

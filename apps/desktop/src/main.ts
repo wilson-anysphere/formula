@@ -13,6 +13,7 @@ import "./styles/auditing.css";
 import "./styles/format-cells-dialog.css";
 import "./styles/macros.css";
 import "./styles/context-menu.css";
+import "./styles/conflicts.css";
 
 import React from "react";
 import { createRoot } from "react-dom/client";

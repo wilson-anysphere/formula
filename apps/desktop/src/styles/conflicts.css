@@ -1,0 +1,31 @@
+/*
+  Minimal styling hooks for the desktop collaborative conflict UIs.
+
+  Token-based: no hardcoded colors outside `tokens.css`
+  (enforced by `apps/desktop/test/noHardcodedColors.test.js`).
+*/
+
+.conflict-dialog__body {
+  display: flex;
+  gap: 16px;
+}
+
+.conflict-dialog__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.conflict-dialog__panel {
+  flex: 1;
+  min-width: 0;
+}
+
+.conflict-dialog__panel-label {
+  font-weight: 700;
+}
+
+.conflict-dialog__manual-editor {
+  margin-top: 12px;
+}
+
