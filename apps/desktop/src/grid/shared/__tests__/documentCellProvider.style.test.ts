@@ -85,6 +85,44 @@ describe("DocumentCellProvider (shared grid) style mapping", () => {
     expect(style.wrapMode).toBe("word");
   });
 
+  it("prefers camelCase overrides when both snake_case + camelCase fields exist (imported style then user edits)", () => {
+    const doc = new DocumentController();
+    const sheetId = "Sheet1";
+
+    doc.setCellValue(sheetId, "A1", "Styled");
+    // Imported formula-model style (snake_case)
+    doc.setRangeFormat(sheetId, "A1", {
+      font: { size_100pt: 1200 },
+      alignment: { wrap_text: true }
+    });
+    // User edits via toolbar / dialogs (camelCase)
+    doc.setRangeFormat(sheetId, "A1", {
+      font: { size: 20 },
+      alignment: { wrapText: false }
+    });
+
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => sheetId,
+      headerRows: 1,
+      headerCols: 1,
+      rowCount: 10,
+      colCount: 10,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const cell = provider.getCell(1, 1);
+    expect(cell).not.toBeNull();
+
+    const style = (cell as any).style as any;
+    expect(style).toBeTruthy();
+    // 20pt -> 26.666...px @96DPI.
+    expect(style.fontSize).toBeCloseTo((20 * 96) / 72, 5);
+    // wrapText:false should override imported wrap_text:true.
+    expect(style.wrapMode).toBeUndefined();
+  });
+
   it("maps alignment.indent into grid CellStyle.textIndentPx", () => {
     const doc = new DocumentController();
     const sheetId = "Sheet1";

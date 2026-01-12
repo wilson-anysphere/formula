@@ -20,6 +20,10 @@ function isPlainObject(value: unknown): value is Record<string, any> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function hasOwn(obj: unknown, key: string): boolean {
+  return Boolean(obj) && Object.prototype.hasOwnProperty.call(obj as object, key);
+}
+
 function normalizeCssColor(value: unknown): string | null {
   return normalizeExcelColorToCss(value) ?? null;
 }
@@ -263,25 +267,35 @@ export class DocumentCellProvider implements CellProvider {
                 : null;
     if (fontName && fontName.trim() !== "") out.fontFamily = fontName;
 
-    const fontSize100Pt = typeof (font as any)?.size_100pt === "number" ? (font as any).size_100pt : null;
-    if (fontSize100Pt != null && Number.isFinite(fontSize100Pt)) {
-      // formula-model / XLSX import serializes font sizes in 1/100th of a point.
-      // Convert to CSS pixels assuming 96DPI.
-      const pt = fontSize100Pt / 100;
-      out.fontSize = (pt * 96) / 72;
+    let fontSizePx: number | null = null;
+    // Prefer the UI-style `font.size` (pt) when present so user edits override imported `size_100pt`.
+    if (font && hasOwn(font, "size")) {
+      const size = (font as any).size;
+      if (typeof size === "number" && Number.isFinite(size)) {
+        fontSizePx = (size * 96) / 72;
+      }
+      // If `size` exists but is not a finite number (e.g. explicitly cleared/null),
+      // treat that as an override and do not fall back to imported values.
+    } else if (font && hasOwn(font, "size_100pt")) {
+      const size100 = (font as any).size_100pt;
+      if (typeof size100 === "number" && Number.isFinite(size100)) {
+        // formula-model / XLSX import serializes font sizes in 1/100th of a point.
+        // Convert to CSS pixels assuming 96DPI.
+        const pt = size100 / 100;
+        fontSizePx = (pt * 96) / 72;
+      }
     } else {
       const fontSizePt =
-        typeof font?.size === "number"
-          ? font.size
-          : typeof (docStyle as any).fontSize === "number"
-            ? (docStyle as any).fontSize
-            : typeof (docStyle as any).font_size === "number"
-              ? (docStyle as any).font_size
-              : null;
+        typeof (docStyle as any).fontSize === "number"
+          ? (docStyle as any).fontSize
+          : typeof (docStyle as any).font_size === "number"
+            ? (docStyle as any).font_size
+            : null;
       if (fontSizePt != null && Number.isFinite(fontSizePt)) {
-        out.fontSize = (fontSizePt * 96) / 72;
+        fontSizePx = (fontSizePt * 96) / 72;
       }
     }
+    if (fontSizePx != null) out.fontSize = fontSizePx;
     const fontColor = normalizeCssColor(
       font?.color ??
         (docStyle as any).textColor ??
@@ -316,7 +330,12 @@ export class DocumentCellProvider implements CellProvider {
     }
     else if (horizontal === "right") out.textAlign = "end";
     // "general"/undefined: leave undefined so renderer can pick based on value type.
-    if (alignment?.wrapText === true || (alignment as any)?.wrap_text === true) out.wrapMode = "word";
+    const wrapRaw = hasOwn(alignment, "wrapText")
+      ? (alignment as any).wrapText
+      : hasOwn(alignment, "wrap_text")
+        ? (alignment as any).wrap_text
+        : undefined;
+    if (wrapRaw === true) out.wrapMode = "word";
 
     const indentRaw = (alignment as any)?.indent;
     const indentLevel =

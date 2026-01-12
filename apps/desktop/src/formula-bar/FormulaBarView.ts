@@ -1,7 +1,7 @@
 import { FormulaBarModel, type FormulaBarAiSuggestion } from "./FormulaBarModel.js";
 import { type RangeAddress } from "../spreadsheet/a1.js";
-import { toggleA1AbsoluteAtCursor, type FormulaReferenceRange } from "@formula/spreadsheet-frontend";
 import { parseSheetQualifiedA1Range } from "./parseSheetQualifiedA1Range.js";
+import { extractFormulaReferences, toggleA1AbsoluteAtCursor, type FormulaReferenceRange } from "@formula/spreadsheet-frontend";
 
 export interface FormulaBarViewCallbacks {
   onBeginEdit?: (activeCellAddress: string) => void;
@@ -354,10 +354,24 @@ export class FormulaBarView {
       const toggled = toggleA1AbsoluteAtCursor(prevText, cursorStart, cursorEnd);
       if (!toggled) return;
 
+      let nextCursorStart = toggled.cursorStart;
+      let nextCursorEnd = toggled.cursorEnd;
+
+      // Excel UX: when toggling absolute references at a caret within a reference token,
+      // select the full reference token so repeated F4 presses keep cycling the same token.
+      if (cursorStart === cursorEnd) {
+        const { references, activeIndex } = extractFormulaReferences(toggled.text, nextCursorStart, nextCursorEnd);
+        const active = activeIndex == null ? null : references[activeIndex] ?? null;
+        if (active) {
+          nextCursorStart = active.start;
+          nextCursorEnd = active.end;
+        }
+      }
+
       this.textarea.value = toggled.text;
-      this.textarea.setSelectionRange(toggled.cursorStart, toggled.cursorEnd);
-      this.model.updateDraft(toggled.text, toggled.cursorStart, toggled.cursorEnd);
-      this.#selectedReferenceIndex = this.#inferSelectedReferenceIndex(toggled.cursorStart, toggled.cursorEnd);
+      this.textarea.setSelectionRange(nextCursorStart, nextCursorEnd);
+      this.model.updateDraft(toggled.text, nextCursorStart, nextCursorEnd);
+      this.#selectedReferenceIndex = this.#inferSelectedReferenceIndex(nextCursorStart, nextCursorEnd);
       this.#render({ preserveTextareaValue: true });
       this.#emitOverlays();
       return;
