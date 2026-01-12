@@ -215,3 +215,303 @@ test("BrowserExtensionHost: workbook.saveAs delegates to spreadsheetApi and emit
   });
 });
 
+test("BrowserExtensionHost: workbook.openWorkbook delegates to spreadsheetApi and emits workbookOpened", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  let openCalls = 0;
+  /** @type {string | null} */
+  let openedPath = null;
+  let active = { name: "Initial", path: "/tmp/initial.xlsx" };
+  const sheets = [{ id: "sheet1", name: "Sheet1" }];
+  const activeSheet = sheets[0];
+
+  /** @type {any} */
+  let apiResult;
+  /** @type {any} */
+  let workbookOpened;
+
+  /** @type {(value?: unknown) => void} */
+  let resolveDone;
+  const done = new Promise((resolve) => {
+    resolveDone = resolve;
+  });
+
+  const scenarios = [
+    {
+      onPostMessage(msg) {
+        if (msg?.type === "event" && msg.event === "workbookOpened") {
+          workbookOpened = msg.data;
+          return;
+        }
+        if (msg?.type === "api_result" && msg.id === "req1") {
+          apiResult = msg.result;
+          resolveDone();
+        }
+      },
+    },
+  ];
+
+  installFakeWorker(t, scenarios);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      listSheets() {
+        return sheets;
+      },
+      getActiveSheet() {
+        return activeSheet;
+      },
+      async getActiveWorkbook() {
+        return active;
+      },
+      async openWorkbook(pathArg) {
+        openCalls += 1;
+        openedPath = String(pathArg);
+        active = { name: "opened.xlsx", path: openedPath };
+      },
+    },
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.workbook-open";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "memory://workbook-open/",
+    mainUrl: "memory://workbook-open/main.mjs",
+    manifest: {
+      name: "workbook-open",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: ["workbook.manage"],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension?.worker);
+
+  extension.worker.emitMessage({
+    type: "api_call",
+    id: "req1",
+    namespace: "workbook",
+    method: "openWorkbook",
+    args: ["/tmp/opened.xlsx"],
+  });
+
+  await done;
+
+  assert.equal(openCalls, 1);
+  assert.equal(openedPath, "/tmp/opened.xlsx");
+
+  assert.deepEqual(apiResult, {
+    name: "opened.xlsx",
+    path: "/tmp/opened.xlsx",
+    sheets,
+    activeSheet,
+  });
+
+  assert.deepEqual(workbookOpened, {
+    workbook: {
+      name: "opened.xlsx",
+      path: "/tmp/opened.xlsx",
+      sheets,
+      activeSheet,
+    },
+  });
+});
+
+test("BrowserExtensionHost: workbook.close delegates to spreadsheetApi and emits workbookOpened", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  let closeCalls = 0;
+  const sheets = [{ id: "sheet1", name: "Sheet1" }];
+  const activeSheet = sheets[0];
+
+  /** @type {any} */
+  let workbookOpened;
+
+  /** @type {(value?: unknown) => void} */
+  let resolveDone;
+  const done = new Promise((resolve) => {
+    resolveDone = resolve;
+  });
+
+  const scenarios = [
+    {
+      onPostMessage(msg) {
+        if (msg?.type === "event" && msg.event === "workbookOpened") {
+          workbookOpened = msg.data;
+          return;
+        }
+        if (msg?.type === "api_result" && msg.id === "req1") {
+          resolveDone();
+        }
+      },
+    },
+  ];
+
+  installFakeWorker(t, scenarios);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      listSheets() {
+        return sheets;
+      },
+      getActiveSheet() {
+        return activeSheet;
+      },
+      async closeWorkbook() {
+        closeCalls += 1;
+      },
+    },
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.workbook-close";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "memory://workbook-close/",
+    mainUrl: "memory://workbook-close/main.mjs",
+    manifest: {
+      name: "workbook-close",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: ["workbook.manage"],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension?.worker);
+
+  extension.worker.emitMessage({
+    type: "api_call",
+    id: "req1",
+    namespace: "workbook",
+    method: "close",
+    args: [],
+  });
+
+  await done;
+
+  assert.equal(closeCalls, 1);
+
+  assert.deepEqual(workbookOpened, {
+    workbook: {
+      name: "MockWorkbook",
+      path: null,
+      sheets,
+      activeSheet,
+    },
+  });
+});
+
+test("BrowserExtensionHost: workbook.save delegates to spreadsheetApi and emits beforeSave", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  let saveCalls = 0;
+  const active = { name: "Book.xlsx", path: "/tmp/book.xlsx" };
+  const sheets = [{ id: "sheet1", name: "Sheet1" }];
+  const activeSheet = sheets[0];
+
+  /** @type {any} */
+  let beforeSave;
+
+  /** @type {(value?: unknown) => void} */
+  let resolveDone;
+  const done = new Promise((resolve) => {
+    resolveDone = resolve;
+  });
+
+  const scenarios = [
+    {
+      onPostMessage(msg) {
+        if (msg?.type === "event" && msg.event === "beforeSave") {
+          beforeSave = msg.data;
+          return;
+        }
+        if (msg?.type === "api_result" && msg.id === "req1") {
+          resolveDone();
+        }
+      },
+    },
+  ];
+
+  installFakeWorker(t, scenarios);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      listSheets() {
+        return sheets;
+      },
+      getActiveSheet() {
+        return activeSheet;
+      },
+      async getActiveWorkbook() {
+        return active;
+      },
+      async saveWorkbook() {
+        saveCalls += 1;
+      },
+    },
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.workbook-save";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "memory://workbook-save/",
+    mainUrl: "memory://workbook-save/main.mjs",
+    manifest: {
+      name: "workbook-save",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: ["workbook.manage"],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension?.worker);
+
+  extension.worker.emitMessage({
+    type: "api_call",
+    id: "req1",
+    namespace: "workbook",
+    method: "save",
+    args: [],
+  });
+
+  await done;
+
+  assert.equal(saveCalls, 1);
+  assert.deepEqual(beforeSave, {
+    workbook: {
+      name: active.name,
+      path: active.path,
+      sheets,
+      activeSheet,
+    },
+  });
+});
