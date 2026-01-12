@@ -2876,6 +2876,46 @@ fn bytecode_backend_financial_date_text_respects_value_locale() {
 }
 
 #[test]
+fn bytecode_backend_financial_date_text_respects_engine_date_system() {
+    let mut engine = Engine::new();
+    // Excel's 1900 date system can (optionally) emulate the Lotus 1-2-3 leap-year bug and accept
+    // the fictitious date 1900-02-29. Ensure financial functions' text date coercion respects the
+    // workbook date system.
+    let formula = r#"=DISC("1900-02-29","1900-03-01",97,100)"#;
+    engine.set_cell_formula("Sheet1", "A1", formula).unwrap();
+
+    // Ensure we're exercising the bytecode path.
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 1);
+    assert_eq!(stats.compiled, 1);
+    assert_eq!(stats.fallback, 0);
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+
+    let system = engine.date_system();
+    let settlement = ymd_to_serial(ExcelDate::new(1900, 2, 29), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(1900, 3, 1), system).unwrap();
+    let expected =
+        formula_engine::functions::financial::disc(settlement, maturity, 97.0, 100.0, 0, system)
+            .unwrap();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(expected));
+    assert_engine_matches_ast(&engine, formula, "A1");
+
+    // Flip date system after the formula has been compiled to ensure the runtime context is used.
+    engine.set_date_system(ExcelDateSystem::Excel1904);
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    // 1900-02-29 is not valid under the 1904 date system.
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_engine_matches_ast(&engine, formula, "A1");
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_odd_coupon_bond_functions() {
     let mut engine = Engine::new();
 
