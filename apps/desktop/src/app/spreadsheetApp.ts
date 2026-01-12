@@ -5526,6 +5526,11 @@ export class SpreadsheetApp {
       // overlays (charts, auditing, etc) after changes.
       this.refresh();
     }
+
+    // If the user is undoing/redoing comment edits before the provider has synced
+    // (and before the comments root observer is attached), refresh the comment
+    // indexes/panel eagerly so indicators and the sidebar stay in sync.
+    this.maybeRefreshCommentsUiForLocalEdit();
     return true;
   }
 
