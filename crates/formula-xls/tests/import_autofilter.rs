@@ -64,3 +64,20 @@ fn imports_autofilter_range_from_filterdatabase_defined_name_without_biff() {
     assert!(af.sort_state.is_none());
     assert!(af.raw_xml.is_empty());
 }
+
+#[test]
+fn imports_autofilter_range_from_workbook_scope_filterdatabase_name_via_externsheet() {
+    let bytes = xls_fixture_builder::build_autofilter_workbook_scope_externsheet_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("AutoFilter")
+        .expect("AutoFilter sheet missing");
+
+    let auto_filter = sheet.auto_filter.as_ref().expect("auto_filter missing");
+    assert_eq!(auto_filter.range, Range::from_a1("A1:C5").unwrap());
+    assert!(auto_filter.filter_columns.is_empty());
+    assert!(auto_filter.sort_state.is_none());
+    assert!(auto_filter.raw_xml.is_empty());
+}

@@ -727,6 +727,89 @@ pub fn build_rich_styles_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a single sheet named `AutoFilter` with a
+/// workbook-scoped `_xlnm._FilterDatabase` defined name.
+///
+/// Some `.xls` files in the wild store the FilterDatabase name with workbook scope (`itab==0`) and
+/// reference the target sheet via a 3D token (`PtgArea3d`) that requires `EXTERNSHEET` resolution.
+pub fn build_autofilter_workbook_scope_externsheet_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_autofilter_workbook_scope_externsheet_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+fn build_autofilter_workbook_scope_externsheet_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // XF table. Keep the usual 16 style XFs so BIFF consumers stay happy.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "AutoFilter");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    // Minimal EXTERNSHEET table with a single internal sheet entry.
+    push_record(&mut globals, RECORD_EXTERNSHEET, &externsheet_record(&[(0, 0)]));
+
+    // Workbook-scoped _FilterDatabase name: Sheet0!$A$1:$C$5 (hidden).
+    let filter_db_rgce = ptg_area3d(0, 0, 4, 0, 2);
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &builtin_name_record(true, 0, 0x0D, &filter_db_rgce),
+    );
+
+    push_record(&mut globals, RECORD_EOF, &[]);
+
+    let sheet_offset = globals.len();
+    let sheet = build_autofilter_workbook_scope_externsheet_sheet_stream();
+
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+
+    globals.extend_from_slice(&sheet);
+    globals
+}
+
+fn build_autofilter_workbook_scope_externsheet_sheet_stream() -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 5) cols [0, 3) (A..C), matching the AutoFilter range.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&5u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&3u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
 fn build_workbook_stream(date_1904: bool) -> Vec<u8> {
     // -- Globals -----------------------------------------------------------------
     let mut globals = Vec::<u8>::new();

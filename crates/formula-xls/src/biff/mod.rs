@@ -11,6 +11,7 @@
 use std::io::{Read, Seek};
 use std::path::Path;
 
+pub(crate) mod autofilter;
 pub(crate) mod globals;
 mod comments;
 pub(crate) mod defined_names;
@@ -22,6 +23,7 @@ pub(crate) mod supbook;
 pub(crate) mod strings;
 
 pub(crate) use comments::parse_biff_sheet_notes;
+pub(crate) use autofilter::{parse_biff_filter_database_ranges, ParsedFilterDatabaseRanges};
 pub(crate) use globals::{
     parse_biff_bound_sheets, parse_biff_codepage, parse_biff_workbook_globals, BoundSheetInfo,
 };

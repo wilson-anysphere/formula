@@ -300,6 +300,7 @@ fn import_xls_path_with_biff_reader(
     let mut row_col_props: Option<Vec<biff::SheetRowColProperties>> = None;
     let mut cell_xf_indices: Option<Vec<HashMap<CellRef, u16>>> = None;
     let mut cell_xf_parse_failed: Option<Vec<bool>> = None;
+    let mut filter_database_ranges: Option<HashMap<usize, Range>> = None;
 
     if let Some(workbook_stream) = workbook_stream.as_deref() {
         let detected_biff_version =
@@ -344,6 +345,33 @@ fn import_xls_path_with_biff_reader(
             Ok(sheets) => biff_sheets = Some(sheets),
             Err(err) => warnings.push(ImportWarning::new(format!(
                 "failed to import `.xls` sheet metadata: {err}"
+            ))),
+        }
+
+        // AutoFilter ranges are stored in a built-in workbook/worksheet defined name
+        // (`_FilterDatabase`). Excel files in the wild use both workbook-scope and local-scope
+        // definitions; decode them from the BIFF workbook globals stream.
+        let sheet_count_for_autofilter = biff_sheets.as_ref().map(|s| s.len());
+        match biff::parse_biff_filter_database_ranges(
+            workbook_stream,
+            detected_biff_version,
+            codepage,
+            sheet_count_for_autofilter,
+        ) {
+            Ok(parsed) => {
+                let biff::ParsedFilterDatabaseRanges {
+                    by_sheet,
+                    warnings: biff_warnings,
+                } = parsed;
+                if !by_sheet.is_empty() {
+                    filter_database_ranges = Some(by_sheet);
+                }
+                warnings.extend(biff_warnings.into_iter().map(|w| {
+                    ImportWarning::new(format!("failed to import `.xls` autofilter: {w}"))
+                }));
+            }
+            Err(err) => warnings.push(ImportWarning::new(format!(
+                "failed to import `.xls` autofilter ranges: {err}"
             ))),
         }
 
@@ -634,6 +662,21 @@ fn import_xls_path_with_biff_reader(
                 apply_row_col_properties(sheet, props);
                 apply_outline_properties(sheet, props);
             }
+
+            if sheet.auto_filter.is_none() {
+                if let Some(range) = filter_database_ranges
+                    .as_ref()
+                    .and_then(|ranges| ranges.get(&biff_idx))
+                    .copied()
+                {
+                    sheet.auto_filter = Some(SheetAutoFilter {
+                        range,
+                        filter_columns: Vec::new(),
+                        sort_state: None,
+                        raw_xml: Vec::new(),
+                    });
+                }
+            }
         }
 
         // Merged regions: prefer calamine's parsed merge metadata, but fall back to scanning the
@@ -710,7 +753,8 @@ fn import_xls_path_with_biff_reader(
                 };
 
                 let anchor = sheet.merged_regions.resolve_cell(cell_ref);
-                let Some((value, mut style_id)) = convert_value(value, sheet_date_time_styles) else {
+                let Some((value, mut style_id)) = convert_value(value, sheet_date_time_styles)
+                else {
                     continue;
                 };
 
@@ -729,11 +773,9 @@ fn import_xls_path_with_biff_reader(
 
         // Extract BIFF hyperlinks after merged regions have been populated so callers can resolve
         // anchors consistently with the model's merged-cell semantics.
-        if let (Some(workbook_stream), Some(codepage), Some(biff_idx)) = (
-            workbook_stream.as_deref(),
-            biff_codepage,
-            biff_idx,
-        ) {
+        if let (Some(workbook_stream), Some(codepage), Some(biff_idx)) =
+            (workbook_stream.as_deref(), biff_codepage, biff_idx)
+        {
             if let Some(sheet_info) = biff_sheets.as_ref().and_then(|s| s.get(biff_idx)) {
                 if sheet_info.offset >= workbook_stream.len() {
                     warnings.push(ImportWarning::new(format!(
