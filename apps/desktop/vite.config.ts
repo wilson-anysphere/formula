@@ -6,6 +6,7 @@ import { defineConfig } from "vite";
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 
 const extensionApiEntry = fileURLToPath(new URL("../../packages/extension-api/index.mjs", import.meta.url));
+const collabUndoEntry = fileURLToPath(new URL("../../packages/collab/undo/index.js", import.meta.url));
 const tauriConfigPath = fileURLToPath(new URL("./src-tauri/tauri.conf.json", import.meta.url));
 const tauriCsp = (JSON.parse(readFileSync(tauriConfigPath, "utf8")) as any)?.app?.security?.csp as unknown;
 const isE2E = process.env.FORMULA_E2E === "1";
@@ -68,7 +69,8 @@ export default defineConfig({
   plugins: [resolveJsToTs()],
   resolve: {
     alias: {
-      "@formula/extension-api": extensionApiEntry
+      "@formula/extension-api": extensionApiEntry,
+      "@formula/collab-undo": collabUndoEntry
     }
   },
   build: {
