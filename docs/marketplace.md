@@ -117,15 +117,12 @@ Downloads raw package bytes.
 - `X-Package-Sha256`: hex sha256 of the response body (**clients must verify**)
 - `X-Package-Signature`: base64 signature (detached for v1; for v2 this matches the in-package signature payload)
 - `X-Package-Scan-Status`: `pending|passed|failed|unknown` (may be used by clients to enforce install policy)
-- `X-Package-Files-Sha256`: sha256 of the server-side file inventory for the package version (used as an optional
-  cross-check against the client-verified file list)
+- `X-Package-Files-Sha256`: sha256 of the server-side file inventory for the package version (used as an optional cross-check
+  against the client-verified file list)
 - `X-Package-Format-Version`: `1` or `2`
-- `X-Package-Published-At`: publish timestamp for the package version
+- `X-Package-Published-At`: publish timestamp for the package version (optional)
 - `X-Publisher`: publisher id
 - `X-Publisher-Key-Id`: key id (sha256 fingerprint) identifying which publisher key signed this version
-- `X-Package-Scan-Status`: package scan status (e.g. `passed`, `pending`, `failed`, `unknown`)
-- `X-Package-Files-Sha256`: sha256 of the signed file inventory (defense-in-depth integrity metadata)
-- `X-Package-Published-At`: ISO timestamp when the version was published (optional)
 
 **Client integrity requirement**
 
