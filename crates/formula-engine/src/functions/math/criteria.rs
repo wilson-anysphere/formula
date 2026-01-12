@@ -171,7 +171,7 @@ impl Criteria {
         // Criteria functions never propagate errors from candidate cells. Errors only match
         // error criteria.
         match value {
-            Value::Error(_) | Value::Spill { .. } => {
+            Value::Error(_) | Value::Lambda(_) | Value::Spill { .. } => {
                 return matches_error_criteria(&self.op, &self.rhs, value);
             }
             _ => {}
@@ -203,6 +203,7 @@ fn matches_error_criteria(op: &CriteriaOp, rhs: &CriteriaRhs, value: &Value) -> 
 
     let candidate = match value {
         Value::Error(e) => Some(*e),
+        Value::Lambda(_) => Some(ErrorKind::Value),
         Value::Spill { .. } => Some(ErrorKind::Spill),
         _ => None,
     };

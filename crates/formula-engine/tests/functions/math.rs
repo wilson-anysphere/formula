@@ -78,6 +78,14 @@ fn count_counta_countblank() {
 }
 
 #[test]
+fn countif_treats_lambda_cells_like_errors() {
+    let mut sheet = TestSheet::new();
+    assert_number(&sheet.eval(r#"=COUNTIF({LAMBDA(x,x),1},"<>")"#), 1.0);
+    assert_number(&sheet.eval(r##"=COUNTIF({LAMBDA(x,x),1},"#VALUE!")"##), 1.0);
+    assert_number(&sheet.eval(r#"=SUMIF({LAMBDA(x,x),1},"<>",{10,20})"#), 20.0);
+}
+
+#[test]
 fn countif_reference_union_dedupes_overlaps() {
     let mut sheet = TestSheet::new();
     sheet.set("A2", 2.0);
