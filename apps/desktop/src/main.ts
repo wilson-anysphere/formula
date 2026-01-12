@@ -2184,14 +2184,13 @@ function installSheetStoreSubscription(): void {
 
 // Excel-like keyboard navigation: Ctrl/Cmd+PgUp/PgDn cycles through sheets.
 //
-// SpreadsheetApp has its own Ctrl+PgUp/PgDn handling, but it is based on
-// `DocumentController.getSheetIds()`, which does not reflect user-driven tab
-// reordering. Intercept the shortcut at the window level so we can use the
-// `WorkbookSheetStore` ordering instead.
+// This must follow the UI sheet store ordering + visibility (WorkbookSheetStore),
+// not `DocumentController.getSheetIds()`, because the DocumentController does not
+// track the user-visible tab order and can create sheets lazily.
 //
 // Note: we intentionally handle this in the capture phase so we can prevent
-// downstream handlers (including SpreadsheetApp + browser defaults) from also
-// consuming the shortcut.
+// downstream handlers (e.g. browser defaults / other listeners) from consuming
+// the shortcut before we can switch sheets.
 window.addEventListener(
   "keydown",
   (e) => {
