@@ -1,5 +1,6 @@
 use crate::commands::{
-    CellUpdate, PythonError, PythonPermissions, PythonRunContext, PythonRunResult, PythonSelection,
+    CellUpdate, PythonError, PythonFilesystemPermission, PythonNetworkPermission,
+    PythonPermissions, PythonRunContext, PythonRunResult, PythonSelection,
 };
 use crate::state::{AppState, AppStateError, CellUpdateData};
 use serde::Deserialize;
@@ -16,6 +17,21 @@ use std::time::Duration;
 
 const DEFAULT_TIMEOUT_MS: u64 = 5_000;
 const DEFAULT_MAX_MEMORY_BYTES: u64 = 256 * 1024 * 1024;
+const PYTHON_PERMISSION_ESCALATION_ERROR: &str =
+    "Python permission escalation is not supported yet";
+
+fn unsafe_python_permissions_enabled() -> bool {
+    // Escape hatch for local development only.
+    //
+    // Release builds should not permit enabling elevated filesystem/network access
+    // from the frontend since the native Python sandbox is not a hardened boundary.
+    if !cfg!(debug_assertions) {
+        return false;
+    }
+
+    let value = std::env::var("FORMULA_UNSAFE_PYTHON_PERMISSIONS").unwrap_or_default();
+    matches!(value.trim(), "1" | "true" | "TRUE" | "yes" | "YES")
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type")]
@@ -555,6 +571,12 @@ pub fn run_python_script(
     context: Option<PythonRunContext>,
 ) -> Result<PythonRunResult, String> {
     let permissions = permissions.unwrap_or_default();
+    if !unsafe_python_permissions_enabled()
+        && (permissions.filesystem != PythonFilesystemPermission::None
+            || permissions.network != PythonNetworkPermission::None)
+    {
+        return Err(PYTHON_PERMISSION_ESCALATION_ERROR.to_string());
+    }
     let timeout_ms = timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS);
     let max_memory_bytes = max_memory_bytes.unwrap_or(DEFAULT_MAX_MEMORY_BYTES);
 
