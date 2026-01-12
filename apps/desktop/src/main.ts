@@ -394,6 +394,8 @@ let rerenderLayout: (() => void) | null = null;
 let vbaEventMacros: ReturnType<typeof installVbaEventMacros> | null = null;
 let ribbonLayoutController: LayoutController | null = null;
 let activeMacroRecorder: MacroRecorder | null = null;
+type MacrosPanelFocusTarget = "runner-select" | "runner-run" | "runner-trust-center" | "recorder-start" | "recorder-stop";
+let pendingMacrosPanelFocus: MacrosPanelFocusTarget | null = null;
 let ensureExtensionsLoadedRef: (() => Promise<void>) | null = null;
 let syncContributedCommandsRef: (() => void) | null = null;
 let syncContributedPanelsRef: (() => void) | null = null;
@@ -4586,29 +4588,69 @@ if (
             }
            })();
  
-           const refreshRunner = () =>
-             renderMacroRunner(runnerPanel, backend, workbookId, {
-               onApplyUpdates: async (updates) => {
-                  if (vbaEventMacros) {
-                    await vbaEventMacros.applyMacroUpdates(updates, { label: "Run macro" });
-                    return;
-                  }
+           const focusMacrosPanelElement = (el: HTMLElement | null) => {
+             if (!el) return;
+             try {
+               el.focus();
+             } catch {
+               // Best-effort: ignore focus errors (e.g. element not focusable in a headless environment).
+             }
+           };
 
-                  const doc = app.getDocument();
-                  doc.beginBatch({ label: "Run macro" });
-                  let committed = false;
-                  try {
-                    applyMacroCellUpdates(doc, updates);
-                    committed = true;
-                  } finally {
-                    if (committed) doc.endBatch();
-                    else doc.cancelBatch();
-                  }
-                  app.refresh();
-                  await app.whenIdle();
-                  app.refresh();
-                },
-              });
+           const refreshRunner = async () => {
+             await renderMacroRunner(runnerPanel, backend, workbookId, {
+               onApplyUpdates: async (updates) => {
+                 if (vbaEventMacros) {
+                   await vbaEventMacros.applyMacroUpdates(updates, { label: "Run macro" });
+                   return;
+                 }
+
+                 const doc = app.getDocument();
+                 doc.beginBatch({ label: "Run macro" });
+                 let committed = false;
+                 try {
+                   applyMacroCellUpdates(doc, updates);
+                   committed = true;
+                 } finally {
+                   if (committed) doc.endBatch();
+                   else doc.cancelBatch();
+                 }
+                 app.refresh();
+                 await app.whenIdle();
+                 app.refresh();
+               },
+             });
+
+             const focusTarget = pendingMacrosPanelFocus;
+             if (!focusTarget) return;
+
+             if (focusTarget === "runner-select") {
+               focusMacrosPanelElement(runnerPanel.querySelector<HTMLElement>('[data-testid="macro-runner-select"]'));
+               pendingMacrosPanelFocus = null;
+               return;
+             }
+
+             if (focusTarget === "runner-run") {
+               const runButton = runnerPanel.querySelector<HTMLButtonElement>('[data-testid="macro-runner-run"]');
+               if (runButton && !runButton.disabled) {
+                 focusMacrosPanelElement(runButton);
+               } else {
+                 focusMacrosPanelElement(runnerPanel.querySelector<HTMLElement>('[data-testid="macro-runner-select"]'));
+               }
+               pendingMacrosPanelFocus = null;
+               return;
+             }
+
+             if (focusTarget === "runner-trust-center") {
+               const trustCenterButton = runnerPanel.querySelector<HTMLButtonElement>('[data-testid="macro-runner-trust-center"]');
+               if (trustCenterButton && !trustCenterButton.disabled) {
+                 focusMacrosPanelElement(trustCenterButton);
+               } else {
+                 focusMacrosPanelElement(runnerPanel.querySelector<HTMLElement>('[data-testid="macro-runner-select"]'));
+               }
+               pendingMacrosPanelFocus = null;
+             }
+           };
 
            const title = document.createElement("div");
            title.textContent = "Macro Recorder";
@@ -4623,15 +4665,25 @@ if (
           buttons.className = "macros-panel__buttons";
           recorderPanel.appendChild(buttons);
 
-          const startButton = document.createElement("button");
-          startButton.type = "button";
-          startButton.textContent = "Start Recording";
-          buttons.appendChild(startButton);
+	          const startButton = document.createElement("button");
+	          startButton.dataset["testid"] = "macros-recorder-start";
+	          startButton.type = "button";
+	          startButton.textContent = "Start Recording";
+	          buttons.appendChild(startButton);
 
-          const stopButton = document.createElement("button");
-          stopButton.type = "button";
-          stopButton.textContent = "Stop Recording";
-          buttons.appendChild(stopButton);
+	          const stopButton = document.createElement("button");
+	          stopButton.dataset["testid"] = "macros-recorder-stop";
+	          stopButton.type = "button";
+	          stopButton.textContent = "Stop Recording";
+	          buttons.appendChild(stopButton);
+
+	          if (pendingMacrosPanelFocus === "recorder-start") {
+	            focusMacrosPanelElement(startButton);
+	            pendingMacrosPanelFocus = null;
+	          } else if (pendingMacrosPanelFocus === "recorder-stop") {
+	            focusMacrosPanelElement(stopButton);
+	            pendingMacrosPanelFocus = null;
+	          }
 
           const copyTsButton = document.createElement("button");
           copyTsButton.type = "button";
@@ -6643,6 +6695,8 @@ mountRibbon(ribbonReactRoot, {
       case "view.macros.viewMacros.run":
       case "view.macros.viewMacros.edit":
       case "view.macros.viewMacros.delete":
+        if (commandId === "view.macros.viewMacros") pendingMacrosPanelFocus = "runner-select";
+        if (commandId.endsWith(".run")) pendingMacrosPanelFocus = "runner-run";
         openRibbonPanel(PanelIds.MACROS);
         // "Edit…" in Excel normally opens an editor; best-effort surface our Script Editor panel too.
         if (commandId.endsWith(".edit")) {
@@ -6651,10 +6705,12 @@ mountRibbon(ribbonReactRoot, {
         return;
 
       case "view.macros.recordMacro":
+        pendingMacrosPanelFocus = "recorder-stop";
         activeMacroRecorder?.start();
         openRibbonPanel(PanelIds.MACROS);
         return;
       case "view.macros.recordMacro.stop":
+        pendingMacrosPanelFocus = "recorder-start";
         activeMacroRecorder?.stop();
         openRibbonPanel(PanelIds.MACROS);
         return;
@@ -6667,6 +6723,8 @@ mountRibbon(ribbonReactRoot, {
       case "developer.code.macros":
       case "developer.code.macros.run":
       case "developer.code.macros.edit":
+        if (commandId === "developer.code.macros") pendingMacrosPanelFocus = "runner-select";
+        if (commandId.endsWith(".run")) pendingMacrosPanelFocus = "runner-run";
         openRibbonPanel(PanelIds.MACROS);
         if (commandId.endsWith(".edit")) {
           openRibbonPanel(PanelIds.SCRIPT_EDITOR);
@@ -6675,14 +6733,17 @@ mountRibbon(ribbonReactRoot, {
 
       case "developer.code.macroSecurity":
       case "developer.code.macroSecurity.trustCenter":
+        pendingMacrosPanelFocus = "runner-trust-center";
         openRibbonPanel(PanelIds.MACROS);
         return;
 
       case "developer.code.recordMacro":
+        pendingMacrosPanelFocus = "recorder-stop";
         activeMacroRecorder?.start();
         openRibbonPanel(PanelIds.MACROS);
         return;
       case "developer.code.recordMacro.stop":
+        pendingMacrosPanelFocus = "recorder-start";
         activeMacroRecorder?.stop();
         openRibbonPanel(PanelIds.MACROS);
         return;

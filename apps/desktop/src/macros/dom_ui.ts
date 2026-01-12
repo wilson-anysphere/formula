@@ -42,6 +42,7 @@ export async function renderMacroRunner(
   controls.className = "macros-runner__controls";
 
   const select = document.createElement("select");
+  select.dataset["testid"] = "macro-runner-select";
   select.className = "macros-runner__select";
   for (const macro of macros) {
     const opt = document.createElement("option");
@@ -51,11 +52,13 @@ export async function renderMacroRunner(
   }
 
   const trustButton = document.createElement("button");
+  trustButton.dataset["testid"] = "macro-runner-trust-center";
   trustButton.type = "button";
   trustButton.className = "macros-runner__button";
   trustButton.textContent = "Trust Center…";
 
   const runButton = document.createElement("button");
+  runButton.dataset["testid"] = "macro-runner-run";
   runButton.type = "button";
   runButton.className = "macros-runner__button";
   runButton.textContent = "Run";
