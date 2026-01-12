@@ -1387,7 +1387,6 @@ fn ensure_vba_project_rels_has_signature(
 
                 buf.clear();
             }
-
             if changed {
                 parts.insert(rels_name.to_string(), writer.into_inner());
             }
@@ -1753,6 +1752,64 @@ mod tests {
                 rel.id
             );
         }
+    }
+
+    #[test]
+    fn repairs_vba_project_rels_signature_relationship_patches_wrong_target() {
+        let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+</Types>"#;
+
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+        let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+
+        let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"></worksheet>"#;
+
+        // Relationship exists but has the wrong Target and unusual formatting.
+        let vba_project_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Target="sig.bin" Id="rId9" Type="http://schemas.microsoft.com/office/2006/relationships/vbaProjectSignature"/>
+</Relationships >"#;
+
+        let bytes = build_package(&[
+            ("[Content_Types].xml", content_types.as_bytes()),
+            ("xl/workbook.xml", workbook_xml.as_bytes()),
+            ("xl/_rels/workbook.xml.rels", workbook_rels.as_bytes()),
+            ("xl/worksheets/sheet1.xml", worksheet_xml.as_bytes()),
+            ("xl/vbaProject.bin", b"fake-vba-project"),
+            ("xl/vbaProjectSignature.bin", b"fake-signature"),
+            ("xl/_rels/vbaProject.bin.rels", vba_project_rels.as_bytes()),
+        ]);
+
+        let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+        let written = pkg.write_to_bytes().expect("write pkg");
+        let pkg2 = XlsxPackage::from_bytes(&written).expect("read pkg2");
+
+        let vba_rels_bytes = pkg2.part("xl/_rels/vbaProject.bin.rels").unwrap();
+        let rels = crate::openxml::parse_relationships(vba_rels_bytes).expect("parse vba rels");
+        let sig = rels
+            .iter()
+            .find(|rel| {
+                rel.type_uri
+                    == "http://schemas.microsoft.com/office/2006/relationships/vbaProjectSignature"
+            })
+            .expect("expected vbaProject.bin.rels to contain a signature relationship");
+        assert_eq!(sig.target, "vbaProjectSignature.bin");
+        assert_eq!(sig.id, "rId9");
     }
 
     #[test]
