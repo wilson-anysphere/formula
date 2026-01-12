@@ -138,9 +138,9 @@ export class DocumentBranchingWorkflow {
         const sheetMeta = {
           id: sheetId,
           // Before DocumentController tracked sheet metadata, BranchService owned sheet
-          // names. Once Task 201 lands, DocumentController becomes authoritative for
-          // sheet display names; feature-detect this to avoid clobbering existing
-          // sheet names on older docs.
+          // names. Now DocumentController is authoritative for display names; keep the
+          // feature-detection so older controller instances (or persisted branch histories)
+          // don't get their existing sheet names clobbered.
           name: supportsSheetMetadata ? (nextMeta?.name ?? sheetId) : sheetId,
           view: nextMeta?.view ? structuredClone(nextMeta.view) : { frozenRows: 0, frozenCols: 0 },
         };
@@ -154,8 +154,8 @@ export class DocumentBranchingWorkflow {
         merged.sheets.metaById[sheetId] = sheetMeta;
       } else {
         // DocumentController always owns per-sheet view state (e.g. frozen panes).
-        // Once sheet metadata is implemented (Task 201), it also becomes authoritative
-        // for display names.
+        // Sheet metadata is also owned by DocumentController, but keep the defensive
+        // feature-detection to support older docs/clients.
         const nextMeta = nextState.sheets.metaById[sheetId];
         if (supportsSheetMetadata && nextMeta?.name != null) {
           const existingName = merged.sheets.metaById[sheetId]?.name;

@@ -19,9 +19,10 @@ const MASKED_CELL_VALUE = "###";
 /**
  * Best-effort access to DocumentController sheet metadata.
  *
- * Task 201 added authoritative sheet metadata (order + display names) to
- * DocumentController. This adapter still feature-detects common access patterns
- * so it can tolerate older controller instances during gradual rollouts.
+ * DocumentController tracks authoritative sheet metadata (order + display names).
+ *
+ * This adapter still feature-detects common access patterns so it can tolerate older
+ * controller instances during gradual rollouts and while reading historical snapshots.
  *
  * @param {any} doc
  * @param {string} sheetId
@@ -30,7 +31,7 @@ const MASKED_CELL_VALUE = "###";
 function getDocumentControllerSheetMeta(doc, sheetId) {
   if (!doc || typeof doc !== "object") return null;
 
-  // Preferred API (post-Task 201).
+  // Preferred API.
   if (typeof doc.getSheetMeta === "function") {
     try {
       return doc.getSheetMeta(sheetId);
@@ -62,7 +63,7 @@ function getDocumentControllerSheetMeta(doc, sheetId) {
  * Read a field off an unknown sheet meta value.
  *
  * Supports both plain JS objects and Map-like objects (including Yjs maps)
- * during gradual rollouts of Task 201.
+ * during gradual rollouts / historical snapshot replay.
  *
  * @param {any} meta
  * @param {string} key
@@ -204,7 +205,7 @@ function parseRowColKey(key) {
  * @returns {DocumentState}
  */
 export function documentControllerToBranchState(doc) {
-  // Preserve the DocumentController's canonical sheet order (Task 201).
+  // Preserve the DocumentController's canonical sheet order (tab order).
   // Do not sort lexicographically, as that loses user-visible tab ordering.
   const sheetIds = doc.getSheetIds().slice();
   /** @type {Record<string, any>} */
@@ -435,7 +436,7 @@ export function documentControllerToBranchState(doc) {
     const rawTabColor = readSheetMetaField(sheetMeta, "tabColor");
     const rawTabColorLegacy = readSheetMetaField(sheetMeta, "tab_color");
     const supportsTabColor =
-      // Task 201+ DocumentController API
+      // DocumentController API
       typeof doc.setSheetTabColor === "function" ||
       // Fallback for alternate metadata shapes
       rawTabColor !== undefined ||
@@ -445,7 +446,7 @@ export function documentControllerToBranchState(doc) {
     // tab-color removals can be committed.
     if (sheetMeta && supportsTabColor) {
       // Collab schema uses an 8-digit ARGB string. Be tolerant of other shapes (e.g. `{ rgb }`)
-      // during Task 201 rollout.
+      // Be tolerant of legacy shapes / historical snapshots.
       let tabColor;
       if (rawTabColor !== undefined) tabColor = rawTabColor;
       else if (rawTabColorLegacy !== undefined) tabColor = rawTabColorLegacy;

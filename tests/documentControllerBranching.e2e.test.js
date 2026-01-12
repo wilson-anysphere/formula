@@ -80,7 +80,7 @@ test("DocumentController + BranchService: commitCurrentState preserves sheet ord
   doc.setCellValue("SheetB", "A1", 1);
   doc.setCellValue("SheetA", "A1", 2);
 
-  // Sheet metadata is now first-class in DocumentController (Task 201+).
+  // Sheet metadata is first-class in DocumentController (name/visibility/tabColor).
   doc.renameSheet("SheetA", "Alpha");
   doc.hideSheet("SheetA");
   doc.setSheetTabColor("SheetA", "ff00ff00");
