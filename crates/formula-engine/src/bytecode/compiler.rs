@@ -674,6 +674,107 @@ impl<'a> CompileCtx<'a> {
         }
     }
 
+    fn compile_choose(&mut self, args: &[Expr]) {
+        // CHOOSE(index, value1, [value2], ...)
+        //
+        // Excel evaluates CHOOSE lazily: only the selected branch is evaluated. This matches the
+        // AST evaluator behavior and avoids propagating errors from unselected branches (e.g.
+        // `CHOOSE(2, 1/0, 7)` => 7).
+        if args.len() < 2 {
+            self.push_error_const(ErrorKind::Value);
+            return;
+        }
+
+        // Evaluate the index expression once and normalize it to an integer by applying INT.
+        // (CHOOSE uses truncation; for the valid index domain (>= 1) INT's floor semantics match.)
+        self.compile_expr(&args[0]);
+        let int_idx = intern_func(self.program, Function::Int);
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::CallFunc, int_idx, 1));
+        let idx_local = self.alloc_temp_local("\u{0}CHOOSE_IDX");
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::StoreLocal, idx_local, 0));
+
+        // If the index is an error, return it without evaluating any branches.
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::LoadLocal, idx_local, 0));
+        let jump_not_error_idx = self.program.instrs.len();
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::JumpIfNotError, 0, 0));
+        // Error path: reload the error and jump to end.
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::LoadLocal, idx_local, 0));
+        let jump_error_end_idx = self.program.instrs.len();
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::Jump, 0, 0));
+
+        let cases_start = self.program.instrs.len() as u32;
+        self.program.instrs[jump_not_error_idx] =
+            Instruction::new(OpCode::JumpIfNotError, cases_start, 0);
+
+        let mut jump_if_idxs: Vec<usize> = Vec::new();
+        let mut jump_end_idxs: Vec<usize> = vec![jump_error_end_idx];
+
+        for (idx, expr) in args[1..].iter().enumerate() {
+            // Reload the index for each comparison after the first.
+            if idx != 0 {
+                self.program
+                    .instrs
+                    .push(Instruction::new(OpCode::LoadLocal, idx_local, 0));
+            }
+
+            // Compare `idx == (choice_index + 1)`.
+            let const_idx = self.program.consts.len() as u32;
+            self.program
+                .consts
+                .push(ConstValue::Value(Value::Number((idx + 1) as f64)));
+            self.program
+                .instrs
+                .push(Instruction::new(OpCode::PushConst, const_idx, 0));
+            self.program.instrs.push(Instruction::new(OpCode::Eq, 0, 0));
+
+            // Patched below: a=next_case_target, b=end_target (for error propagation).
+            let jump_idx = self.program.instrs.len();
+            self.program
+                .instrs
+                .push(Instruction::new(OpCode::JumpIfFalseOrError, 0, 0));
+
+            // Match branch: evaluate the selected expression and jump to end.
+            self.compile_expr(expr);
+            let jump_end_idx = self.program.instrs.len();
+            self.program
+                .instrs
+                .push(Instruction::new(OpCode::Jump, 0, 0));
+
+            let next_case_target = self.program.instrs.len() as u32;
+            self.program.instrs[jump_idx] =
+                Instruction::new(OpCode::JumpIfFalseOrError, next_case_target, 0);
+
+            jump_if_idxs.push(jump_idx);
+            jump_end_idxs.push(jump_end_idx);
+        }
+
+        // No match (including idx < 1 or idx > choices.len()): CHOOSE returns #VALUE!.
+        self.push_error_const(ErrorKind::Value);
+        let end_target = self.program.instrs.len() as u32;
+
+        // Patch error targets for comparisons (should be unreachable since the index is numeric,
+        // but preserves the same control-flow structure as SWITCH/IFS).
+        for idx in jump_if_idxs {
+            let a = self.program.instrs[idx].a();
+            self.program.instrs[idx] = Instruction::new(OpCode::JumpIfFalseOrError, a, end_target);
+        }
+        for idx in jump_end_idxs {
+            self.program.instrs[idx] = Instruction::new(OpCode::Jump, end_target, 0);
+        }
+    }
+
     fn compile_func_arg(&mut self, func: &Function, arg_idx: usize, arg: &Expr) {
         // Preserve `Missing` for *direct* blank arguments so functions can distinguish a
         // syntactically omitted argument from a blank cell value.
