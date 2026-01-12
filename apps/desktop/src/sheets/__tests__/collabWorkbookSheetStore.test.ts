@@ -30,14 +30,14 @@ describe("CollabWorkbookSheetStore", () => {
   it("extracts visibility + tabColor from the collab session and canonicalizes tabColor", () => {
     const session = makeSession([
       { id: "s1", name: "Sheet1", visibility: "hidden", tabColor: "ffff0000" },
-      { id: "s2", name: "Sheet2", tabColor: "not-a-color" },
+      { id: "s2", name: "Sheet2", tabColor: { rgb: "#00FF00" } },
       { id: "s3", name: "Sheet3", visibility: "veryHidden", tabColor: "#00FF00" },
     ]);
 
     const sheets = listSheetsFromCollabSession(session);
     expect(sheets.map((s) => [s.id, s.visibility, s.tabColor?.rgb ?? null])).toEqual([
       ["s1", "hidden", "FFFF0000"],
-      ["s2", "visible", null],
+      ["s2", "visible", "FF00FF00"],
       ["s3", "veryHidden", "FF00FF00"],
     ]);
   });

@@ -87,7 +87,13 @@ function coerceSheetVisibility(value: unknown): SheetVisibility | null {
  * string (uppercase), matching the @formula/collab-workbook schema.
  */
 function coerceTabColorArgb(value: unknown): string | null {
-  const raw = coerceCollabSheetField(value);
+  let raw = coerceCollabSheetField(value);
+  if (!raw && value && typeof value === "object") {
+    // Be tolerant of legacy/non-canonical shapes (e.g. `{ rgb: "FFFF0000" }`) that may
+    // show up in older snapshots or malformed remote writes.
+    const maybe: any = value;
+    raw = coerceCollabSheetField(maybe?.rgb ?? maybe?.argb);
+  }
   if (!raw) return null;
 
   let str = raw.trim();
