@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { SheetMeta, TabColor, WorkbookSheetStore } from "./workbookSheetStore";
+import { computeWorkbookSheetMoveIndex } from "./sheetReorder";
 
 type Props = {
   store: WorkbookSheetStore;
@@ -100,51 +101,38 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
   };
 
   const moveVisibleSheet = (sheetId: string, targetVisibleIndex: number) => {
-    // Preserve hidden sheets by only reordering visible slots.
     const all = store.listAll();
-    const visible = all.filter((s) => s.visibility === "visible").map((s) => s.id);
-    if (visible.length <= 1) return;
-    const fromIndex = visible.findIndex((id) => id === sheetId);
-    if (fromIndex < 0) return;
+    const visibleIds = all.filter((s) => s.visibility === "visible").map((s) => s.id);
+    if (visibleIds.length <= 1) return;
 
-    const rawTarget = Math.max(0, Math.min(Math.floor(targetVisibleIndex), visible.length));
-    const insertIndex = rawTarget > fromIndex ? rawTarget - 1 : rawTarget;
-    if (insertIndex === fromIndex) return;
+    const fromVisibleIndex = visibleIds.findIndex((id) => id === sheetId);
+    if (fromVisibleIndex < 0) return;
 
-    const nextVisible = visible.slice();
-    nextVisible.splice(fromIndex, 1);
-    nextVisible.splice(insertIndex, 0, sheetId);
+    // `targetVisibleIndex` is an insertion point in the visible tab strip (e.g.
+    // 0 = before first, visible.length = after last). Convert it into the final
+    // visible index after removing the dragged sheet, and early-return when the
+    // drop would be a visible no-op.
+    const rawTarget = Math.max(0, Math.min(Math.floor(targetVisibleIndex), visibleIds.length));
+    const insertVisibleIndex = rawTarget > fromVisibleIndex ? rawTarget - 1 : rawTarget;
+    if (insertVisibleIndex === fromVisibleIndex) return;
 
-    const desiredAll: string[] = [];
-    let v = 0;
-    for (const sheet of all) {
-      if (sheet.visibility !== "visible") {
-        desiredAll.push(sheet.id);
-        continue;
-      }
-      desiredAll.push(nextVisible[v] ?? sheet.id);
-      v += 1;
-    }
+    const dropTarget =
+      rawTarget >= visibleIds.length
+        ? ({ kind: "end" } as const)
+        : ({ kind: "before", targetSheetId: visibleIds[rawTarget]! } as const);
 
-    const currentIds = all.map((s) => s.id);
-    const moveInArray = (ids: string[], from: number, to: number) => {
-      const [item] = ids.splice(from, 1);
-      if (!item) return;
-      ids.splice(to, 0, item);
-    };
+    const toIndex = computeWorkbookSheetMoveIndex({
+      sheets: all,
+      fromSheetId: sheetId,
+      dropTarget,
+    });
+    if (toIndex == null) return;
 
-    for (let i = 0; i < desiredAll.length; i += 1) {
-      const desiredId = desiredAll[i];
-      if (!desiredId) continue;
-      if (currentIds[i] === desiredId) continue;
-      const from = currentIds.indexOf(desiredId);
-      if (from < 0) continue;
-      try {
-        store.move(desiredId, i);
-      } catch {
-        return;
-      }
-      moveInArray(currentIds, from, i);
+    try {
+      store.move(sheetId, toIndex);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      onError?.(message);
     }
   };
 
