@@ -433,9 +433,16 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
                                 .target_mode
                                 .as_deref()
                                 .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
-                    })
-                    .map(|rel| {
+                     })
+                     .map(|rel| {
                         let target = rel.target.split('#').next().unwrap_or(&rel.target);
+                        // Be resilient to invalid/unescaped Windows-style path separators.
+                        let target: std::borrow::Cow<'_, str> = if target.contains('\\') {
+                            std::borrow::Cow::Owned(target.replace('\\', "/"))
+                        } else {
+                            std::borrow::Cow::Borrowed(target)
+                        };
+                        let target = target.as_ref();
                         let target = target.strip_prefix("./").unwrap_or(target);
                         // Some producers emit `Target="media/image1.png"` (relative to `xl/`)
                         // rather than `Target="../media/image1.png"` (relative to `xl/richData/`).

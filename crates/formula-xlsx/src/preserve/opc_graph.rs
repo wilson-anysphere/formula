@@ -58,6 +58,13 @@ pub(crate) fn collect_transitive_related_parts(
             if target.is_empty() {
                 continue;
             }
+            // Be resilient to invalid/unescaped Windows-style path separators.
+            let target: std::borrow::Cow<'_, str> = if target.contains('\\') {
+                std::borrow::Cow::Owned(target.replace('\\', "/"))
+            } else {
+                std::borrow::Cow::Borrowed(target)
+            };
+            let target = target.as_ref();
             let target = target.strip_prefix("./").unwrap_or(target);
             let target_part = resolve_target(&part_name, target);
             if pkg.part(&target_part).is_some() {
@@ -173,6 +180,36 @@ mod tests {
             BTreeSet::from([
                 "xl/worksheets/sheet1.xml".to_string(),
                 "xl/worksheets/_rels/sheet1.xml.rels".to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn rich_data_media_relative_targets_with_backslashes_are_handled() {
+        // Some producers emit `Target="media\\image1.png"` (relative to `xl/`) instead of the more
+        // canonical `../media/image1.png` form. Ensure the preservation traversal still follows the
+        // relationship when the target uses backslashes.
+        let rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media\image1.png"/>
+</Relationships>"#;
+
+        let pkg = build_package(&[
+            ("xl/richData/richValueRel.xml", br#"<rvRel/>"#),
+            ("xl/richData/_rels/richValueRel.xml.rels", rels),
+            ("xl/media/image1.png", b"png-bytes"),
+        ]);
+
+        let parts =
+            collect_transitive_related_parts(&pkg, ["xl/richData/richValueRel.xml".to_string()])
+                .expect("traverse");
+
+        assert_eq!(
+            keys(parts),
+            BTreeSet::from([
+                "xl/media/image1.png".to_string(),
+                "xl/richData/richValueRel.xml".to_string(),
+                "xl/richData/_rels/richValueRel.xml.rels".to_string(),
             ])
         );
     }

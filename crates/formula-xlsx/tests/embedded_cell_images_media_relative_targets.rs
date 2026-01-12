@@ -55,6 +55,59 @@ fn embedded_cell_images_accept_media_targets_relative_to_xl() {
     assert_eq!(image.image_bytes, png_bytes);
 }
 
+#[test]
+fn embedded_cell_images_accept_media_targets_relative_to_xl_with_backslashes() {
+    // Same as `embedded_cell_images_accept_media_targets_relative_to_xl`, but the relationship
+    // target uses Windows-style separators (`media\\image1.png`).
+    let png_bytes = base64::engine::general_purpose::STANDARD
+        .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/58HAQUBAO3+2NoAAAAASUVORK5CYII=")
+        .expect("valid base64 png");
+
+    let mut workbook = rust_xlsxwriter::Workbook::new();
+    let worksheet = workbook.add_worksheet();
+    let image = rust_xlsxwriter::Image::new_from_buffer(&png_bytes).expect("image from buffer");
+    worksheet
+        .embed_image(0, 0, &image)
+        .expect("embed image into A1");
+
+    let bytes = workbook.save_to_buffer().expect("save workbook");
+    let bytes = rewrite_zip_part(&bytes, "xl/richData/_rels/richValueRel.xml.rels", |rels| {
+        let xml = std::str::from_utf8(rels).expect("rels xml utf-8");
+        let doc = roxmltree::Document::parse(xml).expect("parse rels xml");
+        let ns = "http://schemas.openxmlformats.org/package/2006/relationships";
+        let relationship = doc
+            .descendants()
+            .find(|n| {
+                n.has_tag_name((ns, "Relationship"))
+                    && n.attribute("Type")
+                        .is_some_and(|t| t.ends_with("/relationships/image"))
+            })
+            .expect("expected an image relationship");
+        let target = relationship
+            .attribute("Target")
+            .expect("expected image relationship Target attribute");
+        let patched = xml.replacen(target, "media\\image1.png", 1);
+        assert!(
+            patched.contains("media\\image1.png"),
+            "expected patched rels xml to contain media\\\\image1.png, got: {patched}"
+        );
+        patched.into_bytes()
+    });
+
+    let pkg = formula_xlsx::XlsxPackage::from_bytes(&bytes).expect("read package");
+    let images = pkg
+        .extract_embedded_cell_images()
+        .expect("extract embedded cell images");
+
+    let key = (
+        "xl/worksheets/sheet1.xml".to_string(),
+        formula_model::CellRef::from_a1("A1").unwrap(),
+    );
+    let image = images.get(&key).expect("expected embedded image at A1");
+    assert_eq!(image.image_part, "xl/media/image1.png");
+    assert_eq!(image.image_bytes, png_bytes);
+}
+
 fn rewrite_zip_part(
     bytes: &[u8],
     part_name: &str,
@@ -96,4 +149,3 @@ fn rewrite_zip_part(
     assert!(rewritten, "expected to rewrite zip part {part_name}");
     zip.finish().expect("finish zip").into_inner()
 }
-

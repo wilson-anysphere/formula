@@ -741,6 +741,13 @@ pub(crate) fn resolve_rich_value_rel_target_part(source_part: &str, target: &str
     // otherwise resolve to `xl/richData/xl/...`). Handle these as special-cases for robust
     // extraction.
     let target = strip_fragment(target);
+    // Be resilient to invalid/unescaped Windows-style path separators.
+    let target: std::borrow::Cow<'_, str> = if target.contains('\\') {
+        std::borrow::Cow::Owned(target.replace('\\', "/"))
+    } else {
+        std::borrow::Cow::Borrowed(target)
+    };
+    let target = target.as_ref();
     let target = target.strip_prefix("./").unwrap_or(target);
     if target.starts_with("media/") {
         format!("xl/{target}")
