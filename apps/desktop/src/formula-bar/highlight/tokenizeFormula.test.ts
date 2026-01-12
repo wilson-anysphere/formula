@@ -28,6 +28,12 @@ describe("tokenizeFormula", () => {
     expect(refs).toEqual(["'Bob''s Sheet'!A1", "'Bob''s Sheet'!A1:A2"]);
   });
 
+  it("tokenizes unquoted Unicode sheet-qualified references", () => {
+    const tokens = tokenizeFormula("=SUM(résumé!A1, 数据!B2)");
+    const refs = tokens.filter((t) => t.type === "reference").map((t) => t.text);
+    expect(refs).toEqual(["résumé!A1", "数据!B2"]);
+  });
+
   it("does not treat unquoted sheet names containing spaces as sheet-qualified refs", () => {
     const tokens = tokenizeFormula("=SUM(My Sheet!A1)");
     const refs = tokens.filter((t) => t.type === "reference").map((t) => t.text);

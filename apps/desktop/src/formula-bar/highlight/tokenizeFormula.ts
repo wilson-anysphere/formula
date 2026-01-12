@@ -8,12 +8,42 @@ function isDigit(ch: string): boolean {
   return ch >= "0" && ch <= "9";
 }
 
+function isAsciiLetter(ch: string): boolean {
+  return ch >= "A" && ch <= "Z" ? true : ch >= "a" && ch <= "z";
+}
+
+const UNICODE_LETTER_RE: RegExp | null = (() => {
+  try {
+    return new RegExp("^\\p{Alphabetic}$", "u");
+  } catch {
+    return null;
+  }
+})();
+
+const UNICODE_ALNUM_RE: RegExp | null = (() => {
+  try {
+    return new RegExp("^[\\p{Alphabetic}\\p{Number}]$", "u");
+  } catch {
+    return null;
+  }
+})();
+
+function isUnicodeAlphabetic(ch: string): boolean {
+  if (UNICODE_LETTER_RE) return UNICODE_LETTER_RE.test(ch);
+  return isAsciiLetter(ch);
+}
+
+function isUnicodeAlphanumeric(ch: string): boolean {
+  if (UNICODE_ALNUM_RE) return UNICODE_ALNUM_RE.test(ch);
+  return isAsciiLetter(ch) || isDigit(ch);
+}
+
 function isIdentifierStart(ch: string): boolean {
-  return (ch >= "A" && ch <= "Z") || (ch >= "a" && ch <= "z") || ch === "_";
+  return ch === "_" || isUnicodeAlphabetic(ch);
 }
 
 function isIdentifierPart(ch: string): boolean {
-  return isIdentifierStart(ch) || isDigit(ch) || ch === ".";
+  return isIdentifierStart(ch) || ch === "." || isUnicodeAlphanumeric(ch);
 }
 
 function isErrorBodyChar(ch: string): boolean {
