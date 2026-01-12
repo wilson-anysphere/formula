@@ -458,6 +458,10 @@
   width: min(520px, calc(100% - 32px));
 }
 
+.ai-inline-edit-overlay[hidden] {
+  display: none;
+}
+
 .command-palette {
   background: var(--cmdk-bg);
   border: 1px solid var(--cmdk-border);
