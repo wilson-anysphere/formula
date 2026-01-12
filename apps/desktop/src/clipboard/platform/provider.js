@@ -20,7 +20,7 @@
 // Guard against unbounded memory usage by skipping oversized formats.
 //
 // Keep this in sync with the Rust backend clipboard guards (`MAX_PNG_BYTES`).
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB (raw PNG bytes)
 const MAX_RICH_TEXT_BYTES = 2 * 1024 * 1024; // 2MB (HTML / RTF)
 const MAX_RICH_TEXT_CHARS = 2 * 1024 * 1024; // writing: approximate guard for JS strings
 
