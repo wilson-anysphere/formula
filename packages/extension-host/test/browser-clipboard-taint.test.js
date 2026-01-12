@@ -350,6 +350,51 @@ test("BrowserExtensionHost: cells.getSelection taints using result.address when 
   ]);
 });
 
+test("BrowserExtensionHost: does not taint from events for inactive extensions", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  installFakeWorker(t, [{}]);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      async setCell() {},
+    },
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.event-taint-inactive";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "http://example.invalid/",
+    mainUrl: "http://example.invalid/main.js",
+    manifest: {
+      name: "event-taint-inactive",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: [],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension);
+  assert.equal(extension.active, false);
+
+  host._broadcastEvent("selectionChanged", {
+    sheetId: "sheet1",
+    selection: { startRow: 0, startCol: 0, endRow: 0, endCol: 1, values: [[1, 2]] },
+  });
+
+  assert.deepEqual(extension.taintedRanges, []);
+});
+
 test("BrowserExtensionHost: records taint for selectionChanged events (and passes it to clipboard guard)", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
 
@@ -398,6 +443,7 @@ test("BrowserExtensionHost: records taint for selectionChanged events (and passe
 
   const extension = host._extensions.get(extensionId);
   assert.ok(extension);
+  extension.active = true;
 
   host._broadcastEvent("selectionChanged", {
     sheetId: "sheet1",
@@ -451,6 +497,7 @@ test("BrowserExtensionHost: selectionChanged taints using active-sheet fallback 
 
   const extension = host._extensions.get(extensionId);
   assert.ok(extension);
+  extension.active = true;
 
   host._broadcastEvent("sheetActivated", { sheet: { id: "sheet2", name: "Sheet2" } });
   host._broadcastEvent("selectionChanged", {
@@ -497,6 +544,7 @@ test("BrowserExtensionHost: selectionChanged taints using selection.address when
 
   const extension = host._extensions.get(extensionId);
   assert.ok(extension);
+  extension.active = true;
 
   host._broadcastEvent("selectionChanged", {
     selection: { address: "A1:B2", values: [[1, 2], [3, 4]] },
@@ -542,6 +590,7 @@ test("BrowserExtensionHost: cellChanged taints using active-sheet fallback when 
 
   const extension = host._extensions.get(extensionId);
   assert.ok(extension);
+  extension.active = true;
 
   host._broadcastEvent("sheetActivated", { sheet: { id: "sheet2", name: "Sheet2" } });
   host._broadcastEvent("cellChanged", { row: 9, col: 8, value: "x" });
@@ -586,6 +635,7 @@ test("BrowserExtensionHost: cellChanged taints using address when row/col are mi
 
   const extension = host._extensions.get(extensionId);
   assert.ok(extension);
+  extension.active = true;
 
   host._broadcastEvent("cellChanged", { address: "B2", value: "x" });
 
@@ -640,6 +690,7 @@ test("BrowserExtensionHost: sheets.activateSheet updates active-sheet id for eve
 
   const extension = host._extensions.get(extensionId);
   assert.ok(extension);
+  extension.active = true;
 
   await host._executeApi("sheets", "activateSheet", ["Sheet2"], extension);
   host._broadcastEvent("selectionChanged", {
@@ -699,6 +750,7 @@ test("BrowserExtensionHost: records taint for cellChanged events (and passes it 
 
   const extension = host._extensions.get(extensionId);
   assert.ok(extension);
+  extension.active = true;
 
   host._broadcastEvent("cellChanged", {
     sheetId: "sheet1",

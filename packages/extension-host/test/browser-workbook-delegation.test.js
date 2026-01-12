@@ -88,6 +88,7 @@ test("BrowserExtensionHost: workbook.createWorkbook delegates to spreadsheetApi 
 
   const extension = host._extensions.get(extensionId);
   assert.ok(extension?.worker);
+  extension.active = true;
 
   extension.worker.emitMessage({
     type: "api_call",
@@ -191,6 +192,7 @@ test("BrowserExtensionHost: workbook.saveAs delegates to spreadsheetApi and emit
 
   const extension = host._extensions.get(extensionId);
   assert.ok(extension?.worker);
+  extension.active = true;
 
   extension.worker.emitMessage({
     type: "api_call",
@@ -296,6 +298,7 @@ test("BrowserExtensionHost: workbook.openWorkbook delegates to spreadsheetApi an
 
   const extension = host._extensions.get(extensionId);
   assert.ok(extension?.worker);
+  extension.active = true;
 
   extension.worker.emitMessage({
     type: "api_call",
@@ -397,6 +400,7 @@ test("BrowserExtensionHost: workbook.close delegates to spreadsheetApi and emits
 
   const extension = host._extensions.get(extensionId);
   assert.ok(extension?.worker);
+  extension.active = true;
 
   extension.worker.emitMessage({
     type: "api_call",
@@ -494,6 +498,7 @@ test("BrowserExtensionHost: workbook.save delegates to spreadsheetApi and emits 
 
   const extension = host._extensions.get(extensionId);
   assert.ok(extension?.worker);
+  extension.active = true;
 
   extension.worker.emitMessage({
     type: "api_call",

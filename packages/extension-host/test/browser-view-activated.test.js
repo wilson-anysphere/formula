@@ -27,17 +27,13 @@ test("BrowserExtensionHost: viewActivated is broadcast before attempting activat
 
         if (msg?.type === "event" && msg.event === "viewActivated") {
           sawViewActivatedOnStartupExtension = true;
+          order.push("event:viewActivated");
         }
       }
     },
     // Worker for the view-gated extension (activation fails).
     {
       onPostMessage(msg, worker) {
-        if (msg?.type === "event" && msg.event === "viewActivated") {
-          order.push("event:viewActivated");
-          return;
-        }
-
         if (msg?.type === "activate") {
           order.push("activate");
           worker.emitMessage({
@@ -124,7 +120,7 @@ test("BrowserExtensionHost: viewActivated is replayed to newly-activated extensi
         }
       }
     },
-    // View-gated extension: should see broadcast, then activation, then a replay after activation.
+    // View-gated extension: should activate and then receive the viewActivated payload after activation.
     {
       onPostMessage(msg, worker) {
         if (msg?.type === "event" && msg.event === "viewActivated") {
@@ -191,7 +187,8 @@ test("BrowserExtensionHost: viewActivated is replayed to newly-activated extensi
   await host.activateView("sampleHello.panel");
 
   assert.equal(startupEventCount, 1);
-  assert.deepEqual(viewOrder, ["event:viewActivated:1", "activate", "event:viewActivated:2"]);
+  assert.equal(viewEventCount, 1);
+  assert.deepEqual(viewOrder, ["activate", "event:viewActivated:1"]);
 });
 
 test("BrowserExtensionHost: activateView normalizes viewId to string in event payload", async (t) => {
@@ -236,6 +233,10 @@ test("BrowserExtensionHost: activateView normalizes viewId to string in event pa
       permissions: []
     }
   });
+
+  const extension = host._extensions.get("test.view-listener");
+  assert.ok(extension);
+  extension.active = true;
 
   await host.activateView(123);
   assert.deepEqual(payload, { viewId: "123" });

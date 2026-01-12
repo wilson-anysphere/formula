@@ -2726,6 +2726,11 @@ class BrowserExtensionHost {
     }
 
     for (const extension of this._extensions.values()) {
+      // Only deliver events to active extensions. Workers are spawned eagerly on load, but
+      // the extension entrypoint is not imported/executed until activation. Broadcasting
+      // selection/cell events to inactive extensions would taint ranges that the extension
+      // never had a chance to read, causing false positives in clipboard DLP enforcement.
+      if (!extension.active) continue;
       this._sendEventToExtension(extension, event, data, { skipHostSync: true });
     }
   }
