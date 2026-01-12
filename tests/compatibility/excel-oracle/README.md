@@ -5,6 +5,11 @@ continuously validate `crates/formula-engine` against an Excel oracle dataset.
 The pinned dataset may be produced by real Excel or may be a synthetic CI baseline;
 check the dataset `source.note` field for details.
 
+If the repo is incrementally patching a synthetic baseline with **real Excel** results for small
+targeted subsets (e.g. odd-coupon bond edge cases), those patches are recorded under
+`source.patches` in the pinned dataset so it’s clear which Excel build produced the overwritten
+case IDs.
+
 ## Quick start (one command)
 
 From repo root:
