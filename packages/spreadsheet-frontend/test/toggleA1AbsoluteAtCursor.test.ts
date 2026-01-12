@@ -60,6 +60,14 @@ describe("toggleA1AbsoluteAtCursor", () => {
     expect(res?.cursorEnd).toBe(5);
   });
 
+  it("selects the full toggled token even when only part of the token is selected", () => {
+    // Select just the column letter.
+    const res = toggleA1AbsoluteAtCursor("=A1", 1, 2);
+    expect(res?.text).toBe("=$A$1");
+    expect(res?.cursorStart).toBe(1);
+    expect(res?.cursorEnd).toBe(5);
+  });
+
   it("returns null when the selection is not contained within a reference token", () => {
     expect(toggleA1AbsoluteAtCursor("=A1+B1", 1, 4)).toBeNull();
   });

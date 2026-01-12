@@ -11,8 +11,6 @@ type ParsedCellRef = {
   col: string;
   rowAbs: boolean;
   row: string;
-  /** 0-based start offset within the full reference token text. */
-  start: number;
 };
 
 type ParsedA1ReferenceToken = {
@@ -23,8 +21,6 @@ type ParsedA1ReferenceToken = {
   start: ParsedCellRef;
   end: ParsedCellRef | null;
 };
-
-type OffsetOp = { pos: number; kind: "insert" | "remove" };
 
 export function toggleA1AbsoluteAtCursor(
   formula: string,
@@ -40,61 +36,22 @@ export function toggleA1AbsoluteAtCursor(
   const parsed = parseA1ReferenceToken(oldTokenText);
   if (!parsed) return null;
 
-  const toggled = toggleParsedReference(parsed);
-  if (!toggled) return null;
+  const nextTokenText = toggleParsedReference(parsed);
+  if (!nextTokenText) return null;
 
   const prefix = formula.slice(0, active.start);
   const suffix = formula.slice(active.end);
-  const nextFormula = prefix + toggled.text + suffix;
+  const nextFormula = prefix + nextTokenText + suffix;
 
-  // Preserve token-wide selection when the full reference token is selected.
-  const start = cursorStart;
-  const end = cursorEnd;
-  const selMin = Math.min(start, end);
-  const selMax = Math.max(start, end);
-  const selectionCoversToken = selMin !== selMax && selMin === active.start && selMax === active.end;
-  // Excel-style behavior: when the caret is inside a reference token, pressing F4 toggles
-  // absolute/relative mode and selects the entire updated token so repeated presses keep
-  // cycling the same reference (and range-drag insertion can replace it).
-  const selectionIsCaret = selMin === selMax;
-
-  const delta = toggled.text.length - oldTokenText.length;
-
-  const mapCursor = (pos: number): number => {
-    // Before/after token: shift by delta.
-    if (pos < active.start) return pos;
-    if (pos > active.end) return pos + delta;
-
-    const oldOffset = pos - active.start;
-    const newOffset = mapOffsetWithinToken(oldOffset, toggled.ops, toggled.text.length);
-    return active.start + newOffset;
-  };
-
-  let nextCursorStart: number;
-  let nextCursorEnd: number;
-  if (selectionCoversToken) {
-    const tokenStart = active.start;
-    const tokenEnd = active.start + toggled.text.length;
-    if (start <= end) {
-      nextCursorStart = tokenStart;
-      nextCursorEnd = tokenEnd;
-    } else {
-      nextCursorStart = tokenEnd;
-      nextCursorEnd = tokenStart;
-    }
-  } else if (selectionIsCaret) {
-    const tokenStart = active.start;
-    const tokenEnd = active.start + toggled.text.length;
-    if (start <= end) {
-      nextCursorStart = tokenStart;
-      nextCursorEnd = tokenEnd;
-    } else {
-      nextCursorStart = tokenEnd;
-      nextCursorEnd = tokenStart;
-    }
-  } else {
-    nextCursorStart = mapCursor(start);
-    nextCursorEnd = mapCursor(end);
+  // Excel-style UX: after toggling, select the entire updated reference token so repeated
+  // F4 presses keep cycling the same token (and range-drag insertion can replace it).
+  const tokenStart = active.start;
+  const tokenEnd = active.start + nextTokenText.length;
+  let nextCursorStart = tokenStart;
+  let nextCursorEnd = tokenEnd;
+  if (cursorStart > cursorEnd) {
+    nextCursorStart = tokenEnd;
+    nextCursorEnd = tokenStart;
   }
 
   // Clamp to the output string (defensive).
@@ -104,24 +61,10 @@ export function toggleA1AbsoluteAtCursor(
   return { text: nextFormula, cursorStart: nextCursorStart, cursorEnd: nextCursorEnd };
 }
 
-function mapOffsetWithinToken(oldOffset: number, ops: readonly OffsetOp[], newTokenLen: number): number {
-  let next = oldOffset;
-  for (const op of ops) {
-    if (op.kind === "insert") {
-      if (oldOffset >= op.pos) next += 1;
-      continue;
-    }
-    // remove
-    if (oldOffset > op.pos) next -= 1;
-  }
-  return Math.max(0, Math.min(next, newTokenLen));
-}
-
 function parseA1ReferenceToken(text: string): ParsedA1ReferenceToken | null {
   const { sheetPrefix, refText } = splitSheetPrefix(text);
-  const prefixLen = sheetPrefix.length;
 
-  const first = parseCellRefAt(refText, 0, prefixLen);
+  const first = parseCellRefAt(refText, 0);
   if (!first) return null;
 
   const afterFirst = refText.slice(first.localEnd);
@@ -130,9 +73,7 @@ function parseA1ReferenceToken(text: string): ParsedA1ReferenceToken | null {
   }
 
   if (!afterFirst.startsWith(":")) return null;
-  // `afterFirst` starts at `refText[first.localEnd]`, which corresponds to
-  // `prefixLen + first.localEnd` within the original token.
-  const second = parseCellRefAt(afterFirst, 1, prefixLen + first.localEnd);
+  const second = parseCellRefAt(afterFirst, 1);
   if (!second) return null;
   if (second.localEnd !== afterFirst.length) return null;
 
@@ -173,8 +114,7 @@ function splitSheetPrefix(text: string): { sheetPrefix: string; refText: string 
 
 function parseCellRefAt(
   refText: string,
-  localStart: number,
-  absoluteStartWithinToken: number
+  localStart: number
 ): { cell: ParsedCellRef; localEnd: number } | null {
   const match = /^\$?([A-Za-z]{1,3})\$?([0-9]+)/.exec(refText.slice(localStart));
   if (!match) return null;
@@ -197,50 +137,27 @@ function parseCellRefAt(
   const col = colLetters;
   const row = rowDigits;
 
-  const absoluteStart = absoluteStartWithinToken + start;
-
-  const cell: ParsedCellRef = { colAbs, col, rowAbs, row, start: absoluteStart };
+  const cell: ParsedCellRef = { colAbs, col, rowAbs, row };
   return { cell, localEnd: end };
 }
 
-function toggleParsedReference(parsed: ParsedA1ReferenceToken): { text: string; ops: OffsetOp[] } | null {
-  const ops: OffsetOp[] = [];
-
-  const start = toggleCellRef(parsed.start, ops);
+function toggleParsedReference(parsed: ParsedA1ReferenceToken): string | null {
+  const start = toggleCellRef(parsed.start);
   if (!start) return null;
 
-  if (!parsed.end) {
-    return { text: parsed.sheetPrefix + start.text, ops };
-  }
+  if (!parsed.end) return parsed.sheetPrefix + start;
 
-  const end = toggleCellRef(parsed.end, ops);
+  const end = toggleCellRef(parsed.end);
   if (!end) return null;
 
-  return { text: parsed.sheetPrefix + start.text + ":" + end.text, ops };
+  return parsed.sheetPrefix + start + ":" + end;
 }
 
-function toggleCellRef(cell: ParsedCellRef, ops: OffsetOp[]): { text: string } | null {
+function toggleCellRef(cell: ParsedCellRef): string | null {
   const next = nextAbsoluteMode(cell.colAbs, cell.rowAbs);
   const colAbs = next.colAbs;
   const rowAbs = next.rowAbs;
-
-  // Compute mapping ops (relative to the original token text).
-  // Leading `$` toggles at the cell start.
-  if (cell.colAbs !== colAbs) {
-    ops.push({ pos: cell.start, kind: cell.colAbs ? "remove" : "insert" });
-  }
-
-  // Row `$` toggles after the column letters (and any leading `$`).
-  const oldLeadingLen = cell.colAbs ? 1 : 0;
-  const rowDollarPos = cell.start + oldLeadingLen + cell.col.length;
-  const rowDigitsStart = rowDollarPos + (cell.rowAbs ? 1 : 0);
-
-  if (cell.rowAbs !== rowAbs) {
-    ops.push({ pos: cell.rowAbs ? rowDollarPos : rowDigitsStart, kind: cell.rowAbs ? "remove" : "insert" });
-  }
-
-  const text = `${colAbs ? "$" : ""}${cell.col}${rowAbs ? "$" : ""}${cell.row}`;
-  return { text };
+  return `${colAbs ? "$" : ""}${cell.col}${rowAbs ? "$" : ""}${cell.row}`;
 }
 
 function nextAbsoluteMode(colAbs: boolean, rowAbs: boolean): { colAbs: boolean; rowAbs: boolean } {
