@@ -107,10 +107,10 @@ describe("renderMacroRunner", () => {
     const runButton = container.querySelectorAll("button")[1];
     const runPromise = (runButton as any).onclick?.();
 
-    const qp = await waitForElement<HTMLDialogElement>('dialog[data-testid="quick-pick"]');
-    const trustOnce = qp.querySelector<HTMLButtonElement>('[data-testid="quick-pick-item-1"]');
-    expect(trustOnce).toBeTruthy();
-    trustOnce?.click();
+    // Running a blocked macro triggers DefaultMacroSecurityController.requestTrustDecision(),
+    // which uses the extensions UI quick-pick. Select "Trust once" (index 1).
+    const trustOnce = await waitForElement<HTMLButtonElement>('[data-testid="quick-pick-item-1"]');
+    trustOnce.click();
 
     await runPromise;
 
