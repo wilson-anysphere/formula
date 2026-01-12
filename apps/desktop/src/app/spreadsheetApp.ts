@@ -3339,6 +3339,11 @@ export class SpreadsheetApp {
         this.lastHoveredCommentCellKey === cellKey &&
         this.lastHoveredCommentIndexVersion === this.commentIndexVersion
       ) {
+        // Tooltip is already showing for this cell and the comment index hasn't changed.
+        // Avoid re-setting text content on every pointer move, but keep the tooltip pinned
+        // to the cursor position.
+        this.commentTooltip.style.setProperty("--comment-tooltip-x", `${x + 12}px`);
+        this.commentTooltip.style.setProperty("--comment-tooltip-y", `${y + 12}px`);
         return;
       }
 
@@ -3396,6 +3401,8 @@ export class SpreadsheetApp {
       this.lastHoveredCommentCellKey === cellKey &&
       this.lastHoveredCommentIndexVersion === this.commentIndexVersion
     ) {
+      this.commentTooltip.style.setProperty("--comment-tooltip-x", `${x + 12}px`);
+      this.commentTooltip.style.setProperty("--comment-tooltip-y", `${y + 12}px`);
       return;
     }
     this.lastHoveredCommentCellKey = cellKey;
