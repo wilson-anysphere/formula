@@ -226,7 +226,7 @@ fn model_cell_value_to_sort_value(value: &ModelCellValue) -> CellValue {
                 .filter(|s| !s.is_empty())
                 .unwrap_or("[Image]");
             CellValue::Text(display.to_string())
-        }
+        },
         ModelCellValue::Record(record) => {
             if let Some(display_field) = record.display_field.as_deref() {
                 if let Some(value) = record.fields.get(display_field) {
@@ -252,7 +252,7 @@ fn model_cell_value_to_sort_value(value: &ModelCellValue) -> CellValue {
                             } else {
                                 Some(CellValue::Text(display))
                             }
-                        }
+                        },
                         ModelCellValue::Image(image) => {
                             let display = image
                                 .alt_text
@@ -260,7 +260,7 @@ fn model_cell_value_to_sort_value(value: &ModelCellValue) -> CellValue {
                                 .filter(|s| !s.is_empty())
                                 .unwrap_or("[Image]");
                             Some(CellValue::Text(display.to_string()))
-                        }
+                        },
                         _ => None,
                     };
                     if let Some(value) = display_value {
@@ -354,6 +354,16 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
                                     .and_then(|v| v.get("text"))
                                     .and_then(|v| v.as_str())
                                     .map(|s| CellValue::Text(s.to_string())),
+                                "image" => display_value
+                                    .get("value")
+                                    .and_then(|v| {
+                                        v.get("altText")
+                                            .or_else(|| v.get("alt_text"))
+                                            .and_then(|v| v.as_str())
+                                    })
+                                    .filter(|s| !s.is_empty())
+                                    .map(|s| CellValue::Text(s.to_string()))
+                                    .or(Some(CellValue::Text("[Image]".to_string()))),
                                 // Degrade nested rich values (e.g. records whose display field is
                                 // an entity/record) using the same logic as the main conversion.
                                 "entity" | "record" => serde_json::from_value(display_value.clone())
@@ -384,6 +394,16 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
                 };
             }
             None
+        }
+        "image" => {
+            let image = serialized.get("value")?;
+            let alt_text = image
+                .get("altText")
+                .or_else(|| image.get("alt_text"))
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .unwrap_or("[Image]");
+            Some(CellValue::Text(alt_text.to_string()))
         }
         _ => None,
     }
@@ -438,6 +458,19 @@ mod tests {
         assert_eq!(
             model_cell_value_to_sort_value(&image),
             CellValue::Text("Logo".to_string())
+        );
+
+        let Some(image_without_alt_text) = from_json_or_skip_unknown_variant(json!({
+            "type": "image",
+            "value": {
+                "imageId": "logo.png"
+            }
+        })) else {
+            return;
+        };
+        assert_eq!(
+            model_cell_value_to_sort_value(&image_without_alt_text),
+            CellValue::Text("[Image]".to_string())
         );
 
         // Canonical camelCase field name (`displayValue`) should also deserialize.
@@ -562,6 +595,22 @@ mod tests {
         assert_eq!(
             model_cell_value_to_sort_value(&record_image_display_field),
             CellValue::Text("Logo".to_string())
+        );
+
+        let record_image_without_alt_text_display_field: ModelCellValue =
+            serde_json::from_value(json!({
+                "type": "record",
+                "value": {
+                    "displayField": "logo",
+                    "fields": {
+                        "logo": { "type": "image", "value": { "imageId": "logo.png" } }
+                    }
+                }
+            }))
+            .expect("record should deserialize");
+        assert_eq!(
+            model_cell_value_to_sort_value(&record_image_without_alt_text_display_field),
+            CellValue::Text("[Image]".to_string())
         );
 
         // Invalid display field falls back to the record's display string (if present),
