@@ -366,11 +366,23 @@ function collectPathDependencyClosure(rootCrateDir) {
  * @returns {string[]}
  */
 function parseTomlPathDependencies(toml) {
+  /** @type {string[]} */
   const paths = [];
-  const regex = /path\s*=\s*"([^"]+)"/g;
-  let match;
-  while ((match = regex.exec(toml))) {
-    paths.push(match[1]);
+  // We only need best-effort detection of `path = "../some-crate"` dependencies. Keep it
+  // line-based so we can cheaply ignore TOML comments without pulling in a full parser.
+  //
+  // Note: Use both quote styles; Cargo accepts either in `Cargo.toml`.
+  const regex = /path\s*=\s*(?:"([^"]+)"|'([^']+)')/g;
+  for (const rawLine of toml.split(/\r?\n/)) {
+    // Strip trailing comments. (This is intentionally simplistic; path values should not
+    // contain `#` in practice.)
+    const line = rawLine.split("#")[0];
+    if (!line) continue;
+    regex.lastIndex = 0;
+    let match;
+    while ((match = regex.exec(line))) {
+      paths.push(match[1] ?? match[2]);
+    }
   }
   return paths;
 }
