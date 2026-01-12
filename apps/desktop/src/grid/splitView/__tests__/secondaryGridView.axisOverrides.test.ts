@@ -83,8 +83,10 @@ describe("SecondaryGridView sheet view axis overrides", () => {
     const view = (doc.getSheetView(sheetId) ?? {}) as any;
     const rowHeights: Record<string, number> = {};
     for (let i = 0; i < 1_000; i += 1) rowHeights[String(i)] = 30;
+    rowHeights["999999"] = 42;
     const colWidths: Record<string, number> = {};
     for (let i = 0; i < 150; i += 1) colWidths[String(i)] = 120;
+    colWidths["999999"] = 321;
     view.rowHeights = rowHeights;
     view.colWidths = colWidths;
     (doc as any).model.setSheetView(sheetId, view);
@@ -108,4 +110,3 @@ describe("SecondaryGridView sheet view axis overrides", () => {
     container.remove();
   });
 });
-

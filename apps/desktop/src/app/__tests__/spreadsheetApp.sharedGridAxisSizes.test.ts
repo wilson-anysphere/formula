@@ -130,9 +130,12 @@ describe("SpreadsheetApp shared-grid axis size sync", () => {
 
       const rowHeights: Record<string, number> = {};
       for (let i = 0; i < 1_000; i += 1) rowHeights[String(i)] = 30 + (i % 3);
+      // Include some invalid/out-of-range indices; the sync should ignore them (and not throw).
+      rowHeights["999999"] = 42;
 
       const colWidths: Record<string, number> = {};
       for (let i = 0; i < 150; i += 1) colWidths[String(i)] = 120 + (i % 5);
+      colWidths["999999"] = 321;
 
       (view as any).rowHeights = rowHeights;
       (view as any).colWidths = colWidths;
@@ -160,4 +163,3 @@ describe("SpreadsheetApp shared-grid axis size sync", () => {
     }
   });
 });
-
