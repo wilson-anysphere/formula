@@ -16,6 +16,24 @@ async function getA1FontProp(page: Page, prop: "bold" | "italic"): Promise<boole
   }, prop);
 }
 
+async function getA1Underline(page: Page): Promise<boolean> {
+  return await page.evaluate(() => {
+    const app = (window as any).__formulaApp;
+    const sheetId = app.getCurrentSheetId();
+    const doc = app.getDocument();
+    return doc.getCellFormat(sheetId, "A1").font?.underline ?? false;
+  });
+}
+
+async function getA1NumberFormat(page: Page): Promise<string | null> {
+  return await page.evaluate(() => {
+    const app = (window as any).__formulaApp;
+    const sheetId = app.getCurrentSheetId();
+    const doc = app.getDocument();
+    return doc.getCellFormat(sheetId, "A1").numberFormat ?? null;
+  });
+}
+
 test.describe("formatting shortcuts", () => {
   test("Ctrl/Cmd+B toggles bold on the selection", async ({ page }) => {
     await gotoDesktop(page);
@@ -42,7 +60,7 @@ test.describe("formatting shortcuts", () => {
     expect(await getA1FontProp(page, "bold")).toBe(before);
   });
 
-  test("Ctrl/Cmd+I toggles italic; Ctrl/Cmd+Shift+A opens AI panel without changing formatting", async ({ page }) => {
+  test("Ctrl+I toggles italic; Ctrl/Cmd+Shift+A opens AI panel without changing formatting", async ({ page }) => {
     await gotoDesktop(page);
     await page.evaluate(() => localStorage.clear());
     await page.reload();
@@ -57,11 +75,11 @@ test.describe("formatting shortcuts", () => {
 
     const initialItalic = await getA1FontProp(page, "italic");
 
-    await page.keyboard.press("ControlOrMeta+I");
+    await page.keyboard.press("Control+I");
     await waitForIdle(page);
     expect(await getA1FontProp(page, "italic")).toBe(!initialItalic);
 
-    await page.keyboard.press("ControlOrMeta+I");
+    await page.keyboard.press("Control+I");
     await waitForIdle(page);
     const italicAfterToggles = await getA1FontProp(page, "italic");
     expect(italicAfterToggles).toBe(initialItalic);
@@ -73,4 +91,52 @@ test.describe("formatting shortcuts", () => {
 
     expect(await getA1FontProp(page, "italic")).toBe(italicAfterToggles);
   });
+
+  test("Ctrl/Cmd+U toggles underline on the selection", async ({ page }) => {
+    await gotoDesktop(page);
+
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const sheetId = app.getCurrentSheetId();
+      const doc = app.getDocument();
+
+      doc.setCellValue(sheetId, "A1", "Hello");
+      app.selectRange({ range: { startRow: 0, endRow: 0, startCol: 0, endCol: 0 } });
+      app.focus();
+    });
+    await waitForIdle(page);
+
+    expect(await getA1Underline(page)).toBe(false);
+
+    await page.keyboard.press("ControlOrMeta+U");
+    await waitForIdle(page);
+
+    expect(await getA1Underline(page)).toBe(true);
+  });
+
+  for (const [name, cfg] of [
+    ["Ctrl/Cmd+Shift+$ applies the currency number format preset", { key: "4", expected: "$#,##0.00" }],
+    ["Ctrl/Cmd+Shift+% applies the percent number format preset", { key: "5", expected: "0%" }],
+    ["Ctrl/Cmd+Shift+# applies the date number format preset", { key: "3", expected: "m/d/yyyy" }],
+  ] as const) {
+    test(name, async ({ page }) => {
+      await gotoDesktop(page);
+
+      await page.evaluate(() => {
+        const app = (window as any).__formulaApp;
+        const sheetId = app.getCurrentSheetId();
+        const doc = app.getDocument();
+
+        doc.setCellValue(sheetId, "A1", 123.45);
+        app.selectRange({ range: { startRow: 0, endRow: 0, startCol: 0, endCol: 0 } });
+        app.focus();
+      });
+      await waitForIdle(page);
+
+      await page.keyboard.press(`ControlOrMeta+Shift+${cfg.key}`);
+      await waitForIdle(page);
+
+      expect(await getA1NumberFormat(page)).toBe(cfg.expected);
+    });
+  }
 });
