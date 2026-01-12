@@ -6,10 +6,6 @@
 mod part_info;
 pub use part_info::{CellImageEmbed, CellImagesPartInfo};
 
-mod part_info;
-
-pub use part_info::{CellImageEmbed, CellImagesPartInfo};
-
 use std::collections::{BTreeMap, HashMap};
 
 use formula_model::drawings::{ImageData, ImageId};
@@ -18,10 +14,6 @@ use roxmltree::Document;
 use crate::drawings::{content_type_for_extension, REL_TYPE_IMAGE};
 use crate::path::resolve_target;
 use crate::XlsxError;
-
-mod part_info;
-
-pub use part_info::{CellImageEmbed, CellImagesPartInfo};
 
 type Result<T> = std::result::Result<T, XlsxError>;
 
