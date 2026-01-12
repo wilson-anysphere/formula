@@ -19,9 +19,10 @@ describe("CellEditorOverlay F4 absolute reference toggle", () => {
     overlay.element.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", cancelable: true }));
 
     expect(overlay.element.value).toBe("=$A$1");
-    // Caret should still be inside the reference token.
-    expect(overlay.element.selectionStart).toBe(4);
-    expect(overlay.element.selectionEnd).toBe(4);
+    // Excel UX: keep the full reference token selected so repeated F4 presses
+    // keep cycling the same token.
+    expect(overlay.element.selectionStart).toBe(1);
+    expect(overlay.element.selectionEnd).toBe(5);
 
     overlay.close();
     container.remove();
@@ -98,23 +99,23 @@ describe("CellEditorOverlay F4 absolute reference toggle", () => {
 
     overlay.element.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", cancelable: true }));
     expect(overlay.element.value).toBe("=$A$1");
-    expect(overlay.element.selectionStart).toBe(4);
-    expect(overlay.element.selectionEnd).toBe(4);
+    expect(overlay.element.selectionStart).toBe(1);
+    expect(overlay.element.selectionEnd).toBe(5);
 
     overlay.element.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", cancelable: true }));
     expect(overlay.element.value).toBe("=A$1");
-    expect(overlay.element.selectionStart).toBe(3);
-    expect(overlay.element.selectionEnd).toBe(3);
+    expect(overlay.element.selectionStart).toBe(1);
+    expect(overlay.element.selectionEnd).toBe(4);
 
     overlay.element.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", cancelable: true }));
     expect(overlay.element.value).toBe("=$A1");
-    expect(overlay.element.selectionStart).toBe(3);
-    expect(overlay.element.selectionEnd).toBe(3);
+    expect(overlay.element.selectionStart).toBe(1);
+    expect(overlay.element.selectionEnd).toBe(4);
 
     overlay.element.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", cancelable: true }));
     expect(overlay.element.value).toBe("=A1");
-    expect(overlay.element.selectionStart).toBe(2);
-    expect(overlay.element.selectionEnd).toBe(2);
+    expect(overlay.element.selectionStart).toBe(1);
+    expect(overlay.element.selectionEnd).toBe(3);
 
     overlay.close();
     container.remove();
