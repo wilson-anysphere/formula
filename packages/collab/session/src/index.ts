@@ -1066,19 +1066,29 @@ export class CollabSession {
       // Use a computed specifier so browser bundlers don't try to resolve this
       // Node-only module unless it's actually used at runtime.
       const specifier = ["@formula/collab-persistence", "file"].join("/");
-      // eslint-disable-next-line no-undef
-      const { FileCollabPersistence } = await import(
+      let FileCollabPersistence: any = null;
+      try {
         // eslint-disable-next-line no-undef
-        /* @vite-ignore */ specifier
-      );
+        ({ FileCollabPersistence } = await import(
+          // eslint-disable-next-line no-undef
+          /* @vite-ignore */ specifier
+        ));
+      } catch {
+        throw new Error('CollabSession offline mode "file" is only supported in Node environments');
+      }
       // Use node:path.dirname for correctness (handles POSIX roots, Windows drive
       // roots, etc) without a static Node import that would break browser bundlers.
       const pathSpecifier = ["node", "path"].join(":");
-      // eslint-disable-next-line no-undef
-      const path = await import(
+      let path: any = null;
+      try {
         // eslint-disable-next-line no-undef
-        /* @vite-ignore */ pathSpecifier
-      );
+        path = await import(
+          // eslint-disable-next-line no-undef
+          /* @vite-ignore */ pathSpecifier
+        );
+      } catch {
+        throw new Error('CollabSession offline mode "file" is only supported in Node environments');
+      }
       const dir = typeof path.dirname === "function" ? path.dirname(offline.filePath) : this.dirnameForOfflineFilePath(offline.filePath);
 
       // Best-effort migration: older `@formula/collab-offline` used `offline.filePath`
