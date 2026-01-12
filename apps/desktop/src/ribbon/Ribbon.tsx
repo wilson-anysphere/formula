@@ -117,7 +117,7 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
       className="ribbon"
       data-testid="ribbon-root"
       onKeyDownCapture={(event) => {
-        if (event.key !== "Escape") return;
+        if (event.key !== "Escape" && event.key !== "ArrowUp") return;
         const target = event.target as HTMLElement | null;
         if (!target) return;
         if (target.closest(".ribbon__tabs")) return;
