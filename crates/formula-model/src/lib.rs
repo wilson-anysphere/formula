@@ -90,7 +90,7 @@ pub use theme::{
     resolve_color_in_context, resolve_number_format_color, ArgbColor, ColorContext, ThemeColorSlot,
     ThemePalette,
 };
-pub use value::{ArrayValue, CellValue, RichText, SpillValue};
+pub use value::{ArrayValue, CellValue, EntityValue, RecordValue, RichText, SpillValue};
 pub use view::{
     a1_to_cell, cell_to_a1, format_sqref, parse_sqref, SheetPane, SheetSelection, SheetView,
     SqrefParseError, WorkbookView, WorkbookWindow, WorkbookWindowState,
@@ -105,7 +105,7 @@ pub use worksheet::{
 /// Current serialization schema version.
 ///
 /// This is embedded into [`Workbook`] to enable forward-compatible IPC payloads.
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 fn new_uuid() -> uuid::Uuid {
     #[cfg(not(target_arch = "wasm32"))]

@@ -1041,6 +1041,74 @@ fn write_updated_cell<W: Write>(
                     writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
                 }
             },
+            value @ CellValue::Entity(entity) => {
+                let s = entity.display.as_str();
+                match &value_kind {
+                    CellValueKind::SharedString { .. } => {
+                        let idx = super::shared_string_index(doc, meta, value, shared_lookup);
+                        writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
+                        writer.write_event(Event::Text(BytesText::new(&idx.to_string())))?;
+                        writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
+                    }
+                    CellValueKind::InlineString => {
+                        writer.write_event(Event::Start(BytesStart::new(is_tag)))?;
+                        let mut t_start = BytesStart::new(t_tag);
+                        if super::needs_space_preserve(s) {
+                            t_start.push_attribute(("xml:space", "preserve"));
+                        }
+                        writer.write_event(Event::Start(t_start))?;
+                        writer.write_event(Event::Text(BytesText::new(s)))?;
+                        writer.write_event(Event::End(BytesEnd::new(t_tag)))?;
+                        writer.write_event(Event::End(BytesEnd::new(is_tag)))?;
+                    }
+                    CellValueKind::Str => {
+                        writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
+                        let v = super::raw_or_str(meta, s);
+                        writer.write_event(Event::Text(BytesText::new(&v)))?;
+                        writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
+                    }
+                    _ => {
+                        let idx = super::shared_string_index(doc, meta, value, shared_lookup);
+                        writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
+                        writer.write_event(Event::Text(BytesText::new(&idx.to_string())))?;
+                        writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
+                    }
+                }
+            }
+            value @ CellValue::Record(record) => {
+                let s = record.display.as_str();
+                match &value_kind {
+                    CellValueKind::SharedString { .. } => {
+                        let idx = super::shared_string_index(doc, meta, value, shared_lookup);
+                        writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
+                        writer.write_event(Event::Text(BytesText::new(&idx.to_string())))?;
+                        writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
+                    }
+                    CellValueKind::InlineString => {
+                        writer.write_event(Event::Start(BytesStart::new(is_tag)))?;
+                        let mut t_start = BytesStart::new(t_tag);
+                        if super::needs_space_preserve(s) {
+                            t_start.push_attribute(("xml:space", "preserve"));
+                        }
+                        writer.write_event(Event::Start(t_start))?;
+                        writer.write_event(Event::Text(BytesText::new(s)))?;
+                        writer.write_event(Event::End(BytesEnd::new(t_tag)))?;
+                        writer.write_event(Event::End(BytesEnd::new(is_tag)))?;
+                    }
+                    CellValueKind::Str => {
+                        writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
+                        let v = super::raw_or_str(meta, s);
+                        writer.write_event(Event::Text(BytesText::new(&v)))?;
+                        writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
+                    }
+                    _ => {
+                        let idx = super::shared_string_index(doc, meta, value, shared_lookup);
+                        writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
+                        writer.write_event(Event::Text(BytesText::new(&idx.to_string())))?;
+                        writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
+                    }
+                }
+            }
             value @ CellValue::RichText(rich) => {
                 let idx = super::shared_string_index(doc, meta, value, shared_lookup);
                 if idx != 0 || !rich.text.is_empty() {

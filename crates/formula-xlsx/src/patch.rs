@@ -1979,6 +1979,16 @@ fn value_semantics_eq(existing: &ExistingCellValue, patch_value: Option<&CellVal
             ExistingCellValue::SharedString(rich) => &rich.text == s,
             _ => false,
         },
+        CellValue::Entity(entity) => match existing {
+            ExistingCellValue::String(v) => v == &entity.display,
+            ExistingCellValue::SharedString(rich) => rich.text == entity.display,
+            _ => false,
+        },
+        CellValue::Record(record) => match existing {
+            ExistingCellValue::String(v) => v == &record.display,
+            ExistingCellValue::SharedString(rich) => rich.text == record.display,
+            _ => false,
+        },
         CellValue::RichText(rich) => match existing {
             ExistingCellValue::SharedString(existing_rich) => existing_rich == rich,
             ExistingCellValue::String(v) => rich.runs.is_empty() && &rich.text == v,
@@ -2054,6 +2064,24 @@ fn cell_representation_for_patch(
                     CellBodyKind::InlineStr(s.clone()),
                 ))
             }
+        }
+        CellValue::Entity(entity) => {
+            let degraded = CellValue::String(entity.display.clone());
+            cell_representation_for_patch(
+                Some(&degraded),
+                formula,
+                existing_t,
+                shared_strings,
+            )
+        }
+        CellValue::Record(record) => {
+            let degraded = CellValue::String(record.display.clone());
+            cell_representation_for_patch(
+                Some(&degraded),
+                formula,
+                existing_t,
+                shared_strings,
+            )
         }
         CellValue::RichText(rich) => {
             if let Some(existing_t) = existing_t {

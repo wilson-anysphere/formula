@@ -551,6 +551,14 @@ fn cell_meta_from_value(value: &CellValue) -> (Option<CellValueKind>, Option<Str
             Some(CellValueKind::SharedString { index: 0 }),
             Some(rich.text.clone()),
         ),
+        CellValue::Entity(entity) => (
+            Some(CellValueKind::SharedString { index: 0 }),
+            Some(entity.display.clone()),
+        ),
+        CellValue::Record(record) => (
+            Some(CellValueKind::SharedString { index: 0 }),
+            Some(record.display.clone()),
+        ),
         _ => (Some(CellValueKind::Number), None),
     }
 }

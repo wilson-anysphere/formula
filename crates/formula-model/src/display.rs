@@ -24,6 +24,8 @@ pub fn format_cell_display(
         CellValue::Boolean(b) => FmtValue::Bool(*b),
         CellValue::Error(e) => FmtValue::Error(e.as_str()),
         CellValue::RichText(r) => FmtValue::Text(r.text.as_str()),
+        CellValue::Entity(e) => FmtValue::Text(e.display.as_str()),
+        CellValue::Record(r) => FmtValue::Text(r.display.as_str()),
         // For now arrays/spills are UI-rendered elsewhere.
         CellValue::Array(_) | CellValue::Spill(_) => FmtValue::Blank,
     };

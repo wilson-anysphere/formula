@@ -665,6 +665,24 @@ fn cell_xml(
                 .unwrap_or_default();
             value_xml.push_str(&format!(r#"<v>{}</v>"#, idx));
         }
+        CellValue::Entity(entity) => {
+            attrs.push_str(r#" t="s""#);
+            let idx = shared_strings
+                .index
+                .get(&entity.display)
+                .copied()
+                .unwrap_or_default();
+            value_xml.push_str(&format!(r#"<v>{}</v>"#, idx));
+        }
+        CellValue::Record(record) => {
+            attrs.push_str(r#" t="s""#);
+            let idx = shared_strings
+                .index
+                .get(&record.display)
+                .copied()
+                .unwrap_or_default();
+            value_xml.push_str(&format!(r#"<v>{}</v>"#, idx));
+        }
         CellValue::Error(e) => {
             attrs.push_str(r#" t="e""#);
             value_xml.push_str(&format!(r#"<v>{}</v>"#, escape_xml(e.as_str())));
@@ -750,6 +768,22 @@ fn build_shared_strings(workbook: &Workbook) -> SharedStrings {
         for (_cell_ref, cell) in sheet.iter_cells() {
             match &cell.value {
                 CellValue::String(s) => {
+                    if !index.contains_key(s) {
+                        let idx = values.len();
+                        values.push(s.clone());
+                        index.insert(s.clone(), idx);
+                    }
+                }
+                CellValue::Entity(entity) => {
+                    let s = &entity.display;
+                    if !index.contains_key(s) {
+                        let idx = values.len();
+                        values.push(s.clone());
+                        index.insert(s.clone(), idx);
+                    }
+                }
+                CellValue::Record(record) => {
+                    let s = &record.display;
                     if !index.contains_key(s) {
                         let idx = values.len();
                         values.push(s.clone());

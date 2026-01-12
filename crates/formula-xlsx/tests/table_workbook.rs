@@ -71,6 +71,8 @@ fn set_engine_value(engine: &mut Engine, sheet: &str, addr: &str, value: &CellVa
         CellValue::Boolean(b) => Value::Bool(*b),
         CellValue::Error(_) => Value::Error(formula_engine::ErrorKind::Value),
         CellValue::RichText(r) => Value::Text(r.text.clone()),
+        CellValue::Entity(e) => Value::Text(e.display.clone()),
+        CellValue::Record(r) => Value::Text(r.display.clone()),
         CellValue::Array(_) | CellValue::Spill(_) => Value::Blank,
     };
     engine

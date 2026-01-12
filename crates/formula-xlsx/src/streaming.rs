@@ -1675,7 +1675,15 @@ fn plan_shared_strings<R: Read + Seek>(
     let any_string_patch = patches_by_part
         .values()
         .flat_map(|patches| patches.iter())
-        .any(|p| matches!(p.value, CellValue::String(_) | CellValue::RichText(_)));
+        .any(|p| {
+            matches!(
+                p.value,
+                CellValue::String(_)
+                    | CellValue::RichText(_)
+                    | CellValue::Entity(_)
+                    | CellValue::Record(_)
+            )
+        });
     if !any_string_patch {
         return Ok((None, HashMap::new(), None));
     }
@@ -1760,13 +1768,23 @@ fn plan_shared_strings<R: Read + Seek>(
             .copied()
             .flatten();
 
-        let reuse_idx = if existing_t == Some("s") {
+                let reuse_idx = if existing_t == Some("s") {
             existing_idx.and_then(|idx| {
                 let matches = match &patch.value {
                     CellValue::String(s) => shared_strings
                         .editor
                         .rich_at(idx)
                         .map(|rt| rt.text.as_str() == s)
+                        .unwrap_or(false),
+                    CellValue::Entity(entity) => shared_strings
+                        .editor
+                        .rich_at(idx)
+                        .map(|rt| rt.text.as_str() == entity.display.as_str())
+                        .unwrap_or(false),
+                    CellValue::Record(record) => shared_strings
+                        .editor
+                        .rich_at(idx)
+                        .map(|rt| rt.text.as_str() == record.display.as_str())
                         .unwrap_or(false),
                     CellValue::RichText(rich) => shared_strings
                         .editor
@@ -1783,6 +1801,8 @@ fn plan_shared_strings<R: Read + Seek>(
 
         let idx = reuse_idx.unwrap_or_else(|| match &patch.value {
             CellValue::String(s) => shared_strings.get_or_insert_plain(s),
+            CellValue::Entity(entity) => shared_strings.get_or_insert_plain(entity.display.as_str()),
+            CellValue::Record(record) => shared_strings.get_or_insert_plain(record.display.as_str()),
             CellValue::RichText(rich) => shared_strings.get_or_insert_rich(rich),
             _ => 0,
         });
@@ -1913,7 +1933,13 @@ fn scan_existing_shared_string_indices<R: Read + Seek>(
     for (part, patches) in patches_by_part {
         let mut targets: HashMap<String, (u32, u32)> = HashMap::new();
         for patch in patches {
-            if matches!(patch.value, CellValue::String(_) | CellValue::RichText(_)) {
+            if matches!(
+                patch.value,
+                CellValue::String(_)
+                    | CellValue::RichText(_)
+                    | CellValue::Entity(_)
+                    | CellValue::Record(_)
+            ) {
                 targets.insert(patch.cell.to_a1(), (patch.cell.row, patch.cell.col));
             }
         }
@@ -2192,7 +2218,7 @@ fn patch_wants_shared_string(
     }
 
     match &patch.value {
-        CellValue::String(_) => {
+        CellValue::String(_) | CellValue::Entity(_) | CellValue::Record(_) => {
             if existing_t.is_some_and(should_preserve_unknown_t) {
                 return false;
             }
@@ -3869,6 +3895,14 @@ fn cell_representation(
                     CellBodyKind::InlineStr(s.clone()),
                 ))
             }
+        }
+        CellValue::Entity(entity) => {
+            let degraded = CellValue::String(entity.display.clone());
+            cell_representation(&degraded, formula, existing_t, shared_string_idx)
+        }
+        CellValue::Record(record) => {
+            let degraded = CellValue::String(record.display.clone());
+            cell_representation(&degraded, formula, existing_t, shared_string_idx)
         }
         CellValue::RichText(rich) => {
             if let Some(existing_t) = existing_t {

@@ -1402,6 +1402,52 @@ fn build_shared_strings_xml(
                         lookup.insert(key, new_index);
                     }
                 }
+                CellValue::Entity(entity) => {
+                    let text = entity.display.as_str();
+                    ref_count += 1;
+                    if meta
+                        .and_then(|m| m.value_kind.clone())
+                        .and_then(|k| match k {
+                            CellValueKind::SharedString { index } => Some(index),
+                            _ => None,
+                        })
+                        .and_then(|idx| doc.shared_strings.get(idx as usize))
+                        .map(|rt| rt.text.as_str() == text)
+                        .unwrap_or(false)
+                    {
+                        continue;
+                    }
+
+                    let key = SharedStringKey::plain(text);
+                    if !lookup.contains_key(&key) {
+                        let new_index = table.len() as u32;
+                        table.push(RichText::new(text.to_string()));
+                        lookup.insert(key, new_index);
+                    }
+                }
+                CellValue::Record(record) => {
+                    let text = record.display.as_str();
+                    ref_count += 1;
+                    if meta
+                        .and_then(|m| m.value_kind.clone())
+                        .and_then(|k| match k {
+                            CellValueKind::SharedString { index } => Some(index),
+                            _ => None,
+                        })
+                        .and_then(|idx| doc.shared_strings.get(idx as usize))
+                        .map(|rt| rt.text.as_str() == text)
+                        .unwrap_or(false)
+                    {
+                        continue;
+                    }
+
+                    let key = SharedStringKey::plain(text);
+                    if !lookup.contains_key(&key) {
+                        let new_index = table.len() as u32;
+                        table.push(RichText::new(text.to_string()));
+                        lookup.insert(key, new_index);
+                    }
+                }
                 CellValue::RichText(rich) => {
                     ref_count += 1;
                     if meta
@@ -3070,6 +3116,70 @@ fn append_cell_xml(
                     out.push_str("</v>");
                 }
             },
+            value @ CellValue::Entity(entity) => {
+                let s = entity.display.as_str();
+                match &value_kind {
+                    CellValueKind::SharedString { .. } => {
+                        let idx = shared_string_index(doc, meta, value, shared_lookup);
+                        out.push_str("<v>");
+                        out.push_str(&idx.to_string());
+                        out.push_str("</v>");
+                    }
+                    CellValueKind::InlineString => {
+                        out.push_str("<is><t");
+                        if needs_space_preserve(s) {
+                            out.push_str(r#" xml:space="preserve""#);
+                        }
+                        out.push('>');
+                        out.push_str(&escape_text(s));
+                        out.push_str("</t></is>");
+                    }
+                    CellValueKind::Str => {
+                        out.push_str("<v>");
+                        out.push_str(&escape_text(&raw_or_str(meta, s)));
+                        out.push_str("</v>");
+                    }
+                    _ => {
+                        // Fallback: treat as shared string.
+                        let idx = shared_string_index(doc, meta, value, shared_lookup);
+                        out.push_str("<v>");
+                        out.push_str(&idx.to_string());
+                        out.push_str("</v>");
+                    }
+                }
+            }
+            value @ CellValue::Record(record) => {
+                let s = record.display.as_str();
+                match &value_kind {
+                    CellValueKind::SharedString { .. } => {
+                        let idx = shared_string_index(doc, meta, value, shared_lookup);
+                        out.push_str("<v>");
+                        out.push_str(&idx.to_string());
+                        out.push_str("</v>");
+                    }
+                    CellValueKind::InlineString => {
+                        out.push_str("<is><t");
+                        if needs_space_preserve(s) {
+                            out.push_str(r#" xml:space="preserve""#);
+                        }
+                        out.push('>');
+                        out.push_str(&escape_text(s));
+                        out.push_str("</t></is>");
+                    }
+                    CellValueKind::Str => {
+                        out.push_str("<v>");
+                        out.push_str(&escape_text(&raw_or_str(meta, s)));
+                        out.push_str("</v>");
+                    }
+                    _ => {
+                        // Fallback: treat as shared string.
+                        let idx = shared_string_index(doc, meta, value, shared_lookup);
+                        out.push_str("<v>");
+                        out.push_str(&idx.to_string());
+                        out.push_str("</v>");
+                    }
+                }
+            }
             value @ CellValue::RichText(rich) => {
                 // Rich text is stored in the shared strings table.
                 let idx = shared_string_index(doc, meta, value, shared_lookup);
@@ -3095,6 +3205,7 @@ fn infer_value_kind(cell: &formula_model::Cell) -> CellValueKind {
         CellValue::Number(_) => CellValueKind::Number,
         CellValue::String(_) => CellValueKind::SharedString { index: 0 },
         CellValue::RichText(_) => CellValueKind::SharedString { index: 0 },
+        CellValue::Entity(_) | CellValue::Record(_) => CellValueKind::SharedString { index: 0 },
         CellValue::Empty => CellValueKind::Number,
         _ => CellValueKind::Number,
     }
@@ -3125,9 +3236,15 @@ fn value_kind_compatible(kind: &CellValueKind, value: &CellValue) -> bool {
         (CellValueKind::Number, CellValue::Number(_)) => true,
         (CellValueKind::Bool, CellValue::Boolean(_)) => true,
         (CellValueKind::Error, CellValue::Error(_)) => true,
-        (CellValueKind::SharedString { .. }, CellValue::String(_) | CellValue::RichText(_)) => true,
-        (CellValueKind::InlineString, CellValue::String(_)) => true,
-        (CellValueKind::Str, CellValue::String(_)) => true,
+        (
+            CellValueKind::SharedString { .. },
+            CellValue::String(_)
+            | CellValue::RichText(_)
+            | CellValue::Entity(_)
+            | CellValue::Record(_),
+        ) => true,
+        (CellValueKind::InlineString, CellValue::String(_) | CellValue::Entity(_) | CellValue::Record(_)) => true,
+        (CellValueKind::Str, CellValue::String(_) | CellValue::Entity(_) | CellValue::Record(_)) => true,
         _ => false,
     }
 }
@@ -3287,6 +3404,44 @@ fn shared_string_index(
                         .get(*index as usize)
                         .map(|rt| rt.text.as_str())
                         == Some(text.as_str())
+                    {
+                        return *index;
+                    }
+                }
+            }
+            shared_lookup
+                .get(&SharedStringKey::plain(text))
+                .copied()
+                .unwrap_or(0)
+        }
+        CellValue::Entity(entity) => {
+            let text = entity.display.as_str();
+            if let Some(meta) = meta {
+                if let Some(CellValueKind::SharedString { index }) = &meta.value_kind {
+                    if doc
+                        .shared_strings
+                        .get(*index as usize)
+                        .map(|rt| rt.text.as_str())
+                        == Some(text)
+                    {
+                        return *index;
+                    }
+                }
+            }
+            shared_lookup
+                .get(&SharedStringKey::plain(text))
+                .copied()
+                .unwrap_or(0)
+        }
+        CellValue::Record(record) => {
+            let text = record.display.as_str();
+            if let Some(meta) = meta {
+                if let Some(CellValueKind::SharedString { index }) = &meta.value_kind {
+                    if doc
+                        .shared_strings
+                        .get(*index as usize)
+                        .map(|rt| rt.text.as_str())
+                        == Some(text)
                     {
                         return *index;
                     }

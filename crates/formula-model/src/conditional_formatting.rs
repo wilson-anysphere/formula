@@ -1073,6 +1073,8 @@ fn cell_value_truthy(value: &CellValue) -> bool {
         CellValue::Empty => false,
         CellValue::Error(_) => false,
         CellValue::RichText(t) => !t.text.is_empty(),
+        CellValue::Entity(e) => !e.display.is_empty(),
+        CellValue::Record(r) => !r.display.is_empty(),
         CellValue::Array(a) => !a.data.is_empty(),
         CellValue::Spill(_) => true,
     }
@@ -1390,6 +1392,8 @@ impl ValueKey {
             CellValue::Error(e) => Some(ValueKey::Error(e)),
             CellValue::Empty => None,
             CellValue::RichText(t) => Some(ValueKey::String(t.text)),
+            CellValue::Entity(e) => Some(ValueKey::String(e.display)),
+            CellValue::Record(r) => Some(ValueKey::String(r.display)),
             CellValue::Array(_) => None,
             CellValue::Spill(_) => None,
         }
