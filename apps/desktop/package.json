@@ -10,7 +10,7 @@
     "preview": "vite preview --port 4174 --strictPort",
     "pyodide:setup": "node scripts/ensure-pyodide-assets.mjs",
     "test:node": "node --test",
-    "test": "vitest run",
+    "test": "vitest run --minWorkers=1",
     "pretest:e2e": "pnpm -w build:wasm",
     "test:e2e": "playwright test"
   },
