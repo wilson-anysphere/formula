@@ -82,6 +82,61 @@ test("BrowserExtensionHost: records read taint for cells.getSelection/getCell/ge
   ]);
 });
 
+test("BrowserExtensionHost: cells.getCell taints numeric-string coordinates", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  installFakeWorker(t, [{}]);
+
+  /** @type {any} */
+  const calls = [];
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      getActiveSheet() {
+        return { id: "sheet1", name: "Sheet1" };
+      },
+      async getCell(row, col) {
+        calls.push({ row, col });
+        return 123;
+      },
+      async setCell() {},
+    },
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.cell-coerce";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "http://example.invalid/",
+    mainUrl: "http://example.invalid/main.js",
+    manifest: {
+      name: "cell-coerce",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: ["cells.read"],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension);
+
+  await host._executeApi("cells", "getCell", ["2", "3"], extension);
+
+  assert.deepEqual(calls, [{ row: 2, col: 3 }]);
+
+  assert.deepEqual(sortRanges(extension.taintedRanges), [
+    { sheetId: "sheet1", startRow: 2, startCol: 3, endRow: 2, endCol: 3 },
+  ]);
+});
+
 test("BrowserExtensionHost: records taint for selectionChanged events (and passes it to clipboard guard)", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
 

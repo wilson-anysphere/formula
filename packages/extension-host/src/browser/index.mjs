@@ -57,6 +57,22 @@ const API_PERMISSIONS = {
 
 const MAX_TAINTED_RANGES_PER_EXTENSION = 50;
 
+function normalizeNonNegativeInt(value, { label }) {
+  const raw = value;
+  if (typeof raw === "number") {
+    if (Number.isInteger(raw) && raw >= 0) return raw;
+    throw new Error(`Invalid ${label}: ${raw}`);
+  }
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    if (!/^\d+$/.test(trimmed)) throw new Error(`Invalid ${label}: ${raw}`);
+    const n = Number(trimmed);
+    if (Number.isInteger(n) && n >= 0) return n;
+    throw new Error(`Invalid ${label}: ${raw}`);
+  }
+  throw new Error(`Invalid ${label}: ${String(raw)}`);
+}
+
 function normalizeTaintedRange(range) {
   if (!range || typeof range !== "object") return null;
 
@@ -1616,13 +1632,11 @@ class BrowserExtensionHost {
         return result;
       }
       case "cells.getCell": {
-        const row = args[0];
-        const col = args[1];
+        const row = normalizeNonNegativeInt(args[0], { label: "row" });
+        const col = normalizeNonNegativeInt(args[1], { label: "col" });
         const sheetId = await this._resolveActiveSheetId();
         const value = await this._spreadsheet.getCell(row, col);
-        if (Number.isInteger(row) && row >= 0 && Number.isInteger(col) && col >= 0) {
-          this._taintExtensionRange(extension, { sheetId, startRow: row, startCol: col, endRow: row, endCol: col });
-        }
+        this._taintExtensionRange(extension, { sheetId, startRow: row, startCol: col, endRow: row, endCol: col });
         return value;
       }
       case "cells.setCell":
