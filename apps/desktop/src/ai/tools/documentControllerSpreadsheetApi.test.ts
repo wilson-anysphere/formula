@@ -533,6 +533,63 @@ describe("DocumentControllerSpreadsheetApi", () => {
     expect(previewNoApproval.requires_approval).toBe(false);
   });
 
+  it("requires approval for large formatting edits even when PreviewEngine diffs cannot materialize cells (layered formats)", async () => {
+    const controller = new DocumentController();
+    // Ensure Sheet1 exists without placing any cells in column A (the formatted column).
+    controller.setCellValue("Sheet1", "B1", 123);
+
+    const api = new DocumentControllerSpreadsheetApi(controller);
+    const previewEngine = new PreviewEngine();
+
+    const sheetModel = controller.model.sheets.get("Sheet1");
+    const beforeCellCount = sheetModel?.cells?.size ?? 0;
+
+    const preview = await previewEngine.generatePreview(
+      [
+        {
+          name: "apply_formatting",
+          parameters: { range: "A1:A1048576", format: { bold: true } }
+        }
+      ],
+      api,
+      { default_sheet: "Sheet1" }
+    );
+
+    // The DocumentController formatting layer stores full-column formatting without creating per-cell entries,
+    // so PreviewEngine's cell-level diff should miss the edit.
+    expect(preview.summary.total_changes).toBe(0);
+
+    // But we should still require approval based on tool-reported cell counts.
+    expect(preview.requires_approval).toBe(true);
+    expect(preview.approval_reasons.some((reason) => reason.startsWith("Large edit"))).toBe(true);
+
+    expect(preview.warnings.some((warning) => /diff may be incomplete/i.test(warning))).toBe(true);
+
+    // Ensure the preview simulation didn't mutate the live controller.
+    expect(controller.model.sheets.get("Sheet1")?.cells?.size ?? 0).toBe(beforeCellCount);
+    expect(controller.getCellFormat("Sheet1", "A1").font?.bold).toBeUndefined();
+    expect(controller.getCell("Sheet1", "B1").value).toBe(123);
+  });
+
+  it("returns 0 formatted_cells when DocumentController refuses apply_formatting edits", async () => {
+    const controller = new DocumentController();
+    const api = new DocumentControllerSpreadsheetApi(controller);
+    const executor = new ToolExecutor(api, { default_sheet: "Sheet1" });
+
+    const spy = vi.spyOn(controller, "setRangeFormat").mockReturnValue(false);
+    const result = await executor.execute({
+      name: "apply_formatting",
+      parameters: { range: "A1", format: { bold: true } }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("apply_formatting");
+    if (!result.ok || result.tool !== "apply_formatting") throw new Error("Unexpected tool result");
+    expect(result.data?.formatted_cells).toBe(0);
+
+    spy.mockRestore();
+  });
+
   it("normalizes formulas to include leading '=' when reading through the adapter", async () => {
     const controller = new DocumentController();
     const api = new DocumentControllerSpreadsheetApi(controller);

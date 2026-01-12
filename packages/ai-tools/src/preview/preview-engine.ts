@@ -65,15 +65,45 @@ export class PreviewEngine {
     const summary = summarizeChanges(changes);
 
     const warnings: string[] = [];
+    let toolReportedCellsTouched = 0;
+    let hasToolExecutionWarnings = false;
     for (const result of toolResults) {
       if (!result.ok) {
+        hasToolExecutionWarnings = true;
         warnings.push(`${result.tool}: ${result.error?.message ?? "Tool failed"}`);
+        continue;
+      }
+
+      // PreviewEngine diffs enumerate non-empty cells only. Some spreadsheet
+      // backends store formatting in layered defaults / range runs without
+      // materializing per-cell entries, so use tool-reported cell counts as a
+      // conservative signal for approval gating.
+      switch (result.tool) {
+        case "apply_formatting":
+          toolReportedCellsTouched += result.data?.formatted_cells ?? 0;
+          break;
+        case "set_range":
+        case "apply_formula_column":
+          toolReportedCellsTouched += result.data?.updated_cells ?? 0;
+          break;
+        case "create_pivot_table":
+        case "fetch_external_data":
+          toolReportedCellsTouched += result.data?.written_cells ?? 0;
+          break;
       }
     }
 
+    if (toolReportedCellsTouched > summary.total_changes) {
+      warnings.push(
+        `Preview diff may be incomplete: tools reported touching ${toolReportedCellsTouched} cells, but the cell-level diff captured ${summary.total_changes}. Formatting-only edits on empty cells may not materialize as per-cell changes.`
+      );
+    }
+
+    const effectiveChangeCount = Math.max(summary.total_changes, toolReportedCellsTouched);
+
     const approvalReasons: string[] = [];
-    if (summary.total_changes > this.options.approval_cell_threshold) {
-      approvalReasons.push(`Large edit (${summary.total_changes} cells)`);
+    if (effectiveChangeCount > this.options.approval_cell_threshold) {
+      approvalReasons.push(`Large edit (${effectiveChangeCount} cells)`);
     }
     if (summary.deletes > 0) {
       approvalReasons.push(`Deletes detected (${summary.deletes} cells cleared)`);
@@ -81,7 +111,7 @@ export class PreviewEngine {
     if (toolCalls.some((call) => call.name === "fetch_external_data")) {
       approvalReasons.push("External data access requested");
     }
-    if (warnings.length > 0) {
+    if (hasToolExecutionWarnings) {
       approvalReasons.push("Tool execution warnings");
     }
 

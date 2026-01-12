@@ -721,13 +721,12 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
   applyFormatting(range: RangeAddress, format: Partial<CellFormat>): number {
     const sheetId = this.resolveSheetIdOrThrow(range.sheet);
     const patch = cellFormatToStylePatch(format);
-    if (patch) {
-      const applied = this.controller.setRangeFormat(sheetId, toControllerRange(range), patch, { label: "AI apply_formatting" });
-      if (applied === false) return 0;
-    }
     const rows = range.endRow - range.startRow + 1;
     const cols = range.endCol - range.startCol + 1;
-    return patch ? rows * cols : 0;
+    if (!patch) return 0;
+
+    const applied = this.controller.setRangeFormat(sheetId, toControllerRange(range), patch, { label: "AI apply_formatting" });
+    return applied ? rows * cols : 0;
   }
 
   getLastUsedRow(sheet: string): number {
