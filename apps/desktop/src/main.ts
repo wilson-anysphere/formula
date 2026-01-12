@@ -3636,6 +3636,22 @@ mountRibbon(ribbonRoot, {
       case "pageLayout.export.exportPdf":
         void handleRibbonExportPdf();
         return;
+      case "view.appearance.theme.system":
+        themeController.setThemePreference("system");
+        app.focus();
+        return;
+      case "view.appearance.theme.light":
+        themeController.setThemePreference("light");
+        app.focus();
+        return;
+      case "view.appearance.theme.dark":
+        themeController.setThemePreference("dark");
+        app.focus();
+        return;
+      case "view.appearance.theme.highContrast":
+        themeController.setThemePreference("high-contrast");
+        app.focus();
+        return;
       case "view.zoom.zoom100":
         app.setZoom(1);
         syncZoomControl();

@@ -56,7 +56,15 @@ export class ThemeController {
   }
 
   start() {
-    const settings = loadAppearanceSettings(this._storage);
+    /** @type {{ themePreference?: "system" | "light" | "dark" | "high-contrast" }} */
+    let settings = { themePreference: "system" };
+    try {
+      settings = loadAppearanceSettings(this._storage);
+    } catch {
+      // Storage may be unavailable (e.g. disabled in the host webview). Themes
+      // should still apply best-effort without persisting.
+    }
+
     this.setThemePreference(settings.themePreference, { persist: false });
     this._applyReducedMotion();
 
@@ -92,7 +100,11 @@ export class ThemeController {
     this._applyTheme();
 
     if (persist) {
-      persistThemePreference(nextPreference, this._storage);
+      try {
+        persistThemePreference(nextPreference, this._storage);
+      } catch {
+        // Best-effort persistence only.
+      }
     }
 
     this._wireThemeListener();

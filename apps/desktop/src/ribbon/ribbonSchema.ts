@@ -1880,6 +1880,50 @@ export const defaultRibbonSchema: RibbonSchema = {
           ],
         },
         {
+          id: "view.appearance",
+          label: "Appearance",
+          buttons: [
+            {
+              id: "view.appearance.theme",
+              label: "Theme",
+              ariaLabel: "Theme",
+              icon: "🎨",
+              kind: "dropdown",
+              testId: "theme-selector",
+              menuItems: [
+                {
+                  id: "view.appearance.theme.system",
+                  label: "System",
+                  ariaLabel: "Use system theme",
+                  icon: "🖥",
+                  testId: "theme-option-system",
+                },
+                {
+                  id: "view.appearance.theme.light",
+                  label: "Light",
+                  ariaLabel: "Use light theme",
+                  icon: "☀",
+                  testId: "theme-option-light",
+                },
+                {
+                  id: "view.appearance.theme.dark",
+                  label: "Dark",
+                  ariaLabel: "Use dark theme",
+                  icon: "🌙",
+                  testId: "theme-option-dark",
+                },
+                {
+                  id: "view.appearance.theme.highContrast",
+                  label: "High Contrast",
+                  ariaLabel: "Use high contrast theme",
+                  icon: "◐",
+                  testId: "theme-option-high-contrast",
+                },
+              ],
+            },
+          ],
+        },
+        {
           id: "view.zoom",
           label: "Zoom",
           buttons: [
