@@ -73,7 +73,7 @@ The user experience must honor Excel's familiar mental model while introducing m
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  ┌───────────────────────────────────────────────────────────────────┐     │
-│  │ > Insert pivot table                                        ⌘⌥P   │     │
+│  │ > Insert pivot table                                                │     │
 │  └───────────────────────────────────────────────────────────────────┘     │
 │                                                                             │
 │  RECENT                                                                     │
@@ -173,7 +173,7 @@ The user experience must honor Excel's familiar mental model while introducing m
 | Shortcut | Action |
 |----------|--------|
 | `Cmd+K` (Mac) / `Ctrl+K` (Windows/Linux) | Inline AI edit |
-| `Cmd+I` (desktop, Mac) | Toggle AI sidebar |
+| `Cmd+I` (desktop, macOS only) | Toggle AI sidebar |
 | `Tab` (while editing a formula) | Accept AI suggestion |
 
 ---
