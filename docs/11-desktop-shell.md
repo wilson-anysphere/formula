@@ -26,7 +26,9 @@ This document is a “what’s real in the repo” reference for contributors.
   - Clipboard commands + platform implementations: `apps/desktop/src-tauri/src/clipboard/`
   - “Open file” path normalization: `apps/desktop/src-tauri/src/open_file.rs`
   - “Open file” IPC queue/handshake state machine: `apps/desktop/src-tauri/src/open_file_ipc.rs`
-  - Filesystem scope helpers: `apps/desktop/src-tauri/src/fs_scope.rs`
+  - Filesystem scope helpers:
+    - `apps/desktop/src-tauri/src/path_scope.rs` (`PathScopePolicy`, used by path-taking commands like `open_workbook`)
+    - `apps/desktop/src-tauri/src/fs_scope.rs` (lower-level canonicalization + scope helpers used by some commands)
   - Custom `asset:` protocol handler (COEP/CORP): `apps/desktop/src-tauri/src/asset_protocol.rs`
   - Tray: `apps/desktop/src-tauri/src/tray.rs`
   - Tray status (icon + tooltip updates): `apps/desktop/src-tauri/src/tray_status.rs`
