@@ -1149,9 +1149,7 @@ test.describe("sheet tabs", () => {
 
     // Set a tab color via the sheet tab context menu and verify it renders.
     // Avoid flaky right-click handling in the desktop shell; dispatch a deterministic contextmenu event.
-    await page.evaluate(() => {
-      const tab = document.querySelector('[data-testid="sheet-tab-Sheet3"]') as HTMLElement | null;
-      if (!tab) throw new Error("Missing Sheet3 tab");
+    await page.getByTestId("sheet-tab-Sheet3").evaluate((tab) => {
       const rect = tab.getBoundingClientRect();
       tab.dispatchEvent(
         new MouseEvent("contextmenu", {
@@ -1399,9 +1397,7 @@ test.describe("sheet tabs", () => {
     await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 2");
 
     // Avoid flaky right-click handling in the desktop shell; dispatch a deterministic contextmenu event.
-    await page.evaluate(() => {
-      const tab = document.querySelector('[data-testid="sheet-tab-Sheet2"]') as HTMLElement | null;
-      if (!tab) throw new Error("Missing Sheet2 tab");
+    await sheet2Tab.evaluate((tab) => {
       const rect = tab.getBoundingClientRect();
       tab.dispatchEvent(
         new MouseEvent("contextmenu", {
@@ -1419,9 +1415,7 @@ test.describe("sheet tabs", () => {
     await expect(sheet2Tab.locator(".sheet-tab__color")).toBeVisible();
 
     // Hiding the active sheet should activate an adjacent visible sheet (Sheet1).
-    await page.evaluate(() => {
-      const tab = document.querySelector('[data-testid="sheet-tab-Sheet2"]') as HTMLElement | null;
-      if (!tab) throw new Error("Missing Sheet2 tab");
+    await sheet2Tab.evaluate((tab) => {
       const rect = tab.getBoundingClientRect();
       tab.dispatchEvent(
         new MouseEvent("contextmenu", {
@@ -1445,11 +1439,10 @@ test.describe("sheet tabs", () => {
     // The last tab stretches to fill the strip width (so drag/drop after it remains targetable),
     // which makes it hard to right-click the strip background with a trusted mouse event. Instead,
     // dispatch a deterministic contextmenu event directly on the strip container element.
-    await page.evaluate(() => {
-      const strip = document.querySelector<HTMLElement>("#sheet-tabs .sheet-tabs");
-      if (!strip) throw new Error("Missing sheet tab strip");
-      const rect = strip.getBoundingClientRect();
-      strip.dispatchEvent(
+    const strip = page.locator("#sheet-tabs .sheet-tabs");
+    await strip.evaluate((el) => {
+      const rect = el.getBoundingClientRect();
+      el.dispatchEvent(
         new MouseEvent("contextmenu", {
           bubbles: true,
           cancelable: true,

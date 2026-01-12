@@ -380,7 +380,7 @@ test.describe("split view", () => {
   test("primary in-cell edits commit on blur when clicking another cell (shared grid)", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
     await waitForIdle(page);
     await waitForGridCanvasesToBeSized(page, "#grid");
@@ -410,7 +410,7 @@ test.describe("split view", () => {
   }) => {
     await gotoDesktop(page, "/?grid=shared");
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
     await waitForIdle(page);
     await waitForGridCanvasesToBeSized(page, "#grid");
@@ -1348,7 +1348,7 @@ test.describe("split view", () => {
 
     await gotoDesktop(page, "/?grid=shared");
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
@@ -1622,7 +1622,7 @@ test.describe("split view / shared grid zoom", () => {
     await page.evaluate(
       ({ x, y }) => {
         const grid = document.getElementById("grid-secondary");
-        if (!grid) throw new Error("Missing #grid-secondary container");
+        if (!grid) throw new Error("Missing #grid-secondary");
         const rect = grid.getBoundingClientRect();
         grid.dispatchEvent(
           new MouseEvent("contextmenu", {

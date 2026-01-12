@@ -146,7 +146,7 @@ test.describe("dockable panels layout persistence", () => {
   test("status bar buttons toggle Version History + Branch Manager panels", async ({ page }) => {
     await gotoDesktop(page);
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
 
     const statusbar = page.locator(".statusbar__main");
