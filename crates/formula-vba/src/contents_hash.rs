@@ -1662,7 +1662,7 @@ fn append_project_line(
 /// Compute the MS-OVBA §2.4.2.7 `ContentsHashV3` value (SHA-256) over v3 `ProjectNormalizedData`.
 ///
 /// `ContentsHashV3 = SHA-256(ProjectNormalizedData)` where:
-/// `ProjectNormalizedData = V3ContentNormalizedData || FormsNormalizedData`.
+/// `ProjectNormalizedData = (filtered PROJECT stream properties) || V3ContentNormalizedData || FormsNormalizedData`.
 ///
 /// Note: signature binding helpers use [`crate::compute_vba_project_digest_v3`] to support
 /// best-effort/non-standard digest algorithms seen in the wild; this function always computes the
