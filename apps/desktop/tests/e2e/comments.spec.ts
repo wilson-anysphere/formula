@@ -139,6 +139,56 @@ test.describe("comments", () => {
     await expect(page.getByTestId("new-comment-input")).toBeFocused();
   });
 
+  test("cell context menu disables Add Comment while editing", async ({ page }) => {
+    await gotoDesktop(page);
+
+    await page.waitForFunction(() => {
+      const app = (window as any).__formulaApp;
+      const rect = app?.getCellRectA1?.("A1");
+      return rect && rect.width > 0 && rect.height > 0;
+    });
+
+    const a1 = (await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("A1"))) as {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    };
+
+    // Select A1 and enter in-cell edit mode (F2 semantics).
+    const grid = page.locator("#grid");
+    await grid.click({ position: { x: a1.x + a1.width / 2, y: a1.y + a1.height / 2 } });
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+
+    await page.keyboard.press("F2");
+    await expect(page.getByTestId("cell-editor")).toBeVisible();
+
+    // Open the context menu while editing. (Dispatch the event directly to avoid flaky right-click handling.)
+    await page.evaluate(
+      ({ x, y }) => {
+        const gridEl = document.getElementById("grid");
+        if (!gridEl) throw new Error("Missing #grid");
+        const rect = gridEl.getBoundingClientRect();
+        gridEl.dispatchEvent(
+          new MouseEvent("contextmenu", {
+            bubbles: true,
+            cancelable: true,
+            button: 2,
+            clientX: rect.left + x,
+            clientY: rect.top + y,
+          }),
+        );
+      },
+      { x: a1.x + a1.width / 2, y: a1.y + a1.height / 2 },
+    );
+
+    const menu = page.getByTestId("context-menu");
+    await expect(menu).toBeVisible();
+
+    const addComment = menu.getByRole("button", { name: "Add Comment" });
+    await expect(addComment).toBeDisabled();
+  });
+
   test("Shift+F2 opens the comments panel and focuses the input", async ({ page }) => {
     await gotoDesktop(page);
 
