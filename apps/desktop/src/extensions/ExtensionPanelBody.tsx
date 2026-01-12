@@ -21,9 +21,7 @@ const WEBVIEW_CSP = [
   "form-action 'none'",
 ].join("; ");
 
-export function injectWebviewCsp(html: string): string {
-  const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${WEBVIEW_CSP}">`;
-  const hardenTauriGlobalsSource = `(() => {
+const HARDEN_TAURI_GLOBALS_SOURCE = `(() => {
   "use strict";
   const keys = ["__TAURI__", "__TAURI_IPC__", "__TAURI_INTERNALS__", "__TAURI_METADATA__"];
   let tauriGlobalsPresent = false;
@@ -160,13 +158,18 @@ export function injectWebviewCsp(html: string): string {
   }
 })();
 `;
-  // Avoid inline scripts: Tauri CSP blocks 'unsafe-inline', and blob: documents inherit the
-  // parent document CSP. Use a `data:` URL script so it can execute under the default policy.
-  const hardenTauriGlobalsScriptUrl = `data:text/javascript;charset=utf-8,${encodeURIComponent(
-    hardenTauriGlobalsSource,
-  )}`;
-  const hardenTauriGlobalsScript = `<script src="${hardenTauriGlobalsScriptUrl}"></script>`;
-  const injectedHeadContent = `${cspMeta}${hardenTauriGlobalsScript}`;
+
+// Avoid inline scripts: Tauri CSP blocks 'unsafe-inline', and blob: documents inherit the
+// parent document CSP. Use a `data:` URL script so it can execute under the default policy.
+const HARDEN_TAURI_GLOBALS_SCRIPT_URL = `data:text/javascript;charset=utf-8,${encodeURIComponent(
+  HARDEN_TAURI_GLOBALS_SOURCE,
+)}`;
+const HARDEN_TAURI_GLOBALS_SCRIPT = `<script src="${HARDEN_TAURI_GLOBALS_SCRIPT_URL}"></script>`;
+const WEBVIEW_CSP_META = `<meta http-equiv="Content-Security-Policy" content="${WEBVIEW_CSP}">`;
+const WEBVIEW_HEAD_INJECTION = `${WEBVIEW_CSP_META}${HARDEN_TAURI_GLOBALS_SCRIPT}`;
+
+export function injectWebviewCsp(html: string): string {
+  const injectedHeadContent = WEBVIEW_HEAD_INJECTION;
   const src = String(html ?? "");
 
   // Ensure the CSP applies before any extension-provided markup is parsed (including malformed
