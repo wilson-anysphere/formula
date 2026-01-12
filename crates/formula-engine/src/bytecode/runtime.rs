@@ -1305,7 +1305,7 @@ fn xor_scalar(v: &Value, acc: &mut bool) -> Option<ErrorKind> {
         }
         Value::Empty => None,
         // Scalar text arguments coerce like NOT().
-        Value::Text(s) => match coerce_to_bool(Value::Text(s.clone())) {
+        Value::Text(_) => match coerce_to_bool(v) {
             Ok(b) => {
                 *acc ^= b;
                 None
@@ -1394,11 +1394,24 @@ fn or_array(a: &ArrayValue, any_true: &mut bool, any: &mut bool) -> Option<Error
 }
 
 fn xor_array(a: &ArrayValue, acc: &mut bool) -> Option<ErrorKind> {
-    for n in &a.values {
-        if n.is_nan() {
-            continue;
+    for v in a.iter() {
+        match v {
+            Value::Error(e) => return Some(*e),
+            Value::Number(n) => {
+                if n.is_nan() {
+                    continue;
+                }
+                *acc ^= *n != 0.0;
+            }
+            Value::Bool(b) => {
+                *acc ^= *b;
+            }
+            // Text and blanks in arrays are ignored (same as references).
+            Value::Text(_) | Value::Empty => {}
+            // Arrays should be scalar values; ignore any nested arrays/references rather than
+            // treating them as implicit spills.
+            Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => {}
         }
-        *acc ^= *n != 0.0;
     }
     None
 }
@@ -5080,7 +5093,7 @@ fn count_if_range_on_sheet(
                     continue;
                 }
                 seen += 1;
-                if let Some(n) = coerce_countif_value_to_number(v) {
+                if let Some(n) = coerce_countif_value_to_number(&v) {
                     if matches_numeric_criteria(n, criteria) {
                         count += 1;
                     }

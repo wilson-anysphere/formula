@@ -386,6 +386,23 @@ fn decodes_structured_ref_multiple_item_flags_prefers_totals_over_data() {
 }
 
 #[test]
+fn decodes_structured_ref_multiple_item_flags_prefers_this_row() {
+    // Ensure the "#This Row" flag wins over other item flags.
+    let rgce = ptg_list(1, 0x0010 | 0x0002, 2, 2, 0x18);
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "[@Column2]");
+    assert_eq!(normalize(&text), normalize("[@Column2]"));
+}
+
+#[test]
+fn decodes_structured_ref_multiple_item_flags_prefers_this_row_all_columns() {
+    let rgce = ptg_list(1, 0x0010 | 0x0001, 0, 0, 0x18);
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "[@]");
+    assert_eq!(normalize(&text), normalize("[@]"));
+}
+
+#[test]
 fn decodes_structured_ref_extend_a_is_supported() {
     // PtgExtendA (0x58) uses the same payload as ref/value class variants.
     let rgce = ptg_list(1, 0x0000, 2, 2, 0x58);
