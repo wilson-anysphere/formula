@@ -103,10 +103,11 @@ impl XlsxPackage {
         // fall back to interpreting `vm` as a direct relationship-slot index.
         let mut vm_to_rich_value: HashMap<u32, u32> = HashMap::new();
         if let Some(metadata_bytes) = self.part("xl/metadata.xml") {
-            let parsed = crate::rich_data::metadata::parse_value_metadata_vm_to_rich_value_index_map(
-                metadata_bytes,
-            )
-            .map_err(|e| XlsxError::Invalid(format!("failed to parse xl/metadata.xml: {e}")))?;
+            let parsed =
+                crate::rich_data::metadata::parse_value_metadata_vm_to_rich_value_index_map(
+                    metadata_bytes,
+                )
+                .map_err(|e| XlsxError::Invalid(format!("failed to parse xl/metadata.xml: {e}")))?;
             vm_to_rich_value = parsed;
         }
         let has_vm_mapping = !vm_to_rich_value.is_empty();
@@ -153,7 +154,11 @@ impl XlsxPackage {
                     break;
                 }
             }
-            if saw_zero { 1 } else { 0 }
+            if saw_zero {
+                1
+            } else {
+                0
+            }
         } else {
             0
         };
@@ -180,7 +185,8 @@ impl XlsxPackage {
                         zero_based_matches = zero_based_matches.saturating_add(1);
                     }
                     if let Some(slot) = vm.checked_sub(1) {
-                        if slot_points_to_image(&rich_value_rel_ids, &image_targets_by_rel_id, slot) {
+                        if slot_points_to_image(&rich_value_rel_ids, &image_targets_by_rel_id, slot)
+                        {
                             one_based_matches = one_based_matches.saturating_add(1);
                         }
                     }
@@ -256,9 +262,8 @@ impl XlsxPackage {
             let Some(sheet_xml_bytes) = self.part(&worksheet_part) else {
                 continue;
             };
-            let sheet_xml = std::str::from_utf8(sheet_xml_bytes).map_err(|e| {
-                XlsxError::Invalid(format!("{worksheet_part} not utf-8: {e}"))
-            })?;
+            let sheet_xml = std::str::from_utf8(sheet_xml_bytes)
+                .map_err(|e| XlsxError::Invalid(format!("{worksheet_part} not utf-8: {e}")))?;
 
             let sheet_rels_part = rels_for_part(&worksheet_part);
             let sheet_rels_xml = self
@@ -280,9 +285,9 @@ impl XlsxPackage {
                     None
                 };
 
-                // Excel has been observed to use `CalcOrigin=5` for in-cell images; treat this as a
-                // reasonable default when rich value tables are missing.
-                let mut calc_origin: u32 = 5;
+                // When rich value tables are missing we cannot recover `CalcOrigin`, so default to
+                // `0` (unknown).
+                let mut calc_origin: u32 = 0;
                 let mut alt_text: Option<String> = None;
 
                 // Determine which relationship-slot index to use for this cell image.
@@ -293,7 +298,8 @@ impl XlsxPackage {
                 // 4) last-ditch: interpret `vm` as the relationship-slot index (tolerating 1-based vs 0-based).
                 let mut slot_candidates: Vec<u32> = Vec::new();
                 if let Some(rich_value_index) = rich_value_index {
-                    if let Some(local_image) = local_image_by_rich_value_index.get(&rich_value_index)
+                    if let Some(local_image) =
+                        local_image_by_rich_value_index.get(&rich_value_index)
                     {
                         slot_candidates.push(local_image.local_image_identifier);
                         calc_origin = local_image.calc_origin;
@@ -520,9 +526,9 @@ fn parse_sheet_vm_image_cells(sheet_xml: &[u8]) -> Result<Vec<(CellRef, u32)>, X
     let cells_with_metadata =
         scan_cells_with_metadata_indices(sheet_xml).map_err(|err| match err {
             RichDataError::Xlsx(err) => err,
-            RichDataError::XmlNonUtf8 { source, .. } => XlsxError::Invalid(format!(
-                "worksheet xml contains invalid UTF-8: {source}"
-            )),
+            RichDataError::XmlNonUtf8 { source, .. } => {
+                XlsxError::Invalid(format!("worksheet xml contains invalid UTF-8: {source}"))
+            }
             RichDataError::XmlParse { source, .. } => XlsxError::RoXml(source),
         })?;
 
