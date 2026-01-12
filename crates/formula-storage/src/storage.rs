@@ -1234,7 +1234,27 @@ impl Storage {
         let mut conn = self.conn.lock().expect("storage mutex poisoned");
         let tx = conn.transaction()?;
 
-        let meta = self.get_sheet_meta_tx(&tx, sheet_id)?;
+        let meta = match self.get_sheet_meta_tx(&tx, sheet_id) {
+            Ok(meta) => meta,
+            Err(StorageError::SheetNotFound(id)) => return Err(StorageError::SheetNotFound(id)),
+            Err(_) => {
+                // The sheet row exists but is corrupted (e.g. invalid `workbook_id` type).
+                // Best-effort fallback: update the sheet name without workbook-wide rewrites.
+                let updated = tx.execute(
+                    "UPDATE sheets SET name = ?1 WHERE id = ?2",
+                    params![name, sheet_id.to_string()],
+                )?;
+                if updated == 0 {
+                    return Err(StorageError::SheetNotFound(sheet_id));
+                }
+                update_sheet_model_json_tx(&tx, sheet_id, |sheet| {
+                    sheet.name = name.to_string();
+                })?;
+                touch_workbook_modified_at(&tx, sheet_id)?;
+                tx.commit()?;
+                return Ok(());
+            }
+        };
         let old_name = meta.name.clone();
 
         // Enforce Excel-style uniqueness (Unicode-aware, case-insensitive) within the workbook.
@@ -1272,16 +1292,18 @@ impl Storage {
     pub fn set_sheet_visibility(&self, sheet_id: Uuid, visibility: SheetVisibility) -> Result<()> {
         let mut conn = self.conn.lock().expect("storage mutex poisoned");
         let tx = conn.transaction()?;
-        let meta = self.get_sheet_meta_tx(&tx, sheet_id)?;
-        tx.execute(
+        let updated = tx.execute(
             "UPDATE sheets SET visibility = ?1 WHERE id = ?2",
             params![visibility.as_str(), sheet_id.to_string()],
         )?;
+        if updated == 0 {
+            return Err(StorageError::SheetNotFound(sheet_id));
+        }
         // Keep `model_sheet_json` aligned so export/import round-trips after legacy metadata edits.
         update_sheet_model_json_tx(&tx, sheet_id, |sheet| {
             sheet.visibility = storage_sheet_visibility_to_model(visibility.as_str());
         })?;
-        touch_workbook_modified_at_by_workbook_id(&tx, meta.workbook_id)?;
+        touch_workbook_modified_at(&tx, sheet_id)?;
         tx.commit()?;
         Ok(())
     }
@@ -1289,18 +1311,20 @@ impl Storage {
     pub fn set_sheet_tab_color(&self, sheet_id: Uuid, tab_color: Option<&str>) -> Result<()> {
         let mut conn = self.conn.lock().expect("storage mutex poisoned");
         let tx = conn.transaction()?;
-        let meta = self.get_sheet_meta_tx(&tx, sheet_id)?;
         let tab_color_json = tab_color
             .map(|c| serde_json::to_value(formula_model::TabColor::rgb(c)))
             .transpose()?;
-        tx.execute(
+        let updated = tx.execute(
             "UPDATE sheets SET tab_color = ?1, tab_color_json = ?2 WHERE id = ?3",
             params![tab_color, tab_color_json, sheet_id.to_string()],
         )?;
+        if updated == 0 {
+            return Err(StorageError::SheetNotFound(sheet_id));
+        }
         update_sheet_model_json_tx(&tx, sheet_id, |sheet| {
             sheet.tab_color = tab_color.map(formula_model::TabColor::rgb);
         })?;
-        touch_workbook_modified_at_by_workbook_id(&tx, meta.workbook_id)?;
+        touch_workbook_modified_at(&tx, sheet_id)?;
         tx.commit()?;
         Ok(())
     }
@@ -1313,16 +1337,18 @@ impl Storage {
     ) -> Result<()> {
         let mut conn = self.conn.lock().expect("storage mutex poisoned");
         let tx = conn.transaction()?;
-        let meta = self.get_sheet_meta_tx(&tx, sheet_id)?;
-        tx.execute(
+        let updated = tx.execute(
             "UPDATE sheets SET xlsx_sheet_id = ?1, xlsx_rel_id = ?2 WHERE id = ?3",
             params![xlsx_sheet_id, xlsx_rel_id, sheet_id.to_string()],
         )?;
+        if updated == 0 {
+            return Err(StorageError::SheetNotFound(sheet_id));
+        }
         update_sheet_model_json_tx(&tx, sheet_id, |sheet| {
             sheet.xlsx_sheet_id = xlsx_sheet_id.and_then(|v| u32::try_from(v).ok());
             sheet.xlsx_rel_id = xlsx_rel_id.map(|s| s.to_string());
         })?;
-        touch_workbook_modified_at_by_workbook_id(&tx, meta.workbook_id)?;
+        touch_workbook_modified_at(&tx, sheet_id)?;
         tx.commit()?;
         Ok(())
     }
@@ -1334,7 +1360,25 @@ impl Storage {
         let mut conn = self.conn.lock().expect("storage mutex poisoned");
         let tx = conn.transaction()?;
 
-        let meta = self.get_sheet_meta_tx(&tx, sheet_id)?;
+        let meta = match self.get_sheet_meta_tx(&tx, sheet_id) {
+            Ok(meta) => meta,
+            Err(StorageError::SheetNotFound(id)) => return Err(StorageError::SheetNotFound(id)),
+            Err(_) => {
+                // The sheet row exists but is corrupted (e.g. invalid `workbook_id` type).
+                // Best-effort fallback: update the sheet's position without renormalizing the rest.
+                let clamped = new_position.max(0);
+                let updated = tx.execute(
+                    "UPDATE sheets SET position = ?1 WHERE id = ?2",
+                    params![clamped, sheet_id.to_string()],
+                )?;
+                if updated == 0 {
+                    return Err(StorageError::SheetNotFound(sheet_id));
+                }
+                touch_workbook_modified_at(&tx, sheet_id)?;
+                tx.commit()?;
+                return Ok(());
+            }
+        };
 
         let mut sheets = self.list_sheets_tx(&tx, meta.workbook_id)?;
         if sheets.len() <= 1 {
@@ -1366,7 +1410,37 @@ impl Storage {
         let mut conn = self.conn.lock().expect("storage mutex poisoned");
         let tx = conn.transaction()?;
 
-        let meta = self.get_sheet_meta_tx(&tx, sheet_id)?;
+        let meta = match self.get_sheet_meta_tx(&tx, sheet_id) {
+            Ok(meta) => meta,
+            Err(StorageError::SheetNotFound(id)) => return Err(StorageError::SheetNotFound(id)),
+            Err(_) => {
+                // The sheet row exists but is corrupted (e.g. invalid `workbook_id` type).
+                // Best-effort fallback: delete the sheet and its dependent rows without attempting
+                // workbook-wide reference rewrites / position renormalization.
+                touch_workbook_modified_at(&tx, sheet_id)?;
+                tx.execute(
+                    "DELETE FROM sheet_drawings WHERE sheet_id = ?1",
+                    params![sheet_id.to_string()],
+                )?;
+                tx.execute(
+                    "DELETE FROM cells WHERE sheet_id = ?1",
+                    params![sheet_id.to_string()],
+                )?;
+                tx.execute(
+                    "DELETE FROM change_log WHERE sheet_id = ?1",
+                    params![sheet_id.to_string()],
+                )?;
+                let deleted = tx.execute(
+                    "DELETE FROM sheets WHERE id = ?1",
+                    params![sheet_id.to_string()],
+                )?;
+                if deleted == 0 {
+                    return Err(StorageError::SheetNotFound(sheet_id));
+                }
+                tx.commit()?;
+                return Ok(());
+            }
+        };
         let (deleted_model_sheet_id, sheet_order, ordered_sheet_ids) = {
             let (model_sheet_id,): (Option<i64>,) = tx.query_row(
                 "SELECT model_sheet_id FROM sheets WHERE id = ?1",
