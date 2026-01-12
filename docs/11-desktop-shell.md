@@ -380,7 +380,7 @@ Implementation notes:
 - Tray menu and click behavior are implemented in `apps/desktop/src-tauri/src/tray.rs`.
   - Emits: `tray-new`, `tray-open`, `tray-quit`
   - “Check for Updates” runs an update check (`updater::spawn_update_check(..., UpdateCheckSource::Manual)`)
-- App menu items are implemented in `apps/desktop/src-tauri/src/menu.rs` and forwarded as `menu-*` events.
+- App menu items are implemented in `apps/desktop/src-tauri/src/menu.rs` and forwarded as `menu-open` / `menu-save` / … events.
 - In release builds, `main.rs` can run a startup update check, but it waits for the frontend to emit `updater-ui-ready` so update events aren’t dropped before listeners are installed.
 - Global shortcuts are registered in `apps/desktop/src-tauri/src/shortcuts.rs`.
   - Accelerators: `CmdOrCtrl+Shift+O`, `CmdOrCtrl+Shift+P`
@@ -410,14 +410,14 @@ Desktop-specific listeners are set up near the bottom of `apps/desktop/src/main.
 - `open-file` → queue workbook opens; then emits `open-file-ready` once the handler is installed (flushes any queued open-file requests on the Rust side)
 - `file-dropped` → open the first dropped path
 - `tray-open` / `tray-new` / `tray-quit` → open dialog/new workbook/quit flow
-- `menu-*` (e.g. open/save/quit) → routed to the same “open/save/close” logic used by keyboard shortcuts and tray menu items
+- menu events (e.g. `menu-open`, `menu-save`, `menu-quit`) → routed to the same “open/save/close” logic used by keyboard shortcuts and tray menu items
 - `shortcut-quick-open` / `shortcut-command-palette` → open dialog/palette
 - updater events → handled by the updater UI (`apps/desktop/src/tauri/updaterUi.ts`)
   - `main.ts` emits `updater-ui-ready` once the updater listeners are installed (so the Rust host can safely start a startup update check in release builds).
 
 Separately, startup metrics listeners are installed at the top of `main.ts` via:
 
-- `installStartupTimingsListeners()` (listens for `startup:*` events)
+- `installStartupTimingsListeners()` (listens for `startup:window-visible`, `startup:webview-loaded`, `startup:tti`, `startup:metrics`)
 - `reportStartupWebviewLoaded()` (invokes the host command to emit the initial timing events)
 
 Important implementation detail: invoke calls are serialized via `queueBackendOp(...)` / `pendingBackendSync` so that bulk edits (workbook sync) don’t race with open/save/close.
