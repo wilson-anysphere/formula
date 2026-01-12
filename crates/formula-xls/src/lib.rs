@@ -6,8 +6,9 @@
 //! metadata, hyperlinks, basic outline (grouping) metadata, and legacy cell
 //! comments/notes ([`formula_model::CommentKind::Note`]) on worksheets where
 //! available. We also attempt to preserve workbook/worksheet view state where
-//! possible (active tab, frozen panes, zoom, selection, and grid/headings/zero
-//! visibility flags).
+//! possible (active tab, workbook window geometry/state, frozen panes, zoom,
+//! selection, and grid/headings/zero visibility flags). Basic workbook- and
+//! worksheet-level protection settings are also imported when present.
 //!
 //! When present, workbook- and sheet-scoped defined names (named ranges) are also
 //! imported. Defined-name formula (`rgce`) decoding is best-effort and may emit
