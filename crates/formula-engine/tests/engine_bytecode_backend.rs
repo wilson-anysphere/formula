@@ -2431,6 +2431,127 @@ fn bytecode_backend_and_or_reference_semantics_match_ast() {
 }
 
 #[test]
+fn bytecode_backend_and_or_single_cell_range_semantics_match_ast() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=AND(A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=OR(A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C1", "=AND(A1:A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C2", "=OR(A1:A1)")
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(
+        stats.fallback,
+        0,
+        "expected all AND/OR formulas to compile to bytecode (report={:?})",
+        engine.bytecode_compile_report(100)
+    );
+    assert_eq!(stats.total_formula_cells, 4);
+    assert_eq!(stats.compiled, 4);
+
+    let cases: &[(Option<Value>, Value, Value, Value, Value)] = &[
+        // Blank cell refs are ignored for both scalar and range semantics.
+        (
+            None,
+            Value::Bool(true),
+            Value::Bool(false),
+            Value::Bool(true),
+            Value::Bool(false),
+        ),
+        // Text cell refs behave like scalar text arguments (#VALUE!) but are ignored in ranges.
+        (
+            Some(Value::Text("hello".to_string())),
+            Value::Error(ErrorKind::Value),
+            Value::Error(ErrorKind::Value),
+            Value::Bool(true),
+            Value::Bool(false),
+        ),
+        // Entity/record values behave like text: scalar refs error, but ranges ignore them.
+        (
+            Some(Value::Entity(EntityValue::new("Entity"))),
+            Value::Error(ErrorKind::Value),
+            Value::Error(ErrorKind::Value),
+            Value::Bool(true),
+            Value::Bool(false),
+        ),
+        (
+            Some(Value::Record(RecordValue::new("Record"))),
+            Value::Error(ErrorKind::Value),
+            Value::Error(ErrorKind::Value),
+            Value::Bool(true),
+            Value::Bool(false),
+        ),
+        // Numbers/bools are included in both scalar and range semantics.
+        (
+            Some(Value::Number(0.0)),
+            Value::Bool(false),
+            Value::Bool(false),
+            Value::Bool(false),
+            Value::Bool(false),
+        ),
+        (
+            Some(Value::Number(2.0)),
+            Value::Bool(true),
+            Value::Bool(true),
+            Value::Bool(true),
+            Value::Bool(true),
+        ),
+        (
+            Some(Value::Bool(false)),
+            Value::Bool(false),
+            Value::Bool(false),
+            Value::Bool(false),
+            Value::Bool(false),
+        ),
+        (
+            Some(Value::Bool(true)),
+            Value::Bool(true),
+            Value::Bool(true),
+            Value::Bool(true),
+            Value::Bool(true),
+        ),
+        // Errors always propagate (even if the result is otherwise known).
+        (
+            Some(Value::Error(ErrorKind::Div0)),
+            Value::Error(ErrorKind::Div0),
+            Value::Error(ErrorKind::Div0),
+            Value::Error(ErrorKind::Div0),
+            Value::Error(ErrorKind::Div0),
+        ),
+    ];
+
+    for (a1, expected_b1, expected_b2, expected_c1, expected_c2) in cases {
+        match a1 {
+            None => engine.clear_cell("Sheet1", "A1").unwrap(),
+            Some(v) => engine.set_cell_value("Sheet1", "A1", v.clone()).unwrap(),
+        };
+
+        engine.recalculate_single_threaded();
+
+        assert_eq!(engine.get_cell_value("Sheet1", "B1"), *expected_b1);
+        assert_eq!(engine.get_cell_value("Sheet1", "B2"), *expected_b2);
+        assert_eq!(engine.get_cell_value("Sheet1", "C1"), *expected_c1);
+        assert_eq!(engine.get_cell_value("Sheet1", "C2"), *expected_c2);
+
+        for (formula, cell) in [
+            ("=AND(A1)", "B1"),
+            ("=OR(A1)", "B2"),
+            ("=AND(A1:A1)", "C1"),
+            ("=OR(A1:A1)", "C2"),
+        ] {
+            assert_engine_matches_ast(&engine, formula, cell);
+        }
+    }
+}
+
+#[test]
 fn bytecode_backend_propagates_error_literals_through_and_or() {
     let mut engine = Engine::new();
     engine
