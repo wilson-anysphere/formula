@@ -115,6 +115,8 @@ Supported menu locations (desktop UI):
 
 - `cell/context` — the grid (cell) context menu (`contributes.menus["cell/context"]`).
   - Extension-contributed items are appended after the built-in clipboard/edit items, separated by a divider.
+  - While the menu is open, the desktop re-evaluates `when` clauses as context keys change (e.g. selection changes),
+    updating enabled/disabled state live.
 
 Reserved menu locations (not yet wired in the desktop UI, but reserved for future parity):
 
@@ -145,6 +147,8 @@ Label formatting:
 
 - Menu item labels come from the contributed command’s `title` and optional `category`.
   If a command specifies a `category`, the label is rendered as `"Category: Title"`.
+- If a command has a keybinding (built-in or extension-contributed), the desktop may show a shortcut hint alongside
+  the menu item.
 
 Example (manifest snippet using `selectionType` + `activeCellA1`):
 
