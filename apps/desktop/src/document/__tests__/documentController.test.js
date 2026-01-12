@@ -919,3 +919,31 @@ test("per-sheet content versions increment only on content changes (not formatti
   doc.setCellFormula("Sheet1", "A1", "=1+1");
   assert.equal(doc.getSheetContentVersion("Sheet1"), v1 + 1);
 });
+
+test("applyState bumps per-sheet content versions when sheets are added/removed (even if empty)", () => {
+  // Build two snapshots: one with Sheet1 only, and one with an additional empty Sheet2.
+  const source = new DocumentController();
+  source.setCellValue("Sheet1", "A1", 1);
+  const snapshot1 = source.encodeState();
+  source.addSheet({ sheetId: "Sheet2", name: "Sheet2" });
+  const snapshot2 = source.encodeState();
+
+  const doc = new DocumentController();
+
+  doc.applyState(snapshot1);
+  const sheet1Version = doc.getSheetContentVersion("Sheet1");
+  const sheet2Before = doc.getSheetContentVersion("Sheet2");
+  assert.equal(sheet2Before, 0);
+
+  // Adding an empty sheet via applyState should still bump that sheet's content version
+  // so downstream caches don't accidentally reuse entries for a sheet id that was removed/re-added.
+  doc.applyState(snapshot2);
+  assert.equal(doc.getSheetContentVersion("Sheet1"), sheet1Version);
+  const sheet2AfterAdd = doc.getSheetContentVersion("Sheet2");
+  assert.equal(sheet2AfterAdd, sheet2Before + 1);
+
+  // Removing the sheet via applyState should bump again (even if the sheet was empty, so no cell deltas).
+  doc.applyState(snapshot1);
+  assert.equal(doc.getSheetContentVersion("Sheet1"), sheet1Version);
+  assert.equal(doc.getSheetContentVersion("Sheet2"), sheet2AfterAdd + 1);
+});
