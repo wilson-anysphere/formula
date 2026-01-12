@@ -8,7 +8,7 @@ import { createDesktopPermissionPrompt } from "./permissionPrompt.js";
 import { validateExtensionManifest } from "../../../../packages/extension-host/src/browser/manifest.mjs";
 
 import { MarketplaceClient, WebExtensionManager } from "@formula/extension-marketplace";
-import { getMarketplaceBaseUrl } from "../panels/marketplace/getMarketplaceBaseUrl.js";
+import { getMarketplaceBaseUrl } from "../panels/marketplace/getMarketplaceBaseUrl.ts";
 
 import sampleHelloManifestJson from "../../../../extensions/sample-hello/package.json";
 import sampleHelloEntrypointSource from "../../../../extensions/sample-hello/dist/extension.mjs?raw";
