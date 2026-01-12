@@ -69,7 +69,7 @@ function awaitWithAbort(promise, signal) {
 /**
  * @typedef {{
  *   vectorStore: any,
- *   embedder: { embedTexts(texts: string[]): Promise<ArrayLike<number>[]> },
+ *   embedder: { embedTexts(texts: string[], options?: { signal?: AbortSignal }): Promise<ArrayLike<number>[]> },
  *   topK?: number,
  *   sampleRows?: number
  * }} WorkbookRagOptions

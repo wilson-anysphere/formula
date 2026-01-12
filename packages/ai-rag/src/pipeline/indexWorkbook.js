@@ -64,7 +64,7 @@ export function approximateTokenCount(text) {
  * @param {{
  *   workbook: import('../workbook/workbookTypes').Workbook,
  *   vectorStore: any,
- *   embedder: { embedTexts(texts: string[]): Promise<ArrayLike<number>[]> },
+ *   embedder: { embedTexts(texts: string[], options?: { signal?: AbortSignal }): Promise<ArrayLike<number>[]> },
  *   sampleRows?: number,
  *   transform?: (record: { id: string, text: string, metadata: any }) => ({ text?: string, metadata?: any } | null | Promise<{ text?: string, metadata?: any } | null>)
  *   signal?: AbortSignal,
