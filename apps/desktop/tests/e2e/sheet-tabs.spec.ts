@@ -168,6 +168,7 @@ test.describe("sheet tabs", () => {
     await switcher.selectOption("Sheet2", { force: true });
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet2");
     await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 3");
+  });
 
   test("renaming a sheet rewrites formulas that reference it", async ({ page }) => {
     await gotoDesktop(page);
