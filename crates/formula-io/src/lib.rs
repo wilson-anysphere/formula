@@ -533,12 +533,16 @@ pub fn open_workbook_model(path: impl AsRef<Path>) -> Result<formula_model::Work
                 source,
             })
         }
-        WorkbookFormat::Xls => xls::import_xls_path(path)
-            .map(|result| result.workbook)
-            .map_err(|source| Error::OpenXls {
+        WorkbookFormat::Xls => match xls::import_xls_path(path) {
+            Ok(result) => Ok(result.workbook),
+            Err(xls::ImportError::EncryptedWorkbook) => Err(Error::EncryptedWorkbook {
+                path: path.to_path_buf(),
+            }),
+            Err(source) => Err(Error::OpenXls {
                 path: path.to_path_buf(),
                 source,
             }),
+        },
         WorkbookFormat::Xlsb => {
             let wb = xlsb::XlsbWorkbook::open_with_options(
                 path,
@@ -638,12 +642,16 @@ pub fn open_workbook(path: impl AsRef<Path>) -> Result<Workbook, Error> {
                 })?;
             Ok(Workbook::Xlsx(package))
         }
-        WorkbookFormat::Xls => xls::import_xls_path(path)
-            .map(Workbook::Xls)
-            .map_err(|source| Error::OpenXls {
+        WorkbookFormat::Xls => match xls::import_xls_path(path) {
+            Ok(result) => Ok(Workbook::Xls(result)),
+            Err(xls::ImportError::EncryptedWorkbook) => Err(Error::EncryptedWorkbook {
+                path: path.to_path_buf(),
+            }),
+            Err(source) => Err(Error::OpenXls {
                 path: path.to_path_buf(),
                 source,
             }),
+        },
         WorkbookFormat::Xlsb => {
             xlsb::XlsbWorkbook::open(path)
                 .map(Workbook::Xlsb)
