@@ -6031,17 +6031,19 @@ export class SpreadsheetApp {
 
     const serialValue = (() => {
       if (kind === "date") {
-        // Excel stores dates/times as a floating-point serial number (1900 date system).
-        // Use UTC midnight so the inserted value is stable and deterministic.
-        const dateUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+        // Excel treats date serial values as "naive" calendar dates (no timezone).
+        // Use the *local* calendar date, but construct the serial using a UTC date so
+        // the stored number is stable/deterministic.
+        const dateUtc = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
         return dateToExcelSerial(dateUtc);
       }
 
-      // Time-only: use the fractional part (rounded to seconds) so formatting as hh:mm:ss
-      // shows the current time without pinning it to a specific date.
-      const serialNow = dateToExcelSerial(now);
-      const frac = serialNow - Math.floor(serialNow);
-      return Math.round(frac * 86_400) / 86_400;
+      // Time-only: Excel stores times as the fractional part of a day. Use the local
+      // time-of-day and round to the nearest second (Excel's Ctrl+Shift+; resolution).
+      const totalSeconds =
+        now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds() + now.getMilliseconds() / 1000;
+      const roundedSeconds = Math.round(totalSeconds) % 86_400;
+      return roundedSeconds / 86_400;
     })();
 
     const numberFormat = kind === "date" ? "yyyy-mm-dd" : "hh:mm:ss";
