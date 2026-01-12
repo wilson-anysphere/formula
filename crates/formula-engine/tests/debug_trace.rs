@@ -393,6 +393,40 @@ fn debug_trace_supports_unquoted_external_refs_with_non_ident_workbook_names() {
 }
 
 #[test]
+fn debug_trace_supports_external_refs_with_quoted_sheet_name_after_workbook_prefix() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set(
+        "[Book.xlsx]My Sheet",
+        CellAddr { row: 0, col: 0 },
+        5.0,
+    );
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=[Book.xlsx]'My Sheet'!A1")
+        .unwrap();
+    engine.recalculate();
+
+    let computed = engine.get_cell_value("Sheet1", "A1");
+    assert_eq!(computed, Value::Number(5.0));
+
+    let dbg = engine.debug_evaluate("Sheet1", "A1").unwrap();
+    assert_eq!(dbg.value, computed);
+    assert_eq!(
+        slice(&dbg.formula, dbg.trace.span),
+        "[Book.xlsx]'My Sheet'!A1"
+    );
+    assert_eq!(
+        dbg.trace.reference,
+        Some(TraceRef::Cell {
+            sheet: formula_engine::functions::SheetId::External("[Book.xlsx]My Sheet".to_string()),
+            addr: CellAddr { row: 0, col: 0 }
+        })
+    );
+}
+
+#[test]
 fn trace_preserves_reference_context_for_sum_over_external_ranges() {
     let provider = Arc::new(TestExternalProvider::default());
     provider.set(

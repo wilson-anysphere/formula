@@ -707,6 +707,15 @@ impl ParserImpl {
                 } else if matches!(self.peek_n(1).kind, TokenKind::Bang)
                     || (matches!(self.peek_n(1).kind, TokenKind::Colon)
                         && matches!(self.peek_n(3).kind, TokenKind::Bang))
+                    || (id.starts_with('[')
+                        && id.ends_with(']')
+                        && matches!(
+                            self.peek_n(1).kind,
+                            TokenKind::Ident(_) | TokenKind::SheetName(_)
+                        )
+                        && (matches!(self.peek_n(2).kind, TokenKind::Bang)
+                            || (matches!(self.peek_n(2).kind, TokenKind::Colon)
+                                && matches!(self.peek_n(4).kind, TokenKind::Bang))))
                 {
                     self.parse_sheet_ref()
                 } else {
@@ -885,7 +894,7 @@ impl ParserImpl {
 
     fn parse_sheet_ref(&mut self) -> Result<SpannedExpr<String>, FormulaParseError> {
         let sheet_tok = self.next();
-        let start_name = match sheet_tok.kind {
+        let mut start_name = match sheet_tok.kind {
             TokenKind::Ident(s) | TokenKind::SheetName(s) => s,
             other => {
                 return Err(FormulaParseError::Expected {
@@ -894,6 +903,29 @@ impl ParserImpl {
                 })
             }
         };
+
+        // External workbook references can be written with the workbook prefix unquoted and the
+        // sheet name quoted separately: `[Book.xlsx]'My Sheet'!A1`.
+        //
+        // The canonical parser treats this as an external workbook sheet ref, but our debug lexer
+        // tokenizes it as two tokens (`[Book.xlsx]` then `My Sheet`). Combine them so the rest of
+        // the parser can operate on a single sheet name string.
+        if start_name.starts_with('[')
+            && start_name.ends_with(']')
+            && matches!(self.peek().kind, TokenKind::Ident(_) | TokenKind::SheetName(_))
+        {
+            let sheet_name_tok = self.next();
+            let sheet_name = match sheet_name_tok.kind {
+                TokenKind::Ident(s) | TokenKind::SheetName(s) => s,
+                other => {
+                    return Err(FormulaParseError::Expected {
+                        expected: "sheet name".to_string(),
+                        got: format!("{other:?}"),
+                    })
+                }
+            };
+            start_name.push_str(&sheet_name);
+        }
 
         let sheet = if matches!(self.peek().kind, TokenKind::Colon) {
             // Sheet span (3D ref) like `Sheet1:Sheet3!A1` / `'Sheet 1':'Sheet 3'!A1`.
