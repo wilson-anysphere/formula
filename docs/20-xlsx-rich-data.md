@@ -406,7 +406,7 @@ This is where Excel binds a cell’s `vm` index to a rich value index via the ri
     <metadataType name="XLRICHVALUE"/>
   </metadataTypes>
 
-  <!-- Future metadata table: rc/@v is a 0-based index into this bk list. -->
+  <!-- Future metadata table: rc/@v is typically a 0-based index into this bk list. -->
   <futureMetadata name="XLRICHVALUE" count="1">
     <bk>
       <extLst>

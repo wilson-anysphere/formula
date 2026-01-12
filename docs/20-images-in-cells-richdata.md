@@ -620,7 +620,7 @@ Minimal representative shape for the `futureMetadata`/`rvb` variant (index bases
   </metadataTypes>
 
   <futureMetadata name="XLRICHVALUE">
-    <!-- `v` in <rc> is a 0-based index into this bk list -->
+    <!-- `v` in <rc> is typically a 0-based index into this bk list -->
     <bk>
       <extLst>
         <ext uri="{...}">
@@ -688,7 +688,7 @@ Current Formula behavior:
 | Index | Location | Base | Meaning |
 |------:|----------|------|---------|
 | `t` | `<valueMetadata><bk><rc t="…">` | usually 1-based (0-based also observed) | index into `<metadataTypes>` (selects `metadataType name="XLRICHVALUE"`) |
-| `v` | `<valueMetadata><bk><rc v="…">` | 0-based | often an index into `<futureMetadata name="XLRICHVALUE"><bk>` (if present); other schemas may use `v` differently (including directly referencing the rich value index). |
+| `v` | `<valueMetadata><bk><rc v="…">` | usually 0-based | often an index into `<futureMetadata name="XLRICHVALUE"><bk>` (if present); other schemas may use `v` differently (including directly referencing the rich value index). |
 | `i` | `<xlrd:rvb i="…"/>` | 0-based | rich value index into the rich value instance table (e.g. `xl/richData/richValue*.xml` or `xl/richData/rdrichvalue.xml`, depending on naming scheme) |
 
 Notes:
