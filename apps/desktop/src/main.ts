@@ -6903,6 +6903,9 @@ mountRibbon(ribbonReactRoot, {
       case "view.macros.viewMacros.run":
       case "view.macros.viewMacros.edit":
       case "view.macros.viewMacros.delete":
+        // Clear any previously-requested focus so that edit/Visual Basic actions don't
+        // get focus stolen by an earlier async macro runner render.
+        if (commandId.endsWith(".edit")) pendingMacrosPanelFocus = null;
         if (commandId === "view.macros.viewMacros") pendingMacrosPanelFocus = "runner-select";
         if (commandId.endsWith(".run")) pendingMacrosPanelFocus = "runner-run";
         if (commandId.endsWith(".delete")) pendingMacrosPanelFocus = "runner-select";
@@ -6933,6 +6936,9 @@ mountRibbon(ribbonReactRoot, {
       case "developer.code.macros":
       case "developer.code.macros.run":
       case "developer.code.macros.edit":
+        // Clear any previously-requested focus so that edit/Visual Basic actions don't
+        // get focus stolen by an earlier async macro runner render.
+        if (commandId.endsWith(".edit")) pendingMacrosPanelFocus = null;
         if (commandId === "developer.code.macros") pendingMacrosPanelFocus = "runner-select";
         if (commandId.endsWith(".run")) pendingMacrosPanelFocus = "runner-run";
         openRibbonPanel(PanelIds.MACROS);
@@ -6965,6 +6971,7 @@ mountRibbon(ribbonReactRoot, {
         return;
 
       case "developer.code.visualBasic":
+        pendingMacrosPanelFocus = null;
         // Desktop builds expose a VBA migration panel (used as a stand-in for the VBA editor).
         if (typeof (globalThis as any).__TAURI__?.core?.invoke === "function") {
           openRibbonPanel(PanelIds.VBA_MIGRATE);
