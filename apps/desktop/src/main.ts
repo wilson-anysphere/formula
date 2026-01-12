@@ -93,6 +93,7 @@ import { registerBuiltinCommands } from "./commands/registerBuiltinCommands.js";
 import type { Range, SelectionState } from "./selection/types";
 import { ContextMenu, type ContextMenuItem } from "./menus/contextMenu.js";
 import { getPasteSpecialMenuItems } from "./clipboard/pasteSpecial.js";
+import { WorkbookSheetStore, generateDefaultSheetName } from "./sheets/workbookSheetStore";
 import {
   applyAllBorders,
   applyNumberFormatPreset,
@@ -179,7 +180,7 @@ function warnIfMissingCrossOriginIsolationInTauriProd(): void {
 
 warnIfMissingCrossOriginIsolationInTauriProd();
 
-const workbookSheetNames = new Map<string, string>();
+let workbookSheetStore = new WorkbookSheetStore([{ id: "Sheet1", name: "Sheet1", visibility: "visible" }]);
 
 // Cursor desktop no longer supports user-provided LLM settings, but legacy builds
 // persisted provider + API keys in localStorage. Best-effort purge on startup so
@@ -752,18 +753,55 @@ const sheetTabsRootEl = sheetTabsRoot;
 sheetTabsRootEl.classList.add("sheet-bar");
 sheetTabsRootEl.classList.remove("sheet-tabs");
 
-let lastSheetIds: string[] = [];
+let lastDocSheetIdsKey = "";
 
 type SheetUiInfo = { id: string; name: string };
 
-function listSheetsForUi(): SheetUiInfo[] {
+function stableSheetIdKey(ids: string[]): string {
+  return ids.slice().sort((a, b) => a.localeCompare(b)).join("|");
+}
+
+function listDocumentSheetIds(): string[] {
   const sheetIds = app.getDocument().getSheetIds();
-  const ids = sheetIds.length > 0 ? sheetIds : ["Sheet1"];
-  return ids.map((id) => ({ id, name: workbookSheetNames.get(id) ?? id }));
+  return sheetIds.length > 0 ? sheetIds : ["Sheet1"];
+}
+
+function reconcileSheetStoreWithDocument(ids: string[]): void {
+  if (ids.length === 0) return;
+
+  const docIdSet = new Set(ids);
+  const existing = workbookSheetStore.listAll();
+  const existingIdSet = new Set(existing.map((s) => s.id));
+
+  // Add missing sheets (append in document order; UI order remains store-managed).
+  let insertAfterId = workbookSheetStore.listAll().at(-1)?.id ?? "";
+  for (const id of ids) {
+    if (existingIdSet.has(id)) continue;
+    workbookSheetStore.addAfter(insertAfterId, { id, name: id });
+    existingIdSet.add(id);
+    insertAfterId = id;
+  }
+
+  // Remove sheets that no longer exist in the document.
+  for (const sheet of existing) {
+    if (docIdSet.has(sheet.id)) continue;
+    try {
+      workbookSheetStore.remove(sheet.id);
+    } catch {
+      // Best-effort: avoid crashing the UI if the sheet store invariants don't
+      // allow the removal (e.g. last-sheet guard).
+    }
+  }
+}
+
+function listSheetsForUi(): SheetUiInfo[] {
+  const visible = workbookSheetStore.listVisible();
+  if (visible.length > 0) return visible.map((s) => ({ id: s.id, name: s.name }));
+  const ids = listDocumentSheetIds();
+  return ids.map((id) => ({ id, name: id }));
 }
 
 function renderSheetTabs(sheets: SheetUiInfo[] = listSheetsForUi()) {
-  lastSheetIds = sheets.map((sheet) => sheet.id);
   sheetTabsRootEl.replaceChildren();
 
   const active = app.getCurrentSheetId();
@@ -817,10 +855,12 @@ function renderSheetTabs(sheets: SheetUiInfo[] = listSheetsForUi()) {
   addSheetBtn.textContent = "+";
   addSheetBtn.setAttribute("aria-label", "Add sheet");
   addSheetBtn.addEventListener("click", () => {
-    const existingIds = new Set(listSheetsForUi().map((sheet) => sheet.id));
-    let n = 1;
-    while (existingIds.has(`Sheet${n}`)) n += 1;
-    const newSheetId = `Sheet${n}`;
+    const activeId = app.getCurrentSheetId();
+    const newName = generateDefaultSheetName(workbookSheetStore.listAll());
+    // Until the DocumentController gains first-class sheet metadata, keep `id` and
+    // `name` in lockstep for newly-created sheets.
+    const newSheetId = newName;
+    workbookSheetStore.addAfter(activeId, { id: newSheetId, name: newName });
 
     const doc = app.getDocument();
     // DocumentController creates sheets lazily; touching any cell ensures the sheet exists.
@@ -866,7 +906,12 @@ function syncSheetUi(): void {
   renderSheetPosition(sheets, activeId);
 }
 
-syncSheetUi();
+{
+  const ids = listDocumentSheetIds();
+  reconcileSheetStoreWithDocument(ids);
+  lastDocSheetIdsKey = stableSheetIdKey(ids);
+  syncSheetUi();
+}
 
 const originalActivateSheet = app.activateSheet.bind(app);
 app.activateSheet = (sheetId: string): void => {
@@ -892,11 +937,39 @@ app.selectRange = (target: Parameters<SpreadsheetApp["selectRange"]>[0]): void =
 // and re-render when edits create new sheets (DocumentController creates sheets lazily).
 app.getDocument().on("change", () => {
   app.refresh();
-  const sheetIds = app.getDocument().getSheetIds();
-  const nextSheetIds = sheetIds.length > 0 ? sheetIds : ["Sheet1"];
-  if (nextSheetIds.length !== lastSheetIds.length || nextSheetIds.some((id, idx) => id !== lastSheetIds[idx])) {
-    syncSheetUi();
+  const ids = listDocumentSheetIds();
+  const key = stableSheetIdKey(ids);
+  if (key === lastDocSheetIdsKey) return;
+  lastDocSheetIdsKey = key;
+  reconcileSheetStoreWithDocument(ids);
+  syncSheetUi();
+});
+
+// Excel-like keyboard navigation: Ctrl+PgUp/PgDn cycles through visible sheets.
+window.addEventListener("keydown", (e) => {
+  if (e.defaultPrevented) return;
+  if (!e.ctrlKey) return;
+  if (e.key !== "PageUp" && e.key !== "PageDown") return;
+
+  const target = e.target as HTMLElement | null;
+  if (target) {
+    const tag = target.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return;
   }
+
+  const visibleSheets = workbookSheetStore.listVisible();
+  if (visibleSheets.length === 0) return;
+
+  const activeSheetId = app.getCurrentSheetId();
+  const idx = visibleSheets.findIndex((sheet) => sheet.id === activeSheetId);
+  if (idx === -1) return;
+
+  e.preventDefault();
+  const delta = e.key === "PageUp" ? -1 : 1;
+  const next = visibleSheets[(idx + delta + visibleSheets.length) % visibleSheets.length];
+  if (!next) return;
+  app.activateSheet(next.id);
+  app.focus();
 });
 
 // --- Dock layout + persistence (minimal shell wiring for e2e + demos) ----------
@@ -1232,7 +1305,7 @@ if (
   const updateContextKeys = (selection: SelectionState | null = lastSelection) => {
     if (!selection) return;
     const sheetId = app.getCurrentSheetId();
-    const sheetName = workbookSheetNames.get(sheetId) ?? sheetId;
+    const sheetName = workbookSheetStore.getName(sheetId) ?? sheetId;
     const active = selection.active;
     const cell = app.getDocument().getCell(sheetId, { row: active.row, col: active.col }) as any;
     const value = normalizeExtensionCellValue(cell?.value ?? null);
@@ -1263,12 +1336,12 @@ if (
   const extensionSpreadsheetApi: any = {
     getActiveSheet() {
       const sheetId = app.getCurrentSheetId();
-      return { id: sheetId, name: workbookSheetNames.get(sheetId) ?? sheetId };
+      return { id: sheetId, name: workbookSheetStore.getName(sheetId) ?? sheetId };
     },
     listSheets() {
-      const ids = app.getDocument().getSheetIds();
-      const list = ids.length > 0 ? ids : ["Sheet1"];
-      return list.map((id) => ({ id, name: workbookSheetNames.get(id) ?? id }));
+      const sheets = workbookSheetStore.listAll();
+      if (sheets.length > 0) return sheets.map((sheet) => ({ id: sheet.id, name: sheet.name }));
+      return [{ id: "Sheet1", name: "Sheet1" }];
     },
     async getSheet(name: string) {
       const sheetId = findSheetIdByName(name);
@@ -1367,12 +1440,8 @@ if (
   if (hasTauriWorkbookBridge) {
     extensionSpreadsheetApi.getActiveWorkbook = async () => {
       const sheetId = app.getCurrentSheetId();
-      const activeSheet = { id: sheetId, name: workbookSheetNames.get(sheetId) ?? sheetId };
-      const sheets = (() => {
-        const ids = app.getDocument().getSheetIds();
-        const list = ids.length > 0 ? ids : ["Sheet1"];
-        return list.map((id) => ({ id, name: workbookSheetNames.get(id) ?? id }));
-      })();
+      const activeSheet = { id: sheetId, name: workbookSheetStore.getName(sheetId) ?? sheetId };
+      const sheets = workbookSheetStore.listAll().map((sheet) => ({ id: sheet.id, name: sheet.name }));
 
       const path =
         activeWorkbook?.path ??
@@ -3728,10 +3797,13 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     throw new Error("Workbook contains no sheets");
   }
 
-  workbookSheetNames.clear();
-  for (const sheet of sheets) {
-    workbookSheetNames.set(sheet.id, sheet.name);
-  }
+  workbookSheetStore = new WorkbookSheetStore(
+    sheets.map((sheet) => ({
+      id: sheet.id,
+      name: sheet.name,
+      visibility: "visible",
+    })),
+  );
 
   const MAX_COLS = 200;
   const CHUNK_ROWS = 200;
@@ -3805,10 +3877,6 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
   // AI completion. This is separate from the cell snapshot that populates the
   // DocumentController.
   workbook.clearSchema();
-  const sheetIdByName = new Map<string, string>();
-  for (const [id, name] of workbookSheetNames.entries()) {
-    sheetIdByName.set(name, id);
-  }
 
   const [definedNames, tables] = await Promise.all([
     tauriBackend.listDefinedNames().catch(() => []),
@@ -3817,16 +3885,16 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
 
   const normalizedTables = tables.map((table) => {
     const rawSheetId = typeof (table as any)?.sheet_id === "string" ? String((table as any).sheet_id) : "";
-    const sheet_id = rawSheetId ? sheetIdByName.get(rawSheetId) ?? rawSheetId : rawSheetId;
+    const sheet_id = rawSheetId ? workbookSheetStore.resolveIdByName(rawSheetId) ?? rawSheetId : rawSheetId;
     return { ...(table as any), sheet_id };
   });
   refreshTableSignaturesFromBackend(doc, normalizedTables as any, { workbookSignature });
   const normalizedDefinedNames = definedNames.map((entry) => {
     const refers_to = typeof (entry as any)?.refers_to === "string" ? String((entry as any).refers_to) : "";
     const { sheetName: explicitSheetName } = splitSheetQualifier(refers_to);
-    const sheetIdFromRef = explicitSheetName ? sheetIdByName.get(explicitSheetName) ?? explicitSheetName : null;
+    const sheetIdFromRef = explicitSheetName ? workbookSheetStore.resolveIdByName(explicitSheetName) ?? explicitSheetName : null;
     const rawScopeSheet = typeof (entry as any)?.sheet_id === "string" ? String((entry as any).sheet_id) : null;
-    const sheetIdFromScope = rawScopeSheet ? sheetIdByName.get(rawScopeSheet) ?? rawScopeSheet : null;
+    const sheetIdFromScope = rawScopeSheet ? workbookSheetStore.resolveIdByName(rawScopeSheet) ?? rawScopeSheet : null;
     return { ...(entry as any), sheet_id: sheetIdFromScope ?? sheetIdFromRef };
   });
   refreshDefinedNameSignaturesFromBackend(doc, normalizedDefinedNames as any, { workbookSignature });
@@ -3838,9 +3906,9 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     if (!name || !refersTo) continue;
 
     const { sheetName: explicitSheetName, ref } = splitSheetQualifier(refersTo);
-    const sheetIdFromRef = explicitSheetName ? sheetIdByName.get(explicitSheetName) ?? explicitSheetName : null;
+    const sheetIdFromRef = explicitSheetName ? workbookSheetStore.resolveIdByName(explicitSheetName) ?? explicitSheetName : null;
     const rawScopeSheet = typeof (entry as any)?.sheet_id === "string" ? String((entry as any).sheet_id) : null;
-    const sheetIdFromScope = rawScopeSheet ? sheetIdByName.get(rawScopeSheet) ?? rawScopeSheet : null;
+    const sheetIdFromScope = rawScopeSheet ? workbookSheetStore.resolveIdByName(rawScopeSheet) ?? rawScopeSheet : null;
     const sheetName = sheetIdFromRef ?? sheetIdFromScope;
     if (!sheetName) continue;
 
@@ -3858,7 +3926,7 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
   for (const table of normalizedTables) {
     const name = typeof (table as any)?.name === "string" ? String((table as any).name) : "";
     const rawSheetName = typeof (table as any)?.sheet_id === "string" ? String((table as any).sheet_id) : "";
-    const sheetName = rawSheetName ? sheetIdByName.get(rawSheetName) ?? rawSheetName : "";
+    const sheetName = rawSheetName ? workbookSheetStore.resolveIdByName(rawSheetName) ?? rawSheetName : "";
     const columns = Array.isArray((table as any)?.columns) ? (table as any).columns.map(String) : [];
     if (!name || !sheetName || columns.length === 0) continue;
 
