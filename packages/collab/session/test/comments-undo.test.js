@@ -516,3 +516,59 @@ test("Binder-origin undo captures comment edits when comments root is added to U
 
   doc.destroy();
 });
+
+test("Binder-origin undo captures comment edits when legacy Array-backed comments root is added to UndoManager scope lazily (desktop-style)", () => {
+  const doc = new Y.Doc();
+
+  const binderOrigin = { type: "document-controller:binder" };
+
+  // Start with an undo scope that does not include comments.
+  const cellsRoot = doc.getMap("cells");
+  const undoService = createUndoService({ mode: "collab", doc, scope: [cellsRoot], origin: binderOrigin });
+
+  const undoManager = Array.from(undoService.localOrigins ?? []).find((origin) => origin instanceof Y.UndoManager);
+  assert.ok(undoManager);
+
+  // Simulate a legacy doc that already uses an Array-backed comments root, but
+  // where the UndoManager was created before the comments root was added to its scope.
+  doc.getArray("comments"); // force legacy array schema
+
+  let commentsScopeAdded = false;
+  const ensureCommentsScope = () => {
+    if (commentsScopeAdded) return;
+    const root = getCommentsRoot(doc);
+    undoManager.addToScope(root.kind === "map" ? root.map : root.array);
+    commentsScopeAdded = true;
+  };
+
+  const comments = createCommentManagerForDoc({
+    doc,
+    transact: (fn) => {
+      ensureCommentsScope();
+      undoService.transact(fn);
+    },
+  });
+
+  const commentId = comments.addComment({
+    id: "c1",
+    cellRef: "Sheet1:0:0",
+    kind: "threaded",
+    content: "hello",
+    author: { id: "u1", name: "Alice" },
+    now: 1,
+  });
+  undoService.stopCapturing();
+
+  comments.setCommentContent({ commentId, content: "hello (edited)", now: 2 });
+  assert.equal(comments.listAll().find((c) => c.id === commentId)?.content ?? null, "hello (edited)");
+
+  assert.equal(undoService.canUndo(), true);
+  undoService.undo();
+  assert.equal(comments.listAll().find((c) => c.id === commentId)?.content ?? null, "hello");
+
+  assert.equal(undoService.canUndo(), true);
+  undoService.undo();
+  assert.equal(comments.listAll().find((c) => c.id === commentId)?.content ?? null, null);
+
+  doc.destroy();
+});
