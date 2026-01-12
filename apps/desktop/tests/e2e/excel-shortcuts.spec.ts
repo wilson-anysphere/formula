@@ -26,8 +26,8 @@ test.describe("excel keyboard shortcuts", () => {
       });
       await waitForIdle(page);
 
-      // Ensure the grid has focus for key events.
-      await page.click("#grid", { position: { x: 5, y: 5 } });
+      // Ensure the grid has focus for key events (without changing selection via a click).
+      await page.evaluate(() => (window as any).__formulaApp.focus());
 
       const modifier = process.platform === "darwin" ? "Meta" : "Control";
       await page.keyboard.press(`${modifier}+D`);
@@ -60,7 +60,7 @@ test.describe("excel keyboard shortcuts", () => {
       });
       await waitForIdle(page);
 
-      await page.click("#grid", { position: { x: 5, y: 5 } });
+      await page.evaluate(() => (window as any).__formulaApp.focus());
 
       const modifier = process.platform === "darwin" ? "Meta" : "Control";
       await page.keyboard.press(`${modifier}+Semicolon`);
