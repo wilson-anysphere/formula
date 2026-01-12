@@ -2,7 +2,6 @@ use thiserror::Error;
 
 use crate::{
     authenticode::extract_vba_signature_signed_digest,
-    compute_vba_project_digest,
     compute_vba_project_digest_v3,
     contents_hash::content_normalized_data,
     DigestAlg,
