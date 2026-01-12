@@ -640,6 +640,7 @@ impl Engine {
                     key,
                     cell.volatile,
                     cell.thread_safe,
+                    cell.dynamic_deps,
                 ) {
                     Ok(program) => (
                         CompiledFormula::Bytecode(BytecodeFormula { ast, program }),
@@ -916,6 +917,7 @@ impl Engine {
                         key,
                         volatile,
                         thread_safe,
+                        dynamic_deps,
                     ) {
                         Ok(program) => (
                             CompiledFormula::Bytecode(BytecodeFormula {
@@ -1235,7 +1237,7 @@ impl Engine {
         self.calc_graph.update_cell_dependencies(cell_id, deps);
 
         let (compiled_formula, bytecode_compile_reason) =
-            match self.try_compile_bytecode(&parsed.expr, key, volatile, thread_safe) {
+            match self.try_compile_bytecode(&parsed.expr, key, volatile, thread_safe, dynamic_deps) {
                 Ok(program) => (
                     CompiledFormula::Bytecode(BytecodeFormula {
                         ast: compiled.clone(),
@@ -2871,8 +2873,9 @@ impl Engine {
         &self,
         expr: &crate::Expr,
         key: CellKey,
-        volatile: bool,
+        _volatile: bool,
         thread_safe: bool,
+        dynamic_deps: bool,
     ) -> Result<Arc<bytecode::Program>, BytecodeCompileReason> {
         if !self.bytecode_enabled {
             return Err(BytecodeCompileReason::Disabled);
@@ -2886,11 +2889,13 @@ impl Engine {
                 bytecode::LowerError::ExternalReference,
             ));
         }
-        if volatile {
-            return Err(BytecodeCompileReason::Volatile);
-        }
         if !thread_safe {
             return Err(BytecodeCompileReason::NotThreadSafe);
+        }
+        // Dynamic-dependency formulas (e.g. OFFSET/INDIRECT) require dependency tracing during
+        // evaluation, which the bytecode backend does not yet implement.
+        if dynamic_deps {
+            return Err(BytecodeCompileReason::IneligibleExpr);
         }
 
         // The bytecode engine currently assumes Excel's fixed worksheet bounds. When callers
@@ -3533,6 +3538,7 @@ impl Engine {
                         key,
                         volatile,
                         thread_safe,
+                        dynamic_deps,
                     ) {
                         Ok(program) => (
                             CompiledFormula::Bytecode(BytecodeFormula {
@@ -6267,7 +6273,9 @@ fn bytecode_expr_is_eligible_inner(
             | bytecode::ast::Function::Mod
             | bytecode::ast::Function::Sign
             | bytecode::ast::Function::Concat
-            | bytecode::ast::Function::Not => args
+            | bytecode::ast::Function::Not
+            | bytecode::ast::Function::Now
+            | bytecode::ast::Function::Today => args
                 .iter()
                 .all(|arg| bytecode_expr_is_eligible_inner(arg, false, lexical_scopes)),
             bytecode::ast::Function::Unknown(_) => false,

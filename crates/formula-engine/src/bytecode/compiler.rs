@@ -286,6 +286,8 @@ impl<'a> CompileCtx<'a> {
             | Function::Sign
             | Function::Concat
             | Function::Not
+            | Function::Now
+            | Function::Today
             | Function::Unknown(_) => false,
         };
 

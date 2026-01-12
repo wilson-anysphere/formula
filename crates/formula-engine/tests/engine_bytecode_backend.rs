@@ -248,6 +248,50 @@ fn bytecode_backend_reuses_program_for_this_row_structured_refs() {
 }
 
 #[test]
+fn bytecode_backend_compiles_and_evaluates_today() {
+    let mut engine = Engine::new();
+    engine.set_date_system(ExcelDateSystem::Excel1904);
+    engine
+        .set_cell_formula("Sheet1", "A1", "=TODAY()")
+        .expect("set TODAY()");
+
+    // Volatile formulas should still compile to bytecode (when thread-safe and non-dynamic).
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_engine_matches_ast(&engine, "=TODAY()", "A1");
+}
+
+#[test]
+fn bytecode_backend_compiles_and_evaluates_now() {
+    let mut engine = Engine::new();
+    engine.set_date_system(ExcelDateSystem::Excel1904);
+    engine
+        .set_cell_formula("Sheet1", "A1", "=NOW()")
+        .expect("set NOW()");
+
+    // Volatile formulas should still compile to bytecode (when thread-safe and non-dynamic).
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+
+    let got = engine.get_cell_value("Sheet1", "A1");
+    let expected = eval_via_ast(&engine, "=NOW()", "A1");
+    match (got, expected) {
+        (Value::Number(a), Value::Number(b)) => {
+            // Engine recalc and this test's standalone AST evaluation use different `now_utc`
+            // instants, so allow a small tolerance.
+            let tolerance_days = 60.0 / 86_400.0; // 60 seconds
+            assert!(
+                (a - b).abs() <= tolerance_days,
+                "NOW() mismatch: bytecode={a}, ast={b}"
+            );
+        }
+        (got, expected) => assert_eq!(got, expected),
+    }
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_sum_and_countif() {
     let mut engine = Engine::new();
 
@@ -1218,14 +1262,6 @@ fn bytecode_compile_diagnostics_reports_fallback_reasons() {
     assert_eq!(
         stats
             .fallback_reasons
-            .get(&BytecodeCompileReason::Volatile)
-            .copied()
-            .unwrap_or(0),
-        1
-    );
-    assert_eq!(
-        stats
-            .fallback_reasons
             .get(&BytecodeCompileReason::LowerError(
                 formula_engine::bytecode::LowerError::CrossSheetReference
             ))
@@ -1233,6 +1269,13 @@ fn bytecode_compile_diagnostics_reports_fallback_reasons() {
             .unwrap_or(0),
         1
     );
+
+    // RAND should fail the eligibility gate (unsupported function).
+    let rand_ineligible = stats
+        .fallback_reasons
+        .get(&BytecodeCompileReason::IneligibleExpr)
+        .copied()
+        .unwrap_or(0);
 
     // Intersection can fail in lowering (Unsupported) or by failing the eligibility gate.
     let unsupported = stats
@@ -1247,7 +1290,10 @@ fn bytecode_compile_diagnostics_reports_fallback_reasons() {
         .get(&BytecodeCompileReason::IneligibleExpr)
         .copied()
         .unwrap_or(0);
-    assert_eq!(unsupported + ineligible, 1);
+
+    // A2 (RAND) is ineligible; A4 (intersection) can be ineligible or unsupported.
+    assert_eq!(unsupported + ineligible, 2);
+    assert!(rand_ineligible >= 1, "expected RAND() to be ineligible for bytecode");
 
     let report = engine.bytecode_compile_report(usize::MAX);
     assert_eq!(report.len(), 3);
@@ -1263,7 +1309,7 @@ fn bytecode_compile_diagnostics_reports_fallback_reasons() {
             .map(|e| e.reason.clone())
     };
 
-    assert_eq!(reason_for(a2), Some(BytecodeCompileReason::Volatile));
+    assert_eq!(reason_for(a2), Some(BytecodeCompileReason::IneligibleExpr));
     assert_eq!(
         reason_for(a3),
         Some(BytecodeCompileReason::LowerError(

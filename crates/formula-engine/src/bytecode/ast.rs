@@ -60,6 +60,8 @@ pub enum Function {
     Sign,
     Concat,
     Not,
+    Now,
+    Today,
     Unknown(Arc<str>),
 }
 
@@ -103,6 +105,8 @@ impl Function {
             "SIGN" => Function::Sign,
             "CONCAT" => Function::Concat,
             "NOT" => Function::Not,
+            "NOW" => Function::Now,
+            "TODAY" => Function::Today,
             _ => Function::Unknown(Arc::from(upper)),
         }
     }
@@ -144,6 +148,8 @@ impl Function {
             Function::Sign => "SIGN",
             Function::Concat => "CONCAT",
             Function::Not => "NOT",
+            Function::Now => "NOW",
+            Function::Today => "TODAY",
             Function::Unknown(s) => s,
         }
     }

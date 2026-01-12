@@ -1,7 +1,7 @@
 use super::ast::{BinaryOp, Expr, Function, UnaryOp};
 use super::grid::Grid;
 use super::value::{Array as ArrayValue, CellCoord, ErrorKind, RangeRef, ResolvedRange, Value};
-use crate::date::ExcelDateSystem;
+use crate::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
 use crate::error::ExcelError;
 use crate::functions::math::criteria::Criteria as EngineCriteria;
 use crate::functions::wildcard::WildcardPattern;
@@ -10,8 +10,8 @@ use crate::simd::{self, CmpOp, NumericCriteria};
 use crate::value::{
     cmp_case_insensitive, parse_number, ErrorKind as EngineErrorKind, Value as EngineValue,
 };
+use chrono::{DateTime, Datelike, Timelike, Utc};
 use formula_format::{DateSystem, FormatOptions, Value as FmtValue};
-use chrono::{DateTime, Utc};
 use smallvec::SmallVec;
 use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
@@ -243,6 +243,8 @@ fn eval_ast_inner(
                     | Function::Sign
                     | Function::Concat
                     | Function::Not
+                    | Function::Now
+                    | Function::Today
                     | Function::Unknown(_) => false,
                 };
 
@@ -622,8 +624,43 @@ pub fn call_function(
         Function::Sign => fn_sign(args),
         Function::Concat => fn_concat(args),
         Function::Not => fn_not(args),
+        Function::Now => fn_now(args),
+        Function::Today => fn_today(args),
         Function::Unknown(_) => Value::Error(ErrorKind::Name),
     }
+}
+
+fn fn_today(args: &[Value]) -> Value {
+    if !args.is_empty() {
+        return Value::Error(ErrorKind::Value);
+    }
+    let now = thread_now_utc();
+    let date = now.date_naive();
+    match ymd_to_serial(
+        ExcelDate::new(date.year(), date.month() as u8, date.day() as u8),
+        thread_date_system(),
+    ) {
+        Ok(serial) => Value::Number(serial as f64),
+        Err(_) => Value::Error(ErrorKind::Num),
+    }
+}
+
+fn fn_now(args: &[Value]) -> Value {
+    if !args.is_empty() {
+        return Value::Error(ErrorKind::Value);
+    }
+    let now = thread_now_utc();
+    let date = now.date_naive();
+    let base = match ymd_to_serial(
+        ExcelDate::new(date.year(), date.month() as u8, date.day() as u8),
+        thread_date_system(),
+    ) {
+        Ok(serial) => serial as f64,
+        Err(_) => return Value::Error(ErrorKind::Num),
+    };
+    let seconds = now.time().num_seconds_from_midnight() as f64
+        + (now.time().nanosecond() as f64 / 1_000_000_000.0);
+    Value::Number(base + seconds / 86_400.0)
 }
 
 fn fn_abs(args: &[Value]) -> Value {
