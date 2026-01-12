@@ -231,6 +231,58 @@ fn build_project_with_ansi_and_unicode_module_name_records() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+fn build_project_with_ansi_and_unicode_module_stream_name_records() -> Vec<u8> {
+    // Keep module source already in normalized form to make expected bytes simple.
+    let module_code = b"Sub Foo()\r\nEnd Sub\r\n";
+    let module_container = compress_container(module_code);
+
+    // Unicode stream name that does not exist in ANSI.
+    let module_stream_name_unicode = "模块1";
+
+    let dir_decompressed = {
+        let mut out = Vec::new();
+
+        // MODULENAME (ANSI).
+        push_record(&mut out, 0x0019, b"Module1");
+
+        // MODULESTREAMNAME (ANSI) points at a stream we will *not* create, to ensure the Unicode
+        // variant is preferred for OLE lookup.
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"Module1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+
+        // MODULESTREAMNAMEUNICODE points at the actual module stream.
+        push_record(
+            &mut out,
+            0x0032,
+            &utf16le_bytes(module_stream_name_unicode),
+        );
+
+        // MODULETYPE (procedural; TypeRecord.Id=0x0021)
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes());
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes()); // MODULETEXTOFFSET (0)
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        let mut s = ole
+            .create_stream(&format!("VBA/{module_stream_name_unicode}"))
+            .expect("module stream");
+        s.write_all(&module_container).expect("write module");
+    }
+
+    ole.into_inner().into_inner()
+}
+
 fn build_project_with_projectcompatversion(include_compat: bool) -> (Vec<u8>, [u8; 4]) {
     // Distinctive compat version payload so the regression assertion is unambiguous.
     let compat_version = 0xDEADBEEFu32.to_le_bytes();
@@ -753,6 +805,19 @@ fn v3_content_normalized_data_resolves_module_stream_name_from_unicode_record_va
     expected.extend_from_slice(b"Sub Foo()\nEnd Sub\n\n");
     expected.extend_from_slice(&utf16le_bytes("模块名"));
     expected.push(b'\n');
+
+    assert_eq!(v3, expected);
+}
+
+#[test]
+fn v3_content_normalized_data_prefers_unicode_module_stream_name_record_when_both_present() {
+    let vba_bin = build_project_with_ansi_and_unicode_module_stream_name_records();
+    let v3 = v3_content_normalized_data(&vba_bin).expect("V3ContentNormalizedData");
+
+    let mut expected = Vec::new();
+    expected.extend_from_slice(&0x0021u16.to_le_bytes());
+    expected.extend_from_slice(&0u16.to_le_bytes());
+    expected.extend_from_slice(b"Sub Foo()\nEnd Sub\n\nModule1\n");
 
     assert_eq!(v3, expected);
 }

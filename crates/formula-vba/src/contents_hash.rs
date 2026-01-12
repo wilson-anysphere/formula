@@ -844,8 +844,7 @@ fn parse_module_stream_name(cur: &mut DirCursor<'_>, encoding: &'static Encoding
     };
 
     if let Some(unicode) = unicode_name {
-        let (cow, _) = UTF_16LE.decode_without_bom_handling(&unicode);
-        return Some(cow.into_owned());
+        return Some(decode_dir_unicode_string(&unicode));
     }
 
     Some(decode_dir_string(trim_reserved_u16(&raw_name), encoding))
