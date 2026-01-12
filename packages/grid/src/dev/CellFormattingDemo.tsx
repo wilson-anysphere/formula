@@ -157,6 +157,14 @@ class CellFormattingDemoProvider implements CellProvider {
     });
 
     // ---------------------------------------------------------------------------------------------
+    // Font sizes / weights
+    // ---------------------------------------------------------------------------------------------
+    put(7, 1, "Font size / weight", { fill: sectionHeaderFill, fontWeight: "700" });
+    put(7, 2, "10px", { fontSize: 10, textAlign: "center", fill: "rgba(148, 163, 184, 0.08)" });
+    put(7, 3, "20px bold", { fontSize: 20, fontWeight: "700", textAlign: "center", fill: "rgba(148, 163, 184, 0.08)" });
+    put(7, 4, "900 weight", { fontWeight: "900", textAlign: "center", fill: "rgba(148, 163, 184, 0.08)" });
+
+    // ---------------------------------------------------------------------------------------------
     // Borders — intentionally uses "Excel-like" border objects (thin/medium/thick, dashed/dotted/double),
     // including conflicts across shared edges.
     // ---------------------------------------------------------------------------------------------
@@ -406,6 +414,7 @@ export function CellFormattingDemo(): React.ReactElement {
     if (!api) return;
 
     // Give wrap/rotation rows a bit more room.
+    api.setRowHeight(7, 34);
     api.setRowHeight(16, 60);
     api.setRowHeight(17, 60);
     api.setRowHeight(18, 68);
@@ -445,6 +454,9 @@ export function CellFormattingDemo(): React.ReactElement {
               </li>
               <li>
                 <code>A5:C6</code>: fills + explicit font color / font family
+              </li>
+              <li>
+                <code>A7:D7</code>: font size / weight
               </li>
               <li>
                 <code>A8:C13</code>: borders (thin/medium/thick, dashed/dotted/double) + conflicts
