@@ -4,7 +4,7 @@ Excel’s “Images in Cell” feature (insert picture → **Place in Cell**, an
 
 This note documents the **expected part set**, the **role of each part**, and the **minimal XML shapes** needed to parse/write Excel-generated files.
 
-For the overall “images in cells” packaging overview (including the optional `xl/cellImages.xml` store part (sometimes `xl/cellimages.xml`), `xl/metadata.xml`,
+For the overall “images in cells” packaging overview (including the optional `xl/cellimages.xml` store part (some producers use `xl/cellImages.xml`), `xl/metadata.xml`,
 and current Formula status/tests), see: [20-images-in-cells.md](./20-images-in-cells.md).
 
 For a **concrete, confirmed** “Place in Cell” (embedded local image) package shape (including the exact

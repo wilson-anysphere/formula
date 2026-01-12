@@ -315,7 +315,7 @@ Notes:
 ## 8) Cell image store part (`xl/cellimages.xml`) is optional
 
 For the verified “Place in Cell” scenario above (the `rdRichValue*` schema), Excel/rust_xlsxwriter **does not**
-create or reference `xl/cellImages.xml` / `xl/cellimages.xml`.
+create or reference `xl/cellimages.xml` / `xl/cellImages.xml`.
 
 Instead, it uses:
 

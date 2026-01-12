@@ -4,7 +4,7 @@
 
 Excel historically stores images via the **drawing layer** (`xl/drawings/*`, anchored/floating shapes). Newer Excel builds (Microsoft 365) also support **“Place in Cell” / “Image in Cell”**, where an image behaves like a *cell value*.
 
-For the dedicated “images in cells” packaging overview (including the optional `xl/cellImages.xml` part, sometimes `xl/cellimages.xml`), see:
+For the dedicated “images in cells” packaging overview (including the optional `xl/cellimages.xml` part; some producers use `xl/cellImages.xml`), see:
 
 - [`docs/20-images-in-cells.md`](./20-images-in-cells.md)
 - [`docs/20-images-in-cells-richdata.md`](./20-images-in-cells-richdata.md)
