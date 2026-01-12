@@ -6995,6 +6995,72 @@ fn bytecode_expr_is_eligible_inner(
         scopes.iter().rev().find_map(|scope| scope.get(name).copied())
     }
 
+    fn infer_binding_kind(
+        expr: &bytecode::Expr,
+        scopes: &mut Vec<HashMap<Arc<str>, BytecodeLocalBindingKind>>,
+    ) -> BytecodeLocalBindingKind {
+        use bytecode::ast::{Function, UnaryOp};
+
+        match expr {
+            bytecode::Expr::Literal(v) => match v {
+                bytecode::Value::Range(_) | bytecode::Value::MultiRange(_) => {
+                    BytecodeLocalBindingKind::Range
+                }
+                bytecode::Value::Array(_) => BytecodeLocalBindingKind::ArrayLiteral,
+                _ => BytecodeLocalBindingKind::Scalar,
+            },
+            bytecode::Expr::CellRef(_) => BytecodeLocalBindingKind::Scalar,
+            bytecode::Expr::RangeRef(_) | bytecode::Expr::MultiRangeRef(_) | bytecode::Expr::SpillRange(_) => {
+                BytecodeLocalBindingKind::Range
+            }
+            bytecode::Expr::NameRef(name) => {
+                local_binding_kind(scopes, name).unwrap_or(BytecodeLocalBindingKind::Scalar)
+            }
+            bytecode::Expr::Unary { op, expr } => match op {
+                UnaryOp::ImplicitIntersection => BytecodeLocalBindingKind::Scalar,
+                UnaryOp::Plus | UnaryOp::Neg => infer_binding_kind(expr, scopes),
+            },
+            bytecode::Expr::Binary { left, right, .. } => {
+                let left_kind = infer_binding_kind(left, scopes);
+                let right_kind = infer_binding_kind(right, scopes);
+                match (left_kind, right_kind) {
+                    (BytecodeLocalBindingKind::Range, _)
+                    | (_, BytecodeLocalBindingKind::Range) => BytecodeLocalBindingKind::Range,
+                    (BytecodeLocalBindingKind::ArrayLiteral, _)
+                    | (_, BytecodeLocalBindingKind::ArrayLiteral) => {
+                        BytecodeLocalBindingKind::ArrayLiteral
+                    }
+                    _ => BytecodeLocalBindingKind::Scalar,
+                }
+            }
+            bytecode::Expr::FuncCall {
+                func: Function::Let,
+                args,
+            } => {
+                if args.len() < 3 || args.len() % 2 == 0 {
+                    return BytecodeLocalBindingKind::Scalar;
+                }
+                scopes.push(HashMap::new());
+                for pair in args[..args.len() - 1].chunks_exact(2) {
+                    let bytecode::Expr::NameRef(name) = &pair[0] else {
+                        scopes.pop();
+                        return BytecodeLocalBindingKind::Scalar;
+                    };
+                    let kind = infer_binding_kind(&pair[1], scopes);
+                    scopes
+                        .last_mut()
+                        .expect("pushed scope")
+                        .insert(name.clone(), kind);
+                }
+                let kind = infer_binding_kind(&args[args.len() - 1], scopes);
+                scopes.pop();
+                kind
+            }
+            // All other supported functions currently return scalars in the bytecode backend.
+            bytecode::Expr::FuncCall { .. } => BytecodeLocalBindingKind::Scalar,
+        }
+    }
+
     match expr {
         bytecode::Expr::Literal(v) => match v {
             bytecode::Value::Number(_) | bytecode::Value::Bool(_) => true,
@@ -7130,31 +7196,7 @@ fn bytecode_expr_is_eligible_inner(
                         return false;
                     }
 
-                    let kind = match &pair[1] {
-                        bytecode::Expr::RangeRef(_) | bytecode::Expr::MultiRangeRef(_) => {
-                            BytecodeLocalBindingKind::Range
-                        }
-                        bytecode::Expr::SpillRange(_) => BytecodeLocalBindingKind::Range,
-                        bytecode::Expr::Literal(bytecode::Value::Array(_)) => {
-                            BytecodeLocalBindingKind::ArrayLiteral
-                        }
-                        bytecode::Expr::Literal(bytecode::Value::Range(_)) => {
-                            BytecodeLocalBindingKind::Range
-                        }
-                        bytecode::Expr::Literal(bytecode::Value::MultiRange(_)) => {
-                            BytecodeLocalBindingKind::Range
-                        }
-                        bytecode::Expr::Unary { op, .. }
-                            if matches!(op, bytecode::ast::UnaryOp::ImplicitIntersection) =>
-                        {
-                            BytecodeLocalBindingKind::Scalar
-                        }
-                        bytecode::Expr::NameRef(other) => {
-                            local_binding_kind(lexical_scopes, other)
-                                .unwrap_or(BytecodeLocalBindingKind::Scalar)
-                        }
-                        _ => BytecodeLocalBindingKind::Scalar,
-                    };
+                    let kind = infer_binding_kind(&pair[1], lexical_scopes);
 
                     lexical_scopes
                         .last_mut()

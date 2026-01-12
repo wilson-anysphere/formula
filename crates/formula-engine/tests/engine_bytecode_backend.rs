@@ -1027,6 +1027,71 @@ fn bytecode_backend_let_spill_range_locals_do_not_enable_scalar_functions() {
 }
 
 #[test]
+fn bytecode_backend_let_range_arithmetic_locals_do_not_enable_scalar_functions() {
+    let mut engine = Engine::new();
+
+    engine.set_cell_value("Sheet1", "A1", -1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", -2.0).unwrap();
+
+    // `A1:A2+0` produces a dynamic array result. Ensure that binding it to a LET local does not
+    // allow the bytecode backend to compile `ABS(...)` (which does not yet lift over arrays).
+    engine
+        .set_cell_formula("Sheet1", "B1", "=ABS(LET(x, A1:A2+0, x))")
+        .unwrap();
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.spill_range("Sheet1", "B1"),
+        Some((parse_a1("B1").unwrap(), parse_a1("B2").unwrap()))
+    );
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(2.0));
+}
+
+#[test]
+fn bytecode_backend_let_array_literal_arithmetic_locals_do_not_enable_scalar_functions() {
+    let mut engine = Engine::new();
+
+    // `{-1;-2}+0` produces a dynamic array result (not a plain array literal). Ensure LET locals
+    // don't allow scalar-only bytecode functions to accept it.
+    engine
+        .set_cell_formula("Sheet1", "A1", "=ABS(LET(x, {-1;-2}+0, x))")
+        .unwrap();
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.spill_range("Sheet1", "A1"),
+        Some((parse_a1("A1").unwrap(), parse_a1("A2").unwrap()))
+    );
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(2.0));
+}
+
+#[test]
+fn bytecode_backend_let_nested_let_range_result_locals_do_not_enable_scalar_functions() {
+    let mut engine = Engine::new();
+
+    engine.set_cell_value("Sheet1", "A1", -1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", -2.0).unwrap();
+
+    // Nested LETs should propagate range/array-typed locals through the kind inference logic.
+    engine
+        .set_cell_formula("Sheet1", "B1", "=ABS(LET(x, LET(r, A1:A2, r)+0, x))")
+        .unwrap();
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.spill_range("Sheet1", "B1"),
+        Some((parse_a1("B1").unwrap(), parse_a1("B2").unwrap()))
+    );
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(2.0));
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_countif_grouped_numeric_criteria() {
     let mut engine = Engine::new();
     engine
