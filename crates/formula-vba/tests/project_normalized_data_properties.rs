@@ -160,17 +160,17 @@ fn project_normalized_data_project_properties_accepts_lfcr_newlines() {
     let normalized =
         project_normalized_data(&vba_project_bin).expect("compute ProjectNormalizedData");
 
+    let mut expected_designer_storage = Vec::new();
+    expected_designer_storage.extend_from_slice(b"DESIGNER");
+    expected_designer_storage.extend(std::iter::repeat(0u8).take(1023 - b"DESIGNER".len()));
+
     let mut expected = Vec::new();
     expected.extend_from_slice(&1252u16.to_le_bytes());
+    expected.extend_from_slice(&expected_designer_storage);
     expected.extend_from_slice(b"NameVBAProject");
     expected.extend_from_slice(b"BaseClassUserForm1");
     expected.extend_from_slice(b"HelpFilec:\\example path\\example.hlp");
     expected.extend_from_slice(b"HelpContextID1");
-
-    let mut expected_designer_storage = Vec::new();
-    expected_designer_storage.extend_from_slice(b"DESIGNER");
-    expected_designer_storage.extend(std::iter::repeat(0u8).take(1023 - b"DESIGNER".len()));
-    expected.extend_from_slice(&expected_designer_storage);
 
     assert_eq!(normalized, expected);
 }
