@@ -21,6 +21,7 @@ set -euo pipefail
 #   FORMULA_RUST_TEST_THREADS  Default RUST_TEST_THREADS for cargo test (default: min(nproc, 16))
 #   FORMULA_RAYON_NUM_THREADS  Default RAYON_NUM_THREADS (default: FORMULA_CARGO_JOBS)
 #   FORMULA_CARGO_RETRY_ATTEMPTS  Retry count for transient rustc EAGAIN panics (default: 5)
+#   FORMULA_LLD_THREADS      When linking with lld via a cc driver, pass `--threads=<n>` (default: 1 on Linux)
 #
 # Based on fastrender's cargo_agent.sh (simpler than cgroups/systemd-run).
 
@@ -41,6 +42,7 @@ Environment:
   FORMULA_RUST_TEST_THREADS  RUST_TEST_THREADS for cargo test (default: min(nproc, 16))
   FORMULA_RAYON_NUM_THREADS  RAYON_NUM_THREADS (default: FORMULA_CARGO_JOBS)
   FORMULA_CARGO_RETRY_ATTEMPTS  Retry count for transient rustc EAGAIN panics (default: 5)
+  FORMULA_LLD_THREADS        lld thread pool size for link steps (default: 1 on Linux)
 EOF
 }
 
@@ -284,6 +286,64 @@ if [[ "${subcommand}" == "test" ]]; then
       export RUSTFLAGS="-C codegen-units=${codegen_units_rustflags}"
     else
       export RUSTFLAGS="${RUSTFLAGS} -C codegen-units=${codegen_units_rustflags}"
+    fi
+  fi
+fi
+
+# Limit lld's internal thread pool on multi-agent hosts.
+#
+# When the Rust toolchain is configured to link via `-fuse-ld=lld`, lld will spawn a thread pool by
+# default. Under heavy system load / strict process limits this can fail with errors like:
+# - `terminate called after throwing an instance of 'std::system_error' what(): Resource temporarily unavailable`
+# - `ThreadPoolExecutor::ThreadPoolExecutor` in the crash backtrace
+#
+# Force single-threaded linking by default on Linux by passing `--threads=1` through the cc driver's
+# `-Wl,` passthrough.
+#
+# Note: We only do this for the default (host) target, since `-Wl,` isn't understood by all linker
+# invocation paths (e.g. some `--target wasm32-*` toolchains).
+cargo_target=""
+if [[ -n "${CARGO_BUILD_TARGET:-}" ]]; then
+  cargo_target="${CARGO_BUILD_TARGET}"
+else
+  expect_target_value=false
+  for arg in "$@"; do
+    if [[ "${expect_target_value}" == "true" ]]; then
+      cargo_target="${arg}"
+      expect_target_value=false
+      continue
+    fi
+    case "${arg}" in
+      --target)
+        expect_target_value=true
+        ;;
+      --target=*)
+        cargo_target="${arg#--target=}"
+        ;;
+    esac
+  done
+fi
+
+if [[ -z "${cargo_target}" ]]; then
+  lld_threads="${FORMULA_LLD_THREADS:-}"
+  if [[ -z "${lld_threads}" ]]; then
+    uname_s="$(uname -s 2>/dev/null || echo "")"
+    if [[ "${uname_s}" == "Linux" ]]; then
+      lld_threads="1"
+    fi
+  fi
+
+  if [[ -n "${lld_threads}" && "${lld_threads}" != "0" && "${lld_threads}" != "off" && "${lld_threads}" != "unlimited" ]]; then
+    if ! [[ "${lld_threads}" =~ ^[0-9]+$ ]]; then
+      echo "cargo_agent: invalid FORMULA_LLD_THREADS=${lld_threads} (expected integer, 0, off, or unlimited)" >&2
+      exit 2
+    fi
+    if [[ "${RUSTFLAGS:-}" != *"--threads="* ]]; then
+      if [[ -z "${RUSTFLAGS:-}" ]]; then
+        export RUSTFLAGS="-C link-arg=-Wl,--threads=${lld_threads}"
+      else
+        export RUSTFLAGS="${RUSTFLAGS} -C link-arg=-Wl,--threads=${lld_threads}"
+      fi
     fi
   fi
 fi
