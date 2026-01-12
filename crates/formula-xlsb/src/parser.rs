@@ -599,7 +599,45 @@ pub(crate) fn parse_workbook<R: Read>(
                 if decoded.text.is_some() {
                     decoded
                 } else {
-                    decode_formula_rgce(&formula.rgce)
+                    let decoded = decode_formula_rgce(&formula.rgce);
+                    if decoded.text.is_some() {
+                        decoded
+                    } else {
+                        // Some contexts (notably defined-name formulas) can contain relative
+                        // reference ptgs (`PtgRefN` / `PtgAreaN`) which require a base cell to
+                        // decode. We don't have a real origin cell for workbook-scoped names, so
+                        // use `A1` as a best-effort base to surface something in the UI and allow
+                        // downstream consumers to attempt evaluation.
+                        let base = crate::rgce::CellCoord::new(0, 0);
+                        let decoded = crate::rgce::decode_formula_rgce_with_context_and_rgcb_and_base(
+                            &formula.rgce,
+                            &formula.extra,
+                            &ctx,
+                            base,
+                        );
+                        let decoded = if decoded.text.is_some() {
+                            decoded
+                        } else {
+                            let decoded =
+                                decode_formula_rgce_with_context_and_base(&formula.rgce, &ctx, base);
+                            if decoded.text.is_some() {
+                                decoded
+                            } else {
+                                let decoded =
+                                    crate::rgce::decode_formula_rgce_with_rgcb_and_base(
+                                        &formula.rgce,
+                                        &formula.extra,
+                                        base,
+                                    );
+                                if decoded.text.is_some() {
+                                    decoded
+                                } else {
+                                    decode_formula_rgce_with_base(&formula.rgce, base)
+                                }
+                            }
+                        };
+                        decoded
+                    }
                 }
             }
         };
@@ -922,6 +960,55 @@ mod tests {
                 .as_ref()
                 .and_then(|f| f.text.as_deref()),
             Some("7")
+        );
+    }
+
+    #[test]
+    fn parse_workbook_decodes_defined_name_with_relative_ptg_using_base_cell() {
+        let mut workbook_bin = Vec::new();
+
+        // Sheet1 (rId1).
+        let mut sheet1 = Vec::new();
+        sheet1.extend_from_slice(&0u32.to_le_bytes()); // flags/state
+        sheet1.extend_from_slice(&1u32.to_le_bytes()); // sheet id
+        write_utf16_string(&mut sheet1, "rId1");
+        write_utf16_string(&mut sheet1, "Sheet1");
+        write_record(&mut workbook_bin, biff12::SHEET, &sheet1);
+
+        write_record(&mut workbook_bin, biff12::SHEETS_END, &[]);
+
+        // Workbook-scoped defined name `RelName` with a relative reference token (PtgRefN).
+        //
+        // `PtgRefN` needs a base cell to decode; we use `A1` as a best-effort base for defined
+        // name formulas.
+        let mut name = Vec::new();
+        name.extend_from_slice(&0u32.to_le_bytes()); // flags
+        name.extend_from_slice(&0xFFFF_FFFFu32.to_le_bytes()); // workbook scope sentinel
+        name.push(0); // reserved
+        write_utf16_string(&mut name, "RelName");
+        let rgce: Vec<u8> = vec![
+            0x2C, // PtgRefN (ref class)
+            0, 0, 0, 0, // row_off (i32)
+            0, 0, // col_off (i16)
+        ];
+        name.extend_from_slice(&(rgce.len() as u32).to_le_bytes());
+        name.extend_from_slice(&rgce);
+        write_record(&mut workbook_bin, biff12::NAME, &name);
+
+        let rels: HashMap<String, String> =
+            HashMap::from([("rId1".to_string(), "worksheets/sheet1.bin".to_string())]);
+
+        let (_sheets, _ctx, _props, defined_names) =
+            parse_workbook(&mut Cursor::new(&workbook_bin), &rels).expect("parse workbook.bin");
+
+        assert_eq!(defined_names.len(), 1);
+        assert_eq!(defined_names[0].name, "RelName");
+        assert_eq!(
+            defined_names[0]
+                .formula
+                .as_ref()
+                .and_then(|f| f.text.as_deref()),
+            Some("A1"),
         );
     }
 
