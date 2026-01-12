@@ -121,13 +121,6 @@ const HARDEN_TAURI_GLOBALS_SOURCE = `(() => {
       lockDownKey(key);
     }
 
-    // If we ever observed any of the known keys as present, proactively lock down all of them so a
-    // runtime cannot re-inject the globals later in the page lifecycle.
-    if (tauriGlobalsPresent) {
-      for (const key of keys) {
-        lockDownKey(key);
-      }
-    }
   };
 
   // Run immediately, then schedule a few additional scrubs in case globals are injected after
