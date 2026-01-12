@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
+
+const require = createRequire(import.meta.url);
 
 // Include an explicit `.ts` specifier so `scripts/run-node-tests.mjs` can skip this
 // suite when TypeScript execution isn't available (no transpile loader and no
@@ -22,6 +25,36 @@ function supportsTypeStripping() {
   return probe.status === 0;
 }
 
+function supportsRegister() {
+  try {
+    return typeof require("node:module")?.register === "function";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * @param {string} loaderUrl
+ * @returns {string[]}
+ */
+function resolveNodeLoaderArgs(loaderUrl) {
+  const allowedFlags =
+    process.allowedNodeEnvironmentFlags && typeof process.allowedNodeEnvironmentFlags.has === "function"
+      ? process.allowedNodeEnvironmentFlags
+      : new Set();
+
+  // Prefer the newer `register()` mechanism when available.
+  if (supportsRegister() && allowedFlags.has("--import")) {
+    const registerScript = `import { register } from "node:module"; register(${JSON.stringify(loaderUrl)});`;
+    const dataUrl = `data:text/javascript;base64,${Buffer.from(registerScript, "utf8").toString("base64")}`;
+    return ["--import", dataUrl];
+  }
+
+  if (allowedFlags.has("--loader")) return ["--loader", loaderUrl];
+  if (allowedFlags.has("--experimental-loader")) return [`--experimental-loader=${loaderUrl}`];
+  return [];
+}
+
 test(
   "resolve-ts-imports-loader works under --experimental-strip-types (no TypeScript dependency)",
   { skip: !supportsTypeStripping() },
@@ -33,8 +66,7 @@ test(
       [
         "--no-warnings",
         "--experimental-strip-types",
-        "--loader",
-        loaderUrl,
+        ...resolveNodeLoaderArgs(loaderUrl),
         "--input-type=module",
         "-e",
         [
