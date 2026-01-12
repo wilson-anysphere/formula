@@ -89,9 +89,16 @@ describe("tauri capability event permissions", () => {
 
     // `core:default` would implicitly grant broad access to many core plugins (event/window/etc),
     // defeating the point of the explicit allowlists in this hardened build.
-    expect(permissions).not.toContain("core:default");
-    expect(permissions).not.toContain("core:event:default");
-    expect(permissions).not.toContain("core:window:default");
+    const hasPermission = (id: string): boolean =>
+      permissions.some(
+        (p) =>
+          (typeof p === "string" && p === id) ||
+          (typeof p === "object" && p != null && (p as any).identifier === id),
+      );
+
+    expect(hasPermission("core:default")).toBe(false);
+    expect(hasPermission("core:event:default")).toBe(false);
+    expect(hasPermission("core:window:default")).toBe(false);
   });
 
   it("includes the desktop shell event names used by the frontend", () => {

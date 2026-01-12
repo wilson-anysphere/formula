@@ -812,7 +812,8 @@ single trusted boundary.
 
 High-level contents (see the file for the exhaustive list):
 
-- We avoid `core:default` to keep the permission surface minimal/explicit.
+- We avoid `core:default` (broad, unscoped access to core plugins like event/window) to keep the permission surface minimal/explicit.
+- We intentionally do **not** rely on `core:allow-invoke` for custom Rust commands; instead commands must validate scope in Rust (window/origin checks + input validation).
 - `event:allow-listen` includes:
   - close flow: `close-prep`, `close-requested`
   - open flow: `open-file`, `file-dropped`
