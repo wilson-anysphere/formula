@@ -26,6 +26,13 @@ desktop = [
     "dep:tauri-plugin-updater",
     "dep:http-range",
     "dep:percent-encoding",
+    # Clipboard integrations on Linux may rely on GTK (system) libraries. Keep them
+    # behind the `desktop` feature so backend unit tests can run headless without
+    # a GTK/WebKit toolchain installed.
+    "dep:gtk",
+    "dep:gdk",
+    "dep:glib",
+    "dep:gdk-pixbuf",
 ]
 # Enable Parquet/Arrow-backed columnar imports.
 #
@@ -69,6 +76,13 @@ tauri-plugin-updater = { version = "2.9", optional = true }
 thiserror = "1.0"
 http-range = { version = "0.1", optional = true }
 percent-encoding = { version = "2", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Optional, GTK-based clipboard support (requires system GTK dev packages).
+gtk = { version = "0.18", optional = true }
+gdk = { version = "0.18", optional = true }
+glib = { version = "0.18", optional = true }
+gdk-pixbuf = { version = "0.18", optional = true }
 
 [dev-dependencies]
 tempfile = "3.10"
