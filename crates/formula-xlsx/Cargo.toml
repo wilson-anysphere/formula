@@ -5,13 +5,21 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "XLSX/XLSM import/export and package preservation utilities for Formula."
 
+[features]
+# `formula-xlsx` can optionally include VBA parsing/signature helpers via `formula-vba`.
+#
+# This is enabled by default so existing users continue to have access to the
+# `formula_xlsx::vba` API surface without having to opt in explicitly.
+default = ["vba"]
+vba = ["dep:formula-vba"]
+
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 formula-engine = { path = "../formula-engine" }
 formula-format = { path = "../formula-format" }
 formula-columnar = { path = "../formula-columnar" }
 formula-model = { path = "../formula-model" }
-formula-vba = { path = "../formula-vba" }
+formula-vba = { path = "../formula-vba", optional = true }
 quick-xml = { version = "0.37", features = ["serialize"] }
 roxmltree = "0.20"
 serde = { version = "1.0", features = ["derive"] }

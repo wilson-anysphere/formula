@@ -58,6 +58,7 @@ mod sheet_metadata;
 pub mod streaming;
 pub mod styles;
 pub mod tables;
+#[cfg(feature = "vba")]
 pub mod vba;
 mod workbook;
 pub mod write;

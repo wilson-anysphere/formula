@@ -15,5 +15,5 @@ thiserror = "2.0"
 
 [dev-dependencies]
 formula-engine = { path = "../formula-engine", default-features = false }
-formula-xlsx = { path = "../formula-xlsx" }
+formula-xlsx = { path = "../formula-xlsx", default-features = false }
 tempfile = "3.10"
