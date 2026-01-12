@@ -254,13 +254,13 @@ function loadSecretStoreKeys(env: NodeJS.ProcessEnv, legacySecret: string): Secr
 
       for (const entry of parsed) {
         if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-          throw new Error("SECRET_STORE_KEYS_JSON array entries must be objects with { id, key }");
+          throw new Error("SECRET_STORE_KEYS_JSON array entries must be objects with { id|keyId, key }");
         }
         const record = entry as Record<string, unknown>;
         const rawKeyId = record.id ?? record.keyId;
         const rawKey = record.key;
         if (typeof rawKeyId !== "string" || rawKeyId.trim().length === 0) {
-          throw new Error("SECRET_STORE_KEYS_JSON array entries must include a non-empty string 'id'");
+          throw new Error("SECRET_STORE_KEYS_JSON array entries must include a non-empty string 'id' or 'keyId'");
         }
 
         const keyId = rawKeyId.trim();
