@@ -1191,16 +1191,18 @@ if (
   };
 
   const activateCellWithSplitSync = app.activateCell.bind(app);
-  app.activateCell = (target: Parameters<SpreadsheetApp["activateCell"]>[0]): void => {
+  app.activateCell = (...args: Parameters<SpreadsheetApp["activateCell"]>): void => {
+    const target = args[0];
     const prevSheet = app.getCurrentSheetId();
-    activateCellWithSplitSync(target);
+    activateCellWithSplitSync(...args);
     if (target.sheetId && target.sheetId !== prevSheet) invalidateSecondaryProvider();
   };
 
   const selectRangeWithSplitSync = app.selectRange.bind(app);
-  app.selectRange = (target: Parameters<SpreadsheetApp["selectRange"]>[0]): void => {
+  app.selectRange = (...args: Parameters<SpreadsheetApp["selectRange"]>): void => {
+    const target = args[0];
     const prevSheet = app.getCurrentSheetId();
-    selectRangeWithSplitSync(target);
+    selectRangeWithSplitSync(...args);
     if (target.sheetId && target.sheetId !== prevSheet) invalidateSecondaryProvider();
   };
 
