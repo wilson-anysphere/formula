@@ -5269,13 +5269,17 @@ if (
     },
     goTo: {
       workbook: app.getSearchWorkbook(),
-      getCurrentSheetName: () => app.getCurrentSheetId(),
+      // Use display names for parsing so sheet-qualified references match what users type
+      // (e.g. after renaming Sheet2 -> Budget, `Budget!A1` should resolve).
+      getCurrentSheetName: () => currentSheetDisplayName(),
       onGoTo: (parsed) => {
         const { range } = parsed;
+        const sheetId = resolveSheetIdFromName(parsed.sheetName);
+        if (!sheetId) return;
         if (range.startRow === range.endRow && range.startCol === range.endCol) {
-          app.activateCell({ sheetId: parsed.sheetName, row: range.startRow, col: range.startCol });
+          app.activateCell({ sheetId, row: range.startRow, col: range.startCol });
         } else {
-          app.selectRange({ sheetId: parsed.sheetName, range });
+          app.selectRange({ sheetId, range });
         }
       },
     },
