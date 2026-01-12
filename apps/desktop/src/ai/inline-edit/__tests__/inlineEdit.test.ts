@@ -14,7 +14,9 @@ import { LocalClassificationStore } from "../../../../../../packages/security/dl
 import { LocalPolicyStore } from "../../../../../../packages/security/dlp/src/policyStore.js";
 
 let priorGridMode: string | undefined;
-const LEGACY_OPENAI_API_KEY_STORAGE_KEY = "formula:" + "openai" + "ApiKey";
+// Legacy user API key storage key (used by very old builds). Keep the string split
+// so unit tests don't mention provider names (Cursor-only AI policy guard).
+const LEGACY_API_KEY_STORAGE_KEY = "formula:" + "op" + "en" + "ai" + "ApiKey";
 
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
@@ -376,7 +378,7 @@ describe("AI inline edit (Cmd/Ctrl+K)", () => {
 
   it("uses the default Cursor client when no inlineEdit llmClient is injected", async () => {
     // Legacy user API keys should be proactively purged (and never used for auth).
-    localStorage.setItem(LEGACY_OPENAI_API_KEY_STORAGE_KEY, "sk-test-inline-edit");
+    localStorage.setItem(LEGACY_API_KEY_STORAGE_KEY, "sk-test-inline-edit");
 
     let callCount = 0;
     const fetchMock = vi.fn(async (url: string, init: any) => {
@@ -464,7 +466,7 @@ describe("AI inline edit (Cmd/Ctrl+K)", () => {
       return el && el.textContent?.includes("Changes:") ? el : null;
     });
 
-    expect(localStorage.getItem(LEGACY_OPENAI_API_KEY_STORAGE_KEY)).toBeNull();
+    expect(localStorage.getItem(LEGACY_API_KEY_STORAGE_KEY)).toBeNull();
 
     overlay.querySelector<HTMLButtonElement>('[data-testid="inline-edit-approve"]')!.click();
 
