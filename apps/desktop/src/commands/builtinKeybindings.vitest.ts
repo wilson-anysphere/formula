@@ -45,6 +45,8 @@ describe("builtin keybinding catalog", () => {
     expect(getPrimaryCommandKeybindingDisplay("edit.editCell", otherIndex)).toBe("F2");
     expect(getPrimaryCommandKeybindingDisplay("view.togglePanel.aiChat", otherIndex)).toBe("Ctrl+Shift+A");
     expect(getPrimaryCommandKeybindingDisplay("ai.inlineEdit", otherIndex)).toBe("Ctrl+K");
+    expect(getPrimaryCommandKeybindingDisplay("comments.togglePanel", otherIndex)).toBe("Ctrl+Shift+M");
+    expect(otherIndex.get("comments.togglePanel")).toEqual(expect.arrayContaining(["Ctrl+Shift+M", "Ctrl+Shift+Meta+M"]));
     expect(getPrimaryCommandKeybindingDisplay("format.toggleItalic", otherIndex)).toBe("Ctrl+I");
     expect(getPrimaryCommandKeybindingDisplay("edit.fillDown", otherIndex)).toBe("Ctrl+D");
     expect(getPrimaryCommandKeybindingDisplay("edit.fillRight", otherIndex)).toBe("Ctrl+R");
@@ -73,6 +75,8 @@ describe("builtin keybinding catalog", () => {
     expect(getPrimaryCommandKeybindingDisplay("edit.editCell", macIndex)).toBe("F2");
     expect(getPrimaryCommandKeybindingDisplay("view.togglePanel.aiChat", macIndex)).toBe("⇧⌘A");
     expect(getPrimaryCommandKeybindingDisplay("ai.inlineEdit", macIndex)).toBe("⌘K");
+    expect(getPrimaryCommandKeybindingDisplay("comments.togglePanel", macIndex)).toBe("⇧⌘M");
+    expect(macIndex.get("comments.togglePanel")).toEqual(expect.arrayContaining(["⇧⌘M", "⌃⇧⌘M"]));
     expect(getPrimaryCommandKeybindingDisplay("format.toggleItalic", macIndex)).toBe("⌘I");
     expect(getPrimaryCommandKeybindingDisplay("edit.fillDown", macIndex)).toBe("⌘D");
     expect(getPrimaryCommandKeybindingDisplay("edit.fillRight", macIndex)).toBe("⌘R");

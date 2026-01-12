@@ -274,4 +274,10 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     mac: "cmd+shift+m",
     when: null,
   },
+  // Some environments emit both Ctrl+Meta for a single chord (remote desktop / VM keyboard setups).
+  {
+    command: "comments.togglePanel",
+    key: "ctrl+cmd+shift+m",
+    when: null,
+  },
 ];
