@@ -10,13 +10,11 @@
 
 #![allow(dead_code)]
 
-use super::{records, rgce, strings, BiffVersion};
+use super::{extern_sheet, records, rgce, strings, BiffVersion};
 
 // Record ids used by workbook-global defined name parsing.
 // See [MS-XLS] sections:
-// - EXTERNSHEET: 2.4.103
 // - NAME: 2.4.150
-const RECORD_EXTERNSHEET: u16 = 0x0017;
 const RECORD_NAME: u16 = 0x0018;
 
 // NAME record flags (Lbl.grbit).
@@ -70,10 +68,33 @@ pub(crate) fn parse_biff_defined_names(
         return Ok(out);
     }
 
-    let allows_continuation = |id: u16| id == RECORD_EXTERNSHEET || id == RECORD_NAME;
+    let extern_sheet::ExternSheetTable { entries, warnings } =
+        extern_sheet::parse_biff8_externsheet_table(workbook_stream);
+    out.warnings.extend(warnings);
+    let externsheet: Vec<rgce::ExternSheetRef> = entries
+        .into_iter()
+        .map(|entry| match entry {
+            extern_sheet::ExternSheetRef::Internal {
+                itab_first,
+                itab_last,
+            } => rgce::ExternSheetRef {
+                // Best-effort: the rgce decoder expects unsigned indices. Negative itab values are
+                // treated as out-of-range by the decoder and will render as `#SHEET(...)!`.
+                itab_first: itab_first as u16,
+                itab_last: itab_last as u16,
+            },
+            extern_sheet::ExternSheetRef::External => rgce::ExternSheetRef {
+                // External references cannot currently be resolved; use a sentinel that will render
+                // as `#SHEET(...)!` with a warning.
+                itab_first: u16::MAX,
+                itab_last: u16::MAX,
+            },
+        })
+        .collect();
+
+    let allows_continuation = |id: u16| id == RECORD_NAME;
     let iter = records::LogicalBiffRecordIter::new(workbook_stream, allows_continuation);
 
-    let mut externsheet: Vec<rgce::ExternSheetRef> = Vec::new();
     let mut raw_names: Vec<RawDefinedName> = Vec::new();
 
     for record in iter {
@@ -93,12 +114,6 @@ pub(crate) fn parse_biff_defined_names(
         }
 
         match record_id {
-            RECORD_EXTERNSHEET => match parse_externsheet_record(record.data.as_ref()) {
-                Ok(table) => externsheet = table,
-                Err(err) => out
-                    .warnings
-                    .push(format!("failed to parse EXTERNSHEET record: {err}")),
-            },
             RECORD_NAME => match parse_biff8_name_record(&record, codepage, sheet_names) {
                 Ok(raw) => raw_names.push(raw),
                 Err(err) => out.warnings.push(format!("failed to parse NAME record: {err}")),
@@ -136,33 +151,6 @@ pub(crate) fn parse_biff_defined_names(
             refers_to: decoded.text,
             hidden: raw.hidden,
             comment: raw.comment,
-        });
-    }
-
-    Ok(out)
-}
-
-fn parse_externsheet_record(data: &[u8]) -> Result<Vec<rgce::ExternSheetRef>, String> {
-    if data.len() < 2 {
-        return Err("EXTERNSHEET record too short".to_string());
-    }
-
-    let count = u16::from_le_bytes([data[0], data[1]]) as usize;
-    let mut offset = 2usize;
-    let mut out = Vec::with_capacity(count);
-
-    for _ in 0..count {
-        if data.len() < offset + 6 {
-            return Err("EXTERNSHEET record truncated".to_string());
-        }
-        // iSupBook is currently ignored; we only support internal sheet refs.
-        let _isupbook = u16::from_le_bytes([data[offset], data[offset + 1]]);
-        let itab_first = u16::from_le_bytes([data[offset + 2], data[offset + 3]]);
-        let itab_last = u16::from_le_bytes([data[offset + 4], data[offset + 5]]);
-        offset += 6;
-        out.push(rgce::ExternSheetRef {
-            itab_first,
-            itab_last,
         });
     }
 
