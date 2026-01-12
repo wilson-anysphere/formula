@@ -114,6 +114,9 @@ interface StoredPackageRecord {
   packageSha256?: string;
 }
 
+// NOTE: `DB_NAME` + `DB_VERSION` are persisted client-side (web + desktop WebView) and must remain
+// stable to avoid orphaning existing installs. If the schema needs to change, add an IndexedDB
+// migration by bumping `DB_VERSION` and updating the upgrade logic below.
 const DB_NAME = "formula.webExtensions";
 const DB_VERSION = 1;
 
