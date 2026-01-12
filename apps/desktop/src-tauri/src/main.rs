@@ -25,6 +25,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tauri::{Emitter, Listener, Manager, State};
 use tauri_plugin_notification::NotificationExt;
+use tauri_plugin_shell::ShellExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
@@ -509,6 +510,32 @@ fn is_trusted_notification_origin(url: &Url) -> bool {
 }
 
 #[tauri::command]
+async fn open_external_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    let parsed = Url::parse(url.trim()).map_err(|err| format!("Invalid URL: {err}"))?;
+    match parsed.scheme() {
+        "http" | "https" | "mailto" => {}
+        "javascript" | "data" | "file" => {
+            return Err(format!(
+                "Refusing to open URL with blocked scheme \"{}:\"",
+                parsed.scheme()
+            ))
+        }
+        other => {
+            return Err(format!(
+                "Refusing to open URL with unsupported scheme \"{other}:\" (allowed: http, https, mailto)"
+            ))
+        }
+    }
+
+    // Open in the host OS (default browser/mail client). This is intentionally routed through a
+    // Rust-side command so protocol allowlisting happens at the trusted boundary.
+    app.shell()
+        .open(parsed.to_string(), None)
+        .map_err(|err| err.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
 async fn show_system_notification(
     window: tauri::WebviewWindow,
     title: String,
@@ -860,6 +887,7 @@ fn main() {
             commands::fire_worksheet_change,
             commands::fire_selection_change,
             tray_status::set_tray_status,
+            open_external_url,
             show_system_notification,
             oauth_loopback_listen,
             report_startup_webview_loaded,

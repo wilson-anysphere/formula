@@ -308,7 +308,7 @@ delete prior release assets.
 - **state** (`SharedAppState`) + **macro trust store** (`SharedMacroTrustStore`)
 - Tauri plugins:
   - `tauri_plugin_global_shortcut` (registers accelerators + emits app events)
-  - `tauri_plugin_shell` (enables `shell.open` from the frontend; guarded by capabilities)
+  - `tauri_plugin_shell` (used by the Rust command `open_external_url` to open external links in the host OS; direct webview access is not granted)
   - `tauri_plugin_updater` (update checks)
   - `tauri_plugin_notification` (native notifications)
   - `tauri_plugin_single_instance` (forward argv/cwd from subsequent launches into the running instance)
@@ -704,12 +704,18 @@ is a list of capability **identifiers** (e.g. `capabilities: ["main"]`). The mai
   - `dialog:allow-open`, `dialog:allow-save`
   - `window:allow-hide`, `window:allow-show`, `window:allow-set-focus`, `window:allow-close`
   - `clipboard:allow-read-text`, `clipboard:allow-write-text`
-  - `shell:allow-open`
   - `updater:allow-check`, `updater:allow-download`, `updater:allow-install`
 
 Note: the Tauri clipboard plugin permissions above only cover the legacy **plain-text** clipboard helpers
 (`globalThis.__TAURI__.clipboard.readText` / `writeText`). Rich clipboard formats (HTML/RTF/PNG) are handled via
 custom Rust IPC commands (`clipboard_read` / `clipboard_write`) and must be added to the `core:allow-invoke` list.
+
+External URL opening is also routed through a custom Rust IPC command:
+
+- `open_external_url` (allows only `http:`, `https:`, and `mailto:` at the Rust boundary)
+
+We intentionally do **not** grant `shell:allow-open` so a compromised webview cannot bypass this validation by calling
+the shell plugin directly.
 
 High-level contents (see the file for the exhaustive list):
 

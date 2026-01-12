@@ -111,7 +111,7 @@ Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the ful
   "windows": ["main"],
   "permissions": [
     "core:default",
-    { "identifier": "core:allow-invoke", "allow": ["open_workbook", "save_workbook"] },
+    { "identifier": "core:allow-invoke", "allow": ["open_workbook", "save_workbook", "open_external_url"] },
     // ...
     { "identifier": "event:allow-listen", "allow": [{ "event": "open-file" }] },
     { "identifier": "event:allow-emit", "allow": [{ "event": "open-file-ready" }] },
@@ -124,13 +124,15 @@ Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the ful
     "window:allow-close",
     "clipboard:allow-read-text",
     "clipboard:allow-write-text",
-    "shell:allow-open",
     "updater:allow-check",
     "updater:allow-download",
     "updater:allow-install"
   ]
 }
 ```
+
+Note: external URL opening should go through the `open_external_url` Rust command (scheme allowlist enforced in Rust)
+rather than granting the webview direct access to the shell plugin (`shell:allow-open`).
 
 Note: `clipboard:allow-read-text` / `clipboard:allow-write-text` only grant access to the legacy plain-text
 clipboard helpers (`globalThis.__TAURI__.clipboard.readText` / `writeText`). Rich clipboard formats

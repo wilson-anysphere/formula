@@ -12,16 +12,18 @@ describe("shellOpen", () => {
     vi.restoreAllMocks();
   });
 
-  it("prefers the Tauri shell plugin when available", async () => {
+  it("invokes the Rust open_external_url command in Tauri builds", async () => {
+    const invoke = vi.fn().mockResolvedValue(undefined);
     const tauriOpen = vi.fn().mockResolvedValue(undefined);
-    (globalThis as any).__TAURI__ = { plugin: { shell: { open: tauriOpen } } };
+    (globalThis as any).__TAURI__ = { core: { invoke }, plugin: { shell: { open: tauriOpen } } };
     const winOpen = vi.fn();
     (globalThis as any).window = { open: winOpen };
 
     await shellOpen("https://example.com");
 
-    expect(tauriOpen).toHaveBeenCalledTimes(1);
-    expect(tauriOpen).toHaveBeenCalledWith("https://example.com");
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith("open_external_url", { url: "https://example.com" });
+    expect(tauriOpen).not.toHaveBeenCalled();
     expect(winOpen).not.toHaveBeenCalled();
   });
 
@@ -37,27 +39,27 @@ describe("shellOpen", () => {
   });
 
   it("blocks javascript: URLs even when the shell API is available", async () => {
-    const tauriOpen = vi.fn().mockResolvedValue(undefined);
-    (globalThis as any).__TAURI__ = { plugin: { shell: { open: tauriOpen } } };
+    const invoke = vi.fn().mockResolvedValue(undefined);
+    (globalThis as any).__TAURI__ = { core: { invoke } };
 
     await expect(shellOpen("javascript:alert(1)")).rejects.toThrow(/blocked protocol/i);
-    expect(tauriOpen).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
   });
 
   it("blocks data: URLs even when the shell API is available", async () => {
-    const tauriOpen = vi.fn().mockResolvedValue(undefined);
-    (globalThis as any).__TAURI__ = { plugin: { shell: { open: tauriOpen } } };
+    const invoke = vi.fn().mockResolvedValue(undefined);
+    (globalThis as any).__TAURI__ = { core: { invoke } };
 
     await expect(shellOpen("data:text/plain,hello")).rejects.toThrow(/blocked protocol/i);
-    expect(tauriOpen).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
   });
 
-  it("does not fall back to window.open when __TAURI__ is present but the shell plugin is missing", async () => {
-    (globalThis as any).__TAURI__ = { core: { invoke: vi.fn() } };
+  it("does not fall back to window.open when __TAURI__ is present but the invoke API is missing", async () => {
+    (globalThis as any).__TAURI__ = { plugin: {} };
     const winOpen = vi.fn();
     (globalThis as any).window = { open: winOpen };
 
-    await expect(shellOpen("https://example.com")).rejects.toThrow(/shell plugin unavailable/i);
+    await expect(shellOpen("https://example.com")).rejects.toThrow(/invoke api unavailable/i);
     expect(winOpen).not.toHaveBeenCalled();
   });
 });

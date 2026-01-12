@@ -71,6 +71,7 @@
         "fire_worksheet_change",
         "fire_selection_change",
         "set_tray_status",
+        "open_external_url",
         "show_system_notification",
         "oauth_loopback_listen",
         "report_startup_webview_loaded",
@@ -146,7 +147,6 @@
     "window:allow-close",
     "clipboard:allow-read-text",
     "clipboard:allow-write-text",
-    "shell:allow-open",
     "updater:allow-check",
     "updater:allow-download",
     "updater:allow-install"
