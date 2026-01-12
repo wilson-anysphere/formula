@@ -772,9 +772,54 @@ fn deref_range_dynamic(grid: &dyn Grid, range: ResolvedRange) -> Value {
     Value::Array(ArrayValue::new(rows, cols, values))
 }
 
+fn deref_range_dynamic_on_sheet(grid: &dyn Grid, sheet: usize, range: ResolvedRange) -> Value {
+    if !range_in_bounds_on_sheet(grid, sheet, range) {
+        return Value::Error(ErrorKind::Ref);
+    }
+
+    if range.rows() == 1 && range.cols() == 1 {
+        return grid.get_value_on_sheet(
+            sheet,
+            CellCoord {
+                row: range.row_start,
+                col: range.col_start,
+            },
+        );
+    }
+
+    let rows = match usize::try_from(range.rows()) {
+        Ok(v) => v,
+        Err(_) => return Value::Error(ErrorKind::Num),
+    };
+    let cols = match usize::try_from(range.cols()) {
+        Ok(v) => v,
+        Err(_) => return Value::Error(ErrorKind::Num),
+    };
+    let total = match rows.checked_mul(cols) {
+        Some(v) => v,
+        None => return Value::Error(ErrorKind::Num),
+    };
+    let mut values = Vec::new();
+    if values.try_reserve_exact(total).is_err() {
+        return Value::Error(ErrorKind::Num);
+    }
+    for row in range.row_start..=range.row_end {
+        for col in range.col_start..=range.col_end {
+            values.push(grid.get_value_on_sheet(sheet, CellCoord { row, col }));
+        }
+    }
+    Value::Array(ArrayValue::new(rows, cols, values))
+}
+
 pub(crate) fn deref_value_dynamic(v: Value, grid: &dyn Grid, base: CellCoord) -> Value {
     match v {
         Value::Range(r) => deref_range_dynamic(grid, r.resolve(base)),
+        Value::MultiRange(r) => match r.areas.as_ref() {
+            [] => Value::Error(ErrorKind::Ref),
+            [only] => deref_range_dynamic_on_sheet(grid, only.sheet, only.range.resolve(base)),
+            // Discontiguous unions cannot be represented as a single rectangular spill.
+            _ => Value::Error(ErrorKind::Value),
+        },
         other => other,
     }
 }

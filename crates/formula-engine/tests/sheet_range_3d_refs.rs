@@ -309,6 +309,32 @@ fn bytecode_compiles_count_over_sheet_range_area_ref_and_matches_ast() {
 }
 
 #[test]
+fn bytecode_dynamic_deref_sheet_range_ref_matches_ast() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet2", "A1", 2.0).unwrap();
+    engine.set_cell_value("Sheet3", "A1", 3.0).unwrap();
+
+    // A 3D reference used as a formula result produces a multi-area reference union, which cannot
+    // be spilled as a single rectangular array. The engine surfaces this as #VALUE!.
+    engine
+        .set_cell_formula("Summary", "A1", "=Sheet1:Sheet3!A1")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    let bytecode_value = engine.get_cell_value("Summary", "A1");
+
+    engine.set_bytecode_enabled(false);
+    engine.recalculate_single_threaded();
+    let ast_value = engine.get_cell_value("Summary", "A1");
+
+    assert_eq!(bytecode_value, ast_value);
+    assert_eq!(bytecode_value, Value::Error(formula_engine::ErrorKind::Value));
+}
+
+#[test]
 fn bytecode_compiles_counta_and_countblank_over_sheet_range_area_ref_and_matches_ast() {
     let mut engine = Engine::new();
 
