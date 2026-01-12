@@ -848,6 +848,10 @@ export class SpreadsheetApp {
     this.chartLayer = document.createElement("div");
     this.chartLayer.className = "chart-layer";
     this.chartLayer.setAttribute("aria-hidden", "true");
+    if (this.gridMode === "shared") {
+      // Shared-grid overlay stacking is expressed via CSS classes (see charts-overlay.css).
+      this.chartLayer.classList.add("chart-layer--shared");
+    }
 
     this.referenceCanvas = document.createElement("canvas");
     this.referenceCanvas.className = "grid-canvas";
@@ -865,6 +869,10 @@ export class SpreadsheetApp {
     this.selectionCanvas = document.createElement("canvas");
     this.selectionCanvas.className = "grid-canvas";
     this.selectionCanvas.setAttribute("aria-hidden", "true");
+    if (this.gridMode === "shared") {
+      // Shared-grid overlay stacking is expressed via CSS classes (see charts-overlay.css).
+      this.selectionCanvas.classList.add("grid-canvas--shared-selection");
+    }
 
     this.root.appendChild(this.gridCanvas);
     this.root.appendChild(this.chartLayer);
@@ -889,6 +897,10 @@ export class SpreadsheetApp {
 
     this.outlineLayer = document.createElement("div");
     this.outlineLayer.className = "outline-layer";
+    if (this.gridMode === "shared") {
+      // Shared-grid overlay stacking is expressed via CSS classes (see charts-overlay.css).
+      this.outlineLayer.classList.add("outline-layer--shared");
+    }
     this.root.appendChild(this.outlineLayer);
 
     // Minimal scrollbars (drawn as DOM overlays, like the React CanvasGrid).
@@ -1117,11 +1129,6 @@ export class SpreadsheetApp {
       this.sharedGrid.renderer.setColWidth(0, this.rowHeaderWidth);
       this.sharedGrid.renderer.setRowHeight(0, this.colHeaderHeight);
       this.sharedGridZoom = this.sharedGrid.renderer.getZoom();
-
-      // Keep legacy overlay ordering: charts above cells, selection above charts.
-      this.chartLayer.classList.add("chart-layer--shared");
-      this.selectionCanvas.classList.add("grid-canvas--shared-selection");
-      this.outlineLayer.classList.add("outline-layer--shared");
 
       this.initSharedChartPanes();
     }
