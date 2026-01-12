@@ -18,13 +18,13 @@ test.describe("sheet rename", () => {
 
     await sheet2Tab.dblclick();
 
-    const input = page.getByTestId("input-box-field");
+    const input = sheet2Tab.locator("input.sheet-tab__input");
     await expect(input).toBeVisible();
     await input.fill("Data");
-    await page.getByTestId("input-box-ok").click();
+    await input.press("Enter");
 
     // The stable sheet id stays the same (data-testid uses the sheet id), but the display label changes.
-    await expect(sheet2Tab).toHaveText("Data");
+    await expect(sheet2Tab.locator(".sheet-tab__name")).toHaveText("Data");
     await expect(sheet2Tab).toHaveAttribute("data-testid", "sheet-tab-Sheet2");
 
     await expect
@@ -37,4 +37,3 @@ test.describe("sheet rename", () => {
       .toBe(true);
   });
 });
-

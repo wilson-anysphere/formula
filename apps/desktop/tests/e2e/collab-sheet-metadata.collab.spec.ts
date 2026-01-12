@@ -187,7 +187,7 @@ test.describe("collaboration: sheet metadata", () => {
 
       // Rename Sheet2 via the UI on client A and ensure it propagates to client B.
       await sheet2TabA.dblclick();
-      const renameInputA = pageA.getByTestId("input-box-field");
+      const renameInputA = sheet2TabA.locator("input.sheet-tab__input");
       await expect(renameInputA).toBeVisible();
       await renameInputA.fill("Expenses");
       await renameInputA.press("Enter");
