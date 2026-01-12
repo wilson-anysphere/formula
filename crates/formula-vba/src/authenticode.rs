@@ -99,6 +99,39 @@ pub fn extract_vba_signature_signed_digest(
     )))
 }
 
+/// Locate the BER/DER-encoded PKCS#7/CMS SignedData `ContentInfo` inside a VBA signature stream.
+///
+/// Returns `(offset, len)` where `offset` is the byte offset from the start of the stream and `len`
+/// is the total length of the ASN.1 TLV (including tag/length/EOC for indefinite encodings).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn locate_pkcs7_signed_data_bounds(signature_stream: &[u8]) -> Option<(usize, usize)> {
+    if let Some(info) = crate::offcrypto::parse_digsig_info_serialized(signature_stream) {
+        return Some((info.pkcs7_offset, info.pkcs7_len));
+    }
+
+    if signature_stream.first() == Some(&0x30)
+        && looks_like_pkcs7_signed_data_content_info(signature_stream)
+    {
+        let rem = skip_element(signature_stream).ok()?;
+        let len = signature_stream.len().saturating_sub(rem.len());
+        return Some((0, len));
+    }
+
+    for offset in 0..signature_stream.len() {
+        if signature_stream[offset] != 0x30 {
+            continue;
+        }
+        let slice = &signature_stream[offset..];
+        if looks_like_pkcs7_signed_data_content_info(slice) {
+            let rem = skip_element(slice).ok()?;
+            let len = slice.len().saturating_sub(rem.len());
+            return Some((offset, len));
+        }
+    }
+
+    None
+}
+
 #[derive(Debug, Clone, Copy)]
 struct Pkcs7Location<'a> {
     der: &'a [u8],
@@ -138,25 +171,79 @@ fn extract_signed_digest_from_pkcs7_location(
 
 fn looks_like_pkcs7_signed_data_content_info(bytes: &[u8]) -> bool {
     // ContentInfo ::= SEQUENCE { contentType OID, content [0] EXPLICIT ANY OPTIONAL }
-    let Ok((tag, _len, rest)) = parse_tag_and_length(bytes) else {
+    let Ok((tag, len, rest)) = parse_tag_and_length(bytes) else {
         return false;
     };
     if tag.class != Asn1Class::Universal || !tag.constructed || tag.number != 16 {
         return false;
     }
 
-    let Ok((oid, after_oid)) = parse_oid(rest) else {
+    let Ok(content) = slice_constructed_contents(rest, len) else {
+        return false;
+    };
+    let mut cur = content;
+
+    let Ok((oid, after_oid)) = parse_oid(cur) else {
         return false;
     };
     if oid != OID_PKCS7_SIGNED_DATA {
         return false;
     }
+    cur = after_oid;
 
     // ContentInfo.content is [0] EXPLICIT for SignedData.
-    let Ok((tag2, _len2, _rest2)) = parse_tag_and_length(after_oid) else {
+    let Ok((tag2, _len2, rest2)) = parse_tag_and_length(cur) else {
         return false;
     };
-    tag2.class == Asn1Class::ContextSpecific && tag2.constructed && tag2.number == 0
+    if tag2.class != Asn1Class::ContextSpecific || !tag2.constructed || tag2.number != 0 {
+        return false;
+    }
+
+    // Sanity check that the explicit content begins with SignedData ::= SEQUENCE { version INTEGER,
+    // digestAlgorithms SET, encapContentInfo SEQUENCE, ... }.
+    let Ok(signed_data_wrapper) = slice_constructed_contents(rest2, _len2) else {
+        return false;
+    };
+    let Ok((sd_tag, sd_len, sd_rest)) = parse_tag_and_length(signed_data_wrapper) else {
+        return false;
+    };
+    if sd_tag.class != Asn1Class::Universal || !sd_tag.constructed || sd_tag.number != 16 {
+        return false;
+    }
+    let Ok(sd_content) = slice_constructed_contents(sd_rest, sd_len) else {
+        return false;
+    };
+    let mut sd_cur = sd_content;
+
+    // version INTEGER
+    let Ok((ver_tag, _ver_len, _ver_rest)) = parse_tag_and_length(sd_cur) else {
+        return false;
+    };
+    if ver_tag.class != Asn1Class::Universal || ver_tag.constructed || ver_tag.number != 2 {
+        return false;
+    }
+    sd_cur = match skip_element(sd_cur) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+
+    // digestAlgorithms SET
+    let Ok((dig_tag, _dig_len, _dig_rest)) = parse_tag_and_length(sd_cur) else {
+        return false;
+    };
+    if dig_tag.class != Asn1Class::Universal || !dig_tag.constructed || dig_tag.number != 17 {
+        return false;
+    }
+    sd_cur = match skip_element(sd_cur) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+
+    // encapContentInfo SEQUENCE
+    let Ok((enc_tag, _enc_len, _enc_rest)) = parse_tag_and_length(sd_cur) else {
+        return false;
+    };
+    enc_tag.class == Asn1Class::Universal && enc_tag.constructed && enc_tag.number == 16
 }
 
 fn parse_pkcs7_signed_data_encap_content(

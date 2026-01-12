@@ -838,6 +838,18 @@ fn parse_pkcs7_with_offset(signature: &[u8]) -> Option<(openssl::pkcs7::Pkcs7, u
         }
     }
 
+    // Use our BER/DER tolerant SignedData locator (handles indefinite-length encodings). This avoids
+    // mis-parsing inner SEQUENCEs as PKCS#7 when scanning a BER stream.
+    if let Some((offset, len)) = crate::authenticode::locate_pkcs7_signed_data_bounds(signature) {
+        let end = offset.saturating_add(len);
+        if end <= signature.len() {
+            let slice = &signature[offset..end];
+            if let Ok(pkcs7) = Pkcs7::from_der(slice) {
+                return Some((pkcs7, offset));
+            }
+        }
+    }
+
     for start in 0..signature.len() {
         if signature[start] != 0x30 {
             continue;

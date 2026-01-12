@@ -210,6 +210,19 @@ fn valid_pkcs7_signature_is_reported_as_verified() {
 }
 
 #[test]
+fn ber_indefinite_pkcs7_signature_is_reported_as_verified() {
+    // BER-indefinite SignedData fixture (OpenSSL `cms -stream` style).
+    let pkcs7 = include_bytes!("fixtures/cms_indefinite.der");
+    let vba = build_vba_project_bin_with_signature(Some(pkcs7));
+
+    let sig = verify_vba_digital_signature(&vba)
+        .expect("signature inspection should succeed")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+}
+
+#[test]
 fn corrupting_signature_bytes_marks_signature_invalid() {
     let mut pkcs7 = make_pkcs7_signed_message(b"formula-vba-test");
     let last = pkcs7.len().saturating_sub(1);
