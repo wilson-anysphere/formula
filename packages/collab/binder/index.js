@@ -58,11 +58,18 @@ function yjsValueToJson(value) {
   if (isYText(value)) return value.toString();
 
   if (value && typeof value === "object") {
-    if (value.constructor?.name === "YArray" && typeof value.toArray === "function") {
+    if (
+      (value.constructor?.name === "YArray" || value.constructor?.name === "_YArray") &&
+      typeof value.toArray === "function"
+    ) {
       return value.toArray().map((item) => yjsValueToJson(item));
     }
 
-    if (value.constructor?.name === "YMap" && typeof value.keys === "function" && typeof value.get === "function") {
+    if (
+      (value.constructor?.name === "YMap" || value.constructor?.name === "_YMap") &&
+      typeof value.keys === "function" &&
+      typeof value.get === "function"
+    ) {
       /** @type {Record<string, any>} */
       const out = {};
       const keys = Array.from(value.keys()).sort();
