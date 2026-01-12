@@ -404,6 +404,22 @@ fn open_workbook_model_csv_strips_utf8_bom() {
 }
 
 #[test]
+fn open_workbook_model_rejects_unknown_binary() {
+    let mut tmp = tempfile::Builder::new()
+        .prefix("binary_")
+        .tempfile()
+        .expect("tempfile");
+
+    tmp.write_all(b"\x00\x01\x02\x03not csv").expect("write tempfile");
+
+    let err = formula_io::open_workbook_model(tmp.path()).expect_err("expected error");
+    match err {
+        formula_io::Error::UnsupportedExtension { .. } => {}
+        other => panic!("expected UnsupportedExtension, got {other:?}"),
+    }
+}
+
+#[test]
 fn open_workbook_model_csv_invalid_sheet_name_falls_back_to_sheet1() {
     let tmp = tempfile::tempdir().expect("temp dir");
     // Use a filename stem that becomes empty after Excel sheet-name sanitization.

@@ -83,3 +83,15 @@ fn detect_workbook_format_sniffs_extensionless_csv() {
     let fmt = detect_workbook_format(&path).expect("detect format");
     assert_eq!(fmt, WorkbookFormat::Csv);
 }
+
+#[test]
+fn detect_workbook_format_does_not_misclassify_binary_as_csv() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("blob");
+
+    // Include NUL/control bytes so the text heuristic should reject it.
+    std::fs::write(&path, b"\x00\x01\x02\x03not csv").expect("write binary");
+
+    let fmt = detect_workbook_format(&path).expect("detect format");
+    assert_eq!(fmt, WorkbookFormat::Unknown);
+}
