@@ -1025,6 +1025,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "home.font.italic": true,
             "home.font.underline": true,
             "home.font.strikethrough": true,
+            "home.font.fontName": true,
             "home.font.fontSize": true,
             "home.font.increaseFont": true,
             "home.font.decreaseFont": true,
@@ -5333,6 +5334,33 @@ mountRibbon(ribbonRoot, {
         return;
       }
     }
+
+    const fontNamePrefix = "home.font.fontName.";
+    if (commandId.startsWith(fontNamePrefix)) {
+      const preset = commandId.slice(fontNamePrefix.length);
+      const fontName = (() => {
+        switch (preset) {
+          case "calibri":
+            return "Calibri";
+          case "arial":
+            return "Arial";
+          case "times":
+            return "Times New Roman";
+          case "courier":
+            return "Courier New";
+          default:
+            return null;
+        }
+      })();
+      if (!fontName) return;
+      applyToSelection("Font", (sheetId, ranges) => {
+        for (const range of ranges) {
+          doc.setRangeFormat(sheetId, range, { font: { name: fontName } }, { label: "Font" });
+        }
+      });
+      return;
+    }
+
     const fontSizePrefix = "home.font.fontSize.";
     if (commandId.startsWith(fontSizePrefix)) {
       const size = Number(commandId.slice(fontSizePrefix.length));
