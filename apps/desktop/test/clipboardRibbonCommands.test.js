@@ -56,6 +56,9 @@ test("Desktop main.ts wires Home → Clipboard ribbon commands to SpreadsheetApp
     { id: "home.clipboard.paste.values", pattern: /\bclipboardPasteSpecial\(\s*["']values["']\s*\)/ },
     { id: "home.clipboard.paste.formulas", pattern: /\bclipboardPasteSpecial\(\s*["']formulas["']\s*\)/ },
     { id: "home.clipboard.paste.formats", pattern: /\bclipboardPasteSpecial\(\s*["']formats["']\s*\)/ },
+    { id: "home.clipboard.pasteSpecial.values", pattern: /\bclipboardPasteSpecial\(\s*["']values["']\s*\)/ },
+    { id: "home.clipboard.pasteSpecial.formulas", pattern: /\bclipboardPasteSpecial\(\s*["']formulas["']\s*\)/ },
+    { id: "home.clipboard.pasteSpecial.formats", pattern: /\bclipboardPasteSpecial\(\s*["']formats["']\s*\)/ },
   ];
 
   for (const { id, pattern } of expects) {
@@ -73,4 +76,3 @@ test("Desktop main.ts wires Home → Clipboard ribbon commands to SpreadsheetApp
   assert.match(main, /\bcase\s+["']home\.clipboard\.pasteSpecial\.transpose["']:/);
   assert.match(main, /Paste Transpose not implemented/);
 });
-

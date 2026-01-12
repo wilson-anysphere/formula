@@ -27,8 +27,10 @@ if (files.length === 0) {
   process.exit(0);
 }
 
-// Keep node:test parallelism conservative; some suites start background services.
-const nodeArgs = ["--no-warnings", "--test-concurrency=2", "--test", ...files];
+// Keep node:test parallelism conservative; some suites start background services and
+// in CI/agent environments we can hit process/thread limits if too many test files
+// run in parallel.
+const nodeArgs = ["--no-warnings", "--test-concurrency=1", "--test", ...files];
 const child = spawn(process.execPath, nodeArgs, { stdio: "inherit" });
 child.on("exit", (code, signal) => {
   if (signal) {
