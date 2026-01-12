@@ -1,7 +1,7 @@
 use std::io::{Cursor, Read};
 use std::path::Path;
 
-use formula_model::{Cell, CellRef, CellValue, Workbook};
+use formula_model::{Cell, CellRef, CellValue, Style, Workbook};
 use formula_xlsx::{load_from_bytes, XlsxDocument};
 use zip::ZipArchive;
 
@@ -167,6 +167,78 @@ fn editing_a_cell_does_not_strip_unrelated_row_col_or_cell_attrs() -> Result<(),
         .and_then(|n| n.text())
         .unwrap_or_default();
     assert_eq!(v, "99");
+
+    Ok(())
+}
+
+#[test]
+fn editing_cell_style_preserves_vm_attribute_when_value_unchanged(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let fixture_path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/xlsx/basic/row-col-attrs.xlsx");
+    let fixture_bytes = std::fs::read(&fixture_path)?;
+
+    let mut doc = load_from_bytes(&fixture_bytes)?;
+    let sheet_id = doc.workbook.sheets[0].id;
+
+    // Sanity check the fixture: A2 is a normal number cell that also carries `vm="1"`.
+    // Style-only edits should not drop that value-metadata pointer.
+    {
+        let sheet = doc.workbook.sheet(sheet_id).unwrap();
+        assert_eq!(sheet.value(CellRef::from_a1("A2")?), CellValue::Number(2.0));
+    }
+
+    let original_sheet_xml = std::str::from_utf8(
+        doc.parts()
+            .get("xl/worksheets/sheet1.xml")
+            .expect("original sheet1.xml exists"),
+    )?;
+    let original_doc = roxmltree::Document::parse(original_sheet_xml)?;
+    let original_a2 = original_doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "c" && n.attribute("r") == Some("A2"))
+        .expect("cell A2 exists in original sheet1.xml");
+    assert_eq!(original_a2.attribute("vm"), Some("1"));
+    assert_eq!(original_a2.attribute("s"), None, "fixture A2 has no style attr");
+
+    // Apply a new (non-default) style to the cell without changing its cached value.
+    let style_id = doc.workbook.styles.intern(Style {
+        number_format: Some("0.00".to_string()),
+        ..Default::default()
+    });
+    assert_ne!(style_id, 0, "expected non-default style id");
+    {
+        let sheet = doc.workbook.sheet_mut(sheet_id).unwrap();
+        sheet.set_style_id(CellRef::from_a1("A2")?, style_id);
+    }
+
+    let saved = doc.save_to_vec()?;
+    let xml_bytes = zip_part(&saved, "xl/worksheets/sheet1.xml");
+    let xml = std::str::from_utf8(&xml_bytes)?;
+    let parsed = roxmltree::Document::parse(xml)?;
+
+    let cell_a2 = parsed
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "c" && n.attribute("r") == Some("A2"))
+        .expect("cell A2 exists");
+    assert_eq!(
+        cell_a2.attribute("vm"),
+        Some("1"),
+        "vm should be preserved when only the style changes, got: {xml}"
+    );
+    assert!(
+        cell_a2
+            .attribute("s")
+            .and_then(|s| s.parse::<u32>().ok())
+            .is_some_and(|s| s != 0),
+        "expected a non-zero style index to be written for A2, got: {xml}"
+    );
+    let v = cell_a2
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "v")
+        .and_then(|n| n.text())
+        .unwrap_or_default();
+    assert_eq!(v, "2");
 
     Ok(())
 }
