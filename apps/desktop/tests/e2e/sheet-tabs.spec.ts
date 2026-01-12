@@ -477,6 +477,34 @@ test.describe("sheet tabs", () => {
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet1");
   });
 
+  test("invalid rename blocks switching sheets via the sheet switcher <select>", async ({ page }) => {
+    await gotoDesktop(page);
+
+    // Create a second sheet we can attempt to switch to.
+    await page.getByTestId("sheet-add").click();
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+
+    // Begin renaming Sheet1 and enter an invalid name.
+    const sheet1Tab = page.getByTestId("sheet-tab-Sheet1");
+    await sheet1Tab.click();
+    await expect(sheet1Tab).toHaveAttribute("data-active", "true");
+
+    await sheet1Tab.dblclick();
+    const input = sheet1Tab.locator("input.sheet-tab__input");
+    await expect(input).toBeVisible();
+    await input.fill("A/B");
+    await input.press("Enter");
+    await expect(input).toBeFocused();
+
+    // Attempt to switch via the status-bar sheet switcher. Invalid rename should block it and keep focus in rename mode.
+    const switcher = page.getByTestId("sheet-switcher");
+    await switcher.selectOption("Sheet2", { force: true });
+
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet1");
+    await expect(input).toBeVisible();
+    await expect(input).toBeFocused();
+  });
+
   test("drag reordering sheet tabs updates Ctrl+PgUp/PgDn navigation order", async ({ page }) => {
     await gotoDesktop(page);
 

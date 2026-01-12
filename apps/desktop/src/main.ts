@@ -7996,18 +7996,61 @@ function renderSheetSwitcher(sheets: { id: string; name: string }[], activeId: s
 }
 
 sheetSwitcherEl.addEventListener("change", () => {
-  const next = sheetSwitcherEl.value;
-  if (!next) return;
+  void (async () => {
+    const next = sheetSwitcherEl.value;
+    if (!next) return;
 
-  // Defensive: only allow activating visible sheets via the dropdown.
-  const sheets = listSheetsForUi();
-  if (!sheets.some((sheet) => sheet.id === next)) {
-    renderSheetSwitcher(sheets, app.getCurrentSheetId());
-    return;
-  }
+    // If a sheet tab rename is in progress, allow it to commit/cancel before switching sheets.
+    //
+    // IMPORTANT: the rename UI lives inside the React sheet tab strip, while the sheet switcher
+    // is owned by main.ts. Detect rename mode via the presence/focus state of the inline rename
+    // <input> and block sheet switching if the rename remains active (e.g. invalid name).
+    const waitForRenameToResolve = async (): Promise<boolean> => {
+      const start = typeof performance !== "undefined" ? performance.now() : Date.now();
+      const timeoutMs = 5_000;
+      while ((typeof performance !== "undefined" ? performance.now() : Date.now()) - start < timeoutMs) {
+        const input = sheetTabsRootEl.querySelector<HTMLInputElement>("input.sheet-tab__input");
+        if (!input) return true;
+        // If the input has regained focus, the rename is still active (likely invalid); don't switch.
+        if (document.activeElement === input) return false;
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      return false;
+    };
 
-  app.activateSheet(next);
-  restoreFocusAfterSheetNavigation();
+    const renameInput = sheetTabsRootEl.querySelector<HTMLInputElement>("input.sheet-tab__input");
+    if (renameInput) {
+      // Ensure any blur-commit handlers have a chance to run. (If the user interacted with the
+      // sheet switcher via mouse, the rename input will already have blurred.)
+      try {
+        renameInput.blur();
+      } catch {
+        // ignore
+      }
+      const ok = await waitForRenameToResolve();
+      if (!ok) {
+        // Restore the dropdown value to the current visible sheet and keep the user in rename mode.
+        const sheets = listSheetsForUi();
+        renderSheetSwitcher(sheets, app.getCurrentSheetId());
+        try {
+          sheetTabsRootEl.querySelector<HTMLInputElement>("input.sheet-tab__input")?.focus();
+        } catch {
+          // ignore
+        }
+        return;
+      }
+    }
+
+    // Defensive: only allow activating visible sheets via the dropdown.
+    const sheets = listSheetsForUi();
+    if (!sheets.some((sheet) => sheet.id === next)) {
+      renderSheetSwitcher(sheets, app.getCurrentSheetId());
+      return;
+    }
+
+    app.activateSheet(next);
+    restoreFocusAfterSheetNavigation();
+  })();
 });
 
 type TauriListen = (event: string, handler: (event: any) => void) => Promise<() => void>;
