@@ -140,7 +140,7 @@ function applyBackendUpdates(document: DocumentControllerLike, raw: unknown): vo
   if (deltas.length === 0) return;
   // These updates already happened in the backend. Apply them without creating a new undo step,
   // and tag them so the workbook sync bridge doesn't echo them back.
-  document.applyExternalDeltas(deltas, { source: "backend" });
+  document.applyExternalDeltas(deltas, { source: "backend", markDirty: false });
 }
 
 async function sendEditsViaTauri(invoke: TauriInvoke, edits: PendingEdit[]): Promise<any[]> {

@@ -138,16 +138,18 @@ describe("workbookSync", () => {
   });
 
   it("applies backend updates returned from set_range (e.g. pivot output auto-refresh)", async () => {
-    const invoke = vi.fn(async (cmd: string) => {
+    const invoke = vi.fn(async (cmd: string, args?: any) => {
       if (cmd === "set_range") {
+        const raw = args?.values?.[0]?.[0]?.value ?? null;
+        const pivotValue = raw == null ? 0 : raw;
         return [
           {
             sheet_id: "Pivot",
             row: 0,
             col: 0,
-            value: 42,
+            value: pivotValue,
             formula: null,
-            display_value: "42",
+            display_value: String(pivotValue),
           },
         ];
       }
@@ -162,7 +164,15 @@ describe("workbookSync", () => {
     await flushMicrotasks();
 
     expect(invoke).toHaveBeenCalledTimes(1);
-    expect(document.getCell("Pivot", { row: 0, col: 0 }).value).toBe(42);
+    expect(document.getCell("Pivot", { row: 0, col: 0 }).value).toBe(1);
+    expect(document.isDirty).toBe(true);
+
+    expect(document.undo()).toBe(true);
+    expect(document.isDirty).toBe(false);
+
+    await flushMicrotasks(8);
+    expect(document.getCell("Pivot", { row: 0, col: 0 }).value).toBe(0);
+    expect(document.isDirty).toBe(false);
 
     sync.stop();
   });

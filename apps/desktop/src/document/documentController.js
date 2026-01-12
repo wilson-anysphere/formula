@@ -1134,7 +1134,7 @@ export class DocumentController {
    * mark the document dirty.
    *
    * @param {CellDelta[]} deltas
-   * @param {{ recalc?: boolean, source?: string }} [options]
+   * @param {{ recalc?: boolean, source?: string, markDirty?: boolean }} [options]
    */
   applyExternalDeltas(deltas, options = {}) {
     if (!deltas || deltas.length === 0) return;
@@ -1148,7 +1148,13 @@ export class DocumentController {
     this.#applyEdits(deltas, [], { recalc, emitChange: true, source });
 
     // Mark dirty even though we didn't advance the undo cursor.
-    this.savedCursor = null;
+    //
+    // Some integrations apply derived/computed updates (e.g. backend pivot auto-refresh output)
+    // that should not affect dirty tracking (the user edit that triggered them already did).
+    // Allow callers to suppress clearing `savedCursor` for those cases.
+    if (options.markDirty !== false) {
+      this.savedCursor = null;
+    }
     this.#emitDirty();
   }
 
