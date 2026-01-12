@@ -194,7 +194,7 @@ pub fn project_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
                 }
             }
             PROJECTDOCSTRINGUNICODE | PROJECTDOCSTRINGUNICODE_ALT => {
-                out.extend_from_slice(data);
+                out.extend_from_slice(trim_u32_len_prefix_unicode_string(data));
             }
 
             PROJECTHELPFILEPATH => {
@@ -207,7 +207,7 @@ pub fn project_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
                 }
             }
             PROJECTHELPFILEPATH2 | PROJECTHELPFILEPATH2_ALT => {
-                out.extend_from_slice(data);
+                out.extend_from_slice(trim_u32_len_prefix_unicode_string(data));
             }
 
             PROJECTCONSTANTS => {
@@ -219,7 +219,7 @@ pub fn project_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
                 }
             }
             PROJECTCONSTANTSUNICODE | PROJECTCONSTANTSUNICODE_ALT => {
-                out.extend_from_slice(data);
+                out.extend_from_slice(trim_u32_len_prefix_unicode_string(data));
             }
 
             _ => {}

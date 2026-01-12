@@ -193,6 +193,59 @@ fn project_normalized_data_prefers_alternate_unicode_dir_record_ids() {
 }
 
 #[test]
+fn project_normalized_data_strips_internal_unicode_length_prefix_for_project_records() {
+    // Some producers embed an *internal* u32 length prefix inside the payload of Unicode records
+    // (in addition to the normal `Id || Size || Data` framing). Ensure we strip this prefix when it
+    // is consistent with the remaining bytes.
+    let dir_decompressed = {
+        let mut out = Vec::new();
+
+        // Included: PROJECTNAME
+        push_record(&mut out, 0x0004, b"MyProject");
+
+        // PROJECTDOCSTRING (ANSI) followed by alternate Unicode record id 0x0041, but the Unicode
+        // payload itself has an internal u32 length prefix.
+        push_record(&mut out, 0x0005, b"DocAnsi");
+        push_record(&mut out, 0x0041, &unicode_record_data("DocUni"));
+
+        // PROJECTHELPFILEPATH (ANSI) followed by alternate second-path/Unicode record id 0x0042,
+        // with an internal *byte-count* length prefix.
+        push_record(&mut out, 0x0006, b"HelpAnsi");
+        push_record(&mut out, 0x0042, &unicode_record_data_bytes_len("HelpUni"));
+
+        // PROJECTCONSTANTS (ANSI) followed by alternate Unicode record id 0x0043 with internal
+        // length prefix.
+        push_record(&mut out, 0x000C, b"ConstAnsi");
+        push_record(&mut out, 0x0043, &unicode_record_data("ConstUni"));
+
+        out
+    };
+
+    let vba_bin = build_vba_bin_with_dir_decompressed(&dir_decompressed);
+    let normalized = project_normalized_data(&vba_bin).expect("ProjectNormalizedData");
+
+    let expected = [
+        b"MyProject".as_slice(),
+        utf16le_bytes("DocUni").as_slice(),
+        utf16le_bytes("HelpUni").as_slice(),
+        utf16le_bytes("ConstUni").as_slice(),
+        b"NameVBAProject".as_slice(),
+    ]
+    .concat();
+    assert_eq!(normalized, expected);
+
+    // Ensure the internal u32 length prefixes were removed.
+    assert!(
+        find_subslice(&normalized, &("DocUni".encode_utf16().count() as u32).to_le_bytes()).is_none(),
+        "did not expect internal code-unit length prefix bytes to appear in output"
+    );
+    assert!(
+        find_subslice(&normalized, &(utf16le_bytes("HelpUni").len() as u32).to_le_bytes()).is_none(),
+        "did not expect internal byte-length prefix bytes to appear in output"
+    );
+}
+
+#[test]
 fn project_normalized_data_includes_projectcompatversion_record() {
     // Real-world `VBA/dir` streams often include PROJECTCOMPATVERSION (0x004A) in the
     // ProjectInformation record list. Ensure it contributes to ProjectNormalizedData.
