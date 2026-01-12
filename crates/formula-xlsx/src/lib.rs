@@ -74,7 +74,8 @@ pub use hyperlinks::{
 pub use model_package::{WorkbookPackage, WorkbookPackageError};
 pub use package::{
     read_part_from_reader, theme_palette_from_reader, worksheet_parts_from_reader,
-    CellPatch as PackageCellPatch, CellPatchSheet, WorksheetPartInfo, XlsxError, XlsxPackage,
+    CellPatch as PackageCellPatch, CellPatchSheet, MacroPresence, WorksheetPartInfo, XlsxError,
+    XlsxPackage,
 };
 pub use patch::{CellPatch, CellStyleRef, WorkbookCellPatches, WorksheetCellPatches};
 pub use pivots::{

@@ -132,6 +132,23 @@ impl From<RecalcPolicyError> for XlsxError {
     }
 }
 
+/// Presence information for macro-capable workbook content.
+///
+/// This is intentionally more granular than a single `has_macros` flag so callers can distinguish
+/// classic VBA projects from Excel 4.0 macrosheets and legacy dialog sheets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MacroPresence {
+    pub has_vba: bool,
+    pub has_xlm_macrosheets: bool,
+    pub has_dialog_sheets: bool,
+}
+
+impl MacroPresence {
+    pub fn any(self) -> bool {
+        self.has_vba || self.has_xlm_macrosheets || self.has_dialog_sheets
+    }
+}
+
 /// In-memory representation of an XLSX/XLSM package as a map of part name -> bytes.
 ///
 /// We keep the API minimal to support macro preservation; a full model will
@@ -324,6 +341,35 @@ impl XlsxPackage {
     /// Returns the optional `xl/vbaData.xml` payload when present.
     pub fn vba_data_xml(&self) -> Option<&[u8]> {
         self.part("xl/vbaData.xml")
+    }
+
+    /// Detect whether the package contains any macro-capable content (VBA, XLM macrosheets, or
+    /// legacy dialog sheets).
+    pub fn macro_presence(&self) -> MacroPresence {
+        let mut presence = MacroPresence {
+            has_vba: false,
+            has_xlm_macrosheets: false,
+            has_dialog_sheets: false,
+        };
+
+        for name in self.part_names() {
+            let name = name.strip_prefix('/').unwrap_or(name);
+            if name == "xl/vbaProject.bin" {
+                presence.has_vba = true;
+            }
+            if name.starts_with("xl/macrosheets/") {
+                presence.has_xlm_macrosheets = true;
+            }
+            if name.starts_with("xl/dialogsheets/") {
+                presence.has_dialog_sheets = true;
+            }
+
+            if presence.has_vba && presence.has_xlm_macrosheets && presence.has_dialog_sheets {
+                break;
+            }
+        }
+
+        presence
     }
 
     /// Parse the workbook theme palette from `xl/theme/theme1.xml` (if present).
@@ -1285,6 +1331,38 @@ fn ensure_vba_project_rels_has_signature(
     }
 
     Ok(())
+}
+
+impl crate::XlsxDocument {
+    /// Detect whether the document contains any macro-capable content (VBA, XLM macrosheets, or
+    /// legacy dialog sheets).
+    pub fn macro_presence(&self) -> MacroPresence {
+        let mut presence = MacroPresence {
+            has_vba: false,
+            has_xlm_macrosheets: false,
+            has_dialog_sheets: false,
+        };
+
+        for name in self.parts().keys() {
+            let name = name.as_str();
+            let name = name.strip_prefix('/').unwrap_or(name);
+            if name == "xl/vbaProject.bin" {
+                presence.has_vba = true;
+            }
+            if name.starts_with("xl/macrosheets/") {
+                presence.has_xlm_macrosheets = true;
+            }
+            if name.starts_with("xl/dialogsheets/") {
+                presence.has_dialog_sheets = true;
+            }
+
+            if presence.has_vba && presence.has_xlm_macrosheets && presence.has_dialog_sheets {
+                break;
+            }
+        }
+
+        presence
+    }
 }
 
 #[cfg(test)]
