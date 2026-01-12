@@ -156,6 +156,102 @@ test("ExtensionManager.install refuses malicious extensions", async (t) => {
   assert.equal(await pathExists(statePath), false);
 });
 
+test("ExtensionManager.install refuses extensions whose publisher is revoked", async (t) => {
+  const fixture = await createFixture();
+  const {
+    tmpRoot,
+    extensionsDir,
+    statePath,
+    extensionId,
+    installDir,
+    publicKeyPem,
+    packageBytes,
+    packageSha256,
+  } = fixture;
+
+  t.after(async () => {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  /** @type {any} */
+  const marketplaceClient = {
+    async getExtension(id) {
+      if (id !== extensionId) return null;
+      return {
+        id,
+        latestVersion: "1.0.0",
+        publisherPublicKeyPem: publicKeyPem,
+        publisherRevoked: true,
+      };
+    },
+    async downloadPackage() {
+      return {
+        bytes: Buffer.from(packageBytes),
+        sha256: packageSha256,
+        formatVersion: 2,
+        signatureBase64: null,
+        publisher: "formula",
+        scanStatus: "passed",
+        filesSha256: null,
+      };
+    },
+  };
+
+  const manager = new ExtensionManager({ marketplaceClient, extensionsDir, statePath });
+  await assert.rejects(() => manager.install(extensionId), /revoked/i);
+
+  assert.equal(await pathExists(installDir), false);
+  assert.equal(await pathExists(statePath), false);
+});
+
+test("ExtensionManager.install refuses extensions when all publisher signing keys are revoked", async (t) => {
+  const fixture = await createFixture();
+  const {
+    tmpRoot,
+    extensionsDir,
+    statePath,
+    extensionId,
+    installDir,
+    publicKeyPem,
+    packageBytes,
+    packageSha256,
+  } = fixture;
+
+  t.after(async () => {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  /** @type {any} */
+  const marketplaceClient = {
+    async getExtension(id) {
+      if (id !== extensionId) return null;
+      return {
+        id,
+        latestVersion: "1.0.0",
+        publisherPublicKeyPem: publicKeyPem,
+        publisherKeys: [{ id: "key-1", publicKeyPem, revoked: true }],
+      };
+    },
+    async downloadPackage() {
+      return {
+        bytes: Buffer.from(packageBytes),
+        sha256: packageSha256,
+        formatVersion: 2,
+        signatureBase64: null,
+        publisher: "formula",
+        scanStatus: "passed",
+        filesSha256: null,
+      };
+    },
+  };
+
+  const manager = new ExtensionManager({ marketplaceClient, extensionsDir, statePath });
+  await assert.rejects(() => manager.install(extensionId), /revoked/i);
+
+  assert.equal(await pathExists(installDir), false);
+  assert.equal(await pathExists(statePath), false);
+});
+
 test("ExtensionManager.install enforces scanStatus when configured", async (t) => {
   const fixture = await createFixture();
   const {
@@ -237,4 +333,3 @@ test("ExtensionManager.install can allow non-passed scanStatus when configured",
   assert.equal(await pathExists(installDir), true);
   assert.equal(await pathExists(statePath), true);
 });
-

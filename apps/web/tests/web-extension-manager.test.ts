@@ -1148,6 +1148,66 @@ test("install refuses malicious extensions returned by the marketplace", async (
   await host.dispose();
 });
 
+test("install refuses extensions whose publisher is revoked", async () => {
+  const keys = generateEd25519KeyPair();
+  const extensionDir = path.resolve("extensions/sample-hello");
+  const pkgBytes = await createExtensionPackageV2(extensionDir, { privateKeyPem: keys.privateKeyPem });
+
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "formula.sample-hello",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes },
+    publisherRevoked: true,
+  });
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: new TestSpreadsheetApi(),
+    permissionPrompt: async () => true,
+  });
+  const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
+
+  await expect(manager.install("formula.sample-hello", "1.0.0")).rejects.toThrow(/revoked/i);
+  expect(await manager.listInstalled()).toEqual([]);
+
+  await manager.dispose();
+  await host.dispose();
+});
+
+test("install refuses extensions when all publisher signing keys are revoked", async () => {
+  const keys = generateEd25519KeyPair();
+  const extensionDir = path.resolve("extensions/sample-hello");
+  const pkgBytes = await createExtensionPackageV2(extensionDir, { privateKeyPem: keys.privateKeyPem });
+
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "formula.sample-hello",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes },
+    publisherKeys: [
+      {
+        id: "key-1",
+        publicKeyPem: keys.publicKeyPem,
+        revoked: true,
+      },
+    ],
+  });
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: new TestSpreadsheetApi(),
+    permissionPrompt: async () => true,
+  });
+  const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
+
+  await expect(manager.install("formula.sample-hello", "1.0.0")).rejects.toThrow(/revoked/i);
+  expect(await manager.listInstalled()).toEqual([]);
+
+  await manager.dispose();
+  await host.dispose();
+});
+
 test("install warns when installing a deprecated extension", async () => {
   const keys = generateEd25519KeyPair();
   const extensionDir = path.resolve("extensions/sample-hello");
