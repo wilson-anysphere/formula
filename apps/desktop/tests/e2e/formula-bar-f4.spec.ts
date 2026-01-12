@@ -11,7 +11,7 @@ test.describe("formula bar F4 toggles absolute/relative references", () => {
   const modes = ["legacy", "shared"] as const;
 
   for (const mode of modes) {
-    test(`pressing F4 toggles =A1 to =$A$1 (${mode})`, async ({ page }) => {
+    test(`pressing F4 cycles absolute/relative modes for a reference token (${mode})`, async ({ page }) => {
       await gotoDesktop(page, `/?grid=${mode}`);
       await waitForIdle(page);
 
@@ -27,12 +27,39 @@ test.describe("formula bar F4 toggles absolute/relative references", () => {
 
       await page.keyboard.press("F4");
       await expect(input).toHaveValue("=$A$1");
+      expect(
+        await input.evaluate((el) => ({
+          start: (el as HTMLTextAreaElement).selectionStart,
+          end: (el as HTMLTextAreaElement).selectionEnd,
+        }))
+      ).toEqual({ start: 1, end: 5 });
 
-      const selection = await input.evaluate((el) => ({
-        start: (el as HTMLTextAreaElement).selectionStart,
-        end: (el as HTMLTextAreaElement).selectionEnd,
-      }));
-      expect(selection).toEqual({ start: 1, end: 5 });
+      await page.keyboard.press("F4");
+      await expect(input).toHaveValue("=A$1");
+      expect(
+        await input.evaluate((el) => ({
+          start: (el as HTMLTextAreaElement).selectionStart,
+          end: (el as HTMLTextAreaElement).selectionEnd,
+        }))
+      ).toEqual({ start: 1, end: 4 });
+
+      await page.keyboard.press("F4");
+      await expect(input).toHaveValue("=$A1");
+      expect(
+        await input.evaluate((el) => ({
+          start: (el as HTMLTextAreaElement).selectionStart,
+          end: (el as HTMLTextAreaElement).selectionEnd,
+        }))
+      ).toEqual({ start: 1, end: 4 });
+
+      await page.keyboard.press("F4");
+      await expect(input).toHaveValue("=A1");
+      expect(
+        await input.evaluate((el) => ({
+          start: (el as HTMLTextAreaElement).selectionStart,
+          end: (el as HTMLTextAreaElement).selectionEnd,
+        }))
+      ).toEqual({ start: 1, end: 3 });
     });
   }
 });
