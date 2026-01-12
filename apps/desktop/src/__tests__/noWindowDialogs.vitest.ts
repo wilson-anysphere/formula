@@ -7,7 +7,16 @@ import { fileURLToPath } from "node:url";
 const SRC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const SOURCE_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"]);
-const WINDOW_DIALOG_RE = /window\.(confirm|alert|prompt)\s*\(/;
+const WINDOW_DIALOG_RES = [
+  // Direct calls: window.confirm / window.confirm?.
+  /\bwindow\.(confirm|alert|prompt)\s*(?:\?\.)?\s*\(/,
+  // Optional chaining on window: window?.confirm / window?.confirm?.
+  /\bwindow\s*\?\.\s*(confirm|alert|prompt)\s*(?:\?\.)?\s*\(/,
+  // Bracket access: window["confirm"] / window["confirm"]?.
+  /\bwindow\s*\[\s*['"](confirm|alert|prompt)['"]\s*\]\s*(?:\?\.)?\s*\(/,
+  // Optional chaining + bracket access: window?.["confirm"]
+  /\bwindow\s*\?\.\s*\[\s*['"](confirm|alert|prompt)['"]\s*\]\s*(?:\?\.)?\s*\(/,
+];
 
 async function collectSourceFiles(dir: string): Promise<string[]> {
   const out: string[] = [];
@@ -36,7 +45,7 @@ describe("desktop/src should not use blocking browser dialogs", () => {
       const lines = content.split(/\r?\n/);
       for (let i = 0; i < lines.length; i += 1) {
         const line = lines[i] ?? "";
-        if (WINDOW_DIALOG_RE.test(line)) {
+        if (WINDOW_DIALOG_RES.some((re) => re.test(line))) {
           violations.push(`${relPath}:${i + 1}: ${line.trim()}`);
         }
       }
@@ -47,4 +56,3 @@ describe("desktop/src should not use blocking browser dialogs", () => {
     }
   });
 });
-
