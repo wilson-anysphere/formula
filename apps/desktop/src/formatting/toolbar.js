@@ -1,9 +1,51 @@
 import { normalizeRange, parseRangeA1 } from "../document/coords.js";
+import { showToast } from "../extensions/ui.js";
 import { applyStylePatch } from "./styleTable.js";
 
 // Excel grid limits (used by the selection model and layered formatting fast paths).
 const EXCEL_MAX_ROW = 1_048_576 - 1;
 const EXCEL_MAX_COL = 16_384 - 1;
+const MAX_RANGE_FORMATTING_CELLS = 50_000;
+
+function rangeCellCount(range) {
+  const rows = Math.max(0, range.end.row - range.start.row + 1);
+  const cols = Math.max(0, range.end.col - range.start.col + 1);
+  return rows * cols;
+}
+
+function isLayeredFormatRange(range) {
+  // DocumentController.setRangeFormat has scalable implementations for:
+  // - full sheet (sheet format layer)
+  // - full-width rows (row format layer)
+  // - full-height columns (column format layer)
+  return (
+    (range.start.row === 0 && range.end.row === EXCEL_MAX_ROW) ||
+    (range.start.col === 0 && range.end.col === EXCEL_MAX_COL)
+  );
+}
+
+function ensureSafeFormattingRange(rangeOrRanges) {
+  let totalCells = 0;
+
+  for (const range of normalizeRanges(rangeOrRanges)) {
+    const r = normalizeCellRange(range);
+    if (isLayeredFormatRange(r)) continue;
+    totalCells += rangeCellCount(r);
+    if (totalCells > MAX_RANGE_FORMATTING_CELLS) {
+      try {
+        showToast(
+          `Selection too large to apply formatting (>${MAX_RANGE_FORMATTING_CELLS.toLocaleString()} cells). Select fewer cells and try again.`,
+          "warning",
+        );
+      } catch {
+        // `showToast` requires a #toast-root (and DOM globals); ignore in non-UI contexts/tests.
+      }
+      return false;
+    }
+  }
+
+  return true;
+}
 
 // For small selections, the simplest (and usually fastest) approach is to scan every cell.
 // This threshold keeps behavior simple for typical edits while preventing catastrophic
@@ -478,6 +520,7 @@ function allCellsMatchRange(doc, sheetId, range, predicate) {
 }
 
 export function toggleBold(doc, sheetId, range, options = {}) {
+  if (!ensureSafeFormattingRange(range)) return false;
   const next =
     typeof options.next === "boolean" ? options.next : !allCellsMatch(doc, sheetId, range, (s) => Boolean(s.font?.bold));
   let applied = true;
@@ -489,6 +532,7 @@ export function toggleBold(doc, sheetId, range, options = {}) {
 }
 
 export function toggleItalic(doc, sheetId, range, options = {}) {
+  if (!ensureSafeFormattingRange(range)) return false;
   const next =
     typeof options.next === "boolean"
       ? options.next
@@ -502,6 +546,7 @@ export function toggleItalic(doc, sheetId, range, options = {}) {
 }
 
 export function toggleUnderline(doc, sheetId, range, options = {}) {
+  if (!ensureSafeFormattingRange(range)) return false;
   const next =
     typeof options.next === "boolean"
       ? options.next
@@ -515,6 +560,7 @@ export function toggleUnderline(doc, sheetId, range, options = {}) {
 }
 
 export function setFontSize(doc, sheetId, range, sizePt) {
+  if (!ensureSafeFormattingRange(range)) return false;
   let applied = true;
   for (const r of normalizeRanges(range)) {
     const ok = doc.setRangeFormat(sheetId, r, { font: { size: sizePt } }, { label: "Font size" });
@@ -524,6 +570,7 @@ export function setFontSize(doc, sheetId, range, sizePt) {
 }
 
 export function setFontColor(doc, sheetId, range, argb) {
+  if (!ensureSafeFormattingRange(range)) return false;
   let applied = true;
   for (const r of normalizeRanges(range)) {
     const ok = doc.setRangeFormat(sheetId, r, { font: { color: argb } }, { label: "Font color" });
@@ -533,6 +580,7 @@ export function setFontColor(doc, sheetId, range, argb) {
 }
 
 export function setFillColor(doc, sheetId, range, argb) {
+  if (!ensureSafeFormattingRange(range)) return false;
   let applied = true;
   for (const r of normalizeRanges(range)) {
     const ok = doc.setRangeFormat(
@@ -549,6 +597,7 @@ export function setFillColor(doc, sheetId, range, argb) {
 const DEFAULT_BORDER_ARGB = "FF000000";
 
 export function applyAllBorders(doc, sheetId, range, { style = "thin", color } = {}) {
+  if (!ensureSafeFormattingRange(range)) return false;
   const resolvedColor = color ?? `#${DEFAULT_BORDER_ARGB}`;
   const edge = { style, color: resolvedColor };
   let applied = true;
@@ -565,6 +614,7 @@ export function applyAllBorders(doc, sheetId, range, { style = "thin", color } =
 }
 
 export function setHorizontalAlign(doc, sheetId, range, align) {
+  if (!ensureSafeFormattingRange(range)) return false;
   let applied = true;
   for (const r of normalizeRanges(range)) {
     const ok = doc.setRangeFormat(
@@ -579,6 +629,7 @@ export function setHorizontalAlign(doc, sheetId, range, align) {
 }
 
 export function toggleWrap(doc, sheetId, range, options = {}) {
+  if (!ensureSafeFormattingRange(range)) return false;
   const next =
     typeof options.next === "boolean"
       ? options.next
@@ -598,6 +649,7 @@ export const NUMBER_FORMATS = {
 };
 
 export function applyNumberFormatPreset(doc, sheetId, range, preset) {
+  if (!ensureSafeFormattingRange(range)) return false;
   const code = NUMBER_FORMATS[preset];
   if (!code) throw new Error(`Unknown number format preset: ${preset}`);
   let applied = true;
