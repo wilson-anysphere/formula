@@ -205,7 +205,7 @@ For VBA binding, we ignore `SpcIndirectDataContent.data` and use only `messageDi
 | Digest algorithm: SHA-1 | `1.3.14.3.2.26` |
 | Digest algorithm: SHA-256 | `2.16.840.1.101.3.4.2.1` |
 
-## Binding (MS-OVBA Contents Hash / V3 Content Hash verification)
+## Binding (MS-OVBA Contents Hash / ContentsHashV3 verification)
 
 CMS signature verification alone answers “is this a valid CMS signature over *some bytes*?”, but it
 does not, by itself, prove that the signature is bound to the rest of the VBA project.
@@ -445,7 +445,8 @@ and binding behavior:
 
 ## Specs / references
 
-- **MS-OVBA**: VBA project storage, signature streams, and Contents Hash (V3 Content Hash) computation.
+- **MS-OVBA**: VBA project storage, signature streams, and Contents Hash (including `ContentsHashV3`)
+  computation.
   - https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-ovba/
 - **MS-OSHARED**: Office shared structures; documents the MD5-always “VBA project source hash”
   behavior used by v1/v2 (legacy) VBA signatures.
