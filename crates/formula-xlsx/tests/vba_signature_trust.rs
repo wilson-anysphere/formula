@@ -266,6 +266,66 @@ fn build_spc_indirect_data_content_sha256(project_digest: &[u8]) -> Vec<u8> {
     der_sequence(&[der_null(), digest_info])
 }
 
+fn build_oshared_digsig_blob(valid_pkcs7: &[u8]) -> Vec<u8> {
+    // MS-OSHARED describes a DigSigBlob wrapper around the PKCS#7 signature bytes.
+    //
+    // This test blob intentionally contains *multiple* PKCS#7 SignedData blobs:
+    // - a corrupted (but still parseable) one early, and
+    // - a corrupted one after the real signature.
+    //
+    // This ensures verification succeeds only when the DigSigBlob offsets are honored, not when
+    // relying on heuristic scan-for-0x30 fallbacks.
+    let mut invalid_pkcs7 = valid_pkcs7.to_vec();
+    let last = invalid_pkcs7.len().saturating_sub(1);
+    invalid_pkcs7[last] ^= 0xFF;
+
+    let digsig_blob_header_len = 8usize; // cb + serializedPointer
+    let digsig_info_len = 0x24usize; // 9 DWORDs (cbSignature/signatureOffset + 7 reserved)
+
+    let invalid_offset = digsig_blob_header_len + digsig_info_len; // 0x2C
+    assert_eq!(invalid_offset, 0x2C);
+
+    // Place the valid signature after the invalid one and align to 4 bytes.
+    let mut signature_offset = invalid_offset + invalid_pkcs7.len();
+    signature_offset = (signature_offset + 3) & !3;
+
+    let cb_signature = u32::try_from(valid_pkcs7.len()).expect("pkcs7 fits u32");
+    let signature_offset_u32 = u32::try_from(signature_offset).expect("offset fits u32");
+
+    let mut out = Vec::new();
+    // DigSigBlob.cb placeholder (filled later) + serializedPointer = 8.
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&8u32.to_le_bytes());
+
+    // DigSigInfoSerialized (MS-OSHARED): we only care about cbSignature and signatureOffset.
+    out.extend_from_slice(&cb_signature.to_le_bytes());
+    out.extend_from_slice(&signature_offset_u32.to_le_bytes());
+    // Remaining fields set to 0 (cert store/project name/timestamp URL).
+    for _ in 0..7 {
+        out.extend_from_slice(&0u32.to_le_bytes());
+    }
+    assert_eq!(out.len(), invalid_offset);
+
+    // Insert a corrupted PKCS#7 blob early in the stream (to break scan-first heuristics).
+    out.extend_from_slice(&invalid_pkcs7);
+
+    // Pad up to signatureOffset and append the actual signature bytes.
+    if out.len() < signature_offset {
+        out.resize(signature_offset, 0);
+    }
+    out.extend_from_slice(valid_pkcs7);
+
+    // Append an invalid PKCS#7 blob after the real signature (to break scan-last heuristics).
+    out.extend_from_slice(&invalid_pkcs7);
+
+    // DigSigBlob.cb: size of the serialized signatureInfo payload (excluding the initial DWORDs).
+    let cb =
+        u32::try_from(out.len().saturating_sub(digsig_blob_header_len)).expect("blob fits u32");
+    out[0..4].copy_from_slice(&cb.to_le_bytes());
+
+    out
+}
+
 fn make_unrelated_root_cert_der() -> Vec<u8> {
     use openssl::asn1::Asn1Time;
     use openssl::bn::BigNum;
@@ -537,6 +597,56 @@ fn external_raw_signature_part_binding_v3_and_trust_is_reported() {
         .expect("signature should be present");
     assert_eq!(sig.signature.verification, VbaSignatureVerification::SignedVerified);
     assert_eq!(sig.signature.binding, VbaSignatureBinding::Bound);
+    assert_eq!(sig.cert_trust, VbaCertificateTrust::Trusted);
+}
+
+#[test]
+fn external_raw_signature_part_binding_v3_and_trust_is_reported_when_digsig_blob_wrapped() {
+    let vba_project_bin = build_minimal_vba_project_bin_v3(b"ABC");
+    let digest =
+        compute_vba_project_digest_v3(&vba_project_bin, DigestAlg::Sha256).expect("digest v3");
+
+    let signed_content = build_spc_indirect_data_content_sha256(&digest);
+    let pkcs7 = make_pkcs7_signed_message(&signed_content);
+    let wrapped = build_oshared_digsig_blob(&pkcs7);
+
+    let vba_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.microsoft.com/office/2006/relationships/vbaProjectSignature" Target="vbaProjectSignature.bin"/>
+</Relationships>"#;
+
+    let zip_bytes = build_zip(&[
+        ("xl/vbaProject.bin", &vba_project_bin),
+        ("xl/_rels/vbaProject.bin.rels", vba_rels),
+        ("xl/vbaProjectSignature.bin", &wrapped),
+    ]);
+    let pkg = XlsxPackage::from_bytes(&zip_bytes).expect("read package");
+
+    let signer_der = X509::from_pem(TEST_CERT_PEM.as_bytes())
+        .expect("parse test certificate")
+        .to_der()
+        .expect("convert test certificate to DER");
+
+    // No trust anchors: trust is unknown, but binding should still verify.
+    let sig = pkg
+        .verify_vba_digital_signature_with_trust(&VbaSignatureTrustOptions::default())
+        .expect("verify signature")
+        .expect("signature should be present");
+    assert_eq!(sig.signature.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(sig.signature.binding, VbaSignatureBinding::Bound);
+    assert_eq!(sig.signature.stream_path, "xl/vbaProjectSignature.bin");
+    assert_eq!(sig.cert_trust, VbaCertificateTrust::Unknown);
+
+    // Trusted publisher (root matches signer): binding should still be bound and trust trusted.
+    let sig = pkg
+        .verify_vba_digital_signature_with_trust(&VbaSignatureTrustOptions {
+            trusted_root_certs_der: vec![signer_der],
+        })
+        .expect("verify signature")
+        .expect("signature should be present");
+    assert_eq!(sig.signature.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(sig.signature.binding, VbaSignatureBinding::Bound);
+    assert_eq!(sig.signature.stream_path, "xl/vbaProjectSignature.bin");
     assert_eq!(sig.cert_trust, VbaCertificateTrust::Trusted);
 }
 
