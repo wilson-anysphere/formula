@@ -1003,6 +1003,24 @@ fn import_xls_path_with_biff_reader(
             }
         }
 
+        // Resolve BIFF sheet indices to XLSX `localSheetId` values (0-based in workbook sheet
+        // order). This is preserved in the model for round-trip fidelity when converting
+        // `.xls` -> `.xlsx`.
+        let mut local_sheet_ids_by_biff_idx: Vec<Option<u32>> =
+            vec![None; sheet_ids_by_biff_idx.len()];
+        for (cal_idx, maybe_biff_idx) in sheet_mapping.iter().enumerate() {
+            let Some(biff_idx) = *maybe_biff_idx else {
+                continue;
+            };
+            let cal_idx_u32: u32 = match cal_idx.try_into() {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            if biff_idx < local_sheet_ids_by_biff_idx.len() {
+                local_sheet_ids_by_biff_idx[biff_idx] = Some(cal_idx_u32);
+            }
+        }
+
         match biff::parse_biff_defined_names(
             workbook_stream,
             biff_version,
@@ -1013,22 +1031,23 @@ fn import_xls_path_with_biff_reader(
                 warnings.extend(parsed.warnings.drain(..).map(ImportWarning::new));
 
                 for name in parsed.names.drain(..) {
-                    let scope = match name.scope_sheet {
-                        None => DefinedNameScope::Workbook,
-                        Some(biff_idx) => sheet_ids_by_biff_idx
-                            .get(biff_idx)
-                            .copied()
-                            .flatten()
-                            .map(DefinedNameScope::Sheet)
-                            .unwrap_or_else(|| {
+                    let (scope, xlsx_local_sheet_id) = match name.scope_sheet {
+                        None => (DefinedNameScope::Workbook, None),
+                        Some(biff_idx) => match sheet_ids_by_biff_idx.get(biff_idx).copied().flatten() {
+                            Some(sheet_id) => (
+                                DefinedNameScope::Sheet(sheet_id),
+                                local_sheet_ids_by_biff_idx.get(biff_idx).copied().flatten(),
+                            ),
+                            None => {
                                 warnings.push(ImportWarning::new(format!(
                                     "defined name `{}` has out-of-range sheet scope itab={} (sheet count={}); importing as workbook-scoped",
                                     name.name,
                                     biff_idx.saturating_add(1),
                                     sheet_ids_by_biff_idx.len()
                                 )));
-                                DefinedNameScope::Workbook
-                            }),
+                                (DefinedNameScope::Workbook, None)
+                            }
+                        },
                     };
 
                     if let Err(err) = out.create_defined_name(
@@ -1037,7 +1056,7 @@ fn import_xls_path_with_biff_reader(
                         name.refers_to.clone(),
                         name.comment.clone(),
                         name.hidden,
-                        None,
+                        xlsx_local_sheet_id,
                     ) {
                         warnings.push(ImportWarning::new(format!(
                             "skipping defined name `{}`: {err}",

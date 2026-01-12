@@ -33,6 +33,7 @@ fn imports_biff_defined_names_with_scope_and_3d_refs() {
     assert_eq!(zed.scope, DefinedNameScope::Workbook);
     assert!(!zed.hidden);
     assert_eq!(zed.refers_to, "Sheet1!$B$1");
+    assert_eq!(zed.xlsx_local_sheet_id, None);
 
     let local = result
         .workbook
@@ -44,6 +45,7 @@ fn imports_biff_defined_names_with_scope_and_3d_refs() {
     assert!(!local.hidden);
     assert_eq!(local.refers_to, "Sheet1!$A$1");
     assert_eq!(local.comment.as_deref(), Some("Local description"));
+    assert_eq!(local.xlsx_local_sheet_id, Some(0));
 
     let hidden = result
         .workbook
