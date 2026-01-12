@@ -630,3 +630,26 @@ test("yjs update inspection: prefix match works even when root name is only deri
   serverDoc.destroy();
   clientDoc.destroy();
 });
+
+test("yjs update inspection: decodes v2 updates via fallback", () => {
+  const serverDoc = new Y.Doc();
+  const clientDoc = new Y.Doc();
+
+  clientDoc.getMap("versions").set("v1", "one");
+  const updateV2 = Y.encodeStateAsUpdateV2(clientDoc);
+
+  // `decodeUpdate` (v1) can decode v2 updates as a no-op; ensure the inspector still detects touches.
+  const res = inspectUpdate({
+    ydoc: serverDoc,
+    update: updateV2,
+    reservedRootNames,
+    reservedRootPrefixes,
+    maxTouches: 10,
+  });
+
+  assert.equal(res.touchesReserved, true);
+  assert.ok(res.touches.some((t) => t.root === "versions" && t.keyPath[0] === "v1"));
+
+  serverDoc.destroy();
+  clientDoc.destroy();
+});

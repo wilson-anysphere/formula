@@ -14,6 +14,11 @@ export type InspectUpdateResult = {
   unknownReason?: string;
 };
 
+export type CollectTouchedRootMapKeysResult = {
+  touched: Map<string, Set<string>>;
+  unknownReason?: string;
+};
+
 export type InspectUpdateParams = {
   ydoc: unknown;
   update: Uint8Array;
@@ -388,25 +393,55 @@ function failClosed(reason: string, kind: ReservedRootTouchKind = "unknown"): In
 }
 
 function safeDecodeUpdate(update: Uint8Array): { structs: unknown[]; ds: unknown } | null {
-  try {
-    const decoded = (Y as any).decodeUpdate(update) as unknown;
-    if (isRecord(decoded) && Array.isArray((decoded as any).structs)) {
-      return { structs: (decoded as any).structs as unknown[], ds: (decoded as any).ds };
+  const decodeV1 = (): { structs: unknown[]; ds: unknown } | null => {
+    try {
+      const decoded = (Y as any).decodeUpdate(update) as unknown;
+      if (isRecord(decoded) && Array.isArray((decoded as any).structs)) {
+        return { structs: (decoded as any).structs as unknown[], ds: (decoded as any).ds };
+      }
+    } catch {
+      // ignore
     }
-  } catch {
-    // fall through
+    return null;
+  };
+
+  const decodeV2 = (): { structs: unknown[]; ds: unknown } | null => {
+    try {
+      const decoded = (Y as any).decodeUpdateV2(update) as unknown;
+      if (isRecord(decoded) && Array.isArray((decoded as any).structs)) {
+        return { structs: (decoded as any).structs as unknown[], ds: (decoded as any).ds };
+      }
+    } catch {
+      // ignore
+    }
+    return null;
+  };
+
+  const dsClientCount = (ds: unknown): number | null => {
+    if (!isRecord(ds)) return null;
+    const clients = (ds as any).clients;
+    if (!(clients instanceof Map)) return null;
+    return clients.size;
+  };
+
+  const v1 = decodeV1();
+  if (v1) {
+    // Yjs v1 decoding can successfully return a *no-op* (0 structs, empty delete set)
+    // when given a v2 update (e.g. `encodeStateAsUpdateV2`). Detect this case and
+    // fall back to v2 decoding.
+    const v1DsSize = dsClientCount(v1.ds);
+    if (v1.structs.length === 0 && v1DsSize === 0) {
+      const v2 = decodeV2();
+      if (v2) {
+        const v2DsSize = dsClientCount(v2.ds);
+        const v2HasContent = v2.structs.length > 0 || (v2DsSize !== null && v2DsSize > 0);
+        if (v2HasContent) return v2;
+      }
+    }
+    return v1;
   }
 
-  try {
-    const decoded = (Y as any).decodeUpdateV2(update) as unknown;
-    if (isRecord(decoded) && Array.isArray((decoded as any).structs)) {
-      return { structs: (decoded as any).structs as unknown[], ds: (decoded as any).ds };
-    }
-  } catch {
-    // ignore
-  }
-
-  return null;
+  return decodeV2();
 }
 
 export function inspectUpdate(params: InspectUpdateParams): InspectUpdateResult {
@@ -554,4 +589,52 @@ export function inspectUpdate(params: InspectUpdateParams): InspectUpdateResult 
   }
 
   return { touchesReserved: touches.length > 0, touches };
+}
+
+/**
+ * Collects *direct* root Y.Map key touches for the specified root names.
+ *
+ * This is primarily useful for server-side quota enforcement where we only need to
+ * know which keys were set/deleted on a top-level root map (e.g. `versions.set(id, ...)`),
+ * and we want to support incremental updates (client clock > 0) without applying the
+ * update to a temporary document.
+ */
+export function collectTouchedRootMapKeys(params: {
+  ydoc: unknown;
+  update: Uint8Array;
+  rootNames: readonly string[];
+}): CollectTouchedRootMapKeysResult {
+  const touched = new Map<string, Set<string>>();
+  for (const rootName of params.rootNames) {
+    touched.set(rootName, new Set());
+  }
+
+  const ydoc = params.ydoc as DocLike;
+  const store = ydoc?.store;
+  if (!store || store.pendingStructs || store.pendingDs) {
+    return { touched, unknownReason: "ydoc_store_pending" };
+  }
+
+  const decoded = safeDecodeUpdate(params.update);
+  if (!decoded) {
+    return { touched, unknownReason: "decode_failed" };
+  }
+
+  const decodedIndex = buildStructIndex(decoded.structs);
+
+  for (const struct of decoded.structs) {
+    if (!isItemStructLike(struct)) continue;
+    const parentRes = resolveEffectiveParentInfo(struct, { decodedIndex, store });
+    if (!parentRes.ok) {
+      return { touched, unknownReason: parentRes.reason };
+    }
+    if (typeof parentRes.parent !== "string") continue;
+    const rootSet = touched.get(parentRes.parent);
+    if (!rootSet) continue;
+    if (typeof parentRes.parentSub === "string" && parentRes.parentSub.length > 0) {
+      rootSet.add(parentRes.parentSub);
+    }
+  }
+
+  return { touched };
 }

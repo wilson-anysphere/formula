@@ -6,6 +6,7 @@ import { getCellPermissions } from "../../../packages/collab/permissions/index.j
 import type { AuthContext } from "./auth.js";
 import type { SyncServerMetrics } from "./metrics.js";
 import { Y } from "./yjs.js";
+import { collectTouchedRootMapKeys } from "./yjsUpdateInspection.js";
 
 type MessageListener = (data: WebSocket.RawData, isBinary: boolean) => void;
 
@@ -986,7 +987,28 @@ export function installYwsSecurity(
         }
 
         if (rootsToCheck.length > 0) {
-          const touched = maybeCollectTouchedRootMapKeys(updateBytes, rootsToCheck);
+          const touchedRes = collectTouchedRootMapKeys({
+            ydoc,
+            update: updateBytes,
+            rootNames: rootsToCheck,
+          });
+          if (touchedRes.unknownReason) {
+            // Fail closed: we couldn't confidently inspect which keys are being written while
+            // the doc is already at/over its reserved history quota.
+            logger.warn(
+              {
+                docName,
+                userId,
+                role,
+                rootsToCheck,
+                unknownReason: touchedRes.unknownReason,
+              },
+              "ws_reserved_root_quota_inspection_failed"
+            );
+            ws.close(1008, "reserved history quota exceeded");
+            return { drop: true };
+          }
+          const touched = touchedRes.touched;
           const violations: Array<{
             kind: "branching_commits" | "versions";
             limit: number;
@@ -1318,69 +1340,4 @@ export function installYwsSecurity(
   };
 
   patchWebSocketMessageHandlers(ws, guard);
-}
-
-function maybeCollectTouchedRootMapKeys(
-  update: Uint8Array,
-  rootNames: string[]
-): Map<string, Set<string>> {
-  const result = new Map<string, Set<string>>();
-  if (rootNames.length === 0) return result;
-
-  const doc = new Y.Doc();
-  const observers: Array<{ root: any; observer: (event: any) => void }> = [];
-
-  const collectFromEvent = (target: Set<string>, event: any) => {
-    const keys = event?.changes?.keys;
-    if (!keys) return;
-
-    if (typeof keys.entries === "function") {
-      for (const [key] of keys.entries()) {
-        if (typeof key === "string" && key.length > 0) target.add(key);
-      }
-      return;
-    }
-
-    if (typeof keys.keys === "function") {
-      for (const key of keys.keys()) {
-        if (typeof key === "string" && key.length > 0) target.add(key);
-      }
-    }
-  };
-
-  for (const rootName of rootNames) {
-    const target = new Set<string>();
-    result.set(rootName, target);
-    const root = doc.getMap(rootName);
-    const observer = (event: any) => {
-      collectFromEvent(target, event);
-    };
-    try {
-      root.observe(observer);
-      observers.push({ root, observer });
-    } catch {
-      // ignore
-    }
-  }
-
-  try {
-    Y.applyUpdate(doc, update);
-  } catch {
-    // ignore (best-effort decoding)
-  } finally {
-    for (const { root, observer } of observers) {
-      try {
-        root.unobserve(observer);
-      } catch {
-        // ignore
-      }
-    }
-    try {
-      doc.destroy();
-    } catch {
-      // ignore
-    }
-  }
-
-  return result;
 }
