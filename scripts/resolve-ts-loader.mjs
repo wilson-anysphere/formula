@@ -179,9 +179,13 @@ export async function load(url, context, defaultLoad) {
       })();
 
       transpileInFlight.set(url, promise);
-      promise.finally(() => {
+      // Avoid `.finally()` here: ignoring the returned promise can trigger an unhandled
+      // rejection if the underlying transpile fails. Use `then(..., ...)` so the
+      // cleanup chain always resolves.
+      const cleanup = () => {
         transpileInFlight.delete(url);
-      });
+      };
+      promise.then(cleanup, cleanup);
     }
 
     const loaded = await promise;
