@@ -677,13 +677,22 @@ impl BiffWorkbookGlobals {
     fn resolve_border(&self, border: BiffXfBorder) -> Option<Border> {
         let to_style = |code: u8| match code {
             0 => BorderStyle::None,
-            1 => BorderStyle::Thin,
+            // BIFF line style codes (subset), see [MS-XLS] 2.5.12:
+            // 1=thin, 2=medium, 3=dashed, 4=dotted, 5=thick, 6=double.
+            //
+            // Excel defines additional styles (hair, dash-dot variants, etc.). `formula_model`
+            // supports a smaller set; map those variants to the closest representable value so the
+            // border is not dropped entirely during `.xls` -> `.xlsx` round-tripping.
+            1 | 7 => BorderStyle::Thin, // 7 = hair
             2 => BorderStyle::Medium,
-            3 => BorderStyle::Dashed,
+            3 | 8 | 9 | 10 | 11 | 12 | 13 => BorderStyle::Dashed,
             4 => BorderStyle::Dotted,
             5 => BorderStyle::Thick,
             6 => BorderStyle::Double,
-            _ => BorderStyle::None,
+            other => {
+                log::warn!("unknown BIFF border style {other}; treating as thin");
+                BorderStyle::Thin
+            }
         };
 
         let edge = |e: BiffXfBorderEdge| {
