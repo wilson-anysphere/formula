@@ -32422,6 +32422,126 @@
       "id": "lambda_makearray_ce970103b29c"
     },
     {
+      "formula": "=COUPPCD(DATE(2024,6,15),DATE(2025,1,1),2,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPPCD"
+      ],
+      "id": "financial_couppcd_1d7d1928e88d"
+    },
+    {
+      "formula": "=COUPNCD(DATE(2024,6,15),DATE(2025,1,1),2,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPNCD"
+      ],
+      "id": "financial_coupncd_c3fa6b0644d0"
+    },
+    {
+      "formula": "=COUPNUM(DATE(2024,6,15),DATE(2025,1,1),2,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPNUM"
+      ],
+      "id": "financial_coupnum_8a01fdf65f23"
+    },
+    {
+      "formula": "=COUPDAYBS(DATE(2024,6,15),DATE(2025,1,1),2,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPDAYBS"
+      ],
+      "id": "financial_coupdaybs_37f37f71ec33"
+    },
+    {
+      "formula": "=COUPDAYSNC(DATE(2024,6,15),DATE(2025,1,1),2,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPDAYSNC"
+      ],
+      "id": "financial_coupdaysnc_6dce3e39d0af"
+    },
+    {
+      "formula": "=COUPDAYS(DATE(2024,6,15),DATE(2025,1,1),2,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPDAYS"
+      ],
+      "id": "financial_coupdays_534468f0bddc"
+    },
+    {
+      "formula": "=ACCRINTM(DATE(2024,1,1),DATE(2024,7,1),0.12,1000,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ACCRINTM"
+      ],
+      "id": "financial_accrintm_42c4d720daaa"
+    },
+    {
+      "formula": "=ACCRINT(DATE(2024,1,1),DATE(2024,7,1),DATE(2024,4,1),0.12,1000,2,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ACCRINT"
+      ],
+      "id": "financial_accrint_3d4de92e6b9a"
+    },
+    {
+      "formula": "=PRICE(DATE(2024,1,1),DATE(2026,1,1),0.1,0.05,100,1,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "PRICE"
+      ],
+      "id": "financial_price_2ae45f962b1a"
+    },
+    {
+      "formula": "=YIELD(DATE(2025,1,1),DATE(2026,1,1),0.1,110/1.05,100,1,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "YIELD"
+      ],
+      "id": "financial_yield_3341b0c2250d"
+    },
+    {
+      "formula": "=DURATION(DATE(2025,1,1),DATE(2026,1,1),0.1,0.05,1,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "DURATION"
+      ],
+      "id": "financial_duration_3e550034de3f"
+    },
+    {
+      "formula": "=MDURATION(DATE(2025,1,1),DATE(2026,1,1),0.1,0.05,1,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "MDURATION"
+      ],
+      "id": "financial_mduration_505f19cc9d47"
+    },
+    {
       "formula": "=1/0",
       "outputCell": "A1",
       "inputs": [],

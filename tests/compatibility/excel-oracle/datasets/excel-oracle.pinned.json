@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-01-12T08:28:46.600626111Z",
+  "generatedAt": "2026-01-12T08:46:01.146994142Z",
   "source": {
     "kind": "excel",
     "version": "unknown",
@@ -17,8 +17,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "fab9b52750025222bbf059b332fdb39cfbe3041914ab5011e18d3a9965536c0c",
-    "count": 1556
+    "sha256": "495c819ae2492b822b5f178407f885c6e3e6989471d8f33eb86b61b84a1aecc0",
+    "count": 1568
   },
   "results": [
     {
@@ -16203,6 +16203,126 @@
       },
       "address": "C1:E2",
       "displayText": "11"
+    },
+    {
+      "caseId": "financial_couppcd_1d7d1928e88d",
+      "outputCell": "A1",
+      "result": {
+        "t": "n",
+        "v": 45292.0
+      },
+      "address": "A1",
+      "displayText": "45292"
+    },
+    {
+      "caseId": "financial_coupncd_c3fa6b0644d0",
+      "outputCell": "A1",
+      "result": {
+        "t": "n",
+        "v": 45474.0
+      },
+      "address": "A1",
+      "displayText": "45474"
+    },
+    {
+      "caseId": "financial_coupnum_8a01fdf65f23",
+      "outputCell": "A1",
+      "result": {
+        "t": "n",
+        "v": 2.0
+      },
+      "address": "A1",
+      "displayText": "2"
+    },
+    {
+      "caseId": "financial_coupdaybs_37f37f71ec33",
+      "outputCell": "A1",
+      "result": {
+        "t": "n",
+        "v": 164.0
+      },
+      "address": "A1",
+      "displayText": "164"
+    },
+    {
+      "caseId": "financial_coupdaysnc_6dce3e39d0af",
+      "outputCell": "A1",
+      "result": {
+        "t": "n",
+        "v": 16.0
+      },
+      "address": "A1",
+      "displayText": "16"
+    },
+    {
+      "caseId": "financial_coupdays_534468f0bddc",
+      "outputCell": "A1",
+      "result": {
+        "t": "n",
+        "v": 180.0
+      },
+      "address": "A1",
+      "displayText": "180"
+    },
+    {
+      "caseId": "financial_accrintm_42c4d720daaa",
+      "outputCell": "A1",
+      "result": {
+        "t": "n",
+        "v": 60.0
+      },
+      "address": "A1",
+      "displayText": "60"
+    },
+    {
+      "caseId": "financial_accrint_3d4de92e6b9a",
+      "outputCell": "A1",
+      "result": {
+        "t": "n",
+        "v": 30.0
+      },
+      "address": "A1",
+      "displayText": "30"
+    },
+    {
+      "caseId": "financial_price_2ae45f962b1a",
+      "outputCell": "A1",
+      "result": {
+        "t": "n",
+        "v": 109.297052154195
+      },
+      "address": "A1",
+      "displayText": "109.297052154195"
+    },
+    {
+      "caseId": "financial_yield_3341b0c2250d",
+      "outputCell": "A1",
+      "result": {
+        "t": "n",
+        "v": 0.050000000000000065
+      },
+      "address": "A1",
+      "displayText": "0.050000000000000065"
+    },
+    {
+      "caseId": "financial_duration_3e550034de3f",
+      "outputCell": "A1",
+      "result": {
+        "t": "n",
+        "v": 1.0
+      },
+      "address": "A1",
+      "displayText": "1"
+    },
+    {
+      "caseId": "financial_mduration_505f19cc9d47",
+      "outputCell": "A1",
+      "result": {
+        "t": "n",
+        "v": 0.9523809523809523
+      },
+      "address": "A1",
+      "displayText": "0.9523809523809523"
     },
     {
       "caseId": "err_div0_f906f10b09bd",

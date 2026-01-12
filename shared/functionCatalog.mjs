@@ -548,6 +548,84 @@ export default {
       ]
     },
     {
+      "name": "COUPDAYBS",
+      "min_args": 3,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "COUPDAYS",
+      "min_args": 3,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "COUPDAYSNC",
+      "min_args": 3,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "COUPNCD",
+      "min_args": 3,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "COUPNUM",
+      "min_args": 3,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "COUPPCD",
+      "min_args": 3,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "number",
+        "number"
+      ]
+    },
+    {
       "name": "COVAR",
       "min_args": 2,
       "max_args": 2,

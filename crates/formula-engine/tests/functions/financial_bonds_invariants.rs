@@ -69,7 +69,13 @@ fn coup_invariants_when_settlement_is_coupon_date() {
                         &mut sheet,
                         &format!("=COUPDAYS({settlement},{maturity},{frequency},{basis})"),
                     );
-                    assert_close(daysnc, days, 1e-12);
+                    // For bases 2 (Actual/360) and 3 (Actual/365), Excel treats the coupon-period
+                    // length E as a fixed fraction of a 360/365-day year, while DSC remains an
+                    // actual day count. That means DSC is not necessarily equal to E even when
+                    // settlement is a coupon date.
+                    if matches!(basis, 0 | 1 | 4) {
+                        assert_close(daysnc, days, 1e-12);
+                    }
 
                     if matches!(basis, 0 | 4) {
                         assert_close(daybs + daysnc, days, 1e-12);
@@ -294,7 +300,11 @@ fn price_matches_pv_when_settlement_is_coupon_date() {
     // the independent `PV` implementation.
     let maturities = ["DATE(2030,12,31)", "DATE(2031,2,28)", "DATE(2030,7,15)"];
     let frequencies = [1, 2, 4];
-    let bases = [0, 1, 2, 3, 4];
+    // For bases 2 and 3, `PRICE` does not reduce to an integer-period `PV` when settlement is a
+    // coupon date because the coupon-period length `E` is fixed (360/freq or 365/freq) while `DSC`
+    // remains an actual day count. Restrict this invariant to bases where settlement aligns with a
+    // true period boundary (0, 1, 4).
+    let bases = [0, 1, 4];
     let rates = [0.0, 0.03, 0.065];
     let yields = [0.01, 0.045, 0.11];
     let redemptions = [100.0, 105.0];

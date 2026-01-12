@@ -1,6 +1,9 @@
 use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
-use formula_engine::functions::financial::{duration, mduration, price, yield_rate};
 use formula_engine::functions::date_time;
+use formula_engine::functions::financial::{
+    accrint, accrintm, coupdaybs, coupdays, coupdaysnc, coupncd, coupnum, couppcd, duration,
+    mduration, price, yield_rate,
+};
 use formula_engine::{ErrorKind, Value};
 
 use super::harness::TestSheet;
@@ -50,7 +53,6 @@ fn yield_matches_excel_doc_example() {
 fn duration_and_mduration_match_excel_doc_example() {
     // Excel docs:
     // DURATION(DATE(2008,1,1), DATE(2016,1,1), 0.08, 0.09, 2, 1) ≈ 5.993774
-    // MDURATION(...) ≈ 5.737
     let system = ExcelDateSystem::EXCEL_1900;
     let settlement = ymd_to_serial(ExcelDate::new(2008, 1, 1), system).unwrap();
     let maturity = ymd_to_serial(ExcelDate::new(2016, 1, 1), system).unwrap();
@@ -85,7 +87,8 @@ fn yield_price_roundtrip() {
     )
     .unwrap();
 
-    let back = yield_rate(settlement, maturity, rate, pr, redemption, frequency, basis, system).unwrap();
+    let back =
+        yield_rate(settlement, maturity, rate, pr, redemption, frequency, basis, system).unwrap();
     assert_close(back, yld, 1e-10);
 }
 
@@ -247,4 +250,153 @@ fn builtins_accept_date_strings_via_datevalue() {
         sheet.eval(r#"=PRICE("2008-02-15","2017-11-15",0.0575,0.065,100,2,99)"#),
         Value::Error(ErrorKind::Num)
     );
+}
+
+#[test]
+fn coupon_schedule_sanity_basis_0_and_1() {
+    let system = ExcelDateSystem::EXCEL_1900;
+    let settlement = ymd_to_serial(ExcelDate::new(2024, 6, 15), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2025, 1, 1), system).unwrap();
+    let pcd_expected = ymd_to_serial(ExcelDate::new(2024, 1, 1), system).unwrap();
+    let ncd_expected = ymd_to_serial(ExcelDate::new(2024, 7, 1), system).unwrap();
+
+    // Basis 0 (US/NASD 30/360).
+    assert_eq!(
+        couppcd(settlement, maturity, 2, 0, system).unwrap(),
+        pcd_expected
+    );
+    assert_eq!(
+        coupncd(settlement, maturity, 2, 0, system).unwrap(),
+        ncd_expected
+    );
+    assert_eq!(coupnum(settlement, maturity, 2, 0, system).unwrap(), 2.0);
+
+    assert_close(
+        coupdaybs(settlement, maturity, 2, 0, system).unwrap(),
+        164.0,
+        0.0,
+    );
+    assert_close(
+        coupdaysnc(settlement, maturity, 2, 0, system).unwrap(),
+        16.0,
+        0.0,
+    );
+    assert_close(coupdays(settlement, maturity, 2, 0, system).unwrap(), 180.0, 0.0);
+
+    // Basis 1 (Actual/Actual).
+    assert_eq!(
+        couppcd(settlement, maturity, 2, 1, system).unwrap(),
+        pcd_expected
+    );
+    assert_eq!(
+        coupncd(settlement, maturity, 2, 1, system).unwrap(),
+        ncd_expected
+    );
+    assert_eq!(coupnum(settlement, maturity, 2, 1, system).unwrap(), 2.0);
+
+    let a_actual = (settlement - pcd_expected) as f64;
+    let dsc_actual = (ncd_expected - settlement) as f64;
+    let e_actual = (ncd_expected - pcd_expected) as f64;
+    assert_close(coupdaybs(settlement, maturity, 2, 1, system).unwrap(), a_actual, 0.0);
+    assert_close(
+        coupdaysnc(settlement, maturity, 2, 1, system).unwrap(),
+        dsc_actual,
+        0.0,
+    );
+    assert_close(coupdays(settlement, maturity, 2, 1, system).unwrap(), e_actual, 0.0);
+}
+
+#[test]
+fn price_settlement_on_coupon_date_matches_discounted_cashflows() {
+    let system = ExcelDateSystem::EXCEL_1900;
+    let settlement = ymd_to_serial(ExcelDate::new(2024, 1, 1), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2026, 1, 1), system).unwrap();
+
+    let rate = 0.10;
+    let yld = 0.05;
+    let redemption = 100.0;
+    let frequency = 1;
+    let basis = 0;
+
+    // Two cashflows remain, exactly 1 and 2 periods away.
+    let expected = 10.0 / 1.05 + 110.0 / 1.05_f64.powi(2);
+    let actual = price(
+        settlement, maturity, rate, yld, redemption, frequency, basis, system,
+    )
+    .unwrap();
+    assert_close(actual, expected, 1e-12);
+}
+
+#[test]
+fn yield_duration_and_mduration_one_cashflow_case_is_analytic() {
+    let system = ExcelDateSystem::EXCEL_1900;
+    let settlement = ymd_to_serial(ExcelDate::new(2025, 1, 1), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2026, 1, 1), system).unwrap();
+
+    let coupon = 0.10;
+    let yld_expected = 0.05;
+    let redemption = 100.0;
+    let frequency = 1;
+    let basis = 0;
+
+    let pr = 110.0 / (1.0 + yld_expected);
+    let yld =
+        yield_rate(settlement, maturity, coupon, pr, redemption, frequency, basis, system).unwrap();
+    assert_close(yld, yld_expected, 1e-12);
+
+    let dur = duration(
+        settlement,
+        maturity,
+        coupon,
+        yld_expected,
+        frequency,
+        basis,
+        system,
+    )
+    .unwrap();
+    assert_close(dur, 1.0, 1e-12);
+
+    let mdur = mduration(
+        settlement,
+        maturity,
+        coupon,
+        yld_expected,
+        frequency,
+        basis,
+        system,
+    )
+    .unwrap();
+    assert_close(mdur, 1.0 / (1.0 + yld_expected), 1e-12);
+}
+
+#[test]
+fn accrint_and_accrintm_basis_0_are_hand_computable() {
+    let system = ExcelDateSystem::EXCEL_1900;
+    let issue = ymd_to_serial(ExcelDate::new(2024, 1, 1), system).unwrap();
+    let settlement = ymd_to_serial(ExcelDate::new(2024, 7, 1), system).unwrap();
+
+    let rate = 0.12;
+    let par = 1000.0;
+    let basis = 0;
+
+    // 30/360 half-year = 0.5; interest = 1000 * 0.12 * 0.5 = 60.
+    let accrued_m = accrintm(issue, settlement, rate, par, basis, system).unwrap();
+    assert_close(accrued_m, 60.0, 1e-12);
+
+    let first_interest = settlement;
+    let settlement2 = ymd_to_serial(ExcelDate::new(2024, 4, 1), system).unwrap();
+    // Semiannual coupon: 1000 * 0.12 / 2 = 60. A/E = 90/180 = 0.5.
+    let accrued = accrint(
+        issue,
+        first_interest,
+        settlement2,
+        rate,
+        par,
+        2,
+        basis,
+        false,
+        system,
+    )
+    .unwrap();
+    assert_close(accrued, 30.0, 1e-12);
 }

@@ -24,7 +24,10 @@ mod time_value;
 
 pub use accrued_interest::{accrint, accrintm};
 pub use amortization::{cumipmt, cumprinc};
-pub use bonds::{duration, mduration, price, yield_rate};
+pub use bonds::{
+    coupdaybs, coupdays, coupdaysnc, coupncd, coupnum, couppcd, duration, mduration, price,
+    yield_rate,
+};
 pub use cashflows::{irr, mirr, npv, xirr, xnpv};
 pub use depreciation::{db, ddb, sln, syd, vdb};
 pub use duration::pduration;

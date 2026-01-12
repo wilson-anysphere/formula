@@ -24,6 +24,13 @@ fn excel_result_number(res: ExcelResult<f64>) -> Value {
     }
 }
 
+fn excel_result_serial(res: ExcelResult<i32>) -> Value {
+    match res {
+        Ok(n) => Value::Number(n as f64),
+        Err(e) => Value::Error(excel_error_kind(e)),
+    }
+}
+
 fn coerce_to_finite_number(ctx: &dyn FunctionContext, v: &Value) -> Result<f64, ErrorKind> {
     let n = v.coerce_to_number_with_ctx(ctx)?;
     if !n.is_finite() {
@@ -69,7 +76,13 @@ fn eval_date_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<i32, 
     let v = eval_scalar_arg(ctx, expr);
     match v {
         Value::Error(e) => Err(e),
-        other => datevalue_from_value(ctx, &other, ctx.date_system(), ctx.value_locale(), ctx.now_utc()),
+        other => datevalue_from_value(
+            ctx,
+            &other,
+            ctx.date_system(),
+            ctx.value_locale(),
+            ctx.now_utc(),
+        ),
     }
 }
 
@@ -87,6 +100,280 @@ fn eval_i32_trunc_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<
         Value::Error(e) => Err(e),
         other => coerce_to_i32_trunc(ctx, &other),
     }
+}
+
+// ---------------------------------------------------------------------
+// COUP* schedule functions
+// ---------------------------------------------------------------------
+
+inventory::submit! {
+    FunctionSpec {
+        name: "COUPDAYBS",
+        min_args: 3,
+        max_args: 4,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::ScalarOnly,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Any, ValueType::Number, ValueType::Number],
+        implementation: coupdaybs_fn,
+    }
+}
+
+fn coupdaybs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let settlement = match eval_date_arg(ctx, &args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let maturity = match eval_date_arg(ctx, &args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let frequency = match eval_i32_trunc_arg(ctx, &args[2]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let basis = match args.get(3) {
+        Some(expr) => match eval_i32_trunc_arg(ctx, expr) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        },
+        None => 0,
+    };
+
+    excel_result_number(super::coupdaybs(
+        settlement,
+        maturity,
+        frequency,
+        basis,
+        ctx.date_system(),
+    ))
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "COUPDAYS",
+        min_args: 3,
+        max_args: 4,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::ScalarOnly,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Any, ValueType::Number, ValueType::Number],
+        implementation: coupdays_fn,
+    }
+}
+
+fn coupdays_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let settlement = match eval_date_arg(ctx, &args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let maturity = match eval_date_arg(ctx, &args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let frequency = match eval_i32_trunc_arg(ctx, &args[2]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let basis = match args.get(3) {
+        Some(expr) => match eval_i32_trunc_arg(ctx, expr) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        },
+        None => 0,
+    };
+
+    excel_result_number(super::coupdays(
+        settlement,
+        maturity,
+        frequency,
+        basis,
+        ctx.date_system(),
+    ))
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "COUPDAYSNC",
+        min_args: 3,
+        max_args: 4,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::ScalarOnly,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Any, ValueType::Number, ValueType::Number],
+        implementation: coupdaysnc_fn,
+    }
+}
+
+fn coupdaysnc_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let settlement = match eval_date_arg(ctx, &args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let maturity = match eval_date_arg(ctx, &args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let frequency = match eval_i32_trunc_arg(ctx, &args[2]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let basis = match args.get(3) {
+        Some(expr) => match eval_i32_trunc_arg(ctx, expr) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        },
+        None => 0,
+    };
+
+    excel_result_number(super::coupdaysnc(
+        settlement,
+        maturity,
+        frequency,
+        basis,
+        ctx.date_system(),
+    ))
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "COUPNCD",
+        min_args: 3,
+        max_args: 4,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::ScalarOnly,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Any, ValueType::Number, ValueType::Number],
+        implementation: coupncd_fn,
+    }
+}
+
+fn coupncd_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let settlement = match eval_date_arg(ctx, &args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let maturity = match eval_date_arg(ctx, &args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let frequency = match eval_i32_trunc_arg(ctx, &args[2]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let basis = match args.get(3) {
+        Some(expr) => match eval_i32_trunc_arg(ctx, expr) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        },
+        None => 0,
+    };
+
+    excel_result_serial(super::coupncd(
+        settlement,
+        maturity,
+        frequency,
+        basis,
+        ctx.date_system(),
+    ))
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "COUPNUM",
+        min_args: 3,
+        max_args: 4,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::ScalarOnly,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Any, ValueType::Number, ValueType::Number],
+        implementation: coupnum_fn,
+    }
+}
+
+fn coupnum_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let settlement = match eval_date_arg(ctx, &args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let maturity = match eval_date_arg(ctx, &args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let frequency = match eval_i32_trunc_arg(ctx, &args[2]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let basis = match args.get(3) {
+        Some(expr) => match eval_i32_trunc_arg(ctx, expr) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        },
+        None => 0,
+    };
+
+    excel_result_number(super::coupnum(
+        settlement,
+        maturity,
+        frequency,
+        basis,
+        ctx.date_system(),
+    ))
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "COUPPCD",
+        min_args: 3,
+        max_args: 4,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::ScalarOnly,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Any, ValueType::Number, ValueType::Number],
+        implementation: couppcd_fn,
+    }
+}
+
+fn couppcd_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let settlement = match eval_date_arg(ctx, &args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let maturity = match eval_date_arg(ctx, &args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let frequency = match eval_i32_trunc_arg(ctx, &args[2]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let basis = match args.get(3) {
+        Some(expr) => match eval_i32_trunc_arg(ctx, expr) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        },
+        None => 0,
+    };
+
+    excel_result_serial(super::couppcd(
+        settlement,
+        maturity,
+        frequency,
+        basis,
+        ctx.date_system(),
+    ))
 }
 
 // ---------------------------------------------------------------------
