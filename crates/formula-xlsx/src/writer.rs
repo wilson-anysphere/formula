@@ -495,6 +495,12 @@ fn sheet_xml(
     }
     let overlay_rows: Vec<u32> = overlay_by_row.keys().copied().collect();
 
+    let row_props_rows: Vec<u32> = sheet
+        .row_properties
+        .iter()
+        .filter_map(|(&row, props)| (props.height.is_some() || props.hidden).then_some(row))
+        .collect();
+
     let outline_rows: Vec<u32> = outline
         .rows
         .iter()
@@ -515,6 +521,7 @@ fn sheet_xml(
         .as_ref()
         .map(|c| c.origin.row.saturating_add(c.rows.saturating_sub(1) as u32));
     let mut outline_row_idx: usize = 0;
+    let mut row_props_row_idx: usize = 0;
 
     loop {
         let next_overlay_row = overlay_rows.get(overlay_row_idx).copied();
@@ -522,10 +529,16 @@ fn sheet_xml(
             (Some(r), Some(end)) if r <= end => Some(r),
             _ => None,
         };
+        let next_row_props_row = row_props_rows.get(row_props_row_idx).copied();
         let next_outline_row = outline_rows.get(outline_row_idx).copied();
 
         let mut row_idx: Option<u32> = None;
-        for candidate in [next_table_row, next_overlay_row, next_outline_row] {
+        for candidate in [
+            next_table_row,
+            next_overlay_row,
+            next_outline_row,
+            next_row_props_row,
+        ] {
             if let Some(candidate) = candidate {
                 row_idx = Some(match row_idx {
                     Some(existing) => existing.min(candidate),
@@ -543,6 +556,9 @@ fn sheet_xml(
         }
         if next_outline_row == Some(row_idx) {
             outline_row_idx += 1;
+        }
+        if next_row_props_row == Some(row_idx) {
+            row_props_row_idx += 1;
         }
 
         let overlay_cells: &[(u32, CellRef, &Cell)] = overlay_by_row
@@ -635,19 +651,28 @@ fn sheet_xml(
 
         let row_number = row_idx + 1;
         let outline_entry = outline.rows.entry(row_number);
+        let row_props = sheet.row_properties.get(&row_idx);
+        let has_row_height = row_props.is_some_and(|props| props.height.is_some());
+        let is_row_hidden =
+            outline_entry.hidden.is_hidden() || row_props.is_some_and(|props| props.hidden);
         let needs_row = wrote_any_cell
             || outline_entry.level > 0
-            || outline_entry.hidden.is_hidden()
-            || outline_entry.collapsed;
+            || is_row_hidden
+            || outline_entry.collapsed
+            || has_row_height;
         if !needs_row {
             continue;
         }
 
         let mut row_attrs = format!(r#" r="{}""#, row_number);
+        if let Some(height) = row_props.and_then(|props| props.height) {
+            let ht = trim_float(height as f64);
+            row_attrs.push_str(&format!(r#" ht="{ht}" customHeight="1""#));
+        }
         if outline_entry.level > 0 {
             row_attrs.push_str(&format!(r#" outlineLevel="{}""#, outline_entry.level));
         }
-        if outline_entry.hidden.is_hidden() {
+        if is_row_hidden {
             row_attrs.push_str(r#" hidden="1""#);
         }
         if outline_entry.collapsed {

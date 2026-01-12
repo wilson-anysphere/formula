@@ -31,6 +31,7 @@ fn write_workbook_emits_outline_metadata() -> Result<(), Box<dyn std::error::Err
     let sheet_id = workbook.add_sheet("Outline")?;
     let sheet = workbook.sheet_mut(sheet_id).expect("sheet exists");
     sheet.set_cell(CellRef::from_a1("A1")?, Cell::new(CellValue::Number(1.0)));
+    sheet.set_row_height(9, Some(20.0));
 
     // Rows 2-3 are detail rows at level 1; row 4 is the collapsed summary row.
     sheet.outline.rows.entry_mut(2).level = 1;
@@ -74,6 +75,13 @@ fn write_workbook_emits_outline_metadata() -> Result<(), Box<dyn std::error::Err
         .find(|n| n.is_element() && n.tag_name().name() == "row" && n.attribute("r") == Some("4"))
         .expect("row 4 exists");
     assert_eq!(row4.attribute("collapsed"), Some("1"));
+
+    let row10 = parsed
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "row" && n.attribute("r") == Some("10"))
+        .expect("row 10 exists");
+    assert_eq!(row10.attribute("ht"), Some("20"));
+    assert_eq!(row10.attribute("customHeight"), Some("1"));
 
     let col_b = parsed
         .descendants()
