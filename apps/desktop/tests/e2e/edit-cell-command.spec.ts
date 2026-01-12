@@ -71,4 +71,28 @@ test.describe("Edit Cell command", () => {
     await expect(editor).toBeVisible();
     await expect(editor).toBeFocused();
   });
+
+  test("F2 keybinding runs Edit Cell and focuses the inline editor", async ({ page }) => {
+    await gotoDesktop(page);
+    await waitForIdle(page);
+
+    // Select A1.
+    await page.waitForFunction(() => {
+      const app = (window as any).__formulaApp;
+      const rect = app?.getCellRectA1?.("A1");
+      return rect && typeof rect.x === "number" && rect.width > 0 && rect.height > 0;
+    });
+    const a1 = await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      return app.getCellRectA1("A1");
+    });
+    await page.click("#grid", { position: { x: a1.x + a1.width / 2, y: a1.y + a1.height / 2 } });
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+
+    await page.keyboard.press("F2");
+
+    const editor = page.getByTestId("cell-editor");
+    await expect(editor).toBeVisible();
+    await expect(editor).toBeFocused();
+  });
 });
