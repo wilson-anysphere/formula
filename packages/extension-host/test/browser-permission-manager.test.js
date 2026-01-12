@@ -202,6 +202,9 @@ test("browser PermissionManager: revokePermissions + resetPermissions clear gran
 
   await pm.resetPermissions(extensionId);
   assert.deepEqual(await pm.getGrantedPermissions(extensionId), {});
+
+  // Resetting the only extension should remove the persisted permissions key entirely.
+  assert.equal(storage.getItem(storageKey), null);
 });
 
 test("browser PermissionManager: resetAllPermissions clears all extensions", async () => {
