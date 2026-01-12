@@ -209,7 +209,7 @@ export function installCommandRecentsTracker(
     // so `throw undefined` doesn't accidentally count as a successful execution.
     if ("error" in evt) return;
     recordCommandRecent(storage, commandId, {
-      maxEntries: options.maxEntries,
+      maxEntries,
       nowMs: now(),
       storageKey,
     });
