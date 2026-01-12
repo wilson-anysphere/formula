@@ -2066,6 +2066,107 @@ mod tests {
     }
 
     #[test]
+    fn window1_iconic_maps_to_minimized_state() {
+        let mut payload = [0u8; 18];
+        payload[0..2].copy_from_slice(&10i16.to_le_bytes()); // xWn
+        payload[2..4].copy_from_slice(&20i16.to_le_bytes()); // yWn
+        payload[4..6].copy_from_slice(&30u16.to_le_bytes()); // dxWn
+        payload[6..8].copy_from_slice(&40u16.to_le_bytes()); // dyWn
+        payload[8..10].copy_from_slice(&WINDOW1_GRBIT_ICONIC.to_le_bytes()); // grbit
+
+        let stream = [
+            record(RECORD_WINDOW1, &payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+        let globals = parse_biff_workbook_globals(&stream, BiffVersion::Biff8, 1252).expect("parse");
+        assert_eq!(
+            globals.workbook_window,
+            Some(WorkbookWindow {
+                x: Some(10),
+                y: Some(20),
+                width: Some(30),
+                height: Some(40),
+                state: Some(WorkbookWindowState::Minimized)
+            })
+        );
+        assert!(
+            globals.warnings.is_empty(),
+            "expected no warnings, got {:?}",
+            globals.warnings
+        );
+    }
+
+    #[test]
+    fn window1_iconic_overrides_maximized() {
+        // If both iconic and maximized bits are set, treat the window as minimized. This matches the
+        // parser precedence and is the safest fallback when flags are inconsistent.
+        let mut payload = [0u8; 18];
+        payload[0..2].copy_from_slice(&1i16.to_le_bytes()); // xWn
+        payload[2..4].copy_from_slice(&2i16.to_le_bytes()); // yWn
+        payload[4..6].copy_from_slice(&3u16.to_le_bytes()); // dxWn
+        payload[6..8].copy_from_slice(&4u16.to_le_bytes()); // dyWn
+        payload[8..10]
+            .copy_from_slice(&(WINDOW1_GRBIT_ICONIC | WINDOW1_GRBIT_MAXIMIZED).to_le_bytes()); // grbit
+
+        let stream = [
+            record(RECORD_WINDOW1, &payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+        let globals = parse_biff_workbook_globals(&stream, BiffVersion::Biff8, 1252).expect("parse");
+        assert_eq!(
+            globals.workbook_window,
+            Some(WorkbookWindow {
+                x: Some(1),
+                y: Some(2),
+                width: Some(3),
+                height: Some(4),
+                state: Some(WorkbookWindowState::Minimized)
+            })
+        );
+        assert!(
+            globals.warnings.is_empty(),
+            "expected no warnings, got {:?}",
+            globals.warnings
+        );
+    }
+
+    #[test]
+    fn window1_no_state_bits_maps_to_normal_state() {
+        // Ensure we still record Normal state when geometry is present (so the record isn't treated
+        // as empty metadata).
+        let mut payload = [0u8; 18];
+        payload[0..2].copy_from_slice(&5i16.to_le_bytes()); // xWn
+        payload[2..4].copy_from_slice(&6i16.to_le_bytes()); // yWn
+        payload[4..6].copy_from_slice(&7u16.to_le_bytes()); // dxWn
+        payload[6..8].copy_from_slice(&8u16.to_le_bytes()); // dyWn
+        payload[8..10].copy_from_slice(&0u16.to_le_bytes()); // grbit
+
+        let stream = [
+            record(RECORD_WINDOW1, &payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+        let globals = parse_biff_workbook_globals(&stream, BiffVersion::Biff8, 1252).expect("parse");
+        assert_eq!(
+            globals.workbook_window,
+            Some(WorkbookWindow {
+                x: Some(5),
+                y: Some(6),
+                width: Some(7),
+                height: Some(8),
+                state: Some(WorkbookWindowState::Normal)
+            })
+        );
+        assert!(
+            globals.warnings.is_empty(),
+            "expected no warnings, got {:?}",
+            globals.warnings
+        );
+    }
+
+    #[test]
     fn workbook_protection_warns_on_truncated_protect_but_continues() {
         // PROTECT record with a 1-byte payload (too short for u16).
         let stream = [
