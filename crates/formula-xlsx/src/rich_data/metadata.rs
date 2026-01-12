@@ -373,10 +373,9 @@ mod tests {
     use super::parse_value_metadata_vm_to_rich_value_index_map;
 
     #[test]
-    fn parses_vm_to_rich_value_indices() {
+    fn parses_vm_to_rich_value_indices_one_based_t() {
         // Two metadataTypes to ensure `rc/@t` is interpreted as an index into the `<metadataTypes>`
-        // list (Excel has been observed to emit both 0-based and 1-based indices here), not
-        // hard-coded to `1`.
+        // list (not hard-coded to `1`).
         let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
           xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
@@ -402,12 +401,54 @@ mod tests {
   </futureMetadata>
   <valueMetadata count="4">
     <bk><rc t="2" v="0"/></bk>
-    <!-- Same metadata type, but using a 0-based `t` index. -->
-    <bk><rc t="1" v="1"/></bk>
-    <!-- Wrong metadata type (neither 0-based nor 1-based XLRICHVALUE); should be ignored. -->
-    <bk><rc t="0" v="0"/></bk>
+    <bk><rc t="2" v="1"/></bk>
+    <!-- Wrong metadata type; should be ignored. -->
+    <bk><rc t="1" v="0"/></bk>
     <!-- Out-of-bounds v; should be ignored. -->
     <bk><rc t="2" v="2"/></bk>
+  </valueMetadata>
+</metadata>
+"#;
+
+        let map = parse_value_metadata_vm_to_rich_value_index_map(xml.as_bytes()).unwrap();
+        assert_eq!(map.get(&1), Some(&5));
+        assert_eq!(map.get(&2), Some(&42));
+        assert_eq!(map.len(), 2);
+    }
+
+    #[test]
+    fn parses_vm_to_rich_value_indices_zero_based_t() {
+        // Same as above, but with `rc/@t` encoded as a 0-based index into `<metadataTypes>`.
+        let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <metadataTypes count="2">
+    <metadataType name="SOMEOTHERTYPE"/>
+    <metadataType name="XLRICHVALUE"/>
+  </metadataTypes>
+  <futureMetadata name="XLRICHVALUE" count="2">
+    <bk>
+      <extLst>
+        <ext uri="{00000000-0000-0000-0000-000000000000}">
+          <xlrd:rvb i="5"/>
+        </ext>
+      </extLst>
+    </bk>
+    <bk>
+      <extLst>
+        <ext uri="{00000000-0000-0000-0000-000000000001}">
+          <xlrd:rvb i="42"/>
+        </ext>
+      </extLst>
+    </bk>
+  </futureMetadata>
+  <valueMetadata count="4">
+    <bk><rc t="1" v="0"/></bk>
+    <bk><rc t="1" v="1"/></bk>
+    <!-- Wrong metadata type; should be ignored. -->
+    <bk><rc t="0" v="0"/></bk>
+    <!-- Out-of-bounds v; should be ignored. -->
+    <bk><rc t="1" v="2"/></bk>
   </valueMetadata>
 </metadata>
 "#;
