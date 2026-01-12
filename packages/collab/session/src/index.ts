@@ -428,6 +428,9 @@ export interface CollabSessionOptions {
   /**
    * When enabled, the session monitors structural operations (moves / deletes)
    * for true offline conflicts and surfaces them via `onConflict`.
+   *
+   * Note: `remoteUserId` in emitted conflicts is best-effort and may be an empty
+   * string when the remote op record does not include a `userId`.
    */
   cellConflicts?: {
     localUserId: string;
