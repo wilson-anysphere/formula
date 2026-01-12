@@ -14,8 +14,11 @@ pub struct VbaSignedDigest {
     ///
     /// Note: for legacy VBA signature streams (`\x05DigitalSignature` / `\x05DigitalSignatureEx`),
     /// Office uses 16-byte MD5 digest bytes for binding per MS-OSHARED §4.3 even when this OID
-    /// indicates SHA-256. For v3 (`\x05DigitalSignatureExt`), this OID is expected to indicate the
-    /// digest algorithm for the MS-OVBA v3 transcript (typically SHA-256).
+    /// indicates SHA-256.
+    ///
+    /// For v3 (`\x05DigitalSignatureExt`), the digest bytes are commonly 32-byte SHA-256 and this OID
+    /// is usually meaningful, but some producers emit inconsistent OIDs; prefer selecting the digest
+    /// algorithm by digest length when possible.
     /// https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/40c8dab3-e8db-4c66-a6be-8cec06351b1e
     pub digest_algorithm_oid: String,
     /// Digest bytes.
