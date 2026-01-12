@@ -527,6 +527,55 @@ test("CollabSession formula conflict monitor detects concurrent delete vs overwr
   docB.destroy();
 });
 
+test("CollabSession formula conflict monitor detects concurrent deletes from clients without the monitor", async () => {
+  // Deterministic tie-break: higher clientID wins map entry overwrites. Ensure the
+  // writer without a monitor wins so the monitor side observes the overwrite and
+  // can detect the conflict.
+  const docA = new Y.Doc();
+  docA.clientID = 1;
+  const docB = new Y.Doc();
+  docB.clientID = 2;
+  let disconnect = connectDocs(docA, docB);
+
+  /** @type {Array<any>} */
+  const conflictsA = [];
+
+  const sessionA = createCollabSession({
+    doc: docA,
+    formulaConflicts: {
+      localUserId: "user-a",
+      concurrencyWindowMs: 1,
+      onConflict: (c) => conflictsA.push(c),
+    },
+  });
+
+  // Remote session without a formula conflict monitor.
+  const sessionB = createCollabSession({ doc: docB });
+
+  await sessionA.setCellFormula("Sheet1:0:0", "=1");
+  assert.equal((await sessionB.getCell("Sheet1:0:0"))?.formula, "=1");
+
+  // Offline concurrent edits: A overwrites while B clears the formula.
+  disconnect();
+  await sessionA.setCellFormula("Sheet1:0:0", "=2");
+  await sessionB.setCellFormula("Sheet1:0:0", null);
+
+  disconnect = connectDocs(docA, docB);
+
+  assert.ok(conflictsA.length >= 1, "expected at least one conflict to be detected");
+  assert.equal(conflictsA[0].kind, "formula");
+  assert.ok(
+    [conflictsA[0].localFormula.trim(), conflictsA[0].remoteFormula.trim()].includes(""),
+    "expected one side of conflict to be empty"
+  );
+
+  sessionA.destroy();
+  sessionB.destroy();
+  disconnect();
+  docA.destroy();
+  docB.destroy();
+});
+
 test("CollabSession value conflicts surface when enabled (formula+value mode)", async () => {
   const docA = new Y.Doc();
   const docB = new Y.Doc();
