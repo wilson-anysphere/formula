@@ -1,5 +1,6 @@
 use std::io::{Cursor, Write};
 
+use encoding_rs::WINDOWS_1251;
 use formula_vba::{compress_container, forms_normalized_data};
 
 fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
@@ -521,4 +522,110 @@ fn forms_normalized_data_empty_stream_contributes_no_bytes() {
         "expected only the non-empty stream to contribute a single 1023-byte block"
     );
     assert_eq!(normalized[0], b'A');
+}
+
+#[test]
+fn forms_normalized_data_decodes_baseclass_using_project_codepage() {
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create compound file");
+
+    let module_name = "Форма";
+    let project_text = format!("CodePage=1251\r\nBaseClass={module_name}\r\n");
+    let (project_bytes, _, _) = WINDOWS_1251.encode(&project_text);
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(&project_bytes).expect("write PROJECT");
+    }
+
+    ole.create_storage("VBA").expect("create VBA storage");
+    {
+        // Set PROJECTCODEPAGE to 1252 to ensure FormsNormalizedData prioritizes the PROJECT stream
+        // CodePage= directive.
+        let mut dir_decompressed = Vec::new();
+        push_record(&mut dir_decompressed, 0x0003, &1252u16.to_le_bytes());
+        // Provide module name using MODULENAMEUNICODE so decoding is independent of the selected
+        // codepage.
+        push_record(&mut dir_decompressed, 0x0047, &utf16le_bytes(module_name));
+
+        let mut stream_name_record = Vec::new();
+        stream_name_record.extend_from_slice(b"UserForm1");
+        stream_name_record.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut dir_decompressed, 0x001A, &stream_name_record);
+        push_record(&mut dir_decompressed, 0x0021, &3u16.to_le_bytes());
+        push_record(&mut dir_decompressed, 0x0031, &0u32.to_le_bytes());
+
+        let dir_container = compress_container(&dir_decompressed);
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+
+    ole.create_storage("UserForm1")
+        .expect("create designer storage");
+    {
+        let mut s = ole
+            .create_stream("UserForm1/Payload")
+            .expect("create stream");
+        s.write_all(b"ABC").expect("write stream bytes");
+    }
+
+    let vba_project_bin = ole.into_inner().into_inner();
+    let normalized = forms_normalized_data(&vba_project_bin).expect("compute FormsNormalizedData");
+
+    let mut expected = Vec::new();
+    expected.extend_from_slice(b"ABC");
+    expected.extend(std::iter::repeat(0u8).take(1020));
+
+    assert_eq!(normalized.len(), 1023);
+    assert_eq!(normalized, expected);
+}
+
+#[test]
+fn forms_normalized_data_falls_back_to_dir_codepage_when_project_lacks_codepage_line() {
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create compound file");
+
+    let module_name = "Форма";
+    let project_text = format!("BaseClass={module_name}\r\n");
+    let (project_bytes, _, _) = WINDOWS_1251.encode(&project_text);
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(&project_bytes).expect("write PROJECT");
+    }
+
+    ole.create_storage("VBA").expect("create VBA storage");
+    {
+        let mut dir_decompressed = Vec::new();
+        push_record(&mut dir_decompressed, 0x0003, &1251u16.to_le_bytes());
+        push_record(&mut dir_decompressed, 0x0047, &utf16le_bytes(module_name));
+
+        let mut stream_name_record = Vec::new();
+        stream_name_record.extend_from_slice(b"UserForm1");
+        stream_name_record.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut dir_decompressed, 0x001A, &stream_name_record);
+        push_record(&mut dir_decompressed, 0x0021, &3u16.to_le_bytes());
+        push_record(&mut dir_decompressed, 0x0031, &0u32.to_le_bytes());
+
+        let dir_container = compress_container(&dir_decompressed);
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+
+    ole.create_storage("UserForm1")
+        .expect("create designer storage");
+    {
+        let mut s = ole
+            .create_stream("UserForm1/Payload")
+            .expect("create stream");
+        s.write_all(b"ABC").expect("write stream bytes");
+    }
+
+    let vba_project_bin = ole.into_inner().into_inner();
+    let normalized = forms_normalized_data(&vba_project_bin).expect("compute FormsNormalizedData");
+
+    let mut expected = Vec::new();
+    expected.extend_from_slice(b"ABC");
+    expected.extend(std::iter::repeat(0u8).take(1020));
+
+    assert_eq!(normalized.len(), 1023);
+    assert_eq!(normalized, expected);
 }
