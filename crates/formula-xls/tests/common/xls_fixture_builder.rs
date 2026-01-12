@@ -1007,9 +1007,17 @@ fn build_rich_styles_workbook_stream() -> Vec<u8> {
         push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
     }
 
-    // One rich cell XF (index 16).
+    // Two rich cell XFs:
+    // - index 16: solid fill
+    // - index 17: mediumGray pattern fill (exercises non-solid fill patterns)
     let xf_rich = 16u16;
+    let xf_rich_medium_gray = 17u16;
     push_record(&mut globals, RECORD_XF, &xf_record_rich());
+    push_record(
+        &mut globals,
+        RECORD_XF,
+        &xf_record_rich_with_fill_pattern(2),
+    );
 
     // Single worksheet.
     let boundsheet_start = globals.len();
@@ -1024,7 +1032,7 @@ fn build_rich_styles_workbook_stream() -> Vec<u8> {
 
     // -- Sheet -------------------------------------------------------------------
     let sheet_offset = globals.len();
-    let sheet = build_rich_styles_sheet_stream(xf_rich);
+    let sheet = build_rich_styles_sheet_stream(xf_rich, xf_rich_medium_gray);
 
     globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
         .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
@@ -1033,17 +1041,17 @@ fn build_rich_styles_workbook_stream() -> Vec<u8> {
     globals
 }
 
-fn build_rich_styles_sheet_stream(xf_rich: u16) -> Vec<u8> {
+fn build_rich_styles_sheet_stream(xf_rich: u16, xf_rich_medium_gray: u16) -> Vec<u8> {
     let mut sheet = Vec::<u8>::new();
 
     push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
 
-    // DIMENSIONS: rows [0, 1) cols [0, 1)
+    // DIMENSIONS: rows [0, 1) cols [0, 2) (A..B)
     let mut dims = Vec::<u8>::new();
     dims.extend_from_slice(&0u32.to_le_bytes()); // first row
     dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
     dims.extend_from_slice(&0u16.to_le_bytes()); // first col
-    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1
     dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
     push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
 
@@ -1051,6 +1059,12 @@ fn build_rich_styles_sheet_stream(xf_rich: u16) -> Vec<u8> {
 
     // A1: number cell with rich style.
     push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_rich, 0.5));
+    // B1: number cell with a non-solid fill pattern.
+    push_record(
+        &mut sheet,
+        RECORD_NUMBER,
+        &number_cell(0, 1, xf_rich_medium_gray, 0.25),
+    );
 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
     sheet
@@ -3928,6 +3942,15 @@ fn xf_record_rich() -> [u8; 20] {
     out[10..14].copy_from_slice(&border1.to_le_bytes());
     out[14..18].copy_from_slice(&border2.to_le_bytes());
     out[18..20].copy_from_slice(&pattern.to_le_bytes());
+    out
+}
+
+fn xf_record_rich_with_fill_pattern(fill_pattern: u8) -> [u8; 20] {
+    let mut out = xf_record_rich();
+    let mut border2 = u32::from_le_bytes([out[14], out[15], out[16], out[17]]);
+    border2 &= !(0x3F_u32 << 25);
+    border2 |= ((fill_pattern as u32) & 0x3F) << 25;
+    out[14..18].copy_from_slice(&border2.to_le_bytes());
     out
 }
 

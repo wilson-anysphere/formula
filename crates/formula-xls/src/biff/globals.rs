@@ -622,10 +622,36 @@ impl BiffWorkbookGlobals {
             return None;
         }
 
+        // BIFF fill patterns map directly to the OOXML `ST_PatternType` enumeration used by
+        // `.xlsx`. `formula_model::FillPattern` intentionally preserves the XML token as a string
+        // (`Other`) so it can round-trip losslessly.
+        //
+        // IMPORTANT: `FillPattern::Other` must contain a *valid* OOXML `patternType` token because
+        // the XLSX writer will emit it verbatim. Avoid storing BIFF-specific placeholders like
+        // `biff:<n>` here, as that would generate invalid `.xlsx` output.
         let pattern = match fill.pattern {
             1 => FillPattern::Solid,
+            2 => FillPattern::Other("mediumGray".to_string()),
+            3 => FillPattern::Other("darkGray".to_string()),
+            4 => FillPattern::Other("lightGray".to_string()),
+            5 => FillPattern::Other("darkHorizontal".to_string()),
+            6 => FillPattern::Other("darkVertical".to_string()),
+            7 => FillPattern::Other("darkDown".to_string()),
+            8 => FillPattern::Other("darkUp".to_string()),
+            9 => FillPattern::Other("darkGrid".to_string()),
+            10 => FillPattern::Other("darkTrellis".to_string()),
+            11 => FillPattern::Other("lightHorizontal".to_string()),
+            12 => FillPattern::Other("lightVertical".to_string()),
+            13 => FillPattern::Other("lightDown".to_string()),
+            14 => FillPattern::Other("lightUp".to_string()),
+            15 => FillPattern::Other("lightGrid".to_string()),
+            16 => FillPattern::Other("lightTrellis".to_string()),
             0x11 => FillPattern::Gray125,
-            other => FillPattern::Other(format!("biff:{other}")),
+            0x12 => FillPattern::Other("gray0625".to_string()),
+            other => {
+                log::warn!("unknown BIFF fill pattern {other}; falling back to solid fill");
+                FillPattern::Solid
+            }
         };
 
         // Only interpret colors when the pattern is meaningful.

@@ -73,5 +73,21 @@ fn imports_rich_biff_cell_styles() {
 
     // Number format.
     assert_eq!(style.number_format.as_deref(), Some("0.00%"));
-}
 
+    // Non-solid fill pattern should map to a valid OOXML patternType token so XLSX round-tripping
+    // does not emit invalid XML.
+    let b1 = CellRef::from_a1("B1").unwrap();
+    let cell_b1 = sheet.cell(b1).expect("B1 missing");
+    assert_ne!(cell_b1.style_id, 0, "expected a non-default style id");
+    let style_b1 = result
+        .workbook
+        .styles
+        .get(cell_b1.style_id)
+        .expect("B1 style missing");
+    let fill_b1 = style_b1.fill.as_ref().expect("expected B1 fill");
+    assert!(
+        matches!(fill_b1.pattern, FillPattern::Other(ref v) if v == "mediumGray"),
+        "unexpected fill pattern: {:?}",
+        fill_b1.pattern
+    );
+}
