@@ -295,6 +295,17 @@ test.describe("Content Security Policy (Tauri parity)", () => {
       });
     });
 
+    await page.route("https://example.test/**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Content-Type": "text/plain"
+        },
+        body: "hello"
+      });
+    });
+
     const response = await page.goto("/");
     const cspHeader = response?.headers()["content-security-policy"];
     expect(cspHeader, "E2E server should emit Content-Security-Policy header").toBeTruthy();
@@ -349,12 +360,13 @@ test.describe("Content Security Policy (Tauri parity)", () => {
         const loadedMainUrl = (manager as any)?._loadedMainUrls?.get(id)?.mainUrl ?? null;
 
         const sum = await host.executeCommand("sampleHello.sumSelection");
+        const fetched = await host.executeCommand("sampleHello.fetchText", "https://example.test/hello");
         const outCell = await spreadsheetApi.getCell(2, 0);
         const messages = host.getMessages();
         await manager.dispose();
         await host.dispose();
 
-        return { id, loadedMainUrl, sum, outCell, writes, messages };
+        return { id, loadedMainUrl, sum, fetched, outCell, writes, messages };
       },
       { hostModuleUrl, managerModuleUrl }
     );
@@ -362,9 +374,11 @@ test.describe("Content Security Policy (Tauri parity)", () => {
     expect(result.id).toBe("formula.sample-hello");
     expect(result.loadedMainUrl).toMatch(/^(blob:|data:)/);
     expect(result.sum).toBe(10);
+    expect(result.fetched).toBe("hello");
     expect(result.outCell).toBe(10);
     expect(result.writes).toEqual([{ row: 2, col: 0, value: 10 }]);
     expect(result.messages.some((m: any) => String(m.message).includes("Sum: 10"))).toBe(true);
+    expect(result.messages.some((m: any) => String(m.message).includes("Fetched: hello"))).toBe(true);
 
     expect(cspViolations, `Unexpected CSP violations:\\n${cspViolations.join("\n")}`).toEqual([]);
   });
