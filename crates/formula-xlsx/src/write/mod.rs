@@ -4173,22 +4173,22 @@ fn shared_string_index(
                 .unwrap_or(0)
         }
         CellValue::Record(record) => {
-            let text = record.to_string();
-            let text_str = text.as_str();
+            let text_owned = record.to_string();
+            let text = text_owned.as_str();
             if let Some(meta) = meta {
                 if let Some(CellValueKind::SharedString { index }) = &meta.value_kind {
                     if doc
                         .shared_strings
                         .get(*index as usize)
                         .map(|rt| rt.text.as_str())
-                        == Some(text_str)
+                        == Some(text)
                     {
                         return *index;
                     }
                 }
             }
             shared_lookup
-                .get(&SharedStringKey::plain(text_str))
+                .get(&SharedStringKey::plain(text))
                 .copied()
                 .unwrap_or(0)
         }

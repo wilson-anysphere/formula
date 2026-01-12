@@ -160,6 +160,59 @@ Confirmed values from this fixture:
 - Workbook → `cellimages.xml` relationship `Type` URI (in `xl/_rels/workbook.xml.rels`):
   - `http://schemas.microsoft.com/office/2019/relationships/cellimages`
 
+### Fixture: `fixtures/xlsx/images-in-cells/image-in-cell.xlsx` (real Excel; Place in Cell + `IMAGE()`)
+
+Fixture workbook: [`fixtures/xlsx/images-in-cells/image-in-cell.xlsx`](../fixtures/xlsx/images-in-cells/image-in-cell.xlsx).
+
+This fixture is intended as a ground-truth-ish Excel workbook that contains **both**:
+
+- Insert → Pictures → **Place in Cell** (cell `A1`)
+- a formula using `_xlfn.IMAGE(...)` (cell `B1`)
+
+Confirmed values from this fixture:
+
+- Part paths:
+  - `xl/cellimages.xml`
+  - `xl/_rels/cellimages.xml.rels`
+  - `xl/metadata.xml`
+  - `xl/richData/richValue.xml`
+  - `xl/richData/richValueRel.xml`
+  - `xl/richData/richValueTypes.xml`
+  - `xl/richData/richValueStructure.xml`
+  - `xl/richData/_rels/richValueRel.xml.rels`
+  - `xl/media/image1.png`
+- Worksheet metadata pointers:
+  - `xl/worksheets/sheet1.xml` contains `c/@vm` on both `A1` and `B1`
+  - `B1` contains a formula with `_xlfn.IMAGE("https://example.com/image.png")`
+- `[Content_Types].xml` overrides:
+  - `/xl/cellimages.xml`: `application/vnd.ms-excel.cellimages+xml`
+  - `/xl/metadata.xml`: `application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml`
+  - `/xl/richData/richValue.xml`: `application/vnd.ms-excel.richvalue+xml`
+  - `/xl/richData/richValueRel.xml`: `application/vnd.ms-excel.richvaluerel+xml`
+  - `/xl/richData/richValueTypes.xml`: `application/vnd.ms-excel.richvaluetypes+xml`
+  - `/xl/richData/richValueStructure.xml`: `application/vnd.ms-excel.richvaluestructure+xml`
+- Workbook-level relationship `Type` URIs (in `xl/_rels/workbook.xml.rels`):
+  - workbook → metadata:
+    - `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata"`
+    - `Target="metadata.xml"`
+  - workbook → cell images store:
+    - `Type="http://schemas.microsoft.com/office/2017/06/relationships/cellImages"`
+    - `Target="cellimages.xml"`
+  - workbook → richData parts:
+    - `Type="http://schemas.microsoft.com/office/2017/06/relationships/richValue"`
+      - `Target="richData/richValue.xml"`
+    - `Type="http://schemas.microsoft.com/office/2017/06/relationships/richValueRel"`
+      - `Target="richData/richValueRel.xml"`
+    - `Type="http://schemas.microsoft.com/office/2017/06/relationships/richValueTypes"`
+      - `Target="richData/richValueTypes.xml"`
+    - `Type="http://schemas.microsoft.com/office/2017/06/relationships/richValueStructure"`
+      - `Target="richData/richValueStructure.xml"`
+- Image relationship usage:
+  - `xl/_rels/cellimages.xml.rels` contains `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"`
+    pointing to `Target="media/image1.png"`.
+  - `xl/richData/_rels/richValueRel.xml.rels` contains the same image `Type`, pointing to
+    `Target="../media/image1.png"`.
+
 ### Quick reference: `cellImages` part graph (OPC + XML)
 
 This section is a “what to look for” summary for the core **cell image store** parts. Details and
@@ -250,8 +303,8 @@ variant shapes are documented further below.
 <Override PartName="/xl/cellimages.xml"
           ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.cellimages+xml"/>
 
-<!-- Other in-repo fixtures/tests -->
-<Override PartName="/xl/cellImages.xml"
+<!-- Real Excel fixture (`fixtures/xlsx/images-in-cells/image-in-cell.xlsx`) -->
+<Override PartName="/xl/cellimages.xml"
           ContentType="application/vnd.ms-excel.cellimages+xml"/>
 ```
 
@@ -859,6 +912,8 @@ Current status:
     - [`fixtures/xlsx/rich-data/images-in-cell.xlsx`](../fixtures/xlsx/rich-data/images-in-cell.xlsx) (notes in [`fixtures/xlsx/rich-data/images-in-cell.md`](../fixtures/xlsx/rich-data/images-in-cell.md))
     - cell `A1` uses `vm="1" cm="1"` with cached `<v>0</v>` (image binding still comes from `vm` + `xl/metadata.xml`)
 - **Still needed**: a real Excel-generated workbook that includes a formula cell containing `=IMAGE(...)` (ideally without external network dependencies).
+- ✅ Real Excel-generated workbook that includes an `_xlfn.IMAGE(...)` formula cell:
+  - [`fixtures/xlsx/images-in-cells/image-in-cell.xlsx`](../fixtures/xlsx/images-in-cells/image-in-cell.xlsx)
 
 Before we hardcode any remaining assumptions, validate them against a real Excel-generated workbook that uses both:
 
@@ -962,12 +1017,12 @@ Limitations (current Formula behavior):
     - [`fixtures/xlsx/basic/image-in-cell.xlsx`](../fixtures/xlsx/basic/image-in-cell.xlsx)
   - ✅ Real Excel “Place in Cell” fixture (includes `xl/cellimages.xml` + full `richValue*` tables):
     - [`fixtures/xlsx/rich-data/images-in-cell.xlsx`](../fixtures/xlsx/rich-data/images-in-cell.xlsx)
-  - Still needed:
-    - a real Excel-generated workbook with `=IMAGE(...)` cells, to confirm whether they use the same `t="e"`/`#VALUE!` encoding or a different formula-based encoding
-- **Confirm and document remaining relationship/content-type variants** from additional real Excel fixtures (especially `=IMAGE(...)`):
-  - `[Content_Types].xml` overrides for:
-    - `/xl/metadata.xml`
-    - `/xl/richData/*.xml` (especially `/xl/richData/richValue.xml`)
+  - ✅ Real Excel fixture that includes an `_xlfn.IMAGE(...)` cell:
+    - [`fixtures/xlsx/images-in-cells/image-in-cell.xlsx`](../fixtures/xlsx/images-in-cells/image-in-cell.xlsx)
+  - **Confirm and document remaining relationship/content-type variants** from additional real Excel fixtures (especially `=IMAGE(...)`):
+    - `[Content_Types].xml` overrides for:
+      - `/xl/metadata.xml`
+      - `/xl/richData/*.xml` (especially `/xl/richData/richValue.xml`)
   - the relationship Type URIs (if any) that connect the workbook/worksheets to:
     - `xl/cellimages.xml` / `xl/cellImages.xml`
     - `xl/metadata.xml`

@@ -23,9 +23,10 @@ openssl = { version = "0.10", features = ["vendored"] }
 [target.'cfg(all(not(target_arch = "wasm32"), not(any(windows, target_os = "macos"))))'.dependencies]
 # Prefer linking against the system OpenSSL on Linux/other Unix targets.
 #
-# Vendored OpenSSL builds are expensive and can be flaky under constrained CI environments
-# (e.g. when process creation is limited). We keep the Windows/macOS vendored builds above,
-# but use the system library elsewhere.
+# Vendored OpenSSL builds are expensive and can be flaky under constrained CI/multi-agent
+# environments (e.g. when process/thread creation is limited). We keep the Windows/macOS vendored
+# builds above, but use the system library elsewhere.
+#
 # If you don't have OpenSSL headers installed, install your distro's
 # `libssl-dev`/`openssl-devel` package.
 openssl = "0.10"

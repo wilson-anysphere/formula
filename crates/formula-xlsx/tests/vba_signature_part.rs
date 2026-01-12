@@ -110,7 +110,9 @@ fn build_minimal_vba_project_bin_impl(module1: &[u8], signature_blob: Option<&[u
 
     {
         let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
-        s.write_all(b"Name=\"VBAProject\"\r\nModule=Module1\r\n")
+        // The `PROJECT` stream is plain text; include a CodePage= line so any callers that need
+        // encoding info can succeed.
+        s.write_all(b"ID=\"{00000000-0000-0000-0000-000000000000}\"\r\nCodePage=1252\r\nName=\"VBAProject\"\r\nModule=Module1\r\n")
             .expect("write PROJECT");
     }
 

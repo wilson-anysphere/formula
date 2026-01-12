@@ -881,9 +881,9 @@ fn write_updated_cell<W: Write>(
         .map(|t| t.t.as_str())
         .unwrap_or(tags.t.as_str());
 
-    let mut preserved_attrs: Vec<(String, String)> = Vec::new();
     let mut original_has_vm = false;
     let mut original_has_cm = false;
+    let mut preserved_attrs: Vec<(String, String)> = Vec::new();
     if let Some(start) = original_start {
         for attr in start.attributes() {
             let attr = attr?;
