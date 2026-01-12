@@ -3,7 +3,7 @@ use std::path::Path;
 
 use formula_model::drawings::ImageId;
 use formula_model::{CellRef, CellValue};
-use formula_xlsx::load_from_bytes;
+use formula_xlsx::{load_from_bytes, parse_value_metadata_vm_to_rich_value_index_map};
 use zip::ZipArchive;
 
 fn zip_part(zip_bytes: &[u8], name: &str) -> Vec<u8> {
@@ -68,6 +68,14 @@ fn real_excel_images_in_cell_roundtrip_preserves_richdata_and_loads_media(
         "expected Sheet1!A1 cell to include a vm=\"...\" attribute, got: {sheet_xml}"
     );
 
+    let metadata_bytes = zip_part(&fixture_bytes, "xl/metadata.xml");
+    let vm_map = parse_value_metadata_vm_to_rich_value_index_map(&metadata_bytes)?;
+    assert_eq!(
+        vm_map.get(&1),
+        Some(&0),
+        "expected vm=1 to resolve to rich value index 0 via xl/metadata.xml"
+    );
+
     // Capture original bytes for all rich-data parts we need to preserve byte-for-byte.
     let original_parts: Vec<(&str, Vec<u8>)> = [
         "xl/cellimages.xml",
@@ -92,9 +100,16 @@ fn real_excel_images_in_cell_roundtrip_preserves_richdata_and_loads_media(
         !doc.workbook.images.is_empty(),
         "expected workbook.images to be non-empty"
     );
-    assert!(
-        doc.workbook.images.get(&ImageId::new("image1.png")).is_some(),
-        "expected workbook.images to contain image1.png"
+    let image_id = ImageId::new("image1.png");
+    let stored = doc
+        .workbook
+        .images
+        .get(&image_id)
+        .expect("expected workbook.images to contain image1.png");
+    assert_eq!(
+        stored.bytes,
+        zip_part(&fixture_bytes, "xl/media/image1.png"),
+        "expected workbook.images bytes for image1.png to match the xl/media/image1.png part"
     );
 
     // Edit an unrelated cell to exercise worksheet patching while preserving rich-data parts.
@@ -127,6 +142,11 @@ fn real_excel_images_in_cell_roundtrip_preserves_richdata_and_loads_media(
         cell_a1.attribute("vm"),
         Some("1"),
         "expected vm attribute to be preserved, got: {saved_sheet_xml}"
+    );
+    assert_eq!(
+        cell_a1.attribute("cm"),
+        Some("1"),
+        "expected cm attribute to be preserved, got: {saved_sheet_xml}"
     );
 
     Ok(())
