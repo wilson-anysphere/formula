@@ -16,6 +16,14 @@ test("renderMacroRunner is class-driven (no inline style assignments)", () => {
     "renderMacroRunner should not set inline styles (element.style.*); use src/styles/macros-runner.css classes instead",
   );
 
+  const mainPath = path.join(__dirname, "..", "src", "main.ts");
+  const mainSrc = fs.readFileSync(mainPath, "utf8");
+  assert.equal(
+    /import\s+["'][^"']*styles\/macros-runner\.css["']/.test(mainSrc),
+    true,
+    "apps/desktop/src/main.ts should import src/styles/macros-runner.css so the macro runner UI is styled in production builds",
+  );
+
   const requiredClasses = [
     "macros-runner",
     "macros-runner__header",
@@ -30,4 +38,3 @@ test("renderMacroRunner is class-driven (no inline style assignments)", () => {
     assert.ok(src.includes(className), `Expected dom_ui.ts to reference CSS class "${className}"`);
   }
 });
-
