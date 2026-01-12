@@ -76,3 +76,19 @@ fn row_ranges_work() {
     engine.recalculate();
     assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(13.0));
 }
+
+#[test]
+fn deref_full_sheet_range_as_formula_result_returns_spill_error() {
+    let mut engine = Engine::new();
+    // A bare reference result is treated as a dynamic array. Materializing a full-sheet reference
+    // would be prohibitively large, so the evaluator should surface `#SPILL!` instead of attempting
+    // to allocate an array of billions of cells.
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine
+        // Put the formula on another sheet to avoid a circular reference (the referenced range
+        // spans the entire source sheet).
+        .set_cell_formula("Sheet2", "A1", "=Sheet1!A:XFD")
+        .unwrap();
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet2", "A1"), Value::Error(ErrorKind::Spill));
+}

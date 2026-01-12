@@ -21,6 +21,17 @@ use std::sync::Arc;
 /// The leading NUL byte ensures this key cannot be referenced by user formulas.
 const ANON_LAMBDA_CALL_NAME: &str = "\u{0}ANON_LAMBDA_CALL";
 
+/// Maximum number of cells the evaluator will materialize when a formula result is a range
+/// reference (e.g. `=A1:B2` or `=Sheet1!A:XFD`).
+///
+/// Without a limit, a bare reference like `=Sheet1!A:XFD` would attempt to allocate an array of
+/// ~17B cells and likely OOM/abort the process. Excel's grid is bounded, but this engine supports
+/// dynamic sheet dimensions (including rows beyond Excel's default), so we must cap reference
+/// materialization to keep evaluation robust.
+///
+/// References larger than this are treated as a spill that is "too big" and evaluate to `#SPILL!`.
+const MAX_REFERENCE_DEREF_CELLS: usize = 5_000_000;
+
 // Excel has various nesting limits (e.g. 64 nested function calls). Keep lambda recursion bounded
 // well below the Rust stack limit to avoid process aborts for accidental infinite recursion.
 const LAMBDA_RECURSION_LIMIT: u32 = 64;
@@ -1082,7 +1093,19 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         self.trace_reference(&reference);
         let rows = (range.end.row - range.start.row + 1) as usize;
         let cols = (range.end.col - range.start.col + 1) as usize;
-        let mut values = Vec::with_capacity(rows.saturating_mul(cols));
+
+        let total_cells = match rows.checked_mul(cols) {
+            Some(v) => v,
+            None => return Value::Error(ErrorKind::Spill),
+        };
+        if total_cells > MAX_REFERENCE_DEREF_CELLS {
+            return Value::Error(ErrorKind::Spill);
+        }
+
+        let mut values: Vec<Value> = Vec::new();
+        if values.try_reserve_exact(total_cells).is_err() {
+            return Value::Error(ErrorKind::Num);
+        }
         for row in range.start.row..=range.end.row {
             for col in range.start.col..=range.end.col {
                 values.push(self.get_sheet_cell_value(&range.sheet_id, CellAddr { row, col }));
