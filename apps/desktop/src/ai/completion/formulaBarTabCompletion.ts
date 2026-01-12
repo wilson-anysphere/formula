@@ -9,6 +9,7 @@ import {
 
 import type { DocumentController } from "../../document/documentController.js";
 import type { FormulaBarView } from "../../formula-bar/FormulaBarView.js";
+import type { SheetNameResolver } from "../../sheet/sheetNameResolver";
 import { evaluateFormula, type SpreadsheetValue } from "../../spreadsheet/evaluateFormula.js";
 
 export interface FormulaBarTabCompletionControllerOptions {
@@ -17,6 +18,14 @@ export interface FormulaBarTabCompletionControllerOptions {
   getSheetId: () => string;
   limits?: { maxRows: number; maxCols: number };
   schemaProvider?: SchemaProvider | null;
+  /**
+   * Optional sheet name <-> id resolver.
+   *
+   * When provided, sheet-qualified references in completion previews (and the sheet list in the
+   * schema provider) use the user-facing sheet display name while resolving back to stable ids
+   * for DocumentController reads.
+   */
+  sheetNameResolver?: SheetNameResolver | null;
   /**
    * Optional Cursor backend completion client.
    *
@@ -33,6 +42,7 @@ export class FormulaBarTabCompletionController {
   readonly #getSheetId: () => string;
   readonly #limits: { maxRows: number; maxCols: number } | null;
   readonly #schemaProvider: SchemaProvider;
+  readonly #sheetNameResolver: SheetNameResolver | null;
 
   #cellsVersion = 0;
   #completionRequest = 0;
@@ -45,17 +55,35 @@ export class FormulaBarTabCompletionController {
     this.#document = opts.document;
     this.#getSheetId = opts.getSheetId;
     this.#limits = opts.limits ?? null;
+    this.#sheetNameResolver = opts.sheetNameResolver ?? null;
 
     const defaultSchemaProvider: SchemaProvider = {
       getSheetNames: () => {
         const ids = this.#document.getSheetIds();
-        return ids.length > 0 ? ids : ["Sheet1"];
+        if (ids.length > 0) {
+          if (!this.#sheetNameResolver) return ids;
+          return ids.map((id) => this.#sheetNameResolver?.getSheetNameById(id) ?? id);
+        }
+
+        // DocumentController creates sheets lazily; fall back to the current sheet even if it
+        // hasn't been materialized yet.
+        const currentSheetId = this.#getSheetId();
+        const fallbackName = this.#sheetNameResolver?.getSheetNameById(currentSheetId) ?? currentSheetId ?? "Sheet1";
+        return [fallbackName];
       },
       getNamedRanges: () => [],
       getTables: () => [],
       // Include the sheet list in the cache key so suggestions refresh when new
       // sheets are created (DocumentController materializes sheets lazily).
-      getCacheKey: () => (this.#document.getSheetIds().length > 0 ? this.#document.getSheetIds().join("|") : "Sheet1"),
+      getCacheKey: () => {
+        const ids = this.#document.getSheetIds();
+        if (ids.length > 0) {
+          if (!this.#sheetNameResolver) return ids.join("|");
+          return ids.map((id) => this.#sheetNameResolver?.getSheetNameById(id) ?? id).join("|");
+        }
+        const currentSheetId = this.#getSheetId();
+        return this.#sheetNameResolver?.getSheetNameById(currentSheetId) ?? currentSheetId ?? "Sheet1";
+      },
     };
 
     const externalSchemaProvider = opts.schemaProvider ?? null;
@@ -155,6 +183,9 @@ export class FormulaBarTabCompletionController {
       const trimmed = name.trim();
       if (!trimmed) return null;
 
+      const resolved = this.#sheetNameResolver?.getSheetIdByName(trimmed);
+      if (resolved) return resolved;
+
       // Avoid creating phantom sheets during completion (DocumentController lazily
       // materializes sheets on read). If we don't have any known sheets yet,
       // only allow reads against the current sheet id.
@@ -187,7 +218,15 @@ export class FormulaBarTabCompletionController {
         cursorPosition: cursor,
         cellRef: activeCell,
         surroundingCells,
-      }, { previewEvaluator: createPreviewEvaluator({ document: this.#document, sheetId, cellAddress: activeCell, schemaProvider: this.#schemaProvider }) })
+      }, {
+        previewEvaluator: createPreviewEvaluator({
+          document: this.#document,
+          sheetId,
+          cellAddress: activeCell,
+          schemaProvider: this.#schemaProvider,
+          sheetNameResolver: this.#sheetNameResolver ?? undefined,
+        })
+      })
       .then((suggestions) => {
         if (requestId !== this.#completionRequest) return;
         if (this.#getSheetId() !== sheetId) return;
@@ -255,9 +294,11 @@ function createPreviewEvaluator(params: {
   sheetId: string;
   cellAddress: string;
   schemaProvider?: SchemaProvider | null;
+  sheetNameResolver?: SheetNameResolver | null;
 }): (args: { suggestion: Suggestion; context: CompletionContext }) => unknown | Promise<unknown> {
   const { document, sheetId, cellAddress } = params;
   const schemaProvider = params.schemaProvider ?? null;
+  const sheetNameResolver = params.sheetNameResolver ?? null;
 
   // Hard cap on the number of cell reads we allow for preview. This keeps
   // completion responsive even when the suggested formula references a large
@@ -343,7 +384,10 @@ function createPreviewEvaluator(params: {
       return entry.ref;
     };
 
-    const maybeRewrittenStructured = text.includes("[") ? rewriteStructuredReferences(text, tables, sheetId) : null;
+    const defaultSheetName = sheetNameResolver?.getSheetNameById(sheetId) ?? sheetId;
+    const maybeRewrittenStructured = text.includes("[")
+      ? rewriteStructuredReferences(text, tables, defaultSheetName)
+      : null;
     const evalText = maybeRewrittenStructured ?? text;
 
     const knownSheets =
@@ -354,6 +398,9 @@ function createPreviewEvaluator(params: {
     const resolveSheetId = (name: string): string | null => {
       const trimmed = name.trim();
       if (!trimmed) return null;
+
+      const resolved = sheetNameResolver?.getSheetIdByName(trimmed);
+      if (resolved) return resolved;
       // Avoid creating phantom sheets during preview evaluation (DocumentController
       // lazily materializes sheets on read). If we don't have any known sheets
       // yet, only allow reads against the current sheet id.

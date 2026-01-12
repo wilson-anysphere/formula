@@ -1252,6 +1252,7 @@ export class SpreadsheetApp {
         formulaBar: this.formulaBar,
         document: this.document,
         getSheetId: () => this.sheetId,
+        sheetNameResolver: this.sheetNameResolver ?? undefined,
         limits: this.limits,
         schemaProvider: {
           getNamedRanges: () => {
