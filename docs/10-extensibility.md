@@ -2,7 +2,9 @@
 
 ## Overview
 
-A vibrant extension ecosystem is critical for long-term success. We follow VS Code's model: extensions run in isolated processes with well-defined APIs, enabling powerful customization without compromising stability or security.
+A vibrant extension ecosystem is critical for long-term success. We follow VS Code's model: extensions run in isolated
+worker/sandbox contexts with well-defined APIs, enabling powerful customization without compromising stability or
+security.
 
 ## Desktop UX (current)
 
