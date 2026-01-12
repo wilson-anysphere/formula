@@ -105,7 +105,7 @@ if (tsLoaderArgs.length > 0) {
   // (bundler-style resolution). Node's default ESM resolver does not support that,
   // so we install a tiny loader that falls back from `./foo.js` -> `./foo.ts`.
   const loaderUrl = pathToFileURL(path.join(repoRoot, "scripts", "resolve-ts-imports-loader.mjs")).href;
-  baseNodeArgs.push(`--experimental-loader=${loaderUrl}`);
+  baseNodeArgs.push(...resolveNodeLoaderArgs(loaderUrl));
 }
 
 // Node's test runner defaults `--test-concurrency` to the number of available CPU
@@ -202,6 +202,36 @@ function supportsTypeStripping() {
   return probe.status === 0;
 }
 
+/**
+ * Resolve Node CLI flags to install an ESM loader.
+ *
+ * Prefer the newer `register()` API when available (via `--import`), since Node is
+ * actively deprecating/removing the older `--experimental-loader` mechanism.
+ *
+ * @param {string} loaderUrl absolute file:// URL
+ * @returns {string[]}
+ */
+function resolveNodeLoaderArgs(loaderUrl) {
+  const allowedFlags =
+    process.allowedNodeEnvironmentFlags && typeof process.allowedNodeEnvironmentFlags.has === "function"
+      ? process.allowedNodeEnvironmentFlags
+      : new Set();
+
+  if (allowedFlags.has("--import")) {
+    const registerScript = `import { register } from "node:module"; register(${JSON.stringify(loaderUrl)});`;
+    const dataUrl = `data:text/javascript;base64,${Buffer.from(registerScript, "utf8").toString("base64")}`;
+    return ["--import", dataUrl];
+  }
+
+  if (allowedFlags.has("--loader")) {
+    return ["--loader", loaderUrl];
+  }
+  if (allowedFlags.has("--experimental-loader")) {
+    return [`--experimental-loader=${loaderUrl}`];
+  }
+  return [];
+}
+
 function resolveTypeScriptLoaderArgs() {
   // When `typescript` is available, prefer a real TS->JS transpile loader over Node's
   // "strip-only" TS support:
@@ -215,20 +245,8 @@ function resolveTypeScriptLoaderArgs() {
     return [];
   }
 
-  const allowedFlags =
-    process.allowedNodeEnvironmentFlags && typeof process.allowedNodeEnvironmentFlags.has === "function"
-      ? process.allowedNodeEnvironmentFlags
-      : new Set();
-
   const loaderUrl = new URL("./resolve-ts-loader.mjs", import.meta.url).href;
-
-  if (allowedFlags.has("--loader")) {
-    return ["--loader", loaderUrl];
-  }
-  if (allowedFlags.has("--experimental-loader")) {
-    return [`--experimental-loader=${loaderUrl}`];
-  }
-  return [];
+  return resolveNodeLoaderArgs(loaderUrl);
 }
 
 async function hasNodeModules() {
