@@ -33693,6 +33693,30 @@
       "id": "oddlyield_date_text_a1e10539f6f5"
     },
     {
+      "formula": "=ODDLPRICE(DATE(2023,10,15),DATE(2025,3,1),DATE(2024,7,1),0.06,0.05,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLPRICE"
+      ],
+      "description": "ODDLPRICE with settlement before last_interest (multiple remaining coupons)",
+      "id": "oddlprice_settlement_before_last_interest_41d8bf60782e"
+    },
+    {
+      "formula": "=ODDLYIELD(DATE(2023,10,15),DATE(2025,3,1),DATE(2024,7,1),0.06,ODDLPRICE(DATE(2023,10,15),DATE(2025,3,1),DATE(2024,7,1),0.06,0.05,100,2,0),100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLYIELD"
+      ],
+      "description": "ODDLYIELD inverts ODDLPRICE when settlement is before last_interest",
+      "id": "oddlyield_settlement_before_last_interest_05b68d486085"
+    },
+    {
       "formula": "=ODDFPRICE(DATE(2020,1,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0)",
       "outputCell": "C1",
       "inputs": [],

@@ -976,6 +976,22 @@ def generate(
         description="ODDLYIELD with ISO date text arguments (date coercion + roundtrip via ODDLPRICE)",
     )
 
+    # Settlement before `last_interest` (ODDL* supports settlement anywhere before maturity).
+    add_case(
+        cases,
+        prefix="oddlprice_settlement_before_last_interest",
+        tags=["financial", "odd_coupon", "ODDLPRICE"],
+        formula="=ODDLPRICE(DATE(2023,10,15),DATE(2025,3,1),DATE(2024,7,1),0.06,0.05,100,2,0)",
+        description="ODDLPRICE with settlement before last_interest (multiple remaining coupons)",
+    )
+    add_case(
+        cases,
+        prefix="oddlyield_settlement_before_last_interest",
+        tags=["financial", "odd_coupon", "ODDLYIELD"],
+        formula="=ODDLYIELD(DATE(2023,10,15),DATE(2025,3,1),DATE(2024,7,1),0.06,ODDLPRICE(DATE(2023,10,15),DATE(2025,3,1),DATE(2024,7,1),0.06,0.05,100,2,0),100,2,0)",
+        description="ODDLYIELD inverts ODDLPRICE when settlement is before last_interest",
+    )
+
     # Boundary-date equality behavior (Excel quirks).
     #
     # These cases are intentionally simple and vary only one boundary at a time. Today they are
