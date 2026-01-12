@@ -134,6 +134,18 @@ if [[ -z "${FORMULA_CARGO_JOBS:-}" && "${jobs}" -gt 8 ]]; then
   jobs="8"
 fi
 limit_as="${FORMULA_CARGO_LIMIT_AS:-14G}"
+if [[ -n "${FORMULA_CARGO_LIMIT_AS:-}" ]]; then
+  if [[ "${limit_as}" != "0" && "${limit_as}" != "off" && "${limit_as}" != "unlimited" ]]; then
+    limit_as_norm="${limit_as//[[:space:]]/}"
+    limit_as_norm="$(printf '%s' "${limit_as_norm}" | tr '[:upper:]' '[:lower:]')"
+    limit_as_norm="${limit_as_norm%ib}"
+    limit_as_norm="${limit_as_norm%b}"
+    if ! [[ "${limit_as_norm}" =~ ^[0-9]+$ ]] && ! [[ "${limit_as_norm}" =~ ^[0-9]+[kmgt]$ ]]; then
+      echo "cargo_agent: invalid FORMULA_CARGO_LIMIT_AS=${limit_as} (expected e.g. 14G, 4096M, 8GiB, 0, off, or unlimited)" >&2
+      exit 2
+    fi
+  fi
+fi
 
 # Note: For `cargo test`, this wrapper may override the above `jobs` default to `1` (unless callers
 # explicitly configure `FORMULA_CARGO_JOBS` / `FORMULA_CARGO_TEST_JOBS`). This avoids sporadic rustc

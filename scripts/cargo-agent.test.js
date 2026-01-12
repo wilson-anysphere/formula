@@ -293,3 +293,21 @@ test(
     );
   },
 );
+
+test(
+  'cargo_agent rejects invalid FORMULA_CARGO_LIMIT_AS',
+  { skip: !hasBash },
+  () => {
+    const proc = spawnSync(
+      'bash',
+      ['-lc', 'export FORMULA_CARGO_LIMIT_AS=not-a-size && bash scripts/cargo_agent.sh check -h'],
+      { encoding: 'utf8', cwd: repoRoot },
+    );
+    if (proc.error) throw proc.error;
+    assert.notEqual(proc.status, 0, 'expected non-zero exit for invalid FORMULA_CARGO_LIMIT_AS');
+    assert.ok(
+      proc.stderr.includes('invalid FORMULA_CARGO_LIMIT_AS'),
+      `expected stderr to mention invalid FORMULA_CARGO_LIMIT_AS, got:\n${proc.stderr}`,
+    );
+  },
+);
