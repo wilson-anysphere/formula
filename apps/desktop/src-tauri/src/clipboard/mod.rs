@@ -26,6 +26,10 @@ fn normalize_base64_str(mut base64: &str) -> &str {
             .position(|&b| b == b',');
         if let Some(comma) = comma {
             base64 = &base64[comma + 1..];
+        } else {
+            // Malformed data URL (missing comma separator). Treat as empty so callers don't
+            // accidentally decode `data:...` as base64.
+            return "";
         }
     }
     base64.trim()

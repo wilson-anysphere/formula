@@ -69,7 +69,13 @@ function base64Bounds(base64: string): { start: number; end: number } {
         break;
       }
     }
-    if (comma >= 0) start = comma + 1;
+    if (comma >= 0) {
+      start = comma + 1;
+    } else {
+      // Malformed data URL (missing comma separator). Treat as empty so we don't accidentally
+      // decode `data:...` as base64.
+      return { start: base64.length, end: base64.length };
+    }
     while (start < base64.length && isTrimChar(base64.charCodeAt(start))) start += 1;
   }
 
