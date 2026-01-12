@@ -23,6 +23,8 @@ If you are editing collaboration code, start here and keep this doc in sync with
 - Workbook metadata managers: [`packages/collab/workbook/src/index.ts`](../packages/collab/workbook/src/index.ts) (`SheetManager`, `MetadataManager`, `NamedRangeManager`, `create*ForSession`)
 - Cell key helpers: [`packages/collab/session/src/cell-key.js`](../packages/collab/session/src/cell-key.js) (`makeCellKey`, `parseCellKey`, `normalizeCellKey`)
 - Desktop binder: [`packages/collab/binder/index.js`](../packages/collab/binder/index.js) (`bindYjsToDocumentController`)
+- Collaborative undo: [`packages/collab/undo/index.js`](../packages/collab/undo/index.js) (`createUndoService`, `REMOTE_ORIGIN`)
+- Cell encryption: [`packages/collab/encryption/src/index.node.js`](../packages/collab/encryption/src/index.node.js) (`encryptCellPlaintext`, `decryptCellPlaintext`)
 - Presence (Awareness wrapper): [`packages/collab/presence/src/presenceManager.js`](../packages/collab/presence/src/presenceManager.js) (`PresenceManager`)
 - Desktop presence renderer: [`apps/desktop/src/grid/presence-renderer/`](../apps/desktop/src/grid/presence-renderer/) (`PresenceRenderer`)
 - Permissions + masking: [`packages/collab/permissions/index.js`](../packages/collab/permissions/index.js) (`getCellPermissions`, `maskCellValue`)
@@ -286,6 +288,31 @@ You can include additional roots via:
 - `undo.includeRoots(doc)` (include arbitrary Yjs root types)
 
 Some internal roots are intentionally excluded from undo tracking (e.g. `cellStructuralOps`, the structural conflict monitor log), so conflict detection metadata is never undone.
+
+### Transactions + origins (local vs remote)
+
+Yjs transactions have an optional `origin` value (`doc.transact(fn, origin)`), which Formula uses pervasively to distinguish **local** vs **remote** changes.
+
+Practical guidance:
+
+- For any feature that mutates shared state, prefer `session.transactLocal(() => { ... })`. It runs `fn` inside a local-origin transaction so:
+  - collaborative undo (when enabled) records it as a local edit
+  - conflict monitors can reliably classify it as local
+- When applying remote updates manually in tests/tools, ensure they do *not* use the local origin. `@formula/collab-undo` exports a `REMOTE_ORIGIN` token for this purpose.
+
+Example:
+
+```ts
+import * as Y from "yjs";
+import { REMOTE_ORIGIN } from "@formula/collab-undo";
+
+Y.applyUpdate(session.doc, remoteUpdateBytes, REMOTE_ORIGIN);
+```
+
+Implementation references:
+
+- `CollabSession.transactLocal`: [`packages/collab/session/src/index.ts`](../packages/collab/session/src/index.ts)
+- `REMOTE_ORIGIN`: [`packages/collab/undo/src/yjs-undo-service.js`](../packages/collab/undo/src/yjs-undo-service.js)
 
 ---
 
