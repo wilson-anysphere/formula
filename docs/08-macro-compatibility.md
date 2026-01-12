@@ -1028,12 +1028,15 @@ Important notes:
     `FormsNormalizedData` (designer/UserForm storages).
   - For the `DigitalSignatureExt` stream variant, Office uses the MS-OVBA §2.4.2 v3 transcript and
     computes the **V3 Content Hash** (MS-OVBA §2.4.2.7):
-    `V3ContentHash = SHA-256(ProjectNormalizedData)`.
-  
-  Per MS-OSHARED §4.3, *legacy* VBA signature streams (`DigitalSignature` / `DigitalSignatureEx`)
-  embed an **MD5 (16-byte)** digest for binding even when the PKCS#7/CMS signature uses SHA-256 and
-  even when `DigestInfo.digestAlgorithm.algorithm` indicates SHA-256 (the OID is informational for
-  VBA binding in those variants).
+    `V3ContentHash = SHA-256(ProjectNormalizedData)`, where
+    `ProjectNormalizedData = V3ContentNormalizedData || FormsNormalizedData`.
+   
+  Per MS-OSHARED §4.3, the digest bytes embedded in **legacy** VBA signature streams
+  (`DigitalSignature` / `DigitalSignatureEx`) are always **MD5 (16 bytes)** even when the PKCS#7/CMS
+  signature uses SHA-256 and even when `DigestInfo.digestAlgorithm.algorithm` indicates SHA-256 (the
+  OID is informational for v1/v2 VBA binding). For the newest `DigitalSignatureExt` stream, Office
+  uses the MS-OVBA v3 digest over v3 `ProjectNormalizedData` and the digest algorithm OID is expected
+  to indicate SHA-256 (and is meaningful for selecting the v3 digest algorithm).
   
   This binding check is exposed via `formula-vba` as `VbaDigitalSignature::binding`. The desktop
   Trust Center treats a VBA project as "signed" only when the PKCS#7/CMS signature verifies **and**
@@ -1087,10 +1090,10 @@ How to obtain the signed digest for MS-OVBA signature binding:
   VBA signature binding digest bytes:
   - `SpcIndirectDataContent`: `messageDigest: DigestInfo.digest`
   - `SpcIndirectDataContentV2`: `SigDataV1Serialized.sourceHash`
-  - For legacy `DigitalSignature` / `DigitalSignatureEx`, digest bytes are expected to be a 16-byte
-    MD5 per MS-OSHARED §4.3 (even when the algorithm OID indicates SHA-256).
-  - For `DigitalSignatureExt`, digest bytes are typically SHA-256 (32 bytes) over the MS-OVBA v3
-    transcript.
+  - digest bytes are expected to be:
+    - 16-byte MD5 for legacy v1/v2 signature streams (`DigitalSignature` / `DigitalSignatureEx`)
+      per MS-OSHARED §4.3 (even when the algorithm OID indicates SHA-256), or
+    - 32-byte SHA-256 for the v3 `DigitalSignatureExt` stream (MS-OVBA §2.4.2).
 
 Binding (best-effort; see MS-OVBA):
 
