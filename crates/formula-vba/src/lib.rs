@@ -113,7 +113,11 @@ impl VBAProject {
         let encoding = project_stream_bytes
             .as_deref()
             .and_then(detect_project_codepage)
-            .or_else(|| DirStream::detect_codepage(&dir_decompressed).map(|cp| cp as u32).map(encoding_for_codepage))
+            .or_else(|| {
+                DirStream::detect_codepage(&dir_decompressed)
+                    .map(|cp| cp as u32)
+                    .map(encoding_for_codepage)
+            })
             .unwrap_or(WINDOWS_1252);
 
         if let Some(project_stream_bytes) = project_stream_bytes.as_deref() {
@@ -155,10 +159,7 @@ impl VBAProject {
         }
 
         Ok(Self {
-            name: dir_stream
-                .project_name
-                .clone()
-                .or(name_from_project_stream),
+            name: dir_stream.project_name.clone().or(name_from_project_stream),
             constants: dir_stream.constants.clone(),
             references,
             modules,
@@ -186,24 +187,64 @@ fn decode_with_encoding(bytes: &[u8], encoding: &'static Encoding) -> String {
 }
 
 fn detect_project_codepage(project_stream_bytes: &[u8]) -> Option<&'static Encoding> {
-    // The `PROJECT` stream is plain text; we can find the codepage by scanning
-    // the raw bytes for the ASCII `CodePage=` line.
-    let mut haystack = project_stream_bytes;
-    while let Some(idx) = find_subslice(haystack, b"CodePage=") {
-        let after = &haystack[idx + "CodePage=".len()..];
-        let mut digits = Vec::new();
-        for &b in after {
-            if b.is_ascii_digit() {
-                digits.push(b);
-            } else {
-                break;
-            }
+    // The `PROJECT` stream is plain text, but it may be encoded in the project's codepage. The
+    // `CodePage=...` directive itself is ASCII, so we can parse it directly from bytes without
+    // decoding the entire stream.
+    //
+    // Be permissive: accept case-insensitive `CodePage` with optional whitespace around `=`.
+    for mut line in project_stream_bytes.split(|&b| b == b'\n') {
+        // Strip CR from CRLF.
+        if line.last() == Some(&b'\r') {
+            line = &line[..line.len() - 1];
         }
-        if let Ok(n) = std::str::from_utf8(&digits).ok()?.parse::<u32>() {
-            return Some(encoding_for_codepage(n));
+
+        // Trim leading ASCII whitespace.
+        let mut start = 0usize;
+        while start < line.len() && matches!(line[start], b' ' | b'\t') {
+            start += 1;
         }
-        haystack = after;
+        let mut line = &line[start..];
+
+        // Parse `CodePage` key.
+        const KEY: &[u8] = b"CodePage";
+        let Some(prefix) = line.get(..KEY.len()) else {
+            continue;
+        };
+        if !prefix.eq_ignore_ascii_case(KEY) {
+            continue;
+        }
+        line = &line[KEY.len()..];
+
+        // Optional whitespace then '='.
+        let mut start = 0usize;
+        while start < line.len() && matches!(line[start], b' ' | b'\t') {
+            start += 1;
+        }
+        line = &line[start..];
+        if !line.starts_with(b"=") {
+            continue;
+        }
+        line = &line[1..];
+
+        // Optional whitespace then digits.
+        let mut start = 0usize;
+        while start < line.len() && matches!(line[start], b' ' | b'\t') {
+            start += 1;
+        }
+        line = &line[start..];
+
+        let mut end = 0usize;
+        while end < line.len() && line[end].is_ascii_digit() {
+            end += 1;
+        }
+        if end == 0 {
+            continue;
+        }
+        let digits = &line[..end];
+        let n = std::str::from_utf8(digits).ok()?.parse::<u32>().ok()?;
+        return Some(encoding_for_codepage(n));
     }
+
     None
 }
 
@@ -226,15 +267,6 @@ fn encoding_for_codepage(codepage: u32) -> &'static Encoding {
         65001 => UTF_8,
         _ => WINDOWS_1252,
     }
-}
-
-fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() {
-        return Some(0);
-    }
-    haystack
-        .windows(needle.len())
-        .position(|window| window == needle)
 }
 
 fn parse_reference(raw: &str) -> VBAReference {
@@ -379,7 +411,10 @@ mod tests {
             .iter()
             .find(|m| m.name == "Module1")
             .expect("Module1 present");
-        assert_eq!(module.attributes.get("VB_Name").map(String::as_str), Some("Module1"));
+        assert_eq!(
+            module.attributes.get("VB_Name").map(String::as_str),
+            Some("Module1")
+        );
         assert!(module.code.contains("Sub Hello"));
         assert!(module.code.contains("MsgBox"));
     }
@@ -429,6 +464,13 @@ mod tests {
 
         let out = decompress_container(&compressed).expect("decompress");
         assert_eq!(&out, data);
+    }
+
+    #[test]
+    fn detects_project_codepage_with_whitespace_and_case() {
+        let bytes = b"Name=\"VBAProject\"\r\ncodepage = 1251\r\n";
+        let enc = detect_project_codepage(bytes).expect("detect CodePage");
+        assert_eq!(enc, WINDOWS_1251);
     }
 
     #[test]
@@ -489,7 +531,11 @@ mod tests {
         let project = VBAProject::parse(&vba_bin).expect("parse");
         assert_eq!(project.name.as_deref(), Some("Проект"));
 
-        let module = project.modules.iter().find(|m| m.name == "Module1").unwrap();
+        let module = project
+            .modules
+            .iter()
+            .find(|m| m.name == "Module1")
+            .unwrap();
         assert!(module.code.contains(comment));
     }
 
@@ -588,7 +634,11 @@ mod tests {
 
         let vba_bin = ole.into_inner().into_inner();
         let project = VBAProject::parse(&vba_bin).expect("parse");
-        let module = project.modules.iter().find(|m| m.name == "Module1").unwrap();
+        let module = project
+            .modules
+            .iter()
+            .find(|m| m.name == "Module1")
+            .unwrap();
         assert!(module.code.contains("Sub Hello"));
     }
 

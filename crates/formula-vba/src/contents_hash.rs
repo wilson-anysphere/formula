@@ -1,8 +1,4 @@
-use encoding_rs::{
-    Encoding, BIG5, EUC_KR, GBK, SHIFT_JIS, UTF_16LE, UTF_8, WINDOWS_1250, WINDOWS_1251,
-    WINDOWS_1252, WINDOWS_1253, WINDOWS_1254, WINDOWS_1255, WINDOWS_1256, WINDOWS_1257,
-    WINDOWS_1258, WINDOWS_874,
-};
+use encoding_rs::{Encoding, UTF_16LE, WINDOWS_1252};
 use md5::Md5;
 use sha2::Digest as _;
 use sha2::Sha256;
@@ -51,8 +47,11 @@ pub fn content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
     let dir_decompressed = decompress_container(&dir_bytes)?;
     let encoding = project_stream_bytes
         .as_deref()
-        .and_then(detect_project_codepage)
-        .or_else(|| DirStream::detect_codepage(&dir_decompressed).map(encoding_for_codepage))
+        .and_then(crate::detect_project_codepage)
+        .or_else(|| {
+            DirStream::detect_codepage(&dir_decompressed)
+                .map(|cp| crate::encoding_for_codepage(cp as u32))
+        })
         .unwrap_or(WINDOWS_1252);
 
     let mut out = Vec::new();
@@ -188,40 +187,6 @@ pub fn agile_content_hash_md5(vba_project_bin: &[u8]) -> Result<Option<[u8; 16]>
     Ok(Some(h.finalize().into()))
 }
 
-fn detect_project_codepage(project_stream_bytes: &[u8]) -> Option<&'static Encoding> {
-    // The `PROJECT` stream is plain text; we can find the codepage by scanning
-    // the raw bytes for the ASCII `CodePage=` line.
-    let mut haystack = project_stream_bytes;
-    while let Some(idx) = find_subslice(haystack, b"CodePage=") {
-        let after = &haystack[idx + "CodePage=".len()..];
-        let mut digits = Vec::new();
-        for &b in after {
-            if b.is_ascii_digit() {
-                digits.push(b);
-            } else {
-                break;
-            }
-        }
-        if let Ok(n) = std::str::from_utf8(&digits).ok()?.parse::<u32>() {
-            if let Ok(cp) = u16::try_from(n) {
-                return Some(encoding_for_codepage(cp));
-            }
-            return Some(WINDOWS_1252);
-        }
-        haystack = after;
-    }
-    None
-}
-
-fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() {
-        return Some(0);
-    }
-    haystack
-        .windows(needle.len())
-        .position(|window| window == needle)
-}
-
 #[derive(Debug, Clone, Default)]
 struct ModuleInfoV3 {
     stream_name: String,
@@ -254,8 +219,11 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
     let dir_decompressed = decompress_container(&dir_bytes)?;
     let encoding = project_stream_bytes
         .as_deref()
-        .and_then(detect_project_codepage)
-        .or_else(|| DirStream::detect_codepage(&dir_decompressed).map(encoding_for_codepage))
+        .and_then(crate::detect_project_codepage)
+        .or_else(|| {
+            DirStream::detect_codepage(&dir_decompressed)
+                .map(|cp| crate::encoding_for_codepage(cp as u32))
+        })
         .unwrap_or(WINDOWS_1252);
 
     let mut out = Vec::new();
@@ -585,27 +553,6 @@ fn is_attribute_line(line: &[u8]) -> bool {
     }
     matches!(line[keyword.len()], b' ' | b'\t')
 }
-fn encoding_for_codepage(codepage: u16) -> &'static Encoding {
-    match codepage as u32 {
-        874 => WINDOWS_874,
-        932 => SHIFT_JIS,
-        936 => GBK,
-        949 => EUC_KR,
-        950 => BIG5,
-        1250 => WINDOWS_1250,
-        1251 => WINDOWS_1251,
-        1252 => WINDOWS_1252,
-        1253 => WINDOWS_1253,
-        1254 => WINDOWS_1254,
-        1255 => WINDOWS_1255,
-        1256 => WINDOWS_1256,
-        1257 => WINDOWS_1257,
-        1258 => WINDOWS_1258,
-        65001 => UTF_8,
-        _ => WINDOWS_1252,
-    }
-}
-
 fn decode_dir_string(bytes: &[u8], encoding: &'static Encoding) -> String {
     // MS-OVBA dir strings are generally stored using the project codepage, but some records may
     // appear in UTF-16LE form. Use the same heuristic as the main `DirStream` parser so we can
