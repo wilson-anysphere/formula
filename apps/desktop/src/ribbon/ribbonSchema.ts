@@ -380,6 +380,36 @@ export const defaultRibbonSchema: RibbonSchema = {
           ],
         },
         {
+          id: "home.debug.ai",
+          label: "AI",
+          buttons: [
+            {
+              id: "open-panel-ai-chat",
+              label: "AI",
+              ariaLabel: "Toggle AI panel",
+              icon: "🤖",
+              testId: "open-panel-ai-chat",
+              size: "icon",
+            },
+            {
+              id: "open-inline-ai-edit",
+              label: "Inline Edit",
+              ariaLabel: "Inline AI Edit",
+              icon: "🪄",
+              testId: "open-inline-ai-edit",
+              size: "icon",
+            },
+            {
+              id: "open-ai-panel",
+              label: "AI (legacy)",
+              ariaLabel: "Toggle AI panel",
+              icon: "🤖",
+              testId: "open-ai-panel",
+              size: "icon",
+            },
+          ],
+        },
+        {
           id: "home.font",
           label: "Font",
           buttons: [
@@ -491,36 +521,6 @@ export const defaultRibbonSchema: RibbonSchema = {
                 { id: "home.font.clearFormatting.clearContents", label: "Clear Contents", ariaLabel: "Clear Contents", icon: "⌫" },
                 { id: "home.font.clearFormatting.clearAll", label: "Clear All", ariaLabel: "Clear All", icon: "🧹" },
               ],
-            },
-          ],
-        },
-        {
-          id: "home.debug.ai",
-          label: "AI",
-          buttons: [
-            {
-              id: "open-panel-ai-chat",
-              label: "AI",
-              ariaLabel: "Toggle AI panel",
-              icon: "🤖",
-              testId: "open-panel-ai-chat",
-              size: "icon",
-            },
-            {
-              id: "open-inline-ai-edit",
-              label: "Inline Edit",
-              ariaLabel: "Inline AI Edit",
-              icon: "🪄",
-              testId: "open-inline-ai-edit",
-              size: "icon",
-            },
-            {
-              id: "open-ai-panel",
-              label: "AI (legacy)",
-              ariaLabel: "Toggle AI panel",
-              icon: "🤖",
-              testId: "open-ai-panel",
-              size: "icon",
             },
           ],
         },
