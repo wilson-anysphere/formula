@@ -2,85 +2,98 @@ import { expect, test } from "@playwright/test";
 
 import { gotoDesktop } from "./helpers";
 
+function installTauriStubForTests() {
+  const listeners: Record<string, any> = {};
+  (window as any).__tauriListeners = listeners;
+  (window as any).__tauriInvokeCalls = [];
+
+  const pushCall = (cmd: string, args: any) => {
+    (window as any).__tauriInvokeCalls.push({ cmd, args });
+  };
+
+  (window as any).__TAURI__ = {
+    core: {
+      invoke: async (cmd: string, args: any) => {
+        pushCall(cmd, args);
+        switch (cmd) {
+          case "open_workbook":
+            return {
+              path: args?.path ?? null,
+              origin_path: args?.path ?? null,
+              sheets: [{ id: "Sheet1", name: "Sheet1" }],
+            };
+
+          case "get_sheet_used_range":
+            return { start_row: 0, end_row: 0, start_col: 0, end_col: 0 };
+
+          case "get_range": {
+            const startRow = Number(args?.start_row ?? 0);
+            const endRow = Number(args?.end_row ?? startRow);
+            const startCol = Number(args?.start_col ?? 0);
+            const endCol = Number(args?.end_col ?? startCol);
+            const rows = Math.max(0, endRow - startRow + 1);
+            const cols = Math.max(0, endCol - startCol + 1);
+
+            const values = Array.from({ length: rows }, (_v, r) =>
+              Array.from({ length: cols }, (_w, c) => {
+                const row = startRow + r;
+                const col = startCol + c;
+                if (row === 0 && col === 0) {
+                  return { value: "Hello", formula: null, display_value: "Hello" };
+                }
+                return { value: null, formula: null, display_value: "" };
+              }),
+            );
+
+            return { values, start_row: startRow, start_col: startCol };
+          }
+
+          case "add_sheet":
+            // Purposefully return an id that differs from the requested name to ensure
+            // the frontend treats the backend response as canonical.
+            return { id: "Sheet2-backend", name: String(args?.name ?? "Sheet2") };
+
+          case "stat_file":
+            return { mtime_ms: 0, size_bytes: 0 };
+
+          case "set_macro_ui_context":
+          case "fire_workbook_open":
+          case "mark_saved":
+          case "set_cell":
+          case "set_range":
+          case "save_workbook":
+            return null;
+
+          default:
+            throw new Error(`Unexpected invoke: ${cmd} ${JSON.stringify(args)}`);
+        }
+      },
+    },
+    event: {
+      listen: async (name: string, handler: any) => {
+        listeners[name] = handler;
+        return () => {
+          delete listeners[name];
+        };
+      },
+      emit: async () => {},
+    },
+    window: {
+      getCurrentWebviewWindow: () => ({
+        hide: async () => {
+          (window as any).__tauriHidden = true;
+        },
+        close: async () => {
+          (window as any).__tauriClosed = true;
+        },
+      }),
+    },
+  };
+}
+
 test.describe("tauri workbook integration", () => {
   test("file-dropped event opens a workbook and populates the document", async ({ page }) => {
-    await page.addInitScript(() => {
-      const listeners: Record<string, any> = {};
-      (window as any).__tauriListeners = listeners;
-
-      (window as any).__TAURI__ = {
-        core: {
-          invoke: async (cmd: string, args: any) => {
-            switch (cmd) {
-              case "open_workbook":
-                return {
-                  path: args?.path ?? null,
-                  origin_path: args?.path ?? null,
-                  sheets: [{ id: "Sheet1", name: "Sheet1" }]
-                };
-
-              case "get_sheet_used_range":
-                return { start_row: 0, end_row: 0, start_col: 0, end_col: 0 };
-
-              case "get_range": {
-                const startRow = Number(args?.start_row ?? 0);
-                const endRow = Number(args?.end_row ?? startRow);
-                const startCol = Number(args?.start_col ?? 0);
-                const endCol = Number(args?.end_col ?? startCol);
-                const rows = Math.max(0, endRow - startRow + 1);
-                const cols = Math.max(0, endCol - startCol + 1);
-
-                const values = Array.from({ length: rows }, (_v, r) =>
-                  Array.from({ length: cols }, (_w, c) => {
-                    const row = startRow + r;
-                    const col = startCol + c;
-                    if (row === 0 && col === 0) {
-                      return { value: "Hello", formula: null, display_value: "Hello" };
-                    }
-                    return { value: null, formula: null, display_value: "" };
-                  })
-                );
-
-                return { values, start_row: startRow, start_col: startCol };
-              }
-
-              case "set_macro_ui_context":
-                return null;
-
-              case "fire_workbook_open":
-                return { ok: true, output: [], updates: [] };
-
-              case "set_cell":
-              case "set_range":
-              case "save_workbook":
-                return null;
-
-              default:
-                throw new Error(`Unexpected invoke: ${cmd} ${JSON.stringify(args)}`);
-            }
-          }
-        },
-        event: {
-          listen: async (name: string, handler: any) => {
-            listeners[name] = handler;
-            return () => {
-              delete listeners[name];
-            };
-          },
-          emit: async () => {},
-        },
-        window: {
-          getCurrentWebviewWindow: () => ({
-            hide: async () => {
-              (window as any).__tauriHidden = true;
-            },
-            close: async () => {
-              (window as any).__tauriClosed = true;
-            }
-          })
-        }
-      };
-    });
+    await page.addInitScript(installTauriStubForTests);
 
     await gotoDesktop(page);
     
@@ -98,5 +111,49 @@ test.describe("tauri workbook integration", () => {
 
     const a1 = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
     expect(a1).toBe("Hello");
+  });
+
+  test("sheet add button calls backend add_sheet and uses returned id for subsequent sync", async ({ page }) => {
+    await page.addInitScript(installTauriStubForTests);
+
+    await gotoDesktop(page);
+
+    await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["file-dropped"]));
+    await page.evaluate(() => {
+      (window as any).__tauriListeners["file-dropped"]({ payload: ["/tmp/fake.xlsx"] });
+    });
+
+    await expect(page.getByTestId("sheet-switcher")).toHaveValue("Sheet1");
+
+    await page.getByTestId("sheet-add").click();
+
+    // Frontend should trust the backend id.
+    await expect(page.getByTestId("sheet-tab-Sheet2-backend")).toBeVisible();
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId()))
+      .toBe("Sheet2-backend");
+
+    // Ensure the backend command was invoked with the next SheetN name.
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__tauriInvokeCalls?.filter((c: any) => c.cmd === "add_sheet")?.length ?? 0))
+      .toBe(1);
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__tauriInvokeCalls?.find((c: any) => c.cmd === "add_sheet")?.args?.name))
+      .toBe("Sheet2");
+
+    // Mutate the document to ensure workbook sync uses the backend sheet id (not the requested name).
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const sheetId = app.getCurrentSheetId();
+      app.getDocument().setCellValue(sheetId, "A1", "Hello from Sheet2");
+    });
+
+    await page.waitForFunction(() =>
+      ((window as any).__tauriInvokeCalls ?? []).some(
+        (c: any) =>
+          (c.cmd === "set_cell" || c.cmd === "set_range") &&
+          (c.args?.sheet_id ?? c.args?.sheetId) === "Sheet2-backend",
+      ),
+    );
   });
 });
