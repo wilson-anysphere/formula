@@ -128,6 +128,25 @@ test.describe("updater UI wiring", () => {
     await expect(page.getByTestId("update-ready-toast")).toContainText(/download/i);
   });
 
+  test("download error events update the dialog when open", async ({ page }) => {
+    await gotoDesktop(page);
+
+    await fireTauriEvent(page, "update-available", { source: "manual", version: "9.9.9", body: "Notes" });
+    await expect(page.getByTestId("updater-dialog")).toBeVisible();
+
+    await fireTauriEvent(page, "update-download-started", { source: "startup", version: "9.9.9" });
+    await expect(page.getByTestId("updater-progress-wrap")).toBeVisible();
+
+    await fireTauriEvent(page, "update-download-error", {
+      source: "startup",
+      version: "9.9.9",
+      message: "network down",
+    });
+    await expect(page.getByTestId("updater-progress-wrap")).toBeHidden();
+    await expect(page.getByTestId("updater-status")).toContainText("network down");
+    await expect(page.getByTestId("updater-view-versions")).toHaveClass(/updater-dialog__view-versions--primary/);
+  });
+
   test("download progress events update the dialog and show a restart CTA when open", async ({ page }) => {
     await gotoDesktop(page);
 
