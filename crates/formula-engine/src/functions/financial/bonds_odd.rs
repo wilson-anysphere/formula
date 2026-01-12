@@ -141,7 +141,11 @@
 //!
 //! - `A = days(I, S)` accrued days from issue to settlement
 //! - `DFC = days(I, F)` days in the odd first accrual period (issue → first coupon)
-//! - `DSC = days(S, F)` days from settlement to first coupon (`DSC = DFC - A`)
+//! - `DSC = days(S, F)` days from settlement to first coupon
+//!   - For additive day-count conventions (the actual/actual bases `1/2/3`), `DSC == DFC - A`.
+//!   - For 30/360 bases (`0/4`), Excel’s 30/360 day-count is **not strictly additive** across
+//!     intermediate dates (because end-of-month adjustments depend on the start date). In that
+//!     case, treat `DSC` as its own quantity computed directly from `(S, F)`.
 //! - `E = days(prev_coupon(F), F)` days in a regular coupon period
 //! - `N = count_regular_coupons(F..=M)` number of coupon dates from `F` through `M` inclusive
 //!
@@ -207,7 +211,10 @@
 //!
 //! - `A = days(L, S)` accrued days in the last period
 //! - `DLM = days(L, M)` days in the odd last accrual period (last_interest → maturity)
-//! - `DSM = days(S, M)` days from settlement to maturity (`DSM = DLM - A`)
+//! - `DSM = days(S, M)` days from settlement to maturity
+//!   - For additive day-count conventions (the actual/actual bases `1/2/3`), `DSM == DLM - A`.
+//!   - For 30/360 bases (`0/4`), Excel’s 30/360 day-count is **not strictly additive** across
+//!     intermediate dates; compute `DSM` directly from `(S, M)`.
 //! - `E = days(prev_coupon(L), L)` days in a regular coupon period
 //!
 //! Cashflows:

@@ -33,6 +33,10 @@ The most stable public docs we link to are the VBA `WorksheetFunction` pages:
 
 ## Where the implementation lives
 
+The core implementation lives at:
+
+- `crates/formula-engine/src/functions/financial/odd_coupon.rs`
+
 Implementation notes and the intended math model are documented inline at:
 
 - `crates/formula-engine/src/functions/financial/bonds_odd.rs`
