@@ -1005,6 +1005,29 @@ fn workbook_xml_set_date_system(
     loop {
         let event = reader.read_event_into(&mut buf)?;
         match event {
+            Event::Empty(ref e) if local_name(e.name().as_ref()) == b"workbook" => {
+                workbook_ns.get_or_insert(crate::xml::workbook_xml_namespaces_from_workbook_start(e)?);
+
+                // Degenerate/self-closing workbook roots can't contain child elements. If we need
+                // to force the 1904 date system we must expand `<workbook/>` into
+                // `<workbook>...<workbookPr/>...</workbook>`.
+                if date_system == DateSystem::V1904 {
+                    let workbook_tag_name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                    writer.write_event(Event::Start(e.to_owned()))?;
+
+                    let tag = workbook_ns
+                        .as_ref()
+                        .map(|ns| crate::xml::prefixed_tag(ns.spreadsheetml_prefix.as_deref(), "workbookPr"))
+                        .unwrap_or_else(|| "workbookPr".to_string());
+                    let mut wb_pr = BytesStart::new(tag.as_str());
+                    wb_pr.push_attribute(("date1904", "1"));
+                    writer.write_event(Event::Empty(wb_pr))?;
+
+                    writer.write_event(Event::End(BytesEnd::new(workbook_tag_name.as_str())))?;
+                } else {
+                    writer.write_event(Event::Empty(e.to_owned()))?;
+                }
+            }
             Event::Start(ref e) if local_name(e.name().as_ref()) == b"workbook" => {
                 workbook_ns.get_or_insert(crate::xml::workbook_xml_namespaces_from_workbook_start(e)?);
                 writer.write_event(Event::Start(e.to_owned()))?;
@@ -1569,6 +1592,73 @@ mod tests {
         zip.write_all(worksheet_xml.as_bytes()).unwrap();
 
         zip.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn set_workbook_date_system_expands_prefixed_self_closing_workbook_root() {
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/>"#;
+
+        let updated =
+            workbook_xml_set_date_system(workbook_xml.as_bytes(), DateSystem::V1904).expect("set date system");
+        let updated = std::str::from_utf8(&updated).expect("utf8");
+        let doc = Document::parse(updated).expect("updated workbook.xml parses");
+
+        assert!(
+            updated.contains(r#"xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main""#),
+            "expected output to preserve SpreadsheetML namespace declaration, got:\n{updated}"
+        );
+        assert!(
+            updated.contains(r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#),
+            "expected output to preserve relationships namespace declaration, got:\n{updated}"
+        );
+        assert!(
+            updated.contains("<x:workbookPr"),
+            "expected output to contain a prefixed workbookPr, got:\n{updated}"
+        );
+        assert!(
+            updated.contains("</x:workbook>"),
+            "expected output to expand the workbook root, got:\n{updated}"
+        );
+
+        let spreadsheetml = crate::xml::SPREADSHEETML_NS;
+        let workbook_pr: Vec<_> = doc
+            .descendants()
+            .filter(|n| n.is_element() && n.tag_name().name() == "workbookPr")
+            .collect();
+        assert_eq!(workbook_pr.len(), 1);
+        assert_eq!(workbook_pr[0].tag_name().namespace(), Some(spreadsheetml));
+        assert_eq!(workbook_pr[0].attribute("date1904"), Some("1"));
+    }
+
+    #[test]
+    fn set_workbook_date_system_expands_default_ns_self_closing_workbook_root() {
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>"#;
+
+        let updated =
+            workbook_xml_set_date_system(workbook_xml.as_bytes(), DateSystem::V1904).expect("set date system");
+        let updated = std::str::from_utf8(&updated).expect("utf8");
+        let doc = Document::parse(updated).expect("updated workbook.xml parses");
+
+        assert!(
+            updated.contains("<workbookPr"),
+            "expected output to contain an unprefixed workbookPr, got:\n{updated}"
+        );
+        assert!(
+            updated.contains("</workbook>"),
+            "expected output to expand the workbook root, got:\n{updated}"
+        );
+
+        let spreadsheetml = crate::xml::SPREADSHEETML_NS;
+        let workbook_pr: Vec<_> = doc
+            .descendants()
+            .filter(|n| n.is_element() && n.tag_name().name() == "workbookPr")
+            .collect();
+        assert_eq!(workbook_pr.len(), 1);
+        assert_eq!(workbook_pr[0].tag_name().namespace(), Some(spreadsheetml));
+        assert_eq!(workbook_pr[0].attribute("date1904"), Some("1"));
     }
 
     fn load_fixture() -> Vec<u8> {
