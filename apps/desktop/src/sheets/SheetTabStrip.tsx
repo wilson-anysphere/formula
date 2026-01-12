@@ -200,6 +200,7 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
           type="button"
           className="sheet-nav-btn"
           aria-label="Scroll sheet tabs left"
+          tabIndex={-1}
           onClick={() => scrollTabsBy(-120)}
           disabled={!canScroll.left}
         >
@@ -209,6 +210,7 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
           type="button"
           className="sheet-nav-btn"
           aria-label="Scroll sheet tabs right"
+          tabIndex={-1}
           onClick={() => scrollTabsBy(120)}
           disabled={!canScroll.right}
         >
@@ -219,18 +221,63 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
       <div
         className="sheet-tabs"
         ref={containerRef}
-        tabIndex={0}
         role="tablist"
         aria-label="Sheets"
+        aria-orientation="horizontal"
         onKeyDown={(e) => {
           if (e.defaultPrevented) return;
+
+          const target = e.target as HTMLElement | null;
+          if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+
+          const tabs = containerRef.current
+            ? Array.from(containerRef.current.querySelectorAll<HTMLButtonElement>('button[role="tab"]'))
+            : [];
+
+          if (target instanceof HTMLButtonElement && target.getAttribute("role") === "tab" && tabs.length > 0) {
+            const idx = tabs.indexOf(target);
+            if (idx !== -1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+              const focusTab = (nextIdx: number) => {
+                const next = tabs[nextIdx];
+                if (!next) return;
+                next.focus();
+                next.scrollIntoView({ block: "nearest", inline: "nearest" });
+              };
+
+              if (e.key === "ArrowRight") {
+                e.preventDefault();
+                e.stopPropagation();
+                focusTab(Math.min(tabs.length - 1, idx + 1));
+                return;
+              }
+              if (e.key === "ArrowLeft") {
+                e.preventDefault();
+                e.stopPropagation();
+                focusTab(Math.max(0, idx - 1));
+                return;
+              }
+              if (e.key === "Home") {
+                e.preventDefault();
+                e.stopPropagation();
+                focusTab(0);
+                return;
+              }
+              if (e.key === "End") {
+                e.preventDefault();
+                e.stopPropagation();
+                focusTab(Math.max(0, tabs.length - 1));
+                return;
+              }
+
+              // Enter/Space are handled by the <button> itself to activate the focused tab.
+              // ContextMenu / Shift+F10 should open the native context menu.
+            }
+          }
+
           const primary = e.ctrlKey || e.metaKey;
           if (!primary) return;
           if (e.shiftKey || e.altKey) return;
           if (e.key !== "PageUp" && e.key !== "PageDown") return;
-
-          const target = e.target as HTMLElement | null;
-          if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
           e.preventDefault();
 
           const idx = visibleSheets.findIndex((s) => s.id === activeSheetId);
@@ -342,16 +389,19 @@ function SheetTab(props: {
 }) {
   const { sheet, active, editing, draftName, renameError } = props;
   const cancelBlurCommitRef = useRef(false);
+  const ariaLabel = sheet.visibility === "visible" ? sheet.name : `${sheet.name} (${sheet.visibility})`;
 
   return (
     <button
       type="button"
       className="sheet-tab"
+      role="tab"
+      aria-selected={active}
+      aria-label={ariaLabel}
+      tabIndex={active ? 0 : -1}
       data-testid={`sheet-tab-${sheet.id}`}
       data-sheet-id={sheet.id}
       data-active={active ? "true" : "false"}
-      role="tab"
-      aria-selected={active ? "true" : "false"}
       draggable={!editing}
       ref={props.tabRef}
       onClick={() => {

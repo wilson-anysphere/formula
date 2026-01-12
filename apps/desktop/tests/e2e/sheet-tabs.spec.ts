@@ -75,6 +75,37 @@ test.describe("sheet tabs", () => {
     await expect(page.getByTestId("active-value")).toHaveText(`Hello from ${nextSheetId}`);
   });
 
+  test("keyboard navigation activates the focused sheet tab", async ({ page }) => {
+    await gotoDesktop(page);
+
+    // Ensure A1 is active before switching sheets so the status bar reflects A1 values.
+    await page.click("#grid", { position: { x: 5, y: 5 } });
+
+    // Lazily create Sheet2 by writing a value into it.
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      app.getDocument().setCellValue("Sheet2", "A1", "Hello from Sheet2");
+    });
+    await expect(page.getByRole("tab", { name: "Sheet2" })).toBeVisible();
+
+    // Focus the tab strip via keyboard navigation.
+    const sheet1Tab = page.getByRole("tab", { name: "Sheet1" });
+    for (let i = 0; i < 6; i += 1) {
+      await page.keyboard.press("Tab");
+      if (await sheet1Tab.evaluate((el) => el === document.activeElement)) break;
+    }
+    await expect(sheet1Tab).toBeFocused();
+
+    // Arrow to Sheet2, then activate it.
+    await page.keyboard.press("ArrowRight");
+    const sheet2Tab = page.getByRole("tab", { name: "Sheet2" });
+    await expect(sheet2Tab).toBeFocused();
+
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("tab", { name: "Sheet2" })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByTestId("active-value")).toHaveText("Hello from Sheet2");
+  });
+
   test("double-click rename commits on Enter and updates the tab label", async ({ page }) => {
     await gotoDesktop(page);
 
@@ -194,6 +225,7 @@ test.describe("sheet tabs", () => {
       window.dispatchEvent(evt);
     });
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet3");
+  });
 
   test("sheet position indicator uses visible sheets (hide/unhide)", async ({ page }) => {
     await gotoDesktop(page);
@@ -223,7 +255,6 @@ test.describe("sheet tabs", () => {
     });
 
     await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 3 of 3");
-  });
   });
 
   test("renaming a sheet marks the document dirty", async ({ page }) => {
