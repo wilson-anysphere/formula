@@ -447,9 +447,8 @@ fn dump_rich_data_cli_extracts_cell_images_and_writes_manifest(
     assert_eq!(cols[3], "Sheet1_A1.png");
     assert_eq!(cols[4], "xl/media/image1.png");
     // The workbook does not include `rdrichvalue.xml` local-image metadata, so `CalcOrigin`
-    // cannot be recovered. Excel commonly uses `CalcOrigin=5` for embedded in-cell images; the
-    // extractor uses that as a best-effort default.
-    assert_eq!(cols[5], "5");
+    // cannot be recovered and defaults to `0` (unknown).
+    assert_eq!(cols[5], "0");
     assert_eq!(cols[6], "-");
     assert_eq!(cols[7], "-");
 
@@ -552,9 +551,8 @@ fn dump_rich_data_cli_extracts_cell_images_without_metadata(
     assert_eq!(cols[3], "Sheet1_A1.png");
     assert_eq!(cols[4], "xl/media/image1.png");
     // Metadata is missing, so the extractor falls back to relationship-slot indexing; without
-    // `rdrichvalue.xml`, `CalcOrigin` cannot be recovered. Excel commonly uses `CalcOrigin=5` for
-    // embedded in-cell images; the extractor uses that as a best-effort default.
-    assert_eq!(cols[5], "5");
+    // `rdrichvalue.xml`, `CalcOrigin` cannot be recovered and defaults to `0` (unknown).
+    assert_eq!(cols[5], "0");
     assert_eq!(cols[6], "-");
     assert_eq!(cols[7], "-");
 
