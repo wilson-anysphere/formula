@@ -369,6 +369,11 @@ fn error_cases() {
         Err(ExcelError::Num)
     );
 
+    // TBILL settlement must be before maturity.
+    assert_eq!(tbillprice(settlement, maturity, 0.05), Err(ExcelError::Num));
+    assert_eq!(tbillyield(settlement, maturity, 99.0), Err(ExcelError::Num));
+    assert_eq!(tbilleq(settlement, maturity, 0.05), Err(ExcelError::Num));
+
     // TBILL maturity too long (> 365 days).
     let long_maturity = serial_1900(2025, 2, 1);
     assert_eq!(
@@ -383,4 +388,33 @@ fn error_cases() {
         tbilleq(settlement, long_maturity, 0.05),
         Err(ExcelError::Num)
     );
+
+    // TBILL functions require finite, positive discount/price inputs.
+    let valid_maturity = serial_1900(2024, 7, 1);
+    for discount in [0.0, -0.01, f64::INFINITY, f64::NAN] {
+        assert_eq!(
+            tbillprice(settlement, valid_maturity, discount),
+            Err(ExcelError::Num),
+            "TBILLPRICE(discount={discount:?}) should be #NUM!"
+        );
+        assert_eq!(
+            tbilleq(settlement, valid_maturity, discount),
+            Err(ExcelError::Num),
+            "TBILLEQ(discount={discount:?}) should be #NUM!"
+        );
+    }
+    for pr in [0.0, -1.0, f64::INFINITY, f64::NAN] {
+        assert_eq!(
+            tbillyield(settlement, valid_maturity, pr),
+            Err(ExcelError::Num),
+            "TBILLYIELD(pr={pr:?}) should be #NUM!"
+        );
+    }
+
+    // Reject discounts that imply a non-positive bill price.
+    assert_eq!(
+        tbillprice(settlement, valid_maturity, 2.0),
+        Err(ExcelError::Num)
+    );
+    assert_eq!(tbilleq(settlement, valid_maturity, 2.0), Err(ExcelError::Num));
 }
