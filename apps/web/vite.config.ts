@@ -3,9 +3,19 @@ import { defineConfig } from "vite";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
+const marketplaceSharedRoot = fileURLToPath(new URL("../../shared", import.meta.url));
 
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: [
+      // `@formula/marketplace-shared` is a workspace package backed by the repo `shared/` directory.
+      // Some CI/dev environments can run with stale node_modules symlinks (cached installs), which
+      // causes Vite/Rollup to fail to resolve the package. Alias it directly so web builds/e2e stay
+      // resilient.
+      { find: /^@formula\/marketplace-shared/, replacement: marketplaceSharedRoot }
+    ],
+  },
   build: {
     commonjsOptions: {
       // `shared/` is CommonJS, but the web runtime imports the browser verifier (ESM)
