@@ -8,6 +8,33 @@ const { MarketplaceStore } = require("./store");
 const CACHE_CONTROL_REVALIDATE = "public, max-age=0, must-revalidate";
 const CACHE_CONTROL_NO_STORE = "no-store";
 
+// The desktop/web clients call the marketplace from non-HTTP origins (e.g. `tauri://localhost`),
+// so public GET endpoints must be CORS-enabled and must expose the signature/sha headers that
+// clients verify at install time.
+//
+// Note: We intentionally keep CORS scoped to read-only endpoints. Mutation endpoints (publish/admin)
+// remain non-CORS so browser contexts cannot call them cross-origin.
+const PUBLIC_CORS_EXPOSE_HEADERS = [
+  "etag",
+  "retry-after",
+  "x-package-signature",
+  "x-package-sha256",
+  "x-package-scan-status",
+  "x-package-files-sha256",
+  "x-package-format-version",
+  "x-package-published-at",
+  "x-publisher",
+  "x-publisher-key-id",
+].join(", ");
+
+function withPublicCorsHeaders(headers = {}) {
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Expose-Headers": PUBLIC_CORS_EXPOSE_HEADERS,
+    ...headers,
+  };
+}
+
 class HttpError extends Error {
   constructor(statusCode, message) {
     super(message);
@@ -248,10 +275,37 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
     const method = req.method || "GET";
     let route = "unknown";
     let statusCode = 500;
+    let isPublicGetEndpoint = false;
 
     try {
       const url = new URL(req.url || "/", "http://localhost");
       const segments = parsePath(url.pathname);
+
+      isPublicGetEndpoint =
+        url.pathname === "/api/search" ||
+        (segments[0] === "api" &&
+          segments[1] === "extensions" &&
+          (segments.length === 3 || (segments.length === 5 && segments[3] === "download")));
+
+      // Handle CORS preflight for public GET endpoints (allows desktop/web clients to use
+      // conditional requests and inspect signature headers).
+      if (req.method === "OPTIONS" && isPublicGetEndpoint) {
+        route = `${url.pathname} (OPTIONS)`;
+        statusCode = 204;
+        res.writeHead(
+          204,
+          withPublicCorsHeaders({
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers":
+              typeof req.headers["access-control-request-headers"] === "string"
+                ? req.headers["access-control-request-headers"]
+                : "Content-Type, If-None-Match",
+            "Access-Control-Max-Age": "86400"
+          }),
+        );
+        res.end();
+        return;
+      }
 
       if (req.method === "GET" && url.pathname === "/api/health") {
         route = "/api/health";
@@ -278,7 +332,7 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
           metrics.rateLimited += 1;
           res.setHeader("Retry-After", String(Math.ceil(limited.retryAfterMs / 1000)));
           statusCode = 429;
-          return sendJson(res, 429, { error: "Too Many Requests" });
+          return sendJson(res, 429, { error: "Too Many Requests" }, withPublicCorsHeaders());
         }
 
         const q = url.searchParams.get("q") || "";
@@ -294,7 +348,8 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
         return sendJson(
           res,
           200,
-          await store.search({ q, category, tag, verified, featured, sort, limit, offset, cursor })
+          await store.search({ q, category, tag, verified, featured, sort, limit, offset, cursor }),
+          withPublicCorsHeaders(),
         );
       }
 
@@ -305,14 +360,14 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
           metrics.rateLimited += 1;
           res.setHeader("Retry-After", String(Math.ceil(limited.retryAfterMs / 1000)));
           statusCode = 429;
-          return sendJson(res, 429, { error: "Too Many Requests" });
+          return sendJson(res, 429, { error: "Too Many Requests" }, withPublicCorsHeaders());
         }
 
         const id = segments[2];
         const ext = await store.getExtension(id);
         if (!ext) {
           statusCode = 404;
-          return sendJson(res, 404, { error: "Not found" });
+          return sendJson(res, 404, { error: "Not found" }, withPublicCorsHeaders());
         }
         const publisherKeysTag = Array.isArray(ext.publisherKeys)
           ? ext.publisherKeys
@@ -327,12 +382,20 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
         )}"`;
         if (etagMatches(req.headers["if-none-match"], etag)) {
           statusCode = 304;
-          res.writeHead(304, { ETag: etag, "Cache-Control": CACHE_CONTROL_REVALIDATE });
+          res.writeHead(
+            304,
+            withPublicCorsHeaders({ ETag: etag, "Cache-Control": CACHE_CONTROL_REVALIDATE }),
+          );
           res.end();
           return;
         }
         statusCode = 200;
-        return sendJson(res, 200, ext, { ETag: etag, "Cache-Control": CACHE_CONTROL_REVALIDATE });
+        return sendJson(
+          res,
+          200,
+          ext,
+          withPublicCorsHeaders({ ETag: etag, "Cache-Control": CACHE_CONTROL_REVALIDATE }),
+        );
       }
 
       if (
@@ -348,7 +411,7 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
           metrics.rateLimited += 1;
           res.setHeader("Retry-After", String(Math.ceil(limited.retryAfterMs / 1000)));
           statusCode = 429;
-          return sendJson(res, 429, { error: "Too Many Requests" });
+          return sendJson(res, 429, { error: "Too Many Requests" }, withPublicCorsHeaders());
         }
 
         const id = segments[2];
@@ -356,11 +419,11 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
         const pkgMeta = await store.getPackage(id, version, { includeBytes: false, includePath: true });
         if (!pkgMeta) {
           statusCode = 404;
-          return sendJson(res, 404, { error: "Not found" });
+          return sendJson(res, 404, { error: "Not found" }, withPublicCorsHeaders());
         }
 
         const etag = `"${pkgMeta.sha256}"`;
-        const baseHeaders = {
+        const baseHeaders = withPublicCorsHeaders({
           ETag: etag,
           "Cache-Control": CACHE_CONTROL_REVALIDATE,
           "X-Package-Signature": pkgMeta.signatureBase64,
@@ -368,7 +431,7 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
           "X-Package-Scan-Status": String(pkgMeta.scanStatus || "unknown"),
           "X-Package-Format-Version": String(pkgMeta.formatVersion ?? 1),
           "X-Publisher": pkgMeta.publisher,
-        };
+        });
         if (pkgMeta.uploadedAt) {
           baseHeaders["X-Package-Published-At"] = String(pkgMeta.uploadedAt);
         }
@@ -395,7 +458,7 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
           }
           if (!stat || !stat.isFile()) {
             statusCode = 404;
-            return sendJson(res, 404, { error: "Not found" });
+            return sendJson(res, 404, { error: "Not found" }, withPublicCorsHeaders());
           }
 
           await store.incrementDownloadCount(id);
@@ -423,7 +486,7 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
         const pkgBytes = await store.getPackage(id, version);
         if (!pkgBytes) {
           statusCode = 404;
-          return sendJson(res, 404, { error: "Not found" });
+          return sendJson(res, 404, { error: "Not found" }, withPublicCorsHeaders());
         }
 
         statusCode = 200;
@@ -1079,16 +1142,17 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
       statusCode = 404;
       return sendJson(res, 404, { error: "Not found" });
     } catch (error) {
+      const extraHeaders = isPublicGetEndpoint ? withPublicCorsHeaders() : {};
       if (error instanceof HttpError) {
         statusCode = error.statusCode;
-        return sendJson(res, error.statusCode, { error: error.message || String(error) });
+        return sendJson(res, error.statusCode, { error: error.message || String(error) }, extraHeaders);
       }
 
       const message = String(error?.message || error);
       const lower = message.toLowerCase();
       if (lower.includes("request body too large")) {
         statusCode = 413;
-        return sendJson(res, 413, { error: message });
+        return sendJson(res, 413, { error: message }, extraHeaders);
       }
       if (
         error instanceof SyntaxError ||
@@ -1103,14 +1167,14 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
         lower.includes("exceeds maximum")
       ) {
         statusCode = 400;
-        return sendJson(res, 400, { error: message });
+        return sendJson(res, 400, { error: message }, extraHeaders);
       }
       if (message.includes("already published")) {
         statusCode = 409;
-        return sendJson(res, 409, { error: message });
+        return sendJson(res, 409, { error: message }, extraHeaders);
       }
       statusCode = 500;
-      return sendJson(res, 500, { error: message });
+      return sendJson(res, 500, { error: message }, extraHeaders);
     } finally {
       const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
       const key = `${method} ${route} ${statusCode}`;
