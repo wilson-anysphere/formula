@@ -268,6 +268,105 @@ describe("VBA event macros wiring", () => {
     wiring.dispose();
   });
 
+  it("preserves captured UI context when a Worksheet_Change flush is deferred by another event macro", async () => {
+    vi.useFakeTimers();
+
+    const calls: Array<{ cmd: string; args?: any }> = [];
+
+    let resolveSheet1Macro: (() => void) | null = null;
+    const sheet1MacroPromise = new Promise<void>((resolve) => {
+      resolveSheet1Macro = resolve;
+    });
+
+    let resolveSelectionMacro: (() => void) | null = null;
+    const selectionMacroPromise = new Promise<void>((resolve) => {
+      resolveSelectionMacro = resolve;
+    });
+
+    const invoke = vi.fn(async (cmd: string, args?: any) => {
+      calls.push({ cmd, args });
+      if (cmd === "get_macro_security_status") {
+        return {
+          has_macros: true,
+          origin_path: null,
+          workbook_fingerprint: null,
+          signature: null,
+          trust: "trusted_always",
+        };
+      }
+      if (cmd === "set_macro_ui_context") return null;
+      if (cmd === "fire_workbook_open") return { ok: true, output: [], updates: [] };
+      if (cmd === "fire_selection_change") {
+        await selectionMacroPromise;
+        return { ok: true, output: [], updates: [] };
+      }
+      if (cmd === "fire_worksheet_change") {
+        if (args?.sheet_id === "Sheet1") {
+          await sheet1MacroPromise;
+        }
+        return { ok: true, output: [], updates: [] };
+      }
+      throw new Error(`Unexpected invoke: ${cmd}`);
+    });
+
+    const doc = new DocumentController();
+    const app = new FakeApp(doc);
+
+    const wiring = installVbaEventMacros({
+      app,
+      workbookId: "workbook-1",
+      invoke,
+      drainBackendSync: vi.fn(async () => undefined),
+    });
+
+    await flushMicrotasks();
+    calls.length = 0;
+
+    // Edit Sheet1 with Sheet1 active.
+    doc.setCellValue("Sheet1", { row: 0, col: 0 }, "A");
+
+    // Switch to Sheet2 and edit it, capturing a different UI context per sheet.
+    app.emitSelection([{ startRow: 5, startCol: 5, endRow: 5, endCol: 5 }], { sheetId: "Sheet2", active: { row: 5, col: 5 } });
+    doc.setCellValue("Sheet2", { row: 1, col: 1 }, "B");
+
+    // Change the visible UI state without emitting a selection event, so if Sheet2's context is
+    // lost, the rerun will sync the macro runtime to the wrong sheet.
+    (app as any).sheetId = "Sheet3";
+    (app as any).active = { row: 9, col: 9 };
+    (app as any).selection = [{ startRow: 9, startCol: 9, endRow: 9, endCol: 9 }];
+
+    await flushMicrotasks();
+
+    // Allow the debounced selection handler to fire while Sheet1's macro is still running, so the
+    // SelectionChange macro starts as soon as Sheet1 finishes and overlaps the Sheet2 rerun.
+    await vi.advanceTimersByTimeAsync(100);
+    await flushMicrotasks();
+
+    resolveSheet1Macro?.();
+    await flushMicrotasks();
+
+    // Let the selection macro remain in flight long enough for Sheet2's first attempt to defer.
+    await flushMicrotasks();
+
+    resolveSelectionMacro?.();
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    const sheet2ChangeIdx = calls.findIndex((c) => c.cmd === "fire_worksheet_change" && c.args?.sheet_id === "Sheet2");
+    expect(sheet2ChangeIdx).toBeGreaterThanOrEqual(0);
+
+    const uiCall = calls[sheet2ChangeIdx - 1];
+    expect(uiCall?.cmd).toBe("set_macro_ui_context");
+    expect(uiCall?.args).toMatchObject({
+      sheet_id: "Sheet2",
+      active_row: 5,
+      active_col: 5,
+      selection: { start_row: 5, start_col: 5, end_row: 5, end_col: 5 },
+    });
+
+    wiring.dispose();
+  });
+
   it("captures Worksheet_SelectionChange changes that occur before macro security status resolves", async () => {
     vi.useFakeTimers();
 

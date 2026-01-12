@@ -398,6 +398,16 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
           let next = unionCell(prev, startRow, startCol);
           next = unionCell(next, endRow, endCol);
           pendingChangesBySheet.set(sheetId, next);
+
+          // Preserve the captured UI context for this pending sheet change, so a delayed rerun
+          // (after another event macro finishes) doesn't incorrectly sync the macro runtime to the
+          // current UI state instead of the state observed when the edit happened.
+          if (uiContext) {
+            pendingWorksheetContexts.set(
+              sheetId,
+              uiContext.sheetId === sheetId ? uiContext : { ...uiContext, sheetId }
+            );
+          }
         }
 
         changeQueuedAfterMacro = true;
