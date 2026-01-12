@@ -414,7 +414,6 @@ impl AppState {
         let (candidate_id, candidate_name, insert_index) = {
             let workbook = self.get_workbook()?;
             let base = name.trim();
-            let base = if base.is_empty() { "Sheet" } else { base };
             formula_model::validate_sheet_name(base)
                 .map_err(|e| AppStateError::WhatIf(e.to_string()))?;
 

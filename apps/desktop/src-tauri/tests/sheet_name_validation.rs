@@ -31,6 +31,21 @@ fn add_sheet_rejects_invalid_character() {
 }
 
 #[test]
+fn add_sheet_rejects_empty_string() {
+    let (mut state, _sheet1_id, _sheet2_id) = loaded_state_with_two_sheets();
+    let err = state
+        .add_sheet("   ".to_string(), None, None)
+        .expect_err("expected empty sheet name error");
+    match err {
+        AppStateError::WhatIf(msg) => assert!(
+            msg.contains("cannot be blank"),
+            "expected blank name error, got {msg:?}"
+        ),
+        other => panic!("expected WhatIf error, got {other:?}"),
+    }
+}
+
+#[test]
 fn create_sheet_rejects_names_longer_than_31_chars() {
     let (mut state, _sheet1_id, _sheet2_id) = loaded_state_with_two_sheets();
     let long_name = "a".repeat(32);
