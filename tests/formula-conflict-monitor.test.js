@@ -521,6 +521,39 @@ test("restart fallback still detects conflicts when remote updates omit modified
   assert.equal(conflict.remoteUserId, "");
 });
 
+test("value conflicts treat remoteUserId as unknown when modifiedBy isn't updated", () => {
+  // Ensure deterministic tie-breaking for concurrent map-entry overwrites:
+  // higher clientID wins in Yjs.
+  const alice = createClient("alice", { clientID: 1, mode: "formula+value" });
+
+  // Remote (legacy) doc without a monitor: overwrites without updating modifiedBy.
+  const bobDoc = new Y.Doc();
+  bobDoc.clientID = 2;
+  const bobCells = bobDoc.getMap("cells");
+
+  // Establish base.
+  alice.monitor.setLocalValue("s:0:0", "base");
+  syncDocs(alice.doc, bobDoc);
+
+  const bobCell = /** @type {Y.Map<any>} */ (bobCells.get("s:0:0"));
+  assert.ok(bobCell);
+
+  // Offline concurrent edits.
+  alice.monitor.setLocalValue("s:0:0", "ours");
+  bobDoc.transact(() => {
+    bobCell.set("value", "theirs");
+    bobCell.set("modified", Date.now());
+    // Intentionally omit `modifiedBy` so it stays at "alice".
+  });
+
+  syncDocs(alice.doc, bobDoc);
+
+  const conflict = alice.conflicts.find((c) => c.kind === "value") ?? null;
+  assert.ok(conflict, "expected a value conflict on alice");
+  // Since the remote overwrite didn't update modifiedBy, the remote user is unknown.
+  assert.equal(conflict.remoteUserId, "");
+});
+
 test("content conflicts (value vs formula) are still detected after restarting the monitor", () => {
   // Ensure deterministic tie-breaking for concurrent map-entry overwrites.
   const alice = createClient("alice", { clientID: 2, mode: "formula+value" });
