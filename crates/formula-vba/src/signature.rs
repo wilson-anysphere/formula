@@ -5,8 +5,7 @@ use crate::{
     compute_vba_project_digest,
     contents_hash::content_normalized_data,
     normalized_data::forms_normalized_data,
-    DigestAlg,
-    OleError, OleFile,
+    DigestAlg, OleError, OleFile,
 };
 use md5::{Digest as _, Md5};
 
@@ -734,12 +733,11 @@ fn digest_alg_from_oid_str(oid: &str) -> Option<DigestAlg> {
 }
 
 fn digest_name_from_oid_str(oid: &str) -> Option<&'static str> {
-    match oid {
-        "1.2.840.113549.2.5" => Some("MD5"),
-        "1.3.14.3.2.26" => Some("SHA-1"),
-        "2.16.840.1.101.3.4.2.1" => Some("SHA-256"),
-        _ => None,
-    }
+    digest_alg_from_oid_str(oid).map(|alg| match alg {
+        DigestAlg::Md5 => "MD5",
+        DigestAlg::Sha1 => "SHA-1",
+        DigestAlg::Sha256 => "SHA-256",
+    })
 }
 fn is_signature_component(component: &str) -> bool {
     let trimmed = component.trim_start_matches(|c: char| c <= '\u{001F}');
@@ -1222,7 +1220,6 @@ pub fn verify_vba_project_signature_binding(
                 continue;
             };
             content_hash_md5 = Some(Md5::digest(&content_normalized).into());
-
             // Agile Content Hash (MS-OVBA §2.4.2.4) incorporates designer storages. Only compute it
             // when `FormsNormalizedData` is available.
             agile_hash_md5 = Some(forms_normalized_data(project_ole).ok().map(|forms| {
