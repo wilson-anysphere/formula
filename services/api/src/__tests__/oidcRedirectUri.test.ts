@@ -131,6 +131,8 @@ describe("OIDC redirect_uri construction", () => {
       [orgId, "mock", issuerUrl, "client", JSON.stringify(["openid", "email"]), true]
     );
 
+    // OIDC start checks that a client secret is configured before redirecting so we
+    // don't send users to the IdP only to fail immediately on callback.
     await putSecret(db, config.secretStoreKeys, `oidc:${orgId}:mock`, "test-client-secret");
 
     const startRes = await app.inject({

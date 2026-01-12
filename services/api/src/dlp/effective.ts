@@ -3,6 +3,7 @@ import {
   classificationRank,
   DLP_ACTION,
   DLP_DECISION,
+  DLP_POLICY_VERSION,
   DLP_REASON_CODE,
   evaluatePolicy,
   maxClassification,
@@ -25,8 +26,26 @@ const DEFAULT_CLASSIFICATION: Classification = {
   labels: [],
 };
 
+const DEFAULT_ORG_POLICY: DlpPolicy = {
+  version: DLP_POLICY_VERSION,
+  allowDocumentOverrides: true,
+  rules: {
+    [DLP_ACTION.SHARE_EXTERNAL_LINK]: { maxAllowed: CLASSIFICATION_LEVEL.INTERNAL },
+    [DLP_ACTION.EXPORT_CSV]: { maxAllowed: CLASSIFICATION_LEVEL.CONFIDENTIAL },
+    [DLP_ACTION.EXPORT_PDF]: { maxAllowed: CLASSIFICATION_LEVEL.CONFIDENTIAL },
+    [DLP_ACTION.EXPORT_XLSX]: { maxAllowed: CLASSIFICATION_LEVEL.CONFIDENTIAL },
+    [DLP_ACTION.CLIPBOARD_COPY]: { maxAllowed: CLASSIFICATION_LEVEL.CONFIDENTIAL },
+    [DLP_ACTION.EXTERNAL_CONNECTOR]: { maxAllowed: CLASSIFICATION_LEVEL.INTERNAL },
+    [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+      maxAllowed: CLASSIFICATION_LEVEL.CONFIDENTIAL,
+      allowRestrictedContent: false,
+      redactDisallowed: true,
+    },
+  },
+};
+validateDlpPolicy(DEFAULT_ORG_POLICY);
+
 type EffectivePolicyResult =
-  | { type: "unconfigured" }
   | { type: "invalid" }
   | { type: "configured"; policy: DlpPolicy };
 
@@ -139,20 +158,16 @@ export async function getEffectiveDocumentClassification(db: DbClient, docId: st
 
 async function resolveEffectivePolicy(db: DbClient, orgId: string, docId: string): Promise<EffectivePolicyResult> {
   const orgPolicyRes = await db.query("SELECT policy FROM org_dlp_policies WHERE org_id = $1", [orgId]);
-  if (orgPolicyRes.rowCount !== 1) {
-    // We intentionally treat missing org policy as "no DLP configured" (allow-all)
-    // so orgs can adopt the feature incrementally.
-    return { type: "unconfigured" };
+  let orgPolicy: DlpPolicy = DEFAULT_ORG_POLICY;
+  if (orgPolicyRes.rowCount === 1) {
+    const orgPolicyRaw = orgPolicyRes.rows[0]!.policy as unknown;
+    try {
+      validateDlpPolicy(orgPolicyRaw);
+    } catch {
+      return { type: "invalid" };
+    }
+    orgPolicy = orgPolicyRaw as DlpPolicy;
   }
-
-  const orgPolicyRaw = orgPolicyRes.rows[0]!.policy as unknown;
-  try {
-    validateDlpPolicy(orgPolicyRaw);
-  } catch {
-    return { type: "invalid" };
-  }
-
-  const orgPolicy = orgPolicyRaw as DlpPolicy;
   if (!orgPolicy.allowDocumentOverrides) {
     return { type: "configured", policy: orgPolicy };
   }
@@ -194,15 +209,6 @@ export async function evaluateDocumentDlpPolicy(
       reasonCode: DLP_REASON_CODE.INVALID_POLICY,
       classification,
       maxAllowed: null,
-    };
-  }
-
-  if (policyRes.type === "unconfigured") {
-    return {
-      action: params.action,
-      decision: DLP_DECISION.ALLOW,
-      classification,
-      maxAllowed: CLASSIFICATION_LEVEL.RESTRICTED,
     };
   }
 
