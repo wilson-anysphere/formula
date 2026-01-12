@@ -61,4 +61,37 @@ test.describe("ribbon File backstage", () => {
     const homeTab = ribbon.getByRole("tab", { name: "Home" });
     await expect(homeTab).toHaveAttribute("aria-selected", "true");
   });
+
+  test("can toggle Version History + Branch Manager panels from the backstage actions", async ({ page }) => {
+    await gotoDesktop(page);
+
+    const ribbon = page.getByTestId("ribbon-root");
+    await expect(ribbon).toBeVisible();
+
+    const fileTab = ribbon.getByRole("tab", { name: "File" });
+
+    // Version History: open
+    await fileTab.click();
+    await expect(ribbon.getByTestId("file-version-history")).toBeVisible();
+    await ribbon.getByTestId("file-version-history").click();
+    await expect(page.getByTestId("panel-versionHistory")).toBeVisible();
+
+    // Version History: close (toggle)
+    await fileTab.click();
+    await expect(ribbon.getByTestId("file-version-history")).toBeVisible();
+    await ribbon.getByTestId("file-version-history").click();
+    await expect(page.getByTestId("panel-versionHistory")).toHaveCount(0);
+
+    // Branch Manager: open
+    await fileTab.click();
+    await expect(ribbon.getByTestId("file-branch-manager")).toBeVisible();
+    await ribbon.getByTestId("file-branch-manager").click();
+    await expect(page.getByTestId("panel-branchManager")).toBeVisible();
+
+    // Branch Manager: close (toggle)
+    await fileTab.click();
+    await expect(ribbon.getByTestId("file-branch-manager")).toBeVisible();
+    await ribbon.getByTestId("file-branch-manager").click();
+    await expect(page.getByTestId("panel-branchManager")).toHaveCount(0);
+  });
 });
