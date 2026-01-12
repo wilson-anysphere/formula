@@ -83,7 +83,7 @@ The user experience must honor Excel's familiar mental model while introducing m
 │                                                                             │
 │  SUGGESTIONS                                                                │
 │  ├── Insert Pivot Table from A1:F100                                       │
-│  ├── Insert Column Before                                      ⌘I          │
+│  ├── Insert Column Before                                                   │
 │  └── Insert Row Above                                          ⌘⇧I         │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -107,6 +107,9 @@ The user experience must honor Excel's familiar mental model while introducing m
 ---
 
 ## Keyboard Shortcuts
+
+> Note: This document is a UX/design overview. For the authoritative shortcut list in this repo, see
+> [`instructions/ui.md`](../instructions/ui.md).
 
 ### App
 
@@ -169,10 +172,9 @@ The user experience must honor Excel's familiar mental model while introducing m
 
 | Shortcut | Action |
 |----------|--------|
-| `Ctrl+Shift+A` | AI assistant panel |
-| `Ctrl+Shift+E` | Explain selection/formula |
-| `Ctrl+Shift+G` | Generate from description |
-| `Tab` (in formula) | Accept AI suggestion |
+| `Cmd+K` (Mac) / `Ctrl+K` (Windows/Linux) | Inline AI edit |
+| `Cmd+I` (desktop, Mac) | Toggle AI sidebar |
+| `Tab` (while editing a formula) | Accept AI suggestion |
 
 ---
 
