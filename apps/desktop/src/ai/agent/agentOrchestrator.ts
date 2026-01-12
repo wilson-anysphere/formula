@@ -210,7 +210,8 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
       ? createDesktopRagService({
           documentController: params.documentController,
           workbookId: params.workbookId,
-          ...(params.ragOptions ?? {})
+          ...(params.ragOptions ?? {}),
+          ...(params.tokenEstimator ? { tokenEstimator: params.tokenEstimator } : {})
         })
       : null;
   const ragService = (params.ragService ?? ownedRagService)!;

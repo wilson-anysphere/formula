@@ -1,7 +1,7 @@
 import type { DocumentController } from "../../document/documentController.js";
 
 import { ContextManager } from "../../../../../packages/ai-context/src/contextManager.js";
-import { stableJsonStringify } from "../../../../../packages/ai-context/src/tokenBudget.js";
+import { stableJsonStringify, type TokenEstimator } from "../../../../../packages/ai-context/src/tokenBudget.js";
 import {
   HashEmbedder,
   LocalStorageBinaryStorage,
@@ -35,6 +35,7 @@ export interface DesktopRagServiceOptions {
   tokenBudgetTokens?: number;
   topK?: number;
   sampleRows?: number;
+  tokenEstimator?: TokenEstimator;
 
   /**
    * Embedding configuration. Desktop workbook RAG uses `HashEmbedder`
@@ -218,6 +219,7 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
         embedder,
         storage: new LocalStorageBinaryStorage({ namespace: storageNamespace, workbookId: options.workbookId }),
         tokenBudgetTokens: options.tokenBudgetTokens,
+        tokenEstimator: options.tokenEstimator,
         topK: options.topK,
         sampleRows: options.sampleRows,
         locateFile: options.locateFile,

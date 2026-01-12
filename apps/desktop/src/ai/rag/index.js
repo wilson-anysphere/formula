@@ -33,6 +33,7 @@ export async function createDesktopRagSqlite(opts) {
 
   const contextManager = new ContextManager({
     tokenBudgetTokens: opts.tokenBudgetTokens ?? 16_000,
+    tokenEstimator: opts.tokenEstimator,
     workbookRag: {
       vectorStore,
       embedder,

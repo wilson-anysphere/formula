@@ -307,6 +307,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
       documentController: options.documentController,
       workbookId: options.workbookId,
       ...(options.ragOptions ?? {}),
+      ...(options.tokenEstimator ? { tokenEstimator: estimator } : {}),
     }));
 
   const baseSystemPrompt =
