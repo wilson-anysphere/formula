@@ -237,10 +237,11 @@ fn content_normalized_data_reference_records_registered_and_project() {
 fn content_normalized_data_module_newlines_and_attribute_stripping() {
     // Module source includes:
     // - Attribute lines (mixed case) that must be stripped (case-insensitive match)
+    // - Attribute lines where `Attribute` is followed by a **tab** (whitespace) that must also be stripped
     // - CRLF, CR-only, and lone-LF line endings
     // - A non-attribute line containing the word "Attribute" (must be preserved)
     let module_code = concat!(
-        "aTtRiBuTe VB_Name = \"Module1\"\r\n",
+        "aTtRiBuTe\tVB_Name = \"Module1\"\r\n",
         "Option Explicit\r",
         "Print \"Attribute\"\n",
         "AtTrIbUtE VB_Base = \"0{00000000-0000-0000-0000-000000000000}\"\r\n",
@@ -291,6 +292,51 @@ fn content_normalized_data_module_newlines_and_attribute_stripping() {
     .to_vec();
 
     assert_eq!(normalized, expected);
+}
+
+#[test]
+fn content_normalized_data_uses_module_stream_name_record_for_stream_lookup() {
+    // In MS-OVBA, MODULENAME (0x0019) and MODULESTREAMNAME (0x001A) are distinct records.
+    // ContentNormalizedData must read module source bytes from the module's *stream name*
+    // (0x001A), not the display/module name (0x0019).
+    let module_code = "Option Explicit\r\n";
+    let module_container = compress_container(module_code.as_bytes());
+
+    let dir_decompressed = {
+        let mut out = Vec::new();
+
+        // MODULENAME: not the actual stream name.
+        push_record(&mut out, 0x0019, b"NiceName");
+
+        // MODULESTREAMNAME + reserved u16.
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"Stream1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+
+        // MODULETYPE + MODULETEXTOFFSET (0: stream begins with compressed container)
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes());
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        // Create only the MODULESTREAMNAME stream (not "VBA/NiceName").
+        let mut s = ole.create_stream("VBA/Stream1").expect("module stream");
+        s.write_all(&module_container).expect("write module");
+    }
+    let vba_bin = ole.into_inner().into_inner();
+
+    let normalized = content_normalized_data(&vba_bin).expect("ContentNormalizedData");
+    assert_eq!(normalized, module_code.as_bytes());
 }
 #[test]
 fn content_normalized_data_decodes_module_stream_name_using_dir_codepage() {
