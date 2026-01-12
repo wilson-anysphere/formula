@@ -515,3 +515,92 @@ test("BrowserExtensionHost: workbook.save delegates to spreadsheetApi and emits 
     },
   });
 });
+
+test("BrowserExtensionHost: workbook.save does not emit beforeSave when workbook has no path", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  let saveCalls = 0;
+  const active = { name: "Untitled", path: null };
+  const sheets = [{ id: "sheet1", name: "Sheet1" }];
+  const activeSheet = sheets[0];
+
+  /** @type {any} */
+  let beforeSave;
+
+  /** @type {(value?: unknown) => void} */
+  let resolveDone;
+  const done = new Promise((resolve) => {
+    resolveDone = resolve;
+  });
+
+  const scenarios = [
+    {
+      onPostMessage(msg) {
+        if (msg?.type === "event" && msg.event === "beforeSave") {
+          beforeSave = msg.data;
+          return;
+        }
+        if (msg?.type === "api_result" && msg.id === "req1") {
+          resolveDone();
+        }
+      },
+    },
+  ];
+
+  installFakeWorker(t, scenarios);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      listSheets() {
+        return sheets;
+      },
+      getActiveSheet() {
+        return activeSheet;
+      },
+      async getActiveWorkbook() {
+        return active;
+      },
+      async saveWorkbook() {
+        saveCalls += 1;
+      },
+    },
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.workbook-save-pathless";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "memory://workbook-save-pathless/",
+    mainUrl: "memory://workbook-save-pathless/main.mjs",
+    manifest: {
+      name: "workbook-save-pathless",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: ["workbook.manage"],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension?.worker);
+
+  extension.worker.emitMessage({
+    type: "api_call",
+    id: "req1",
+    namespace: "workbook",
+    method: "save",
+    args: [],
+  });
+
+  await done;
+
+  assert.equal(saveCalls, 1);
+  assert.equal(beforeSave, undefined);
+});
