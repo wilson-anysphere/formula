@@ -6,6 +6,19 @@ on:
   pull_request:
 
 jobs:
+  conflict-marker-guard:
+    name: Guard: no merge conflict markers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail if merge conflict markers are present
+        run: |
+          set -euo pipefail
+          if git grep -n -e '<<<<<<<' -e '|||||||' -e '=======' -e '>>>>>>>' ; then
+            echo "Merge conflict markers detected. Resolve conflicts and remove conflict markers before pushing." >&2
+            exit 1
+          fi
+
   xlsx-roundtrip:
     name: XLSX round-trip fixtures
     runs-on: ubuntu-latest
