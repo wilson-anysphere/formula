@@ -581,6 +581,7 @@ export class SpreadsheetApp {
   private conflictUi: ConflictUiController | null = null;
   private conflictUiContainer: HTMLDivElement | null = null;
   private structuralConflictUi: StructuralConflictUiController | null = null;
+  private pendingStructuralConflicts: any[] = [];
 
   private readonly chartStore: ChartStore;
   private chartTheme: ChartTheme = FALLBACK_CHART_THEME;
@@ -669,7 +670,13 @@ export class SpreadsheetApp {
           localUserId: collab.user.id,
           onConflict: (conflict) => {
             // Structural move/delete-vs-edit/content/format conflicts.
-            this.structuralConflictUi?.addConflict(conflict);
+            if (this.structuralConflictUi) {
+              this.structuralConflictUi.addConflict(conflict);
+            } else {
+              // Conflicts can be detected during session construction (e.g. from persisted
+              // structural op logs). Queue them until the conflict UI overlay is mounted.
+              this.pendingStructuralConflicts.push(conflict);
+            }
           },
         },
       });
@@ -1382,6 +1389,14 @@ export class SpreadsheetApp {
         structuralDialogRoot.style.boxShadow = "var(--dialog-shadow)";
       }
 
+      if (this.pendingStructuralConflicts.length > 0) {
+        const queued = this.pendingStructuralConflicts;
+        this.pendingStructuralConflicts = [];
+        for (const conflict of queued) {
+          this.structuralConflictUi.addConflict(conflict);
+        }
+      }
+
       const presence = this.collabSession.presence;
       if (presence) {
         // Publish local selection state.
@@ -1484,6 +1499,7 @@ export class SpreadsheetApp {
 
     this.structuralConflictUi?.destroy();
     this.structuralConflictUi = null;
+    this.pendingStructuralConflicts = [];
 
     this.formulaBarCompletion?.destroy();
     this.sharedGrid?.destroy();
