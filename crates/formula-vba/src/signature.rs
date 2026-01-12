@@ -896,7 +896,7 @@ pub fn verify_vba_signature_certificate_trust(
     }
     verify_pkcs7_trust(signature, &options.trusted_root_certs_der)
 }
-fn digest_alg_from_oid_str(oid: &str) -> Option<DigestAlg> {
+fn digest_alg_from_oid_str(oid: &str) -> Option<crate::DigestAlg> {
     // DigestInfo.algorithm values found in Authenticode `SpcIndirectDataContent`.
     //
     // - MD5:     1.2.840.113549.2.5
@@ -904,19 +904,19 @@ fn digest_alg_from_oid_str(oid: &str) -> Option<DigestAlg> {
     // - SHA-256: 2.16.840.1.101.3.4.2.1
     match oid.trim() {
         // id-md5 (RFC 1321 / PKCS#1)
-        "1.2.840.113549.2.5" => Some(DigestAlg::Md5),
+        "1.2.840.113549.2.5" => Some(crate::DigestAlg::Md5),
         // id-sha1 (RFC 3279)
-        "1.3.14.3.2.26" => Some(DigestAlg::Sha1),
+        "1.3.14.3.2.26" => Some(crate::DigestAlg::Sha1),
         // id-sha256 (NIST)
-        "2.16.840.1.101.3.4.2.1" => Some(DigestAlg::Sha256),
-        "1.2.840.113549.1.1.4" => Some(DigestAlg::Md5),
-        "1.2.840.113549.1.1.5" => Some(DigestAlg::Sha1),
-        "1.2.840.113549.1.1.11" => Some(DigestAlg::Sha256),
+        "2.16.840.1.101.3.4.2.1" => Some(crate::DigestAlg::Sha256),
+        "1.2.840.113549.1.1.4" => Some(crate::DigestAlg::Md5),
+        "1.2.840.113549.1.1.5" => Some(crate::DigestAlg::Sha1),
+        "1.2.840.113549.1.1.11" => Some(crate::DigestAlg::Sha256),
         _ => None,
     }
 }
 
-fn digest_alg_from_digest_len(len: usize) -> Option<DigestAlg> {
+fn digest_alg_from_digest_len(len: usize) -> Option<crate::DigestAlg> {
     // VBA signature binding digests in the wild typically use one of:
     // - MD5    (16 bytes)
     // - SHA-1  (20 bytes)
@@ -926,17 +926,17 @@ fn digest_alg_from_digest_len(len: usize) -> Option<DigestAlg> {
     // inconsistent with the digest bytes (MS-OSHARED §4.3); length-based inference is therefore a
     // more reliable first-pass.
     match len {
-        16 => Some(DigestAlg::Md5),
-        20 => Some(DigestAlg::Sha1),
-        32 => Some(DigestAlg::Sha256),
+        16 => Some(crate::DigestAlg::Md5),
+        20 => Some(crate::DigestAlg::Sha1),
+        32 => Some(crate::DigestAlg::Sha256),
         _ => None,
     }
 }
 fn digest_name_from_oid_str(oid: &str) -> Option<&'static str> {
     digest_alg_from_oid_str(oid).map(|alg| match alg {
-        DigestAlg::Md5 => "MD5",
-        DigestAlg::Sha1 => "SHA-1",
-        DigestAlg::Sha256 => "SHA-256",
+        crate::DigestAlg::Md5 => "MD5",
+        crate::DigestAlg::Sha1 => "SHA-1",
+        crate::DigestAlg::Sha256 => "SHA-256",
     })
 }
 
@@ -1449,7 +1449,7 @@ pub fn verify_vba_project_signature_binding(
     // Outer Option = attempted; inner Option = computed successfully.
     let mut agile_hash_md5: Option<Option<[u8; 16]>> = None;
     // Lazily computed MS-OVBA v3 digest (for `\x05DigitalSignatureExt`-style signatures).
-    let mut v3_digest: Option<(DigestAlg, Vec<u8>)> = None;
+    let mut v3_digest: Option<(crate::DigestAlg, Vec<u8>)> = None;
     for payload in payloads {
         let signed = match extract_vba_signature_signed_digest(&payload.bytes) {
             Ok(Some(signed)) => signed,

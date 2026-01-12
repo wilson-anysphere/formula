@@ -17,6 +17,7 @@ const collabVersioningEntry = resolve(repoRoot, "packages/collab/versioning/src/
 const collabPersistenceEntry = resolve(repoRoot, "packages/collab/persistence/src/index.ts");
 const collabPersistenceIndexedDbEntry = resolve(repoRoot, "packages/collab/persistence/src/indexeddb.ts");
 const marketplaceSharedEntry = resolve(repoRoot, "shared");
+const extensionMarketplaceEntry = resolve(repoRoot, "packages/extension-marketplace/src/index.ts");
 
 function resolveJsToTs() {
   return {
@@ -53,6 +54,7 @@ export default defineConfig({
   plugins: [resolveJsToTs()],
   resolve: {
     alias: [
+      { find: "@formula/extension-marketplace", replacement: extensionMarketplaceEntry },
       { find: "@formula/collab-undo", replacement: collabUndoEntry },
       { find: "@formula/collab-session", replacement: collabSessionEntry },
       { find: "@formula/collab-versioning", replacement: collabVersioningEntry },
