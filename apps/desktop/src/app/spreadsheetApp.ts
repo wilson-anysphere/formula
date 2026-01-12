@@ -2460,9 +2460,12 @@ export class SpreadsheetApp {
       }
       const presence = this.collabSession?.presence;
       if (presence) {
+        // Ensure presence updates are always associated with the correct sheet.
+        // Note: `setCursor` / `setSelections` may broadcast immediately (throttleMs=0),
+        // so update `activeSheet` first.
+        presence.setActiveSheet(this.sheetId);
         presence.setCursor(this.selection.active);
         presence.setSelections(this.selection.ranges);
-        presence.setActiveSheet(this.sheetId);
       }
     } finally {
       this.wasmSyncSuspended = false;
@@ -2598,7 +2601,12 @@ export class SpreadsheetApp {
     if (!sheetId) return;
     if (sheetId === this.sheetId) return;
     this.sheetId = sheetId;
-    this.collabSession?.presence?.setActiveSheet(this.sheetId);
+    const presence = this.collabSession?.presence;
+    if (presence) {
+      presence.setActiveSheet(this.sheetId);
+      presence.setCursor(this.selection.active);
+      presence.setSelections(this.selection.ranges);
+    }
     this.chartStore.setDefaultSheet(sheetId);
     this.referencePreview = null;
     this.referenceHighlights = this.computeReferenceHighlightsForSheet(this.sheetId, this.referenceHighlightsSource);
@@ -2671,6 +2679,13 @@ export class SpreadsheetApp {
     }
     if (this.sharedGrid) this.syncSharedGridSelectionFromState({ scrollIntoView });
     else if (didScroll) this.ensureViewportMappingCurrent();
+    if (sheetChanged) {
+      const presence = this.collabSession?.presence;
+      if (presence) {
+        presence.setCursor(this.selection.active);
+        presence.setSelections(this.selection.ranges);
+      }
+    }
     this.renderSelection();
     this.updateStatus();
     if (sheetChanged) {
@@ -2730,6 +2745,13 @@ export class SpreadsheetApp {
     }
     if (this.sharedGrid) this.syncSharedGridSelectionFromState({ scrollIntoView });
     else if (didScroll) this.ensureViewportMappingCurrent();
+    if (sheetChanged) {
+      const presence = this.collabSession?.presence;
+      if (presence) {
+        presence.setCursor(this.selection.active);
+        presence.setSelections(this.selection.ranges);
+      }
+    }
     this.renderSelection();
     this.updateStatus();
     if (sheetChanged) {
