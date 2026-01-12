@@ -207,6 +207,24 @@ Or run Vitest directly:
 FORMULA_SKIP_WASM_BUILD=1 node_modules/.bin/vitest run apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts
 ```
 
+### Playwright: avoid a literal `--` argument when filtering e2e tests
+
+`pnpm` forwards script arguments without requiring a `--` delimiter. If you add a bare `--`,
+it will be forwarded to the underlying command as a literal argument.
+
+For Playwright, a literal `--` is particularly problematic because it terminates option parsing,
+so flags like `-g/--grep` stop working (and `--` can accidentally match additional spec file names).
+
+Prefer:
+
+```bash
+# Run specific e2e specs (no leading `--` delimiter)
+pnpm -C apps/desktop test:e2e tests/e2e/freeze-panes.spec.ts tests/e2e/pivot-builder.spec.ts
+
+# Use --grep to filter within a spec file
+pnpm -C apps/desktop exec playwright test tests/e2e/split-view.spec.ts -g "Ctrl/Cmd\\+S commits"
+```
+
 
 ### Adaptive Parallelism Script
 
