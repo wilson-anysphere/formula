@@ -119,6 +119,16 @@ export function ExtensionsPanel({
     void refreshInstalled();
   }, [refreshInstalled, webExtensionManager]);
 
+  // Keep the marketplace-installed list in sync when other parts of the app mutate installs
+  // (Marketplace panel install/uninstall/update). Those flows ultimately call
+  // `DesktopExtensionHostManager.notifyDidChange()`, so subscribing here avoids requiring a reload.
+  React.useEffect(() => {
+    if (!webExtensionManager) return;
+    return manager.subscribe(() => {
+      void refreshInstalled();
+    });
+  }, [manager, refreshInstalled, webExtensionManager]);
+
   const extensions = manager.host.listExtensions();
   const commands = manager.getContributedCommands() as ContributedCommand[];
   const panels = manager.getContributedPanels() as ContributedPanel[];
