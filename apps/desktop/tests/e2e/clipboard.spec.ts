@@ -595,6 +595,8 @@ test.describe("clipboard shortcuts (copy/cut/paste)", () => {
     const copyToast = toastRoot.getByTestId("toast").last();
     await expect(copyToast).toBeVisible();
     await expect(copyToast).toContainText(/clipboard copy is blocked|data loss prevention/i);
+    await expect(copyToast).toContainText("Restricted");
+    await expect(copyToast).toContainText("Confidential");
 
     await expect
       .poll(() => page.evaluate(async () => (await navigator.clipboard.readText()).trim()), { timeout: 10_000 })
@@ -615,6 +617,8 @@ test.describe("clipboard shortcuts (copy/cut/paste)", () => {
     const cutToast = toastRoot.getByTestId("toast").last();
     await expect(cutToast).toBeVisible();
     await expect(cutToast).toContainText(/clipboard copy is blocked|data loss prevention/i);
+    await expect(cutToast).toContainText("Restricted");
+    await expect(cutToast).toContainText("Confidential");
 
     await expect
       .poll(() => page.evaluate(async () => (await navigator.clipboard.readText()).trim()), { timeout: 10_000 })
