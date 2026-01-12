@@ -161,7 +161,8 @@ fn lex_formula_honors_locale_id_option_for_arg_separator() {
     let opts = Object::new();
     Reflect::set(&opts, &JsValue::from_str("localeId"), &JsValue::from_str("de-DE")).unwrap();
 
-    // In en-US, ';' is an array-row separator. In de-DE, ';' is the argument separator.
+    // In the default en-US locale, `;` is not accepted as a function argument separator.
+    // In de-DE, `;` *is* the argument separator.
     let tokens_js = lex_formula("=SUMME(1;2)", Some(opts.into())).unwrap();
     let tokens: Vec<TokenKindOnly> = serde_wasm_bindgen::from_value(tokens_js).unwrap();
     assert!(
@@ -169,11 +170,13 @@ fn lex_formula_honors_locale_id_option_for_arg_separator() {
         "expected de-DE lexing to emit ArgSep tokens, got {tokens:?}"
     );
 
-    let default_js = lex_formula("=SUMME(1;2)", None).unwrap();
-    let default_tokens: Vec<TokenKindOnly> = serde_wasm_bindgen::from_value(default_js).unwrap();
+    let default_err = lex_formula("=SUMME(1;2)", None).unwrap_err();
+    let message = default_err
+        .as_string()
+        .unwrap_or_else(|| format!("unexpected error value: {default_err:?}"));
     assert!(
-        default_tokens.iter().any(|t| t.kind == "ArrayRowSep"),
-        "expected default en-US lexing to treat ';' as ArrayRowSep, got {default_tokens:?}"
+        message.contains("Unexpected character `;`"),
+        "expected default en-US lexing to reject ';' as a function arg separator, got {message:?}"
     );
 }
 
@@ -212,6 +215,14 @@ fn parse_formula_partial_honors_locale_id_option() {
     let parsed: PartialParseResult = serde_wasm_bindgen::from_value(parsed_js).unwrap();
 
     assert!(parsed.error.is_none(), "expected successful parse, got {parsed:?}");
+
+    let default_js = parse_formula_partial("=SUMME(1;2)".to_string(), None, None).unwrap();
+    let default_parsed: PartialParseResult = serde_wasm_bindgen::from_value(default_js).unwrap();
+    let default_err = default_parsed.error.expect("expected parse error");
+    assert_eq!(default_err.message, "Unexpected character `;`".to_string());
+    // Span should point at the `;` in `=SUMME(1;2)`.
+    assert_eq!(default_err.span.start, 8);
+    assert_eq!(default_err.span.end, 9);
 }
 
 #[wasm_bindgen_test]
