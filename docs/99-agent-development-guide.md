@@ -205,6 +205,9 @@ Prefer:
 pnpm test:vitest apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts
 ```
 
+(`pnpm test:vitest -- <file>` is also OK: the wrapper at `scripts/run-vitest.mjs` strips a
+leading `--` so Vitest doesn't accidentally treat it as a test pattern.)
+
 Or run Vitest directly:
 
 ```bash
