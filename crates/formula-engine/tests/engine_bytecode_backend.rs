@@ -1305,6 +1305,55 @@ fn bytecode_backend_inlines_defined_name_reference_aliases_when_static_refs() {
 }
 
 #[test]
+fn bytecode_backend_inlines_defined_name_range_endpoints_through_aliases() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 3.0).unwrap();
+
+    engine
+        .define_name(
+            "Start",
+            NameScope::Workbook,
+            NameDefinition::Reference("Sheet1!$A$1".to_string()),
+        )
+        .unwrap();
+    engine
+        .define_name(
+            "End",
+            NameScope::Workbook,
+            NameDefinition::Reference("Sheet1!$A$3".to_string()),
+        )
+        .unwrap();
+    engine
+        // Range definitions can be expressed via other defined names as long as they ultimately
+        // resolve to static references.
+        .define_name(
+            "MyRange",
+            NameScope::Workbook,
+            NameDefinition::Reference("Start:End".to_string()),
+        )
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=SUM(MyRange)")
+        .unwrap();
+
+    // Ensure the named range (built from aliased endpoints) was inlined and compiled to bytecode.
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    let via_bytecode = engine.get_cell_value("Sheet1", "B1");
+    assert_eq!(via_bytecode, Value::Number(6.0));
+
+    engine.set_bytecode_enabled(false);
+    engine.recalculate_single_threaded();
+    let via_ast = engine.get_cell_value("Sheet1", "B1");
+
+    assert_eq!(via_bytecode, via_ast);
+}
+
+#[test]
 fn bytecode_backend_inlines_defined_name_union_static_refs() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();

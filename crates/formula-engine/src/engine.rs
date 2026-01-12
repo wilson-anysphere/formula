@@ -3615,11 +3615,13 @@ impl Engine {
                             crate::Expr::CellRef(_)
                                 | crate::Expr::ColRef(_)
                                 | crate::Expr::RowRef(_)
+                                | crate::Expr::NameRef(_)
                         ) || !matches!(
                             b.right.as_ref(),
                             crate::Expr::CellRef(_)
                                 | crate::Expr::ColRef(_)
                                 | crate::Expr::RowRef(_)
+                                | crate::Expr::NameRef(_)
                         ) {
                             None
                         } else {
