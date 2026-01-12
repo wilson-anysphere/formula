@@ -27,8 +27,6 @@ export class SecondaryGridView {
   private readonly headerCols = 1;
 
   private sheetId: string;
-  private readonly appliedCols = new Set<number>();
-  private readonly appliedRows = new Set<number>();
 
   private readonly resizeObserver: ResizeObserver;
   private readonly disposeFns: Array<() => void> = [];
@@ -229,15 +227,6 @@ export class SecondaryGridView {
   syncSheetViewFromDocument(): void {
     const sheetId = this.getSheetId();
     if (sheetId !== this.sheetId) {
-      // Clear any axis overrides from the previous sheet before switching.
-      for (const col of this.appliedCols) {
-        this.grid.renderer.resetColWidth(col + this.headerCols);
-      }
-      for (const row of this.appliedRows) {
-        this.grid.renderer.resetRowHeight(row + this.headerRows);
-      }
-      this.appliedCols.clear();
-      this.appliedRows.clear();
       this.sheetId = sheetId;
     }
 
@@ -281,30 +270,26 @@ export class SecondaryGridView {
       nextRows.set(row, size);
     }
 
-    const allCols = new Set<number>();
-    for (const col of this.appliedCols) allCols.add(col);
-    for (const col of nextCols.keys()) allCols.add(col);
-    for (const col of allCols) {
-      const base = nextCols.get(col);
-      const gridCol = col + this.headerCols;
-      if (base === undefined) this.grid.renderer.resetColWidth(gridCol);
-      else this.grid.renderer.setColWidth(gridCol, base * zoom);
+    // Batch apply to avoid N-per-index invalidations when many overrides exist.
+    const colSizes = new Map<number, number>();
+    for (let i = 0; i < this.headerCols; i += 1) {
+      colSizes.set(i, this.grid.renderer.getColWidth(i));
+    }
+    for (const [col, base] of nextCols) {
+      if (col >= maxCols) continue;
+      colSizes.set(col + this.headerCols, base * zoom);
     }
 
-    const allRows = new Set<number>();
-    for (const row of this.appliedRows) allRows.add(row);
-    for (const row of nextRows.keys()) allRows.add(row);
-    for (const row of allRows) {
-      const base = nextRows.get(row);
-      const gridRow = row + this.headerRows;
-      if (base === undefined) this.grid.renderer.resetRowHeight(gridRow);
-      else this.grid.renderer.setRowHeight(gridRow, base * zoom);
+    const rowSizes = new Map<number, number>();
+    for (let i = 0; i < this.headerRows; i += 1) {
+      rowSizes.set(i, this.grid.renderer.getRowHeight(i));
+    }
+    for (const [row, base] of nextRows) {
+      if (row >= maxRows) continue;
+      rowSizes.set(row + this.headerRows, base * zoom);
     }
 
-    this.appliedCols.clear();
-    for (const col of nextCols.keys()) this.appliedCols.add(col);
-    this.appliedRows.clear();
-    for (const row of nextRows.keys()) this.appliedRows.add(row);
+    this.grid.renderer.applyAxisSizeOverrides({ rows: rowSizes, cols: colSizes }, { resetUnspecified: true });
 
     this.grid.syncScrollbars();
     const scroll = this.grid.getScroll();
