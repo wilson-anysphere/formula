@@ -1086,39 +1086,39 @@ test.describe("split view", () => {
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
+    // Seed a deterministic initial value so the F2 edit semantics (caret-at-end)
+    // are asserted without coupling to SpreadsheetApp's default seeded data.
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const sheetId = app.getCurrentSheetId();
+      const doc = app.getDocument();
+      doc.setCellValue(sheetId, "A1", "seed");
+    });
+    await waitForIdle(page);
+
     await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
     const secondary = page.locator("#grid-secondary");
     await expect(secondary).toBeVisible();
     await waitForGridCanvasesToBeSized(page, "#grid-secondary");
 
-    // Clear the seeded A1 value so the test doesn't depend on demo/fixture content.
-    // (F2 editing uses Excel semantics: caret at end of existing contents.)
-    await page.evaluate(() => {
-      const app = (window as any).__formulaApp;
-      const sheetId = app.getCurrentSheetId();
-      const doc = app.getDocument();
-      doc.setCellValue(sheetId, "A1", "");
-    });
-    await waitForIdle(page);
-
     await secondary.click({ position: { x: 48 + 12, y: 24 + 12 } }); // A1
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
 
-    const before = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"))).toBe("seed");
 
     await page.keyboard.press("F2");
     const editor = secondary.locator("textarea.cell-editor");
     await expect(editor).toBeVisible();
+    await expect(page.getByTestId("status-mode")).toHaveText("Edit");
     // F2 enters "edit existing value" mode (Excel semantics) rather than clearing the cell.
     // Ensure typing appends at the cursor position rather than replacing via a new edit session.
-    await expect(editor).toHaveValue(before);
+    await expect(editor).toHaveValue("seed");
     await page.keyboard.type("F2");
     await page.keyboard.press("Enter");
     await waitForIdle(page);
 
-    await expect
-      .poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1")))
-      .toBe(`${before}F2`);
+    await expect(page.getByTestId("status-mode")).toHaveText("Ready");
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"))).toBe("seedF2");
   });
 
   test("clicking inside the secondary cell editor does not commit the edit", async ({ page }) => {
