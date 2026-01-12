@@ -27,10 +27,15 @@ function normalizeClipboardRtf(rtf: string): string {
   // Clipboard backends may:
   // - normalize newlines differently across platforms (CRLF vs LF)
   // - append whitespace/newlines after the payload
+  // - include NUL terminators (`\0`) at the end of the string
   //
   // Normalize in a similar spirit to `normalizeClipboardText`: normalize newlines and ignore
   // trailing whitespace so "internal paste" detection remains stable.
-  return rtf.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trimEnd();
+  let normalized = rtf.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trimEnd();
+  // Some backends may include a NUL terminator after the RTF payload. Strip it and trim again in
+  // case the terminator appeared after whitespace/newlines.
+  normalized = normalized.replace(/\u0000+$/g, "").trimEnd();
+  return normalized;
 }
 
 function hasUsableClipboardContent(content: ClipboardContentLike): boolean {
