@@ -16,6 +16,7 @@ import {
   parseClipboardContentToCellGrid,
   serializeCellGridToClipboardPayload,
 } from "../clipboard/index.js";
+import { reconcileClipboardCopyContextForPaste } from "./clipboardPasteContext";
 import { cellToA1, rangeToA1 } from "../selection/a1";
 import { computeCurrentRegionRange } from "../selection/currentRegion";
 import { navigateSelectionByKey } from "../selection/navigation";
@@ -6938,22 +6939,8 @@ export class SpreadsheetApp {
       let deltaRow = 0;
       let deltaCol = 0;
 
-      const normalizeClipboardText = (text: string): string =>
-        text
-          .replace(/\r\n/g, "\n")
-          .replace(/\r/g, "\n")
-          // Some clipboard implementations add a trailing newline; ignore it when
-          // detecting "internal" pastes for formula shifting.
-          .replace(/\n+$/g, "");
-
-      const isInternalPaste =
-        ctx &&
-        ((typeof content.text === "string" &&
-          typeof ctx.payload.text === "string" &&
-          normalizeClipboardText(content.text) === normalizeClipboardText(ctx.payload.text)) ||
-          (typeof content.html === "string" &&
-            typeof ctx.payload.html === "string" &&
-            content.html === ctx.payload.html));
+      const { isInternalPaste, nextContext } = reconcileClipboardCopyContextForPaste(ctx, content);
+      this.clipboardCopyContext = nextContext;
 
       const externalGrid = mode === "all" && isInternalPaste ? null : parseClipboardContentToCellGrid(content);
       const internalCells = isInternalPaste ? ctx.cells : null;
