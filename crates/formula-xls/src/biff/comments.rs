@@ -168,13 +168,16 @@ pub(crate) fn parse_biff_sheet_notes(
         };
 
         if let Some(&existing) = out_by_obj_id.get(&obj_id) {
-            warnings.push(format!(
-                "duplicate NOTE record for object id {obj_id} (cell {}); overwriting previous NOTE at cell {}",
-                resolved.cell.to_a1(),
-                out.get(existing)
-                    .map(|note| note.cell.to_a1())
-                    .unwrap_or_else(|| "<unknown>".to_string())
-            ));
+            push_warning(
+                &mut warnings,
+                format!(
+                    "duplicate NOTE record for object id {obj_id} (cell {}); overwriting previous NOTE at cell {}",
+                    resolved.cell.to_a1(),
+                    out.get(existing)
+                        .map(|note| note.cell.to_a1())
+                        .unwrap_or_else(|| "<unknown>".to_string())
+                ),
+            );
             if let Some(slot) = out.get_mut(existing) {
                 *slot = resolved;
             }
@@ -308,7 +311,9 @@ fn parse_obj_record_id(
         let Some(sub) = data.get(idx..end) else {
             push_warning(
                 warnings,
-                "OBJ record at offset {record_offset} has truncated subrecord 0x{ft:04X} (cb={cb})"
+                format!(
+                    "OBJ record at offset {record_offset} has truncated subrecord 0x{ft:04X} (cb={cb})"
+                ),
             );
             break;
         };
