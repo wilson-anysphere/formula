@@ -2885,6 +2885,16 @@ fn odd_coupon_bond_functions_reject_non_finite_numeric_inputs() {
     sheet.set_formula("A2", "=A1-A1"); // NaN
     sheet.recalc();
 
+    // Ensure the test is actually exercising non-finite numbers (not pre-coerced errors).
+    match sheet.get("A1") {
+        Value::Number(n) => assert!(n.is_infinite(), "expected A1 to be +Inf, got {n:?}"),
+        other => panic!("expected A1 to be a number (+Inf), got {other:?}"),
+    }
+    match sheet.get("A2") {
+        Value::Number(n) => assert!(n.is_nan(), "expected A2 to be NaN, got {n:?}"),
+        other => panic!("expected A2 to be a number (NaN), got {other:?}"),
+    }
+
     // Infinity in rate.
     match sheet.eval("=ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),A1,0.05,100,1,0)") {
         Value::Error(ErrorKind::Num) => {}
