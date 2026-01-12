@@ -90,7 +90,6 @@ import {
   setDesktopPowerQueryService,
 } from "./power-query/service.js";
 import { createPowerQueryRefreshStateStore } from "./power-query/refreshStateStore.js";
-import { createClipboardProvider } from "./clipboard/platform/provider.js";
 import { createDesktopDlpContext } from "./dlp/desktopDlp.js";
 import { enforceClipboardCopy } from "./dlp/enforceClipboardCopy.js";
 import { showInputBox, showQuickPick, showToast } from "./extensions/ui.js";
@@ -4737,22 +4736,20 @@ if (
     };
   }
 
-  const clipboardProviderPromise = createClipboardProvider();
-
   const extensionHostManager = new DesktopExtensionHostManager({
     engineVersion: "1.0.0",
     spreadsheetApi: extensionSpreadsheetApi,
     clipboardWriteGuard,
     clipboardApi: {
       readText: async () => {
-        const provider = await clipboardProviderPromise;
+        const provider = await getClipboardProvider();
         const { text } = await provider.read();
         return text ?? "";
       },
       writeText: async (text: string) => {
         // DLP enforcement for extension clipboard writes is handled by `clipboardWriteGuard`
         // using per-extension taint tracking (data read via `cells.*` and `events.*`).
-        const provider = await clipboardProviderPromise;
+        const provider = await getClipboardProvider();
         await provider.write({ text: String(text ?? "") });
       },
     },
@@ -6090,7 +6087,7 @@ if (
 
           const copyText = async (text: string) => {
             try {
-              const provider = await clipboardProviderPromise;
+              const provider = await getClipboardProvider();
               await provider.write({ text });
             } catch {
               // Fall back to execCommand in case Clipboard API permissions are unavailable.
