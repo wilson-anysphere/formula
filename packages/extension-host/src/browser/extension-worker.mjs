@@ -24,6 +24,46 @@ function createInternalRequestId() {
   return `__internal__${nextInternalRequestId++}`;
 }
 
+function serializeError(payload) {
+  const out = { message: "Unknown error" };
+
+  try {
+    if (payload && typeof payload === "object" && "message" in payload) {
+      out.message = String(payload.message);
+    } else {
+      out.message = String(payload);
+    }
+  } catch {
+    out.message = "Unknown error";
+  }
+
+  try {
+    if (payload && typeof payload === "object" && "stack" in payload && payload.stack != null) {
+      out.stack = String(payload.stack);
+    }
+  } catch {
+    // ignore stack serialization failures
+  }
+
+  try {
+    if (payload && typeof payload === "object") {
+      if (typeof payload.name === "string" && payload.name.trim().length > 0) {
+        out.name = String(payload.name);
+      }
+      if (Object.prototype.hasOwnProperty.call(payload, "code")) {
+        const code = payload.code;
+        const primitive =
+          code == null || typeof code === "string" || typeof code === "number" || typeof code === "boolean";
+        out.code = primitive ? code : String(code);
+      }
+    }
+  } catch {
+    // ignore metadata serialization failures
+  }
+
+  return out;
+}
+
 function deserializeError(payload) {
   const message =
     typeof payload === "string" ? payload : String(payload?.message ?? "Unknown error");
@@ -1150,7 +1190,7 @@ self.addEventListener("message", async (event) => {
       postMessage({
         type: "activate_error",
         id: message.id,
-        error: { message: String(error?.message ?? error), stack: error?.stack }
+        error: serializeError(error)
       });
     }
     return;

@@ -895,6 +895,56 @@ test("api errors: host preserves extension error name/code for command/custom fu
   await assertBoomError(() => host.invokeDataConnector(connectorId, "browse"));
 });
 
+test("api errors: activation errors preserve extension error name/code", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-activation-error-name-"));
+  const extDir = path.join(dir, "ext");
+  await fs.mkdir(extDir);
+
+  const commandId = "activationExt.fail";
+  await writeExtensionFixture(
+    extDir,
+    {
+      name: "activation-error-name-ext",
+      version: "1.0.0",
+      publisher: "formula-test",
+      main: "./dist/extension.js",
+      engines: { formula: "^1.0.0" },
+      activationEvents: [`onCommand:${commandId}`],
+      contributes: { commands: [{ command: commandId, title: "Fail activation" }] },
+      permissions: ["ui.commands"]
+    },
+    `
+      exports.activate = async () => {
+        const err = new Error("boom");
+        err.name = "BoomError";
+        err.code = "BOOM";
+        throw err;
+      };
+    `
+  );
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    activationTimeoutMs: ACTIVATION_TIMEOUT_MS,
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await host.loadExtension(extDir);
+
+  await assert.rejects(() => host.executeCommand(commandId), (err) => {
+    assert.equal(err?.name, "BoomError");
+    assert.equal(err?.code, "BOOM");
+    assert.equal(err?.message, "boom");
+    return true;
+  });
+});
+
 test("permissions: workbook.saveAs requires workbook.manage and denial prevents updating workbook path", async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-workbook-saveas-deny-"));
   const extDir = path.join(dir, "ext");

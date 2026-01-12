@@ -23,6 +23,46 @@ function createSandboxError(message) {
   return new SandboxError(String(message));
 }
 
+function serializeErrorForTransport(error) {
+  const payload = { message: "Unknown error" };
+
+  try {
+    if (error && typeof error === "object" && "message" in error) {
+      payload.message = String(error.message);
+    } else {
+      payload.message = String(error);
+    }
+  } catch {
+    payload.message = "Unknown error";
+  }
+
+  try {
+    if (error && typeof error === "object" && "stack" in error && error.stack != null) {
+      payload.stack = String(error.stack);
+    }
+  } catch {
+    // ignore
+  }
+
+  try {
+    if (error && typeof error === "object") {
+      if (typeof error.name === "string" && error.name.trim().length > 0) {
+        payload.name = String(error.name);
+      }
+      if (Object.prototype.hasOwnProperty.call(error, "code")) {
+        const code = error.code;
+        const primitive =
+          code == null || typeof code === "string" || typeof code === "number" || typeof code === "boolean";
+        payload.code = primitive ? code : String(code);
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  return payload;
+}
+
 function hardenHostFunction(fn) {
   Object.setPrototypeOf(fn, null);
   return fn;
@@ -916,7 +956,7 @@ try {
   parentPort.postMessage({
     type: "activate_error",
     id: "startup",
-    error: { message: String(error?.message ?? error), stack: error?.stack }
+    error: serializeErrorForTransport(error)
   });
   throw error;
 }
@@ -1306,7 +1346,7 @@ parentPort.on("message", async (message) => {
       parentPort.postMessage({
         type: "activate_error",
         id: message.id,
-        error: { message: String(error?.message ?? error), stack: error?.stack }
+        error: serializeErrorForTransport(error)
       });
     }
     return;
