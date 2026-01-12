@@ -496,3 +496,76 @@ fn project_normalized_data_baseclass_matches_case_insensitively_for_non_ascii() 
 
     assert_eq!(normalized, expected);
 }
+
+#[test]
+fn project_normalized_data_baseclass_decodes_using_project_stream_codepage_line() {
+    // Regression test: BaseClass values are MBCS bytes in the PROJECT stream codepage.
+    // `project_normalized_data()` must prefer `CodePage=` from the PROJECT stream when present,
+    // even if the dir stream's PROJECTCODEPAGE record disagrees.
+
+    let module_identifier = "Форма"; // Cyrillic
+    let (module_identifier_bytes, _, _) = WINDOWS_1251.encode(module_identifier);
+
+    // Encode the PROJECT stream in Windows-1251 and include CodePage=1251.
+    let project_text = format!("CodePage=1251\r\nBaseClass={module_identifier}\r\n");
+    let (project_bytes, _, _) = WINDOWS_1251.encode(&project_text);
+
+    // Dir stream lies and claims Windows-1252, but stores the module identifier bytes in 1251.
+    // The PROJECT stream CodePage line must win so the BaseClass mapping succeeds.
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        push_record(&mut out, 0x0003, &1252u16.to_le_bytes()); // PROJECTCODEPAGE (conflicting)
+        push_record(&mut out, 0x0019, module_identifier_bytes.as_ref()); // MODULENAME (MBCS in 1251)
+
+        // MODULESTREAMNAME -> root designer storage name.
+        let mut stream_name_record = Vec::new();
+        stream_name_record.extend_from_slice(b"UserForm1");
+        stream_name_record.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name_record);
+        push_record(&mut out, 0x0021, &3u16.to_le_bytes()); // MODULETYPE (UserForm)
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(project_bytes.as_ref())
+            .expect("write PROJECT");
+    }
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+
+    // Designer storage referenced by MODULESTREAMNAME.
+    ole.create_storage("UserForm1")
+        .expect("create designer storage");
+    {
+        let mut s = ole
+            .create_stream("UserForm1/Payload")
+            .expect("create designer stream");
+        s.write_all(b"ABC").expect("write designer bytes");
+    }
+
+    let vba_project_bin = ole.into_inner().into_inner();
+    let normalized =
+        project_normalized_data(&vba_project_bin).expect("compute ProjectNormalizedData");
+
+    // Expected transcript:
+    // - dir record bytes: PROJECTCODEPAGE payload (1252) included by ProjectNormalizedData
+    // - ProjectProperties: CodePage token bytes
+    // - BaseClass triggers NormalizeDesignerStorage output
+    // - BaseClass token bytes (raw 1251 MBCS)
+    let mut expected = Vec::new();
+    expected.extend_from_slice(&1252u16.to_le_bytes());
+    expected.extend_from_slice(b"CodePage1251");
+    expected.extend_from_slice(b"ABC");
+    expected.extend(std::iter::repeat_n(0u8, 1023 - 3));
+    expected.extend_from_slice(b"BaseClass");
+    expected.extend_from_slice(module_identifier_bytes.as_ref());
+
+    assert_eq!(normalized, expected);
+}
