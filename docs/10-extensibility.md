@@ -848,7 +848,8 @@ extension accessed:
 - Before allowing `clipboard.writeText`, the host evaluates DLP policy over:
   - the current UI selection (active-cell fallback), and
   - any tainted ranges.
-- If any tainted range is classified above the allowed threshold (e.g. `Restricted`), the clipboard write throws.
+- If the selection or any tainted range is classified above the allowed threshold (e.g. `Restricted`), the clipboard
+  write throws.
 
 Writing arbitrary text to the clipboard **without reading or receiving any spreadsheet cell values** (via `cells.*`
 or `events.*`) does not taint any ranges. However, clipboard writes may still be blocked when the current selection is
