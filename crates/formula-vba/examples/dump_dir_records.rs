@@ -276,7 +276,6 @@ fn escape_str(s: &str) -> String {
     s.chars().flat_map(|c| c.escape_default()).collect()
 }
 
-#[cfg(formula_vba_has_project_normalized_data_v3)]
 fn dump_project_normalized_data_v3(vba_project_bin: &[u8]) {
     const PREFIX_LEN: usize = 64;
     println!();
@@ -294,11 +293,4 @@ fn dump_project_normalized_data_v3(vba_project_bin: &[u8]) {
             println!("error: {err}");
         }
     }
-}
-
-#[cfg(not(formula_vba_has_project_normalized_data_v3))]
-fn dump_project_normalized_data_v3(_vba_project_bin: &[u8]) {
-    println!();
-    println!("-- ProjectNormalizedDataV3 --");
-    println!("unavailable: formula_vba::project_normalized_data_v3 not found in this build");
 }
