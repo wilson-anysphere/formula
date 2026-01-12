@@ -198,10 +198,14 @@ the `:` key on layouts where that shares the same physical key.
 
 - Extension keybindings only run when the event has not already been handled (`event.defaultPrevented === false`) and
   focus is not in a text input/textarea/contenteditable element.
+- Desktop lazily loads extensions for performance; extension-contributed keybindings become active once extensions
+  have been loaded in the current session (e.g. after opening the Extensions panel or triggering an extension UI surface).
+- Built-in keybindings always win over extension keybindings (extensions cannot override core shortcuts).
 - When an extension keybinding matches, the desktop host calls `preventDefault()` and executes the extension command.
-  (Extensions can therefore intercept shortcuts that the spreadsheet UI would otherwise handle.)
-- Some shortcuts are used by the desktop app and extensions should avoid binding them:
-  - `Ctrl/Cmd+Shift+P` (command palette; reserved by the host so extensions cannot override it)
+- Some shortcuts are reserved and extensions can never claim them (safety net):
+  - `Ctrl/Cmd+C`, `Ctrl/Cmd+X`, `Ctrl/Cmd+V` (copy/cut/paste)
+  - `Ctrl/Cmd+Shift+P` (command palette)
+- Additional shortcuts are used by the desktop app and extensions should avoid binding them:
   - `Ctrl/Cmd+K` (inline AI edit)
   - `Ctrl/Cmd+Shift+M` (comments panel)
 
