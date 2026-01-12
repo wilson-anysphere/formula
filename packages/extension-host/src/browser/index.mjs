@@ -422,8 +422,9 @@ class LocalStorageExtensionStorage {
 
   _load(extensionId) {
     if (!this._storage) return Object.create(null);
+    const key = this._key(extensionId);
     try {
-      const raw = this._storage.getItem(this._key(extensionId));
+      const raw = this._storage.getItem(key);
       if (!raw) return Object.create(null);
       const parsed = JSON.parse(raw);
       const { record, migrated } = normalizeExtensionStorageRecord(parsed);
@@ -436,6 +437,15 @@ class LocalStorageExtensionStorage {
       }
       return record;
     } catch {
+      // If the stored value is corrupted (invalid JSON), remove it so the next access starts from
+      // a clean slate.
+      try {
+        if (typeof this._storage.removeItem === "function") {
+          this._storage.removeItem(key);
+        }
+      } catch {
+        // ignore
+      }
       return Object.create(null);
     }
   }

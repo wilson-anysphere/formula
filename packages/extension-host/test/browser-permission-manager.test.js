@@ -108,6 +108,24 @@ test("browser PermissionManager: migrates legacy string-array grants to v2 permi
   });
 });
 
+test("browser PermissionManager: clears corrupted persisted JSON (invalid permissions store)", async () => {
+  const { PermissionManager } = await importBrowserPermissionManager();
+
+  const storage = createMemoryStorage();
+  const storageKey = "formula.test.permissions.corrupt";
+  storage.setItem(storageKey, "{not-json");
+
+  const pm = new PermissionManager({
+    storage,
+    storageKey,
+    prompt: async () => true
+  });
+
+  assert.deepEqual(await pm.getGrantedPermissions("pub.ext"), {});
+  // Corrupted JSON should be cleaned up (PermissionManager rewrites to a clean slate).
+  assert.equal(storage.getItem(storageKey), null);
+});
+
 test("browser PermissionManager: revokePermissions removes persisted grants for a single extension", async () => {
   const { PermissionManager } = await importBrowserPermissionManager();
 

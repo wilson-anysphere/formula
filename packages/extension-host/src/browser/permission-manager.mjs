@@ -212,6 +212,9 @@ class PermissionManager {
       this._needsSave = migrated;
     } catch {
       this._data = Object.create(null);
+      // If the stored value is corrupted (invalid JSON), treat it as a migration so we rewrite
+      // storage to a clean slate (and remove the key entirely when the store is empty).
+      this._needsSave = true;
     }
     if (this._needsSave) {
       this._needsSave = false;
