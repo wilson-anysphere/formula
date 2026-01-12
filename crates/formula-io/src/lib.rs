@@ -822,7 +822,14 @@ pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), 
             }
             "xltx" => {
                 let mut out = package.clone();
-                if out.vba_project_bin().is_some() {
+                // If we're saving a workbook with any macro-capable content to a `.xltx` filename,
+                // strip macro parts/relationships so we don't produce a macro-capable template.
+                //
+                // Macro-capable surfaces include:
+                // - classic VBA (`xl/vbaProject.bin`)
+                // - Excel 4.0 macro sheets (`xl/macrosheets/**`)
+                // - legacy dialog sheets (`xl/dialogsheets/**`)
+                if out.macro_presence().any() {
                     out.remove_vba_project()
                         .map_err(|source| Error::SaveXlsxPackage {
                             path: path.to_path_buf(),
