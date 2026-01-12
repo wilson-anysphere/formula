@@ -248,6 +248,7 @@ export class LayoutController {
     // non-emitting updates we can safely apply the change directly without running full
     // normalization/persistence logic on every tick.
     if (!persist && !emit) {
+      if (typeof ratio !== "number" || !Number.isFinite(ratio)) return;
       const clamped = Math.max(0.1, Math.min(0.9, ratio));
       if (this.layout?.splitView?.ratio === clamped) return;
       this.layout.splitView.ratio = clamped;
