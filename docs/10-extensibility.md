@@ -123,6 +123,7 @@ Notes:
 ## Menus (manifest contributions)
 
 Extensions can contribute menu items via `contributes.menus` in the manifest (and via `formula.ui.registerContextMenu(...)`).
+The desktop merges both sources and applies the same `when` + `group` sorting/grouping rules.
 
 Supported menu locations (desktop UI):
 
