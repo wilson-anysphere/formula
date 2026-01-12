@@ -164,4 +164,178 @@ test.describe("desktop OAuth redirect capture", () => {
     const promptCalls = await page.evaluate(() => (window as any).__promptCalls?.length ?? 0);
     expect(promptCalls).toBe(0);
   });
+
+  test("redirect emitted during openAuthUrl (before waitForRedirect) still completes PKCE", async ({ page }) => {
+    await page.addInitScript(() => {
+      const listeners: Record<string, any> = {};
+      const emitted: Array<{ event: string; payload: any }> = [];
+      const callOrder: Array<{ kind: "listen" | "listen-registered" | "emit"; name: string; seq: number }> = [];
+      let seq = 0;
+
+      (window as any).__tauriListeners = listeners;
+      (window as any).__tauriEmittedEvents = emitted;
+      (window as any).__tauriCallOrder = callOrder;
+
+      const credentialEntries = new Map<string, { id: string; secret: any }>();
+      let credentialIdCounter = 0;
+
+      (window as any).__promptCalls = [] as Array<{ message?: string; defaultValue?: string | null }>;
+
+      // Track prompt usage so tests can assert we didn't fall back to manual copy/paste.
+      window.prompt = ((message?: string, defaultValue?: string) => {
+        (window as any).__promptCalls.push({ message, defaultValue: defaultValue ?? null });
+        return null;
+      }) as any;
+
+      const originalFetch = window.fetch.bind(window);
+      window.fetch = async (input: any, init?: any) => {
+        const url = typeof input === "string" ? input : input?.url;
+        if (url === "https://example.com/oauth/token") {
+          return new Response(
+            JSON.stringify({
+              access_token: "at-1",
+              refresh_token: "rt-1",
+              token_type: "bearer",
+              expires_in: 3600,
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return originalFetch(input, init);
+      };
+
+      window.localStorage.setItem(
+        "formula.desktop.powerQuery.oauthProviders:local-workbook",
+        JSON.stringify([
+          {
+            id: "example",
+            clientId: "client-id",
+            tokenEndpoint: "https://example.com/oauth/token",
+            authorizationEndpoint: "https://example.com/oauth/authorize",
+            redirectUri: "formula://oauth/callback",
+            defaultScopes: ["scope-a"],
+          },
+        ]),
+      );
+
+      window.localStorage.setItem(
+        "formula.desktop.powerQuery.queries:local-workbook",
+        JSON.stringify([
+          {
+            id: "q_oauth",
+            name: "OAuth query",
+            source: {
+              type: "api",
+              url: "https://example.com/api",
+              method: "GET",
+              auth: { type: "oauth2", providerId: "example", scopes: ["scope-a"] },
+            },
+            steps: [],
+            refreshPolicy: { type: "manual" },
+          },
+        ]),
+      );
+
+      (window as any).__TAURI__ = {
+        core: {
+          invoke: async (cmd: string, args: any) => {
+            if (cmd === "power_query_state_get") return null;
+            if (cmd === "power_query_state_set") return null;
+
+            if (cmd === "power_query_credential_get") {
+              const scopeKey = String(args?.scope_key ?? "");
+              return scopeKey ? credentialEntries.get(scopeKey) ?? null : null;
+            }
+            if (cmd === "power_query_credential_set") {
+              const scopeKey = String(args?.scope_key ?? "");
+              if (!scopeKey) throw new Error("missing scope_key");
+              const entry = { id: `id-${++credentialIdCounter}`, secret: args?.secret };
+              credentialEntries.set(scopeKey, entry);
+              return entry;
+            }
+            if (cmd === "power_query_credential_delete") {
+              const scopeKey = String(args?.scope_key ?? "");
+              if (scopeKey) credentialEntries.delete(scopeKey);
+              return null;
+            }
+            if (cmd === "power_query_credential_list") {
+              return Array.from(credentialEntries.entries()).map(([scopeKey, entry]) => ({ scopeKey, id: entry.id }));
+            }
+
+            return null;
+          },
+        },
+        event: {
+          listen: async (name: string, handler: any) => {
+            // Simulate async backend confirmation for handler registration.
+            callOrder.push({ kind: "listen", name, seq: ++seq });
+            await Promise.resolve();
+            listeners[name] = handler;
+            callOrder.push({ kind: "listen-registered", name, seq: ++seq });
+            return () => {
+              delete listeners[name];
+            };
+          },
+          emit: async (event: string, payload?: any) => {
+            callOrder.push({ kind: "emit", name: event, seq: ++seq });
+            emitted.push({ event, payload });
+          },
+        },
+        shell: {
+          open: async (url: string) => {
+            // Immediately bounce the redirect back via the event channel *before*
+            // the PKCE flow registers `waitForRedirect(...)`.
+            const parsed = new URL(url);
+            const state = parsed.searchParams.get("state");
+            const redirectUri = parsed.searchParams.get("redirect_uri");
+            if (state && redirectUri && typeof listeners["oauth-redirect"] === "function") {
+              const redirectUrl = `${redirectUri}?code=fake_code&state=${encodeURIComponent(state)}`;
+              listeners["oauth-redirect"]({ payload: redirectUrl });
+            }
+          },
+        },
+        window: {
+          getCurrentWebviewWindow: () => ({
+            hide: async () => {},
+            close: async () => {},
+          }),
+        },
+      };
+    });
+
+    await gotoDesktop(page);
+
+    // Ensure the frontend handshake fired (used by the Rust side to flush queued redirects).
+    await page.waitForFunction(() =>
+      Boolean((window as any).__tauriEmittedEvents?.some((entry: any) => entry?.event === "oauth-redirect-ready")),
+    );
+    const ordering = await page.evaluate(() => {
+      const calls = (window as any).__tauriCallOrder as Array<{ kind: string; name: string; seq: number }> | undefined;
+      if (!Array.isArray(calls)) return null;
+      const redirectRegistered = calls.find((c) => c.kind === "listen-registered" && c.name === "oauth-redirect")?.seq ?? null;
+      const readyEmitted = calls.find((c) => c.kind === "emit" && c.name === "oauth-redirect-ready")?.seq ?? null;
+      return { redirectRegistered, readyEmitted };
+    });
+    expect(ordering).not.toBeNull();
+    expect(ordering!.redirectRegistered).not.toBeNull();
+    expect(ordering!.readyEmitted).not.toBeNull();
+    expect(ordering!.readyEmitted!).toBeGreaterThan(ordering!.redirectRegistered!);
+
+    // Open the Data Queries panel.
+    await page.evaluate(() => {
+      window.dispatchEvent(new CustomEvent("formula:open-panel", { detail: { panelId: "dataQueries" } }));
+    });
+
+    const signIn = page.getByRole("button", { name: "Sign in" }).first();
+    await expect(signIn).toBeVisible();
+    await signIn.click();
+
+    // Shell.open triggers the oauth-redirect event immediately; the flow should still
+    // complete (without manual paste/prompt) even though the redirect arrives before
+    // `waitForRedirect` is registered.
+    await expect(page.getByRole("button", { name: "Sign out" }).first()).toBeVisible();
+
+    const promptCalls = await page.evaluate(() => (window as any).__promptCalls?.length ?? 0);
+    expect(promptCalls).toBe(0);
+  });
 });
