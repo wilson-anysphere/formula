@@ -515,9 +515,10 @@ export class FormulaBarView {
       this.#errorPanel.style.display = "none";
       this.#errorPanel.textContent = "";
     } else {
+      const address = this.model.activeCell.address;
       this.#errorButton.style.display = "inline-flex";
       this.#errorPanel.innerHTML = `
-        <div class="formula-bar-error-title">${explanation.code}: ${explanation.title}</div>
+        <div class="formula-bar-error-title">${explanation.code} (${escapeHtml(address)}): ${explanation.title}</div>
         <div class="formula-bar-error-desc">${explanation.description}</div>
         <ul class="formula-bar-error-suggestions">${explanation.suggestions.map((s) => `<li>${s}</li>`).join("")}</ul>
       `;

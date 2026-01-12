@@ -9,6 +9,12 @@ const extensionApiEntry = fileURLToPath(new URL("../../packages/extension-api/in
 const tauriConfigPath = fileURLToPath(new URL("./src-tauri/tauri.conf.json", import.meta.url));
 const tauriCsp = (JSON.parse(readFileSync(tauriConfigPath, "utf8")) as any)?.app?.security?.csp as unknown;
 const isE2E = process.env.FORMULA_E2E === "1";
+const cacheDir =
+  process.env.FORMULA_E2E === "1"
+    ? "node_modules/.vite-e2e-csp"
+    : process.env.FORMULA_E2E === "0"
+      ? "node_modules/.vite-e2e"
+      : undefined;
 
 if (isE2E && typeof tauriCsp !== "string") {
   throw new Error("Missing `app.security.csp` in src-tauri/tauri.conf.json (required for CSP e2e tests)");
@@ -54,6 +60,7 @@ function resolveJsToTs() {
 
 export default defineConfig({
   root: ".",
+  cacheDir,
   plugins: [resolveJsToTs()],
   resolve: {
     alias: {

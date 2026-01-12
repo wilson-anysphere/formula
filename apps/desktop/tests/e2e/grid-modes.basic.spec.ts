@@ -16,12 +16,22 @@ function captureAppErrors(page: import("@playwright/test").Page): string[] {
 }
 
 async function waitForIdle(page: import("@playwright/test").Page, capturedErrors: string[]): Promise<void> {
-  try {
-    await page.waitForFunction(() => Boolean((window as any).__formulaApp?.whenIdle), null, { timeout: 10_000 });
-    await page.evaluate(() => (window as any).__formulaApp.whenIdle());
-  } catch (err) {
-    const errorText = capturedErrors.length > 0 ? capturedErrors.join("\n") : "(no console errors captured)";
-    throw new Error(`Spreadsheet app failed to initialize.\n\nCaptured browser errors:\n${errorText}\n\nOriginal error:\n${String(err)}`);
+  // Vite may occasionally trigger a one-time full reload after dependency optimization.
+  // Retry once if the execution context is destroyed mid-wait.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await page.waitForFunction(() => Boolean((window as any).__formulaApp?.whenIdle), null, { timeout: 10_000 });
+      await page.evaluate(() => (window as any).__formulaApp.whenIdle());
+      return;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (attempt === 0 && message.includes("Execution context was destroyed")) {
+        await page.waitForLoadState("load");
+        continue;
+      }
+      const errorText = capturedErrors.length > 0 ? capturedErrors.join("\n") : "(no console errors captured)";
+      throw new Error(`Spreadsheet app failed to initialize.\n\nCaptured browser errors:\n${errorText}\n\nOriginal error:\n${String(err)}`);
+    }
   }
 }
 

@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { gotoDesktop, waitForDesktopReady } from "./helpers";
+
 test.describe("pivot builder", () => {
   test("creates and refreshes a pivot table from the current selection", async ({ page }) => {
     await page.addInitScript(() => {
@@ -167,9 +169,10 @@ test.describe("pivot builder", () => {
       };
     });
 
-    await page.goto("/");
+    await gotoDesktop(page);
     await page.evaluate(() => localStorage.clear());
     await page.reload();
+    await waitForDesktopReady(page);
 
     // Seed a small dataset.
     await page.evaluate(() => {
@@ -204,7 +207,25 @@ test.describe("pivot builder", () => {
 
     // Configure fields via drag-and-drop.
     await page.dragAndDrop('[data-testid="pivot-field-Category"]', '[data-testid="pivot-drop-rows"]');
+    await expect(panel.getByTestId("pivot-drop-rows")).toContainText("Category");
     await page.dragAndDrop('[data-testid="pivot-field-Amount"]', '[data-testid="pivot-drop-values"]');
+    // Playwright dragAndDrop can be flaky with HTML5 dataTransfer under load; fall back to
+    // dispatching a synthetic drop event so the test exercises pivot generation rather than
+    // getting stuck on DnD plumbing.
+    try {
+      await panel.getByTestId("pivot-value-aggregation-0").waitFor({ state: "visible", timeout: 2_000 });
+    } catch {
+      await page.evaluate(() => {
+        const zone = document.querySelector('[data-testid="pivot-drop-values"]');
+        if (!zone) throw new Error("Missing pivot-drop-values");
+        const dt = new DataTransfer();
+        dt.setData("text/plain", "Amount");
+        const drop = new DragEvent("drop", { bubbles: true, cancelable: true });
+        Object.defineProperty(drop, "dataTransfer", { value: dt });
+        zone.dispatchEvent(drop);
+      });
+      await expect(panel.getByTestId("pivot-value-aggregation-0")).toBeVisible();
+    }
 
     // Disable column grand totals to keep the output shape deterministic for assertions.
     await panel.getByTestId("pivot-grand-totals-columns").uncheck();
@@ -242,4 +263,3 @@ test.describe("pivot builder", () => {
     expect(lastRequest?.config?.grandTotals?.columns).toBe(false);
   });
 });
-

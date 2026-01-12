@@ -27,7 +27,9 @@ export function applyPivotCellUpdates(document: DocumentController, updates: rea
     }
     // Pivot updates originate in the backend pivot engine. Tag them so the desktop workbook sync
     // bridge does not echo the edits back via `set_cell` / `set_range`.
-    setCellInputs(inputs, { source: "pivot" });
+    // `setCellInputs` is a method on the DocumentController; ensure it is invoked with the
+    // controller instance as its `this` context.
+    setCellInputs.call(document, inputs, { source: "pivot" });
     return;
   }
 

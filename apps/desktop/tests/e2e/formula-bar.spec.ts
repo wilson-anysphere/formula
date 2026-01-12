@@ -3,8 +3,22 @@ import { expect, test } from "@playwright/test";
 import { gotoDesktop } from "./helpers";
 
 async function waitForIdle(page: import("@playwright/test").Page): Promise<void> {
-  await page.waitForFunction(() => Boolean((window as any).__formulaApp?.whenIdle), null, { timeout: 10_000 });
-  await page.evaluate(() => (window as any).__formulaApp.whenIdle());
+  // Vite may occasionally trigger a one-time full reload after dependency optimization.
+  // Retry once if the execution context is destroyed mid-wait.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await page.waitForFunction(() => Boolean((window as any).__formulaApp?.whenIdle), null, { timeout: 10_000 });
+      await page.evaluate(() => (window as any).__formulaApp.whenIdle());
+      return;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (attempt === 0 && message.includes("Execution context was destroyed")) {
+        await page.waitForLoadState("load");
+        continue;
+      }
+      throw err;
+    }
+  }
 }
 
 test.describe("formula bar editing + range insertion", () => {
@@ -195,7 +209,7 @@ test.describe("formula bar editing + range insertion", () => {
       await errorButton.click();
       await expect(page.getByTestId("formula-error-panel")).toBeVisible();
       await expect(page.getByTestId("formula-error-panel")).toContainText("Division by zero");
+      await expect(page.getByTestId("formula-error-panel").locator(".formula-bar-error-title")).toContainText("B1");
     });
   }
 });
-

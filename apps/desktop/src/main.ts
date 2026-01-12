@@ -262,6 +262,11 @@ const app = new SpreadsheetApp(
   { formulaBar: formulaBarRoot, workbookId },
 );
 
+// Expose a small API for Playwright assertions early so e2e can still attach even if
+// optional desktop integrations (e.g. Tauri host wiring) fail during startup.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(window as any).__formulaApp = app;
+
 function normalizeSelectionRange(range: Range): CellRange {
   const startRow = Math.min(range.startRow, range.endRow);
   const endRow = Math.max(range.startRow, range.endRow);
@@ -331,7 +336,6 @@ function openColorPicker(
   );
   input.click();
 }
-
 // Panels persist state keyed by a workbook/document identifier. For file-backed workbooks we use
 // their on-disk path; for unsaved sessions we generate a random session id so distinct new
 // workbooks don't collide.
