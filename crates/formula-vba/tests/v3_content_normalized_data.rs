@@ -191,6 +191,53 @@ fn build_project_unicode_only_module_stream_name() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+fn build_project_unicode_only_module_stream_name_with_project_stream() -> Vec<u8> {
+    // Keep module source already in normalized form to make expected bytes simple.
+    let module_code = b"Sub Foo()\r\nEnd Sub\r\n";
+    let module_container = compress_container(module_code);
+
+    // Unicode module identifiers + stream names.
+    let module_name_unicode = "模块名";
+    let module_stream_name_unicode = "模块1";
+
+    let dir_decompressed = {
+        let mut out = Vec::new();
+
+        // MODULENAMEUNICODE only (no ANSI MODULENAME).
+        push_record(&mut out, 0x0047, &utf16le_bytes(module_name_unicode));
+
+        // MODULESTREAMNAMEUNICODE only (no ANSI MODULESTREAMNAME).
+        push_record(&mut out, 0x0032, &utf16le_bytes(module_stream_name_unicode));
+
+        // MODULETYPE (procedural; TypeRecord.Id=0x0021)
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes());
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes()); // MODULETEXTOFFSET (0)
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(b"Name=\"VBAProject\"\r\n")
+            .expect("write PROJECT");
+    }
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        let mut s = ole
+            .create_stream(&format!("VBA/{module_stream_name_unicode}"))
+            .expect("module stream");
+        s.write_all(&module_container).expect("write module");
+    }
+
+    ole.into_inner().into_inner()
+}
+
 fn build_project_unicode_module_stream_name_with_internal_len_prefix() -> Vec<u8> {
     // Keep module source already in normalized form to make expected bytes simple.
     let module_code = b"Sub Foo()\r\nEnd Sub\r\n";
@@ -1000,6 +1047,24 @@ fn v3_content_normalized_data_resolves_module_stream_name_from_unicode_record_va
     expected.push(b'\n');
 
     assert_eq!(v3, expected);
+}
+
+#[test]
+fn project_normalized_data_v3_includes_project_properties_and_resolves_unicode_module_stream_name() {
+    let vba_bin = build_project_unicode_only_module_stream_name_with_project_stream();
+    let normalized = project_normalized_data_v3(&vba_bin).expect("ProjectNormalizedData v3");
+
+    let mut expected = Vec::new();
+    // Filtered PROJECT stream properties (CRLF normalized).
+    expected.extend_from_slice(b"Name=\"VBAProject\"\r\n");
+    // Then V3ContentNormalizedData for the single module.
+    expected.extend_from_slice(&0x0021u16.to_le_bytes());
+    expected.extend_from_slice(&0u16.to_le_bytes());
+    expected.extend_from_slice(b"Sub Foo()\nEnd Sub\n\n");
+    expected.extend_from_slice(&utf16le_bytes("模块名"));
+    expected.push(b'\n');
+
+    assert_eq!(normalized, expected);
 }
 
 #[test]
