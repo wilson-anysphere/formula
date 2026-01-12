@@ -5,7 +5,8 @@ use formula_engine::locale::{
 };
 use formula_engine::{Engine, ErrorKind, NameDefinition, NameScope, Value as EngineValue};
 use formula_model::{
-    display_formula_text, CellRef, CellValue, DateSystem, DefinedNameScope, Range,
+    display_formula_text, CellRef, CellValue, DateSystem, DefinedNameScope, Range, EXCEL_MAX_COLS,
+    EXCEL_MAX_ROWS,
 };
 use js_sys::{Array, Object, Reflect};
 use serde::{Deserialize, Serialize};
@@ -248,6 +249,25 @@ impl WorkbookState {
         self.sheets.entry(display.clone()).or_default();
         self.engine.ensure_sheet(&display);
         display
+    }
+
+    fn set_sheet_dimensions_internal(
+        &mut self,
+        name: &str,
+        rows: u32,
+        cols: u32,
+    ) -> Result<(), JsValue> {
+        let sheet = self.ensure_sheet(name);
+        self.engine
+            .set_sheet_dimensions(&sheet, rows, cols)
+            .map_err(|err| js_err(err.to_string()))
+    }
+
+    fn get_sheet_dimensions_internal(&self, name: &str) -> Result<(u32, u32), JsValue> {
+        let sheet = self.require_sheet(name)?;
+        self.engine
+            .sheet_dimensions(sheet)
+            .ok_or_else(|| js_err(format!("missing sheet: {name}")))
     }
 
     fn resolve_sheet(&self, name: &str) -> Option<&str> {
@@ -893,6 +913,10 @@ impl WasmWorkbook {
 
         #[derive(Debug, Deserialize)]
         struct SheetJson {
+            #[serde(default, rename = "rowCount")]
+            row_count: Option<u32>,
+            #[serde(default, rename = "colCount")]
+            col_count: Option<u32>,
             cells: BTreeMap<String, JsonValue>,
         }
 
@@ -907,6 +931,16 @@ impl WasmWorkbook {
         }
 
         for (sheet_name, sheet) in parsed.sheets {
+            // Apply sheet dimensions (when provided) before importing cells so large addresses
+            // can be set without pre-populating the full grid.
+            if sheet.row_count.is_some() || sheet.col_count.is_some() {
+                let rows = sheet.row_count.unwrap_or(EXCEL_MAX_ROWS);
+                let cols = sheet.col_count.unwrap_or(EXCEL_MAX_COLS);
+                if rows != EXCEL_MAX_ROWS || cols != EXCEL_MAX_COLS {
+                    wb.set_sheet_dimensions_internal(&sheet_name, rows, cols)?;
+                }
+            }
+
             for (address, input) in sheet.cells {
                 if !is_scalar_json(&input) {
                     return Err(js_err(format!("invalid cell value: {address}")));
@@ -942,6 +976,14 @@ impl WasmWorkbook {
         // Create all sheets up-front so formulas can resolve cross-sheet references.
         for sheet in &model.sheets {
             wb.ensure_sheet(&sheet.name);
+        }
+
+        // Apply per-sheet dimensions (logical grid size) before importing cells/formulas so
+        // whole-column/row semantics (`A:A`, `1:1`) resolve correctly for large sheets.
+        for sheet in &model.sheets {
+            if sheet.row_count != EXCEL_MAX_ROWS || sheet.col_count != EXCEL_MAX_COLS {
+                wb.set_sheet_dimensions_internal(&sheet.name, sheet.row_count, sheet.col_count)?;
+            }
         }
 
         // Import Excel tables (structured reference metadata) before formulas are compiled so
@@ -1047,6 +1089,26 @@ impl WasmWorkbook {
         Ok(WasmWorkbook { inner: wb })
     }
 
+    #[wasm_bindgen(js_name = "setSheetDimensions")]
+    pub fn set_sheet_dimensions(
+        &mut self,
+        sheet_name: String,
+        rows: u32,
+        cols: u32,
+    ) -> Result<(), JsValue> {
+        self.inner
+            .set_sheet_dimensions_internal(&sheet_name, rows, cols)
+    }
+
+    #[wasm_bindgen(js_name = "getSheetDimensions")]
+    pub fn get_sheet_dimensions(&self, sheet_name: String) -> Result<JsValue, JsValue> {
+        let (rows, cols) = self.inner.get_sheet_dimensions_internal(&sheet_name)?;
+        let obj = Object::new();
+        object_set(&obj, "rows", &JsValue::from_f64(rows as f64))?;
+        object_set(&obj, "cols", &JsValue::from_f64(cols as f64))?;
+        Ok(obj.into())
+    }
+
     #[wasm_bindgen(js_name = "toJson")]
     pub fn to_json(&self) -> Result<String, JsValue> {
         #[derive(Serialize)]
@@ -1056,6 +1118,10 @@ impl WasmWorkbook {
 
         #[derive(Serialize)]
         struct SheetJson {
+            #[serde(default, skip_serializing_if = "Option::is_none", rename = "rowCount")]
+            row_count: Option<u32>,
+            #[serde(default, skip_serializing_if = "Option::is_none", rename = "colCount")]
+            col_count: Option<u32>,
             cells: BTreeMap<String, JsonValue>,
         }
 
@@ -1070,7 +1136,21 @@ impl WasmWorkbook {
                 }
                 out_cells.insert(address.clone(), input.clone());
             }
-            sheets.insert(sheet_name.clone(), SheetJson { cells: out_cells });
+            let (rows, cols) = self
+                .inner
+                .engine
+                .sheet_dimensions(sheet_name)
+                .unwrap_or((EXCEL_MAX_ROWS, EXCEL_MAX_COLS));
+            let row_count = (rows != EXCEL_MAX_ROWS).then_some(rows);
+            let col_count = (cols != EXCEL_MAX_COLS).then_some(cols);
+            sheets.insert(
+                sheet_name.clone(),
+                SheetJson {
+                    row_count,
+                    col_count,
+                    cells: out_cells,
+                },
+            );
         }
 
         serde_json::to_string(&WorkbookJson { sheets })
@@ -1417,5 +1497,28 @@ mod tests {
             json!("=SUM(1,2)")
         );
         assert_eq!(parsed["sheets"]["Sheet1"]["cells"]["A2"], json!("=1.5+1"));
+    }
+
+    #[test]
+    fn sheet_dimensions_expand_whole_column_references() {
+        let mut wb = WasmWorkbook::new();
+
+        // Expand the default sheet to include row 2,000,000.
+        wb.set_sheet_dimensions(DEFAULT_SHEET.to_string(), 2_100_000, EXCEL_MAX_COLS)
+            .unwrap();
+
+        wb.inner
+            .set_cell_internal(DEFAULT_SHEET, "A2000000", json!(5.0))
+            .unwrap();
+        wb.inner
+            .set_cell_internal(DEFAULT_SHEET, "B1", json!("=SUM(A:A)"))
+            .unwrap();
+
+        wb.inner.recalculate_internal(None).unwrap();
+
+        assert_eq!(
+            wb.inner.engine.get_cell_value(DEFAULT_SHEET, "B1"),
+            EngineValue::Number(5.0)
+        );
     }
 }

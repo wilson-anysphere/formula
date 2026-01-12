@@ -236,6 +236,16 @@ export class EngineWorker {
     return (await this.invoke("parseFormulaPartial", { formula, cursor, options }, rpcOptions)) as FormulaPartialParseResult;
   }
 
+  async setSheetDimensions(sheet: string, rows: number, cols: number, options?: RpcOptions): Promise<void> {
+    await this.flush();
+    await this.invoke("setSheetDimensions", { sheet, rows, cols }, options);
+  }
+
+  async getSheetDimensions(sheet: string, options?: RpcOptions): Promise<{ rows: number; cols: number }> {
+    await this.flush();
+    return (await this.invoke("getSheetDimensions", { sheet }, options)) as { rows: number; cols: number };
+  }
+
   private async scheduleFlush(): Promise<void> {
     if (this.flushPromise) {
       return this.flushPromise;

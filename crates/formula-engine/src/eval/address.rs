@@ -90,12 +90,14 @@ pub fn parse_a1(input: &str) -> Result<CellAddr, AddressParseError> {
         return Err(AddressParseError::RowOutOfRange);
     }
 
-    // Excel max is XFD (16384) columns and 1,048,576 rows. Enforce for sanity.
+    // Excel max is XFD (16384) columns and 1,048,576 rows.
+    //
+    // We continue to enforce the Excel column bound because the engine data model (and
+    // `formula-model::CellKey`) assumes a fixed 16,384-column grid. Rows are allowed to exceed
+    // Excel's limits so the engine can support very large sheets; callers should enforce per-sheet
+    // row bounds via `Engine` sheet dimensions.
     if col > 16_384 {
         return Err(AddressParseError::ColumnOutOfRange);
-    }
-    if row > 1_048_576 {
-        return Err(AddressParseError::RowOutOfRange);
     }
 
     Ok(CellAddr {

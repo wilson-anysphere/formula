@@ -23,6 +23,11 @@ pub enum BytecodeCompileReason {
     ExceedsGridLimits,
     /// The formula contains a range reference that exceeds the bytecode backend's cell-count limit.
     ExceedsRangeCellLimit,
+    /// The workbook has custom sheet dimensions that don't match Excel's fixed worksheet bounds.
+    ///
+    /// The bytecode backend currently assumes Excel's default 1,048,576 x 16,384 grid when
+    /// lowering whole-row / whole-column references and validating range sizes.
+    NonDefaultSheetDimensions,
 }
 
 /// Aggregate bytecode compilation coverage statistics.
@@ -45,4 +50,3 @@ pub struct BytecodeCompileReportEntry {
     pub addr: CellAddr,
     pub reason: BytecodeCompileReason,
 }
-

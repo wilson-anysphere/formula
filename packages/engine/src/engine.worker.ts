@@ -17,6 +17,8 @@ type WasmWorkbookInstance = {
   getRange(range: string, sheet?: string): unknown;
   setRange(range: string, values: CellScalar[][], sheet?: string): void;
   recalculate(sheet?: string): unknown;
+  setSheetDimensions?: (sheet: string, rows: number, cols: number) => void;
+  getSheetDimensions?: (sheet: string) => { rows: number; cols: number };
   toJson(): string;
 };
 
@@ -332,6 +334,19 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               break;
             case "getRange":
               result = normalizeRangeData(wb.getRange(params.range, params.sheet));
+              break;
+            case "setSheetDimensions":
+              if (typeof (wb as any).setSheetDimensions !== "function") {
+                throw new Error("setSheetDimensions: not available in this WASM build");
+              }
+              (wb as any).setSheetDimensions(params.sheet, params.rows, params.cols);
+              result = null;
+              break;
+            case "getSheetDimensions":
+              if (typeof (wb as any).getSheetDimensions !== "function") {
+                throw new Error("getSheetDimensions: not available in this WASM build");
+              }
+              result = (wb as any).getSheetDimensions(params.sheet);
               break;
             case "setCells":
               if (typeof (wb as any).setCells === "function") {

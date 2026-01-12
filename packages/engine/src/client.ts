@@ -64,6 +64,13 @@ export interface EngineClient {
    * cross-sheet caches coherent.
    */
   recalculate(sheet?: string, options?: RpcOptions): Promise<CellChange[]>;
+  /**
+   * Configure the logical worksheet dimensions (row/column count) for a sheet.
+   *
+   * This affects whole-row/whole-column references like `1:1` / `A:A`.
+   */
+  setSheetDimensions(sheet: string, rows: number, cols: number, options?: RpcOptions): Promise<void>;
+  getSheetDimensions(sheet: string, options?: RpcOptions): Promise<{ rows: number; cols: number }>;
 
   /**
    * Tokenize a formula string for editor tooling (syntax highlighting, etc).
@@ -175,6 +182,10 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
       await withEngine((connected) => connected.setRange(range, values, sheet, rpcOptions)),
     setLocale: async (localeId, rpcOptions) => await withEngine((connected) => connected.setLocale(localeId, rpcOptions)),
     recalculate: async (sheet, rpcOptions) => await withEngine((connected) => connected.recalculate(sheet, rpcOptions)),
+    setSheetDimensions: async (sheet, rows, cols, rpcOptions) =>
+      await withEngine((connected) => connected.setSheetDimensions(sheet, rows, cols, rpcOptions)),
+    getSheetDimensions: async (sheet, rpcOptions) =>
+      await withEngine((connected) => connected.getSheetDimensions(sheet, rpcOptions)),
     lexFormula: async (formula, options, rpcOptions) =>
       await withEngine((connected) => connected.lexFormula(formula, options, rpcOptions)),
     parseFormulaPartial: async (formula, cursor, options, rpcOptions) =>

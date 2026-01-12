@@ -135,11 +135,31 @@ impl Default for Cell {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 struct Sheet {
     cells: HashMap<CellAddr, Cell>,
     tables: Vec<Table>,
     names: HashMap<String, DefinedName>,
+    /// Logical row count for the worksheet grid.
+    ///
+    /// Defaults to Excel's row limit, but can be increased to support larger-than-Excel sheets.
+    row_count: u32,
+    /// Logical column count for the worksheet grid.
+    ///
+    /// The engine currently enforces Excel's 16,384-column maximum.
+    col_count: u32,
+}
+
+impl Default for Sheet {
+    fn default() -> Self {
+        Self {
+            cells: HashMap::new(),
+            tables: Vec::new(),
+            names: HashMap::new(),
+            row_count: EXCEL_MAX_ROWS,
+            col_count: EXCEL_MAX_COLS,
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -163,11 +183,7 @@ impl Workbook {
             return id;
         }
         let id = self.sheets.len();
-        self.sheets.push(Sheet {
-            cells: HashMap::new(),
-            tables: Vec::new(),
-            names: HashMap::new(),
-        });
+        self.sheets.push(Sheet::default());
         self.sheet_names.push(name.to_string());
         self.sheet_name_to_id.insert(key, id);
         id
@@ -363,6 +379,95 @@ impl Engine {
     /// before setting formulas to ensure cross-sheet references resolve correctly.
     pub fn ensure_sheet(&mut self, sheet: &str) {
         self.workbook.ensure_sheet(sheet);
+    }
+
+    /// Returns the configured worksheet dimensions for `sheet` (row/column count).
+    ///
+    /// When unset, sheets default to Excel-compatible dimensions
+    /// (`EXCEL_MAX_ROWS` x `EXCEL_MAX_COLS`).
+    pub fn sheet_dimensions(&self, sheet: &str) -> Option<(u32, u32)> {
+        let sheet_id = self.workbook.sheet_id(sheet)?;
+        let sheet = self.workbook.sheets.get(sheet_id)?;
+        Some((sheet.row_count, sheet.col_count))
+    }
+
+    /// Configure the logical worksheet grid size for `sheet`.
+    ///
+    /// This affects whole-row/whole-column references like `1:1` and `A:A`, which are resolved
+    /// against the sheet's configured dimensions.
+    ///
+    /// Notes:
+    /// - `col_count` is limited to Excel's 16,384-column maximum.
+    /// - `row_count` is limited to `i32::MAX` for now because several internal evaluation paths
+    ///   (notably the bytecode engine) use 32-bit coordinates.
+    pub fn set_sheet_dimensions(
+        &mut self,
+        sheet: &str,
+        row_count: u32,
+        col_count: u32,
+    ) -> Result<(), EngineError> {
+        let sheet_id = self.workbook.ensure_sheet(sheet);
+
+        if row_count == 0 {
+            return Err(EngineError::Address(crate::eval::AddressParseError::RowOutOfRange));
+        }
+        if col_count == 0 {
+            return Err(EngineError::Address(
+                crate::eval::AddressParseError::ColumnOutOfRange,
+            ));
+        }
+        if col_count > EXCEL_MAX_COLS {
+            return Err(EngineError::Address(
+                crate::eval::AddressParseError::ColumnOutOfRange,
+            ));
+        }
+        if row_count > i32::MAX as u32 {
+            return Err(EngineError::Address(crate::eval::AddressParseError::RowOutOfRange));
+        }
+
+        // Prevent shrinking below existing populated/spill cells. This avoids having "stored" cells
+        // that can no longer be addressed within the sheet's configured bounds.
+        if let Some(sheet_state) = self.workbook.sheets.get(sheet_id) {
+            for addr in sheet_state.cells.keys() {
+                if addr.row >= row_count {
+                    return Err(EngineError::Address(crate::eval::AddressParseError::RowOutOfRange));
+                }
+                if addr.col >= col_count {
+                    return Err(EngineError::Address(
+                        crate::eval::AddressParseError::ColumnOutOfRange,
+                    ));
+                }
+            }
+            for (origin, spill) in &self.spills.by_origin {
+                if origin.sheet != sheet_id {
+                    continue;
+                }
+                if spill.end.row >= row_count {
+                    return Err(EngineError::Address(crate::eval::AddressParseError::RowOutOfRange));
+                }
+                if spill.end.col >= col_count {
+                    return Err(EngineError::Address(
+                        crate::eval::AddressParseError::ColumnOutOfRange,
+                    ));
+                }
+            }
+        }
+
+        if let Some(sheet_state) = self.workbook.sheets.get_mut(sheet_id) {
+            sheet_state.row_count = row_count;
+            sheet_state.col_count = col_count;
+        }
+
+        // Changing sheet dimensions can affect whole-column / whole-row references, which are
+        // baked into compiled expressions. Recompile formulas to ensure range endpoints are
+        // updated, and then recalculate.
+        self.recompile_all_formula_cells()?;
+
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
+
+        Ok(())
     }
 
     pub fn set_calc_settings(&mut self, settings: CalcSettings) {
@@ -636,6 +741,17 @@ impl Engine {
     ) -> Result<(), EngineError> {
         let sheet_id = self.workbook.ensure_sheet(sheet);
         let addr = parse_a1(addr)?;
+        let sheet_state = self
+            .workbook
+            .sheets
+            .get(sheet_id)
+            .expect("sheet just ensured must exist");
+        if addr.row >= sheet_state.row_count {
+            return Err(EngineError::Address(crate::eval::AddressParseError::RowOutOfRange));
+        }
+        if addr.col >= sheet_state.col_count {
+            return Err(EngineError::Address(crate::eval::AddressParseError::ColumnOutOfRange));
+        }
         let key = CellKey {
             sheet: sheet_id,
             addr,
@@ -681,6 +797,14 @@ impl Engine {
         let Some(sheet_id) = self.workbook.sheet_id(sheet) else {
             return Ok(());
         };
+        if let Some(sheet_state) = self.workbook.sheets.get(sheet_id) {
+            if addr.row >= sheet_state.row_count {
+                return Err(EngineError::Address(crate::eval::AddressParseError::RowOutOfRange));
+            }
+            if addr.col >= sheet_state.col_count {
+                return Err(EngineError::Address(crate::eval::AddressParseError::ColumnOutOfRange));
+            }
+        }
         let key = CellKey {
             sheet: sheet_id,
             addr,
@@ -822,6 +946,116 @@ impl Engine {
         }
     }
 
+    fn recompile_all_formula_cells(&mut self) -> Result<(), EngineError> {
+        let tables_by_sheet: Vec<Vec<Table>> = self
+            .workbook
+            .sheets
+            .iter()
+            .map(|s| s.tables.clone())
+            .collect();
+
+        // Collect formula cells up-front to avoid borrow conflicts while recompiling.
+        let mut formulas: Vec<(CellKey, String)> = Vec::new();
+        for (sheet_id, sheet) in self.workbook.sheets.iter().enumerate() {
+            for (addr, cell) in &sheet.cells {
+                if let Some(formula) = cell.formula.as_deref() {
+                    formulas.push((
+                        CellKey {
+                            sheet: sheet_id,
+                            addr: *addr,
+                        },
+                        formula.to_string(),
+                    ));
+                }
+            }
+        }
+
+        for (key, formula) in formulas {
+            let origin = crate::CellAddr::new(key.addr.row, key.addr.col);
+            let parsed = crate::parse_formula(
+                &formula,
+                crate::ParseOptions {
+                    locale: crate::LocaleConfig::en_us(),
+                    reference_style: crate::ReferenceStyle::A1,
+                    normalize_relative_to: Some(origin),
+                },
+            )?;
+
+            let mut resolve_sheet = |name: &str| self.workbook.sheet_id(name);
+            let mut sheet_dims = |sheet_id: usize| {
+                self.workbook
+                    .sheets
+                    .get(sheet_id)
+                    .map(|s| (s.row_count, s.col_count))
+                    .unwrap_or((EXCEL_MAX_ROWS, EXCEL_MAX_COLS))
+            };
+            let compiled_ast = compile_canonical_expr(
+                &parsed.expr,
+                key.sheet,
+                key.addr,
+                &mut resolve_sheet,
+                &mut sheet_dims,
+            );
+
+            let (names, volatile, thread_safe, dynamic_deps) =
+                analyze_expr_flags(&compiled_ast, key, &tables_by_sheet, &self.workbook);
+            self.set_cell_name_refs(key, names);
+
+            let calc_precedents =
+                analyze_calc_precedents(&compiled_ast, key, &tables_by_sheet, &self.workbook, &self.spills);
+            let mut calc_vec: Vec<Precedent> = calc_precedents.into_iter().collect();
+            calc_vec.sort_by_key(|p| match p {
+                Precedent::Cell(c) => (0u8, c.sheet_id, c.cell.row, c.cell.col, 0u32, 0u32),
+                Precedent::Range(r) => (
+                    1u8,
+                    r.sheet_id,
+                    r.range.start.row,
+                    r.range.start.col,
+                    r.range.end.row,
+                    r.range.end.col,
+                ),
+            });
+            let cell_id = cell_id_from_key(key);
+            let deps = CellDeps::new(calc_vec).volatile(volatile);
+            self.calc_graph.update_cell_dependencies(cell_id, deps);
+
+            let (compiled_formula, bytecode_compile_reason) =
+                match self.try_compile_bytecode(&parsed.expr, key, volatile, thread_safe) {
+                    Ok(program) => (
+                        CompiledFormula::Bytecode(BytecodeFormula {
+                            ast: compiled_ast.clone(),
+                            program,
+                        }),
+                        None,
+                    ),
+                    Err(reason) => (CompiledFormula::Ast(compiled_ast), Some(reason)),
+                };
+
+            if let Some(cell) = self
+                .workbook
+                .sheets
+                .get_mut(key.sheet)
+                .and_then(|s| s.cells.get_mut(&key.addr))
+            {
+                cell.compiled = Some(compiled_formula);
+                cell.bytecode_compile_reason = bytecode_compile_reason;
+                cell.volatile = volatile;
+                cell.thread_safe = thread_safe;
+                cell.dynamic_deps = dynamic_deps;
+            }
+
+            // Mark the formula (and its transitive dependents) dirty so recalculation picks up any
+            // semantic changes (e.g. whole-column range expansion).
+            self.dirty.insert(key);
+            self.dirty_reasons.remove(&key);
+            self.calc_graph.mark_dirty(cell_id);
+        }
+
+        self.sync_dirty_from_calc_graph();
+
+        Ok(())
+    }
+
     pub fn define_name(
         &mut self,
         name: &str,
@@ -929,6 +1163,17 @@ impl Engine {
     ) -> Result<(), EngineError> {
         let sheet_id = self.workbook.ensure_sheet(sheet);
         let addr = parse_a1(addr)?;
+        let sheet_state = self
+            .workbook
+            .sheets
+            .get(sheet_id)
+            .expect("sheet just ensured must exist");
+        if addr.row >= sheet_state.row_count {
+            return Err(EngineError::Address(crate::eval::AddressParseError::RowOutOfRange));
+        }
+        if addr.col >= sheet_state.col_count {
+            return Err(EngineError::Address(crate::eval::AddressParseError::ColumnOutOfRange));
+        }
         let key = CellKey {
             sheet: sheet_id,
             addr,
@@ -947,7 +1192,15 @@ impl Engine {
             },
         )?;
         let mut resolve_sheet = |name: &str| self.workbook.sheet_id(name);
-        let compiled = compile_canonical_expr(&parsed.expr, sheet_id, addr, &mut resolve_sheet);
+        let mut sheet_dims = |sheet_id: usize| {
+            self.workbook
+                .sheets
+                .get(sheet_id)
+                .map(|s| (s.row_count, s.col_count))
+                .unwrap_or((EXCEL_MAX_ROWS, EXCEL_MAX_COLS))
+        };
+        let compiled =
+            compile_canonical_expr(&parsed.expr, sheet_id, addr, &mut resolve_sheet, &mut sheet_dims);
         let tables_by_sheet: Vec<Vec<Table>> = self
             .workbook
             .sheets
@@ -1108,6 +1361,11 @@ impl Engine {
         let Ok(addr) = parse_a1(addr) else {
             return Value::Error(ErrorKind::Ref);
         };
+        if let Some(sheet_state) = self.workbook.sheets.get(sheet_id) {
+            if addr.row >= sheet_state.row_count || addr.col >= sheet_state.col_count {
+                return Value::Error(ErrorKind::Ref);
+            }
+        }
         let key = CellKey {
             sheet: sheet_id,
             addr,
@@ -1137,6 +1395,11 @@ impl Engine {
     pub fn spill_range(&self, sheet: &str, addr: &str) -> Option<(CellAddr, CellAddr)> {
         let sheet_id = self.workbook.sheet_id(sheet)?;
         let addr = parse_a1(addr).ok()?;
+        if let Some(sheet_state) = self.workbook.sheets.get(sheet_id) {
+            if addr.row >= sheet_state.row_count || addr.col >= sheet_state.col_count {
+                return None;
+            }
+        }
         let key = CellKey {
             sheet: sheet_id,
             addr,
@@ -1151,6 +1414,11 @@ impl Engine {
     pub fn spill_origin(&self, sheet: &str, addr: &str) -> Option<(SheetId, CellAddr)> {
         let sheet_id = self.workbook.sheet_id(sheet)?;
         let addr = parse_a1(addr).ok()?;
+        if let Some(sheet_state) = self.workbook.sheets.get(sheet_id) {
+            if addr.row >= sheet_state.row_count || addr.col >= sheet_state.col_count {
+                return None;
+            }
+        }
         let key = CellKey {
             sheet: sheet_id,
             addr,
@@ -2198,6 +2466,13 @@ impl Engine {
                     }
                 }
 
+                let (sheet_rows, sheet_cols) = self
+                    .workbook
+                    .sheets
+                    .get(key.sheet)
+                    .map(|s| (s.row_count, s.col_count))
+                    .unwrap_or((EXCEL_MAX_ROWS, EXCEL_MAX_COLS));
+
                 let mut spill_too_big = || {
                     let cleared = self.clear_spill_for_origin(key);
                     snapshot.spill_end_by_origin.remove(&key);
@@ -2256,11 +2531,10 @@ impl Engine {
                     col: end_col,
                 };
 
-                // Excel worksheets have fixed bounds (1,048,576 rows x 16,384 columns). If the
-                // spilled result would extend beyond those bounds, the origin evaluates to
-                // `#SPILL!` ("Spill range is too big") and no out-of-bounds spill cells should be
-                // materialized.
-                if end_row >= EXCEL_MAX_ROWS || end_col >= EXCEL_MAX_COLS {
+                // If the spilled result would extend beyond the sheet's bounds, the origin
+                // evaluates to `#SPILL!` ("Spill range is too big") and no out-of-bounds spill
+                // cells should be materialized.
+                if end_row >= sheet_rows || end_col >= sheet_cols {
                     spill_too_big();
                     return;
                 }
@@ -2617,6 +2891,18 @@ impl Engine {
         }
         if !thread_safe {
             return Err(BytecodeCompileReason::NotThreadSafe);
+        }
+
+        // The bytecode engine currently assumes Excel's fixed worksheet bounds. When callers
+        // configure custom sheet dimensions (e.g. > 1,048,576 rows), skip bytecode compilation so
+        // the AST evaluator's sparse range handling is used instead.
+        let sheet = self
+            .workbook
+            .sheets
+            .get(key.sheet)
+            .ok_or(BytecodeCompileReason::IneligibleExpr)?;
+        if sheet.row_count != EXCEL_MAX_ROWS || sheet.col_count != EXCEL_MAX_COLS {
+            return Err(BytecodeCompileReason::NonDefaultSheetDimensions);
         }
 
         let origin_ast = crate::CellAddr::new(key.addr.row, key.addr.col);
@@ -7767,7 +8053,15 @@ mod tests {
         // payload to satisfy the `CompiledFormula::Bytecode` wrapper.
         let parsed = crate::parse_formula("=1", crate::ParseOptions::default()).unwrap();
         let mut resolve_sheet = |name: &str| engine.workbook.sheet_id(name);
-        let ast = compile_canonical_expr(&parsed.expr, sheet_id, addr, &mut resolve_sheet);
+        let mut sheet_dims = |sheet_id: usize| {
+            engine
+                .workbook
+                .sheets
+                .get(sheet_id)
+                .map(|s| (s.row_count, s.col_count))
+                .unwrap_or((EXCEL_MAX_ROWS, EXCEL_MAX_COLS))
+        };
+        let ast = compile_canonical_expr(&parsed.expr, sheet_id, addr, &mut resolve_sheet, &mut sheet_dims);
 
         let key = CellKey {
             sheet: sheet_id,

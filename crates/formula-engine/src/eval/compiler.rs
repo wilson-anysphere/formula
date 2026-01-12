@@ -6,11 +6,16 @@ use crate::eval::ast::{
 use crate::value::ErrorKind;
 use crate::SheetRef;
 
-/// Excel limits (0-indexed).
+/// Excel-compatible column limit (0-indexed).
 ///
-/// These match the bounds enforced by [`crate::eval::parse_a1`].
+/// The engine data model assumes a fixed 16,384-column grid.
 const MAX_COL: u32 = 16_383;
-const MAX_ROW: u32 = 1_048_575;
+
+/// Excel-compatible row limit (0-indexed).
+///
+/// Rows can be configured per-sheet via engine sheet dimensions; this constant is used as the
+/// default/fallback when sheet dimensions are unknown (e.g. external workbook references).
+const EXCEL_MAX_ROW: u32 = 1_048_575;
 
 fn parse_number(raw: &str) -> Option<f64> {
     match raw.parse::<f64>() {
@@ -48,7 +53,7 @@ pub fn lower_expr(expr: &crate::Expr, origin: Option<crate::CellAddr>) -> Expr<S
             let Some(col) = coord_to_index_opt(&r.col, origin.map(|o| o.col), MAX_COL) else {
                 return Expr::Error(ErrorKind::Ref);
             };
-            let Some(row) = coord_to_index_opt(&r.row, origin.map(|o| o.row), MAX_ROW) else {
+            let Some(row) = coord_to_index_opt(&r.row, origin.map(|o| o.row), EXCEL_MAX_ROW) else {
                 return Expr::Error(ErrorKind::Ref);
             };
             Expr::CellRef(CellRef {
@@ -64,12 +69,15 @@ pub fn lower_expr(expr: &crate::Expr, origin: Option<crate::CellAddr>) -> Expr<S
             Expr::RangeRef(RangeRef {
                 sheet,
                 start: CellAddr { row: 0, col },
-                end: CellAddr { row: MAX_ROW, col },
+                end: CellAddr {
+                    row: EXCEL_MAX_ROW,
+                    col,
+                },
             })
         }
         crate::Expr::RowRef(r) => {
             let sheet = lower_sheet_reference(&r.workbook, &r.sheet);
-            let Some(row) = coord_to_index_opt(&r.row, origin.map(|o| o.row), MAX_ROW) else {
+            let Some(row) = coord_to_index_opt(&r.row, origin.map(|o| o.row), EXCEL_MAX_ROW) else {
                 return Expr::Error(ErrorKind::Ref);
             };
             Expr::RangeRef(RangeRef {
@@ -326,7 +334,7 @@ fn try_lower_static_range_operand(
     match expr {
         crate::Expr::CellRef(r) => {
             let col = coord_to_index_opt(&r.col, origin.map(|o| o.col), MAX_COL)?;
-            let row = coord_to_index_opt(&r.row, origin.map(|o| o.row), MAX_ROW)?;
+            let row = coord_to_index_opt(&r.row, origin.map(|o| o.row), EXCEL_MAX_ROW)?;
             let addr = CellAddr { row, col };
             Some(StaticRangeOperandUnresolved {
                 workbook: r.workbook.clone(),
@@ -341,11 +349,14 @@ fn try_lower_static_range_operand(
                 workbook: r.workbook.clone(),
                 sheet: r.sheet.clone(),
                 start: CellAddr { row: 0, col },
-                end: CellAddr { row: MAX_ROW, col },
+                end: CellAddr {
+                    row: EXCEL_MAX_ROW,
+                    col,
+                },
             })
         }
         crate::Expr::RowRef(r) => {
-            let row = coord_to_index_opt(&r.row, origin.map(|o| o.row), MAX_ROW)?;
+            let row = coord_to_index_opt(&r.row, origin.map(|o| o.row), EXCEL_MAX_ROW)?;
             Some(StaticRangeOperandUnresolved {
                 workbook: r.workbook.clone(),
                 sheet: r.sheet.clone(),
@@ -372,8 +383,15 @@ pub fn compile_canonical_expr(
     current_sheet: usize,
     current_cell: CellAddr,
     resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
+    sheet_dimensions: &mut impl FnMut(usize) -> (u32, u32),
 ) -> CompiledExpr {
-    compile_expr_inner(expr, current_sheet, current_cell, resolve_sheet)
+    compile_expr_inner(
+        expr,
+        current_sheet,
+        current_cell,
+        resolve_sheet,
+        sheet_dimensions,
+    )
 }
 
 fn compile_expr_inner(
@@ -381,6 +399,7 @@ fn compile_expr_inner(
     current_sheet: usize,
     current_cell: CellAddr,
     resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
+    sheet_dimensions: &mut impl FnMut(usize) -> (u32, u32),
 ) -> CompiledExpr {
     match expr {
         crate::Expr::Number(raw) => match parse_number(raw) {
@@ -405,10 +424,12 @@ fn compile_expr_inner(
         crate::Expr::CellRef(r) => {
             let sheet =
                 compile_sheet_reference(&r.workbook, &r.sheet, current_sheet, resolve_sheet);
-            let Some(col) = coord_to_index(&r.col, current_cell.col, MAX_COL) else {
+            let (max_row, max_col) =
+                sheet_max_indices(&sheet, current_sheet, sheet_dimensions);
+            let Some(col) = coord_to_index(&r.col, current_cell.col, max_col) else {
                 return Expr::Error(ErrorKind::Ref);
             };
-            let Some(row) = coord_to_index(&r.row, current_cell.row, MAX_ROW) else {
+            let Some(row) = coord_to_index(&r.row, current_cell.row, max_row) else {
                 return Expr::Error(ErrorKind::Ref);
             };
             Expr::CellRef(CellRef {
@@ -419,25 +440,29 @@ fn compile_expr_inner(
         crate::Expr::ColRef(r) => {
             let sheet =
                 compile_sheet_reference(&r.workbook, &r.sheet, current_sheet, resolve_sheet);
-            let Some(col) = coord_to_index(&r.col, current_cell.col, MAX_COL) else {
+            let (max_row, max_col) =
+                sheet_max_indices(&sheet, current_sheet, sheet_dimensions);
+            let Some(col) = coord_to_index(&r.col, current_cell.col, max_col) else {
                 return Expr::Error(ErrorKind::Ref);
             };
             Expr::RangeRef(RangeRef {
                 sheet,
                 start: CellAddr { row: 0, col },
-                end: CellAddr { row: MAX_ROW, col },
+                end: CellAddr { row: max_row, col },
             })
         }
         crate::Expr::RowRef(r) => {
             let sheet =
                 compile_sheet_reference(&r.workbook, &r.sheet, current_sheet, resolve_sheet);
-            let Some(row) = coord_to_index(&r.row, current_cell.row, MAX_ROW) else {
+            let (max_row, max_col) =
+                sheet_max_indices(&sheet, current_sheet, sheet_dimensions);
+            let Some(row) = coord_to_index(&r.row, current_cell.row, max_row) else {
                 return Expr::Error(ErrorKind::Ref);
             };
             Expr::RangeRef(RangeRef {
                 sheet,
                 start: CellAddr { row, col: 0 },
-                end: CellAddr { row, col: MAX_COL },
+                end: CellAddr { row, col: max_col },
             })
         }
         crate::Expr::StructuredRef(r) => {
@@ -460,16 +485,28 @@ fn compile_expr_inner(
                 _ => Expr::Error(ErrorKind::Name),
             }
         }
-        crate::Expr::Array(arr) => {
-            compile_array_literal(arr, current_sheet, current_cell, resolve_sheet)
-        }
+        crate::Expr::Array(arr) => compile_array_literal(
+            arr,
+            current_sheet,
+            current_cell,
+            resolve_sheet,
+            sheet_dimensions,
+        ),
         crate::Expr::FunctionCall(call) => {
             let name = call.name.name_upper.clone();
             let original_name = call.name.original.clone();
             let args = call
                 .args
                 .iter()
-                .map(|a| compile_expr_inner(a, current_sheet, current_cell, resolve_sheet))
+                .map(|a| {
+                    compile_expr_inner(
+                        a,
+                        current_sheet,
+                        current_cell,
+                        resolve_sheet,
+                        sheet_dimensions,
+                    )
+                })
                 .collect();
             Expr::FunctionCall {
                 name,
@@ -483,11 +520,20 @@ fn compile_expr_inner(
                 current_sheet,
                 current_cell,
                 resolve_sheet,
+                sheet_dimensions,
             )),
             args: call
                 .args
                 .iter()
-                .map(|a| compile_expr_inner(a, current_sheet, current_cell, resolve_sheet))
+                .map(|a| {
+                    compile_expr_inner(
+                        a,
+                        current_sheet,
+                        current_cell,
+                        resolve_sheet,
+                        sheet_dimensions,
+                    )
+                })
                 .collect(),
         },
         crate::Expr::Unary(u) => match u.op {
@@ -498,6 +544,7 @@ fn compile_expr_inner(
                     current_sheet,
                     current_cell,
                     resolve_sheet,
+                    sheet_dimensions,
                 )),
             },
             crate::UnaryOp::Minus => Expr::Unary {
@@ -507,10 +554,17 @@ fn compile_expr_inner(
                     current_sheet,
                     current_cell,
                     resolve_sheet,
+                    sheet_dimensions,
                 )),
             },
             crate::UnaryOp::ImplicitIntersection => Expr::ImplicitIntersection(Box::new(
-                compile_expr_inner(&u.expr, current_sheet, current_cell, resolve_sheet),
+                compile_expr_inner(
+                    &u.expr,
+                    current_sheet,
+                    current_cell,
+                    resolve_sheet,
+                    sheet_dimensions,
+                ),
             )),
         },
         crate::Expr::Postfix(p) => match p.op {
@@ -521,6 +575,7 @@ fn compile_expr_inner(
                     current_sheet,
                     current_cell,
                     resolve_sheet,
+                    sheet_dimensions,
                 )),
             },
             crate::PostfixOp::SpillRange => Expr::SpillRange(Box::new(compile_expr_inner(
@@ -528,9 +583,12 @@ fn compile_expr_inner(
                 current_sheet,
                 current_cell,
                 resolve_sheet,
+                sheet_dimensions,
             ))),
         },
-        crate::Expr::Binary(b) => compile_binary(b, current_sheet, current_cell, resolve_sheet),
+        crate::Expr::Binary(b) => {
+            compile_binary(b, current_sheet, current_cell, resolve_sheet, sheet_dimensions)
+        }
     }
 }
 
@@ -539,6 +597,7 @@ fn compile_array_literal(
     current_sheet: usize,
     current_cell: CellAddr,
     resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
+    sheet_dimensions: &mut impl FnMut(usize) -> (u32, u32),
 ) -> CompiledExpr {
     let rows = arr.rows.len();
     let cols = arr.rows.first().map(|r| r.len()).unwrap_or(0);
@@ -559,6 +618,7 @@ fn compile_array_literal(
                 current_sheet,
                 current_cell,
                 resolve_sheet,
+                sheet_dimensions,
             ));
         }
     }
@@ -575,6 +635,7 @@ fn compile_binary(
     current_sheet: usize,
     current_cell: CellAddr,
     resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
+    sheet_dimensions: &mut impl FnMut(usize) -> (u32, u32),
 ) -> CompiledExpr {
     match b.op {
         crate::BinaryOp::Eq
@@ -599,12 +660,14 @@ fn compile_binary(
                     current_sheet,
                     current_cell,
                     resolve_sheet,
+                    sheet_dimensions,
                 )),
                 right: Box::new(compile_expr_inner(
                     &b.right,
                     current_sheet,
                     current_cell,
                     resolve_sheet,
+                    sheet_dimensions,
                 )),
             }
         }
@@ -615,6 +678,7 @@ fn compile_binary(
                 current_sheet,
                 current_cell,
                 resolve_sheet,
+                sheet_dimensions,
             ) {
                 return Expr::RangeRef(range);
             }
@@ -626,12 +690,14 @@ fn compile_binary(
                     current_sheet,
                     current_cell,
                     resolve_sheet,
+                    sheet_dimensions,
                 )),
                 right: Box::new(compile_expr_inner(
                     &b.right,
                     current_sheet,
                     current_cell,
                     resolve_sheet,
+                    sheet_dimensions,
                 )),
             }
         }
@@ -642,12 +708,14 @@ fn compile_binary(
                 current_sheet,
                 current_cell,
                 resolve_sheet,
+                sheet_dimensions,
             )),
             right: Box::new(compile_expr_inner(
                 &b.right,
                 current_sheet,
                 current_cell,
                 resolve_sheet,
+                sheet_dimensions,
             )),
         },
         crate::BinaryOp::Union => Expr::Binary {
@@ -657,12 +725,14 @@ fn compile_binary(
                 current_sheet,
                 current_cell,
                 resolve_sheet,
+                sheet_dimensions,
             )),
             right: Box::new(compile_expr_inner(
                 &b.right,
                 current_sheet,
                 current_cell,
                 resolve_sheet,
+                sheet_dimensions,
             )),
         },
         crate::BinaryOp::Pow => Expr::Binary {
@@ -672,12 +742,14 @@ fn compile_binary(
                 current_sheet,
                 current_cell,
                 resolve_sheet,
+                sheet_dimensions,
             )),
             right: Box::new(compile_expr_inner(
                 &b.right,
                 current_sheet,
                 current_cell,
                 resolve_sheet,
+                sheet_dimensions,
             )),
         },
         crate::BinaryOp::Mul => Expr::Binary {
@@ -687,12 +759,14 @@ fn compile_binary(
                 current_sheet,
                 current_cell,
                 resolve_sheet,
+                sheet_dimensions,
             )),
             right: Box::new(compile_expr_inner(
                 &b.right,
                 current_sheet,
                 current_cell,
                 resolve_sheet,
+                sheet_dimensions,
             )),
         },
         crate::BinaryOp::Div => Expr::Binary {
@@ -702,12 +776,14 @@ fn compile_binary(
                 current_sheet,
                 current_cell,
                 resolve_sheet,
+                sheet_dimensions,
             )),
             right: Box::new(compile_expr_inner(
                 &b.right,
                 current_sheet,
                 current_cell,
                 resolve_sheet,
+                sheet_dimensions,
             )),
         },
         crate::BinaryOp::Add => Expr::Binary {
@@ -717,12 +793,14 @@ fn compile_binary(
                 current_sheet,
                 current_cell,
                 resolve_sheet,
+                sheet_dimensions,
             )),
             right: Box::new(compile_expr_inner(
                 &b.right,
                 current_sheet,
                 current_cell,
                 resolve_sheet,
+                sheet_dimensions,
             )),
         },
         crate::BinaryOp::Sub => Expr::Binary {
@@ -732,12 +810,14 @@ fn compile_binary(
                 current_sheet,
                 current_cell,
                 resolve_sheet,
+                sheet_dimensions,
             )),
             right: Box::new(compile_expr_inner(
                 &b.right,
                 current_sheet,
                 current_cell,
                 resolve_sheet,
+                sheet_dimensions,
             )),
         },
         crate::BinaryOp::Concat => Expr::Binary {
@@ -747,12 +827,14 @@ fn compile_binary(
                 current_sheet,
                 current_cell,
                 resolve_sheet,
+                sheet_dimensions,
             )),
             right: Box::new(compile_expr_inner(
                 &b.right,
                 current_sheet,
                 current_cell,
                 resolve_sheet,
+                sheet_dimensions,
             )),
         },
     }
@@ -767,6 +849,35 @@ fn coord_to_index(coord: &crate::Coord, origin: u32, max: u32) -> Option<u32> {
         return None;
     }
     Some(idx)
+}
+
+fn sheet_max_indices(
+    sheet: &SheetReference<usize>,
+    current_sheet: usize,
+    sheet_dimensions: &mut impl FnMut(usize) -> (u32, u32),
+) -> (u32, u32) {
+    match sheet {
+        SheetReference::Sheet(id) => {
+            let (rows, cols) = sheet_dimensions(*id);
+            (rows.saturating_sub(1), cols.saturating_sub(1))
+        }
+        SheetReference::Current => {
+            let (rows, cols) = sheet_dimensions(current_sheet);
+            (rows.saturating_sub(1), cols.saturating_sub(1))
+        }
+        SheetReference::SheetRange(a, b) => {
+            let (start, end) = if a <= b { (*a, *b) } else { (*b, *a) };
+            let mut max_rows = 0u32;
+            let mut max_cols = 0u32;
+            for sheet_id in start..=end {
+                let (rows, cols) = sheet_dimensions(sheet_id);
+                max_rows = max_rows.max(rows);
+                max_cols = max_cols.max(cols);
+            }
+            (max_rows.saturating_sub(1), max_cols.saturating_sub(1))
+        }
+        SheetReference::External(_) => (EXCEL_MAX_ROW, MAX_COL),
+    }
 }
 
 fn compile_sheet_reference(
@@ -837,11 +948,24 @@ fn try_compile_static_range_ref(
     current_sheet: usize,
     current_cell: CellAddr,
     resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
+    sheet_dimensions: &mut impl FnMut(usize) -> (u32, u32),
 ) -> Option<RangeRef<usize>> {
     let left_op =
-        try_compile_static_range_operand(left, current_sheet, current_cell, resolve_sheet)?;
+        try_compile_static_range_operand(
+            left,
+            current_sheet,
+            current_cell,
+            resolve_sheet,
+            sheet_dimensions,
+        )?;
     let right_op =
-        try_compile_static_range_operand(right, current_sheet, current_cell, resolve_sheet)?;
+        try_compile_static_range_operand(
+            right,
+            current_sheet,
+            current_cell,
+            resolve_sheet,
+            sheet_dimensions,
+        )?;
     if left_op.sheet == right_op.sheet {
         let (start, end) = bounding_rect(left_op.start, left_op.end, right_op.start, right_op.end);
         return Some(RangeRef {
@@ -871,9 +995,21 @@ fn try_compile_static_range_ref(
     match explicit_sheet {
         SheetReference::Sheet(merged_sheet) => {
             let left_op =
-                try_compile_static_range_operand(left, merged_sheet, current_cell, resolve_sheet)?;
+                try_compile_static_range_operand(
+                    left,
+                    merged_sheet,
+                    current_cell,
+                    resolve_sheet,
+                    sheet_dimensions,
+                )?;
             let right_op =
-                try_compile_static_range_operand(right, merged_sheet, current_cell, resolve_sheet)?;
+                try_compile_static_range_operand(
+                    right,
+                    merged_sheet,
+                    current_cell,
+                    resolve_sheet,
+                    sheet_dimensions,
+                )?;
             if left_op.sheet != right_op.sheet {
                 return None;
             }
@@ -913,13 +1049,16 @@ fn try_compile_static_range_operand(
     current_sheet: usize,
     current_cell: CellAddr,
     resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
+    sheet_dimensions: &mut impl FnMut(usize) -> (u32, u32),
 ) -> Option<StaticRangeOperand> {
     match expr {
         crate::Expr::CellRef(r) => {
             let sheet =
                 compile_sheet_reference(&r.workbook, &r.sheet, current_sheet, resolve_sheet);
-            let col = coord_to_index(&r.col, current_cell.col, MAX_COL)?;
-            let row = coord_to_index(&r.row, current_cell.row, MAX_ROW)?;
+            let (max_row, max_col) =
+                sheet_max_indices(&sheet, current_sheet, sheet_dimensions);
+            let col = coord_to_index(&r.col, current_cell.col, max_col)?;
+            let row = coord_to_index(&r.row, current_cell.row, max_row)?;
             let addr = CellAddr { row, col };
             Some(StaticRangeOperand {
                 sheet,
@@ -930,21 +1069,25 @@ fn try_compile_static_range_operand(
         crate::Expr::ColRef(r) => {
             let sheet =
                 compile_sheet_reference(&r.workbook, &r.sheet, current_sheet, resolve_sheet);
-            let col = coord_to_index(&r.col, current_cell.col, MAX_COL)?;
+            let (max_row, max_col) =
+                sheet_max_indices(&sheet, current_sheet, sheet_dimensions);
+            let col = coord_to_index(&r.col, current_cell.col, max_col)?;
             Some(StaticRangeOperand {
                 sheet,
                 start: CellAddr { row: 0, col },
-                end: CellAddr { row: MAX_ROW, col },
+                end: CellAddr { row: max_row, col },
             })
         }
         crate::Expr::RowRef(r) => {
             let sheet =
                 compile_sheet_reference(&r.workbook, &r.sheet, current_sheet, resolve_sheet);
-            let row = coord_to_index(&r.row, current_cell.row, MAX_ROW)?;
+            let (max_row, max_col) =
+                sheet_max_indices(&sheet, current_sheet, sheet_dimensions);
+            let row = coord_to_index(&r.row, current_cell.row, max_row)?;
             Some(StaticRangeOperand {
                 sheet,
                 start: CellAddr { row, col: 0 },
-                end: CellAddr { row, col: MAX_COL },
+                end: CellAddr { row, col: max_col },
             })
         }
         _ => None,
