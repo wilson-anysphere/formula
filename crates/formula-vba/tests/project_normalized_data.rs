@@ -878,6 +878,14 @@ fn project_normalized_data_multiple_baseclass_entries_preserve_order_and_precede
         idx_base_formb < idx_base_forma,
         "expected BaseClass tokens for FormB to precede FormA (PROJECT order)"
     );
+    let baseclass_occurrences = normalized
+        .windows(b"BaseClass".len())
+        .filter(|w| *w == b"BaseClass")
+        .count();
+    assert_eq!(
+        baseclass_occurrences, 2,
+        "expected exactly two BaseClass property token occurrences"
+    );
 
     assert!(
         idx_formb < idx_base_formb,
