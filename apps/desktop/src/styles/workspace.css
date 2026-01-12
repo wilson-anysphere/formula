@@ -246,6 +246,13 @@
   overflow: auto;
 }
 
+/*
+  Panel body layout helpers.
+
+  These classes are applied by the desktop dock panel body renderer
+  (`src/panels/panelBodyRenderer.tsx`) so panel mounts are class-driven and
+  themeable (no inline style mutations).
+*/
 .panel-body--fill {
   flex: 1;
   min-height: 0;
