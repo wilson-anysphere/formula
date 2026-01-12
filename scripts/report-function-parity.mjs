@@ -13,6 +13,12 @@ function normalizeName(name) {
   return name.trim().toUpperCase();
 }
 
+function formatRelPath(absPath) {
+  // `path.relative` uses platform separators, which makes output non-deterministic across OSes.
+  // Normalize to `/` so reports are stable (and match docs snapshots) on all platforms.
+  return path.relative(repoRoot, absPath).split(path.sep).join("/");
+}
+
 /**
  * @param {string} raw
  * @returns {string[]}
@@ -21,7 +27,7 @@ function extractFtabNames(raw) {
   const match = raw.match(/pub const FTAB:\s*\[&str;\s*\d+\]\s*=\s*\[([\s\S]*?)\n\];/m);
   if (!match) {
     throw new Error(
-      `failed to locate \`pub const FTAB: [&str; N] = [ ... ];\` in ${path.relative(repoRoot, ftabPath)}`
+      `failed to locate \`pub const FTAB: [&str; N] = [ ... ];\` in ${formatRelPath(ftabPath)}`
     );
   }
 
@@ -92,8 +98,8 @@ const catalogNotInFtab = Array.from(catalogNameSet)
 
 console.log("Function parity report (catalog ↔ BIFF FTAB)");
 console.log("");
-console.log(`Catalog functions (${path.relative(repoRoot, catalogPath)}): ${catalogTotal}`);
-console.log(`FTAB functions (${path.relative(repoRoot, ftabPath)}): ${ftabNonEmptyTotal}`);
+console.log(`Catalog functions (${formatRelPath(catalogPath)}): ${catalogTotal}`);
+console.log(`FTAB functions (${formatRelPath(ftabPath)}): ${ftabNonEmptyTotal}`);
 console.log(`Catalog ∩ FTAB (case-insensitive name match): ${matchingCatalogCount}`);
 console.log(`FTAB \\ Catalog (missing from catalog): ${ftabMissingFromCatalog.length}`);
 console.log(`Catalog \\ FTAB (not present in FTAB): ${catalogNotInFtab.length}`);
