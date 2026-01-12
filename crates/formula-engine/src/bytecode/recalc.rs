@@ -226,6 +226,7 @@ mod tests {
         let cache = BytecodeCache::new();
         let program = cache.get_or_compile(&expr);
         let empty_grid = crate::bytecode::ColumnarGrid::new(1, 1);
+        let locale = crate::LocaleConfig::en_us();
         let now_utc = chrono::Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
 
         // Set a non-default locale on this thread so we can verify `RecalcEngine::recalc` uses its
@@ -237,7 +238,7 @@ mod tests {
         );
 
         let mut vm = Vm::with_capacity(32);
-        let de_de_value = vm.eval(&program, &empty_grid, origin);
+        let de_de_value = vm.eval(&program, &empty_grid, origin, &locale);
         let en_us_value = vm.eval_with_coercion_context(
             &program,
             &empty_grid,
@@ -266,7 +267,7 @@ mod tests {
         );
 
         // Ensure `recalc` restores the thread-local context after it finishes.
-        let after_value = vm.eval(&program, &empty_grid, origin);
+        let after_value = vm.eval(&program, &empty_grid, origin, &locale);
         assert_eq!(
             after_value, de_de_value,
             "recalc should restore any prior thread-local eval context"
