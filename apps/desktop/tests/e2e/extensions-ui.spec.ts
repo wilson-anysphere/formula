@@ -172,6 +172,15 @@ test.describe("Extensions UI integration", () => {
 
     const iframeOrigin = await webviewFrame!.evaluate(() => window.location.origin);
     expect(iframeOrigin, "webview should have an opaque origin (no allow-same-origin sandbox flag)").toBe("null");
+    const parentAccessBlocked = await webviewFrame!.evaluate(() => {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return Boolean((window.top as any).__formulaApp);
+      } catch {
+        return true;
+      }
+    });
+    expect(parentAccessBlocked, "webview should not be able to access parent window properties").toBe(true);
 
     const sandboxInfo = await webviewFrame!.evaluate(() => (window as any).__formulaWebviewSandbox);
     expect(sandboxInfo, "webview should inject a sandbox hardening script").toBeTruthy();
