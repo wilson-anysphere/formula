@@ -55,6 +55,14 @@ test("clipboard RTF supports OOXML-style ARGB hex colors", () => {
   assert.match(rtf, /\\colortbl;/);
 });
 
+test("clipboard RTF formats date serials using yyyy-mm-dd number formats", () => {
+  // 2024-01-31 in Excel serial (1900 date system).
+  const serial = 45322;
+  const rtf = serializeCellGridToRtf([[{ value: serial, format: { numberFormat: "yyyy-mm-dd" } }]]);
+
+  assert.match(rtf, /2024-01-31/);
+});
+
 test("clipboard RTF escapes unicode using \\\\uN? sequences", () => {
   // Astral-plane character (surrogate pair) + BMP character.
   const rtf = serializeCellGridToRtf([[{ value: "😀Ω" }]]);

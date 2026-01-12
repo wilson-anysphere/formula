@@ -8,6 +8,8 @@
  * @typedef {import("../document/cell.js").CellState} CellState
  */
 
+import { excelSerialToDate } from "../shared/valueParsing.js";
+
 /**
  * @typedef {{ r: number, g: number, b: number }} RgbColor
  */
@@ -49,6 +51,11 @@ const CSS_NAMED_COLORS = {
   hotpink: { r: 255, g: 105, b: 180 },
   rebeccapurple: { r: 102, g: 51, b: 153 },
 };
+
+function isLikelyDateNumberFormat(fmt) {
+  if (typeof fmt !== "string") return false;
+  return fmt.toLowerCase().includes("yyyy-mm-dd");
+}
 
 function clampByte(value) {
   const n = Number(value);
@@ -324,6 +331,12 @@ function cellValueToRtf(cell) {
 
   // DocumentController rich text values should copy as plain text.
   if (typeof value === "object" && typeof value.text === "string") return value.text;
+
+  const numberFormat = cell.format?.numberFormat;
+  if (typeof value === "number" && isLikelyDateNumberFormat(numberFormat)) {
+    const date = excelSerialToDate(value);
+    return numberFormat.includes("hh") ? date.toISOString() : date.toISOString().slice(0, 10);
+  }
 
   return String(value);
 }
