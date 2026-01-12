@@ -363,6 +363,115 @@ describe("CanvasGridRenderer side border rendering (Excel-like)", () => {
     }
   });
 
+  it("resolves border conflicts across frozen row boundaries (collapsed borders across quadrants)", () => {
+    const provider: CellProvider = {
+      getCell: (row, col) => {
+        if (row === 0 && col === 0) {
+          return { row, col, value: null, style: { borders: { bottom: { width: 3, style: "solid", color: "#0000ff" } } } };
+        }
+        if (row === 1 && col === 0) {
+          return { row, col, value: null, style: { borders: { top: { width: 1, style: "solid", color: "#ff0000" } } } };
+        }
+        return { row, col, value: null };
+      }
+    };
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const { ctx: gridCtx, strokes: gridStrokes } = createRecording2dContext(gridCanvas);
+    const contentCtx = createRecording2dContext(contentCanvas).ctx;
+    const selectionCtx = createRecording2dContext(selectionCanvas).ctx;
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+      [gridCanvas, gridCtx],
+      [contentCanvas, contentCtx],
+      [selectionCanvas, selectionCtx]
+    ]);
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      return contexts.get(this) ?? createRecording2dContext(this).ctx;
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const renderer = new CanvasGridRenderer({
+      provider,
+      rowCount: 2,
+      colCount: 1,
+      defaultRowHeight: 10,
+      defaultColWidth: 10
+    });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(100, 50, 1);
+    gridStrokes.length = 0;
+
+    // Freeze the first row so the shared edge between row 0 and row 1 is rendered across quadrants.
+    renderer.setFrozen(1, 0);
+
+    const blueStrokes = gridStrokes.filter((stroke) => stroke.strokeStyle === "#0000ff" && stroke.lineWidth === 3);
+    expect(blueStrokes.length).toBeGreaterThan(0);
+    expect(
+      blueStrokes.some((stroke) => hasNormalizedSegment(stroke.segments, { x1: 0, y1: 10.5, x2: 10, y2: 10.5 }))
+    ).toBe(true);
+
+    // Ensure the thinner red border never wins the shared edge.
+    expect(gridStrokes.some((stroke) => stroke.strokeStyle === "#ff0000")).toBe(false);
+  });
+
+  it("resolves border conflicts across frozen column boundaries (collapsed borders across quadrants)", () => {
+    const provider: CellProvider = {
+      getCell: (row, col) => {
+        if (row === 0 && col === 0) {
+          return { row, col, value: null, style: { borders: { right: { width: 3, style: "solid", color: "#0000ff" } } } };
+        }
+        if (row === 0 && col === 1) {
+          return { row, col, value: null, style: { borders: { left: { width: 1, style: "solid", color: "#ff0000" } } } };
+        }
+        return { row, col, value: null };
+      }
+    };
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const { ctx: gridCtx, strokes: gridStrokes } = createRecording2dContext(gridCanvas);
+    const contentCtx = createRecording2dContext(contentCanvas).ctx;
+    const selectionCtx = createRecording2dContext(selectionCanvas).ctx;
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+      [gridCanvas, gridCtx],
+      [contentCanvas, contentCtx],
+      [selectionCanvas, selectionCtx]
+    ]);
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      return contexts.get(this) ?? createRecording2dContext(this).ctx;
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const renderer = new CanvasGridRenderer({
+      provider,
+      rowCount: 1,
+      colCount: 2,
+      defaultRowHeight: 10,
+      defaultColWidth: 10
+    });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(100, 50, 1);
+    gridStrokes.length = 0;
+
+    // Freeze the first column so the shared edge between col 0 and col 1 is rendered across quadrants.
+    renderer.setFrozen(0, 1);
+
+    const blueStrokes = gridStrokes.filter((stroke) => stroke.strokeStyle === "#0000ff" && stroke.lineWidth === 3);
+    expect(blueStrokes.length).toBeGreaterThan(0);
+    expect(
+      blueStrokes.some((stroke) => hasNormalizedSegment(stroke.segments, { x1: 10.5, y1: 0, x2: 10.5, y2: 10 }))
+    ).toBe(true);
+
+    expect(gridStrokes.some((stroke) => stroke.strokeStyle === "#ff0000")).toBe(false);
+  });
+
   it("resolves shared-edge border conflicts deterministically (width, style, tie-break)", () => {
     const provider: CellProvider = {
       getCell: (row, col) => {

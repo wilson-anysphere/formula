@@ -2443,7 +2443,21 @@ export class CanvasGridRenderer {
 
       const headerRows = this.headerRowsOverride ?? (viewport.frozenRows > 0 ? 1 : 0);
       const headerCols = this.headerColsOverride ?? (viewport.frozenCols > 0 ? 1 : 0);
-      this.renderGridQuadrant(quadrant, mergedIndex, startRow, endRow, startCol, endCol, headerRows, headerCols, perf);
+      this.renderGridQuadrant(
+        quadrant,
+        mergedIndex,
+        startRow,
+        endRow,
+        startCol,
+        endCol,
+        viewport.frozenRows,
+        viewport.frozenCols,
+        viewport.scrollX,
+        viewport.scrollY,
+        headerRows,
+        headerCols,
+        perf
+      );
 
       contentCtx.restore();
       gridCtx.restore();
@@ -2462,6 +2476,10 @@ export class CanvasGridRenderer {
     endRow: number,
     startCol: number,
     endCol: number,
+    frozenRows: number,
+    frozenCols: number,
+    scrollX: number,
+    scrollY: number,
     headerRows: number,
     headerCols: number,
     perf: GridPerfStats | null
@@ -3872,6 +3890,98 @@ export class CanvasGridRenderer {
         }
 
         borderRowYSheet += rowHeight;
+      }
+
+      // When frozen panes are enabled, the grid is rendered in quadrants with different scroll bases.
+      // At scrollX/scrollY === 0, the frozen quadrants abut the scrollable quadrants in *sheet space*,
+      // meaning cell borders can conflict on the shared frozen boundary (Excel-like collapsed borders).
+      //
+      // When scrollX/scrollY > 0, the boundary is a "jump" in sheet space (the scrolled-out region is not
+      // visible), so borders from frozen and scrollable panes are not adjacent and should not be collapsed.
+      if (scrollY === 0 && frozenRows > 0) {
+        // Shared horizontal boundary between the last frozen row (frozenRows-1) and the first scrollable row (frozenRows).
+        if (startRow === frozenRows && startRow > 0) {
+          // We are rendering the scrollable pane directly below the frozen rows; include the row above's bottom borders.
+          const rowAbove = startRow - 1;
+          const yBoundary = startRowYSheet - quadrant.scrollBaseY + quadrant.originY;
+          let xSheet = startColXSheet;
+          for (let col = startCol; col < endCol; col++) {
+            const colWidth = colAxis.getSize(col);
+            const x = xSheet - quadrant.scrollBaseX + quadrant.originX;
+            if (hasMerges && mergedRangeAt(rowAbove, col)) {
+              xSheet += colWidth;
+              continue;
+            }
+            const cell = getCellCached(rowAbove, col);
+            const bottom = cell?.style?.borders?.bottom;
+            if (isCellBorder(bottom)) {
+              addBorder(hKey(startRow, col), bottom, rowAbove, col, x, yBoundary, x + colWidth, yBoundary, ORIENT_H);
+            }
+            xSheet += colWidth;
+          }
+        } else if (endRow === frozenRows && endRow < rowCount) {
+          // We are rendering the frozen pane; include the first scrollable row's top borders.
+          const rowBelow = endRow;
+          const yBoundary = borderRowYSheet - quadrant.scrollBaseY + quadrant.originY;
+          let xSheet = startColXSheet;
+          for (let col = startCol; col < endCol; col++) {
+            const colWidth = colAxis.getSize(col);
+            const x = xSheet - quadrant.scrollBaseX + quadrant.originX;
+            if (hasMerges && mergedRangeAt(rowBelow, col)) {
+              xSheet += colWidth;
+              continue;
+            }
+            const cell = getCellCached(rowBelow, col);
+            const top = cell?.style?.borders?.top;
+            if (isCellBorder(top)) {
+              addBorder(hKey(endRow, col), top, rowBelow, col, x, yBoundary, x + colWidth, yBoundary, ORIENT_H);
+            }
+            xSheet += colWidth;
+          }
+        }
+      }
+
+      if (scrollX === 0 && frozenCols > 0) {
+        // Shared vertical boundary between the last frozen col (frozenCols-1) and the first scrollable col (frozenCols).
+        if (startCol === frozenCols && startCol > 0) {
+          // We are rendering the scrollable pane to the right of the frozen cols; include the col to the left's right borders.
+          const colLeft = startCol - 1;
+          const xBoundary = startColXSheet - quadrant.scrollBaseX + quadrant.originX;
+          let ySheet = startRowYSheet;
+          for (let row = startRow; row < endRow; row++) {
+            const rowHeight = rowAxis.getSize(row);
+            const y = ySheet - quadrant.scrollBaseY + quadrant.originY;
+            if (hasMerges && mergedRangeAt(row, colLeft)) {
+              ySheet += rowHeight;
+              continue;
+            }
+            const cell = getCellCached(row, colLeft);
+            const right = cell?.style?.borders?.right;
+            if (isCellBorder(right)) {
+              addBorder(vKey(row, startCol), right, row, colLeft, xBoundary, y, xBoundary, y + rowHeight, ORIENT_V);
+            }
+            ySheet += rowHeight;
+          }
+        } else if (endCol === frozenCols && endCol < colCount) {
+          // We are rendering the frozen pane; include the first scrollable col's left borders.
+          const colRight = endCol;
+          const xBoundary = colAxis.positionOf(endCol) - quadrant.scrollBaseX + quadrant.originX;
+          let ySheet = startRowYSheet;
+          for (let row = startRow; row < endRow; row++) {
+            const rowHeight = rowAxis.getSize(row);
+            const y = ySheet - quadrant.scrollBaseY + quadrant.originY;
+            if (hasMerges && mergedRangeAt(row, colRight)) {
+              ySheet += rowHeight;
+              continue;
+            }
+            const cell = getCellCached(row, colRight);
+            const left = cell?.style?.borders?.left;
+            if (isCellBorder(left)) {
+              addBorder(vKey(row, endCol), left, row, colRight, xBoundary, y, xBoundary, y + rowHeight, ORIENT_V);
+            }
+            ySheet += rowHeight;
+          }
+        }
       }
 
       // 2) Collect merged range borders by drawing the perimeter of the merged rect.
