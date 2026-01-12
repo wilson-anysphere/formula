@@ -39,20 +39,21 @@ fn build_rich_data_package(metadata_xml: &str) -> Vec<u8> {
   </sheetData>
 </worksheet>"#;
 
-    // Minimal rich value table with one record pointing at relationship index 0.
-    let rich_value_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
-  <values>
-    <rv><v t="rel">0</v></rv>
-  </values>
-</rvData>"#;
-
     // Relationship index 0 is the first `r:id` reference in this part.
     let rich_value_rel_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <rv:richValueRel xmlns:rv="http://schemas.microsoft.com/office/spreadsheetml/2017/richvalue"
  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
    <rv:rel r:id="rId1"/>
 </rv:richValueRel>"#;
+
+    // Minimal richValue payload with a single `<rv>` record that references relationship index 0.
+    // Excel's real schema is richer; this is the smallest thing our extractor understands.
+    let rich_value_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rv:richValue xmlns:rv="http://schemas.microsoft.com/office/spreadsheetml/2017/richvalue">
+  <rv:rv>
+    <rv:v t="rel">0</rv:v>
+  </rv:rv>
+</rv:richValue>"#;
 
     let rich_value_rel_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
