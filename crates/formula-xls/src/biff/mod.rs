@@ -25,6 +25,14 @@ pub(crate) enum BiffVersion {
     Biff8,
 }
 
+// BIFF version numbers stored in the BOF record payload.
+// See [MS-XLS] 2.4.21 (BOF).
+const BOF_VERSION_BIFF5: u16 = 0x0500;
+const BOF_VERSION_BIFF8: u16 = 0x0600;
+// BOF "substream type" value used by the `calamine` heuristic when the BIFF version is 0.
+// 0x1000 corresponds to a worksheet substream.
+const BOF_DT_WORKSHEET: u16 = 0x1000;
+
 /// Read the workbook stream bytes from a compound file.
 pub(crate) fn read_workbook_stream_from_xls(path: &Path) -> Result<Vec<u8>, String> {
     let mut comp = cfb::open(path).map_err(|err| err.to_string())?;
@@ -68,10 +76,10 @@ pub(crate) fn detect_biff_version(workbook_stream: &[u8]) -> BiffVersion {
         .unwrap_or(0);
 
     match biff_version {
-        0x0500 => BiffVersion::Biff5,
-        0x0600 => BiffVersion::Biff8,
+        BOF_VERSION_BIFF5 => BiffVersion::Biff5,
+        BOF_VERSION_BIFF8 => BiffVersion::Biff8,
         0 => {
-            if dt == 0x1000 {
+            if dt == BOF_DT_WORKSHEET {
                 BiffVersion::Biff5
             } else {
                 BiffVersion::Biff8
@@ -95,26 +103,30 @@ mod tests {
 
     #[test]
     fn detects_biff8_from_bof_version() {
-        let stream = record(records::RECORD_BOF_BIFF8, &[0x00, 0x06, 0x00, 0x00]);
+        let payload = [BOF_VERSION_BIFF8.to_le_bytes(), 0u16.to_le_bytes()].concat();
+        let stream = record(records::RECORD_BOF_BIFF8, &payload);
         assert_eq!(detect_biff_version(&stream), BiffVersion::Biff8);
     }
 
     #[test]
     fn detects_biff5_from_bof_version() {
-        let stream = record(records::RECORD_BOF_BIFF5, &[0x00, 0x05, 0x00, 0x00]);
+        let payload = [BOF_VERSION_BIFF5.to_le_bytes(), 0u16.to_le_bytes()].concat();
+        let stream = record(records::RECORD_BOF_BIFF5, &payload);
         assert_eq!(detect_biff_version(&stream), BiffVersion::Biff5);
     }
 
     #[test]
     fn detects_biff5_from_dt_heuristic_when_version_is_zero() {
-        // BIFF version=0, dt=0x1000 => BIFF5 heuristic.
-        let stream = record(records::RECORD_BOF_BIFF5, &[0x00, 0x00, 0x00, 0x10]);
+        // BIFF version=0, dt=worksheet => BIFF5 heuristic.
+        let payload = [0u16.to_le_bytes(), BOF_DT_WORKSHEET.to_le_bytes()].concat();
+        let stream = record(records::RECORD_BOF_BIFF5, &payload);
         assert_eq!(detect_biff_version(&stream), BiffVersion::Biff5);
     }
 
     #[test]
     fn defaults_to_biff8_when_version_is_zero_and_dt_is_not_worksheet() {
-        let stream = record(records::RECORD_BOF_BIFF5, &[0x00, 0x00, 0x00, 0x00]);
+        let payload = [0u16.to_le_bytes(), 0u16.to_le_bytes()].concat();
+        let stream = record(records::RECORD_BOF_BIFF5, &payload);
         assert_eq!(detect_biff_version(&stream), BiffVersion::Biff8);
     }
 
