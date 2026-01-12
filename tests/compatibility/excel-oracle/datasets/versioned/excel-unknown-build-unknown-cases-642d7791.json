@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-01-12T15:14:27.945983Z",
+  "generatedAt": "2026-01-12T16:19:51.257031186Z",
   "source": {
     "kind": "excel",
     "version": "unknown",
@@ -6845,21 +6845,21 @@
       "caseId": "roman_6f7f757e7335",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NAME?"
+        "t": "s",
+        "v": "CDXCIX"
       },
       "address": "C1",
-      "displayText": "#NAME?"
+      "displayText": "CDXCIX"
     },
     {
       "caseId": "arabic_0f602467781d",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NAME?"
+        "t": "n",
+        "v": 1999.0
       },
       "address": "C1",
-      "displayText": "#NAME?"
+      "displayText": "1999"
     },
     {
       "caseId": "radians_b14947f6d6f0",
@@ -7650,6 +7650,16 @@
       },
       "address": "C1",
       "displayText": "0.421024421083418"
+    },
+    {
+      "caseId": "convert_a89703f2a31c",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 3.280839895013123
+      },
+      "address": "C1",
+      "displayText": "3.280839895013123"
     },
     {
       "caseId": "sum_r_94c994d17f65",
@@ -10143,11 +10153,11 @@
       "caseId": "forecast_ets_monthly_a85a1d4ee073",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NUM!"
+        "t": "n",
+        "v": 10.0
       },
       "address": "C1",
-      "displayText": "#NUM!"
+      "displayText": "10"
     },
     {
       "caseId": "forecast_ets_confint_8eafb6e3d87f",
@@ -10163,11 +10173,11 @@
       "caseId": "forecast_ets_confint_monthly_a7b2f6ab6f6a",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NUM!"
+        "t": "n",
+        "v": 0.0
       },
       "address": "C1",
-      "displayText": "#NUM!"
+      "displayText": "0"
     },
     {
       "caseId": "forecast_ets_seasonality_a4855868338a",
@@ -10183,11 +10193,11 @@
       "caseId": "forecast_ets_seasonality_monthly_b0903c51d41f",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NUM!"
+        "t": "n",
+        "v": 1.0
       },
       "address": "C1",
-      "displayText": "#NUM!"
+      "displayText": "1"
     },
     {
       "caseId": "forecast_ets_stat_c8d98934d450",
@@ -10203,11 +10213,11 @@
       "caseId": "forecast_ets_stat_monthly_f8804c55be98",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NUM!"
+        "t": "n",
+        "v": 0.0
       },
       "address": "C1",
-      "displayText": "#NUM!"
+      "displayText": "0"
     },
     {
       "caseId": "steyx_069420cb8eee",
@@ -10243,41 +10253,89 @@
       "caseId": "stat_linest_d9c2a8e060fe",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NAME?"
+        "t": "arr",
+        "rows": [
+          [
+            {
+              "t": "n",
+              "v": 0.9999999999999994
+            },
+            {
+              "t": "n",
+              "v": 1.4430967688835197e-15
+            }
+          ]
+        ]
       },
-      "address": "C1",
-      "displayText": "#NAME?"
+      "address": "C1:D1",
+      "displayText": "0.9999999999999994"
     },
     {
       "caseId": "stat_logest_8fab3593593b",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NAME?"
+        "t": "arr",
+        "rows": [
+          [
+            {
+              "t": "n",
+              "v": 2.999999999999999
+            },
+            {
+              "t": "n",
+              "v": 2.0000000000000013
+            }
+          ]
+        ]
       },
-      "address": "C1",
-      "displayText": "#NAME?"
+      "address": "C1:D1",
+      "displayText": "2.999999999999999"
     },
     {
       "caseId": "stat_trend_af71dd9a2007",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NAME?"
+        "t": "arr",
+        "rows": [
+          [
+            {
+              "t": "n",
+              "v": 3.999999999999999
+            }
+          ],
+          [
+            {
+              "t": "n",
+              "v": 4.999999999999999
+            }
+          ]
+        ]
       },
-      "address": "C1",
-      "displayText": "#NAME?"
+      "address": "C1:C2",
+      "displayText": "3.999999999999999"
     },
     {
       "caseId": "stat_growth_750ef3f5abd7",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NAME?"
+        "t": "arr",
+        "rows": [
+          [
+            {
+              "t": "n",
+              "v": 53.999999999999986
+            }
+          ],
+          [
+            {
+              "t": "n",
+              "v": 161.99999999999991
+            }
+          ]
+        ]
       },
-      "address": "C1",
-      "displayText": "#NAME?"
+      "address": "C1:C2",
+      "displayText": "53.999999999999986"
     },
     {
       "caseId": "and_95c1b28040be",
@@ -13243,11 +13301,11 @@
       "caseId": "hyperlink_50a1e2786fb7",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NAME?"
+        "t": "s",
+        "v": "Example"
       },
       "address": "C1",
-      "displayText": "#NAME?"
+      "displayText": "Example"
     },
     {
       "caseId": "textjoin_6f63b2cb1f9b",
@@ -14428,11 +14486,11 @@
       "caseId": "lookup_14d2fce8ebcb",
       "outputCell": "E1",
       "result": {
-        "t": "e",
-        "v": "#NAME?"
+        "t": "s",
+        "v": "three"
       },
       "address": "E1",
-      "displayText": "#NAME?"
+      "displayText": "three"
     },
     {
       "caseId": "hlookup_0c04a351e7bf",
@@ -14678,11 +14736,11 @@
       "caseId": "areas_88aea759af4f",
       "outputCell": "E1",
       "result": {
-        "t": "e",
-        "v": "#NAME?"
+        "t": "n",
+        "v": 2.0
       },
       "address": "E1",
-      "displayText": "#NAME?"
+      "displayText": "2"
     },
     {
       "caseId": "database_daverage_489759fd9a44",
@@ -17584,21 +17642,21 @@
       "caseId": "isref_241c70b18320",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NAME?"
+        "t": "b",
+        "v": true
       },
       "address": "C1",
-      "displayText": "#NAME?"
+      "displayText": "TRUE"
     },
     {
       "caseId": "isnontext_4cf8fa084d68",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NAME?"
+        "t": "b",
+        "v": false
       },
       "address": "C1",
-      "displayText": "#NAME?"
+      "displayText": "FALSE"
     },
     {
       "caseId": "islogical_f99dae6e94a9",
@@ -17884,41 +17942,41 @@
       "caseId": "sheet_7dce9a8d409b",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NAME?"
+        "t": "n",
+        "v": 1.0
       },
       "address": "C1",
-      "displayText": "#NAME?"
+      "displayText": "1"
     },
     {
       "caseId": "sheet_2adbaa985742",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NAME?"
+        "t": "n",
+        "v": 1.0
       },
       "address": "C1",
-      "displayText": "#NAME?"
+      "displayText": "1"
     },
     {
       "caseId": "sheets_7c3532d7395b",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NAME?"
+        "t": "n",
+        "v": 1.0
       },
       "address": "C1",
-      "displayText": "#NAME?"
+      "displayText": "1"
     },
     {
       "caseId": "formulatext_e475ecc3e23c",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NAME?"
+        "t": "s",
+        "v": "=1+1"
       },
       "address": "C1",
-      "displayText": "#NAME?"
+      "displayText": "=1+1"
     },
     {
       "caseId": "formulatext_6e53664936a7",
@@ -17934,21 +17992,21 @@
       "caseId": "isformula_de4876bb5980",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NAME?"
+        "t": "b",
+        "v": true
       },
       "address": "C1",
-      "displayText": "#NAME?"
+      "displayText": "TRUE"
     },
     {
       "caseId": "isformula_86cf6becefe7",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NAME?"
+        "t": "b",
+        "v": false
       },
       "address": "C1",
-      "displayText": "#NAME?"
+      "displayText": "FALSE"
     },
     {
       "caseId": "lambda_let_541b4e7b019e",
