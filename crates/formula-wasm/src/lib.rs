@@ -3100,6 +3100,36 @@ mod tests {
     }
 
     #[test]
+    fn from_xlsx_bytes_preserves_modern_error_values_as_engine_errors() {
+        let bytes = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fixtures/xlsx/basic/bool-error.xlsx"
+        ));
+        let wb = WasmWorkbook::from_xlsx_bytes(bytes).unwrap();
+
+        assert_eq!(
+            wb.inner.engine.get_cell_value(DEFAULT_SHEET, "B1"),
+            EngineValue::Error(ErrorKind::Div0)
+        );
+        assert_eq!(
+            wb.inner.engine.get_cell_value(DEFAULT_SHEET, "C1"),
+            EngineValue::Error(ErrorKind::Field)
+        );
+        assert_eq!(
+            wb.inner.engine.get_cell_value(DEFAULT_SHEET, "D1"),
+            EngineValue::Error(ErrorKind::Connect)
+        );
+        assert_eq!(
+            wb.inner.engine.get_cell_value(DEFAULT_SHEET, "E1"),
+            EngineValue::Error(ErrorKind::Blocked)
+        );
+        assert_eq!(
+            wb.inner.engine.get_cell_value(DEFAULT_SHEET, "F1"),
+            EngineValue::Error(ErrorKind::Unknown)
+        );
+    }
+
+    #[test]
     fn localized_formula_input_is_canonicalized_and_persisted() {
         let mut wb = WasmWorkbook::new();
         assert!(wb.set_locale("de-DE".to_string()));
