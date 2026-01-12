@@ -509,10 +509,21 @@ Events emitted by the Rust host (see `main.rs`, `menu.rs`, `tray.rs`, `updater.r
   - `update-available` (payload: `{ source, version, body }`)
 
 Updater events are consumed by the desktop frontend in `apps/desktop/src/tauri/updaterUi.ts` (installed
-from `apps/desktop/src/main.ts`). The update-available dialog includes an **"Open release page"**
-action that opens the GitHub Releases page for manual downgrade/rollback. If an update download or
-install fails, this action is relabeled/promoted to **"Download manually"** and the dialog’s status
-text includes manual download/downgrade instructions.
+from `apps/desktop/src/main.ts`).
+
+Updater UX responsibilities:
+
+- **Manual checks** (`source: "manual"`): show in-app feedback (toasts + focus the window), and show the
+  update dialog when an update is available.
+- **Startup checks** (`source: "startup"`): show a **system notification only** when an update is available
+  (no in-app dialog/toasts).
+  - If the user triggers "Check for Updates" while a startup check is already in-flight, the backend may
+    later emit a completion event with `source: "startup"`. The frontend treats that result as manual UX
+    so the user still sees the expected dialog/toasts.
+
+The update-available dialog includes an **"Open release page"** action that opens the GitHub Releases page
+for manual downgrade/rollback. If an update download or install fails, this action is relabeled/promoted
+to **"Download manually"** and the dialog’s status text includes manual download/downgrade instructions.
 
 Related frontend → backend events used as acknowledgements / readiness signals:
 
