@@ -85,6 +85,11 @@ function rawPathnameFromUrl(requestUrl: string): string {
   const queryIndex = requestUrl.indexOf("?");
   const withoutQuery = queryIndex === -1 ? requestUrl : requestUrl.slice(0, queryIndex);
 
+  // Typical HTTP request targets are "origin-form" (e.g. "/path"). Only treat
+  // `scheme://...` as an absolute-form URL when the string does not start with
+  // a slash so document ids like `/doc://name` don't get misclassified.
+  if (withoutQuery.startsWith("/")) return withoutQuery;
+
   const schemeIndex = withoutQuery.indexOf("://");
   if (schemeIndex !== -1) {
     const pathIndex = withoutQuery.indexOf("/", schemeIndex + 3);

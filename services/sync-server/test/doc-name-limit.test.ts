@@ -126,3 +126,22 @@ test("accepts document ids up to 1024 bytes and rejects larger ids", async (t) =
   );
 });
 
+test("accepts document ids containing :// sequences (no absolute-form confusion)", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-docname-"));
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const logger = createLogger("silent");
+  const server = createSyncServer(createConfig(dataDir), logger);
+  await server.start();
+  t.after(async () => {
+    await server.stop();
+  });
+
+  const docName = "doc://name";
+  const ws = new WebSocket(`${server.getWsUrl()}/${docName}?token=test-token`);
+  t.after(() => ws.terminate());
+  await waitForWebSocketOpen(ws);
+  ws.close();
+});
