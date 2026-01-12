@@ -730,6 +730,82 @@ pub fn apply_implicit_intersection(v: Value, grid: &dyn Grid, base: CellCoord) -
 
             Value::Error(ErrorKind::Value)
         }
+        Value::MultiRange(r) => {
+            fn intersect_area(
+                grid: &dyn Grid,
+                sheet: usize,
+                range: ResolvedRange,
+                base: CellCoord,
+            ) -> Value {
+                if !range_in_bounds_on_sheet(grid, sheet, range) {
+                    return Value::Error(ErrorKind::Ref);
+                }
+
+                // Single-cell ranges return that cell.
+                if range.row_start == range.row_end && range.col_start == range.col_end {
+                    return grid.get_value_on_sheet(
+                        sheet,
+                        CellCoord {
+                            row: range.row_start,
+                            col: range.col_start,
+                        },
+                    );
+                }
+
+                // 1D ranges intersect on the matching row/column.
+                if range.col_start == range.col_end {
+                    if base.row >= range.row_start && base.row <= range.row_end {
+                        return grid.get_value_on_sheet(
+                            sheet,
+                            CellCoord {
+                                row: base.row,
+                                col: range.col_start,
+                            },
+                        );
+                    }
+                    return Value::Error(ErrorKind::Value);
+                }
+
+                if range.row_start == range.row_end {
+                    if base.col >= range.col_start && base.col <= range.col_end {
+                        return grid.get_value_on_sheet(
+                            sheet,
+                            CellCoord {
+                                row: range.row_start,
+                                col: base.col,
+                            },
+                        );
+                    }
+                    return Value::Error(ErrorKind::Value);
+                }
+
+                // 2D ranges intersect only if the current cell is within the rectangle.
+                if base.row >= range.row_start
+                    && base.row <= range.row_end
+                    && base.col >= range.col_start
+                    && base.col <= range.col_end
+                {
+                    return grid.get_value_on_sheet(sheet, base);
+                }
+
+                Value::Error(ErrorKind::Value)
+            }
+
+            // If multiple areas intersect, Excel's implicit intersection is ambiguous. We
+            // approximate by succeeding only when exactly one area intersects.
+            let mut hit: Option<Value> = None;
+            for area in r.areas.iter() {
+                let v = intersect_area(grid, area.sheet, area.range.resolve(base), base);
+                if matches!(v, Value::Error(ErrorKind::Value)) {
+                    continue;
+                }
+                if hit.is_some() {
+                    return Value::Error(ErrorKind::Value);
+                }
+                hit = Some(v);
+            }
+            hit.unwrap_or(Value::Error(ErrorKind::Value))
+        }
         other => other,
     }
 }

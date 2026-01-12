@@ -9670,6 +9670,51 @@ mod tests {
     }
 
     #[test]
+    fn bytecode_implicit_intersection_over_sheet_spans_matches_ast() {
+        fn setup(engine: &mut Engine) {
+            for sheet in ["Sheet1", "Sheet2", "Sheet3"] {
+                engine.ensure_sheet(sheet);
+            }
+            engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+            engine.set_cell_value("Sheet2", "A1", 2.0).unwrap();
+            engine.set_cell_value("Sheet3", "A1", 3.0).unwrap();
+            engine
+                .set_cell_formula("Sheet1", "B1", "=ISNUMBER(@Sheet1:Sheet3!A1)")
+                .unwrap();
+        }
+
+        let mut bytecode_engine = Engine::new();
+        setup(&mut bytecode_engine);
+
+        // Ensure the formula is actually bytecode-compiled.
+        let sheet_id = bytecode_engine.workbook.sheet_id("Sheet1").unwrap();
+        let b1 = parse_a1("B1").unwrap();
+        let cell_b1 = bytecode_engine.workbook.sheets[sheet_id]
+            .cells
+            .get(&b1)
+            .and_then(|c| c.compiled.as_ref())
+            .expect("compiled formula");
+        assert!(
+            matches!(cell_b1, CompiledFormula::Bytecode(_)),
+            "expected ISNUMBER(@Sheet1:Sheet3!A1) to compile to bytecode"
+        );
+
+        bytecode_engine.recalculate_single_threaded();
+        let bc_value = bytecode_engine.get_cell_value("Sheet1", "B1");
+
+        let mut ast_engine = Engine::new();
+        ast_engine.set_bytecode_enabled(false);
+        setup(&mut ast_engine);
+        ast_engine.recalculate_single_threaded();
+        let ast_value = ast_engine.get_cell_value("Sheet1", "B1");
+
+        assert_eq!(bc_value, ast_value, "bytecode/AST mismatch");
+        // Implicit intersection over a 3D span is ambiguous, yielding #VALUE!, and information
+        // functions should treat that as a non-number rather than propagating the error.
+        assert_eq!(bc_value, Value::Bool(false));
+    }
+
+    #[test]
     fn bytecode_compile_report_classifies_unsupported_operators() {
         let mut engine = Engine::new();
         // The intersection operator (space) is not supported by the bytecode backend.
