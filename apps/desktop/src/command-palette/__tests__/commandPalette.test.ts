@@ -105,6 +105,26 @@ describe("command-palette/recents", () => {
     expect(readCommandRecents(storage)).toEqual([{ commandId: "cmd.normal", lastUsedMs: 1234, count: 1 }]);
   });
 
+  test("ignore list matches command ids even when events contain whitespace", async () => {
+    const storage = new MemoryStorage();
+    const listeners: Array<(evt: any) => void> = [];
+    const commandRegistry = {
+      onDidExecuteCommand: (listener: (evt: any) => void) => {
+        listeners.push(listener);
+        return () => {};
+      },
+    };
+
+    installCommandRecentsTracker(commandRegistry as any, storage, {
+      now: () => 1234,
+      ignoreCommandIds: ["clipboard.copy"],
+    });
+
+    // Simulate a malformed event payload with whitespace.
+    listeners[0]!({ commandId: " clipboard.copy ", args: [], result: null });
+    expect(readCommandRecents(storage)).toEqual([]);
+  });
+
   test("failed commands are not recorded", async () => {
     const storage = new MemoryStorage();
     const commandRegistry = new CommandRegistry();

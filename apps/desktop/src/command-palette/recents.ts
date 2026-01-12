@@ -190,11 +190,13 @@ export function installCommandRecentsTracker(
   }
 
   return commandRegistry.onDidExecuteCommand((evt) => {
-    if (ignore.has(evt.commandId)) return;
+    const commandId = String(evt.commandId ?? "").trim();
+    if (!commandId) return;
+    if (ignore.has(commandId)) return;
     // The registry only includes `error` on failure, but use property presence (not value)
     // so `throw undefined` doesn't accidentally count as a successful execution.
     if ("error" in evt) return;
-    recordCommandRecent(storage, evt.commandId, {
+    recordCommandRecent(storage, commandId, {
       maxEntries: options.maxEntries,
       nowMs: now(),
       storageKey,
