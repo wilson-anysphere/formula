@@ -84,8 +84,8 @@ test("DocumentController + BranchService: commitCurrentState preserves sheet ord
   /** @type {Map<string, any>} */
   const metaById = new Map();
   doc.getSheetMeta = (sheetId) => metaById.get(sheetId) ?? null;
-  metaById.set("SheetA", { id: "SheetA", name: "Alpha" });
-  metaById.set("SheetB", { id: "SheetB", name: "Beta" });
+  metaById.set("SheetA", { id: "SheetA", name: "Alpha", visibility: "hidden", tabColor: "ff00ff00" });
+  metaById.set("SheetB", { id: "SheetB", name: "Beta", visibility: "visible", tabColor: null });
 
   const store = new InMemoryBranchStore();
   const branchService = new BranchService({ docId: "doc-sheet-meta", store });
@@ -112,6 +112,10 @@ test("DocumentController + BranchService: commitCurrentState preserves sheet ord
   assert.deepEqual(state.sheets.order, ["SheetB", "SheetA"]);
   assert.equal(state.sheets.metaById.SheetA?.name, "Alpha");
   assert.equal(state.sheets.metaById.SheetB?.name, "Beta");
+  assert.equal(state.sheets.metaById.SheetA?.visibility, "hidden");
+  assert.equal(state.sheets.metaById.SheetA?.tabColor, "FF00FF00");
+  assert.equal(state.sheets.metaById.SheetB?.visibility, "visible");
+  assert.equal(state.sheets.metaById.SheetB?.tabColor, null);
 });
 
 test("DocumentController + BranchService: format-only conflicts round-trip through adapter", async () => {

@@ -286,7 +286,9 @@ export function documentControllerToBranchState(doc) {
     if (sheetMeta && ("tabColor" in sheetMeta || "tab_color" in sheetMeta)) {
       // Collab schema uses an 8-digit ARGB string. Be tolerant of other shapes
       // (e.g. { rgb }) during Task 201 rollout.
-      let tabColor = sheetMeta.tabColor ?? sheetMeta.tab_color;
+      let tabColor;
+      if ("tabColor" in sheetMeta) tabColor = sheetMeta.tabColor;
+      else tabColor = sheetMeta.tab_color;
       if (tabColor && typeof tabColor === "object" && typeof tabColor.rgb === "string") {
         tabColor = tabColor.rgb;
       }
