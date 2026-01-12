@@ -40,14 +40,13 @@ describe("injectWebviewCsp", () => {
     expect(cspIdx).toBeLessThan(imgIdx);
   });
 
-  it("wraps arbitrary markup in a full document and injects CSP + hardening", () => {
+  it("prefixes a doctype and injects CSP + hardening for arbitrary markup", () => {
     const html = "<h1>Hello</h1>";
     const out = injectWebviewCsp(html);
 
     expect(out).toContain("<!doctype html>");
     expect(out).toContain('<meta http-equiv="Content-Security-Policy"');
     expect(out).toContain("__formulaWebviewSandbox");
-    expect(out).toContain("<body>");
     expect(out).toContain("<h1>Hello</h1>");
   });
 

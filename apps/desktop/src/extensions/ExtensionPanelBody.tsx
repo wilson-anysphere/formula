@@ -140,12 +140,6 @@ export function injectWebviewCsp(html: string): string {
   const injectedHeadContent = `${cspMeta}${hardenTauriGlobalsScript}`;
   const src = String(html ?? "");
 
-  // If the markup doesn't include an `<html>`, wrap it so the iframe always runs in standards mode
-  // and the CSP meta tag is guaranteed to be parsed as a head directive.
-  if (!/<html(\s[^>]*)?>/i.test(src)) {
-    return `<!doctype html><html><head>${injectedHeadContent}</head><body>${src}</body></html>`;
-  }
-
   // Ensure the CSP applies before any extension-provided markup is parsed (including malformed
   // HTML that places tags before `<html>`/`<head>`). We do this by injecting immediately after the
   // document doctype when present, otherwise by prefixing a doctype and injecting right after it.
