@@ -7834,6 +7834,45 @@ export class SpreadsheetApp {
         this.formulaBar?.commitEdit();
         return;
       }
+
+      // In range-selection mode, focus may temporarily move to the grid. Ensure deletion keys still
+      // edit the formula bar text (and do not clear sheet contents).
+      if ((e.key === "Backspace" || e.key === "Delete") && this.formulaBar) {
+        e.preventDefault();
+        const textarea = this.formulaBar.textarea;
+        const current = textarea.value;
+        const selStart = textarea.selectionStart ?? current.length;
+        const selEnd = textarea.selectionEnd ?? current.length;
+        const start = Math.max(0, Math.min(selStart, selEnd, current.length));
+        const end = Math.max(0, Math.min(Math.max(selStart, selEnd), current.length));
+
+        const nextValue = (() => {
+          if (start !== end) {
+            return current.slice(0, start) + current.slice(end);
+          }
+          if (e.key === "Backspace") {
+            if (start === 0) return current;
+            return current.slice(0, start - 1) + current.slice(start);
+          }
+          // Delete
+          if (start >= current.length) return current;
+          return current.slice(0, start) + current.slice(start + 1);
+        })();
+
+        if (nextValue !== current) {
+          textarea.value = nextValue;
+        }
+
+        const cursor = (() => {
+          if (start !== end) return start;
+          if (e.key === "Backspace") return Math.max(0, start - 1);
+          return start;
+        })();
+        textarea.setSelectionRange(cursor, cursor);
+        textarea.dispatchEvent(new Event("input", { bubbles: true }));
+        this.formulaBar.focus();
+        return;
+      }
     }
 
     if (this.handleUndoRedoShortcut(e)) return;

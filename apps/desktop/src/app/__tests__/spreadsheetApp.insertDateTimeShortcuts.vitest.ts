@@ -529,6 +529,51 @@ describe("SpreadsheetApp Excel-style date/time insertion shortcuts (serial value
     formulaBar.remove();
   });
 
+  it("edits formula bar text with Backspace while focus is on the grid", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const app = new SpreadsheetApp(root, status, { formulaBar });
+    const doc = app.getDocument();
+    const sheetId = app.getCurrentSheetId();
+    const before = doc.getCell(sheetId, { row: 0, col: 0 }).value;
+
+    const input = formulaBar.querySelector<HTMLTextAreaElement>('[data-testid="formula-input"]');
+    expect(input).not.toBeNull();
+    input!.focus();
+    expect(app.isEditing()).toBe(true);
+
+    input!.value = "=SUM(";
+    input!.setSelectionRange(input!.value.length, input!.value.length);
+    input!.dispatchEvent(new Event("input", { bubbles: true }));
+
+    // Mimic a range-selection workflow where focus temporarily moves back to the grid.
+    root.focus();
+
+    root.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        key: "Backspace",
+      }),
+    );
+
+    expect(input!.value).toBe("=SUM");
+    expect(doc.getCell(sheetId, { row: 0, col: 0 }).value).toBe(before);
+    expect(app.isEditing()).toBe(true);
+
+    app.destroy();
+    root.remove();
+    formulaBar.remove();
+  });
+
   it("Fill Down/Right commands no-op while the formula bar is actively editing", () => {
     const root = createRoot();
     const status = {
