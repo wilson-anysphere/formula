@@ -1029,6 +1029,41 @@ if (
   }
 
   let secondaryGridView: SecondaryGridView | null = null;
+  let splitPanePersistTimer: number | null = null;
+  let splitPanePersistDirty = false;
+
+  // High-frequency split-pane interactions (scroll/zoom) update the in-memory layout
+  // without persisting on every event. Flush to storage on a debounce so we avoid
+  // spamming localStorage writes.
+  const scheduleSplitPanePersist = (delayMs = 500) => {
+    splitPanePersistDirty = true;
+    if (splitPanePersistTimer != null) window.clearTimeout(splitPanePersistTimer);
+    splitPanePersistTimer = window.setTimeout(() => {
+      splitPanePersistTimer = null;
+      if (!splitPanePersistDirty) return;
+      splitPanePersistDirty = false;
+      layoutController.persistNow();
+    }, delayMs);
+  };
+
+  const flushSplitPanePersist = () => {
+    if (splitPanePersistTimer != null) {
+      window.clearTimeout(splitPanePersistTimer);
+      splitPanePersistTimer = null;
+    }
+    if (!splitPanePersistDirty) return;
+    splitPanePersistDirty = false;
+    layoutController.persistNow();
+  };
+
+  const persistLayoutNow = () => {
+    if (splitPanePersistTimer != null) {
+      window.clearTimeout(splitPanePersistTimer);
+      splitPanePersistTimer = null;
+    }
+    splitPanePersistDirty = false;
+    layoutController.persistNow();
+  };
 
   const invalidateSecondaryProvider = () => {
     if (!secondaryGridView) return;
@@ -1085,6 +1120,7 @@ if (
     if (split.direction === "none") {
       secondaryGridView?.destroy();
       secondaryGridView = null;
+      flushSplitPanePersist();
       gridRoot.dataset.splitActive = "false";
       gridSecondaryEl.dataset.splitActive = "false";
       return;
@@ -1116,12 +1152,14 @@ if (
         persistScroll: (scroll) => {
           const pane = layoutController.layout.splitView.panes.secondary;
           if (pane.scrollX === scroll.scrollX && pane.scrollY === scroll.scrollY) return;
-          layoutController.setSplitPaneScroll("secondary", scroll);
+          layoutController.setSplitPaneScroll("secondary", scroll, { persist: false });
+          scheduleSplitPanePersist();
         },
         persistZoom: (zoom) => {
           const pane = layoutController.layout.splitView.panes.secondary;
           if (pane.zoom === zoom) return;
-          layoutController.setSplitPaneZoom("secondary", zoom);
+          layoutController.setSplitPaneZoom("secondary", zoom, { persist: false });
+          scheduleSplitPanePersist();
         },
       });
     }
@@ -2484,11 +2522,11 @@ if (
       try {
         gridSplitterEl.releasePointerCapture(pointerId);
       } catch {
-        // Ignore capture release errors.
+      // Ignore capture release errors.
       }
 
       // Persist the final ratio (without emitting an additional change event).
-      layoutController.persistNow();
+      persistLayoutNow();
     };
 
     window.addEventListener("pointermove", onMove, { passive: false });
