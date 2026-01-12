@@ -40,3 +40,28 @@ test("PythonPanel is class-driven (no static inline style assignments)", () => {
   }
 });
 
+test("pythonPanelMount is class-driven (no static inline style assignments)", () => {
+  const srcPath = path.join(__dirname, "..", "src", "panels", "python", "pythonPanelMount.js");
+  const src = fs.readFileSync(srcPath, "utf8");
+
+  assert.equal(
+    /\.style\b/.test(src) || /setAttribute\(\s*["']style["']/.test(src),
+    false,
+    "pythonPanelMount should not use inline styles (element.style* / setAttribute('style', ...)); use src/styles/python-panel.css classes instead",
+  );
+
+  const requiredClasses = [
+    "python-panel-mount",
+    "python-panel-mount__toolbar",
+    "python-panel-mount__runtime-select",
+    "python-panel-mount__isolation-label",
+    "python-panel-mount__degraded-banner",
+    "python-panel-mount__editor-host",
+    "python-panel-mount__editor",
+    "python-panel-mount__console",
+  ];
+
+  for (const className of requiredClasses) {
+    assert.ok(src.includes(className), `Expected pythonPanelMount.js to reference CSS class "${className}"`);
+  }
+});

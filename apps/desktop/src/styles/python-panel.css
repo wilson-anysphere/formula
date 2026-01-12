@@ -1,5 +1,6 @@
 /*
-  Styles for the DOM-based Python panel UI (src/panels/python/PythonPanel.tsx).
+  Styles for the DOM-based Python panel UIs (src/panels/python/PythonPanel.tsx and
+  src/panels/python/pythonPanelMount.js).
 
   This file intentionally uses only design tokens from `tokens.css` and does not
   hardcode colors (enforced by `noHardcodedColors.test.js`).
@@ -86,6 +87,90 @@
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  color: var(--text-primary);
+  font:
+    12px/16px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace;
+}
+
+/*
+  Styles for the runtime-select Python panel mount (src/panels/python/pythonPanelMount.js).
+*/
+
+.python-panel-mount {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.python-panel-mount__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.python-panel-mount__runtime-select {
+  max-width: 240px;
+}
+
+.python-panel-mount__isolation-label {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.python-panel-mount__degraded-banner {
+  padding: 8px;
+  border-bottom: 1px solid var(--panel-border);
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+}
+
+.python-panel-mount__editor-host {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.python-panel-mount__editor {
+  width: 100%;
+  height: 100%;
+  resize: none;
+  border: none;
+  outline: none;
+  padding: 8px;
+  background: transparent;
+  color: var(--text-primary);
+  font:
+    13px/18px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace;
+}
+
+.python-panel-mount__console {
+  flex: 0 0 auto;
+  height: 140px;
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  border-top: 1px solid var(--panel-border);
   color: var(--text-primary);
   font:
     12px/16px ui-monospace,

@@ -98,14 +98,11 @@ export function mountPythonPanel({
   container.innerHTML = "";
 
   const toolbar = document.createElement("div");
-  toolbar.style.display = "flex";
-  toolbar.style.gap = "8px";
-  toolbar.style.padding = "8px";
-  toolbar.style.borderBottom = "1px solid var(--panel-border)";
+  toolbar.className = "python-panel-mount__toolbar";
 
   const runtimeSelect = document.createElement("select");
   runtimeSelect.dataset.testid = "python-panel-runtime";
-  runtimeSelect.style.maxWidth = "240px";
+  runtimeSelect.className = "python-panel-mount__runtime-select";
   runtimeSelect.title = "Python runtime";
   const pyodideOption = document.createElement("option");
   pyodideOption.value = "pyodide";
@@ -128,39 +125,26 @@ export function mountPythonPanel({
 
   const isolationLabel = document.createElement("div");
   isolationLabel.dataset.testid = "python-panel-isolation";
-  isolationLabel.style.marginLeft = "auto";
-  isolationLabel.style.fontSize = "12px";
-  isolationLabel.style.color = "var(--text-secondary)";
+  isolationLabel.className = "python-panel-mount__isolation-label";
   toolbar.appendChild(isolationLabel);
 
   const degradedBanner = document.createElement("div");
-  degradedBanner.style.padding = "8px";
-  degradedBanner.style.borderBottom = "1px solid var(--panel-border)";
-  degradedBanner.style.fontSize = "12px";
-  degradedBanner.style.color = "var(--text-secondary)";
-  degradedBanner.style.background = "var(--bg-tertiary)";
+  degradedBanner.className = "python-panel-mount__degraded-banner";
   degradedBanner.dataset.testid = "python-panel-degraded-banner";
   degradedBanner.textContent =
     "SharedArrayBuffer unavailable; running Pyodide on main thread (UI may freeze during execution).";
-  degradedBanner.style.display = "none";
+  degradedBanner.hidden = true;
 
   const editorHost = document.createElement("div");
-  editorHost.style.flex = "1";
-  editorHost.style.minHeight = "0";
+  editorHost.className = "python-panel-mount__editor-host";
 
   const consoleHost = document.createElement("pre");
-  consoleHost.style.height = "140px";
-  consoleHost.style.margin = "0";
-  consoleHost.style.padding = "8px";
-  consoleHost.style.overflow = "auto";
-  consoleHost.style.borderTop = "1px solid var(--panel-border)";
+  consoleHost.className = "python-panel-mount__console";
   consoleHost.dataset.testid = "python-panel-output";
   consoleHost.textContent = "Output…";
 
   const root = document.createElement("div");
-  root.style.display = "flex";
-  root.style.flexDirection = "column";
-  root.style.height = "100%";
+  root.className = "python-panel-mount";
 
   root.appendChild(toolbar);
   root.appendChild(degradedBanner);
@@ -172,16 +156,7 @@ export function mountPythonPanel({
   editor.value = defaultScript();
   editor.dataset.testid = "python-panel-code";
   editor.spellcheck = false;
-  editor.style.width = "100%";
-  editor.style.height = "100%";
-  editor.style.resize = "none";
-  editor.style.border = "none";
-  editor.style.outline = "none";
-  editor.style.padding = "8px";
-  editor.style.boxSizing = "border-box";
-  editor.style.fontFamily =
-    'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
-  editor.style.fontSize = "13px";
+  editor.className = "python-panel-mount__editor";
   editorHost.appendChild(editor);
 
   const setOutput = (text) => {
@@ -200,7 +175,7 @@ export function mountPythonPanel({
   const updateRuntimeStatus = () => {
     if (runtimeSelect.value === "native") {
       isolationLabel.textContent = nativeAvailable ? "Using system Python via Tauri" : "Native runtime unavailable";
-      degradedBanner.style.display = "none";
+      degradedBanner.hidden = true;
       return;
     }
 
@@ -209,7 +184,7 @@ export function mountPythonPanel({
       backendMode === "worker"
         ? "SharedArrayBuffer enabled"
         : "SharedArrayBuffer unavailable — running Pyodide on main thread (may freeze UI)";
-    degradedBanner.style.display = backendMode === "mainThread" ? "block" : "none";
+    degradedBanner.hidden = backendMode !== "mainThread";
   };
 
   updateRuntimeStatus();
