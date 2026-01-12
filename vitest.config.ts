@@ -2,6 +2,8 @@ import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { defineConfig } from "vitest/config";
 
+const MAX_VITEST_THREADS = 8;
+
 function resolveJsToTs() {
   return {
     name: "formula:resolve-js-to-ts",
@@ -54,6 +56,17 @@ export default defineConfig({
       "services/api/src/__tests__/**/*.vitest.ts",
     ],
     environment: "node",
+    poolOptions: {
+      // Vitest defaults to using a worker count based on CPU cores. In some
+      // shared/contended environments (CI runners, sandboxes) `nproc` can be very
+      // high even when the process is constrained by OS thread limits. Cap the
+      // pool size so `vitest run <single test>` doesn't try to spin up hundreds of
+      // worker threads (which can lead to flaky shutdowns).
+      threads: {
+        minThreads: 1,
+        maxThreads: MAX_VITEST_THREADS,
+      },
+    },
     setupFiles: ["./vitest.setup.ts"],
     globalSetup: "./scripts/vitest.global-setup.mjs",
   },
