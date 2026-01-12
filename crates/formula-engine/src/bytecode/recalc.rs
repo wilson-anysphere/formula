@@ -6,8 +6,43 @@ use crate::date::ExcelDateSystem;
 use crate::locale::ValueLocaleConfig;
 use ahash::{AHashMap, AHashSet};
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
-use rayon::prelude::*;
+use rayon::{prelude::*, ThreadPool, ThreadPoolBuilder};
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+use std::sync::OnceLock;
 use std::sync::Arc;
+
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+static RECALC_THREAD_POOL: OnceLock<Option<ThreadPool>> = OnceLock::new();
+
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+fn recalc_thread_pool() -> Option<&'static ThreadPool> {
+    RECALC_THREAD_POOL
+        .get_or_init(build_recalc_thread_pool)
+        .as_ref()
+}
+
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+fn build_recalc_thread_pool() -> Option<ThreadPool> {
+    // Like the full engine, keep Rayon away from the global thread pool by default.
+    //
+    // The global pool can panic on initialization if the OS refuses to spawn threads (e.g. EAGAIN
+    // under high test concurrency). A dedicated pool lets us bound thread creation and fall back
+    // gracefully.
+    let available = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1);
+    let mut threads = available.min(8).max(1);
+
+    loop {
+        match ThreadPoolBuilder::new().num_threads(threads).build() {
+            Ok(pool) => return Some(pool),
+            Err(_) if threads > 1 => {
+                threads /= 2;
+            }
+            Err(_) => return None,
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct FormulaCell {
@@ -132,29 +167,7 @@ impl RecalcEngine {
             results.resize(level.len(), Value::Empty);
             {
                 let g: &dyn Grid = &*grid;
-                #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
-                {
-                    results.par_iter_mut().zip(level.par_iter()).for_each_init(
-                        || {
-                            (
-                                Vm::with_capacity(32),
-                                super::runtime::set_thread_eval_context(
-                                    date_system,
-                                    value_locale,
-                                    now_utc.clone(),
-                                    recalc_id,
-                                ),
-                            )
-                        },
-                        |(vm, _guard), (out, &idx)| {
-                            let node = &graph.nodes[idx];
-                            super::runtime::set_thread_current_sheet_id(0);
-                            *out = vm.eval(&node.program, g, 0, node.coord, &locale);
-                        },
-                    );
-                }
-                #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
-                {
+                let eval_level_serial = |results: &mut [Value]| {
                     let mut vm = Vm::with_capacity(32);
                     let _guard = super::runtime::set_thread_eval_context(
                         date_system,
@@ -167,6 +180,41 @@ impl RecalcEngine {
                         super::runtime::set_thread_current_sheet_id(0);
                         *out = vm.eval(&node.program, g, 0, node.coord, &locale);
                     }
+                };
+
+                #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+                {
+                    if let Some(pool) = recalc_thread_pool() {
+                        pool.install(|| {
+                            results
+                                .par_iter_mut()
+                                .zip(level.par_iter())
+                                .for_each_init(
+                                    || {
+                                        (
+                                            Vm::with_capacity(32),
+                                            super::runtime::set_thread_eval_context(
+                                                date_system,
+                                                value_locale,
+                                                now_utc.clone(),
+                                                recalc_id,
+                                            ),
+                                        )
+                                    },
+                                    |(vm, _guard), (out, &idx)| {
+                                        let node = &graph.nodes[idx];
+                                        super::runtime::set_thread_current_sheet_id(0);
+                                        *out = vm.eval(&node.program, g, 0, node.coord, &locale);
+                                    },
+                                );
+                        });
+                    } else {
+                        eval_level_serial(&mut results);
+                    }
+                }
+                #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
+                {
+                    eval_level_serial(&mut results);
                 }
             }
 
