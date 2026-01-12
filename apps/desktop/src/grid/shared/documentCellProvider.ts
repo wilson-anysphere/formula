@@ -76,6 +76,7 @@ export class DocumentCellProvider implements CellProvider {
   private readonly sheetCaches = new Map<string, LruCache<number, CellData | null>>();
   private lastSheetId: string | null = null;
   private lastSheetCache: LruCache<number, CellData | null> | null = null;
+  private readonly coordScratch = { row: 0, col: 0 };
   private readonly styleCache = new Map<number, CellStyle | undefined>();
   // Cache resolved layered formats by contributing style ids (sheet/col/row/range-run/cell). This avoids
   // re-merging OOXML-ish style objects for every cell when large regions share the same
@@ -551,7 +552,11 @@ export class DocumentCellProvider implements CellProvider {
     const docRow = row - headerRows;
     const docCol = col - headerCols;
 
-    const state = this.options.document.getCell(sheetId, { row: docRow, col: docCol }) as {
+    const coord = this.coordScratch;
+    coord.row = docRow;
+    coord.col = docCol;
+
+    const state = this.options.document.getCell(sheetId, coord) as {
       value: unknown;
       formula: string | null;
       styleId?: number;
@@ -567,7 +572,7 @@ export class DocumentCellProvider implements CellProvider {
       if (this.options.showFormulas()) {
         value = state.formula;
       } else {
-        value = this.options.getComputedValue({ row: docRow, col: docCol });
+        value = this.options.getComputedValue(coord);
       }
     } else if (state.value != null) {
       if (isRichTextValue(state.value)) {
@@ -582,7 +587,7 @@ export class DocumentCellProvider implements CellProvider {
     }
 
     const styleId = typeof state.styleId === "number" ? state.styleId : 0;
-    const { style, numberFormat } = this.resolveResolvedFormat(sheetId, { row: docRow, col: docCol }, styleId);
+    const { style, numberFormat } = this.resolveResolvedFormat(sheetId, coord, styleId);
     let resolvedStyle = style;
 
     if (typeof value === "number" && numberFormat !== null) {

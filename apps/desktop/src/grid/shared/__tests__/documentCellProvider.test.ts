@@ -9,6 +9,7 @@ function createProvider(options: {
   getCell: (sheetId: string, coord: { row: number; col: number }) => CellState | null;
   headerRows?: number;
   headerCols?: number;
+  getComputedValue?: (cell: { row: number; col: number }) => string | number | boolean | null;
   getCommentMeta?: (row: number, col: number) => { resolved: boolean } | null;
 }) {
   const headerRows = options.headerRows ?? 1;
@@ -25,7 +26,7 @@ function createProvider(options: {
     rowCount: headerRows + 10,
     colCount: headerCols + 10,
     showFormulas: () => false,
-    getComputedValue: () => null,
+    getComputedValue: options.getComputedValue ?? (() => null),
     getCommentMeta: options.getCommentMeta,
   });
 
@@ -205,5 +206,38 @@ describe("DocumentCellProvider (shared grid)", () => {
     provider.getCell(5, 0);
     provider.getCell(0, 0);
     expect(getCommentMeta).toHaveBeenCalledTimes(0);
+  });
+
+  it("reuses the coord object for getComputedValue calls (no per-cell allocations)", () => {
+    const seen: Array<{ row: number; col: number }> = [];
+    const getComputedValue = vi.fn((coord: { row: number; col: number }) => {
+      seen.push({ row: coord.row, col: coord.col });
+      return coord.col;
+    });
+
+    const { provider } = createProvider({
+      getSheetId: () => "sheet-1",
+      getCell: () => ({ value: null, formula: "=1" }),
+      getComputedValue,
+    });
+
+    // Grid (1,1) -> doc (0,0) when headers are enabled.
+    const a1 = provider.getCell(1, 1);
+    // Grid (1,2) -> doc (0,1).
+    const b1 = provider.getCell(1, 2);
+
+    expect(a1?.value).toBe(0);
+    expect(b1?.value).toBe(1);
+
+    expect(getComputedValue).toHaveBeenCalledTimes(2);
+    const firstArg = getComputedValue.mock.calls[0]?.[0];
+    const secondArg = getComputedValue.mock.calls[1]?.[0];
+    expect(firstArg).toBeTruthy();
+    expect(secondArg).toBeTruthy();
+    expect(firstArg).toBe(secondArg);
+    expect(seen).toEqual([
+      { row: 0, col: 0 },
+      { row: 0, col: 1 },
+    ]);
   });
 });
