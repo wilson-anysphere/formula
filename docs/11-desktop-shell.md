@@ -533,6 +533,8 @@ Desktop vs web behavior:
   **rich, multi-format** clipboard access via `globalThis.__TAURI__.core.invoke(...)`.
   - If `clipboard_read` is missing (older builds), the provider also tries the legacy command name
     `read_clipboard` as a best-effort merge (never clobbering WebView values).
+  - If `clipboard_write` is missing (older builds) or errors, the provider also tries the legacy
+    command name `write_clipboard` before falling back to plain-text clipboard APIs.
   - If native commands are unavailable/unimplemented, it falls back to the Web Clipboard API
     (`navigator.clipboard`) and finally to `globalThis.__TAURI__.clipboard.readText` / `writeText`
     (plain text).
