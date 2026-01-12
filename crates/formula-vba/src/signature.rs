@@ -446,10 +446,12 @@ pub fn verify_vba_digital_signature_bound(
 
         match signature.stream_kind {
             VbaSignatureStreamKind::DigitalSignatureExt => {
-                // Prefer selecting the digest algorithm by digest length rather than the OID.
-                // Office VBA signatures sometimes use an inconsistent digest algorithm OID
-                // (see MS-OSHARED §4.3), so the digest length can be a more reliable signal for
-                // MD5/SHA-1/SHA-256.
+                // Spec note: for VBA signatures the binding digest bytes are always a 16-byte MD5
+                // per MS-OSHARED §4.3, regardless of the `DigestInfo.digestAlgorithm` OID.
+                //
+                // This code still accepts non-16-byte digests as a best-effort/legacy compatibility
+                // path (some fixtures and non-Office producers use them); when present we infer a
+                // hashing algorithm from the digest length. This is not spec-correct for VBA binding.
                 let Some(alg) = digest_alg_from_digest_len(signed.digest.len())
                     .or_else(|| digest_alg_from_oid_str(&signed.digest_algorithm_oid))
                 else {
@@ -754,9 +756,11 @@ pub fn verify_vba_signature_binding_with_stream_path(
         };
 
         if treat_as_v3 {
-            // Prefer selecting the digest algorithm by digest length rather than the OID. Office VBA
-            // signatures sometimes use an inconsistent digest algorithm OID (see MS-OSHARED §4.3),
-            // so the digest length is a more reliable signal for MD5/SHA-1/SHA-256.
+            // Spec note: for VBA signatures the binding digest bytes are always a 16-byte MD5 per
+            // MS-OSHARED §4.3, regardless of the `DigestInfo.digestAlgorithm` OID.
+            //
+            // If callers feed us non-16-byte digests, treat them as non-spec/legacy and fall back to
+            // inferring a hashing algorithm from the digest length.
             let Some(alg) = digest_alg_from_digest_len(signed_digest.len())
                 .or_else(|| digest_alg_from_oid_str(&signed.digest_algorithm_oid))
             else {
@@ -1442,9 +1446,11 @@ pub fn verify_vba_project_signature_binding(
         };
 
         if treat_as_v3 {
-            // Prefer selecting the digest algorithm by digest length rather than the OID. Office VBA
-            // signatures sometimes use an inconsistent digest algorithm OID (see MS-OSHARED §4.3),
-            // so the digest length is a more reliable signal for MD5/SHA-1/SHA-256.
+            // Spec note: for VBA signatures the binding digest bytes are always a 16-byte MD5 per
+            // MS-OSHARED §4.3, regardless of the `DigestInfo.digestAlgorithm` OID.
+            //
+            // If callers feed us non-16-byte digests, treat them as non-spec/legacy and fall back to
+            // inferring a hashing algorithm from the digest length.
             let Some(alg) = digest_alg_from_digest_len(signed_digest.len())
                 .or_else(|| digest_alg_from_oid_str(&signed.digest_algorithm_oid))
             else {
