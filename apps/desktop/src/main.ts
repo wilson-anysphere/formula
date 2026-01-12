@@ -107,7 +107,7 @@ import { DEFAULT_GRID_LIMITS } from "./selection/selection.js";
 import type { GridLimits, Range, SelectionState } from "./selection/types";
 import { ContextMenu, type ContextMenuItem } from "./menus/contextMenu.js";
 import { getPasteSpecialMenuItems } from "./clipboard/pasteSpecial.js";
-import { WorkbookSheetStore, generateDefaultSheetName, validateSheetName } from "./sheets/workbookSheetStore";
+import { WorkbookSheetStore, generateDefaultSheetName, validateSheetName, type SheetVisibility, type TabColor } from "./sheets/workbookSheetStore";
 import { startSheetStoreDocumentSync } from "./sheets/sheetStoreDocumentSync";
 import { rewriteSheetNamesInFormula } from "./workbook/formulaRewrite";
 import {
@@ -1469,7 +1469,7 @@ let addSheetInFlight = false;
 let sheetStoreDocSync: ReturnType<typeof startSheetStoreDocumentSync> | null = null;
 let sheetStoreDocSyncStore: WorkbookSheetStore | null = null;
 
-type SheetUiInfo = { id: string; name: string };
+type SheetUiInfo = { id: string; name: string; visibility?: SheetVisibility; tabColor?: TabColor };
 
 function listDocumentSheetIds(): string[] {
   const sheetIds = app.getDocument().getSheetIds();
@@ -1540,6 +1540,21 @@ function coerceCollabSheetField(value: unknown): string | null {
   return null;
 }
 
+function coerceCollabSheetVisibility(value: unknown): SheetVisibility {
+  const raw = coerceCollabSheetField(value);
+  if (raw === "visible" || raw === "hidden" || raw === "veryHidden") return raw;
+  return "visible";
+}
+
+function coerceCollabSheetTabColor(value: unknown): TabColor | undefined {
+  const raw = coerceCollabSheetField(value);
+  const trimmed = raw ? raw.trim() : "";
+  if (!trimmed) return undefined;
+  // Collab sheet metadata stores Excel-style 8-digit ARGB hex strings. Reuse the sheet tab
+  // underline renderer by mapping this to `TabColor.rgb`.
+  return { rgb: trimmed };
+}
+
 function listSheetsFromCollabSession(session: CollabSession): SheetUiInfo[] {
   const out: SheetUiInfo[] = [];
   const seen = new Set<string>();
@@ -1552,9 +1567,21 @@ function listSheetsFromCollabSession(session: CollabSession): SheetUiInfo[] {
     if (!trimmed || seen.has(trimmed)) continue;
     seen.add(trimmed);
     const name = coerceCollabSheetField(map?.get?.("name") ?? map?.name) ?? trimmed;
-    out.push({ id: trimmed, name });
+    const visibility = coerceCollabSheetVisibility(map?.get?.("visibility") ?? map?.visibility);
+    const tabColor = coerceCollabSheetTabColor(map?.get?.("tabColor") ?? map?.tabColor);
+    out.push({ id: trimmed, name, visibility, tabColor });
   }
-  return out.length > 0 ? out : [{ id: "Sheet1", name: "Sheet1" }];
+  return out.length > 0 ? out : [{ id: "Sheet1", name: "Sheet1", visibility: "visible" }];
+}
+
+function collabSheetsKeyFromList(sheets: SheetUiInfo[]): string {
+  return JSON.stringify(
+    sheets.map((s) => [s.id, s.name, s.visibility ?? "visible", s.tabColor?.rgb ?? null]),
+  );
+}
+
+function collabSheetsKey(session: CollabSession): string {
+  return collabSheetsKeyFromList(listSheetsFromCollabSession(session));
 }
 
 function findCollabSheetIndexById(session: CollabSession, sheetId: string): number {
@@ -1681,9 +1708,7 @@ class CollabWorkbookSheetStore extends WorkbookSheetStore {
       entry.set("name", after);
       // This update originated locally; update the cached key so our observer
       // doesn't unnecessarily rebuild the sheet store instance.
-      lastCollabSheetsKey = listSheetsFromCollabSession(this.session)
-        .map((s) => `${s.id}\u0000${s.name}`)
-        .join("|");
+      lastCollabSheetsKey = collabSheetsKey(this.session);
     });
   }
 
@@ -1706,9 +1731,7 @@ class CollabWorkbookSheetStore extends WorkbookSheetStore {
 
       // This update originated locally; update the cached key so our observer
       // doesn't unnecessarily rebuild the sheet store instance.
-      lastCollabSheetsKey = listSheetsFromCollabSession(this.session)
-        .map((s) => `${s.id}\u0000${s.name}`)
-        .join("|");
+      lastCollabSheetsKey = collabSheetsKey(this.session);
     });
   }
 }
@@ -1745,7 +1768,7 @@ let lastCollabSheetsKey = "";
 
 function syncSheetStoreFromCollabSession(session: CollabSession): void {
   const sheets = listSheetsFromCollabSession(session);
-  const key = sheets.map((s) => `${s.id}\u0000${s.name}`).join("|");
+  const key = collabSheetsKeyFromList(sheets);
   if (key === lastCollabSheetsKey) return;
   lastCollabSheetsKey = key;
 
@@ -1755,7 +1778,8 @@ function syncSheetStoreFromCollabSession(session: CollabSession): void {
       sheets.map((sheet) => ({
         id: sheet.id,
         name: sheet.name,
-        visibility: "visible",
+        visibility: sheet.visibility ?? "visible",
+        tabColor: sheet.tabColor,
       })),
     );
   } catch (err) {
@@ -1768,7 +1792,8 @@ function syncSheetStoreFromCollabSession(session: CollabSession): void {
       sheets.map((sheet) => ({
         id: sheet.id,
         name: sheet.id,
-        visibility: "visible",
+        visibility: sheet.visibility ?? "visible",
+        tabColor: sheet.tabColor,
       })),
     );
   }
@@ -1866,6 +1891,7 @@ async function handleAddSheet(): Promise<void> {
         const sheet = new Y.Map<unknown>();
         sheet.set("id", id);
         sheet.set("name", desiredName);
+        sheet.set("visibility", "visible");
 
         // Insert after the active sheet when possible; otherwise append.
         let insertIndex = collabSession.sheets.length;
@@ -2987,6 +3013,7 @@ if (
           const sheet = new Y.Map<unknown>();
           sheet.set("id", id);
           sheet.set("name", normalizedName);
+          sheet.set("visibility", "visible");
 
           const activeIdx = findCollabSheetIndexById(collabSession, activeId);
           const insertIndex = activeIdx >= 0 ? activeIdx + 1 : collabSession.sheets.length;
