@@ -2216,7 +2216,6 @@ async function handleAddSheet(): Promise<void> {
 
       // DocumentController creates sheets lazily; touching any cell ensures the sheet exists.
       doc.getCell(id, { row: 0, col: 0 });
-      doc.markDirty();
       app.activateSheet(id);
       restoreFocusAfterSheetNavigation();
       return;
@@ -2240,19 +2239,17 @@ async function handleAddSheet(): Promise<void> {
 
       // DocumentController creates sheets lazily; touching any cell ensures the sheet exists.
       doc.getCell(id, { row: 0, col: 0 });
-      doc.markDirty();
       app.activateSheet(id);
       restoreFocusAfterSheetNavigation();
       return;
     }
 
     // Web-only behavior: create a local DocumentController sheet lazily.
-    // Until the DocumentController gains first-class sheet metadata, keep `id` and
-    // `name` in lockstep for newly-created sheets.
+    // (In the desktop-web test harness there is no workbook backend, so we synthesize a stable
+    // sheet id locally.)
     const newSheetId = desiredName;
     workbookSheetStore.addAfter(activeId, { id: newSheetId, name: desiredName });
     doc.getCell(newSheetId, { row: 0, col: 0 });
-    doc.markDirty();
     app.activateSheet(newSheetId);
     restoreFocusAfterSheetNavigation();
   } catch (err) {
@@ -3924,7 +3921,6 @@ if (
 
         // DocumentController creates sheets lazily; touching any cell ensures the sheet exists.
         doc.getCell(id, { row: 0, col: 0 });
-        doc.markDirty();
         app.activateSheet(id);
         restoreFocusAfterSheetNavigation();
         return { id, name: normalizedName };
@@ -3951,7 +3947,6 @@ if (
         workbookSheetStore.addAfter(activeId, { id, name: resolvedName || validatedName });
         // DocumentController creates sheets lazily; touching any cell ensures the sheet exists.
         doc.getCell(id, { row: 0, col: 0 });
-        doc.markDirty();
         app.activateSheet(id);
         restoreFocusAfterSheetNavigation();
         const storedName = workbookSheetStore.getName(id);
@@ -3959,12 +3954,11 @@ if (
       }
 
       // Web-only behavior: create a local DocumentController sheet lazily.
-      // Until the DocumentController gains first-class sheet metadata, keep `id` and
-      // `name` in lockstep for newly-created sheets.
+      // (In the desktop-web test harness there is no workbook backend, so we synthesize a stable
+      // sheet id locally.)
       const newSheetId = validatedName;
       workbookSheetStore.addAfter(activeId, { id: newSheetId, name: validatedName });
       doc.getCell(newSheetId, { row: 0, col: 0 });
-      doc.markDirty();
       app.activateSheet(newSheetId);
       restoreFocusAfterSheetNavigation();
       const storedName = workbookSheetStore.getName(newSheetId);

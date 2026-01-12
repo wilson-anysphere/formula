@@ -75,6 +75,36 @@ test.describe("sheet tabs", () => {
     await expect(page.getByTestId("active-value")).toHaveText(`Hello from ${nextSheetId}`);
   });
 
+  test("add sheet marks the document dirty and undo returns to clean state", async ({ page }) => {
+    await gotoDesktop(page);
+
+    const initialSheetIds = await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      app.getDocument().markSaved();
+      return app.getWorkbookSheetStore().listAll().map((s: any) => s.id);
+    });
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(false);
+
+    await page.getByTestId("sheet-add").click();
+
+    // Adding a sheet should create an undo step and mark the workbook dirty.
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(true);
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__formulaApp.getWorkbookSheetStore().listAll().length))
+      .toBe(initialSheetIds.length + 1);
+
+    // Undo should remove the sheet and return to the last-saved dirty state.
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      app.getDocument().undo();
+    });
+
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(false);
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__formulaApp.getWorkbookSheetStore().listAll().map((s: any) => s.id)))
+      .toEqual(initialSheetIds);
+  });
+
   test("sheet overflow menu activates the selected sheet", async ({ page }) => {
     await gotoDesktop(page);
 
