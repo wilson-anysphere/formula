@@ -2097,6 +2097,7 @@ dependencies = [
  "base64 0.22.1",
  "cfb 0.10.0",
  "chrono",
+ "formula-columnar",
  "formula-engine",
  "formula-format",
  "formula-model",

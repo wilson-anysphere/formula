@@ -578,6 +578,45 @@ impl Worksheet {
         self.columnar.as_ref().map(|c| &c.table)
     }
 
+    /// Returns the origin cell for the columnar backing table, if present.
+    pub fn columnar_origin(&self) -> Option<CellRef> {
+        self.columnar.as_ref().map(|c| c.origin)
+    }
+
+    /// Returns the (origin, row_count, col_count) for the backing columnar table, clamped to
+    /// Excel's sheet bounds.
+    ///
+    /// The returned `row_count` and `col_count` are suitable for iterating over cell positions
+    /// within the table.
+    pub fn columnar_table_extent(&self) -> Option<(CellRef, usize, usize)> {
+        let backend = self.columnar.as_ref()?;
+        let origin = backend.origin;
+        if origin.row >= crate::cell::EXCEL_MAX_ROWS || origin.col >= crate::cell::EXCEL_MAX_COLS {
+            return None;
+        }
+
+        let max_rows = (crate::cell::EXCEL_MAX_ROWS - origin.row) as usize;
+        let max_cols = (crate::cell::EXCEL_MAX_COLS - origin.col) as usize;
+        let rows = backend.table.row_count().min(max_rows);
+        let cols = backend.table.column_count().min(max_cols);
+        if rows == 0 || cols == 0 {
+            return None;
+        }
+
+        Some((origin, rows, cols))
+    }
+
+    /// Returns the bounding range covered by the backing columnar table, clamped to Excel's
+    /// sheet bounds.
+    pub fn columnar_range(&self) -> Option<Range> {
+        let (origin, rows, cols) = self.columnar_table_extent()?;
+        let end = CellRef::new(
+            origin.row.saturating_add(rows.saturating_sub(1) as u32),
+            origin.col.saturating_add(cols.saturating_sub(1) as u32),
+        );
+        Some(Range::new(origin, end))
+    }
+
     /// Get per-row properties if an override exists.
     pub fn row_properties(&self, row: u32) -> Option<&RowProperties> {
         self.row_properties.get(&row)

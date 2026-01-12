@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 pub use formula_xls as xls;
 pub use formula_xlsb as xlsb;
 pub use formula_xlsx as xlsx;
+use formula_model::import::{import_csv_into_workbook, CsvImportError, CsvOptions};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -31,6 +32,12 @@ pub enum Error {
         path: PathBuf,
         #[source]
         source: xlsb::Error,
+    },
+    #[error("failed to open `.csv` workbook `{path}`: {source}")]
+    OpenCsv {
+        path: PathBuf,
+        #[source]
+        source: CsvImportError,
     },
     #[error("failed to save workbook `{path}`: {source}")]
     SaveIo {
@@ -73,6 +80,8 @@ pub enum Workbook {
     Xlsx(xlsx::XlsxPackage),
     Xls(xls::XlsImportResult),
     Xlsb(xlsb::XlsbWorkbook),
+    /// A workbook represented as an in-memory model (e.g. imported from a non-OPC format like CSV).
+    Model(formula_model::Workbook),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,6 +89,7 @@ enum WorkbookFormat {
     Xlsx,
     Xls,
     Xlsb,
+    Csv,
 }
 
 fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
@@ -96,6 +106,7 @@ fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
         "xlsx" | "xlsm" => Ok(WorkbookFormat::Xlsx),
         "xls" => Ok(WorkbookFormat::Xls),
         "xlsb" => Ok(WorkbookFormat::Xlsb),
+        "csv" => Ok(WorkbookFormat::Csv),
         other => {
             // Best-effort content sniffing for files with missing/unknown extensions.
             //
@@ -212,6 +223,34 @@ pub fn open_workbook_model(path: impl AsRef<Path>) -> Result<formula_model::Work
                 source,
             })
         }
+        WorkbookFormat::Csv => {
+            let file = File::open(path).map_err(|source| Error::OpenIo {
+                path: path.to_path_buf(),
+                source,
+            })?;
+            let reader = std::io::BufReader::new(file);
+
+            let sheet_name = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .filter(|s| !s.is_empty())
+                .unwrap_or("Sheet1")
+                .to_string();
+
+            let mut workbook = formula_model::Workbook::new();
+            import_csv_into_workbook(
+                &mut workbook,
+                sheet_name,
+                reader,
+                CsvOptions::default(),
+            )
+            .map_err(|source| Error::OpenCsv {
+                path: path.to_path_buf(),
+                source,
+            })?;
+
+            Ok(workbook)
+        }
     }
 }
 
@@ -248,6 +287,34 @@ pub fn open_workbook(path: impl AsRef<Path>) -> Result<Workbook, Error> {
                 path: path.to_path_buf(),
                 source,
             }),
+        WorkbookFormat::Csv => {
+            let file = std::fs::File::open(path).map_err(|source| Error::OpenIo {
+                path: path.to_path_buf(),
+                source,
+            })?;
+            let reader = std::io::BufReader::new(file);
+
+            let sheet_name = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .filter(|s| !s.is_empty())
+                .unwrap_or("Sheet1")
+                .to_string();
+
+            let mut workbook = formula_model::Workbook::new();
+            import_csv_into_workbook(
+                &mut workbook,
+                sheet_name,
+                reader,
+                CsvOptions::default(),
+            )
+            .map_err(|source| Error::OpenCsv {
+                path: path.to_path_buf(),
+                source,
+            })?;
+
+            Ok(Workbook::Model(workbook))
+        }
     }
 }
 
@@ -347,6 +414,16 @@ pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), 
                     source,
                 })
             }
+            other => Err(Error::UnsupportedExtension {
+                path: path.to_path_buf(),
+                extension: other.to_string(),
+            }),
+        },
+        Workbook::Model(model) => match ext.as_str() {
+            "xlsx" => xlsx::write_workbook(model, path).map_err(|source| Error::SaveXlsxExport {
+                path: path.to_path_buf(),
+                source,
+            }),
             other => Err(Error::UnsupportedExtension {
                 path: path.to_path_buf(),
                 extension: other.to_string(),

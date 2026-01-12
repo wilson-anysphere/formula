@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{Cursor, Write};
 
 use formula_engine::{parse_formula, CellAddr, ParseOptions, SerializeOptions};
+use formula_columnar::{ColumnType as ColumnarType, Value as ColumnarValue};
 use formula_model::rich_text::{RichText, Underline};
 use formula_model::{
     CellRef, CellValue, ErrorValue, Hyperlink, HyperlinkTarget, Outline, OutlineEntry, Range,
@@ -1315,6 +1316,27 @@ fn build_shared_strings_xml(
                 }
             }
         }
+
+        // Include shared strings from columnar-backed worksheets.
+        if let Some((_, rows, cols)) = sheet.columnar_table_extent() {
+            if let Some(columnar) = sheet.columnar_table() {
+                let columnar = columnar.as_ref();
+                for row in 0..rows {
+                    for col in 0..cols {
+                        if let ColumnarValue::String(s) = columnar.get_cell(row, col) {
+                            ref_count += 1;
+                            let text = s.as_ref();
+                            let key = SharedStringKey::plain(text);
+                            if !lookup.contains_key(&key) {
+                                let new_index = table.len() as u32;
+                                table.push(RichText::new(text.to_string()));
+                                lookup.insert(key, new_index);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // If we started from an existing `sharedStrings.xml` and we didn't add any new entries,
@@ -2320,6 +2342,24 @@ fn render_sheet_data(
 ) -> String {
     let shared_formulas = shared_formula_groups(doc, sheet_meta.worksheet_id);
 
+    if let Some((origin, rows, cols)) = sheet.columnar_table_extent() {
+        if sheet.columnar_table().is_some() {
+            return render_sheet_data_columnar(
+                doc,
+                sheet_meta,
+                sheet,
+                shared_lookup,
+                style_to_xf,
+                cell_meta_sheet_ids,
+                outline,
+                &shared_formulas,
+                origin,
+                rows,
+                cols,
+            );
+        }
+    }
+
     let mut out = String::new();
     out.push_str("<sheetData>");
 
@@ -2396,197 +2436,18 @@ fn render_sheet_data(
                 wrote_any_cell = true;
             }
             cell_idx += 1;
-
-        out.push_str(r#"<c r=""#);
-        out.push_str(&cell_ref.to_a1());
-        out.push('"');
-
-        if cell.style_id != 0 {
-            if let Some(xf_index) = style_to_xf.get(&cell.style_id) {
-                out.push_str(&format!(r#" s="{xf_index}""#));
-            }
-        }
-
-        let meta = lookup_cell_meta(doc, cell_meta_sheet_ids, sheet_meta.worksheet_id, cell_ref);
-        let value_kind = effective_value_kind(meta, cell);
-
-        if !matches!(cell.value, CellValue::Empty) {
-            match &value_kind {
-                CellValueKind::SharedString { .. } => out.push_str(r#" t="s""#),
-                CellValueKind::InlineString => out.push_str(r#" t="inlineStr""#),
-                CellValueKind::Bool => out.push_str(r#" t="b""#),
-                CellValueKind::Error => out.push_str(r#" t="e""#),
-                CellValueKind::Str => out.push_str(r#" t="str""#),
-                CellValueKind::Number => {}
-                CellValueKind::Other { t } => {
-                    out.push_str(&format!(r#" t="{}""#, escape_attr(t)));
-                }
-            }
-        }
-
-        out.push('>');
-
-        let model_formula = cell.formula.as_deref();
-        let mut preserve_textless_shared = false;
-        let mut formula_meta = match (model_formula, meta.and_then(|m| m.formula.clone())) {
-            (Some(_), Some(meta)) => Some(meta),
-            (Some(formula), None) => Some(crate::FormulaMeta {
-                file_text: crate::formula_text::add_xlfn_prefixes(strip_leading_equals(formula)),
-                ..Default::default()
-            }),
-            (None, Some(meta)) => {
-                // The in-memory model doesn't currently represent shared formulas for follower
-                // cells. Preserve those formulas when the stored SpreadsheetML indicates a formula
-                // even if the model omits it.
-                if meta.file_text.is_empty()
-                    && meta.t.is_none()
-                    && meta.reference.is_none()
-                    && meta.shared_index.is_none()
-                    && meta.always_calc.is_none()
-                {
-                    None
-                } else if meta.file_text.is_empty() {
-                    Some(meta)
-                } else {
-                    // Model cleared the formula; don't keep stale formula text from metadata.
-                    None
-                }
-            }
-            (None, None) => None,
-        };
-
-        if let (Some(display), Some(meta)) = (model_formula, formula_meta.as_mut()) {
-            if meta.t.as_deref() == Some("shared") && meta.file_text.is_empty() {
-                if let Some(si) = meta.shared_index {
-                    if let Some(expected) = shared_formula_expected(&shared_formulas, si, cell_ref) {
-                        if expected == strip_leading_equals(display) {
-                            preserve_textless_shared = true;
-                        } else {
-                            // The cell's model formula differs from the shared-formula expansion,
-                            // so break sharing and store the explicit formula text.
-                            meta.t = None;
-                            meta.reference = None;
-                            meta.shared_index = None;
-                            meta.file_text = crate::formula_text::add_xlfn_prefixes(
-                                strip_leading_equals(display),
-                            );
-                        }
-                    } else {
-                        // Without the shared-formula master we can't validate equivalence, so
-                        // prefer preserving the model formula over keeping the shared structure.
-                        meta.t = None;
-                        meta.reference = None;
-                        meta.shared_index = None;
-                        meta.file_text = crate::formula_text::add_xlfn_prefixes(
-                            strip_leading_equals(display),
-                        );
-                    }
-                } else {
-                    // Malformed shared-formula follower; fall back to a normal formula.
-                    meta.t = None;
-                    meta.reference = None;
-                    meta.shared_index = None;
-                    meta.file_text =
-                        crate::formula_text::add_xlfn_prefixes(strip_leading_equals(display));
-                }
-            }
-        }
-
-        if let Some(formula_meta) = formula_meta {
-            out.push_str("<f");
-            if let Some(t) = &formula_meta.t {
-                out.push_str(&format!(r#" t="{}""#, escape_attr(t)));
-            }
-            if let Some(r) = &formula_meta.reference {
-                out.push_str(&format!(r#" ref="{}""#, escape_attr(r)));
-            }
-            if let Some(si) = formula_meta.shared_index {
-                out.push_str(&format!(r#" si="{si}""#));
-            }
-            if let Some(aca) = formula_meta.always_calc {
-                out.push_str(&format!(r#" aca="{}""#, if aca { "1" } else { "0" }));
-            }
-
-            let file_text = if preserve_textless_shared {
-                String::new()
-            } else {
-                formula_file_text(&formula_meta, model_formula)
-            };
-            if file_text.is_empty() {
-                out.push_str("/>");
-            } else {
-                out.push('>');
-                out.push_str(&escape_text(&file_text));
-                out.push_str("</f>");
-            }
-        }
-
-        match &cell.value {
-            CellValue::Empty => {}
-            value @ CellValue::String(s) if matches!(&value_kind, CellValueKind::Other { .. }) => {
-                out.push_str("<v>");
-                out.push_str(&escape_text(&raw_or_other(meta, s)));
-                out.push_str("</v>");
-            }
-            CellValue::Number(n) => {
-                out.push_str("<v>");
-                out.push_str(&escape_text(&raw_or_number(meta, *n)));
-                out.push_str("</v>");
-            }
-            CellValue::Boolean(b) => {
-                out.push_str("<v>");
-                out.push_str(raw_or_bool(meta, *b));
-                out.push_str("</v>");
-            }
-            CellValue::Error(err) => {
-                out.push_str("<v>");
-                out.push_str(&escape_text(&raw_or_error(meta, *err)));
-                out.push_str("</v>");
-            }
-            value @ CellValue::String(s) => match &value_kind {
-                CellValueKind::SharedString { .. } => {
-                    let idx = shared_string_index(doc, meta, value, shared_lookup);
-                    out.push_str("<v>");
-                    out.push_str(&idx.to_string());
-                    out.push_str("</v>");
-                }
-                CellValueKind::InlineString => {
-                    out.push_str("<is><t");
-                    if needs_space_preserve(s) {
-                        out.push_str(r#" xml:space="preserve""#);
-                    }
-                    out.push('>');
-                    out.push_str(&escape_text(s));
-                    out.push_str("</t></is>");
-                }
-                CellValueKind::Str => {
-                    out.push_str("<v>");
-                    out.push_str(&escape_text(&raw_or_str(meta, s)));
-                    out.push_str("</v>");
-                }
-                _ => {
-                    // Fallback: treat as shared string.
-                    let idx = shared_string_index(doc, meta, value, shared_lookup);
-                    out.push_str("<v>");
-                    out.push_str(&idx.to_string());
-                    out.push_str("</v>");
-                }
-            },
-            value @ CellValue::RichText(rich) => {
-                // Rich text is stored in the shared strings table.
-                let idx = shared_string_index(doc, meta, value, shared_lookup);
-                if idx != 0 || !rich.text.is_empty() {
-                    out.push_str("<v>");
-                    out.push_str(&idx.to_string());
-                    out.push_str("</v>");
-                }
-            }
-            _ => {
-                // Array/Spill not yet modeled for writing. Preserve as blank.
-            }
-        }
-
-        out.push_str("</c>");
+            append_cell_xml(
+                &mut out,
+                doc,
+                sheet_meta,
+                sheet,
+                cell_ref,
+                cell,
+                shared_lookup,
+                style_to_xf,
+                cell_meta_sheet_ids,
+                &shared_formulas,
+            );
     }
 
         if wrote_any_cell {
@@ -2597,6 +2458,493 @@ fn render_sheet_data(
     }
     out.push_str("</sheetData>");
     out
+}
+
+fn render_sheet_data_columnar(
+    doc: &XlsxDocument,
+    sheet_meta: &SheetMeta,
+    sheet: &Worksheet,
+    shared_lookup: &HashMap<SharedStringKey, u32>,
+    style_to_xf: &HashMap<u32, u32>,
+    cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
+    outline: Option<&Outline>,
+    shared_formulas: &HashMap<u32, SharedFormulaGroup>,
+    origin: CellRef,
+    table_rows: usize,
+    table_cols: usize,
+) -> String {
+    let Some(columnar) = sheet.columnar_table() else {
+        return String::from("<sheetData></sheetData>");
+    };
+    let table = columnar.as_ref();
+
+    let mut out = String::new();
+    out.push_str("<sheetData>");
+
+    // Sparse overlay cells in row-major order.
+    let mut overlay_cells: Vec<(CellRef, &formula_model::Cell)> = sheet.iter_cells().collect();
+    overlay_cells.sort_by_key(|(r, _)| (r.row, r.col));
+    let mut overlay_idx = 0usize;
+
+    // Rows to emit outside the contiguous table row range (row properties, outline-only rows,
+    // and rows containing overlay cells).
+    let mut extra_rows: BTreeMap<u32, ()> = BTreeMap::new();
+    for (cell_ref, _) in &overlay_cells {
+        extra_rows.insert(cell_ref.row + 1, ());
+    }
+    for (row, props) in sheet.row_properties.iter() {
+        if props.height.is_some() || props.hidden {
+            extra_rows.insert(row + 1, ());
+        }
+    }
+    if let Some(outline) = outline {
+        // Preserve outline-only rows (groups, hidden rows, etc) even if they contain no cells.
+        // We don't attempt to preserve all row-level metadata yet—only the outline-related attrs.
+        for (row, entry) in outline.rows.iter() {
+            if entry.level > 0 || entry.hidden.is_hidden() || entry.collapsed {
+                extra_rows.insert(row, ());
+            }
+        }
+    }
+    let extra_rows: Vec<u32> = extra_rows.keys().copied().collect();
+    let mut extra_idx = 0usize;
+
+    let table_row_start_1 = origin.row.saturating_add(1);
+    let table_row_end_1 = origin
+        .row
+        .saturating_add(table_rows.saturating_sub(1) as u32)
+        .saturating_add(1);
+
+    let mut table_row_1 = table_row_start_1;
+
+    loop {
+        let next_extra = extra_rows.get(extra_idx).copied();
+        let next_table = (table_row_1 <= table_row_end_1).then_some(table_row_1);
+
+        let Some(row_1_based) = (match (next_table, next_extra) {
+            (Some(t), Some(e)) => Some(t.min(e)),
+            (Some(t), None) => Some(t),
+            (None, Some(e)) => Some(e),
+            (None, None) => None,
+        }) else {
+            break;
+        };
+
+        if next_extra == Some(row_1_based) {
+            extra_idx += 1;
+        }
+        if next_table == Some(row_1_based) {
+            table_row_1 = table_row_1.saturating_add(1);
+        }
+
+        let row_zero = row_1_based.saturating_sub(1);
+
+        // Gather overlay cells for this row.
+        while overlay_idx < overlay_cells.len()
+            && overlay_cells[overlay_idx].0.row.saturating_add(1) < row_1_based
+        {
+            overlay_idx += 1;
+        }
+        let overlay_start = overlay_idx;
+        while overlay_idx < overlay_cells.len()
+            && overlay_cells[overlay_idx].0.row.saturating_add(1) == row_1_based
+        {
+            overlay_idx += 1;
+        }
+        let overlay_slice = &overlay_cells[overlay_start..overlay_idx];
+
+        let outline_entry: OutlineEntry = outline
+            .map(|outline| outline.rows.entry(row_1_based))
+            .unwrap_or_default();
+        let row_props = sheet.row_properties(row_zero);
+
+        // Pre-render the row attributes so we can skip truly-empty rows (no attrs and no cells).
+        let mut row_attrs = String::new();
+        if let Some(row_props) = row_props {
+            if let Some(height) = row_props.height {
+                row_attrs.push_str(&format!(r#" ht="{height}""#));
+                row_attrs.push_str(r#" customHeight="1""#);
+            }
+            if row_props.hidden {
+                row_attrs.push_str(r#" hidden="1""#);
+            }
+        }
+        if outline_entry.level > 0 {
+            row_attrs.push_str(&format!(r#" outlineLevel="{}""#, outline_entry.level));
+        }
+        if outline_entry.hidden.is_hidden() && !row_props.is_some_and(|p| p.hidden) {
+            row_attrs.push_str(r#" hidden="1""#);
+        }
+        if outline_entry.collapsed {
+            row_attrs.push_str(r#" collapsed="1""#);
+        }
+
+        let mut cells_xml = String::new();
+        let mut wrote_any_cell = false;
+
+        let in_table_row = row_zero >= origin.row
+            && row_zero < origin.row.saturating_add(table_rows as u32);
+
+        if in_table_row {
+            let row_off = (row_zero - origin.row) as usize;
+
+            let mut overlay_cell_idx = 0usize;
+
+            // Overlay cells left of the table.
+            while overlay_cell_idx < overlay_slice.len()
+                && overlay_slice[overlay_cell_idx].0.col < origin.col
+            {
+                let (cell_ref, cell) = overlay_slice[overlay_cell_idx];
+                append_cell_xml(
+                    &mut cells_xml,
+                    doc,
+                    sheet_meta,
+                    sheet,
+                    cell_ref,
+                    cell,
+                    shared_lookup,
+                    style_to_xf,
+                    cell_meta_sheet_ids,
+                    shared_formulas,
+                );
+                overlay_cell_idx += 1;
+                wrote_any_cell = true;
+            }
+
+            // Table columns (overlay overrides).
+            for col_off in 0..table_cols {
+                let col_idx = origin.col.saturating_add(col_off as u32);
+                if overlay_cell_idx < overlay_slice.len()
+                    && overlay_slice[overlay_cell_idx].0.col == col_idx
+                {
+                    let (cell_ref, cell) = overlay_slice[overlay_cell_idx];
+                    append_cell_xml(
+                        &mut cells_xml,
+                        doc,
+                        sheet_meta,
+                        sheet,
+                        cell_ref,
+                        cell,
+                        shared_lookup,
+                        style_to_xf,
+                        cell_meta_sheet_ids,
+                        shared_formulas,
+                    );
+                    overlay_cell_idx += 1;
+                    wrote_any_cell = true;
+                    continue;
+                }
+
+                let cell_ref = CellRef::new(row_zero, col_idx);
+                if sheet.merged_regions.resolve_cell(cell_ref) != cell_ref {
+                    continue;
+                }
+
+                let value = table.get_cell(row_off, col_off);
+                let col_type = table
+                    .schema()
+                    .get(col_off)
+                    .map(|s| s.column_type)
+                    .unwrap_or(ColumnarType::String);
+                let cell_value = columnar_to_cell_value(value, col_type);
+                if matches!(cell_value, CellValue::Empty) {
+                    continue;
+                }
+                let cell = formula_model::Cell::new(cell_value);
+                append_cell_xml(
+                    &mut cells_xml,
+                    doc,
+                    sheet_meta,
+                    sheet,
+                    cell_ref,
+                    &cell,
+                    shared_lookup,
+                    style_to_xf,
+                    cell_meta_sheet_ids,
+                    shared_formulas,
+                );
+                wrote_any_cell = true;
+            }
+
+            // Overlay cells right of the table.
+            while overlay_cell_idx < overlay_slice.len() {
+                let (cell_ref, cell) = overlay_slice[overlay_cell_idx];
+                append_cell_xml(
+                    &mut cells_xml,
+                    doc,
+                    sheet_meta,
+                    sheet,
+                    cell_ref,
+                    cell,
+                    shared_lookup,
+                    style_to_xf,
+                    cell_meta_sheet_ids,
+                    shared_formulas,
+                );
+                overlay_cell_idx += 1;
+                wrote_any_cell = true;
+            }
+        } else {
+            // Row outside the columnar table; only overlay cells apply.
+            for (cell_ref, cell) in overlay_slice {
+                append_cell_xml(
+                    &mut cells_xml,
+                    doc,
+                    sheet_meta,
+                    sheet,
+                    *cell_ref,
+                    cell,
+                    shared_lookup,
+                    style_to_xf,
+                    cell_meta_sheet_ids,
+                    shared_formulas,
+                );
+                wrote_any_cell = true;
+            }
+        }
+
+        if !wrote_any_cell && row_attrs.is_empty() {
+            continue;
+        }
+
+        out.push_str(&format!(r#"<row r="{row_1_based}""#));
+        out.push_str(&row_attrs);
+        if wrote_any_cell {
+            out.push('>');
+            out.push_str(&cells_xml);
+            out.push_str("</row>");
+        } else {
+            out.push_str("/>");
+        }
+    }
+
+    out.push_str("</sheetData>");
+    out
+}
+
+fn columnar_to_cell_value(value: ColumnarValue, column_type: ColumnarType) -> CellValue {
+    match value {
+        ColumnarValue::Null => CellValue::Empty,
+        ColumnarValue::Number(v) => CellValue::Number(v),
+        ColumnarValue::Boolean(v) => CellValue::Boolean(v),
+        ColumnarValue::String(v) => CellValue::String(v.as_ref().to_string()),
+        ColumnarValue::DateTime(v) => CellValue::Number(v as f64),
+        ColumnarValue::Currency(v) => match column_type {
+            ColumnarType::Currency { scale } => {
+                let denom = 10f64.powi(scale as i32);
+                CellValue::Number(v as f64 / denom)
+            }
+            _ => CellValue::Number(v as f64),
+        },
+        ColumnarValue::Percentage(v) => match column_type {
+            ColumnarType::Percentage { scale } => {
+                let denom = 10f64.powi(scale as i32);
+                CellValue::Number(v as f64 / denom)
+            }
+            _ => CellValue::Number(v as f64),
+        },
+    }
+}
+
+fn append_cell_xml(
+    out: &mut String,
+    doc: &XlsxDocument,
+    sheet_meta: &SheetMeta,
+    _sheet: &Worksheet,
+    cell_ref: CellRef,
+    cell: &formula_model::Cell,
+    shared_lookup: &HashMap<SharedStringKey, u32>,
+    style_to_xf: &HashMap<u32, u32>,
+    cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
+    shared_formulas: &HashMap<u32, SharedFormulaGroup>,
+) {
+    out.push_str(r#"<c r=""#);
+    out.push_str(&cell_ref.to_a1());
+    out.push('"');
+
+    if cell.style_id != 0 {
+        if let Some(xf_index) = style_to_xf.get(&cell.style_id) {
+            out.push_str(&format!(r#" s="{xf_index}""#));
+        }
+    }
+
+    let meta = lookup_cell_meta(doc, cell_meta_sheet_ids, sheet_meta.worksheet_id, cell_ref);
+    let value_kind = effective_value_kind(meta, cell);
+
+    if !matches!(cell.value, CellValue::Empty) {
+        match &value_kind {
+            CellValueKind::SharedString { .. } => out.push_str(r#" t="s""#),
+            CellValueKind::InlineString => out.push_str(r#" t="inlineStr""#),
+            CellValueKind::Bool => out.push_str(r#" t="b""#),
+            CellValueKind::Error => out.push_str(r#" t="e""#),
+            CellValueKind::Str => out.push_str(r#" t="str""#),
+            CellValueKind::Number => {}
+            CellValueKind::Other { t } => {
+                out.push_str(&format!(r#" t="{}""#, escape_attr(t)));
+            }
+        }
+    }
+
+    out.push('>');
+
+    let model_formula = cell.formula.as_deref();
+    let mut preserve_textless_shared = false;
+    let mut formula_meta = match (model_formula, meta.and_then(|m| m.formula.clone())) {
+        (Some(_), Some(meta)) => Some(meta),
+        (Some(formula), None) => Some(crate::FormulaMeta {
+            file_text: crate::formula_text::add_xlfn_prefixes(strip_leading_equals(formula)),
+            ..Default::default()
+        }),
+        (None, Some(meta)) => {
+            // The in-memory model doesn't currently represent shared formulas for follower
+            // cells. Preserve those formulas when the stored SpreadsheetML indicates a formula
+            // even if the model omits it.
+            if meta.file_text.is_empty()
+                && meta.t.is_none()
+                && meta.reference.is_none()
+                && meta.shared_index.is_none()
+                && meta.always_calc.is_none()
+            {
+                None
+            } else if meta.file_text.is_empty() {
+                Some(meta)
+            } else {
+                // Model cleared the formula; don't keep stale formula text from metadata.
+                None
+            }
+        }
+        (None, None) => None,
+    };
+
+    if let (Some(display), Some(meta)) = (model_formula, formula_meta.as_mut()) {
+        if meta.t.as_deref() == Some("shared") && meta.file_text.is_empty() {
+            if let Some(si) = meta.shared_index {
+                if let Some(expected) = shared_formula_expected(shared_formulas, si, cell_ref) {
+                    if expected == strip_leading_equals(display) {
+                        preserve_textless_shared = true;
+                    } else {
+                        // The cell's model formula differs from the shared-formula expansion,
+                        // so break sharing and store the explicit formula text.
+                        meta.t = None;
+                        meta.reference = None;
+                        meta.shared_index = None;
+                        meta.file_text =
+                            crate::formula_text::add_xlfn_prefixes(strip_leading_equals(display));
+                    }
+                } else {
+                    // Without the shared-formula master we can't validate equivalence, so
+                    // prefer preserving the model formula over keeping the shared structure.
+                    meta.t = None;
+                    meta.reference = None;
+                    meta.shared_index = None;
+                    meta.file_text =
+                        crate::formula_text::add_xlfn_prefixes(strip_leading_equals(display));
+                }
+            } else {
+                // Malformed shared-formula follower; fall back to a normal formula.
+                meta.t = None;
+                meta.reference = None;
+                meta.shared_index = None;
+                meta.file_text = crate::formula_text::add_xlfn_prefixes(strip_leading_equals(display));
+            }
+        }
+    }
+
+    if let Some(formula_meta) = formula_meta {
+        out.push_str("<f");
+        if let Some(t) = &formula_meta.t {
+            out.push_str(&format!(r#" t="{}""#, escape_attr(t)));
+        }
+        if let Some(r) = &formula_meta.reference {
+            out.push_str(&format!(r#" ref="{}""#, escape_attr(r)));
+        }
+        if let Some(si) = formula_meta.shared_index {
+            out.push_str(&format!(r#" si="{si}""#));
+        }
+        if let Some(aca) = formula_meta.always_calc {
+            out.push_str(&format!(r#" aca="{}""#, if aca { "1" } else { "0" }));
+        }
+
+        let file_text = if preserve_textless_shared {
+            String::new()
+        } else {
+            formula_file_text(&formula_meta, model_formula)
+        };
+        if file_text.is_empty() {
+            out.push_str("/>");
+        } else {
+            out.push('>');
+            out.push_str(&escape_text(&file_text));
+            out.push_str("</f>");
+        }
+    }
+
+    match &cell.value {
+        CellValue::Empty => {}
+        value @ CellValue::String(s) if matches!(&value_kind, CellValueKind::Other { .. }) => {
+            out.push_str("<v>");
+            out.push_str(&escape_text(&raw_or_other(meta, s)));
+            out.push_str("</v>");
+        }
+        CellValue::Number(n) => {
+            out.push_str("<v>");
+            out.push_str(&escape_text(&raw_or_number(meta, *n)));
+            out.push_str("</v>");
+        }
+        CellValue::Boolean(b) => {
+            out.push_str("<v>");
+            out.push_str(raw_or_bool(meta, *b));
+            out.push_str("</v>");
+        }
+        CellValue::Error(err) => {
+            out.push_str("<v>");
+            out.push_str(&escape_text(&raw_or_error(meta, *err)));
+            out.push_str("</v>");
+        }
+        value @ CellValue::String(s) => match &value_kind {
+            CellValueKind::SharedString { .. } => {
+                let idx = shared_string_index(doc, meta, value, shared_lookup);
+                out.push_str("<v>");
+                out.push_str(&idx.to_string());
+                out.push_str("</v>");
+            }
+            CellValueKind::InlineString => {
+                out.push_str("<is><t");
+                if needs_space_preserve(s) {
+                    out.push_str(r#" xml:space="preserve""#);
+                }
+                out.push('>');
+                out.push_str(&escape_text(s));
+                out.push_str("</t></is>");
+            }
+            CellValueKind::Str => {
+                out.push_str("<v>");
+                out.push_str(&escape_text(&raw_or_str(meta, s)));
+                out.push_str("</v>");
+            }
+            _ => {
+                // Fallback: treat as shared string.
+                let idx = shared_string_index(doc, meta, value, shared_lookup);
+                out.push_str("<v>");
+                out.push_str(&idx.to_string());
+                out.push_str("</v>");
+            }
+        },
+        value @ CellValue::RichText(rich) => {
+            // Rich text is stored in the shared strings table.
+            let idx = shared_string_index(doc, meta, value, shared_lookup);
+            if idx != 0 || !rich.text.is_empty() {
+                out.push_str("<v>");
+                out.push_str(&idx.to_string());
+                out.push_str("</v>");
+            }
+        }
+        _ => {
+            // Array/Spill not yet modeled for writing. Preserve as blank.
+        }
+    }
+
+    out.push_str("</c>");
 }
 
 fn infer_value_kind(cell: &formula_model::Cell) -> CellValueKind {

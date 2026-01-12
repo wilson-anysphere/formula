@@ -1,5 +1,6 @@
 use crate::tables::{write_table_xml, TABLE_REL_TYPE};
 use crate::styles::StylesPart;
+use formula_columnar::{ColumnType as ColumnarType, Value as ColumnarValue};
 use formula_model::{
     normalize_formula_text, Cell, CellRef, CellValue, DateSystem, DefinedNameScope, Hyperlink,
     HyperlinkTarget, Range, SheetVisibility, Workbook, Worksheet,
@@ -281,24 +282,188 @@ fn sheet_xml(
     table_parts: &[(String, String)],
     style_to_xf: &HashMap<u32, u32>,
 ) -> Result<(String, String), XlsxWriteError> {
-    // Excel expects rows in ascending order.
-    let mut rows: BTreeMap<u32, Vec<(u32, CellRef, &Cell)>> = BTreeMap::new();
+    // Dimension should include both the columnar table extent and any sparse overlay cells.
+    let mut dim: Option<Range> = sheet.used_range();
+    if dim.is_none() {
+        // Some sheet sources may not maintain used_range; fall back to scanning.
+        let mut min: Option<CellRef> = None;
+        let mut max: Option<CellRef> = None;
+        for (cell_ref, _) in sheet.iter_cells() {
+            min = Some(match min {
+                Some(m) => CellRef::new(m.row.min(cell_ref.row), m.col.min(cell_ref.col)),
+                None => cell_ref,
+            });
+            max = Some(match max {
+                Some(m) => CellRef::new(m.row.max(cell_ref.row), m.col.max(cell_ref.col)),
+                None => cell_ref,
+            });
+        }
+        dim = match (min, max) {
+            (Some(start), Some(end)) => Some(Range::new(start, end)),
+            _ => None,
+        };
+    }
+    if let Some(columnar_range) = sheet.columnar_range() {
+        dim = Some(match dim {
+            Some(existing) => existing.bounding_box(&columnar_range),
+            None => columnar_range,
+        });
+    }
+    let dimension_ref = dim
+        .unwrap_or_else(|| Range::new(CellRef::new(0, 0), CellRef::new(0, 0)))
+        .to_string();
+
+    struct ColumnarInfo<'a> {
+        origin: CellRef,
+        rows: usize,
+        cols: usize,
+        table: &'a formula_columnar::ColumnarTable,
+    }
+
+    let columnar = sheet
+        .columnar_table_extent()
+        .and_then(|(origin, rows, cols)| sheet.columnar_table().map(|t| ColumnarInfo {
+            origin,
+            rows,
+            cols,
+            table: t.as_ref(),
+        }));
+
+    // Group overlay cells by row for streaming output.
+    let mut overlay_by_row: BTreeMap<u32, Vec<(u32, CellRef, &Cell)>> = BTreeMap::new();
     for (cell_ref, cell) in sheet.iter_cells() {
-        rows.entry(cell_ref.row)
+        overlay_by_row
+            .entry(cell_ref.row)
             .or_default()
             .push((cell_ref.col, cell_ref, cell));
     }
-    for row_cells in rows.values_mut() {
+    for row_cells in overlay_by_row.values_mut() {
         row_cells.sort_by_key(|(col, _, _)| *col);
     }
+    let overlay_rows: Vec<u32> = overlay_by_row.keys().copied().collect();
 
+    // Emit rows in ascending order, streaming through the columnar table rows if present.
     let mut sheet_data = String::new();
-    for (row_idx, cells) in rows {
+    let mut overlay_row_idx: usize = 0;
+    let mut table_row: Option<u32> = columnar.as_ref().map(|c| c.origin.row);
+    let table_end_row: Option<u32> = columnar
+        .as_ref()
+        .map(|c| c.origin.row.saturating_add(c.rows.saturating_sub(1) as u32));
+
+    loop {
+        let next_overlay_row = overlay_rows.get(overlay_row_idx).copied();
+        let next_table_row = match (table_row, table_end_row) {
+            (Some(r), Some(end)) if r <= end => Some(r),
+            _ => None,
+        };
+
+        let Some(row_idx) = (match (next_table_row, next_overlay_row) {
+            (Some(t), Some(o)) => Some(t.min(o)),
+            (Some(t), None) => Some(t),
+            (None, Some(o)) => Some(o),
+            (None, None) => None,
+        }) else {
+            break;
+        };
+
+        if next_overlay_row == Some(row_idx) {
+            overlay_row_idx += 1;
+        }
+        if next_table_row == Some(row_idx) {
+            table_row = Some(row_idx + 1);
+        }
+
+        let overlay_cells: &[(u32, CellRef, &Cell)] = overlay_by_row
+            .get(&row_idx)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+
+        let mut row_cells_xml = String::new();
+        let mut wrote_any_cell = false;
+
+        if let Some(columnar) = columnar.as_ref() {
+            let in_table_row = row_idx >= columnar.origin.row
+                && row_idx < columnar.origin.row.saturating_add(columnar.rows as u32);
+            if in_table_row {
+                let row_off = (row_idx - columnar.origin.row) as usize;
+                let mut overlay_cell_idx = 0usize;
+
+                // Overlay cells left of the table.
+                while overlay_cell_idx < overlay_cells.len()
+                    && overlay_cells[overlay_cell_idx].0 < columnar.origin.col
+                {
+                    let (_col, cell_ref, cell) = overlay_cells[overlay_cell_idx];
+                    row_cells_xml.push_str(&cell_xml(&cell_ref, cell, shared_strings, style_to_xf));
+                    overlay_cell_idx += 1;
+                    wrote_any_cell = true;
+                }
+
+                // Table columns (overlay overrides).
+                for col_off in 0..columnar.cols {
+                    let col_idx = columnar.origin.col + col_off as u32;
+                    if overlay_cell_idx < overlay_cells.len()
+                        && overlay_cells[overlay_cell_idx].0 == col_idx
+                    {
+                        let (_col, cell_ref, cell) = overlay_cells[overlay_cell_idx];
+                        row_cells_xml
+                            .push_str(&cell_xml(&cell_ref, cell, shared_strings, style_to_xf));
+                        overlay_cell_idx += 1;
+                        wrote_any_cell = true;
+                        continue;
+                    }
+
+                    let cell_ref = CellRef::new(row_idx, col_idx);
+                    if sheet.merged_regions.resolve_cell(cell_ref) != cell_ref {
+                        continue;
+                    }
+
+                    let value = columnar.table.get_cell(row_off, col_off);
+                    if matches!(value, ColumnarValue::Null) {
+                        continue;
+                    }
+                    let column_type = columnar
+                        .table
+                        .schema()
+                        .get(col_off)
+                        .map(|s| s.column_type)
+                        .unwrap_or(ColumnarType::String);
+                    if let Some(xml) =
+                        columnar_cell_xml(&cell_ref, value, column_type, shared_strings)
+                    {
+                        row_cells_xml.push_str(&xml);
+                        wrote_any_cell = true;
+                    }
+                }
+
+                // Overlay cells right of the table.
+                while overlay_cell_idx < overlay_cells.len() {
+                    let (_col, cell_ref, cell) = overlay_cells[overlay_cell_idx];
+                    row_cells_xml.push_str(&cell_xml(&cell_ref, cell, shared_strings, style_to_xf));
+                    overlay_cell_idx += 1;
+                    wrote_any_cell = true;
+                }
+            } else {
+                // Row outside the columnar table; only overlay cells apply.
+                for (_col, cell_ref, cell) in overlay_cells {
+                    row_cells_xml.push_str(&cell_xml(cell_ref, cell, shared_strings, style_to_xf));
+                    wrote_any_cell = true;
+                }
+            }
+        } else {
+            // No columnar table; only overlay cells apply.
+            for (_col, cell_ref, cell) in overlay_cells {
+                row_cells_xml.push_str(&cell_xml(cell_ref, cell, shared_strings, style_to_xf));
+                wrote_any_cell = true;
+            }
+        }
+
+        if !wrote_any_cell {
+            continue;
+        }
+
         let row_number = row_idx + 1;
         sheet_data.push_str(&format!(r#"<row r="{}">"#, row_number));
-        for (_col, cell_ref, cell) in cells {
-            sheet_data.push_str(&cell_xml(&cell_ref, cell, shared_strings, style_to_xf));
-        }
+        sheet_data.push_str(&row_cells_xml);
         sheet_data.push_str("</row>");
     }
 
@@ -327,6 +492,8 @@ fn sheet_xml(
     xml.push_str(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#);
     xml.push('\n');
     xml.push_str(r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">"#);
+    xml.push('\n');
+    xml.push_str(&format!(r#"  <dimension ref="{dimension_ref}"/>"#));
     xml.push('\n');
     xml.push_str("  <sheetData>\n");
     if !sheet_data.is_empty() {
@@ -496,6 +663,58 @@ fn cell_xml(
     format!(r#"<c{}>{}</c>"#, attrs, value_xml)
 }
 
+fn columnar_cell_xml(
+    cell_ref: &CellRef,
+    value: ColumnarValue,
+    column_type: ColumnarType,
+    shared_strings: &SharedStrings,
+) -> Option<String> {
+    let a1 = cell_ref.to_a1();
+    let mut attrs = format!(r#" r="{}""#, a1);
+    let mut value_xml = String::new();
+
+    match value {
+        ColumnarValue::Null => return None,
+        ColumnarValue::Number(n) => {
+            value_xml.push_str(&format!(r#"<v>{}</v>"#, n));
+        }
+        ColumnarValue::Boolean(b) => {
+            attrs.push_str(r#" t="b""#);
+            value_xml.push_str(&format!(r#"<v>{}</v>"#, if b { 1 } else { 0 }));
+        }
+        ColumnarValue::String(s) => {
+            attrs.push_str(r#" t="s""#);
+            let idx = shared_strings.index.get(s.as_ref()).copied().unwrap_or_default();
+            value_xml.push_str(&format!(r#"<v>{}</v>"#, idx));
+        }
+        ColumnarValue::DateTime(v) => {
+            value_xml.push_str(&format!(r#"<v>{}</v>"#, v as f64));
+        }
+        ColumnarValue::Currency(v) => {
+            let n = match column_type {
+                ColumnarType::Currency { scale } => {
+                    let denom = 10f64.powi(scale as i32);
+                    v as f64 / denom
+                }
+                _ => v as f64,
+            };
+            value_xml.push_str(&format!(r#"<v>{}</v>"#, n));
+        }
+        ColumnarValue::Percentage(v) => {
+            let n = match column_type {
+                ColumnarType::Percentage { scale } => {
+                    let denom = 10f64.powi(scale as i32);
+                    v as f64 / denom
+                }
+                _ => v as f64,
+            };
+            value_xml.push_str(&format!(r#"<v>{}</v>"#, n));
+        }
+    }
+
+    Some(format!(r#"<c{}>{}</c>"#, attrs, value_xml))
+}
+
 #[derive(Debug, Clone)]
 struct SharedStrings {
     values: Vec<String>,
@@ -524,6 +743,25 @@ fn build_shared_strings(workbook: &Workbook) -> SharedStrings {
                     }
                 }
                 _ => {}
+            }
+        }
+
+        if let Some((_, rows, cols)) = sheet.columnar_table_extent() {
+            if let Some(table) = sheet.columnar_table() {
+                let table = table.as_ref();
+                for row in 0..rows {
+                    for col in 0..cols {
+                        if let ColumnarValue::String(s) = table.get_cell(row, col) {
+                            let text = s.as_ref();
+                            if !index.contains_key(text) {
+                                let idx = values.len();
+                                let owned = text.to_string();
+                                values.push(owned.clone());
+                                index.insert(owned, idx);
+                            }
+                        }
+                    }
+                }
             }
         }
     }
