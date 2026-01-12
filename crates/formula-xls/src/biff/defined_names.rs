@@ -94,7 +94,12 @@ fn parse_biff8_name_record(
     let name = cursor.read_biff8_unicode_string_no_cch(cch, codepage)?;
 
     // `rgce`: parsed formula bytes.
-    let rgce = cursor.read_bytes(cce)?;
+    //
+    // BIFF8 can insert an additional option-flags byte at the start of a `CONTINUE` fragment when
+    // an in-record string (e.g. a `PtgStr` token) is split across fragments. We therefore parse the
+    // rgce token stream in a fragment-aware way so those continuation flag bytes are not treated as
+    // rgce payload bytes.
+    let rgce = cursor.read_biff8_rgce(cce)?;
 
     // Optional strings (ignored for now, but we need to consume them so continued-string decoding
     // can validate fragment boundaries).
@@ -288,11 +293,156 @@ impl<'a> FragmentCursor<'a> {
 
         Ok(out)
     }
+
+    fn read_biff8_rgce(&mut self, cce: usize) -> Result<Vec<u8>, String> {
+        // Best-effort: parse a subset of BIFF8 ptg tokens so we can skip the continuation flags
+        // byte injected at fragment boundaries when a `PtgStr` (ShortXLUnicodeString) payload is
+        // split across `CONTINUE` records.
+        //
+        // If we encounter an unsupported token, fall back to raw byte copying for the remainder of
+        // the `rgce` stream (without special continuation handling).
+        let mut out = Vec::with_capacity(cce);
+
+        while out.len() < cce {
+            let ptg = self.read_u8()?;
+            out.push(ptg);
+
+            match ptg {
+                // Binary operators.
+                0x03..=0x11
+                // Unary +/- and postfix/paren/missarg.
+                | 0x12
+                | 0x13
+                | 0x14
+                | 0x15
+                | 0x16 => {}
+                // PtgStr (ShortXLUnicodeString) [MS-XLS 2.5.293]
+                0x17 => {
+                    let cch = self.read_u8()? as usize;
+                    let flags = self.read_u8()?;
+                    out.push(cch as u8);
+                    out.push(flags);
+
+                    let richtext_runs = if (flags & STR_FLAG_RICH_TEXT) != 0 {
+                        let v = self.read_u16_le()?;
+                        out.extend_from_slice(&v.to_le_bytes());
+                        v as usize
+                    } else {
+                        0
+                    };
+
+                    let ext_size = if (flags & STR_FLAG_EXT) != 0 {
+                        let v = self.read_u32_le()?;
+                        out.extend_from_slice(&v.to_le_bytes());
+                        v as usize
+                    } else {
+                        0
+                    };
+
+                    let mut is_unicode = (flags & STR_FLAG_HIGH_BYTE) != 0;
+                    let mut remaining_chars = cch;
+
+                    while remaining_chars > 0 {
+                        if self.remaining_in_fragment() == 0 {
+                            self.advance_fragment()?;
+                            // Continued-segment option flags byte (fHighByte).
+                            let cont_flags = self.read_u8()?;
+                            is_unicode = (cont_flags & STR_FLAG_HIGH_BYTE) != 0;
+                            continue;
+                        }
+
+                        let bytes_per_char = if is_unicode { 2 } else { 1 };
+                        let available_bytes = self.remaining_in_fragment();
+                        let available_chars = available_bytes / bytes_per_char;
+                        if available_chars == 0 {
+                            return Err("string continuation split mid-character".to_string());
+                        }
+
+                        let take_chars = remaining_chars.min(available_chars);
+                        let take_bytes = take_chars * bytes_per_char;
+                        let bytes = self.read_exact_from_current(take_bytes)?;
+                        out.extend_from_slice(bytes);
+                        remaining_chars -= take_chars;
+                    }
+
+                    let richtext_bytes = richtext_runs
+                        .checked_mul(4)
+                        .ok_or_else(|| "rich text run count overflow".to_string())?;
+                    if richtext_bytes + ext_size > 0 {
+                        let extra = self.read_bytes(richtext_bytes + ext_size)?;
+                        out.extend_from_slice(&extra);
+                    }
+                }
+                // PtgErr (1 byte)
+                0x1C | 0x1D => {
+                    out.push(self.read_u8()?);
+                }
+                // PtgInt (2 bytes)
+                0x1E => {
+                    let bytes = self.read_bytes(2)?;
+                    out.extend_from_slice(&bytes);
+                }
+                // PtgNum (8 bytes)
+                0x1F => {
+                    let bytes = self.read_bytes(8)?;
+                    out.extend_from_slice(&bytes);
+                }
+                // PtgFunc (2 bytes)
+                0x21 | 0x41 | 0x61 => {
+                    let bytes = self.read_bytes(2)?;
+                    out.extend_from_slice(&bytes);
+                }
+                // PtgFuncVar (3 bytes)
+                0x22 | 0x42 | 0x62 => {
+                    let bytes = self.read_bytes(3)?;
+                    out.extend_from_slice(&bytes);
+                }
+                // PtgRef (4 bytes)
+                0x24 | 0x44 | 0x64 => {
+                    let bytes = self.read_bytes(4)?;
+                    out.extend_from_slice(&bytes);
+                }
+                // PtgArea (8 bytes)
+                0x25 | 0x45 | 0x65 => {
+                    let bytes = self.read_bytes(8)?;
+                    out.extend_from_slice(&bytes);
+                }
+                // 3D references: PtgRef3d / PtgArea3d.
+                0x3A | 0x5A | 0x7A => {
+                    let bytes = self.read_bytes(6)?;
+                    out.extend_from_slice(&bytes);
+                }
+                0x3B | 0x5B | 0x7B => {
+                    let bytes = self.read_bytes(10)?;
+                    out.extend_from_slice(&bytes);
+                }
+                _ => {
+                    // Unsupported token: copy the remaining bytes as-is to satisfy the `cce`
+                    // contract and avoid dropping the defined name entirely.
+                    let remaining = cce.saturating_sub(out.len());
+                    if remaining > 0 {
+                        let bytes = self.read_bytes(remaining)?;
+                        out.extend_from_slice(&bytes);
+                    }
+                }
+            }
+        }
+
+        if out.len() != cce {
+            return Err(format!(
+                "rgce length mismatch (expected {cce} bytes, got {})",
+                out.len()
+            ));
+        }
+
+        Ok(out)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::biff::rgce;
 
     fn record(id: u16, payload: &[u8]) -> Vec<u8> {
         let mut out = Vec::with_capacity(4 + payload.len());
@@ -305,7 +455,11 @@ mod tests {
     #[test]
     fn parses_defined_name_with_continued_rgce_bytes() {
         let name = "Name";
-        let rgce: Vec<u8> = vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06];
+        // rgce for `1+2`:
+        //   PtgInt 1
+        //   PtgInt 2
+        //   PtgAdd
+        let rgce: Vec<u8> = vec![0x1E, 0x01, 0x00, 0x1E, 0x02, 0x00, 0x03];
 
         let mut header = Vec::new();
         header.extend_from_slice(&0u16.to_le_bytes()); // grbit
@@ -320,8 +474,8 @@ mod tests {
         name_str.push(0); // flags (compressed)
         name_str.extend_from_slice(name.as_bytes());
 
-        let first_rgce = &rgce[..2];
-        let second_rgce = &rgce[2..];
+        let first_rgce = &rgce[..4];
+        let second_rgce = &rgce[4..];
 
         let r_bof = record(records::RECORD_BOF_BIFF8, &[0u8; 16]);
         let r_name = record(RECORD_NAME, &[header.clone(), name_str.clone(), first_rgce.to_vec()].concat());
@@ -343,7 +497,8 @@ mod tests {
     #[test]
     fn parses_defined_name_with_continued_name_string() {
         let name = "ABCDE";
-        let rgce: Vec<u8> = vec![0x11, 0x22];
+        // rgce for `1` (PtgInt 1).
+        let rgce: Vec<u8> = vec![0x1E, 0x01, 0x00];
 
         let mut header = Vec::new();
         header.extend_from_slice(&0u16.to_le_bytes()); // grbit
@@ -382,5 +537,56 @@ mod tests {
                 rgce
             }]
         );
+    }
+
+    #[test]
+    fn parses_defined_name_with_continued_ptgstr_token() {
+        let name = "StrName";
+        let literal = "ABCDE";
+
+        // rgce containing a single PtgStr token (string literal).
+        let rgce: Vec<u8> = [
+            vec![0x17, literal.len() as u8, 0u8], // PtgStr + cch + flags (compressed)
+            literal.as_bytes().to_vec(),
+        ]
+        .concat();
+
+        let mut header = Vec::new();
+        header.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        header.push(0); // chKey
+        header.push(name.len() as u8); // cch
+        header.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        header.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        header.extend_from_slice(&0u16.to_le_bytes()); // itab
+        header.extend_from_slice(&[0, 0, 0, 0]); // cchCustMenu, cchDescription, cchHelpTopic, cchStatusText
+
+        let mut name_str = Vec::new();
+        name_str.push(0); // flags (compressed)
+        name_str.extend_from_slice(name.as_bytes());
+
+        // Split the PtgStr character bytes across the CONTINUE boundary after "AB".
+        let first_rgce = &rgce[..5]; // ptg + cch + flags + "AB"
+        let second_chars = &literal.as_bytes()[2..]; // "CDE"
+
+        let mut continue_payload = Vec::new();
+        continue_payload.push(0); // continued segment option flags (fHighByte=0)
+        continue_payload.extend_from_slice(second_chars);
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_NAME, &[header, name_str, first_rgce.to_vec()].concat()),
+            record(records::RECORD_CONTINUE, &continue_payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let names =
+            parse_biff_defined_names(&stream, BiffVersion::Biff8, 1252).expect("parse names");
+        assert_eq!(names.len(), 1);
+        assert_eq!(names[0].name, name);
+        assert_eq!(names[0].rgce, rgce);
+
+        let decoded = rgce::decode_defined_name_rgce(&names[0].rgce, 1252);
+        assert_eq!(decoded.text.as_deref(), Some("\"ABCDE\""));
     }
 }
