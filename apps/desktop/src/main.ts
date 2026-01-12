@@ -31,6 +31,7 @@ import { formatRangeAddress, parseRangeAddress } from "@formula/scripting";
 import { normalizeFormulaTextOpt } from "@formula/engine";
 import { startWorkbookSync } from "./tauri/workbookSync";
 import { TauriWorkbookBackend } from "./tauri/workbookBackend";
+import * as nativeDialogs from "./tauri/nativeDialogs";
 import type { WorkbookInfo } from "@formula/workbook-backend";
 import { chartThemeFromWorkbookPalette } from "./charts/theme";
 import { parseA1Range, splitSheetQualifier } from "../../../packages/search/index.js";
@@ -2111,7 +2112,7 @@ function normalizeSheetList(info: WorkbookInfo): { id: string; name: string }[] 
 async function confirmDiscardDirtyState(actionLabel: string): Promise<boolean> {
   const doc = app.getDocument();
   if (!doc.isDirty) return true;
-  return window.confirm(`You have unsaved changes. Discard them and ${actionLabel}?`);
+  return nativeDialogs.confirm(`You have unsaved changes. Discard them and ${actionLabel}?`);
 }
 
 function queueBackendOp<T>(op: () => Promise<T>): Promise<T> {
@@ -2629,21 +2630,21 @@ try {
       await openWorkbookFromPath(first);
     } catch (err) {
       console.error("Failed to open workbook:", err);
-      window.alert(`Failed to open workbook: ${String(err)}`);
+      void nativeDialogs.alert(`Failed to open workbook: ${String(err)}`);
     }
   });
 
   void listen("tray-open", () => {
     void promptOpenWorkbook().catch((err) => {
       console.error("Failed to open workbook:", err);
-      window.alert(`Failed to open workbook: ${String(err)}`);
+      void nativeDialogs.alert(`Failed to open workbook: ${String(err)}`);
     });
   });
 
   void listen("tray-new", () => {
     void handleNewWorkbook().catch((err) => {
       console.error("Failed to create workbook:", err);
-      window.alert(`Failed to create workbook: ${String(err)}`);
+      void nativeDialogs.alert(`Failed to create workbook: ${String(err)}`);
     });
   });
 
@@ -2656,7 +2657,7 @@ try {
   void listen("shortcut-quick-open", () => {
     void promptOpenWorkbook().catch((err) => {
       console.error("Failed to open workbook:", err);
-      window.alert(`Failed to open workbook: ${String(err)}`);
+      void nativeDialogs.alert(`Failed to open workbook: ${String(err)}`);
     });
   });
 
@@ -2787,7 +2788,7 @@ try {
 
       const doc = app.getDocument();
       if (doc.isDirty) {
-        const discard = window.confirm("You have unsaved changes. Discard them?");
+        const discard = await nativeDialogs.confirm("You have unsaved changes. Discard them?");
         if (!discard) return;
       }
 
@@ -2833,7 +2834,7 @@ try {
       e.preventDefault();
       void handleSaveAs().catch((err) => {
         console.error("Failed to save workbook:", err);
-        window.alert(`Failed to save workbook: ${String(err)}`);
+        void nativeDialogs.alert(`Failed to save workbook: ${String(err)}`);
       });
       return;
     }
@@ -2841,7 +2842,7 @@ try {
     e.preventDefault();
     void handleSave().catch((err) => {
       console.error("Failed to save workbook:", err);
-      window.alert(`Failed to save workbook: ${String(err)}`);
+      void nativeDialogs.alert(`Failed to save workbook: ${String(err)}`);
     });
   });
 } catch {
