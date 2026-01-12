@@ -971,7 +971,9 @@ fn parse_worksheet_into_model(
                 }
 
                 if let Some(row_1_based) = row_1_based {
-                    if row_1_based > 0 && row_1_based <= formula_model::EXCEL_MAX_ROWS {
+                    // Accept any 1-based row index that fits in `u32` (the OOXML schema uses
+                    // unsigned integers and our model supports sheets beyond Excel's UI limits).
+                    if row_1_based > 0 {
                         let row = row_1_based - 1;
                         if custom_height != Some(false) {
                             if let Some(height) = height {
