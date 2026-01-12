@@ -83,6 +83,8 @@ describe("Tauri capabilities", () => {
     expect(permissions).toContain("clipboard-manager:allow-write-text");
     // Keep clipboard permission surface minimal.
     expect(permissions).not.toContain("clipboard-manager:default");
+    // Guard against legacy/unprefixed identifiers too (schema drift).
+    expect(permissions).not.toContain("clipboard:default");
   });
 
   it("grants the window permissions required by the UI window helpers", () => {
