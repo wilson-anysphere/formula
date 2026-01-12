@@ -129,7 +129,15 @@ function unionCell(rect: Rect | undefined, row: number, col: number): Rect {
 function getUiSelectionRect(app: SpreadsheetAppLike): Rect {
   const active = app.getActiveCell();
   const ranges = app.getSelectionRanges();
-  const first = ranges[0] ?? { startRow: active.row, startCol: active.col, endRow: active.row, endCol: active.col };
+  const containing =
+    ranges.find(
+      (r) =>
+        active.row >= Math.min(r.startRow, r.endRow) &&
+        active.row <= Math.max(r.startRow, r.endRow) &&
+        active.col >= Math.min(r.startCol, r.endCol) &&
+        active.col <= Math.max(r.startCol, r.endCol),
+    ) ?? ranges[0];
+  const first = containing ?? { startRow: active.row, startCol: active.col, endRow: active.row, endCol: active.col };
   return normalizeRect({
     startRow: Number(first.startRow) || 0,
     startCol: Number(first.startCol) || 0,
@@ -751,15 +759,7 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
     if (!eventsAllowed) return;
 
     const active = args.app.getActiveCell();
-    const ranges = args.app.getSelectionRanges();
-    const firstRange =
-      ranges[0] ?? { startRow: active.row, startCol: active.col, endRow: active.row, endCol: active.col };
-    const selectionRect = normalizeRect({
-      startRow: Number(firstRange.startRow) || 0,
-      startCol: Number(firstRange.startCol) || 0,
-      endRow: Number(firstRange.endRow) || 0,
-      endCol: Number(firstRange.endCol) || 0,
-    });
+    const selectionRect = getUiSelectionRect(args.app);
 
     for (const delta of deltas) {
       if (!delta?.before || !delta?.after) continue;
@@ -800,13 +800,7 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
     }
 
     const active = args.app.getActiveCell();
-    const first = selection.ranges[0] ?? { startRow: active.row, startCol: active.col, endRow: active.row, endCol: active.col };
-    const rect = normalizeRect({
-      startRow: Number(first.startRow) || 0,
-      startCol: Number(first.startCol) || 0,
-      endRow: Number(first.endRow) || 0,
-      endCol: Number(first.endCol) || 0,
-    });
+    const rect = getUiSelectionRect(args.app);
 
     const sheetId = args.app.getCurrentSheetId();
     const key = `${sheetId}:${rect.startRow},${rect.startCol}:${rect.endRow},${rect.endCol}@${active.row},${active.col}`;

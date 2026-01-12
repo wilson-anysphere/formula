@@ -701,6 +701,73 @@ describe("VBA event macros wiring", () => {
     wiring.dispose();
   });
 
+  it("uses the selection range containing the active cell when firing Worksheet_SelectionChange", async () => {
+    vi.useFakeTimers();
+
+    const calls: Array<{ cmd: string; args?: any }> = [];
+    const invoke = vi.fn(async (cmd: string, args?: any) => {
+      calls.push({ cmd, args });
+      if (cmd === "get_macro_security_status") {
+        return {
+          has_macros: true,
+          origin_path: null,
+          workbook_fingerprint: null,
+          signature: null,
+          trust: "trusted_always",
+        };
+      }
+      if (cmd === "set_macro_ui_context") return null;
+      if (cmd === "fire_workbook_open") return { ok: true, output: [], updates: [] };
+      if (cmd === "fire_selection_change") return { ok: true, output: [], updates: [] };
+      throw new Error(`Unexpected invoke: ${cmd}`);
+    });
+
+    const doc = new DocumentController();
+    const app = new FakeApp(doc);
+
+    const wiring = installVbaEventMacros({
+      app,
+      workbookId: "workbook-1",
+      invoke,
+      drainBackendSync: vi.fn(async () => undefined),
+    });
+
+    await flushMicrotasks();
+    calls.length = 0;
+
+    // Multi-range selection where the active cell is in the second range.
+    app.emitSelection(
+      [
+        { startRow: 0, startCol: 0, endRow: 0, endCol: 0 },
+        { startRow: 2, startCol: 2, endRow: 3, endCol: 4 },
+      ],
+      { active: { row: 3, col: 4 } },
+    );
+
+    await vi.advanceTimersByTimeAsync(100);
+    await flushMicrotasks();
+
+    const uiIdx = calls.findIndex((c) => c.cmd === "set_macro_ui_context");
+    expect(calls[uiIdx]?.args).toMatchObject({
+      sheet_id: "Sheet1",
+      active_row: 3,
+      active_col: 4,
+      selection: { start_row: 2, start_col: 2, end_row: 3, end_col: 4 },
+    });
+
+    const selectionCalls = calls.filter((c) => c.cmd === "fire_selection_change");
+    expect(selectionCalls).toHaveLength(1);
+    expect(selectionCalls[0]?.args).toMatchObject({
+      sheet_id: "Sheet1",
+      start_row: 2,
+      start_col: 2,
+      end_row: 3,
+      end_col: 4,
+    });
+
+    wiring.dispose();
+  });
+
   it("uses the sheet id captured at selection time when firing Worksheet_SelectionChange", async () => {
     vi.useFakeTimers();
 
