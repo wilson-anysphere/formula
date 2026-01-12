@@ -292,23 +292,19 @@ test.describe("Extensions permissions UI", () => {
   });
 
   test("network allowlist prompts again for a new host", async ({ page }) => {
-    const server = http.createServer((_req, res) => {
-      res.writeHead(200, {
-        "Content-Type": "text/plain",
-        "Access-Control-Allow-Origin": "*",
+    // Use Playwright routing to avoid relying on loopback alias configuration (127.0.0.2).
+    // We only care about hostname-based allowlisting, not real DNS.
+    const urlA = "http://allowed.example/";
+    const urlB = "http://blocked.example/";
+
+    await page.route("http://allowed.example/**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/plain",
+        headers: { "Access-Control-Allow-Origin": "*" },
+        body: "hello",
       });
-      res.end("hello");
     });
-
-    // Bind to all IPv4 interfaces so the same server can be reached via multiple 127/8 hostnames.
-    await new Promise<void>((resolve) => server.listen(0, "0.0.0.0", resolve));
-
-    const address = server.address();
-    const port = typeof address === "object" && address ? address.port : null;
-    if (!port) throw new Error("Failed to allocate test port");
-
-    const urlA = `http://127.0.0.1:${port}/`;
-    const urlB = `http://127.0.0.2:${port}/`;
     const extensionId = "formula.sample-hello";
 
     try {
@@ -342,9 +338,9 @@ test.describe("Extensions permissions UI", () => {
       await expect(page.getByTestId("extension-permission-network")).toHaveCount(0);
 
       await expect(page.getByTestId("toast-root")).toContainText("Fetched: hello");
-      await expect(page.getByTestId(`permission-${extensionId}-network`)).toContainText("127.0.0.1");
+      await expect(page.getByTestId(`permission-${extensionId}-network`)).toContainText("allowed.example");
 
-      // Second run: different host (127.0.0.2) should prompt again because network is allowlisted by hostname.
+      // Second run: different host should prompt again because network is allowlisted by hostname.
       await page.getByTestId("run-command-with-args-sampleHello.fetchText").click();
       await expect(page.getByTestId("input-box")).toBeVisible();
       await page.getByTestId("input-box-field").fill(JSON.stringify([urlB]));
@@ -353,15 +349,15 @@ test.describe("Extensions permissions UI", () => {
       await expect(page.getByTestId("extension-permission-prompt")).toBeVisible();
       const networkEntry = page.getByTestId("extension-permission-network");
       await expect(networkEntry).toBeVisible();
-      await expect(networkEntry).toContainText("127.0.0.2");
+      await expect(networkEntry).toContainText("blocked.example");
       await page.getByTestId("extension-permission-deny").click();
       await expect(page.getByTestId("extension-permission-network")).toHaveCount(0);
       await expect(page.getByTestId("toast-root")).toContainText("Permission denied");
 
       // Permissions UI should still only include the original allowlisted host.
-      await expect(page.getByTestId(`permission-${extensionId}-network`)).toContainText("127.0.0.1");
+      await expect(page.getByTestId(`permission-${extensionId}-network`)).toContainText("allowed.example");
     } finally {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await page.unroute("http://allowed.example/**").catch(() => {});
     }
   });
 });
