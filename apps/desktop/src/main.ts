@@ -972,7 +972,8 @@ function stepDecimalPlacesInNumberFormat(format: string | null, direction: "incr
   // Avoid trying to manipulate date/time format codes.
   if (lower.includes("m/d/yyyy") || lower.includes("yyyy-mm-dd")) return null;
 
-  const prefix = section.includes("$") ? "$" : "";
+  const currencyMatch = /[$€£¥]/.exec(section);
+  const prefix = currencyMatch?.[0] ?? "";
   const suffix = section.includes("%") ? "%" : "";
   const useThousands = section.includes(",");
   const decimals = parseDecimalPlaces(section);
