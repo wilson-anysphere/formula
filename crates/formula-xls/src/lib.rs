@@ -1362,7 +1362,15 @@ fn import_xls_path_with_biff_reader(
     for (name, refers_to) in calamine_defined_names {
         let name = normalize_calamine_defined_name_name(&name);
         let refers_to = refers_to.trim();
-        let refers_to = refers_to.strip_prefix('=').unwrap_or(refers_to).to_string();
+        let refers_to = refers_to.strip_prefix('=').unwrap_or(refers_to);
+        // Calamine can surface BIFF8 formula/Unicode strings with embedded NUL bytes (notably
+        // defined-name references via `PtgName`). Strip them so the formula text is parseable and
+        // stable across import paths.
+        let refers_to = if refers_to.contains('\0') {
+            refers_to.replace('\0', "")
+        } else {
+            refers_to.to_string()
+        };
 
         // Defined names can contain sheet references, and those can point at sheet names that were
         // later sanitized during import. Rewrite any sheet-qualified references using the same
