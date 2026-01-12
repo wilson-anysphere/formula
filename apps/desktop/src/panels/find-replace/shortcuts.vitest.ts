@@ -93,6 +93,14 @@ describe("find/replace shortcuts", () => {
     commandRegistry.registerBuiltinCommand("edit.replace", "Replace", () => showDialogAndFocus(replaceDialog as any));
 
     expect(replaceDialog.hasAttribute("open")).toBe(false);
+    expect(findDialog.hasAttribute("open")).toBe(false);
+
+    // Cmd+F should open Find (and not Replace).
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", code: "KeyF", metaKey: true, bubbles: true }));
+    await flushMicrotasks();
+    expect(findDialog.hasAttribute("open")).toBe(true);
+    expect(replaceDialog.hasAttribute("open")).toBe(false);
+    (findDialog as any).close();
 
     // Cmd+H (macOS Hide) should no longer open Replace.
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "h", metaKey: true, bubbles: true }));
