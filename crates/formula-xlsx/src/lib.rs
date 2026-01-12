@@ -824,17 +824,23 @@ impl XlsxDocument {
     }
 
     fn rich_value_rel_id(&self, rel_index: u32) -> Result<Option<(String, String)>, XlsxError> {
-        fn is_rich_value_rel_part(part_name: &str) -> bool {
+        fn rich_value_rel_part_suffix(part_name: &str) -> Option<u32> {
             const PREFIX: &str = "xl/richData/richValueRel";
             const SUFFIX: &str = ".xml";
             if !part_name.starts_with(PREFIX) || !part_name.ends_with(SUFFIX) {
-                return false;
+                return None;
             }
             if part_name.contains("/_rels/") {
-                return false;
+                return None;
             }
             let mid = &part_name[PREFIX.len()..part_name.len() - SUFFIX.len()];
-            mid.chars().all(|c| c.is_ascii_digit())
+            if mid.is_empty() {
+                return Some(0);
+            }
+            if !mid.chars().all(|c| c.is_ascii_digit()) {
+                return None;
+            }
+            mid.parse::<u32>().ok()
         }
 
         fn parse_rel_ids(xml: &str) -> Result<Vec<String>, XlsxError> {
@@ -863,10 +869,17 @@ impl XlsxDocument {
         let rich_value_rel_part = if self.parts.contains_key("xl/richData/richValueRel.xml") {
             "xl/richData/richValueRel.xml".to_string()
         } else {
-            self.parts
+            let mut candidates: Vec<(u32, &str)> = self
+                .parts
                 .keys()
-                .find(|name| is_rich_value_rel_part(name))
-                .cloned()
+                .filter_map(|name| rich_value_rel_part_suffix(name).map(|idx| (idx, name.as_str())))
+                .collect();
+            candidates.sort_by(|(a_idx, a_name), (b_idx, b_name)| {
+                a_idx.cmp(b_idx).then_with(|| a_name.cmp(b_name))
+            });
+            candidates
+                .first()
+                .map(|(_, name)| (*name).to_string())
                 .unwrap_or_default()
         };
 

@@ -75,7 +75,9 @@ fn build_rich_cell_image_fixture() -> Vec<u8> {
  </richValue>
  "#;
  
-     let rich_value_rel_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+     // Use non-canonical richValueRel part names to ensure we don't rely on lexicographic ordering
+     // (`richValueRel10.xml` must not be chosen over `richValueRel2.xml`).
+     let rich_value_rel2_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
  <richValueRel xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
                xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
    <rel r:id="rId1"/>
@@ -84,7 +86,15 @@ fn build_rich_cell_image_fixture() -> Vec<u8> {
  </richValueRel>
  "#;
  
-     let rich_value_rel_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+     // Dummy part that should not be selected (wrong suffix ordering).
+     let rich_value_rel10_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+ <richValueRel xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+               xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+   <rel r:id="rId999"/>
+ </richValueRel>
+ "#;
+ 
+     let rich_value_rel2_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
  <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
    <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
    <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image2.png#fragment"/>
@@ -117,12 +127,15 @@ fn build_rich_cell_image_fixture() -> Vec<u8> {
      zip.start_file("xl/richData/richValue10.xml", options).unwrap();
      zip.write_all(rich_value10_xml.as_bytes()).unwrap();
 
-    zip.start_file("xl/richData/richValueRel.xml", options).unwrap();
-    zip.write_all(rich_value_rel_xml.as_bytes()).unwrap();
-
-    zip.start_file("xl/richData/_rels/richValueRel.xml.rels", options)
-        .unwrap();
-    zip.write_all(rich_value_rel_rels.as_bytes()).unwrap();
+     zip.start_file("xl/richData/richValueRel2.xml", options).unwrap();
+     zip.write_all(rich_value_rel2_xml.as_bytes()).unwrap();
+ 
+     zip.start_file("xl/richData/richValueRel10.xml", options).unwrap();
+     zip.write_all(rich_value_rel10_xml.as_bytes()).unwrap();
+ 
+     zip.start_file("xl/richData/_rels/richValueRel2.xml.rels", options)
+         .unwrap();
+     zip.write_all(rich_value_rel2_rels.as_bytes()).unwrap();
 
      zip.start_file("xl/media/image1.png", options).unwrap();
      zip.write_all(b"fakepng").unwrap();
