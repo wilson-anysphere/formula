@@ -14,6 +14,7 @@ describe("shiftFormulaA1", () => {
   it("drops sheet prefixes when shifting creates a #REF! (engine grammar does not accept Sheet1!#REF!)", () => {
     expect(shiftFormulaA1("=Sheet1!A1", 0, -1)).toBe("=#REF!");
     expect(shiftFormulaA1("='Sheet Name'!A1", 0, -1)).toBe("=#REF!");
+    expect(shiftFormulaA1("=Sheet1!A1#", 0, -1)).toBe("=#REF!");
   });
 });
 

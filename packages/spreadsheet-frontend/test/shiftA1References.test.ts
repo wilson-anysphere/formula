@@ -33,6 +33,7 @@ describe("shiftA1References", () => {
   it("drops sheet prefixes when shifting creates a #REF! (engine grammar does not accept Sheet1!#REF!)", () => {
     expect(shiftA1References("=Sheet1!A1", 0, -1)).toBe("=#REF!");
     expect(shiftA1References("='Sheet Name'!A1", 0, -1)).toBe("=#REF!");
+    expect(shiftA1References("=Sheet1!A1#", 0, -1)).toBe("=#REF!");
   });
 
   it("shifts sheet-qualified references", () => {
