@@ -39,11 +39,10 @@ test.describe("Extensions permissions UI", () => {
       await expect(page.getByTestId(`extension-card-${extensionId}`)).toBeVisible();
       await expect(page.getByTestId(`permissions-empty-${extensionId}`)).toBeVisible();
 
-      page.once("dialog", async (dialog) => {
-        expect(dialog.type()).toBe("prompt");
-        await dialog.accept(JSON.stringify([url]));
-      });
       await page.getByTestId("run-command-with-args-sampleHello.fetchText").click();
+      await expect(page.getByTestId("input-box")).toBeVisible();
+      await page.getByTestId("input-box-field").fill(JSON.stringify([url]));
+      await page.getByTestId("input-box-ok").click();
 
       await expect(page.getByTestId("extension-permission-prompt")).toBeVisible();
       await expect(page.getByTestId("extension-permission-ui.commands")).toBeVisible();
@@ -63,11 +62,10 @@ test.describe("Extensions permissions UI", () => {
       await page.getByTestId(`revoke-all-permissions-${extensionId}`).click();
       await expect(page.getByTestId(`permissions-empty-${extensionId}`)).toBeVisible();
 
-      page.once("dialog", async (dialog) => {
-        expect(dialog.type()).toBe("prompt");
-        await dialog.accept(JSON.stringify([url]));
-      });
       await page.getByTestId("run-command-with-args-sampleHello.fetchText").click();
+      await expect(page.getByTestId("input-box")).toBeVisible();
+      await page.getByTestId("input-box-field").fill(JSON.stringify([url]));
+      await page.getByTestId("input-box-ok").click();
       await expect(page.getByTestId("extension-permission-prompt")).toBeVisible();
       await expect(page.getByTestId("extension-permission-network")).toBeVisible();
       await page.getByTestId("extension-permission-deny").click();

@@ -2,6 +2,7 @@ import React from "react";
 
 import type { DesktopExtensionHostManager } from "./extensionHostManager.js";
 import { buildCommandKeybindingDisplayIndex, getPrimaryCommandKeybindingDisplay } from "./keybindings.js";
+import { showInputBox, showToast } from "./ui.js";
 
 type NetworkPolicy = {
   mode: "full" | "deny" | "allowlist" | string;
@@ -132,20 +133,27 @@ export function ExtensionsPanel({
 
   const runCommandWithArgs = React.useCallback(
     (extensionId: string, commandId: string) => {
-      const raw = globalThis.prompt?.("Command arguments (JSON array)", "[]");
-      if (raw == null) return;
+      void (async () => {
+        const raw = await showInputBox({
+          prompt: "Command arguments (JSON array)",
+          value: "[]",
+          placeHolder: 'Example: ["https://example.com/"]',
+        });
+        if (raw == null) return;
 
-      try {
-        const parsed = JSON.parse(raw);
-        const args = Array.isArray(parsed) ? parsed : [parsed];
-        void executeCommandAndRefreshPermissions(extensionId, commandId, args);
-      } catch (err) {
+        let parsed: unknown;
         try {
-          globalThis.alert?.(`Invalid JSON: ${String((err as any)?.message ?? err)}`);
-        } catch {
-          // ignore
+          parsed = JSON.parse(raw);
+        } catch (err) {
+          showToast(`Invalid JSON: ${String((err as any)?.message ?? err)}`, "error");
+          return;
         }
-      }
+
+        const args = Array.isArray(parsed) ? parsed : [parsed];
+        await executeCommandAndRefreshPermissions(extensionId, commandId, args);
+      })().catch((err) => {
+        showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
+      });
     },
     [executeCommandAndRefreshPermissions],
   );
