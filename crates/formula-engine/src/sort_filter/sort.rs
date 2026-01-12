@@ -1,6 +1,7 @@
 use crate::locale::ValueLocaleConfig;
 use crate::sort_filter::parse::{parse_text_datetime, parse_text_number};
 use crate::sort_filter::types::{CellValue, HeaderOption, RangeData};
+use crate::value::casefold;
 use chrono::{NaiveDate, NaiveDateTime, Timelike};
 use formula_model::ErrorValue;
 use std::cmp::Ordering;
@@ -314,7 +315,7 @@ fn fold_text(s: String, case_sensitive: bool) -> String {
     if case_sensitive {
         s
     } else {
-        s.to_lowercase()
+        casefold(&s)
     }
 }
 
@@ -389,6 +390,35 @@ mod tests {
             end_col: rows[0].len() - 1,
         };
         RangeData::new(range, rows).unwrap()
+    }
+
+    #[test]
+    fn case_insensitive_text_sort_uses_excel_unicode_casefold() {
+        let mut data = range(vec![
+            vec![CellValue::Text("Straße".into())],
+            vec![CellValue::Text("STRASSE".into())],
+        ]);
+        let spec = SortSpec {
+            header: HeaderOption::None,
+            keys: vec![SortKey {
+                column: 0,
+                order: SortOrder::Ascending,
+                value_type: SortValueType::Text,
+                case_sensitive: false,
+            }],
+        };
+        let perm = sort_range(&mut data, &spec);
+
+        // Excel-style case folding treats ß like SS, so the two keys compare equal and the sort is
+        // stable (preserves original order).
+        assert_eq!(perm.new_to_old, vec![0, 1]);
+        assert_eq!(
+            data.rows,
+            vec![
+                vec![CellValue::Text("Straße".into())],
+                vec![CellValue::Text("STRASSE".into())],
+            ]
+        );
     }
 
     #[test]

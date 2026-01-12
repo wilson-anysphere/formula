@@ -6,7 +6,7 @@ use crate::functions::{
     eval_scalar_arg, volatile_rand_u64_below, ArgValue, ArraySupport, FunctionContext, FunctionSpec,
 };
 use crate::functions::{ThreadSafety, ValueType, Volatility};
-use crate::value::{Array, ErrorKind, Lambda, Value};
+use crate::value::{casefold, Array, ErrorKind, Lambda, Value};
 
 inventory::submit! {
     FunctionSpec {
@@ -379,10 +379,10 @@ impl SortKeyValue {
 pub(super) fn sort_key(value: &Value) -> SortKeyValue {
     match value {
         Value::Number(n) => SortKeyValue::Number(*n),
-        Value::Text(s) => SortKeyValue::Text(s.to_lowercase()),
+        Value::Text(s) => SortKeyValue::Text(casefold(s)),
         Value::Bool(b) => SortKeyValue::Bool(*b),
-        Value::Entity(entity) => SortKeyValue::Text(entity.display.to_lowercase()),
-        Value::Record(record) => SortKeyValue::Text(record.display.to_lowercase()),
+        Value::Entity(entity) => SortKeyValue::Text(casefold(&entity.display)),
+        Value::Record(record) => SortKeyValue::Text(casefold(&record.display)),
         Value::Blank => SortKeyValue::Blank,
         Value::Error(e) => SortKeyValue::Error(*e),
         Value::Reference(_)
@@ -481,11 +481,11 @@ fn unique_key_cell(value: &Value) -> UniqueKeyCell {
         Value::Bool(b) => UniqueKeyCell::Bool(*b),
         Value::Number(n) => UniqueKeyCell::Number(canonical_number_bits(*n)),
         Value::Text(s) if s.is_empty() => UniqueKeyCell::Blank,
-        Value::Text(s) => UniqueKeyCell::Text(s.to_lowercase()),
+        Value::Text(s) => UniqueKeyCell::Text(casefold(s)),
         Value::Entity(entity) if entity.display.is_empty() => UniqueKeyCell::Blank,
-        Value::Entity(entity) => UniqueKeyCell::Text(entity.display.to_lowercase()),
+        Value::Entity(entity) => UniqueKeyCell::Text(casefold(&entity.display)),
         Value::Record(record) if record.display.is_empty() => UniqueKeyCell::Blank,
-        Value::Record(record) => UniqueKeyCell::Text(record.display.to_lowercase()),
+        Value::Record(record) => UniqueKeyCell::Text(casefold(&record.display)),
         Value::Error(e) => UniqueKeyCell::Error(*e),
         Value::Reference(_)
         | Value::ReferenceUnion(_)

@@ -144,15 +144,48 @@ fn sort_sorts_rich_values_by_display_string() {
 }
 
 #[test]
+fn sort_is_case_insensitive_for_unicode_text_like_excel() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_value("Sheet1", "A1", Value::Entity(EntityValue::new("Straße")))
+        .unwrap();
+    engine.set_cell_value("Sheet1", "A2", "STRASSE").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C1", "=SORT(A1:A2)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    // Excel-style case folding treats ß like SS. Entities/records should behave text-like, so the
+    // two values compare equal and SORT preserves their original order.
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "C1"),
+        Value::Entity(EntityValue::new("Straße"))
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "C2"),
+        Value::Text("STRASSE".to_string())
+    );
+}
+
+#[test]
 fn sort_orders_field_error_by_error_code() {
     let mut engine = Engine::new();
     engine
         .set_cell_formula("Sheet1", "A1", "=SORT({#FIELD!;#VALUE!;#DIV/0!})")
         .unwrap();
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::Div0));
-    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Error(ErrorKind::Value));
-    assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Error(ErrorKind::Field));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Div0)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A2"),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A3"),
+        Value::Error(ErrorKind::Field)
+    );
 }
 
 #[test]
@@ -588,11 +621,7 @@ fn map_preserves_lambda_name_for_recursive_let_bindings() {
 fn map_invokes_lambda_even_when_name_collides_with_builtin_function() {
     let mut engine = Engine::new();
     engine
-        .set_cell_formula(
-            "Sheet1",
-            "A1",
-            "=LET(SUM,LAMBDA(x,x+1),MAP({1;2;3},SUM))",
-        )
+        .set_cell_formula("Sheet1", "A1", "=LET(SUM,LAMBDA(x,x+1),MAP({1;2;3},SUM))")
         .unwrap();
     engine.recalculate_single_threaded();
 
