@@ -510,8 +510,16 @@ while true; do
   # Capture output for error pattern detection while still streaming it to the console.
   tmp_log="$(mktemp -t cargo_agent.XXXXXX)"
   set +e
-  "${run_cargo_cmd[@]}" 2>&1 | tee "${tmp_log}"
-  status="${PIPESTATUS[0]}"
+  # Preserve stdout/stderr streams for callers that capture machine-readable output (e.g. JSON)
+  # while still recording a combined log for retry detection.
+  exec 3> >(tee -a "${tmp_log}")
+  tee_stdout_pid=$!
+  exec 4> >(tee -a "${tmp_log}" >&2)
+  tee_stderr_pid=$!
+  "${run_cargo_cmd[@]}" 1>&3 2>&4
+  status=$?
+  exec 3>&- 4>&-
+  wait "${tee_stdout_pid}" "${tee_stderr_pid}" 2>/dev/null || true
   set -e
 
   if [[ "${status}" -eq 0 ]]; then
@@ -538,12 +546,13 @@ while true; do
     fi
 
     if [[ "${sccache_failed}" == "true" && "${disabled_rustc_wrapper_for_retry}" == "false" ]]; then
-      rustc_wrapper_basename="${RUSTC_WRAPPER##*/}"
-      if [[ "${rustc_wrapper_basename}" == "sccache" ]]; then
-        echo "cargo_agent: sccache failure; retrying with RUSTC_WRAPPER disabled" >&2
-        unset RUSTC_WRAPPER
-        disabled_rustc_wrapper_for_retry=true
-      fi
+      echo "cargo_agent: sccache failure; retrying with rustc wrappers disabled" >&2
+      # Disable wrappers via env vars so we override any global Cargo config (`build.rustc-wrapper`).
+      export RUSTC_WRAPPER=""
+      export RUSTC_WORKSPACE_WRAPPER=""
+      export CARGO_BUILD_RUSTC_WRAPPER=""
+      export CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER=""
+      disabled_rustc_wrapper_for_retry=true
     fi
 
     # Exponential-ish backoff with jitter.
