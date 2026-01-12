@@ -619,7 +619,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
 
       const header = document.createElement("li");
       header.className = "command-palette__group";
-      header.textContent = "FUNCTIONS";
+      header.textContent = t("commandPalette.group.functions");
       header.setAttribute("role", "presentation");
       header.setAttribute("aria-hidden", "true");
       list.appendChild(header);
@@ -674,7 +674,37 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
 
     const renderCommandRows = (startIndex: number): void => {
       let commandOffset = 0;
-      for (const group of limitedGroups) {
+
+      const recentLabel = t("commandPalette.group.recent");
+      const isEmptyQuery = trimmed === "";
+      const hasCommands = limitedGroups.some((group) => group.commands.length > 0);
+
+      // Match the command palette mockup: show RECENT first (when present), then a COMMANDS section
+      // for the rest of the command results.
+      let startGroupIndex = 0;
+      if (isEmptyQuery && limitedGroups[0]?.label === recentLabel) {
+        startGroupIndex = 1;
+      } else if (hasCommands) {
+        const header = document.createElement("li");
+        header.className = "command-palette__group";
+        header.textContent = t("commandPalette.group.commands");
+        header.setAttribute("role", "presentation");
+        header.setAttribute("aria-hidden", "true");
+        list.appendChild(header);
+      }
+
+      for (let groupIndex = 0; groupIndex < limitedGroups.length; groupIndex += 1) {
+        const group = limitedGroups[groupIndex]!;
+
+        if (groupIndex === startGroupIndex && hasCommands && startGroupIndex === 1) {
+          const header = document.createElement("li");
+          header.className = "command-palette__group";
+          header.textContent = t("commandPalette.group.commands");
+          header.setAttribute("role", "presentation");
+          header.setAttribute("aria-hidden", "true");
+          list.appendChild(header);
+        }
+
         const header = document.createElement("li");
         header.className = "command-palette__group";
         header.textContent = group.label;

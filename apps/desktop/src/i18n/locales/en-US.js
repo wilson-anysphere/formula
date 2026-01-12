@@ -260,6 +260,8 @@ export const enUS = {
   "commandDescription.navigation.goTo": "Go to a reference or named range",
   "commandPalette.placeholder": "Type a command…",
   "commandPalette.group.recent": "RECENT",
+  "commandPalette.group.commands": "COMMANDS",
+  "commandPalette.group.functions": "FUNCTIONS",
   "commandPalette.group.other": "Other",
   "commandPalette.empty.noMatchingCommands": "No matching commands",
   "commandPalette.empty.noCommands": "No commands",
