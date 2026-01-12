@@ -7,8 +7,7 @@ test.describe("command palette (Show Formulas)", () => {
     await gotoDesktop(page);
 
     await page.evaluate(async () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const app: any = (window as any).__formulaApp;
+      const app = window.__formulaApp as any;
       if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
       const doc = app.getDocument();
       const sheetId = app.getCurrentSheetId();
@@ -18,8 +17,7 @@ test.describe("command palette (Show Formulas)", () => {
     });
 
     const before = await page.evaluate(async () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const app: any = (window as any).__formulaApp;
+      const app = window.__formulaApp as any;
       return await app.getCellDisplayTextForRenderA1("A1");
     });
     expect(before).toBe("2");
@@ -43,11 +41,9 @@ test.describe("command palette (Show Formulas)", () => {
     await expect(page.getByTestId("command-palette")).toBeHidden();
 
     const after = await page.evaluate(async () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const app: any = (window as any).__formulaApp;
+      const app = window.__formulaApp as any;
       return await app.getCellDisplayTextForRenderA1("A1");
     });
     expect(after).toBe("=1+1");
   });
 });
-

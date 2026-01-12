@@ -24,8 +24,8 @@ test.describe("command palette (Audit toggles)", () => {
     await precedentsItem.click();
     await expect(page.getByTestId("command-palette")).toBeHidden();
 
-    await page.evaluate(async () => (window as any).__formulaApp.whenIdle());
-    const afterPrecedents = await page.evaluate(() => (window as any).__formulaApp.getAuditingHighlights());
+    await page.evaluate(async () => (window.__formulaApp as any).whenIdle());
+    const afterPrecedents = await page.evaluate(() => (window.__formulaApp as any).getAuditingHighlights());
     expect(afterPrecedents.mode).toBe("precedents");
 
     // Toggle dependents (should become BOTH).
@@ -44,9 +44,8 @@ test.describe("command palette (Audit toggles)", () => {
     await dependentsItem.click();
     await expect(page.getByTestId("command-palette")).toBeHidden();
 
-    await page.evaluate(async () => (window as any).__formulaApp.whenIdle());
-    const afterDependents = await page.evaluate(() => (window as any).__formulaApp.getAuditingHighlights());
+    await page.evaluate(async () => (window.__formulaApp as any).whenIdle());
+    const afterDependents = await page.evaluate(() => (window.__formulaApp as any).getAuditingHighlights());
     expect(afterDependents.mode).toBe("both");
   });
 });
-

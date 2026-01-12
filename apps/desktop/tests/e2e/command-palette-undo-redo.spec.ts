@@ -6,10 +6,10 @@ test.describe("command palette (Undo/Redo)", () => {
   test("shows keybinding hints and runs edit.undo/edit.redo", async ({ page }) => {
     await gotoDesktop(page);
 
-    const before = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
+    const before = await page.evaluate(() => (window.__formulaApp as any).getCellValueA1("A1"));
 
     await page.evaluate(async () => {
-      const app = (window as any).__formulaApp;
+      const app = window.__formulaApp as any;
       const doc = app.getDocument();
       const sheetId = app.getCurrentSheetId();
       doc.setCellValue(sheetId, "A1", "PaletteUndoRedo", { label: "Set A1" });
@@ -17,7 +17,7 @@ test.describe("command palette (Undo/Redo)", () => {
       await app.whenIdle();
     });
 
-    const edited = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
+    const edited = await page.evaluate(() => (window.__formulaApp as any).getCellValueA1("A1"));
     expect(edited).toBe("PaletteUndoRedo");
 
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
@@ -38,7 +38,7 @@ test.describe("command palette (Undo/Redo)", () => {
     await undoItem.click();
     await expect(page.getByTestId("command-palette")).toBeHidden();
 
-    const afterUndo = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
+    const afterUndo = await page.evaluate(() => (window.__formulaApp as any).getCellValueA1("A1"));
     expect(afterUndo).toBe(before);
 
     // Redo.
@@ -57,8 +57,7 @@ test.describe("command palette (Undo/Redo)", () => {
     await redoItem.click();
     await expect(page.getByTestId("command-palette")).toBeHidden();
 
-    const afterRedo = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
+    const afterRedo = await page.evaluate(() => (window.__formulaApp as any).getCellValueA1("A1"));
     expect(afterRedo).toBe("PaletteUndoRedo");
   });
 });
-

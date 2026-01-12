@@ -261,7 +261,9 @@ test.describe("sheet tabs", () => {
     await page.evaluate(() => {
       const app = (window as any).__formulaApp;
       const store =
-        typeof app.getWorkbookSheetStore === "function" ? app.getWorkbookSheetStore() : (window as any).__workbookSheetStore;
+        typeof app.getWorkbookSheetStore === "function"
+          ? app.getWorkbookSheetStore()
+          : (window.__workbookSheetStore as any);
 
       // Create a sheet whose id is not equal to its user-visible name.
       store.addAfter("Sheet1", { id: "s2", name: "Budget" });
@@ -796,7 +798,7 @@ test.describe("sheet tabs", () => {
 
     // Open command palette via the command registry (same path used by extensions).
     await page.evaluate(async () => {
-      await (window as any).__formulaCommandRegistry.executeCommand("workbench.showCommandPalette");
+      await (window.__formulaCommandRegistry as any).executeCommand("workbench.showCommandPalette");
     });
     await expect(page.getByTestId("command-palette-input")).toBeVisible();
 
