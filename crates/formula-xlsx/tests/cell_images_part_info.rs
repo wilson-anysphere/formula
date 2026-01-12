@@ -39,7 +39,8 @@ fn discovers_cell_images_part_and_resolves_image_targets() {
 
     let cellimages_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png#frag"/>
+  <Relationship Id="rIdIgnore" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://example.com" TargetMode="External"/>
 </Relationships>"#;
 
     let png_bytes: &[u8] = b"not-a-real-png";
@@ -53,6 +54,18 @@ fn discovers_cell_images_part_and_resolves_image_targets() {
     ]);
 
     let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+
+    let part_info = pkg
+        .cell_images_part_info()
+        .expect("cell_images_part_info")
+        .expect("expected cell images part info");
+    assert_eq!(part_info.part_path, "xl/cellimages.xml");
+    assert_eq!(part_info.rels_path, "xl/_rels/cellimages.xml.rels");
+    assert_eq!(part_info.embeds.len(), 1);
+    assert_eq!(part_info.embeds[0].embed_rid, "rId1");
+    assert_eq!(part_info.embeds[0].target_part, "xl/media/image1.png");
+    assert_eq!(part_info.embeds[0].target_bytes.as_slice(), png_bytes);
+
     let mut workbook = Workbook::default();
     let images = CellImages::parse_from_parts(pkg.parts_map(), &mut workbook)
         .expect("parse cell images parts");
