@@ -11,6 +11,7 @@ import type {
 import { CanvasGridRenderer, computeScrollbarThumb, resolveGridThemeFromCssVars } from "@formula/grid";
 
 import { openExternalHyperlink } from "../../hyperlinks/openExternal.js";
+import * as nativeDialogs from "../../tauri/nativeDialogs.js";
 import { shellOpen } from "../../tauri/shellOpen";
 
 export type DesktopGridInteractionMode = "default" | "rangeSelection";
@@ -1342,10 +1343,7 @@ export class DesktopSharedGrid {
           void openExternalHyperlink(uri, {
             shellOpen,
             confirmUntrustedProtocol: async (message) => {
-              if (typeof window !== "undefined" && typeof window.confirm === "function") {
-                return window.confirm(message);
-              }
-              return false;
+              return nativeDialogs.confirm(message);
             },
           }).catch(() => {
             // Best-effort: link opening should not crash grid interaction.
