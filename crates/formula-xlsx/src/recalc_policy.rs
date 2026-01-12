@@ -422,4 +422,32 @@ mod tests {
             "expected inserted calcPr fullCalcOnLoad=1"
         );
     }
+
+    #[test]
+    fn workbook_rels_remove_calc_chain_preserves_other_relationships_and_prefixes() {
+        let rels_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<r:Relationships xmlns:r="http://schemas.openxmlformats.org/package/2006/relationships">
+  <r:Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <r:Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain" Target="calcChain.xml"/>
+  <r:Relationship Id="rId9" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata" Target="metadata.xml"/>
+</r:Relationships>
+"#;
+
+        let updated = workbook_rels_remove_calc_chain(rels_xml.as_bytes())
+            .expect("remove calc chain relationship from workbook.xml.rels");
+        let updated = std::str::from_utf8(&updated).expect("utf8 workbook rels");
+
+        assert!(
+            !updated.contains("calcChain.xml"),
+            "expected calc chain relationship to be removed, got: {updated}"
+        );
+        assert!(
+            updated.contains("metadata.xml"),
+            "expected metadata relationship to be preserved, got: {updated}"
+        );
+        assert!(
+            updated.contains("<r:Relationships"),
+            "expected root element prefix to be preserved, got: {updated}"
+        );
+    }
 }
