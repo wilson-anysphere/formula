@@ -3,7 +3,12 @@
 This document records a **concrete OOXML parts + relationship chain** for **embedded images in cells**
 (Excel UI: *Insert → Pictures → Place in Cell*).
 
-The schema described below was confirmed by generating a minimal `.xlsx` using `rust_xlsxwriter` (and inspecting the resulting package). It is recorded here so future engine/model work can round-trip these files without treating them as “mysterious metadata”.
+The schema described below was confirmed by inspecting both:
+
+- a minimal `.xlsx` generated using `rust_xlsxwriter`, and
+- the real Excel-generated fixture workbook `fixtures/xlsx/basic/image-in-cell.xlsx`.
+
+It is recorded here so future engine/model work can round-trip these files without treating them as “mysterious metadata”.
 
 The same overall `xl/metadata.xml` + `xl/richData/rd*` + `richValueRel` shape is also present in the real
 Excel-generated fixture workbook:

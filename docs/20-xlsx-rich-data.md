@@ -99,6 +99,7 @@ sheetN.xml: <c vm="VM_INDEX">…</c>
 
 - **`vm` is ambiguous (0-based or 1-based).** Both appear in this repo:
   - 1-based: `fixtures/xlsx/metadata/rich-values-vm.xlsx` (see `crates/formula-xlsx/tests/metadata_rich_value_roundtrip.rs`)
+  - 1-based: `fixtures/xlsx/basic/image-in-cell.xlsx` (Excel-generated “Place in Cell” fixture)
   - 0-based: `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`
 - Rich value indices are **0-based**.
 - `xl/metadata.xml` schemas vary:
@@ -120,8 +121,8 @@ Cells that reference rich values always carry `vm="…"` to select a record in `
 *underlying cell value representation varies*:
 
 * Some files store a normal `<v>` payload (often numeric) alongside `vm="…"`.
-* “Place in Cell” embedded images (confirmed for rust_xlsxwriter) store the cell as an error:
-  `t="e"` with cached `#VALUE!` and `vm="1"`. See
+* “Place in Cell” embedded images (observed in real Excel fixtures and rust_xlsxwriter output) store the cell as an error:
+  `t="e"` with cached `#VALUE!` and `vm="1"`. See:
   [`docs/xlsx-embedded-images-in-cells.md`](./xlsx-embedded-images-in-cells.md).
 
 ```xml

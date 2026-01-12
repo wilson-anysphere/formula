@@ -639,8 +639,19 @@ Until confirmed, Formula must preserve any such relationships byte-for-byte rath
 ## TODO: verify with real Excel sample
 
 This doc is partially derived from **synthetic fixtures** in this repository plus best-effort reverse
-engineering. Before we hardcode any remaining assumptions, validate them against a real Excel-generated
-workbook that uses both:
+engineering.
+
+Current status:
+
+- **Confirmed** for a real Excel-generated “Place in Cell” workbook in this repo:
+  - `fixtures/xlsx/basic/image-in-cell.xlsx` (see `fixtures/xlsx/basic/image-in-cell.md`)
+  - uses `t="e"` / cached `#VALUE!` + `vm="…"` → `xl/metadata.xml` → `xl/richData/rd*` → `richValueRel.xml` → `xl/media/*`
+  - does **not** use `xl/cellImages.xml`
+- **Still needed**: a real Excel-generated workbook that includes:
+  - a formula cell containing `=IMAGE(...)` (ideally without external network dependencies), and
+  - (if Excel ever uses it for “images in cells”) an `xl/cellImages.xml` part wired into the workbook.
+
+Before we hardcode any remaining assumptions, validate them against a real Excel-generated workbook that uses both:
 
 - Insert → Pictures → **Place in Cell**
 - a formula cell containing `=IMAGE(...)`
@@ -660,7 +671,8 @@ Checklist:
    - owning part (`xl/workbook.xml` vs per-sheet)
    - relationship `Type` URI (likely Microsoft-specific)
 6. Confirm how the worksheet cell references an image:
-   - the exact `vm` / `metadata.xml` / `richData/*` path and any `<extLst>` hooks used in `sheetN.xml`.
+   - Confirmed for `fixtures/xlsx/basic/image-in-cell.xlsx`: `vm` → `xl/metadata.xml` (`futureMetadata` + `xlrd:rvb`) → `xl/richData/rdrichvalue.xml` → `xl/richData/richValueRel.xml(.rels)` → `xl/media/*`.
+   - Still needs confirmation for real Excel `=IMAGE(...)` cells and any scenarios involving `xl/cellImages*.xml`.
 
 ## Round-trip constraints for Formula
 
@@ -728,9 +740,12 @@ Limitations (current Formula behavior):
 
 ### TODO work (required for images-in-cells)
 
-- **Add a real Excel-generated fixture workbook** covering:
-  - a “Place in Cell” inserted image that uses `xl/cellImages.xml` (if present in modern Excel builds)
-  - a richData-backed image-in-cell (e.g. from `=IMAGE(...)`)
+- Fixture coverage status:
+  - ✅ Real Excel “Place in Cell” fixture (richData-backed, no `xl/cellImages*.xml`):
+    - `fixtures/xlsx/basic/image-in-cell.xlsx`
+  - Still needed:
+    - a real Excel-generated “Place in Cell” workbook that uses `xl/cellImages*.xml` (if present in modern Excel builds)
+    - a real Excel-generated workbook with `=IMAGE(...)` cells, to confirm whether they use the same `t="e"`/`#VALUE!` encoding or a different formula-based encoding
 - **Confirm and document the remaining relationship/content-type details** from that fixture:
   - `[Content_Types].xml` overrides for:
     - `/xl/metadata.xml`
