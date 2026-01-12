@@ -548,10 +548,11 @@ export class CanvasGridRenderer {
     nextScroll.setViewportSize(prevViewport.width, prevViewport.height);
     nextScroll.setFrozen(prevViewport.frozenRows, prevViewport.frozenCols);
 
-    for (const [row, baseHeight] of this.rowHeightOverridesBase) {
+    // Apply overrides in sorted order to keep VariableSizeAxis prefix diff updates predictable.
+    for (const [row, baseHeight] of Array.from(this.rowHeightOverridesBase.entries()).sort((a, b) => a[0] - b[0])) {
       nextScroll.rows.setSize(row, baseHeight * clamped);
     }
-    for (const [col, baseWidth] of this.colWidthOverridesBase) {
+    for (const [col, baseWidth] of Array.from(this.colWidthOverridesBase.entries()).sort((a, b) => a[0] - b[0])) {
       nextScroll.cols.setSize(col, baseWidth * clamped);
     }
 
