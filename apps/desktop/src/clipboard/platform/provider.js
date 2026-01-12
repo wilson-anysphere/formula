@@ -24,6 +24,11 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB (raw PNG bytes)
 const MAX_RICH_TEXT_BYTES = 2 * 1024 * 1024; // 2MB (HTML / RTF / text)
 const MAX_RICH_TEXT_CHARS = 2 * 1024 * 1024; // writing: approximate guard for JS strings
 
+// Internal marker used to communicate "we detected an oversized text/plain blob" between provider
+// layers (e.g. Web Clipboard API read -> Tauri provider fallback logic) without surfacing it to
+// callers.
+const SKIPPED_OVERSIZED_PLAINTEXT = Symbol("skippedOversizedPlainText");
+
 function hasTauri() {
   return Boolean(globalThis.__TAURI__);
 }
@@ -359,6 +364,7 @@ function createTauriClipboardProvider() {
       /** @type {any | undefined} */
       let native;
       let clipboardReadErrored = false;
+      let skippedOversizedPlainText = false;
 
       // 1) Prefer rich reads via the native clipboard command when available (Tauri IPC).
       if (typeof tauriInvoke === "function") {
@@ -405,10 +411,17 @@ function createTauriClipboardProvider() {
       // 2) Fall back to rich reads via the WebView Clipboard API when available so we can
       // ingest HTML tables + formats from external spreadsheets.
       const web = await createWebClipboardProvider().read();
+      // If the web clipboard path observed an oversized `text/plain` payload, do not fall back to
+      // other plain-text clipboard APIs (they may allocate the same huge string).
+      if (web && typeof web === "object" && web[SKIPPED_OVERSIZED_PLAINTEXT]) {
+        skippedOversizedPlainText = true;
+      }
 
       /** @type {any} */
       const merged = { ...web };
       if (merged.imagePng != null) merged.imagePng = coerceUint8Array(merged.imagePng);
+      // Ensure we don't leak internal sentinel properties to consumers.
+      delete merged[SKIPPED_OVERSIZED_PLAINTEXT];
 
       if (native) {
         mergeClipboardContent(merged, native);
@@ -427,7 +440,7 @@ function createTauriClipboardProvider() {
       }
 
       // 3) Fill missing plain text via the legacy Tauri plain text clipboard API.
-      if (typeof merged.text !== "string" && tauriClipboard?.readText) {
+      if (!skippedOversizedPlainText && typeof merged.text !== "string" && tauriClipboard?.readText) {
         try {
           const text = await tauriClipboard.readText();
           if (typeof text === "string") merged.text = text;
@@ -591,7 +604,11 @@ function createWebClipboardProvider() {
       }
 
       if (skipped_oversized_plain_text) {
-        return {};
+        /** @type {any} */
+        const out = {};
+        // Non-enumerable so consumers' `Object.keys` / JSON serialization ignore it.
+        Object.defineProperty(out, SKIPPED_OVERSIZED_PLAINTEXT, { value: true });
+        return out;
       }
 
       let text;
