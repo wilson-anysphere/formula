@@ -162,7 +162,6 @@ export class DesktopExtensionHostManager {
       } catch (err) {
         error = err;
       }
-
       // Always run `startup()` so the Extensions UI can render (even with zero loaded extensions).
       //
       // Desktop also supports IndexedDB-installed extensions via WebExtensionManager. Use the
@@ -202,6 +201,7 @@ export class DesktopExtensionHostManager {
       this._ready = true;
       this.emit();
     })().finally(() => {
+      // If the load flow errors before setting `_ready`, allow a subsequent retry.
       this._loadPromise = null;
     });
 

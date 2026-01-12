@@ -810,18 +810,19 @@ class BrowserExtensionHost {
   }
 
   async activateView(viewId) {
-    // `viewActivated` is exposed as `formula.events.onViewActivated`. Like the other workbook/grid
-    // events, it should be delivered to any active extensions immediately (even if the view's
-    // owning extension later needs to request permissions during activation).
-    this._broadcastEvent("viewActivated", { viewId });
-
-    const activationEvent = `onView:${viewId}`;
+    const id = String(viewId ?? "");
+    const activationEvent = `onView:${id}`;
     const targets = [];
     for (const extension of this._extensions.values()) {
       if ((extension.manifest.activationEvents ?? []).includes(activationEvent)) {
         targets.push(extension);
       }
     }
+
+    // `viewActivated` is exposed as `formula.events.onViewActivated`. Like the other workbook/grid
+    // events, it should be delivered to any active extensions immediately (even if the view's
+    // owning extension later needs to request permissions during activation).
+    this._broadcastEvent("viewActivated", { viewId: id });
 
     // Activate any extensions that depend on this view, but always emit the view activation
     // event to the broader runtime so already-running extensions can observe it.
@@ -836,7 +837,7 @@ class BrowserExtensionHost {
       try {
         // eslint-disable-next-line no-await-in-loop
         await this._activateExtension(extension, activationEvent);
-        this._sendEventToExtension(extension, "viewActivated", { viewId });
+        this._sendEventToExtension(extension, "viewActivated", { viewId: id });
       } catch {
         // Ignore activation failures so the view event can still be delivered to other
         // running extensions.
@@ -1018,15 +1019,22 @@ class BrowserExtensionHost {
     // re-run its activation path and therefore won't re-request permissions. Restart the worker
     // so future command/view activations behave like a fresh load.
     const extension = this._extensions.get(id);
-    if (extension?.worker) {
-      this._terminateWorker(extension, { reason: "permissions_reset", cause: null });
-    } else if (extension) {
-      extension.active = false;
+    if (extension) {
+      this._terminateWorker(extension, {
+        reason: "permissions_reset",
+        cause: new Error("Extension permissions reset"),
+      });
     }
   }
 
   async resetAllPermissions() {
-    return this._permissionManager.resetAllPermissions();
+    await this._permissionManager.resetAllPermissions();
+    for (const extension of this._extensions.values()) {
+      this._terminateWorker(extension, {
+        reason: "permissions_reset",
+        cause: new Error("Extension permissions reset"),
+      });
+    }
   }
 
   /**

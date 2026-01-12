@@ -77,10 +77,15 @@ export function ExtensionsPanel({
 }) {
   const [, bump] = React.useState(0);
   React.useEffect(() => manager.subscribe(() => bump((v) => v + 1)), [manager]);
+
+  // The desktop app defers loading built-in extensions until a user action triggers it (to avoid
+  // spawning extra Workers during startup). If the Extensions panel is already open due to layout
+  // persistence, we still want it to load extensions so the panel isn't stuck in the "Loading…"
+  // state after reload.
   React.useEffect(() => {
     if (manager.ready) return;
     void manager.loadBuiltInExtensions().catch(() => {
-      // Errors are surfaced via `manager.error` and rendered in the panel body.
+      // Errors are surfaced via `manager.error` once the load attempt completes.
     });
   }, [manager]);
 

@@ -431,12 +431,14 @@ class ExtensionHost {
   }
 
   async activateView(viewId) {
+    const id = String(viewId ?? "");
+
     // `viewActivated` is exposed as `formula.events.onViewActivated`. Like other workbook/grid
     // events, it should be delivered to any active extensions immediately (even if the view's
     // owning extension later requests permissions during activation).
-    this._broadcastEvent("viewActivated", { viewId });
+    this._broadcastEvent("viewActivated", { viewId: id });
 
-    const activationEvent = `onView:${viewId}`;
+    const activationEvent = `onView:${id}`;
     const targets = [];
     for (const extension of this._extensions.values()) {
       if ((extension.manifest.activationEvents ?? []).includes(activationEvent)) {
@@ -451,12 +453,12 @@ class ExtensionHost {
       const wasActive = extension.active;
       if (!wasActive) {
         await this._activateExtension(extension, activationEvent);
-        this._sendEventToExtension(extension, "viewActivated", { viewId });
+        this._sendEventToExtension(extension, "viewActivated", { viewId: id });
       }
       // If the view corresponds to a contributed panel, wait for it to render so callers can
       // treat `activateView()` as "ready to show" (important for flaky/shared test runners).
-      if ((extension.manifest.contributes.panels ?? []).some((p) => p.id === viewId)) {
-        panelReadyTasks.push(this._waitForPanelHtml(viewId, this._activationTimeoutMs));
+      if ((extension.manifest.contributes.panels ?? []).some((p) => p.id === id)) {
+        panelReadyTasks.push(this._waitForPanelHtml(id, this._activationTimeoutMs));
       }
     }
 
