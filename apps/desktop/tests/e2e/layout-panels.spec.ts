@@ -112,6 +112,10 @@ test.describe("dockable panels layout persistence", () => {
         "[data-testid='dock-left'] [data-testid='panel-versionHistory'], [data-testid='dock-right'] [data-testid='panel-versionHistory'], [data-testid='dock-bottom'] [data-testid='panel-versionHistory']",
       ),
     ).toBeVisible();
+
+    // Toggle again closes it.
+    await page.getByTestId("ribbon-root").getByTestId("open-version-history-panel").click();
+    await expect(page.getByTestId("panel-versionHistory")).toHaveCount(0);
   });
 
   test("ribbon button opens Branch Manager panel", async ({ page }) => {
@@ -127,6 +131,10 @@ test.describe("dockable panels layout persistence", () => {
         "[data-testid='dock-left'] [data-testid='panel-branchManager'], [data-testid='dock-right'] [data-testid='panel-branchManager'], [data-testid='dock-bottom'] [data-testid='panel-branchManager']",
       ),
     ).toBeVisible();
+
+    // Toggle again closes it.
+    await page.getByTestId("ribbon-root").getByTestId("open-branch-manager-panel").click();
+    await expect(page.getByTestId("panel-branchManager")).toHaveCount(0);
   });
 
   test("Ctrl/Cmd+Shift+A toggles AI chat panel open/closed", async ({ page }) => {
