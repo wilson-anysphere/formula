@@ -7789,6 +7789,25 @@ export class SpreadsheetApp {
       }
     }
 
+    // While the formula bar is actively editing, Enter/Escape should commit/cancel the formula
+    // edit even if focus temporarily moved back to the grid (Excel-style range selection mode).
+    //
+    // This prevents "Enter moves selection" / "Escape does nothing" behavior while the user
+    // is still building a formula in the formula bar.
+    if (this.formulaBar?.isEditing() || this.formulaEditCell) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        this.formulaBar?.cancelEdit();
+        return;
+      }
+      // Match FormulaBarView: Enter commits, Alt+Enter inserts newline.
+      if (e.key === "Enter" && !e.altKey) {
+        e.preventDefault();
+        this.formulaBar?.commitEdit();
+        return;
+      }
+    }
+
     if (this.handleUndoRedoShortcut(e)) return;
     if (this.handleShowFormulasShortcut(e)) return;
     if (this.handleAuditingShortcut(e)) return;

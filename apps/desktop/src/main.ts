@@ -1023,6 +1023,10 @@ function applyFormattingToSelection(
   fn: (doc: DocumentController, sheetId: string, ranges: CellRange[]) => void | boolean,
   options: { forceBatch?: boolean } = {},
 ): void {
+  // Match SpreadsheetApp guards: formatting commands should never mutate the sheet while the user
+  // is actively editing (cell editor / formula bar / inline edit).
+  if (app.isEditing()) return;
+
   const doc = app.getDocument();
   const sheetId = app.getCurrentSheetId();
   const selection = app.getSelectionRanges();
