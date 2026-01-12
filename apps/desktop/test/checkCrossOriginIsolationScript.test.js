@@ -46,6 +46,13 @@ test("pnpm check:coi script builds via cargo_agent and targets the desktop tauri
     "expected COI smoke-check script to verify the built binary exists",
   );
 
+  // Must build the desktop frontend (Vite).
+  assert.match(
+    src,
+    /run\(\s*["']pnpm["']\s*,\s*\[[^\]]*["']build["']/,
+    "expected COI smoke-check script to run `pnpm build` for the desktop frontend",
+  );
+
   // On Linux we need to support headless CI, so ensure the script is aware of xvfb-run-safe.sh.
   assert.match(
     src,
