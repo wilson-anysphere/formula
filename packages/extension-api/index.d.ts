@@ -210,9 +210,9 @@ export namespace config {
 }
 
 export namespace events {
-  function onSelectionChanged(callback: (e: { selection: Range }) => void): Disposable;
+  function onSelectionChanged(callback: (e: { sheetId?: string; selection: Range }) => void): Disposable;
   function onCellChanged(
-    callback: (e: { row: number; col: number; value: CellValue }) => void
+    callback: (e: { sheetId?: string; row: number; col: number; value: CellValue }) => void
   ): Disposable;
   function onSheetActivated(callback: (e: { sheet: Sheet }) => void): Disposable;
   function onWorkbookOpened(callback: (e: { workbook: Workbook }) => void): Disposable;
