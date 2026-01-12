@@ -125,6 +125,9 @@ pub trait ValueResolver {
     fn get_external_value(&self, _sheet: &str, _addr: CellAddr) -> Option<Value> {
         None
     }
+    fn external_data_provider(&self) -> Option<&dyn crate::ExternalDataProvider> {
+        None
+    }
     /// Resolve a worksheet name to an internal sheet id.
     ///
     /// This is used by volatile reference functions like `INDIRECT` that parse sheet names
@@ -1451,6 +1454,10 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
 
     fn resolve_sheet_name(&self, name: &str) -> Option<usize> {
         self.resolver.sheet_id(name)
+    }
+
+    fn external_data_provider(&self) -> Option<&dyn crate::ExternalDataProvider> {
+        self.resolver.external_data_provider()
     }
 
     fn number_locale(&self) -> NumberLocale {

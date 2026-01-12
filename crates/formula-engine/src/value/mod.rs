@@ -76,6 +76,7 @@ pub enum ErrorKind {
     Name,
     Num,
     NA,
+    GettingData,
     Spill,
     Calc,
 }
@@ -90,6 +91,7 @@ impl ErrorKind {
             ErrorKind::Name => "#NAME?",
             ErrorKind::Num => "#NUM!",
             ErrorKind::NA => "#N/A",
+            ErrorKind::GettingData => "#GETTING_DATA",
             ErrorKind::Spill => "#SPILL!",
             ErrorKind::Calc => "#CALC!",
         }
@@ -97,7 +99,7 @@ impl ErrorKind {
 
     /// Parse an Excel error literal (e.g. `#DIV/0!`) into an [`ErrorKind`].
     ///
-    /// Returns `None` for error literals that this engine does not model (e.g. `#GETTING_DATA`).
+    /// Returns `None` for error literals that this engine does not model.
     pub fn from_code(raw: &str) -> Option<Self> {
         let raw = raw.trim();
         if raw.eq_ignore_ascii_case("#NULL!") {
@@ -120,6 +122,9 @@ impl ErrorKind {
         }
         if raw.eq_ignore_ascii_case("#N/A") {
             return Some(ErrorKind::NA);
+        }
+        if raw.eq_ignore_ascii_case("#GETTING_DATA") {
+            return Some(ErrorKind::GettingData);
         }
         if raw.eq_ignore_ascii_case("#SPILL!") {
             return Some(ErrorKind::Spill);

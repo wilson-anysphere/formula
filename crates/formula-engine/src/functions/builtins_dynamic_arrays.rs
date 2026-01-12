@@ -400,8 +400,9 @@ fn error_rank(error: ErrorKind) -> u8 {
         ErrorKind::Name => 4,
         ErrorKind::Num => 5,
         ErrorKind::NA => 6,
-        ErrorKind::Spill => 7,
-        ErrorKind::Calc => 8,
+        ErrorKind::GettingData => 7,
+        ErrorKind::Spill => 8,
+        ErrorKind::Calc => 9,
     }
 }
 

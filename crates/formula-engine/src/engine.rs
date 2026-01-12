@@ -280,6 +280,7 @@ pub struct Engine {
     bytecode_cache: bytecode::BytecodeCache,
     bytecode_enabled: bool,
     external_value_provider: Option<Arc<dyn ExternalValueProvider>>,
+    external_data_provider: Option<Arc<dyn ExternalDataProvider>>,
     name_dependents: HashMap<String, HashSet<CellKey>>,
     cell_name_refs: HashMap<CellKey, HashSet<String>>,
     /// Optimized dependency graph used for incremental recalculation ordering.
@@ -348,6 +349,7 @@ impl Engine {
             bytecode_cache: bytecode::BytecodeCache::new(),
             bytecode_enabled: true,
             external_value_provider: None,
+            external_data_provider: None,
             name_dependents: HashMap::new(),
             cell_name_refs: HashMap::new(),
             calc_graph: CalcGraph::new(),
@@ -494,6 +496,13 @@ impl Engine {
         provider: Option<Arc<dyn ExternalValueProvider>>,
     ) {
         self.external_value_provider = provider;
+    }
+
+    pub fn set_external_data_provider(
+        &mut self,
+        provider: Option<Arc<dyn ExternalDataProvider>>,
+    ) {
+        self.external_data_provider = provider;
     }
 
     pub fn bytecode_program_count(&self) -> usize {
@@ -1902,6 +1911,7 @@ impl Engine {
             &self.workbook,
             &self.spills,
             self.external_value_provider.clone(),
+            self.external_data_provider.clone(),
         );
         let mut spill_dirty_roots: Vec<CellId> = Vec::new();
         let mut dynamic_dirty_roots: Vec<CellId> = Vec::new();
@@ -2316,6 +2326,7 @@ impl Engine {
             &self.workbook,
             &self.spills,
             self.external_value_provider.clone(),
+            self.external_data_provider.clone(),
         );
         let mut spill_dirty_roots: Vec<CellId> = Vec::new();
         let date_system = self.date_system;
@@ -3746,6 +3757,7 @@ impl Engine {
             &self.workbook,
             &self.spills,
             self.external_value_provider.clone(),
+            self.external_data_provider.clone(),
         );
         let ctx = crate::eval::EvalContext {
             current_sheet: sheet_id,
@@ -5194,6 +5206,7 @@ struct Snapshot {
     workbook_names: HashMap<String, crate::eval::ResolvedName>,
     sheet_names: Vec<HashMap<String, crate::eval::ResolvedName>>,
     external_value_provider: Option<Arc<dyn ExternalValueProvider>>,
+    external_data_provider: Option<Arc<dyn ExternalDataProvider>>,
 }
 
 impl Snapshot {
@@ -5201,6 +5214,7 @@ impl Snapshot {
         workbook: &Workbook,
         spills: &SpillState,
         external_value_provider: Option<Arc<dyn ExternalValueProvider>>,
+        external_data_provider: Option<Arc<dyn ExternalDataProvider>>,
     ) -> Self {
         let sheets: HashSet<SheetId> = (0..workbook.sheets.len()).collect();
         let sheet_names_by_id = workbook.sheet_names.clone();
@@ -5288,6 +5302,7 @@ impl Snapshot {
             workbook_names,
             sheet_names,
             external_value_provider,
+            external_data_provider,
         }
     }
 
@@ -5340,6 +5355,10 @@ impl crate::eval::ValueResolver for Snapshot {
         self.external_value_provider
             .as_ref()
             .and_then(|provider| provider.get(sheet, addr))
+    }
+
+    fn external_data_provider(&self) -> Option<&dyn ExternalDataProvider> {
+        self.external_data_provider.as_deref()
     }
 
     fn sheet_id(&self, name: &str) -> Option<usize> {
@@ -5562,6 +5581,41 @@ fn rewrite_defined_name_constants_for_bytecode(
 
 pub trait ExternalValueProvider: Send + Sync {
     fn get(&self, sheet: &str, addr: CellAddr) -> Option<Value>;
+}
+
+pub trait ExternalDataProvider: Send + Sync {
+    fn rtd(&self, prog_id: &str, server: &str, topics: &[String]) -> Value;
+    fn cube_value(&self, connection: &str, tuples: &[String]) -> Value;
+    fn cube_member(&self, connection: &str, member_expression: &str, caption: Option<&str>) -> Value;
+    fn cube_member_property(
+        &self,
+        connection: &str,
+        member_expression_or_handle: &str,
+        property: &str,
+    ) -> Value;
+    fn cube_ranked_member(
+        &self,
+        connection: &str,
+        set_expression_or_handle: &str,
+        rank: i64,
+        caption: Option<&str>,
+    ) -> Value;
+    fn cube_set(
+        &self,
+        connection: &str,
+        set_expression: &str,
+        caption: Option<&str>,
+        sort_order: Option<i64>,
+        sort_by: Option<&str>,
+    ) -> Value;
+    fn cube_set_count(&self, set_expression_or_handle: &str) -> Value;
+    fn cube_kpi_member(
+        &self,
+        connection: &str,
+        kpi_name: &str,
+        kpi_property: &str,
+        caption: Option<&str>,
+    ) -> Value;
 }
 
 const EXCEL_MAX_ROWS_I32: i32 = 1_048_576;
@@ -8112,6 +8166,7 @@ mod tests {
             &bytecode_engine.workbook,
             &bytecode_engine.spills,
             bytecode_engine.external_value_provider.clone(),
+            bytecode_engine.external_data_provider.clone(),
         );
         let key_b1 = CellKey {
             sheet: sheet_id,
@@ -8216,6 +8271,7 @@ mod tests {
             &engine.workbook,
             &engine.spills,
             engine.external_value_provider.clone(),
+            engine.external_data_provider.clone(),
         );
         let column_cache =
             BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
@@ -8251,6 +8307,7 @@ mod tests {
             &engine.workbook,
             &engine.spills,
             engine.external_value_provider.clone(),
+            engine.external_data_provider.clone(),
         );
         let column_cache =
             BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
@@ -8288,6 +8345,7 @@ mod tests {
             &engine.workbook,
             &engine.spills,
             engine.external_value_provider.clone(),
+            engine.external_data_provider.clone(),
         );
         let column_cache =
             BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
@@ -8329,6 +8387,7 @@ mod tests {
             &engine.workbook,
             &engine.spills,
             engine.external_value_provider.clone(),
+            engine.external_data_provider.clone(),
         );
         let column_cache =
             BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
@@ -8377,6 +8436,7 @@ mod tests {
             &engine.workbook,
             &engine.spills,
             engine.external_value_provider.clone(),
+            engine.external_data_provider.clone(),
         );
         let column_cache =
             BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
@@ -8473,6 +8533,7 @@ mod tests {
             &engine.workbook,
             &engine.spills,
             engine.external_value_provider.clone(),
+            engine.external_data_provider.clone(),
         );
 
         let mut cols = HashMap::new();

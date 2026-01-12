@@ -628,6 +628,10 @@ mod tests {
             parse_formula("=#DIV/0!", origin).expect("parse"),
             Expr::Literal(Value::Error(ErrorKind::Div0))
         );
+        assert_eq!(
+            parse_formula("=#GETTING_DATA", origin).expect("parse"),
+            Expr::Literal(Value::Error(ErrorKind::GettingData))
+        );
     }
 
     #[test]
@@ -635,7 +639,7 @@ mod tests {
         let origin = CellCoord::new(0, 0);
 
         assert_eq!(
-            parse_formula("=#GETTING_DATA", origin).expect("parse"),
+            parse_formula("=#NOT_A_REAL_ERROR", origin).expect("parse"),
             Expr::Literal(Value::Error(ErrorKind::Value))
         );
     }

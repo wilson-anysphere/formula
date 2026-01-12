@@ -167,6 +167,7 @@ fn bytecode_value_to_engine(value: formula_engine::bytecode::Value) -> Value {
             ByteErrorKind::Name => ErrorKind::Name,
             ByteErrorKind::Num => ErrorKind::Num,
             ByteErrorKind::NA => ErrorKind::NA,
+            ByteErrorKind::GettingData => ErrorKind::GettingData,
             ByteErrorKind::Spill => ErrorKind::Spill,
             ByteErrorKind::Calc => ErrorKind::Calc,
         }),

@@ -601,6 +601,91 @@ export default {
       ]
     },
     {
+      "name": "CUBEKPIMEMBER",
+      "min_args": 3,
+      "max_args": 4,
+      "volatility": "volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text",
+        "text",
+        "text",
+        "text"
+      ]
+    },
+    {
+      "name": "CUBEMEMBER",
+      "min_args": 2,
+      "max_args": 3,
+      "volatility": "volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text",
+        "text",
+        "text"
+      ]
+    },
+    {
+      "name": "CUBEMEMBERPROPERTY",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "volatile",
+      "return_type": "any",
+      "arg_types": [
+        "text",
+        "text",
+        "text"
+      ]
+    },
+    {
+      "name": "CUBERANKEDMEMBER",
+      "min_args": 3,
+      "max_args": 4,
+      "volatility": "volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text",
+        "text",
+        "number",
+        "text"
+      ]
+    },
+    {
+      "name": "CUBESET",
+      "min_args": 2,
+      "max_args": 5,
+      "volatility": "volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text",
+        "text",
+        "text",
+        "number",
+        "text"
+      ]
+    },
+    {
+      "name": "CUBESETCOUNT",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "volatile",
+      "return_type": "number",
+      "arg_types": [
+        "text"
+      ]
+    },
+    {
+      "name": "CUBEVALUE",
+      "min_args": 2,
+      "max_args": 255,
+      "volatility": "volatile",
+      "return_type": "any",
+      "arg_types": [
+        "text",
+        "text"
+      ]
+    },
+    {
       "name": "CUMIPMT",
       "min_args": 6,
       "max_args": 6,
@@ -2846,6 +2931,18 @@ export default {
       "arg_types": [
         "any",
         "any"
+      ]
+    },
+    {
+      "name": "RTD",
+      "min_args": 3,
+      "max_args": 255,
+      "volatility": "volatile",
+      "return_type": "any",
+      "arg_types": [
+        "text",
+        "text",
+        "text"
       ]
     },
     {

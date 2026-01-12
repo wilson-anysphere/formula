@@ -51,6 +51,7 @@ mod statistical_distributions_normal;
 mod statistical_more;
 mod statistical_ets;
 mod criteria_locale;
+mod cube_rtd;
 mod text;
 mod text_dbcs;
 mod thai;

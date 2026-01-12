@@ -325,6 +325,7 @@ fn cell_value_to_engine(value: &CellValue) -> EngineValue {
             formula_model::ErrorValue::Name => EngineValue::Error(ErrorKind::Name),
             formula_model::ErrorValue::Num => EngineValue::Error(ErrorKind::Num),
             formula_model::ErrorValue::NA => EngineValue::Error(ErrorKind::NA),
+            formula_model::ErrorValue::GettingData => EngineValue::Error(ErrorKind::GettingData),
             formula_model::ErrorValue::Spill => EngineValue::Error(ErrorKind::Spill),
             formula_model::ErrorValue::Calc => EngineValue::Error(ErrorKind::Calc),
             other => EngineValue::Text(other.as_str().to_string()),

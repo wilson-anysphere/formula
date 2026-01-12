@@ -34,6 +34,7 @@ pub enum SheetId {
 // Built-in Excel-compatible functions registered with the inventory-backed
 // registry live in dedicated modules to avoid merge conflicts.
 mod builtins_array;
+mod builtins_cube;
 mod builtins_date_time;
 mod builtins_database;
 mod builtins_dynamic_arrays;
@@ -184,6 +185,10 @@ pub trait FunctionContext {
         None
     }
     fn resolve_sheet_name(&self, _name: &str) -> Option<usize> {
+        None
+    }
+
+    fn external_data_provider(&self) -> Option<&dyn crate::ExternalDataProvider> {
         None
     }
 

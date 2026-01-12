@@ -68,6 +68,7 @@ pub fn r#type(value: &Value) -> i32 {
 /// - 5: `#NAME?`
 /// - 6: `#NUM!`
 /// - 7: `#N/A`
+/// - 8: `#GETTING_DATA`
 /// - 9: `#SPILL!`
 /// - 10: `#CALC!`
 pub fn error_type_code(kind: ErrorKind) -> i32 {
@@ -79,6 +80,7 @@ pub fn error_type_code(kind: ErrorKind) -> i32 {
         ErrorKind::Name => 5,
         ErrorKind::Num => 6,
         ErrorKind::NA => 7,
+        ErrorKind::GettingData => 8,
         ErrorKind::Spill => 9,
         ErrorKind::Calc => 10,
     }

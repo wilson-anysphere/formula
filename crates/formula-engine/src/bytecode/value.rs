@@ -154,6 +154,7 @@ pub enum ErrorKind {
     Name,
     Num,
     NA,
+    GettingData,
     Spill,
     Calc,
 }
@@ -178,6 +179,7 @@ impl From<crate::value::ErrorKind> for ErrorKind {
             crate::value::ErrorKind::Name => ErrorKind::Name,
             crate::value::ErrorKind::Num => ErrorKind::Num,
             crate::value::ErrorKind::NA => ErrorKind::NA,
+            crate::value::ErrorKind::GettingData => ErrorKind::GettingData,
             crate::value::ErrorKind::Spill => ErrorKind::Spill,
             crate::value::ErrorKind::Calc => ErrorKind::Calc,
         }
@@ -194,6 +196,7 @@ impl From<ErrorKind> for crate::value::ErrorKind {
             ErrorKind::Name => crate::value::ErrorKind::Name,
             ErrorKind::Num => crate::value::ErrorKind::Num,
             ErrorKind::NA => crate::value::ErrorKind::NA,
+            ErrorKind::GettingData => crate::value::ErrorKind::GettingData,
             ErrorKind::Spill => crate::value::ErrorKind::Spill,
             ErrorKind::Calc => crate::value::ErrorKind::Calc,
         }
