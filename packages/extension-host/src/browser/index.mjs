@@ -1579,18 +1579,26 @@ class BrowserExtensionHost {
   }
 
   async _handleApiCall(extension, message) {
-    const { id, namespace, method } = message;
+    const worker = extension.worker;
+    const id = message?.id;
     // Treat malformed `args` payloads as "no args" to avoid TypeError crashes when untrusted
     // extension workers post malformed messages.
-    const args = Array.isArray(message.args) ? message.args : [];
-    const apiKey = `${namespace}.${method}`;
-    const worker = extension.worker;
-
-    const permissions = API_PERMISSIONS[apiKey] ?? [];
-    const isNetworkApi = apiKey === "network.fetch" || apiKey === "network.openWebSocket";
-    const networkUrl = isNetworkApi ? String(args?.[0] ?? "") : null;
+    const args = Array.isArray(message?.args) ? message.args : [];
+    let apiKey = "";
+    let permissions = [];
+    let isNetworkApi = false;
+    let networkUrl = null;
+    let namespace = "";
+    let method = "";
 
     try {
+      namespace = typeof message?.namespace === "string" ? message.namespace : String(message?.namespace ?? "");
+      method = typeof message?.method === "string" ? message.method : String(message?.method ?? "");
+      apiKey = `${namespace}.${method}`;
+      permissions = API_PERMISSIONS[apiKey] ?? [];
+      isNetworkApi = apiKey === "network.fetch" || apiKey === "network.openWebSocket";
+      networkUrl = isNetworkApi ? String(args?.[0] ?? "") : null;
+
       // Validate obvious argument errors before prompting for permissions to avoid
       // spurious permission prompts for calls that will fail fast anyway.
       if (apiKey === "workbook.openWorkbook" || apiKey === "workbook.saveAs") {
