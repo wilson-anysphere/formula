@@ -180,7 +180,7 @@ impl<'a> LogicalBiffRecord<'a> {
         self.data.get(0..first_len).unwrap_or_default()
     }
 
-    pub(crate) fn fragments(&'a self) -> FragmentIter<'a> {
+    pub(crate) fn fragments(&self) -> FragmentIter<'_> {
         FragmentIter {
             data: self.data.as_ref(),
             sizes: &self.fragment_sizes,
