@@ -170,6 +170,289 @@ fn oddl_price_excel_model(
     let t = dsm / e;
     (amount / base.powf(t)) - accrued_interest
 }
+
+fn assert_num_error_or_skip(sheet: &mut TestSheet, formula: &str) -> bool {
+    match sheet.eval(formula) {
+        Value::Error(ErrorKind::Name) => false,
+        Value::Error(ErrorKind::Num) => true,
+        other => panic!("expected #NUM! from {formula}, got {other:?}"),
+    }
+}
+
+#[test]
+fn odd_coupon_boundary_date_equalities_return_num_error() {
+    let mut sheet = TestSheet::new();
+
+    // ODDF* boundaries
+    // issue == settlement
+    if !assert_num_error_or_skip(&mut sheet, "=ODDFPRICE(DATE(2020,1,1),DATE(2021,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.06,100,2,0)") {
+        return;
+    }
+    if !assert_num_error_or_skip(&mut sheet, "=ODDFYIELD(DATE(2020,1,1),DATE(2021,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,98,100,2,0)") {
+        return;
+    }
+
+    // settlement == first_coupon
+    if !assert_num_error_or_skip(&mut sheet, "=ODDFPRICE(DATE(2020,7,1),DATE(2021,7,1),DATE(2019,10,1),DATE(2020,7,1),0.05,0.06,100,2,0)") {
+        return;
+    }
+    if !assert_num_error_or_skip(&mut sheet, "=ODDFYIELD(DATE(2020,7,1),DATE(2021,7,1),DATE(2019,10,1),DATE(2020,7,1),0.05,98,100,2,0)") {
+        return;
+    }
+
+    // first_coupon > maturity
+    if !assert_num_error_or_skip(&mut sheet, "=ODDFPRICE(DATE(2020,1,1),DATE(2021,7,1),DATE(2019,10,1),DATE(2021,8,1),0.05,0.06,100,2,0)") {
+        return;
+    }
+    if !assert_num_error_or_skip(&mut sheet, "=ODDFYIELD(DATE(2020,1,1),DATE(2021,7,1),DATE(2019,10,1),DATE(2021,8,1),0.05,98,100,2,0)") {
+        return;
+    }
+
+    // settlement >= maturity
+    if !assert_num_error_or_skip(&mut sheet, "=ODDFPRICE(DATE(2021,8,1),DATE(2021,7,1),DATE(2019,10,1),DATE(2020,7,1),0.05,0.06,100,2,0)") {
+        return;
+    }
+    if !assert_num_error_or_skip(&mut sheet, "=ODDFYIELD(DATE(2021,8,1),DATE(2021,7,1),DATE(2019,10,1),DATE(2020,7,1),0.05,98,100,2,0)") {
+        return;
+    }
+
+    // ODDL* boundaries
+    // last_interest == settlement
+    if !assert_num_error_or_skip(&mut sheet, "=ODDLPRICE(DATE(2020,10,15),DATE(2021,3,1),DATE(2020,10,15),0.05,0.06,100,2,0)") {
+        return;
+    }
+    if !assert_num_error_or_skip(&mut sheet, "=ODDLYIELD(DATE(2020,10,15),DATE(2021,3,1),DATE(2020,10,15),0.05,98,100,2,0)") {
+        return;
+    }
+
+    // settlement == maturity
+    if !assert_num_error_or_skip(&mut sheet, "=ODDLPRICE(DATE(2021,3,1),DATE(2021,3,1),DATE(2020,10,15),0.05,0.06,100,2,0)") {
+        return;
+    }
+    if !assert_num_error_or_skip(&mut sheet, "=ODDLYIELD(DATE(2021,3,1),DATE(2021,3,1),DATE(2020,10,15),0.05,98,100,2,0)") {
+        return;
+    }
+
+    // last_interest >= maturity
+    if !assert_num_error_or_skip(&mut sheet, "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2021,3,1),0.05,0.06,100,2,0)") {
+        return;
+    }
+    if !assert_num_error_or_skip(&mut sheet, "=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2021,3,1),0.05,98,100,2,0)") {
+        return;
+    }
+}
+
+#[test]
+fn odd_coupon_date_serials_are_floored_like_excel() {
+    let mut sheet = TestSheet::new();
+
+    // ODDFPRICE: all date arguments accept time fractions and are floored.
+    let baseline = match eval_number_or_skip(
+        &mut sheet,
+        "=ODDFPRICE(DATE(2020,1,15),DATE(2021,7,1),DATE(2019,10,1),DATE(2020,7,1),0.05,0.06,100,2,0)",
+    ) {
+        Some(v) => v,
+        None => return,
+    };
+
+    let with_time = eval_number_or_skip(
+        &mut sheet,
+        "=ODDFPRICE(DATE(2020,1,15)+0.9,DATE(2021,7,1)+0.9,DATE(2019,10,1)+0.9,DATE(2020,7,1)+0.9,0.05,0.06,100,2,0)",
+    )
+    .expect("ODDFPRICE should evaluate");
+    assert_close(with_time, baseline, 1e-10);
+
+    // ODDLYIELD: date arguments accept time fractions and are floored.
+    sheet.set_formula(
+        "A1",
+        "=ODDLPRICE(DATE(2021,2,1),DATE(2021,5,1),DATE(2021,1,1),0.05,0.06,100,2,0)",
+    );
+    sheet.recalc();
+    let Some(_price) = cell_number_or_skip(&sheet, "A1") else {
+        return;
+    };
+
+    let y_baseline = eval_number_or_skip(
+        &mut sheet,
+        "=ODDLYIELD(DATE(2021,2,1),DATE(2021,5,1),DATE(2021,1,1),0.05,A1,100,2,0)",
+    )
+    .expect("ODDLYIELD should evaluate");
+    let y_with_time = eval_number_or_skip(
+        &mut sheet,
+        "=ODDLYIELD(DATE(2021,2,1)+0.9,DATE(2021,5,1)+0.9,DATE(2021,1,1)+0.9,0.05,A1,100,2,0)",
+    )
+    .expect("ODDLYIELD should evaluate with time fractions in dates");
+    assert_close(y_with_time, y_baseline, 1e-10);
+}
+
+#[test]
+fn odd_coupon_yield_optional_basis_defaults_to_zero() {
+    let mut sheet = TestSheet::new();
+
+    // ODDFYIELD
+    sheet.set_formula(
+        "A1",
+        "=ODDFPRICE(DATE(2020,1,15),DATE(2021,7,1),DATE(2019,10,1),DATE(2020,7,1),0.05,0.06,100,2,0)",
+    );
+    sheet.recalc();
+    let Some(_price) = cell_number_or_skip(&sheet, "A1") else {
+        return;
+    };
+
+    let baseline = eval_number_or_skip(
+        &mut sheet,
+        "=ODDFYIELD(DATE(2020,1,15),DATE(2021,7,1),DATE(2019,10,1),DATE(2020,7,1),0.05,A1,100,2,0)",
+    )
+    .expect("ODDFYIELD should evaluate");
+    let omitted = eval_number_or_skip(
+        &mut sheet,
+        "=ODDFYIELD(DATE(2020,1,15),DATE(2021,7,1),DATE(2019,10,1),DATE(2020,7,1),0.05,A1,100,2)",
+    )
+    .expect("ODDFYIELD with omitted basis should evaluate");
+    let blank_arg = eval_number_or_skip(
+        &mut sheet,
+        "=ODDFYIELD(DATE(2020,1,15),DATE(2021,7,1),DATE(2019,10,1),DATE(2020,7,1),0.05,A1,100,2,)",
+    )
+    .expect("ODDFYIELD with blank basis arg should evaluate");
+    let blank_cell = eval_number_or_skip(
+        &mut sheet,
+        "=ODDFYIELD(DATE(2020,1,15),DATE(2021,7,1),DATE(2019,10,1),DATE(2020,7,1),0.05,A1,100,2,B1)",
+    )
+    .expect("ODDFYIELD with blank-cell basis should evaluate");
+    assert_close(omitted, baseline, 1e-10);
+    assert_close(blank_arg, baseline, 1e-10);
+    assert_close(blank_cell, baseline, 1e-10);
+
+    // ODDLYIELD
+    sheet.set_formula(
+        "A2",
+        "=ODDLPRICE(DATE(2021,2,1),DATE(2021,5,1),DATE(2021,1,1),0.05,0.06,100,2,0)",
+    );
+    sheet.recalc();
+    let Some(_price) = cell_number_or_skip(&sheet, "A2") else {
+        return;
+    };
+
+    let baseline = eval_number_or_skip(
+        &mut sheet,
+        "=ODDLYIELD(DATE(2021,2,1),DATE(2021,5,1),DATE(2021,1,1),0.05,A2,100,2,0)",
+    )
+    .expect("ODDLYIELD should evaluate");
+    let omitted = eval_number_or_skip(
+        &mut sheet,
+        "=ODDLYIELD(DATE(2021,2,1),DATE(2021,5,1),DATE(2021,1,1),0.05,A2,100,2)",
+    )
+    .expect("ODDLYIELD with omitted basis should evaluate");
+    let blank_arg = eval_number_or_skip(
+        &mut sheet,
+        "=ODDLYIELD(DATE(2021,2,1),DATE(2021,5,1),DATE(2021,1,1),0.05,A2,100,2,)",
+    )
+    .expect("ODDLYIELD with blank basis arg should evaluate");
+    let blank_cell = eval_number_or_skip(
+        &mut sheet,
+        "=ODDLYIELD(DATE(2021,2,1),DATE(2021,5,1),DATE(2021,1,1),0.05,A2,100,2,B1)",
+    )
+    .expect("ODDLYIELD with blank-cell basis should evaluate");
+    assert_close(omitted, baseline, 1e-10);
+    assert_close(blank_arg, baseline, 1e-10);
+    assert_close(blank_cell, baseline, 1e-10);
+}
+
+#[test]
+fn odd_coupon_price_and_yield_handle_zero_yield() {
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    // ODDF*: long odd first coupon period, then regular semiannual coupons.
+    let issue = serial(2019, 10, 1, system);
+    let settlement = serial(2020, 1, 1, system);
+    let first_coupon = serial(2020, 7, 1, system);
+    let maturity = serial(2021, 7, 1, system);
+    let rate = 0.05;
+    let redemption = 100.0;
+    let frequency = 2;
+    let basis = 0;
+
+    // With yld=0, all discount factors are 1 and price becomes:
+    // price = (sum of cashflows) - accrued_interest.
+    // For this schedule/basis:
+    // - regular coupon C = redemption * rate / frequency
+    // - odd first coupon = 1.5 * C (issue->first_coupon is 270 days vs E=180)
+    // - accrued_interest = 0.5 * C (issue->settlement is 90 days vs E=180)
+    // - total cashflows = odd_first_coupon + C + (redemption + C)
+    // => price = redemption + 3*C
+    let c = redemption * rate / (frequency as f64);
+    let expected_price = redemption + 3.0 * c;
+
+    let price = oddfprice(
+        settlement,
+        maturity,
+        issue,
+        first_coupon,
+        rate,
+        0.0,
+        redemption,
+        frequency,
+        basis,
+        system,
+    )
+    .expect("oddfprice should succeed for yld=0");
+    assert!(price.is_finite());
+    assert_close(price, expected_price, 1e-12);
+
+    let recovered = oddfyield(
+        settlement,
+        maturity,
+        issue,
+        first_coupon,
+        rate,
+        price,
+        redemption,
+        frequency,
+        basis,
+        system,
+    )
+    .expect("oddfyield should invert yld=0 price");
+    assert_close(recovered, 0.0, 1e-7);
+
+    // ODDL*: short odd last coupon.
+    let last_interest = serial(2021, 1, 1, system);
+    let settlement_last = serial(2021, 2, 1, system);
+    let maturity_last = serial(2021, 5, 1, system);
+
+    // For this setup/basis:
+    // - DLM/E = 120/180 = 2/3, A/E = 30/180 = 1/6
+    // - price = redemption + C*(2/3 - 1/6) = redemption + C/2
+    let expected_price_last = redemption + 0.5 * c;
+
+    let price_last = oddlprice(
+        settlement_last,
+        maturity_last,
+        last_interest,
+        rate,
+        0.0,
+        redemption,
+        frequency,
+        basis,
+        system,
+    )
+    .expect("oddlprice should succeed for yld=0");
+    assert!(price_last.is_finite());
+    assert_close(price_last, expected_price_last, 1e-12);
+
+    let recovered_last = oddlyield(
+        settlement_last,
+        maturity_last,
+        last_interest,
+        rate,
+        price_last,
+        redemption,
+        frequency,
+        basis,
+        system,
+    )
+    .expect("oddlyield should invert yld=0 price");
+    assert_close(recovered_last, 0.0, 1e-7);
+}
 #[test]
 fn oddfprice_zero_coupon_rate_reduces_to_discounted_redemption() {
     let system = ExcelDateSystem::EXCEL_1900;
