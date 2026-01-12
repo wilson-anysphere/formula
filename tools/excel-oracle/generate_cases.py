@@ -537,7 +537,10 @@ def generate_cases() -> dict[str, Any]:
             output_cell="D1",
         )
 
-    # Date-string criteria against date serial numbers.
+    # Date criteria against date serial numbers.
+    #
+    # Avoid locale-dependent date parsing (e.g. "1/1/2020") by building criteria
+    # from DATE(...) so the criterion is numeric and stable across locales.
     date_serials = [
         _excel_serial_1900(2019, 12, 31),
         _excel_serial_1900(2020, 1, 1),
@@ -545,14 +548,27 @@ def generate_cases() -> dict[str, Any]:
         _excel_serial_1900(2021, 1, 1),
     ]
     criteria_date_inputs = [CellInput(f"D{i+1}", v) for i, v in enumerate(date_serials)]
-    for crit in [">1/1/2020", "<=1/1/2020", "1/1/2020"]:
-        _add_case(
-            cases,
-            prefix="criteria_countif",
-            tags=["agg", "criteria", "COUNTIF", "dates"],
-            formula=f'=COUNTIF(D1:D4,"{crit}")',
-            inputs=criteria_date_inputs,
-        )
+    _add_case(
+        cases,
+        prefix="criteria_countif",
+        tags=["agg", "criteria", "COUNTIF", "dates"],
+        formula='=COUNTIF(D1:D4,">"&DATE(2020,1,1))',
+        inputs=criteria_date_inputs,
+    )
+    _add_case(
+        cases,
+        prefix="criteria_countif",
+        tags=["agg", "criteria", "COUNTIF", "dates"],
+        formula='=COUNTIF(D1:D4,"<="&DATE(2020,1,1))',
+        inputs=criteria_date_inputs,
+    )
+    _add_case(
+        cases,
+        prefix="criteria_countif",
+        tags=["agg", "criteria", "COUNTIF", "dates"],
+        formula="=COUNTIF(D1:D4,DATE(2020,1,1))",
+        inputs=criteria_date_inputs,
+    )
 
     # Multi-criteria fixtures (shared by *IFS variants).
     ifs_inputs = [
@@ -962,15 +978,15 @@ def generate_cases() -> dict[str, Any]:
     _add_case(cases, prefix="coercion", tags=["coercion", "implicit"], formula='=--""')
     _add_case(cases, prefix="coercion", tags=["coercion", "implicit", "NOT"], formula='=NOT("")')
     _add_case(cases, prefix="coercion", tags=["coercion", "implicit", "IF"], formula='=IF("",10,20)')
-    _add_case(cases, prefix="coercion", tags=["coercion", "implicit", "add"], formula='="1,234"+1')
-    _add_case(cases, prefix="coercion", tags=["coercion", "implicit", "add"], formula='="(1,000)"+0')
+    _add_case(cases, prefix="coercion", tags=["coercion", "implicit", "add"], formula='="1234"+1')
+    _add_case(cases, prefix="coercion", tags=["coercion", "implicit", "add"], formula='="(1000)"+0')
     _add_case(cases, prefix="coercion", tags=["coercion", "implicit", "mul"], formula='="10%"*100')
-    _add_case(cases, prefix="coercion", tags=["coercion", "implicit", "add"], formula='="$1,234.50"+0')
+    _add_case(cases, prefix="coercion", tags=["coercion", "implicit", "add"], formula='=" 1234 "+0')
 
     # Explicit conversion functions.
     _add_case(cases, prefix="value", tags=["coercion", "VALUE"], formula='=VALUE("2020-01-01")')
-    _add_case(cases, prefix="value", tags=["coercion", "VALUE"], formula='=VALUE("2020-01-01 1:30 PM")')
-    _add_case(cases, prefix="timevalue", tags=["coercion", "TIMEVALUE"], formula='=TIMEVALUE("1 PM")')
+    _add_case(cases, prefix="value", tags=["coercion", "VALUE"], formula='=VALUE("2020-01-01 13:30")')
+    _add_case(cases, prefix="timevalue", tags=["coercion", "TIMEVALUE"], formula='=TIMEVALUE("13:00")')
 
     # ------------------------------------------------------------------
     # Text functions (keep cases deterministic; avoid locale-dependent parsing where possible)
@@ -1143,8 +1159,8 @@ def generate_cases() -> dict[str, Any]:
     _add_case(cases, prefix="text_fmt", tags=["text", "TEXT"], formula='=TEXT(1234.567,"#,##0.00")')
     _add_case(cases, prefix="text_pct", tags=["text", "TEXT"], formula='=TEXT(1.23,"0%")')
     _add_case(cases, prefix="text_cur", tags=["text", "TEXT"], formula='=TEXT(-1,"$0.00")')
-    _add_case(cases, prefix="value", tags=["text", "VALUE", "coercion"], formula='=VALUE("1,234.5")')
-    _add_case(cases, prefix="value", tags=["text", "VALUE"], formula='=VALUE("(1,000)")')
+    _add_case(cases, prefix="value", tags=["text", "VALUE", "coercion"], formula='=VALUE("1234")')
+    _add_case(cases, prefix="value", tags=["text", "VALUE"], formula='=VALUE("(1000)")')
     _add_case(cases, prefix="value", tags=["text", "VALUE"], formula='=VALUE("10%")')
     _add_case(cases, prefix="value", tags=["text", "VALUE", "error"], formula='=VALUE("nope")')
     _add_case(
@@ -1217,7 +1233,7 @@ def generate_cases() -> dict[str, Any]:
     _add_case(cases, prefix="time", tags=["date", "TIME", "error"], formula="=TIME(-1,0,0)")
 
     _add_case(cases, prefix="timevalue", tags=["date", "TIMEVALUE"], formula='=TIMEVALUE("1:30")')
-    _add_case(cases, prefix="timevalue", tags=["date", "TIMEVALUE", "coercion"], formula='=TIMEVALUE("1:30 PM")')
+    _add_case(cases, prefix="timevalue", tags=["date", "TIMEVALUE", "coercion"], formula='=TIMEVALUE("13:30")')
     _add_case(cases, prefix="timevalue", tags=["date", "TIMEVALUE", "error"], formula='=TIMEVALUE("nope")')
 
     _add_case(cases, prefix="hour", tags=["date", "HOUR"], formula="=HOUR(TIME(1,2,3))")

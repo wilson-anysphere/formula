@@ -17070,7 +17070,7 @@
       "id": "criteria_countif_8f567c383730"
     },
     {
-      "formula": "=COUNTIF(D1:D4,\">1/1/2020\")",
+      "formula": "=COUNTIF(D1:D4,\">\"&DATE(2020,1,1))",
       "outputCell": "C1",
       "inputs": [
         {
@@ -17096,10 +17096,10 @@
         "COUNTIF",
         "dates"
       ],
-      "id": "criteria_countif_5e6eaa8ca234"
+      "id": "criteria_countif_3a2d4ccd76f6"
     },
     {
-      "formula": "=COUNTIF(D1:D4,\"<=1/1/2020\")",
+      "formula": "=COUNTIF(D1:D4,\"<=\"&DATE(2020,1,1))",
       "outputCell": "C1",
       "inputs": [
         {
@@ -17125,10 +17125,10 @@
         "COUNTIF",
         "dates"
       ],
-      "id": "criteria_countif_a8cf16179373"
+      "id": "criteria_countif_c249cdb2b508"
     },
     {
-      "formula": "=COUNTIF(D1:D4,\"1/1/2020\")",
+      "formula": "=COUNTIF(D1:D4,DATE(2020,1,1))",
       "outputCell": "C1",
       "inputs": [
         {
@@ -17154,7 +17154,7 @@
         "COUNTIF",
         "dates"
       ],
-      "id": "criteria_countif_be9ba1d13f12"
+      "id": "criteria_countif_52056774595e"
     },
     {
       "formula": "=COUNTIFS(E1:E7,\"*x*\",F1:F7,\">=4\")",
@@ -20176,7 +20176,7 @@
       "id": "coercion_b7d29dcf4329"
     },
     {
-      "formula": "=\"1,234\"+1",
+      "formula": "=\"1234\"+1",
       "outputCell": "C1",
       "inputs": [],
       "tags": [
@@ -20184,10 +20184,10 @@
         "implicit",
         "add"
       ],
-      "id": "coercion_ec1205d0e51a"
+      "id": "coercion_94b50f987177"
     },
     {
-      "formula": "=\"(1,000)\"+0",
+      "formula": "=\"(1000)\"+0",
       "outputCell": "C1",
       "inputs": [],
       "tags": [
@@ -20195,7 +20195,7 @@
         "implicit",
         "add"
       ],
-      "id": "coercion_a5d95a114368"
+      "id": "coercion_96ce0f6904c4"
     },
     {
       "formula": "=\"10%\"*100",
@@ -20209,7 +20209,7 @@
       "id": "coercion_d725764559e6"
     },
     {
-      "formula": "=\"$1,234.50\"+0",
+      "formula": "=\" 1234 \"+0",
       "outputCell": "C1",
       "inputs": [],
       "tags": [
@@ -20217,7 +20217,7 @@
         "implicit",
         "add"
       ],
-      "id": "coercion_07824d6e0929"
+      "id": "coercion_dcf11a8a431e"
     },
     {
       "formula": "=VALUE(\"2020-01-01\")",
@@ -20230,24 +20230,24 @@
       "id": "value_77f4907b2420"
     },
     {
-      "formula": "=VALUE(\"2020-01-01 1:30 PM\")",
+      "formula": "=VALUE(\"2020-01-01 13:30\")",
       "outputCell": "C1",
       "inputs": [],
       "tags": [
         "coercion",
         "VALUE"
       ],
-      "id": "value_efcac2b241e9"
+      "id": "value_63620f41bdcb"
     },
     {
-      "formula": "=TIMEVALUE(\"1 PM\")",
+      "formula": "=TIMEVALUE(\"13:00\")",
       "outputCell": "C1",
       "inputs": [],
       "tags": [
         "coercion",
         "TIMEVALUE"
       ],
-      "id": "timevalue_6fcedd519d50"
+      "id": "timevalue_6d54cc1fac03"
     },
     {
       "formula": "=LEN(A1)",
@@ -24781,7 +24781,7 @@
       "id": "text_cur_99ef77d58413"
     },
     {
-      "formula": "=VALUE(\"1,234.5\")",
+      "formula": "=VALUE(\"1234\")",
       "outputCell": "C1",
       "inputs": [],
       "tags": [
@@ -24789,17 +24789,17 @@
         "VALUE",
         "coercion"
       ],
-      "id": "value_8e5491c6f776"
+      "id": "value_7b9b63be93a9"
     },
     {
-      "formula": "=VALUE(\"(1,000)\")",
+      "formula": "=VALUE(\"(1000)\")",
       "outputCell": "C1",
       "inputs": [],
       "tags": [
         "text",
         "VALUE"
       ],
-      "id": "value_a5ec6ad8dd6a"
+      "id": "value_351b19317a19"
     },
     {
       "formula": "=VALUE(\"10%\")",
@@ -25572,7 +25572,7 @@
       "id": "timevalue_6c44107f616c"
     },
     {
-      "formula": "=TIMEVALUE(\"1:30 PM\")",
+      "formula": "=TIMEVALUE(\"13:30\")",
       "outputCell": "C1",
       "inputs": [],
       "tags": [
@@ -25580,7 +25580,7 @@
         "TIMEVALUE",
         "coercion"
       ],
-      "id": "timevalue_d20b8d021a68"
+      "id": "timevalue_3e2098cdc0d3"
     },
     {
       "formula": "=TIMEVALUE(\"nope\")",

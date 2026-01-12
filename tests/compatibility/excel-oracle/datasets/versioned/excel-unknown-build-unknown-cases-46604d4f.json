@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-01-12T02:30:39.118843482Z",
+  "generatedAt": "2026-01-12T03:32:30.83934706Z",
   "source": {
     "kind": "excel",
     "version": "unknown",
@@ -10,7 +10,7 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "cebbcd789a09074792d45c51f8077c89e2551b474d634208a40c1bdd5a568756",
+    "sha256": "46604d4ff04d520099220c9e4f132e26eb3bee90e2887c814aee0c4b48ad0a67",
     "count": 1390
   },
   "results": [
@@ -8385,7 +8385,7 @@
       "displayText": "3"
     },
     {
-      "caseId": "criteria_countif_5e6eaa8ca234",
+      "caseId": "criteria_countif_3a2d4ccd76f6",
       "outputCell": "C1",
       "result": {
         "t": "n",
@@ -8395,7 +8395,7 @@
       "displayText": "2"
     },
     {
-      "caseId": "criteria_countif_a8cf16179373",
+      "caseId": "criteria_countif_c249cdb2b508",
       "outputCell": "C1",
       "result": {
         "t": "n",
@@ -8405,7 +8405,7 @@
       "displayText": "2"
     },
     {
-      "caseId": "criteria_countif_be9ba1d13f12",
+      "caseId": "criteria_countif_52056774595e",
       "outputCell": "C1",
       "result": {
         "t": "n",
@@ -9498,7 +9498,7 @@
       "displayText": "20"
     },
     {
-      "caseId": "coercion_ec1205d0e51a",
+      "caseId": "coercion_94b50f987177",
       "outputCell": "C1",
       "result": {
         "t": "n",
@@ -9508,7 +9508,7 @@
       "displayText": "1235"
     },
     {
-      "caseId": "coercion_a5d95a114368",
+      "caseId": "coercion_96ce0f6904c4",
       "outputCell": "C1",
       "result": {
         "t": "n",
@@ -9528,14 +9528,14 @@
       "displayText": "10"
     },
     {
-      "caseId": "coercion_07824d6e0929",
+      "caseId": "coercion_dcf11a8a431e",
       "outputCell": "C1",
       "result": {
         "t": "n",
-        "v": 1234.5
+        "v": 1234.0
       },
       "address": "C1",
-      "displayText": "1234.5"
+      "displayText": "1234"
     },
     {
       "caseId": "value_77f4907b2420",
@@ -9548,7 +9548,7 @@
       "displayText": "43831"
     },
     {
-      "caseId": "value_efcac2b241e9",
+      "caseId": "value_63620f41bdcb",
       "outputCell": "C1",
       "result": {
         "t": "n",
@@ -9558,7 +9558,7 @@
       "displayText": "43831.5625"
     },
     {
-      "caseId": "timevalue_6fcedd519d50",
+      "caseId": "timevalue_6d54cc1fac03",
       "outputCell": "C1",
       "result": {
         "t": "n",
@@ -11873,17 +11873,17 @@
       "displayText": "-$1.00"
     },
     {
-      "caseId": "value_8e5491c6f776",
+      "caseId": "value_7b9b63be93a9",
       "outputCell": "C1",
       "result": {
         "t": "n",
-        "v": 1234.5
+        "v": 1234.0
       },
       "address": "C1",
-      "displayText": "1234.5"
+      "displayText": "1234"
     },
     {
-      "caseId": "value_a5ec6ad8dd6a",
+      "caseId": "value_351b19317a19",
       "outputCell": "C1",
       "result": {
         "t": "n",
@@ -12293,7 +12293,7 @@
       "displayText": "0.0625"
     },
     {
-      "caseId": "timevalue_d20b8d021a68",
+      "caseId": "timevalue_3e2098cdc0d3",
       "outputCell": "C1",
       "result": {
         "t": "n",
