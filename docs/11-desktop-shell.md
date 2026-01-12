@@ -53,9 +53,11 @@ The CSP is set in `app.security.csp`.
 
 Current policy allows:
 
-- `script-src 'wasm-unsafe-eval' 'unsafe-eval'` (WASM + JS evaluation used by scripting/macro tooling)
+- `script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' blob: data:` (WASM + JS evaluation used by scripting/macro tooling)
 - `worker-src 'self' blob:` and `child-src 'self' blob:` (Workers; some bundlers bootstrap via `blob:` URLs)
-- `connect-src 'self'` (tight by default; expand intentionally when adding network access)
+- `connect-src 'self' https: wss: blob: data:` (current policy)
+  - `https:`/`wss:` are allowed because the app needs to talk to remote services (e.g. collaboration over WebSockets, and remote connectors).
+  - In dev you may also want to allow localhost endpoints (e.g. Ollama at `http://localhost:11434`) by adding them to `connect-src` in `apps/desktop/src-tauri/tauri.conf.json`.
 
 ### `app.windows[].capabilities` (Tauri permissions)
 
