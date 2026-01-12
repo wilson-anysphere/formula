@@ -10,7 +10,8 @@ use roxmltree::Document;
 use crate::{XlsxError, XlsxPackage};
 
 const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
-const RICH_VALUE_REL_XML: &str = "xl/richData/richValueRel.xml";
+/// Conventional part name for `xl/richData/richValueRel.xml`.
+pub const RICH_VALUE_REL_XML: &str = "xl/richData/richValueRel.xml";
 
 /// A parsed `xl/richData/richValueRel.xml` part.
 ///

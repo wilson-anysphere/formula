@@ -9,7 +9,8 @@ use roxmltree::Document;
 
 use crate::{XlsxError, XlsxPackage};
 
-const RICH_VALUE_XML: &str = "xl/richData/richValue.xml";
+/// Conventional part name for `xl/richData/richValue.xml`.
+pub const RICH_VALUE_XML: &str = "xl/richData/richValue.xml";
 
 /// Parse `xl/richData/richValue.xml` and return a vector where each entry corresponds to a rich
 /// value record (0-based index).
@@ -108,8 +109,8 @@ pub fn parse_rich_values_xml(xml_bytes: &[u8]) -> Result<RichValues, XlsxError> 
         .descendants()
         .filter(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("rv"))
     {
-        let type_id = attr_local(&rv, &["t", "type", "id"])
-            .and_then(|v| v.trim().parse::<u32>().ok());
+        let type_id =
+            attr_local(&rv, &["t", "type", "id"]).and_then(|v| v.trim().parse::<u32>().ok());
         let structure_id = attr_local(&rv, &["s", "structure", "structureId", "structure_id"]);
 
         let mut fields = Vec::new();

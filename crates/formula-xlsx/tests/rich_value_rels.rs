@@ -1,6 +1,6 @@
 use std::io::{Cursor, Write};
 
-use formula_xlsx::rich_data::rich_value_rel::RichValueRels;
+use formula_xlsx::rich_data::RichValueRels;
 use formula_xlsx::XlsxPackage;
 use zip::write::FileOptions;
 use zip::ZipWriter;

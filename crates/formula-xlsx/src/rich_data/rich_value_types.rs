@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 use roxmltree::{Document, Node};
 
-use crate::XlsxError;
+use crate::{XlsxError, XlsxPackage};
 
 pub type RichValueTypes = Vec<RichValueType>;
 
@@ -19,6 +19,18 @@ pub struct RichValueType {
     pub structure_id: Option<String>,
     /// Attributes not recognized by this parser (including namespaced attributes).
     pub attributes: BTreeMap<String, String>,
+}
+
+const RICH_VALUE_TYPES_XML: &str = "xl/richData/richValueTypes.xml";
+
+/// Read and parse `xl/richData/richValueTypes.xml` from an [`XlsxPackage`].
+pub fn parse_rich_value_types_from_package(
+    pkg: &XlsxPackage,
+) -> Result<Option<RichValueTypes>, XlsxError> {
+    let Some(bytes) = pkg.part(RICH_VALUE_TYPES_XML) else {
+        return Ok(None);
+    };
+    Ok(Some(parse_rich_value_types_xml(bytes)?))
 }
 
 /// Parse `xl/richData/richValueTypes.xml` into a vector of rich value type definitions.
@@ -32,28 +44,36 @@ pub fn parse_rich_value_types_xml(xml: &[u8]) -> Result<RichValueTypes, XlsxErro
 
     // Typical shape:
     // <rvTypes> <types> <type .../>* </types> </rvTypes>
-    let Some(types_el) = doc
-        .descendants()
-        .find(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("types"))
-    else {
-        return Ok(out);
-    };
-
-    // Use `descendants()` (not `children()`) so we can tolerate additional wrapper/container nodes
-    // under `<types>`.
-    for type_el in types_el
-        .descendants()
-        .filter(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("type"))
-    {
-        let id = attr_no_ns(type_el, "id").and_then(|v| v.parse::<u32>().ok());
+    //
+    // Be tolerant: don't require specific wrapper/root nodes; scan for `type`-like elements
+    // anywhere in the document.
+    for type_el in doc.descendants().filter(|n| {
+        n.is_element() && matches_local_name(n.tag_name().name(), &["type", "richValueType"])
+    }) {
+        let id = attr_local(type_el, &["id", "t", "typeId", "type_id"])
+            .and_then(|v| v.trim().parse::<u32>().ok());
         let Some(id) = id else {
             // Best-effort: ignore malformed/unrecognized <type> entries.
             continue;
         };
 
-        let name = attr_no_ns(type_el, "name").map(|s| s.to_string());
-        let structure_id = attr_no_ns(type_el, "structure").map(|s| s.to_string());
-        let attributes = collect_unknown_attrs(type_el, &["id", "name", "structure"]);
+        let name = attr_local(type_el, &["name", "n"]);
+        let structure_id = attr_local(type_el, &["structure", "s", "structureId", "structure_id"]);
+        let attributes = collect_unknown_attrs(
+            type_el,
+            &[
+                "id",
+                "t",
+                "typeId",
+                "type_id",
+                "name",
+                "n",
+                "structure",
+                "s",
+                "structureId",
+                "structure_id",
+            ],
+        );
 
         out.push(RichValueType {
             id,
@@ -68,16 +88,21 @@ pub fn parse_rich_value_types_xml(xml: &[u8]) -> Result<RichValueTypes, XlsxErro
 
 const XMLNS_NS: &str = "http://www.w3.org/2000/xmlns/";
 
-fn attr_no_ns<'a>(node: Node<'a, 'a>, local: &str) -> Option<&'a str> {
+fn matches_local_name(name: &str, expected: &[&str]) -> bool {
+    expected.iter().any(|n| name.eq_ignore_ascii_case(n))
+}
+
+fn attr_local(node: Node<'_, '_>, locals: &[&str]) -> Option<String> {
     for attr in node.attributes() {
-        if attr.namespace().is_none() && attr.name() == local {
-            return Some(attr.value());
+        let local = attr.name().rsplit(':').next().unwrap_or(attr.name());
+        if locals.iter().any(|n| local.eq_ignore_ascii_case(n)) {
+            return Some(attr.value().to_string());
         }
     }
     None
 }
 
-fn collect_unknown_attrs(node: Node<'_, '_>, known_unqualified: &[&str]) -> BTreeMap<String, String> {
+fn collect_unknown_attrs(node: Node<'_, '_>, known_locals: &[&str]) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
 
     for attr in node.attributes() {
@@ -86,10 +111,8 @@ fn collect_unknown_attrs(node: Node<'_, '_>, known_unqualified: &[&str]) -> BTre
             continue;
         }
 
-        // Only treat *unqualified* known attrs as "known". Namespaced attributes are preserved,
-        // even if their local name matches one of the known fields, since the namespace can be
-        // semantically meaningful (e.g. `r:id`).
-        if attr.namespace().is_none() && known_unqualified.iter().any(|k| *k == attr.name()) {
+        let local = attr.name().rsplit(':').next().unwrap_or(attr.name());
+        if known_locals.iter().any(|k| local.eq_ignore_ascii_case(k)) {
             continue;
         }
 

@@ -11,6 +11,7 @@
 mod discovery;
 pub mod metadata;
 pub mod rich_value;
+pub mod rich_value_parts;
 pub mod rich_value_rel;
 pub mod rich_value_structure;
 pub mod rich_value_types;
@@ -21,8 +22,14 @@ mod worksheet_scan;
 
 pub use discovery::discover_rich_data_part_names;
 pub use images::resolve_rich_value_image_targets;
+pub use rich_value::parse_rich_values_xml;
+pub use rich_value::{RichValueFieldValue, RichValueInstance, RichValues};
+pub use rich_value_images::{
+    ExtractedRichValueImages, RichValueEntry, RichValueIndex, RichValueWarning,
+};
+pub use rich_value_parts::RichValueParts;
+pub use rich_value_rel::RichValueRels;
 pub use worksheet_scan::scan_cells_with_metadata_indices;
-pub use rich_value_images::{ExtractedRichValueImages, RichValueEntry, RichValueIndex, RichValueWarning};
 
 use std::cmp::Ordering;
 
@@ -591,12 +598,11 @@ fn parse_rich_value_types_xml_best_effort(
     let mut out: HashMap<u32, Vec<RichValueTypePropertyDescriptor>> = HashMap::new();
     let mut next_fallback_idx: u32 = 0;
     for ty in type_nodes {
-        let idx =
-            parse_node_numeric_attr(ty, &["id", "i", "idx", "s"]).unwrap_or_else(|| {
-                let idx = next_fallback_idx;
-                next_fallback_idx = next_fallback_idx.wrapping_add(1);
-                idx
-            });
+        let idx = parse_node_numeric_attr(ty, &["id", "i", "idx", "s"]).unwrap_or_else(|| {
+            let idx = next_fallback_idx;
+            next_fallback_idx = next_fallback_idx.wrapping_add(1);
+            idx
+        });
 
         let prop_container = ty
             .children()
@@ -619,14 +625,23 @@ fn parse_rich_value_types_xml_best_effort(
 
         let mut props = Vec::with_capacity(prop_nodes.len());
         for (position, prop) in prop_nodes.into_iter().enumerate() {
-            let name = find_node_attr_value(prop, &["name", "n", "id", "key", "k", "pid", "propId"]);
+            let name =
+                find_node_attr_value(prop, &["name", "n", "id", "key", "k", "pid", "propId"]);
             let kind = find_node_attr_value(prop, &["t", "type", "kind", "vt", "valType"]);
-            props.push(RichValueTypePropertyDescriptor { name, kind, position });
+            props.push(RichValueTypePropertyDescriptor {
+                name,
+                kind,
+                position,
+            });
         }
         out.insert(idx, props);
     }
 
-    if out.is_empty() { None } else { Some(out) }
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
 }
 
 fn parse_rv_rel_index_with_schema(
@@ -649,12 +664,20 @@ fn parse_rv_rel_index_with_schema(
 }
 
 fn descriptor_is_relationship(desc: &RichValueTypePropertyDescriptor) -> bool {
-    let kind = desc.kind.as_deref().unwrap_or_default().to_ascii_lowercase();
+    let kind = desc
+        .kind
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
     if kind == "rel" || kind == "relationship" {
         return true;
     }
 
-    let name = desc.name.as_deref().unwrap_or_default().to_ascii_lowercase();
+    let name = desc
+        .name
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
     if name == "rel" || name == "relationship" {
         return true;
     }
@@ -664,7 +687,9 @@ fn descriptor_is_relationship(desc: &RichValueTypePropertyDescriptor) -> bool {
 }
 
 fn local_name(name: &str) -> &str {
-    name.rsplit_once(':').map(|(_, local)| local).unwrap_or(name)
+    name.rsplit_once(':')
+        .map(|(_, local)| local)
+        .unwrap_or(name)
 }
 
 fn parse_node_numeric_attr(node: roxmltree::Node<'_, '_>, keys: &[&str]) -> Option<u32> {
