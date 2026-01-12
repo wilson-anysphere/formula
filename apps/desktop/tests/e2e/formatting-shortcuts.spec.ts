@@ -111,6 +111,9 @@ test.describe("formatting shortcuts", () => {
     });
     await waitForIdle(page);
 
+    // Ensure the grid is focused so keyboard events route through SpreadsheetApp's keydown handler.
+    await page.locator("#grid").focus();
+
     expect(await getA1Underline(page)).toBe(false);
 
     await page.keyboard.press("ControlOrMeta+U");
@@ -120,9 +123,9 @@ test.describe("formatting shortcuts", () => {
   });
 
   for (const [name, cfg] of [
-    ["Ctrl/Cmd+Shift+$ applies the currency number format preset", { key: "4", expected: "$#,##0.00" }],
-    ["Ctrl/Cmd+Shift+% applies the percent number format preset", { key: "5", expected: "0%" }],
-    ["Ctrl/Cmd+Shift+# applies the date number format preset", { key: "3", expected: "m/d/yyyy" }],
+    ["Ctrl/Cmd+Shift+$ applies the currency number format preset", { key: "Digit4", expected: "$#,##0.00" }],
+    ["Ctrl/Cmd+Shift+% applies the percent number format preset", { key: "Digit5", expected: "0%" }],
+    ["Ctrl/Cmd+Shift+# applies the date number format preset", { key: "Digit3", expected: "m/d/yyyy" }],
   ] as const) {
     test(name, async ({ page }) => {
       await gotoDesktop(page);
@@ -138,6 +141,8 @@ test.describe("formatting shortcuts", () => {
       });
       await waitForIdle(page);
 
+      // Use the physical digit key so the shortcut is stable regardless of keyboard layout (e.g. Shift+4 -> "$").
+      await page.locator("#grid").focus();
       await page.keyboard.press(`ControlOrMeta+Shift+${cfg.key}`);
       await waitForIdle(page);
 
