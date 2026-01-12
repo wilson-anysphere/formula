@@ -675,6 +675,34 @@ fn bytecode_backend_supports_array_literal_arguments_for_count() {
 }
 
 #[test]
+fn bytecode_backend_supports_countif_array_literal_ranges() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=COUNTIF({1,2,3}, \">1\")")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(2.0));
+    assert_engine_matches_ast(&engine, "=COUNTIF({1,2,3}, \">1\")", "A1");
+}
+
+#[test]
+fn bytecode_backend_supports_countif_array_literal_locals_via_let() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LET(a, {1,2,3}, COUNTIF(a, \">1\"))")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(2.0));
+    assert_engine_matches_ast(&engine, "=LET(a, {1,2,3}, COUNTIF(a, \">1\"))", "A1");
+}
+
+#[test]
 fn array_literal_errors_propagate_in_sum() {
     let mut engine = Engine::new();
     engine
@@ -691,11 +719,7 @@ fn array_literal_errors_propagate_in_sum() {
 }
 
 #[test]
-fn array_literals_do_not_enable_bytecode_for_typed_array_functions_yet() {
-    // The bytecode backend currently only supports array literals as *numeric* arrays (NaN for
-    // non-numeric elements) for numeric aggregate functions. Functions like AND/OR have typed
-    // semantics over booleans within array literals, so keep them on the AST backend until the
-    // bytecode Value representation can preserve mixed element types.
+fn array_literals_enable_bytecode_for_logical_functions() {
     let mut engine = Engine::new();
     engine
         .set_cell_formula("Sheet1", "A1", "=AND({TRUE,FALSE})")
@@ -704,7 +728,7 @@ fn array_literals_do_not_enable_bytecode_for_typed_array_functions_yet() {
         .set_cell_formula("Sheet1", "A2", "=OR({TRUE,FALSE})")
         .unwrap();
 
-    assert_eq!(engine.bytecode_program_count(), 0);
+    assert_eq!(engine.bytecode_program_count(), 2);
 
     engine.recalculate_single_threaded();
     assert_engine_matches_ast(&engine, "=AND({TRUE,FALSE})", "A1");
@@ -957,10 +981,7 @@ fn bytecode_backend_matches_ast_for_counta_and_countblank() {
 }
 
 #[test]
-fn bytecode_backend_rejects_counta_and_countblank_array_literals() {
-    // Bytecode array literals are numeric-only (f64 + NaN for blanks/non-numeric). That is not
-    // sufficient to preserve COUNTA/COUNTBLANK semantics over arrays containing text/bools.
-    // Ensure these formulas fall back to the AST backend.
+fn bytecode_backend_supports_counta_and_countblank_array_literals() {
     let mut engine = Engine::new();
 
     engine
@@ -970,7 +991,7 @@ fn bytecode_backend_rejects_counta_and_countblank_array_literals() {
         .set_cell_formula("Sheet1", "A2", "=COUNTBLANK({\"a\",TRUE,\"\"})")
         .unwrap();
 
-    assert_eq!(engine.bytecode_program_count(), 0);
+    assert_eq!(engine.bytecode_program_count(), 2);
 
     engine.recalculate_single_threaded();
 

@@ -6881,7 +6881,10 @@ fn bytecode_expr_is_eligible(expr: &bytecode::Expr) -> bool {
     let mut lexical_scopes: Vec<HashMap<Arc<str>, BytecodeLocalBindingKind>> = Vec::new();
     // Top-level formulas use dynamic reference dereference, so range references are eligible and
     // may spill (e.g. `=A1:A3` / `=A1:A3+1`).
-    bytecode_expr_is_eligible_inner(expr, true, false, &mut lexical_scopes)
+    //
+    // Array literals are also eligible at the top-level since the bytecode backend supports
+    // spilling array results.
+    bytecode_expr_is_eligible_inner(expr, true, true, &mut lexical_scopes)
 }
 
 fn bytecode_expr_within_grid_limits(
@@ -7074,13 +7077,10 @@ fn bytecode_expr_is_eligible_inner(
             bytecode::Value::Text(_) => true,
             bytecode::Value::Empty => true,
             bytecode::Value::Error(_) => true,
-            // Array literals are currently supported in the bytecode backend only as *numeric*
-            // arrays passed directly to supported numeric aggregate functions
-            // (SUM/AVERAGE/MIN/MAX/COUNT).
-            //
-            // Do not treat this the same as `allow_range`: other bytecode contexts accept ranges
-            // (e.g. `AND(range)`), but our numeric-only array literal lowering cannot preserve
-            // typed/mixed array semantics for those functions yet.
+            // Array literals are supported by the bytecode runtime as full typed arrays, but not
+            // all bytecode function implementations support Excel's array-lifting semantics yet
+            // (e.g. `ABS({1;2})` should spill via the AST evaluator). Gate array literals by
+            // context using the `allow_array_literals` flag.
             bytecode::Value::Array(_) => allow_array_literals,
             bytecode::Value::Range(_) | bytecode::Value::MultiRange(_) => false,
         },
@@ -7146,7 +7146,7 @@ fn bytecode_expr_is_eligible_inner(
                     return false;
                 }
                 args.iter()
-                    .all(|arg| bytecode_expr_is_eligible_inner(arg, true, false, lexical_scopes))
+                    .all(|arg| bytecode_expr_is_eligible_inner(arg, true, true, lexical_scopes))
             }
             bytecode::ast::Function::IfError | bytecode::ast::Function::IfNa => {
                 if args.len() != 2 {
@@ -7231,10 +7231,7 @@ fn bytecode_expr_is_eligible_inner(
                 .iter()
                 .all(|arg| bytecode_expr_is_eligible_inner(arg, true, true, lexical_scopes)),
             bytecode::ast::Function::CountA | bytecode::ast::Function::CountBlank => args.iter().all(|arg| {
-                // Bytecode array literals are numeric-only (`f64` with NaN for blanks/non-numeric).
-                // That's sufficient for SUM/AVERAGE/MIN/MAX/COUNT (which ignore non-numeric),
-                // but would be incorrect for COUNTA/COUNTBLANK which are sensitive to text/bools.
-                bytecode_expr_is_eligible_inner(arg, true, false, lexical_scopes)
+                bytecode_expr_is_eligible_inner(arg, true, true, lexical_scopes)
             }),
             bytecode::ast::Function::SumIf | bytecode::ast::Function::AverageIf => {
                 if args.len() != 2 && args.len() != 3 {
@@ -7311,13 +7308,18 @@ fn bytecode_expr_is_eligible_inner(
                 if args.len() != 2 {
                     return false;
                 }
-                let range_ok = matches!(
-                    args[0],
+                let range_ok = match &args[0] {
                     bytecode::Expr::RangeRef(_)
-                        | bytecode::Expr::MultiRangeRef(_)
-                        | bytecode::Expr::CellRef(_)
-                        | bytecode::Expr::SpillRange(_)
-                );
+                    | bytecode::Expr::MultiRangeRef(_)
+                    | bytecode::Expr::CellRef(_)
+                    | bytecode::Expr::SpillRange(_) => true,
+                    bytecode::Expr::Literal(bytecode::Value::Array(_)) => true,
+                    bytecode::Expr::NameRef(name) => matches!(
+                        local_binding_kind(lexical_scopes, name),
+                        Some(BytecodeLocalBindingKind::Range | BytecodeLocalBindingKind::ArrayLiteral)
+                    ),
+                    _ => false,
+                };
                 let criteria_ok =
                     bytecode_expr_is_eligible_inner(&args[1], false, false, lexical_scopes);
 
@@ -7423,11 +7425,8 @@ fn bytecode_expr_is_eligible_inner(
                 if args.len() != 1 {
                     return false;
                 }
-                match &args[0] {
-                    // TYPE is scalar even for multi-cell ranges (returns 64), so allow ranges.
-                    bytecode::Expr::RangeRef(_) => true,
-                    other => bytecode_expr_is_eligible_inner(other, false, false, lexical_scopes),
-                }
+                // TYPE is scalar even for multi-cell ranges/arrays (returns 64), so allow them.
+                bytecode_expr_is_eligible_inner(&args[0], true, true, lexical_scopes)
             }
             bytecode::ast::Function::Unknown(_) => false,
         },
