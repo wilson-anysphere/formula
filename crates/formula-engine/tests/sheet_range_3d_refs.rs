@@ -325,3 +325,39 @@ fn bytecode_compiles_counta_and_countblank_over_sheet_range_area_ref_and_matches
     assert_eq!(bytecode_counta, Value::Number(6.0));
     assert_eq!(bytecode_countblank, Value::Number(4.0));
 }
+
+#[test]
+fn bytecode_compiles_and_or_over_sheet_range_cell_ref_and_matches_ast() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", "hello").unwrap();
+    engine.set_cell_value("Sheet2", "A1", 0.0).unwrap();
+    engine.set_cell_value("Sheet3", "A1", 1.0).unwrap();
+
+    // Place the formula on Sheet1 so the 3D span includes the current sheet.
+    engine
+        .set_cell_formula("Sheet1", "B1", "=AND(Sheet1:Sheet3!A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=OR(Sheet1:Sheet3!A1)")
+        .unwrap();
+
+    // Ensure the bytecode backend accepted the 3D reference.
+    assert_eq!(engine.bytecode_program_count(), 2);
+
+    engine.recalculate_single_threaded();
+    let bytecode_and = engine.get_cell_value("Sheet1", "B1");
+    let bytecode_or = engine.get_cell_value("Sheet1", "B2");
+
+    engine.set_bytecode_enabled(false);
+    engine.recalculate_single_threaded();
+    let ast_and = engine.get_cell_value("Sheet1", "B1");
+    let ast_or = engine.get_cell_value("Sheet1", "B2");
+
+    assert_eq!(bytecode_and, ast_and);
+    assert_eq!(bytecode_or, ast_or);
+
+    // `Sheet1!A1` is text and should be ignored for the 3D reference union; `0` forces AND false,
+    // and `1` forces OR true.
+    assert_eq!(bytecode_and, Value::Bool(false));
+    assert_eq!(bytecode_or, Value::Bool(true));
+}

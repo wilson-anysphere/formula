@@ -1205,6 +1205,7 @@ fn fn_and(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     for arg in args {
         let err = match arg {
             Value::Range(r) => and_range(grid, r.resolve(base), &mut all_true, &mut any),
+            Value::MultiRange(r) => and_multi_range(grid, r, base, &mut all_true, &mut any),
             Value::Array(a) => and_array(a, &mut all_true, &mut any),
             other => and_scalar(other, &mut all_true, &mut any),
         };
@@ -1230,6 +1231,7 @@ fn fn_or(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     for arg in args {
         let err = match arg {
             Value::Range(r) => or_range(grid, r.resolve(base), &mut any_true, &mut any),
+            Value::MultiRange(r) => or_multi_range(grid, r, base, &mut any_true, &mut any),
             Value::Array(a) => or_array(a, &mut any_true, &mut any),
             other => or_scalar(other, &mut any_true, &mut any),
         };
@@ -1444,6 +1446,108 @@ fn or_range(
     for row in range.row_start..=range.row_end {
         for col in range.col_start..=range.col_end {
             match grid.get_value(CellCoord { row, col }) {
+                Value::Error(e) => return Some(e),
+                Value::Number(n) => {
+                    *any = true;
+                    if n != 0.0 {
+                        *any_true = true;
+                    }
+                }
+                Value::Bool(b) => {
+                    *any = true;
+                    if b {
+                        *any_true = true;
+                    }
+                }
+                // Text/blanks in references are ignored.
+                Value::Text(_)
+                | Value::Empty
+                | Value::Array(_)
+                | Value::Range(_)
+                | Value::MultiRange(_) => {}
+            }
+        }
+    }
+    None
+}
+
+fn and_multi_range(
+    grid: &dyn Grid,
+    range: &super::value::MultiRangeRef,
+    base: CellCoord,
+    all_true: &mut bool,
+    any: &mut bool,
+) -> Option<ErrorKind> {
+    for area in range.areas.iter() {
+        if let Some(e) = and_range_on_sheet(grid, area.sheet, area.range.resolve(base), all_true, any)
+        {
+            return Some(e);
+        }
+    }
+    None
+}
+
+fn and_range_on_sheet(
+    grid: &dyn Grid,
+    sheet: usize,
+    range: ResolvedRange,
+    all_true: &mut bool,
+    any: &mut bool,
+) -> Option<ErrorKind> {
+    for row in range.row_start..=range.row_end {
+        for col in range.col_start..=range.col_end {
+            match grid.get_value_on_sheet(sheet, CellCoord { row, col }) {
+                Value::Error(e) => return Some(e),
+                Value::Number(n) => {
+                    *any = true;
+                    if n == 0.0 {
+                        *all_true = false;
+                    }
+                }
+                Value::Bool(b) => {
+                    *any = true;
+                    if !b {
+                        *all_true = false;
+                    }
+                }
+                // Text/blanks in references are ignored.
+                Value::Text(_)
+                | Value::Empty
+                | Value::Array(_)
+                | Value::Range(_)
+                | Value::MultiRange(_) => {}
+            }
+        }
+    }
+    None
+}
+
+fn or_multi_range(
+    grid: &dyn Grid,
+    range: &super::value::MultiRangeRef,
+    base: CellCoord,
+    any_true: &mut bool,
+    any: &mut bool,
+) -> Option<ErrorKind> {
+    for area in range.areas.iter() {
+        if let Some(e) = or_range_on_sheet(grid, area.sheet, area.range.resolve(base), any_true, any)
+        {
+            return Some(e);
+        }
+    }
+    None
+}
+
+fn or_range_on_sheet(
+    grid: &dyn Grid,
+    sheet: usize,
+    range: ResolvedRange,
+    any_true: &mut bool,
+    any: &mut bool,
+) -> Option<ErrorKind> {
+    for row in range.row_start..=range.row_end {
+        for col in range.col_start..=range.col_end {
+            match grid.get_value_on_sheet(sheet, CellCoord { row, col }) {
                 Value::Error(e) => return Some(e),
                 Value::Number(n) => {
                     *any = true;
