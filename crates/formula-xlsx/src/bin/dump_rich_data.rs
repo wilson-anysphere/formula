@@ -41,7 +41,7 @@ Print a best-effort overview of rich-data related parts:\n\
   - xl/metadata.xml presence/size\n\
   - xl/richData/* part list + sizes\n\
   - likely in-cell image parts (xl/cellImages*, xl/media/*, etc)\n\
-  - workbook.xml.rels entries involving metadata/richData\n\
+  - workbook.xml.rels and metadata.xml.rels entries involving metadata/richData\n\
   - per-worksheet vm/cm usage + a few sample cells\n\
 \n\
 Print a best-effort mapping from worksheet cells with `vm` attributes to:\n\
@@ -134,6 +134,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     eprintln!("workbook: {}", xlsx_path.display());
     dump_required_part_presence(&pkg);
     dump_workbook_relationships(&pkg);
+    dump_metadata_relationships(&pkg);
     dump_worksheet_vm_cm_usage(&pkg);
 
     let found_vm_cells = dump_vm_mappings(&pkg);
@@ -260,7 +261,80 @@ fn dump_workbook_relationships(pkg: &XlsxPackage) {
         {
             matched += 1;
             let resolved = openxml::resolve_target("xl/workbook.xml", &rel.target);
-            let resolved_size = find_part_bytes_case_insensitive(pkg, &resolved).map(|(_, b)| b.len());
+            let resolved_size =
+                find_part_bytes_case_insensitive(pkg, &resolved).map(|(_, b)| b.len());
+            if let Some(mode) = rel.target_mode.as_deref() {
+                eprintln!(
+                    "  Id={} Type={} Target={} TargetMode={} (resolved: {}, {})",
+                    rel.id,
+                    rel.type_uri,
+                    rel.target,
+                    mode,
+                    resolved,
+                    resolved_size
+                        .map(|n| format!("{n} bytes"))
+                        .unwrap_or_else(|| "missing".to_string())
+                );
+            } else {
+                eprintln!(
+                    "  Id={} Type={} Target={} (resolved: {}, {})",
+                    rel.id,
+                    rel.type_uri,
+                    rel.target,
+                    resolved,
+                    resolved_size
+                        .map(|n| format!("{n} bytes"))
+                        .unwrap_or_else(|| "missing".to_string())
+                );
+            }
+        }
+    }
+
+    if matched == 0 {
+        eprintln!("  (none)");
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn dump_metadata_relationships(pkg: &XlsxPackage) {
+    eprintln!();
+    eprintln!("metadata.xml.rels (filtered richData):");
+
+    let Some((metadata_part_name, _metadata_bytes)) =
+        find_part_bytes_case_insensitive(pkg, "xl/metadata.xml")
+    else {
+        eprintln!("  (metadata missing)");
+        return;
+    };
+
+    let rels_part_name = openxml::rels_part_name(metadata_part_name);
+    let Some((rels_part_name, rels_bytes)) = find_part_bytes_case_insensitive(pkg, &rels_part_name)
+    else {
+        eprintln!("  (missing relationships part: {rels_part_name})");
+        return;
+    };
+    eprintln!("  part: {rels_part_name} ({} bytes)", rels_bytes.len());
+
+    let relationships = match openxml::parse_relationships(rels_bytes) {
+        Ok(r) => r,
+        Err(err) => {
+            eprintln!("  warning: failed to parse {rels_part_name}: {err}");
+            return;
+        }
+    };
+
+    let mut matched = 0usize;
+    for rel in relationships {
+        let target_lower = rel.target.to_ascii_lowercase();
+        let type_lower = rel.type_uri.to_ascii_lowercase();
+        if target_lower.contains("richdata")
+            || type_lower.contains("richdata")
+            || type_lower.contains("richvalue")
+        {
+            matched += 1;
+            let resolved = openxml::resolve_target(metadata_part_name, &rel.target);
+            let resolved_size =
+                find_part_bytes_case_insensitive(pkg, &resolved).map(|(_, b)| b.len());
             if let Some(mode) = rel.target_mode.as_deref() {
                 eprintln!(
                     "  Id={} Type={} Target={} TargetMode={} (resolved: {}, {})",
@@ -306,7 +380,10 @@ fn dump_worksheet_vm_cm_usage(pkg: &XlsxPackage) {
 
     for sheet in &sheets {
         let Some(bytes) = pkg.part(&sheet.worksheet_part) else {
-            eprintln!("  {} ({}): (missing part)", sheet.sheet_name, sheet.worksheet_part);
+            eprintln!(
+                "  {} ({}): (missing part)",
+                sheet.sheet_name, sheet.worksheet_part
+            );
             continue;
         };
 
@@ -516,7 +593,9 @@ fn scan_sheet_vm_cm_best_effort(
                 }
                 if name.eq_ignore_ascii_case(b"c") {
                     if let Some(cell) = current.take() {
-                        if out.samples.len() < MAX_SAMPLES && (cell.vm.is_some() || cell.cm.is_some()) {
+                        if out.samples.len() < MAX_SAMPLES
+                            && (cell.vm.is_some() || cell.cm.is_some())
+                        {
                             let raw = if !cell.inline_text.is_empty() {
                                 Some(cell.inline_text)
                             } else if !cell.v_text.is_empty() {
