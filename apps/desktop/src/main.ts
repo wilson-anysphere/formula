@@ -4933,9 +4933,7 @@ try {
   const oauthRedirectListener = listen("oauth-redirect", (event) => {
     const redirectUrl = (event as any)?.payload;
     if (typeof redirectUrl !== "string" || redirectUrl.trim() === "") return;
-    const expectedRedirectUri = oauthBroker.findPendingRedirectUri(redirectUrl);
-    if (!expectedRedirectUri) return;
-    oauthBroker.resolveRedirect(expectedRedirectUri, redirectUrl);
+    oauthBroker.observeRedirect(redirectUrl);
   });
 
   // Signal that we're ready to receive (and flush any queued) oauth-redirect events.

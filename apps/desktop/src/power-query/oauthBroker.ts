@@ -79,6 +79,12 @@ export class DesktopOAuthBroker implements OAuthBroker {
   private openAuthUrlHandler: ((url: string) => Promise<void> | void) | null = null;
   private deviceCodePromptHandler: ((code: string, verificationUri: string) => Promise<void> | void) | null = null;
   private pendingRedirects = new Map<string, Deferred<string>>();
+  private observedRedirects: Array<{ url: string; observedAtMs: number }> = [];
+
+  // Small buffer to avoid dropping redirects that arrive before `waitForRedirect(...)`
+  // is registered (e.g. fast redirects, or deep-link events emitted at app startup).
+  private static readonly OBSERVED_REDIRECT_LIMIT = 10;
+  private static readonly OBSERVED_REDIRECT_TTL_MS = 5 * 60_000;
 
   setOpenAuthUrlHandler(handler: ((url: string) => Promise<void> | void) | null) {
     this.openAuthUrlHandler = handler;
@@ -112,6 +118,10 @@ export class DesktopOAuthBroker implements OAuthBroker {
   }
 
   waitForRedirect(redirectUri: string): Promise<string> {
+    // If we observed a redirect before the caller registered the wait, resolve immediately.
+    const observed = this.shiftObservedRedirect(redirectUri);
+    if (observed) return Promise.resolve(observed);
+
     const existing = this.pendingRedirects.get(redirectUri);
     if (existing) return existing.promise;
     const d = defer<string>();
@@ -134,6 +144,33 @@ export class DesktopOAuthBroker implements OAuthBroker {
   }
 
   /**
+   * Observe a redirect URL coming from an external source (e.g. a Tauri deep-link
+   * handler) and either resolve an in-flight redirect or buffer it briefly until
+   * a future `waitForRedirect(...)` call registers interest.
+   *
+   * Returns true when the redirect was accepted and applied to an in-flight wait.
+   */
+  observeRedirect(redirectUrl: string): boolean {
+    if (typeof redirectUrl !== "string" || redirectUrl.trim() === "") return false;
+
+    // Try to resolve an existing pending redirect first.
+    const expectedRedirectUri = this.findPendingRedirectUri(redirectUrl);
+    if (expectedRedirectUri) {
+      this.resolveRedirect(expectedRedirectUri, redirectUrl);
+      return true;
+    }
+
+    // Otherwise, store it briefly so we don't drop redirects that race ahead of
+    // `waitForRedirect`.
+    this.pruneObservedRedirects();
+    this.observedRedirects.push({ url: redirectUrl, observedAtMs: Date.now() });
+    if (this.observedRedirects.length > DesktopOAuthBroker.OBSERVED_REDIRECT_LIMIT) {
+      this.observedRedirects.splice(0, this.observedRedirects.length - DesktopOAuthBroker.OBSERVED_REDIRECT_LIMIT);
+    }
+    return false;
+  }
+
+  /**
    * Find a pending redirect URI (registered via `waitForRedirect`) that matches
    * the provided full redirect URL. Returns `null` when no pending redirect
    * matches.
@@ -143,6 +180,19 @@ export class DesktopOAuthBroker implements OAuthBroker {
       if (matchesRedirectUri(redirectUri, redirectUrl)) return redirectUri;
     }
     return null;
+  }
+
+  private pruneObservedRedirects(): void {
+    const cutoff = Date.now() - DesktopOAuthBroker.OBSERVED_REDIRECT_TTL_MS;
+    this.observedRedirects = this.observedRedirects.filter((e) => e.observedAtMs >= cutoff);
+  }
+
+  private shiftObservedRedirect(redirectUri: string): string | null {
+    this.pruneObservedRedirects();
+    const idx = this.observedRedirects.findIndex((e) => matchesRedirectUri(redirectUri, e.url));
+    if (idx === -1) return null;
+    const [entry] = this.observedRedirects.splice(idx, 1);
+    return entry?.url ?? null;
   }
 
   rejectRedirect(redirectUri: string, reason?: unknown) {
