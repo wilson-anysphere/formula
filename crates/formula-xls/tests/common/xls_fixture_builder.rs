@@ -553,6 +553,27 @@ pub fn build_note_comment_split_across_continues_mixed_encoding_fixture_xls() ->
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a single sheet with a NOTE/OBJ/TXO comment, where the
+/// TXO text is split across multiple `CONTINUE` records and uses a multibyte codepage
+/// (`CODEPAGE=932` / Shift-JIS).
+///
+/// This fixture intentionally splits a single multibyte character (`"あ"` = `0x82 0xA0` in Shift-JIS)
+/// across two `CONTINUE` fragments to ensure we buffer/decode compressed bytes across record
+/// boundaries (rather than decoding each fragment independently).
+pub fn build_note_comment_split_across_continues_codepage_932_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_note_comment_split_across_continues_codepage_932_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing a NOTE/OBJ pair but **missing** the associated TXO text
 /// payload.
 ///
@@ -1006,6 +1027,14 @@ fn build_note_comment_split_across_continues_mixed_encoding_workbook_stream() ->
     )
 }
 
+fn build_note_comment_split_across_continues_codepage_932_workbook_stream() -> Vec<u8> {
+    build_single_sheet_workbook_stream(
+        "NotesSplitCp932",
+        &build_note_comment_split_across_continues_codepage_932_sheet_stream(),
+        932,
+    )
+}
+
 fn build_note_comment_missing_txo_workbook_stream() -> Vec<u8> {
     build_single_sheet_workbook_stream(
         "NotesMissingTxo",
@@ -1128,6 +1157,18 @@ fn build_note_comment_split_across_continues_mixed_encoding_sheet_stream() -> Ve
 
     push_record(&mut sheet, RECORD_EOF, &[]);
     sheet
+}
+
+fn build_note_comment_split_across_continues_codepage_932_sheet_stream() -> Vec<u8> {
+    const OBJECT_ID: u16 = 1;
+    const AUTHOR: &str = "Alice";
+
+    // "あ" in Shift-JIS is 0x82 0xA0. Split across two `CONTINUE` records as 0x82 + 0xA0.
+    let part1 = [0x82u8];
+    let part2 = [0xA0u8];
+    let segments: [&[u8]; 2] = [&part1, &part2];
+
+    build_note_comment_sheet_stream_with_compressed_txo(false, OBJECT_ID, AUTHOR, &segments)
 }
 
 fn build_note_comment_missing_txo_sheet_stream() -> Vec<u8> {
