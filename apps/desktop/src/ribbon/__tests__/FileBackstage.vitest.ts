@@ -33,6 +33,7 @@ function enableFileActions(): RibbonActions {
       openWorkbook: vi.fn(),
       saveWorkbook: vi.fn(),
       saveWorkbookAs: vi.fn(),
+      versionHistory: vi.fn(),
       print: vi.fn(),
       pageSetup: vi.fn(),
       closeWindow: vi.fn(),
@@ -86,10 +87,14 @@ describe("FileBackstage", () => {
 
     const newItem = overlay.querySelector<HTMLButtonElement>('[data-testid="file-new"]');
     const openItem = overlay.querySelector<HTMLButtonElement>('[data-testid="file-open"]');
+    const saveItem = overlay.querySelector<HTMLButtonElement>('[data-testid="file-save"]');
+    const saveAsItem = overlay.querySelector<HTMLButtonElement>('[data-testid="file-save-as"]');
     const versionHistoryItem = overlay.querySelector<HTMLButtonElement>('[data-testid="file-version-history"]');
     const quitItem = overlay.querySelector<HTMLButtonElement>('[data-testid="file-quit"]');
     expect(newItem).toBeInstanceOf(HTMLButtonElement);
     expect(openItem).toBeInstanceOf(HTMLButtonElement);
+    expect(saveItem).toBeInstanceOf(HTMLButtonElement);
+    expect(saveAsItem).toBeInstanceOf(HTMLButtonElement);
     expect(versionHistoryItem).toBeInstanceOf(HTMLButtonElement);
     expect(quitItem).toBeInstanceOf(HTMLButtonElement);
 
@@ -105,13 +110,33 @@ describe("FileBackstage", () => {
     });
     expect(document.activeElement).toBe(newItem);
 
-    // ArrowDown should continue to advance through items (including Version History).
+    act(() => {
+      newItem?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    });
+    expect(document.activeElement).toBe(openItem);
+
     act(() => {
       openItem?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
     });
+    expect(document.activeElement).toBe(saveItem);
+
+    act(() => {
+      saveItem?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    });
+    expect(document.activeElement).toBe(saveAsItem);
+
+    act(() => {
+      saveAsItem?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    });
     expect(document.activeElement).toBe(versionHistoryItem);
 
+    act(() => {
+      versionHistoryItem?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+    });
+    expect(document.activeElement).toBe(saveAsItem);
+
     // Wrap around on ArrowUp from the first item.
+    newItem?.focus();
     act(() => {
       newItem?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
     });
