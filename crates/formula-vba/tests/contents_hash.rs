@@ -278,3 +278,45 @@ fn content_normalized_data_decodes_module_stream_name_using_dir_codepage() {
     let normalized = content_normalized_data(&vba_bin).expect("ContentNormalizedData");
     assert_eq!(normalized, module_code.as_bytes());
 }
+
+#[test]
+fn content_normalized_data_finds_module_source_without_text_offset_using_signature_scan() {
+    // Ensure we exercise the same "scan for compressed container signature" fallback that the
+    // module parser uses when `MODULETEXTOFFSET` (0x0031) is absent.
+    let module_code = "Option Explicit\r\n";
+    let module_container = compress_container(module_code.as_bytes());
+
+    // Prefix the module stream with some header bytes that should not be mistaken for a compressed
+    // container signature.
+    let mut module_stream = vec![0x01, 0x00, 0x00, 0x99, 0x99, 0x88, 0x77];
+    module_stream.extend_from_slice(&module_container);
+
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        push_record(&mut out, 0x0019, b"Module1");
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"Module1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes());
+        // Intentionally omit MODULETEXTOFFSET (0x0031).
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        let mut s = ole.create_stream("VBA/Module1").expect("module stream");
+        s.write_all(&module_stream).expect("write module");
+    }
+    let vba_bin = ole.into_inner().into_inner();
+
+    let normalized = content_normalized_data(&vba_bin).expect("ContentNormalizedData");
+    assert_eq!(normalized, module_code.as_bytes());
+}

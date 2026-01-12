@@ -700,15 +700,6 @@ fn digest_name_from_oid_str(oid: &str) -> Option<&'static str> {
     }
 }
 
-fn digest_alg_from_oid_str(oid: &str) -> Option<DigestAlg> {
-    match oid {
-        "1.2.840.113549.2.5" => Some(DigestAlg::Md5),
-        "1.3.14.3.2.26" => Some(DigestAlg::Sha1),
-        "2.16.840.1.101.3.4.2.1" => Some(DigestAlg::Sha256),
-        _ => None,
-    }
-}
-
 fn is_signature_component(component: &str) -> bool {
     let trimmed = component.trim_start_matches(|c: char| c <= '\u{001F}');
     matches!(
@@ -1177,17 +1168,12 @@ pub fn verify_vba_project_signature_binding(
             any_signed_digest = Some(debug.clone());
         }
 
-        let Some(alg) = digest_alg_from_oid_str(&signed.digest_algorithm_oid) else {
-            continue;
-        };
+        debug.hash_algorithm_name =
+            digest_name_from_oid_str(&signed.digest_algorithm_oid).map(str::to_owned);
 
-        debug.hash_algorithm_name = Some(match alg {
-            DigestAlg::Md5 => "MD5".to_owned(),
-            DigestAlg::Sha1 => "SHA-1".to_owned(),
-            DigestAlg::Sha256 => "SHA-256".to_owned(),
-        });
-
-        let computed = compute_vba_project_digest(project_ole, alg)?;
+        // MS-OSHARED §4.3: the VBA project digest is always MD5 (16 bytes), even if the PKCS#7
+        // signature uses SHA-1/SHA-256 and even if the DigestInfo algorithm OID indicates SHA-256.
+        let computed = compute_vba_project_digest(project_ole, DigestAlg::Md5)?;
         debug.computed_digest = Some(computed.clone());
 
         if first_comparison.is_none() {
