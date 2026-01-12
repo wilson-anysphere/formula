@@ -61,11 +61,12 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 const FORMULA_PARSE_OPTIONS_ERROR =
   'options must be { localeId?: string, referenceStyle?: "A1" | "R1C1" } or a ParseOptions object';
+const FORMULA_PARSE_OPTIONS_NOT_OBJECT_ERROR = "options must be an object";
 
 function normalizeFormulaParseOptions(options: unknown): unknown | undefined {
   if (options == null) return undefined;
   if (!isPlainObject(options)) {
-    throw new Error(FORMULA_PARSE_OPTIONS_ERROR);
+    throw new Error(FORMULA_PARSE_OPTIONS_NOT_OBJECT_ERROR);
   }
 
   // Backward compatibility: older call sites may pass the full `ParseOptions` object supported by

@@ -182,6 +182,24 @@ describe("EngineWorker RPC", () => {
     });
   });
 
+  it("does not silently drop malformed parse options passed as the 3rd arg to parseFormulaPartial", async () => {
+    const worker = new MockWorker();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    await expect(engine.parseFormulaPartial("=1+2", undefined, { localeID: "de-DE" } as any)).rejects.toThrow(
+      /options must be \{ localeId\?: string, referenceStyle\?:/
+    );
+
+    const requests = worker.received.filter(
+      (msg): msg is RpcRequest => msg.type === "request" && (msg as RpcRequest).method === "parseFormulaPartial"
+    );
+    expect(requests).toHaveLength(0);
+  });
+
   it("transfers xlsx ArrayBuffer when loading workbooks from bytes", async () => {
     const worker = new MockWorker();
     const channel = createMockChannel();

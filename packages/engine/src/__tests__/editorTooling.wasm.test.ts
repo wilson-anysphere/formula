@@ -344,9 +344,9 @@ describeWasm("EngineWorker editor tooling RPCs (wasm)", () => {
       await expect(engine.lexFormula("=1+2", { localeID: "de-DE" } as any)).rejects.toThrow(
         /options must be \{ localeId\?: string, referenceStyle\?:/
       );
-      // Pass the malformed object as the second argument (options overload) so it is forwarded
-      // through the EngineWorker overload parsing.
-      await expect(engine.parseFormulaPartial("=1+2", { localeID: "de-DE" } as any)).rejects.toThrow(
+      // Legacy call sites use `(formula, undefined, options)` when they want to supply a cursor
+      // later. Ensure malformed objects aren't silently dropped by the overload parsing.
+      await expect(engine.parseFormulaPartial("=1+2", undefined, { localeID: "de-DE" } as any)).rejects.toThrow(
         /options must be \{ localeId\?: string, referenceStyle\?:/
       );
     } finally {
