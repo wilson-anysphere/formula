@@ -19,7 +19,7 @@ test("renderMacroRunner is class-driven (no inline style assignments)", () => {
     /setAttribute\(\s*["']style["']/.test(src) ||
     /setAttributeNS\(\s*[^,]+,\s*["']style["']/.test(src) ||
     // Inline style attributes in HTML strings (e.g. element.innerHTML = "<div style=\"...\">").
-    /<[^>]*\bstyle\s*=\s*["']/.test(src);
+    /<[^>]*\bstyle\s*=\s*["']/i.test(src);
 
   assert.equal(
     usesInlineStyle,
@@ -43,6 +43,11 @@ test("renderMacroRunner is class-driven (no inline style assignments)", () => {
   );
   const css = fs.readFileSync(cssPath, "utf8");
   assert.match(css, /\.macros-runner\b/, "Expected macros-runner.css to define a .macros-runner selector");
+  assert.match(
+    css,
+    /\.macros-runner__controls\s*\{[^}]*\bdisplay\s*:\s*flex\b[^}]*\}/,
+    "Expected .macros-runner__controls to lay out the select + buttons as a flex row",
+  );
 
   const requiredClasses = [
     "macros-runner",
