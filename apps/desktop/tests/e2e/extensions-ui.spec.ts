@@ -170,6 +170,9 @@ test.describe("Extensions UI integration", () => {
       { timeout: 5_000 },
     );
 
+    const iframeOrigin = await webviewFrame!.evaluate(() => window.location.origin);
+    expect(iframeOrigin, "webview should have an opaque origin (no allow-same-origin sandbox flag)").toBe("null");
+
     const sandboxInfo = await webviewFrame!.evaluate(() => (window as any).__formulaWebviewSandbox);
     expect(sandboxInfo, "webview should inject a sandbox hardening script").toBeTruthy();
     expect(typeof sandboxInfo.tauriGlobalsPresent).toBe("boolean");
