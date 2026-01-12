@@ -1290,17 +1290,10 @@ fn import_xls_path_with_biff_reader(
     // later sanitized during import. Rewrite defined-name formulas using the same sheet rename
     // mapping we apply to cells.
     if !sheet_rename_pairs.is_empty() {
-        for name in &mut out.defined_names {
-            let mut rewritten = name.refers_to.clone();
-            for (old_name, new_name) in &sheet_rename_pairs {
-                rewritten =
-                    formula_model::rewrite_sheet_names_in_formula(&rewritten, old_name, new_name);
-            }
-
-            if rewritten != name.refers_to {
-                name.refers_to = rewritten;
-            }
-        }
+        formula_rewrite::rewrite_defined_name_formulas_for_sheet_renames(
+            &mut out,
+            &sheet_rename_pairs,
+        );
     }
 
     populate_print_settings_from_defined_names(&mut out, &mut warnings);

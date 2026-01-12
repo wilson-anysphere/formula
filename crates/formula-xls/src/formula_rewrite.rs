@@ -2,16 +2,18 @@ use std::collections::HashSet;
 
 use formula_model::{rewrite_sheet_names_in_formula, Workbook};
 
-/// Rewrite all workbook cell formulas to account for worksheet renames during import.
-///
-/// `sheet_rename_pairs` contains `(old_name, new_name)` pairs, using the sheet names as they
-/// appear in the source workbook (calamine metadata and/or BIFF BoundSheet names).
-pub(crate) fn rewrite_workbook_formulas_for_sheet_renames(
-    workbook: &mut Workbook,
+#[derive(Debug, Clone)]
+struct SheetRenameRewritePlan {
+    old_to_tmp: Vec<(String, String)>,
+    tmp_to_new: Vec<(String, String)>,
+}
+
+fn build_sheet_rename_rewrite_plan<'a>(
+    sheet_names: impl IntoIterator<Item = &'a str>,
     sheet_rename_pairs: &[(String, String)],
-) {
+) -> Option<SheetRenameRewritePlan> {
     if sheet_rename_pairs.is_empty() {
-        return;
+        return None;
     }
 
     // Rewriting multiple renames sequentially can cascade when one sheet's *new* name equals
@@ -36,10 +38,9 @@ pub(crate) fn rewrite_workbook_formulas_for_sheet_renames(
             .map(|(_, new)| super::normalize_sheet_name_for_match(new)),
     );
     reserved.extend(
-        workbook
-            .sheets
-            .iter()
-            .map(|s| super::normalize_sheet_name_for_match(&s.name)),
+        sheet_names
+            .into_iter()
+            .map(super::normalize_sheet_name_for_match),
     );
 
     let mut old_to_tmp: Vec<(String, String)> = Vec::with_capacity(sheet_rename_pairs.len());
@@ -62,6 +63,38 @@ pub(crate) fn rewrite_workbook_formulas_for_sheet_renames(
         tmp_to_new.push((tmp, new.clone()));
     }
 
+    Some(SheetRenameRewritePlan {
+        old_to_tmp,
+        tmp_to_new,
+    })
+}
+
+fn rewrite_formula_with_plan(formula: &str, plan: &SheetRenameRewritePlan) -> String {
+    let mut rewritten = formula.to_string();
+    for (old, tmp) in &plan.old_to_tmp {
+        rewritten = rewrite_sheet_names_in_formula(&rewritten, old, tmp);
+    }
+    for (tmp, new) in &plan.tmp_to_new {
+        rewritten = rewrite_sheet_names_in_formula(&rewritten, tmp, new);
+    }
+    rewritten
+}
+
+/// Rewrite all workbook cell formulas to account for worksheet renames during import.
+///
+/// `sheet_rename_pairs` contains `(old_name, new_name)` pairs, using the sheet names as they
+/// appear in the source workbook (calamine metadata and/or BIFF BoundSheet names).
+pub(crate) fn rewrite_workbook_formulas_for_sheet_renames(
+    workbook: &mut Workbook,
+    sheet_rename_pairs: &[(String, String)],
+) {
+    let Some(plan) = build_sheet_rename_rewrite_plan(
+        workbook.sheets.iter().map(|s| s.name.as_str()),
+        sheet_rename_pairs,
+    ) else {
+        return;
+    };
+
     for sheet in &mut workbook.sheets {
         for (_, cell) in sheet.iter_cells_mut() {
             let Some(formula) = cell.formula.as_mut() else {
@@ -69,16 +102,27 @@ pub(crate) fn rewrite_workbook_formulas_for_sheet_renames(
             };
 
             // Avoid cloning the existing formula string.
-            let mut rewritten = std::mem::take(formula);
+            let original = std::mem::take(formula);
+            *formula = rewrite_formula_with_plan(&original, &plan);
+        }
+    }
+}
 
-            for (old, tmp) in &old_to_tmp {
-                rewritten = rewrite_sheet_names_in_formula(&rewritten, old, tmp);
-            }
-            for (tmp, new) in &tmp_to_new {
-                rewritten = rewrite_sheet_names_in_formula(&rewritten, tmp, new);
-            }
+pub(crate) fn rewrite_defined_name_formulas_for_sheet_renames(
+    workbook: &mut Workbook,
+    sheet_rename_pairs: &[(String, String)],
+) {
+    let Some(plan) = build_sheet_rename_rewrite_plan(
+        workbook.sheets.iter().map(|s| s.name.as_str()),
+        sheet_rename_pairs,
+    ) else {
+        return;
+    };
 
-            *formula = rewritten;
+    for name in &mut workbook.defined_names {
+        let rewritten = rewrite_formula_with_plan(&name.refers_to, &plan);
+        if rewritten != name.refers_to {
+            name.refers_to = rewritten;
         }
     }
 }
@@ -86,7 +130,7 @@ pub(crate) fn rewrite_workbook_formulas_for_sheet_renames(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use formula_model::{CellRef, Workbook};
+    use formula_model::{CellRef, DefinedNameScope, Workbook};
 
     #[test]
     fn rewrites_workbook_formulas_for_sheet_renames() {
@@ -123,6 +167,17 @@ mod tests {
         ];
 
         rewrite_workbook_formulas_for_sheet_renames(&mut workbook, &renames);
+        workbook
+            .create_defined_name(
+                DefinedNameScope::Workbook,
+                "TestName",
+                "A!A1+B!A1+\"A!A1\"",
+                None,
+                false,
+                None,
+            )
+            .unwrap();
+        rewrite_defined_name_formulas_for_sheet_renames(&mut workbook, &renames);
 
         let sheet = workbook.sheet_by_name("C").unwrap();
         assert_eq!(
@@ -134,5 +189,12 @@ mod tests {
             sheet.formula_a1("A3").unwrap(),
             Some("'My Sheet'!A1+\"bad/name!A1\"")
         );
+
+        let dn = workbook
+            .defined_names
+            .iter()
+            .find(|n| n.name == "TestName")
+            .expect("defined name missing");
+        assert_eq!(dn.refers_to, "B!A1+'C'!A1+\"A!A1\"");
     }
 }
