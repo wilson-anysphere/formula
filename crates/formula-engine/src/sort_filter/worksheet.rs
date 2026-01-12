@@ -231,6 +231,17 @@ fn model_cell_value_to_sort_value(value: &ModelCellValue) -> CellValue {
                         ModelCellValue::RichText(rt) => {
                             Some(CellValue::Text(rt.plain_text().to_string()))
                         }
+                        ModelCellValue::Entity(entity) => (!entity.display_value.is_empty())
+                            .then(|| CellValue::Text(entity.display_value.clone()))
+                            .or(Some(CellValue::Blank)),
+                        ModelCellValue::Record(record) => {
+                            let display = record.to_string();
+                            if display.is_empty() {
+                                Some(CellValue::Blank)
+                            } else {
+                                Some(CellValue::Text(display))
+                            }
+                        }
                         _ => None,
                     };
                     if let Some(value) = display_value {
@@ -239,7 +250,11 @@ fn model_cell_value_to_sort_value(value: &ModelCellValue) -> CellValue {
                 }
             }
 
-            CellValue::Blank
+            if record.display_value.is_empty() {
+                CellValue::Blank
+            } else {
+                CellValue::Text(record.display_value.clone())
+            }
         }
         ModelCellValue::Array(_) => CellValue::Blank,
         ModelCellValue::Spill(_) => CellValue::Blank,
@@ -478,8 +493,8 @@ mod tests {
             CellValue::Text("Hello".to_string())
         );
 
-        // Records only use the display field if it's a primitive sort/filter value.
-        // Rich values fall back to blank.
+        // Records prefer the display field when it points at a scalar value. Rich values (like
+        // entities) degrade to their display string.
         let record_entity_display_field: ModelCellValue = serde_json::from_value(json!({
             "type": "record",
             "value": {
@@ -492,7 +507,7 @@ mod tests {
         .expect("record should deserialize");
         assert_eq!(
             model_cell_value_to_sort_value(&record_entity_display_field),
-            CellValue::Blank
+            CellValue::Text("Nested entity".to_string())
         );
 
         // Missing display field should fall back to blank.
@@ -511,8 +526,7 @@ mod tests {
             CellValue::Blank
         );
 
-        // Records without a display field are treated as blank, even if they carry a legacy
-        // display string.
+        // Records without a display field fall back to their legacy display string.
         let Some(record_display_fallback) = from_json_or_skip_unknown_variant(json!({
             "type": "record",
             "value": {
@@ -523,7 +537,7 @@ mod tests {
         };
         assert_eq!(
             model_cell_value_to_sort_value(&record_display_fallback),
-            CellValue::Blank
+            CellValue::Text("Record display".to_string())
         );
 
         // Canonical camelCase field name (`displayValue`) should also deserialize.
@@ -537,7 +551,7 @@ mod tests {
         };
         assert_eq!(
             model_cell_value_to_sort_value(&record_display_value_fallback),
-            CellValue::Blank
+            CellValue::Text("Record display (camelCase)".to_string())
         );
 
         // Empty display values should degrade to blank.
