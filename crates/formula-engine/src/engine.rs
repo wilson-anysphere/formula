@@ -6894,8 +6894,12 @@ fn bytecode_expr_is_eligible_inner(
                         bytecode::Expr::RangeRef(_) | bytecode::Expr::MultiRangeRef(_) => {
                             BytecodeLocalBindingKind::Range
                         }
+                        bytecode::Expr::SpillRange(_) => BytecodeLocalBindingKind::Range,
                         bytecode::Expr::Literal(bytecode::Value::Array(_)) => {
                             BytecodeLocalBindingKind::ArrayLiteral
+                        }
+                        bytecode::Expr::Literal(bytecode::Value::Range(_)) => {
+                            BytecodeLocalBindingKind::Range
                         }
                         bytecode::Expr::Literal(bytecode::Value::MultiRange(_)) => {
                             BytecodeLocalBindingKind::Range

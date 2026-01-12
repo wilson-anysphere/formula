@@ -1001,6 +1001,32 @@ fn bytecode_backend_supports_spill_range_operator() {
 }
 
 #[test]
+fn bytecode_backend_let_spill_range_locals_do_not_enable_scalar_functions() {
+    let mut engine = Engine::new();
+
+    // Create a spilled dynamic array (A1:A2).
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SEQUENCE(2)")
+        .unwrap();
+
+    // Scalar functions like ABS lift over arrays in the AST backend, but the bytecode backend does
+    // not support that yet. Ensure LET locals don't "smuggle" a spill-range reference into a
+    // scalar-only bytecode context.
+    engine
+        .set_cell_formula("Sheet1", "B1", "=ABS(LET(r, A1#, r))")
+        .unwrap();
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.spill_range("Sheet1", "B1"),
+        Some((parse_a1("B1").unwrap(), parse_a1("B2").unwrap()))
+    );
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(2.0));
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_countif_grouped_numeric_criteria() {
     let mut engine = Engine::new();
     engine
