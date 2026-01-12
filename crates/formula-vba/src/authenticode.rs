@@ -22,6 +22,7 @@ pub enum VbaSignatureSignedDigestError {
 
 // PKCS#7 OID value-encoding bytes (no tag/length)
 const OID_PKCS7_SIGNED_DATA: &[u8] = b"\x2A\x86\x48\x86\xF7\x0D\x01\x07\x02"; // 1.2.840.113549.1.7.2
+const OID_MD5_STR: &str = "1.2.840.113549.2.5";
 
 /// Extract the signed Authenticode file digest (the `DigestInfo` inside
 /// `SpcIndirectDataContent`) from a raw VBA `\x05DigitalSignature*` stream.
@@ -206,7 +207,15 @@ fn extract_signed_digest_from_pkcs7_location(
         return Err(VbaSignatureSignedDigestError::DetachedContentMissing);
     };
 
-    parse_spc_indirect_data_content(&signed_content)
+    match parse_spc_indirect_data_content(&signed_content) {
+        Ok(v) => Ok(v),
+        Err(err1) => match parse_spc_indirect_data_content_v2(&signed_content) {
+            Ok(v) => Ok(v),
+            Err(err2) => Err(der_err(format!(
+                "failed to parse signed content as SpcIndirectDataContent ({err1}) or SpcIndirectDataContentV2 ({err2})"
+            ))),
+        },
+    }
 }
 
 fn looks_like_pkcs7_signed_data_content_info(bytes: &[u8]) -> bool {
@@ -399,8 +408,169 @@ fn parse_spc_indirect_data_content(
     })
 }
 
+fn parse_spc_indirect_data_content_v2(
+    bytes: &[u8],
+) -> Result<VbaSignedDigest, VbaSignatureSignedDigestError> {
+    // [MS-OSHARED] SpcIndirectDataContentV2 is a newer signature binding format used by Office.
+    //
+    // Unlike the classic Authenticode `SpcIndirectDataContent` (which stores the digest directly
+    // in a `DigestInfo`), the VBA project hash is stored in `SigDataV1Serialized.sourceHash`.
+    //
+    // This parser is intentionally minimal: it traverses the ASN.1 payload looking for a
+    // SigDataV1Serialized-like blob and extracts a 16-byte "source hash" (MD5 per MS-OSHARED §4.3).
+    let (tag, len, rest) = parse_tag_and_length(bytes)?;
+    if tag.class != Asn1Class::Universal || !tag.constructed || tag.number != 16 {
+        return Err(der_err("expected SpcIndirectDataContentV2 SEQUENCE"));
+    }
+    let content = slice_constructed_contents(rest, len)?;
+
+    // Prefer extracting via SigData parsing (binary or nested ASN.1), then fall back to a raw
+    // 16-byte OCTET STRING if present.
+    if let Some(hash) = scan_asn1_for_sigdata_source_hash(content)? {
+        return Ok(VbaSignedDigest {
+            digest_algorithm_oid: OID_MD5_STR.to_owned(),
+            digest: hash,
+        });
+    }
+    if let Some(hash) = scan_asn1_for_octet_string_len(content, 16)? {
+        return Ok(VbaSignedDigest {
+            digest_algorithm_oid: OID_MD5_STR.to_owned(),
+            digest: hash,
+        });
+    }
+
+    Err(der_err(
+        "no SigDataV1Serialized.sourceHash found in SpcIndirectDataContentV2".to_owned(),
+    ))
+}
+
 fn is_eoc(bytes: &[u8]) -> bool {
     bytes.len() >= 2 && bytes[0] == 0x00 && bytes[1] == 0x00
+}
+
+fn scan_asn1_for_sigdata_source_hash(
+    mut cur: &[u8],
+) -> Result<Option<Vec<u8>>, VbaSignatureSignedDigestError> {
+    while !cur.is_empty() {
+        if is_eoc(cur) {
+            break;
+        }
+
+        if let Some(hash) = extract_sigdata_source_hash_from_asn1_element(cur)? {
+            return Ok(Some(hash));
+        }
+        cur = skip_element(cur)?;
+    }
+    Ok(None)
+}
+
+fn extract_sigdata_source_hash_from_asn1_element(
+    element: &[u8],
+) -> Result<Option<Vec<u8>>, VbaSignatureSignedDigestError> {
+    let (tag, len, rest) = parse_tag_and_length(element)?;
+
+    // OCTET STRING: treat the value bytes as a candidate SigDataV1Serialized blob.
+    if tag.class == Asn1Class::Universal && tag.number == 4 {
+        let (octets, _after) = parse_octet_string(element)?;
+        if let Some(hash) = extract_source_hash_from_sig_data_v1_serialized(&octets)? {
+            return Ok(Some(hash));
+        }
+        return Ok(None);
+    }
+
+    // Constructed types: recursively scan their contents.
+    if tag.constructed {
+        let content = slice_constructed_contents(rest, len)?;
+        return scan_asn1_for_sigdata_source_hash(content);
+    }
+
+    Ok(None)
+}
+
+fn scan_asn1_for_octet_string_len(
+    mut cur: &[u8],
+    desired_len: usize,
+) -> Result<Option<Vec<u8>>, VbaSignatureSignedDigestError> {
+    while !cur.is_empty() {
+        if is_eoc(cur) {
+            break;
+        }
+        let (tag, _len, _rest) = parse_tag_and_length(cur)?;
+        if tag.class == Asn1Class::Universal && tag.number == 4 {
+            let (octets, _after) = parse_octet_string(cur)?;
+            if octets.len() == desired_len {
+                return Ok(Some(octets));
+            }
+        } else if tag.constructed {
+            let (_tag2, len2, rest2) = parse_tag_and_length(cur)?;
+            let content = slice_constructed_contents(rest2, len2)?;
+            if let Some(found) = scan_asn1_for_octet_string_len(content, desired_len)? {
+                return Ok(Some(found));
+            }
+        }
+        cur = skip_element(cur)?;
+    }
+    Ok(None)
+}
+
+fn extract_source_hash_from_sig_data_v1_serialized(
+    bytes: &[u8],
+) -> Result<Option<Vec<u8>>, VbaSignatureSignedDigestError> {
+    // Some producers store `SigDataV1Serialized` as an embedded ASN.1 SEQUENCE (often inside an
+    // OCTET STRING). If it parses as ASN.1, look for a 16-byte OCTET STRING value inside it.
+    if bytes.first() == Some(&0x30) {
+        if let Ok(Some(hash)) = scan_asn1_for_octet_string_len(bytes, 16) {
+            return Ok(Some(hash));
+        }
+    }
+
+    // Otherwise treat it as an MS-OSHARED serialized binary structure and heuristically extract
+    // the `sourceHash` BLOB. MS-OSHARED §4.3 specifies this is always a 16-byte MD5 digest.
+    Ok(extract_source_hash_from_sig_data_v1_serialized_binary(bytes))
+}
+
+fn extract_source_hash_from_sig_data_v1_serialized_binary(bytes: &[u8]) -> Option<Vec<u8>> {
+    // Fast path: raw MD5 bytes.
+    if bytes.len() == 16 {
+        return Some(bytes.to_vec());
+    }
+
+    fn read_u32_le(bytes: &[u8], offset: usize) -> Option<u32> {
+        let b = bytes.get(offset..offset + 4)?;
+        Some(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    }
+
+    // Common BLOB pattern: [u32 len][len bytes]
+    for offset in [0usize, 4, 8, 12, 16] {
+        let Some(len) = read_u32_le(bytes, offset).map(|n| n as usize) else {
+            continue;
+        };
+        if len != 16 {
+            continue;
+        }
+        let start = offset + 4;
+        let end = start + 16;
+        if end <= bytes.len() {
+            return Some(bytes[start..end].to_vec());
+        }
+    }
+
+    // Fallback: scan DWORD-aligned offsets for a 16-byte BLOB length prefix.
+    for offset in (0..bytes.len().saturating_sub(4 + 16)).step_by(4) {
+        let Some(len) = read_u32_le(bytes, offset) else {
+            break;
+        };
+        if len as usize != 16 {
+            continue;
+        }
+        let start = offset + 4;
+        let end = start + 16;
+        if end <= bytes.len() {
+            return Some(bytes[start..end].to_vec());
+        }
+    }
+
+    None
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
