@@ -165,6 +165,7 @@ fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
                         has_workbook_xml = true;
                     } else if normalized.eq_ignore_ascii_case("xl/workbook.bin") {
                         has_workbook_bin = true;
+                        break;
                     }
                 }
 
@@ -214,7 +215,15 @@ pub fn open_workbook_model(path: impl AsRef<Path>) -> Result<formula_model::Work
                 source,
             }),
         WorkbookFormat::Xlsb => {
-            let wb = xlsb::XlsbWorkbook::open(path).map_err(|source| Error::OpenXlsb {
+            let wb = xlsb::XlsbWorkbook::open_with_options(
+                path,
+                xlsb::OpenOptions {
+                    preserve_unknown_parts: false,
+                    preserve_parsed_parts: false,
+                    preserve_worksheets: false,
+                },
+            )
+            .map_err(|source| Error::OpenXlsb {
                 path: path.to_path_buf(),
                 source,
             })?;
