@@ -249,4 +249,61 @@ describe("DesktopSharedGrid selection scrollIntoView option", () => {
     grid.destroy();
     container.remove();
   });
+
+  it("avoids scrollbar sync work when scrollBy hits a scroll boundary", () => {
+    const rowCount = 100;
+    const colCount = 100;
+    const provider = new MockCellProvider({ rowCount, colCount });
+
+    const onScroll = vi.fn();
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const canvases = {
+      grid: document.createElement("canvas"),
+      content: document.createElement("canvas"),
+      selection: document.createElement("canvas"),
+    };
+
+    const scrollbars = {
+      vTrack: document.createElement("div"),
+      vThumb: document.createElement("div"),
+      hTrack: document.createElement("div"),
+      hThumb: document.createElement("div"),
+    };
+
+    scrollbars.vTrack.appendChild(scrollbars.vThumb);
+    scrollbars.hTrack.appendChild(scrollbars.hThumb);
+    container.appendChild(scrollbars.vTrack);
+    container.appendChild(scrollbars.hTrack);
+
+    const grid = new DesktopSharedGrid({
+      container,
+      provider,
+      rowCount,
+      colCount,
+      canvases,
+      scrollbars,
+      callbacks: { onScroll },
+    });
+
+    grid.resize(300, 200, 1);
+    const viewport = grid.renderer.getViewportState();
+    grid.scrollTo(viewport.maxScrollX, viewport.maxScrollY);
+
+    const syncSpy = vi.spyOn(grid, "syncScrollbars");
+    syncSpy.mockClear();
+    onScroll.mockClear();
+
+    const before = grid.getScroll();
+    grid.scrollBy(10_000, 10_000);
+
+    expect(grid.getScroll()).toEqual(before);
+    expect(syncSpy).not.toHaveBeenCalled();
+    expect(onScroll).not.toHaveBeenCalled();
+
+    grid.destroy();
+    container.remove();
+  });
 });

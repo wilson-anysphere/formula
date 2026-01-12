@@ -382,7 +382,18 @@ export class DesktopSharedGrid {
   }
 
   scrollBy(dx: number, dy: number): void {
+    // Support `scrollBy(0,0)` as a "sync scrollbars + notify" call site (tests and host code use this
+    // to force a scrollbar refresh after viewport changes).
+    if (dx === 0 && dy === 0) {
+      this.syncScrollbars();
+      this.emitScroll();
+      return;
+    }
+
+    const before = this.renderer.scroll.getScroll();
     this.renderer.scrollBy(dx, dy);
+    const after = this.renderer.scroll.getScroll();
+    if (before.x === after.x && before.y === after.y) return;
     this.syncScrollbars();
     this.emitScroll();
   }
@@ -700,9 +711,7 @@ export class DesktopSharedGrid {
       if (deltaX === 0 && deltaY === 0) return;
 
       event.preventDefault();
-      renderer.scrollBy(deltaX, deltaY);
-      this.syncScrollbars();
-      this.emitScroll();
+      this.scrollBy(deltaX, deltaY);
     };
 
     this.container.addEventListener("wheel", onWheel, { passive: false });
