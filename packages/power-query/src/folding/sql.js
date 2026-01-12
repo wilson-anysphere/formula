@@ -1751,7 +1751,7 @@ function joinTypeToSql(dialect, joinType) {
     case "left":
       return "LEFT JOIN";
     case "right":
-      return dialect.name === "postgres" || dialect.name === "sqlserver" ? "RIGHT JOIN" : null;
+      return dialect.name === "postgres" || dialect.name === "sqlserver" || dialect.name === "mysql" ? "RIGHT JOIN" : null;
     case "full":
       return dialect.name === "postgres" || dialect.name === "sqlserver" ? "FULL OUTER JOIN" : null;
     default: {

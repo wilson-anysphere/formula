@@ -516,6 +516,35 @@ test("compile: folds merge (join) when both sides fully fold to SQL", () => {
   });
 });
 
+test("compile: folds merge (right join) for MySQL", () => {
+  const folding = new QueryFoldingEngine();
+  const connection = {};
+
+  const right = {
+    id: "q_right_mysql_right",
+    name: "Targets",
+    source: { type: "database", connection, query: "SELECT * FROM targets" },
+    steps: [{ id: "r1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Target"] } }],
+  };
+
+  const left = {
+    id: "q_left_mysql_right",
+    name: "Sales",
+    source: { type: "database", connection, query: "SELECT * FROM sales" },
+    steps: [
+      { id: "l1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Sales"] } },
+      { id: "l2", name: "Merge", operation: { type: "merge", rightQuery: "q_right_mysql_right", joinType: "right", leftKeys: ["Id"], rightKeys: ["Id"], joinMode: "flat" } },
+    ],
+  };
+
+  const plan = folding.compile(left, { dialect: "mysql", queries: { q_right_mysql_right: right } });
+  assert.deepEqual(plan, {
+    type: "sql",
+    sql: "SELECT l.`Id` AS `Id`, l.`Sales` AS `Sales`, r.`Target` AS `Target` FROM (SELECT t.`Id`, t.`Sales` FROM (SELECT * FROM sales) AS t) AS l RIGHT JOIN (SELECT t.`Id`, t.`Target` FROM (SELECT * FROM targets) AS t) AS r ON l.`Id` <=> r.`Id`",
+    params: [],
+  });
+});
+
 test("compile: folds merge when joinAlgorithm is set (joinAlgorithm does not affect SQL shape)", () => {
   const folding = new QueryFoldingEngine();
   const connection = {};
