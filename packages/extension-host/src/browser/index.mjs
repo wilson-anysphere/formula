@@ -282,9 +282,44 @@ function normalizeSandboxOptions(options) {
   };
 }
 
+const STORAGE_PROTO_POLLUTION_KEY = "__proto__";
+// Persist `__proto__` under an internal alias so JSON parsing/loading cannot mutate prototypes.
+const STORAGE_PROTO_POLLUTION_KEY_ALIAS = "__formula_reserved_key__:__proto__";
+
+function normalizeStorageKey(key) {
+  const s = String(key);
+  if (s === STORAGE_PROTO_POLLUTION_KEY) return STORAGE_PROTO_POLLUTION_KEY_ALIAS;
+  return s;
+}
+
+function normalizeExtensionStorageRecord(data) {
+  const out = Object.create(null);
+  let migrated = false;
+
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return { record: out, migrated: false };
+  }
+
+  try {
+    if (Object.getPrototypeOf(data) !== Object.prototype) {
+      migrated = true;
+    }
+  } catch {
+    migrated = true;
+  }
+
+  for (const [key, value] of Object.entries(data)) {
+    const normalizedKey = normalizeStorageKey(key);
+    if (normalizedKey !== key) migrated = true;
+    out[normalizedKey] = value;
+  }
+
+  return { record: out, migrated };
+}
+
 class InMemoryExtensionStorage {
   constructor() {
-    this._data = {};
+    this._data = Object.create(null);
   }
 
   /**
@@ -292,7 +327,7 @@ class InMemoryExtensionStorage {
    */
   getExtensionStore(extensionId) {
     const id = String(extensionId);
-    if (!this._data[id]) this._data[id] = {};
+    if (!this._data[id]) this._data[id] = Object.create(null);
     return this._data[id];
   }
 
@@ -330,15 +365,22 @@ class LocalStorageExtensionStorage {
   }
 
   _load(extensionId) {
-    if (!this._storage) return {};
+    if (!this._storage) return Object.create(null);
     try {
       const raw = this._storage.getItem(this._key(extensionId));
-      if (!raw) return {};
+      if (!raw) return Object.create(null);
       const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-      return parsed;
+      const { record, migrated } = normalizeExtensionStorageRecord(parsed);
+      if (migrated) {
+        try {
+          this._persist(extensionId, record);
+        } catch {
+          // ignore migration write failures
+        }
+      }
+      return record;
     } catch {
-      return {};
+      return Object.create(null);
     }
   }
 
@@ -2043,17 +2085,18 @@ class BrowserExtensionHost {
 
       case "storage.get": {
         const store = this._storageApi.getExtensionStore(extension.id);
-        return store[String(args[0])];
+        const key = normalizeStorageKey(args[0]);
+        return store[key];
       }
       case "storage.set": {
-        const key = String(args[0]);
+        const key = normalizeStorageKey(args[0]);
         const value = args[1];
         const store = this._storageApi.getExtensionStore(extension.id);
         store[key] = value;
         return null;
       }
       case "storage.delete": {
-        const key = String(args[0]);
+        const key = normalizeStorageKey(args[0]);
         const store = this._storageApi.getExtensionStore(extension.id);
         delete store[key];
         return null;

@@ -64,6 +64,66 @@ const API_PERMISSIONS = {
   "config.update": ["storage"]
 };
 
+const STORAGE_PROTO_POLLUTION_KEY = "__proto__";
+// Persist `__proto__` under an internal alias so JSON parsing/loading cannot mutate prototypes.
+// This preserves round-trip behavior for extensions that (intentionally or accidentally) use the key.
+const STORAGE_PROTO_POLLUTION_KEY_ALIAS = "__formula_reserved_key__:__proto__";
+
+function normalizeStorageKey(key) {
+  const s = String(key);
+  if (s === STORAGE_PROTO_POLLUTION_KEY) return STORAGE_PROTO_POLLUTION_KEY_ALIAS;
+  return s;
+}
+
+function normalizeExtensionStorageStore(data) {
+  const out = Object.create(null);
+  let migrated = false;
+
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return { store: out, migrated: false };
+  }
+
+  try {
+    if (Object.getPrototypeOf(data) !== Object.prototype) {
+      migrated = true;
+    }
+  } catch {
+    migrated = true;
+  }
+
+  for (const [extensionId, record] of Object.entries(data)) {
+    if (!record || typeof record !== "object" || Array.isArray(record)) {
+      migrated = true;
+      continue;
+    }
+
+    try {
+      if (Object.getPrototypeOf(record) !== Object.prototype) {
+        migrated = true;
+      }
+    } catch {
+      migrated = true;
+    }
+
+    const normalizedRecord = Object.create(null);
+    for (const [key, value] of Object.entries(record)) {
+      const normalizedKey = normalizeStorageKey(key);
+      if (normalizedKey !== key) migrated = true;
+      normalizedRecord[normalizedKey] = value;
+    }
+
+    // Avoid persisting noisy empty records.
+    if (Object.keys(normalizedRecord).length === 0) {
+      migrated = true;
+      continue;
+    }
+
+    out[extensionId] = normalizedRecord;
+  }
+
+  return { store: out, migrated };
+}
+
 function serializeError(error) {
   if (error instanceof Error) {
     const payload = { message: error.message, stack: error.stack };
@@ -1459,22 +1519,28 @@ class ExtensionHost {
 
       case "storage.get": {
         const store = await this._loadExtensionStorage();
-        return store[extension.id]?.[String(args[0])];
+        const key = normalizeStorageKey(args[0]);
+        return store[extension.id]?.[key];
       }
       case "storage.set": {
-        const key = String(args[0]);
+        const key = normalizeStorageKey(args[0]);
         const value = args[1];
         const store = await this._loadExtensionStorage();
-        store[extension.id] = store[extension.id] ?? {};
+        store[extension.id] = store[extension.id] ?? Object.create(null);
         store[extension.id][key] = value;
         await this._saveExtensionStorage(store);
         return null;
       }
       case "storage.delete": {
-        const key = String(args[0]);
+        const key = normalizeStorageKey(args[0]);
         const store = await this._loadExtensionStorage();
-        if (store[extension.id]) delete store[extension.id][key];
-        await this._saveExtensionStorage(store);
+        if (store[extension.id]) {
+          delete store[extension.id][key];
+          if (Object.keys(store[extension.id]).length === 0) {
+            delete store[extension.id];
+          }
+          await this._saveExtensionStorage(store);
+        }
         return null;
       }
 
@@ -1499,7 +1565,7 @@ class ExtensionHost {
         const key = `__config__:${configKey}`;
         const value = args[1];
         const store = await this._loadExtensionStorage();
-        store[extension.id] = store[extension.id] ?? {};
+        store[extension.id] = store[extension.id] ?? Object.create(null);
         store[extension.id][key] = value;
         await this._saveExtensionStorage(store);
         this._sendEventToExtension(extension, "configChanged", { key: configKey, value });
@@ -1515,9 +1581,17 @@ class ExtensionHost {
     try {
       const raw = await fs.readFile(this._extensionStoragePath, "utf8");
       const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === "object" ? parsed : {};
+      const { store, migrated } = normalizeExtensionStorageStore(parsed);
+      if (migrated) {
+        try {
+          await this._saveExtensionStorage(store);
+        } catch {
+          // ignore migration write failures
+        }
+      }
+      return store;
     } catch {
-      return {};
+      return Object.create(null);
     }
   }
 
