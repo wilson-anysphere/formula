@@ -85,6 +85,9 @@ python tools/excel-oracle/pin_dataset.py \
   --versioned-dir tests/compatibility/excel-oracle/datasets/versioned
 ```
 
+Note: `pin_dataset.py` enforces that the dataset includes Excel version/build/OS metadata
+from COM automation, to avoid accidentally pinning a synthetic/non-Excel dataset.
+
 The workflow prefers `excel-oracle.pinned.json` if present.
 
 To force Excel generation in the workflow when a pinned dataset exists, run the workflow manually (`workflow_dispatch`) and set `oracle_source=generate`.

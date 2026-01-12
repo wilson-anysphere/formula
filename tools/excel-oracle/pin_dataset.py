@@ -70,6 +70,17 @@ def main() -> int:
             f"source.kind={source.get('kind')!r}"
         )
 
+    # `run-excel-oracle.ps1` always includes these properties from the Excel COM object.
+    # Enforce that they're present so we don't accidentally pin a synthetic dataset that
+    # simply sets `source.kind = \"excel\"`.
+    for key in ("version", "build", "operatingSystem"):
+        value = source.get(key)
+        if not isinstance(value, str) or not value.strip() or value.strip().lower() == "unknown":
+            raise SystemExit(
+                "Refusing to pin dataset missing Excel metadata. "
+                f"Expected source.{key} to be a non-empty string from real Excel; got {value!r}."
+            )
+
     excel_version = _sanitize_fragment(str(source.get("version", "unknown")))
     excel_build = _sanitize_fragment(str(source.get("build", "unknown")))
     cases_sha = _sanitize_fragment(str(case_set.get("sha256", "unknown")))
