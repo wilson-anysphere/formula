@@ -38,6 +38,7 @@ types and images-in-cells) which require ground-truth workbooks saved by Excel.
   - `comments.xlsx` - legacy comments parts.
   - `grouped-rows.xlsx` - outline/grouped rows metadata.
   - `image.xlsx` - embedded image (`xl/media/image1.png`) + drawing relationship.
+  - `image-in-cell.xlsx` - **real Excel** “Place in Cell” image values using `xl/metadata.xml` + `xl/richData/*` (no `xl/cellimages.xml`; see `basic/image-in-cell.md`).
   - `cellimages.xlsx` - includes an Excel-style in-cell image store part (`xl/cellimages.xml` + `.rels`) referencing `xl/media/image1.png`.
   - `activex-control.xlsx` - minimal ActiveX/form control parts (`xl/ctrlProps/*` + `xl/activeX/*`) with a worksheet `<controls>` fragment.
   - `print-settings.xlsx` - page setup + print titles/areas.
