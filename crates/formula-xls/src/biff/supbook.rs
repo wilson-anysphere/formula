@@ -535,6 +535,18 @@ mod tests {
         [cch.to_le_bytes().to_vec(), vec![0u8], bytes.to_vec()].concat()
     }
 
+    fn externname_record_payload_compressed(name: &str) -> Vec<u8> {
+        // Best-effort EXTERNNAME payload matching the common layout parsed by `parse_externname_record`:
+        //   [grbit: u16][reserved: u32][cch: u8][XLUnicodeStringNoCch]
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        payload.extend_from_slice(&0u32.to_le_bytes()); // reserved
+        payload.push(name.len() as u8); // cch
+        payload.push(0); // flags (compressed)
+        payload.extend_from_slice(name.as_bytes());
+        payload
+    }
+
     #[test]
     fn parses_external_supbook_with_sheet_list() {
         let mut payload = Vec::new();
@@ -640,5 +652,57 @@ mod tests {
         let sb = &parsed.supbooks[0];
         assert_eq!(sb.kind, SupBookKind::ExternalWorkbook);
         assert_eq!(sb.workbook_name.as_deref(), Some("Book2.xlsx"));
+    }
+
+    #[test]
+    fn parses_externname_records_after_supbook() {
+        let mut sb_payload = Vec::new();
+        sb_payload.extend_from_slice(&0u16.to_le_bytes()); // ctab
+        sb_payload.extend_from_slice(&xl_unicode_string_compressed("Book2.xlsx"));
+
+        let externname_payload = externname_record_payload_compressed("MyName");
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_SUPBOOK, &sb_payload),
+            record(RECORD_EXTERNNAME, &externname_payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff8_supbook_table(&stream, 1252);
+        assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
+        assert_eq!(parsed.supbooks.len(), 1);
+        assert_eq!(parsed.supbooks[0].extern_names, vec!["MyName".to_string()]);
+    }
+
+    #[test]
+    fn parses_continued_externname_strings() {
+        let mut sb_payload = Vec::new();
+        sb_payload.extend_from_slice(&0u16.to_le_bytes()); // ctab
+        sb_payload.extend_from_slice(&xl_unicode_string_compressed("Book2.xlsx"));
+
+        let full = externname_record_payload_compressed("ABCDEFG");
+        // Split after "ABC" so the remaining chars ("DEFG") are in a CONTINUE fragment.
+        let split_at = 2 + 4 + 1 + 1 + 3;
+        let first = &full[..split_at];
+        let rest = &full[split_at..];
+
+        // BIFF8 inserts an option flags byte at the start of each continued string fragment.
+        let second = [vec![0u8], rest.to_vec()].concat();
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_SUPBOOK, &sb_payload),
+            record(RECORD_EXTERNNAME, first),
+            record(records::RECORD_CONTINUE, &second),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff8_supbook_table(&stream, 1252);
+        assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
+        assert_eq!(parsed.supbooks.len(), 1);
+        assert_eq!(parsed.supbooks[0].extern_names, vec!["ABCDEFG".to_string()]);
     }
 }
