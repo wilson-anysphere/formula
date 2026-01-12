@@ -30,15 +30,30 @@ pub fn parse_value_text(
     now_utc: DateTime<Utc>,
     system: ExcelDateSystem,
 ) -> ExcelResult<f64> {
-    match super::number::parse_number_strict(
-        text,
-        cfg.separators.decimal_sep,
-        Some(cfg.separators.thousands_sep),
-    ) {
-        Ok(n) => return Ok(n),
-        Err(ExcelError::Num) => return Err(ExcelError::Num),
-        Err(ExcelError::Div0) => return Err(ExcelError::Div0),
-        Err(ExcelError::Value) => {}
+    let decimal_sep = cfg.separators.decimal_sep;
+    let group_sep = cfg.separators.thousands_sep;
+
+    // Excel's VALUE is eager to treat many strings as dates/times. For locales where the
+    // thousands separator is `.`, we need to be careful not to interpret dot-separated dates
+    // (e.g. `2020.01.01`) as a number by stripping all separators. A pragmatic approximation is
+    // to reject invalid thousands grouping (groups must be 3 digits) before attempting numeric
+    // parsing.
+    let mut try_number = true;
+    if group_sep == '.' && text.contains(group_sep) {
+        if let Some(compact) = compact_for_grouping_validation(text) {
+            if !has_valid_thousands_grouping(&compact, decimal_sep, group_sep) {
+                try_number = false;
+            }
+        }
+    }
+
+    if try_number {
+        match super::number::parse_number_strict(text, decimal_sep, Some(group_sep)) {
+            Ok(n) => return Ok(n),
+            Err(ExcelError::Num) => return Err(ExcelError::Num),
+            Err(ExcelError::Div0) => return Err(ExcelError::Div0),
+            Err(ExcelError::Value) => {}
+        }
     }
 
     let date = match try_parse_date(text, cfg, now_utc, system) {
@@ -59,6 +74,99 @@ pub fn parse_value_text(
         (None, Some(t)) => Ok(t),
         (None, None) => Err(ExcelError::Value),
     }
+}
+
+fn compact_for_grouping_validation(text: &str) -> Option<String> {
+    let mut s = text.trim();
+    if s.is_empty() {
+        return None;
+    }
+
+    // Parentheses indicate accounting negative numbers; they're not relevant to grouping.
+    if s.starts_with('(') && s.ends_with(')') && s.len() >= 2 {
+        s = s[1..s.len() - 1].trim();
+    }
+
+    if let Some(rest) = s.strip_prefix('-') {
+        s = rest.trim_start();
+    } else if let Some(rest) = s.strip_prefix('+') {
+        s = rest.trim_start();
+    }
+
+    // Strip a small set of common currency symbols (mirrors coercion::number).
+    s = s
+        .trim_start_matches(|c: char| matches!(c, '$' | '€' | '£' | '¥'))
+        .trim();
+
+    // Strip trailing percent signs.
+    loop {
+        let trimmed = s.trim_end();
+        if let Some(rest) = trimmed.strip_suffix('%') {
+            s = rest;
+            continue;
+        }
+        s = trimmed;
+        break;
+    }
+
+    let compact: String = s.chars().filter(|c| !c.is_whitespace()).collect();
+    if compact.is_empty() {
+        None
+    } else {
+        Some(compact)
+    }
+}
+
+fn has_valid_thousands_grouping(compact: &str, decimal_sep: char, group_sep: char) -> bool {
+    if group_sep == decimal_sep {
+        return false;
+    }
+
+    // Ignore exponent part when validating grouping in the mantissa.
+    let mantissa = compact
+        .split_once('e')
+        .map(|(m, _)| m)
+        .unwrap_or_else(|| compact.split_once('E').map(|(m, _)| m).unwrap_or(compact));
+
+    if !mantissa.contains(group_sep) {
+        return true;
+    }
+
+    // Fractional part must not contain grouping separators.
+    let (integer, fractional) = mantissa
+        .split_once(decimal_sep)
+        .map(|(i, f)| (i, Some(f)))
+        .unwrap_or((mantissa, None));
+    if fractional.is_some_and(|f| f.contains(group_sep)) {
+        return false;
+    }
+
+    if integer.starts_with(group_sep) || integer.ends_with(group_sep) {
+        return false;
+    }
+
+    let segments: Vec<&str> = integer.split(group_sep).collect();
+    if segments.len() <= 1 {
+        return true;
+    }
+
+    if segments[0].is_empty() || segments[0].len() > 3 {
+        return false;
+    }
+
+    for seg in &segments {
+        if seg.is_empty() || !seg.chars().all(|c| c.is_ascii_digit()) {
+            return false;
+        }
+    }
+
+    for seg in &segments[1..] {
+        if seg.len() != 3 {
+            return false;
+        }
+    }
+
+    true
 }
 
 fn try_parse_date(

@@ -146,6 +146,14 @@ fn value_locale_controls_numeric_and_date_order_parsing() {
         sheet.eval("=DATEVALUE(\"1/2/2020\")"),
         sheet.eval("=DATE(2020,2,1)")
     );
+    assert_eq!(
+        sheet.eval("=VALUE(\"2020.01.01\")"),
+        sheet.eval("=DATE(2020,1,1)")
+    );
+    assert_eq!(
+        sheet.eval("=VALUE(\"1.2.2020\")"),
+        sheet.eval("=DATE(2020,2,1)")
+    );
     assert_number(&sheet.eval("=VALUE(\"1,5\")"), 1.5);
 }
 
