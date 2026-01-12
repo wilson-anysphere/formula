@@ -149,6 +149,66 @@ those tooling directories and bridge it into the real app via IPC/Tauri plumbing
 
 See `docs/10-extensibility.md` for the end-to-end flow.
 
+## Real-time collaboration (Yjs)
+
+The desktop dev server can run in a real-time collaborative mode backed by the local Yjs sync server (`services/sync-server`).
+Collaboration is enabled/configured via URL query params.
+
+### 1) Start the sync server
+
+From the repo root:
+
+```bash
+pnpm dev:sync
+```
+
+Equivalent:
+
+```bash
+pnpm -C services/sync-server dev
+```
+
+Notes:
+
+- Default WebSocket URL: `ws://127.0.0.1:1234`
+- The sync server requires auth. In non-production environments it defaults to the shared dev token: `dev-token`
+  (you can override with `SYNC_SERVER_AUTH_TOKEN=...`).
+
+### 2) Start the desktop app (Vite dev server)
+
+```bash
+pnpm -C apps/desktop dev
+```
+
+This serves the app at `http://localhost:4174`.
+
+### 3) Open two clients to the same doc (URL params)
+
+Open two browser windows/tabs with the same `docId`, but different user identities:
+
+```text
+http://localhost:4174/?collab=1&wsUrl=ws://127.0.0.1:1234&docId=my-doc&token=dev-token&userId=u1&userName=User%201&userColor=%23ff0000
+http://localhost:4174/?collab=1&wsUrl=ws://127.0.0.1:1234&docId=my-doc&token=dev-token&userId=u2&userName=User%202&userColor=%2300ff00
+```
+
+Params:
+
+- `collab=1` enables collaboration mode
+- `wsUrl` is the base sync-server URL (no trailing `/docId`)
+- `docId` is the shared document/room name (must match across clients)
+- `token` must match the sync-server auth token (defaults to `dev-token`)
+- `userId`, `userName`, `userColor` control presence/awareness identity
+  - `userColor` must be URL-encoded (`#` → `%23`)
+
+### 4) Expected behavior
+
+With two clients connected to the same `docId` you should see:
+
+- Cell edits sync between windows/tabs
+- Comments sync between windows/tabs
+- Presence (remote cursors / selections) rendered in the grid
+- A conflicts UI when two clients concurrently edit the same cell
+
 ## Power Query caching + credentials (security)
 
 The desktop app persists some Power Query state across restarts:
