@@ -15,6 +15,13 @@ export type TabColor = {
   auto?: boolean;
 };
 
+function normalizeTabColor(value: TabColor | undefined): TabColor | undefined {
+  if (!value) return undefined;
+  const out = { ...value };
+  if (typeof out.rgb === "string") out.rgb = out.rgb.trim().toUpperCase();
+  return out;
+}
+
 export type SheetMeta = {
   /**
    * Stable identifier used by the DocumentController + backend.
@@ -135,7 +142,7 @@ export class WorkbookSheetStore {
         id: String(sheet.id).trim(),
         name: normalizedName,
         visibility,
-        tabColor: sheet.tabColor ? { ...sheet.tabColor } : undefined,
+        tabColor: normalizeTabColor(sheet.tabColor),
       });
     }
 
@@ -300,7 +307,7 @@ export class WorkbookSheetStore {
     const sheet = this.sheets[idx]!;
 
     const next = this.sheets.slice();
-    next[idx] = { ...sheet, tabColor: color ? { ...color } : undefined };
+    next[idx] = { ...sheet, tabColor: normalizeTabColor(color) };
     this.sheets = next;
     this.emit();
   }
@@ -331,7 +338,7 @@ export class WorkbookSheetStore {
         id: String(sheet.id).trim(),
         name: normalizedName,
         visibility,
-        tabColor: sheet.tabColor ? { ...sheet.tabColor } : undefined,
+        tabColor: normalizeTabColor(sheet.tabColor),
       });
     }
 

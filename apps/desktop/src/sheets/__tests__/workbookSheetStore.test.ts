@@ -81,4 +81,14 @@ describe("WorkbookSheetStore", () => {
     expect(store.resolveIdByName("budget")).toBe("s2");
     expect(store.resolveIdByName("missing")).toBeUndefined();
   });
+
+  it("normalizes tabColor.rgb to uppercase when setting colors", () => {
+    const store = new WorkbookSheetStore([
+      { id: "s1", name: "Sheet1", visibility: "visible", tabColor: { rgb: "#ff0000" } },
+    ]);
+    expect(store.getById("s1")?.tabColor?.rgb).toBe("#FF0000");
+
+    store.setTabColor("s1", { rgb: "ff00ff00" });
+    expect(store.getById("s1")?.tabColor?.rgb).toBe("FF00FF00");
+  });
 });
