@@ -73,7 +73,7 @@ function tokenizeForDiff(formula) {
  * @param {(x: T, y: T) => boolean} equals
  * @returns {Array<{ type: DiffOpType, token: T }>}
  */
-function myersDiff(a, b, equals) {
+function myersDiff(a, b, equals, opts = {}) {
   const n = a.length;
   const m = b.length;
 
@@ -111,7 +111,7 @@ function myersDiff(a, b, equals) {
       v[kIndex] = x;
 
       if (x >= n && y >= m) {
-        return backtrackMyers(trace, a, b, offset);
+        return backtrackMyers(trace, a, b, offset, opts);
       }
     }
   }
@@ -129,7 +129,8 @@ function myersDiff(a, b, equals) {
    * @param {T[]} b
    * @param {number} offset
    */
-  function backtrackMyers(trace, a, b, offset) {
+  function backtrackMyers(trace, a, b, offset, opts) {
+    const preferBForEqual = Boolean(opts?.preferBForEqual);
     let x = a.length;
     let y = b.length;
     /** @type {Array<{ type: DiffOpType, token: T }>} */
@@ -151,7 +152,7 @@ function myersDiff(a, b, equals) {
       const prevY = prevX - prevK;
 
       while (x > prevX && y > prevY) {
-        edits.push({ type: "equal", token: a[x - 1] });
+        edits.push({ type: "equal", token: preferBForEqual ? b[y - 1] : a[x - 1] });
         x -= 1;
         y -= 1;
       }
@@ -167,7 +168,7 @@ function myersDiff(a, b, equals) {
 
     // d === 0: the remaining path is only diagonal moves (common prefix).
     while (x > 0 && y > 0) {
-      edits.push({ type: "equal", token: a[x - 1] });
+      edits.push({ type: "equal", token: preferBForEqual ? b[y - 1] : a[x - 1] });
       x -= 1;
       y -= 1;
     }
@@ -279,13 +280,17 @@ export function diffFormula(oldFormula, newFormula, opts) {
           ...oldMid.map((token) => ({ type: "delete", token })),
           ...newMid.map((token) => ({ type: "insert", token })),
         ]
-      : myersDiff(oldMid, newMid, equals);
+      : myersDiff(oldMid, newMid, equals, { preferBForEqual: normalize });
 
   /** @type {Array<{ type: DiffOpType, token: Token }>} */
   const edits = [];
-  for (const token of oldTokens.slice(0, prefixLen)) edits.push({ type: "equal", token });
+  const equalPrefixTokens = normalize ? newTokens.slice(0, prefixLen) : oldTokens.slice(0, prefixLen);
+  for (const token of equalPrefixTokens) edits.push({ type: "equal", token });
   edits.push(...midEdits);
-  for (const token of oldTokens.slice(oldTokens.length - suffixLen)) edits.push({ type: "equal", token });
+  const equalSuffixTokens = normalize
+    ? newTokens.slice(newTokens.length - suffixLen)
+    : oldTokens.slice(oldTokens.length - suffixLen);
+  for (const token of equalSuffixTokens) edits.push({ type: "equal", token });
 
   const ops = coalesceEdits(edits);
 

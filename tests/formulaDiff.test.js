@@ -121,7 +121,7 @@ test("diffFormula: normalize=true treats identifier case changes as equal", () =
   const result = diffFormula("=sum(a1:a2)", "=SUM(A1:A2)", { normalize: true });
   assert.equal(result.equal, true);
   assert.deepEqual(simplifyOps(result.ops), [
-    { type: "equal", tokens: ["op:=", "ident:sum", "punct:(", "ident:a1", "op::", "ident:a2", "punct:)"] },
+    { type: "equal", tokens: ["op:=", "ident:SUM", "punct:(", "ident:A1", "op::", "ident:A2", "punct:)"] },
   ]);
 });
 
