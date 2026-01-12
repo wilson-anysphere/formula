@@ -820,6 +820,8 @@ sync with the capability file’s `"windows": [...]` list so capability grants r
 
 It gates:
 
+- **`allow-invoke`**: allows the frontend to invoke custom Rust `#[tauri::command]` functions via `__TAURI__.core.invoke(...)`.
+  - This is intentionally unscoped in this repo’s current Tauri toolchain; commands must validate scope/authorization in Rust.
 - **`core:event:allow-listen` / `core:event:allow-emit`**: which event names the frontend can `listen(...)` for or `emit(...)`.
 - **`core:event:allow-unlisten`**: allows the frontend to unregister event listeners it previously installed (so we don’t leak
   listeners for one-shot flows like close/open/OAuth readiness signals).
@@ -829,9 +831,9 @@ It gates:
   - `clipboard-manager:allow-read-text`, `clipboard-manager:allow-write-text`
   - `updater:allow-check`, `updater:allow-download`, `updater:allow-install`
 
-Custom Rust commands (everything behind `#[tauri::command]`, invoked via `__TAURI__.core.invoke(...)`) are not currently
-gated by a per-command capability allowlist in this repo’s Tauri toolchain (no `core:allow-invoke`). Keep them hardened
-in Rust (window label + trusted-origin checks, argument validation, filesystem/network scope checks, etc.).
+Custom Rust commands (everything behind `#[tauri::command]`) are enabled via the unscoped `allow-invoke` permission,
+but are not currently gated by a per-command capability allowlist in this repo’s Tauri toolchain (no `core:allow-invoke`);
+keep them hardened in Rust (window label + trusted-origin checks, argument validation, filesystem/network scope checks, etc.).
 
 Note: the clipboard plugin permissions above only cover the legacy **plain-text** clipboard helpers
 (`globalThis.__TAURI__.clipboard.readText` / `writeText`). Rich clipboard formats (HTML/RTF/PNG) are handled via
