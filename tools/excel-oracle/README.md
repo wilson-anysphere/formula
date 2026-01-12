@@ -102,6 +102,17 @@ From repo root:
 python tools/excel-oracle/compat_gate.py
 ```
 
+The gate supports tier presets:
+
+```bash
+python tools/excel-oracle/compat_gate.py --tier smoke   # default, CI-friendly slice
+python tools/excel-oracle/compat_gate.py --tier p0      # broader common-function slice
+python tools/excel-oracle/compat_gate.py --tier full    # full corpus (no include-tag filtering)
+```
+
+See `tests/compatibility/excel-oracle/README.md` for the exact tag presets and
+recommended runtime tradeoffs.
+
 This runs the in-repo engine adapter (`crates/formula-excel-oracle`) against a curated tag set,
 compares against the pinned dataset in `tests/compatibility/excel-oracle/datasets/versioned/`,
 writes reports under `tests/compatibility/excel-oracle/reports/`, and exits non-zero on mismatch.
