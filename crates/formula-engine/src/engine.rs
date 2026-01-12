@@ -2960,13 +2960,8 @@ impl Engine {
         let rewritten_names =
             rewrite_defined_name_constants_for_bytecode(expr_after_structured, key.sheet, &self.workbook);
         let expr_to_lower = rewritten_names.as_ref().unwrap_or(expr_after_structured);
-        let expr = bytecode::lower_canonical_expr(
-            expr_to_lower,
-            origin_ast,
-            key.sheet,
-            &mut resolve_sheet,
-        )
-        .map_err(BytecodeCompileReason::LowerError)?;
+        let expr = bytecode::lower_canonical_expr(expr_to_lower, origin_ast, key.sheet, &mut resolve_sheet)
+            .map_err(BytecodeCompileReason::LowerError)?;
         if !bytecode_expr_is_eligible(&expr) {
             return Err(BytecodeCompileReason::IneligibleExpr);
         }
@@ -8671,9 +8666,7 @@ mod tests {
                 NameDefinition::Constant(Value::Number(5.0)),
             )
             .unwrap();
-        engine
-            .set_cell_formula("Sheet1", "A1", "=@X")
-            .unwrap();
+        engine.set_cell_formula("Sheet1", "A1", "=@X").unwrap();
 
         // Ensure the name constant was inlined so the bytecode backend can compile the `@`
         // expression (bytecode lowering does not support NameRef directly).
@@ -8692,10 +8685,7 @@ mod tests {
 
         let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
         let b2 = parse_a1("B2").unwrap();
-        let key = CellKey {
-            sheet: sheet_id,
-            addr: b2,
-        };
+        let key = CellKey { sheet: sheet_id, addr: b2 };
 
         let precedents = engine.calc_graph.precedents_of(cell_id_from_key(key));
         assert_eq!(
@@ -8703,6 +8693,146 @@ mod tests {
             vec![Precedent::Cell(CellId::new(sheet_id_for_graph(sheet_id), 1, 0))],
             "=@A1:A3 in row 2 should only depend on A2"
         );
+    }
+
+    #[test]
+    fn bytecode_supports_structured_refs_by_resolving_tables() {
+        use formula_model::table::TableColumn;
+
+        fn table_fixture(range: &str) -> Table {
+            Table {
+                id: 1,
+                name: "Table1".into(),
+                display_name: "Table1".into(),
+                range: Range::from_a1(range).unwrap(),
+                header_row_count: 1,
+                totals_row_count: 0,
+                columns: vec![
+                    TableColumn {
+                        id: 1,
+                        name: "Col1".into(),
+                        formula: None,
+                        totals_formula: None,
+                    },
+                    TableColumn {
+                        id: 2,
+                        name: "Col2".into(),
+                        formula: None,
+                        totals_formula: None,
+                    },
+                    TableColumn {
+                        id: 3,
+                        name: "Col3".into(),
+                        formula: None,
+                        totals_formula: None,
+                    },
+                ],
+                style: None,
+                auto_filter: None,
+                relationship_id: None,
+                part_path: None,
+            }
+        }
+
+        let mut engine = Engine::new();
+        engine.ensure_sheet("Sheet1");
+        engine.set_sheet_tables("Sheet1", vec![table_fixture("A1:C3")]);
+
+        engine.set_cell_value("Sheet1", "A2", 1.0).unwrap();
+        engine.set_cell_value("Sheet1", "A3", 2.0).unwrap();
+        engine.set_cell_value("Sheet1", "B2", 10.0).unwrap();
+        engine.set_cell_value("Sheet1", "B3", 20.0).unwrap();
+
+        engine
+            .set_cell_formula("Sheet1", "D1", "=SUM(Table1[Col1])")
+            .unwrap();
+        engine
+            .set_cell_formula("Sheet1", "C2", "=[@Col1]+[@Col2]")
+            .unwrap();
+
+        let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
+        let addr_d1 = parse_a1("D1").unwrap();
+        let addr_c2 = parse_a1("C2").unwrap();
+        let cell_d1 = engine.workbook.sheets[sheet_id]
+            .cells
+            .get(&addr_d1)
+            .expect("D1 stored");
+        let cell_c2 = engine.workbook.sheets[sheet_id]
+            .cells
+            .get(&addr_c2)
+            .expect("C2 stored");
+
+        assert!(
+            matches!(cell_d1.compiled, Some(CompiledFormula::Bytecode(_))),
+            "structured refs should be eligible for bytecode after lowering"
+        );
+        assert!(
+            matches!(cell_c2.compiled, Some(CompiledFormula::Bytecode(_))),
+            "this-row structured refs should be eligible for bytecode after lowering"
+        );
+
+        engine.recalculate_single_threaded();
+        let d1_bc = engine.get_cell_value("Sheet1", "D1");
+        let c2_bc = engine.get_cell_value("Sheet1", "C2");
+        assert_eq!(d1_bc, Value::Number(3.0));
+        assert_eq!(c2_bc, Value::Number(11.0));
+
+        // Compare bytecode vs AST evaluation.
+        engine.set_bytecode_enabled(false);
+        engine.recalculate_single_threaded();
+        assert_eq!(engine.get_cell_value("Sheet1", "D1"), d1_bc);
+        assert_eq!(engine.get_cell_value("Sheet1", "C2"), c2_bc);
+    }
+
+    #[test]
+    fn structured_ref_bytecode_recompiles_on_table_resize() {
+        use formula_model::table::TableColumn;
+
+        fn table_fixture(range: &str) -> Table {
+            Table {
+                id: 1,
+                name: "Table1".into(),
+                display_name: "Table1".into(),
+                range: Range::from_a1(range).unwrap(),
+                header_row_count: 1,
+                totals_row_count: 0,
+                columns: vec![TableColumn {
+                    id: 1,
+                    name: "Col1".into(),
+                    formula: None,
+                    totals_formula: None,
+                }],
+                style: None,
+                auto_filter: None,
+                relationship_id: None,
+                part_path: None,
+            }
+        }
+
+        let mut engine = Engine::new();
+        engine.ensure_sheet("Sheet1");
+        engine.set_sheet_tables("Sheet1", vec![table_fixture("A1:A3")]);
+
+        engine.set_cell_value("Sheet1", "A2", 1.0).unwrap();
+        engine.set_cell_value("Sheet1", "A3", 2.0).unwrap();
+
+        engine
+            .set_cell_formula("Sheet1", "B1", "=SUM(Table1[Col1])")
+            .unwrap();
+
+        assert_eq!(engine.bytecode_program_count(), 1);
+        engine.recalculate_single_threaded();
+        assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(3.0));
+
+        // Resize the table to include an additional data row.
+        engine.set_sheet_tables("Sheet1", vec![table_fixture("A1:A4")]);
+        engine.set_cell_value("Sheet1", "A4", 3.0).unwrap();
+
+        // The new table extents should cause the structured ref to be re-lowered and recompiled,
+        // producing a new program key.
+        assert_eq!(engine.bytecode_program_count(), 2);
+        engine.recalculate_single_threaded();
+        assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(6.0));
     }
 
     #[test]

@@ -1316,17 +1316,10 @@ fn fn_type(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
 }
 
 fn error_type_code(kind: ErrorKind) -> i32 {
-    match kind {
-        ErrorKind::Null => 1,
-        ErrorKind::Div0 => 2,
-        ErrorKind::Value => 3,
-        ErrorKind::Ref => 4,
-        ErrorKind::Name => 5,
-        ErrorKind::Num => 6,
-        ErrorKind::NA => 7,
-        ErrorKind::Spill => 9,
-        ErrorKind::Calc => 10,
-    }
+    // Keep bytecode ERROR.TYPE semantics aligned with the AST evaluator's mapping.
+    // `bytecode::value::ErrorKind` mirrors `crate::value::ErrorKind`, so use the canonical
+    // `code()` mapping from the main error kind.
+    i32::from(crate::value::ErrorKind::from(kind).code())
 }
 
 fn fn_error_type(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
