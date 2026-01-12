@@ -254,36 +254,56 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
       for (const indices of indicesById.values()) {
         if (indices.length <= 1) continue;
 
-        const local: number[] = [];
-        const nonLocal: number[] = [];
-        for (const index of indices) {
-          const entry = sheets.get(index) as any;
-          const client = entry?._item?.id?.client;
-          if (typeof client === "number" && client === doc.clientID) {
-            local.push(index);
-          } else {
-            nonLocal.push(index);
+        // Deterministic pruning: keep exactly one surviving entry by index.
+        //
+        // Importantly, the choice must be stable across clients. Using `doc.clientID`
+        // to prefer "non-local" entries can lead to divergence when two clients
+        // concurrently initialize a brand new workbook (each sees their own Sheet1
+        // as local and the other as non-local, so both delete their own and the
+        // workbook ends up with *no* Sheet1).
+        //
+        // Keeping the last entry by index is deterministic in Yjs and tends to
+        // preserve the sheet order/metadata that arrives later (e.g. from merges,
+        // restores, or persistence hydration).
+        const remaining = indices.slice().sort((a, b) => a - b);
+        const winnerIndex = remaining[remaining.length - 1]!;
+
+        // Before deleting duplicates, opportunistically merge any non-default
+        // metadata from the losing entries into the winner. This helps avoid
+        // losing canonical sheet metadata if a placeholder entry happened to win
+        // the index tie-breaker.
+        const winner = sheets.get(winnerIndex) as any;
+        if (winner && typeof winner.get === "function" && typeof winner.set === "function") {
+          for (const index of remaining) {
+            if (index === winnerIndex) continue;
+            const entry = sheets.get(index) as any;
+            if (!entry || typeof entry.get !== "function") continue;
+
+            const id = coerceString(winner.get("id"));
+            if (!id) continue;
+
+            const winnerName = coerceString(winner.get("name"));
+            const entryName = coerceString(entry.get("name"));
+            // Prefer a non-default display name when the winner has a blank/default name.
+            if ((!winnerName || winnerName === id) && entryName && entryName !== id) {
+              winner.set("name", entryName);
+            }
+
+            const winnerVis = coerceSheetVisibility(coerceString(winner.get("visibility"))) ?? "visible";
+            const entryVis = coerceSheetVisibility(coerceString(entry.get("visibility")));
+            // Prefer explicit non-visible visibility over default "visible" when deduping.
+            if (winnerVis === "visible" && entryVis && entryVis !== "visible") {
+              winner.set("visibility", entryVis);
+            }
+
+            const winnerTab = coerceTabColor(winner.get("tabColor"));
+            const entryTab = coerceTabColor(entry.get("tabColor"));
+            if (!winnerTab && entryTab) {
+              winner.set("tabColor", entryTab);
+            }
           }
         }
 
-        // If we see duplicates created by the current client alongside entries
-        // from other clients, prefer keeping the non-local entry. This avoids a
-        // common persistence/hydration pitfall where a client creates a default
-        // Sheet1 before the server finishes loading persisted state, and the
-        // resulting "placeholder" sheet races with the real one.
-        let remaining = indices;
-        if (nonLocal.length > 0 && local.length > 0) {
-          deleteIndices.push(...local);
-          remaining = nonLocal;
-        }
-
-        // Deterministic pruning: keep the last surviving entry by index.
-        //
-        // This helps in scenarios where a sheet placeholder is inserted first
-        // (e.g. schema init) and later canonical state arrives (e.g. from a
-        // merge/checkout or persistence load). The later entry is more likely to
-        // reflect the intended sheet order and metadata.
-        remaining.sort((a, b) => a - b);
         for (let i = 0; i < remaining.length - 1; i += 1) {
           deleteIndices.push(remaining[i]!);
         }
