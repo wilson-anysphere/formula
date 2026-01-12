@@ -31,6 +31,7 @@ export class LayoutController {
   setDockCollapsed(side: any, collapsed: boolean): void;
   setDockSize(side: any, sizePx: number): void;
 
+  setSplitDirection(direction: any, options?: { persist?: boolean }): void;
   setSplitDirection(direction: any, ratio?: number, options?: { persist?: boolean }): void;
   setSplitRatio(ratio: number, options?: { persist?: boolean }): void;
   setActiveSplitPane(pane: any): void;
