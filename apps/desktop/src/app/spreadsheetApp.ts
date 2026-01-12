@@ -7550,10 +7550,8 @@ export class SpreadsheetApp {
     if (this.editor.isOpen()) return false;
     if (this.inlineEditController.isOpen()) return false;
     e.preventDefault();
-    if (e.shiftKey) this.insertCurrentDateTimeIntoSelection("time");
-    else this.insertCurrentDateTimeIntoSelection("date");
-    this.refresh();
-    this.focus();
+    if (e.shiftKey) this.insertTime();
+    else this.insertDate();
     return true;
   }
 
@@ -7626,6 +7624,82 @@ export class SpreadsheetApp {
           { start: { row: range.startRow, col: range.startCol }, end: { row: range.endRow, col: range.endCol } },
           { numberFormat },
         );
+      }
+    } finally {
+      this.document.endBatch();
+    }
+  }
+
+  private insertCurrentDateTimeIntoSelectionExcelSerial(kind: "date" | "time"): void {
+    // Mirror Excel behavior:
+    // - Ctrl+; inserts the current date as an Excel serial number with a date number format.
+    // - Ctrl+Shift+; inserts the current time as a fractional day serial with a time number format.
+    //
+    // Performance/safety: cap this to 10k cells and fall back to only the active cell if exceeded.
+    const MAX_INSERT_DATE_TIME_CELLS = 10_000;
+
+    const now = new Date();
+    const { serial, numberFormat, batchLabel } = (() => {
+      if (kind === "date") {
+        const y = now.getFullYear();
+        const m = now.getMonth();
+        const d = now.getDate();
+        return {
+          serial: dateToExcelSerial(new Date(Date.UTC(y, m, d))),
+          numberFormat: "yyyy-mm-dd",
+          batchLabel: "Insert Date",
+        };
+      }
+
+      const seconds = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+      return {
+        serial: seconds / 86_400,
+        numberFormat: "hh:mm:ss",
+        batchLabel: "Insert Time",
+      };
+    })();
+
+    let totalCells = 0;
+    for (const range of this.selection.ranges) {
+      const r = normalizeSelectionRange(range);
+      const rows = r.endRow - r.startRow + 1;
+      const cols = r.endCol - r.startCol + 1;
+      if (rows <= 0 || cols <= 0) continue;
+      totalCells += rows * cols;
+      if (totalCells > MAX_INSERT_DATE_TIME_CELLS) break;
+    }
+
+    const rangesToInsert =
+      totalCells > MAX_INSERT_DATE_TIME_CELLS
+        ? [
+            {
+              startRow: this.selection.active.row,
+              endRow: this.selection.active.row,
+              startCol: this.selection.active.col,
+              endCol: this.selection.active.col,
+            },
+          ]
+        : this.selection.ranges.map(normalizeSelectionRange);
+
+    this.document.beginBatch({ label: batchLabel });
+    try {
+      for (const r of rangesToInsert) {
+        const rowCount = r.endRow - r.startRow + 1;
+        const colCount = r.endCol - r.startCol + 1;
+        if (rowCount <= 0 || colCount <= 0) continue;
+
+        const docRange = {
+          start: { row: r.startRow, col: r.startCol },
+          end: { row: r.endRow, col: r.endCol },
+        };
+
+        // Bulk-write values to the selection.
+        const row = new Array(colCount).fill(serial);
+        const values = new Array(rowCount).fill(row);
+        this.document.setRangeValues?.(this.sheetId, docRange, values);
+
+        // Apply the appropriate number format so the serial displays as date/time.
+        this.document.setRangeFormat(this.sheetId, docRange, { numberFormat });
       }
     } finally {
       this.document.endBatch();

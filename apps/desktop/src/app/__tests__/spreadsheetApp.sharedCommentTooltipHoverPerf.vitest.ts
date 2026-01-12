@@ -162,6 +162,11 @@ describe("SpreadsheetApp shared-grid comment tooltip hover perf", () => {
       expect(pickSpy).toHaveBeenCalledTimes(1);
       expect(mutations.length).toBeGreaterThan(0);
       const firstMutationCount = mutations.length;
+      // The initial hover may require a one-time measurement to position the tooltip.
+      // Clear the spies so we can assert that *subsequent* pointer moves within the same
+      // cell do not trigger additional layout reads.
+      rootRectSpy.mockClear();
+      selectionRectSpy.mockClear();
 
       for (let i = 0; i < 100; i++) {
         move(60 + (i % 3), 30 + (i % 3));
