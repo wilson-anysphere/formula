@@ -215,6 +215,10 @@ Format: `"<modifier>+<modifier>+<key>"` where:
 - Modifiers: `ctrl`/`control`/`ctl`, `shift`, `alt`/`option`/`opt`, `meta`/`cmd`/`command` (also `win`/`super`)
 - The final token is the key (examples: `m`, `f2`, `escape`, `delete`, `arrowup`, `;`)
 
+Note:
+
+- Do **not** use Electron-style `CmdOrCtrl` / `cmdorctrl` / `mod` tokens. Use the manifest's `key` + `mac` fields instead.
+
 Platform override:
 
 - Use the `mac` field to specify a different keybinding on macOS (otherwise `key` is used on all platforms).
