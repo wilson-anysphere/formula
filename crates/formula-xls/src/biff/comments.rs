@@ -694,6 +694,7 @@ fn parse_txo_text_biff8(
 
     let mut out = String::new();
     let mut ansi_bytes: Vec<u8> = Vec::new();
+    let mut utf16_bytes: Vec<u8> = Vec::new();
     let mut pending_unicode_byte: Option<u8> = None;
     let mut remaining = cch_text;
     let mut remaining_bytes = text_continue_bytes;
@@ -742,7 +743,9 @@ fn parse_txo_text_biff8(
             let take_from_current = need_from_current.min(bytes.len());
             buf.extend_from_slice(&bytes[..take_from_current]);
             let used_current = take_from_current;
-            out.push_str(&decode_utf16le(&buf));
+            // Buffer all UTF-16LE bytes across fragments so surrogate pairs split across CONTINUE
+            // records can still be decoded correctly.
+            utf16_bytes.extend_from_slice(&buf);
 
             remaining -= take_chars;
 
@@ -754,6 +757,10 @@ fn parse_txo_text_biff8(
                 pending_unicode_byte = None;
             }
         } else {
+            if !utf16_bytes.is_empty() {
+                out.push_str(&decode_utf16le(&utf16_bytes));
+                utf16_bytes.clear();
+            }
             pending_unicode_byte = None;
             // Accumulate and decode once to preserve stateful multibyte encodings (e.g. Shift-JIS)
             // when a character boundary is split across CONTINUE records.
@@ -777,6 +784,9 @@ fn parse_txo_text_biff8(
                 cch_text.saturating_sub(remaining)
             ),
         );
+    }
+    if !utf16_bytes.is_empty() {
+        out.push_str(&decode_utf16le(&utf16_bytes));
     }
     if !ansi_bytes.is_empty() {
         out.push_str(&strings::decode_ansi(codepage, &ansi_bytes));
@@ -922,6 +932,7 @@ fn fallback_decode_continue_fragments(
 
     let mut out = String::new();
     let mut ansi_bytes: Vec<u8> = Vec::new();
+    let mut utf16_bytes: Vec<u8> = Vec::new();
     let mut pending_unicode_byte: Option<u8> = None;
     let mut remaining_chars = TXO_MAX_TEXT_CHARS;
     for frag in continues {
@@ -974,7 +985,9 @@ fn fallback_decode_continue_fragments(
             let take_from_current = need_from_current.min(bytes.len());
             buf.extend_from_slice(&bytes[..take_from_current]);
             let used_current = take_from_current;
-            out.push_str(&decode_utf16le(&buf));
+            // Buffer all UTF-16LE bytes across fragments so surrogate pairs split across CONTINUE
+            // records can still be decoded correctly.
+            utf16_bytes.extend_from_slice(&buf);
             remaining_chars -= take_chars;
 
             if remaining_chars > 0 && bytes.len() > used_current {
@@ -983,6 +996,10 @@ fn fallback_decode_continue_fragments(
                 pending_unicode_byte = None;
             }
         } else {
+            if !utf16_bytes.is_empty() {
+                out.push_str(&decode_utf16le(&utf16_bytes));
+                utf16_bytes.clear();
+            }
             pending_unicode_byte = None;
             let available_chars = bytes.len();
             if available_chars == 0 {
@@ -994,6 +1011,9 @@ fn fallback_decode_continue_fragments(
             ansi_bytes.extend_from_slice(slice);
             remaining_chars -= take_chars;
         }
+    }
+    if !utf16_bytes.is_empty() {
+        out.push_str(&decode_utf16le(&utf16_bytes));
     }
     if !ansi_bytes.is_empty() {
         out.push_str(&strings::decode_ansi(codepage, &ansi_bytes));
@@ -2123,6 +2143,33 @@ mod tests {
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].author, "Alice");
         assert_eq!(notes[0].text, "\u{3042}");
+    }
+
+    #[test]
+    fn parses_biff8_txo_text_with_surrogate_pair_split_across_continue_records() {
+        // U+1F600 GRINNING FACE 😀 is encoded in UTF-16 as the surrogate pair D83D DE00. Ensure we
+        // can handle the surrogate pair being split across CONTINUE fragments.
+        let cch_text = 2u16; // two UTF-16 code units
+
+        let stream = [
+            bof(),
+            note(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            txo_with_cch_text(cch_text),
+            // High surrogate (D83D).
+            record(records::RECORD_CONTINUE, &[0x01, 0x3D, 0xD8]),
+            // Low surrogate (DE00).
+            record(records::RECORD_CONTINUE, &[0x01, 0x00, 0xDE]),
+            eof(),
+        ]
+        .concat();
+
+        let ParsedSheetNotes { notes, warnings } =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].author, "Alice");
+        assert_eq!(notes[0].text, "\u{1F600}");
     }
 
     #[test]

@@ -979,18 +979,14 @@ fn write_updated_cell<W: Write>(
     // value-metadata reference.
     //
     // If the value itself hasn't changed (e.g. style-only edits), preserve `vm`.
-    let preserve_vm = !value_changed || matches!(cell.value, CellValue::Error(ErrorValue::Value));
-    let drop_vm = original_has_vm && !preserve_vm;
-    // If the cell did not previously have a `vm` attribute, populate it from `CellMeta` when set.
     //
-    // Note: For some rich value use cases Excel stores `#VALUE!` as the cached cell value and uses
-    // `vm` as an indirection pointer. However, callers may also explicitly attach `vm` metadata to
-    // non-error cached values (e.g. during round-trip repair flows), so we honor `CellMeta.vm`
-    // regardless of the current cached value when inserting new cells.
-    if !original_has_vm {
-        if let Some(vm) = meta_vm.as_deref() {
-            c_start.push_attribute(("vm", vm));
-        }
+    // If the caller explicitly provides `vm` metadata we always emit it. Otherwise, preserve a
+    // pre-existing `vm` attribute only if the cell's cached value hasn't changed (e.g. style-only
+    // edits) or the cell still contains the `#VALUE!` placeholder used by many rich-data cells.
+    let preserve_vm = !value_changed || matches!(cell.value, CellValue::Error(ErrorValue::Value));
+    let drop_vm = original_has_vm && (meta_vm.is_some() || !preserve_vm);
+    if let Some(vm) = meta_vm.as_deref() {
+        c_start.push_attribute(("vm", vm));
     }
     if !original_has_cm {
         if let Some(cm) = meta_cm.as_deref() {
