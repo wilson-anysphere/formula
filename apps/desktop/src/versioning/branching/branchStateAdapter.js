@@ -185,19 +185,23 @@ export function documentControllerToBranchState(doc) {
     //
     // Backwards compatibility: if these fields are absent, treat as no defaults.
     const defaultFormat =
-      branchFormatFromDocFormat(doc, rawView?.defaultFormat ?? rawView?.defaultStyleId) ??
-      branchFormatFromDocFormat(doc, sheet?.defaultFormat ?? sheet?.defaultStyleId);
+      branchFormatFromDocFormat(doc, rawView?.defaultFormat ?? rawView?.defaultStyleId ?? rawView?.sheetFormat ?? rawView?.sheetStyleId) ??
+      // New DocumentController layered formatting stores these on the sheet model directly:
+      // - `sheet.sheetStyleId` (style id)
+      // - `sheet.sheetFormat` (style object, legacy)
+      branchFormatFromDocFormat(doc, sheet?.sheetFormat ?? sheet?.sheetStyleId ?? sheet?.defaultFormat ?? sheet?.defaultStyleId);
     const rowFormats =
       branchFormatMapFromDocFormatMap(doc, rawView?.rowFormats ?? rawView?.rowStyleIds) ??
-      branchFormatMapFromDocFormatMap(doc, sheet?.rowFormats ?? sheet?.rowStyleIds);
+      branchFormatMapFromDocFormatMap(doc, sheet?.rowFormats ?? sheet?.rowStyleIds ?? sheet?.rowStyles);
     const colFormats =
       branchFormatMapFromDocFormatMap(doc, rawView?.colFormats ?? rawView?.colStyleIds) ??
-      branchFormatMapFromDocFormatMap(doc, sheet?.colFormats ?? sheet?.colStyleIds);
+      branchFormatMapFromDocFormatMap(doc, sheet?.colFormats ?? sheet?.colStyleIds ?? sheet?.colStyles);
 
     // Ensure we never persist style-id based fields.
     delete view.defaultStyleId;
     delete view.rowStyleIds;
     delete view.colStyleIds;
+    delete view.sheetStyleId;
 
     if (defaultFormat) {
       view.defaultFormat = defaultFormat;
@@ -293,7 +297,11 @@ export function applyBranchStateToDocumentController(doc, state) {
     //
     // Backwards compatibility: if absent, treat as no defaults.
     if (isNonEmptyPlainObject(view.defaultFormat)) {
-      outSheet.defaultFormat = cloneJsonish(view.defaultFormat);
+      const format = cloneJsonish(view.defaultFormat);
+      // Legacy adapters used `defaultFormat` while the current DocumentController snapshot
+      // schema uses `sheetFormat`. Include both so either reader can restore sheet defaults.
+      outSheet.defaultFormat = format;
+      outSheet.sheetFormat = format;
     }
 
     if (isNonEmptyPlainObject(view.rowFormats)) {
