@@ -5610,6 +5610,46 @@ export class SpreadsheetApp {
     return inBounds(below) ? below : null;
   }
 
+  private shouldHandleSpreadsheetClipboardCommand(): boolean {
+    if (this.formulaBar?.isEditing() || this.formulaEditCell) return false;
+    const target = document.activeElement as HTMLElement | null;
+    if (!target) return true;
+    const tag = target.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return false;
+    return true;
+  }
+
+  /**
+   * Clipboard actions are normally triggered by keyboard shortcuts on the grid.
+   * These wrappers exist so menus/commands can execute the same behavior.
+   */
+  copyToClipboard(): Promise<void> {
+    if (!this.shouldHandleSpreadsheetClipboardCommand()) return Promise.resolve();
+    const promise = this.copySelectionToClipboard();
+    this.idle.track(promise);
+    return promise.finally(() => {
+      this.focus();
+    });
+  }
+
+  cutToClipboard(): Promise<void> {
+    if (!this.shouldHandleSpreadsheetClipboardCommand()) return Promise.resolve();
+    const promise = this.cutSelectionToClipboard();
+    this.idle.track(promise);
+    return promise.finally(() => {
+      this.focus();
+    });
+  }
+
+  pasteFromClipboard(): Promise<void> {
+    if (!this.shouldHandleSpreadsheetClipboardCommand()) return Promise.resolve();
+    const promise = this.pasteClipboardToSelection();
+    this.idle.track(promise);
+    return promise.finally(() => {
+      this.focus();
+    });
+  }
+
   private handleClipboardShortcut(e: KeyboardEvent): boolean {
     const primary = e.ctrlKey || e.metaKey;
     if (!primary || e.altKey || e.shiftKey) return false;

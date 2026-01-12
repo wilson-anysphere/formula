@@ -88,6 +88,7 @@ import { deriveSelectionContextKeys } from "./extensions/selectionContextKeys.js
 import { evaluateWhenClause } from "./extensions/whenClause.js";
 import { CommandRegistry } from "./extensions/commandRegistry.js";
 import { createCommandPalette } from "./command-palette/index.js";
+import { registerBuiltinCommands } from "./commands/registerBuiltinCommands.js";
 import type { Range, SelectionState } from "./selection/types";
 import { ContextMenu, type ContextMenuItem } from "./menus/contextMenu.js";
 import { getPasteSpecialMenuItems } from "./clipboard/pasteSpecial.js";
@@ -1293,15 +1294,7 @@ if (
   extensionHostManagerForE2e = extensionHostManager;
 
   const commandRegistry = new CommandRegistry();
-  // Built-in spreadsheet commands. These must be registered in the CommandRegistry so
-  // context menus (and eventually the command palette) can execute them uniformly.
-  commandRegistry.registerBuiltinCommand("clipboard.cut", t("clipboard.cut"), () => app.clipboardCut());
-  commandRegistry.registerBuiltinCommand("clipboard.copy", t("clipboard.copy"), () => app.clipboardCopy());
-  commandRegistry.registerBuiltinCommand("clipboard.paste", t("clipboard.paste"), () => app.clipboardPaste());
-  commandRegistry.registerBuiltinCommand("clipboard.pasteSpecial", "Paste Special…", (mode?: unknown) =>
-    app.clipboardPasteSpecial((mode as any) ?? "all"),
-  );
-  commandRegistry.registerBuiltinCommand("edit.clearContents", "Clear Contents", () => app.clearContents());
+  registerBuiltinCommands({ commandRegistry, app, layoutController });
 
   extensionPanelBridge = new ExtensionPanelBridge({
     host: extensionHostManager.host as any,
@@ -2577,103 +2570,6 @@ if (
   // --- Command palette -----------------------------------------------------------
 
   commandRegistry.registerBuiltinCommand(
-    "insertPivotTable",
-    t("commandPalette.command.insertPivotTable"),
-    () => {
-      layoutController.openPanel(PanelIds.PIVOT_BUILDER);
-      // If the panel is already open, we still want to refresh its source range from
-      // the latest selection.
-      window.dispatchEvent(new CustomEvent("pivot-builder:use-selection"));
-    },
-    { category: "Insert" },
-  );
-  commandRegistry.registerBuiltinCommand(
-    "tracePrecedents",
-    "Trace precedents",
-    () => {
-      app.clearAuditing();
-      app.toggleAuditingPrecedents();
-      app.focus();
-    },
-    { category: "Auditing" },
-  );
-  commandRegistry.registerBuiltinCommand(
-    "traceDependents",
-    "Trace dependents",
-    () => {
-      app.clearAuditing();
-      app.toggleAuditingDependents();
-      app.focus();
-    },
-    { category: "Auditing" },
-  );
-  commandRegistry.registerBuiltinCommand(
-    "traceBoth",
-    "Trace precedents + dependents",
-    () => {
-      app.clearAuditing();
-      app.toggleAuditingPrecedents();
-      app.toggleAuditingDependents();
-      app.focus();
-    },
-    { category: "Auditing" },
-  );
-  commandRegistry.registerBuiltinCommand(
-    "clearAuditing",
-    "Clear auditing",
-    () => {
-      app.clearAuditing();
-      app.focus();
-    },
-    { category: "Auditing" },
-  );
-  commandRegistry.registerBuiltinCommand(
-    "toggleTransitiveAuditing",
-    "Toggle transitive auditing",
-    () => {
-      app.toggleAuditingTransitive();
-      app.focus();
-    },
-    { category: "Auditing" },
-  );
-  commandRegistry.registerBuiltinCommand(
-    "freezePanes",
-    "Freeze Panes",
-    () => {
-      app.freezePanes();
-      app.focus();
-    },
-    { category: "View" },
-  );
-  commandRegistry.registerBuiltinCommand(
-    "freezeTopRow",
-    "Freeze Top Row",
-    () => {
-      app.freezeTopRow();
-      app.focus();
-    },
-    { category: "View" },
-  );
-  commandRegistry.registerBuiltinCommand(
-    "freezeFirstColumn",
-    "Freeze First Column",
-    () => {
-      app.freezeFirstColumn();
-      app.focus();
-    },
-    { category: "View" },
-  );
-  commandRegistry.registerBuiltinCommand(
-    "unfreezePanes",
-    "Unfreeze Panes",
-    () => {
-      app.unfreezePanes();
-      app.focus();
-    },
-    { category: "View" },
-  );
-
-  commandRegistry.registerBuiltinCommand(
     "checkForUpdates",
     "Check for Updates",
     () => {
@@ -2683,7 +2579,6 @@ if (
     },
     { category: "Help" },
   );
-
   if (import.meta.env.DEV) {
     commandRegistry.registerBuiltinCommand(
       "debugShowSystemNotification",

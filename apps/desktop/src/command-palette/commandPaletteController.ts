@@ -252,12 +252,13 @@ export class CommandPaletteController {
   }
 
   private filteredCommands(): CommandContribution[] {
-    const list = this.commandRegistry.listCommands();
+    const list = this.commandRegistry.listCommands().filter((cmd) => cmd.commandId !== "workbench.showCommandPalette");
     const q = this.paletteQuery.trim().toLowerCase();
     if (!q) return list;
     return list.filter((cmd) => {
       const label = this.displayLabel(cmd);
-      const haystack = `${label} ${cmd.commandId} ${cmd.category ?? ""}`.toLowerCase();
+      const keywords = Array.isArray(cmd.keywords) ? cmd.keywords.join(" ") : "";
+      const haystack = `${label} ${cmd.commandId} ${cmd.category ?? ""} ${cmd.description ?? ""} ${keywords}`.toLowerCase();
       return haystack.includes(q);
     });
   }
