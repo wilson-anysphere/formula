@@ -965,6 +965,13 @@ impl Engine {
             self.dirty_reasons.remove(&key);
             self.calc_graph.mark_dirty(cell_id);
         }
+
+        // Ensure the engine-level dirty set matches the dependency graph (including any spill
+        // output nodes that were marked dirty as dependents).
+        self.sync_dirty_from_calc_graph();
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
     }
 
     fn recompile_all_formula_cells(&mut self) -> Result<(), EngineError> {
