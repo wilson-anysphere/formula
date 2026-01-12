@@ -147,6 +147,29 @@ test.describe("sheet tabs", () => {
     await expect(tab).toContainText("Renamed");
   });
 
+  test("sheet switcher select activates sheets and updates sheet position", async ({ page }) => {
+    await gotoDesktop(page);
+
+    // Ensure A1 is active so subsequent sheet activation has a deterministic cell focus.
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      app.activateCell({ row: 0, col: 0 });
+      app.getDocument().setCellValue("Sheet2", "A1", "Hello from Sheet2");
+      app.getDocument().setCellValue("Sheet3", "A1", "Hello from Sheet3");
+    });
+
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 3");
+
+    const switcher = page.getByTestId("sheet-switcher");
+    await switcher.selectOption("Sheet3", { force: true });
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet3");
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 3 of 3");
+
+    await switcher.selectOption("Sheet2", { force: true });
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet2");
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 3");
+  });
+
   test("rename cancels on Escape (does not commit via blur)", async ({ page }) => {
     await gotoDesktop(page);
 
