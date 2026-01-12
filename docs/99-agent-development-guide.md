@@ -161,7 +161,7 @@ The scheduler handles CPU contention well. The issue is that **parallelism corre
 | npm scripts (parallel) | `-j4`            | `npm-run-all -p` or `concurrently`         |
 | Jest/Vitest            | `--maxWorkers=4` | Test parallelism                           |
 | `pnpm test:node`       | `FORMULA_NODE_TEST_CONCURRENCY=2` (default) | Avoids over-parallelizing heavyweight integration tests |
-| Likely solo operation  | `-j8` to `-j16`  | When you're confident few others compiling |
+| Likely solo operation  | `-j8`            | Avoid >8 on multi-agent hosts              |
 
 ### Node test runner concurrency
 

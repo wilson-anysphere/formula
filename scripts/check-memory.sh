@@ -51,7 +51,7 @@ elif [ "$AVAIL_GB" -lt 500 ]; then
   echo "   → System is healthy"
 else
   echo "🚀 EXCELLENT: ${AVAIL_GB}GB available (${USED_PCT}% used)"
-  echo "   → Use -j8 to -j16 for builds"
+  echo "   → Use -j8 for builds (max recommended on multi-agent hosts)"
   echo "   → Plenty of headroom"
 fi
 
