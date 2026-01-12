@@ -202,11 +202,9 @@ function normalizeClipboardHtml(html) {
   if (startMarker) {
     const afterStart = startMarker.index + startMarker[0].length;
     const endMarker = /<!--\s*EndFragment\s*-->/i.exec(input.slice(afterStart));
-    if (endMarker) {
-      const fragment = input.slice(afterStart, afterStart + endMarker.index);
-      const stripped = stripToMarkup(fragment);
-      if (containsCompleteTable(stripped)) return stripped;
-    }
+    const fragment = endMarker ? input.slice(afterStart, afterStart + endMarker.index) : input.slice(afterStart);
+    const stripped = stripToMarkup(fragment);
+    if (containsCompleteTable(stripped)) return stripped;
   }
 
   // Fall back to StartHTML/EndHTML offsets when fragment offsets are missing/incorrect. This can still
