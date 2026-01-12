@@ -150,6 +150,28 @@ fn encodes_and_decodes_discount_securities_and_tbill_functions_via_ftab() {
 }
 
 #[test]
+fn encodes_and_decodes_modern_error_literals() {
+    let ctx = WorkbookContext::default();
+
+    for (code, lit) in [
+        (0x2C, "#SPILL!"),
+        (0x2D, "#CALC!"),
+        (0x2E, "#FIELD!"),
+        (0x2F, "#CONNECT!"),
+        (0x30, "#BLOCKED!"),
+        (0x31, "#UNKNOWN!"),
+    ] {
+        let formula = format!("={lit}");
+        let encoded = encode_rgce_with_context(&formula, &ctx, CellCoord::new(0, 0)).expect("encode");
+        assert_eq!(encoded.rgce, vec![0x1C, code], "encode {lit}");
+        assert!(encoded.rgcb.is_empty(), "encode {lit} should not emit rgcb");
+
+        let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+        assert_eq!(decoded, lit, "decode code={code:#04x}");
+    }
+}
+
+#[test]
 fn encodes_addin_udf_calls_via_namex() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/udf.xlsb");
     let wb = XlsbWorkbook::open(path).expect("open xlsb");

@@ -3291,6 +3291,7 @@ const PTG_MUL: u8 = 0x05;
 const PTG_DIV: u8 = 0x06;
 const PTG_UPLUS: u8 = 0x12;
 const PTG_UMINUS: u8 = 0x13;
+const PTG_ERR: u8 = 0x1C;
 const PTG_INT: u8 = 0x1E;
 const PTG_NUM: u8 = 0x1F;
 const PTG_ARRAY: u8 = 0x20;
@@ -3327,6 +3328,7 @@ const COL_INDEX_MASK: u16 = 0x3FFF;
 #[derive(Clone, Debug, PartialEq)]
 enum Expr {
     Number(f64),
+    Error(u8),
     Ref(Ref),
     Name(NameRef),
     Array(ArrayConst),
@@ -3415,6 +3417,10 @@ fn emit_expr(
 ) -> Result<(), EncodeError> {
     match expr {
         Expr::Number(n) => emit_number(*n, rgce),
+        Expr::Error(code) => {
+            rgce.push(PTG_ERR);
+            rgce.push(*code);
+        }
         Expr::Ref(r) => emit_ref(r, ctx, rgce, PtgClass::Ref)?,
         Expr::Name(n) => emit_name(n, ctx, rgce, PtgClass::Ref)?,
         Expr::Array(a) => emit_array(a, rgce, rgcb)?,
@@ -3850,6 +3856,7 @@ impl<'a> FormulaParser<'a> {
                 }
                 expr
             }
+            Some('#') => Expr::Error(self.parse_error_literal()?),
             Some(ch) if ch.is_ascii_digit() || ch == '.' => self.parse_number()?,
             Some('[') => self.parse_ident_or_ref()?,
             Some('\'') => self.parse_ident_or_ref()?,
@@ -3988,11 +3995,15 @@ impl<'a> FormulaParser<'a> {
 
     fn parse_error_literal(&mut self) -> Result<u8, String> {
         let start = self.pos;
+        if self.next_char() != Some('#') {
+            return Err("expected error literal".to_string());
+        }
         while let Some(ch) = self.peek_char() {
-            if matches!(ch, ',' | ';' | '}') || ch.is_whitespace() {
+            if matches!(ch, '_' | '/' | '!' | '?') || ch.is_ascii_alphanumeric() {
+                self.next_char();
+            } else {
                 break;
             }
-            self.next_char();
         }
         let raw = &self.input[start..self.pos];
         xlsb_error_code_from_literal(raw).ok_or_else(|| format!("unknown error literal: {raw}"))
