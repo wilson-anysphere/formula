@@ -368,7 +368,15 @@ export class DesktopSharedGrid {
   }
 
   scrollTo(x: number, y: number): void {
-    this.renderer.setScroll(x, y);
+    // `CanvasGridRenderer.setScroll` invalidates for scroll unconditionally (even if the scroll
+    // position doesn't actually change). Skip calling it when we're already at the requested
+    // scroll offsets so we don't trigger redundant render work.
+    const before = this.renderer.scroll.getScroll();
+    const nextX = Number.isFinite(x) ? x : 0;
+    const nextY = Number.isFinite(y) ? y : 0;
+    if (before.x !== nextX || before.y !== nextY) {
+      this.renderer.setScroll(nextX, nextY);
+    }
     this.syncScrollbars();
     this.emitScroll();
   }
