@@ -1100,13 +1100,10 @@ impl AppState {
             (current, visible_count)
         };
 
-        // The desktop UI only exposes "visible" / "hidden". Preserve `veryHidden` when present in
-        // imported workbooks, but do not allow the webview to set it.
-        if matches!(visibility, SheetVisibility::VeryHidden) {
-            return Err(AppStateError::WhatIf(
-                "setting veryHidden sheet visibility is not supported".to_string(),
-            ));
-        }
+        // Note: the desktop UI only exposes "visible" / "hidden", but we still allow setting
+        // `veryHidden` from the host APIs so:
+        // - imported workbooks can round-trip their original visibility state, and
+        // - advanced integrations (extensions, automation) can opt into the VBA-style behavior.
 
         // Excel invariant: cannot hide the last visible sheet.
         if matches!(current, SheetVisibility::Visible)
