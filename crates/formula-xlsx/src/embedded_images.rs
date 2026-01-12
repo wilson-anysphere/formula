@@ -631,9 +631,9 @@ fn parse_rich_value_rel_ids(xml: &[u8]) -> Result<Vec<String>, XlsxError> {
                         break;
                     }
                 }
-                if let Some(rid) = rid {
-                    out.push(rid);
-                }
+                // Preserve missing `r:id` entries as placeholders to avoid shifting relationship
+                // indices (Excel treats the `<rel>` list as a dense table).
+                out.push(rid.unwrap_or_default());
             }
             _ => {}
         }
