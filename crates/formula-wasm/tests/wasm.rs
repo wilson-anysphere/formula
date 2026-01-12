@@ -7,11 +7,50 @@ use wasm_bindgen_test::wasm_bindgen_test;
 
 use formula_wasm::{lex_formula, parse_formula_partial, WasmWorkbook, DEFAULT_SHEET};
 
+#[derive(Debug, serde::Deserialize, PartialEq, Eq)]
+struct Span {
+    start: usize,
+    end: usize,
+}
+
+#[derive(Debug, serde::Deserialize, PartialEq)]
+struct LexToken {
+    kind: String,
+    span: Span,
+    #[serde(default)]
+    value: Option<JsonValue>,
+}
+
 fn assert_json_number(value: &JsonValue, expected: f64) {
     let actual = value
         .as_f64()
         .unwrap_or_else(|| panic!("expected JSON number, got {value:?}"));
     assert_eq!(actual, expected);
+}
+
+#[derive(Debug, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct PartialParseResult {
+    error: Option<PartialParseError>,
+    context: PartialParseContext,
+}
+
+#[derive(Debug, serde::Deserialize, PartialEq)]
+struct PartialParseError {
+    message: String,
+    span: Span,
+}
+
+#[derive(Debug, serde::Deserialize, PartialEq)]
+struct PartialParseContext {
+    function: Option<PartialParseFunctionContext>,
+}
+
+#[derive(Debug, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct PartialParseFunctionContext {
+    name: String,
+    arg_index: usize,
 }
 
 #[derive(Debug, serde::Deserialize, PartialEq)]
@@ -27,45 +66,6 @@ struct CellData {
     address: String,
     input: JsonValue,
     value: JsonValue,
-}
-
-#[derive(Debug, serde::Deserialize, PartialEq, Eq)]
-struct Utf16Span {
-    start: u32,
-    end: u32,
-}
-
-#[derive(Debug, serde::Deserialize, PartialEq)]
-struct LexToken {
-    kind: String,
-    span: Utf16Span,
-    #[serde(default)]
-    value: Option<String>,
-}
-
-#[derive(Debug, serde::Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-struct PartialParseResult {
-    error: Option<PartialParseError>,
-    context: PartialParseContext,
-}
-
-#[derive(Debug, serde::Deserialize, PartialEq)]
-struct PartialParseError {
-    message: String,
-    span: Utf16Span,
-}
-
-#[derive(Debug, serde::Deserialize, PartialEq)]
-struct PartialParseContext {
-    function: Option<PartialParseFunctionContext>,
-}
-
-#[derive(Debug, serde::Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-struct PartialParseFunctionContext {
-    name: String,
-    arg_index: usize,
 }
 
 #[wasm_bindgen_test]
@@ -97,6 +97,25 @@ fn parse_formula_partial_fallback_context_in_unterminated_string() {
 }
 
 #[wasm_bindgen_test]
+fn parse_formula_partial_uses_utf16_cursor_and_spans_for_emoji() {
+    let formula = r#"=SUM("😀"#.to_string();
+    let cursor = formula.encode_utf16().count() as u32;
+
+    let parsed_js = parse_formula_partial(formula, Some(cursor), None).unwrap();
+    let parsed: PartialParseResult = serde_wasm_bindgen::from_value(parsed_js).unwrap();
+
+    let err = parsed.error.expect("expected error");
+    assert_eq!(err.message, "Unterminated string literal".to_string());
+    // Span offsets must be expressed as UTF-16 code units (JS string indices).
+    assert_eq!(err.span.start, 5);
+    assert_eq!(err.span.end, cursor as usize);
+
+    let ctx = parsed.context.function.expect("expected function context");
+    assert_eq!(ctx.name, "SUM".to_string());
+    assert_eq!(ctx.arg_index, 0);
+}
+
+#[wasm_bindgen_test]
 fn parse_formula_partial_fallback_context_in_unterminated_sheet_quote() {
     let formula = "=SUM('My Sheet".to_string();
     let cursor = formula.encode_utf16().count() as u32;
@@ -113,6 +132,22 @@ fn parse_formula_partial_fallback_context_in_unterminated_sheet_quote() {
     let ctx = parsed.context.function.unwrap();
     assert_eq!(ctx.name, "SUM".to_string());
     assert_eq!(ctx.arg_index, 0);
+}
+
+#[wasm_bindgen_test]
+fn lex_formula_emits_utf16_spans_for_emoji() {
+    let formula = "=\"😀\"".to_string();
+    let expected_end = formula.encode_utf16().count();
+
+    let tokens_js = lex_formula(&formula, None).unwrap();
+    let tokens: Vec<LexToken> = serde_wasm_bindgen::from_value(tokens_js).unwrap();
+
+    let string_token = tokens
+        .iter()
+        .find(|t| t.kind == "String")
+        .expect("expected string token");
+    assert_eq!(string_token.span.start, 1);
+    assert_eq!(string_token.span.end, expected_end);
 }
 
 #[wasm_bindgen_test]
@@ -928,12 +963,15 @@ fn lex_formula_spans_are_utf16() {
     let tokens_js = lex_formula(formula, None).unwrap();
     let tokens: Vec<LexToken> = serde_wasm_bindgen::from_value(tokens_js).unwrap();
 
-    let utf16_len = formula.encode_utf16().count() as u32;
+    let utf16_len = formula.encode_utf16().count();
     let string_tok = tokens
         .iter()
         .find(|tok| tok.kind == "String")
         .unwrap_or_else(|| panic!("expected String token, got {tokens:?}"));
-    assert_eq!(string_tok.value.as_deref(), Some("a😊b"));
+    assert_eq!(
+        string_tok.value.as_ref().and_then(|v| v.as_str()),
+        Some("a😊b")
+    );
     // String token includes surrounding quotes, so it should start at the opening quote right after '='.
     assert_eq!(string_tok.span.start, 1);
     assert_eq!(string_tok.span.end, utf16_len);
@@ -970,7 +1008,7 @@ fn parse_formula_partial_reports_error_span_utf16() {
     // Unterminated string with a surrogate-pair char in it (😊).
     let formula = "=\"a😊".to_string();
     let cursor = formula.encode_utf16().count() as u32;
-    let utf16_len = cursor;
+    let utf16_len = cursor as usize;
 
     let parsed_js = parse_formula_partial(formula, Some(cursor), None).unwrap();
     let parsed: PartialParseResult = serde_wasm_bindgen::from_value(parsed_js).unwrap();

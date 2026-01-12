@@ -46,16 +46,6 @@ fn js_err(message: impl ToString) -> JsValue {
     JsValue::from_str(&message.to_string())
 }
 
-fn edit_error_to_string(err: EngineEditError) -> String {
-    match err {
-        EngineEditError::SheetNotFound(sheet) => format!("sheet not found: {sheet}"),
-        EngineEditError::InvalidCount => "invalid count".to_string(),
-        EngineEditError::InvalidRange => "invalid range".to_string(),
-        EngineEditError::OverlappingMove => "overlapping move".to_string(),
-        EngineEditError::Engine(message) => message,
-    }
-}
-
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ParseOptionsJsDto {
@@ -64,7 +54,6 @@ struct ParseOptionsJsDto {
     #[serde(default)]
     reference_style: Option<formula_engine::ReferenceStyle>,
 }
-
 fn parse_options_from_js(options: Option<JsValue>) -> Result<ParseOptions, JsValue> {
     let Some(value) = options else {
         return Ok(ParseOptions::default());
@@ -107,6 +96,15 @@ fn parse_options_from_js(options: Option<JsValue>) -> Result<ParseOptions, JsVal
 
     // Fall back to the full ParseOptions struct for advanced callers.
     serde_wasm_bindgen::from_value(obj.into()).map_err(|err| js_err(err.to_string()))
+}
+fn edit_error_to_string(err: EngineEditError) -> String {
+    match err {
+        EngineEditError::SheetNotFound(sheet) => format!("sheet not found: {sheet}"),
+        EngineEditError::InvalidCount => "invalid count".to_string(),
+        EngineEditError::InvalidRange => "invalid range".to_string(),
+        EngineEditError::OverlappingMove => "overlapping move".to_string(),
+        EngineEditError::Engine(message) => message,
+    }
 }
 
 #[cfg(target_arch = "wasm32")]

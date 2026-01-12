@@ -5117,7 +5117,9 @@ fn expand_nodes_to_cells(nodes: &[PrecedentNode], limit: usize) -> Vec<(SheetId,
 fn canonical_expr_contains_structured_refs(expr: &crate::Expr) -> bool {
     match expr {
         crate::Expr::StructuredRef(_) => true,
-        crate::Expr::FieldAccess(access) => canonical_expr_contains_structured_refs(access.base.as_ref()),
+        crate::Expr::FieldAccess(access) => {
+            canonical_expr_contains_structured_refs(access.base.as_ref())
+        }
         crate::Expr::FunctionCall(call) => call
             .args
             .iter()
