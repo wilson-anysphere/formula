@@ -31,4 +31,17 @@ describe("ribbonIconMap", () => {
       expect(getRibbonIcon(id), `Expected icon for ${id}`).toBeDefined();
     }
   });
+
+  it("covers desktop panel toggle icons used in e2e", () => {
+    const requiredCommandIds = [
+      "open-marketplace-panel",
+      "open-version-history-panel",
+      "open-branch-manager-panel",
+      "file.info.manageWorkbook.versions",
+    ] as const;
+
+    for (const id of requiredCommandIds) {
+      expect(getRibbonIcon(id), `Expected icon for ${id}`).toBeDefined();
+    }
+  });
 });
