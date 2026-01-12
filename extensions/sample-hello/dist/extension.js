@@ -116,7 +116,7 @@ async function activate(context) {
       await formula.workbook.openWorkbook(workbookPath);
       const evt = await Promise.race([
         eventPromise,
-        new Promise((resolve) => setTimeout(() => resolve(null), 5000))
+        new Promise((resolve) => setTimeout(() => resolve(null), 5e3))
       ]);
       const workbook = await formula.workbook.getActiveWorkbook();
       await formula.ui.showMessage(
@@ -142,7 +142,7 @@ async function activate(context) {
       await formula.workbook.saveAs(workbookPath);
       const evt = await Promise.race([
         eventPromise,
-        new Promise((resolve) => setTimeout(() => resolve(null), 5000))
+        new Promise((resolve) => setTimeout(() => resolve(null), 5e3))
       ]);
       const workbook = await formula.workbook.getActiveWorkbook();
       await formula.ui.showMessage(
