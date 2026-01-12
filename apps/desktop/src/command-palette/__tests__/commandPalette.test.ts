@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import { fuzzyMatchCommand } from "../fuzzy";
 import {
   COMMAND_RECENTS_STORAGE_KEY,
+  LEGACY_COMMAND_RECENTS_STORAGE_KEY,
   getRecentCommandIdsForDisplay,
   installCommandRecentsTracker,
   readCommandRecents,
@@ -84,6 +85,56 @@ describe("command-palette/recents", () => {
     await commandRegistry.executeCommand("test.command");
 
     expect(readCommandRecents(storage)).toEqual([{ commandId: "test.command", lastUsedMs: 1234, count: 1 }]);
+  });
+
+  test("clipboard commands can be ignored", async () => {
+    const storage = new MemoryStorage();
+    const commandRegistry = new CommandRegistry();
+    commandRegistry.registerBuiltinCommand("clipboard.copy", "Copy", () => "ok");
+    commandRegistry.registerBuiltinCommand("cmd.normal", "Normal", () => "ok");
+
+    installCommandRecentsTracker(commandRegistry, storage, {
+      now: () => 1234,
+      ignoreCommandIds: ["clipboard.copy", "clipboard.cut", "clipboard.paste"],
+    });
+
+    await commandRegistry.executeCommand("clipboard.copy");
+    expect(readCommandRecents(storage)).toEqual([]);
+
+    await commandRegistry.executeCommand("cmd.normal");
+    expect(readCommandRecents(storage)).toEqual([{ commandId: "cmd.normal", lastUsedMs: 1234, count: 1 }]);
+  });
+
+  test("failed commands are not recorded", async () => {
+    const storage = new MemoryStorage();
+    const commandRegistry = new CommandRegistry();
+    commandRegistry.registerBuiltinCommand("cmd.fail", "Fail", () => {
+      throw new Error("boom");
+    });
+
+    installCommandRecentsTracker(commandRegistry, storage, { now: () => 1234 });
+
+    await expect(commandRegistry.executeCommand("cmd.fail")).rejects.toThrow("boom");
+    expect(readCommandRecents(storage)).toEqual([]);
+  });
+
+  test("migrates legacy storage key into the new schema (one-time)", () => {
+    const storage = new MemoryStorage();
+    storage.setItem(LEGACY_COMMAND_RECENTS_STORAGE_KEY, JSON.stringify(["cmd.a", "cmd.b"]));
+    const commandRegistry = new CommandRegistry();
+
+    installCommandRecentsTracker(commandRegistry, storage, { now: () => 999 });
+    expect(readCommandRecents(storage)).toEqual([
+      { commandId: "cmd.a", lastUsedMs: 999, count: 1 },
+      { commandId: "cmd.b", lastUsedMs: 999, count: 1 },
+    ]);
+
+    // Idempotent: installing again should not overwrite the migrated timestamps.
+    installCommandRecentsTracker(commandRegistry, storage, { now: () => 1000 });
+    expect(readCommandRecents(storage)).toEqual([
+      { commandId: "cmd.a", lastUsedMs: 999, count: 1 },
+      { commandId: "cmd.b", lastUsedMs: 999, count: 1 },
+    ]);
   });
 
   test("removed commands are filtered out", () => {

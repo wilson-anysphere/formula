@@ -1,6 +1,7 @@
 import type { CommandRegistry } from "../extensions/commandRegistry.js";
 
 export const COMMAND_RECENTS_STORAGE_KEY = "formula.commandRecents";
+export const LEGACY_COMMAND_RECENTS_STORAGE_KEY = "formula.commandPalette.recents";
 export const DEFAULT_COMMAND_RECENTS_MAX_ENTRIES = 20;
 
 export type StorageLike = Pick<Storage, "getItem" | "setItem">;
@@ -33,6 +34,28 @@ function safeParseRecents(raw: string | null): CommandRecentEntry[] {
 
     // Ensure deterministic ordering for callers (and for the stored JSON).
     out.sort((a, b) => b.lastUsedMs - a.lastUsedMs);
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+function safeParseLegacyRecents(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const item of parsed) {
+      if (typeof item !== "string") continue;
+      const commandId = String(item).trim();
+      if (!commandId) continue;
+      if (seen.has(commandId)) continue;
+      seen.add(commandId);
+      out.push(commandId);
+    }
     return out;
   } catch {
     return [];
@@ -124,8 +147,32 @@ export function installCommandRecentsTracker(
   const now = options.now ?? (() => Date.now());
   const ignore = new Set((options.ignoreCommandIds ?? []).map((id) => String(id)));
 
+  // Best-effort, one-time migration from the legacy recents key.
+  // We only migrate when the new key has no entries yet, so it is idempotent.
+  try {
+    const existing = readCommandRecents(storage, { storageKey: options.storageKey });
+    if (existing.length === 0) {
+      const legacyIds = safeParseLegacyRecents(storage.getItem(LEGACY_COMMAND_RECENTS_STORAGE_KEY));
+      if (legacyIds.length > 0) {
+        const limit = Number.isFinite(options.maxEntries)
+          ? Math.max(0, options.maxEntries ?? DEFAULT_COMMAND_RECENTS_MAX_ENTRIES)
+          : DEFAULT_COMMAND_RECENTS_MAX_ENTRIES;
+        const nowMs = now();
+        const migrated: CommandRecentEntry[] = (limit > 0 ? legacyIds.slice(0, limit) : []).map((commandId) => ({
+          commandId,
+          lastUsedMs: nowMs,
+          count: 1,
+        }));
+        if (migrated.length > 0) writeCommandRecents(storage, migrated, { storageKey: options.storageKey });
+      }
+    }
+  } catch {
+    // ignore
+  }
+
   return commandRegistry.onDidExecuteCommand((evt) => {
     if (ignore.has(evt.commandId)) return;
+    if (evt.error != null) return;
     recordCommandRecent(storage, evt.commandId, {
       maxEntries: options.maxEntries,
       nowMs: now(),

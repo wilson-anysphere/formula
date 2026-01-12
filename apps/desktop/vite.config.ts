@@ -106,6 +106,7 @@ export default defineConfig({
     headers: crossOriginIsolationHeaders,
   },
   test: {
+    setupFiles: [resolve(repoRoot, "vitest.setup.ts")],
     environment: "node",
     // Desktop unit tests can incur a fair amount of Vite/React compilation overhead on
     // shared runners; keep timeouts generous so we don't flake on cold caches.

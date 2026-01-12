@@ -918,7 +918,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   });
 
   const disposeRecentsTracker = installCommandRecentsTracker(commandRegistry, storage, {
-    ignoreCommandIds: ["workbench.showCommandPalette"],
+    ignoreCommandIds: ["workbench.showCommandPalette", "clipboard.copy", "clipboard.cut", "clipboard.paste"],
   });
 
   const onOverlayClick = (e: MouseEvent) => {
