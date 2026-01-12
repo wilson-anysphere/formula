@@ -727,7 +727,10 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
 
     const applied = this.controller.setRangeFormat(sheetId, toControllerRange(range), patch, { label: "AI apply_formatting" });
     if (applied === false) {
-      throw new Error(`Formatting could not be applied to ${formatA1Range(range)}. Try selecting fewer cells/rows.`);
+      const rangeForUser = { ...range, sheet: this.getSheetNameById(sheetId) };
+      throw new Error(
+        `Formatting could not be applied to ${formatA1Range(rangeForUser)}. Try selecting fewer cells/rows.`,
+      );
     }
     return rows * cols;
   }
