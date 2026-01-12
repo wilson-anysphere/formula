@@ -133,20 +133,20 @@ export function parseFormula(formula) {
     // Function call
     if (isPunct("(")) {
       next();
-        /** @type {AstNode[]} */
-        const args = [];
-        if (!isPunct(")")) {
-          while (true) {
-            args.push(parseExpression());
-            // In Excel, argument separators are typically `,` but some locales use `;`.
-            // Our tokenizer classifies both as punctuation.
-            if (isPunct(",") || isPunct(";")) {
-              next();
-              continue;
-            }
-            break;
+      /** @type {AstNode[]} */
+      const args = [];
+      if (!isPunct(")")) {
+        while (true) {
+          args.push(parseExpression());
+          // In Excel, argument separators are typically `,` but some locales use `;`.
+          // Our tokenizer classifies both as punctuation.
+          if (isPunct(",") || isPunct(";")) {
+            next();
+            continue;
           }
+          break;
         }
+      }
       expect("punct", ")");
       return { type: "Function", name: first, args };
     }
