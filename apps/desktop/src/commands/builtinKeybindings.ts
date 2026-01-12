@@ -372,9 +372,23 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     allowRepeat: true,
   },
   {
+    // Some keyboards/remote setups can emit both ctrlKey+metaKey for a single chord.
+    command: "workbook.previousSheet",
+    key: "ctrl+cmd+pageup",
+    when: WHEN_SHEET_NAVIGATION,
+    allowRepeat: true,
+  },
+  {
     command: "workbook.nextSheet",
     key: "ctrl+pagedown",
     mac: "cmd+pagedown",
+    when: WHEN_SHEET_NAVIGATION,
+    allowRepeat: true,
+  },
+  {
+    // Some keyboards/remote setups can emit both ctrlKey+metaKey for a single chord.
+    command: "workbook.nextSheet",
+    key: "ctrl+cmd+pagedown",
     when: WHEN_SHEET_NAVIGATION,
     allowRepeat: true,
   },

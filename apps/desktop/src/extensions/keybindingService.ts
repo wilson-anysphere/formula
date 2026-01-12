@@ -235,10 +235,10 @@ export class KeybindingService {
     },
   ) {
     this.platform = params.platform ?? detectPlatform();
+    this.ignoreInputTargets = params.ignoreInputTargets ?? "all";
     this.reservedExtensionShortcuts = (params.reservedShortcuts ?? DEFAULT_RESERVED_EXTENSION_SHORTCUTS)
       .map((binding) => parseKeybinding("__reserved__", binding, null))
       .filter((binding): binding is ParsedKeybinding => binding != null);
-    this.ignoreInputTargets = params.ignoreInputTargets ?? "all";
   }
 
   setBuiltinKeybindings(bindings: BuiltinKeybinding[]): void {
@@ -316,11 +316,32 @@ export class KeybindingService {
   ): () => void {
     this.dispose();
     const { capture = false, allowBuiltins, allowExtensions } = opts;
+
+    // When installed in capture phase, never run extension-contributed keybindings in capture.
+    // Instead, run built-ins in capture and extensions in bubble.
+    if (capture) {
+      const captureHandler = (e: KeyboardEvent) => {
+        if (allowBuiltins === false) return;
+        void this.dispatchKeydown(e, { allowBuiltins: true, allowExtensions: false });
+      };
+      const bubbleHandler = (e: KeyboardEvent) => {
+        if (allowExtensions === false) return;
+        void this.dispatchKeydown(e, { allowBuiltins: false, allowExtensions: true });
+      };
+      target.addEventListener("keydown", captureHandler, { capture: true });
+      target.addEventListener("keydown", bubbleHandler, { capture: false });
+      this.removeListener = () => {
+        target.removeEventListener("keydown", captureHandler, { capture: true });
+        target.removeEventListener("keydown", bubbleHandler, { capture: false });
+      };
+      return () => this.dispose();
+    }
+
     const handler = (e: KeyboardEvent) => {
       void this.dispatchKeydown(e, { allowBuiltins, allowExtensions });
     };
-    target.addEventListener("keydown", handler, { capture });
-    this.removeListener = () => target.removeEventListener("keydown", handler, { capture });
+    target.addEventListener("keydown", handler, { capture: false });
+    this.removeListener = () => target.removeEventListener("keydown", handler, { capture: false });
     return () => this.dispose();
   }
 
@@ -353,12 +374,12 @@ export class KeybindingService {
         (opts.allowExtensions ?? true) && !(inputTarget && this.ignoreInputTargets === "extensions"),
     });
     if (!match) return false;
+    if (event.repeat && !match.allowRepeat) return false;
 
     event.preventDefault();
     void (async () => {
       try {
-        await this.params.onBeforeExecuteCommand?.(match.binding.command, match.source);
-        await this.params.commandRegistry.executeCommand(match.binding.command);
+        await this.executeMatch(match);
       } catch (err) {
         this.params.onCommandError?.(match.binding.command, err);
       }
@@ -382,15 +403,23 @@ export class KeybindingService {
         (opts.allowExtensions ?? true) && !(inputTarget && this.ignoreInputTargets === "extensions"),
     });
     if (!match) return false;
+    // Avoid repeatedly firing commands when the user holds a key down (e.g. toggles like
+    // command palette / AI chat). Some commands (e.g. sheet navigation) explicitly opt into
+    // repeated dispatch.
+    if (event.repeat && !match.allowRepeat) return false;
 
     event.preventDefault();
     try {
-      await this.params.onBeforeExecuteCommand?.(match.binding.command, match.source);
-      await this.params.commandRegistry.executeCommand(match.binding.command);
+      await this.executeMatch(match);
     } catch (err) {
       this.params.onCommandError?.(match.binding.command, err);
     }
     return true;
+  }
+
+  private async executeMatch(match: StoredKeybinding): Promise<void> {
+    await this.params.onBeforeExecuteCommand?.(match.binding.command, match.source);
+    await this.params.commandRegistry.executeCommand(match.binding.command);
   }
 
   private findMatchingBinding(

@@ -33,6 +33,12 @@ function makeKeydownEvent(opts: {
   return event as KeyboardEvent;
 }
 
+async function flushMicrotasks(times = 6): Promise<void> {
+  for (let i = 0; i < times; i++) {
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+  }
+}
+
 describe("KeybindingService", () => {
   it("prefers built-in bindings over extension bindings for the same key", async () => {
     const contextKeys = new ContextKeyService();
@@ -347,6 +353,7 @@ describe("KeybindingService", () => {
     expect(handled24).toBe(false);
     expect(event24.defaultPrevented).toBe(false);
     expect(extRun).not.toHaveBeenCalled();
+
 
     // File shortcuts: Ctrl/Cmd + N/O/S/W/Q.
     const fileEvent1 = makeKeydownEvent({ key: "n", ctrlKey: true });
@@ -736,7 +743,7 @@ describe("KeybindingService", () => {
     expect(builtinRun).not.toHaveBeenCalled();
   });
 
-  it("ignores keybindings when the target is an input/textarea/contenteditable", async () => {
+  it('blocks built-in keybindings in inputs when ignoreInputTargets="all" (default)', async () => {
     const contextKeys = new ContextKeyService();
     const commandRegistry = new CommandRegistry();
 
@@ -792,6 +799,129 @@ describe("KeybindingService", () => {
     expect(event2.defaultPrevented).toBe(false);
     expect(builtinRun).toHaveBeenCalledTimes(1);
     expect(extRun).not.toHaveBeenCalled();
+  });
+
+  it('allows built-ins and extensions in inputs when ignoreInputTargets="none"', async () => {
+    const contextKeys = new ContextKeyService();
+    const commandRegistry = new CommandRegistry();
+
+    const builtinRun = vi.fn();
+    const extRun = vi.fn();
+    commandRegistry.registerBuiltinCommand("builtin.doThing", "Builtin", builtinRun);
+    commandRegistry.setExtensionCommands(
+      [{ extensionId: "ext", command: "ext.doThing", title: "Ext" }],
+      async () => extRun(),
+    );
+
+    const inputTarget = { tagName: "INPUT", isContentEditable: false };
+    const service = new KeybindingService({ commandRegistry, contextKeys, platform: "other", ignoreInputTargets: "none" });
+    service.setBuiltinKeybindings([{ command: "builtin.doThing", key: "ctrl+j" }]);
+    service.setExtensionKeybindings([{ extensionId: "ext", command: "ext.doThing", key: "ctrl+l", mac: null, when: null }]);
+
+    const builtinEvent = makeKeydownEvent({ key: "j", ctrlKey: true, target: inputTarget });
+    const builtinHandled = await service.dispatchKeydown(builtinEvent);
+    expect(builtinHandled).toBe(true);
+    expect(builtinEvent.defaultPrevented).toBe(true);
+    expect(builtinRun).toHaveBeenCalledTimes(1);
+
+    const extEvent = makeKeydownEvent({ key: "l", ctrlKey: true, target: inputTarget });
+    const extHandled = await service.dispatchKeydown(extEvent);
+    expect(extHandled).toBe(true);
+    expect(extEvent.defaultPrevented).toBe(true);
+    expect(extRun).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores keybindings when the target is inside a `data-keybinding-barrier="true"` subtree', async () => {
+    const contextKeys = new ContextKeyService();
+    const commandRegistry = new CommandRegistry();
+
+    const builtinRun = vi.fn();
+    commandRegistry.registerBuiltinCommand("builtin.barrier", "Builtin", builtinRun);
+
+    const service = new KeybindingService({ commandRegistry, contextKeys, platform: "other", ignoreInputTargets: "none" });
+    service.setBuiltinKeybindings([{ command: "builtin.barrier", key: "ctrl+k" }]);
+
+    const barrier = { dataset: { keybindingBarrier: "true" } };
+    const target = { tagName: "DIV", isContentEditable: false, parentElement: barrier };
+
+    const event = makeKeydownEvent({ key: "k", ctrlKey: true, target });
+    const handled = await service.dispatchKeydown(event);
+
+    expect(handled).toBe(false);
+    expect(event.defaultPrevented).toBe(false);
+    expect(builtinRun).not.toHaveBeenCalled();
+  });
+
+  it("does not run extension keybindings from capture-phase listeners", async () => {
+    const contextKeys = new ContextKeyService();
+    const commandRegistry = new CommandRegistry();
+
+    const builtinRun = vi.fn();
+    const extRun = vi.fn();
+    commandRegistry.registerBuiltinCommand("builtin.doThing", "Builtin", builtinRun);
+    commandRegistry.setExtensionCommands(
+      [{ extensionId: "ext", command: "ext.doThing", title: "Ext" }],
+      async () => extRun(),
+    );
+
+    const service = new KeybindingService({ commandRegistry, contextKeys, platform: "other", ignoreInputTargets: "none" });
+    service.setBuiltinKeybindings([{ command: "builtin.doThing", key: "ctrl+j" }]);
+    service.setExtensionKeybindings([{ extensionId: "ext", command: "ext.doThing", key: "ctrl+l", mac: null, when: null }]);
+
+    const listeners: Array<{ capture: boolean; handler: (evt: KeyboardEvent) => void }> = [];
+    const fakeWindow = {
+      addEventListener: (_type: string, handler: any, options?: any) => {
+        listeners.push({ capture: Boolean(options?.capture), handler });
+      },
+      removeEventListener: () => {},
+    };
+    service.installWindowListener(fakeWindow as any, { capture: true });
+
+    const captureHandler = listeners.find((l) => l.capture)?.handler;
+    const bubbleHandler = listeners.find((l) => !l.capture)?.handler;
+    expect(captureHandler).toBeDefined();
+    expect(bubbleHandler).toBeDefined();
+
+    // Extension-only chord should not fire during capture, but should fire during bubble.
+    const event = makeKeydownEvent({ key: "l", ctrlKey: true });
+    captureHandler!(event);
+    await flushMicrotasks();
+    expect(extRun).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+
+    bubbleHandler!(event);
+    await flushMicrotasks();
+    expect(extRun).toHaveBeenCalledTimes(1);
+    expect(event.defaultPrevented).toBe(true);
+
+    // Builtins should still win overall.
+    const event2 = makeKeydownEvent({ key: "j", ctrlKey: true });
+    captureHandler!(event2);
+    await flushMicrotasks();
+    expect(builtinRun).toHaveBeenCalledTimes(1);
+    expect(event2.defaultPrevented).toBe(true);
+
+    bubbleHandler!(event2);
+    await flushMicrotasks();
+    expect(extRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("dispatches repeated keydown events when the binding opts into repeat", async () => {
+    const contextKeys = new ContextKeyService();
+    const commandRegistry = new CommandRegistry();
+
+    const builtinRun = vi.fn();
+    commandRegistry.registerBuiltinCommand("builtin.repeatAllowed", "Builtin", builtinRun);
+
+    const service = new KeybindingService({ commandRegistry, contextKeys, platform: "other" });
+    service.setBuiltinKeybindings([{ command: "builtin.repeatAllowed", key: "ctrl+k", allowRepeat: true }]);
+
+    const event = makeKeydownEvent({ key: "k", ctrlKey: true, repeat: true });
+    const handled = await service.dispatchKeydown(event);
+
+    expect(handled).toBe(true);
+    expect(event.defaultPrevented).toBe(true);
+    expect(builtinRun).toHaveBeenCalledTimes(1);
   });
 
   it("respects weight when multiple built-in bindings match the same chord", async () => {
