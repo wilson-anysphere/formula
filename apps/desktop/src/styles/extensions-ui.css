@@ -31,8 +31,7 @@ dialog.extensions-ui {
   box-shadow: 0 0 0 2px var(--selection-bg);
 }
 
-.extensions-ui textarea.dialog__field,
-.extensions-ui .dialog__field--textarea {
+.extensions-ui textarea.dialog__field {
   resize: vertical;
   font-family:
     ui-monospace,

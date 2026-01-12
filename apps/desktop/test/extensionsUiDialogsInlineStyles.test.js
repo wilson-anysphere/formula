@@ -49,6 +49,11 @@ test("extension UI dialogs avoid inline style assignments", () => {
   );
   assert.match(
     inputBoxSection,
+    /textarea\.className\s*=\s*"dialog__field"/,
+    "showInputBox should apply the dialog__field CSS class in textarea mode",
+  );
+  assert.match(
+    inputBoxSection,
     /controls\.className\s*=\s*"dialog__controls"/,
     "showInputBox should apply the dialog__controls CSS class",
   );
