@@ -3087,6 +3087,7 @@ export class CanvasGridRenderer {
           const direction = style?.direction ?? "auto";
           const verticalAlign = style?.verticalAlign ?? "middle";
           const rotationDeg = style?.rotationDeg ?? 0;
+          const horizontalAlign = style?.horizontalAlign;
           const underlineStyle = style?.underlineStyle;
           const underline =
             style?.underline === true || underlineStyle === "single" || underlineStyle === "double";
@@ -3154,13 +3155,60 @@ export class CanvasGridRenderer {
               baselineY = y + height - paddingY - descent;
             }
 
-            const shouldClip = textWidth > maxWidth;
-            if (shouldClip) {
-              let clipX = x;
-              let clipWidth = width;
+            if (horizontalAlign === "fill" && textWidth > 0 && maxWidth > 0) {
+              // Excel-style "Fill" alignment: repeat the single-line text horizontally to fill
+              // the available width. This is intentionally clipped to the cell rect (unlike the
+              // default overflow behavior for long left/right-aligned text).
+              const startX = originX;
+              const maxRepeats = 512;
+              const repeats = Math.min(maxRepeats, Math.max(1, Math.ceil(maxWidth / textWidth)));
 
-              const rowProbeStart = probeStartRow ?? spanStartRow;
-              const rowProbeEnd = probeEndRow ?? spanEndRow;
+              contentCtx.save();
+              contentCtx.beginPath();
+              contentCtx.rect(x, y, width, height);
+              contentCtx.clip();
+
+              for (let i = 0; i < repeats; i++) {
+                contentCtx.fillText(text, startX + i * textWidth, baselineY);
+              }
+
+              if (hasTextDecorations) {
+                prepareDecorationStroke();
+                const repeatedWidth = repeats * textWidth;
+
+                if (underline) {
+                  const underlineOffset = Math.max(1, Math.round(descent * 0.5));
+                  const underlineY = alignDecorationY(baselineY + underlineOffset);
+                  contentCtx.beginPath();
+                  contentCtx.moveTo(startX, underlineY);
+                  contentCtx.lineTo(startX + repeatedWidth, underlineY);
+                  if (doubleUnderline) {
+                    const doubleGap = Math.max(2, Math.round(decorationLineWidth * 2));
+                    const underlineY2 = alignDecorationY(baselineY + underlineOffset + doubleGap);
+                    contentCtx.moveTo(startX, underlineY2);
+                    contentCtx.lineTo(startX + repeatedWidth, underlineY2);
+                  }
+                  contentCtx.stroke();
+                }
+
+                if (strike) {
+                  const strikeY = alignDecorationY(baselineY - Math.max(1, Math.round(ascent * 0.3)));
+                  contentCtx.beginPath();
+                  contentCtx.moveTo(startX, strikeY);
+                  contentCtx.lineTo(startX + repeatedWidth, strikeY);
+                  contentCtx.stroke();
+                }
+              }
+
+              contentCtx.restore();
+            } else {
+              const shouldClip = textWidth > maxWidth;
+              if (shouldClip) {
+                let clipX = x;
+                let clipWidth = width;
+
+                const rowProbeStart = probeStartRow ?? spanStartRow;
+                const rowProbeEnd = probeEndRow ?? spanEndRow;
 
               if ((resolvedAlign === "left" || resolvedAlign === "right") && textWidth > width - (paddingX + indentX)) {
                 const requiredExtra = paddingX + indentX + textWidth - width;
@@ -3275,6 +3323,7 @@ export class CanvasGridRenderer {
                 }
                 contentCtx.restore();
               }
+            }
             }
           } else if (layoutEngine && maxWidth > 0) {
             const layout = layoutEngine.layout({

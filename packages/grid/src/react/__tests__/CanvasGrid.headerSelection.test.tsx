@@ -68,6 +68,8 @@ describe("CanvasGrid header selection", () => {
     vi.unstubAllGlobals();
   });
 
+  // This test can occasionally exceed the default 5s Vitest timeout when run as part of
+  // the full `packages/grid` suite in slower CI environments (React rendering + jsdom).
   it("selects rows/cols/all when clicking header cells", async () => {
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
       x: 0,
@@ -180,7 +182,7 @@ describe("CanvasGrid header selection", () => {
       root.unmount();
     });
     host.remove();
-  });
+  }, 15_000);
 
   it("selects rows/cols/all when tapping header cells on touch", async () => {
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({

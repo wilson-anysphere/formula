@@ -33,7 +33,7 @@ export interface CellStyle {
    * Canvas font style (e.g. `"normal"`, `"italic"`).
    *
    * Note: This maps directly into the `FontSpec.style` field used by `@formula/text-layout`.
-   */
+  */
   fontStyle?: string;
   textAlign?: CanvasTextAlign;
   /**
@@ -45,6 +45,16 @@ export interface CellStyle {
    * - center alignment → indent is ignored (deterministic)
    */
   textIndentPx?: number;
+  /**
+   * Spreadsheet-like horizontal alignment semantics that cannot be represented by
+   * {@link CanvasTextAlign}.
+   *
+   * - `"fill"`: repeat the cell text to fill the available width (Excel "Fill")
+   * - `"justify"`: justify wrapped text by expanding spaces between words
+   *
+   * Renderers may still use {@link CellStyle.textAlign} as a fallback baseline alignment.
+   */
+  horizontalAlign?: "fill" | "justify";
   underline?: boolean;
   /**
    * Optional underline variant.

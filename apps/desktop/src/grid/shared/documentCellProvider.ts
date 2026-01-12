@@ -319,7 +319,7 @@ export class DocumentCellProvider implements CellProvider {
     if (typeof rawNumberFormat === "string" && rawNumberFormat.trim() !== "") out.numberFormat = rawNumberFormat;
 
     const alignment = isPlainObject(docStyle.alignment) ? docStyle.alignment : null;
-    const horizontal =
+    const horizontalRaw =
       alignment?.horizontal ??
       (alignment as any)?.horizontal_align ??
       (alignment as any)?.horizontal_alignment ??
@@ -329,16 +329,19 @@ export class DocumentCellProvider implements CellProvider {
       (docStyle as any).horizontal_align ??
       (docStyle as any).horizontalAlignment ??
       (docStyle as any).horizontal_alignment;
+
+    const horizontal = typeof horizontalRaw === "string" ? horizontalRaw.toLowerCase() : null;
     if (horizontal === "center") out.textAlign = "center";
     else if (horizontal === "left") out.textAlign = "start";
-    else if (horizontal === "fill" || horizontal === "justify") {
-      // Excel supports additional horizontal alignment modes:
-      // - "fill": repeat-to-fill cell width
-      // - "justify": distribute spacing across the line
-      // shared-grid doesn't implement these semantics yet; fall back to a deterministic left/start align.
-      out.textAlign = "start";
-    }
     else if (horizontal === "right") out.textAlign = "end";
+    else if (horizontal === "fill" || horizontal === "justify") {
+      // @formula/grid only supports CanvasTextAlign today, but Excel's `fill`/`justify`
+      // horizontal alignment values exist in formula-model serialization. Map them to
+      // a deterministic fallback ("start") and preserve the semantic in a separate field
+      // for renderers that opt into it.
+      out.textAlign = "start";
+      out.horizontalAlign = horizontal;
+    }
     // "general"/undefined: leave undefined so renderer can pick based on value type.
     const wrapRaw = hasOwn(alignment, "wrapText")
       ? (alignment as any).wrapText

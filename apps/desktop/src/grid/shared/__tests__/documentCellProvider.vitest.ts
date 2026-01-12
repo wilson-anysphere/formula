@@ -183,9 +183,12 @@ describe("DocumentCellProvider formatting integration", () => {
     expect(provider.getCell(3, 1)?.style?.rotationDeg).toBe(90);
   });
 
-  it('maps Excel horizontal alignment "fill" into a deterministic shared-grid textAlign fallback', () => {
+  it("falls back fill/justify horizontal alignment to a deterministic textAlign value (and preserves semantics)", () => {
     const doc = new DocumentController();
+    doc.setCellValue("Sheet1", "A1", "Fill");
+    doc.setCellValue("Sheet1", "A2", "Justify");
     doc.setRangeFormat("Sheet1", "A1", { alignment: { horizontal: "fill" } });
+    doc.setRangeFormat("Sheet1", "A2", { alignment: { horizontal: "justify" } });
 
     const headerRows = 1;
     const headerCols = 1;
@@ -194,19 +197,29 @@ describe("DocumentCellProvider formatting integration", () => {
       getSheetId: () => "Sheet1",
       headerRows,
       headerCols,
-      rowCount: 2 + headerRows,
+      rowCount: 3 + headerRows,
       colCount: 2 + headerCols,
       showFormulas: () => false,
       getComputedValue: () => null
     });
 
-    const cell = provider.getCell(headerRows, headerCols);
-    expect(cell?.style?.textAlign).toBe("start");
+    const fillCell = provider.getCell(headerRows, headerCols);
+    const justifyCell = provider.getCell(headerRows + 1, headerCols);
+
+    expect(fillCell?.style?.textAlign).toBe("start");
+    expect((fillCell?.style as any)?.horizontalAlign).toBe("fill");
+
+    expect(justifyCell?.style?.textAlign).toBe("start");
+    expect((justifyCell?.style as any)?.horizontalAlign).toBe("justify");
   });
 
-  it('maps Excel horizontal alignment "justify" into a deterministic shared-grid textAlign fallback', () => {
-    const doc = new DocumentController();
-    doc.setRangeFormat("Sheet1", "A1", { alignment: { horizontal: "justify" } });
+  it("supports snake_case alignment.horizontal_alignment (formula-model serialization) when mapping styles", () => {
+    const doc: any = {
+      getCell: (_sheetId: string, _coord: { row: number; col: number }) => ({ value: "x", formula: null, styleId: 1 }),
+      styleTable: {
+        get: (id: number) => (id === 1 ? { alignment: { horizontal_alignment: "fill" } } : {})
+      }
+    };
 
     const headerRows = 1;
     const headerCols = 1;
@@ -223,6 +236,7 @@ describe("DocumentCellProvider formatting integration", () => {
 
     const cell = provider.getCell(headerRows, headerCols);
     expect(cell?.style?.textAlign).toBe("start");
+    expect((cell?.style as any)?.horizontalAlign).toBe("fill");
   });
 
   it("supports flat/clipboard-ish style keys when mapping styleId -> CellStyle", () => {

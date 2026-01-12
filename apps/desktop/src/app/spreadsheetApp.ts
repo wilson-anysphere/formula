@@ -3535,7 +3535,6 @@ export class SpreadsheetApp {
       return;
     }
 
-    this.maybeRefreshRootPosition();
     const x = e.clientX - this.rootLeft;
     const y = e.clientY - this.rootTop;
     if (x < 0 || y < 0 || x > this.width || y > this.height) {
