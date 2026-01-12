@@ -68,6 +68,24 @@ describe("CellEditorOverlay F4 absolute reference toggle", () => {
     container.remove();
   });
 
+  it("toggles sheet-qualified range references and preserves the qualifier", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const overlay = new CellEditorOverlay(container, { onCancel: () => {}, onCommit: () => {} });
+    overlay.open({ row: 0, col: 0 }, { x: 0, y: 0, width: 100, height: 24 }, "='My Sheet'!A1:B2");
+
+    overlay.element.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", cancelable: true }));
+
+    expect(overlay.element.value).toBe("='My Sheet'!$A$1:$B$2");
+    // Caret should still be at the end of the token after expansion.
+    expect(overlay.element.selectionStart).toBe(overlay.element.value.length);
+    expect(overlay.element.selectionEnd).toBe(overlay.element.value.length);
+
+    overlay.close();
+    container.remove();
+  });
+
   it("cycles absolute modes correctly on repeated F4 presses", () => {
     const container = document.createElement("div");
     document.body.appendChild(container);

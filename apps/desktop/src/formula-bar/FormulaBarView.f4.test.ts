@@ -80,6 +80,28 @@ describe("FormulaBarView F4 absolute reference toggle", () => {
     host.remove();
   });
 
+  it("toggles sheet-qualified range references and preserves the qualifier", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "='My Sheet'!A1:B2";
+    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", cancelable: true }));
+
+    expect(view.textarea.value).toBe("='My Sheet'!$A$1:$B$2");
+    // Formula bar UX: keep the full reference token selected.
+    expect(view.textarea.selectionStart).toBe(1);
+    expect(view.textarea.selectionEnd).toBe(view.textarea.value.length);
+
+    host.remove();
+  });
+
   it("cycles absolute modes correctly on repeated F4 presses", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
