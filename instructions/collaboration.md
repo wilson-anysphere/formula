@@ -47,6 +47,13 @@ interface SpreadsheetDoc {
 }
 ```
 
+Important nuance (formula clears): when clearing a formula, prefer writing an explicit
+`formula = null` marker rather than deleting the `formula` key. Yjs map deletes do not create
+Items; a `null` marker preserves causal history used by conflict detection.
+
+Related: “empty” cells may still exist as marker-only `Y.Map`s in Yjs (e.g. to carry the
+`formula = null` clear marker for deterministic delete-vs-overwrite detection).
+
 See [`docs/06-collaboration.md`](../docs/06-collaboration.md) for:
 
 - desktop binder wiring (`packages/collab/binder/index.js`, `bindYjsToDocumentController`)
