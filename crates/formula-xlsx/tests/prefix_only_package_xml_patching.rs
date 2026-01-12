@@ -1,6 +1,6 @@
 use std::io::{Cursor, Read, Write};
 
-use formula_xlsx::{DateSystem, XlsxPackage};
+use formula_xlsx::{strip_vba_project_streaming, DateSystem, XlsxPackage};
 use roxmltree::Document;
 
 fn build_package(entries: &[(&str, &[u8])]) -> Vec<u8> {
@@ -190,6 +190,74 @@ fn prefix_only_content_types_macro_strip_preserves_override_prefix() {
     assert!(pkg.part("xl/vbaProject.bin").is_none());
 
     let updated_ct = std::str::from_utf8(pkg.part("[Content_Types].xml").unwrap()).unwrap();
+    let doc = Document::parse(updated_ct).expect("updated [Content_Types].xml parses");
+
+    // Ensure we didn't rewrite the patched workbook Override as an unprefixed element (which would
+    // be namespace-less in prefix-only documents).
+    assert!(!updated_ct.contains("<Override"));
+
+    let ct_ns = "http://schemas.openxmlformats.org/package/2006/content-types";
+    let workbook_override = doc
+        .descendants()
+        .find(|n| {
+            n.is_element()
+                && n.tag_name().name() == "Override"
+                && n.attribute("PartName") == Some("/xl/workbook.xml")
+        })
+        .expect("workbook override exists");
+    assert_eq!(workbook_override.tag_name().namespace(), Some(ct_ns));
+    assert_eq!(
+        workbook_override.attribute("ContentType"),
+        Some("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml")
+    );
+
+    assert!(
+        doc.descendants().all(|n| {
+            !(n.is_element()
+                && n.tag_name().name() == "Override"
+                && n.attribute("PartName") == Some("/xl/vbaProject.bin"))
+        }),
+        "expected vbaProject override to be removed"
+    );
+}
+
+#[test]
+fn prefix_only_content_types_macro_strip_streaming_preserves_override_prefix() {
+    let content_types_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ct:Types xmlns:ct="http://schemas.openxmlformats.org/package/2006/content-types">
+  <ct:Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <ct:Default Extension="xml" ContentType="application/xml"/>
+  <ct:Override PartName="/xl/workbook.xml" ContentType="application/vnd.ms-excel.sheet.macroEnabled.main+xml"/>
+  <ct:Override PartName="/xl/vbaProject.bin" ContentType="application/vnd.ms-office.vbaProject"/>
+</ct:Types>"#;
+
+    let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>"#;
+
+    let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pr:Relationships xmlns:pr="http://schemas.openxmlformats.org/package/2006/relationships">
+  <pr:Relationship Id="rIdVba" Type="http://schemas.microsoft.com/office/2006/relationships/vbaProject" Target="vbaProject.bin"/>
+</pr:Relationships>"#;
+
+    let bytes = build_package(&[
+        ("[Content_Types].xml", content_types_xml.as_bytes()),
+        ("xl/workbook.xml", workbook_xml.as_bytes()),
+        ("xl/_rels/workbook.xml.rels", workbook_rels.as_bytes()),
+        ("xl/vbaProject.bin", b"fake-vba-project"),
+    ]);
+
+    let mut out = Cursor::new(Vec::new());
+    strip_vba_project_streaming(Cursor::new(bytes), &mut out).expect("streaming macro strip");
+    let written = out.into_inner();
+
+    let mut zip = zip::ZipArchive::new(Cursor::new(written.as_slice())).unwrap();
+    assert!(
+        zip.by_name("xl/vbaProject.bin").is_err(),
+        "expected vbaProject.bin to be removed"
+    );
+
+    let updated_ct = read_zip_part(&written, "[Content_Types].xml");
+    let updated_ct = std::str::from_utf8(&updated_ct).unwrap();
     let doc = Document::parse(updated_ct).expect("updated [Content_Types].xml parses");
 
     // Ensure we didn't rewrite the patched workbook Override as an unprefixed element (which would
