@@ -165,6 +165,10 @@ describe("tauri capability event permissions", () => {
       "update-not-available",
       "update-check-error",
       "update-available",
+      "update-download-started",
+      "update-download-progress",
+      "update-downloaded",
+      "update-download-error",
 
       // Startup instrumentation
       "startup:window-visible",
