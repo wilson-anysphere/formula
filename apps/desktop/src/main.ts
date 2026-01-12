@@ -6231,7 +6231,7 @@ try {
       bubbles: true,
       cancelable: true,
     });
-    gridRootEl.dispatchEvent(e);
+    gridRoot.dispatchEvent(e);
     app.focus();
   };
 

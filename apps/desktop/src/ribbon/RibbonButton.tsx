@@ -48,7 +48,12 @@ export const RibbonButton = React.memo(function RibbonButton({
   const ariaPressed = kind === "toggle" ? isPressed : undefined;
   const ariaHaspopup = kind === "dropdown" ? ("menu" as const) : undefined;
   const hasMenu = kind === "dropdown" && Boolean(button.menuItems?.length);
-  const menuId = React.useMemo(() => `ribbon-menu-${button.id.replace(/[^a-zA-Z0-9_-]/g, "-")}`, [button.id]);
+  const reactInstanceId = React.useId();
+  const domInstanceId = React.useMemo(() => reactInstanceId.replace(/[^a-zA-Z0-9_-]/g, "-"), [reactInstanceId]);
+  const menuId = React.useMemo(
+    () => `ribbon-menu-${domInstanceId}-${button.id.replace(/[^a-zA-Z0-9_-]/g, "-")}`,
+    [button.id, domInstanceId],
+  );
   const label = labelOverride ?? button.label;
   const disabled = typeof disabledOverride === "boolean" ? disabledOverride : Boolean(button.disabled);
 

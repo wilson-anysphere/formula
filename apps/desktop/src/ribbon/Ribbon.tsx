@@ -72,6 +72,11 @@ export interface RibbonProps {
 
 export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: RibbonProps) {
   const rootRef = React.useRef<HTMLDivElement | null>(null);
+  const reactInstanceId = React.useId();
+  const domInstanceId = React.useMemo(() => reactInstanceId.replace(/[^a-zA-Z0-9_-]/g, "-"), [reactInstanceId]);
+
+  const tabDomId = React.useCallback((tabId: string) => `ribbon-tab-${domInstanceId}-${tabId}`, [domInstanceId]);
+  const panelDomId = React.useCallback((tabId: string) => `ribbon-panel-${domInstanceId}-${tabId}`, [domInstanceId]);
 
   const tabs = schema.tabs;
   const defaultTabId = React.useMemo(() => {
@@ -211,7 +216,7 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
   );
 
   const focusFirstControl = React.useCallback((tabId: string) => {
-    const panel = document.getElementById(`ribbon-panel-${tabId}`);
+    const panel = document.getElementById(panelDomId(tabId));
     if (!panel) return;
     const first = panel.querySelector<HTMLElement>(
       'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
@@ -223,7 +228,7 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
     // Ensure Tab from the tab strip doesn't become a focus trap when a panel has
     // no tabbable controls (e.g. all commands are disabled).
     (panel as HTMLElement).focus?.();
-  }, []);
+  }, [panelDomId]);
 
   const responsiveDensity = React.useMemo(() => densityFromWidth(ribbonWidth), [ribbonWidth]);
   const density: RibbonDensity = responsiveDensity === "hidden" ? "hidden" : userCollapsed ? "hidden" : responsiveDensity;
@@ -334,9 +339,9 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
                   .filter(Boolean)
                   .join(" ")}
                 role="tab"
-                id={`ribbon-tab-${tab.id}`}
+                id={tabDomId(tab.id)}
                 aria-selected={isActive}
-                aria-controls={`ribbon-panel-${tab.id}`}
+                aria-controls={panelDomId(tab.id)}
                 tabIndex={isActive ? 0 : -1}
                 ref={(el) => {
                   tabButtonRefs.current[tab.id] = el;
@@ -476,9 +481,9 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
           return (
             <div
               key={tab.id}
-              id={`ribbon-panel-${tab.id}`}
+              id={panelDomId(tab.id)}
               role="tabpanel"
-              aria-labelledby={`ribbon-tab-${tab.id}`}
+              aria-labelledby={tabDomId(tab.id)}
               aria-label={tab.label}
               tabIndex={-1}
               hidden={!isActive}
