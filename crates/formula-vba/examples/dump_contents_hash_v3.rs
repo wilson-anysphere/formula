@@ -47,7 +47,7 @@ fn run() -> Result<(), String> {
     );
 
     let project = project_normalized_data_v3(&vba_project_bin)
-        .map_err(|e| format!("failed to compute ProjectNormalizedData: {e}"))?;
+        .map_err(|e| format!("failed to compute project_normalized_data_v3: {e}"))?;
     println!(
         "project_normalized_data_v3: len={} head[0..{}]={}",
         project.len(),
@@ -55,10 +55,15 @@ fn run() -> Result<(), String> {
         bytes_to_lower_hex(&project[..DEFAULT_HEAD_BYTES.min(project.len())])
     );
 
-    // MS-OVBA v3 signature binding hashes the *same transcript* (`ProjectNormalizedData`), but the
-    // on-disk `DigestInfo.digestAlgorithm` can vary (SHA-256 is common, but some producers use MD5).
+    // Spec note (important):
     //
-    // This tool prints both digests by default so you can compare against the on-disk digest bytes.
+    // For Office-produced VBA signatures, the binding digest bytes embedded in Authenticode
+    // (`SpcIndirectDataContent` -> `DigestInfo.digest`) are always a 16-byte MD5 per MS-OSHARED §4.3,
+    // even when the `DigestInfo.digestAlgorithm.algorithm` OID indicates SHA-256.
+    //
+    // This tool is a debugging helper that prints MD5/SHA-256 digests over the repo's
+    // `project_normalized_data_v3` transcript for comparison/testing. SHA-256 output is legacy/test
+    // and is not the spec-correct VBA binding value.
     let digest_md5 = {
         use md5::Digest as _;
         md5::Md5::digest(&project)
@@ -71,23 +76,23 @@ fn run() -> Result<(), String> {
     match alg {
         Some(Alg::Md5) => {
             println!(
-                "digest_md5(ProjectNormalizedData):    {}",
+                "digest_md5(project_normalized_data_v3):    {}",
                 bytes_to_lower_hex(digest_md5.as_slice())
             );
         }
         Some(Alg::Sha256) => {
             println!(
-                "digest_sha256(ProjectNormalizedData): {}",
+                "digest_sha256(project_normalized_data_v3): {}",
                 bytes_to_lower_hex(digest_sha256.as_slice())
             );
         }
         None => {
             println!(
-                "digest_md5(ProjectNormalizedData):    {}",
+                "digest_md5(project_normalized_data_v3):    {}",
                 bytes_to_lower_hex(digest_md5.as_slice())
             );
             println!(
-                "digest_sha256(ProjectNormalizedData): {}",
+                "digest_sha256(project_normalized_data_v3): {}",
                 bytes_to_lower_hex(digest_sha256.as_slice())
             );
         }
@@ -119,9 +124,9 @@ fn parse_args(
         }
 
         if arg_str == "--alg" {
-            // Optional value. If omitted, default to SHA-256 (the common case).
+            // Optional value. If omitted, default to MD5 (the spec binding digest length).
             //
-            // This allows `--alg <input-path>` as shorthand for printing only the SHA-256 digest.
+            // This allows `--alg <input-path>` as shorthand for printing only the MD5 digest.
             if let Some(value) = args.peek() {
                 if let Some(parsed) = parse_alg(value) {
                     // Consume the value.
@@ -141,7 +146,7 @@ fn parse_args(
                 }
             }
 
-            alg = Some(Alg::Sha256);
+            alg = Some(Alg::Md5);
             continue;
         }
 

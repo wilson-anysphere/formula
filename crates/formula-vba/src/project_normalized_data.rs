@@ -21,8 +21,9 @@ struct ModuleUnicodePresence {
 /// - v3 module source normalization (`V3ContentNormalizedData`), or
 /// - designer storage bytes (`FormsNormalizedData`).
 ///
-/// For the transcript used by `ContentsHashV3` / `\x05DigitalSignatureExt` binding, use
-/// [`crate::project_normalized_data_v3`].
+/// For the full v3 signature binding transcripts, see:
+/// - [`crate::project_normalized_data`] (MS-OVBA `ProjectNormalizedData`), and
+/// - [`crate::v3_content_normalized_data`] (MS-OVBA `V3ContentNormalizedData`).
 ///
 /// Notes / invariants enforced for hashing:
 /// - Records are processed in the **stored order** from the decompressed `VBA/dir` stream.

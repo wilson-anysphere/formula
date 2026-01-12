@@ -10,15 +10,14 @@ use thiserror::Error;
 /// digital signature stream.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VbaSignedDigest {
-    /// Algorithm OID from the signed digest structure (often SHA-256 in the wild).
+    /// Algorithm OID from the signed digest structure.
     ///
-    /// Note: for legacy VBA signature streams (`\x05DigitalSignature` / `\x05DigitalSignatureEx`),
-    /// Office uses 16-byte MD5 digest bytes for binding per MS-OSHARED §4.3 even when this OID
-    /// indicates SHA-256.
+    /// Note: for VBA signatures this OID is not authoritative for binding: Office uses **16-byte
+    /// MD5** digest bytes per MS-OSHARED §4.3 even when this OID indicates SHA-256. This applies to
+    /// all `\x05DigitalSignature*` variants, including `\x05DigitalSignatureExt`.
     ///
-    /// For v3 (`\x05DigitalSignatureExt`), the digest bytes are commonly 32-byte SHA-256 and this OID
-    /// is usually meaningful, but some producers emit inconsistent OIDs; prefer selecting the digest
-    /// algorithm by digest length when possible.
+    /// This field is surfaced for debugging/UI display only.
+    ///
     /// https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/40c8dab3-e8db-4c66-a6be-8cec06351b1e
     pub digest_algorithm_oid: String,
     /// Digest bytes.
