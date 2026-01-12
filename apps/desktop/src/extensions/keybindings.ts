@@ -83,3 +83,111 @@ export function platformKeybinding(binding: ContributedKeybinding, platform: "ma
   if (platform === "mac" && binding.mac) return binding.mac;
   return binding.key;
 }
+
+function formatKeyTokenForDisplay(keyToken: string, platform: "mac" | "other"): string {
+  const key = normalizeKeyToken(keyToken);
+
+  switch (key) {
+    case "arrowup":
+      return platform === "mac" ? "↑" : "Up";
+    case "arrowdown":
+      return platform === "mac" ? "↓" : "Down";
+    case "arrowleft":
+      return platform === "mac" ? "←" : "Left";
+    case "arrowright":
+      return platform === "mac" ? "→" : "Right";
+    case "escape":
+      return platform === "mac" ? "⎋" : "Esc";
+    case "enter":
+    case "return":
+      return platform === "mac" ? "↩" : "Enter";
+    case "backspace":
+      return platform === "mac" ? "⌫" : "Backspace";
+    case "delete":
+      // macOS has both delete (backspace) and forward delete; VS Code uses ⌦
+      // for the forward delete key.
+      return platform === "mac" ? "⌦" : "Delete";
+    case "space":
+      return "Space";
+    case "tab":
+      return platform === "mac" ? "⇥" : "Tab";
+    default:
+      break;
+  }
+
+  // Preserve punctuation (/, ., etc) as-is.
+  if (key.length === 1) return key.toUpperCase();
+
+  // F-keys are common and should be upper-cased (f1 -> F1).
+  if (/^f\d{1,2}$/.test(key)) return key.toUpperCase();
+
+  // Default: Title-case only the first character (pageup -> Pageup). Prefer a
+  // predictable output over overfitting for every possible `event.key`.
+  return key.slice(0, 1).toUpperCase() + key.slice(1);
+}
+
+/**
+ * Renders a parsed keybinding as a human-readable label for UI.
+ *
+ * Note: This is display-only. Matching semantics are intentionally unchanged.
+ */
+export function formatKeybindingForDisplay(binding: ParsedKeybinding, platform: "mac" | "other"): string {
+  const key = formatKeyTokenForDisplay(binding.key, platform);
+
+  if (platform === "mac") {
+    // Match macOS menu ordering: Control, Option, Shift, Command.
+    return `${binding.ctrl ? "⌃" : ""}${binding.alt ? "⌥" : ""}${binding.shift ? "⇧" : ""}${binding.meta ? "⌘" : ""}${key}`;
+  }
+
+  const parts: string[] = [];
+  // Match the requirement ordering: Ctrl+Alt+Shift+Meta+<Key>.
+  if (binding.ctrl) parts.push("Ctrl");
+  if (binding.alt) parts.push("Alt");
+  if (binding.shift) parts.push("Shift");
+  if (binding.meta) parts.push("Meta");
+  parts.push(key);
+  return parts.join("+");
+}
+
+export type KeybindingContribution = {
+  command: string;
+  key: string;
+  mac?: string | null;
+  when?: string | null;
+};
+
+/**
+ * Builds a `commandId -> [displayKeybinding...]` index (primary binding first).
+ *
+ * Intended for command palette and context menu rendering.
+ */
+export function buildCommandKeybindingDisplayIndex(params: {
+  platform: "mac" | "other";
+  contributed: KeybindingContribution[];
+  builtin?: KeybindingContribution[];
+}): Map<string, string[]> {
+  const index = new Map<string, string[]>();
+
+  const add = (kb: KeybindingContribution) => {
+    const binding = params.platform === "mac" && kb.mac ? kb.mac : kb.key;
+    const parsed = parseKeybinding(kb.command, binding, kb.when ?? null);
+    if (!parsed) return;
+    const display = formatKeybindingForDisplay(parsed, params.platform);
+
+    const existing = index.get(parsed.command);
+    if (!existing) {
+      index.set(parsed.command, [display]);
+      return;
+    }
+    if (!existing.includes(display)) existing.push(display);
+  };
+
+  for (const kb of params.builtin ?? []) add(kb);
+  for (const kb of params.contributed) add(kb);
+
+  return index;
+}
+
+export function getPrimaryCommandKeybindingDisplay(commandId: string, index: Map<string, string[]>): string | null {
+  return index.get(String(commandId))?.[0] ?? null;
+}
