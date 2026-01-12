@@ -1,8 +1,8 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use formula_vba::{
-    parse_vba_digital_signature, verify_vba_digital_signature, VbaSignatureBinding,
-    VbaSignatureVerification,
+    list_vba_digital_signatures, parse_vba_digital_signature, verify_vba_digital_signature,
+    VbaSignatureBinding, VbaSignatureVerification,
 };
 
 mod signature_test_utils;
@@ -118,4 +118,22 @@ fn parse_returns_digsig_blob_bytes_intact() {
         sig.signature, blob,
         "expected raw stream bytes to be preserved"
     );
+}
+
+#[test]
+fn list_reports_digsig_blob_pkcs7_offset_and_len() {
+    let pkcs7 = make_pkcs7_signed_message(b"formula-vba-test");
+    let blob = build_oshared_digsig_blob(&pkcs7);
+    let vba = build_vba_project_bin_with_signature(Some(&blob));
+
+    let sigs = list_vba_digital_signatures(&vba).expect("signature enumeration should succeed");
+    assert_eq!(sigs.len(), 1, "expected one signature stream");
+    let sig = &sigs[0];
+
+    let invalid_offset = 0x2Cusize;
+    let mut expected_offset = invalid_offset + pkcs7.len();
+    expected_offset = (expected_offset + 3) & !3;
+
+    assert_eq!(sig.pkcs7_offset, Some(expected_offset));
+    assert_eq!(sig.pkcs7_len, Some(pkcs7.len()));
 }
