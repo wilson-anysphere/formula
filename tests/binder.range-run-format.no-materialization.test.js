@@ -72,3 +72,70 @@ test("binder: large-rectangle format syncs via range runs without per-cell mater
     ydoc.destroy();
   }
 });
+
+test("binder: top-level formatRunsByCol overrides legacy view.formatRunsByCol (prevents stale fallback)", async () => {
+  const ydoc = new Y.Doc();
+  const sheets = ydoc.getArray("sheets");
+
+  // Seed a sheet entry with legacy `view.formatRunsByCol` only.
+  ydoc.transact(() => {
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+    sheet.set("view", {
+      frozenRows: 0,
+      frozenCols: 0,
+      formatRunsByCol: {
+        "0": [{ startRow: 0, endRowExclusive: 2, format: { font: { bold: true } } }],
+      },
+    });
+    sheets.push([sheet]);
+  });
+
+  const docA = new DocumentController();
+  const binderA = bindYjsToDocumentController({ ydoc, documentController: docA, defaultSheetId: "Sheet1", userId: "u-a" });
+
+  try {
+    await waitForCondition(() => Boolean(docA.getCellFormat("Sheet1", "A1")?.font?.bold));
+    assert.equal(docA.getCellFormat("Sheet1", "A1")?.font?.bold, true);
+
+    // Clear the formatting via range-run deltas. This triggers DocumentController→Yjs writes
+    // that should create an *empty* top-level `formatRunsByCol` map, preventing future clients
+    // from falling back to the stale legacy `view.formatRunsByCol` formatting.
+    const beforeRuns = docA.model.sheets.get("Sheet1")?.formatRunsByCol?.get?.(0) ?? [];
+    assert.ok(beforeRuns.length > 0, "expected Sheet1 col 0 to have hydrated legacy runs");
+
+    docA.applyExternalRangeRunDeltas([
+      { sheetId: "Sheet1", col: 0, startRow: 0, endRowExclusive: 2, beforeRuns, afterRuns: [] },
+    ]);
+
+    await waitForCondition(() => {
+      const sheetEntry = sheets.get(0);
+      if (!(sheetEntry instanceof Y.Map)) return false;
+      const map = sheetEntry.get("formatRunsByCol");
+      return map instanceof Y.Map && map.size === 0;
+    });
+
+    const sheetEntry = sheets.get(0);
+    assert.ok(sheetEntry instanceof Y.Map);
+    const formatRunsByCol = sheetEntry.get("formatRunsByCol");
+    assert.ok(formatRunsByCol instanceof Y.Map);
+    assert.equal(formatRunsByCol.size, 0);
+
+    const view = sheetEntry.get("view");
+    assert.equal(view?.formatRunsByCol?.["0"]?.[0]?.format?.font?.bold, true);
+
+    // A freshly-bound client should ignore legacy `view.formatRunsByCol` once the top-level
+    // key exists (even if empty).
+    const docB = new DocumentController();
+    const binderB = bindYjsToDocumentController({ ydoc, documentController: docB, defaultSheetId: "Sheet1", userId: "u-b" });
+    try {
+      assert.equal(docB.getCellFormat("Sheet1", "A1")?.font?.bold, undefined);
+    } finally {
+      binderB.destroy();
+    }
+  } finally {
+    binderA.destroy();
+    ydoc.destroy();
+  }
+});
