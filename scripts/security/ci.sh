@@ -5,6 +5,10 @@ set -uo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
 
+# Fail fast if unresolved merge conflict markers are present. These can hide in
+# unbuilt paths and cause confusing downstream CI failures.
+bash scripts/ci/check-merge-conflict-markers.sh
+
 # Use a repo-local cargo home by default to avoid lock contention on ~/.cargo
 # when many agents build concurrently. Preserve any user/CI override.
 #
