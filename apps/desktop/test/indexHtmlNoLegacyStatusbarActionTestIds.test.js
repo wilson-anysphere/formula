@@ -74,6 +74,47 @@ function collectRibbonTestIds() {
   return ids;
 }
 
+function collectNonRibbonDesktopTestIds() {
+  const srcDir = path.join(__dirname, "..", "src");
+  /** @type {Map<string, Set<string>>} */
+  const ids = new Map();
+
+  const isTestFile = (name) =>
+    name.includes(".test.") ||
+    name.includes(".vitest.") ||
+    name.endsWith(".spec.ts") ||
+    name.endsWith(".spec.tsx") ||
+    name.endsWith(".spec.js") ||
+    name.endsWith(".spec.jsx");
+
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        if (entry.name === "ribbon") continue;
+        if (entry.name === "__tests__") continue;
+        walk(path.join(dir, entry.name));
+        continue;
+      }
+
+      if (!entry.isFile()) continue;
+      if (!/\.(ts|tsx|js|jsx)$/.test(entry.name)) continue;
+      if (isTestFile(entry.name)) continue;
+
+      const fullPath = path.join(dir, entry.name);
+      const source = fs.readFileSync(fullPath, "utf8");
+      const extracted = extractRibbonTestIdsFromSource(source);
+      for (const testId of extracted) {
+        const existing = ids.get(testId) ?? new Set();
+        existing.add(fullPath);
+        ids.set(testId, existing);
+      }
+    }
+  };
+
+  walk(srcDir);
+  return ids;
+}
+
 test("desktop index.html does not hardcode ribbon action testids (avoid Playwright strict locator collisions)", () => {
   const htmlPath = path.join(__dirname, "..", "index.html");
   const html = fs.readFileSync(htmlPath, "utf8");
@@ -89,6 +130,7 @@ test("desktop index.html does not hardcode ribbon action testids (avoid Playwrig
 
   const indexTestIds = extractTestIdsFromIndexHtml(html);
   const ribbonTestIds = collectRibbonTestIds();
+  const nonRibbonTestIds = collectNonRibbonDesktopTestIds();
 
   // Ensure Ribbon itself does not ship duplicate test IDs (Playwright strict mode would
   // fail even without any static HTML collisions).
@@ -105,6 +147,25 @@ test("desktop index.html does not hardcode ribbon action testids (avoid Playwrig
     [],
     `Ribbon contains duplicate test id values (should be unique):\\n${ribbonTestIdDuplicates
       .map((id) => `- ${id}`)
+      .join("\\n")}`,
+  );
+
+  // Ensure ribbon-owned test ids are not also used elsewhere in the desktop UI,
+  // otherwise Playwright strict locators like `page.getByTestId("open-panel-ai-chat")`
+  // would become ambiguous.
+  const ribbonIdsUnique = [...new Set(ribbonTestIds)];
+  const collisionsOutsideRibbon = ribbonIdsUnique
+    .filter((id) => nonRibbonTestIds.has(id))
+    .sort((a, b) => a.localeCompare(b));
+
+  assert.deepEqual(
+    collisionsOutsideRibbon,
+    [],
+    `Ribbon test ids must be unique across the desktop UI (found outside ribbon sources):\\n${collisionsOutsideRibbon
+      .map((id) => {
+        const files = [...(nonRibbonTestIds.get(id) ?? [])].sort((a, b) => a.localeCompare(b));
+        return `- ${id}\\n${files.map((file) => `  - ${file}`).join("\\n")}`;
+      })
       .join("\\n")}`,
   );
 
