@@ -287,8 +287,10 @@ npx playwright install-deps
 ```bash
 # Tauri can build without display, but needs libraries
 sudo apt-get install -y \
-  libgtk-3-dev libwebkit2gtk-4.0-dev libappindicator3-dev \
+  libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
   librsvg2-dev patchelf
+
+# Note: some distros still use `libwebkit2gtk-4.0-dev` and/or `libappindicator3-dev`.
 
 # Build works headless (ALWAYS use the cargo wrapper in agent environments)
 (cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)
