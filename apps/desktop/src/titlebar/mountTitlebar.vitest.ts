@@ -33,14 +33,14 @@ describe("mountTitlebar", () => {
     // so the rendered titlebar isn't nested inside another styled titlebar element.
     expect(container.classList.contains("formula-titlebar")).toBe(false);
 
-    const titlebarRoot = container.querySelector<HTMLElement>(".formula-titlebar--component");
+    const titlebarRoot = container.querySelector<HTMLElement>('[data-testid="titlebar-component"]');
     expect(titlebarRoot).toBeInstanceOf(HTMLDivElement);
     expect(titlebarRoot?.getAttribute("role")).toBe("banner");
     expect(titlebarRoot?.getAttribute("aria-label")).toBe("Titlebar");
 
     expect(container.querySelector(".formula-titlebar")).toBeInstanceOf(HTMLDivElement);
 
-    const dragRegion = container.querySelector<HTMLElement>(".formula-titlebar__drag-region");
+    const dragRegion = container.querySelector<HTMLElement>('[data-testid="titlebar-drag-region"]');
     expect(dragRegion).toBeTruthy();
     expect(dragRegion?.getAttribute("data-tauri-drag-region")).not.toBeNull();
 
@@ -49,7 +49,7 @@ describe("mountTitlebar", () => {
     expect(container.querySelector(".formula-titlebar__document-name")?.getAttribute("title")).toBe("Untitled.xlsx");
 
     // Window controls exist with accessible labels.
-    const windowControls = container.querySelector<HTMLElement>(".formula-titlebar__window-controls");
+    const windowControls = container.querySelector<HTMLElement>('[data-testid="titlebar-window-controls"]');
     expect(windowControls?.getAttribute("role")).toBe("group");
     expect(windowControls?.getAttribute("aria-label")).toBe("Window controls");
 
@@ -66,7 +66,7 @@ describe("mountTitlebar", () => {
     expect((maximizeButton as HTMLButtonElement).disabled).toBe(true);
 
     // Actions exist with aria labels.
-    const actionsToolbar = container.querySelector<HTMLElement>(".formula-titlebar__actions");
+    const actionsToolbar = container.querySelector<HTMLElement>('[data-testid="titlebar-actions"]');
     expect(actionsToolbar).toBeTruthy();
     expect(actionsToolbar?.getAttribute("role")).toBe("toolbar");
     expect(actionsToolbar?.getAttribute("aria-label")).toBe("Titlebar actions");
@@ -113,7 +113,7 @@ describe("mountTitlebar", () => {
       });
     });
 
-    expect(container.querySelector(".formula-titlebar__actions")).toBeNull();
+    expect(container.querySelector('[data-testid="titlebar-actions"]')).toBeNull();
 
     const closeButton = container.querySelector<HTMLButtonElement>('[aria-label="Close window"]');
     const minimizeButton = container.querySelector<HTMLButtonElement>('[aria-label="Minimize window"]');

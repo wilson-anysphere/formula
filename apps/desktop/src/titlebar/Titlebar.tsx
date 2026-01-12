@@ -112,8 +112,14 @@ export function Titlebar({
       className={["formula-titlebar", "formula-titlebar--component", className].filter(Boolean).join(" ")}
       role="banner"
       aria-label="Titlebar"
+      data-testid="titlebar-component"
     >
-      <div className="formula-titlebar__window-controls" role="group" aria-label="Window controls">
+      <div
+        className="formula-titlebar__window-controls"
+        role="group"
+        aria-label="Window controls"
+        data-testid="titlebar-window-controls"
+      >
         <button
           type="button"
           className="formula-titlebar__window-button formula-titlebar__window-button--close"
@@ -168,8 +174,8 @@ export function Titlebar({
       ) : null}
 
       {/* Only the middle section is marked as draggable so controls remain clickable. */}
-      <div className="formula-titlebar__drag-region" data-tauri-drag-region>
-        <div className="formula-titlebar__titles">
+      <div className="formula-titlebar__drag-region" data-tauri-drag-region data-testid="titlebar-drag-region">
+        <div className="formula-titlebar__titles" data-testid="titlebar-titles">
           <span className="formula-titlebar__app-name">{appName}</span>
           {normalizedDocumentName.trim().length > 0 ? (
             <span className="formula-titlebar__document-name" title={normalizedDocumentName}>
@@ -180,7 +186,7 @@ export function Titlebar({
       </div>
 
       {actions.length > 0 ? (
-        <div className="formula-titlebar__actions" role="toolbar" aria-label="Titlebar actions">
+        <div className="formula-titlebar__actions" role="toolbar" aria-label="Titlebar actions" data-testid="titlebar-actions">
           {actions.map((action) => {
             const variantClass =
               action.variant === "primary" ? "formula-titlebar__action-button--primary" : "";
