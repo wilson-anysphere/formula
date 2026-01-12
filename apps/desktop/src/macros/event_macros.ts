@@ -109,6 +109,14 @@ function normalizeRect(rect: Rect): Rect {
   return { startRow, startCol, endRow, endCol };
 }
 
+function nonNegativeInt(value: unknown): number {
+  const num = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(num)) return 0;
+  const floored = Math.floor(num);
+  if (!Number.isSafeInteger(floored) || floored < 0) return 0;
+  return floored;
+}
+
 function normalizeFormulaText(formula: unknown): string | null {
   if (typeof formula !== "string") return null;
   return normalizeFormulaTextOpt(formula);
@@ -139,10 +147,10 @@ function getUiSelectionRect(app: SpreadsheetAppLike): Rect {
     ) ?? ranges[0];
   const first = containing ?? { startRow: active.row, startCol: active.col, endRow: active.row, endCol: active.col };
   return normalizeRect({
-    startRow: Number(first.startRow) || 0,
-    startCol: Number(first.startCol) || 0,
-    endRow: Number(first.endRow) || 0,
-    endCol: Number(first.endCol) || 0,
+    startRow: nonNegativeInt(first.startRow),
+    startCol: nonNegativeInt(first.startCol),
+    endRow: nonNegativeInt(first.endRow),
+    endCol: nonNegativeInt(first.endCol),
   });
 }
 
@@ -155,13 +163,13 @@ async function setMacroUiContext(args: InstallVbaEventMacrosArgs, context?: UiCo
     await args.invoke("set_macro_ui_context", {
       workbook_id: args.workbookId,
       sheet_id: sheetId,
-      active_row: active.row,
-      active_col: active.col,
+      active_row: nonNegativeInt(active.row),
+      active_col: nonNegativeInt(active.col),
       selection: {
-        start_row: selection.startRow,
-        start_col: selection.startCol,
-        end_row: selection.endRow,
-        end_col: selection.endCol,
+        start_row: nonNegativeInt(selection.startRow),
+        start_col: nonNegativeInt(selection.startCol),
+        end_row: nonNegativeInt(selection.endRow),
+        end_col: nonNegativeInt(selection.endCol),
       },
     });
   } catch (err) {
