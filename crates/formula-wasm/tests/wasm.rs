@@ -1214,7 +1214,7 @@ fn rich_values_roundtrip_through_wasm_exports() {
             "Owner": {
                 "type": "record",
                 "displayField": "Name",
-                "fields": { "Name": "Alice", "Age": 42 }
+                "fields": { "Name": "Alice", "Age": 42.0 }
             }
         }
     });
