@@ -315,6 +315,16 @@ python tools/excel-oracle/compare.py \
   --report   tests/compatibility/excel-oracle/reports/mismatch-report.json
 ```
 
+To preview how many cases would be compared (after tag filtering / `--max-cases`) without writing a report file, use:
+
+```bash
+python tools/excel-oracle/compare.py --dry-run \
+  --cases    tests/compatibility/excel-oracle/cases.json \
+  --expected tests/compatibility/excel-oracle/datasets/excel-oracle.pinned.json \
+  --actual   tests/compatibility/excel-oracle/datasets/engine-results.json \
+  --report   tests/compatibility/excel-oracle/reports/mismatch-report.json
+```
+
 ### Numeric tolerances
 
 `compare.py` uses a tight default numeric tolerance (`abs=rel=1e-9`). Some functions are
