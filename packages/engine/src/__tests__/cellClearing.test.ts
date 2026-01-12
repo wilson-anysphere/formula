@@ -4,6 +4,7 @@ import { formulaWasmNodeEntryUrl } from "../../../../scripts/build-formula-wasm-
 
 import { EngineWorker, type MessageChannelLike, type WorkerLike } from "../worker/EngineWorker.ts";
 import type {
+  CellValueRich,
   InitMessage,
   RpcRequest,
   WorkerInboundMessage,
@@ -262,7 +263,7 @@ describeWasm("EngineWorker null clear semantics", () => {
     try {
       await engine.newWorkbook();
 
-      const richText = {
+      const richText: CellValueRich = {
         type: "rich_text",
         value: {
           text: "Hello",
@@ -274,7 +275,7 @@ describeWasm("EngineWorker null clear semantics", () => {
             }
           ]
         }
-      } as const;
+      };
 
       await engine.setCellRich?.("A1", richText, "Sheet1");
 
@@ -283,7 +284,9 @@ describeWasm("EngineWorker null clear semantics", () => {
       expect(a1.value).toBe("Hello");
 
       const a1Rich = await engine.getCellRich?.("A1", "Sheet1");
-      expect(a1Rich?.input).toEqual(richText);
+      // RichTextRunStyle may round-trip with additional explicit null fields for unset style props.
+      // Assert the essential structure without requiring an exact key-for-key match.
+      expect(a1Rich?.input).toMatchObject(richText);
       expect(a1Rich?.value).toEqual({ type: "string", value: "Hello" });
     } finally {
       engine.terminate();
