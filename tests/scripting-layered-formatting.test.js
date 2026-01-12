@@ -91,6 +91,32 @@ test("Macro recorder receives formatChanged for column style deltas (layered for
   workbook.dispose();
 });
 
+test("Macro recorder receives formatChanged for colFormats changes in sheetViewDeltas (layered formatting)", () => {
+  const doc = new FakeDocumentController();
+  const boldId = doc.styleTable.intern({ font: { bold: true } });
+
+  const workbook = new DocumentControllerWorkbookAdapter(doc, { activeSheetName: "Sheet1" });
+  const recorder = new MacroRecorder(workbook);
+  recorder.start();
+
+  doc.emitChange({
+    deltas: [],
+    sheetViewDeltas: [
+      {
+        sheetId: "Sheet1",
+        before: { frozenRows: 0, frozenCols: 0, colFormats: {} },
+        after: { frozenRows: 0, frozenCols: 0, colFormats: { "2": boldId } },
+      },
+    ],
+  });
+
+  assert.deepEqual(recorder.stop(), [
+    { type: "setFormat", sheetName: "Sheet1", address: "C1:C1048576", format: { bold: true } },
+  ]);
+
+  workbook.dispose();
+});
+
 test("Macro recorder receives formatChanged for row style deltas (layered formatting)", () => {
   const doc = new FakeDocumentController();
   const italicId = doc.styleTable.intern({ font: { italic: true } });
@@ -130,4 +156,3 @@ test("Macro recorder receives formatChanged for sheet default style deltas (laye
 
   workbook.dispose();
 });
-
