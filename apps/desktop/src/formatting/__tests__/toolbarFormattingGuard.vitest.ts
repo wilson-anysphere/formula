@@ -20,7 +20,9 @@ describe("toolbar formatting safety cap", () => {
     const spy = vi.spyOn(doc, "setRangeFormat");
 
     const start = performance.now();
-    setFillColor(doc, "Sheet1", ["A1:Z2308", "A3000:Z5307"], "#FFFF0000");
+    // Keep each rectangle below the range-run threshold so the guard counts every cell
+    // (and blocks once we exceed the total enumerated cell cap).
+    setFillColor(doc, "Sheet1", ["A1:Z1923", "A3000:Z4922", "A6000:A6004"], "#FFFF0000");
     const elapsed = performance.now() - start;
 
     expect(elapsed).toBeLessThan(250);
@@ -41,13 +43,11 @@ describe("toolbar formatting safety cap", () => {
     const elapsed = performance.now() - start;
 
     expect(elapsed).toBeLessThan(250);
-    expect(applied).toBe(false);
-    expect(spy).not.toHaveBeenCalled();
-
-    const toast = document.querySelector('[data-testid="toast"]') as HTMLElement | null;
-    expect(toast).not.toBeNull();
-    expect(toast?.dataset.type).toBe("warning");
-    expect(toast?.textContent).toMatch(/Selection too large to apply formatting/i);
+    // Large rectangles use a compressed range-run formatting representation and should
+    // be allowed (the safety cap is for per-cell enumeration across many small ranges).
+    expect(applied).toBe(true);
+    expect(spy).toHaveBeenCalled();
+    expect(document.querySelector('[data-testid="toast"]')).toBeNull();
   });
 
   it("refuses to apply formatting to extremely large full-row selections (row band cap)", () => {

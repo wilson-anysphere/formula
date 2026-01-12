@@ -27,26 +27,71 @@ function normalizeCssHexToExcelArgb(cssColor: string): string | null {
 
   const hasHash = trimmed.startsWith("#");
   const raw = hasHash ? trimmed.slice(1) : trimmed;
-  if (!/^[0-9a-fA-F]+$/.test(raw)) return null;
 
-  // #RRGGBB / RRGGBB
-  if (raw.length === 6) {
-    return `FF${raw.toUpperCase()}`;
+  // Fast path: hex-like strings (including ARGB).
+  if (/^[0-9a-fA-F]+$/.test(raw)) {
+    // #RRGGBB / RRGGBB
+    if (raw.length === 6) {
+      return `FF${raw.toUpperCase()}`;
+    }
+
+    // #RGB / RGB (expand to RRGGBB)
+    if (raw.length === 3) {
+      const [r, g, b] = raw.toUpperCase().split("");
+      if (!r || !g || !b) return null;
+      return `FF${r}${r}${g}${g}${b}${b}`;
+    }
+
+    // Already ARGB (#AARRGGBB / AARRGGBB)
+    if (raw.length === 8) {
+      return raw.toUpperCase();
+    }
   }
 
-  // #RGB / RGB (expand to RRGGBB)
-  if (raw.length === 3) {
-    const [r, g, b] = raw.toUpperCase().split("");
-    if (!r || !g || !b) return null;
-    return `FF${r}${r}${g}${g}${b}${b}`;
-  }
+  // Fallback: resolve non-hex CSS colors (named colors, rgb()/rgba(), etc) through
+  // the browser's CSS parser so we can still persist them as Excel ARGB. This is
+  // especially important in test environments (jsdom) where CSS tokens are not
+  // available and we fall back to named colors like "red".
+  const resolved = (() => {
+    if (typeof document === "undefined") return null;
+    const root = document.body ?? document.documentElement;
+    if (!root) return null;
 
-  // Already ARGB (#AARRGGBB / AARRGGBB)
-  if (raw.length === 8) {
-    return raw.toUpperCase();
-  }
+    const probe = document.createElement("span");
+    probe.style.color = trimmed;
+    probe.style.display = "none";
+    root.appendChild(probe);
+    try {
+      const computed = typeof getComputedStyle === "function" ? getComputedStyle(probe).color : "";
+      const normalized = String(computed ?? "").trim();
+      return normalized ? normalized : null;
+    } catch {
+      return null;
+    } finally {
+      probe.remove();
+    }
+  })();
+  if (!resolved) return null;
 
-  return null;
+  const parsed = (() => {
+    const match = resolved.match(
+      /^rgba?\(\s*([0-9]+)\s*,\s*([0-9]+)\s*,\s*([0-9]+)(?:\s*,\s*([0-9]*\.?[0-9]+))?\s*\)$/i,
+    );
+    if (!match) return null;
+    const r = Number(match[1]);
+    const g = Number(match[2]);
+    const b = Number(match[3]);
+    const a = match[4] != null ? Number(match[4]) : 1;
+    if (![r, g, b, a].every((n) => Number.isFinite(n))) return null;
+    return { r, g, b, a };
+  })();
+  if (!parsed) return null;
+
+  const clampByte = (value: number): number => Math.max(0, Math.min(255, Math.round(value)));
+  const toHex2 = (value: number): string => clampByte(value).toString(16).padStart(2, "0").toUpperCase();
+
+  const alpha = Math.max(0, Math.min(1, parsed.a));
+  return `${toHex2(alpha * 255)}${toHex2(parsed.r)}${toHex2(parsed.g)}${toHex2(parsed.b)}`;
 }
 
 type Props = {
