@@ -364,6 +364,32 @@ describe("EngineWorker RPC", () => {
     });
   });
 
+  it("does not flush pending setCell batches when calling lexFormula", async () => {
+    const worker = new MockWorker();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    // Intentionally do not await: this leaves a scheduled microtask flush pending.
+    const setPromise = engine.setCell("A1", 1);
+
+    // `lexFormula` is editor tooling and should not force-flush workbook edits.
+    await engine.lexFormula("=1+2");
+
+    // Clean up to avoid leaking an in-flight flush promise.
+    await setPromise;
+
+    const requests = worker.received.filter((msg): msg is RpcRequest => msg.type === "request");
+    const lexIndex = requests.findIndex((req) => req.method === "lexFormula");
+    const setCellsIndex = requests.findIndex((req) => req.method === "setCells");
+
+    expect(lexIndex).toBeGreaterThanOrEqual(0);
+    expect(setCellsIndex).toBeGreaterThanOrEqual(0);
+    expect(lexIndex).toBeLessThan(setCellsIndex);
+  });
+
   it("sends parseFormulaPartial RPC requests with the expected params", async () => {
     const worker = new MockWorker();
     const engine = await EngineWorker.connect({
@@ -400,6 +426,32 @@ describe("EngineWorker RPC", () => {
       cursor: 6,
       options: { localeId: "de-DE", referenceStyle: "R1C1" }
     });
+  });
+
+  it("does not flush pending setCell batches when calling parseFormulaPartial", async () => {
+    const worker = new MockWorker();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    // Intentionally do not await: this leaves a scheduled microtask flush pending.
+    const setPromise = engine.setCell("A1", 1);
+
+    // `parseFormulaPartial` is editor tooling and should not force-flush workbook edits.
+    await engine.parseFormulaPartial("=SUM(1,", 6);
+
+    // Clean up to avoid leaking an in-flight flush promise.
+    await setPromise;
+
+    const requests = worker.received.filter((msg): msg is RpcRequest => msg.type === "request");
+    const parseIndex = requests.findIndex((req) => req.method === "parseFormulaPartial");
+    const setCellsIndex = requests.findIndex((req) => req.method === "setCells");
+
+    expect(parseIndex).toBeGreaterThanOrEqual(0);
+    expect(setCellsIndex).toBeGreaterThanOrEqual(0);
+    expect(parseIndex).toBeLessThan(setCellsIndex);
   });
 
   it("forwards setLocale calls with the correct RPC method name", async () => {
