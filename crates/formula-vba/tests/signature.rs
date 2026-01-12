@@ -223,6 +223,33 @@ fn ber_indefinite_pkcs7_signature_is_reported_as_verified() {
 }
 
 #[test]
+fn ber_indefinite_pkcs7_signature_with_prefix_is_still_verified() {
+    let pkcs7 = include_bytes!("fixtures/cms_indefinite.der");
+    let mut prefixed = b"VBA\0SIG\0".to_vec();
+    prefixed.extend_from_slice(pkcs7);
+    let vba = build_vba_project_bin_with_signature(Some(&prefixed));
+
+    let sig = verify_vba_digital_signature(&vba)
+        .expect("signature inspection should succeed")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+}
+
+#[test]
+fn ber_indefinite_pkcs7_wrapped_in_digsig_info_serialized_is_still_verified() {
+    let pkcs7 = include_bytes!("fixtures/cms_indefinite.der");
+    let wrapped = wrap_in_digsig_info_serialized(pkcs7);
+    let vba = build_vba_project_bin_with_signature(Some(&wrapped));
+
+    let sig = verify_vba_digital_signature(&vba)
+        .expect("signature inspection should succeed")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+}
+
+#[test]
 fn corrupting_signature_bytes_marks_signature_invalid() {
     let mut pkcs7 = make_pkcs7_signed_message(b"formula-vba-test");
     let last = pkcs7.len().saturating_sub(1);
