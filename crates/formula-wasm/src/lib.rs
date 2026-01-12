@@ -46,6 +46,7 @@ fn edit_error_to_string(err: EngineEditError) -> String {
         EngineEditError::Engine(message) => message,
     }
 }
+
 #[cfg(target_arch = "wasm32")]
 fn ensure_rust_constructors_run() {
     use std::sync::Once;
