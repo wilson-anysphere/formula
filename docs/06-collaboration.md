@@ -24,6 +24,8 @@ If you are editing collaboration code, start here and keep this doc in sync with
 - Desktop binder: [`packages/collab/binder/index.js`](../packages/collab/binder/index.js) (`bindYjsToDocumentController`)
 - Presence (Awareness wrapper): [`packages/collab/presence/src/presenceManager.js`](../packages/collab/presence/src/presenceManager.js) (`PresenceManager`)
 - Desktop presence renderer: [`apps/desktop/src/grid/presence-renderer/`](../apps/desktop/src/grid/presence-renderer/) (`PresenceRenderer`)
+- Comments (Yjs `comments` root helpers): [`packages/collab/comments/src/manager.ts`](../packages/collab/comments/src/manager.ts) (`CommentManager`, `createCommentManagerForSession`, `migrateCommentsArrayToMap`)
+- Conflict monitors: [`packages/collab/conflicts/index.js`](../packages/collab/conflicts/index.js) (`FormulaConflictMonitor`, `CellConflictMonitor`, `CellStructuralConflictMonitor`)
 - Collab version history glue: [`packages/collab/versioning/src/index.ts`](../packages/collab/versioning/src/index.ts) (`createCollabVersioning`)
 - Version store kept *inside the Y.Doc*: [`packages/versioning/src/store/yjsVersionStore.js`](../packages/versioning/src/store/yjsVersionStore.js) (`YjsVersionStore`)
 - Branching glue: [`packages/collab/branching/index.js`](../packages/collab/branching/index.js) (`CollabBranchingWorkflow`)
@@ -383,6 +385,90 @@ Also remember to drive the local presence from UI events:
 - `session.presence.setActiveSheet(sheetId)`
 - `session.presence.setCursor({ row, col })`
 - `session.presence.setSelections([{ startRow, startCol, endRow, endCol }, ...])`
+
+---
+
+## Comments (shared `comments` root)
+
+Formula supports shared cell comments stored in the collaborative Y.Doc under the `comments` root.
+
+Package:
+
+- `@formula/collab-comments` (implementation: [`packages/collab/comments/src/`](../packages/collab/comments/src/))
+
+The canonical schema is a `Y.Map` keyed by comment id. For backwards compatibility, some historical docs store comments as a `Y.Array<Y.Map>`.
+
+Important rule: **don’t call** `doc.getMap("comments")` blindly on unknown documents; instantiating a legacy Array root as a Map can make the array content inaccessible. Instead, use `CommentManager` (which supports both) or run a migration first.
+
+Recommended integration in collaborative mode:
+
+```ts
+import { createCommentManagerForSession } from "@formula/collab-comments";
+
+// Ensures comment edits are wrapped in session.transactLocal(...) so they participate
+// correctly in collaborative undo (when enabled).
+const comments = createCommentManagerForSession(session);
+
+const commentId = comments.addComment({
+  cellRef: "A1",
+  kind: "threaded",
+  content: "Hello",
+  author: { id: userId, name: userName },
+});
+
+comments.addReply({
+  commentId,
+  content: "First reply",
+  author: { id: userId, name: userName },
+});
+```
+
+If you need to normalize legacy Array-backed docs to the canonical Map schema:
+
+- `migrateCommentsArrayToMap(doc)` (see [`packages/collab/comments/src/manager.ts`](../packages/collab/comments/src/manager.ts))
+
+---
+
+## Conflict monitoring (optional)
+
+`@formula/collab-session` can attach conflict monitors that detect *true* offline/concurrent edits that overwrite one another.
+
+These are implemented in `@formula/collab-conflicts` (see [`packages/collab/conflicts/index.js`](../packages/collab/conflicts/index.js)) and are enabled by passing options into `createCollabSession`:
+
+```ts
+import { createCollabSession } from "@formula/collab-session";
+
+const session = createCollabSession({
+  connection: { wsUrl, docId, token },
+
+  // Detect same-cell formula conflicts (and optionally formula-vs-value conflicts).
+  formulaConflicts: {
+    localUserId: userId,
+    mode: "formula", // or "formula+value"
+    onConflict: (conflict) => {
+      // conflict.remoteUserId is best-effort and may be an empty string.
+      console.log("formula conflict", conflict);
+    },
+  },
+
+  // Detect move/delete-vs-edit conflicts using the shared `cellStructuralOps` log.
+  cellConflicts: {
+    localUserId: userId,
+    onConflict: (conflict) => console.log("structural conflict", conflict),
+  },
+
+  // Optional: detect value-vs-value conflicts when you are NOT using formula+value mode above.
+  cellValueConflicts: {
+    localUserId: userId,
+    onConflict: (conflict) => console.log("value conflict", conflict),
+  },
+});
+```
+
+Notes:
+
+- Concurrency detection is **causal** and based on Yjs map entry Item origin ids (not wall-clock timestamps).
+- `remoteUserId` attribution is best-effort and may be empty if the overwriting writer did not update `modifiedBy`.
 
 ---
 
