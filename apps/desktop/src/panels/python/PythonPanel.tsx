@@ -29,19 +29,10 @@ export function mountPythonPanel({ documentController, container, getActiveSheet
     (globalThis as any).__pyodideIndexURL || "/pyodide/v0.25.1/full/";
 
   const root = document.createElement("div");
-  root.style.display = "flex";
-  root.style.flexDirection = "column";
-  root.style.height = "100%";
-  root.style.padding = "8px";
-  root.style.boxSizing = "border-box";
-  root.style.gap = "8px";
-  root.style.fontSize = "12px";
+  root.className = "python-panel";
 
   const toolbar = document.createElement("div");
-  toolbar.style.display = "flex";
-  toolbar.style.flexWrap = "wrap";
-  toolbar.style.alignItems = "center";
-  toolbar.style.gap = "8px";
+  toolbar.className = "python-panel__toolbar";
 
   const runButton = document.createElement("button");
   runButton.type = "button";
@@ -55,9 +46,7 @@ export function mountPythonPanel({ documentController, container, getActiveSheet
 
   const networkLabel = document.createElement("label");
   networkLabel.textContent = "Network:";
-  networkLabel.style.display = "inline-flex";
-  networkLabel.style.alignItems = "center";
-  networkLabel.style.gap = "6px";
+  networkLabel.className = "python-panel__network-label";
 
   const networkSelect = document.createElement("select");
   networkSelect.dataset.testid = "python-network-permission";
@@ -74,10 +63,10 @@ export function mountPythonPanel({ documentController, container, getActiveSheet
   allowlistInput.type = "text";
   allowlistInput.placeholder = "Allowlist hostnames (e.g. example.com api.mycorp.com)";
   allowlistInput.dataset.testid = "python-network-allowlist";
-  allowlistInput.style.minWidth = "280px";
+  allowlistInput.className = "python-panel__allowlist-input";
 
   function updateAllowlistVisibility() {
-    allowlistInput.style.display = networkSelect.value === "allowlist" ? "inline-block" : "none";
+    allowlistInput.hidden = networkSelect.value !== "allowlist";
   }
   updateAllowlistVisibility();
   networkSelect.addEventListener("change", updateAllowlistVisibility);
@@ -88,11 +77,7 @@ export function mountPythonPanel({ documentController, container, getActiveSheet
   toolbar.appendChild(allowlistInput);
 
   const split = document.createElement("div");
-  split.style.display = "grid";
-  split.style.gridTemplateRows = "1fr 1fr";
-  split.style.gap = "8px";
-  split.style.flex = "1";
-  split.style.minHeight = "0";
+  split.className = "python-panel__split";
 
   const editor = document.createElement("textarea");
   editor.dataset.testid = "python-panel-code";
@@ -105,38 +90,14 @@ export function mountPythonPanel({ documentController, container, getActiveSheet
     'print(\"Wrote A1\")',
     "",
   ].join("\n");
-  editor.style.width = "100%";
-  editor.style.height = "100%";
-  editor.style.resize = "none";
-  editor.style.fontFamily =
-    'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
-  editor.style.fontSize = "12px";
-  editor.style.lineHeight = "16px";
-  editor.style.padding = "8px";
-  editor.style.boxSizing = "border-box";
+  editor.className = "python-panel__editor";
 
   const output = document.createElement("pre");
   output.dataset.testid = "python-panel-output";
-  output.style.margin = "0";
-  output.style.width = "100%";
-  output.style.height = "100%";
-  output.style.overflow = "auto";
-  output.style.whiteSpace = "pre-wrap";
-  output.style.fontFamily =
-    'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
-  output.style.fontSize = "12px";
-  output.style.lineHeight = "16px";
-  output.style.padding = "8px";
-  output.style.boxSizing = "border-box";
-  output.style.background = "var(--bg-secondary)";
-  output.style.border = "1px solid var(--border)";
-  output.style.borderRadius = "6px";
+  output.className = "python-panel__output";
 
   const editorWrap = document.createElement("div");
-  editorWrap.style.border = "1px solid var(--border)";
-  editorWrap.style.borderRadius = "6px";
-  editorWrap.style.overflow = "hidden";
-  editorWrap.style.minHeight = "0";
+  editorWrap.className = "python-panel__editor-wrap";
   editorWrap.appendChild(editor);
 
   split.appendChild(editorWrap);
