@@ -69,6 +69,7 @@ The wrapper script:
 4. Caps **RAYON_NUM_THREADS** (defaults to `FORMULA_CARGO_JOBS`) to avoid huge per-process Rayon thread pools on high-core agent hosts
 5. Defaults `MAKEFLAGS=-j<jobs>` and `CARGO_PROFILE_*_CODEGEN_UNITS=<jobs>` to keep non-Rust build steps + rustc/LLVM parallelism aligned
 6. Uses a **repo-local CARGO_HOME** to avoid lock contention
+7. Preserves stdout/stderr streams (does not merge stderr into stdout), so commands that emit machine-readable output on stdout (e.g. JSON) can be safely wrapped
 
 ### Environment Setup (Optional but Recommended)
 
