@@ -532,8 +532,10 @@ Desktop-specific listeners are set up near the bottom of `apps/desktop/src/main.
 - `tray-open` / `tray-new` / `tray-quit` → open dialog/new workbook/quit flow
 - menu events (e.g. `menu-open`, `menu-save`, `menu-quit`) → routed to the same “open/save/close” logic used by keyboard shortcuts and tray menu items
 - Window-level keyboard shortcuts (desktop-only): `Cmd/Ctrl+N`, `Cmd/Ctrl+O`, `Cmd/Ctrl+S`, `Cmd/Ctrl+Shift+S`, `Cmd/Ctrl+W`, `Cmd/Ctrl+Q`
-  - Implemented via a `window.addEventListener("keydown", ...)` handler in `main.ts` so these common file actions work even when focus is outside the grid.
-  - `SpreadsheetApp.onKeyDown(...)` checks `e.defaultPrevented` and treats the event as consumed to avoid double-handling when the desktop host layer already claimed the shortcut.
+  - Implemented as **built-in keybindings** (`apps/desktop/src/commands/builtinKeybindings.ts`) routed through the **KeybindingService** (`apps/desktop/src/extensions/keybindingService.ts`).
+  - These bindings execute `workbench.*` commands registered in the `CommandRegistry` (see `apps/desktop/src/commands/registerWorkbenchFileCommands.ts`), so they also surface in UI (Command Palette shortcut hints, etc.).
+  - `when`-clauses are used for focus scoping (e.g. avoid firing while focus is in a text input / editor surface).
+  - `SpreadsheetApp.onKeyDown(...)` checks `e.defaultPrevented` and treats the event as consumed to avoid double-handling when the desktop keybinding layer already claimed the shortcut.
 - `shortcut-quick-open` / `shortcut-command-palette` → open dialog/palette
 - updater events → handled by the updater UI (`apps/desktop/src/tauri/updaterUi.ts`)
   - `main.ts` emits `updater-ui-ready` once the updater listeners are installed (so the Rust host can safely start a startup update check in release builds).
