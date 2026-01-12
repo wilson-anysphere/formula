@@ -93,6 +93,28 @@ test.describe("Extensions UI integration", () => {
     await gotoDesktop(page);
     await grantSampleHelloPermissions(page);
 
+    // Production safety check: built-in extensions must not be fetched from the repo filesystem at
+    // runtime (no Vite `/@fs/...` dependency). If the loader still uses
+    // `BrowserExtensionHost.loadExtensionFromUrl(...)`, this would throw and the extension would
+    // fail to load.
+    await page.evaluate(() => {
+      const originalFetch = window.fetch.bind(window);
+      window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : typeof (input as any)?.url === "string"
+                ? String((input as any).url)
+                : String(input);
+        if (url.includes("extensions/sample-hello/") && url.includes("package.json")) {
+          throw new Error(`Blocked fetch for built-in extension asset: ${url}`);
+        }
+        return originalFetch(input, init);
+      };
+    });
+
     await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const app: any = (window as any).__formulaApp;
