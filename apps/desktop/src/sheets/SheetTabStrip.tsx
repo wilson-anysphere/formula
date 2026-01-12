@@ -154,7 +154,7 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
     setRenameError(null);
   };
 
-  const openSheetTabContextMenu = (sheetId: string, anchor: { x: number; y: number }, options: { focusFirst?: boolean }) => {
+  const openSheetTabContextMenu = (sheetId: string, anchor: { x: number; y: number }) => {
     const sheet = store.getById(sheetId);
     if (!sheet) return;
 
@@ -166,7 +166,7 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
       },
     ];
 
-    tabContextMenu.open({ x: anchor.x, y: anchor.y, items, focusFirst: options.focusFirst });
+    tabContextMenu.open({ x: anchor.x, y: anchor.y, items });
   };
 
   const updateScrollButtons = useCallback(() => {
@@ -280,7 +280,7 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
                 }
                 lastContextMenuTabRef.current = target;
                 const rect = target.getBoundingClientRect();
-                openSheetTabContextMenu(sheetId, { x: rect.left + rect.width / 2, y: rect.bottom }, { focusFirst: true });
+                openSheetTabContextMenu(sheetId, { x: rect.left + rect.width / 2, y: rect.bottom });
                 return;
               }
 
@@ -364,7 +364,7 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
                 if (!ok) return;
               }
               lastContextMenuTabRef.current = e.currentTarget;
-              openSheetTabContextMenu(sheet.id, { x: e.clientX, y: e.clientY }, { focusFirst: false });
+              openSheetTabContextMenu(sheet.id, { x: e.clientX, y: e.clientY });
             }}
             onCommitRename={() => commitRename(sheet.id)}
             onCancelRename={() => {
