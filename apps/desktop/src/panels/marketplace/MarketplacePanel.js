@@ -181,7 +181,12 @@ async function renderSearchResults({
   );
 
   for (const item of results.results) {
-    const installed = await extensionManager.getInstalled(item.id);
+    let installed = null;
+    try {
+      installed = await extensionManager.getInstalled(item.id);
+    } catch {
+      installed = null;
+    }
     const details = detailsById.get(item.id) || null;
     const transientStatus = transientStatusById?.get(item.id) ?? null;
 

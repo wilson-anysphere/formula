@@ -315,6 +315,70 @@ describe("MarketplacePanel", () => {
     await waitFor(() => container.textContent?.includes("Error: Search failed") ?? false);
   });
 
+  it("tolerates getInstalled() failures and still renders search results", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const marketplaceClient = {
+      search: vi.fn(async () => ({
+        total: 1,
+        results: [
+          {
+            id: "formula.sample-hello",
+            name: "sample-hello",
+            displayName: "Sample Hello",
+            publisher: "formula",
+            description: "hello",
+            latestVersion: "1.0.0",
+            verified: true,
+            featured: false,
+          },
+        ],
+        nextCursor: null,
+      })),
+      getExtension: vi.fn(async (id: string) => ({
+        id,
+        latestVersion: "1.0.0",
+        verified: true,
+        featured: false,
+        deprecated: false,
+        blocked: false,
+        malicious: false,
+        versions: [{ version: "1.0.0", scanStatus: "passed" }],
+      })),
+    };
+
+    const extensionManager = {
+      getInstalled: vi.fn(async () => {
+        throw new Error("IndexedDB unavailable");
+      }),
+      install: vi.fn(async () => {
+        throw new Error("not implemented");
+      }),
+      uninstall: vi.fn(async () => {
+        throw new Error("not implemented");
+      }),
+      checkForUpdates: vi.fn(async () => []),
+      update: vi.fn(async () => {
+        throw new Error("not implemented");
+      }),
+    };
+
+    createMarketplacePanel({ container, marketplaceClient: marketplaceClient as any, extensionManager: extensionManager as any });
+
+    const searchInput = container.querySelector<HTMLInputElement>('input[type="search"]');
+    expect(searchInput).toBeInstanceOf(HTMLInputElement);
+    searchInput!.value = "sample";
+
+    const searchButton = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Search");
+    expect(searchButton).toBeInstanceOf(HTMLButtonElement);
+    searchButton!.click();
+
+    await waitFor(() => Boolean(container.querySelector(".marketplace-result")));
+    const installButton = container.querySelector<HTMLButtonElement>('[data-testid="marketplace-install-formula.sample-hello"]');
+    expect(installButton).toBeInstanceOf(HTMLButtonElement);
+  });
+
   it("restores action buttons when the update check finds no updates", async () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
