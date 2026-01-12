@@ -156,6 +156,9 @@ FUNCTIONALITY (# of Excel buttons/features)
 | `Ctrl+;` | Insert date |
 | `Alt+=` | AutoSum |
 | `Ctrl+C/V/X/Z/Y` | Standard clipboard/undo |
+| `Cmd/Ctrl+F` | Find |
+| `Cmd+Option+F` (macOS) / `Ctrl+H` (Windows/Linux) | Replace |
+| `Cmd/Ctrl+G` | Go to |
 
 ### App Shortcuts
 
