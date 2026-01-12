@@ -77,7 +77,17 @@ test.describe("collab presence: sheet switching", () => {
 
     // Ensure the Playwright worker doesn't hang on a still-running child process.
     await new Promise<void>((resolve) => {
-      const timeout = setTimeout(resolve, 5_000);
+      const timeout = setTimeout(() => {
+        // Best-effort: force-kill if graceful shutdown hangs.
+        if (child.exitCode == null && !child.killed) {
+          try {
+            child.kill("SIGKILL");
+          } catch {
+            // ignore
+          }
+        }
+        resolve();
+      }, 5_000);
       child.once("exit", () => {
         clearTimeout(timeout);
         resolve();
@@ -106,8 +116,10 @@ test.describe("collab presence: sheet switching", () => {
 
     await Promise.all([gotoDesktop(page, urlForUser("user1")), gotoDesktop(page2, urlForUser("user2"))]);
 
-    await expect(page.getByTestId("collab-status")).toContainText("Synced", { timeout: 30_000 });
-    await expect(page2.getByTestId("collab-status")).toContainText("Synced", { timeout: 30_000 });
+    await expect(page.getByTestId("collab-status")).toBeVisible();
+    await expect(page2.getByTestId("collab-status")).toBeVisible();
+    await expect(page.getByTestId("collab-status")).toHaveAttribute("data-collab-sync", "synced", { timeout: 30_000 });
+    await expect(page2.getByTestId("collab-status")).toHaveAttribute("data-collab-sync", "synced", { timeout: 30_000 });
 
     // With both clients on the initial sheet, user2 should see user1's presence.
     await expect
