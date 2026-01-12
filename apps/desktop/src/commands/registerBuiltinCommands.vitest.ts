@@ -455,4 +455,56 @@ describe("registerBuiltinCommands: core editing/view/audit commands", () => {
     expect(app.undo).not.toHaveBeenCalled();
     expect(app.redo).not.toHaveBeenCalled();
   });
+
+  it("uses document.execCommand for clipboard commands while the formula bar is editing (range selection mode)", async () => {
+    const commandRegistry = new CommandRegistry();
+    const layoutController = {
+      layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
+      openPanel(panelId: string) {
+        this.layout = openPanel(this.layout, panelId, { panelRegistry });
+      },
+      closePanel(panelId: string) {
+        this.layout = closePanel(this.layout, panelId);
+      },
+    } as any;
+
+    const app = {
+      copyToClipboard: vi.fn(),
+      cutToClipboard: vi.fn(),
+      pasteFromClipboard: vi.fn(),
+      // Focus is on the grid (not an input), but the formula bar is still editing.
+      isFormulaBarEditing: vi.fn(() => true),
+      focusFormulaBar: vi.fn(),
+    } as any;
+
+    const execCommand = vi.fn(() => true);
+    const prevDocument = (globalThis as any).document;
+    (globalThis as any).document = {
+      activeElement: { tagName: "DIV", isContentEditable: false },
+      execCommand,
+    };
+
+    try {
+      registerBuiltinCommands({ commandRegistry, app, layoutController });
+      await commandRegistry.executeCommand("clipboard.copy");
+      await commandRegistry.executeCommand("clipboard.cut");
+      await commandRegistry.executeCommand("clipboard.paste");
+    } finally {
+      if (prevDocument === undefined) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        delete (globalThis as any).document;
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (globalThis as any).document = prevDocument;
+      }
+    }
+
+    expect(app.focusFormulaBar).toHaveBeenCalledTimes(3);
+    expect(execCommand).toHaveBeenCalledWith("copy", false);
+    expect(execCommand).toHaveBeenCalledWith("cut", false);
+    expect(execCommand).toHaveBeenCalledWith("paste", false);
+    expect(app.copyToClipboard).not.toHaveBeenCalled();
+    expect(app.cutToClipboard).not.toHaveBeenCalled();
+    expect(app.pasteFromClipboard).not.toHaveBeenCalled();
+  });
 });

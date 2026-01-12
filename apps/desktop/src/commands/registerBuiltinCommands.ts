@@ -612,7 +612,22 @@ export function registerBuiltinCommands(params: {
   commandRegistry.registerBuiltinCommand(
     "clipboard.copy",
     t("command.clipboard.copy"),
-    () => app.copyToClipboard(),
+    () => {
+      // Excel-like behavior: when focus is in a text editing surface, copy/cut/paste should apply to
+      // that surface instead of the spreadsheet selection.
+      if (getTextEditingTarget()) {
+        tryExecCommand("copy");
+        return;
+      }
+      // Formula bar range selection mode can temporarily move focus back to the grid while the formula
+      // bar is still actively editing. In that case, treat copy/cut/paste as text editing operations.
+      if ((app as any).isFormulaBarEditing?.()) {
+        (app as any).focusFormulaBar?.();
+        tryExecCommand("copy");
+        return;
+      }
+      void app.copyToClipboard();
+    },
     {
       category: t("commandCategory.editing"),
       icon: null,
@@ -624,7 +639,18 @@ export function registerBuiltinCommands(params: {
   commandRegistry.registerBuiltinCommand(
     "clipboard.cut",
     t("command.clipboard.cut"),
-    () => app.cutToClipboard(),
+    () => {
+      if (getTextEditingTarget()) {
+        tryExecCommand("cut");
+        return;
+      }
+      if ((app as any).isFormulaBarEditing?.()) {
+        (app as any).focusFormulaBar?.();
+        tryExecCommand("cut");
+        return;
+      }
+      void app.cutToClipboard();
+    },
     {
       category: t("commandCategory.editing"),
       icon: null,
@@ -636,7 +662,18 @@ export function registerBuiltinCommands(params: {
   commandRegistry.registerBuiltinCommand(
     "clipboard.paste",
     t("command.clipboard.paste"),
-    () => app.pasteFromClipboard(),
+    () => {
+      if (getTextEditingTarget()) {
+        tryExecCommand("paste");
+        return;
+      }
+      if ((app as any).isFormulaBarEditing?.()) {
+        (app as any).focusFormulaBar?.();
+        tryExecCommand("paste");
+        return;
+      }
+      void app.pasteFromClipboard();
+    },
     {
       category: t("commandCategory.editing"),
       icon: null,

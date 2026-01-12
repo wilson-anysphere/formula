@@ -69,7 +69,7 @@ import { formatSheetNameForA1 } from "../sheet/formatSheetNameForA1.js";
 import { parseGoTo, splitSheetQualifier } from "../../../../packages/search/index.js";
 import type { CreateChartResult, CreateChartSpec } from "../../../../packages/ai-tools/src/spreadsheet/api.js";
 import { colToName as colToNameA1, fromA1 as fromA1A1 } from "@formula/spreadsheet-frontend/a1";
-import { shiftA1References } from "@formula/spreadsheet-frontend";
+import { shiftA1References, toggleA1AbsoluteAtCursor } from "@formula/spreadsheet-frontend";
 import { createSchemaProviderFromSearchWorkbook } from "../ai/context/searchWorkbookSchemaProvider.js";
 import type { WorkbookContextBuildStats } from "../ai/context/WorkbookContextBuilder.js";
 import { InlineEditController, type InlineEditLLMClient } from "../ai/inline-edit/inlineEditController";
@@ -8100,6 +8100,31 @@ export class SpreadsheetApp {
       if (e.key === "Enter" && !e.altKey) {
         e.preventDefault();
         this.formulaBar?.commitEdit();
+        return;
+      }
+
+      // Excel-like: while editing a formula, F4 toggles absolute/relative references.
+      // Route it to the formula bar even if focus is temporarily on the grid (range selection mode).
+      if (
+        e.key === "F4" &&
+        !e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        this.formulaBar &&
+        this.formulaBar.textarea.value.trim().startsWith("=")
+      ) {
+        e.preventDefault();
+        const textarea = this.formulaBar.textarea;
+        const prevText = textarea.value;
+        const cursorStart = textarea.selectionStart ?? prevText.length;
+        const cursorEnd = textarea.selectionEnd ?? prevText.length;
+        const toggled = toggleA1AbsoluteAtCursor(prevText, cursorStart, cursorEnd);
+        if (toggled) {
+          textarea.value = toggled.text;
+          textarea.setSelectionRange(toggled.cursorStart, toggled.cursorEnd);
+          textarea.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+        this.formulaBar.focus();
         return;
       }
 

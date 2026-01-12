@@ -658,6 +658,48 @@ describe("SpreadsheetApp Excel-style date/time insertion shortcuts (serial value
     }
   });
 
+  it("toggles absolute/relative references with F4 while focus is on the grid (range selection mode)", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const app = new SpreadsheetApp(root, status, { formulaBar });
+
+    const input = formulaBar.querySelector<HTMLTextAreaElement>('[data-testid="formula-input"]');
+    expect(input).not.toBeNull();
+
+    input!.focus();
+    input!.value = "=A1";
+    input!.setSelectionRange(input!.value.length, input!.value.length);
+    input!.dispatchEvent(new Event("input", { bubbles: true }));
+
+    // Mimic a range-selection workflow where focus temporarily moves back to the grid.
+    root.focus();
+
+    root.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        key: "F4",
+      }),
+    );
+
+    expect(input!.value).toBe("=$A$1");
+    // `toggleA1AbsoluteAtCursor` selects the updated token (Excel behavior).
+    expect(input!.selectionStart).toBe(1);
+    expect(input!.selectionEnd).toBe(5);
+
+    app.destroy();
+    root.remove();
+    formulaBar.remove();
+  });
+
   it("Fill Down/Right commands no-op while the formula bar is actively editing", () => {
     const root = createRoot();
     const status = {
