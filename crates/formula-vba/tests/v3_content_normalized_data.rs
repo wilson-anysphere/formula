@@ -1,8 +1,8 @@
 use std::io::{Cursor, Write};
 
 use formula_vba::{
-    compress_container, content_normalized_data, forms_normalized_data, project_normalized_data_v3,
-    v3_content_normalized_data,
+    compress_container, content_normalized_data, contents_hash_v3, forms_normalized_data,
+    project_normalized_data_v3, v3_content_normalized_data,
 };
 
 fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
@@ -273,6 +273,14 @@ fn v3_content_normalized_data_skips_projectcompatversion_record() {
     assert_eq!(
         normalized_without, normalized_with,
         "PROJECTCOMPATVERSION (0x004A) must not affect V3ContentNormalizedData"
+    );
+
+    // Contents Hash v3 (the actual digest used by DigitalSignatureExt) should also be unaffected.
+    let digest_without = contents_hash_v3(&vba_without).expect("ContentsHash v3 without compat");
+    let digest_with = contents_hash_v3(&vba_with).expect("ContentsHash v3 with compat");
+    assert_eq!(
+        digest_without, digest_with,
+        "PROJECTCOMPATVERSION (0x004A) must not affect ContentsHash v3"
     );
 
     // Sanity check: ensure module bytes are still present so this test is sensitive to parsing
