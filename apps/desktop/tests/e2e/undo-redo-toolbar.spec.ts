@@ -18,6 +18,16 @@ test.describe("titlebar undo/redo buttons", () => {
 
       await expect(undo).toBeVisible();
       await expect(redo).toBeVisible();
+
+      // Ensure a clean undo stack regardless of any boot-time document initialization.
+      await page.evaluate(() => {
+        const app = (window as any).__formulaApp;
+        const doc = app.getDocument();
+        doc.applyState(doc.encodeState());
+        doc.markSaved();
+      });
+      await waitForIdle(page);
+
       await expect(undo).toBeDisabled();
       await expect(redo).toBeDisabled();
 
@@ -32,6 +42,13 @@ test.describe("titlebar undo/redo buttons", () => {
       await expect(undo).toBeEnabled();
       await expect(redo).toBeDisabled();
       await expect(undo).toHaveAttribute("aria-label", "Undo Set Cell");
+
+      // While editing, undo/redo should be disabled (Excel-like behavior: Ctrl+Z becomes text undo).
+      await page.getByTestId("formula-input").click();
+      await expect(undo).toBeDisabled();
+      await expect(redo).toBeDisabled();
+      await page.keyboard.press("Escape");
+      await expect(undo).toBeEnabled();
 
       await undo.click();
       await waitForIdle(page);
@@ -59,4 +76,3 @@ test.describe("titlebar undo/redo buttons", () => {
     });
   }
 });
-
