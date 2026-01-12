@@ -27,28 +27,31 @@ export interface CompletionContext {
   surroundingCells: SurroundingCellsContext;
 }
 
-export interface CompletionClient {
-  complete: (prompt: string, options?: CompletionOptions) => Promise<string>;
+export interface TabCompletionRequest {
+  input: string;
+  cursorPosition: number;
+  cellA1: string;
+}
+
+export interface TabCompletionClient {
+  completeTabCompletion(req: TabCompletionRequest): Promise<string>;
+}
+
+export class CursorTabCompletionClient implements TabCompletionClient {
+  constructor(options?: { baseUrl?: string; fetchImpl?: typeof fetch; timeoutMs?: number });
+  completeTabCompletion(req: TabCompletionRequest): Promise<string>;
 }
 
 export class TabCompletionEngine {
   constructor(options?: {
     functionRegistry?: FunctionRegistry;
     parsePartialFormula?: typeof parsePartialFormula;
-    /**
-     * Optional Cursor-managed completion client for formula-body suggestions.
-     */
-    completionClient?: CompletionClient | null;
-    /**
-     * @deprecated Use completionClient instead.
-     */
-    localModel?: CompletionClient | null;
+    completionClient?: TabCompletionClient | null;
     schemaProvider?: SchemaProvider | null;
     cache?: LRUCache<Suggestion[]>;
     cacheSize?: number;
     maxSuggestions?: number;
     completionTimeoutMs?: number;
-    localModelTimeoutMs?: number;
   });
 
   getSuggestions(context: CompletionContext, options?: { previewEvaluator?: PreviewEvaluator }): Promise<Suggestion[]>;
@@ -106,45 +109,6 @@ export class LRUCache<V = unknown> {
   delete(key: string): boolean;
   clear(): void;
   readonly size: number;
-}
-
-export interface CompletionOptions {
-  model?: string;
-  maxTokens?: number;
-  temperature?: number;
-  stop?: string[];
-  timeoutMs?: number;
-}
-
-export class CursorCompletionClient implements CompletionClient {
-  constructor(options: { baseUrl: string; fetchImpl?: typeof fetch; timeoutMs?: number; headers?: Record<string, string> });
-  complete(prompt: string, options?: CompletionOptions): Promise<string>;
-}
-
-export class LocalModelManager {
-  constructor(params: {
-    ollamaClient: {
-      health: () => Promise<boolean>;
-      hasModel: (name: string) => Promise<boolean>;
-      pullModel: (name: string) => Promise<void>;
-      generate: (params: { model: string; prompt: string; options?: Record<string, unknown>; stream?: boolean }) => Promise<unknown>;
-    };
-    requiredModels?: string[];
-    defaultModel?: string;
-    cacheSize?: number;
-  });
-
-  initialize(): Promise<void>;
-  complete(prompt: string, options?: CompletionOptions): Promise<string>;
-}
-
-export class OllamaClient {
-  constructor(options?: { baseUrl?: string; fetchImpl?: typeof fetch; timeoutMs?: number });
-  health(): Promise<boolean>;
-  listModels(): Promise<unknown[]>;
-  hasModel(modelName: string): Promise<boolean>;
-  pullModel(modelName: string): Promise<void>;
-  generate(params: { model: string; prompt: string; options?: Record<string, unknown>; stream?: boolean }): Promise<unknown>;
 }
 
 export interface RangeSuggestion {

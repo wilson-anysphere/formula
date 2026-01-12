@@ -639,14 +639,14 @@ test("Argument value suggestions use catalog arg_types (RANDBETWEEN suggests num
 
 test("TabCompletionEngine caches suggestions by context key", async () => {
   let callCount = 0;
-  const localModel = {
-    async complete() {
+  const completionClient = {
+    async completeTabCompletion() {
       callCount++;
       return "+1";
     },
   };
 
-  const engine = new TabCompletionEngine({ localModel, localModelTimeoutMs: 200 });
+  const engine = new TabCompletionEngine({ completionClient, completionTimeoutMs: 200 });
 
   const ctx = {
     currentInput: "=1+",
@@ -659,7 +659,7 @@ test("TabCompletionEngine caches suggestions by context key", async () => {
   const s2 = await engine.getSuggestions(ctx);
 
   assert.deepEqual(s1, s2);
-  assert.equal(callCount, 1, "Expected local model to be called once due to caching");
+  assert.equal(callCount, 1, "Expected completion client to be called once due to caching");
 });
 
 test("parsePartialFormula ignores commas inside structured refs and array constants", () => {
@@ -698,16 +698,16 @@ test("TabCompletionEngine cache busts when schemaProvider cache key changes", as
   let callCount = 0;
   let schemaKey = "v1";
 
-  const localModel = {
-    async complete() {
+  const completionClient = {
+    async completeTabCompletion() {
       callCount++;
       return "+1";
     },
   };
 
   const engine = new TabCompletionEngine({
-    localModel,
-    localModelTimeoutMs: 200,
+    completionClient,
+    completionTimeoutMs: 200,
     schemaProvider: {
       getCacheKey: () => schemaKey,
     },
@@ -724,23 +724,23 @@ test("TabCompletionEngine cache busts when schemaProvider cache key changes", as
   schemaKey = "v2";
   await engine.getSuggestions(ctx);
 
-  assert.equal(callCount, 2, "Expected local model to be called again when schema key changes");
+  assert.equal(callCount, 2, "Expected completion client to be called again when schema key changes");
 });
 
 test("TabCompletionEngine cache busts when surroundingCells cache key changes", async () => {
   let callCount = 0;
   let cellsKey = "cells:v1";
 
-  const localModel = {
-    async complete() {
+  const completionClient = {
+    async completeTabCompletion() {
       callCount++;
       return "+1";
     },
   };
 
   const engine = new TabCompletionEngine({
-    localModel,
-    localModelTimeoutMs: 200,
+    completionClient,
+    completionTimeoutMs: 200,
   });
 
   const ctx = {
@@ -757,7 +757,7 @@ test("TabCompletionEngine cache busts when surroundingCells cache key changes", 
   cellsKey = "cells:v2";
   await engine.getSuggestions(ctx);
 
-  assert.equal(callCount, 2, "Expected local model to be called again when surrounding key changes");
+  assert.equal(callCount, 2, "Expected completion client to be called again when surrounding key changes");
 });
 
 test("Named ranges are suggested in range arguments (=SUM(Sal → SalesData)", async () => {
@@ -806,18 +806,14 @@ test("Named ranges preserve the typed prefix case (lowercase)", async () => {
   );
 });
 
-test("Local-model prompt formatting is stable and completion inserts at the cursor", async () => {
-  /** @type {string | null} */
-  let seenPrompt = null;
-
-  const localModel = {
-    async complete(prompt) {
-      seenPrompt = prompt;
+test("Cursor backend completion inserts at the cursor (=1+ + '2' => =1+2)", async () => {
+  const completionClient = {
+    async completeTabCompletion() {
       return "2";
     },
   };
 
-  const engine = new TabCompletionEngine({ localModel, localModelTimeoutMs: 200 });
+  const engine = new TabCompletionEngine({ completionClient, completionTimeoutMs: 200 });
 
   const currentInput = "=1+";
   const suggestions = await engine.getSuggestions({
@@ -827,19 +823,9 @@ test("Local-model prompt formatting is stable and completion inserts at the curs
     surroundingCells: createMockCellContext({}),
   });
 
-  const expectedPrompt = [
-    "You are a spreadsheet formula completion engine.",
-    "Return ONLY the text to insert at the cursor.",
-    "Cell: A1",
-    `Input: ${currentInput}`,
-    `CursorPosition: ${currentInput.length}`,
-    "Completion:",
-  ].join("\n");
-
-  assert.equal(seenPrompt, expectedPrompt);
   assert.ok(
-    suggestions.some(s => s.text === "=1+2"),
-    `Expected the local model completion to be inserted, got: ${suggestions.map(s => s.text).join(", ")}`
+    suggestions.some((s) => s.text === "=1+2"),
+    `Expected the backend completion to be inserted, got: ${suggestions.map((s) => s.text).join(", ")}`
   );
 });
 

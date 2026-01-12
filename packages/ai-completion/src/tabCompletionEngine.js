@@ -53,27 +53,24 @@ export class TabCompletionEngine {
    * @param {{
    *   functionRegistry?: FunctionRegistry,
    *   parsePartialFormula?: typeof parsePartialFormula,
-   *   // Optional Cursor-managed completion client. When provided, the engine will
-   *   // request a completion for formula bodies and treat the returned string as
-   *   // insertion text at the cursor (or a full formula if it begins with "=").
-   *   completionClient?: { complete: (prompt: string, options?: any) => Promise<string> } | null,
-   *   localModel?: { complete: (prompt: string, options?: any) => Promise<string> } | null,
+   *   completionClient?: { completeTabCompletion: (req: { input: string, cursorPosition: number, cellA1: string }) => Promise<string> } | null,
    *   schemaProvider?: SchemaProvider | null,
    *   cache?: LRUCache,
    *   cacheSize?: number,
    *   maxSuggestions?: number,
-   *   completionTimeoutMs?: number,
-   *   localModelTimeoutMs?: number
+   *   completionTimeoutMs?: number
    * }} [options]
    */
   constructor(options = {}) {
     this.functionRegistry = options.functionRegistry ?? new FunctionRegistry();
     this.parsePartialFormula = options.parsePartialFormula ?? parsePartialFormula;
-    this.localModel = options.completionClient ?? options.localModel ?? null;
+    this.completionClient = options.completionClient ?? null;
     this.schemaProvider = options.schemaProvider ?? null;
     this.cache = options.cache ?? new LRUCache(options.cacheSize ?? 200);
     this.maxSuggestions = options.maxSuggestions ?? 5;
-    this.localModelTimeoutMs = options.completionTimeoutMs ?? options.localModelTimeoutMs ?? 60;
+    const rawTimeout = options.completionTimeoutMs ?? 100;
+    // Tab completion should stay responsive; clamp to a small budget.
+    this.completionTimeoutMs = Number.isFinite(rawTimeout) ? Math.max(1, Math.min(rawTimeout, 200)) : 100;
   }
 
   /**
@@ -121,16 +118,16 @@ export class TabCompletionEngine {
   async #computeBaseSuggestions(context, input, cursorPosition) {
     const parsed = this.parsePartialFormula(input, cursorPosition, this.functionRegistry);
 
-    const [ruleBased, patternBased, localModelBased] = await Promise.all([
+    const [ruleBased, patternBased, backendBased] = await Promise.all([
       this.getRuleBasedSuggestions(context, parsed),
       this.getPatternSuggestions(context, parsed),
-      this.getLocalModelSuggestions(context, parsed),
+      this.getCursorBackendSuggestions(context, parsed),
     ]);
 
     return rankAndDedupe([
       ...ruleBased,
       ...patternBased,
-      ...localModelBased,
+      ...backendBased,
     ]).slice(0, this.maxSuggestions);
   }
 
@@ -183,35 +180,29 @@ export class TabCompletionEngine {
    * @param {ReturnType<typeof parsePartialFormula>} parsed
    * @returns {Promise<Suggestion[]>}
    */
-  async getLocalModelSuggestions(context, parsed) {
-    if (!this.localModel) return [];
+  async getCursorBackendSuggestions(context, parsed) {
+    if (!this.completionClient) return [];
     if (!parsed.isFormula) return [];
 
     // Rule-based completions are often better than LLM for function names and
-    // argument structure. Only ask the model when we have an actual formula body.
+    // argument structure. Only ask the backend when we have an actual formula body.
     if (parsed.functionNamePrefix) return [];
 
     const input = context.currentInput ?? "";
     const cursor = clampCursor(input, context.cursorPosition);
     const cell = normalizeCellRef(context.cellRef);
 
-    const prompt = buildLocalModelPrompt({
-      input,
-      cursorPosition: cursor,
-      cellA1: toA1(cell),
-    });
-
     try {
       const completion = await withTimeout(
-        this.localModel.complete(prompt, {
-          maxTokens: 50,
-          temperature: 0.1,
-          stop: [")", ",", "\n"],
+        this.completionClient.completeTabCompletion({
+          input,
+          cursorPosition: cursor,
+          cellA1: toA1(cell),
         }),
-        this.localModelTimeoutMs
+        this.completionTimeoutMs
       );
 
-      const suggestionText = normalizeLocalCompletion(input, cursor, completion);
+      const suggestionText = normalizeBackendCompletion(input, cursor, completion);
       if (!suggestionText) return [];
 
       return [
@@ -223,7 +214,7 @@ export class TabCompletionEngine {
         },
       ];
     } catch {
-      // LLM is optional; ignore failures and timeouts.
+      // Backend is optional; ignore failures and timeouts.
       return [];
     }
   }
@@ -521,22 +512,11 @@ export class TabCompletionEngine {
   }
 }
 
-function buildLocalModelPrompt({ input, cursorPosition, cellA1 }) {
-  return [
-    "You are a spreadsheet formula completion engine.",
-    "Return ONLY the text to insert at the cursor.",
-    `Cell: ${cellA1}`,
-    `Input: ${input}`,
-    `CursorPosition: ${cursorPosition}`,
-    "Completion:",
-  ].join("\n");
-}
-
-function normalizeLocalCompletion(input, cursorPosition, completion) {
+function normalizeBackendCompletion(input, cursorPosition, completion) {
   const raw = (completion ?? "").toString().trim();
   if (!raw) return "";
 
-  // If the model returned a full formula, trust it.
+  // If the backend returned a full formula, trust it.
   if (raw.startsWith("=")) return raw;
 
   // Otherwise treat it as text to insert at the cursor.

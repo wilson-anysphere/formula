@@ -1,7 +1,7 @@
 import {
-  CursorCompletionClient,
+  CursorTabCompletionClient,
   TabCompletionEngine,
-  type CompletionClient,
+  type TabCompletionClient,
   type CompletionContext,
   type SchemaProvider,
   type Suggestion
@@ -23,7 +23,7 @@ export interface FormulaBarTabCompletionControllerOptions {
    * Tests can inject a stub implementation to keep the suite network-safe and
    * deterministic.
    */
-  completionClient?: CompletionClient | null;
+  completionClient?: TabCompletionClient | null;
 }
 
 export class FormulaBarTabCompletionController {
@@ -71,13 +71,12 @@ export class FormulaBarTabCompletionController {
     };
     this.#schemaProvider = schemaProvider;
 
-    const completionClient = opts.completionClient ?? createCursorCompletionClientFromEnv();
-
+    const completionClient = opts.completionClient ?? new CursorTabCompletionClient();
     this.#completion = new TabCompletionEngine({
       completionClient,
       schemaProvider,
       // Keep tab completion responsive even if the backend is slow/unavailable.
-      completionTimeoutMs: 200,
+      completionTimeoutMs: 100,
     });
 
     const textarea = this.#formulaBar.textarea;
@@ -210,21 +209,6 @@ export class FormulaBarTabCompletionController {
   }
 }
 
-function createCursorCompletionClientFromEnv(): CompletionClient | null {
-  const viteUrl = import.meta.env.VITE_CURSOR_AI_COMPLETION_URL;
-  const nodeUrl = (globalThis as any).process?.env?.CURSOR_AI_COMPLETION_URL;
-  const raw = typeof viteUrl === "string" && viteUrl.trim() ? viteUrl : typeof nodeUrl === "string" && nodeUrl.trim() ? nodeUrl : null;
-  if (!raw) return null;
-
-  try {
-    return new CursorCompletionClient({
-      baseUrl: raw.trim(),
-      timeoutMs: 200,
-    });
-  } catch {
-    return null;
-  }
-}
 function createPreviewEvaluator(params: {
   document: DocumentController;
   sheetId: string;
