@@ -730,28 +730,47 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
         }
       }
 
-      // Clear (but do not delete) any existing cell entries that are no longer
-      // part of the desired snapshot, as well as any legacy key encodings.
+      /** @type {string[]} */
+      const legacyKeysToDelete = [];
+      /** @type {Set<string>} */
+      const canonicalKeysToClear = new Set();
+
+      // Drop legacy key encodings (`${sheetId}:${row},${col}` or `r{row}c{col}`),
+      // but preserve *canonical* cell maps for removed cells by clearing them via
+      // `value: null` / `formula: null` markers.
       //
-      // Rationale:
+      // Rationale for clearing (instead of deleting) removed canonical cells:
       // - Root `cells.delete(key)` operations do not create new Yjs Items, so
       //   later overwrites cannot reliably establish causal ordering against a
       //   delete (important for conflict monitors).
       // - Deep observers can miss root deletes depending on listener shape.
       //
-      // Instead, preserve the per-cell Y.Map and represent emptiness via
-      // `value: null`, `formula: null`, and absent format/style.
-      cellsMap.forEach((cellData, rawKey) => {
+      // We still delete legacy encodings to keep the document canonical and to
+      // avoid permanently re-propagating duplicate keys after a checkout.
+      cellsMap.forEach((_cellData, rawKey) => {
         if (typeof rawKey !== "string") return;
         const parsed = parseSpreadsheetCellKey(rawKey);
         if (!parsed) return;
         const canonical = `${parsed.sheetId}:${parsed.row}:${parsed.col}`;
-        if (desiredCells.has(canonical) && rawKey === canonical) return;
 
-        let yCell = getYMap(cellData);
+        if (rawKey !== canonical) {
+          legacyKeysToDelete.push(rawKey);
+          if (!desiredCells.has(canonical)) canonicalKeysToClear.add(canonical);
+          return;
+        }
+
+        if (!desiredCells.has(canonical)) canonicalKeysToClear.add(canonical);
+      });
+
+      for (const key of legacyKeysToDelete) {
+        cellsMap.delete(key);
+      }
+
+      for (const canonicalKey of canonicalKeysToClear) {
+        let yCell = getYMap(cellsMap.get(canonicalKey));
         if (!yCell) {
           yCell = new Y.Map();
-          cellsMap.set(rawKey, yCell);
+          cellsMap.set(canonicalKey, yCell);
         }
 
         yCell.delete("enc");
@@ -759,7 +778,7 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
         yCell.set("formula", null);
         yCell.delete("format");
         yCell.delete("style");
-      });
+      }
 
       for (const [key, normalizedCell] of desiredCells) {
         let yCell = getYMap(cellsMap.get(key));
