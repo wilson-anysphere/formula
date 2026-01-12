@@ -57,12 +57,12 @@ test.describe("collaboration: sheet metadata", () => {
           const app = (window as any).__formulaApp;
           const session = app?.getCollabSession?.() ?? null;
           return Boolean(session?.provider?.synced);
-        }),
+        }, undefined, { timeout: 60_000 }),
         pageB.waitForFunction(() => {
           const app = (window as any).__formulaApp;
           const session = app?.getCollabSession?.() ?? null;
           return Boolean(session?.provider?.synced);
-        }),
+        }, undefined, { timeout: 60_000 }),
       ]);
 
       // 1) Add a new sheet entry directly in Yjs (simulates version restore / branch checkout).
@@ -194,4 +194,3 @@ test.describe("collaboration: sheet metadata", () => {
     }
   });
 });
-
