@@ -3156,6 +3156,58 @@ mod tests {
     }
 
     #[test]
+    fn set_cell_rich_string_preserves_error_like_text_via_quote_prefix() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+
+        wb.set_cell_rich_internal(
+            DEFAULT_SHEET,
+            "A1",
+            CellValue::String("#FIELD!".to_string()),
+        )
+        .unwrap();
+
+        let scalar = wb.get_cell_data(DEFAULT_SHEET, "A1").unwrap();
+        assert_eq!(scalar.input, json!("'#FIELD!"));
+        assert_eq!(scalar.value, json!("#FIELD!"));
+
+        let rich = wb.get_cell_rich_data(DEFAULT_SHEET, "A1").unwrap();
+        assert_eq!(rich.input, CellValue::String("#FIELD!".to_string()));
+        assert_eq!(rich.value, rich.input);
+    }
+
+    #[test]
+    fn set_cell_rich_string_preserves_formula_like_text_via_quote_prefix() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+
+        wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", CellValue::String("=1+1".to_string()))
+            .unwrap();
+
+        let scalar = wb.get_cell_data(DEFAULT_SHEET, "A1").unwrap();
+        assert_eq!(scalar.input, json!("'=1+1"));
+        assert_eq!(scalar.value, json!("=1+1"));
+
+        let rich = wb.get_cell_rich_data(DEFAULT_SHEET, "A1").unwrap();
+        assert_eq!(rich.input, CellValue::String("=1+1".to_string()));
+        assert_eq!(rich.value, rich.input);
+    }
+
+    #[test]
+    fn set_cell_rich_string_preserves_leading_apostrophe_by_double_prefixing_input() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+
+        wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", CellValue::String("'hello".to_string()))
+            .unwrap();
+
+        let scalar = wb.get_cell_data(DEFAULT_SHEET, "A1").unwrap();
+        assert_eq!(scalar.input, json!("''hello"));
+        assert_eq!(scalar.value, json!("'hello"));
+
+        let rich = wb.get_cell_rich_data(DEFAULT_SHEET, "A1").unwrap();
+        assert_eq!(rich.input, CellValue::String("'hello".to_string()));
+        assert_eq!(rich.value, rich.input);
+    }
+
+    #[test]
     fn cell_value_json_roundtrips_entity_and_record() {
         let mut record_fields = BTreeMap::new();
         record_fields.insert("Name".to_string(), CellValue::String("Alice".to_string()));
