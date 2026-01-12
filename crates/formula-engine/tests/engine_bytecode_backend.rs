@@ -2804,6 +2804,71 @@ fn bytecode_backend_propagates_error_literals_through_ops_and_functions() {
 }
 
 #[test]
+fn bytecode_backend_handles_extended_error_literals_inside_expressions() {
+    let mut engine = Engine::new();
+
+    let cases = [
+        ("#GETTING_DATA", ErrorKind::GettingData, 8.0),
+        ("#FIELD!", ErrorKind::Field, 11.0),
+        ("#CONNECT!", ErrorKind::Connect, 12.0),
+        ("#BLOCKED!", ErrorKind::Blocked, 13.0),
+        ("#UNKNOWN!", ErrorKind::Unknown, 14.0),
+    ];
+
+    for (idx, (lit, _kind, _code)) in cases.iter().enumerate() {
+        let row = idx + 1;
+        engine
+            .set_cell_formula("Sheet1", &format!("A{row}"), &format!("={lit}+1"))
+            .unwrap();
+        engine
+            .set_cell_formula("Sheet1", &format!("B{row}"), &format!("=IFERROR({lit},7)"))
+            .unwrap();
+        engine
+            .set_cell_formula("Sheet1", &format!("C{row}"), &format!("=ERROR.TYPE({lit})"))
+            .unwrap();
+        engine
+            .set_cell_formula("Sheet1", &format!("D{row}"), &format!("=ISERROR({lit})"))
+            .unwrap();
+    }
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(
+        stats.fallback,
+        0,
+        "expected all formulas to compile to bytecode (report={:?})",
+        engine.bytecode_compile_report(100)
+    );
+    assert_eq!(stats.total_formula_cells, cases.len() * 4);
+    assert_eq!(stats.compiled, cases.len() * 4);
+
+    engine.recalculate_single_threaded();
+
+    for (idx, (lit, kind, code)) in cases.iter().enumerate() {
+        let row = idx + 1;
+
+        let a_cell = format!("A{row}");
+        let a_formula = format!("={lit}+1");
+        assert_eq!(engine.get_cell_value("Sheet1", &a_cell), Value::Error(*kind));
+        assert_engine_matches_ast(&engine, &a_formula, &a_cell);
+
+        let b_cell = format!("B{row}");
+        let b_formula = format!("=IFERROR({lit},7)");
+        assert_eq!(engine.get_cell_value("Sheet1", &b_cell), Value::Number(7.0));
+        assert_engine_matches_ast(&engine, &b_formula, &b_cell);
+
+        let c_cell = format!("C{row}");
+        let c_formula = format!("=ERROR.TYPE({lit})");
+        assert_eq!(engine.get_cell_value("Sheet1", &c_cell), Value::Number(*code));
+        assert_engine_matches_ast(&engine, &c_formula, &c_cell);
+
+        let d_cell = format!("D{row}");
+        let d_formula = format!("=ISERROR({lit})");
+        assert_eq!(engine.get_cell_value("Sheet1", &d_cell), Value::Bool(true));
+        assert_engine_matches_ast(&engine, &d_formula, &d_cell);
+    }
+}
+
+#[test]
 fn bytecode_backend_compiles_criteria_functions_with_error_literal_criteria_args() {
     let mut engine = Engine::new();
 
