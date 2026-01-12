@@ -321,6 +321,24 @@ export class WorkbookContextBuilder {
     this.estimator = options.tokenEstimator ?? createHeuristicTokenEstimator();
   }
 
+  private getSheetContentVersion(sheetId: string): number {
+    const controllerAny = this.options.documentController as any;
+    try {
+      const perSheet = controllerAny?.getSheetContentVersion?.(sheetId);
+      if (typeof perSheet === "number" && Number.isFinite(perSheet)) return Math.trunc(perSheet);
+    } catch {
+      // Ignore and fall back to coarser versions.
+    }
+
+    const contentVersion = controllerAny?.contentVersion;
+    if (typeof contentVersion === "number" && Number.isFinite(contentVersion)) return Math.trunc(contentVersion);
+
+    const updateVersion = controllerAny?.updateVersion;
+    if (typeof updateVersion === "number" && Number.isFinite(updateVersion)) return Math.trunc(updateVersion);
+
+    return 0;
+  }
+
   async build(input: BuildWorkbookContextInput): Promise<BuildWorkbookContextResult> {
     const onBuildStats = this.options.onBuildStats;
     const stats: WorkbookContextBuildStats | null = onBuildStats
@@ -622,7 +640,7 @@ export class WorkbookContextBuilder {
     const cached = this.blockCache.get(key);
     if (!cached) return null;
 
-    const contentVersion = this.options.documentController.getSheetContentVersion?.(params.sheetId) ?? 0;
+    const contentVersion = this.getSheetContentVersion(params.sheetId);
     if (cached.contentVersion !== contentVersion) {
       // Drop stale entries eagerly to keep the cache small.
       this.blockCache.delete(key);
@@ -659,7 +677,7 @@ export class WorkbookContextBuilder {
   ): Promise<WorkbookContextSheetSummary> {
     if (stats) stats.sheetCountSummarized += 1;
 
-    const contentVersion = this.options.documentController.getSheetContentVersion?.(sheetId) ?? 0;
+    const contentVersion = this.getSheetContentVersion(sheetId);
     const schemaVersion =
       typeof extras?.schemaVersion === "number" && Number.isFinite(extras.schemaVersion) ? Math.trunc(extras.schemaVersion) : 0;
 
@@ -956,9 +974,8 @@ export class WorkbookContextBuilder {
     },
     stats?: WorkbookContextBuildStats | null,
   ): Promise<WorkbookContextDataBlock> {
-    const contentVersion = this.options.documentController.getSheetContentVersion?.(params.sheetId) ?? 0;
+    const contentVersion = this.getSheetContentVersion(params.sheetId);
     const { key: cacheKey, clamped, rangeRef } = this.getReadBlockCacheKey(params);
-
     const cached = this.blockCache.get(cacheKey);
     if (cached && cached.contentVersion === contentVersion) {
       // Bump recency for eviction.
