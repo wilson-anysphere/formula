@@ -7,9 +7,8 @@ import { PanelIds, panelRegistry } from "../panels/panelRegistry.js";
 import { registerBuiltinCommands } from "./registerBuiltinCommands.js";
 
 describe("registerBuiltinCommands: panel toggles", () => {
-  it("toggles AI Chat panel open/closed", async () => {
+  const createHarness = () => {
     const commandRegistry = new CommandRegistry();
-
     const layoutController = {
       layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
       openPanel(panelId: string) {
@@ -19,32 +18,36 @@ describe("registerBuiltinCommands: panel toggles", () => {
         this.layout = closePanel(this.layout, panelId);
       },
     } as any;
-
     registerBuiltinCommands({ commandRegistry, app: {} as any, layoutController });
+    return { commandRegistry, layoutController };
+  };
 
-    expect(getPanelPlacement(layoutController.layout, PanelIds.AI_CHAT).kind).toBe("closed");
+  it("toggles required panel toggle commands open/closed", async () => {
+    const { commandRegistry, layoutController } = createHarness();
 
-    await commandRegistry.executeCommand("view.togglePanel.aiChat");
-    expect(getPanelPlacement(layoutController.layout, PanelIds.AI_CHAT)).toEqual({ kind: "docked", side: "right" });
+    const cases: Array<{ commandId: string; panelId: string; expectedSide: "left" | "right" | "bottom" }> = [
+      { commandId: "view.togglePanel.aiChat", panelId: PanelIds.AI_CHAT, expectedSide: "right" },
+      { commandId: "view.togglePanel.aiAudit", panelId: PanelIds.AI_AUDIT, expectedSide: "right" },
+      { commandId: "view.togglePanel.extensions", panelId: PanelIds.EXTENSIONS, expectedSide: "left" },
+      { commandId: "view.togglePanel.macros", panelId: PanelIds.MACROS, expectedSide: "right" },
+      { commandId: "view.togglePanel.dataQueries", panelId: PanelIds.DATA_QUERIES, expectedSide: "right" },
+      { commandId: "view.togglePanel.scriptEditor", panelId: PanelIds.SCRIPT_EDITOR, expectedSide: "bottom" },
+      { commandId: "view.togglePanel.python", panelId: PanelIds.PYTHON, expectedSide: "bottom" },
+    ];
 
-    await commandRegistry.executeCommand("view.togglePanel.aiChat");
-    expect(getPanelPlacement(layoutController.layout, PanelIds.AI_CHAT).kind).toBe("closed");
+    for (const { commandId, panelId, expectedSide } of cases) {
+      expect(getPanelPlacement(layoutController.layout, panelId).kind).toBe("closed");
+
+      await commandRegistry.executeCommand(commandId);
+      expect(getPanelPlacement(layoutController.layout, panelId)).toEqual({ kind: "docked", side: expectedSide });
+
+      await commandRegistry.executeCommand(commandId);
+      expect(getPanelPlacement(layoutController.layout, panelId).kind).toBe("closed");
+    }
   });
 
   it("toggles Version History panel open/closed", async () => {
-    const commandRegistry = new CommandRegistry();
-
-    const layoutController = {
-      layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
-      openPanel(panelId: string) {
-        this.layout = openPanel(this.layout, panelId, { panelRegistry });
-      },
-      closePanel(panelId: string) {
-        this.layout = closePanel(this.layout, panelId);
-      },
-    } as any;
-
-    registerBuiltinCommands({ commandRegistry, app: {} as any, layoutController });
+    const { commandRegistry, layoutController } = createHarness();
 
     expect(getPanelPlacement(layoutController.layout, PanelIds.VERSION_HISTORY).kind).toBe("closed");
 
@@ -56,19 +59,7 @@ describe("registerBuiltinCommands: panel toggles", () => {
   });
 
   it("toggles Branch Manager panel open/closed", async () => {
-    const commandRegistry = new CommandRegistry();
-
-    const layoutController = {
-      layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
-      openPanel(panelId: string) {
-        this.layout = openPanel(this.layout, panelId, { panelRegistry });
-      },
-      closePanel(panelId: string) {
-        this.layout = closePanel(this.layout, panelId);
-      },
-    } as any;
-
-    registerBuiltinCommands({ commandRegistry, app: {} as any, layoutController });
+    const { commandRegistry, layoutController } = createHarness();
 
     expect(getPanelPlacement(layoutController.layout, PanelIds.BRANCH_MANAGER).kind).toBe("closed");
 
