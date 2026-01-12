@@ -30,6 +30,21 @@ test.describe("collaboration: sheet metadata", () => {
     const pageB = await contextB.newPage();
 
     try {
+      const pollSheetSwitcher = async (expected: { value: string; options: Array<{ value: string; label: string }> }) => {
+        await expect
+          .poll(() =>
+            pageB.evaluate(() => {
+              const el = document.querySelector<HTMLSelectElement>('[data-testid="sheet-switcher"]');
+              if (!el) return null;
+              return {
+                value: el.value,
+                options: Array.from(el.options).map((opt) => ({ value: opt.value, label: opt.textContent ?? "" })),
+              };
+            }),
+          )
+          .toEqual(expected);
+      };
+
       const docId = randomUUID();
 
       const makeUrl = (user: { id: string; name: string }): string => {
@@ -91,6 +106,13 @@ test.describe("collaboration: sheet metadata", () => {
       });
 
       await expect(pageB.getByTestId("sheet-tab-Sheet2")).toBeVisible({ timeout: 30_000 });
+      await pollSheetSwitcher({
+        value: "Sheet1",
+        options: [
+          { value: "Sheet1", label: "Sheet1" },
+          { value: "Sheet2", label: "Sheet2" },
+        ],
+      });
 
       // 1.5) Perform sheet-tab UI actions on client A and assert they propagate to client B
       // via the shared session.sheets schema (this exercises CollabWorkbookSheetStore write-backs).
@@ -153,6 +175,13 @@ test.describe("collaboration: sheet metadata", () => {
       await expect(pageB.getByTestId("sheet-tab-Sheet1").locator(".sheet-tab__name")).toHaveText("Budget", {
         timeout: 30_000,
       });
+      await pollSheetSwitcher({
+        value: "Sheet1",
+        options: [
+          { value: "Sheet1", label: "Budget" },
+          { value: "Sheet2", label: "Expenses" },
+        ],
+      });
 
       // 2.5) Set Sheet1 tab color via Yjs metadata (remote-driven tab color).
       await pageA.evaluate(() => {
@@ -209,6 +238,13 @@ test.describe("collaboration: sheet metadata", () => {
           ),
         )
         .toEqual(["Sheet2", "Sheet1"]);
+      await pollSheetSwitcher({
+        value: "Sheet1",
+        options: [
+          { value: "Sheet2", label: "Expenses" },
+          { value: "Sheet1", label: "Budget" },
+        ],
+      });
 
       // 3.5) Mark Sheet2 as "veryHidden" and ensure it is not shown in the tab UI.
       await pageA.evaluate(() => {
@@ -230,6 +266,10 @@ test.describe("collaboration: sheet metadata", () => {
       });
 
       await expect(pageB.locator('[data-testid="sheet-tab-Sheet2"]')).toHaveCount(0, { timeout: 30_000 });
+      await pollSheetSwitcher({
+        value: "Sheet1",
+        options: [{ value: "Sheet1", label: "Budget" }],
+      });
 
       // 3.6) Restore Sheet2 to visible and ensure it reappears.
       await pageA.evaluate(() => {
@@ -256,6 +296,13 @@ test.describe("collaboration: sheet metadata", () => {
       });
       await expect(pageB.getByTestId("sheet-tab-Sheet2")).toHaveAttribute("data-tab-color", "#0070c0", {
         timeout: 30_000,
+      });
+      await pollSheetSwitcher({
+        value: "Sheet1",
+        options: [
+          { value: "Sheet2", label: "Expenses" },
+          { value: "Sheet1", label: "Budget" },
+        ],
       });
 
       // 4) Hide the currently active sheet (Sheet1) and ensure the UI auto-switches.
@@ -284,6 +331,10 @@ test.describe("collaboration: sheet metadata", () => {
       await expect
         .poll(() => pageB.evaluate(() => (window as any).__formulaApp.getCurrentSheetId()))
         .toBe("Sheet2");
+      await pollSheetSwitcher({
+        value: "Sheet2",
+        options: [{ value: "Sheet2", label: "Expenses" }],
+      });
 
       // 5) Unhide Sheet1 and ensure the tab returns (while staying on Sheet2).
       await pageA.evaluate(() => {
@@ -310,6 +361,13 @@ test.describe("collaboration: sheet metadata", () => {
       await expect
         .poll(() => pageB.evaluate(() => (window as any).__formulaApp.getCurrentSheetId()))
         .toBe("Sheet2");
+      await pollSheetSwitcher({
+        value: "Sheet2",
+        options: [
+          { value: "Sheet2", label: "Expenses" },
+          { value: "Sheet1", label: "Budget" },
+        ],
+      });
 
       // 6) Remove Sheet1 entirely and ensure the remaining client stays on Sheet2.
       await pageA.evaluate(() => {
@@ -333,6 +391,10 @@ test.describe("collaboration: sheet metadata", () => {
       await expect
         .poll(() => pageB.evaluate(() => (window as any).__formulaApp.getCurrentSheetId()))
         .toBe("Sheet2");
+      await pollSheetSwitcher({
+        value: "Sheet2",
+        options: [{ value: "Sheet2", label: "Expenses" }],
+      });
     } finally {
       await Promise.allSettled([contextA.close(), contextB.close()]);
       await server.stop().catch(() => {});
