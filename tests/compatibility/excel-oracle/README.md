@@ -34,9 +34,9 @@ and exits non-zero if mismatches exceed the configured threshold.
     (e.g. `issue == settlement`, `settlement == first_coupon`). This subset reuses the canonical `caseId`s from
     `cases.json` so results can be merged back into the pinned dataset.
   - `tools/excel-oracle/odd_coupon_invalid_schedule_cases.json` — odd-coupon **invalid schedule** scenarios
-    (cases that intentionally return `#NUM!` because `first_coupon`/`last_interest` are not on the coupon schedule
-    implied by `maturity` + `frequency`). This subset reuses the canonical `caseId`s from `cases.json` so results
-    can be merged back into the pinned dataset.
+    (cases covering schedule alignment / misalignment; some return `#NUM!`, while others are accepted by the
+    engine today and should be validated against real Excel). This subset reuses the canonical `caseId`s from
+    `cases.json` so results can be merged back into the pinned dataset.
   - `tools/excel-oracle/odd_coupon_validation_cases.json` — validation scenarios for **negative yields / negative coupon rates**
     and yield-domain boundaries (tagged `odd_coupon_validation` in the canonical corpus). This subset reuses the canonical
     `caseId`s from `cases.json` so results can be merged back into the pinned dataset.

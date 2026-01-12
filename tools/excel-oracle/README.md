@@ -149,9 +149,9 @@ powershell -ExecutionPolicy Bypass -File tools/excel-oracle/run-excel-oracle.ps1
   -OutPath  tests/compatibility/excel-oracle/datasets/excel-oracle.json
 ```
 
-To generate only the **odd-coupon invalid schedule** scenarios (cases that intentionally produce
-`#NUM!` because the coupon schedule implied by `maturity`+`frequency` doesn't match the provided
-`first_coupon`/`last_interest`), use:
+To generate only the **odd-coupon invalid schedule** scenarios (cases covering schedule alignment /
+misalignment; some return `#NUM!`, while others are accepted by the engine today and should be
+validated against real Excel), use:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/excel-oracle/run-excel-oracle.ps1 `

@@ -99,7 +99,7 @@ For quick Windows + Excel runs, use the derived subset corpora (all regenerated 
 - Boundary cases: `tools/excel-oracle/odd_coupon_boundary_cases.json` (tagged `odd_coupon` + `boundary`)
 - Negative yield / negative coupon validation: `tools/excel-oracle/odd_coupon_validation_cases.json` (tagged `odd_coupon_validation`)
 - Long stub (long first/last odd periods): `tools/excel-oracle/odd_coupon_long_stub_cases.json` (tagged `odd_coupon` + `long_stub`)
-- Invalid schedule (intentionally `#NUM!`): `tools/excel-oracle/odd_coupon_invalid_schedule_cases.json` (tagged `odd_coupon` + `invalid_schedule`)
+- Invalid schedule / schedule-misalignment cases: `tools/excel-oracle/odd_coupon_invalid_schedule_cases.json` (tagged `odd_coupon` + `invalid_schedule`)
 
 To **patch real Excel results for just these odd-coupon cases** into the committed pinned dataset
 (keeping the rest of the corpus intact / merge-friendly), run on Windows + Excel:
