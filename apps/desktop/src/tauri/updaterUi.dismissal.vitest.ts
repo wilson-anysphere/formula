@@ -100,6 +100,7 @@ describe("tauri/updaterUi dismissal persistence", () => {
 
     await handleUpdaterEvent("update-available", { source: "manual", version: "1.2.3", body: "Notes" });
     expect(document.querySelector('[data-testid="updater-dialog"]')).toBeTruthy();
+    expect(notifySpy).not.toHaveBeenCalled();
   });
 
   it("does not suppress when a manual check is waiting on an in-flight startup check", async () => {
@@ -114,7 +115,7 @@ describe("tauri/updaterUi dismissal persistence", () => {
     expect(document.querySelector('[data-testid="updater-dialog"]')).toBeTruthy();
   });
 
-  it("shows the startup dialog again once the dismissal TTL expires", async () => {
+  it("sends a startup notification again once the dismissal TTL expires", async () => {
     const { handleUpdaterEvent } = await loadUpdaterUi();
     const notifications = await import("./notifications");
     const notifySpy = vi.spyOn(notifications, "notify").mockResolvedValue(undefined);
@@ -130,7 +131,7 @@ describe("tauri/updaterUi dismissal persistence", () => {
     expect(localStorage.getItem(DISMISSED_AT_KEY)).toBeNull();
   });
 
-  it("clears stored dismissal when a different version becomes available", async () => {
+  it("clears stored dismissal when a different version becomes available at startup", async () => {
     const { handleUpdaterEvent } = await loadUpdaterUi();
     const notifications = await import("./notifications");
     const notifySpy = vi.spyOn(notifications, "notify").mockResolvedValue(undefined);

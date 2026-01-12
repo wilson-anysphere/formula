@@ -743,9 +743,8 @@ export async function handleUpdaterEvent(name: UpdaterEventName, payload: Update
     const version = typeof payload?.version === "string" ? payload.version.trim() : "";
     const body = typeof payload?.body === "string" ? payload.body.trim() : "";
     // If the user recently clicked "Later" for this version, suppress repeat system notifications too.
-    if (version && shouldSuppressStartupUpdatePrompt(version)) {
-      // Do not notify.
-    } else {
+    const suppressed = version ? shouldSuppressStartupUpdatePrompt(version) : false;
+    if (!suppressed) {
       const appName = t("app.title");
       const message =
         version && body

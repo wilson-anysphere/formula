@@ -174,6 +174,8 @@ describe("updaterUi (events)", () => {
     await handleUpdaterEvent("update-check-already-running", { source: "manual" });
     await handleUpdaterEvent("update-not-available", { source: "startup" });
 
+    // The "already running" event is manual (and can be triggered while the app is hidden),
+    // so we show/focus the main window once before surfacing any user-visible feedback.
     expect(show).toHaveBeenCalledTimes(1);
     expect(setFocus).toHaveBeenCalledTimes(1);
     expect(toastSpy).toHaveBeenCalledTimes(2);
