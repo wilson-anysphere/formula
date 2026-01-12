@@ -2,7 +2,10 @@ use super::ast::{BinaryOp, Expr, Function, UnaryOp};
 use super::grid::Grid;
 use super::value::{Array as ArrayValue, CellCoord, ErrorKind, RangeRef, ResolvedRange, Value};
 use crate::error::ExcelError;
-use crate::value::{cmp_case_insensitive, parse_number};
+use crate::functions::math::criteria::Criteria as EngineCriteria;
+use crate::value::{
+    cmp_case_insensitive, parse_number, ErrorKind as EngineErrorKind, Value as EngineValue,
+};
 use crate::simd::{self, CmpOp, NumericCriteria};
 use smallvec::SmallVec;
 use std::cmp::Ordering;
@@ -671,15 +674,29 @@ fn fn_countif(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         Value::Array(a) => RangeArg::Array(a),
         _ => return Value::Error(ErrorKind::Value),
     };
-    let Some(criteria) = parse_numeric_criteria(&args[1]) else {
-        return Value::Error(ErrorKind::Value);
+    let criteria = match parse_countif_criteria(&args[1]) {
+        Ok(c) => c,
+        Err(e) => return Value::Error(e),
     };
+
+    // Fast path: criteria that can be represented as a simple numeric comparator.
+    if let Some(numeric) = criteria.as_numeric_criteria() {
+        let count = match range {
+            RangeArg::Range(r) => match count_if_range(grid, r.resolve(base), numeric) {
+                Ok(c) => c,
+                Err(e) => return Value::Error(e),
+            },
+            RangeArg::Array(a) => count_if_f64_blank_as_zero(a.as_slice(), numeric),
+        };
+        return Value::Number(count as f64);
+    }
+
     let count = match range {
-        RangeArg::Range(r) => match count_if_range(grid, r.resolve(base), criteria) {
+        RangeArg::Range(r) => match count_if_range_criteria(grid, r.resolve(base), &criteria) {
             Ok(c) => c,
             Err(e) => return Value::Error(e),
         },
-        RangeArg::Array(a) => count_if_f64_blank_as_zero(a.as_slice(), criteria),
+        RangeArg::Array(a) => count_if_array_criteria(a, &criteria),
     };
     Value::Number(count as f64)
 }
@@ -712,38 +729,98 @@ enum RangeArg<'a> {
     Array(&'a ArrayValue),
 }
 
-fn parse_numeric_criteria(v: &Value) -> Option<NumericCriteria> {
-    match v {
-        Value::Number(n) => Some(NumericCriteria::new(CmpOp::Eq, *n)),
-        Value::Bool(b) => Some(NumericCriteria::new(CmpOp::Eq, if *b { 1.0 } else { 0.0 })),
-        Value::Text(s) => parse_criteria_str(s),
-        _ => None,
+fn bytecode_error_to_engine(err: ErrorKind) -> EngineErrorKind {
+    match err {
+        ErrorKind::Null => EngineErrorKind::Null,
+        ErrorKind::Div0 => EngineErrorKind::Div0,
+        ErrorKind::Ref => EngineErrorKind::Ref,
+        ErrorKind::Value => EngineErrorKind::Value,
+        ErrorKind::Name => EngineErrorKind::Name,
+        ErrorKind::Num => EngineErrorKind::Num,
+        ErrorKind::NA => EngineErrorKind::NA,
+        ErrorKind::Spill => EngineErrorKind::Spill,
+        ErrorKind::Calc => EngineErrorKind::Calc,
     }
 }
 
-fn parse_criteria_str(s: &str) -> Option<NumericCriteria> {
-    let s = s.trim();
-    let (op, rest) = if let Some(r) = s.strip_prefix(">=") {
-        (CmpOp::Ge, r)
-    } else if let Some(r) = s.strip_prefix("<=") {
-        (CmpOp::Le, r)
-    } else if let Some(r) = s.strip_prefix("<>") {
-        (CmpOp::Ne, r)
-    } else if let Some(r) = s.strip_prefix('>') {
-        (CmpOp::Gt, r)
-    } else if let Some(r) = s.strip_prefix('<') {
-        (CmpOp::Lt, r)
-    } else if let Some(r) = s.strip_prefix('=') {
-        (CmpOp::Eq, r)
-    } else {
-        (CmpOp::Eq, s)
-    };
-    let rhs_str = rest.trim();
-    if rhs_str.is_empty() {
-        return None;
+fn engine_error_to_bytecode(err: EngineErrorKind) -> ErrorKind {
+    match err {
+        EngineErrorKind::Null => ErrorKind::Null,
+        EngineErrorKind::Div0 => ErrorKind::Div0,
+        EngineErrorKind::Ref => ErrorKind::Ref,
+        EngineErrorKind::Value => ErrorKind::Value,
+        EngineErrorKind::Name => ErrorKind::Name,
+        EngineErrorKind::Num => ErrorKind::Num,
+        EngineErrorKind::NA => ErrorKind::NA,
+        EngineErrorKind::Spill => ErrorKind::Spill,
+        EngineErrorKind::Calc => ErrorKind::Calc,
     }
-    let rhs = parse_number_from_text(rhs_str).ok()?;
-    Some(NumericCriteria::new(op, rhs))
+}
+
+fn bytecode_value_to_engine(value: Value) -> EngineValue {
+    match value {
+        Value::Number(n) => EngineValue::Number(n),
+        Value::Bool(b) => EngineValue::Bool(b),
+        Value::Text(s) => EngineValue::Text(s.to_string()),
+        Value::Empty => EngineValue::Blank,
+        Value::Error(e) => EngineValue::Error(bytecode_error_to_engine(e)),
+        // Array/range values are not valid scalar values, but the bytecode runtime uses `#SPILL!`
+        // for "range-as-scalar" cases elsewhere.
+        Value::Array(_) | Value::Range(_) => EngineValue::Error(EngineErrorKind::Spill),
+    }
+}
+
+fn parse_countif_criteria(criteria: &Value) -> Result<EngineCriteria, ErrorKind> {
+    // Errors in the criteria argument always propagate (they don't act as "match error" criteria).
+    if let Value::Error(e) = criteria {
+        return Err(*e);
+    }
+
+    let criteria_value = match criteria {
+        Value::Number(_)
+        | Value::Bool(_)
+        | Value::Text(_)
+        | Value::Empty => bytecode_value_to_engine(criteria.clone()),
+        Value::Error(_) => unreachable!("handled above"),
+        Value::Array(_) | Value::Range(_) => return Err(ErrorKind::Value),
+    };
+
+    EngineCriteria::parse(&criteria_value).map_err(engine_error_to_bytecode)
+}
+
+fn count_if_range_criteria(
+    grid: &dyn Grid,
+    range: ResolvedRange,
+    criteria: &EngineCriteria,
+) -> Result<usize, ErrorKind> {
+    if !range_in_bounds(grid, range) {
+        return Err(ErrorKind::Ref);
+    }
+
+    let mut count = 0usize;
+    for col in range.col_start..=range.col_end {
+        for row in range.row_start..=range.row_end {
+            let engine_value = bytecode_value_to_engine(grid.get_value(CellCoord { row, col }));
+            if criteria.matches(&engine_value) {
+                count += 1;
+            }
+        }
+    }
+    Ok(count)
+}
+
+fn count_if_array_criteria(arr: &ArrayValue, criteria: &EngineCriteria) -> usize {
+    arr.values
+        .iter()
+        .filter(|n| {
+            let v = if n.is_nan() {
+                EngineValue::Blank
+            } else {
+                EngineValue::Number(**n)
+            };
+            criteria.matches(&v)
+        })
+        .count()
 }
 
 #[inline]

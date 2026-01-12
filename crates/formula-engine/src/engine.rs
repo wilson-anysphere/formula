@@ -4357,28 +4357,6 @@ fn bytecode_expr_within_grid_limits(expr: &bytecode::Expr, origin: bytecode::Cel
 }
 
 fn bytecode_expr_is_eligible_inner(expr: &bytecode::Expr, allow_range: bool) -> bool {
-    fn parses_numeric_criteria_literal(raw: &str) -> bool {
-        let rest = if let Some(r) = raw.strip_prefix(">=") {
-            r
-        } else if let Some(r) = raw.strip_prefix("<=") {
-            r
-        } else if let Some(r) = raw.strip_prefix("<>") {
-            r
-        } else if let Some(r) = raw.strip_prefix('>') {
-            r
-        } else if let Some(r) = raw.strip_prefix('<') {
-            r
-        } else if let Some(r) = raw.strip_prefix('=') {
-            r
-        } else {
-            raw
-        };
-        let rhs = rest.trim();
-        if rhs.is_empty() {
-            return false;
-        }
-        crate::value::parse_number(rhs, crate::value::NumberLocale::en_us()).is_ok()
-    }
     match expr {
         bytecode::Expr::Literal(v) => match v {
             bytecode::Value::Number(_) | bytecode::Value::Bool(_) => true,
@@ -4424,18 +4402,7 @@ fn bytecode_expr_is_eligible_inner(expr: &bytecode::Expr, allow_range: bool) -> 
                     args[0],
                     bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)
                 );
-
-                // The bytecode runtime currently supports numeric COUNTIF criteria only. Reject
-                // unsupported criteria shapes here so the engine falls back to the full evaluator
-                // (which implements Excel-style wildcards, blanks, errors, date parsing, etc).
-                let criteria_ok = match &args[1] {
-                    bytecode::Expr::Literal(bytecode::Value::Number(_))
-                    | bytecode::Expr::Literal(bytecode::Value::Bool(_)) => true,
-                    bytecode::Expr::Literal(bytecode::Value::Text(s)) => {
-                        parses_numeric_criteria_literal(s.as_ref())
-                    }
-                    _ => false,
-                };
+                let criteria_ok = bytecode_expr_is_eligible_inner(&args[1], false);
 
                 range_ok && criteria_ok
             }

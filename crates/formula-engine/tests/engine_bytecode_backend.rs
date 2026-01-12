@@ -1,7 +1,8 @@
 use formula_engine::eval::{
     parse_a1, EvalContext, Evaluator, RecalcContext, SheetReference, ValueResolver,
 };
-use formula_engine::{Engine, ExternalValueProvider, Value};
+use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
+use formula_engine::{Engine, ErrorKind, ExternalValueProvider, Value};
 use proptest::prelude::*;
 use std::sync::Arc;
 
@@ -265,4 +266,67 @@ proptest! {
         let expected = eval_via_ast(&engine, &formula, "C1");
         prop_assert_eq!(engine.get_cell_value("Sheet1", "C1"), expected);
     }
+}
+
+#[test]
+fn bytecode_backend_matches_ast_for_countif_full_criteria_semantics() {
+    let mut engine = Engine::new();
+
+    // Text + wildcards.
+    engine.set_cell_value("Sheet1", "A1", "apple").unwrap();
+    engine.set_cell_value("Sheet1", "A2", "apricot").unwrap();
+    engine.set_cell_value("Sheet1", "A3", "banana").unwrap();
+    engine.set_cell_value("Sheet1", "A4", "*").unwrap();
+    engine.set_cell_value("Sheet1", "A5", "ab").unwrap();
+    engine.set_cell_value("Sheet1", "A6", "abc").unwrap();
+    engine.set_cell_value("Sheet1", "A7", "").unwrap(); // empty string counts as blank
+    // A8 left blank
+    engine
+        .set_cell_value("Sheet1", "A9", Value::Error(ErrorKind::Div0))
+        .unwrap();
+    engine.set_cell_value("Sheet1", "A10", true).unwrap();
+
+    // Date criteria strings are parsed in the default (1900) date system.
+    let d1 = ymd_to_serial(ExcelDate::new(2020, 1, 1), ExcelDateSystem::EXCEL_1900).unwrap();
+    let d2 = ymd_to_serial(ExcelDate::new(2020, 1, 2), ExcelDateSystem::EXCEL_1900).unwrap();
+    let d3 = ymd_to_serial(ExcelDate::new(2020, 1, 3), ExcelDateSystem::EXCEL_1900).unwrap();
+    engine.set_cell_value("Sheet1", "B1", d1 as f64).unwrap();
+    engine.set_cell_value("Sheet1", "B2", d2 as f64).unwrap();
+    engine.set_cell_value("Sheet1", "B3", d3 as f64).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "C1", "=COUNTIF(A1:A10, D1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C2", "=COUNTIF(B1:B3, D2)")
+        .unwrap();
+
+    // Ensure we're actually exercising the bytecode COUNTIF implementation (criteria args are
+    // cell references, not numeric literals).
+    assert_eq!(engine.bytecode_program_count(), 2);
+
+    for (criteria, expected) in [
+        (Value::Text("ap*".to_string()), Value::Number(2.0)),
+        (Value::Text("~*".to_string()), Value::Number(1.0)),
+        (Value::Text("??".to_string()), Value::Number(1.0)),
+        (Value::Text("".to_string()), Value::Number(2.0)),  // blanks
+        (Value::Text("<>".to_string()), Value::Number(7.0)), // non-blanks (errors excluded)
+        (Value::Text("#DIV/0!".to_string()), Value::Number(1.0)),
+        (Value::Bool(true), Value::Number(1.0)),
+        (Value::Error(ErrorKind::Div0), Value::Error(ErrorKind::Div0)),
+    ] {
+        engine.set_cell_value("Sheet1", "D1", criteria).unwrap();
+        engine.recalculate_single_threaded();
+
+        assert_eq!(engine.get_cell_value("Sheet1", "C1"), expected);
+        assert_engine_matches_ast(&engine, "=COUNTIF(A1:A10, D1)", "C1");
+    }
+
+    engine
+        .set_cell_value("Sheet1", "D2", Value::Text(">=1/2/2020".to_string()))
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(2.0));
+    assert_engine_matches_ast(&engine, "=COUNTIF(B1:B3, D2)", "C2");
 }
