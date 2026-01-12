@@ -767,6 +767,24 @@ pub fn build_window_geometry_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture with workbook window geometry/state populated in the WINDOW1 record,
+/// using `WINDOW1.fHidden` to represent a hidden workbook window.
+///
+/// This is used to validate best-effort mapping of hidden windows to `WorkbookWindowState::Minimized`.
+pub fn build_window_hidden_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_window_hidden_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture that contains sheet-scoped built-in defined names (`NAME` records).
 ///
 /// This is used to validate that the importer maps BIFF8 built-in name ids to the expected
@@ -4690,6 +4708,52 @@ fn build_window_geometry_workbook_stream() -> Vec<u8> {
     globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
         .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
 
+    globals.extend_from_slice(&sheet);
+    globals
+}
+
+fn build_window_hidden_workbook_stream() -> Vec<u8> {
+    // WINDOW1 grbit flags.
+    const WINDOW1_GRBIT_HIDDEN: u16 = 0x0001;
+
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+
+    // x=111, y=222, width=333, height=444, hidden.
+    let window1 = window1_with_geometry(111, 222, 333, 444, WINDOW1_GRBIT_HIDDEN);
+    push_record(&mut globals, RECORD_WINDOW1, &window1);
+
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // Minimal XF table (style XFs only).
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+
+    // One General cell XF (required by some readers).
+    let xf_general = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "Sheet1");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    // Worksheet substream: minimal with DIMENSIONS + WINDOW2.
+    let sheet_offset = globals.len();
+    let sheet = build_empty_sheet_stream(xf_general);
+
+    // Patch BoundSheet offset.
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
     globals.extend_from_slice(&sheet);
     globals
 }

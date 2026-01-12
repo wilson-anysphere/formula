@@ -61,8 +61,10 @@ const XF_FLAG_STYLE: u16 = 0x0004;
 
 // WINDOW1.grbit option flags [MS-XLS 2.4.346].
 //
+// Bit 0 (`fHidden`) indicates the workbook window is hidden (View -> Window -> Hide).
 // Bit 1 (`fIconic`) indicates the workbook window is minimized.
 // Bit 5 (`fMaximized`) indicates the workbook window is maximized.
+const WINDOW1_GRBIT_HIDDEN: u16 = 0x0001;
 const WINDOW1_GRBIT_ICONIC: u16 = 0x0002;
 const WINDOW1_GRBIT_MAXIMIZED: u16 = 0x0020;
 
@@ -872,7 +874,7 @@ pub(crate) fn parse_biff_workbook_globals(
                             None
                         } else {
                             let grbit = u16::from_le_bytes([data[8], data[9]]);
-                            Some(if (grbit & WINDOW1_GRBIT_ICONIC) != 0 {
+                            Some(if (grbit & (WINDOW1_GRBIT_HIDDEN | WINDOW1_GRBIT_ICONIC)) != 0 {
                                 WorkbookWindowState::Minimized
                             } else if (grbit & WINDOW1_GRBIT_MAXIMIZED) != 0 {
                                 WorkbookWindowState::Maximized
