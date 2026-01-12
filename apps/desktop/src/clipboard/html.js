@@ -208,7 +208,8 @@ function normalizeClipboardHtml(html) {
 
 function isLikelyDateNumberFormat(fmt) {
   if (typeof fmt !== "string") return false;
-  return fmt.toLowerCase().includes("yyyy-mm-dd");
+  const lower = fmt.toLowerCase();
+  return lower.includes("yyyy-mm-dd") || lower.includes("m/d/yyyy");
 }
 
 /**
@@ -233,7 +234,8 @@ function cellValueToHtml(cell) {
   const numberFormat = cell.format?.numberFormat;
   if (typeof value === "number" && isLikelyDateNumberFormat(numberFormat)) {
     const date = excelSerialToDate(value);
-    const text = numberFormat.includes("hh") ? date.toISOString() : date.toISOString().slice(0, 10);
+    const lower = numberFormat.toLowerCase();
+    const text = lower.includes("h") ? date.toISOString() : date.toISOString().slice(0, 10);
     return escapeHtml(text);
   }
 

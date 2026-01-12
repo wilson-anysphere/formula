@@ -78,7 +78,8 @@ async function packageExtension(extensionDir, { privateKeyPem, formatVersion = 2
 
 async function signExtensionPackage(packageBytes, privateKeyPemOrPath) {
   let privateKeyPem = privateKeyPemOrPath;
-  if (privateKeyPemOrPath.includes(path.sep) || privateKeyPemOrPath.includes(".pem")) {
+  const looksLikePem = String(privateKeyPemOrPath).trim().startsWith("-----BEGIN");
+  if (!looksLikePem && (privateKeyPemOrPath.includes(path.sep) || privateKeyPemOrPath.includes(".pem"))) {
     privateKeyPem = await fs.readFile(privateKeyPemOrPath, "utf8");
   }
   return signBytes(packageBytes, privateKeyPem);
@@ -110,7 +111,8 @@ async function publishExtension({ extensionDir, marketplaceUrl, token, privateKe
   })();
 
   let privateKeyPem = privateKeyPemOrPath;
-  if (privateKeyPemOrPath.includes(path.sep) || privateKeyPemOrPath.includes(".pem")) {
+  const looksLikePem = String(privateKeyPemOrPath).trim().startsWith("-----BEGIN");
+  if (!looksLikePem && (privateKeyPemOrPath.includes(path.sep) || privateKeyPemOrPath.includes(".pem"))) {
     privateKeyPem = await fs.readFile(privateKeyPemOrPath, "utf8");
   }
 

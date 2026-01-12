@@ -54,7 +54,8 @@ const CSS_NAMED_COLORS = {
 
 function isLikelyDateNumberFormat(fmt) {
   if (typeof fmt !== "string") return false;
-  return fmt.toLowerCase().includes("yyyy-mm-dd");
+  const lower = fmt.toLowerCase();
+  return lower.includes("yyyy-mm-dd") || lower.includes("m/d/yyyy");
 }
 
 function clampByte(value) {
@@ -335,7 +336,8 @@ function cellValueToRtf(cell) {
   const numberFormat = cell.format?.numberFormat;
   if (typeof value === "number" && isLikelyDateNumberFormat(numberFormat)) {
     const date = excelSerialToDate(value);
-    return numberFormat.includes("hh") ? date.toISOString() : date.toISOString().slice(0, 10);
+    const lower = numberFormat.toLowerCase();
+    return lower.includes("h") ? date.toISOString() : date.toISOString().slice(0, 10);
   }
 
   return String(value);

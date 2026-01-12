@@ -28,6 +28,18 @@ test("copyRangeToClipboardPayload preserves numberFormat for date serials", () =
   assert.match(payload.html, /data-number-format="yyyy-mm-dd"/);
 });
 
+test("copyRangeToClipboardPayload formats m/d/yyyy date serials (UI date preset)", () => {
+  const doc = new DocumentController();
+
+  const serial = dateToExcelSerial(new Date(Date.UTC(2024, 0, 31)));
+  doc.setRangeValues("Sheet1", "A1", [[{ value: serial, format: { numberFormat: "m/d/yyyy" } }]]);
+
+  const payload = copyRangeToClipboardPayload(doc, "Sheet1", "A1");
+  assert.equal(payload.text, "2024-01-31");
+  assert.ok(payload.html);
+  assert.match(payload.html, /data-number-format="m\/d\/yyyy"/);
+});
+
 test("copyRangeToClipboardPayload serializes rich text values as plain text", () => {
   const doc = new DocumentController();
 

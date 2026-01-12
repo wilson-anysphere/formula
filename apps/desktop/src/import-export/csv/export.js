@@ -49,7 +49,8 @@ function cellToCsvField(cell) {
   const numberFormat = cell.format?.numberFormat;
   if (typeof value === "number" && isLikelyDateNumberFormat(numberFormat)) {
     const date = excelSerialToDate(value);
-    return numberFormat.includes("hh") ? date.toISOString() : date.toISOString().slice(0, 10);
+    const lower = numberFormat.toLowerCase();
+    return lower.includes("h") ? date.toISOString() : date.toISOString().slice(0, 10);
   }
 
   if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
