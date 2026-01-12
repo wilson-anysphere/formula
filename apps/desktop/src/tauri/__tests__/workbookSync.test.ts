@@ -247,6 +247,39 @@ describe("workbookSync", () => {
     sync.stop();
   });
 
+  it("yields before mark_saved so delayed backend ops (e.g. sheet reorder) can enqueue first", async () => {
+    const document = createMaterializedDocument();
+    const sync = startWorkbookSync({ document: document as any });
+    const invoke = (globalThis as any).__TAURI__?.core?.invoke as ReturnType<typeof vi.fn>;
+
+    document.setCellValue("Sheet1", { row: 0, col: 0 }, "hello");
+    await flushMicrotasks();
+    expect(document.isDirty).toBe(true);
+
+    expect(document.undo()).toBe(true);
+    expect(document.isDirty).toBe(false);
+
+    // Simulate a doc-driven sheet reorder persistence layer that schedules a backend call
+    // after a microtask tick (like `main.ts`'s reorder coalescing logic).
+    queueMicrotask(() => {
+      void (async () => {
+        await new Promise<void>((resolve) => queueMicrotask(resolve));
+        await invoke("move_sheet", { sheet_id: "Sheet1", to_index: 0 });
+      })();
+    });
+
+    await flushMicrotasks(8);
+    await flushNextTick();
+
+    const cmds = invoke.mock.calls.map((c) => c[0]);
+    const moveIdx = cmds.lastIndexOf("move_sheet");
+    const markIdx = cmds.lastIndexOf("mark_saved");
+    expect(moveIdx).toBeGreaterThanOrEqual(0);
+    expect(markIdx).toBeGreaterThan(moveIdx);
+
+    sync.stop();
+  });
+
   it("clears the backend dirty flag when undo returns the document to a saved state (sheet metadata only)", async () => {
     const document = createMaterializedDocument();
     const sync = startWorkbookSync({ document: document as any });
