@@ -25,7 +25,7 @@ for (const specifier of ["@formula/marketplace-shared/package.json", "@formula/e
 }
 
 test(
-  "extension-marketplace MarketplaceClient TS source is importable under Node ESM (strip-types)",
+  "extension-marketplace MarketplaceClient TS source is importable under Node ESM when executing TS sources directly",
   async () => {
     const { MarketplaceClient, normalizeMarketplaceBaseUrl: normalizeFromClient } = await import(
       "../packages/extension-marketplace/src/MarketplaceClient.ts"
