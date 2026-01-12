@@ -100,7 +100,8 @@ const MAX_KEYBOARD_FORMATTING_CELLS = 50_000;
 // Encode (row, col) into a single numeric key for allocation-free lookups.
 // `16_384` matches Excel's maximum column count, so the mapping is collision-free for Excel-sized sheets.
 const COMMENT_COORD_COL_STRIDE = 16_384;
-const A1_CELL_REF_RE = /^[A-Za-z]+[1-9][0-9]*$/;
+// Plain A1 address (with optional `$` absolute markers) without sheet qualification.
+const A1_CELL_REF_RE = /^\$?[A-Za-z]+\$?[1-9][0-9]*$/;
 
 function isThenable(value: unknown): value is PromiseLike<unknown> {
   return typeof (value as { then?: unknown } | null)?.then === "function";
