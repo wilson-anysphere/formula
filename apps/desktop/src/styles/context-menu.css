@@ -9,8 +9,15 @@
   inset: 0;
   display: none;
   z-index: 900;
-  /* Transparent overlay so outside clicks dismiss the menu without leaking through. */
+  /*
+    Transparent overlay hosting the menu.
+
+    Pointer events are disabled so outside clicks can both dismiss the menu and
+    interact with the underlying UI (Excel-like behavior). The menu JS closes
+    the menu via a window-level pointerdown capture listener.
+  */
   background: transparent;
+  pointer-events: none;
 }
 
 .context-menu,
@@ -28,6 +35,8 @@
   background: var(--dialog-bg);
   box-shadow: var(--dialog-shadow);
   gap: 2px;
+  /* Re-enable pointer events for the actual menu surface. */
+  pointer-events: auto;
 }
 
 .context-menu {

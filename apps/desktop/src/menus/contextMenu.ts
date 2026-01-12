@@ -51,6 +51,7 @@ export class ContextMenu {
 
   private readonly onClose: (() => void) | null;
   private keydownListener: ((e: KeyboardEvent) => void) | null = null;
+  private pointerDownListener: ((e: PointerEvent) => void) | null = null;
 
   private readonly buttonItems = new WeakMap<HTMLButtonElement, ContextMenuButtonItem>();
 
@@ -71,14 +72,8 @@ export class ContextMenu {
     overlay.appendChild(menu);
     document.body.appendChild(overlay);
 
-    overlay.addEventListener("click", (e) => {
-      if (!this.isShown) return;
-      const target = e.target as Node | null;
-      if (!target) return;
-      if (menu.contains(target)) return;
-      if (this.submenu && this.submenu.contains(target)) return;
-      this.close();
-    });
+    // Prevent showing the native browser context menu when right-clicking inside ours.
+    menu.addEventListener("contextmenu", (e) => e.preventDefault());
 
     this.overlay = overlay;
     this.menu = menu;
@@ -100,6 +95,17 @@ export class ContextMenu {
 
     this.overlay.style.display = "block";
     this.positionMenu(x, y);
+
+    // Close on outside clicks without swallowing the click (Excel-like behavior).
+    this.pointerDownListener = (e: PointerEvent) => {
+      if (!this.isShown) return;
+      const target = e.target as Node | null;
+      if (!target) return;
+      if (this.menu.contains(target)) return;
+      if (this.submenu && this.submenu.contains(target)) return;
+      this.close();
+    };
+    window.addEventListener("pointerdown", this.pointerDownListener, true);
 
     this.keydownListener = (e) => this.onKeyDown(e);
     window.addEventListener("keydown", this.keydownListener, true);
@@ -160,6 +166,11 @@ export class ContextMenu {
     if (this.keydownListener) {
       window.removeEventListener("keydown", this.keydownListener, true);
       this.keydownListener = null;
+    }
+
+    if (this.pointerDownListener) {
+      window.removeEventListener("pointerdown", this.pointerDownListener, true);
+      this.pointerDownListener = null;
     }
 
     try {
@@ -404,6 +415,7 @@ export class ContextMenu {
     submenu.setAttribute("role", "menu");
     submenu.setAttribute("aria-orientation", "vertical");
     submenu.tabIndex = -1;
+    submenu.addEventListener("contextmenu", (e) => e.preventDefault());
 
     this.buildMenuContents(submenu, items, { level: "submenu" });
 
