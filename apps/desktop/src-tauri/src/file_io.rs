@@ -2725,10 +2725,43 @@ mod tests {
     use formula_format::{format_value, FormatOptions, Value as FormatValue};
     use formula_xlsb::biff12_varint;
     use std::collections::BTreeSet;
-    use std::io::Read;
+    use std::io::{Cursor, Read, Write};
     use xlsx_diff::{
         diff_workbooks, diff_workbooks_with_options, DiffOptions, Severity, WorkbookArchive,
     };
+    use zip::write::FileOptions;
+    use zip::{CompressionMethod, ZipArchive, ZipWriter};
+
+    fn rewrite_zip_with_leading_slash_entry_names(bytes: &[u8]) -> Vec<u8> {
+        let mut input = ZipArchive::new(Cursor::new(bytes)).expect("open zip");
+
+        let mut output = ZipWriter::new(Cursor::new(Vec::<u8>::new()));
+        let options = FileOptions::<()>::default().compression_method(CompressionMethod::Stored);
+
+        for i in 0..input.len() {
+            let mut entry = input.by_index(i).expect("open zip entry");
+            let name = entry.name().to_string();
+            let new_name = if name.starts_with('/') {
+                name
+            } else {
+                format!("/{name}")
+            };
+
+            let mut contents = Vec::with_capacity(entry.size() as usize);
+            entry.read_to_end(&mut contents).expect("read zip entry");
+
+            if entry.is_dir() {
+                output
+                    .add_directory(new_name, options)
+                    .expect("write directory");
+            } else {
+                output.start_file(new_name, options).expect("start file");
+                output.write_all(&contents).expect("write file");
+            }
+        }
+
+        output.finish().expect("finish zip").into_inner()
+    }
 
     fn assert_no_critical_diffs(expected: &Path, actual: &Path) {
         let report = diff_workbooks(expected, actual).expect("diff workbooks");
@@ -2778,6 +2811,51 @@ mod tests {
                 "expected part {name} to be preserved byte-for-byte"
             );
         }
+    }
+
+    #[test]
+    fn sniff_workbook_format_tolerates_leading_slash_zip_entry_names() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+
+        let xlsx_fixture = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/basic/basic.xlsx"
+        );
+        let xlsx_bytes = std::fs::read(xlsx_fixture).expect("read xlsx fixture");
+        let rewritten = rewrite_zip_with_leading_slash_entry_names(&xlsx_bytes);
+        let xlsx_path = tmp.path().join("leading_slash.xlsx");
+        std::fs::write(&xlsx_path, rewritten).expect("write rewritten xlsx");
+        assert_eq!(
+            sniff_workbook_format(&xlsx_path),
+            Some(SniffedWorkbookFormat::Xlsx)
+        );
+
+        let xlsb_fixture = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../crates/formula-xlsb/tests/fixtures/simple.xlsb"
+        );
+        let xlsb_bytes = std::fs::read(xlsb_fixture).expect("read xlsb fixture");
+        let rewritten = rewrite_zip_with_leading_slash_entry_names(&xlsb_bytes);
+        let xlsb_path = tmp.path().join("leading_slash.xlsb");
+        std::fs::write(&xlsb_path, rewritten).expect("write rewritten xlsb");
+        assert_eq!(
+            sniff_workbook_format(&xlsb_path),
+            Some(SniffedWorkbookFormat::Xlsb)
+        );
+    }
+
+    #[test]
+    fn zip_part_exists_tolerates_leading_slash_zip_entry_names() {
+        let fixture = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/macros/basic.xlsm"
+        );
+        let bytes = std::fs::read(fixture).expect("read xlsm fixture");
+        let rewritten = rewrite_zip_with_leading_slash_entry_names(&bytes);
+        assert!(
+            zip_part_exists(&rewritten, "xl/vbaProject.bin"),
+            "expected xl/vbaProject.bin to be discovered even when ZIP entry names have leading '/'"
+        );
     }
 
     #[test]
