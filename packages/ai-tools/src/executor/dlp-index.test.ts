@@ -10,9 +10,9 @@ vi.mock("../../../security/dlp/src/selectors.js", async () => {
   };
 });
 
-import { ToolExecutor } from "./tool-executor.js";
-import { parseA1Cell } from "../spreadsheet/a1.js";
-import { InMemoryWorkbook } from "../spreadsheet/in-memory-workbook.js";
+import { ToolExecutor } from "./tool-executor.ts";
+import { parseA1Cell } from "../spreadsheet/a1.ts";
+import { InMemoryWorkbook } from "../spreadsheet/in-memory-workbook.ts";
 
 import { DLP_ACTION } from "../../../security/dlp/src/actions.js";
 import * as selectors from "../../../security/dlp/src/selectors.js";
@@ -158,4 +158,3 @@ describe("ToolExecutor DLP indexing", () => {
     expect(effectiveCellClassification).toHaveBeenCalledTimes(0);
   });
 });
-

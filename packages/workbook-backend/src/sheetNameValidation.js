@@ -23,6 +23,10 @@ function normalizeSheetNameForCaseInsensitiveCompare(name) {
  *
  * This mirrors the backend validation (`formula_model::validate_sheet_name`) so the UI can
  * provide immediate feedback and avoid server-side rejection.
+ *
+ * @param {string} name
+ * @param {{ existingNames?: Iterable<string>, ignoreExistingName?: string | null }} [options]
+ * @returns {null | { kind: string, message: string, max?: number, character?: string }}
  */
 export function getSheetNameValidationError(name, options = {}) {
   // Match the backend behavior: only trim to detect blank/whitespace-only names.
@@ -76,6 +80,10 @@ export function getSheetNameValidationError(name, options = {}) {
   return null;
 }
 
+/**
+ * @param {string} name
+ * @param {{ existingNames?: Iterable<string>, ignoreExistingName?: string | null }} [options]
+ */
 export function getSheetNameValidationErrorMessage(name, options = {}) {
   return getSheetNameValidationError(name, options)?.message ?? null;
 }

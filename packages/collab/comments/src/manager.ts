@@ -68,6 +68,33 @@ function isYText(value: unknown): value is Y.Text {
   return true;
 }
 
+function replacePlaceholderRootType<T>(params: { doc: Y.Doc; name: string; existing: any; create: () => T }): T {
+  const { doc, name, existing, create } = params;
+  const t: any = create();
+
+  // Mirror Yjs' `Doc.get()` behavior when turning an `AbstractType` root placeholder
+  // into a concrete type, but support cases where we intentionally choose a
+  // constructor from a different Yjs module instance (ESM vs CJS).
+  t._map = existing?._map;
+  if (t._map instanceof Map) {
+    t._map.forEach((n: any) => {
+      for (; n !== null; n = n.left) {
+        n.parent = t;
+      }
+    });
+  }
+
+  t._start = existing?._start;
+  for (let n = t._start; n !== null; n = n.right) {
+    n.parent = t;
+  }
+  t._length = existing?._length;
+
+  doc.share.set(name, t);
+  t._integrate?.(doc as any, null);
+  return t as T;
+}
+
 /**
  * Safely determine whether the `comments` root is a `Y.Map` (current schema) or a
  * legacy `Y.Array` (older docs).
@@ -104,6 +131,36 @@ export function getCommentsRoot(doc: Y.Doc): CommentsRoot {
   if (kind === "array") {
     return { kind: "array", array: doc.getArray("comments") as YCommentsArray };
   }
+
+  // Prefer preserving foreign Yjs constructors (CJS vs ESM) when the doc was
+  // hydrated by a foreign build. If we instantiate the root as a local `Y.Map`
+  // while its entries were created by a foreign Yjs instance, we end up with a
+  // mixed-module tree that breaks constructor checks in Yjs UndoManager and can
+  // cause `doc.getMap("comments")` to throw later.
+  const placeholderMap = placeholder?._map;
+  if (placeholderMap instanceof Map) {
+    for (const item of placeholderMap.values()) {
+      if (!item || item.deleted) continue;
+      const content = item.content?.getContent?.() ?? [];
+      const value = content[content.length - 1];
+      const yValueMap = getYMap(value);
+      if (!yValueMap) continue;
+      if (yValueMap instanceof Y.Map) break; // already local; fall back to `doc.getMap`
+
+      const MapCtor = (yValueMap as any).constructor as new () => any;
+      if (typeof MapCtor === "function") {
+        const map = replacePlaceholderRootType({
+          doc,
+          name: "comments",
+          existing: placeholder,
+          create: () => new MapCtor(),
+        }) as YCommentsMap;
+        return { kind: "map", map };
+      }
+      break;
+    }
+  }
+
   return { kind: "map", map: doc.getMap("comments") as YCommentsMap };
 }
 

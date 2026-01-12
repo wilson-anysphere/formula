@@ -1,8 +1,21 @@
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 const MAX_VITEST_THREADS = 8;
+
+const repoRoot = fileURLToPath(new URL(".", import.meta.url));
+
+// Workspace packages are normally resolved via pnpm's node_modules symlinks. Some CI/dev
+// environments can run with stale node_modules (cached installs), which causes Vite/Vitest to fail
+// to resolve newly-added workspace dependencies. Alias the collab workspace entrypoints directly so
+// cross-package integration suites (apps/desktop) remain resilient.
+const collabUndoEntry = resolve(repoRoot, "packages/collab/undo/index.js");
+const collabSessionEntry = resolve(repoRoot, "packages/collab/session/src/index.ts");
+const collabVersioningEntry = resolve(repoRoot, "packages/collab/versioning/src/index.ts");
+const collabPersistenceEntry = resolve(repoRoot, "packages/collab/persistence/src/index.ts");
+const collabPersistenceIndexedDbEntry = resolve(repoRoot, "packages/collab/persistence/src/indexeddb.ts");
 
 function resolveJsToTs() {
   return {
@@ -37,6 +50,15 @@ function resolveJsToTs() {
 
 export default defineConfig({
   plugins: [resolveJsToTs()],
+  resolve: {
+    alias: [
+      { find: "@formula/collab-undo", replacement: collabUndoEntry },
+      { find: "@formula/collab-session", replacement: collabSessionEntry },
+      { find: "@formula/collab-versioning", replacement: collabVersioningEntry },
+      { find: "@formula/collab-persistence/indexeddb", replacement: collabPersistenceIndexedDbEntry },
+      { find: /^@formula\/collab-persistence$/, replacement: collabPersistenceEntry },
+    ],
+  },
   test: {
     // The repo includes several integration-style suites (API, sandboxed runtimes,
     // wasm-backed rendering) that can exceed Vitest's default 10s hook timeout on
