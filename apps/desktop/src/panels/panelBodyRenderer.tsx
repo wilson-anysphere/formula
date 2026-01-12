@@ -12,11 +12,13 @@ import { ExtensionsPanel } from "../extensions/ExtensionsPanel.js";
 import type { ExtensionPanelBridge } from "../extensions/extensionPanelBridge.js";
 import type { DesktopExtensionHostManager } from "../extensions/extensionHostManager.js";
 import type { PanelRegistry } from "./panelRegistry.js";
+import { PivotBuilderPanelContainer } from "./pivot-builder/PivotBuilderPanelContainer.js";
 import type { SpreadsheetApi } from "../../../../packages/ai-tools/src/spreadsheet/api.js";
 
 export interface PanelBodyRendererOptions {
   getDocumentController: () => unknown;
   getActiveSheetId?: () => string;
+  getSelection?: () => unknown;
   workbookId?: string;
   /**
    * Optional invoke wrapper (typically a queued/serialized Tauri invoke).
@@ -162,6 +164,22 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
           manager={options.extensionHostManager}
           onExecuteCommand={options.onExecuteExtensionCommand}
           onOpenPanel={options.onOpenExtensionPanel}
+        />,
+      );
+      return;
+    }
+
+    if (panelId === PanelIds.PIVOT_BUILDER) {
+      makeBodyFillAvailableHeight(body);
+      renderReactPanel(
+        panelId,
+        body,
+        <PivotBuilderPanelContainer
+          getDocumentController={options.getDocumentController}
+          getActiveSheetId={options.getActiveSheetId}
+          getSelection={options.getSelection as any}
+          invoke={options.invoke as any}
+          drainBackendSync={options.drainBackendSync}
         />,
       );
       return;

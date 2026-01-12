@@ -388,6 +388,22 @@ pub async fn new_workbook(state: State<'_, SharedAppState>) -> Result<WorkbookIn
     })
 }
 
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn add_sheet(name: String, state: State<'_, SharedAppState>) -> Result<SheetInfo, String> {
+    let shared = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut state = shared.lock().unwrap();
+        let sheet = state.add_sheet(name).map_err(app_error)?;
+        Ok::<_, String>(SheetInfo {
+            id: sheet.id,
+            name: sheet.name,
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Read a local text file on behalf of the frontend.
 ///
 /// This exists so the desktop webview can power-query local sources (CSV/JSON) without

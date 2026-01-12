@@ -16,6 +16,8 @@ export interface PivotBuilderPanelProps {
   initialConfig?: Partial<PivotTableConfig>;
   onChange?: (config: PivotTableConfig) => void;
   onCreate?: (config: PivotTableConfig) => void;
+  createDisabled?: boolean;
+  createLabel?: string;
 }
 
 const DEFAULT_CONFIG: PivotTableConfig = {
@@ -43,11 +45,17 @@ function defaultValueField(field: string): ValueField {
   return { sourceField: field, name: tWithVars("pivotBuilder.valueField.sumOf", { field }), aggregation: "sum" };
 }
 
+function testIdSafe(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]+/g, "-");
+}
+
 export function PivotBuilderPanel({
   availableFields,
   initialConfig,
   onChange,
   onCreate,
+  createDisabled,
+  createLabel,
 }: PivotBuilderPanelProps) {
   const [config, setConfig] = useState<PivotTableConfig>({
     ...DEFAULT_CONFIG,
@@ -136,6 +144,7 @@ export function PivotBuilderPanel({
           {availableFields.map((f) => (
             <li
               key={f}
+              data-testid={`pivot-field-${testIdSafe(f)}`}
               draggable
               onDragStart={(e) => onDragStartField(f, e)}
               style={{
@@ -153,19 +162,34 @@ export function PivotBuilderPanel({
       </section>
 
       <section style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        <DropArea title={t("pivotBuilder.dropArea.rows")} onDrop={(e) => onDrop("rows", e)} onDragOver={onDragOver}>
+        <DropArea
+          title={t("pivotBuilder.dropArea.rows")}
+          testId="pivot-drop-rows"
+          onDrop={(e) => onDrop("rows", e)}
+          onDragOver={onDragOver}
+        >
           {config.rowFields.map((f) => (
             <Pill key={f.sourceField} label={f.sourceField} />
           ))}
         </DropArea>
 
-        <DropArea title={t("pivotBuilder.dropArea.columns")} onDrop={(e) => onDrop("columns", e)} onDragOver={onDragOver}>
+        <DropArea
+          title={t("pivotBuilder.dropArea.columns")}
+          testId="pivot-drop-columns"
+          onDrop={(e) => onDrop("columns", e)}
+          onDragOver={onDragOver}
+        >
           {config.columnFields.map((f) => (
             <Pill key={f.sourceField} label={f.sourceField} />
           ))}
         </DropArea>
 
-        <DropArea title={t("pivotBuilder.dropArea.values")} onDrop={(e) => onDrop("values", e)} onDragOver={onDragOver}>
+        <DropArea
+          title={t("pivotBuilder.dropArea.values")}
+          testId="pivot-drop-values"
+          onDrop={(e) => onDrop("values", e)}
+          onDragOver={onDragOver}
+        >
           {config.valueFields.length === 0 ? (
             <div style={{ color: "var(--text-secondary)" }}>{t("pivotBuilder.values.emptyHint")}</div>
           ) : (
@@ -189,6 +213,7 @@ export function PivotBuilderPanel({
                   <div>
                     <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{t("pivotBuilder.value.aggregationLabel")}</div>
                     <select
+                      data-testid={`pivot-value-aggregation-${idx}`}
                       value={vf.aggregation}
                       onChange={(e) => updateValueField(idx, { aggregation: e.target.value as AggregationType })}
                     >
@@ -205,27 +230,57 @@ export function PivotBuilderPanel({
           )}
         </DropArea>
 
-        <DropArea title={t("pivotBuilder.dropArea.filters")} onDrop={(e) => onDrop("filters", e)} onDragOver={onDragOver}>
+        <DropArea
+          title={t("pivotBuilder.dropArea.filters")}
+          testId="pivot-drop-filters"
+          onDrop={(e) => onDrop("filters", e)}
+          onDragOver={onDragOver}
+        >
           {config.filterFields.map((f) => (
             <Pill key={f.sourceField} label={f.sourceField} />
           ))}
         </DropArea>
+
+        <div style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: 16 }}>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <input
+              data-testid="pivot-grand-totals-rows"
+              type="checkbox"
+              checked={config.grandTotals.rows}
+              onChange={(e) => applyConfig({ ...config, grandTotals: { ...config.grandTotals, rows: e.target.checked } })}
+            />
+            {t("pivotBuilder.options.grandTotalsRows")}
+          </label>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <input
+              data-testid="pivot-grand-totals-columns"
+              type="checkbox"
+              checked={config.grandTotals.columns}
+              onChange={(e) =>
+                applyConfig({ ...config, grandTotals: { ...config.grandTotals, columns: e.target.checked } })
+              }
+            />
+            {t("pivotBuilder.options.grandTotalsColumns")}
+          </label>
+        </div>
 
         <div style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <button
             onClick={() => applyConfig(DEFAULT_CONFIG)}
             type="button"
             style={{ padding: "6px 10px" }}
+            data-testid="pivot-reset"
           >
             {t("pivotBuilder.actions.reset")}
           </button>
           <button
             onClick={() => onCreate?.(config)}
             type="button"
-            disabled={config.valueFields.length === 0}
+            disabled={Boolean(createDisabled) || config.valueFields.length === 0}
             style={{ padding: "6px 10px" }}
+            data-testid="pivot-create"
           >
-            {t("pivotBuilder.actions.create")}
+            {createLabel ?? t("pivotBuilder.actions.create")}
           </button>
         </div>
       </section>
@@ -238,14 +293,17 @@ function DropArea({
   children,
   onDrop,
   onDragOver,
+  testId,
 }: {
   title: string;
   children: React.ReactNode;
   onDrop: (e: React.DragEvent) => void;
   onDragOver: (e: React.DragEvent) => void;
+  testId?: string;
 }) {
   return (
     <div
+      data-testid={testId}
       onDrop={onDrop}
       onDragOver={onDragOver}
       style={{

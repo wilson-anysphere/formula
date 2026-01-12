@@ -23,6 +23,7 @@ import { mountScriptEditorPanel } from "./panels/script-editor/index.js";
 import { installUnsavedChangesPrompt } from "./document/index.js";
 import { DocumentControllerWorkbookAdapter } from "./scripting/documentControllerWorkbookAdapter.js";
 import { registerFindReplaceShortcuts, FindReplaceController } from "./panels/find-replace/index.js";
+import { t } from "./i18n/index.js";
 import { formatRangeAddress, parseRangeAddress } from "@formula/scripting";
 import { normalizeFormulaTextOpt } from "@formula/engine";
 import { startWorkbookSync } from "./tauri/workbookSync";
@@ -202,6 +203,8 @@ function currentSelectionRect(): SelectionRect {
     activeCol: active.col,
   };
 }
+
+let openCommandPalette: (() => void) | null = null;
 
 // --- Sheet tabs (minimal multi-sheet support) ---------------------------------
 
@@ -753,6 +756,11 @@ if (
   const panelBodyRenderer = createPanelBodyRenderer({
     getDocumentController: () => app.getDocument(),
     getActiveSheetId: () => app.getCurrentSheetId(),
+    getSelection: () => {
+      const ranges = app.getSelectionRanges();
+      const first = ranges[0] ?? { startRow: 0, startCol: 0, endRow: 0, endCol: 0 };
+      return { sheetId: app.getCurrentSheetId(), range: first };
+    },
     workbookId,
     getWorkbookId: () => activePanelWorkbookId,
     invoke:
@@ -1415,6 +1423,195 @@ if (
     const placement = getPanelPlacement(layoutController.layout, PanelIds.VBA_MIGRATE);
     if (placement.kind === "closed") layoutController.openPanel(PanelIds.VBA_MIGRATE);
     else layoutController.closePanel(PanelIds.VBA_MIGRATE);
+  });
+
+  // --- Command palette (minimal) ------------------------------------------------
+
+  const paletteOverlay = document.createElement("div");
+  paletteOverlay.style.position = "fixed";
+  paletteOverlay.style.inset = "0";
+  paletteOverlay.style.display = "none";
+  paletteOverlay.style.alignItems = "flex-start";
+  paletteOverlay.style.justifyContent = "center";
+  paletteOverlay.style.paddingTop = "80px";
+  paletteOverlay.style.background = "rgba(0,0,0,0.25)";
+  paletteOverlay.style.zIndex = "1000";
+
+  const palette = document.createElement("div");
+  palette.className = "command-palette";
+  palette.dataset.testid = "command-palette";
+
+  const paletteInput = document.createElement("input");
+  paletteInput.className = "command-palette__input";
+  paletteInput.dataset.testid = "command-palette-input";
+  paletteInput.placeholder = t("commandPalette.placeholder");
+
+  const paletteList = document.createElement("ul");
+  paletteList.className = "command-palette__list";
+  paletteList.dataset.testid = "command-palette-list";
+
+  palette.appendChild(paletteInput);
+  palette.appendChild(paletteList);
+  paletteOverlay.appendChild(palette);
+  document.body.appendChild(paletteOverlay);
+
+  type PaletteCommand = { id: string; label: string; run: () => void };
+
+  const paletteCommands: PaletteCommand[] = [
+    {
+      id: "insertPivotTable",
+      label: t("commandPalette.command.insertPivotTable"),
+      run: () => layoutController.openPanel(PanelIds.PIVOT_BUILDER),
+    },
+    {
+      id: "tracePrecedents",
+      label: "Trace precedents",
+      run: () => {
+        app.clearAuditing();
+        app.toggleAuditingPrecedents();
+        app.focus();
+      },
+    },
+    {
+      id: "traceDependents",
+      label: "Trace dependents",
+      run: () => {
+        app.clearAuditing();
+        app.toggleAuditingDependents();
+        app.focus();
+      },
+    },
+    {
+      id: "traceBoth",
+      label: "Trace precedents + dependents",
+      run: () => {
+        app.clearAuditing();
+        app.toggleAuditingPrecedents();
+        app.toggleAuditingDependents();
+        app.focus();
+      },
+    },
+    {
+      id: "clearAuditing",
+      label: "Clear auditing",
+      run: () => {
+        app.clearAuditing();
+        app.focus();
+      },
+    },
+    {
+      id: "toggleTransitiveAuditing",
+      label: "Toggle transitive auditing",
+      run: () => {
+        app.toggleAuditingTransitive();
+        app.focus();
+      },
+    },
+  ];
+
+  let paletteQuery = "";
+  let paletteSelected = 0;
+
+  function filteredCommands(): PaletteCommand[] {
+    const q = paletteQuery.trim().toLowerCase();
+    if (!q) return paletteCommands;
+    return paletteCommands.filter((cmd) => cmd.label.toLowerCase().includes(q));
+  }
+
+  function renderPalette(): void {
+    const list = filteredCommands();
+    if (paletteSelected >= list.length) paletteSelected = Math.max(0, list.length - 1);
+    paletteList.replaceChildren();
+
+    for (let i = 0; i < list.length; i += 1) {
+      const cmd = list[i]!;
+      const li = document.createElement("li");
+      li.className = "command-palette__item";
+      li.textContent = cmd.label;
+      li.setAttribute("aria-selected", i === paletteSelected ? "true" : "false");
+      li.addEventListener("mousedown", (e) => {
+        // Prevent focus leaving the input before we run the command.
+        e.preventDefault();
+      });
+      li.addEventListener("click", () => {
+        closePalette();
+        cmd.run();
+      });
+      paletteList.appendChild(li);
+    }
+  }
+
+  function openPalette(): void {
+    paletteQuery = "";
+    paletteSelected = 0;
+    paletteInput.value = "";
+    paletteOverlay.style.display = "flex";
+    renderPalette();
+    paletteInput.focus();
+    paletteInput.select();
+  }
+
+  function closePalette(): void {
+    paletteOverlay.style.display = "none";
+    // Best-effort: return focus to the grid.
+    app.focus();
+  }
+
+  paletteOverlay.addEventListener("click", (e) => {
+    if (e.target === paletteOverlay) closePalette();
+  });
+
+  paletteInput.addEventListener("input", () => {
+    paletteQuery = paletteInput.value;
+    paletteSelected = 0;
+    renderPalette();
+  });
+
+  paletteInput.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      closePalette();
+      return;
+    }
+
+    const list = filteredCommands();
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      paletteSelected = list.length === 0 ? 0 : Math.min(list.length - 1, paletteSelected + 1);
+      renderPalette();
+      return;
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      paletteSelected = list.length === 0 ? 0 : Math.max(0, paletteSelected - 1);
+      renderPalette();
+      return;
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const cmd = list[paletteSelected];
+      if (!cmd) return;
+      closePalette();
+      cmd.run();
+    }
+  });
+
+  openCommandPalette = openPalette;
+
+  window.addEventListener("keydown", (e) => {
+    if (e.defaultPrevented) return;
+    const primary = e.ctrlKey || e.metaKey;
+    if (!primary || !e.shiftKey) return;
+    if (e.key !== "P" && e.key !== "p") return;
+
+    const target = e.target as HTMLElement | null;
+    if (target) {
+      const tag = target.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return;
+    }
+
+    e.preventDefault();
+    openPalette();
   });
 
   layoutController.on("change", () => renderLayout());
@@ -2128,53 +2325,6 @@ async function handleNewWorkbook(): Promise<void> {
   }
 }
 
-function openCommandPalette(): void {
-  const choice = window
-    .prompt(
-      [
-        "Command palette:",
-        "1) Trace precedents",
-        "2) Trace dependents",
-        "3) Trace precedents + dependents",
-        "4) Clear auditing",
-        "5) Toggle transitive auditing",
-        "",
-        "Enter a number:",
-      ].join("\n"),
-    )
-    ?.trim();
-
-  if (!choice) return;
-  switch (choice) {
-    case "1":
-      app.clearAuditing();
-      app.toggleAuditingPrecedents();
-      app.focus();
-      return;
-    case "2":
-      app.clearAuditing();
-      app.toggleAuditingDependents();
-      app.focus();
-      return;
-    case "3":
-      app.clearAuditing();
-      app.toggleAuditingPrecedents();
-      app.toggleAuditingDependents();
-      app.focus();
-      return;
-    case "4":
-      app.clearAuditing();
-      app.focus();
-      return;
-    case "5":
-      app.toggleAuditingTransitive();
-      app.focus();
-      return;
-    default:
-      return;
-  }
-}
-
 try {
   tauriBackend = new TauriWorkbookBackend();
   const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
@@ -2282,7 +2432,7 @@ try {
   });
 
   void listen("shortcut-command-palette", () => {
-    openCommandPalette();
+    openCommandPalette?.();
   });
 
   let closeInFlight = false;

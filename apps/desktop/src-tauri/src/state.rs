@@ -362,6 +362,48 @@ impl AppState {
         Ok(candidate)
     }
 
+    pub fn add_sheet(&mut self, name: String) -> Result<SheetInfoData, AppStateError> {
+        let workbook = self.get_workbook_mut()?;
+        let base = name.trim();
+        let base = if base.is_empty() { "Sheet" } else { base };
+
+        let mut candidate_name = base.to_string();
+        let mut counter = 1usize;
+        while workbook
+            .sheets
+            .iter()
+            .any(|sheet| sheet.name.eq_ignore_ascii_case(&candidate_name))
+        {
+            counter += 1;
+            candidate_name = format!("{base} {counter}");
+        }
+
+        let base_id = candidate_name.clone();
+        let mut candidate_id = base_id.clone();
+        let mut id_counter = 1usize;
+        while workbook
+            .sheets
+            .iter()
+            .any(|sheet| sheet.id.eq_ignore_ascii_case(&candidate_id))
+        {
+            id_counter += 1;
+            candidate_id = format!("{base_id}-{id_counter}");
+        }
+
+        workbook.sheets.push(crate::file_io::Sheet::new(
+            candidate_id.clone(),
+            candidate_name.clone(),
+        ));
+        self.engine.ensure_sheet(&candidate_name);
+
+        self.dirty = true;
+        self.redo_stack.clear();
+        Ok(SheetInfoData {
+            id: candidate_id,
+            name: candidate_name,
+        })
+    }
+
     pub fn rename_sheet(&mut self, sheet_id: &str, name: String) -> Result<(), AppStateError> {
         let workbook = self.get_workbook_mut()?;
         let trimmed = name.trim();
