@@ -3200,6 +3200,16 @@ fn odd_coupon_bond_functions_reject_non_finite_numeric_inputs() {
         other => panic!("expected #NUM!, got {other:?}"),
     }
 
+    // Non-finite dates should also be rejected (#NUM!).
+    match sheet.eval("=ODDFPRICE(A1,DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,100,1,0)") {
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+    match sheet.eval("=ODDLPRICE(DATE(2022,11,1),A2,DATE(2022,7,1),0.06,0.05,100,1,0)") {
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+
     // NaN in yield.
     match sheet.eval("=ODDLPRICE(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,A2,100,1,0)") {
         Value::Error(ErrorKind::Num) => {}
@@ -3249,12 +3259,32 @@ fn odd_coupon_bond_functions_return_value_for_unparseable_date_text() {
         other => panic!("expected #VALUE!, got {other:?}"),
     }
 
+    // Other date positions.
+    match sheet.eval(r#"=ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),"nope",DATE(2020,7,1),0.06,0.05,100,1,0)"#) {
+        Value::Error(ErrorKind::Value) => {}
+        other => panic!("expected #VALUE!, got {other:?}"),
+    }
+    match sheet.eval(r#"=ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),"nope",0.06,0.05,100,1,0)"#) {
+        Value::Error(ErrorKind::Value) => {}
+        other => panic!("expected #VALUE!, got {other:?}"),
+    }
+    match sheet.eval(r#"=ODDLPRICE(DATE(2022,11,1),DATE(2023,3,1),"nope",0.06,0.05,100,1,0)"#) {
+        Value::Error(ErrorKind::Value) => {}
+        other => panic!("expected #VALUE!, got {other:?}"),
+    }
+
     match sheet.eval(r#"=ODDFYIELD("nope",DATE(2025,1,1),DATE(2019,1,1),DATE(2020,7,1),0.05,95,100,2)"#) {
         Value::Error(ErrorKind::Value) => {}
         other => panic!("expected #VALUE!, got {other:?}"),
     }
 
     match sheet.eval(r#"=ODDLYIELD(DATE(2020,1,1),"nope",DATE(2024,7,1),0.05,95,100,2)"#) {
+        Value::Error(ErrorKind::Value) => {}
+        other => panic!("expected #VALUE!, got {other:?}"),
+    }
+
+    // Invalid "last_interest" for ODDLYIELD.
+    match sheet.eval(r#"=ODDLYIELD(DATE(2022,11,1),DATE(2023,3,1),"nope",0.06,95,100,1,0)"#) {
         Value::Error(ErrorKind::Value) => {}
         other => panic!("expected #VALUE!, got {other:?}"),
     }
