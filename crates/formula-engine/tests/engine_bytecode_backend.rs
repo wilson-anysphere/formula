@@ -1290,6 +1290,31 @@ fn bytecode_backend_inlines_defined_name_spill_range_refs() {
 }
 
 #[test]
+fn bytecode_backend_sheet_qualified_defined_name_formula_uses_target_sheet_context() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet2", "A1", 2.0).unwrap();
+    engine
+        .define_name(
+            "MyFormulaName",
+            NameScope::Workbook,
+            NameDefinition::Formula("=A1".to_string()),
+        )
+        .unwrap();
+
+    // Evaluating `Sheet2!MyFormulaName` should use Sheet2 as the "current sheet" for `A1`.
+    // The bytecode backend cannot evaluate cross-sheet single-sheet references, so this should
+    // fall back to the AST backend rather than compiling an incorrect same-sheet program.
+    engine
+        .set_cell_formula("Sheet1", "B1", "=Sheet2!MyFormulaName")
+        .unwrap();
+    assert_eq!(engine.bytecode_program_count(), 0);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(2.0));
+}
+
+#[test]
 fn bytecode_backend_does_not_inline_dynamic_defined_name_formulas() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();

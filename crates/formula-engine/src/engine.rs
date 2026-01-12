@@ -3633,18 +3633,162 @@ impl Engine {
                         return None;
                     }
                 };
-                Some(self.inline_static_defined_names_for_bytecode_inner(
+                let inlined = self.inline_static_defined_names_for_bytecode_inner(
                     &ast.expr,
                     sheet_id,
                     visiting,
                     lexical_scopes,
-                ))
+                );
+                Some(self.normalize_defined_name_formula_refs_for_bytecode(&inlined, sheet_id))
             }
             NameDefinition::Constant(_) => None,
         };
 
         visiting.remove(&visit_key);
         result
+    }
+
+    /// Defined-name formulas preserve `SheetReference::Current` so they can be evaluated relative
+    /// to the sheet where the name is *used* (or explicitly sheet-qualified).
+    ///
+    /// When we inline a name formula into the canonical AST for bytecode compilation, we need to
+    /// make that "current sheet" context explicit so later lowering treats references correctly
+    /// (especially for sheet-qualified name uses like `Sheet2!MyName`).
+    ///
+    /// This walks an expression and fills in missing `sheet` prefixes on references using
+    /// `current_sheet`, while preserving Excel's range-prefix semantics (`Sheet1!A1:B2` is parsed
+    /// as `Sheet1!A1` + `B2`, where the prefix applies to both endpoints).
+    fn normalize_defined_name_formula_refs_for_bytecode(
+        &self,
+        expr: &crate::Expr,
+        current_sheet: SheetId,
+    ) -> crate::Expr {
+        fn ref_is_unprefixed(expr: &crate::Expr) -> bool {
+            match expr {
+                crate::Expr::CellRef(r) => r.workbook.is_none() && r.sheet.is_none(),
+                crate::Expr::ColRef(r) => r.workbook.is_none() && r.sheet.is_none(),
+                crate::Expr::RowRef(r) => r.workbook.is_none() && r.sheet.is_none(),
+                _ => false,
+            }
+        }
+
+        fn fill_ref_sheet(expr: &mut crate::Expr, sheet_name: &str) {
+            match expr {
+                crate::Expr::CellRef(r) => {
+                    if r.workbook.is_none() && r.sheet.is_none() {
+                        r.sheet = Some(crate::SheetRef::Sheet(sheet_name.to_string()));
+                    }
+                }
+                crate::Expr::ColRef(r) => {
+                    if r.workbook.is_none() && r.sheet.is_none() {
+                        r.sheet = Some(crate::SheetRef::Sheet(sheet_name.to_string()));
+                    }
+                }
+                crate::Expr::RowRef(r) => {
+                    if r.workbook.is_none() && r.sheet.is_none() {
+                        r.sheet = Some(crate::SheetRef::Sheet(sheet_name.to_string()));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        fn normalize_inner(expr: &crate::Expr, sheet_name: &str, fill_unprefixed: bool) -> crate::Expr {
+            match expr {
+                crate::Expr::CellRef(r) => {
+                    let mut r = r.clone();
+                    if fill_unprefixed && r.workbook.is_none() && r.sheet.is_none() {
+                        r.sheet = Some(crate::SheetRef::Sheet(sheet_name.to_string()));
+                    }
+                    crate::Expr::CellRef(r)
+                }
+                crate::Expr::ColRef(r) => {
+                    let mut r = r.clone();
+                    if fill_unprefixed && r.workbook.is_none() && r.sheet.is_none() {
+                        r.sheet = Some(crate::SheetRef::Sheet(sheet_name.to_string()));
+                    }
+                    crate::Expr::ColRef(r)
+                }
+                crate::Expr::RowRef(r) => {
+                    let mut r = r.clone();
+                    if fill_unprefixed && r.workbook.is_none() && r.sheet.is_none() {
+                        r.sheet = Some(crate::SheetRef::Sheet(sheet_name.to_string()));
+                    }
+                    crate::Expr::RowRef(r)
+                }
+                crate::Expr::Binary(b) if b.op == crate::BinaryOp::Range => {
+                    // Preserve unprefixed endpoints so range prefixes can be merged by the lowerer,
+                    // then fill both endpoints when they are truly unprefixed (e.g. `A1:B2`).
+                    let mut left = normalize_inner(&b.left, sheet_name, false);
+                    let mut right = normalize_inner(&b.right, sheet_name, false);
+                    if ref_is_unprefixed(&left) && ref_is_unprefixed(&right) {
+                        fill_ref_sheet(&mut left, sheet_name);
+                        fill_ref_sheet(&mut right, sheet_name);
+                    }
+                    crate::Expr::Binary(crate::BinaryExpr {
+                        op: crate::BinaryOp::Range,
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    })
+                }
+                crate::Expr::Binary(b) => crate::Expr::Binary(crate::BinaryExpr {
+                    op: b.op,
+                    left: Box::new(normalize_inner(&b.left, sheet_name, true)),
+                    right: Box::new(normalize_inner(&b.right, sheet_name, true)),
+                }),
+                crate::Expr::Postfix(p) => crate::Expr::Postfix(crate::PostfixExpr {
+                    op: p.op,
+                    expr: Box::new(normalize_inner(&p.expr, sheet_name, true)),
+                }),
+                crate::Expr::Unary(u) => crate::Expr::Unary(crate::UnaryExpr {
+                    op: u.op,
+                    expr: Box::new(normalize_inner(&u.expr, sheet_name, true)),
+                }),
+                crate::Expr::FunctionCall(call) => crate::Expr::FunctionCall(crate::FunctionCall {
+                    name: call.name.clone(),
+                    args: call
+                        .args
+                        .iter()
+                        .map(|arg| normalize_inner(arg, sheet_name, true))
+                        .collect(),
+                }),
+                crate::Expr::Call(call) => crate::Expr::Call(crate::CallExpr {
+                    callee: Box::new(normalize_inner(&call.callee, sheet_name, true)),
+                    args: call
+                        .args
+                        .iter()
+                        .map(|arg| normalize_inner(arg, sheet_name, true))
+                        .collect(),
+                }),
+                crate::Expr::FieldAccess(access) => crate::Expr::FieldAccess(crate::FieldAccessExpr {
+                    base: Box::new(normalize_inner(&access.base, sheet_name, true)),
+                    field: access.field.clone(),
+                }),
+                crate::Expr::Array(arr) => crate::Expr::Array(crate::ArrayLiteral {
+                    rows: arr
+                        .rows
+                        .iter()
+                        .map(|row| {
+                            row.iter()
+                                .map(|el| normalize_inner(el, sheet_name, true))
+                                .collect()
+                        })
+                        .collect(),
+                }),
+                crate::Expr::NameRef(_)
+                | crate::Expr::StructuredRef(_)
+                | crate::Expr::Number(_)
+                | crate::Expr::String(_)
+                | crate::Expr::Boolean(_)
+                | crate::Expr::Error(_)
+                | crate::Expr::Missing => expr.clone(),
+            }
+        }
+
+        let Some(sheet_name) = self.workbook.sheet_names.get(current_sheet) else {
+            return expr.clone();
+        };
+        normalize_inner(expr, sheet_name, true)
     }
 
     fn extract_static_ref_expr_for_bytecode(
