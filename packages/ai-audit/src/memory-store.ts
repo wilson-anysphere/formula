@@ -1,5 +1,5 @@
-import type { AIAuditEntry, AuditListFilters } from "./types.js";
-import type { AIAuditStore } from "./store.js";
+import type { AIAuditEntry, AuditListFilters } from "./types.ts";
+import type { AIAuditStore } from "./store.ts";
 
 export class MemoryAIAuditStore implements AIAuditStore {
   private readonly entries: AIAuditEntry[] = [];

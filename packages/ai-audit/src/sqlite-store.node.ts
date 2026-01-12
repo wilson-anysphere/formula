@@ -1,7 +1,7 @@
 import { createRequire } from "node:module";
 
-import { SqliteAIAuditStore } from "./sqlite-store.js";
-import type { SqliteAIAuditStoreOptions } from "./sqlite-store.js";
+import { SqliteAIAuditStore } from "./sqlite-store.ts";
+import type { SqliteAIAuditStoreOptions } from "./sqlite-store.ts";
 
 export function locateSqlJsFileNode(file: string, _prefix?: string): string {
   const require = createRequire(import.meta.url);

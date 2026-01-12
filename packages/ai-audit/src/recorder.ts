@@ -1,5 +1,5 @@
-import type { AIAuditStore } from "./store.js";
-import type { AIAuditEntry, AIMode, TokenUsage, ToolCallLog, UserFeedback, AIVerificationResult } from "./types.js";
+import type { AIAuditStore } from "./store.ts";
+import type { AIAuditEntry, AIMode, TokenUsage, ToolCallLog, UserFeedback, AIVerificationResult } from "./types.ts";
 
 export interface AIAuditRecorderOptions {
   store: AIAuditStore;

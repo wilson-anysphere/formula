@@ -1,4 +1,4 @@
-import type { AIAuditEntry, AuditListFilters } from "./types.js";
+import type { AIAuditEntry, AuditListFilters } from "./types.ts";
 
 export interface AIAuditStore {
   logEntry(entry: AIAuditEntry): Promise<void>;

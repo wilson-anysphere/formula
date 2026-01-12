@@ -1,8 +1,8 @@
 import initSqlJs from "sql.js";
-import type { AIAuditEntry, AuditListFilters, TokenUsage, ToolCallLog, UserFeedback, AIVerificationResult } from "./types.js";
-import type { AIAuditStore } from "./store.js";
-import type { SqliteBinaryStorage } from "./storage.js";
-import { InMemoryBinaryStorage } from "./storage.js";
+import type { AIAuditEntry, AuditListFilters, TokenUsage, ToolCallLog, UserFeedback, AIVerificationResult } from "./types.ts";
+import type { AIAuditStore } from "./store.ts";
+import type { SqliteBinaryStorage } from "./storage.ts";
+import { InMemoryBinaryStorage } from "./storage.ts";
 
 type SqlJsDatabase = any;
 

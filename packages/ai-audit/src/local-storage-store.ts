@@ -1,5 +1,5 @@
-import type { AIAuditStore } from "./store.js";
-import type { AIAuditEntry, AuditListFilters } from "./types.js";
+import type { AIAuditStore } from "./store.ts";
+import type { AIAuditEntry, AuditListFilters } from "./types.ts";
 
 export interface LocalStorageAIAuditStoreOptions {
   /**

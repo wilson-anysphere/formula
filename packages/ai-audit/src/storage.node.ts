@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 
-import type { SqliteBinaryStorage } from "./storage.js";
+import type { SqliteBinaryStorage } from "./storage.ts";
 
 export class NodeFileBinaryStorage implements SqliteBinaryStorage {
   readonly filePath: string;
@@ -23,4 +23,3 @@ export class NodeFileBinaryStorage implements SqliteBinaryStorage {
     await fs.writeFile(this.filePath, data);
   }
 }
-
