@@ -203,7 +203,19 @@ export function startSheetStoreDocumentSync(
             try {
               store.setVisibility(sheetId, desiredVisibility, { allowHideLastVisible: true });
             } catch {
-              // ignore
+              // WorkbookSheetStore enforces the Excel invariant that at least one sheet must
+              // remain visible. When syncing from the DocumentController (especially on
+              // applyState restores / scripts), we still want the UI store to reflect the
+              // authoritative metadata even if it violates that constraint (e.g. a workbook
+              // snapshot with a single hidden sheet).
+              try {
+                const current = store.listAll();
+                store.replaceAll(
+                  current.map((sheet) => (sheet.id === sheetId ? { ...sheet, visibility: desiredVisibility } : sheet)),
+                );
+              } catch {
+                // ignore
+              }
             }
           }
 
