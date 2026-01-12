@@ -380,6 +380,34 @@ fn yearfrac_basis1_uses_correct_year_length_within_year() {
     let expected = 307.0 / 366.0;
     assert!((date_time::yearfrac(start, end, 1, system).unwrap() - expected).abs() < 1e-12);
     assert!((date_time::yearfrac(end, start, 1, system).unwrap() + expected).abs() < 1e-12);
+
+    // The anniversary denominator can span into the next year, so it can include (or exclude) a leap
+    // day even if both dates are within the same calendar year.
+    let start = ymd_to_serial(ExcelDate::new(2019, 3, 1), system).unwrap();
+    let end = ymd_to_serial(ExcelDate::new(2019, 12, 31), system).unwrap();
+    let expected = 305.0 / 366.0;
+    assert!((date_time::yearfrac(start, end, 1, system).unwrap() - expected).abs() < 1e-12);
+    assert!((date_time::yearfrac(end, start, 1, system).unwrap() + expected).abs() < 1e-12);
+
+    let start = ymd_to_serial(ExcelDate::new(2020, 3, 1), system).unwrap();
+    let end = ymd_to_serial(ExcelDate::new(2020, 12, 31), system).unwrap();
+    let expected = 305.0 / 365.0;
+    assert!((date_time::yearfrac(start, end, 1, system).unwrap() - expected).abs() < 1e-12);
+    assert!((date_time::yearfrac(end, start, 1, system).unwrap() + expected).abs() < 1e-12);
+
+    // One-day spans across year-end should also pick up the correct denominator based on the
+    // anniversary year length.
+    let start = ymd_to_serial(ExcelDate::new(2019, 12, 31), system).unwrap();
+    let end = ymd_to_serial(ExcelDate::new(2020, 1, 1), system).unwrap();
+    let expected = 1.0 / 366.0;
+    assert!((date_time::yearfrac(start, end, 1, system).unwrap() - expected).abs() < 1e-12);
+    assert!((date_time::yearfrac(end, start, 1, system).unwrap() + expected).abs() < 1e-12);
+
+    let start = ymd_to_serial(ExcelDate::new(2020, 12, 31), system).unwrap();
+    let end = ymd_to_serial(ExcelDate::new(2021, 1, 1), system).unwrap();
+    let expected = 1.0 / 365.0;
+    assert!((date_time::yearfrac(start, end, 1, system).unwrap() - expected).abs() < 1e-12);
+    assert!((date_time::yearfrac(end, start, 1, system).unwrap() + expected).abs() < 1e-12);
 }
 
 #[test]

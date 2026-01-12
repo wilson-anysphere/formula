@@ -585,6 +585,26 @@ fn yearfrac_basis1_uses_correct_year_length_within_year() {
         307.0 / 366.0,
     );
 
+    // Denominator can span into the next year and include/exclude a leap day based on the anniversary.
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2019,3,1),DATE(2019,12,31),1)"),
+        305.0 / 366.0,
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2020,3,1),DATE(2020,12,31),1)"),
+        305.0 / 365.0,
+    );
+
+    // One-day spans across year-end should use the correct anniversary-year denominator.
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2019,12,31),DATE(2020,1,1),1)"),
+        1.0 / 366.0,
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2020,12,31),DATE(2021,1,1),1)"),
+        1.0 / 365.0,
+    );
+
     // Sign handling should remain consistent for within-year spans.
     assert_number(
         &sheet.eval("=YEARFRAC(DATE(2019,12,31),DATE(2019,1,1),1)"),
@@ -593,6 +613,23 @@ fn yearfrac_basis1_uses_correct_year_length_within_year() {
     assert_number(
         &sheet.eval("=YEARFRAC(DATE(2020,12,31),DATE(2020,1,1),1)"),
         -(365.0 / 366.0),
+    );
+
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2019,12,31),DATE(2019,3,1),1)"),
+        -(305.0 / 366.0),
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2020,12,31),DATE(2020,3,1),1)"),
+        -(305.0 / 365.0),
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2020,1,1),DATE(2019,12,31),1)"),
+        -(1.0 / 366.0),
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2021,1,1),DATE(2020,12,31),1)"),
+        -(1.0 / 365.0),
     );
 }
 
