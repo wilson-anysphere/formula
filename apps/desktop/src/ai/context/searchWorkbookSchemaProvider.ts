@@ -24,6 +24,7 @@ function isValidRange(value: unknown): value is Range {
  */
 export function createSchemaProviderFromSearchWorkbook(workbook: any): WorkbookSchemaProvider {
   return {
+    getSchemaVersion: () => (typeof workbook?.schemaVersion === "number" ? workbook.schemaVersion : 0),
     getNamedRanges: () => {
       const values = typeof workbook?.names?.values === "function" ? Array.from(workbook.names.values()) : [];
       const out: Array<{ name: string; sheetId: string; range: Range }> = [];
@@ -59,4 +60,3 @@ export function createSchemaProviderFromSearchWorkbook(workbook: any): WorkbookS
     },
   };
 }
-

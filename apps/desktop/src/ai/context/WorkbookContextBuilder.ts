@@ -123,6 +123,16 @@ export interface BuildWorkbookContextResult {
 }
 
 export interface WorkbookSchemaProvider {
+  /**
+   * Optional schema version counter for workbook-level schema metadata (named ranges / tables).
+   *
+   * When provided, callers can cache the normalized metadata and avoid re-reading + re-sorting
+   * the full list on every context build. Providers should increment the version whenever any
+   * named range or table definition changes.
+   *
+   * When omitted, the version is treated as 0.
+   */
+  getSchemaVersion?: () => number;
   getNamedRanges?: () => Array<{ name: string; sheetId: string; range: Range }>;
   getTables?: () => Array<{ name: string; sheetId: string; range: Range }>;
 }
@@ -207,7 +217,7 @@ export class WorkbookContextBuilder {
     Pick<
       WorkbookContextBuilderOptions,
       "ragService" | "dlp" | "tokenEstimator" | "maxPromptContextTokens" | "contextWindowTokens" | "reserveForOutputTokens" | "schemaProvider"
-    >;
+  >;
   private readonly estimator: TokenEstimator;
 
   // Context caching:
@@ -217,6 +227,16 @@ export class WorkbookContextBuilder {
   private cachedContentVersion: number | null = null;
   private readonly blockCache = new Map<string, WorkbookContextDataBlock>();
   private readonly sheetSummaryCache = new Map<string, WorkbookContextSheetSummary>();
+  private cachedSchemaMetadata:
+    | {
+        provider: WorkbookSchemaProvider | null;
+        schemaVersion: number;
+        schemaNamedRangesBySheet: Map<string, Array<{ name: string; range: string }>>;
+        schemaTablesBySheet: Map<string, Array<{ name: string; range: string }>>;
+        namedRanges: Array<{ name: string; range: string }>;
+        explicitTables: Array<{ sheetId: string; name: string; range: string }>;
+      }
+    | null = null;
 
   constructor(options: WorkbookContextBuilderOptions) {
     const isInlineEdit = options.mode === "inline_edit";
@@ -240,63 +260,10 @@ export class WorkbookContextBuilder {
     const selection = input.selectedRange;
     const schemaProvider = this.options.schemaProvider ?? null;
 
-    const namedRangeDefs = safeList(() => schemaProvider?.getNamedRanges?.() ?? []);
-    const explicitTableDefs = safeList(() => schemaProvider?.getTables?.() ?? []);
-
-    const schemaNamedRangesBySheet = new Map<string, Array<{ name: string; range: string }>>();
-    for (const nr of namedRangeDefs) {
-      const name = typeof nr?.name === "string" ? nr.name.trim() : "";
-      const sheetId = typeof nr?.sheetId === "string" ? nr.sheetId : "";
-      if (!name || !sheetId) continue;
-      let range: string;
-      try {
-        range = this.schemaRangeRef(sheetId, nr.range);
-      } catch {
-        continue;
-      }
-      const list = schemaNamedRangesBySheet.get(sheetId) ?? [];
-      list.push({ name, range });
-      schemaNamedRangesBySheet.set(sheetId, list);
-    }
-
-    const schemaTablesBySheet = new Map<string, Array<{ name: string; range: string }>>();
-    for (const t of explicitTableDefs) {
-      const name = typeof t?.name === "string" ? t.name.trim() : "";
-      const sheetId = typeof t?.sheetId === "string" ? t.sheetId : "";
-      if (!name || !sheetId) continue;
-      let range: string;
-      try {
-        range = this.schemaRangeRef(sheetId, t.range);
-      } catch {
-        continue;
-      }
-      const list = schemaTablesBySheet.get(sheetId) ?? [];
-      list.push({ name, range });
-      schemaTablesBySheet.set(sheetId, list);
-    }
-
-    for (const [_sheetId, list] of schemaNamedRangesBySheet) {
-      list.sort((a, b) => {
-        const ak = `${a.name}\u0000${a.range}`;
-        const bk = `${b.name}\u0000${b.range}`;
-        return ak.localeCompare(bk);
-      });
-    }
-    for (const [_sheetId, list] of schemaTablesBySheet) {
-      list.sort((a, b) => {
-        const ak = `${a.name}\u0000${a.range}`;
-        const bk = `${b.name}\u0000${b.range}`;
-        return ak.localeCompare(bk);
-      });
-    }
-
-    const namedRanges = Array.from(schemaNamedRangesBySheet.entries())
-      .flatMap(([sheetId, list]) => list.map((r) => ({ name: r.name, range: r.range })))
-      .sort((a, b) => {
-        const ak = `${a.name}\u0000${a.range}`;
-        const bk = `${b.name}\u0000${b.range}`;
-        return ak.localeCompare(bk);
-      });
+    const schemaMetadata = this.getSchemaMetadata(schemaProvider);
+    const schemaNamedRangesBySheet = schemaMetadata.schemaNamedRangesBySheet;
+    const schemaTablesBySheet = schemaMetadata.schemaTablesBySheet;
+    const namedRanges = schemaMetadata.namedRanges;
 
     // Retrieval (semantic search) is optional and query-driven.
     const ragResult =
@@ -335,6 +302,7 @@ export class WorkbookContextBuilder {
 
     for (const sheetId of sheetsToSummarize) {
       const summary = await this.buildSheetSummary(sheetId, {
+        schemaVersion: schemaMetadata.schemaVersion,
         namedRanges: schemaNamedRangesBySheet.get(sheetId),
         tables: schemaTablesBySheet.get(sheetId),
       });
@@ -388,17 +356,8 @@ export class WorkbookContextBuilder {
     for (const entry of sheetSummaries.flatMap((s) => s.schema.tables.map((t) => ({ sheetId: s.sheetId, name: t.name, range: t.range })))) {
       tablesByRange.set(`${entry.sheetId}\u0000${entry.range}`, entry);
     }
-    for (const t of explicitTableDefs) {
-      const name = typeof t?.name === "string" ? String(t.name).trim() : "";
-      const sheetId = typeof t?.sheetId === "string" ? String(t.sheetId) : "";
-      if (!name || !sheetId) continue;
-      let range: string;
-      try {
-        range = this.schemaRangeRef(sheetId, t.range);
-      } catch {
-        continue;
-      }
-      tablesByRange.set(`${sheetId}\u0000${range}`, { sheetId, name, range });
+    for (const t of schemaMetadata.explicitTables) {
+      tablesByRange.set(`${t.sheetId}\u0000${t.range}`, { sheetId: t.sheetId, name: t.name, range: t.range });
     }
     const tables = Array.from(tablesByRange.values()).sort((a, b) => {
       const ak = `${a.sheetId}\u0000${a.name}\u0000${a.range}`;
@@ -477,11 +436,16 @@ export class WorkbookContextBuilder {
 
   private async buildSheetSummary(
     sheetId: string,
-    extras?: { namedRanges?: Array<{ name: string; range: string }>; tables?: Array<{ name: string; range: string }> },
+    extras?: {
+      schemaVersion?: number;
+      namedRanges?: Array<{ name: string; range: string }>;
+      tables?: Array<{ name: string; range: string }>;
+    },
   ): Promise<WorkbookContextSheetSummary> {
     this.ensureCacheVersion();
-    const extrasKey = extras ? stableJsonStringify(extras) : "";
-    const cacheKey = `${sheetId}\u0000${extrasKey}`;
+    const schemaVersion =
+      typeof extras?.schemaVersion === "number" && Number.isFinite(extras.schemaVersion) ? Math.trunc(extras.schemaVersion) : 0;
+    const cacheKey = `${sheetId}\u0000${schemaVersion}`;
     const cached = this.sheetSummaryCache.get(cacheKey);
     if (cached) return cached;
 
@@ -709,6 +673,100 @@ export class WorkbookContextBuilder {
 
   private rangeRef(sheetId: string, range: Range): string {
     return `${formatSheetNameForA1(sheetId)}!${rangeToA1Selection(range)}`;
+  }
+
+  private getSchemaProviderVersion(schemaProvider: WorkbookSchemaProvider | null): number {
+    if (!schemaProvider?.getSchemaVersion) return 0;
+    try {
+      const v = schemaProvider.getSchemaVersion();
+      return typeof v === "number" && Number.isFinite(v) ? Math.trunc(v) : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  private getSchemaMetadata(schemaProvider: WorkbookSchemaProvider | null): NonNullable<typeof this.cachedSchemaMetadata> {
+    const schemaVersion = this.getSchemaProviderVersion(schemaProvider);
+    const cached = this.cachedSchemaMetadata;
+    if (cached && cached.provider === schemaProvider && cached.schemaVersion === schemaVersion) return cached;
+    if (cached && (cached.provider !== schemaProvider || cached.schemaVersion !== schemaVersion)) {
+      // Sheet schemas incorporate named ranges / explicit tables. If workbook-level schema
+      // metadata changes, invalidate the sheet summary cache even if workbook content
+      // didn't change.
+      this.sheetSummaryCache.clear();
+    }
+
+    const namedRangeDefs = safeList(() => schemaProvider?.getNamedRanges?.() ?? []);
+    const explicitTableDefs = safeList(() => schemaProvider?.getTables?.() ?? []);
+
+    const schemaNamedRangesBySheet = new Map<string, Array<{ name: string; range: string }>>();
+    for (const nr of namedRangeDefs) {
+      const name = typeof nr?.name === "string" ? nr.name.trim() : "";
+      const sheetId = typeof nr?.sheetId === "string" ? nr.sheetId : "";
+      if (!name || !sheetId) continue;
+      let range: string;
+      try {
+        range = this.schemaRangeRef(sheetId, nr.range);
+      } catch {
+        continue;
+      }
+      const list = schemaNamedRangesBySheet.get(sheetId) ?? [];
+      list.push({ name, range });
+      schemaNamedRangesBySheet.set(sheetId, list);
+    }
+
+    const schemaTablesBySheet = new Map<string, Array<{ name: string; range: string }>>();
+    /** @type {Array<{ sheetId: string; name: string; range: string }>} */
+    const explicitTables: Array<{ sheetId: string; name: string; range: string }> = [];
+    for (const t of explicitTableDefs) {
+      const name = typeof t?.name === "string" ? t.name.trim() : "";
+      const sheetId = typeof t?.sheetId === "string" ? t.sheetId : "";
+      if (!name || !sheetId) continue;
+      let range: string;
+      try {
+        range = this.schemaRangeRef(sheetId, t.range);
+      } catch {
+        continue;
+      }
+      explicitTables.push({ sheetId, name, range });
+      const list = schemaTablesBySheet.get(sheetId) ?? [];
+      list.push({ name, range });
+      schemaTablesBySheet.set(sheetId, list);
+    }
+
+    for (const [_sheetId, list] of schemaNamedRangesBySheet) {
+      list.sort((a, b) => {
+        const ak = `${a.name}\u0000${a.range}`;
+        const bk = `${b.name}\u0000${b.range}`;
+        return ak.localeCompare(bk);
+      });
+    }
+    for (const [_sheetId, list] of schemaTablesBySheet) {
+      list.sort((a, b) => {
+        const ak = `${a.name}\u0000${a.range}`;
+        const bk = `${b.name}\u0000${b.range}`;
+        return ak.localeCompare(bk);
+      });
+    }
+
+    const namedRanges = Array.from(schemaNamedRangesBySheet.entries())
+      .flatMap(([sheetId, list]) => list.map((r) => ({ name: r.name, range: r.range })))
+      .sort((a, b) => {
+        const ak = `${a.name}\u0000${a.range}`;
+        const bk = `${b.name}\u0000${b.range}`;
+        return ak.localeCompare(bk);
+      });
+
+    const out = {
+      provider: schemaProvider,
+      schemaVersion,
+      schemaNamedRangesBySheet,
+      schemaTablesBySheet,
+      namedRanges,
+      explicitTables,
+    };
+    this.cachedSchemaMetadata = out;
+    return out;
   }
 
   private schemaRangeRef(sheetId: string, range: Range): string {

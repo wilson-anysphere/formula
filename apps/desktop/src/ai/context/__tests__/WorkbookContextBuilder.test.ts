@@ -80,6 +80,50 @@ describe("WorkbookContextBuilder", () => {
     expect(ctx.payload.tables).toEqual([{ sheetId: "Sheet1", name: "SalesTable", range: "Sheet1!A1:B3" }]);
   });
 
+  it("caches schemaProvider named ranges/tables by schemaVersion", async () => {
+    const documentController = new DocumentController();
+    documentController.setRangeValues("Sheet1", "A1", [["A"]]);
+
+    const spreadsheet = new DocumentControllerSpreadsheetApi(documentController);
+
+    let schemaVersion = 1;
+    const getNamedRanges = vi.fn(() => [
+      { name: "MyRange", sheetId: "Sheet1", range: { startRow: 0, endRow: 0, startCol: 0, endCol: 0 } },
+    ]);
+    const getTables = vi.fn(() => [
+      { name: "MyTable", sheetId: "Sheet1", range: { startRow: 0, endRow: 0, startCol: 0, endCol: 0 } },
+    ]);
+
+    const builder = new WorkbookContextBuilder({
+      workbookId: "wb_schema_cache",
+      documentController,
+      spreadsheet,
+      ragService: null,
+      mode: "chat",
+      model: "unit-test-model",
+      schemaProvider: {
+        getSchemaVersion: () => schemaVersion,
+        getNamedRanges,
+        getTables,
+      },
+    });
+
+    await builder.build({ activeSheetId: "Sheet1" });
+    expect(getNamedRanges).toHaveBeenCalledTimes(1);
+    expect(getTables).toHaveBeenCalledTimes(1);
+
+    // Same schema version -> cached metadata -> no extra provider calls.
+    await builder.build({ activeSheetId: "Sheet1" });
+    expect(getNamedRanges).toHaveBeenCalledTimes(1);
+    expect(getTables).toHaveBeenCalledTimes(1);
+
+    // Version bump should invalidate the cache.
+    schemaVersion += 1;
+    await builder.build({ activeSheetId: "Sheet1" });
+    expect(getNamedRanges).toHaveBeenCalledTimes(2);
+    expect(getTables).toHaveBeenCalledTimes(2);
+  });
+
   it("redacts restricted cells in sampled blocks (DLP)", async () => {
     const workbookId = "wb_dlp";
     const documentController = new DocumentController();
