@@ -1081,8 +1081,16 @@ test.describe("sheet tabs", () => {
 
     // Set a tab color via the sheet tab context menu and verify it renders.
     await page.getByTestId("sheet-tab-Sheet3").click({ button: "right" });
-    await page.getByRole("button", { name: "Tab Color" }).click();
-    await page.getByRole("button", { name: "Red" }).click();
+    {
+      const menu = page.getByTestId("sheet-tab-context-menu");
+      await expect(page.getByTestId("context-menu")).toBeHidden();
+      await expect(menu).toBeVisible();
+      await menu.getByRole("button", { name: "Tab Color", exact: true }).click();
+      // Scope to the sheet tab context menu overlay so we don't collide with similarly named
+      // controls elsewhere in the UI (e.g. "Redo").
+      await menu.getByRole("button", { name: "Red", exact: true }).click();
+      await expect(menu).toBeHidden();
+    }
     await expect(page.getByTestId("sheet-tab-Sheet3").locator(".sheet-tab__color")).toBeVisible();
   });
 
