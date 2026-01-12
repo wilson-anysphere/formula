@@ -1431,4 +1431,46 @@ mod tests {
         });
         assert!(kept.is_some(), "expected unrelated definedName to remain");
     }
+
+    #[test]
+    fn update_workbook_xml_removes_self_closing_default_ns_defined_name_on_remove() {
+        let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <definedNames>
+    <definedName name="_xlnm.Print_Area" localSheetId="0"/>
+    <definedName name="_xlnm.Print_Titles" localSheetId="0">Sheet1!$1:$1</definedName>
+  </definedNames>
+</workbook>"#;
+
+        let edits: HashMap<(String, usize), DefinedNameEdit> = HashMap::from([(
+            ("_xlnm.Print_Area".to_string(), 0),
+            DefinedNameEdit::Remove,
+        )]);
+
+        let updated = update_workbook_xml(workbook_xml, &edits).unwrap();
+        let updated_str = std::str::from_utf8(&updated).unwrap();
+
+        // Do not introduce SpreadsheetML prefixes when the workbook uses the default namespace.
+        assert!(!updated_str.contains("<x:definedNames"));
+        assert!(!updated_str.contains("<x:definedName"));
+
+        let doc = roxmltree::Document::parse(updated_str).unwrap();
+        let root = doc.root_element();
+
+        let removed = root.descendants().find(|n| {
+            n.is_element()
+                && n.tag_name().name() == "definedName"
+                && n.attribute("name") == Some("_xlnm.Print_Area")
+                && n.attribute("localSheetId") == Some("0")
+        });
+        assert!(removed.is_none(), "expected definedName to be removed");
+
+        let kept = root.descendants().find(|n| {
+            n.is_element()
+                && n.tag_name().name() == "definedName"
+                && n.attribute("name") == Some("_xlnm.Print_Titles")
+                && n.attribute("localSheetId") == Some("0")
+        });
+        assert!(kept.is_some(), "expected unrelated definedName to remain");
+    }
 }
