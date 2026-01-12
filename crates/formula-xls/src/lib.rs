@@ -1161,11 +1161,18 @@ fn import_xls_path_with_biff_reader(
     //
     // Deterministic precedence: if a name already exists (e.g. imported via BIFF), skip the
     // calamine definition.
+    let defined_names_before_calamine = out.defined_names.len();
+    let mut imported_count: usize = 0;
     let mut skipped_count: usize = 0;
     for (name, refers_to) in calamine_defined_names {
         // Calamine may surface BIFF8 Unicode strings with embedded NUL bytes; strip them so the
         // imported name matches Excel’s visible name semantics.
         let name = name.replace('\0', "");
+        let refers_to = refers_to.trim();
+        let refers_to = refers_to
+            .strip_prefix('=')
+            .unwrap_or(refers_to)
+            .to_string();
 
         if out
             .defined_names
@@ -1175,19 +1182,28 @@ fn import_xls_path_with_biff_reader(
             continue;
         }
 
-        if out
-            .create_defined_name(
-                DefinedNameScope::Workbook,
-                name,
-                refers_to,
-                None,
-                false,
-                None,
-            )
-            .is_err()
-        {
-            skipped_count = skipped_count.saturating_add(1);
+        match out.create_defined_name(
+            DefinedNameScope::Workbook,
+            name.clone(),
+            refers_to,
+            None,
+            false,
+            None,
+        ) {
+            Ok(_) => imported_count = imported_count.saturating_add(1),
+            Err(err) => {
+                skipped_count = skipped_count.saturating_add(1);
+                warnings.push(ImportWarning::new(format!(
+                    "skipping `.xls` defined name `{name}` from calamine fallback: {err}"
+                )));
+            }
         }
+    }
+
+    if defined_names_before_calamine == 0 && imported_count > 0 {
+        warnings.push(ImportWarning::new(
+            "imported `.xls` defined names via calamine fallback; defined name metadata may be incomplete (scope/hidden/comment may be missing)",
+        ));
     }
 
     if skipped_count > 0 {
