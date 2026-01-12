@@ -557,6 +557,7 @@ Frontend entry point:
 Rust implementation:
 
 - Tauri commands: `apps/desktop/src-tauri/src/clipboard/mod.rs` (`clipboard_read`, `clipboard_write`)
+- Legacy clipboard commands (fallback path / main-thread bridging on macOS): `apps/desktop/src-tauri/src/commands.rs` (`read_clipboard`, `write_clipboard`)
 - Platform backends: `apps/desktop/src-tauri/src/clipboard/platform/*` (delegates into OS-specific modules like `clipboard/macos.rs`)
 
 Provider selection:
@@ -600,6 +601,8 @@ Tauri wire contract (internal, used only for `__TAURI__.core.invoke`):
 
 - Read: `invoke("clipboard_read")` → `{ text?: string, html?: string, rtf?: string, pngBase64?: string }`
 - Write: `invoke("clipboard_write", { payload: { text?, html?, rtf?, pngBase64? } })` → `void`
+- Legacy read fallback: `invoke("read_clipboard")` → `{ text?: string, html?: string, rtf?: string, pngBase64?: string }`
+- Legacy write fallback: `invoke("write_clipboard", { text, html?, rtf?, image_png_base64? })` → `void`
 
 Provider return shape:
 
