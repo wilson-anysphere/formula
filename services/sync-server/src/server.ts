@@ -1106,6 +1106,12 @@ export function createSyncServer(
             sendJson(res, 400, { error: "missing_doc_id" });
             return;
           }
+          const docNameBytes = Buffer.byteLength(docName, "utf8");
+          if (docNameBytes > MAX_DOC_NAME_BYTES) {
+            logger.warn({ ip, docNameBytes }, "internal_doc_purge_rejected");
+            sendJson(res, 414, { error: "doc_id_too_long" });
+            return;
+          }
 
           const docKey = docKeyFromDocName(docName);
           await tombstones.set(docKey);

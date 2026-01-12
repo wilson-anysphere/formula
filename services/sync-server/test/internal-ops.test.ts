@@ -238,3 +238,33 @@ test("purge decodes url-encoded doc ids", async (t) => {
 
   await expectWsUpgradeStatus(`${server.wsUrl}/${docName}?token=test-token`, 410);
 });
+
+test("purge rejects doc ids that exceed the server's maximum length", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
+
+  const server = await startSyncServer({
+    dataDir,
+    auth: { mode: "opaque", token: "test-token" },
+    env: {
+      SYNC_SERVER_INTERNAL_ADMIN_TOKEN: "admin-token",
+    },
+  });
+  t.after(async () => {
+    await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const tooLongDocName = "a".repeat(1025);
+  const res = await fetch(
+    `${server.httpUrl}/internal/docs/${encodeURIComponent(tooLongDocName)}`,
+    {
+      method: "DELETE",
+      headers: { "x-internal-admin-token": "admin-token" },
+    }
+  );
+
+  assert.equal(res.status, 414);
+  assert.deepEqual(await res.json(), { error: "doc_id_too_long" });
+});
