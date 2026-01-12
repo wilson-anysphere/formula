@@ -357,3 +357,67 @@ test("E2E: concurrent value vs formula (value wins) surfaces a content conflict 
     globalThis.Event = prevEvent;
   }
 });
+
+test("E2E: conflict UI handles unknown remote user id when modifiedBy isn't updated", () => {
+  const dom = new JSDOM('<div id="a"></div>', { url: "http://localhost" });
+
+  const prevWindow = globalThis.window;
+  const prevDocument = globalThis.document;
+  const prevEvent = globalThis.Event;
+
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.Event = dom.window.Event;
+
+  try {
+    const containerA = dom.window.document.getElementById("a");
+    assert.ok(containerA);
+
+    const alice = createClient("alice", containerA, { clientID: 1 });
+
+    // Remote (legacy) doc without a monitor: overwrites without updating modifiedBy.
+    const bobDoc = new Y.Doc();
+    bobDoc.clientID = 2;
+    const bobCells = bobDoc.getMap("cells");
+
+    // Establish base cell map.
+    alice.monitor.setLocalFormula("s:0:0", "=0");
+    syncDocs(alice.doc, bobDoc);
+
+    const bobCell = /** @type {Y.Map<any>} */ (bobCells.get("s:0:0"));
+    assert.ok(bobCell, "expected base cell map on remote doc");
+
+    // Offline concurrent edits: alice writes a formula; bob overwrites the formula but
+    // does not update `modifiedBy`, leaving it as "alice".
+    alice.monitor.setLocalFormula("s:0:0", "=1");
+    bobDoc.transact(() => {
+      bobCell.set("formula", "=2");
+      bobCell.set("modified", Date.now());
+      // Intentionally omit `modifiedBy`.
+    });
+
+    // Reconnect.
+    syncDocs(alice.doc, bobDoc);
+
+    const toastA = containerA.querySelector('[data-testid="conflict-toast"]');
+    assert.ok(toastA, "expected conflict toast on alice");
+
+    // User opens conflict dialog.
+    const openBtn = containerA.querySelector('[data-testid="conflict-toast-open"]');
+    assert.ok(openBtn);
+    openBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+
+    const dialog = containerA.querySelector('[data-testid="conflict-dialog"]');
+    assert.ok(dialog, "expected conflict dialog to open");
+
+    const remotePanel = containerA.querySelector('[data-testid="conflict-remote"]');
+    assert.ok(remotePanel);
+
+    // The remote user id is unknown, so the UI should not render empty parentheses.
+    assert.equal(remotePanel.firstChild?.textContent, "Theirs");
+  } finally {
+    globalThis.window = prevWindow;
+    globalThis.document = prevDocument;
+    globalThis.Event = prevEvent;
+  }
+});
