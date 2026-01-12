@@ -59,6 +59,10 @@ Date-ordering equality edge cases and other boundary validations are locked via:
 - `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`
 - `crates/formula-engine/tests/functions/financial_oddcoupons.rs`
 
+Excel-oracle regression cases (expected values captured from the oracle harness) live at:
+
+- `crates/formula-engine/tests/odd_coupon_oracle_regressions.rs`
+
 These tests currently focus on invariants that should *always* hold (e.g. independence from the
 workbook date system). As additional edge cases are discovered (EOM schedules, long first coupons,
 30/360 boundaries, solver convergence cliffs), add tests here to pin behavior.
