@@ -1,5 +1,33 @@
 const A1_CELL_RE = /^([A-Z]+)(\d+)$/;
-const A1_RANGE_RE = /^(?:(?<sheet>[^!]+)!)?(?<start>[A-Z]+\d+)(?::(?<end>[A-Z]+\d+))?$/;
+const A1_RANGE_RE = /^(?<start>[A-Z]+\d+)(?::(?<end>[A-Z]+\d+))?$/;
+
+/**
+ * Excel-style sheet names:
+ *  - Sheet1
+ *  - 'My Sheet'
+ *  - 'Bob''s Sheet' (escaped single quotes)
+ *
+ * @param {string} rawSheet
+ */
+function unescapeSheetName(rawSheet) {
+  const sheet = rawSheet.trim();
+  if (sheet.startsWith("'") && sheet.endsWith("'")) {
+    return sheet.slice(1, -1).replace(/''/g, "'");
+  }
+  return sheet;
+}
+
+/**
+ * Quote sheet names when needed for Excel-compatible A1 references.
+ *
+ * @param {string} sheetName
+ */
+function formatSheetName(sheetName) {
+  // Identifier-like sheet names can be used without quoting.
+  if (/^[A-Za-z0-9_]+$/.test(sheetName)) return sheetName;
+  // Excel style: wrap in single quotes and escape embedded quotes via doubling.
+  return `'${sheetName.replace(/'/g, "''")}'`;
+}
 
 /**
  * @param {unknown} value
@@ -75,7 +103,7 @@ export function rangeToA1(range) {
   const start = cellRefToA1({ row: range.startRow, col: range.startCol });
   const end = cellRefToA1({ row: range.endRow, col: range.endCol });
   const suffix = start === end ? start : `${start}:${end}`;
-  return range.sheetName ? `${range.sheetName}!${suffix}` : suffix;
+  return range.sheetName ? `${formatSheetName(range.sheetName)}!${suffix}` : suffix;
 }
 
 /**
@@ -83,10 +111,18 @@ export function rangeToA1(range) {
  * @param {string} a1Range
  */
 export function parseA1Range(a1Range) {
-  const match = A1_RANGE_RE.exec(a1Range);
+  const input = String(a1Range).trim();
+  const bangIndex = input.lastIndexOf("!");
+  const rawSheet = bangIndex === -1 ? "" : input.slice(0, bangIndex);
+  const sheetName = bangIndex === -1 ? undefined : unescapeSheetName(rawSheet);
+  if (bangIndex !== -1 && !sheetName) {
+    throw new Error(`Invalid A1 range: missing sheet name in "${a1Range}"`);
+  }
+  const rest = bangIndex === -1 ? input : input.slice(bangIndex + 1).trim();
+
+  const match = A1_RANGE_RE.exec(rest);
   if (!match || !match.groups) throw new Error(`Invalid A1 range: ${a1Range}`);
 
-  const sheetName = match.groups.sheet;
   const start = a1ToCellRef(match.groups.start);
   const end = match.groups.end ? a1ToCellRef(match.groups.end) : start;
 
