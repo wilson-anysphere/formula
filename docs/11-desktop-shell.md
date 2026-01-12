@@ -593,8 +593,8 @@ Supported MIME types (read + write, best-effort):
 
 JS provider contract (normalized API):
 
-- Read: `provider.read()` → `{ text?: string, html?: string, rtf?: string, imagePng?: Uint8Array }`
-- Write: `provider.write({ text, html?, rtf?, imagePng? })` → `void`
+- Read: `provider.read()` → `{ text?: string, html?: string, rtf?: string, imagePng?: Uint8Array, pngBase64?: string }`
+- Write: `provider.write({ text, html?, rtf?, imagePng?, pngBase64? })` → `void`
 
 Tauri wire contract (internal, used only for `__TAURI__.core.invoke`):
 
