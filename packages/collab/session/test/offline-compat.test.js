@@ -114,6 +114,42 @@ test("CollabSession legacy `options.offline` with autoLoad=false gates schema in
   assert.deepEqual(ids, ["Persisted"]);
 });
 
+test("CollabSession legacy `options.offline.destroy()` is a no-op before start (autoLoad=false)", async (t) => {
+  const dir = await mkdtemp(path.join(tmpdir(), "collab-session-offline-compat-destroy-before-start-"));
+  const filePath = path.join(dir, "doc.yjslog");
+
+  t.after(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  const session = createCollabSession({
+    schema: { autoInit: false },
+    offline: { mode: "file", filePath, autoLoad: false },
+  });
+
+  // Should not prevent subsequent start.
+  session.offline?.destroy();
+
+  await session.offline?.whenLoaded();
+  await session.setCellValue("Sheet1:0:0", "still-persists");
+  await session.flushLocalPersistence();
+
+  session.destroy();
+  session.doc.destroy();
+
+  const restarted = createCollabSession({
+    schema: { autoInit: false },
+    offline: { mode: "file", filePath },
+  });
+  t.after(() => {
+    restarted.destroy();
+    restarted.doc.destroy();
+  });
+
+  await restarted.offline?.whenLoaded();
+  assert.equal((await restarted.getCell("Sheet1:0:0"))?.value, "still-persists");
+});
+
 test("CollabSession legacy `options.offline` (file) is implemented via collab-persistence", async (t) => {
   const dir = await mkdtemp(path.join(tmpdir(), "collab-session-offline-compat-file-"));
   const filePath = path.join(dir, "doc.yjslog");

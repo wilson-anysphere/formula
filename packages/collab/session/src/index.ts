@@ -764,6 +764,10 @@ export class CollabSession {
           }
         },
         destroy: () => {
+          // Match legacy `@formula/collab-offline` behavior: if persistence hasn't
+          // started yet (e.g. `offline.autoLoad: false` and the caller never
+          // awaited `whenLoaded()`), destroy is a no-op.
+          if (!this.localPersistenceStarted) return;
           this.detachLocalPersistence();
         },
         clear: async () => {
