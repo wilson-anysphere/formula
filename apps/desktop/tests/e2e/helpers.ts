@@ -82,7 +82,7 @@ export async function waitForDesktopReady(page: Page): Promise<void> {
           message.includes("net::ERR_ABORTED") ||
           message.includes("frame was detached"))
       ) {
-        await page.waitForLoadState("load");
+        await page.waitForLoadState("domcontentloaded");
         continue;
       }
       throw err;

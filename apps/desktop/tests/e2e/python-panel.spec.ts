@@ -52,7 +52,7 @@ print("Hello from Python")
           attempt === 0 &&
           (message.includes("Execution context was destroyed") || message.includes("element(s) not found"))
         ) {
-          await page.waitForLoadState("load");
+          await page.waitForLoadState("domcontentloaded");
           continue;
         }
         throw err;

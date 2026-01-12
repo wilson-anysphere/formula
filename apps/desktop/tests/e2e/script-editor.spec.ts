@@ -39,7 +39,7 @@ await ctx.activeSheet.getRange("C1").setValue(99);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         if (attempt === 0 && message.includes("Execution context was destroyed")) {
-          await page.waitForLoadState("load");
+          await page.waitForLoadState("domcontentloaded");
           continue;
         }
         throw err;

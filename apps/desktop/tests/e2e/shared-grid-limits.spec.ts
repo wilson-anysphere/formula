@@ -28,7 +28,7 @@ async function waitForIdle(page: import("@playwright/test").Page, capturedErrors
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (attempt === 0 && message.includes("Execution context was destroyed")) {
-        await page.waitForLoadState("load");
+        await page.waitForLoadState("domcontentloaded");
         continue;
       }
       const errorText = capturedErrors.length > 0 ? capturedErrors.join("\n") : "(no console errors captured)";

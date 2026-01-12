@@ -35,7 +35,7 @@ async function gotoDesktop(page: Page, urlPath: string = "/"): Promise<void> {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (attempt === 0 && message.includes("Execution context was destroyed")) {
-        await page.waitForLoadState("load");
+        await page.waitForLoadState("domcontentloaded");
         continue;
       }
       throw err;
@@ -51,7 +51,7 @@ async function waitForDesktopReady(page: Page): Promise<void> {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (attempt === 0 && message.includes("Execution context was destroyed")) {
-        await page.waitForLoadState("load");
+        await page.waitForLoadState("domcontentloaded");
         continue;
       }
       throw err;
