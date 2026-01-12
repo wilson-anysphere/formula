@@ -1,4 +1,7 @@
-use formula_engine::{eval, Engine, Value};
+use formula_engine::eval::CellAddr;
+use formula_engine::value::RecordValue;
+use formula_engine::{eval, Engine, PrecedentNode, Value};
+use std::collections::HashMap;
 
 #[test]
 fn engine_evaluates_r1c1_relative_cell_reference_equivalent_to_a1() {
@@ -99,4 +102,65 @@ fn engine_evaluates_r1c1_sheet_range_refs_with_quoted_span() {
     engine.recalculate();
 
     assert_eq!(engine.get_cell_value("Summary", "A1"), Value::Number(6.0));
+}
+
+#[test]
+fn engine_evaluates_r1c1_field_access_and_tracks_dependencies() {
+    let mut engine = Engine::new();
+
+    engine
+        .set_cell_value(
+            "Sheet1",
+            "A1",
+            Value::Record(RecordValue::with_fields(
+                "Record",
+                HashMap::from([("Price".to_string(), Value::Number(10.0))]),
+            )),
+        )
+        .unwrap();
+
+    // From B1, `RC[-1]` refers to A1. This regression test ensures the lexer treats `.Price` as
+    // field access rather than part of an identifier like `RC[-1].Price`.
+    engine
+        .set_cell_formula_r1c1("Sheet1", "B1", "=RC[-1].Price")
+        .unwrap();
+
+    // Formulas are stored in canonical A1 style but can be rendered back to R1C1.
+    assert_eq!(engine.get_cell_formula("Sheet1", "B1"), Some("=A1.Price"));
+    assert_eq!(
+        engine.get_cell_formula_r1c1("Sheet1", "B1"),
+        Some("=RC[-1].Price".to_string())
+    );
+
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(10.0));
+    assert_eq!(
+        engine.precedents("Sheet1", "B1").unwrap(),
+        vec![PrecedentNode::Cell {
+            sheet: 0,
+            addr: CellAddr { row: 0, col: 0 }, // A1
+        }]
+    );
+    assert_eq!(
+        engine.dependents("Sheet1", "A1").unwrap(),
+        vec![PrecedentNode::Cell {
+            sheet: 0,
+            addr: CellAddr { row: 0, col: 1 }, // B1
+        }]
+    );
+
+    engine
+        .set_cell_value(
+            "Sheet1",
+            "A1",
+            Value::Record(RecordValue::with_fields(
+                "Record",
+                HashMap::from([("Price".to_string(), Value::Number(25.0))]),
+            )),
+        )
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(25.0));
 }
