@@ -43,6 +43,7 @@ describe("Tauri capabilities", () => {
 
   it("grants the window permissions required by the UI window helpers", () => {
     const permissions = readPermissions();
+
     expect(permissions).toContain("core:window:allow-hide");
     expect(permissions).toContain("core:window:allow-show");
     expect(permissions).toContain("core:window:allow-set-focus");

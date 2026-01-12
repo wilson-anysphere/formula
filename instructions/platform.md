@@ -104,9 +104,10 @@ Tauri v2 permissions are granted via **capabilities**:
 
 - `apps/desktop/src-tauri/capabilities/*.json`
 - capability files scope themselves to window labels via the capability file’s `"windows": [...]` list (matches `app.windows[].label` in `apps/desktop/src-tauri/tauri.conf.json`)
+  - the main window label is `main`, and `apps/desktop/src-tauri/capabilities/main.json` applies to it via `"windows": ["main"]`
 
-Note: this repo’s current Tauri config schema does **not** support window-level opt-in via
-`app.windows[].capabilities`. Scope capabilities using the capability file’s `"windows"` patterns.
+Note: this repo’s current Tauri config schema does **not** support window-level opt-in via `app.windows[].capabilities`.
+Scope capabilities using the capability file’s `"windows"` patterns.
 
 Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the full allowlists):
 
@@ -138,8 +139,9 @@ Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the ful
 }
 ```
 
-Note: `core:event:allow-unlisten` is granted so the frontend can unregister event listeners it previously installed (to
-avoid leaking listeners for one-shot flows).
+Note: `core:event:allow-unlisten` is granted so the frontend can unregister event listeners it previously installed (to avoid
+leaking listeners for one-shot flows). Permission identifiers are toolchain-dependent; follow the identifiers in
+`apps/desktop/src-tauri/capabilities/main.json`.
 
 Note: external URL opening should go through the `open_external_url` Rust command (scheme allowlist enforced in Rust,
 and restricted to the main window + trusted app-local origins) rather than granting the webview direct access to the
@@ -170,12 +172,13 @@ If you add new desktop IPC surface area, you must update the capability allowlis
 
 - new frontend↔backend events → `core:event:allow-listen` / `core:event:allow-emit`
 - new plugin API usage → add the corresponding `*:allow-*` permission string(s)
+- new Rust `#[tauri::command]` invocation surface → capabilities do not currently provide a per-command allowlist; keep commands hardened in Rust (validate inputs/scopes, enforce main-window + trusted-origin checks where relevant)
 
 We keep guardrail tests to ensure we don't accidentally broaden the desktop IPC surface:
 
 - **Event allowlists**: enforce the **exact** `core:event:allow-listen` / `core:event:allow-emit` sets (no wildcard / allow-all):
   - `apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts`
-- **Core/plugin permissions**: ensure required plugin APIs are explicitly granted (dialogs, clipboard plain text, window ops, updater, etc):
+- **Core/plugin permissions**: ensure required plugin APIs are explicitly granted (dialogs, window ops, clipboard plain text, updater, etc):
   - `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts`
 
 Filesystem access for Power Query is handled via **custom Rust commands** (e.g. `read_text_file`, `list_dir`)
