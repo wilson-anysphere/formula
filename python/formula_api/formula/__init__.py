@@ -13,7 +13,7 @@ docs/08-macro-compatibility.md:
 
 - `active_sheet` (dynamic attribute)
 - `get_sheet(name)`
-- `create_sheet(name)`
+- `create_sheet(name, index=None)`
 - Sheet and Range objects with convenient cell/range accessors
 - Optional pandas helpers (`to_dataframe`, `from_dataframe`)
 - `@custom_function` decorator for UDF registration
@@ -65,9 +65,9 @@ def get_sheet(name: str) -> "Sheet":
     return Sheet(sheet_id=sheet_id, bridge=bridge)
 
 
-def create_sheet(name: str) -> "Sheet":
+def create_sheet(name: str, index: Optional[int] = None) -> "Sheet":
     bridge = _require_bridge()
-    sheet_id = bridge.create_sheet(name)
+    sheet_id = bridge.create_sheet(name, index=index)
     return Sheet(sheet_id=sheet_id, bridge=bridge)
 
 

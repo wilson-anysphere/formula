@@ -25,8 +25,10 @@ class JsBridge:
     def get_sheet_id(self, name: str) -> Optional[str]:
         return to_py(formula_bridge.get_sheet_id(name))
 
-    def create_sheet(self, name: str) -> str:
-        return str(formula_bridge.create_sheet(name))
+    def create_sheet(self, name: str, index: Optional[int] = None) -> str:
+        if index is None:
+            return str(formula_bridge.create_sheet(name))
+        return str(formula_bridge.create_sheet(name, index))
 
     def get_sheet_name(self, sheet_id: str) -> str:
         return str(formula_bridge.get_sheet_name(sheet_id))

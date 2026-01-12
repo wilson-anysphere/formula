@@ -47,8 +47,11 @@ class StdioRpcBridge:
     def get_sheet_id(self, name: str) -> Optional[str]:
         return self._request("get_sheet_id", {"name": name})
 
-    def create_sheet(self, name: str) -> str:
-        return str(self._request("create_sheet", {"name": name}))
+    def create_sheet(self, name: str, index: Optional[int] = None) -> str:
+        params: Dict[str, Any] = {"name": name}
+        if index is not None:
+            params["index"] = index
+        return str(self._request("create_sheet", params))
 
     def get_sheet_name(self, sheet_id: str) -> str:
         return str(self._request("get_sheet_name", {"sheet_id": sheet_id}))
