@@ -1,22 +1,23 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
 describe("@formula/workbook-backend index exports", () => {
-  it("keeps Node ESM import specifiers explicit for TS entrypoints", () => {
+  it("avoids .ts import specifiers (breaks repo-level typecheck)", () => {
     const testDir = dirname(fileURLToPath(import.meta.url));
     const indexPath = join(testDir, "..", "index.ts");
     const src = readFileSync(indexPath, "utf8");
 
-    // `@formula/workbook-backend` exports TypeScript source directly
-    // (package.json `exports` points at `./src/index.ts`). When executing these
-    // sources under Node ESM (e.g. via `--experimental-strip-types`), Node does
-    // *not* apply TypeScript-style extension resolution for relative imports.
-    //
-    // Keep internal re-exports using explicit `.ts` specifiers so the package is
-    // directly runnable in Node ESM without a build step.
-    expect(src).toMatch(/from\s+\"\.\/sheetNameValidation\.ts\"/);
+    // Repo-wide `pnpm -w typecheck` uses a TS config that does not enable
+    // `allowImportingTsExtensions`, so `.ts` specifiers in source imports/exports
+    // break the build.
+    expect(src).not.toMatch(/from\s+\"\.\/[^\"\n]+\.ts\"/);
+
+    // Keep Node ESM runnable by ensuring any `.js` specifier we use is backed by
+    // a real `.js` file on disk.
+    expect(src).toMatch(/from\s+\"\.\/sheetNameValidation\.js\"/);
+    expect(existsSync(join(testDir, "..", "sheetNameValidation.js"))).toBe(true);
   });
 });
