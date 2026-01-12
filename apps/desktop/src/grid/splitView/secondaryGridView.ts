@@ -263,11 +263,17 @@ export class SecondaryGridView {
       }
     });
 
-    // Clicking the canvas should behave like clicking a spreadsheet surface: focus the pane so
-    // keyboard navigation/editing works immediately.
-    const onPointerDown = () => focusWithoutScroll(this.container);
-    this.container.addEventListener("pointerdown", onPointerDown);
-    this.disposeFns.push(() => this.container.removeEventListener("pointerdown", onPointerDown));
+    // Match SpreadsheetApp semantics: while the in-cell editor is open, ignore pointer interactions
+    // on the grid surface (don't change selection / start drags / steal focus from the editor).
+    const onSelectionCanvasPointerDownCapture = (event: PointerEvent) => {
+      if (!this.editor.isOpen()) return;
+      event.preventDefault();
+      // Block DesktopSharedGrid's pointer handler on the same canvas.
+      event.stopImmediatePropagation();
+      focusWithoutScroll(this.editor.element);
+    };
+    selectionCanvas.addEventListener("pointerdown", onSelectionCanvasPointerDownCapture, { capture: true });
+    this.disposeFns.push(() => selectionCanvas.removeEventListener("pointerdown", onSelectionCanvasPointerDownCapture, { capture: true }));
 
     // Match SpreadsheetApp header sizing so cell hit targets line up.
     this.grid.renderer.setColWidth(0, 48);

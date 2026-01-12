@@ -143,6 +143,37 @@ test.describe("split view", () => {
       .toBeCloseTo(persistedZoom, 2);
   });
 
+  test("horizontal split view mounts and persists direction", async ({ page }) => {
+    await gotoDesktop(page, "/?grid=shared");
+
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await waitForDesktopReady(page);
+    await waitForIdle(page);
+
+    await page.getByTestId("ribbon-root").getByTestId("split-horizontal").click();
+
+    const secondary = page.locator("#grid-secondary");
+    await expect(secondary).toBeVisible();
+    await expect(secondary.locator("canvas")).toHaveCount(3);
+    await waitForGridCanvasesToBeSized(page, "#grid-secondary");
+
+    const persisted = await page.evaluate((key) => {
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    }, LAYOUT_KEY);
+    expect(persisted?.splitView?.direction).toBe("horizontal");
+
+    // Reload and ensure horizontal split restores.
+    await page.reload();
+    await waitForDesktopReady(page);
+    await waitForIdle(page);
+
+    await expect(page.locator("#grid-secondary")).toBeVisible();
+    await expect(page.locator("#grid-split")).toHaveAttribute("data-split-direction", "horizontal");
+  });
+
   test("secondary pane supports clipboard shortcuts + Delete key", async ({ page }) => {
     await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
     await gotoDesktop(page, "/?grid=shared");
