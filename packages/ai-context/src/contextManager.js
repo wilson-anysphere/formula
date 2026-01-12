@@ -179,8 +179,10 @@ export class ContextManager {
       // classification is within the threshold so every in-range cell must be allowed.
       let nextValues;
       if (dlpDecision.decision === DLP_DECISION.REDACT) {
-        const index = buildDlpRangeIndex({ documentId: dlp.documentId, sheetId, range: normalizedRange }, records);
         const maxAllowedRank = dlpDecision.maxAllowed === null ? null : classificationRank(dlpDecision.maxAllowed);
+        const index = buildDlpRangeIndex({ documentId: dlp.documentId, sheetId, range: normalizedRange }, records, {
+          maxAllowedRank: maxAllowedRank ?? DEFAULT_CLASSIFICATION_RANK,
+        });
         const policyAllowsRestrictedContent = Boolean(dlp.policy?.rules?.[DLP_ACTION.AI_CLOUD_PROCESSING]?.allowRestrictedContent);
         const cellCheck = { index, maxAllowedRank, includeRestrictedContent, policyAllowsRestrictedContent };
 
@@ -852,12 +854,13 @@ function rangesIntersectNormalized(a, b) {
   return a.start.row <= b.end.row && b.start.row <= a.end.row && a.start.col <= b.end.col && b.start.col <= a.end.col;
 }
 
-function buildDlpRangeIndex(ref, records) {
+function buildDlpRangeIndex(ref, records, opts) {
   const selectionRange = ref.range;
   const startRow = selectionRange.start.row;
   const startCol = selectionRange.start.col;
   const rowCount = selectionRange.end.row - selectionRange.start.row + 1;
   const colCount = selectionRange.end.col - selectionRange.start.col + 1;
+  const maxAllowedRank = opts?.maxAllowedRank ?? DEFAULT_CLASSIFICATION_RANK;
 
   const rankFromClassification = (classification) => {
     if (!classification) return DEFAULT_CLASSIFICATION_RANK;
@@ -880,9 +883,11 @@ function buildDlpRangeIndex(ref, records) {
     if (selector.documentId !== ref.documentId) continue;
 
     // The per-cell allow/redact decision depends only on the max classification level.
-    // Public records cannot increase the effective rank and are ignored for performance.
+    // Records at/below the policy `maxAllowed` threshold cannot change allow/redact decisions
+    // and are ignored for performance (reduces index build and avoids allocating dense arrays
+    // for allowed-only classifications).
     const recordRank = rankFromClassification(record.classification);
-    if (recordRank <= DEFAULT_CLASSIFICATION_RANK) continue;
+    if (recordRank <= maxAllowedRank) continue;
 
     switch (selector.scope) {
       case "document": {
