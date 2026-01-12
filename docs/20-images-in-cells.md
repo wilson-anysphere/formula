@@ -566,7 +566,7 @@ Observed in [`fixtures/xlsx/basic/image-in-cell.xlsx`](../fixtures/xlsx/basic/im
 - `/xl/richData/rdrichvaluestructure.xml`: `application/vnd.ms-excel.rdrichvaluestructure+xml`
 - `/xl/richData/rdRichValueTypes.xml`: `application/vnd.ms-excel.rdrichvaluetypes+xml`
 
-Observed in `fixtures/xlsx/rich-data/richdata-minimal.xlsx` (Excel-generated; explicit overrides present for
+Observed in `fixtures/xlsx/rich-data/richdata-minimal.xlsx` (synthetic Formula fixture used by tests; explicit overrides present for
 the unprefixed `richValue*` naming scheme):
 
 - `application/vnd.ms-excel.richvalue+xml` (for `/xl/richData/richValue.xml`)
@@ -601,10 +601,10 @@ TODO (fixture-driven): add additional Excel-generated workbooks covering:
 - “Place in Cell” images across Excel versions
 
 and update this section if Excel emits additional `xl/richData/*` part names or content types beyond those
-already observed in:
+already observed in our fixture corpus (including synthetic fixtures and real Excel fixtures), e.g.:
 
-- `fixtures/xlsx/rich-data/richdata-minimal.xlsx`
-- `fixtures/xlsx/basic/image-in-cell.xlsx`
+- `fixtures/xlsx/rich-data/richdata-minimal.xlsx` (synthetic Formula fixture used by tests)
+- `fixtures/xlsx/basic/image-in-cell.xlsx` (Excel-generated)
 
 and exercised by tests like
 `crates/formula-xlsx/tests/richdata_preservation.rs`.
