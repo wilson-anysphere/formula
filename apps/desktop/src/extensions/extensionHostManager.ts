@@ -7,6 +7,9 @@ import { BrowserExtensionHost } from "../../../../packages/extension-host/src/br
 import { createDesktopPermissionPrompt } from "./permissionPrompt.js";
 import { validateExtensionManifest } from "../../../../packages/extension-host/src/browser/manifest.mjs";
 
+import { MarketplaceClient, WebExtensionManager } from "@formula/extension-marketplace";
+import { getMarketplaceBaseUrl } from "../panels/marketplace/getMarketplaceBaseUrl.js";
+
 import sampleHelloManifestJson from "../../../../extensions/sample-hello/package.json";
 import sampleHelloEntrypointSource from "../../../../extensions/sample-hello/dist/extension.mjs?raw";
 import e2eEventsManifestJson from "../../../../extensions/e2e-events/package.json";
@@ -36,6 +39,8 @@ export class DesktopExtensionHostManager {
 
   private _extensionApiModule: { url: string; revoke: () => void } | null = null;
   private readonly _loadedBuiltIns = new Map<string, { mainUrl: string; revoke: () => void }>();
+  private _marketplaceClient: MarketplaceClient | null = null;
+  private _marketplaceExtensionManager: WebExtensionManager | null = null;
 
   constructor(params: {
     engineVersion: string;
@@ -92,6 +97,24 @@ export class DesktopExtensionHostManager {
     }
   }
 
+  getMarketplaceClient(): MarketplaceClient {
+    if (!this._marketplaceClient) {
+      this._marketplaceClient = new MarketplaceClient({ baseUrl: getMarketplaceBaseUrl() });
+    }
+    return this._marketplaceClient;
+  }
+
+  getMarketplaceExtensionManager(): WebExtensionManager {
+    if (!this._marketplaceExtensionManager) {
+      this._marketplaceExtensionManager = new WebExtensionManager({
+        marketplaceClient: this.getMarketplaceClient(),
+        host: this.host as any,
+        engineVersion: this.engineVersion,
+      });
+    }
+    return this._marketplaceExtensionManager;
+  }
+
   async loadBuiltInExtensions(): Promise<void> {
     if (this._ready) return;
 
@@ -105,10 +128,21 @@ export class DesktopExtensionHostManager {
     }
 
     // Always run `startup()` so the Extensions UI can render (even with zero loaded extensions).
+    //
+    // Desktop also supports IndexedDB-installed extensions via WebExtensionManager. Use the
+    // manager's `loadAllInstalled()` boot helper so `onStartupFinished` + the initial
+    // `workbookOpened` event behave consistently for built-in *and* installed extensions.
     try {
-      await this.host.startup();
+      await this.getMarketplaceExtensionManager().loadAllInstalled();
     } catch (err) {
       error ??= err;
+      // Fallback: if loading installed extensions fails (IndexedDB unavailable/corrupted),
+      // still attempt to start the host so built-in extensions can run.
+      try {
+        await this.host.startup();
+      } catch (startupErr) {
+        error ??= startupErr;
+      }
     }
 
     this._error = error;

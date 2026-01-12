@@ -341,6 +341,15 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
     | null = null;
 
   function getMarketplaceServices() {
+    // Prefer using the DesktopExtensionHostManager's shared marketplace services so that:
+    // - installed extensions loaded at boot are tracked in a single WebExtensionManager instance
+    //   (so unload/update can revoke blob URLs correctly)
+    // - panel/UI code doesn't accidentally create a second manager with a separate loaded-state map
+    if (options.extensionHostManager) {
+      marketplaceClient = options.extensionHostManager.getMarketplaceClient();
+      marketplaceExtensionManager = options.extensionHostManager.getMarketplaceExtensionManager();
+    }
+
     if (!marketplaceClient) {
       marketplaceClient = new MarketplaceClient({ baseUrl: getMarketplaceBaseUrl() });
     }
