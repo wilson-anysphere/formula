@@ -17,7 +17,6 @@ use crate::XlsxError;
 type Result<T> = std::result::Result<T, XlsxError>;
 
 const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
-const REL_TYPE_IMAGE: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
 
 /// Best-effort loader for workbook-level "in-cell" images.
 ///
@@ -152,6 +151,9 @@ fn parse_cell_images_part(
     let doc = Document::parse(xml)?;
 
     let mut images = Vec::new();
+
+    // Excel emits DrawingML `<xdr:pic>` payloads for in-cell images, which reference the media via
+    // `<a:blip r:embed="…">`.
     for pic in doc
         .root_element()
         .descendants()
@@ -337,16 +339,18 @@ fn resolve_target_best_effort(
 }
 
 fn get_blip_embed_rel_id(blip_node: &roxmltree::Node<'_, '_>) -> Option<String> {
-    // The canonical namespaces form.
-    blip_node
-        .attribute((REL_NS, "embed"))
-        .or_else(|| blip_node.attribute("r:embed"))
-        .or_else(|| {
-            // Some XML libraries represent namespaced attributes using Clark notation:
-            // `{namespace}localname`.
-            let clark = format!("{{{REL_NS}}}embed");
-            blip_node.attribute(clark.as_str())
-        })
+    get_relationship_id_attr(blip_node, "embed")
+}
+
+fn get_relationship_id_attr(node: &roxmltree::Node<'_, '_>, local: &str) -> Option<String> {
+    let prefixed = format!("r:{local}");
+    let clark = format!("{{{REL_NS}}}{local}");
+    // Prefer the canonical namespace-aware lookup.
+    node.attribute((REL_NS, local))
+        .or_else(|| node.attribute(prefixed.as_str()))
+        // Some XML libraries represent namespaced attributes using Clark notation:
+        // `{namespace}localname`.
+        .or_else(|| node.attribute(clark.as_str()))
         .map(|s| s.to_string())
 }
 
