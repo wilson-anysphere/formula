@@ -256,6 +256,32 @@ describe("SpreadsheetApp shared-grid keyboard navigation", () => {
       root.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true, cancelable: true }));
       expect(app.getActiveCell()).toEqual({ row: pageRows, col: 0 });
 
+      // Ctrl/Cmd+Home/End should still work via the generic navigation helper.
+      // Validate this doesn't accidentally depend on the legacy visibility caches either.
+      root.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", ctrlKey: true, bubbles: true, cancelable: true }));
+      expect(app.getActiveCell()).toEqual({ row: 0, col: 0 });
+
+      const used = (app as any).document.getUsedRange((app as any).sheetId) as
+        | { startRow: number; endRow: number; startCol: number; endCol: number }
+        | null;
+      expect(used).not.toBeNull();
+      const usedEnd = used ? { row: used.endRow, col: used.endCol } : { row: 0, col: 0 };
+
+      root.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "End", ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }),
+      );
+      expect(app.getActiveCell()).toEqual(usedEnd);
+      expect((app as any).selection.ranges).toEqual([
+        { startRow: 0, endRow: usedEnd.row, startCol: 0, endCol: usedEnd.col },
+      ]);
+
+      // Collapse back to a single cell before jumping to End without shift.
+      root.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", ctrlKey: true, bubbles: true, cancelable: true }));
+      expect(app.getActiveCell()).toEqual({ row: 0, col: 0 });
+
+      root.dispatchEvent(new KeyboardEvent("keydown", { key: "End", ctrlKey: true, bubbles: true, cancelable: true }));
+      expect(app.getActiveCell()).toEqual(usedEnd);
+
       app.destroy();
       root.remove();
     } finally {
