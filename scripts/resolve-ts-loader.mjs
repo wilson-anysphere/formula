@@ -30,7 +30,7 @@ const transpileInFlight = new Map();
  * - Resolves extensionless relative/absolute specifiers to `.ts` / `.tsx` / `.js`
  * - Resolves directory imports like `./foo` -> `./foo/index.ts` (bundler-style resolution)
  * - Transpiles `.ts` / `.tsx` sources on the fly (strip-only mode is insufficient for
- *   TypeScript features like parameter properties).
+ *   TypeScript runtime features like parameter properties and enums).
  */
 
 function splitSpecifier(specifier) {

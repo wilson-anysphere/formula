@@ -275,7 +275,7 @@ function resolveNodeLoaderArgs(loaderUrl) {
 function resolveTypeScriptLoaderArgs() {
   // When `typescript` is available, prefer a real TS->JS transpile loader over Node's
   // "strip-only" TS support:
-  // - strip-only mode rejects TS features like parameter properties
+  // - strip-only mode rejects TS runtime features like parameter properties and enums
   // - many packages use `.js` specifiers that should resolve to `.ts` sources (TS ESM convention)
   //
   // This keeps `node --test` usable without a separate build step.
