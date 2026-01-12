@@ -42,13 +42,14 @@ describe("Tauri capabilities", () => {
 
   it("grants the window permissions required by the UI window helpers", () => {
     const permissions = readPermissions();
-
     expect(permissions).toContain("core:window:allow-hide");
     expect(permissions).toContain("core:window:allow-show");
     expect(permissions).toContain("core:window:allow-set-focus");
     expect(permissions).toContain("core:window:allow-close");
     expect(permissions).toContain("core:window:allow-minimize");
     expect(permissions).toContain("core:window:allow-toggle-maximize");
+    expect(permissions).toContain("core:window:allow-maximize");
+    expect(permissions).toContain("core:window:allow-unmaximize");
     expect(permissions).toContain("core:window:allow-is-maximized");
 
     // Keep window permission surface minimal.

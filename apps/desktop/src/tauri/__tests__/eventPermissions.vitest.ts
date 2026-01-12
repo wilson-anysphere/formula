@@ -13,11 +13,8 @@ type CapabilityPermission =
     };
 
 describe("tauri capability event permissions", () => {
-  // Tauri capability identifiers differ slightly between versions / configs.
-  // Accept both the `core:`-prefixed and unprefixed identifiers, but always require
-  // explicit allowlists (no string-form permissions).
-  const allowListenIdentifiers = ["event:allow-listen", "core:event:allow-listen"] as const;
-  const allowEmitIdentifiers = ["event:allow-emit", "core:event:allow-emit"] as const;
+  const allowListenIdentifiers = ["core:event:allow-listen"] as const;
+  const allowEmitIdentifiers = ["core:event:allow-emit"] as const;
 
   it("is scoped to the main window label via the capability file", () => {
     const tauriConfUrl = new URL("../../../src-tauri/tauri.conf.json", import.meta.url);

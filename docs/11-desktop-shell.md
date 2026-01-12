@@ -828,7 +828,7 @@ It gates:
   - `updater:allow-check`, `updater:allow-download`, `updater:allow-install`
 
 Custom Rust commands (everything behind `#[tauri::command]`, invoked via `__TAURI__.core.invoke(...)`) are not currently
-gated by a per-command capability allowlist in this repo’s Tauri toolchain (no `core:allow-invoke`); keep them hardened
+gated by a per-command capability allowlist in this repo’s Tauri toolchain (no `core:allow-invoke`). Keep them hardened
 in Rust (window label + trusted-origin checks, argument validation, filesystem/network scope checks, etc.).
 
 Note: the clipboard plugin permissions above only cover the legacy **plain-text** clipboard helpers
@@ -849,7 +849,7 @@ single trusted boundary.
 High-level contents (see the file for the exhaustive list):
 
 - We avoid `core:default` (broad, unscoped access to core plugins like event/window) to keep the permission surface minimal/explicit.
-- We do **not** rely on `core:allow-invoke` for custom `#[tauri::command]` allowlisting (commands must enforce security in Rust).
+- We do **not** rely on `core:allow-invoke` for custom `#[tauri::command]` allowlisting (custom commands are not capability-gated; keep input validation and scope checks in Rust).
 - We scope `core:event:allow-listen` / `core:event:allow-emit` to explicit event-name allowlists (no wildcards).
 - `core:event:allow-listen` includes:
   - close flow: `close-prep`, `close-requested`
@@ -868,7 +868,6 @@ High-level contents (see the file for the exhaustive list):
 - Plugin permissions include dialog/window/clipboard APIs plus updater permissions (`updater:allow-check`, `updater:allow-download`, `updater:allow-install`, required for the updater UI).
   - Window API permissions are `core:window:allow-*`.
   - Plain-text clipboard permissions are `clipboard-manager:allow-*`.
-- Custom Rust commands are not capability-gated; keep input validation and scope checks in Rust.
 
 We intentionally keep capabilities narrow and rely on explicit Rust commands + higher-level app permission gates (macro
 trust, DLP, extension permissions) for privileged operations.
@@ -895,6 +894,8 @@ bash scripts/cargo_agent.sh check -p formula-desktop-tauri --features desktop --
 cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri permission ls
 ```
 
+Note: on Tauri v2.9, core permissions use the `core:` prefix (e.g. `core:event:allow-listen`, `core:window:allow-hide`).
+
 ### Practical workflow
 
 - If you add a new event name used by `listen(...)` or `emit(...)`, update the `core:event:allow-listen` / `core:event:allow-emit`
@@ -903,9 +904,9 @@ cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri permission ls
   permission string(s).
   - Window permissions are currently `core:window:allow-*`.
   - Plain-text clipboard permissions are currently `clipboard-manager:allow-*`.
-- For custom Rust `#[tauri::command]` functions invoked via `__TAURI__.core.invoke(...)`, keep input validation and scope checks
-  in Rust (trusted-origin + window-label checks, etc). There is no per-command capability allowlist in this repo’s current
-  Tauri toolchain.
+- For custom Rust `#[tauri::command]` functions invoked via `__TAURI__.core.invoke(...)`, keep them hardened in Rust
+  (trusted-origin + window-label checks, input validation, scope checks, etc). There is no per-command capability
+  allowlist in this repo’s current Tauri toolchain.
 
 Guardrails (CI/tests):
 

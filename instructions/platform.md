@@ -142,8 +142,7 @@ Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the ful
 ```
 
 Note: `core:event:allow-unlisten` is granted so the frontend can unregister event listeners it previously installed (to avoid
-leaking listeners for one-shot flows). Permission identifiers are toolchain-dependent; follow the identifiers in
-`apps/desktop/src-tauri/capabilities/main.json`.
+leaking listeners for one-shot flows).
 
 Note: external URL opening should go through the `open_external_url` Rust command (scheme allowlist enforced in Rust,
 and restricted to the main window + trusted app-local origins) rather than granting the webview direct access to the
@@ -168,6 +167,8 @@ bash scripts/cargo_agent.sh check -p formula-desktop-tauri --features desktop --
 cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri permission ls
 ```
 
+Note: on Tauri v2.9, core permissions use the `core:` prefix (e.g. `core:event:allow-listen`, `core:window:allow-hide`).
+
 If you add new desktop IPC surface area, you must update the capability allowlists:
 
 - new frontend↔backend events → `core:event:allow-listen` / `core:event:allow-emit`
@@ -177,7 +178,7 @@ We keep guardrail tests to ensure we don't accidentally broaden the desktop IPC 
 
 - **Event allowlists**: enforce the **exact** `core:event:allow-listen` / `core:event:allow-emit` sets (no wildcard / allow-all):
   - `apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts`
-- **Core/plugin permissions**: ensure required plugin permissions are explicitly granted (dialogs, window ops, clipboard plain text, updater, etc) and we don't accidentally grant dangerous extras:
+- **Core/plugin permissions**: ensure required plugin APIs are explicitly granted (dialogs, clipboard plain text, window ops, updater, etc) and we don't accidentally grant dangerous extras:
   - `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts`
 
 Filesystem access for Power Query is handled via **custom Rust commands** (e.g. `read_text_file`, `list_dir`)
@@ -295,9 +296,10 @@ TypeScript ↔ Rust communication:
 // In this repo, commands must also be:
 //  1) registered in `apps/desktop/src-tauri/src/main.rs` (`generate_handler![...]`)
 //
-// Note: the capability system primarily gates built-in core/plugin APIs (event/window/dialog/etc).
-// This repo does **not** rely on a per-command capability allowlist for app-defined `#[tauri::command]` invocation
-// (no `core:allow-invoke`). Commands must be hardened in Rust (trusted-origin + window-label checks, argument validation,
+// Note: the capability system primarily gates built-in core/plugin APIs (event/window/dialog/etc) and disables IPC
+// entirely for non-matching windows. This repo does **not** rely on a per-command capability allowlist for app-defined
+// `#[tauri::command]` invocation (no `core:allow-invoke` / per-command allowlist in the current schema). Commands must be
+// hardened in Rust (trusted-origin + window-label checks, argument validation,
 // filesystem/network scope checks, etc).
 //
 #[tauri::command]
