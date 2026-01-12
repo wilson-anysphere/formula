@@ -1,5 +1,5 @@
 import type { CellChange, CellData as EngineCellData, CellScalar, EngineClient } from "@formula/engine";
-import { fromA1, range0ToA1, type Range0 } from "./a1";
+import { fromA1, range0ToA1, type Range0 } from "./a1.ts";
 
 function defaultSheetName(sheet?: string): string {
   return sheet ?? "Sheet1";

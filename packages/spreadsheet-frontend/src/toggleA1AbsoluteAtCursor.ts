@@ -1,4 +1,4 @@
-import { extractFormulaReferences } from "./formulaReferences";
+import { extractFormulaReferences } from "./formulaReferences.ts";
 
 export type ToggleA1AbsoluteAtCursorResult = {
   text: string;

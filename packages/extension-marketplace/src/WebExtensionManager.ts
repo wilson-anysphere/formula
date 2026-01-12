@@ -8,7 +8,7 @@ import {
 } from "@formula/marketplace-shared/extension-package/v2-browser.mjs";
 import { validateExtensionManifest } from "@formula/marketplace-shared/extension-manifest/index.mjs";
 
-import { MarketplaceClient } from "./MarketplaceClient";
+import { MarketplaceClient } from "./MarketplaceClient.ts";
 
 export type VerifyExtensionPackageV2Fn = (
   packageBytes: Uint8Array,

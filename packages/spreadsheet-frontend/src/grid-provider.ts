@@ -1,7 +1,7 @@
 import type { CellChange } from "@formula/engine";
 import type { CellData, CellProvider, CellProviderUpdate, CellRange, CellStyle } from "@formula/grid";
-import { colToName, fromA1, type Range0 } from "./a1";
-import { EngineCellCache } from "./cache";
+import { colToName, fromA1, type Range0 } from "./a1.ts";
+import { EngineCellCache } from "./cache.ts";
 
 function defaultSheetName(sheet?: string): string {
   return sheet ?? "Sheet1";

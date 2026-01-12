@@ -1,4 +1,4 @@
-import { colToName } from "../a1";
+import { colToName } from "../a1.ts";
 
 function colNameToIndex(col: string): number {
   const normalized = col.toUpperCase();
