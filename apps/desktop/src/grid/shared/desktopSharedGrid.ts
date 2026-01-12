@@ -203,6 +203,8 @@ export class DesktopSharedGrid {
     range: null
   };
 
+  private lastEmittedViewport: GridViewportState | null = null;
+
   private readonly a11yStatusId: string;
   private readonly a11yStatusEl: HTMLDivElement;
   private readonly a11yActiveCellId: string;
@@ -504,7 +506,35 @@ export class DesktopSharedGrid {
   }
 
   private emitScroll(): void {
-    this.callbacks.onScroll?.(this.renderer.scroll.getScroll(), this.renderer.getViewportState());
+    const viewport = this.renderer.getViewportState();
+
+    const prev = this.lastEmittedViewport;
+    if (
+      prev &&
+      prev.scrollX === viewport.scrollX &&
+      prev.scrollY === viewport.scrollY &&
+      prev.width === viewport.width &&
+      prev.height === viewport.height &&
+      prev.maxScrollX === viewport.maxScrollX &&
+      prev.maxScrollY === viewport.maxScrollY &&
+      prev.frozenRows === viewport.frozenRows &&
+      prev.frozenCols === viewport.frozenCols &&
+      prev.frozenWidth === viewport.frozenWidth &&
+      prev.frozenHeight === viewport.frozenHeight &&
+      prev.totalWidth === viewport.totalWidth &&
+      prev.totalHeight === viewport.totalHeight &&
+      prev.main.rows.start === viewport.main.rows.start &&
+      prev.main.rows.end === viewport.main.rows.end &&
+      prev.main.rows.offset === viewport.main.rows.offset &&
+      prev.main.cols.start === viewport.main.cols.start &&
+      prev.main.cols.end === viewport.main.cols.end &&
+      prev.main.cols.offset === viewport.main.cols.offset
+    ) {
+      return;
+    }
+
+    this.lastEmittedViewport = viewport;
+    this.callbacks.onScroll?.({ x: viewport.scrollX, y: viewport.scrollY }, viewport);
   }
 
   private emitSelectionChange(

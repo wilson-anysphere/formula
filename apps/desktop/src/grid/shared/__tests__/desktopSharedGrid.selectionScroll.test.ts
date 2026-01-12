@@ -137,5 +137,58 @@ describe("DesktopSharedGrid selection scrollIntoView option", () => {
     grid.destroy();
     container.remove();
   });
-});
 
+  it("does not emit onScroll when scroll operations are a no-op (but does when viewport changes)", () => {
+    const rowCount = 50;
+    const colCount = 50;
+    const provider = new MockCellProvider({ rowCount, colCount });
+
+    const onScroll = vi.fn();
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const canvases = {
+      grid: document.createElement("canvas"),
+      content: document.createElement("canvas"),
+      selection: document.createElement("canvas"),
+    };
+
+    const scrollbars = {
+      vTrack: document.createElement("div"),
+      vThumb: document.createElement("div"),
+      hTrack: document.createElement("div"),
+      hThumb: document.createElement("div"),
+    };
+
+    scrollbars.vTrack.appendChild(scrollbars.vThumb);
+    scrollbars.hTrack.appendChild(scrollbars.hThumb);
+    container.appendChild(scrollbars.vTrack);
+    container.appendChild(scrollbars.hTrack);
+
+    const grid = new DesktopSharedGrid({
+      container,
+      provider,
+      rowCount,
+      colCount,
+      canvases,
+      scrollbars,
+      callbacks: { onScroll },
+    });
+
+    grid.resize(300, 200, 1);
+    onScroll.mockClear();
+
+    // Cell 0,0 is already visible at scroll origin; ensure no onScroll is emitted.
+    grid.scrollToCell(0, 0, { align: "auto", padding: 0 });
+    expect(onScroll).not.toHaveBeenCalled();
+
+    // Changing viewport state (e.g. frozen panes) should still emit onScroll even when scroll offsets remain unchanged.
+    grid.renderer.setFrozen(1, 1);
+    grid.scrollTo(0, 0);
+    expect(onScroll).toHaveBeenCalled();
+
+    grid.destroy();
+    container.remove();
+  });
+});
