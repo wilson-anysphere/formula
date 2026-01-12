@@ -57,14 +57,8 @@ mod gtk_backend {
     use super::{
         bytes_to_utf8, choose_best_target, ClipboardContent, ClipboardError, ClipboardWritePayload,
     };
+    use super::super::{estimate_base64_decoded_len, MAX_IMAGE_BYTES, MAX_RICH_TEXT_BYTES};
     use crate::clipboard_fallback;
-
-    // Clipboard items can contain extremely large rich payloads (especially images).
-    // Guard against unbounded memory usage / IPC payload sizes by skipping oversized formats.
-    //
-    // These match the frontend clipboard provider limits.
-    const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024; // 10 MiB
-    const MAX_RICH_TEXT_BYTES: usize = 2 * 1024 * 1024; // 2 MiB (HTML / RTF)
 
     // GTK clipboard APIs must be called on the GTK main thread.
     //
@@ -174,32 +168,6 @@ mod gtk_backend {
             None
         } else {
             Some(STANDARD.encode(bytes))
-        }
-    }
-
-    fn estimate_base64_decoded_len(base64: &str) -> Option<usize> {
-        let s = base64.trim();
-        if s.is_empty() {
-            return Some(0);
-        }
-
-        let len = s.len();
-        let padding = if s.ends_with("==") {
-            2
-        } else if s.ends_with('=') {
-            1
-        } else {
-            0
-        };
-
-        // If the encoded length is well-formed, we can compute the exact decoded length. Otherwise,
-        // compute a conservative upper bound to avoid allocating huge buffers during base64 decode.
-        if len % 4 == 0 {
-            let groups = len / 4;
-            groups.checked_mul(3)?.checked_sub(padding)
-        } else {
-            let groups = (len + 3) / 4;
-            groups.checked_mul(3)
         }
     }
 
