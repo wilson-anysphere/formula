@@ -3836,6 +3836,44 @@ mod tests {
     }
 
     #[test]
+    fn wraps_union_operator_when_used_as_function_argument_among_others() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // SUM((A1,B1),C1):
+        // - The first argument is a union expression `A1,B1`, which must be parenthesized so the
+        //   comma is not interpreted as an argument separator.
+        //
+        // rgce:
+        //   PtgRef A1
+        //   PtgRef B1
+        //   PtgUnion
+        //   PtgRef C1
+        //   PtgFuncVar argc=2 iftab=4 (SUM)
+        let a1_col = encode_col_field(0, true, true);
+        let b1_col = encode_col_field(1, true, true);
+        let c1_col = encode_col_field(2, true, true);
+        let rgce = vec![
+            0x24, 0x00, 0x00, a1_col.to_le_bytes()[0], a1_col.to_le_bytes()[1], // A1
+            0x24, 0x00, 0x00, b1_col.to_le_bytes()[0], b1_col.to_le_bytes()[1], // B1
+            0x10, // union operator
+            0x24, 0x00, 0x00, c1_col.to_le_bytes()[0], c1_col.to_le_bytes()[1], // C1
+            0x22, 0x02, 0x04, 0x00, // SUM(argc=2)
+        ];
+
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "SUM((A1,B1),C1)");
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
     fn decodes_if_true_1_2_from_ptg_funcvar() {
         let sheet_names: Vec<String> = Vec::new();
         let externsheet: Vec<ExternSheetEntry> = Vec::new();
