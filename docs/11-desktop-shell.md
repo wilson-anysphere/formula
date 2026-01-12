@@ -96,7 +96,7 @@ The CSP is set in `app.security.csp` (see `apps/desktop/src-tauri/tauri.conf.jso
 Current policy (exact):
 
 ```text
-default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' blob: data:; worker-src 'self' blob:; child-src 'self' blob:; connect-src 'self' https: wss: http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:* blob: data:
+default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' blob: data:; worker-src 'self' blob:; child-src 'self' blob:; connect-src 'self' https: ws: wss: http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:* blob: data:
 ```
 
 Rationale:
@@ -107,7 +107,7 @@ Rationale:
 - We also rely on `script-src 'unsafe-eval'` for the scripting sandbox (`new Function`-based evaluation in a Worker).
 - `connect-src` stays narrow but must allow:
   - `https:` for remote APIs and user-driven Power Query fetches.
-  - `wss:` for collaboration WebSocket connections.
+  - `ws:` / `wss:` for WebSocket connections (e.g. collaboration, or local services).
   - loopback (`http://localhost:*`, `http://127.0.0.1:*`, `ws://localhost:*`, `ws://127.0.0.1:*`) for local development services and user-driven fetches to local endpoints.
 
 ### Tauri v2 capabilities (permissions)
