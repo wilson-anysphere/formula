@@ -121,6 +121,7 @@ Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the ful
   "windows": ["main"],
   "permissions": [
     "allow-invoke",
+    { "identifier": "core:allow-invoke", "allow": [{ "command": "open_external_url" }] },
     { "identifier": "core:event:allow-listen", "allow": [{ "event": "open-file" }] },
     { "identifier": "core:event:allow-emit", "allow": [{ "event": "open-file-ready" }] },
     "core:event:allow-unlisten",
@@ -143,6 +144,11 @@ Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the ful
 
 Note: `core:event:allow-unlisten` is granted so the frontend can unregister event listeners it previously installed (to avoid
 leaking listeners for one-shot flows).
+
+Note: custom Rust `#[tauri::command]` IPC calls are allowlisted in two places:
+
+- `apps/desktop/src-tauri/permissions/allow-invoke.json` (`allow-invoke` application permission; should match the backend `generate_handler![...]` list)
+- `apps/desktop/src-tauri/capabilities/main.json` (`core:allow-invoke` scoped allowlist; should match frontend `invoke("...")` usage)
 
 Note: external URL opening should go through the `open_external_url` Rust command (scheme allowlist enforced in Rust,
 and restricted to the main window + trusted app-local origins) rather than granting the webview direct access to the
@@ -176,13 +182,14 @@ If you add new desktop IPC surface area, you must update the capability allowlis
 - new invoked command (`#[tauri::command]`) →
   - register it in `apps/desktop/src-tauri/src/main.rs`
   - add it to `apps/desktop/src-tauri/permissions/allow-invoke.json` (`allow-invoke` permission)
+  - if the frontend starts invoking it via `__TAURI__.core.invoke("...")`, add it to `core:allow-invoke` in `apps/desktop/src-tauri/capabilities/main.json`
   - enforce window/origin/scope checks in Rust (never trust the webview)
 
 We keep guardrail tests to ensure we don't accidentally broaden the desktop IPC surface:
 
 - **Event allowlists**: enforce the **exact** `core:event:allow-listen` / `core:event:allow-emit` sets (no wildcard / allow-all):
   - `apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts`
-- **Core/plugin permissions**: ensure required plugin permissions are explicitly granted (dialogs, window ops, clipboard plain text, updater, etc), we don't accidentally grant dangerous extras, and we do **not** rely on `core:allow-invoke`:
+- **Core/plugin + invoke permissions**: ensure required plugin permissions are explicitly granted (dialogs, window ops, clipboard plain text, updater, etc), we don't accidentally grant dangerous extras, and `core:allow-invoke` stays scoped + in sync with frontend invoke usage:
   - `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts`
 
 Filesystem access for Power Query is handled via **custom Rust commands** (e.g. `read_text_file`, `list_dir`)
@@ -303,9 +310,9 @@ TypeScript ↔ Rust communication:
 // Note: the capability system gates built-in core/plugin APIs (event/window/dialog/etc) and disables IPC entirely for
 // non-matching windows (scoped per-window via the capability file’s `"windows"` patterns).
 //
-// App-defined `#[tauri::command]` invocation is allowlisted via the application permission `allow-invoke`
-// (see `apps/desktop/src-tauri/permissions/allow-invoke.json` and `apps/desktop/src-tauri/capabilities/main.json`).
-// We do not rely on `core:allow-invoke`.
+// App-defined `#[tauri::command]` invocation is allowlisted via:
+//  - `allow-invoke` (application permission manifest: `apps/desktop/src-tauri/permissions/allow-invoke.json`)
+//  - `core:allow-invoke` (scoped allowlist in `apps/desktop/src-tauri/capabilities/main.json`)
 //
 // Even with allowlisting, commands must be hardened in Rust (trusted-origin + window-label checks,
 // argument validation, filesystem/network scope checks, etc).

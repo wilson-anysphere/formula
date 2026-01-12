@@ -836,11 +836,14 @@ labeled `main` (`app.windows[].label` in `apps/desktop/src-tauri/tauri.conf.json
 
 It gates:
 
-- **`allow-invoke`**: allows the frontend to invoke Formula's app-defined Rust `#[tauri::command]` functions via
+- **`allow-invoke`** (application permission): allows the frontend to invoke Formula's app-defined Rust `#[tauri::command]` functions via
   `__TAURI__.core.invoke(...)`.
   - The command allowlist lives in `apps/desktop/src-tauri/permissions/allow-invoke.json`.
   - Even with allowlisting, commands must validate scope/authorization in Rust (trusted-origin + window-label checks,
-    argument validation, filesystem/network scope checks, etc.).
+    argument validation, filesystem/network scope checks, etc).
+- **`core:allow-invoke`** (scoped core permission): an explicit allowlist of **which command names** the frontend can invoke.
+  - In this repo we use the object form with `allow: [{ "command": "..." }]` in `capabilities/main.json` (no allow-all).
+  - Keep this list in sync with the frontend’s `invoke("...")` usage (guardrailed by `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts`).
 - **`core:event:allow-listen` / `core:event:allow-emit`**: which event names the frontend can `listen(...)` for or `emit(...)`.
 - **`core:event:allow-unlisten`**: allows the frontend to unregister event listeners it previously installed (so we don’t leak
   listeners for one-shot flows like close/open/OAuth readiness signals).
@@ -850,9 +853,9 @@ It gates:
   - `clipboard-manager:allow-read-text`, `clipboard-manager:allow-write-text`
   - `updater:allow-check`, `updater:allow-download`, `updater:allow-install`
 
-Custom Rust commands (everything behind `#[tauri::command]`, invoked via `__TAURI__.core.invoke(...)`) are gated by the
-`allow-invoke` permission allowlist, but must still be hardened in Rust (window label + trusted-origin checks, argument
-validation, filesystem/network scope checks, etc.). We do not rely on `core:allow-invoke` for per-command allowlisting.
+Custom Rust commands (everything behind `#[tauri::command]`, invoked via `__TAURI__.core.invoke(...)`) are allowlisted by
+`allow-invoke` and `core:allow-invoke`, but must still be hardened in Rust (window label + trusted-origin checks, argument
+validation, filesystem/network scope checks, etc.).
 
 Note: the clipboard plugin permissions above only cover the legacy **plain-text** clipboard helpers
 (`globalThis.__TAURI__.clipboard.readText` / `writeText`). Rich clipboard formats (HTML/RTF/PNG) are handled via
@@ -872,7 +875,9 @@ single trusted boundary.
 High-level contents (see the file for the exhaustive list):
 
 - We avoid `core:default` (broad, unscoped access to core plugins like event/window) to keep the permission surface minimal/explicit.
-- We do not rely on `core:allow-invoke`; instead we use the application permission `allow-invoke` (defined in `apps/desktop/src-tauri/permissions/allow-invoke.json`) to keep the invokable command surface explicit.
+- We keep custom Rust IPC calls explicit via:
+  - `allow-invoke` (application permission defined in `apps/desktop/src-tauri/permissions/allow-invoke.json`, kept in sync with `generate_handler![...]`)
+  - `core:allow-invoke` (scoped allowlist in `apps/desktop/src-tauri/capabilities/main.json`, kept in sync with frontend invoke usage)
 - We scope `core:event:allow-listen` / `core:event:allow-emit` to explicit event-name allowlists (no wildcards).
 - `core:event:allow-listen` includes:
   - close flow: `close-prep`, `close-requested`
@@ -891,7 +896,7 @@ High-level contents (see the file for the exhaustive list):
 - Plugin permissions include dialog/window/clipboard APIs plus updater permissions (`updater:allow-check`, `updater:allow-download`, `updater:allow-install`, required for the updater UI).
   - Window API permissions are `core:window:allow-*`.
   - Plain-text clipboard permissions are `clipboard-manager:allow-*`.
-- Custom Rust commands are allowlisted by `allow-invoke`, but must still keep input validation and scope checks in Rust.
+- Custom Rust commands are allowlisted by `allow-invoke` + `core:allow-invoke`, but must still keep input validation and scope checks in Rust.
 
 We intentionally keep capabilities narrow and rely on explicit Rust commands + higher-level app permission gates (macro
 trust, DLP, extension permissions) for privileged operations.
@@ -901,7 +906,7 @@ Guardrail tests (to prevent accidental “allow everything” capability drift):
 - `apps/desktop/src/tauri/__tests__/tauriSecurityConfig.vitest.ts` — asserts the hardened CSP/headers (COOP/COEP, no framing, restricted network) and that `tauri.conf.json` does **not** include `app.windows[].capabilities` (unsupported by our current toolchain).
 - `apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts` — asserts the `core:event:allow-listen` / `core:event:allow-emit`
   allowlists match the desktop shell’s real event usage (and contain no wildcards).
-- `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts` — asserts `main.json` does **not** include `core:allow-invoke`, required plugin permissions stay explicit/minimal (dialogs, window ops, clipboard plain text, updater, etc), and we don’t grant dangerous extras (e.g. `shell:allow-open`, notification permissions).
+- `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts` — asserts required plugin permissions stay explicit/minimal (dialogs, window ops, clipboard plain text, updater, etc), we don’t grant dangerous extras (e.g. `shell:allow-open`, notification permissions), and that `core:allow-invoke` matches actual frontend invoke usage (no allow-all / no unused commands).
 - `apps/desktop/src-tauri/tests/tauri_ipc_allowlist.rs` — asserts the `allow-invoke` permission allowlist stays in sync with the `generate_handler![...]` list in `apps/desktop/src-tauri/src/main.rs`.
 - `apps/desktop/src/tauri/__tests__/openFileIpcWiring.vitest.ts` — asserts the open-file IPC handshake (`open-file-ready`) is still wired in `main.ts` (prevents cold-start open drops).
 - `apps/desktop/src/tauri/__tests__/updaterMainListeners.vitest.ts` — asserts updater UX listeners remain consolidated in `tauri/updaterUi.ts` and the `updater-ui-ready` handshake stays intact.
@@ -930,15 +935,16 @@ Note: on Tauri v2.9, core permissions use the `core:` prefix (e.g. `core:event:a
   permission string(s).
   - Window permissions are currently `core:window:allow-*`.
   - Plain-text clipboard permissions are currently `clipboard-manager:allow-*`.
-- If the frontend starts calling a new Rust `#[tauri::command]` via `__TAURI__.core.invoke(...)`:
-  - register it in `apps/desktop/src-tauri/src/main.rs` (`generate_handler![...]`)
-  - add it to `apps/desktop/src-tauri/permissions/allow-invoke.json` (`allow-invoke` permission, `commands.allow`)
-  - keep it hardened in Rust (trusted-origin + window-label checks, input validation, scope checks, etc)
+- For custom Rust `#[tauri::command]` functions invoked via `__TAURI__.core.invoke(...)`:
+  - register them in `apps/desktop/src-tauri/src/main.rs` (`generate_handler![...]`)
+  - add them to `apps/desktop/src-tauri/permissions/allow-invoke.json` (`allow-invoke` permission `commands.allow`)
+  - add them to `apps/desktop/src-tauri/capabilities/main.json` (`core:allow-invoke` allowlist) when the frontend starts invoking them
+  - keep input validation and scope checks in Rust (trusted-origin + window-label checks, etc)
 
 Guardrails (CI/tests):
 
 - `apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts` enforces that the event allowlists are explicit (no allow-all) and match the events used by the desktop code.
-- `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts` asserts we do **not** rely on `core:allow-invoke` and keeps the plugin permission surface minimal/explicit (including split updater `allow-check` / `allow-download` / `allow-install`).
+- `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts` asserts `core:allow-invoke` stays scoped (no allow-all) and in sync with frontend invoke usage, and keeps the plugin permission surface minimal/explicit (including split updater `allow-check` / `allow-download` / `allow-install`).
 
 For background on capability syntax/semantics, see the upstream Tauri v2 docs:
 

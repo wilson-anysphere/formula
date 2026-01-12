@@ -12,39 +12,42 @@ describe("Tauri capabilities", () => {
     return capability.permissions as unknown[];
   }
 
-  it("uses the application allow-invoke permission (and does not grant unscoped core:allow-invoke)", () => {
+  it("grants the application allow-invoke permission (IPC commands)", () => {
     const permissions = readPermissions();
 
-    // Application commands (`#[tauri::command]`) are allowlisted via `src-tauri/permissions/allow-invoke.json`
-    // and granted through `capabilities/main.json` as an application permission entry.
+    // Application commands (`#[tauri::command]`) are allowlisted via
+    // `apps/desktop/src-tauri/permissions/allow-invoke.json` and granted through
+    // `capabilities/main.json` as an application permission entry.
     expect(permissions).toContain("allow-invoke");
+  });
 
-    // Some Tauri toolchains expose a `core:allow-invoke` permission for per-command allowlisting.
-    //
-    // If present, it must be scoped via the object form (explicit allowlist). The plain string
-    // form would grant the default/unscoped allowlist, which is not acceptable for hardened
-    // desktop builds.
+  it("scopes custom Rust command invocation via core:allow-invoke (explicit allowlist)", () => {
+    const permissions = readPermissions();
+
+    // Use the object form so we can keep the command allowlist explicit (no allow-all).
     expect(permissions).not.toContain("core:allow-invoke");
-    const coreAllowInvoke = permissions.find(
-      (permission): permission is { identifier: string; allow?: unknown } =>
-        Boolean(permission) && typeof permission === "object" && (permission as any).identifier === "core:allow-invoke",
+
+    const allowInvoke = permissions.find(
+      (permission) => Boolean(permission) && typeof permission === "object" && (permission as any).identifier === "core:allow-invoke",
     );
+    expect(allowInvoke).toBeTruthy();
 
-    if (coreAllowInvoke) {
-      const allow = (coreAllowInvoke as any).allow;
-      expect(Array.isArray(allow)).toBe(true);
-      expect((allow as unknown[]).length).toBeGreaterThan(0);
+    const allow = (allowInvoke as any).allow;
+    expect(Array.isArray(allow)).toBe(true);
+    expect(allow.length).toBeGreaterThan(0);
 
-      const commands = (allow as any[])
-        .map((scope) => scope?.command)
-        .filter((name): name is string => typeof name === "string");
-      expect(new Set(commands).size).toBe(commands.length);
+    const commands = allow
+      .map((entry: any) => entry?.command)
+      .filter((cmd: any): cmd is string => typeof cmd === "string");
+    expect(commands.length).toBe(allow.length);
 
-      for (const cmd of commands) {
-        expect(cmd.trim()).not.toBe("");
-        // Disallow wildcard/pattern scopes; we want explicit command names only.
-        expect(cmd).not.toContain("*");
-      }
+    // No duplicates.
+    expect(new Set(commands).size).toBe(commands.length);
+
+    for (const cmd of commands) {
+      expect(cmd.trim()).not.toBe("");
+      // Disallow wildcard/pattern scopes; keep commands explicit.
+      expect(cmd).not.toContain("*");
     }
   });
 
@@ -70,7 +73,7 @@ describe("Tauri capabilities", () => {
     }
   });
 
-  it("keeps src-tauri/permissions/allow-invoke.json in sync with frontend invoke() usage", () => {
+  it("keeps invoke allowlists in sync with frontend invoke() usage", () => {
     const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
 
     const allowInvokePath = path.join(root, "apps/desktop/src-tauri/permissions/allow-invoke.json");
@@ -84,6 +87,25 @@ describe("Tauri capabilities", () => {
     const allowlistedCommands = new Set<string>(allow);
     // No duplicates.
     expect(allowlistedCommands.size).toBe(allow.length);
+
+    // `core:allow-invoke` is the *scoped* per-command allowlist used by the webview.
+    const capabilityPath = path.join(root, "apps/desktop/src-tauri/capabilities/main.json");
+    const capability = JSON.parse(readFileSync(capabilityPath, "utf8")) as any;
+    expect(Array.isArray(capability?.permissions)).toBe(true);
+
+    const permissions = capability.permissions as any[];
+    // The string form would grant the default/unscoped allowlist, which is not acceptable for hardened desktop builds.
+    expect(permissions).not.toContain("core:allow-invoke");
+
+    const coreAllowInvoke = permissions.find(
+      (permission) => Boolean(permission) && typeof permission === "object" && permission.identifier === "core:allow-invoke",
+    ) as any;
+    expect(coreAllowInvoke).toBeTruthy();
+
+    const coreAllow = Array.isArray(coreAllowInvoke?.allow) ? coreAllowInvoke.allow : [];
+    const coreAllowlistedCommands = new Set(
+      coreAllow.map((entry: any) => entry?.command).filter((cmd: any): cmd is string => typeof cmd === "string"),
+    );
 
     for (const cmd of allowlistedCommands) {
       expect(cmd.trim()).not.toBe("");
@@ -147,7 +169,11 @@ describe("Tauri capabilities", () => {
 
     for (const cmd of invokedCommands) {
       expect(allowlistedCommands.has(cmd)).toBe(true);
+      expect(coreAllowlistedCommands.has(cmd)).toBe(true);
     }
+
+    // Keep the `core:allow-invoke` allowlist as small as possible: it should match actual invoke usage.
+    expect(Array.from(coreAllowlistedCommands).sort()).toEqual(Array.from(invokedCommands).sort());
   });
 
   it("grants the dialog + clipboard permissions required by the frontend", () => {
@@ -219,87 +245,5 @@ describe("Tauri capabilities", () => {
     expect(identifiers.some((permission) => permission.startsWith("notification:"))).toBe(false);
     // Some Tauri versions may namespace this as a core permission.
     expect(identifiers.some((permission) => permission.startsWith("core:notification:"))).toBe(false);
-  });
-
-  it("keeps the Rust invoke_handler allowlist in sync with the frontend's invoke() usage", () => {
-    const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
-
-    const rustMainPath = path.join(root, "apps/desktop/src-tauri/src/main.rs");
-    const rustMainText = readFileSync(rustMainPath, "utf8");
-    const invokeHandlerMatch = rustMainText.match(
-      /\.invoke_handler\s*\(\s*tauri::generate_handler!\[([\s\S]*?)\]\s*\)/m,
-    );
-    expect(invokeHandlerMatch, "expected .invoke_handler(generate_handler![...]) in src-tauri/src/main.rs").toBeTruthy();
-
-    const handlerBody = invokeHandlerMatch![1].replace(/\/\/.*$/gm, "");
-    const rustCommands = handlerBody
-      .split(",")
-      .map((entry) => entry.trim())
-      .filter(Boolean)
-      .map((entry) => entry.split("::").at(-1))
-      .filter((cmd): cmd is string => typeof cmd === "string" && cmd.length > 0);
-    const allowlistedCommands = new Set(rustCommands);
-
-    const isRuntimeSource = (filePath: string): boolean => {
-      const normalized = filePath.replace(/\\/g, "/");
-      if (normalized.includes("/__tests__/")) return false;
-      if (normalized.match(/\.(test|spec|vitest)\./)) return false;
-      if (normalized.endsWith(".md")) return false;
-      if (normalized.includes("/src-tauri/capabilities/")) return false;
-      const ext = path.extname(filePath);
-      return ext === ".ts" || ext === ".tsx" || ext === ".js" || ext === ".jsx" || ext === ".mjs";
-    };
-
-    const walk = (dir: string): string[] => {
-      const out: string[] = [];
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
-        const full = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-          if (entry.name === "node_modules" || entry.name === "__tests__") continue;
-          out.push(...walk(full));
-        } else if (entry.isFile()) {
-          if (isRuntimeSource(full)) out.push(full);
-        }
-      }
-      return out;
-    };
-
-    const runtimeFiles = [
-      ...walk(path.join(root, "apps/desktop/src")),
-      ...walk(path.join(root, "packages/extension-marketplace/src")),
-      ...walk(path.join(root, "packages/extension-host/src/browser")),
-      ...walk(path.join(root, "shared/extension-package")),
-    ].sort();
-
-    const runtimeText = runtimeFiles.map((p) => readFileSync(p, "utf8")).join("\n");
-
-    // Capture command invocations from helpers like:
-    // - invoke("...")
-    // - tauriInvoke("...")
-    // - invokeFn("...")
-    // - args.invoke("...") (the `.invoke` segment still matches)
-    const invokedCommands = new Set<string>();
-    const invokeCall = /\b[\w$]*invoke[\w$]*\s*\(\s*(["'])([^"']+)\1/gim;
-    for (const match of runtimeText.matchAll(invokeCall)) {
-      invokedCommands.add(match[2]);
-    }
-
-    // Some code uses indirection (e.g. VBA event macros pass the command name into a helper).
-    // Keep those allowlisted too.
-    {
-      const eventMacrosPath = path.join(root, "apps/desktop/src/macros/event_macros.ts");
-      const eventMacrosText = readFileSync(eventMacrosPath, "utf8");
-      const runEventMacroCall = /runEventMacro\s*\(\s*[^,]+,\s*(["'])([^"']+)\1/gm;
-      for (const match of eventMacrosText.matchAll(runEventMacroCall)) {
-        invokedCommands.add(match[2]);
-      }
-    }
-
-    for (const cmd of invokedCommands) {
-      expect(allowlistedCommands.has(cmd)).toBe(true);
-    }
-
-    // Keep the allowlist as small as possible: it should match actual invoke usage.
-    expect(Array.from(allowlistedCommands).sort()).toEqual(Array.from(invokedCommands).sort());
   });
 });
