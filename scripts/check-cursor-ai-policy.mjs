@@ -277,7 +277,9 @@ function gitGrepMatches(rootDir, needles) {
     // Use fixed-string matching (`-F`) since we're looking for literal substrings,
     // not regex patterns. `-z` makes the output robust against filenames that
     // contain `:` (colon), which would otherwise break `file:line:text` parsing.
-    const args = ["-C", rootDir, "grep", "-I", "-n", "-i", "-F", "-z"];
+    // `-m1` limits output to the first match per file, which keeps stdout bounded
+    // even if a single file contains many occurrences.
+    const args = ["-C", rootDir, "grep", "-I", "-n", "-i", "-F", "-z", "-m", "1"];
     for (const needle of needles) {
       args.push("-e", needle);
     }
