@@ -120,8 +120,8 @@ fn odd_coupon_settlement_boundary_behavior() {
     // - ODDL*: settlement < maturity, maturity > last_interest (settlement may be <= last_interest).
     //   If settlement < last_interest, the engine PVs remaining regular coupons through last_interest
     //   plus the final odd stub cashflow at maturity.
-    // - ODDF*: issue <= settlement <= first_coupon <= maturity (with `issue < first_coupon` and
-    //   `settlement < maturity`).
+    // - ODDF*: issue <= settlement <= first_coupon <= maturity, with the additional strict
+    //   constraints `issue < first_coupon` and `settlement < maturity`.
     //
     // ODDF* rejects settlement > first_coupon, issue > settlement, issue == first_coupon, and
     // settlement >= maturity (see `crates/formula-engine/tests/odd_coupon_date_boundaries.rs` for
@@ -194,8 +194,9 @@ fn odd_coupon_settlement_boundary_behavior() {
     let issue = ymd_to_serial(ExcelDate::new(2022, 12, 15), system).unwrap();
     let first_coupon = ymd_to_serial(ExcelDate::new(2023, 1, 31), system).unwrap();
     let maturity2 = ymd_to_serial(ExcelDate::new(2024, 7, 31), system).unwrap();
-    let pr = oddfprice(
-        first_coupon, // settlement == first_coupon
+    let settlement_eq_first = first_coupon;
+    let pr_oddf_eq_first = oddfprice(
+        settlement_eq_first,
         maturity2,
         issue,
         first_coupon,
@@ -206,15 +207,14 @@ fn odd_coupon_settlement_boundary_behavior() {
         0,
         system,
     )
-    .expect("ODDFPRICE should allow settlement == first_coupon");
-    assert!(pr.is_finite() && pr > 0.0, "expected finite price, got {pr}");
+    .expect("ODDFPRICE should accept settlement == first_coupon");
     let yld_out = oddfyield(
-        first_coupon,
+        settlement_eq_first,
         maturity2,
         issue,
         first_coupon,
         0.05,
-        pr,
+        pr_oddf_eq_first,
         100.0,
         2,
         0,
@@ -280,10 +280,12 @@ fn odd_coupon_settlement_boundary_behavior() {
         other => panic!("expected number for worksheet ODDLYIELD when settlement < last_interest, got {other:?}"),
     }
     let v = sheet.eval("=ODDFPRICE(DATE(2023,1,31),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,31),0.05,0.06,100,2,0)");
-    assert!(
-        matches!(v, Value::Number(n) if n.is_finite() && n > 0.0),
-        "expected finite number for worksheet ODDFPRICE when settlement == first_coupon, got {v:?}"
-    );
+    match v {
+        Value::Number(n) => assert_close(n, pr_oddf_eq_first, 1e-9),
+        other => panic!(
+            "expected number for worksheet ODDFPRICE when settlement == first_coupon, got {other:?}"
+        ),
+    }
     let v = sheet.eval("=ODDFYIELD(DATE(2023,1,31),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,31),0.05,ODDFPRICE(DATE(2023,1,31),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,31),0.05,0.06,100,2,0),100,2,0)");
     assert!(
         matches!(v, Value::Number(n) if (n - yld_in).abs() <= 1e-6),

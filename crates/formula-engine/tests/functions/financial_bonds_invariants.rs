@@ -441,7 +441,7 @@ fn duration_n1_equals_time_to_maturity() {
                     // schedule (`coupon_schedule` in `bonds.rs`):
                     // - basis 0: `E` is modeled as 360/frequency and `DSC = E - A` (with `A`
                     //   computed via US/NASD DAYS360)
-                    // - basis 4: `E` is modeled as 360/frequency and `DSC = E - A` (European 30/360
+                    // - basis 4: `E` is modeled as 360/frequency and `DSC = E - A` (European 30E/360
                     //   day counts for `A`, but a fixed coupon-period length for `E`)
                     // - basis 2: `E = 360/frequency`, `DSC` is an actual day count
                     // - basis 3: `E = 365/frequency`, `DSC` is an actual day count

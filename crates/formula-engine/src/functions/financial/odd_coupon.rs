@@ -302,7 +302,7 @@ mod tests {
         assert_eq!(e, 360.0 / (frequency as f64));
         assert_ne!(e as i64, days360);
 
-        // COUPDAYS should use the same modeled coupon-period length.
+        // COUPDAYS uses the same helper (`coupon_schedule::coupon_period_e`).
         let settlement = ymd_to_serial(ExcelDate::new(2001, 5, 1), system).unwrap();
         let e_coupdays =
             super::super::coupon_schedule::coupdays(settlement, ncd, frequency, basis, system)

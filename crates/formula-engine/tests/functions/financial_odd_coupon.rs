@@ -65,10 +65,10 @@ fn coupon_period_e(
     // Keep in sync with the source-of-truth:
     // `crates/formula-engine/src/functions/financial/coupon_schedule.rs::coupon_period_e`.
     //
-    // Note: basis=4 uses European 30/360 (DAYS360(..., TRUE)) for day counts like `A`, but Excel
+    // Note: basis=4 uses European 30E/360 (DAYS360(..., TRUE)) for day counts like `A`, but Excel
     // models the coupon period length `E` used by COUPDAYS (and reused by the odd-coupon bond
-    // functions) as a fixed `360/frequency` (even when `DAYS360(PCD, NCD, TRUE)` differs for some
-    // end-of-month schedules involving February).
+    // functions) as a fixed `360/frequency` (same convention as basis=0/2). This can differ from
+    // `DAYS360(PCD, NCD, TRUE)` for some end-of-month schedules involving February.
     match basis {
         1 => (ncd - pcd) as f64,
         0 | 2 | 4 => 360.0 / freq,
@@ -4140,8 +4140,7 @@ fn oddfprice_matches_excel_model_for_30_360_bases() {
         let first_coupon = ymd_to_serial(first_coupon, system).unwrap();
         let maturity = ymd_to_serial(maturity, system).unwrap();
 
-        // Guard: ensure we cover a schedule where European `DAYS360(PCD, NCD, TRUE)` differs from
-        // the modeled `E = 360/frequency`.
+        // Guard: ensure we cover a basis=4 schedule where `DAYS360(PCD, NCD, TRUE) != 360/frequency`.
         if maturity == ymd_to_serial(ExcelDate::new(2019, 2, 28), system).unwrap() {
             let months_per_period = 12 / frequency;
             let eom = is_end_of_month(maturity, system);
@@ -4170,7 +4169,7 @@ fn oddfprice_matches_excel_model_for_30_360_bases() {
             "expected DAYS360 method=false vs method=true to diverge for this scenario"
         );
 
-        // (The above guard already asserts DAYS360_EU != E for basis=4 in the mismatch scenario.)
+        // (The above guard asserts DAYS360_EU(PCD,NCD) != E for basis=4 in the mismatch scenario.)
 
         for basis in [0, 4] {
             let expected = oddf_price_excel_model(
@@ -4241,8 +4240,8 @@ fn oddlprice_matches_excel_model_for_30_360_bases() {
     let redemption = 100.0;
     let frequency = 2;
 
-    // Guard: ensure this scenario exercises a case where European DAYS360 between coupon dates
-    // differs from the modeled `E = 360/frequency`.
+    // Guard: ensure this scenario actually exercises a basis=4 schedule where
+    // `DAYS360(PCD, NCD, TRUE) != 360/frequency`.
     //
     // last_interest is EOM Feb 28, so the EOM-pinned prior coupon date is Aug 31.
     // Under COUP* conventions, basis=4 uses `E = DAYS360_EU(PCD, NCD) = 178` for this period.
