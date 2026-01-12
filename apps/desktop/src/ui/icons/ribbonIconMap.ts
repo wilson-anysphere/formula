@@ -147,6 +147,19 @@ import { PhoneIcon } from "./PhoneIcon";
 
 export type RibbonIconComponent = ComponentType<Omit<IconProps, "children">>;
 
+export type RibbonIconId = keyof typeof ribbonIconMap;
+
+/**
+ * Look up an icon component by ribbon command id.
+ *
+ * The ribbon schema currently provides `icon` as a placeholder glyph string.
+ * This helper lets the ribbon UI migrate to the internal SVG icon set without
+ * coupling the ribbon to a hard-coded import list.
+ */
+export function getRibbonIcon(commandId: string): RibbonIconComponent | undefined {
+  return (ribbonIconMap as Record<string, RibbonIconComponent | undefined>)[commandId];
+}
+
 /**
  * Command-id → icon component mapping for ribbon integration.
  *
