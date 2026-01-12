@@ -144,6 +144,75 @@ test("Typing =DROP(A suggests a contiguous range above the current cell", async 
   );
 });
 
+test("Range suggestions do not auto-close parens when the function needs more args (CHOOSECOLS)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) {
+    values[`A${r}`] = r; // A1..A10 contain numbers
+  }
+
+  const currentInput = "=CHOOSECOLS(A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on row 11 (0-based 10), below the data.
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some(s => s.text === "=CHOOSECOLS(A1:A10"),
+    `Expected a CHOOSECOLS range suggestion without closing paren, got: ${suggestions.map(s => s.text).join(", ")}`
+  );
+});
+
+test("Range suggestions do not auto-close parens when the function needs more args (CHOOSEROWS)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) {
+    values[`A${r}`] = r; // A1..A10 contain numbers
+  }
+
+  const currentInput = "=CHOOSEROWS(A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on row 11 (0-based 10), below the data.
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some(s => s.text === "=CHOOSEROWS(A1:A10"),
+    `Expected a CHOOSEROWS range suggestion without closing paren, got: ${suggestions.map(s => s.text).join(", ")}`
+  );
+});
+
+test("Range suggestions do not auto-close parens when the function needs more args (EXPAND)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) {
+    values[`A${r}`] = r; // A1..A10 contain numbers
+  }
+
+  const currentInput = "=EXPAND(A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on row 11 (0-based 10), below the data.
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some(s => s.text === "=EXPAND(A1:A10"),
+    `Expected an EXPAND range suggestion without closing paren, got: ${suggestions.map(s => s.text).join(", ")}`
+  );
+});
+
 test("Typing =SUM($A suggests an absolute-column contiguous range above the current cell", async () => {
   const engine = new TabCompletionEngine();
 
