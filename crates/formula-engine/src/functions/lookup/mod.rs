@@ -659,3 +659,54 @@ pub fn xlookup_with_modes(
         Err(e) => Err(e),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn xmatch_matches_numeric_text_via_value_parsing() {
+        let array = vec![Value::from("1,234.5")];
+        assert_eq!(xmatch(&Value::Number(1234.5), &array).unwrap(), 1);
+    }
+
+    #[test]
+    fn xmatch_wildcard_reverse_search_returns_last_match() {
+        let array = vec![Value::from("apple"), Value::from("banana"), Value::from("apricot")];
+        assert_eq!(
+            xmatch_with_modes(
+                &Value::from("a*"),
+                &array,
+                MatchMode::Wildcard,
+                SearchMode::LastToFirst
+            )
+            .unwrap(),
+            3
+        );
+    }
+
+    #[test]
+    fn xmatch_binary_search_rejects_wildcard_mode() {
+        let array = vec![Value::from("apple"), Value::from("banana")];
+        assert_eq!(
+            xmatch_with_modes(
+                &Value::from("a*"),
+                &array,
+                MatchMode::Wildcard,
+                SearchMode::BinaryAscending
+            )
+            .unwrap_err(),
+            ErrorKind::Value
+        );
+    }
+
+    #[test]
+    fn xlookup_len_mismatch_is_value_error() {
+        let lookup_array = vec![Value::from("A"), Value::from("B")];
+        let return_array = vec![Value::Number(1.0)];
+        assert_eq!(
+            xlookup(&Value::from("A"), &lookup_array, &return_array, None).unwrap_err(),
+            ErrorKind::Value
+        );
+    }
+}
