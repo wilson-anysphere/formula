@@ -1,7 +1,7 @@
 use std::io::{Cursor, Write};
 
 use formula_model::{CellRef, CellValue};
-use formula_xlsx::{CellPatch, WorkbookCellPatches, XlsxPackage};
+use formula_xlsx::{CellPatch, PackageCellPatch, WorkbookCellPatches, XlsxPackage};
 
 fn build_cellimages_calcchain_fixture() -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
     let content_types = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -206,3 +206,60 @@ fn formula_patches_drop_calc_chain_but_preserve_cellimages_parts() -> Result<(),
     Ok(())
 }
 
+#[test]
+fn streaming_formula_patches_drop_calc_chain_but_preserve_cellimages_parts(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (fixture, cellimages_xml, cellimages_rels, image1_png) =
+        build_cellimages_calcchain_fixture();
+
+    let pkg = XlsxPackage::from_bytes(&fixture)?;
+    let patch = PackageCellPatch::for_sheet_name(
+        "Sheet1",
+        CellRef::from_a1("A1")?,
+        CellValue::Number(3.0),
+        Some("=1+2".to_string()),
+    );
+    let out_bytes = pkg.apply_cell_patches_to_bytes(&[patch])?;
+    let out_pkg = XlsxPackage::from_bytes(&out_bytes)?;
+
+    // calcChain.xml should be removed entirely.
+    assert!(out_pkg.part("xl/calcChain.xml").is_none());
+
+    // workbook.xml.rels should remove the calcChain relationship but preserve the cellimages one.
+    let workbook_rels_xml =
+        std::str::from_utf8(out_pkg.part("xl/_rels/workbook.xml.rels").unwrap())?;
+    let rels = workbook_relationships(workbook_rels_xml);
+    assert!(
+        !rels.iter().any(|(ty, target)| {
+            ty.contains("relationships/calcChain") || target.ends_with("calcChain.xml")
+        }),
+        "expected workbook.xml.rels to remove calcChain relationship (got {workbook_rels_xml:?})"
+    );
+    assert!(
+        rels.iter()
+            .any(|(_, target)| target.ends_with("cellimages.xml")),
+        "expected workbook.xml.rels to preserve cellimages relationship (got {workbook_rels_xml:?})"
+    );
+
+    // [Content_Types].xml should remove the calcChain override but preserve the cellimages one.
+    let ct_xml = std::str::from_utf8(out_pkg.part("[Content_Types].xml").unwrap())?;
+    let overrides = content_type_overrides(ct_xml);
+    assert!(
+        !overrides.iter().any(|p| p.ends_with("calcChain.xml")),
+        "expected [Content_Types].xml to remove calcChain override (got {ct_xml:?})"
+    );
+    assert!(
+        overrides.iter().any(|p| p == "/xl/cellimages.xml"),
+        "expected [Content_Types].xml to preserve cellimages override (got {ct_xml:?})"
+    );
+
+    // In-cell image parts must be preserved byte-for-byte.
+    assert_eq!(out_pkg.part("xl/cellimages.xml").unwrap(), cellimages_xml);
+    assert_eq!(
+        out_pkg.part("xl/_rels/cellimages.xml.rels").unwrap(),
+        cellimages_rels
+    );
+    assert_eq!(out_pkg.part("xl/media/image1.png").unwrap(), image1_png);
+
+    Ok(())
+}
