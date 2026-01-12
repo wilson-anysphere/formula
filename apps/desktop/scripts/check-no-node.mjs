@@ -36,7 +36,8 @@ for (const mod of builtinModules) {
   }
 }
 
-const TEST_FILE_RE = /\.(test|spec)\.[jt]sx?$|\.vitest\.[jt]sx?$|\.e2e\.[jt]sx?$/;
+const TEST_FILE_RE =
+  /\.(test|spec)\.(ts|tsx|js|jsx|mts|cts|mjs|cjs)$|\.vitest\.(ts|tsx|js|jsx|mts|cts|mjs|cjs)$|\.e2e\.(ts|tsx|js|jsx|mts|cts|mjs|cjs)$/;
 const IGNORED_DIRS = new Set([
   "node_modules",
   ".git",
