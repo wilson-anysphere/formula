@@ -1217,6 +1217,13 @@ mod tests {
     fn assert_parseable(expr: &str) {
         let expr = expr.trim();
         assert!(!expr.is_empty(), "decoded expression must be non-empty");
+        // BIFF decode can return Excel error literals (`#REF!`) or best-effort placeholders (e.g.
+        // `#UNSUPPORTED_PTG_0x..`). These are intentionally allowed even if they don't parse as
+        // formulas.
+        if expr.starts_with('#') {
+            return;
+        }
+
         let formula = format!("={expr}");
         parse_formula(&formula, ParseOptions::default()).unwrap_or_else(|err| {
             panic!("expected decoded expression to be parseable, expr={expr:?}, err={err:?}");

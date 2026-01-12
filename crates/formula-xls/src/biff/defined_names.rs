@@ -248,10 +248,11 @@ fn parse_biff8_name_record(
         let _ = cursor.read_biff8_unicode_string_no_cch(cch_cust_menu, codepage)?;
     }
     let comment = if cch_description > 0 {
-        Some(cursor.read_biff8_unicode_string_no_cch(
-            cch_description,
-            codepage,
-        )?)
+        let raw = cursor.read_biff8_unicode_string_no_cch(cch_description, codepage)?;
+        // Best-effort: Excel UIs generally treat embedded NULs as invalid; strip them so the value
+        // is usable as `formula_model::DefinedName.comment`.
+        let stripped = raw.replace('\0', "");
+        (!stripped.is_empty()).then_some(stripped)
     } else {
         None
     };
@@ -1189,6 +1190,44 @@ mod tests {
         assert_eq!(parsed.names[0].name, name);
         assert_eq!(parsed.names[0].refers_to, "1");
         assert_eq!(parsed.names[0].comment.as_deref(), Some(description));
+        assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
+    }
+
+    #[test]
+    fn strips_embedded_nuls_from_description_string() {
+        let name = "NulDesc";
+        let rgce: Vec<u8> = vec![0x1E, 0x01, 0x00]; // PtgInt 1
+        let description = "Hello\0World";
+        let expected = "HelloWorld";
+
+        let mut header = Vec::new();
+        header.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        header.push(0); // chKey
+        header.push(name.len() as u8); // cch
+        header.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        header.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        header.extend_from_slice(&0u16.to_le_bytes()); // itab
+        header.push(0); // cchCustMenu
+        header.push(description.len() as u8); // cchDescription (includes NUL)
+        header.push(0); // cchHelpTopic
+        header.push(0); // cchStatusText
+
+        let name_str = xl_unicode_string_no_cch_compressed(name);
+        let desc_str = xl_unicode_string_no_cch_compressed(description);
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_NAME, &[header, name_str, rgce.clone(), desc_str].concat()),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed =
+            parse_biff_defined_names(&stream, BiffVersion::Biff8, 1252, &[]).expect("parse names");
+        assert_eq!(parsed.names.len(), 1);
+        assert_eq!(parsed.names[0].name, name);
+        assert_eq!(parsed.names[0].refers_to, "1");
+        assert_eq!(parsed.names[0].comment.as_deref(), Some(expected));
         assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
     }
 
