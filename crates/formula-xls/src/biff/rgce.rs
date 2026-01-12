@@ -1483,4 +1483,60 @@ mod tests {
         );
         assert_parseable(&decoded.text);
     }
+
+    #[test]
+    fn defined_name_3d_ref_quotes_sheet_names_with_spaces() {
+        let sheet_names: Vec<String> = vec!["My Sheet".to_string()];
+        let externsheet: Vec<ExternSheetRef> = vec![ExternSheetRef {
+            itab_first: 0,
+            itab_last: 0,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // PtgRef3d: [ptg][ixti: u16][rw: u16][col: u16] => sheet-qualified $A$1.
+        let rgce = [0x3Au8, 0, 0, 0, 0, 0, 0];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "'My Sheet'!$A$1");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn defined_name_3d_ref_escapes_apostrophes_in_sheet_names() {
+        let sheet_names: Vec<String> = vec!["O'Brien".to_string()];
+        let externsheet: Vec<ExternSheetRef> = vec![ExternSheetRef {
+            itab_first: 0,
+            itab_last: 0,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        let rgce = [0x3Au8, 0, 0, 0, 0, 0, 0];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "'O''Brien'!$A$1");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn defined_name_3d_ref_renders_sheet_ranges_as_two_quoted_idents() {
+        let sheet_names: Vec<String> = vec![
+            "Sheet 1".to_string(),
+            "Sheet 2".to_string(),
+            "Sheet 3".to_string(),
+        ];
+        let externsheet: Vec<ExternSheetRef> = vec![ExternSheetRef {
+            itab_first: 0,
+            itab_last: 2,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        let rgce = [0x3Au8, 0, 0, 0, 0, 0, 0];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "'Sheet 1':'Sheet 3'!$A$1");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
+    }
 }
