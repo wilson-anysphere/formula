@@ -1396,7 +1396,10 @@ class ExtensionHost {
   }
 
   async _handleApiCall(extension, message) {
-    const { id, namespace, method, args } = message;
+    const { id, namespace, method } = message;
+    // Treat malformed `args` payloads as "no args" to avoid TypeError crashes when untrusted
+    // extension workers post malformed messages.
+    const args = Array.isArray(message.args) ? message.args : [];
     const apiKey = `${namespace}.${method}`;
     const worker = extension.worker;
 
