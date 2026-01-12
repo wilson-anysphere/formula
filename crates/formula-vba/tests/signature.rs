@@ -439,6 +439,47 @@ fn prefers_digital_signature_ext_over_ex_when_both_verify() {
 }
 
 #[test]
+fn lists_signature_streams_in_ext_ex_legacy_order() {
+    let legacy = make_pkcs7_signed_message(b"legacy-signed");
+    let ex = make_pkcs7_signed_message(b"ex-signed");
+    let ext = make_pkcs7_signed_message(b"ext-signed");
+
+    let vba = build_vba_project_bin_with_signature_streams(&[
+        ("\u{0005}DigitalSignature", &legacy),
+        ("\u{0005}DigitalSignatureEx", &ex),
+        ("\u{0005}DigitalSignatureExt", &ext),
+    ]);
+
+    let sigs = list_vba_digital_signatures(&vba).expect("signature enumeration should succeed");
+    assert_eq!(sigs.len(), 3, "expected three signature streams");
+
+    // Deterministic Excel-like ordering: newest stream first.
+    assert!(
+        sigs[0].stream_path.ends_with("\u{0005}DigitalSignatureExt"),
+        "unexpected first stream path: {}",
+        sigs[0].stream_path
+    );
+    assert!(
+        sigs[1].stream_path.ends_with("\u{0005}DigitalSignatureEx"),
+        "unexpected second stream path: {}",
+        sigs[1].stream_path
+    );
+    assert!(
+        sigs[2].stream_path.ends_with("\u{0005}DigitalSignature"),
+        "unexpected third stream path: {}",
+        sigs[2].stream_path
+    );
+
+    for sig in &sigs {
+        assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+    }
+
+    assert_eq!(sigs[0].signature.as_slice(), ext.as_slice());
+    assert_eq!(sigs[1].signature.as_slice(), ex.as_slice());
+    assert_eq!(sigs[2].signature.as_slice(), legacy.as_slice());
+}
+
+#[test]
 fn lists_all_signature_streams_and_extracts_digest_info_per_stream() {
     // Use a deterministic digest so we can assert exact output.
     let digest_algorithm_oid = "2.16.840.1.101.3.4.2.1"; // sha256
