@@ -30,7 +30,7 @@ export function createWorkbookLoadTruncationWarning(
   if (!Array.isArray(truncations) || truncations.length === 0) return null;
 
   const maxSheetsToShow = Math.max(1, options?.maxSheetsToShow ?? 3);
-  const capText = `${formatInt(limits.maxRows)} rows × ${formatInt(limits.maxCols)} cols`;
+  const capText = `rows 1-${formatInt(limits.maxRows)}, cols 1-${formatInt(limits.maxCols)}`;
 
   const sheetSummaries = truncations.slice(0, maxSheetsToShow).map((t) => {
     const sheetLabel = String(t.sheetName ?? "").trim() || String(t.sheetId ?? "").trim() || "Sheet";
