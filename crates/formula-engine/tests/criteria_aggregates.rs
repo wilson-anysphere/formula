@@ -480,3 +480,60 @@ fn maxifs_and_minifs_parse_date_criteria_strings() {
     assert_number(&sheet.eval(r#"=MAXIFS(B1:B3,A1:A3,">12/31/2019")"#), 3.0);
     assert_number(&sheet.eval(r#"=MINIFS(B1:B3,A1:A3,">12/31/2019")"#), 2.0);
 }
+
+#[test]
+fn maxifs_and_minifs_support_wildcards_blank_and_error_criteria() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", "apple");
+    sheet.set("A2", "banana");
+    sheet.set("A3", "apricot");
+
+    sheet.set("B1", 1);
+    sheet.set("B2", 2);
+    sheet.set("B3", 3);
+
+    assert_number(&sheet.eval(r#"=MAXIFS(B1:B3,A1:A3,"ap*")"#), 3.0);
+    assert_number(&sheet.eval(r#"=MINIFS(B1:B3,A1:A3,"ap*")"#), 1.0);
+
+    // A4 is implicit blank; A5 is explicit empty string.
+    sheet.set("A5", "");
+    sheet.set("A6", "x");
+    sheet.set("B4", 4);
+    sheet.set("B5", 5);
+    sheet.set("B6", 6);
+
+    assert_number(&sheet.eval(r#"=MAXIFS(B4:B6,A4:A6,"")"#), 5.0);
+    assert_number(&sheet.eval(r#"=MINIFS(B4:B6,A4:A6,"")"#), 4.0);
+    assert_number(&sheet.eval(r#"=MAXIFS(B4:B6,A4:A6,"<>")"#), 6.0);
+    assert_number(&sheet.eval(r#"=MINIFS(B4:B6,A4:A6,"<>")"#), 6.0);
+
+    // Criteria strings can match errors without the criteria argument itself being an error.
+    sheet.set("C1", Value::Error(ErrorKind::Div0));
+    sheet.set("C2", 0);
+    sheet.set("C3", Value::Error(ErrorKind::Div0));
+    sheet.set("D1", 10);
+    sheet.set("D2", 20);
+    sheet.set("D3", 30);
+
+    assert_number(&sheet.eval(r##"=MAXIFS(D1:D3,C1:C3,"#DIV/0!")"##), 30.0);
+    assert_number(&sheet.eval(r##"=MINIFS(D1:D3,C1:C3,"#DIV/0!")"##), 10.0);
+}
+
+#[test]
+fn averageifs_propagates_average_range_errors_only_when_included() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", 1);
+    sheet.set("A2", 2);
+
+    sheet.set("B1", Value::Error(ErrorKind::Div0));
+    sheet.set("B2", 5);
+
+    // Error is excluded by criteria, so it is ignored.
+    assert_number(&sheet.eval(r#"=AVERAGEIFS(B1:B2,A1:A2,2)"#), 5.0);
+
+    // Error is included, so it propagates.
+    assert_eq!(
+        sheet.eval(r#"=AVERAGEIFS(B1:B2,A1:A2,">0")"#),
+        Value::Error(ErrorKind::Div0)
+    );
+}
