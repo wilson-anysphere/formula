@@ -310,14 +310,14 @@ fn model_cell_value_to_sort_value(value: &ModelCellValue) -> CellValue {
                 CellValue::Text(record.display_value.clone())
             }
         }
-        ModelCellValue::Array(_) => CellValue::Blank,
-        ModelCellValue::Spill(_) => CellValue::Blank,
         // Rich value variants are represented as `{type, value}` in `formula-model` for stable IPC.
         //
         // Keep a wildcard arm for forward-compatibility with new `formula-model::CellValue`
         // variants. Best-effort: attempt to degrade the value to a scalar sort/filter value.
-        #[allow(unreachable_patterns)]
-        _ => rich_model_cell_value_to_sort_value(value).unwrap_or(CellValue::Blank),
+        other => match other {
+            ModelCellValue::Array(_) | ModelCellValue::Spill(_) => CellValue::Blank,
+            _ => rich_model_cell_value_to_sort_value(other).unwrap_or(CellValue::Blank),
+        },
     }
 }
 
