@@ -24,8 +24,8 @@ test.describe("sheet tab context menu (tauri persistence)", () => {
                   path: args?.path ?? null,
                   origin_path: args?.path ?? null,
                   sheets: [
-                    { id: "Sheet1", name: "Sheet1" },
-                    { id: "Sheet2", name: "Sheet2" },
+                    { id: "Sheet1", name: "Sheet1", visibility: "visible" },
+                    { id: "Sheet2", name: "Sheet2", visibility: "visible" },
                   ],
                 };
               case "new_workbook":
@@ -33,8 +33,8 @@ test.describe("sheet tab context menu (tauri persistence)", () => {
                   path: null,
                   origin_path: null,
                   sheets: [
-                    { id: "Sheet1", name: "Sheet1" },
-                    { id: "Sheet2", name: "Sheet2" },
+                    { id: "Sheet1", name: "Sheet1", visibility: "visible" },
+                    { id: "Sheet2", name: "Sheet2", visibility: "visible" },
                   ],
                 };
               case "get_sheet_used_range":
