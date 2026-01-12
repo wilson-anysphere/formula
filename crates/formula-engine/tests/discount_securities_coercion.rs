@@ -18,45 +18,150 @@ fn assert_close(actual: f64, expected: f64, tol: f64) {
 fn discount_security_optional_basis_treats_blank_as_zero() {
     let mut engine = Engine::new();
 
-    // B1 is unset/blank by default.
+    // Z1 is unset/blank by default.
     engine
         .set_cell_formula(
             "Sheet1",
             "A1",
-            "=DISC(DATE(2020,1,1),DATE(2021,1,1),97,100,B1)",
+            "=DISC(DATE(2020,1,1),DATE(2021,1,1),97,100,Z1)",
         )
         .unwrap();
     engine
         .set_cell_formula("Sheet1", "A2", "=DISC(DATE(2020,1,1),DATE(2021,1,1),97,100,0)")
         .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A3", "=DISC(DATE(2020,1,1),DATE(2021,1,1),97,100,)")
+        .unwrap();
 
     engine
         .set_cell_formula(
             "Sheet1",
-            "A3",
-            "=PRICEDISC(DATE(2020,1,1),DATE(2021,1,1),0.05,100,B1)",
+            "B1",
+            "=PRICEDISC(DATE(2020,1,1),DATE(2021,1,1),0.05,100,Z1)",
         )
         .unwrap();
     engine
         .set_cell_formula(
             "Sheet1",
-            "A4",
+            "B2",
             "=PRICEDISC(DATE(2020,1,1),DATE(2021,1,1),0.05,100,0)",
         )
         .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "B3",
+            "=PRICEDISC(DATE(2020,1,1),DATE(2021,1,1),0.05,100,)",
+        )
+        .unwrap();
 
     engine
         .set_cell_formula(
             "Sheet1",
-            "A5",
-            "=RECEIVED(DATE(2020,1,1),DATE(2021,1,1),95,0.05,B1)",
+            "C1",
+            "=RECEIVED(DATE(2020,1,1),DATE(2021,1,1),95,0.05,Z1)",
         )
         .unwrap();
     engine
         .set_cell_formula(
             "Sheet1",
-            "A6",
+            "C2",
             "=RECEIVED(DATE(2020,1,1),DATE(2021,1,1),95,0.05,0)",
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "C3",
+            "=RECEIVED(DATE(2020,1,1),DATE(2021,1,1),95,0.05,)",
+        )
+        .unwrap();
+
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "D1",
+            "=YIELDDISC(DATE(2020,1,1),DATE(2021,1,1),97,100,Z1)",
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "D2",
+            "=YIELDDISC(DATE(2020,1,1),DATE(2021,1,1),97,100,0)",
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "D3",
+            "=YIELDDISC(DATE(2020,1,1),DATE(2021,1,1),97,100,)",
+        )
+        .unwrap();
+
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "E1",
+            "=INTRATE(DATE(2020,1,1),DATE(2021,1,1),97,100,Z1)",
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "E2",
+            "=INTRATE(DATE(2020,1,1),DATE(2021,1,1),97,100,0)",
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "E3",
+            "=INTRATE(DATE(2020,1,1),DATE(2021,1,1),97,100,)",
+        )
+        .unwrap();
+
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "F1",
+            "=PRICEMAT(DATE(2020,1,1),DATE(2021,1,1),DATE(2019,1,1),0.05,0.04,Z1)",
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "F2",
+            "=PRICEMAT(DATE(2020,1,1),DATE(2021,1,1),DATE(2019,1,1),0.05,0.04,0)",
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "F3",
+            "=PRICEMAT(DATE(2020,1,1),DATE(2021,1,1),DATE(2019,1,1),0.05,0.04,)",
+        )
+        .unwrap();
+
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "G1",
+            "=YIELDMAT(DATE(2020,1,1),DATE(2021,1,1),DATE(2019,1,1),0.05,100.76923076923077,Z1)",
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "G2",
+            "=YIELDMAT(DATE(2020,1,1),DATE(2021,1,1),DATE(2019,1,1),0.05,100.76923076923077,0)",
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "G3",
+            "=YIELDMAT(DATE(2020,1,1),DATE(2021,1,1),DATE(2019,1,1),0.05,100.76923076923077,)",
         )
         .unwrap();
 
@@ -68,18 +173,77 @@ fn discount_security_optional_basis_treats_blank_as_zero() {
         assert_number(engine.get_cell_value("Sheet1", "A2")),
         1e-12,
     );
-
-    assert_close(assert_number(engine.get_cell_value("Sheet1", "A3")), 95.0, 1e-12);
     assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "A1")),
         assert_number(engine.get_cell_value("Sheet1", "A3")),
-        assert_number(engine.get_cell_value("Sheet1", "A4")),
         1e-12,
     );
 
-    assert_close(assert_number(engine.get_cell_value("Sheet1", "A5")), 100.0, 1e-12);
+    assert_close(assert_number(engine.get_cell_value("Sheet1", "B1")), 95.0, 1e-12);
     assert_close(
-        assert_number(engine.get_cell_value("Sheet1", "A5")),
-        assert_number(engine.get_cell_value("Sheet1", "A6")),
+        assert_number(engine.get_cell_value("Sheet1", "B1")),
+        assert_number(engine.get_cell_value("Sheet1", "B2")),
+        1e-12,
+    );
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "B1")),
+        assert_number(engine.get_cell_value("Sheet1", "B3")),
+        1e-12,
+    );
+
+    assert_close(assert_number(engine.get_cell_value("Sheet1", "C1")), 100.0, 1e-12);
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "C1")),
+        assert_number(engine.get_cell_value("Sheet1", "C2")),
+        1e-12,
+    );
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "C1")),
+        assert_number(engine.get_cell_value("Sheet1", "C3")),
+        1e-12,
+    );
+
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "D1")),
+        assert_number(engine.get_cell_value("Sheet1", "D2")),
+        1e-12,
+    );
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "D1")),
+        assert_number(engine.get_cell_value("Sheet1", "D3")),
+        1e-12,
+    );
+
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "E1")),
+        assert_number(engine.get_cell_value("Sheet1", "E2")),
+        1e-12,
+    );
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "E1")),
+        assert_number(engine.get_cell_value("Sheet1", "E3")),
+        1e-12,
+    );
+
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "F1")),
+        assert_number(engine.get_cell_value("Sheet1", "F2")),
+        1e-12,
+    );
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "F1")),
+        assert_number(engine.get_cell_value("Sheet1", "F3")),
+        1e-12,
+    );
+
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "G1")),
+        assert_number(engine.get_cell_value("Sheet1", "G2")),
+        1e-12,
+    );
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "G1")),
+        assert_number(engine.get_cell_value("Sheet1", "G3")),
         1e-12,
     );
 }
@@ -96,4 +260,3 @@ fn discount_security_date_coercion_floors_numeric_serials() {
     engine.recalculate();
     assert_close(assert_number(engine.get_cell_value("Sheet1", "A1")), 0.03, 1e-12);
 }
-
