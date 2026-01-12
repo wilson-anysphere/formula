@@ -24,6 +24,10 @@ body {
   display: grid;
   /* titlebar, ribbon, formula bar, workspace, sheet tabs, status bar */
   grid-template-rows: auto auto auto 1fr auto auto;
+  /* Explicit single-column track: avoid implicit `auto` columns sizing to max-content
+     (which can introduce horizontal scroll when the ribbon overflows). */
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   min-height: 0;
 }
 
