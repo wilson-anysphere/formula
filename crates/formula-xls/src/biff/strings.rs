@@ -488,4 +488,61 @@ mod tests {
         assert_eq!(consumed, input.len());
         assert_eq!(s, "А");
     }
+
+    #[test]
+    fn parses_biff8_short_string_unicode() {
+        // "Hi" as UTF-16LE.
+        let input = [2u8, 0x01, b'H', 0x00, b'i', 0x00];
+        let (s, consumed) = parse_biff8_short_string(&input, 1252).expect("parse");
+        assert_eq!(consumed, input.len());
+        assert_eq!(s, "Hi");
+    }
+
+    #[test]
+    fn parses_biff8_short_string_with_richtext_and_ext() {
+        let mut input = Vec::new();
+        // cch=3, flags=richtext+ext (compressed)
+        input.extend_from_slice(&[3u8, 0x0C]);
+        input.extend_from_slice(&1u16.to_le_bytes()); // cRun
+        input.extend_from_slice(&2u32.to_le_bytes()); // cbExtRst
+        input.extend_from_slice(b"abc"); // char data
+        input.extend_from_slice(&[0u8; 4]); // rich text runs payload
+        input.extend_from_slice(&[0u8; 2]); // ext payload
+
+        let (s, consumed) = parse_biff8_short_string(&input, 1252).expect("parse");
+        assert_eq!(consumed, input.len());
+        assert_eq!(s, "abc");
+    }
+
+    #[test]
+    fn parses_biff8_unicode_string_compressed() {
+        let mut input = Vec::new();
+        input.extend_from_slice(&5u16.to_le_bytes());
+        input.push(0x00); // flags (compressed)
+        input.extend_from_slice(b"Hello");
+        let (s, consumed) = parse_biff8_unicode_string(&input, 1252).expect("parse");
+        assert_eq!(consumed, input.len());
+        assert_eq!(s, "Hello");
+    }
+
+    #[test]
+    fn parses_biff8_unicode_string_unicode() {
+        let mut input = Vec::new();
+        input.extend_from_slice(&2u16.to_le_bytes());
+        input.push(0x01); // flags (unicode)
+        input.extend_from_slice(&[b'H', 0x00, b'i', 0x00]);
+        let (s, consumed) = parse_biff8_unicode_string(&input, 1252).expect("parse");
+        assert_eq!(consumed, input.len());
+        assert_eq!(s, "Hi");
+    }
+
+    #[test]
+    fn errors_on_truncated_biff8_unicode_string_data() {
+        let mut input = Vec::new();
+        input.extend_from_slice(&5u16.to_le_bytes());
+        input.push(0x00); // flags (compressed)
+        input.extend_from_slice(b"Hel"); // truncated
+        let err = parse_biff8_unicode_string(&input, 1252).unwrap_err();
+        assert_eq!(err, "unexpected end of string");
+    }
 }
