@@ -3106,6 +3106,15 @@ fn append_cell_xml(
         }
     }
 
+    if let Some(meta) = meta {
+        if let Some(cm) = meta.cm.as_deref() {
+            out.push_str(&format!(r#" cm="{}""#, escape_attr(cm)));
+        }
+        if let Some(vm) = meta.vm.as_deref() {
+            out.push_str(&format!(r#" vm="{}""#, escape_attr(vm)));
+        }
+    }
+
     out.push('>');
 
     let model_formula = cell.formula.as_deref();

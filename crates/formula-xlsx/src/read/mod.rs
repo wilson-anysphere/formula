@@ -32,6 +32,8 @@ use crate::{
     CalcPr, CellMeta, CellValueKind, DateSystem, FormulaMeta, SheetMeta, XlsxDocument, XlsxMeta,
 };
 
+mod rich_values;
+
 const WORKBOOK_PART: &str = "xl/workbook.xml";
 const WORKBOOK_RELS_PART: &str = "xl/_rels/workbook.xml.rels";
 const REL_TYPE_STYLES: &str =
@@ -573,6 +575,10 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
     // pipeline (`xl/metadata.xml` + `xl/richData/*`), even when no DrawingML cell image store part
     // exists.
     load_rich_value_images_from_parts(&parts, &mut workbook);
+
+    // Best-effort entity/record rich value decoding. This only affects the in-memory model; the
+    // underlying parts are preserved verbatim for round-trip.
+    rich_values::apply_rich_values_to_workbook(&mut workbook, &rich_value_cells, &parts);
 
     Ok(XlsxDocument {
         workbook,

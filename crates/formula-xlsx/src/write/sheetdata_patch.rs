@@ -1307,6 +1307,15 @@ impl CellSemantics {
         } else {
             style_to_xf.get(&cell.style_id).copied().unwrap_or(0)
         };
+        // Compare entities/records by their scalar display representation so that simply *modeling*
+        // a rich value does not force the writer to rewrite the cell XML on a no-op roundtrip.
+        //
+        // The `vm` attribute and richData payloads are preserved separately via `XlsxDocument.parts`.
+        let value = match &cell.value {
+            CellValue::Entity(entity) => CellValue::String(entity.display_value.clone()),
+            CellValue::Record(record) => CellValue::String(record.to_string()),
+            other => other.clone(),
+        };
         Self {
             style_xf,
             formula: cell
@@ -1314,7 +1323,7 @@ impl CellSemantics {
                 .as_deref()
                 .map(crate::formula_text::normalize_display_formula)
                 .filter(|f| !f.is_empty()),
-            value: cell.value.clone(),
+            value,
         }
     }
 
