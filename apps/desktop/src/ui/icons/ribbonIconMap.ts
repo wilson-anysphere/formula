@@ -16,14 +16,17 @@ import { ClearIcon } from "./ClearIcon";
 import { ClipboardPaneIcon } from "./ClipboardPaneIcon";
 import { ClockIcon } from "./ClockIcon";
 import { CloseIcon } from "./CloseIcon";
+import { ColumnWidthIcon } from "./ColumnWidthIcon";
 import { CommaIcon } from "./CommaIcon";
 import { ConditionalFormattingIcon } from "./ConditionalFormattingIcon";
 import { CopyIcon } from "./CopyIcon";
 import { CurrencyIcon } from "./CurrencyIcon";
 import { CutIcon } from "./CutIcon";
+import { DeleteCellsIcon } from "./DeleteCellsIcon";
 import { DecreaseDecimalIcon } from "./DecreaseDecimalIcon";
 import { DecreaseFontIcon } from "./DecreaseFontIcon";
 import { DecreaseIndentIcon } from "./DecreaseIndentIcon";
+import { DeleteSheetIcon } from "./DeleteSheetIcon";
 import { ExportIcon } from "./ExportIcon";
 import { EyeIcon } from "./EyeIcon";
 import { FileIcon } from "./FileIcon";
@@ -41,6 +44,10 @@ import { GoToIcon } from "./GoToIcon";
 import { IncreaseDecimalIcon } from "./IncreaseDecimalIcon";
 import { IncreaseFontIcon } from "./IncreaseFontIcon";
 import { IncreaseIndentIcon } from "./IncreaseIndentIcon";
+import { InsertCellsIcon } from "./InsertCellsIcon";
+import { InsertColumnsIcon } from "./InsertColumnsIcon";
+import { InsertRowsIcon } from "./InsertRowsIcon";
+import { InsertSheetIcon } from "./InsertSheetIcon";
 import { ItalicIcon } from "./ItalicIcon";
 import { LinkIcon } from "./LinkIcon";
 import { LockIcon } from "./LockIcon";
@@ -49,6 +56,7 @@ import { MergeCenterIcon } from "./MergeCenterIcon";
 import { MoreFormatsIcon } from "./MoreFormatsIcon";
 import { NumberFormatIcon } from "./NumberFormatIcon";
 import { OrientationIcon } from "./OrientationIcon";
+import { OrganizeSheetsIcon } from "./OrganizeSheetsIcon";
 import { PageSetupIcon } from "./PageSetupIcon";
 import { PasteIcon } from "./PasteIcon";
 import { PasteSpecialIcon } from "./PasteSpecialIcon";
@@ -59,6 +67,7 @@ import { SaveIcon } from "./SaveIcon";
 import { SettingsIcon } from "./SettingsIcon";
 import { ShareIcon } from "./ShareIcon";
 import { ReplaceIcon } from "./ReplaceIcon";
+import { RowHeightIcon } from "./RowHeightIcon";
 import { SortFilterIcon } from "./SortFilterIcon";
 import { SortIcon } from "./SortIcon";
 import { StrikethroughIcon } from "./StrikethroughIcon";
@@ -156,6 +165,23 @@ export const ribbonIconMap = {
   "home.styles.conditionalFormatting": ConditionalFormattingIcon,
   "home.styles.formatAsTable": FormatAsTableIcon,
   "home.styles.cellStyles": CellStylesIcon,
+
+  // Cells
+  "home.cells.insert": InsertCellsIcon,
+  "home.cells.delete": DeleteCellsIcon,
+  "home.cells.format": SettingsIcon,
+  "home.insert.insertCells": InsertCellsIcon,
+  "home.insert.insertRows": InsertRowsIcon,
+  "home.insert.insertColumns": InsertColumnsIcon,
+  "home.insert.insertSheet": InsertSheetIcon,
+  "home.delete.deleteCells": DeleteCellsIcon,
+  "home.delete.deleteRows": DeleteCellsIcon,
+  "home.delete.deleteColumns": DeleteCellsIcon,
+  "home.delete.deleteSheet": DeleteSheetIcon,
+  "home.format.formatCells": SettingsIcon,
+  "home.format.rowHeight": RowHeightIcon,
+  "home.format.columnWidth": ColumnWidthIcon,
+  "home.format.organizeSheets": OrganizeSheetsIcon,
 
   // Editing
   "home.editing.autoSum": AutoSumIcon,
