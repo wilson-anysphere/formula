@@ -17,6 +17,8 @@ use super::strings;
 // - MULBLANK: 2.4.140
 const RECORD_ROW: u16 = 0x0208;
 const RECORD_COLINFO: u16 = 0x007D;
+/// MERGEDCELLS [MS-XLS 2.4.139]
+const RECORD_MERGEDCELLS: u16 = 0x00E5;
 
 const RECORD_FORMULA: u16 = 0x0006;
 const RECORD_BLANK: u16 = 0x0201;
@@ -110,6 +112,65 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
     }
 
     Ok(props)
+}
+
+/// Parse merged cell regions from a worksheet BIFF substream.
+///
+/// `calamine` usually exposes merge ranges via `worksheet_merge_cells()`, but some `.xls` files in
+/// the wild contain `MERGEDCELLS` records that are not surfaced (or surfaced incompletely). This is
+/// a best-effort fallback that scans the sheet substream directly and recovers any merge ranges it
+/// can.
+pub(crate) fn parse_biff_sheet_merged_cells(
+    workbook_stream: &[u8],
+    start: usize,
+) -> Result<Vec<Range>, String> {
+    let mut out = Vec::new();
+
+    for record in records::BestEffortSubstreamIter::from_offset(workbook_stream, start)? {
+        match record.record_id {
+            RECORD_MERGEDCELLS => {
+                // MERGEDCELLS [MS-XLS 2.4.139]
+                // - cAreas (2 bytes): number of Ref8 structures
+                // - Ref8 (8 bytes each): rwFirst, rwLast, colFirst, colLast (all u16)
+                let data = record.data;
+                if data.len() < 2 {
+                    continue;
+                }
+
+                let c_areas = u16::from_le_bytes([data[0], data[1]]) as usize;
+                let mut pos = 2usize;
+                for _ in 0..c_areas {
+                    let Some(chunk) = data.get(pos..pos + 8) else {
+                        break;
+                    };
+                    pos = pos.saturating_add(8);
+
+                    let rw_first = u16::from_le_bytes([chunk[0], chunk[1]]) as u32;
+                    let rw_last = u16::from_le_bytes([chunk[2], chunk[3]]) as u32;
+                    let col_first = u16::from_le_bytes([chunk[4], chunk[5]]) as u32;
+                    let col_last = u16::from_le_bytes([chunk[6], chunk[7]]) as u32;
+
+                    if rw_first >= EXCEL_MAX_ROWS
+                        || rw_last >= EXCEL_MAX_ROWS
+                        || col_first >= EXCEL_MAX_COLS
+                        || col_last >= EXCEL_MAX_COLS
+                    {
+                        // Ignore out-of-bounds ranges to avoid corrupt coordinates.
+                        continue;
+                    }
+
+                    out.push(Range::new(
+                        CellRef::new(rw_first, col_first),
+                        CellRef::new(rw_last, col_last),
+                    ));
+                }
+            }
+            records::RECORD_EOF => break,
+            _ => {}
+        }
+    }
+
+    Ok(out)
 }
 
 pub(crate) fn parse_biff_sheet_cell_xf_indices_filtered(
@@ -625,6 +686,47 @@ mod tests {
         assert_eq!(xfs.get(&CellRef::new(1, 2)).copied(), Some(12));
         assert_eq!(xfs.get(&CellRef::new(2, 1)).copied(), Some(20));
         assert_eq!(xfs.get(&CellRef::new(2, 2)).copied(), Some(21));
+    }
+
+    #[test]
+    fn parses_mergedcells_records() {
+        // First record: A1:B1.
+        let mut merged1 = Vec::new();
+        merged1.extend_from_slice(&1u16.to_le_bytes()); // cAreas
+        merged1.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
+        merged1.extend_from_slice(&0u16.to_le_bytes()); // rwLast
+        merged1.extend_from_slice(&0u16.to_le_bytes()); // colFirst
+        merged1.extend_from_slice(&1u16.to_le_bytes()); // colLast
+
+        // Second record: one valid area (C2:D3) and one out-of-bounds (colFirst >= EXCEL_MAX_COLS).
+        let mut merged2 = Vec::new();
+        merged2.extend_from_slice(&2u16.to_le_bytes()); // cAreas
+        // C2:D3 => rows 1..2, cols 2..3 (0-based)
+        merged2.extend_from_slice(&1u16.to_le_bytes()); // rwFirst
+        merged2.extend_from_slice(&2u16.to_le_bytes()); // rwLast
+        merged2.extend_from_slice(&2u16.to_le_bytes()); // colFirst
+        merged2.extend_from_slice(&3u16.to_le_bytes()); // colLast
+        // Out-of-bounds cols.
+        merged2.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
+        merged2.extend_from_slice(&0u16.to_le_bytes()); // rwLast
+        merged2.extend_from_slice(&(EXCEL_MAX_COLS as u16).to_le_bytes()); // colFirst (OOB)
+        merged2.extend_from_slice(&(EXCEL_MAX_COLS as u16).to_le_bytes()); // colLast (OOB)
+
+        let stream = [
+            record(RECORD_MERGEDCELLS, &merged1),
+            record(RECORD_MERGEDCELLS, &merged2),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let ranges = parse_biff_sheet_merged_cells(&stream, 0).expect("parse");
+        assert_eq!(
+            ranges,
+            vec![
+                Range::from_a1("A1:B1").unwrap(),
+                Range::from_a1("C2:D3").unwrap(),
+            ]
+        );
     }
 
     #[test]

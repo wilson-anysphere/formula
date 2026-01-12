@@ -7,7 +7,7 @@
 //! preserve Excel number format codes and the workbook date system (1900 vs 1904)
 //! when possible. Anything else is preserved as metadata/warnings.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use calamine::{open_workbook, Data, Reader, Sheet, SheetType, SheetVisible, Xls};
@@ -433,12 +433,52 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
             }
         }
 
+        // Merged regions: prefer calamine's parsed merge metadata, but fall back to scanning the
+        // worksheet BIFF substream for `MERGEDCELLS` records when calamine provides none.
+        let mut merge_ranges: Vec<Range> = Vec::new();
         if let Some(merge_cells) = workbook.worksheet_merge_cells(&source_sheet_name) {
             for dim in merge_cells {
-                let range = Range::new(
+                merge_ranges.push(Range::new(
                     CellRef::new(dim.start.0, dim.start.1),
                     CellRef::new(dim.end.0, dim.end.1),
-                );
+                ));
+            }
+        }
+
+        // Best-effort fallback when calamine does not surface any merged-cell ranges.
+        if merge_ranges.is_empty() {
+            if let (Some(workbook_stream), Some(biff_idx)) = (workbook_stream.as_deref(), biff_idx) {
+                if let Some(sheet_info) = biff_sheets.as_ref().and_then(|s| s.get(biff_idx)) {
+                    if sheet_info.offset >= workbook_stream.len() {
+                        warnings.push(ImportWarning::new(format!(
+                            "failed to import `.xls` merged cells for sheet `{sheet_name}`: out-of-bounds stream offset {}",
+                            sheet_info.offset
+                        )));
+                    } else {
+                        match biff::parse_biff_sheet_merged_cells(
+                            workbook_stream,
+                            sheet_info.offset,
+                        ) {
+                            Ok(mut ranges) => {
+                                if !ranges.is_empty() {
+                                    merge_ranges.append(&mut ranges);
+                                }
+                            }
+                            Err(err) => warnings.push(ImportWarning::new(format!(
+                                "failed to import `.xls` merged cells for sheet `{sheet_name}`: {err}"
+                            ))),
+                        }
+                    }
+                }
+            }
+        }
+
+        if !merge_ranges.is_empty() {
+            let mut seen: HashSet<Range> = HashSet::new();
+            for range in merge_ranges {
+                if !seen.insert(range) {
+                    continue;
+                }
 
                 // Populate the model's merged-region table so cell resolution matches Excel.
                 if let Err(err) = sheet.merged_regions.add(range) {
@@ -848,6 +888,18 @@ pub fn sanitize_sheet_name(
     }
 
     unreachable!("suffix loop should always return a unique sheet name");
+}
+
+/// Parse worksheet merged regions from BIFF `MERGEDCELLS` records.
+///
+/// This helper is part of the public API only so it can be exercised from integration tests in
+/// `crates/formula-xls/tests/`. Most callers should use [`import_xls_path`] instead.
+#[doc(hidden)]
+pub fn parse_biff_sheet_merged_cells(
+    workbook_stream: &[u8],
+    start: usize,
+) -> Result<Vec<Range>, String> {
+    biff::parse_biff_sheet_merged_cells(workbook_stream, start)
 }
 
 fn normalize_sheet_name_for_match(name: &str) -> String {
