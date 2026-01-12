@@ -13,14 +13,26 @@ const DOC_PATH = path.resolve(process.cwd(), "docs/05-ai-integration.md");
  * @param {string} headingLine exact line including leading `### `
  */
 function extractSection(markdown, headingLine) {
-  const start = markdown.indexOf(headingLine);
-  assert.notEqual(start, -1, `Expected docs to contain heading: ${headingLine}`);
+  const lines = markdown.split("\n");
+  const startLine = lines.findIndex((line) => line === headingLine);
+  assert.notEqual(startLine, -1, `Expected docs to contain heading: ${headingLine}`);
 
-  // Find the next top-level section heading at the same depth (`### `).
-  const afterStart = start + headingLine.length;
-  const next = markdown.indexOf("\n### ", afterStart);
-  const end = next === -1 ? markdown.length : next;
-  return markdown.slice(start, end);
+  /** @type {string[]} */
+  const out = [];
+
+  // Keep this intentionally simple: stop at the next heading at the same or higher
+  // level (### / ## / #), but ignore headings inside fenced code blocks.
+  let inFence = false;
+  for (let i = startLine; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (i > startLine && !inFence && /^#{1,3}\s/.test(line)) break;
+
+    out.push(line);
+
+    if (line.startsWith("```")) inFence = !inFence;
+  }
+
+  return out.join("\n");
 }
 
 test("docs: RAG Over Cells describes deterministic HashEmbedder embeddings (not user-configurable)", async () => {
