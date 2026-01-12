@@ -814,6 +814,22 @@ export const defaultRibbonSchema: RibbonSchema = {
               size: "icon",
             },
             {
+              id: "open-version-history-panel",
+              label: "Version History",
+              ariaLabel: "Toggle Version History panel",
+              icon: "🕘",
+              testId: "open-version-history-panel",
+              size: "icon",
+            },
+            {
+              id: "open-branch-manager-panel",
+              label: "Branches",
+              ariaLabel: "Toggle Branch Manager panel",
+              icon: "🌿",
+              testId: "open-branch-manager-panel",
+              size: "icon",
+            },
+            {
               id: "open-data-queries-panel",
               label: "Queries",
               ariaLabel: "Toggle Queries panel",

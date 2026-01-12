@@ -99,6 +99,26 @@ test.describe("dockable panels layout persistence", () => {
     await expect(rightDock.getByTestId("dock-tab-aiChat")).toHaveAttribute("aria-selected", "true");
   });
 
+  test("ribbon button opens Version History panel", async ({ page }) => {
+    await gotoDesktop(page);
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await waitForDesktopReady(page);
+
+    await page.getByTestId("open-version-history-panel").click();
+    await expect(page.getByTestId("dock-right").getByTestId("panel-versionHistory")).toBeVisible();
+  });
+
+  test("ribbon button opens Branch Manager panel", async ({ page }) => {
+    await gotoDesktop(page);
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await waitForDesktopReady(page);
+
+    await page.getByTestId("open-branch-manager-panel").click();
+    await expect(page.getByTestId("dock-right").getByTestId("panel-branchManager")).toBeVisible();
+  });
+
   test("Ctrl/Cmd+Shift+A toggles AI chat panel open/closed", async ({ page }) => {
     await gotoDesktop(page);
     await page.evaluate(() => localStorage.clear());

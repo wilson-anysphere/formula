@@ -6366,6 +6366,11 @@ mountRibbon(ribbonReactRoot, {
         return;
       }
 
+      case "file.info.manageWorkbook.versions": {
+        toggleDockPanel(PanelIds.VERSION_HISTORY);
+        return;
+      }
+
       case "file.save.saveAs":
       case "file.save.saveAs.copy":
       case "file.save.saveAs.download": {
@@ -6843,6 +6848,12 @@ mountRibbon(ribbonReactRoot, {
       case "open-ai-audit-panel":
       case "open-panel-ai-audit":
         toggleDockPanel(PanelIds.AI_AUDIT);
+        return;
+      case "open-version-history-panel":
+        toggleDockPanel(PanelIds.VERSION_HISTORY);
+        return;
+      case "open-branch-manager-panel":
+        toggleDockPanel(PanelIds.BRANCH_MANAGER);
         return;
       case "open-data-queries-panel":
         toggleDockPanel(PanelIds.DATA_QUERIES);

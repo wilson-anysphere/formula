@@ -323,6 +323,30 @@ export function registerBuiltinCommands(params: {
   );
 
   commandRegistry.registerBuiltinCommand(
+    "view.togglePanel.versionHistory",
+    t("command.view.togglePanel.versionHistory"),
+    () => toggleDockPanel(PanelIds.VERSION_HISTORY),
+    {
+      category: t("commandCategory.view"),
+      icon: null,
+      description: t("commandDescription.view.togglePanel.versionHistory"),
+      keywords: ["version", "versions", "history", "panel"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "view.togglePanel.branchManager",
+    t("command.view.togglePanel.branchManager"),
+    () => toggleDockPanel(PanelIds.BRANCH_MANAGER),
+    {
+      category: t("commandCategory.view"),
+      icon: null,
+      description: t("commandDescription.view.togglePanel.branchManager"),
+      keywords: ["branch", "branches", "panel"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
     "comments.togglePanel",
     t("command.comments.togglePanel"),
     () => app.toggleCommentsPanel(),
