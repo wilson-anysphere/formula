@@ -203,7 +203,7 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
 
     let mut xf_style_ids: Option<Vec<u32>> = None;
     let mut xf_is_interesting: Option<Vec<bool>> = None;
-    let mut xf_resolved_styles: Option<Vec<Style>> = None;
+    let mut biff_globals: Option<biff::globals::BiffWorkbookGlobals> = None;
     let mut sheet_tab_colors: Option<Vec<Option<TabColor>>> = None;
     let mut workbook_active_tab: Option<u16> = None;
     let mut biff_sheets: Option<Vec<biff::BoundSheetInfo>> = None;
@@ -244,19 +244,10 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                 warnings.extend(globals.warnings.drain(..).map(ImportWarning::new));
                 sheet_tab_colors = Some(std::mem::take(&mut globals.sheet_tab_colors));
 
-                let resolved_styles = globals.resolve_all_styles();
-                let mut interesting = Vec::with_capacity(resolved_styles.len());
-
-                for style in &resolved_styles {
-                    interesting.push(style != &Style::default());
-                }
-
-                // Defer interning styles until we know which XF indices are actually referenced by
-                // cells. This keeps the in-memory style table smaller for workbooks with many
-                // unused XF records.
-                xf_style_ids = Some(vec![0; resolved_styles.len()]);
+                let interesting = globals.xf_is_interesting_mask();
+                xf_style_ids = Some(vec![0; interesting.len()]);
                 xf_is_interesting = Some(interesting);
-                xf_resolved_styles = Some(resolved_styles);
+                biff_globals = Some(globals);
             }
             Err(err) => warnings.push(ImportWarning::new(format!(
                 "failed to import `.xls` workbook globals: {err}"
@@ -356,12 +347,12 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
         // Intern styles only for XF indices that were referenced by at least one "interesting" cell
         // record (including BLANK/MUL* records). This is best-effort; out-of-range XF indices are
         // ignored here but still preserved in `cell_xf_indices` so callers can surface warnings.
-        if let (Some(resolved_styles), Some(style_ids), Some(cell_xfs_by_sheet)) = (
-            xf_resolved_styles.as_ref(),
+        if let (Some(globals), Some(style_ids), Some(cell_xfs_by_sheet)) = (
+            biff_globals.as_ref(),
             xf_style_ids.as_mut(),
             cell_xf_indices.as_ref(),
         ) {
-            let mut used = vec![false; resolved_styles.len()];
+            let mut used = vec![false; style_ids.len()];
             for sheet_xfs in cell_xfs_by_sheet {
                 for &xf_idx in sheet_xfs.values() {
                     let idx = xf_idx as usize;
@@ -371,20 +362,16 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                 }
             }
 
-            for (xf_idx, is_used) in used.iter().enumerate() {
-                if !*is_used {
+            for (xf_idx, style) in globals.resolve_styles_for_used_mask(&used) {
+                if style == Style::default() {
                     continue;
                 }
-                let style = &resolved_styles[xf_idx];
-                if style == &Style::default() {
-                    continue;
-                }
-                style_ids[xf_idx] = out.intern_style(style.clone());
+                style_ids[xf_idx] = out.intern_style(style);
             }
         }
 
-        // Drop the resolved style cache once we've built the XF -> style_id mapping.
-        drop(xf_resolved_styles.take());
+        // Drop the BIFF globals cache once we've built the XF -> style_id mapping.
+        drop(biff_globals.take());
     }
 
     // `calamine` may surface date/time serials as `Data::DateTime`, but it does not preserve the

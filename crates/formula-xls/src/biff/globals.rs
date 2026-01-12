@@ -240,6 +240,22 @@ struct BiffXfFill {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct BiffResolvedXfDiff {
+    num_fmt: bool,
+    font: bool,
+    fill: bool,
+    border: bool,
+    alignment: bool,
+    protection: bool,
+}
+
+impl BiffResolvedXfDiff {
+    fn is_interesting(self) -> bool {
+        self.num_fmt || self.font || self.fill || self.border || self.alignment || self.protection
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) struct BiffXf {
     pub(crate) font_idx: u16,
     pub(crate) num_fmt_id: u16,
@@ -295,6 +311,7 @@ impl BiffWorkbookGlobals {
             .unwrap_or_default()
     }
 
+    #[allow(dead_code)]
     pub(crate) fn resolve_all_styles(&self) -> Vec<Style> {
         let mut cache: Vec<Option<Style>> = vec![None; self.xfs.len()];
         let mut stack: Vec<usize> = Vec::new();
@@ -302,6 +319,47 @@ impl BiffWorkbookGlobals {
             let _ = self.resolve_style_inner(idx, &mut cache, &mut stack);
         }
         cache.into_iter().map(|s| s.unwrap_or_default()).collect()
+    }
+
+    /// Return a boolean mask (`xf_index -> is_interesting`) indicating which XF records resolve to a
+    /// non-default [`Style`].
+    ///
+    /// This is used to avoid recording per-cell XF indices for cells that only use the default
+    /// style (which can be the vast majority of cells in a sheet).
+    pub(crate) fn xf_is_interesting_mask(&self) -> Vec<bool> {
+        let mut cache: Vec<Option<BiffResolvedXfDiff>> = vec![None; self.xfs.len()];
+        let mut stack: Vec<usize> = Vec::new();
+        let mut out = Vec::with_capacity(self.xfs.len());
+        for idx in 0..self.xfs.len() {
+            let diff = self
+                .resolve_xf_diff_inner(idx, &mut cache, &mut stack)
+                .unwrap_or_default();
+            out.push(diff.is_interesting());
+        }
+        out
+    }
+
+    /// Resolve the [`Style`] values for each XF index where `used_mask[idx] == true`.
+    ///
+    /// Styles are returned as `(xf_index, style)` pairs. Callers can then intern those styles into
+    /// their destination workbook.
+    pub(crate) fn resolve_styles_for_used_mask(&self, used_mask: &[bool]) -> Vec<(usize, Style)> {
+        let mut cache: Vec<Option<Style>> = vec![None; self.xfs.len()];
+        let mut stack: Vec<usize> = Vec::new();
+        let mut out: Vec<(usize, Style)> = Vec::new();
+
+        let len = self.xfs.len().min(used_mask.len());
+        for idx in 0..len {
+            if !used_mask[idx] {
+                continue;
+            }
+            let style = self
+                .resolve_style_inner(idx, &mut cache, &mut stack)
+                .unwrap_or_default();
+            out.push((idx, style));
+        }
+
+        out
     }
 
     fn resolve_style_inner(
@@ -375,6 +433,110 @@ impl BiffWorkbookGlobals {
         stack.pop();
         cache[xf_index] = Some(base.clone());
         Some(base)
+    }
+
+    fn resolve_xf_diff_inner(
+        &self,
+        xf_index: usize,
+        cache: &mut [Option<BiffResolvedXfDiff>],
+        stack: &mut Vec<usize>,
+    ) -> Option<BiffResolvedXfDiff> {
+        if xf_index >= self.xfs.len() {
+            return Some(BiffResolvedXfDiff::default());
+        }
+
+        if let Some(diff) = cache[xf_index] {
+            return Some(diff);
+        }
+
+        if stack.contains(&xf_index) {
+            log::warn!("cycle detected while resolving XF inheritance at index {xf_index}");
+            return Some(BiffResolvedXfDiff::default());
+        }
+        stack.push(xf_index);
+
+        let xf = self.xfs[xf_index];
+        let kind = xf.kind.unwrap_or(BiffXfKind::Cell);
+
+        let mut base = if let Some(parent) = xf.parent_xf {
+            let parent_idx = parent as usize;
+            if parent_idx != xf_index && parent_idx < self.xfs.len() {
+                self.resolve_xf_diff_inner(parent_idx, cache, stack)
+                    .unwrap_or_default()
+            } else {
+                BiffResolvedXfDiff::default()
+            }
+        } else {
+            BiffResolvedXfDiff::default()
+        };
+
+        let apply = |flag: bool| kind == BiffXfKind::Style || flag;
+
+        if apply(xf.apply.num_fmt) || xf.num_fmt_id != 0 {
+            base.num_fmt = xf.num_fmt_id != 0;
+        }
+
+        if apply(xf.apply.font) {
+            base.font = self.font_is_non_default(xf.font_idx);
+        }
+
+        if apply(xf.apply.fill) {
+            base.fill = xf.fill.pattern != 0;
+        }
+
+        if apply(xf.apply.border) {
+            base.border = self.border_is_non_default(xf.border);
+        }
+
+        if apply(xf.apply.alignment) {
+            base.alignment = self.alignment_is_non_default(xf.alignment);
+        }
+
+        if apply(xf.apply.protection) {
+            base.protection = self.protection_is_non_default(xf.protection);
+        }
+
+        stack.pop();
+        cache[xf_index] = Some(base);
+        Some(base)
+    }
+
+    fn font_is_non_default(&self, ifnt: u16) -> bool {
+        let Some(base_font) = self.fonts.first() else {
+            return false;
+        };
+
+        // BIFF quirk: font index 4 is reserved and omitted from the FONT record stream.
+        let idx = if ifnt >= 4 { ifnt - 1 } else { ifnt } as usize;
+        let Some(font) = self.fonts.get(idx) else {
+            return false;
+        };
+
+        font != base_font
+    }
+
+    fn border_is_non_default(&self, border: BiffXfBorder) -> bool {
+        border.left.style != 0
+            || border.right.style != 0
+            || border.top.style != 0
+            || border.bottom.style != 0
+            || border.diagonal.style != 0
+            || border.diagonal_up
+            || border.diagonal_down
+            // If a border color is set but the style is "none", it does not affect rendering, so we
+            // intentionally ignore `color_idx` when `style == 0`.
+    }
+
+    fn alignment_is_non_default(&self, alignment: BiffXfAlignment) -> bool {
+        alignment.horizontal.is_some()
+            || alignment.vertical.is_some()
+            || alignment.wrap_text
+            || alignment.rotation.is_some()
+            || alignment.indent.is_some()
+    }
+
+    fn protection_is_non_default(&self, protection: BiffXfProtection) -> bool {
+        protection.locked != true || protection.hidden != false
     }
 
     fn resolve_color_idx(&self, idx: u16) -> Option<Color> {
