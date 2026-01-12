@@ -1,7 +1,7 @@
 use std::io::Write as _;
 use std::path::PathBuf;
 
-use formula_model::{CellRef, CellValue};
+use formula_model::{CellRef, CellValue, DateSystem, SheetVisibility};
 
 fn fixture_path(rel: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures").join(rel)
@@ -16,6 +16,12 @@ fn xlsb_fixture_path(rel: &str) -> PathBuf {
 fn xls_fixture_path(rel: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../formula-xls/tests/fixtures")
+        .join(rel)
+}
+
+fn xlsx_test_fixture_path(rel: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../formula-xlsx/tests/fixtures")
         .join(rel)
 }
 
@@ -56,6 +62,48 @@ fn open_workbook_model_xlsx_multi_sheet() {
 
     let sheet2 = workbook.sheet_by_name("Sheet2").expect("Sheet2 missing");
     assert_eq!(sheet2.value_a1("A1").unwrap(), CellValue::Number(2.0));
+}
+
+#[test]
+fn open_workbook_model_xlsx_shared_strings() {
+    let path = fixture_path("xlsx/basic/shared-strings.xlsx");
+    let workbook = formula_io::open_workbook_model(&path).expect("open workbook model");
+
+    assert_eq!(workbook.sheets.len(), 1);
+    assert_eq!(workbook.sheets[0].name, "Sheet1");
+
+    let sheet = workbook.sheet_by_name("Sheet1").expect("Sheet1 missing");
+    assert_eq!(
+        sheet.value(CellRef::from_a1("A1").unwrap()),
+        CellValue::String("Hello".to_string())
+    );
+    assert_eq!(
+        sheet.value(CellRef::from_a1("B1").unwrap()),
+        CellValue::String("World".to_string())
+    );
+}
+
+#[test]
+fn open_workbook_model_xlsx_date_system_1904() {
+    let path = fixture_path("xlsx/metadata/date-system-1904.xlsx");
+    let workbook = formula_io::open_workbook_model(&path).expect("open workbook model");
+    assert_eq!(workbook.date_system, DateSystem::Excel1904);
+}
+
+#[test]
+fn open_workbook_model_xlsx_sheet_visibility() {
+    let path = xlsx_test_fixture_path("sheet-metadata.xlsx");
+    let workbook = formula_io::open_workbook_model(&path).expect("open workbook model");
+
+    assert_eq!(workbook.sheets.len(), 3);
+    assert_eq!(workbook.sheets[0].name, "Visible");
+    assert_eq!(workbook.sheets[0].visibility, SheetVisibility::Visible);
+
+    assert_eq!(workbook.sheets[1].name, "Hidden");
+    assert_eq!(workbook.sheets[1].visibility, SheetVisibility::Hidden);
+
+    assert_eq!(workbook.sheets[2].name, "VeryHidden");
+    assert_eq!(workbook.sheets[2].visibility, SheetVisibility::VeryHidden);
 }
 
 #[test]
