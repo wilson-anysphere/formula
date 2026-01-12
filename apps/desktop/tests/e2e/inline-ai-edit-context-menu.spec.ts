@@ -23,9 +23,10 @@ test.describe("AI inline edit (context menu)", () => {
 
     const item = menu.getByRole("button", { name: /Inline AI Edit/ });
     await expect(item).toBeEnabled();
+    const expectedShortcut = process.platform === "darwin" ? "⌘K" : "Ctrl+K";
+    await expect(item.locator('span[aria-hidden="true"]')).toHaveText(expectedShortcut);
     await item.click();
 
     await expect(page.getByTestId("inline-edit-overlay")).toBeVisible();
   });
 });
-
