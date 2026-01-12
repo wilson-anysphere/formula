@@ -12,6 +12,7 @@
 ///     `PROJECTHELPFILEPATH2` (0x003D)
 ///   - Module strings: `MODULENAMEUNICODE` (0x0047), `MODULESTREAMNAMEUNICODE` (0x0032),
 ///     `MODULEDOCSTRINGUNICODE` (0x0048)
+/// - `0x004A` is `PROJECTCOMPATVERSION`.
 pub fn record_name(id: u16) -> Option<&'static str> {
     Some(match id {
         // ---- Project information records ----
@@ -19,10 +20,8 @@ pub fn record_name(id: u16) -> Option<&'static str> {
         0x0002 => "PROJECTLCID",
         0x0003 => "PROJECTCODEPAGE",
         0x0004 => "PROJECTNAME",
-
         0x0005 => "PROJECTDOCSTRING",
         0x0040 => "PROJECTDOCSTRINGUNICODE",
-
         0x0006 => "PROJECTHELPFILEPATH",
         0x003D => "PROJECTHELPFILEPATH2",
 
@@ -59,6 +58,7 @@ pub fn record_name(id: u16) -> Option<&'static str> {
         0x0048 => "MODULEDOCSTRINGUNICODE",
 
         0x001D => "MODULEHELPFILEPATH",
+        0x0049 => "MODULEHELPFILEPATHUNICODE",
         0x001E => "MODULEHELPCONTEXT",
 
         0x0021 => "MODULETYPE (procedural TypeRecord.Id=0x0021)",
