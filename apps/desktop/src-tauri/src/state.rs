@@ -2928,6 +2928,47 @@ fn refresh_pivot_registration(
     engine: &mut FormulaEngine,
     pivot: &mut PivotRegistration,
 ) -> Result<Vec<CellUpdateData>, AppStateError> {
+    if pivot.source_range.start_row > pivot.source_range.end_row
+        || pivot.source_range.start_col > pivot.source_range.end_col
+    {
+        return Err(AppStateError::InvalidRange {
+            start_row: pivot.source_range.start_row,
+            start_col: pivot.source_range.start_col,
+            end_row: pivot.source_range.end_row,
+            end_col: pivot.source_range.end_col,
+        });
+    }
+
+    let source_rows = pivot
+        .source_range
+        .end_row
+        .checked_sub(pivot.source_range.start_row)
+        .and_then(|d| d.checked_add(1))
+        .unwrap_or(usize::MAX);
+    let source_cols = pivot
+        .source_range
+        .end_col
+        .checked_sub(pivot.source_range.start_col)
+        .and_then(|d| d.checked_add(1))
+        .unwrap_or(usize::MAX);
+
+    if source_rows > MAX_RANGE_DIM || source_cols > MAX_RANGE_DIM {
+        return Err(AppStateError::RangeDimensionTooLarge {
+            rows: source_rows,
+            cols: source_cols,
+            limit: MAX_RANGE_DIM,
+        });
+    }
+
+    let source_cells = (source_rows as u128) * (source_cols as u128);
+    if source_cells > MAX_RANGE_CELLS_PER_CALL as u128 {
+        return Err(AppStateError::RangeTooLarge {
+            rows: source_rows,
+            cols: source_cols,
+            limit: MAX_RANGE_CELLS_PER_CALL,
+        });
+    }
+
     let source_values = {
         let sheet = workbook
             .sheet(&pivot.source_sheet_id)
@@ -2958,14 +2999,38 @@ fn refresh_pivot_registration(
     let row_count = grid.len();
     let col_count = grid[0].len();
 
+    if row_count > MAX_RANGE_DIM || col_count > MAX_RANGE_DIM {
+        return Err(AppStateError::RangeDimensionTooLarge {
+            rows: row_count,
+            cols: col_count,
+            limit: MAX_RANGE_DIM,
+        });
+    }
+
+    let output_cells = (row_count as u128) * (col_count as u128);
+    if output_cells > MAX_RANGE_CELLS_PER_CALL as u128 {
+        return Err(AppStateError::RangeTooLarge {
+            rows: row_count,
+            cols: col_count,
+            limit: MAX_RANGE_CELLS_PER_CALL,
+        });
+    }
+
     let dest_start_row = pivot.destination.row;
     let dest_start_col = pivot.destination.col;
+
+    let end_row = dest_start_row
+        .checked_add(row_count.saturating_sub(1))
+        .ok_or_else(|| AppStateError::Pivot("pivot output range row overflow".to_string()))?;
+    let end_col = dest_start_col
+        .checked_add(col_count.saturating_sub(1))
+        .ok_or_else(|| AppStateError::Pivot("pivot output range col overflow".to_string()))?;
 
     let next_range = CellRect {
         start_row: dest_start_row,
         start_col: dest_start_col,
-        end_row: dest_start_row + row_count - 1,
-        end_col: dest_start_col + col_count - 1,
+        end_row,
+        end_col,
     };
 
     let union_range = pivot
@@ -2974,8 +3039,16 @@ fn refresh_pivot_registration(
         .map(|prev| prev.union(&next_range))
         .unwrap_or_else(|| next_range.clone());
 
-    let union_rows = union_range.end_row - union_range.start_row + 1;
-    let union_cols = union_range.end_col - union_range.start_col + 1;
+    let union_rows = union_range
+        .end_row
+        .checked_sub(union_range.start_row)
+        .and_then(|d| d.checked_add(1))
+        .ok_or_else(|| AppStateError::Pivot("pivot output range row overflow".to_string()))?;
+    let union_cols = union_range
+        .end_col
+        .checked_sub(union_range.start_col)
+        .and_then(|d| d.checked_add(1))
+        .ok_or_else(|| AppStateError::Pivot("pivot output range col overflow".to_string()))?;
 
     let dest_sheet_id = pivot.destination.sheet_id.clone();
     let dest_sheet_name = workbook
@@ -3719,6 +3792,46 @@ mod tests {
         let err = state
             .set_range_number_format(&sheet_id, 0, 0, end_row, end_col, Some("0.00".to_string()))
             .expect_err("expected oversized set_range_number_format to fail");
+        assert!(matches!(
+            err,
+            AppStateError::RangeTooLarge {
+                rows: MAX_RANGE_DIM,
+                cols: MAX_RANGE_DIM,
+                limit: MAX_RANGE_CELLS_PER_CALL
+            }
+        ));
+    }
+
+    #[test]
+    fn create_pivot_table_rejects_oversized_source_range() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let sheet_id = workbook.sheets[0].id.clone();
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let source_range = CellRect {
+            start_row: 0,
+            start_col: 0,
+            end_row: MAX_RANGE_DIM - 1,
+            end_col: MAX_RANGE_DIM - 1,
+        };
+
+        let err = state
+            .create_pivot_table(
+                "Pivot".to_string(),
+                sheet_id.clone(),
+                source_range,
+                PivotDestination {
+                    sheet_id: sheet_id.clone(),
+                    row: 0,
+                    col: 0,
+                },
+                PivotConfig::default(),
+            )
+            .expect_err("expected oversized pivot source range to fail");
+
         assert!(matches!(
             err,
             AppStateError::RangeTooLarge {
