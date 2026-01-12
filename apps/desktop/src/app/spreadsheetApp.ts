@@ -3566,8 +3566,15 @@ export class SpreadsheetApp {
       return;
     }
 
-    const x = e.clientX - this.rootLeft;
-    const y = e.clientY - this.rootTop;
+    const useOffsetCoords =
+      target === this.root ||
+      target === this.selectionCanvas ||
+      target === this.gridCanvas ||
+      target === this.referenceCanvas ||
+      target === this.auditingCanvas ||
+      target === this.presenceCanvas;
+    const x = useOffsetCoords ? e.offsetX : e.clientX - this.rootLeft;
+    const y = useOffsetCoords ? e.offsetY : e.clientY - this.rootTop;
     if (x < 0 || y < 0 || x > this.width || y > this.height) {
       this.hideCommentTooltip();
       return;
@@ -6796,9 +6803,17 @@ export class SpreadsheetApp {
       return;
     }
 
+    const target = e.target as HTMLElement | null;
+    const useOffsetCoords =
+      target === this.root ||
+      target === this.selectionCanvas ||
+      target === this.gridCanvas ||
+      target === this.referenceCanvas ||
+      target === this.auditingCanvas ||
+      target === this.presenceCanvas;
+
     if (!this.dragState) {
-      const target = e.target as HTMLElement | null;
-      if (target && target !== this.selectionCanvas) {
+      if (target && !useOffsetCoords) {
         if (
           this.vScrollbarTrack.contains(target) ||
           this.hScrollbarTrack.contains(target) ||
@@ -6810,11 +6825,16 @@ export class SpreadsheetApp {
         }
       }
 
-      this.maybeRefreshRootPosition();
+      // When the pointermove target is the selection canvas (or another full-viewport canvas
+      // overlay), we can use `offsetX/Y` which are already in the correct coordinate space.
+      // Only refresh cached root position when we need to fall back to client-relative coords.
+      if (!useOffsetCoords) {
+        this.maybeRefreshRootPosition();
+      }
     }
 
-    const x = e.clientX - this.rootLeft;
-    const y = e.clientY - this.rootTop;
+    const x = useOffsetCoords ? e.offsetX : e.clientX - this.rootLeft;
+    const y = useOffsetCoords ? e.offsetY : e.clientY - this.rootTop;
     if (this.dragPointerPos) {
       this.dragPointerPos.x = x;
       this.dragPointerPos.y = y;
