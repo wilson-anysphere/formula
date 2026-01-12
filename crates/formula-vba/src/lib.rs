@@ -174,7 +174,7 @@ impl VBAProject {
 fn decode_with_encoding(bytes: &[u8], encoding: &'static Encoding) -> String {
     // Module source is commonly stored as MBCS in the project codepage. If it
     // looks like UTF-16LE, decode as UTF-16LE instead (some producers emit it).
-    if bytes.len() >= 2 && bytes.len() % 2 == 0 {
+    if bytes.len() >= 2 && bytes.len().is_multiple_of(2) {
         // Same heuristic as `dir` strings: if many high bytes are NUL, treat as UTF-16LE.
         let total = bytes.len() / 2;
         let nul_high = bytes.iter().skip(1).step_by(2).filter(|&&b| b == 0).count();
@@ -259,8 +259,8 @@ fn detect_project_codepage(project_stream_bytes: &[u8]) -> Option<&'static Encod
     None
 }
 
-fn split_crlf_lines<'a>(text: &'a str) -> impl Iterator<Item = &'a str> {
-    text.split(|c| c == '\n' || c == '\r')
+fn split_crlf_lines(text: &str) -> impl Iterator<Item = &str> {
+    text.split(['\n', '\r'])
         .map(str::trim)
         .filter(|line| !line.is_empty())
 }

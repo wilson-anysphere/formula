@@ -932,7 +932,7 @@ fn signature_path_stream_kind(path: &str) -> Option<VbaSignatureStreamKind> {
     // `xl/vbaProjectSignature.bin:\x05DigitalSignatureExt`.
     //
     // Be permissive and scan both `/` and `:`-delimited components for `DigitalSignature*`.
-    for component in path.split(|c| c == '/' || c == ':') {
+    for component in path.split(['/', ':']) {
         let Some(kind) = signature_component_stream_kind(component) else {
             continue;
         };
@@ -1427,11 +1427,13 @@ pub fn verify_vba_project_signature_binding(
             Ok(None) | Err(_) => continue,
         };
 
-        let mut debug = VbaProjectDigestDebugInfo::default();
-        debug.hash_algorithm_oid = Some(signed.digest_algorithm_oid.clone());
-        debug.hash_algorithm_name =
-            digest_name_from_oid_str(&signed.digest_algorithm_oid).map(str::to_owned);
-        debug.signed_digest = Some(signed.digest.clone());
+        let mut debug = VbaProjectDigestDebugInfo {
+            hash_algorithm_oid: Some(signed.digest_algorithm_oid.clone()),
+            hash_algorithm_name: digest_name_from_oid_str(&signed.digest_algorithm_oid)
+                .map(str::to_owned),
+            signed_digest: Some(signed.digest.clone()),
+            ..Default::default()
+        };
 
         if any_signed_digest.is_none() {
             any_signed_digest = Some(debug.clone());

@@ -261,7 +261,7 @@ fn copy_token_bit_count(current_decompressed_len: usize) -> u32 {
     let bits_needed = if n == 0 {
         0
     } else {
-        (usize::BITS - n.leading_zeros()) as u32
+        usize::BITS - n.leading_zeros()
     };
     bits_needed.clamp(4, 12)
 }

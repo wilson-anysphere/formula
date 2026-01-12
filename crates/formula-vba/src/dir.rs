@@ -360,7 +360,7 @@ fn decode_unicode_bytes(bytes: &[u8]) -> String {
 }
 
 fn looks_like_utf16le(bytes: &[u8]) -> bool {
-    if bytes.len() < 2 || bytes.len() % 2 != 0 {
+    if bytes.len() < 2 || !bytes.len().is_multiple_of(2) {
         return false;
     }
     // If a substantial portion of the high bytes are NUL, it's probably

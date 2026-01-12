@@ -202,10 +202,7 @@ fn scan_unicode_presence(
     Ok((project_unicode, modules_unicode))
 }
 
-fn read_dir_record<'a>(
-    buf: &'a [u8],
-    offset: usize,
-) -> Result<(u16, &'a [u8], usize), DirParseError> {
+fn read_dir_record(buf: &[u8], offset: usize) -> Result<(u16, &[u8], usize), DirParseError> {
     if offset + 6 > buf.len() {
         return Err(DirParseError::Truncated);
     }

@@ -326,7 +326,7 @@ fn trim_ascii_whitespace(bytes: &[u8]) -> &[u8] {
 ///   - `REFERENCECONTROL` (0x002F)
 ///   - `REFERENCEEXTENDED` (0x0030)
 ///   - `REFERENCEORIGINAL` (0x0033)
-///   Other reference-related records (e.g. `REFERENCENAME` (0x0016)) MUST NOT contribute.
+///     Other reference-related records (e.g. `REFERENCENAME` (0x0016)) MUST NOT contribute.
 ///
 /// Spec reference: MS-OVBA §2.4.2.1 "Content Normalized Data".
 pub fn content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseError> {
@@ -1164,7 +1164,7 @@ fn starts_with_ascii_case_insensitive(haystack: &[u8], needle: &[u8]) -> bool {
     haystack[..needle.len()]
         .iter()
         .zip(needle.iter())
-        .all(|(a, b)| a.to_ascii_lowercase() == b.to_ascii_lowercase())
+        .all(|(a, b)| a.eq_ignore_ascii_case(b))
 }
 
 /// Compute the MS-OVBA §2.4.2.3 **Content Hash** (v1) for a VBA project.
@@ -2061,7 +2061,7 @@ fn normalize_reference_original(data: &[u8]) -> Result<Vec<u8>, ParseError> {
     Ok(copy_until_nul(data))
 }
 
-fn read_u32_len_prefixed_bytes<'a>(cur: &mut &'a [u8]) -> Result<Vec<u8>, ParseError> {
+fn read_u32_len_prefixed_bytes(cur: &mut &[u8]) -> Result<Vec<u8>, ParseError> {
     if cur.len() < 4 {
         return Err(DirParseError::Truncated.into());
     }
@@ -2163,7 +2163,7 @@ fn append_v3_line(line: &[u8], out: &mut Vec<u8>) -> bool {
     }
 
     // Skip DefaultAttributes lines by exact byte equality (case-sensitive).
-    if V3_DEFAULT_ATTRIBUTES.iter().any(|&a| line == a) {
+    if V3_DEFAULT_ATTRIBUTES.contains(&line) {
         return false;
     }
 
@@ -2237,7 +2237,7 @@ fn starts_with_ignore_ascii_case(haystack: &[u8], needle: &[u8]) -> bool {
         .iter()
         .take(needle.len())
         .zip(needle.iter())
-        .all(|(a, b)| a.to_ascii_lowercase() == b.to_ascii_lowercase())
+        .all(|(a, b)| a.eq_ignore_ascii_case(b))
 }
 fn decode_dir_string(bytes: &[u8], encoding: &'static Encoding) -> String {
     // MS-OVBA dir strings are generally stored using the project codepage, but some records may
@@ -2276,14 +2276,14 @@ fn trim_u32_len_prefix_unicode_string(bytes: &[u8]) -> &[u8] {
     if n == rest.len() {
         return rest;
     }
-    if rest.len() % 2 == 0 && n.saturating_mul(2) == rest.len() {
+    if rest.len().is_multiple_of(2) && n.saturating_mul(2) == rest.len() {
         return rest;
     }
     bytes
 }
 
 fn looks_like_utf16le(bytes: &[u8]) -> bool {
-    if bytes.len() < 2 || bytes.len() % 2 != 0 {
+    if bytes.len() < 2 || !bytes.len().is_multiple_of(2) {
         return false;
     }
 

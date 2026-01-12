@@ -134,9 +134,7 @@ pub fn extract_vba_signature_signed_digest(
     // Fast path: raw ContentInfo at the start.
     if signature_stream.first() == Some(&0x30)
         && looks_like_pkcs7_signed_data_content_info(signature_stream)
-        && !attempted_offsets[..attempted_count]
-            .iter()
-            .any(|&o| o == Some(0))
+        && !attempted_offsets[..attempted_count].contains(&Some(0))
     {
         any_candidate = true;
         if attempted_count < attempted_offsets.len() {
@@ -165,10 +163,7 @@ pub fn extract_vba_signature_signed_digest(
         if signature_stream[offset] != 0x30 {
             continue;
         }
-        if attempted_offsets[..attempted_count]
-            .iter()
-            .any(|&o| o == Some(offset))
-        {
+        if attempted_offsets[..attempted_count].contains(&Some(offset)) {
             continue;
         }
         if !looks_like_pkcs7_signed_data_content_info(&signature_stream[offset..]) {
@@ -1012,10 +1007,10 @@ fn parse_length(input: &[u8]) -> Result<(Length, usize), VbaSignatureSignedDiges
     Ok((Length::Definite(len), 1 + count))
 }
 
-fn slice_constructed_contents<'a>(
-    rest_after_header: &'a [u8],
+fn slice_constructed_contents(
+    rest_after_header: &[u8],
     len: Length,
-) -> Result<&'a [u8], VbaSignatureSignedDigestError> {
+) -> Result<&[u8], VbaSignatureSignedDigestError> {
     match len {
         Length::Definite(l) => rest_after_header
             .get(..l)
@@ -1024,10 +1019,10 @@ fn slice_constructed_contents<'a>(
     }
 }
 
-fn parse_context_specific_constructed<'a>(
-    input: &'a [u8],
+fn parse_context_specific_constructed(
+    input: &[u8],
     tag_number: u32,
-) -> Result<&'a [u8], VbaSignatureSignedDigestError> {
+) -> Result<&[u8], VbaSignatureSignedDigestError> {
     let (tag, len, rest) = parse_tag_and_length(input)?;
     if tag.class != Asn1Class::ContextSpecific || !tag.constructed || tag.number != tag_number {
         return Err(der_err("unexpected tag"));
@@ -1035,7 +1030,7 @@ fn parse_context_specific_constructed<'a>(
     slice_constructed_contents(rest, len)
 }
 
-fn parse_oid<'a>(input: &'a [u8]) -> Result<(&'a [u8], &'a [u8]), VbaSignatureSignedDigestError> {
+fn parse_oid(input: &[u8]) -> Result<(&[u8], &[u8]), VbaSignatureSignedDigestError> {
     let (tag, len, rest) = parse_tag_and_length(input)?;
     if tag.class != Asn1Class::Universal || tag.constructed || tag.number != 6 {
         return Err(der_err("expected OBJECT IDENTIFIER"));
