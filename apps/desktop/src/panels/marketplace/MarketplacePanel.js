@@ -67,10 +67,10 @@ function updateContributedPanelSeedsFromHost(extensionHostManager, extensionId) 
 
 function badge(text, { tone = "neutral", title = null } = {}) {
   const bgByTone = {
-    neutral: "var(--bg-hover)",
-    good: "var(--bg-hover)",
-    warn: "var(--bg-hover)",
-    bad: "var(--bg-hover)",
+    neutral: "var(--bg-tertiary)",
+    good: "var(--success-bg)",
+    warn: "var(--warning-bg)",
+    bad: "var(--error-bg)",
   };
   const fgByTone = {
     neutral: "var(--text-secondary)",
