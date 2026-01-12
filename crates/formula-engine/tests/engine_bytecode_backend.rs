@@ -1451,6 +1451,25 @@ fn bytecode_backend_let_array_returning_abs_does_not_enable_concat_bytecode() {
 }
 
 #[test]
+fn bytecode_backend_let_single_cell_reference_local_is_scalar_safe_for_concat() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", "hello").unwrap();
+
+    // LET binding values are evaluated in a reference context by the bytecode compiler, so `x`
+    // is stored as a single-cell reference. CONCAT is scalar-only in bytecode, so it must apply
+    // implicit intersection when consuming `x` (otherwise the runtime would see a range and
+    // return #VALUE!).
+    let formula = "=LET(x, A1, CONCAT(x))";
+    engine.set_cell_formula("Sheet1", "B1", formula).unwrap();
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text("hello".into()));
+    assert_engine_matches_ast(&engine, formula, "B1");
+}
+
+#[test]
 fn bytecode_backend_let_cell_ref_bindings_can_be_consumed_as_ranges_for_countif() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
