@@ -16,6 +16,53 @@
 pnpm --filter @formula/sync-server dev
 ```
 
+## Stress testing
+
+`services/sync-server` includes a **manual** stress/load harness that starts a local sync-server
+instance and hammers it with many concurrent `y-websocket` clients.
+
+Run with defaults:
+
+```bash
+pnpm -C services/sync-server stress
+```
+
+Common overrides:
+
+```bash
+# More clients + multiple docs (rooms)
+pnpm -C services/sync-server stress -- --clients 200 --docs 10 --durationMs 30000
+
+# Fixed number of ops per client, spread across a duration
+pnpm -C services/sync-server stress -- --clients 50 --opsPerClient 2000 --durationMs 60000
+
+# Use JWT auth instead of opaque tokens
+pnpm -C services/sync-server stress -- --authMode jwt
+
+# Force a smaller max message size (useful for validating 1009 behavior)
+pnpm -C services/sync-server stress -- --maxMessageBytes 65536
+```
+
+Notes:
+
+- The harness **does not** run under `pnpm test` (manual only).
+- It spawns a sync-server child process using `src/index.ts` (via `tsx`), waits for `/healthz`,
+  then connects `y-websocket` `WebsocketProvider` clients.
+- Workload:
+  - baseline “cell-ish” updates against a `cells` `Y.Map`
+  - periodic awareness updates (presence churn)
+  - a small fraction of writes to reserved-ish roots (`branching:*`, `versions`) to exercise those paths
+- At the end it waits for **convergence** (all clients observe a final per-client counter map),
+  prints a summary, and exits **non-zero** if convergence fails or if any disconnects / unexpected
+  websocket close codes are observed.
+
+Interpreting output:
+
+- `throughput`: rough ops/sec based on successful local ops attempted by clients during the workload
+- `convergenceTime`: how long it took for all clients to observe the final counters after the workload
+- `wsCloseCodes`: counts of websocket close codes observed (watch for `1008`, `1009`, `1013`, `1006`)
+- `metrics snapshot`: selected `/metrics` lines at the end of the run (if available)
+
 Required environment variables:
 
 - `SYNC_SERVER_HOST` (default: `127.0.0.1`)
