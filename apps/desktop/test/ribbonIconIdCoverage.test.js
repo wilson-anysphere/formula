@@ -12,7 +12,7 @@ function readDesktopSource(...segments) {
 
 function collectSchemaButtonsWithSize(source, sizeValue) {
   const buttons = new Map();
-  const re = new RegExp(`\\bsize\\s*:\\s*\\"${sizeValue}\\"`, "g");
+  const re = new RegExp(`\\bsize\\s*:\\s*["']${sizeValue}["']`, "g");
   let match;
   while ((match = re.exec(source))) {
     const objectStart = findEnclosingObjectStart(source, match.index);
