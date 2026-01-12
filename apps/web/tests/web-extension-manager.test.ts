@@ -723,6 +723,43 @@ test("install fails when engines.formula is incompatible with engineVersion", as
   await fs.rm(tmpRoot, { recursive: true, force: true });
 });
 
+test("install fails when publisher/name contain path separators (invalid extension id)", async () => {
+  const keys = generateEd25519KeyPair();
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-web-ext-invalid-id-"));
+  const extDir = path.join(tmpRoot, "ext");
+  await fs.mkdir(path.join(extDir, "dist"), { recursive: true });
+
+  const manifest = {
+    name: "bad-ext",
+    publisher: "evil/publisher",
+    version: "1.0.0",
+    main: "./dist/extension.js",
+    browser: "./dist/extension.mjs",
+    engines: { formula: "^1.0.0" }
+  };
+
+  await fs.writeFile(path.join(extDir, "package.json"), JSON.stringify(manifest, null, 2));
+  const source = `export async function activate() {}\n`;
+  await fs.writeFile(path.join(extDir, "dist", "extension.mjs"), source);
+  await fs.writeFile(path.join(extDir, "dist", "extension.js"), source);
+
+  const pkgBytes = await createExtensionPackageV2(extDir, { privateKeyPem: keys.privateKeyPem });
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "evil/publisher.bad-ext",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes }
+  });
+
+  const manager = new WebExtensionManager({ marketplaceClient, engineVersion: "1.0.0" });
+
+  await expect(manager.install("evil/publisher.bad-ext")).rejects.toThrow(/invalid extension id/i);
+  expect(await manager.listInstalled()).toEqual([]);
+
+  await manager.dispose();
+  await fs.rm(tmpRoot, { recursive: true, force: true });
+});
+
 test("loadInstalled quarantines when a stored manifest becomes incompatible with engineVersion", async () => {
   const keys = generateEd25519KeyPair();
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-web-ext-quarantine-"));

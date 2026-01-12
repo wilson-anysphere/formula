@@ -1460,10 +1460,19 @@ export class WebExtensionManager {
     context: { id: string; version: string }
   ): Record<string, any> {
     try {
-      return validateExtensionManifest(manifest, {
+      const validated = validateExtensionManifest(manifest, {
         engineVersion: this.engineVersion,
         enforceEngine: true
       }) as Record<string, any>;
+
+      const extensionId = `${validated.publisher}.${validated.name}`;
+      if (/[/\\]/.test(extensionId) || extensionId.includes("\0")) {
+        throw new Error(
+          `Invalid extension id: ${extensionId} (publisher/name must not contain path separators)`
+        );
+      }
+
+      return validated;
     } catch (error) {
       const msg = String((error as Error)?.message ?? error);
       throw new Error(`Invalid extension manifest for ${context.id}@${context.version}: ${msg}`);
