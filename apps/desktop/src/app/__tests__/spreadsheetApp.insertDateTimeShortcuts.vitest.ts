@@ -365,6 +365,48 @@ describe("SpreadsheetApp Excel-style date/time insertion shortcuts (serial value
     formulaBar.remove();
   });
 
+  it("does not start editing the grid cell when typing during formula bar range selection mode", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const app = new SpreadsheetApp(root, status, { formulaBar });
+
+    const input = formulaBar.querySelector<HTMLTextAreaElement>('[data-testid="formula-input"]');
+    expect(input).not.toBeNull();
+
+    input!.focus();
+    input!.value = "=SUM(";
+    input!.setSelectionRange(input!.value.length, input!.value.length);
+    input!.dispatchEvent(new Event("input", { bubbles: true }));
+
+    // Mimic a range-selection workflow where focus temporarily moves back to the grid.
+    root.focus();
+
+    root.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        key: "1",
+        code: "Digit1",
+      }),
+    );
+
+    // Should continue editing the formula bar instead of opening the in-cell editor overlay.
+    expect(app.isCellEditorOpen()).toBe(false);
+    expect(input!.value).toBe("=SUM(1");
+
+    app.destroy();
+    root.remove();
+    formulaBar.remove();
+  });
+
   it("falls back to only inserting into the active cell when the selection exceeds 10k cells", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2020, 0, 2, 3, 4, 5));

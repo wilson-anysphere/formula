@@ -7946,6 +7946,32 @@ export class SpreadsheetApp {
     // Excel-like "start typing to edit" behavior: any printable key begins edit
     // mode and replaces the cell contents.
     if (!primary && !e.altKey && e.key.length === 1) {
+      // When the formula bar is editing, do not start editing the active cell. Instead, treat
+      // printable key presses as formula bar input even if focus temporarily moved back to the grid
+      // (Excel-style range selection mode).
+      //
+      // NOTE: We avoid calling `insertIntoFormulaBar()` here because it contains special-case logic
+      // for inserting leading `=` templates (e.g. `=SUM()`), which would break normal typing of
+      // `=` inside formulas.
+      if (this.formulaBar?.isEditing() || this.formulaEditCell) {
+        const bar = this.formulaBar;
+        if (bar) {
+          e.preventDefault();
+          const textarea = bar.textarea;
+          const current = textarea.value;
+          const selStart = textarea.selectionStart ?? current.length;
+          const selEnd = textarea.selectionEnd ?? current.length;
+          const start = Math.max(0, Math.min(selStart, selEnd, current.length));
+          const end = Math.max(0, Math.min(Math.max(selStart, selEnd), current.length));
+          const next = current.slice(0, start) + e.key + current.slice(end);
+          textarea.value = next;
+          const cursor = Math.max(0, Math.min(start + e.key.length, next.length));
+          textarea.setSelectionRange(cursor, cursor);
+          textarea.dispatchEvent(new Event("input", { bubbles: true }));
+          bar.focus();
+        }
+        return;
+      }
       e.preventDefault();
       const cell = this.selection.active;
       const bounds = this.getCellRect(cell);
