@@ -7724,13 +7724,22 @@ fn fn_vlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         return Value::Error(ErrorKind::Spill);
     }
 
+    enum LookupTable<'a> {
+        Range(ResolvedRange),
+        Array(&'a ArrayValue),
+    }
+
     let table = match &args[1] {
-        Value::Range(r) => r.resolve(base),
+        Value::Range(r) => LookupTable::Range(r.resolve(base)),
+        Value::Array(a) => LookupTable::Array(a),
         Value::Error(e) => return Value::Error(*e),
+        Value::MultiRange(_) => return Value::Error(ErrorKind::Value),
         _ => return Value::Error(ErrorKind::Value),
     };
-    if !range_in_bounds(grid, table) {
-        return Value::Error(ErrorKind::Ref);
+    if let LookupTable::Range(table) = &table {
+        if !range_in_bounds(grid, *table) {
+            return Value::Error(ErrorKind::Ref);
+        }
     }
 
     let col_index = match coerce_to_i64(&args[2]) {
@@ -7740,7 +7749,10 @@ fn fn_vlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if col_index < 1 {
         return Value::Error(ErrorKind::Value);
     }
-    let cols = table.cols() as i64;
+    let cols = match &table {
+        LookupTable::Range(r) => r.cols() as i64,
+        LookupTable::Array(a) => a.cols as i64,
+    };
     if col_index > cols {
         return Value::Error(ErrorKind::Ref);
     }
@@ -7754,21 +7766,48 @@ fn fn_vlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         true
     };
 
-    let row_offset = if approx {
-        match approximate_match_in_first_col(grid, lookup_value, table) {
-            Some(r) => r,
-            None => return Value::Error(ErrorKind::NA),
-        }
-    } else {
-        match exact_match_in_first_col(grid, lookup_value, table) {
-            Some(r) => r,
-            None => return Value::Error(ErrorKind::NA),
-        }
-    };
+    match table {
+        LookupTable::Range(table) => {
+            let row_offset = if approx {
+                match approximate_match_in_first_col(grid, lookup_value, table) {
+                    Some(r) => r,
+                    None => return Value::Error(ErrorKind::NA),
+                }
+            } else {
+                match exact_match_in_first_col(grid, lookup_value, table) {
+                    Some(r) => r,
+                    None => return Value::Error(ErrorKind::NA),
+                }
+            };
 
-    let row = table.row_start + row_offset;
-    let col = table.col_start + (col_index as i32) - 1;
-    grid.get_value(CellCoord { row, col })
+            let row = table.row_start + row_offset;
+            let col = table.col_start + (col_index as i32) - 1;
+            grid.get_value(CellCoord { row, col })
+        }
+        LookupTable::Array(table) => {
+            let row_offset = if approx {
+                match approximate_match_in_first_col_array(lookup_value, table) {
+                    Some(r) => r,
+                    None => return Value::Error(ErrorKind::NA),
+                }
+            } else {
+                match exact_match_in_first_col_array(lookup_value, table) {
+                    Some(r) => r,
+                    None => return Value::Error(ErrorKind::NA),
+                }
+            };
+
+            let row = match usize::try_from(row_offset) {
+                Ok(v) => v,
+                Err(_) => return Value::Error(ErrorKind::NA),
+            };
+            let col = match usize::try_from(col_index - 1) {
+                Ok(v) => v,
+                Err(_) => return Value::Error(ErrorKind::Ref),
+            };
+            table.get(row, col).cloned().unwrap_or(Value::Empty)
+        }
+    }
 }
 
 fn fn_hlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
@@ -7797,13 +7836,22 @@ fn fn_hlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         return Value::Error(ErrorKind::Spill);
     }
 
+    enum LookupTable<'a> {
+        Range(ResolvedRange),
+        Array(&'a ArrayValue),
+    }
+
     let table = match &args[1] {
-        Value::Range(r) => r.resolve(base),
+        Value::Range(r) => LookupTable::Range(r.resolve(base)),
+        Value::Array(a) => LookupTable::Array(a),
         Value::Error(e) => return Value::Error(*e),
+        Value::MultiRange(_) => return Value::Error(ErrorKind::Value),
         _ => return Value::Error(ErrorKind::Value),
     };
-    if !range_in_bounds(grid, table) {
-        return Value::Error(ErrorKind::Ref);
+    if let LookupTable::Range(table) = &table {
+        if !range_in_bounds(grid, *table) {
+            return Value::Error(ErrorKind::Ref);
+        }
     }
 
     let row_index = match coerce_to_i64(&args[2]) {
@@ -7813,7 +7861,10 @@ fn fn_hlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if row_index < 1 {
         return Value::Error(ErrorKind::Value);
     }
-    let rows = table.rows() as i64;
+    let rows = match &table {
+        LookupTable::Range(r) => r.rows() as i64,
+        LookupTable::Array(a) => a.rows as i64,
+    };
     if row_index > rows {
         return Value::Error(ErrorKind::Ref);
     }
@@ -7827,21 +7878,48 @@ fn fn_hlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         true
     };
 
-    let col_offset = if approx {
-        match approximate_match_in_first_row(grid, lookup_value, table) {
-            Some(c) => c,
-            None => return Value::Error(ErrorKind::NA),
-        }
-    } else {
-        match exact_match_in_first_row(grid, lookup_value, table) {
-            Some(c) => c,
-            None => return Value::Error(ErrorKind::NA),
-        }
-    };
+    match table {
+        LookupTable::Range(table) => {
+            let col_offset = if approx {
+                match approximate_match_in_first_row(grid, lookup_value, table) {
+                    Some(c) => c,
+                    None => return Value::Error(ErrorKind::NA),
+                }
+            } else {
+                match exact_match_in_first_row(grid, lookup_value, table) {
+                    Some(c) => c,
+                    None => return Value::Error(ErrorKind::NA),
+                }
+            };
 
-    let row = table.row_start + (row_index as i32) - 1;
-    let col = table.col_start + col_offset;
-    grid.get_value(CellCoord { row, col })
+            let row = table.row_start + (row_index as i32) - 1;
+            let col = table.col_start + col_offset;
+            grid.get_value(CellCoord { row, col })
+        }
+        LookupTable::Array(table) => {
+            let col_offset = if approx {
+                match approximate_match_in_first_row_array(lookup_value, table) {
+                    Some(c) => c,
+                    None => return Value::Error(ErrorKind::NA),
+                }
+            } else {
+                match exact_match_in_first_row_array(lookup_value, table) {
+                    Some(c) => c,
+                    None => return Value::Error(ErrorKind::NA),
+                }
+            };
+
+            let row = match usize::try_from(row_index - 1) {
+                Ok(v) => v,
+                Err(_) => return Value::Error(ErrorKind::Ref),
+            };
+            let col = match usize::try_from(col_offset) {
+                Ok(v) => v,
+                Err(_) => return Value::Error(ErrorKind::NA),
+            };
+            table.get(row, col).cloned().unwrap_or(Value::Empty)
+        }
+    }
 }
 
 fn fn_match(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
@@ -7879,18 +7957,29 @@ fn fn_match(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         1
     };
 
-    let pos = match &args[1] {
-        Value::Range(r) => {
-            let range = r.resolve(base);
-            if !range_in_bounds(grid, range) {
-                return Value::Error(ErrorKind::Ref);
-            }
+    enum LookupArray<'a> {
+        Range(ResolvedRange),
+        Array(&'a ArrayValue),
+    }
 
+    let lookup_array = match &args[1] {
+        Value::Range(r) => LookupArray::Range(r.resolve(base)),
+        Value::Array(a) => LookupArray::Array(a),
+        Value::Error(e) => return Value::Error(*e),
+        Value::MultiRange(_) => return Value::Error(ErrorKind::Value),
+        _ => return Value::Error(ErrorKind::Value),
+    };
+
+    if let LookupArray::Range(range) = &lookup_array {
+        if !range_in_bounds(grid, *range) {
+            return Value::Error(ErrorKind::Ref);
+        }
+    }
+
+    let pos = match lookup_array {
+        LookupArray::Range(range) => {
             if range.row_start == range.row_end {
                 let len = range.cols() as usize;
-                if len == 0 {
-                    return Value::Error(ErrorKind::NA);
-                }
                 let row = range.row_start;
                 let value_at = |idx: usize| {
                     grid.get_value(CellCoord {
@@ -7906,9 +7995,6 @@ fn fn_match(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 }
             } else if range.col_start == range.col_end {
                 let len = range.rows() as usize;
-                if len == 0 {
-                    return Value::Error(ErrorKind::NA);
-                }
                 let col = range.col_start;
                 let value_at = |idx: usize| {
                     grid.get_value(CellCoord {
@@ -7927,7 +8013,7 @@ fn fn_match(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 return Value::Error(ErrorKind::NA);
             }
         }
-        Value::Array(arr) => {
+        LookupArray::Array(arr) => {
             if arr.rows != 1 && arr.cols != 1 {
                 return Value::Error(ErrorKind::NA);
             }
@@ -7942,8 +8028,6 @@ fn fn_match(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 _ => return Value::Error(ErrorKind::NA),
             }
         }
-        Value::Error(e) => return Value::Error(*e),
-        _ => return Value::Error(ErrorKind::Value),
     };
 
     match pos {
@@ -8565,6 +8649,29 @@ fn exact_match_in_first_col(grid: &dyn Grid, lookup: &Value, table: ResolvedRang
     None
 }
 
+fn exact_match_in_first_col_array(lookup: &Value, table: &ArrayValue) -> Option<i32> {
+    let wildcard_pattern = wildcard_pattern_for_lookup(lookup);
+    for row in 0..table.rows {
+        let key = table.get(row, 0).unwrap_or(&Value::Empty);
+        if let Some(pattern) = &wildcard_pattern {
+            let text = match key {
+                Value::Error(_) => continue,
+                Value::Text(s) => Cow::Borrowed(s.as_ref()),
+                other => match coerce_to_string_for_lookup(other) {
+                    Ok(s) => Cow::Owned(s),
+                    Err(_) => continue,
+                },
+            };
+            if pattern.matches(text.as_ref()) {
+                return Some(row as i32);
+            }
+        } else if values_equal_for_lookup(lookup, key) {
+            return Some(row as i32);
+        }
+    }
+    None
+}
+
 fn exact_match_in_first_row(grid: &dyn Grid, lookup: &Value, table: ResolvedRange) -> Option<i32> {
     let wildcard_pattern = wildcard_pattern_for_lookup(lookup);
     let cols = table.col_start..=table.col_end;
@@ -8587,6 +8694,29 @@ fn exact_match_in_first_row(grid: &dyn Grid, lookup: &Value, table: ResolvedRang
             }
         } else if values_equal_for_lookup(lookup, &key) {
             return Some(idx as i32);
+        }
+    }
+    None
+}
+
+fn exact_match_in_first_row_array(lookup: &Value, table: &ArrayValue) -> Option<i32> {
+    let wildcard_pattern = wildcard_pattern_for_lookup(lookup);
+    for col in 0..table.cols {
+        let key = table.get(0, col).unwrap_or(&Value::Empty);
+        if let Some(pattern) = &wildcard_pattern {
+            let text = match key {
+                Value::Error(_) => continue,
+                Value::Text(s) => Cow::Borrowed(s.as_ref()),
+                other => match coerce_to_string_for_lookup(other) {
+                    Ok(s) => Cow::Owned(s),
+                    Err(_) => continue,
+                },
+            };
+            if pattern.matches(text.as_ref()) {
+                return Some(col as i32);
+            }
+        } else if values_equal_for_lookup(lookup, key) {
+            return Some(col as i32);
         }
     }
     None
@@ -8646,6 +8776,27 @@ fn approximate_match_in_first_col(
     lo.checked_sub(1).map(|idx| idx as i32)
 }
 
+fn approximate_match_in_first_col_array(lookup: &Value, table: &ArrayValue) -> Option<i32> {
+    let len = table.rows;
+    if len == 0 {
+        return None;
+    }
+
+    let mut lo = 0usize;
+    let mut hi = len;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        let key = table.get(mid, 0).unwrap_or(&Value::Empty);
+        if excel_le(key, lookup)? {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+
+    lo.checked_sub(1).map(|idx| idx as i32)
+}
+
 fn approximate_match_in_first_row(
     grid: &dyn Grid,
     lookup: &Value,
@@ -8670,6 +8821,27 @@ fn approximate_match_in_first_row(
             hi = mid;
         }
     }
+    lo.checked_sub(1).map(|idx| idx as i32)
+}
+
+fn approximate_match_in_first_row_array(lookup: &Value, table: &ArrayValue) -> Option<i32> {
+    let len = table.cols;
+    if len == 0 {
+        return None;
+    }
+
+    let mut lo = 0usize;
+    let mut hi = len;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        let key = table.get(0, mid).unwrap_or(&Value::Empty);
+        if excel_le(key, lookup)? {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+
     lo.checked_sub(1).map(|idx| idx as i32)
 }
 

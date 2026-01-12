@@ -8304,18 +8304,11 @@ fn bytecode_expr_is_eligible_inner(
                     return false;
                 }
 
-                let table_ok = match &args[1] {
-                    bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_) => true,
-                    bytecode::Expr::MultiRangeRef(_) => true,
-                    bytecode::Expr::SpillRange(inner) => {
-                        bytecode_expr_is_eligible_inner(inner, true, false, lexical_scopes)
-                    }
-                    bytecode::Expr::NameRef(name) => matches!(
-                        local_binding_kind(lexical_scopes, name),
-                        Some(BytecodeLocalBindingKind::Range | BytecodeLocalBindingKind::RefSingle)
-                    ),
-                    _ => false,
-                };
+                // table_array supports both range references and array values (e.g. array literals,
+                // LET-bound arrays, and computed arrays like `A1:A3*10`). Require it to be eligible
+                // in a range/array context; runtime still enforces the actual table semantics.
+                let table_ok =
+                    bytecode_expr_is_eligible_inner(&args[1], true, true, lexical_scopes);
                 // `lookup_value` is a scalar argument, so Excel applies implicit intersection when
                 // it is provided as a range reference. Allow range values here and let the runtime
                 // perform implicit intersection (matching the AST evaluator's `eval_scalar_arg`).

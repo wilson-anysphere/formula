@@ -798,6 +798,77 @@ fn xmatch_and_xlookup_propagate_spill_range_errors_and_compile_to_bytecode_backe
 }
 
 #[test]
+fn lookup_functions_compile_to_bytecode_backend_for_array_literal_tables() {
+    let mut sheet = TestSheet::new();
+
+    sheet.set_formula("A1", "=VLOOKUP(2, {1,\"a\";2,\"b\";3,\"c\"}, 2, FALSE)");
+    sheet.set_formula("A2", "=HLOOKUP(2, {1,2,3;10,20,30}, 2, FALSE)");
+    sheet.set_formula("A3", "=MATCH(2, {1;2;3}, 0)");
+
+    assert_eq!(sheet.bytecode_program_count(), 3);
+
+    sheet.recalculate();
+
+    assert_eq!(sheet.get("A1"), Value::Text("b".to_string()));
+    assert_eq!(sheet.get("A2"), Value::Number(20.0));
+    assert_eq!(sheet.get("A3"), Value::Number(2.0));
+}
+
+#[test]
+fn lookup_functions_compile_to_bytecode_backend_with_let_bound_arrays() {
+    let mut sheet = TestSheet::new();
+
+    sheet.set_formula(
+        "A1",
+        "=LET(t, {1,\"a\";2,\"b\";3,\"c\"}, VLOOKUP(2, t, 2, FALSE))",
+    );
+    sheet.set_formula(
+        "A2",
+        "=LET(t, {1,2,3;10,20,30}, HLOOKUP(2, t, 2, FALSE))",
+    );
+    sheet.set_formula("A3", "=LET(a, {1;2;3}, MATCH(2, a, 0))");
+
+    assert_eq!(sheet.bytecode_program_count(), 3);
+
+    sheet.recalculate();
+
+    assert_eq!(sheet.get("A1"), Value::Text("b".to_string()));
+    assert_eq!(sheet.get("A2"), Value::Number(20.0));
+    assert_eq!(sheet.get("A3"), Value::Number(2.0));
+}
+
+#[test]
+fn lookup_functions_compile_to_bytecode_backend_for_computed_array_tables() {
+    let mut sheet = TestSheet::new();
+
+    sheet.set("A1", 1.0);
+    sheet.set("A2", 2.0);
+    sheet.set("A3", 3.0);
+    sheet.set("B1", 10.0);
+    sheet.set("B2", 20.0);
+    sheet.set("B3", 30.0);
+
+    sheet.set("D1", 1.0);
+    sheet.set("E1", 2.0);
+    sheet.set("F1", 3.0);
+    sheet.set("D2", 10.0);
+    sheet.set("E2", 20.0);
+    sheet.set("F2", 30.0);
+
+    sheet.set_formula("C1", "=VLOOKUP(2, A1:B3*1, 2, FALSE)");
+    sheet.set_formula("C2", "=HLOOKUP(2, D1:F2*1, 2, FALSE)");
+    sheet.set_formula("C3", "=MATCH(20, A1:A3*10, 0)");
+
+    assert_eq!(sheet.bytecode_program_count(), 3);
+
+    sheet.recalculate();
+
+    assert_eq!(sheet.get("C1"), Value::Number(20.0));
+    assert_eq!(sheet.get("C2"), Value::Number(20.0));
+    assert_eq!(sheet.get("C3"), Value::Number(2.0));
+}
+
+#[test]
 fn match_and_vlookup_approximate_treat_blanks_like_zero_or_empty_string() {
     let mut sheet = TestSheet::new();
 
