@@ -3562,6 +3562,7 @@ fn odd_coupon_bond_functions_reject_non_finite_numeric_inputs() {
     // overflow/NaN behavior.
     sheet.set("A1", Value::Number(f64::INFINITY));
     sheet.set("A2", Value::Number(f64::NAN));
+    sheet.set("A3", Value::Number(f64::NEG_INFINITY));
 
     // Ensure the test is actually exercising non-finite numbers (not pre-coerced errors).
     match sheet.get("A1") {
@@ -3571,6 +3572,13 @@ fn odd_coupon_bond_functions_reject_non_finite_numeric_inputs() {
     match sheet.get("A2") {
         Value::Number(n) => assert!(n.is_nan(), "expected A2 to be NaN, got {n:?}"),
         other => panic!("expected A2 to be a number (NaN), got {other:?}"),
+    }
+    match sheet.get("A3") {
+        Value::Number(n) => assert!(
+            n.is_infinite() && n.is_sign_negative(),
+            "expected A3 to be -Inf, got {n:?}"
+        ),
+        other => panic!("expected A3 to be a number (-Inf), got {other:?}"),
     }
 
     // Infinity in rate.
@@ -3675,6 +3683,36 @@ fn odd_coupon_bond_functions_reject_non_finite_numeric_inputs() {
         Value::Error(ErrorKind::Num) => {}
         other => panic!("expected #NUM!, got {other:?}"),
     }
+    match sheet.eval("=ODDFYIELD(DATE(2020,3,1),A1,DATE(2020,1,1),DATE(2020,7,1),0.06,95,100,1,0)") {
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+    match sheet.eval("=ODDFYIELD(DATE(2020,3,1),DATE(2023,7,1),A2,DATE(2020,7,1),0.06,95,100,1,0)") {
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+    match sheet.eval("=ODDFYIELD(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),A1,0.06,95,100,1,0)") {
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+
+    // Non-finite numeric args in ODDFYIELD should return #NUM!.
+    match sheet.eval("=ODDFYIELD(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),A3,95,100,1,0)") {
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+    match sheet.eval("=ODDFYIELD(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,95,A2,1,0)") {
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+    match sheet.eval("=ODDFYIELD(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,95,100,A1,0)") {
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+    match sheet.eval("=ODDFYIELD(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,95,100,1,A2)") {
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
 
     // ODDLYIELD should also reject non-finite numeric args.
     match sheet.eval("=ODDLYIELD(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,A1,100,1,0)") {
@@ -3688,6 +3726,32 @@ fn odd_coupon_bond_functions_reject_non_finite_numeric_inputs() {
 
     // Non-finite dates in ODDLYIELD should also return #NUM!.
     match sheet.eval("=ODDLYIELD(A1,DATE(2023,3,1),DATE(2022,7,1),0.06,95,100,1,0)") {
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+    match sheet.eval("=ODDLYIELD(DATE(2022,11,1),A1,DATE(2022,7,1),0.06,95,100,1,0)") {
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+    match sheet.eval("=ODDLYIELD(DATE(2022,11,1),DATE(2023,3,1),A2,0.06,95,100,1,0)") {
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+
+    // Non-finite numeric args in ODDLYIELD should return #NUM!.
+    match sheet.eval("=ODDLYIELD(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),A3,95,100,1,0)") {
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+    match sheet.eval("=ODDLYIELD(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,95,A1,1,0)") {
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+    match sheet.eval("=ODDLYIELD(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,95,100,A2,0)") {
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+    match sheet.eval("=ODDLYIELD(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,95,100,1,A1)") {
         Value::Error(ErrorKind::Num) => {}
         other => panic!("expected #NUM!, got {other:?}"),
     }
