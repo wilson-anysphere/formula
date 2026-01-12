@@ -436,6 +436,9 @@ if [[ -n "${CARGO_BUILD_TARGET:-}" ]]; then
 else
   expect_target_value=false
   for arg in "$@"; do
+    if [[ "${arg}" == "--" ]]; then
+      break
+    fi
     if [[ "${expect_target_value}" == "true" ]]; then
       cargo_target="${arg}"
       expect_target_value=false
