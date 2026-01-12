@@ -963,6 +963,7 @@ function buildDlpRangeIndex(ref, records, opts) {
   return {
     docRankMax,
     sheetRankMax,
+    baseRank: Math.max(docRankMax, sheetRankMax),
     startRow,
     startCol,
     rowCount,
@@ -985,8 +986,7 @@ function isDlpCellAllowedFromIndex(params, row0, col0) {
   const canShortCircuitOverThreshold = !restrictedOverrideAllowed;
   const restrictedAllowed = includeRestrictedContent ? policyAllowsRestrictedContent : maxAllowedRank >= RESTRICTED_CLASSIFICATION_RANK;
 
-  let rank = index.docRankMax;
-  if (index.sheetRankMax > rank) rank = index.sheetRankMax;
+  let rank = index.baseRank;
 
   if (rank === RESTRICTED_CLASSIFICATION_RANK) return restrictedAllowed;
   if (canShortCircuitOverThreshold && rank > maxAllowedRank) return false;
