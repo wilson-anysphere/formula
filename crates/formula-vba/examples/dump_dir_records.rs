@@ -367,7 +367,7 @@ fn dump_project_normalized_data_v3(vba_project_bin: &[u8]) {
     const PREFIX_LEN: usize = 64;
     println!();
     println!(
-        "-- ProjectNormalizedDataV3 (filtered PROJECT props || V3ContentNormalizedData || FormsNormalizedData) --"
+        "-- ProjectNormalizedDataV3 (filtered PROJECT stream properties || V3ContentNormalizedData || FormsNormalizedData) --"
     );
 
     match formula_vba::project_normalized_data_v3(vba_project_bin) {
