@@ -136,6 +136,7 @@ describe("tauri capability event permissions", () => {
       "close-prep-done",
       "close-handled",
       "open-file-ready",
+      "oauth-redirect-ready",
       "updater-ui-ready",
       // Emitted by the COI check harness (window.eval) to report results back to Rust.
       "coi-check-result",
