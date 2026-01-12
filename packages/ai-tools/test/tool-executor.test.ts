@@ -76,6 +76,100 @@ describe("ToolExecutor", () => {
     expect(workbook.listSheets()).toEqual(["Sheet2"]);
   });
 
+  it("refreshes pivots when subsequent edits use a display sheet name", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet2"]);
+    const sheetNameResolver = {
+      getSheetIdByName(name: string) {
+        return name.toLowerCase() === "budget" ? "Sheet2" : null;
+      },
+      getSheetNameById(id: string) {
+        return id === "Sheet2" ? "Budget" : null;
+      }
+    };
+
+    const executor = new ToolExecutor(workbook, { default_sheet: "Sheet2", sheet_name_resolver: sheetNameResolver });
+
+    // Source data.
+    await executor.execute({
+      name: "set_range",
+      parameters: {
+        range: "Budget!A1:B3",
+        values: [
+          ["Category", "Value"],
+          ["A", 10],
+          ["B", 20]
+        ]
+      }
+    });
+
+    // Create a simple pivot at D1.
+    const pivot = await executor.execute({
+      name: "create_pivot_table",
+      parameters: {
+        source_range: "Budget!A1:B3",
+        destination: "Budget!D1",
+        rows: ["Category"],
+        columns: [],
+        values: [{ field: "Value", aggregation: "sum" }]
+      }
+    });
+
+    expect(pivot.ok).toBe(true);
+    expect(pivot.tool).toBe("create_pivot_table");
+    if (!pivot.ok || pivot.tool !== "create_pivot_table") throw new Error("Unexpected tool result");
+    expect(pivot.data?.destination_range).toBe("Budget!D1:E4");
+
+    // Validate initial pivot output written to the stable-id sheet.
+    expect(workbook.getCell(parseA1Cell("Sheet2!D2")).value).toBe("A");
+    expect(workbook.getCell(parseA1Cell("Sheet2!E2")).value).toBe(10);
+    expect(workbook.getCell(parseA1Cell("Sheet2!E4")).value).toBe(30);
+
+    // Edit the source using the display sheet name and ensure pivot refreshes.
+    await executor.execute({
+      name: "write_cell",
+      parameters: { cell: "Budget!B2", value: 15 }
+    });
+
+    expect(workbook.getCell(parseA1Cell("Sheet2!E2")).value).toBe(15);
+    expect(workbook.getCell(parseA1Cell("Sheet2!E4")).value).toBe(35);
+    // Ensure we did not create a phantom "Budget" sheet.
+    expect(workbook.listSheets()).toEqual(["Sheet2"]);
+  });
+
+  it("create_chart passes stable sheet ids to the host but returns display names to the caller", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet2"]);
+    const sheetNameResolver = {
+      getSheetIdByName(name: string) {
+        return name.toLowerCase() === "budget" ? "Sheet2" : null;
+      },
+      getSheetNameById(id: string) {
+        return id === "Sheet2" ? "Budget" : null;
+      }
+    };
+
+    const executor = new ToolExecutor(workbook, { default_sheet: "Sheet2", sheet_name_resolver: sheetNameResolver });
+    const result = await executor.execute({
+      name: "create_chart",
+      parameters: {
+        chart_type: "bar",
+        data_range: "Budget!A1:B3",
+        title: "Demo"
+      }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("create_chart");
+    if (!result.ok || result.tool !== "create_chart") throw new Error("Unexpected tool result");
+
+    // User-facing output uses display sheet name.
+    expect(result.data?.data_range).toBe("Budget!A1:B3");
+
+    // Host receives stable sheet id.
+    const charts = workbook.listCharts();
+    expect(charts).toHaveLength(1);
+    expect(charts[0]?.spec.data_range).toBe("Sheet2!A1:B3");
+  });
+
   it("write_cell writes a formula when value starts with '='", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const executor = new ToolExecutor(workbook);
