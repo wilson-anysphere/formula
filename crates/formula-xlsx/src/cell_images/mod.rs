@@ -17,14 +17,6 @@ type Result<T> = std::result::Result<T, XlsxError>;
 
 const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
-/// Best-effort loader for workbook-level "in-cell" images.
-///
-/// This preserves the historical `formula-xlsx` behavior: if the part is missing or malformed,
-/// this is a no-op (workbook load should still succeed).
-pub fn load_cell_images_from_parts(parts: &BTreeMap<String, Vec<u8>>, workbook: &mut formula_model::Workbook) {
-    let _ = CellImages::parse_from_parts(parts, workbook);
-}
-
 /// Parsed workbook-level cell images parts.
 #[derive(Debug, Clone, Default)]
 pub struct CellImages {
