@@ -123,7 +123,7 @@ oracle dataset; at that point they serve as parity checks for Excel’s boundary
 If you modify these functions, re-check these areas carefully:
 
 1. **`basis` day-count mapping**: must match Excel (`0..=4` with specific 30/360 rules).
-   - Note: for `basis=4` (European 30/360), day counts use `DAYS360(..., TRUE)`, but the modeled
+    - Note: for `basis=4` (European 30/360), day counts use `DAYS360(..., TRUE)`, but the modeled
       coupon-period length `E` is fixed: `E = 360/frequency` (see `coupon_schedule::coupon_period_e`).
       This intentionally diverges from `DAYS360(PCD, NCD, TRUE)` for some end-of-month schedules
       involving February (e.g. Feb 28 → Aug 31 yields 182 under European `DAYS360`, not 180).
@@ -239,12 +239,16 @@ dates** (consistent with `COUP*`/`PRICE` behavior).
 For `basis=4`, day counts use `DAYS360(..., TRUE)`, but the modeled coupon-period length `E` is:
 
 ```
-E = 360 / frequency
+E = 360/frequency
 ```
 
 Day counts like `A`/`DFC`/`DSC` still use `DAYS360(..., TRUE)`, so for some end-of-month schedules
 involving February `DAYS360(PCD, NCD, TRUE)` can differ from the modeled `E` (e.g. Feb 28 → Aug 31
 yields 182 under European `DAYS360`, not 180).
+
+For `basis=4`, the remaining days in the coupon period (`DSC`) are computed as `DSC = E - A`, so
+`DSC` is not always equal to `DAYS360(settlement, NCD, TRUE)` (see
+`crates/formula-engine/tests/functions/financial_coupons.rs`).
 
 ### Excel oracle run (odd-coupon cases only)
 
