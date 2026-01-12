@@ -4,6 +4,27 @@ use formula_model::{CellRef, ColProperties, RowProperties, EXCEL_MAX_COLS, EXCEL
 
 use super::records;
 
+// Record ids used by worksheet parsing.
+// See [MS-XLS] sections:
+// - ROW: 2.4.184
+// - COLINFO: 2.4.48
+// - Cell records: 2.5.14
+// - MULRK: 2.4.141
+// - MULBLANK: 2.4.140
+const RECORD_ROW: u16 = 0x0208;
+const RECORD_COLINFO: u16 = 0x007D;
+
+const RECORD_FORMULA: u16 = 0x0006;
+const RECORD_BLANK: u16 = 0x0201;
+const RECORD_NUMBER: u16 = 0x0203;
+const RECORD_LABEL_BIFF5: u16 = 0x0204;
+const RECORD_BOOLERR: u16 = 0x0205;
+const RECORD_RK: u16 = 0x027E;
+const RECORD_RSTRING: u16 = 0x00D6;
+const RECORD_LABELSST: u16 = 0x00FD;
+const RECORD_MULRK: u16 = 0x00BD;
+const RECORD_MULBLANK: u16 = 0x00BE;
+
 #[derive(Debug, Default)]
 pub(crate) struct SheetRowColProperties {
     pub(crate) rows: BTreeMap<u32, RowProperties>,
@@ -19,7 +40,7 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
     for record in records::BestEffortSubstreamIter::from_offset(workbook_stream, start)? {
         match record.record_id {
             // ROW [MS-XLS 2.4.184]
-            0x0208 => {
+            RECORD_ROW => {
                 let data = record.data;
                 if data.len() < 16 {
                     continue;
@@ -45,7 +66,7 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
                 }
             }
             // COLINFO [MS-XLS 2.4.48]
-            0x007D => {
+            RECORD_COLINFO => {
                 let data = record.data;
                 if data.len() < 12 {
                     continue;
@@ -111,14 +132,8 @@ pub(crate) fn parse_biff_sheet_cell_xf_indices_filtered(
             //
             // We only care about extracting the XF index (`ixfe`) so we can resolve
             // number formats from workbook globals.
-            0x0006 // FORMULA
-            | 0x0201 // BLANK
-            | 0x0203 // NUMBER
-            | 0x0204 // LABEL (BIFF5)
-            | 0x0205 // BOOLERR
-            | 0x027E // RK
-            | 0x00D6 // RSTRING
-            | 0x00FD => { // LABELSST
+            RECORD_FORMULA | RECORD_BLANK | RECORD_NUMBER | RECORD_LABEL_BIFF5 | RECORD_BOOLERR
+            | RECORD_RK | RECORD_RSTRING | RECORD_LABELSST => {
                 if data.len() < 6 {
                     continue;
                 }
@@ -128,14 +143,14 @@ pub(crate) fn parse_biff_sheet_cell_xf_indices_filtered(
                 maybe_insert(row, col, xf);
             }
             // MULRK [MS-XLS 2.4.141]
-            0x00BD => {
+            RECORD_MULRK => {
                 if data.len() < 6 {
                     continue;
                 }
                 let row = u16::from_le_bytes([data[0], data[1]]) as u32;
                 let col_first = u16::from_le_bytes([data[2], data[3]]) as u32;
-                let col_last = u16::from_le_bytes([data[data.len() - 2], data[data.len() - 1]])
-                    as u32;
+                let col_last =
+                    u16::from_le_bytes([data[data.len() - 2], data[data.len() - 1]]) as u32;
                 let rk_data = &data[4..data.len().saturating_sub(2)];
                 for (idx, chunk) in rk_data.chunks_exact(6).enumerate() {
                     let col = match col_first.checked_add(idx as u32) {
@@ -150,14 +165,14 @@ pub(crate) fn parse_biff_sheet_cell_xf_indices_filtered(
                 }
             }
             // MULBLANK [MS-XLS 2.4.140]
-            0x00BE => {
+            RECORD_MULBLANK => {
                 if data.len() < 6 {
                     continue;
                 }
                 let row = u16::from_le_bytes([data[0], data[1]]) as u32;
                 let col_first = u16::from_le_bytes([data[2], data[3]]) as u32;
-                let col_last = u16::from_le_bytes([data[data.len() - 2], data[data.len() - 1]])
-                    as u32;
+                let col_last =
+                    u16::from_le_bytes([data[data.len() - 2], data[data.len() - 1]]) as u32;
                 let xf_data = &data[4..data.len().saturating_sub(2)];
                 for (idx, chunk) in xf_data.chunks_exact(2).enumerate() {
                     let col = match col_first.checked_add(idx as u32) {
@@ -200,7 +215,7 @@ mod tests {
         let mut row_payload = [0u8; 16];
         row_payload[0..2].copy_from_slice(&1u16.to_le_bytes());
         row_payload[6..8].copy_from_slice(&400u16.to_le_bytes());
-        let row_record = record(0x0208, &row_payload);
+        let row_record = record(RECORD_ROW, &row_payload);
 
         let mut truncated = Vec::new();
         truncated.extend_from_slice(&0x0001u16.to_le_bytes());
@@ -242,9 +257,9 @@ mod tests {
         mulrk_payload.extend_from_slice(&2u16.to_le_bytes()); // colLast
 
         let stream = [
-            record(0x0203, &number_payload),
-            record(0x00BE, &mulblank_payload),
-            record(0x00BD, &mulrk_payload),
+            record(RECORD_NUMBER, &number_payload),
+            record(RECORD_MULBLANK, &mulblank_payload),
+            record(RECORD_MULRK, &mulrk_payload),
             record(records::RECORD_EOF, &[]),
         ]
         .concat();
@@ -266,7 +281,11 @@ mod tests {
         data.extend_from_slice(&7u16.to_le_bytes()); // xf
         data.extend_from_slice(&0f64.to_le_bytes()); // value
 
-        let stream = [record(0x0203, &data), record(records::RECORD_EOF, &[])].concat();
+        let stream = [
+            record(RECORD_NUMBER, &data),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
         let xfs = parse_biff_sheet_cell_xf_indices_filtered(&stream, 0, None).expect("parse");
         assert_eq!(xfs.get(&CellRef::new(1, 2)).copied(), Some(7));
     }
@@ -279,7 +298,7 @@ mod tests {
         data.extend_from_slice(&9u16.to_le_bytes()); // xf
         data.extend_from_slice(&0u32.to_le_bytes()); // rk
 
-        let stream = [record(0x027E, &data), record(records::RECORD_EOF, &[])].concat();
+        let stream = [record(RECORD_RK, &data), record(records::RECORD_EOF, &[])].concat();
         let xfs = parse_biff_sheet_cell_xf_indices_filtered(&stream, 0, None).expect("parse");
         assert_eq!(xfs.get(&CellRef::new(3, 4)).copied(), Some(9));
     }
@@ -291,7 +310,11 @@ mod tests {
         data.extend_from_slice(&3u16.to_le_bytes()); // col
         data.extend_from_slice(&2u16.to_le_bytes()); // xf
 
-        let stream = [record(0x0201, &data), record(records::RECORD_EOF, &[])].concat();
+        let stream = [
+            record(RECORD_BLANK, &data),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
         let xfs = parse_biff_sheet_cell_xf_indices_filtered(&stream, 0, None).expect("parse");
         assert_eq!(xfs.get(&CellRef::new(10, 3)).copied(), Some(2));
     }
@@ -304,7 +327,11 @@ mod tests {
         data.extend_from_slice(&55u16.to_le_bytes()); // xf
         data.extend_from_slice(&123u32.to_le_bytes()); // sst index
 
-        let stream = [record(0x00FD, &data), record(records::RECORD_EOF, &[])].concat();
+        let stream = [
+            record(RECORD_LABELSST, &data),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
         let xfs = parse_biff_sheet_cell_xf_indices_filtered(&stream, 0, None).expect("parse");
         assert_eq!(xfs.get(&CellRef::new(0, 0)).copied(), Some(55));
     }
@@ -317,7 +344,11 @@ mod tests {
         data.extend_from_slice(&77u16.to_le_bytes()); // xf
         data.extend_from_slice(&0u16.to_le_bytes()); // cch (placeholder)
 
-        let stream = [record(0x0204, &data), record(records::RECORD_EOF, &[])].concat();
+        let stream = [
+            record(RECORD_LABEL_BIFF5, &data),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
         let xfs = parse_biff_sheet_cell_xf_indices_filtered(&stream, 0, None).expect("parse");
         assert_eq!(xfs.get(&CellRef::new(2, 1)).copied(), Some(77));
     }
@@ -331,7 +362,11 @@ mod tests {
         data.push(1); // value
         data.push(0); // fErr
 
-        let stream = [record(0x0205, &data), record(records::RECORD_EOF, &[])].concat();
+        let stream = [
+            record(RECORD_BOOLERR, &data),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
         let xfs = parse_biff_sheet_cell_xf_indices_filtered(&stream, 0, None).expect("parse");
         assert_eq!(xfs.get(&CellRef::new(9, 8)).copied(), Some(5));
     }
@@ -344,7 +379,11 @@ mod tests {
         data.extend_from_slice(&6u16.to_le_bytes()); // xf
         data.extend_from_slice(&[0u8; 14]); // rest of FORMULA record (dummy)
 
-        let stream = [record(0x0006, &data), record(records::RECORD_EOF, &[])].concat();
+        let stream = [
+            record(RECORD_FORMULA, &data),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
         let xfs = parse_biff_sheet_cell_xf_indices_filtered(&stream, 0, None).expect("parse");
         assert_eq!(xfs.get(&CellRef::new(4, 4)).copied(), Some(6));
     }
@@ -356,7 +395,7 @@ mod tests {
             data.extend_from_slice(&0u16.to_le_bytes()); // row
             data.extend_from_slice(&0u16.to_le_bytes()); // col
             data.extend_from_slice(&1u16.to_le_bytes()); // xf
-            record(0x0201, &data)
+            record(RECORD_BLANK, &data)
         };
 
         let number = {
@@ -365,7 +404,7 @@ mod tests {
             data.extend_from_slice(&0u16.to_le_bytes()); // col
             data.extend_from_slice(&2u16.to_le_bytes()); // xf
             data.extend_from_slice(&0f64.to_le_bytes());
-            record(0x0203, &data)
+            record(RECORD_NUMBER, &data)
         };
 
         let stream = [blank, number, record(records::RECORD_EOF, &[])].concat();
@@ -380,7 +419,11 @@ mod tests {
         data.extend_from_slice(&(EXCEL_MAX_COLS as u16).to_le_bytes()); // col (out of bounds)
         data.extend_from_slice(&1u16.to_le_bytes()); // xf
 
-        let stream = [record(0x0201, &data), record(records::RECORD_EOF, &[])].concat();
+        let stream = [
+            record(RECORD_BLANK, &data),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
         let xfs = parse_biff_sheet_cell_xf_indices_filtered(&stream, 0, None).expect("parse");
         assert!(xfs.is_empty());
     }
@@ -393,7 +436,7 @@ mod tests {
         let mut row_payload = [0u8; 16];
         row_payload[0..2].copy_from_slice(&1u16.to_le_bytes());
         row_payload[6..8].copy_from_slice(&400u16.to_le_bytes());
-        let row_record = record(0x0208, &row_payload);
+        let row_record = record(RECORD_ROW, &row_payload);
 
         // BOF for the next substream; no EOF record for the worksheet.
         let next_bof = record(records::RECORD_BOF_BIFF8, &[0u8; 16]);
@@ -412,7 +455,7 @@ mod tests {
         number_payload[0..2].copy_from_slice(&0u16.to_le_bytes());
         number_payload[2..4].copy_from_slice(&0u16.to_le_bytes());
         number_payload[4..6].copy_from_slice(&7u16.to_le_bytes());
-        let number_record = record(0x0203, &number_payload);
+        let number_record = record(RECORD_NUMBER, &number_payload);
 
         // BOF for the next substream; no EOF record for the worksheet.
         let next_bof = record(records::RECORD_BOF_BIFF8, &[0u8; 16]);
@@ -431,7 +474,7 @@ mod tests {
         number_payload[0..2].copy_from_slice(&0u16.to_le_bytes());
         number_payload[2..4].copy_from_slice(&0u16.to_le_bytes());
         number_payload[4..6].copy_from_slice(&7u16.to_le_bytes());
-        let number_record = record(0x0203, &number_payload);
+        let number_record = record(RECORD_NUMBER, &number_payload);
 
         let mut truncated = Vec::new();
         truncated.extend_from_slice(&0x0001u16.to_le_bytes());

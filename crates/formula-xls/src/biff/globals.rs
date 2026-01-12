@@ -10,6 +10,20 @@ pub(crate) struct BoundSheetInfo {
     pub(crate) offset: usize,
 }
 
+// Record ids used by workbook-global parsing.
+// See [MS-XLS] sections:
+// - CODEPAGE: 2.4.52
+// - BoundSheet8: 2.4.28
+// - 1904: 2.4.169
+// - FORMAT / FORMAT2: 2.4.90
+// - XF: 2.4.353
+const RECORD_CODEPAGE: u16 = 0x0042;
+const RECORD_BOUNDSHEET: u16 = 0x0085;
+const RECORD_1904: u16 = 0x0022;
+const RECORD_FORMAT_BIFF8: u16 = 0x041E;
+const RECORD_FORMAT2_BIFF5: u16 = 0x001E;
+const RECORD_XF: u16 = 0x00E0;
+
 fn strip_embedded_nuls(s: &mut String) {
     if s.contains('\0') {
         s.retain(|c| c != '\0');
@@ -24,7 +38,7 @@ fn biff_codepage(workbook_stream: &[u8]) -> u16 {
     for record in iter {
         match record.record_id {
             // CODEPAGE [MS-XLS 2.4.52]
-            0x0042 => {
+            RECORD_CODEPAGE => {
                 if record.data.len() >= 2 {
                     return u16::from_le_bytes([record.data[0], record.data[1]]);
                 }
@@ -49,7 +63,7 @@ pub(crate) fn parse_biff_bound_sheets(
     for record in records::BestEffortSubstreamIter::from_offset(workbook_stream, 0)? {
         match record.record_id {
             // BoundSheet8 [MS-XLS 2.4.28]
-            0x0085 => {
+            RECORD_BOUNDSHEET => {
                 if record.data.len() < 7 {
                     continue;
                 }
@@ -186,7 +200,7 @@ pub(crate) fn parse_biff_workbook_globals(
 
         match record_id {
             // 1904 [MS-XLS 2.4.169]
-            0x0022 => {
+            RECORD_1904 => {
                 if data.len() >= 2 {
                     let flag = u16::from_le_bytes([data[0], data[1]]);
                     if flag != 0 {
@@ -195,22 +209,24 @@ pub(crate) fn parse_biff_workbook_globals(
                 }
             }
             // FORMAT / FORMAT2 [MS-XLS 2.4.90]
-            0x041E | 0x001E => match parse_biff_format_record_strict(&record, codepage) {
-                Ok((num_fmt_id, code)) => {
-                    out.formats.insert(num_fmt_id, code);
-                }
-                Err(_) if record.is_continued() => {
-                    continuation_parse_failed = true;
-                    if let Some((num_fmt_id, code)) =
-                        parse_biff_format_record_best_effort(&record, codepage)
-                    {
+            RECORD_FORMAT_BIFF8 | RECORD_FORMAT2_BIFF5 => {
+                match parse_biff_format_record_strict(&record, codepage) {
+                    Ok((num_fmt_id, code)) => {
                         out.formats.insert(num_fmt_id, code);
                     }
+                    Err(_) if record.is_continued() => {
+                        continuation_parse_failed = true;
+                        if let Some((num_fmt_id, code)) =
+                            parse_biff_format_record_best_effort(&record, codepage)
+                        {
+                            out.formats.insert(num_fmt_id, code);
+                        }
+                    }
+                    Err(_) => {}
                 }
-                Err(_) => {}
-            },
+            }
             // XF [MS-XLS 2.4.353]
-            0x00E0 => {
+            RECORD_XF => {
                 if let Ok(xf) = parse_biff_xf_record(data) {
                     out.xfs.push(xf);
                 }
@@ -245,12 +261,12 @@ pub(crate) fn parse_biff_workbook_globals(
 
 fn workbook_globals_allows_continuation_biff5(record_id: u16) -> bool {
     // FORMAT2 [MS-XLS 2.4.90]
-    record_id == 0x001E
+    record_id == RECORD_FORMAT2_BIFF5
 }
 
 fn workbook_globals_allows_continuation_biff8(record_id: u16) -> bool {
     // FORMAT [MS-XLS 2.4.88]
-    record_id == 0x041E
+    record_id == RECORD_FORMAT_BIFF8
 }
 
 fn parse_biff_xf_record(data: &[u8]) -> Result<BiffXf, String> {
@@ -289,7 +305,7 @@ fn parse_biff_format_record_strict(
     let mut code = match record_id {
         // BIFF8 FORMAT uses `XLUnicodeString` (16-bit length) and may be split
         // across one or more `CONTINUE` records.
-        0x041E => {
+        RECORD_FORMAT_BIFF8 => {
             if record.is_continued() {
                 let fragments: Vec<&[u8]> = record.fragments().collect();
                 strings::parse_biff8_unicode_string_continued(&fragments, 2, codepage)?
@@ -298,7 +314,7 @@ fn parse_biff_format_record_strict(
             }
         }
         // BIFF5 FORMAT2 uses a short ANSI string (8-bit length).
-        0x001E => strings::parse_biff5_short_string(rest, codepage)?.0,
+        RECORD_FORMAT2_BIFF5 => strings::parse_biff5_short_string(rest, codepage)?.0,
         _ => return Err(format!("unexpected FORMAT record id 0x{record_id:04X}")),
     };
 
@@ -319,8 +335,8 @@ fn parse_biff_format_record_best_effort(
     let rest = first.get(2..).unwrap_or_default();
 
     let mut code = match record.record_id {
-        0x041E => strings::parse_biff8_unicode_string_best_effort(rest, codepage)?,
-        0x001E => strings::parse_biff5_short_string_best_effort(rest, codepage)?,
+        RECORD_FORMAT_BIFF8 => strings::parse_biff8_unicode_string_best_effort(rest, codepage)?,
+        RECORD_FORMAT2_BIFF5 => strings::parse_biff5_short_string_best_effort(rest, codepage)?,
         _ => return None,
     };
     strip_embedded_nuls(&mut code);
@@ -354,7 +370,7 @@ mod tests {
         truncated.extend_from_slice(&4u16.to_le_bytes());
         truncated.extend_from_slice(&[1, 2]); // missing 2 bytes
 
-        let stream = [record(0x0085, &bs_payload), truncated].concat();
+        let stream = [record(RECORD_BOUNDSHEET, &bs_payload), truncated].concat();
         let sheets = parse_biff_bound_sheets(&stream, BiffVersion::Biff8).expect("parse");
         assert_eq!(
             sheets,
@@ -376,7 +392,7 @@ mod tests {
         bs_payload.extend_from_slice(&[b'A', 0x00, b'B']);
 
         let stream = [
-            record(0x0085, &bs_payload),
+            record(RECORD_BOUNDSHEET, &bs_payload),
             record(records::RECORD_EOF, &[]),
         ]
         .concat();
@@ -393,7 +409,7 @@ mod tests {
     #[test]
     fn decodes_boundsheet_names_using_codepage() {
         // CODEPAGE=1251 (Windows Cyrillic).
-        let r_codepage = record(0x0042, &1251u16.to_le_bytes());
+        let r_codepage = record(RECORD_CODEPAGE, &1251u16.to_le_bytes());
 
         // BoundSheet8 with a compressed 8-bit name (fHighByte=0).
         let mut bs_payload = Vec::new();
@@ -402,7 +418,7 @@ mod tests {
         bs_payload.push(1); // cch
         bs_payload.push(0); // flags (compressed)
         bs_payload.push(0x80); // "Ђ" in cp1251
-        let r_bs = record(0x0085, &bs_payload);
+        let r_bs = record(RECORD_BOUNDSHEET, &bs_payload);
 
         let stream = [r_codepage, r_bs, record(records::RECORD_EOF, &[])].concat();
         let sheets = parse_biff_bound_sheets(&stream, BiffVersion::Biff8).expect("parse");
@@ -418,7 +434,7 @@ mod tests {
     #[test]
     fn decodes_boundsheet_names_using_codepage_1252_currency_symbol() {
         // CODEPAGE=1252 (Windows Western).
-        let r_codepage = record(0x0042, &1252u16.to_le_bytes());
+        let r_codepage = record(RECORD_CODEPAGE, &1252u16.to_le_bytes());
 
         // BoundSheet8 with a compressed 8-bit name (fHighByte=0): 0xA3 => '£' in cp1252.
         let mut bs_payload = Vec::new();
@@ -427,7 +443,7 @@ mod tests {
         bs_payload.push(1); // cch
         bs_payload.push(0); // flags (compressed)
         bs_payload.push(0xA3); // "£" in cp1252
-        let r_bs = record(0x0085, &bs_payload);
+        let r_bs = record(RECORD_BOUNDSHEET, &bs_payload);
 
         let stream = [r_codepage, r_bs, record(records::RECORD_EOF, &[])].concat();
         let sheets = parse_biff_bound_sheets(&stream, BiffVersion::Biff8).expect("parse");
@@ -443,7 +459,7 @@ mod tests {
     #[test]
     fn boundsheet_scan_stops_at_next_bof_without_eof() {
         // CODEPAGE=1251 (Windows Cyrillic).
-        let r_codepage = record(0x0042, &1251u16.to_le_bytes());
+        let r_codepage = record(RECORD_CODEPAGE, &1251u16.to_le_bytes());
 
         // BoundSheet8 with a compressed 8-bit name (fHighByte=0).
         let mut bs_payload = Vec::new();
@@ -452,7 +468,7 @@ mod tests {
         bs_payload.push(1); // cch
         bs_payload.push(0); // flags (compressed)
         bs_payload.push(0x80); // "Ђ" in cp1251
-        let r_bs = record(0x0085, &bs_payload);
+        let r_bs = record(RECORD_BOUNDSHEET, &bs_payload);
 
         // BOF for the next substream (worksheet).
         let r_sheet_bof = record(records::RECORD_BOF_BIFF8, &[0u8; 16]);
@@ -473,7 +489,7 @@ mod tests {
     fn globals_scan_stops_at_next_bof_without_eof() {
         let r_bof_globals = record(records::RECORD_BOF_BIFF8, &[0u8; 16]);
         // CODEPAGE=1251 (Windows Cyrillic).
-        let r_codepage = record(0x0042, &1251u16.to_le_bytes());
+        let r_codepage = record(RECORD_CODEPAGE, &1251u16.to_le_bytes());
 
         // FORMAT id=200, code = byte 0x80 in cp1251 => "Ђ".
         let mut fmt_payload = Vec::new();
@@ -481,18 +497,18 @@ mod tests {
         fmt_payload.extend_from_slice(&1u16.to_le_bytes()); // cch
         fmt_payload.push(0); // flags (compressed)
         fmt_payload.push(0x80); // "Ђ" in cp1251
-        let r_fmt = record(0x041E, &fmt_payload);
+        let r_fmt = record(RECORD_FORMAT_BIFF8, &fmt_payload);
 
         let mut xf_payload = vec![0u8; 20];
         xf_payload[2..4].copy_from_slice(&200u16.to_le_bytes());
-        let r_xf = record(0x00E0, &xf_payload);
+        let r_xf = record(RECORD_XF, &xf_payload);
 
         // BOF for the next substream (worksheet).
         let r_sheet_bof = record(records::RECORD_BOF_BIFF8, &[0u8; 16]);
 
         // A 1904 record and another CODEPAGE after the worksheet BOF should be ignored.
-        let r_1904_after = record(0x0022, &[1, 0]);
-        let r_codepage_after = record(0x0042, &1252u16.to_le_bytes());
+        let r_1904_after = record(RECORD_1904, &[1, 0]);
+        let r_codepage_after = record(RECORD_CODEPAGE, &1252u16.to_le_bytes());
 
         // No EOF for globals; parser should stop at the worksheet BOF.
         let stream = [
@@ -515,11 +531,11 @@ mod tests {
     #[test]
     fn globals_missing_eof_returns_partial_with_warning() {
         let r_bof_globals = record(records::RECORD_BOF_BIFF8, &[0u8; 16]);
-        let r_1904 = record(0x0022, &[1, 0]);
+        let r_1904 = record(RECORD_1904, &[1, 0]);
 
         let mut xf_payload = vec![0u8; 20];
         xf_payload[2..4].copy_from_slice(&14u16.to_le_bytes()); // built-in date format
-        let r_xf = record(0x00E0, &xf_payload);
+        let r_xf = record(RECORD_XF, &xf_payload);
 
         // No EOF record and no subsequent BOF; parser should return partial globals with a warning.
         let stream = [r_bof_globals, r_1904, r_xf].concat();
@@ -540,7 +556,7 @@ mod tests {
     #[test]
     fn globals_scan_stops_on_malformed_record_and_warns() {
         let r_bof_globals = record(records::RECORD_BOF_BIFF8, &[0u8; 16]);
-        let r_1904 = record(0x0022, &[1, 0]);
+        let r_1904 = record(RECORD_1904, &[1, 0]);
 
         // Truncated record: declares 4 bytes but only provides 2.
         let mut truncated = Vec::new();
@@ -569,7 +585,7 @@ mod tests {
     #[test]
     fn parses_globals_date_system_formats_and_xfs_biff8() {
         // 1904 record payload: f1904 = 1.
-        let r_1904 = record(0x0022, &[1, 0]);
+        let r_1904 = record(RECORD_1904, &[1, 0]);
 
         // FORMAT record: id=164, code="0.00" as XLUnicodeString (compressed).
         let mut fmt_payload = Vec::new();
@@ -577,13 +593,13 @@ mod tests {
         fmt_payload.extend_from_slice(&4u16.to_le_bytes()); // cch
         fmt_payload.push(0); // flags (compressed)
         fmt_payload.extend_from_slice(b"0.00");
-        let r_fmt = record(0x041E, &fmt_payload);
+        let r_fmt = record(RECORD_FORMAT_BIFF8, &fmt_payload);
 
         // XF record referencing numFmtId=164, cell xf (fStyle=0).
         let mut xf_payload = vec![0u8; 20];
         xf_payload[2..4].copy_from_slice(&164u16.to_le_bytes());
         xf_payload[4..6].copy_from_slice(&0u16.to_le_bytes());
-        let r_xf = record(0x00E0, &xf_payload);
+        let r_xf = record(RECORD_XF, &xf_payload);
 
         let r_eof = record(records::RECORD_EOF, &[]);
 
@@ -603,7 +619,7 @@ mod tests {
 
     #[test]
     fn resolves_builtins_and_placeholders() {
-        let r_1900 = record(0x0022, &[0, 0]);
+        let r_1900 = record(RECORD_1904, &[0, 0]);
 
         // Two XF records: one built-in (14), one unknown (60), and one General (0).
         let mut xf14 = vec![0u8; 20];
@@ -615,9 +631,9 @@ mod tests {
 
         let stream = [
             r_1900,
-            record(0x00E0, &xf14),
-            record(0x00E0, &xf60),
-            record(0x00E0, &xf0),
+            record(RECORD_XF, &xf14),
+            record(RECORD_XF, &xf60),
+            record(RECORD_XF, &xf0),
             record(records::RECORD_EOF, &[]),
         ]
         .concat();
@@ -642,14 +658,14 @@ mod tests {
         fmt_payload.extend_from_slice(&200u16.to_le_bytes());
         fmt_payload.push(5); // cch (including NUL)
         fmt_payload.extend_from_slice(b"0\0.00");
-        let r_fmt = record(0x001E, &fmt_payload);
+        let r_fmt = record(RECORD_FORMAT2_BIFF5, &fmt_payload);
 
         let mut xf_payload = vec![0u8; 16];
         xf_payload[2..4].copy_from_slice(&200u16.to_le_bytes());
 
         let stream = [
             r_fmt,
-            record(0x00E0, &xf_payload),
+            record(RECORD_XF, &xf_payload),
             record(records::RECORD_EOF, &[]),
         ]
         .concat();
