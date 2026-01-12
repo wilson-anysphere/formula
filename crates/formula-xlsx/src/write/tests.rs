@@ -3,7 +3,8 @@ use super::*;
 use quick_xml::events::Event;
 use quick_xml::Reader;
 use std::collections::BTreeMap;
-use std::io::Read;
+use std::io::{Read, Write};
+use zip::write::{FileOptions, ZipWriter};
 use zip::ZipArchive;
 
 fn worksheet_formula_texts_from_xlsx(bytes: &[u8], part_name: &str) -> Vec<String> {
@@ -45,6 +46,41 @@ fn worksheet_formula_texts_from_xlsx(bytes: &[u8], part_name: &str) -> Vec<Strin
     formulas
 }
 
+fn build_minimal_xlsx_with_sheet1(sheet1_xml: &str) -> Vec<u8> {
+    let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+    let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+
+    let cursor = std::io::Cursor::new(Vec::new());
+    let mut zip = ZipWriter::new(cursor);
+    let options = FileOptions::<()>::default().compression_method(zip::CompressionMethod::Stored);
+
+    zip.start_file("xl/workbook.xml", options)
+        .expect("start xl/workbook.xml");
+    zip.write_all(workbook_xml.as_bytes())
+        .expect("write xl/workbook.xml");
+
+    zip.start_file("xl/_rels/workbook.xml.rels", options)
+        .expect("start xl/_rels/workbook.xml.rels");
+    zip.write_all(workbook_rels.as_bytes())
+        .expect("write xl/_rels/workbook.xml.rels");
+
+    zip.start_file("xl/worksheets/sheet1.xml", options)
+        .expect("start xl/worksheets/sheet1.xml");
+    zip.write_all(sheet1_xml.as_bytes())
+        .expect("write xl/worksheets/sheet1.xml");
+
+    zip.finish().expect("finish zip").into_inner()
+}
+
 #[test]
 fn writes_spreadsheetml_formula_text_without_leading_equals() {
     let mut workbook = formula_model::Workbook::new();
@@ -76,6 +112,96 @@ fn writes_spreadsheetml_formula_text_without_leading_equals() {
             "SpreadsheetML <f> text must not start with '=' (got {f:?})"
         );
     }
+}
+
+#[test]
+fn sheetdata_patch_emits_vm_cm_for_inserted_cells() {
+    let sheet1_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1"><v>1</v></c>
+    </row>
+  </sheetData>
+</worksheet>"#;
+    let input = build_minimal_xlsx_with_sheet1(sheet1_xml);
+
+    let mut doc = crate::load_from_bytes(&input).expect("load minimal xlsx");
+
+    let sheet_id = doc
+        .workbook
+        .sheets
+        .first()
+        .map(|s| s.id)
+        .expect("sheet exists");
+
+    let b1 = formula_model::CellRef::from_a1("B1").unwrap();
+    doc.workbook
+        .sheet_mut(sheet_id)
+        .expect("sheet exists")
+        .set_value(b1, formula_model::CellValue::Number(2.0));
+
+    doc.meta.cell_meta.insert(
+        (sheet_id, b1),
+        crate::CellMeta {
+            vm: Some(1),
+            cm: Some(2),
+            ..Default::default()
+        },
+    );
+
+    let out = write_to_vec(&doc).expect("write patched xlsx");
+
+    let cursor = std::io::Cursor::new(out);
+    let mut archive = ZipArchive::new(cursor).expect("open output zip");
+    let mut file = archive
+        .by_name("xl/worksheets/sheet1.xml")
+        .expect("worksheet part missing");
+    let mut xml = String::new();
+    file.read_to_string(&mut xml).expect("read worksheet xml");
+
+    let mut reader = Reader::from_str(&xml);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+
+    let mut found = false;
+    let mut found_vm: Option<String> = None;
+    let mut found_cm: Option<String> = None;
+
+    loop {
+        match reader.read_event_into(&mut buf).expect("xml parse") {
+            Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"c" => {
+                let mut r: Option<String> = None;
+                let mut vm: Option<String> = None;
+                let mut cm: Option<String> = None;
+
+                for attr in e.attributes() {
+                    let attr = attr.expect("attr");
+                    let v = attr.unescape_value().expect("attr value").into_owned();
+                    match attr.key.as_ref() {
+                        b"r" => r = Some(v),
+                        b"vm" => vm = Some(v),
+                        b"cm" => cm = Some(v),
+                        _ => {}
+                    }
+                }
+
+                if r.as_deref() == Some("B1") {
+                    found = true;
+                    found_vm = vm;
+                    found_cm = cm;
+                    break;
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    assert!(found, "expected to find <c r=\"B1\"> in patched worksheet");
+    assert_eq!(found_vm.as_deref(), Some("1"), "missing/incorrect vm= on B1");
+    assert_eq!(found_cm.as_deref(), Some("2"), "missing/incorrect cm= on B1");
 }
 
 #[test]
@@ -305,3 +431,4 @@ fn patch_content_types_for_sheet_edits_preserves_prefix_only_content_types() {
         );
     }
 }
+

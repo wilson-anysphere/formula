@@ -886,6 +886,17 @@ fn write_updated_cell<W: Write>(
 
     let a1 = cell_ref.to_a1();
     let meta = super::lookup_cell_meta(doc, cell_meta_sheet_ids, sheet_meta.worksheet_id, cell_ref);
+    let meta_vm = meta.and_then(|m| m.vm).map(|vm| vm.to_string());
+    let meta_cm = meta.and_then(|m| m.cm).map(|cm| cm.to_string());
+    // If the file already had `vm`/`cm` attributes, they were captured in `preserved_attrs`.
+    // Avoid emitting duplicate attributes, and prefer meta-provided values so callers can
+    // intentionally update the metadata indices.
+    if meta_vm.is_some() {
+        preserved_attrs.retain(|(k, _)| k != "vm");
+    }
+    if meta_cm.is_some() {
+        preserved_attrs.retain(|(k, _)| k != "cm");
+    }
     let value_kind = super::effective_value_kind(meta, cell);
     let meta_sheet_id = cell_meta_sheet_ids
         .get(&sheet_meta.worksheet_id)
@@ -959,6 +970,12 @@ fn write_updated_cell<W: Write>(
         }
     }
     let preserve_vm = matches!(cell.value, CellValue::Error(ErrorValue::Value));
+    if let Some(vm) = &meta_vm {
+        c_start.push_attribute(("vm", vm.as_str()));
+    }
+    if let Some(cm) = &meta_cm {
+        c_start.push_attribute(("cm", cm.as_str()));
+    }
     for (k, v) in &preserved_attrs {
         if k == "vm" && !preserve_vm {
             continue;
