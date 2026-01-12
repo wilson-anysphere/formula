@@ -29,7 +29,7 @@ pub use part_info::{CellImageEmbed, CellImagesPartInfo};
 
 /// Best-effort loader for workbook-level "in-cell" images.
 ///
-/// This is intentionally tolerant of incomplete/malformed workbooks:
+/// This is intentionally best-effort/tolerant of incomplete or malformed workbooks:
 /// - Missing `cellimages*.xml` parts → no-op
 /// - Missing `.rels` → skip that part
 /// - Missing referenced media part → skip that image/part
@@ -49,6 +49,7 @@ pub fn load_cell_images_from_parts(
         let _ = parse_cell_images_part(path, parts, workbook);
     }
 }
+
 /// Parsed workbook-level cell images parts.
 #[derive(Debug, Clone, Default)]
 pub struct CellImages {
@@ -387,4 +388,3 @@ fn slice_node_xml(node: &roxmltree::Node<'_, '_>, doc: &str) -> Option<String> {
     let range = node.range();
     doc.get(range).map(|s| s.to_string())
 }
-
