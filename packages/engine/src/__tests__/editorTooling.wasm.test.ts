@@ -294,6 +294,39 @@ describeWasm("EngineWorker editor tooling RPCs (wasm)", () => {
     }
   });
 
+  it("accepts full ParseOptions objects (snake_case) for backward compatibility", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      const fullOpts = {
+        locale: {
+          decimal_separator: ".",
+          arg_separator: ",",
+          array_col_separator: ",",
+          array_row_separator: ";",
+          thousands_separator: null
+        },
+        reference_style: "R1C1",
+        normalize_relative_to: null
+      };
+
+      const tokens = await engine.lexFormula("=R1C1", fullOpts as any);
+      expect(tokens.some((t) => t.kind === "R1C1Cell")).toBe(true);
+
+      const parsed = await engine.parseFormulaPartial("=R1C1", fullOpts as any);
+      expect(parsed.error).toBeNull();
+      expect((parsed.ast as any)?.expr?.CellRef).toBeTruthy();
+    } finally {
+      engine.terminate();
+    }
+  });
+
   it("surfaces a clear error when the options object has an unexpected shape", async () => {
     const wasm = await loadFormulaWasm();
     const worker = new WasmBackedWorker(wasm);
