@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 // Include an explicit `.ts` import specifier so the repo's node:test runner can
-// automatically skip this suite when `--experimental-strip-types` is not available.
+// automatically skip this suite when TypeScript execution isn't available.
 import { fromA1 as fromA1FromTs } from "../../../packages/spreadsheet-frontend/src/a1.ts";
 
-test("spreadsheet-frontend subpath exports are importable under Node ESM (strip-types)", async () => {
+test(
+  "spreadsheet-frontend subpath exports are importable under Node ESM when executing TS sources directly",
+  async () => {
   const a1 = await import("@formula/spreadsheet-frontend/a1");
   const cache = await import("@formula/spreadsheet-frontend/cache");
   const grid = await import("@formula/spreadsheet-frontend/grid");
@@ -16,5 +18,5 @@ test("spreadsheet-frontend subpath exports are importable under Node ESM (strip-
 
   assert.equal(typeof cache.EngineCellCache, "function");
   assert.equal(typeof grid.EngineGridProvider, "function");
-});
-
+  },
+);
