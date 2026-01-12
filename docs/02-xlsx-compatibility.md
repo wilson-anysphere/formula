@@ -399,7 +399,8 @@ At the worksheet level, this shows up as additional attributes on the `<c>` (cel
 - `cm="…"`, the **cell metadata index**
 
 These are integer indices into metadata tables stored at the workbook level (Excel-produced files
-commonly use **1-based** indices for `vm`; treat `vm`/`cm` as opaque and preserve them exactly).
+commonly use **1-based** indices for `vm`, but **0-based** also appears in the wild; treat `vm`/`cm` as
+opaque and preserve them exactly).
 
 Example cell carrying rich/linked metadata:
 

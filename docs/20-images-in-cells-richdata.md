@@ -26,11 +26,22 @@ xl/
     richValueRel.xml.rels   # required if richValueRel.xml contains r:id entries
 ```
 
+Notes:
+
+* The *minimum* observed set for a simple in-cell image can be smaller. For example,
+  `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` includes:
+  * `xl/richData/richValue.xml`
+  * `xl/richData/richValueRel.xml`
+  * `xl/richData/_rels/richValueRel.xml.rels`
+  and omits `richValueTypes.xml` / `richValueStructure.xml`.
+* For linked data types and richer payloads, Excel is expected to add the supporting “types” and
+  “structure” tables; treat their presence as feature-dependent.
+
 ### Roles (high level)
 
 | Part | Purpose |
 |------|---------|
-| `xl/richData/richValueTypes.xml` | Defines **type IDs** (numeric) and links each type to a **structure ID** (string) that describes its field layout. |
+| `xl/richData/richValueTypes.xml` | Defines **type identifiers** (often numeric IDs) and links each type to a **structure ID** (string) that describes its field layout. |
 | `xl/richData/richValueStructure.xml` | Defines **structures**: ordered field/member layouts keyed by **string IDs**. |
 | `xl/richData/richValue.xml` | Stores the **rich value instances** (“objects”) in a workbook-global table. Each instance references a type (and/or structure) and stores member values. |
 | `xl/richData/richValueRel.xml` | Stores a **relationship-ID table** (`r:id` strings) that can be referenced **by index** from rich values, avoiding embedding raw `rId*` strings inside each rich value payload. |
@@ -42,15 +53,17 @@ xl/
 
 The RichData parts above are workbook-global tables. A worksheet cell does **not** point directly at `xl/richData/richValue.xml`.
 
-Instead, Excel uses **cell metadata** in `xl/metadata.xml`:
+Instead, Excel uses **cell metadata** in `xl/metadata.xml` (schema varies across Excel builds):
 
 1. Worksheet cells use `c/@vm` (value-metadata index).
 2. `vm` selects a `<valueMetadata><bk>` record in `xl/metadata.xml`.
-3. That `<bk>` contains an `<rc t="…" v="…"/>` record pointing at `futureMetadata name="XLRICHVALUE"`.
-4. The `futureMetadata` record contains an extension element (commonly `xlrd:rvb`) with `i="…"`, which is the
-   **0-based rich value index** into `xl/richData/richValue.xml`.
+3. That `<bk>` contains an `<rc t="…" v="…"/>` record.
+4. Depending on the `metadata.xml` shape, `rc/@v` may:
+   * directly be the **0-based rich value index** into `xl/richData/richValue.xml`, or
+   * be an index into another extension table (commonly a `futureMetadata name="XLRICHVALUE"` table containing
+     `xlrd:rvb i="…"` entries, where `rvb/@i` is the rich value index).
 
-Minimal representative shape (index bases are important; see below):
+Minimal representative shape for the `futureMetadata`/`rvb` variant (index bases are important; see below):
 
 ```xml
 <metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
@@ -73,7 +86,7 @@ Minimal representative shape (index bases are important; see below):
   </futureMetadata>
 
   <valueMetadata>
-    <!-- vm=1 (1-based) selects the first <bk> -->
+    <!-- vm selects a <bk> record (often 1-based; sometimes 0-based) -->
     <bk><rc t="1" v="0"/></bk>
   </valueMetadata>
 </metadata>
@@ -82,7 +95,8 @@ Minimal representative shape (index bases are important; see below):
 This indirection is important for engineering because:
 
 * `vm` indexes are **independent** from `richValue.xml` indexes.
-* `vm` is **1-based** in Excel’s `xl/metadata.xml` model (see [Index bases](#index-bases--indirection)).
+* `vm` base is **not consistent** across all observed files; treat `vm` as opaque and resolve best-effort
+  (see [Index bases](#index-bases--indirection)).
 
 ---
 
@@ -90,7 +104,7 @@ This indirection is important for engineering because:
 
 Excel uses multiple indices; mixing bases is a common source of bugs.
 
-### `vm` (worksheet cell attribute) — **1-based**
+### `vm` (worksheet cell attribute) — **0-based or 1-based (tolerate both)**
 
 In worksheet XML, cells can carry `vm="n"` to attach value metadata:
 
@@ -100,10 +114,18 @@ In worksheet XML, cells can carry `vm="n"` to attach value metadata:
 </c>
 ```
 
+Some workbooks use `vm="0"` for the first entry (0-based). Example from
+`fixtures/xlsx/basic/image-in-cell-richdata.xlsx`:
+
+```xml
+<c r="A1" vm="0"><v>0</v></c>
+```
+
 Current Formula behavior:
 
-* `vm` is treated as **1-based** (i.e. `vm="1"` refers to the *first* `<valueMetadata><bk>` record).
-  See `crates/formula-xlsx/src/rich_data/metadata.rs` (and its unit tests).
+* `vm` is treated as **ambiguous** (0-based or 1-based), because both appear in the wild.
+  Implementations should attempt to resolve both (e.g. try `vm` and `vm-1`), and preserve the original
+  values when round-tripping.
 * Missing `vm` means “no value metadata”.
 * Preserve unusual values like `vm="0"` if encountered (even if they don’t resolve cleanly).
 
@@ -112,13 +134,19 @@ Current Formula behavior:
 | Index | Location | Base | Meaning |
 |------:|----------|------|---------|
 | `t` | `<valueMetadata><bk><rc t="…">` | 1-based | index into `<metadataTypes>` (selects `metadataType name="XLRICHVALUE"`) |
-| `v` | `<valueMetadata><bk><rc v="…">` | 0-based | index into `<futureMetadata name="XLRICHVALUE"><bk>` |
+| `v` | `<valueMetadata><bk><rc v="…">` | 0-based | often an index into `<futureMetadata name="XLRICHVALUE"><bk>` (if present); other schemas may use `v` differently (including directly referencing the rich value index). |
 | `i` | `<xlrd:rvb i="…"/>` | 0-based | rich value index into `xl/richData/richValue.xml` |
+
+Notes:
+
+* The `metadata.xml` schema varies across Excel builds. Some files do not include `futureMetadata`/`rvb`;
+  in those, `rc/@v` may directly refer to the rich value index (or be interpreted via other extension
+  tables). Preserve unknown metadata and implement mapping best-effort.
 
 ### `richValue.xml` rich value table — **0-based**
 
 Rich values are stored in a list; the rich value index is **0-based** and is referenced from `xl/metadata.xml`
-via `xlrd:rvb/@i`.
+either directly (e.g. `rc/@v = richValueIndex`) or indirectly (e.g. via `xlrd:rvb/@i`).
 
 ### `richValueRel.xml` relationship table — **0-based**
 
@@ -148,9 +176,9 @@ The exact XML vocab inside `richValue.xml` varies across Excel builds, but the *
 is generally:
 
 1. **Worksheet cell** (`xl/worksheets/sheetN.xml`)
-   - Cell has `c/@vm="1"` (value metadata index, **1-based**).
+   - Cell has `c/@vm="0"` or `c/@vm="1"` (value metadata index; **0-based or 1-based** in observed files).
 2. **Value metadata** (`xl/metadata.xml`)
-   - `vm=1` selects `<valueMetadata><bk>` #1 (**1-based**).
+   - `vm` selects a `<valueMetadata><bk>` record (base varies; preserve and resolve best-effort).
    - That `<bk>` contains `<rc t="…" v="0"/>` where `v` is **0-based** into `futureMetadata name="XLRICHVALUE"`.
 3. **Future metadata** (`xl/metadata.xml`)
    - `futureMetadata name="XLRICHVALUE"` `<bk>` #0 contains `<xlrd:rvb i="5"/>`.
@@ -164,22 +192,22 @@ is generally:
    - Relationship `Id="rId7"` resolves to an OPC `Target` (often a media part like `../media/image1.png`,
      but treat this as opaque; other targets/types may appear depending on Excel build).
 
-So: **cell → vm (1-based) → metadata.xml → rvb@i (0-based) → richValue.xml → relIndex (0-based) →
+So: **cell → vm (0/1-based) → metadata.xml → rvb@i (0-based) → richValue.xml → relIndex (0-based) →
 richValueRel.xml → rId → .rels target → image bytes**.
 
 ## Minimal XML skeletons (best-effort)
 
 These skeletons aim to show **roots, key child tags, and key attributes** as Excel tends to emit them. Namespaces and some attribute names may differ across builds—treat them as *shape guidance*, not a strict schema.
 
-### 1) `xl/richData/richValueTypes.xml`
+### 1) `xl/richData/richValueTypes.xml` (optional / feature-dependent)
 
-Defines **type IDs** (numeric) and links to a **structure ID** (string).
+Defines **type identifiers** and links to a **structure ID** (string).
 
 ```xml
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <rvTypes xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
   <!-- One entry per type used in this workbook. -->
-  <!-- Type IDs are numeric; richValue.xml instances reference them. -->
+  <!-- Type identifiers may be numeric IDs or strings depending on Excel build. -->
   <types>
     <type id="0" name="com.microsoft.excel.image" structure="s_image"/>
     <!-- ... -->
@@ -193,7 +221,7 @@ Notes:
 * `structure` is a string key into `richValueStructure.xml`.
 * `name` is often present but should be treated as opaque.
 
-### 2) `xl/richData/richValueStructure.xml`
+### 2) `xl/richData/richValueStructure.xml` (optional / feature-dependent)
 
 Defines member/field layouts keyed by **string IDs**. Structures are typically interpreted as “schemas” for the ordered value list stored in `richValue.xml`.
 
@@ -221,18 +249,20 @@ Notes:
 
 Stores a **vector/table** of `r:id` strings. The *index* into this vector is what rich values store.
 
+Observed in `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`:
+
 ```xml
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<rvRel xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata"
-       xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<richValueRel xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata2"
+              xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <!-- Table position = relationship index (0-based). -->
-  <rels>
-    <rel r:id="rId1"/>
-    <rel r:id="rId2"/>
-    <!-- ... -->
-  </rels>
-</rvRel>
+  <rel r:id="rId1"/>
+  <!-- ... -->
+</richValueRel>
 ```
+
+Some variants may wrap the entries (e.g. `<rels><rel .../></rels>`); match on element local-names and
+preserve unknown structure when round-tripping.
 
 And the corresponding OPC relationships part:
 
@@ -254,26 +284,31 @@ And the corresponding OPC relationships part:
 
 Stores the actual rich value instances. Each instance references a type (and/or structure) and encodes member values (often positionally, guided by `richValueStructure.xml`).
 
+Observed in `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` (image rich value referencing relationship index `0`):
+
 ```xml
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
-  <!-- Table position = rich value index (0-based). -->
-  <values>
-    <rv type="0">
-      <!-- The exact payload encoding varies; this is illustrative. -->
-      <!-- Example: relationship index 0 => richValueRel.xml entry 0 => r:id => image target -->
-      <v kind="rel">0</v>
-      <v kind="string">Alt text</v>
-    </rv>
-    <!-- ... -->
-  </values>
+  <!-- Rich value index is typically the 0-based order of <rv> records (unless an explicit id/index is provided). -->
+  <rv s="0" t="image">
+    <!-- Relationship index (0-based) into richValueRel.xml -->
+    <v>0</v>
+  </rv>
 </rvData>
 ```
 
+Other builds may:
+
+* split values across `xl/richData/richValue1.xml`, `richValue2.xml`, ...
+* include an explicit global index attribute on `<rv>` (e.g. `i="…"`, `id="…"`, `idx="…"`)
+* include multiple `<v>` members, with types indicated by attributes like `t="rel"` / `t="r"` / etc.
+
 Notes:
 
-* The “rich value index” is 0-based and is referenced from `xl/metadata.xml` via `xlrd:rvb/@i`. In practice,
-  Excel appears to treat this as the record’s 0-based index within the `richValue.xml` table.
+* The “rich value index” is 0-based. Depending on the `metadata.xml` schema, the cell metadata may
+  reference it either:
+  * directly (e.g. `rc/@v = richValueIndex`), or
+  * indirectly via a `rvb/@i` lookup table.
 * The “relationship index” stored in the payload is 0-based and indexes into `richValueRel.xml`.
 
 ---
@@ -285,70 +320,97 @@ Notes:
 Excel uses OPC relationships to connect:
 
 * `xl/workbook.xml` → `xl/metadata.xml` (worksheet cells only carry `vm`/`cm` indices; the actual mapping tables live in metadata).
-* `xl/metadata.xml` → `xl/richData/*` (the rich value tables).
+* `xl/workbook.xml` → `xl/richData/*` (the rich value tables; often directly related from the workbook for in-cell images).
+* (Sometimes) `xl/metadata.xml` → `xl/richData/*` via `xl/_rels/metadata.xml.rels`.
 * `xl/richData/richValueRel.xml` → external OPC targets (commonly `xl/media/*` images) via `xl/richData/_rels/richValueRel.xml.rels`.
 
-The workbook → metadata relationship uses a standard SpreadsheetML relationship type URI:
+The workbook → metadata relationship uses a standard SpreadsheetML relationship type URI. Two variants are
+observed in this repo:
 
 * `http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata`
   * Observed in `fixtures/xlsx/metadata/rich-values-vm.xlsx`
+* `http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata`
+  * Observed in `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`
 
-In many Excel-generated workbooks, the richData parts are not related directly from `workbook.xml.rels`, but instead via a separate relationships part:
+Additionally, `xl/workbook.xml` may include a `<metadata r:id="..."/>` element pointing at the relationship
+ID for the metadata part (observed in `fixtures/xlsx/metadata/rich-values-vm.xlsx`). Some workbooks omit
+this element and only include the relationship in `workbook.xml.rels` (observed in
+`fixtures/xlsx/basic/image-in-cell-richdata.xlsx`). Preserve whichever representation the source workbook
+uses.
 
-* `xl/_rels/metadata.xml.rels` (for `xl/metadata.xml`)
+The richValue relationships are Microsoft-specific. Observed in
+`fixtures/xlsx/basic/image-in-cell-richdata.xlsx`:
 
-Relationship *targets* for the richData tables are typically:
+* `http://schemas.microsoft.com/office/2017/06/relationships/richValue` → `xl/richData/richValue.xml`
+* `http://schemas.microsoft.com/office/2017/06/relationships/richValueRel` → `xl/richData/richValueRel.xml`
 
-* `richData/richValue.xml`
-* `richData/richValueRel.xml`
-* `richData/richValueTypes.xml`
-* `richData/richValueStructure.xml`
+Likely (not observed in fixtures here, but expected for richer payloads):
 
-Some Excel builds may additionally include direct relationships from `xl/workbook.xml.rels` to `xl/richData/*`.
-For parsing and round-trip safety, treat both layouts as valid.
+* `http://schemas.microsoft.com/office/2017/06/relationships/richValueTypes` → `xl/richData/richValueTypes.xml`
+* `http://schemas.microsoft.com/office/2017/06/relationships/richValueStructure` → `xl/richData/richValueStructure.xml`
 
-Relationship **Type URIs** for these parts are Microsoft-specific and not yet verified in this repo. Likely patterns include:
-
-* `http://schemas.microsoft.com/office/.../relationships/richValue`
-* `http://schemas.microsoft.com/office/.../relationships/richValueRel`
-* `http://schemas.microsoft.com/office/.../relationships/richValueTypes`
-* `http://schemas.microsoft.com/office/.../relationships/richValueStructure`
+Some workbooks may instead relate the richData parts from `xl/metadata.xml` via `xl/_rels/metadata.xml.rels`.
+For parsing and round-trip safety, treat both relationship layouts as valid.
 
 Implementation guidance:
 
 * When parsing, do not hardcode exact Type URIs; match by resolved `Target` path when necessary and preserve unknown relationship types.
-* When writing new files, prefer the Excel-like layering (`workbook.xml` → `metadata.xml` → `richData/*`) and keep Type URIs stable (but be prepared that Excel may rewrite them).
+* When writing new files, keep relationship IDs stable and prefer “append-only” updates. Excel may rewrite
+  relationship type URIs and renumber `rId*` values.
 
 #### Minimal `.rels` skeletons (best-effort)
 
-`xl/_rels/workbook.xml.rels` (workbook → metadata; Type URI likely standard OpenXML, but verify):
+`xl/_rels/workbook.xml.rels` (workbook → metadata and/or richData):
 
 ```xml
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <!-- ...other workbook relationships... -->
-  <Relationship
-    Id="rIdMeta"
-    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata"
-    Target="metadata.xml"/>
+  <!-- metadata.xml (Type may be /metadata or /sheetMetadata) -->
+  <Relationship Id="rIdMeta"
+                Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata"
+                Target="metadata.xml"/>
+
+  <!-- richData tables (Type URIs are Microsoft-specific; examples observed in fixtures) -->
+  <Relationship Id="rIdRichValue"
+                Type="http://schemas.microsoft.com/office/2017/06/relationships/richValue"
+                Target="richData/richValue.xml"/>
+  <Relationship Id="rIdRichValueRel"
+                Type="http://schemas.microsoft.com/office/2017/06/relationships/richValueRel"
+                Target="richData/richValueRel.xml"/>
 </Relationships>
 ```
 
-`xl/_rels/metadata.xml.rels` (metadata → richData tables; Type URIs are Microsoft-specific and unverified):
+`xl/_rels/metadata.xml.rels` (optional; metadata → richData tables):
 
 ```xml
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rIdRichValue"          Type="http://schemas.microsoft.com/office/.../relationships/richValue"          Target="richData/richValue.xml"/>
-  <Relationship Id="rIdRichValueRel"       Type="http://schemas.microsoft.com/office/.../relationships/richValueRel"       Target="richData/richValueRel.xml"/>
-  <Relationship Id="rIdRichValueTypes"     Type="http://schemas.microsoft.com/office/.../relationships/richValueTypes"     Target="richData/richValueTypes.xml"/>
-  <Relationship Id="rIdRichValueStructure" Type="http://schemas.microsoft.com/office/.../relationships/richValueStructure" Target="richData/richValueStructure.xml"/>
+  <Relationship Id="rIdRichValue"
+                Type="http://schemas.microsoft.com/office/2017/06/relationships/richValue"
+                Target="richData/richValue.xml"/>
+  <Relationship Id="rIdRichValueRel"
+                Type="http://schemas.microsoft.com/office/2017/06/relationships/richValueRel"
+                Target="richData/richValueRel.xml"/>
+  <!-- richValueTypes/richValueStructure relationships may also appear (unverified) -->
 </Relationships>
 ```
 
-### `[Content_Types].xml` overrides (likely)
+### `[Content_Types].xml` considerations
 
-Excel adds explicit `<Override>` entries for each richData part. Exact `ContentType` strings are not yet verified here; likely patterns:
+Excel may or may not add explicit `<Override>` entries for `xl/metadata.xml` and `xl/richData/*`.
+Observed patterns in this repo:
+
+* `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` relies on the default:
+  * `<Default Extension="xml" ContentType="application/xml"/>`
+  and includes no overrides for `metadata.xml` or `xl/richData/*`.
+* `fixtures/xlsx/metadata/rich-values-vm.xlsx` includes an override:
+  * `<Override PartName="/xl/metadata.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"/>`
+* Some tests construct workbooks that use:
+  * `application/vnd.openxmlformats-officedocument.spreadsheetml.metadata+xml` for `/xl/metadata.xml`
+
+For the richData tables themselves, Excel may emit Microsoft-specific content types (not yet verified here);
+best-effort likely patterns:
 
 ```xml
 <Override PartName="/xl/richData/richValue.xml"          ContentType="application/vnd.ms-excel.richvalue+xml"/>
@@ -360,7 +422,8 @@ Excel adds explicit `<Override>` entries for each richData part. Exact `ContentT
 Implementation guidance:
 
 * When round-tripping an existing file: preserve the original overrides verbatim.
-* When generating from scratch: emit overrides (do not rely on `Default Extension="xml" …`), as Excel tends to do for non-standard parts.
+* When generating from scratch: emitting overrides for non-standard parts can improve compatibility, but
+  preserve and round-trip whatever the source workbook uses.
 
 ---
 
@@ -369,13 +432,15 @@ Implementation guidance:
 For images-in-cell, the minimum viable read path usually looks like:
 
 1. Locate `xl/metadata.xml` (typically via `xl/_rels/workbook.xml.rels`, but fall back to part existence).
-2. Locate the four `xl/richData/*` parts (often via `xl/_rels/metadata.xml.rels`, but fall back to part existence).
-3. Parse `richValueTypes.xml` into `type_id -> structure_id`.
-4. Parse `richValueStructure.xml` into `structure_id -> ordered member schema`.
+2. Locate the `xl/richData/*` parts (often directly via `xl/_rels/workbook.xml.rels`; sometimes via
+   `xl/_rels/metadata.xml.rels`; also fall back to part existence).
+3. If present, parse `richValueTypes.xml` into `type_id -> structure_id`.
+4. If present, parse `richValueStructure.xml` into `structure_id -> ordered member schema`.
 5. Parse `richValueRel.xml` into `rel_index -> rId`.
 6. Parse `xl/richData/_rels/richValueRel.xml.rels` into `rId -> target` (image path).
 7. Parse `richValue.xml` into a table of `rich_value_index -> {type_id, payload...}`.
-8. Parse `xl/metadata.xml` to resolve `vm` (cell attribute) → `rich_value_index` (`xlrd:rvb/@i`).
+8. Parse `xl/metadata.xml` to resolve `vm` (cell attribute) → `rich_value_index` (best-effort; schemas vary:
+   some use `xlrd:rvb/@i`, others may reference the rich value index directly).
 9. Use worksheet cell `vm` values to map cells → `rich_value_index`.
 
 For writing, the safest approach is typically “append-only”:

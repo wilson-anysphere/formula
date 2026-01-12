@@ -215,13 +215,13 @@ explicitly implement full rich-value editing.
 
 Formula’s current understanding (implemented in `crates/formula-xlsx/src/rich_data/metadata.rs`) is:
 
-1. Worksheet cells reference a *value metadata record* via `c/@vm` (**1-based**).
+1. Worksheet cells reference a *value metadata record* via `c/@vm` (**often 1-based, but 0-based is also observed**; treat as opaque and preserve).
 2. `xl/metadata.xml` contains `<valueMetadata>` with a list of `<bk>` records; `vm` selects a `<bk>`.
 3. That `<bk>` contains `<rc t="…" v="…"/>` where:
-   - `t` is the **1-based** index of `"XLRICHVALUE"` inside `<metadataTypes>`.
-   - `v` is a **0-based** index into `<futureMetadata name="XLRICHVALUE">`’s `<bk>` list.
+    - `t` is the **1-based** index of `"XLRICHVALUE"` inside `<metadataTypes>`.
+    - `v` is **0-based** (in this schema it indexes into `<futureMetadata name="XLRICHVALUE">`’s `<bk>` list; other schemas may use `v` differently).
 4. That future-metadata `<bk>` contains an extension element (commonly `xlrd:rvb`) with an `i="…"`
-   attribute, which is a **0-based** index into `xl/richData/richValue.xml`.
+    attribute, which is a **0-based** index into `xl/richData/richValue.xml`.
 
 Representative snippet (from the unit tests in `crates/formula-xlsx/src/rich_data/metadata.rs`):
 
