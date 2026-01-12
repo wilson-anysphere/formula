@@ -372,7 +372,7 @@ function tabColorRgbToCss(raw: string): string {
   if (/^[0-9A-Fa-f]{6}$/.test(rgb)) return `#${rgb}`;
   if (/^#[0-9A-Fa-f]{8}$/.test(rgb)) return argbToCssHsl(rgb.slice(1));
   if (/^[0-9A-Fa-f]{8}$/.test(rgb)) return argbToCssHsl(rgb);
-  // Best-effort fallback (handles named colors, rgb(...), etc).
+  // Best-effort fallback (handles named colors, rgb(r,g,b), etc).
   return rgb;
 }
 
