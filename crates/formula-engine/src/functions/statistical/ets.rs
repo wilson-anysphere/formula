@@ -41,6 +41,16 @@ pub enum TimelineStep {
         months_step: i32,
         system: ExcelDateSystem,
     },
+    /// Timeline advances in fixed calendar-month steps anchored to end-of-month (EOMONTH semantics).
+    ///
+    /// This is required to support common Excel timelines that use month-end dates
+    /// (e.g. 2020-02-29, 2020-03-31, 2020-04-30...), where `EDATE` does not preserve month-end
+    /// when the start date is clamped (e.g. Feb 29).
+    MonthEnd {
+        start_serial: i32,
+        months_step: i32,
+        system: ExcelDateSystem,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -71,6 +81,11 @@ impl PreparedSeries {
                 months_step,
                 system,
             } => month_step_position(target_date, start_serial, months_step, system),
+            TimelineStep::MonthEnd {
+                start_serial,
+                months_step,
+                system,
+            } => month_end_step_position(target_date, start_serial, months_step, system),
         }
     }
 
@@ -299,25 +314,76 @@ fn prepare_series_month_step(
     let start_serial = serials[0];
     let start_month_id = month_ids[0];
 
-    // Map each observed point to its integer period index.
-    let mut known = std::collections::BTreeMap::<usize, f64>::new();
-    let mut max_k = 0usize;
-    for ((&serial, &month_id), &v) in serials.iter().zip(month_ids.iter()).zip(values.iter()) {
-        let month_diff = month_id - start_month_id;
-        if month_diff < 0 || month_diff % months_step != 0 {
-            return Err(ErrorKind::Num);
+    fn build_known<F>(
+        serials: &[i32],
+        month_ids: &[i32],
+        values: &[f64],
+        start_month_id: i32,
+        months_step: i32,
+        mut expected_for_months: F,
+    ) -> Result<(std::collections::BTreeMap<usize, f64>, usize), ErrorKind>
+    where
+        F: FnMut(i32) -> Result<i32, ErrorKind>,
+    {
+        let mut known = std::collections::BTreeMap::<usize, f64>::new();
+        let mut max_k = 0usize;
+        for ((&serial, &month_id), &v) in serials.iter().zip(month_ids.iter()).zip(values.iter()) {
+            let month_diff = month_id - start_month_id;
+            if month_diff < 0 || month_diff % months_step != 0 {
+                return Err(ErrorKind::Num);
+            }
+            let k_i32 = month_diff / months_step;
+            let expected = expected_for_months(k_i32 * months_step)?;
+            if expected != serial {
+                return Err(ErrorKind::Num);
+            }
+            let k = k_i32 as usize;
+            max_k = max_k.max(k);
+            known.insert(k, v);
         }
-        let k_i32 = month_diff / months_step;
-        let expected = date_time::edate(start_serial, k_i32 * months_step, system)
-            .map_err(|_| ErrorKind::Num)?;
-        if expected != serial {
-            return Err(ErrorKind::Num);
-        }
-
-        let k = k_i32 as usize;
-        max_k = max_k.max(k);
-        known.insert(k, v);
+        Ok((known, max_k))
     }
+
+    // First try EDATE semantics (preserve day-of-month where possible).
+    let (known, max_k, step) = match build_known(
+        &serials,
+        &month_ids,
+        values,
+        start_month_id,
+        months_step,
+        |months| date_time::edate(start_serial, months, system).map_err(|_| ErrorKind::Num),
+    ) {
+        Ok((known, max_k)) => (
+            known,
+            max_k,
+            TimelineStep::Month {
+                start_serial,
+                months_step,
+                system,
+            },
+        ),
+        Err(_) => {
+            // Fall back to EOMONTH semantics (month-end anchored). This covers month-end sequences
+            // that do not follow EDATE after a clamped start date like Feb 29.
+            let (known, max_k) = build_known(
+                &serials,
+                &month_ids,
+                values,
+                start_month_id,
+                months_step,
+                |months| date_time::eomonth(start_serial, months, system).map_err(|_| ErrorKind::Num),
+            )?;
+            (
+                known,
+                max_k,
+                TimelineStep::MonthEnd {
+                    start_serial,
+                    months_step,
+                    system,
+                },
+            )
+        }
+    };
 
     // Expand to the full set of periods [0..=max_k], filling missing values according to
     // `data_completion` (interpolate or zero-fill).
@@ -358,11 +424,7 @@ fn prepare_series_month_step(
     }
 
     Ok(PreparedSeries {
-        step: TimelineStep::Month {
-            start_serial,
-            months_step,
-            system,
-        },
+        step,
         values: out,
     })
 }
@@ -394,6 +456,54 @@ fn month_step_position(
             continue;
         }
         let date_k1 = date_time::edate(start_serial, (k + 1) * months_step, system)
+            .map_err(|_| ErrorKind::Num)? as f64;
+        if target_date >= date_k1 {
+            k += 1;
+            continue;
+        }
+
+        let denom = date_k1 - date_k;
+        if denom == 0.0 || !denom.is_finite() {
+            return Err(ErrorKind::Num);
+        }
+        let frac = (target_date - date_k) / denom;
+        let pos = k as f64 + frac;
+        if pos.is_finite() {
+            return Ok(pos);
+        } else {
+            return Err(ErrorKind::Num);
+        }
+    }
+    Err(ErrorKind::Num)
+}
+
+fn month_end_step_position(
+    target_date: f64,
+    start_serial: i32,
+    months_step: i32,
+    system: ExcelDateSystem,
+) -> Result<f64, ErrorKind> {
+    if months_step <= 0 || !target_date.is_finite() {
+        return Err(ErrorKind::Num);
+    }
+
+    let start_month_id = month_index(start_serial, system)?;
+    let target_day = as_integer_day(target_date.floor()).ok_or(ErrorKind::Num)?;
+    let target_month_id = month_index(target_day, system)?;
+    let month_diff = target_month_id - start_month_id;
+
+    let mut k = month_diff.div_euclid(months_step);
+
+    // Ensure date_k <= target_date < date_{k+1}.
+    for _ in 0..4 {
+        let date_k =
+            date_time::eomonth(start_serial, k * months_step, system).map_err(|_| ErrorKind::Num)?
+                as f64;
+        if target_date < date_k {
+            k -= 1;
+            continue;
+        }
+        let date_k1 = date_time::eomonth(start_serial, (k + 1) * months_step, system)
             .map_err(|_| ErrorKind::Num)? as f64;
         if target_date >= date_k1 {
             k += 1;

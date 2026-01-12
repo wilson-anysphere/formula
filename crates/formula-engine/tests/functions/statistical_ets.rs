@@ -85,6 +85,41 @@ fn forecast_ets_accepts_monthly_date_timeline() {
 }
 
 #[test]
+fn forecast_ets_accepts_month_end_date_timeline_across_leap_day() {
+    let system = ExcelDateSystem::EXCEL_1900;
+    let mut sheet = TestSheet::new();
+    sheet.set_date_system(system);
+
+    // Month-end timeline starting on Feb 29 (leap day). This sequence follows EOMONTH semantics,
+    // but does *not* follow EDATE semantics (EDATE(2020-02-29,1) = 2020-03-29).
+    let feb29 = ymd_to_serial(ExcelDate::new(2020, 2, 29), system).unwrap() as f64;
+    let mar31 = ymd_to_serial(ExcelDate::new(2020, 3, 31), system).unwrap() as f64;
+    let apr30 = ymd_to_serial(ExcelDate::new(2020, 4, 30), system).unwrap() as f64;
+    let may31 = ymd_to_serial(ExcelDate::new(2020, 5, 31), system).unwrap() as f64;
+    let jun30 = ymd_to_serial(ExcelDate::new(2020, 6, 30), system).unwrap() as f64;
+
+    for row in 1..=4 {
+        sheet.set(&format!("A{row}"), 10.0);
+    }
+    sheet.set("B1", feb29);
+    sheet.set("B2", mar31);
+    sheet.set("B3", apr30);
+    sheet.set("B4", may31);
+    sheet.set("B5", jun30);
+
+    assert_number(&sheet.eval("=FORECAST.ETS(B5,A1:A4,B1:B4,1)"), 10.0);
+    assert_number(
+        &sheet.eval("=FORECAST.ETS.CONFINT(B5,A1:A4,B1:B4,0.95,1)"),
+        0.0,
+    );
+    assert_number(&sheet.eval("=FORECAST.ETS.SEASONALITY(A1:A4,B1:B4)"), 1.0);
+    assert_number(
+        &sheet.eval("=FORECAST.ETS.STAT(A1:A4,B1:B4,1,1,1,8)"),
+        0.0,
+    );
+}
+
+#[test]
 fn forecast_ets_accepts_yearly_date_timeline_across_leap_years() {
     let system = ExcelDateSystem::EXCEL_1900;
     let mut sheet = TestSheet::new();
