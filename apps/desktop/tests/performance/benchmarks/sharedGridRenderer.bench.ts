@@ -166,9 +166,12 @@ export function createSharedGridRendererBenchmarks(): BenchmarkDef[] {
   // The scroll benchmarks have warmup iterations, so the one-time init cost is absorbed there.
   let scrollRendererY: CanvasGridRenderer | null = null;
   let scrollRendererX: CanvasGridRenderer | null = null;
+  let selectionRenderer: CanvasGridRenderer | null = null;
 
   const deltaY = 21 * 5; // 5 rows per "wheel" step at default 21px row height.
   const deltaX = 100 * 3; // 3 columns per step at default 100px col width.
+  let selectionRow = 10;
+  let selectionCol = 5;
 
   // Reuse DOM canvases across first-frame iterations to avoid benchmarking JSDOM element allocation
   // rather than renderer work.
@@ -220,6 +223,21 @@ export function createSharedGridRendererBenchmarks(): BenchmarkDef[] {
       targetMs: 16,
       clock: 'cpu',
       // Use enough samples that occasional Node/V8 GC pauses don't dominate p95.
+      iterations: 200,
+      warmup: 20,
+    },
+    {
+      name: 'gridRenderer.selectionChange.p95',
+      fn: () => {
+        const renderer = (selectionRenderer ??= createInitializedRenderer());
+        // Toggle the selected cell to force a re-render of selection overlays.
+        selectionRow = selectionRow === 10 ? 11 : 10;
+        selectionCol = selectionCol === 5 ? 6 : 5;
+        renderer.setSelection({ row: selectionRow, col: selectionCol });
+        renderer.renderImmediately();
+      },
+      targetMs: 16,
+      clock: 'cpu',
       iterations: 200,
       warmup: 20,
     },
