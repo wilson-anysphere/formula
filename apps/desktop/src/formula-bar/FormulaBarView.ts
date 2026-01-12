@@ -351,7 +351,13 @@ export class FormulaBarView {
         this.model.updateDraft(prevText, cursorStart, cursorEnd);
       }
 
-      const toggled = toggleA1AbsoluteAtCursor(prevText, cursorStart, cursorEnd);
+      const activeIndex = this.model.activeReferenceIndex();
+      const active = activeIndex == null ? null : this.model.coloredReferences()[activeIndex] ?? null;
+      if (!active) return;
+
+      // Match Excel UX: pressing F4 should keep cycling the same reference, so
+      // expand selection to the full reference token before toggling.
+      const toggled = toggleA1AbsoluteAtCursor(prevText, active.start, active.end);
       if (!toggled) return;
 
       let nextCursorStart = toggled.cursorStart;

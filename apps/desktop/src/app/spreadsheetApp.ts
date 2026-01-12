@@ -2565,6 +2565,7 @@ export class SpreadsheetApp {
       const sheetIds = this.document.getSheetIds();
       if (sheetIds.length > 0 && !sheetIds.includes(this.sheetId)) {
         this.sheetId = sheetIds[0];
+        this.reindexCommentCells();
         this.chartStore.setDefaultSheet(this.sheetId);
       }
       this.referencePreview = null;
