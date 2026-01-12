@@ -1,5 +1,6 @@
 import { rewriteSheetNamesInFormula } from "./formulaRewrite";
 import { fromA1, toA1 } from "@formula/spreadsheet-frontend/a1";
+import { getSheetNameValidationErrorMessage } from "@formula/workbook-backend";
 
 export type SheetVisibility = "visible" | "hidden" | "veryHidden";
 
@@ -17,6 +18,15 @@ export type Cell = {
   value: CellValue;
   formula?: string;
 };
+
+function normalizeSheetNameForCaseInsensitiveCompare(name: string): string {
+  // Excel compares sheet names case-insensitively with Unicode NFKC normalization.
+  try {
+    return String(name ?? "").normalize("NFKC").toUpperCase();
+  } catch {
+    return String(name ?? "").toUpperCase();
+  }
+}
 
 export type Sheet = {
   id: string;
@@ -39,13 +49,13 @@ export class Workbook {
   constructor(private readonly persistence?: WorkbookPersistence) {}
 
   addSheet(name?: string): Sheet {
+    const hasName = name != null;
     const sheet: Sheet = {
       id: crypto.randomUUID(),
-      name: name ?? this.nextDefaultSheetName(),
+      name: hasName ? this.validateSheetName(name, null) : this.nextDefaultSheetName(),
       visibility: "visible",
       cells: new Map(),
     };
-    this.assertUniqueSheetName(sheet.name, null);
 
     this.sheets.push(sheet);
     this.persistence?.createSheet(sheet);
@@ -55,19 +65,17 @@ export class Workbook {
   renameSheet(sheetId: string, newName: string): void {
     const sheet = this.getSheet(sheetId);
     const normalized = newName.trim();
-    if (!normalized) throw new Error("Sheet name cannot be empty");
-
     const oldName = sheet.name;
-    this.assertUniqueSheetName(normalized, sheetId);
+    const next = this.validateSheetName(normalized, sheetId);
 
     for (const s of this.sheets) {
       for (const cell of s.cells.values()) {
         if (!cell.formula) continue;
-        cell.formula = rewriteSheetNamesInFormula(cell.formula, oldName, normalized);
+        cell.formula = rewriteSheetNamesInFormula(cell.formula, oldName, next);
       }
     }
 
-    sheet.name = normalized;
+    sheet.name = next;
     this.persistence?.updateSheet(sheet);
   }
 
@@ -127,22 +135,23 @@ export class Workbook {
   }
 
   private nextDefaultSheetName(): string {
+    const existing = new Set(
+      this.sheets.map((s) => normalizeSheetNameForCaseInsensitiveCompare(s.name)),
+    );
     for (let n = 1; ; n += 1) {
       const candidate = `Sheet${n}`;
-      if (!this.sheets.some((s) => s.name.toLowerCase() === candidate.toLowerCase())) {
-        return candidate;
-      }
+      if (!existing.has(normalizeSheetNameForCaseInsensitiveCompare(candidate))) return candidate;
     }
   }
 
-  private assertUniqueSheetName(name: string, ignoreId: string | null): void {
-    const nameCi = name.toLowerCase();
-    for (const sheet of this.sheets) {
-      if (ignoreId && sheet.id === ignoreId) continue;
-      if (sheet.name.toLowerCase() === nameCi) {
-        throw new Error("Duplicate sheet name");
-      }
-    }
+  private validateSheetName(name: string, ignoreId: string | null): string {
+    const normalized = String(name ?? "").trim();
+    const existingNames = this.sheets
+      .filter((sheet) => !(ignoreId && sheet.id === ignoreId))
+      .map((sheet) => sheet.name);
+    const err = getSheetNameValidationErrorMessage(normalized, { existingNames });
+    if (err) throw new Error(err);
+    return normalized;
   }
 }
 
@@ -177,7 +186,8 @@ function workbookSheetRef(workbook: Workbook, part: string): number | null {
     ? sheetPart.slice(1, -1).replace(/''/g, "'")
     : sheetPart;
 
-  const sheet = workbook.sheets.find((s) => s.name.toLowerCase() === sheetName.toLowerCase());
+  const targetCi = normalizeSheetNameForCaseInsensitiveCompare(sheetName);
+  const sheet = workbook.sheets.find((s) => normalizeSheetNameForCaseInsensitiveCompare(s.name) === targetCi);
   if (!sheet) return null;
 
   const parsed = parseA1(cellPart.replace(/\$/g, ""));
