@@ -626,7 +626,7 @@ fn cell_meta_from_value(value: &CellValue) -> (Option<CellValueKind>, Option<Str
         ),
         CellValue::Record(record) => (
             Some(CellValueKind::SharedString { index: 0 }),
-            Some(record.display_value.clone()),
+            Some(record.to_string()),
         ),
         _ => (Some(CellValueKind::Number), None),
     }

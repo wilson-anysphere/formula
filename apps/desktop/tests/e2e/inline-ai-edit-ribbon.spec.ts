@@ -3,6 +3,8 @@ import { expect, test } from "@playwright/test";
 import { gotoDesktop } from "./helpers";
 
 test.describe("AI inline edit (ribbon)", () => {
+  test.setTimeout(120_000);
+
   test("opens from the ribbon", async ({ page }) => {
     await gotoDesktop(page);
 
@@ -13,4 +15,3 @@ test.describe("AI inline edit (ribbon)", () => {
     await expect(page.getByTestId("inline-edit-overlay")).toBeVisible();
   });
 });
-

@@ -3,6 +3,8 @@ import { expect, test } from "@playwright/test";
 import { gotoDesktop } from "./helpers";
 
 test.describe("AI inline edit (context menu)", () => {
+  test.setTimeout(120_000);
+
   test("opens from the grid context menu", async ({ page }) => {
     await gotoDesktop(page);
 

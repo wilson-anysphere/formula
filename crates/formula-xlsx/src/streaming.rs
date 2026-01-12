@@ -1801,12 +1801,8 @@ fn plan_shared_strings<R: Read + Seek>(
 
         let idx = reuse_idx.unwrap_or_else(|| match &patch.value {
             CellValue::String(s) => shared_strings.get_or_insert_plain(s),
-            CellValue::Entity(entity) => {
-                shared_strings.get_or_insert_plain(entity.display_value.as_str())
-            }
-            CellValue::Record(record) => {
-                shared_strings.get_or_insert_plain(record.display_value.as_str())
-            }
+            CellValue::Entity(entity) => shared_strings.get_or_insert_plain(entity.display_value.as_str()),
+            CellValue::Record(record) => shared_strings.get_or_insert_plain(record.display_value.as_str()),
             CellValue::RichText(rich) => shared_strings.get_or_insert_rich(rich),
             _ => 0,
         });
