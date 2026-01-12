@@ -41,3 +41,38 @@ test("CellEditorOverlay avoids inline display/z-index style assignments", () => 
     );
   }
 });
+
+test("CellEditorOverlay static visibility + z-index are defined in CSS", () => {
+  const cssPath = path.join(__dirname, "..", "src", "styles", "shell.css");
+  const css = fs.readFileSync(cssPath, "utf8");
+
+  const baseRule = css.match(/\.cell-editor\s*\{([\s\S]*?)\}/);
+  assert.ok(baseRule, "Expected shell.css to define a .cell-editor rule");
+  const baseBody = baseRule[1] ?? "";
+
+  // Stacking must be handled in CSS (especially for shared-grid mode).
+  assert.ok(
+    /\.cell-editor[^{]*\{[\s\S]*?\bz-index\s*:/.test(css),
+    "Expected .cell-editor styles to set z-index via CSS",
+  );
+
+  const baseHidden = /\bdisplay\s*:\s*none\s*;?/.test(baseBody);
+  const hiddenRule = css.match(/\.cell-editor[^{]*\[\s*hidden\s*\][^{]*\{([\s\S]*?)\}/);
+  const hiddenViaAttr = hiddenRule ? /\bdisplay\s*:\s*none\s*;?/.test(hiddenRule[1] ?? "") : false;
+
+  assert.ok(
+    baseHidden || hiddenViaAttr,
+    "Expected the cell editor to be hidden by default via CSS (display:none or [hidden])",
+  );
+
+  // If the base rule hides the editor, ensure we have a modifier selector that
+  // makes it visible again.
+  if (baseHidden) {
+    const openRule = css.match(/\.cell-editor[^{]*cell-editor--open[^{]*\{([\s\S]*?)\}/);
+    assert.ok(openRule, "Expected shell.css to define a .cell-editor--open modifier rule");
+    assert.ok(
+      /\bdisplay\s*:\s*(?!none\b)[a-z-]+\s*;?/i.test(openRule[1] ?? ""),
+      "Expected .cell-editor--open to set display to a visible value (not none)",
+    );
+  }
+});
