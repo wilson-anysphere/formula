@@ -144,6 +144,7 @@ Reserved menu locations (not yet wired in the desktop UI, but reserved for futur
 - `row/context` — row header context menu
 - `column/context` — column header context menu
 - `corner/context` — top-left corner (select-all) context menu
+  - Note: right-clicking row/column headers currently opens the `cell/context` menu; dedicated header menus are planned.
 
 ### `group` / `group@order` + separators
 
