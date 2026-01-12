@@ -13,6 +13,38 @@ function throwIfAborted(signal) {
 }
 
 /**
+ * Await a promise but reject early if the AbortSignal is triggered.
+ *
+ * This cannot cancel underlying work (e.g. an embedder call), but it ensures callers can
+ * stop waiting promptly when a request is canceled.
+ *
+ * @template T
+ * @param {Promise<T> | T} promise
+ * @param {AbortSignal | undefined} signal
+ * @returns {Promise<T>}
+ */
+function awaitWithAbort(promise, signal) {
+  if (!signal) return Promise.resolve(promise);
+  if (signal.aborted) return Promise.reject(createAbortError());
+
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(createAbortError());
+    signal.addEventListener("abort", onAbort, { once: true });
+
+    Promise.resolve(promise).then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      }
+    );
+  });
+}
+
+/**
  * @param {string} text
  */
 export function approximateTokenCount(text) {
@@ -46,10 +78,13 @@ export async function indexWorkbook(params) {
   const chunks = chunkWorkbook(workbook, { signal });
   throwIfAborted(signal);
 
-  const existingForWorkbook = await vectorStore.list({
-    workbookId: workbook.id,
-    includeVector: false,
-  });
+  const existingForWorkbook = await awaitWithAbort(
+    vectorStore.list({
+      workbookId: workbook.id,
+      includeVector: false,
+    }),
+    signal
+  );
   throwIfAborted(signal);
   const existingHashes = new Map(
     existingForWorkbook.map((r) => [r.id, r.metadata?.contentHash])
@@ -79,7 +114,7 @@ export async function indexWorkbook(params) {
 
     if (typeof params.transform === "function") {
       throwIfAborted(signal);
-      const transformed = await params.transform(record);
+      const transformed = await awaitWithAbort(params.transform(record), signal);
       throwIfAborted(signal);
       if (!transformed) continue;
 
@@ -96,7 +131,7 @@ export async function indexWorkbook(params) {
     }
 
     throwIfAborted(signal);
-    const chunkHash = await contentHash(record.text);
+    const chunkHash = await awaitWithAbort(contentHash(record.text), signal);
     throwIfAborted(signal);
     currentIds.add(record.id);
 
@@ -115,16 +150,21 @@ export async function indexWorkbook(params) {
 
   throwIfAborted(signal);
   const vectors =
-    toUpsert.length > 0 ? await embedder.embedTexts(toUpsert.map((r) => r.text)) : [];
+    toUpsert.length > 0
+      ? await awaitWithAbort(embedder.embedTexts(toUpsert.map((r) => r.text)), signal)
+      : [];
   throwIfAborted(signal);
 
   if (toUpsert.length) {
-    await vectorStore.upsert(
-      toUpsert.map((r, i) => ({
-        id: r.id,
-        vector: vectors[i],
-        metadata: r.metadata,
-      }))
+    await awaitWithAbort(
+      vectorStore.upsert(
+        toUpsert.map((r, i) => ({
+          id: r.id,
+          vector: vectors[i],
+          metadata: r.metadata,
+        }))
+      ),
+      signal
     );
   }
   throwIfAborted(signal);
@@ -133,7 +173,7 @@ export async function indexWorkbook(params) {
   const staleIds = existingForWorkbook
     .map((r) => r.id)
     .filter((id) => !currentIds.has(id));
-  if (staleIds.length) await vectorStore.delete(staleIds);
+  if (staleIds.length) await awaitWithAbort(vectorStore.delete(staleIds), signal);
   throwIfAborted(signal);
 
   return {

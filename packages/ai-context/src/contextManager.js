@@ -23,6 +23,38 @@ function throwIfAborted(signal) {
 }
 
 /**
+ * Await a promise but reject early if the AbortSignal is triggered.
+ *
+ * This cannot cancel underlying work (e.g. embedding requests), but it ensures callers can
+ * stop waiting promptly when a request is canceled.
+ *
+ * @template T
+ * @param {Promise<T> | T} promise
+ * @param {AbortSignal | undefined} signal
+ * @returns {Promise<T>}
+ */
+function awaitWithAbort(promise, signal) {
+  if (!signal) return Promise.resolve(promise);
+  if (signal.aborted) return Promise.reject(createAbortError());
+
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(createAbortError());
+    signal.addEventListener("abort", onAbort, { once: true });
+
+    Promise.resolve(promise).then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      }
+    );
+  });
+}
+
+/**
  * @typedef {{ type: "range"|"formula"|"table"|"chart", reference: string, data?: any }} Attachment
  */
 
@@ -173,9 +205,9 @@ export class ContextManager {
 
     // Index once per build for now; in the app this should be cached per sheet.
     throwIfAborted(signal);
-    await this.ragIndex.indexSheet(sheetForContext);
+    await awaitWithAbort(this.ragIndex.indexSheet(sheetForContext), signal);
     throwIfAborted(signal);
-    const retrieved = await this.ragIndex.search(params.query, 5);
+    const retrieved = await awaitWithAbort(this.ragIndex.search(params.query, 5), signal);
     throwIfAborted(signal);
 
     const sampleRows = params.sampleRows ?? 20;
@@ -470,12 +502,15 @@ export class ContextManager {
     const queryForEmbedding =
       dlp && queryDecision && queryDecision.decision !== DLP_DECISION.ALLOW ? this.redactor(params.query) : params.query;
     throwIfAborted(signal);
-    const [queryVector] = await embedder.embedTexts([queryForEmbedding]);
+    const [queryVector] = await awaitWithAbort(embedder.embedTexts([queryForEmbedding]), signal);
     throwIfAborted(signal);
-    const hits = await vectorStore.query(queryVector, topK, {
-      workbookId: params.workbook.id,
-      filter: (metadata) => metadata && metadata.workbookId === params.workbook.id,
-    });
+    const hits = await awaitWithAbort(
+      vectorStore.query(queryVector, topK, {
+        workbookId: params.workbook.id,
+        filter: (metadata) => metadata && metadata.workbookId === params.workbook.id,
+      }),
+      signal
+    );
     throwIfAborted(signal);
 
     /** @type {{level: string, labels: string[]} } */
@@ -488,6 +523,7 @@ export class ContextManager {
     // policies deterministically before sending anything to a cloud model.
     if (dlp && classificationRecords.length) {
       for (const record of classificationRecords) {
+        throwIfAborted(signal);
         const classification = record?.classification;
         if (classification && typeof classification === "object") {
           overallClassification = maxClassification(overallClassification, classification);
