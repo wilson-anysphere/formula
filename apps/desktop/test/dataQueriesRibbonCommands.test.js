@@ -1,0 +1,52 @@
+import fs from "node:fs";
+import path from "node:path";
+import test from "node:test";
+import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+test("Ribbon schema includes Data → Queries & Connections controls", () => {
+  const schemaPath = path.join(__dirname, "..", "src", "ribbon", "ribbonSchema.ts");
+  const schema = fs.readFileSync(schemaPath, "utf8");
+
+  // Toggle button.
+  assert.match(schema, /\bid:\s*["']data\.queriesConnections\.queriesConnections["']/);
+  assert.match(schema, /\bkind:\s*["']toggle["']/);
+
+  // Refresh All dropdown + key menu items.
+  assert.match(schema, /\bid:\s*["']data\.queriesConnections\.refreshAll["']/);
+  assert.match(schema, /\bkind:\s*["']dropdown["']/);
+
+  const refreshMenuIds = [
+    "data.queriesConnections.refreshAll",
+    "data.queriesConnections.refreshAll.refresh",
+    "data.queriesConnections.refreshAll.refreshAllConnections",
+    "data.queriesConnections.refreshAll.refreshAllQueries",
+  ];
+  for (const id of refreshMenuIds) {
+    assert.match(schema, new RegExp(`\\bid:\\s*["']${escapeRegExp(id)}["']`));
+  }
+});
+
+test("Desktop main.ts wires Data → Queries & Connections controls to the panel + refresh", () => {
+  const mainPath = path.join(__dirname, "..", "src", "main.ts");
+  const main = fs.readFileSync(mainPath, "utf8");
+
+  // Toggle opens/closes the DATA_QUERIES panel.
+  assert.match(main, /\bcase\s+["']data\.queriesConnections\.queriesConnections["']:/);
+  assert.match(main, /\bPanelIds\.DATA_QUERIES\b/);
+
+  // Pressed state syncs from layout placement.
+  assert.match(main, /"data\.queriesConnections\.queriesConnections":/);
+  assert.match(main, /\bgetPanelPlacement\([^)]*PanelIds\.DATA_QUERIES\)/);
+
+  // Refresh All wires to powerQueryService.refreshAll().
+  assert.match(main, /\bcommandId\s*===\s*["']data\.queriesConnections\.refreshAll["']/);
+  assert.match(main, /\brefreshAll\(\)/);
+});
+
