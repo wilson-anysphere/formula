@@ -1,7 +1,7 @@
 import type { CommandContribution, CommandRegistry } from "../extensions/commandRegistry.js";
 import type { ContextKeyService } from "../extensions/contextKeys.js";
 
-import { t } from "../i18n/index.js";
+import { t, tWithVars } from "../i18n/index.js";
 
 import { debounce } from "./debounce.js";
 import {
@@ -508,7 +508,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
               });
               return {
                 kind: "goTo" as const,
-                label: `Go to ${trimmed}`,
+                label: tWithVars("commandPalette.goToSuggestion", { query: trimmed }),
                 resolved: `${parsed.sheetName}!${formatA1Range(parsed.range)}`,
                 parsed,
               };

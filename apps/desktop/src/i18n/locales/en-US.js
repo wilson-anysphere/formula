@@ -263,6 +263,7 @@ export const enUS = {
   "commandDescription.edit.autoSum": "Insert a SUM formula based on adjacent numeric cells (Excel: Alt+=)",
   "commandDescription.navigation.goTo": "Go to a reference or named range",
   "commandPalette.placeholder": "Type a command…",
+  "commandPalette.goToSuggestion": "Go to {query}",
   "commandPalette.group.recent": "RECENT",
   "commandPalette.group.commands": "COMMANDS",
   "commandPalette.group.functions": "FUNCTIONS",
