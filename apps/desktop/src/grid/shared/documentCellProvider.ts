@@ -407,9 +407,16 @@ export class DocumentCellProvider implements CellProvider {
     };
 
     // Best-effort cache eviction for the affected region.
-    const cellCount = Math.max(0, gridRange.endRow - gridRange.startRow) * Math.max(0, gridRange.endCol - gridRange.startCol);
+    const height = Math.max(0, gridRange.endRow - gridRange.startRow);
+    const width = Math.max(0, gridRange.endCol - gridRange.startCol);
+    const cellCount = height * width;
     const sheetId = this.options.getSheetId();
-    if (cellCount <= 1000) {
+    // For large invalidations, prefer evicting just the touched cells when the dirty
+    // region is "thin" (e.g. a single formatted row across all columns) to avoid
+    // nuking the entire sheet cache.
+    const maxDirectEvictions = 50_000;
+    const shouldEvictDirectly = cellCount <= 1000 || (cellCount <= maxDirectEvictions && height <= 4);
+    if (shouldEvictDirectly) {
       const cache = this.sheetCaches.get(sheetId);
       if (cache) {
         for (let r = gridRange.startRow; r < gridRange.endRow; r++) {

@@ -357,4 +357,44 @@ describe("DocumentCellProvider formatting integration", () => {
       })
     );
   });
+
+  it("keeps other rows cached when invalidating a full-width row range", () => {
+    const doc = new DocumentController();
+    doc.setCellValue("Sheet1", "A1", "row1");
+    doc.setCellValue("Sheet1", "A2", "row2");
+
+    const headerRows = 1;
+    const headerCols = 1;
+    const docRows = 10;
+    const docCols = 2001; // > 1000 so row-wide invalidation is considered "large"
+
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => "Sheet1",
+      headerRows,
+      headerCols,
+      rowCount: docRows + headerRows,
+      colCount: docCols + headerCols,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const getCellSpy = vi.spyOn(doc, "getCell");
+
+    // Prime cache for two rows (same column).
+    expect(provider.getCell(headerRows + 0, headerCols + 0)?.value).toBe("row1");
+    expect(provider.getCell(headerRows + 1, headerCols + 0)?.value).toBe("row2");
+    expect(getCellSpy).toHaveBeenCalledTimes(2);
+
+    // Invalidate row 0 across all columns (doc range).
+    provider.invalidateDocCells({ startRow: 0, endRow: 1, startCol: 0, endCol: docCols });
+
+    // Row 0 should be refetched...
+    expect(provider.getCell(headerRows + 0, headerCols + 0)?.value).toBe("row1");
+    expect(getCellSpy).toHaveBeenCalledTimes(3);
+
+    // ...but row 1 should stay cached.
+    expect(provider.getCell(headerRows + 1, headerCols + 0)?.value).toBe("row2");
+    expect(getCellSpy).toHaveBeenCalledTimes(3);
+  });
 });
