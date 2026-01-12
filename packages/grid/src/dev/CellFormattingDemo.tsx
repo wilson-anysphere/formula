@@ -217,6 +217,16 @@ class CellFormattingDemoProvider implements CellProvider {
       borders: { left: mkBorder(1, "dotted", "#3b82f6") }
     });
 
+    put(11, 3, "Mixed edges", {
+      ...borderCellBase,
+      borders: {
+        top: mkBorder(3, "solid", "#ef4444"),
+        right: mkBorder(2, "dashed", "#22c55e"),
+        bottom: mkBorder(2, "double", "#a855f7"),
+        left: mkBorder(1, "dotted", "#3b82f6")
+      }
+    });
+
     // Conflicting top/bottom border (stacked).
     put(12, 3, "Bottom thick", {
       ...borderCellBase,
