@@ -15,6 +15,8 @@ const REL_TYPE_RD_RICH_VALUE: &str =
     "http://schemas.microsoft.com/office/2017/06/relationships/rdRichValue";
 const REL_TYPE_RICH_VALUE_REL: &str =
     "http://schemas.microsoft.com/office/2022/10/relationships/richValueRel";
+const REL_TYPE_IMAGE: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
 
 /// Embedded ("Place in Cell") image mapping extracted from an XLSX package.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,10 +113,11 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
                 let rels = openxml::parse_relationships(rels_bytes)?;
                 rels.into_iter()
                     .filter(|rel| {
-                        !rel
-                            .target_mode
-                            .as_deref()
-                            .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+                        rel.type_uri.eq_ignore_ascii_case(REL_TYPE_IMAGE)
+                            && !rel
+                                .target_mode
+                                .as_deref()
+                                .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
                     })
                     .map(|rel| {
                         let target = path::resolve_target(rich_value_rel_part, &rel.target);
@@ -377,6 +380,7 @@ fn parse_rdrichvalue(xml: &[u8]) -> Result<HashMap<u32, RichValueImage>, XlsxErr
     let mut buf = Vec::new();
     let mut in_rv = false;
     let mut in_v = false;
+    let mut current_v_text = String::new();
     let mut current_values: Vec<String> = Vec::new();
     let mut rich_value_index: u32 = 0;
     let mut out: HashMap<u32, RichValueImage> = HashMap::new();
@@ -387,17 +391,20 @@ fn parse_rdrichvalue(xml: &[u8]) -> Result<HashMap<u32, RichValueImage>, XlsxErr
             Event::Start(e) if e.local_name().as_ref().eq_ignore_ascii_case(b"rv") => {
                 in_rv = true;
                 in_v = false;
+                current_v_text.clear();
                 current_values.clear();
             }
             Event::Empty(e) if e.local_name().as_ref().eq_ignore_ascii_case(b"rv") => {
                 // Empty rv elements aren't expected for local images.
                 in_rv = false;
                 in_v = false;
+                current_v_text.clear();
                 rich_value_index = rich_value_index.saturating_add(1);
             }
             Event::End(e) if e.local_name().as_ref().eq_ignore_ascii_case(b"rv") => {
                 in_rv = false;
                 in_v = false;
+                current_v_text.clear();
 
                 let local_image_identifier = current_values
                     .get(0)
@@ -427,20 +434,23 @@ fn parse_rdrichvalue(xml: &[u8]) -> Result<HashMap<u32, RichValueImage>, XlsxErr
             }
             Event::Start(e) if in_rv && e.local_name().as_ref().eq_ignore_ascii_case(b"v") => {
                 in_v = true;
+                current_v_text.clear();
             }
             Event::Empty(e) if in_rv && e.local_name().as_ref().eq_ignore_ascii_case(b"v") => {
                 current_values.push(String::new());
                 in_v = false;
+                current_v_text.clear();
             }
             Event::End(e) if in_rv && e.local_name().as_ref().eq_ignore_ascii_case(b"v") => {
+                current_values.push(std::mem::take(&mut current_v_text));
                 in_v = false;
             }
             Event::Text(e) if in_rv && in_v => {
-                current_values.push(e.unescape()?.into_owned());
+                current_v_text.push_str(&e.unescape()?.into_owned());
             }
             Event::CData(e) if in_rv && in_v => {
-                current_values.push(
-                    e.decode()
+                current_v_text.push_str(
+                    &e.decode()
                         .map_err(quick_xml::Error::from)?
                         .into_owned(),
                 );
