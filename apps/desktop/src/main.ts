@@ -168,6 +168,8 @@ import {
 import { openExternalHyperlink } from "./hyperlinks/openExternal.js";
 import {
   clampUsedRange,
+  DEFAULT_DESKTOP_LOAD_MAX_COLS,
+  DEFAULT_DESKTOP_LOAD_MAX_ROWS,
   resolveWorkbookLoadChunkRows,
   resolveWorkbookLoadLimits,
   WORKBOOK_LOAD_CHUNK_ROWS_STORAGE_KEY,
@@ -843,9 +845,11 @@ const app = new SpreadsheetApp(
 
 function getGridLimitsForFormatting(): GridLimits {
   const anyApp = app as any;
-  const raw = anyApp.limits ?? { maxRows: 10_000, maxCols: 200 };
-  const maxRows = Number.isInteger(raw?.maxRows) && raw.maxRows > 0 ? raw.maxRows : 10_000;
-  const maxCols = Number.isInteger(raw?.maxCols) && raw.maxCols > 0 ? raw.maxCols : 200;
+  const raw = anyApp.limits ?? { maxRows: DEFAULT_DESKTOP_LOAD_MAX_ROWS, maxCols: DEFAULT_DESKTOP_LOAD_MAX_COLS };
+  const maxRows =
+    Number.isInteger(raw?.maxRows) && raw.maxRows > 0 ? raw.maxRows : DEFAULT_DESKTOP_LOAD_MAX_ROWS;
+  const maxCols =
+    Number.isInteger(raw?.maxCols) && raw.maxCols > 0 ? raw.maxCols : DEFAULT_DESKTOP_LOAD_MAX_COLS;
   return { maxRows, maxCols };
 }
 
@@ -3214,9 +3218,9 @@ if (
       // Use the same DocumentController / computed value cache as the primary grid so
       // the secondary pane stays live with edits and formula recalculation.
       const anyApp = app as any;
-      const limits = anyApp.limits ?? { maxRows: 10_000, maxCols: 200 };
-      const rowCount = Number.isInteger(limits.maxRows) ? limits.maxRows + 1 : 10_001;
-      const colCount = Number.isInteger(limits.maxCols) ? limits.maxCols + 1 : 201;
+      const limits = anyApp.limits ?? { maxRows: DEFAULT_DESKTOP_LOAD_MAX_ROWS, maxCols: DEFAULT_DESKTOP_LOAD_MAX_COLS };
+      const rowCount = Number.isInteger(limits.maxRows) ? limits.maxRows + 1 : DEFAULT_DESKTOP_LOAD_MAX_ROWS + 1;
+      const colCount = Number.isInteger(limits.maxCols) ? limits.maxCols + 1 : DEFAULT_DESKTOP_LOAD_MAX_COLS + 1;
 
       secondaryGridView = new SecondaryGridView({
         container: gridSecondaryEl,

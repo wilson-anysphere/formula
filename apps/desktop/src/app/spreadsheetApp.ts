@@ -37,6 +37,7 @@ import {
   selectRows,
   setActiveCell
 } from "../selection/selection";
+import { DEFAULT_DESKTOP_LOAD_MAX_COLS, DEFAULT_DESKTOP_LOAD_MAX_ROWS } from "../workbook/load/clampUsedRange.js";
 import { DocumentController } from "../document/documentController.js";
 import { MockEngine } from "../document/engine.js";
 import { isRedoKeyboardEvent, isUndoKeyboardEvent } from "../document/shortcuts.js";
@@ -751,8 +752,8 @@ export class SpreadsheetApp {
             // Legacy renderer relies on eagerly-built row/col visibility caches; keep its
             // default caps small to avoid O(N) work and large Map allocations.
             ...DEFAULT_GRID_LIMITS,
-            maxRows: 10_000,
-            maxCols: 200
+            maxRows: DEFAULT_DESKTOP_LOAD_MAX_ROWS,
+            maxCols: DEFAULT_DESKTOP_LOAD_MAX_COLS
           });
     this.selection = createSelection({ row: 0, col: 0 }, this.limits);
     const collab = opts.collab ?? resolveCollabOptionsFromUrl() ?? resolveCollabOptionsFromStoredConnection(opts.workbookId);
