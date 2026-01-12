@@ -405,6 +405,24 @@ fn canonicalize_and_localize_with_style_r1c1_for_external_data_functions() {
 }
 
 #[test]
+fn localized_function_names_are_not_translated_in_sheet_prefixes() {
+    let de = "=SUMME(CUBEWERT!A1;1)";
+    let canon = locale::canonicalize_formula(de, &locale::DE_DE).unwrap();
+    assert_eq!(canon, "=SUM(CUBEWERT!A1,1)");
+    assert_eq!(locale::localize_formula(&canon, &locale::DE_DE).unwrap(), de);
+
+    let fr = "=SOMME(VALEUR.CUBE!A1;1)";
+    let canon = locale::canonicalize_formula(fr, &locale::FR_FR).unwrap();
+    assert_eq!(canon, "=SUM(VALEUR.CUBE!A1,1)");
+    assert_eq!(locale::localize_formula(&canon, &locale::FR_FR).unwrap(), fr);
+
+    let es = "=SUMA(VALOR.CUBO!A1;1)";
+    let canon = locale::canonicalize_formula(es, &locale::ES_ES).unwrap();
+    assert_eq!(canon, "=SUM(VALOR.CUBO!A1,1)");
+    assert_eq!(locale::localize_formula(&canon, &locale::ES_ES).unwrap(), es);
+}
+
+#[test]
 fn engine_accepts_localized_formulas_and_persists_canonical() {
     let mut engine = Engine::new();
     engine
