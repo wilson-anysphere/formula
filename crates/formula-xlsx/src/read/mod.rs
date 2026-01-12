@@ -714,13 +714,13 @@ fn parse_worksheet_into_model(
 
     loop {
         match reader.read_event_into(&mut buf)? {
-            Event::Start(e) if e.name().as_ref() == b"cols" => in_cols = true,
-            Event::End(e) if e.name().as_ref() == b"cols" => in_cols = false,
-            Event::Empty(e) if e.name().as_ref() == b"cols" => {
+            Event::Start(e) if e.local_name().as_ref() == b"cols" => in_cols = true,
+            Event::End(e) if e.local_name().as_ref() == b"cols" => in_cols = false,
+            Event::Empty(e) if e.local_name().as_ref() == b"cols" => {
                 in_cols = false;
                 drop(e);
             }
-            Event::Start(e) | Event::Empty(e) if in_cols && e.name().as_ref() == b"col" => {
+            Event::Start(e) | Event::Empty(e) if in_cols && e.local_name().as_ref() == b"col" => {
                 let mut min: Option<u32> = None;
                 let mut max: Option<u32> = None;
                 let mut width: Option<f32> = None;
@@ -772,26 +772,26 @@ fn parse_worksheet_into_model(
                 }
             }
 
-            Event::Start(e) if e.name().as_ref() == b"sheetData" => in_sheet_data = true,
-            Event::End(e) if e.name().as_ref() == b"sheetData" => in_sheet_data = false,
-            Event::Empty(e) if e.name().as_ref() == b"sheetData" => {
+            Event::Start(e) if e.local_name().as_ref() == b"sheetData" => in_sheet_data = true,
+            Event::End(e) if e.local_name().as_ref() == b"sheetData" => in_sheet_data = false,
+            Event::Empty(e) if e.local_name().as_ref() == b"sheetData" => {
                 in_sheet_data = false;
                 drop(e);
             }
 
-            Event::Start(e) if e.name().as_ref() == b"sheetViews" => in_sheet_views = true,
-            Event::End(e) if e.name().as_ref() == b"sheetViews" => {
+            Event::Start(e) if e.local_name().as_ref() == b"sheetViews" => in_sheet_views = true,
+            Event::End(e) if e.local_name().as_ref() == b"sheetViews" => {
                 in_sheet_views = false;
                 in_sheet_view = false;
                 drop(e);
             }
-            Event::Empty(e) if e.name().as_ref() == b"sheetViews" => {
+            Event::Empty(e) if e.local_name().as_ref() == b"sheetViews" => {
                 in_sheet_views = false;
                 in_sheet_view = false;
                 drop(e);
             }
 
-            Event::Start(e) if in_sheet_views && e.name().as_ref() == b"sheetView" => {
+            Event::Start(e) if in_sheet_views && e.local_name().as_ref() == b"sheetView" => {
                 in_sheet_view = true;
                 for attr in e.attributes() {
                     let attr = attr?;
@@ -802,7 +802,7 @@ fn parse_worksheet_into_model(
                     }
                 }
             }
-            Event::Empty(e) if in_sheet_views && e.name().as_ref() == b"sheetView" => {
+            Event::Empty(e) if in_sheet_views && e.local_name().as_ref() == b"sheetView" => {
                 for attr in e.attributes() {
                     let attr = attr?;
                     if attr.key.as_ref() == b"zoomScale" {
@@ -812,12 +812,12 @@ fn parse_worksheet_into_model(
                     }
                 }
             }
-            Event::End(e) if in_sheet_view && e.name().as_ref() == b"sheetView" => {
+            Event::End(e) if in_sheet_view && e.local_name().as_ref() == b"sheetView" => {
                 in_sheet_view = false;
                 drop(e);
             }
 
-            Event::Start(e) | Event::Empty(e) if in_sheet_view && e.name().as_ref() == b"pane" => {
+            Event::Start(e) | Event::Empty(e) if in_sheet_view && e.local_name().as_ref() == b"pane" => {
                 let mut state: Option<String> = None;
                 let mut x_split: Option<u32> = None;
                 let mut y_split: Option<u32> = None;
@@ -837,7 +837,7 @@ fn parse_worksheet_into_model(
                 }
             }
 
-            Event::Start(e) | Event::Empty(e) if in_sheet_data && e.name().as_ref() == b"row" => {
+            Event::Start(e) | Event::Empty(e) if in_sheet_data && e.local_name().as_ref() == b"row" => {
                 let mut row_1_based: Option<u32> = None;
                 let mut height: Option<f32> = None;
                 let mut custom_height: Option<bool> = None;
@@ -880,7 +880,7 @@ fn parse_worksheet_into_model(
                 }
             }
 
-            Event::Start(e) if in_sheet_data && e.name().as_ref() == b"c" => {
+            Event::Start(e) if in_sheet_data && e.local_name().as_ref() == b"c" => {
                 current_ref = None;
                 current_t = None;
                 current_style = 0;
@@ -908,7 +908,7 @@ fn parse_worksheet_into_model(
                     }
                 }
             }
-            Event::Empty(e) if in_sheet_data && e.name().as_ref() == b"c" => {
+            Event::Empty(e) if in_sheet_data && e.local_name().as_ref() == b"c" => {
                 let mut cell_ref = None;
                 let mut style_id = 0u32;
                 for attr in e.attributes() {
@@ -939,7 +939,7 @@ fn parse_worksheet_into_model(
                 }
             }
 
-            Event::End(e) if in_sheet_data && e.name().as_ref() == b"c" => {
+            Event::End(e) if in_sheet_data && e.local_name().as_ref() == b"c" => {
                 if let Some(cell_ref) = current_ref {
                     if worksheet.merged_regions.resolve_cell(cell_ref) == cell_ref {
                         let (value, value_kind, raw_value) = if cell_meta_map.is_some() {
@@ -1039,17 +1039,17 @@ fn parse_worksheet_into_model(
             }
 
             Event::Start(e)
-                if in_sheet_data && current_ref.is_some() && e.name().as_ref() == b"v" =>
+                if in_sheet_data && current_ref.is_some() && e.local_name().as_ref() == b"v" =>
             {
                 in_v = true;
             }
-            Event::End(e) if in_sheet_data && e.name().as_ref() == b"v" => in_v = false,
+            Event::End(e) if in_sheet_data && e.local_name().as_ref() == b"v" => in_v = false,
             Event::Text(e) if in_sheet_data && in_v => {
                 current_value_text = Some(e.unescape()?.into_owned());
             }
 
             Event::Start(e)
-                if in_sheet_data && current_ref.is_some() && e.name().as_ref() == b"f" =>
+                if in_sheet_data && current_ref.is_some() && e.local_name().as_ref() == b"f" =>
             {
                 in_f = true;
                 let mut formula = FormulaMeta::default();
@@ -1072,7 +1072,7 @@ fn parse_worksheet_into_model(
                 current_formula = Some(formula);
             }
             Event::Empty(e)
-                if in_sheet_data && current_ref.is_some() && e.name().as_ref() == b"f" =>
+                if in_sheet_data && current_ref.is_some() && e.local_name().as_ref() == b"f" =>
             {
                 let mut formula = FormulaMeta::default();
                 for attr in e.attributes() {
@@ -1093,7 +1093,7 @@ fn parse_worksheet_into_model(
                 }
                 current_formula = Some(formula);
             }
-            Event::End(e) if in_sheet_data && e.name().as_ref() == b"f" => in_f = false,
+            Event::End(e) if in_sheet_data && e.local_name().as_ref() == b"f" => in_f = false,
             Event::Text(e) if in_sheet_data && in_f => {
                 if let Some(formula) = current_formula.as_mut() {
                     formula.file_text = e.unescape()?.into_owned();
