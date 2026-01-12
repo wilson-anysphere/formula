@@ -44,7 +44,7 @@ describe("AIChatPanel tool-calling history", () => {
     let sawInvalidToolMessage = false;
 
     let callIndex = 0;
-    const chat = vi.fn(async (request) => {
+    const chat = vi.fn<LLMClient["chat"]>(async (request) => {
       for (const m of request.messages) {
         if (m.role === "tool" && !(m as any).toolCallId) {
           sawInvalidToolMessage = true;

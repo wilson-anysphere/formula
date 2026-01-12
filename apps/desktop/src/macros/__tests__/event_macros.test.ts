@@ -171,7 +171,7 @@ describe("VBA event macros wiring", () => {
 
     expect(calls.some((c) => c.cmd === "fire_worksheet_change")).toBe(false);
 
-    resolveStatus?.({
+    (resolveStatus as ((value: any) => void) | null)?.({
       has_macros: true,
       origin_path: null,
       workbook_fingerprint: null,
@@ -408,7 +408,7 @@ describe("VBA event macros wiring", () => {
 
     expect(calls.some((c) => c.cmd === "fire_selection_change")).toBe(false);
 
-    resolveStatus?.({
+    (resolveStatus as ((value: any) => void) | null)?.({
       has_macros: true,
       origin_path: null,
       workbook_fingerprint: null,

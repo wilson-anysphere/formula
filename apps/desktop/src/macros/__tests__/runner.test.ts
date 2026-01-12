@@ -6,8 +6,8 @@ import { MacroRunner } from "../runner";
 
 function makeSecurityController(overrides: Partial<MacroSecurityController> = {}): MacroSecurityController {
   return {
-    requestTrustDecision: vi.fn(async () => null),
-    requestPermissions: vi.fn(async () => null),
+    requestTrustDecision: vi.fn(async (_prompt: any) => null),
+    requestPermissions: vi.fn(async (_prompt: any) => null),
     ...overrides,
   };
 }
@@ -32,7 +32,7 @@ describe("MacroRunner", () => {
     };
 
     const security = makeSecurityController({
-      requestTrustDecision: vi.fn(async () => "trusted_once"),
+      requestTrustDecision: vi.fn(async (_prompt: any) => "trusted_once" as const),
     });
 
     const runner = new MacroRunner(backend, security);
@@ -88,7 +88,7 @@ describe("MacroRunner", () => {
     };
 
     const security = makeSecurityController({
-      requestPermissions: vi.fn(async () => ["network"]),
+      requestPermissions: vi.fn(async (_prompt: any) => ["network" as const]),
     });
 
     const runner = new MacroRunner(backend, security);
@@ -129,7 +129,7 @@ describe("MacroRunner", () => {
     };
 
     const security = makeSecurityController({
-      requestTrustDecision: vi.fn(async () => null),
+      requestTrustDecision: vi.fn(async (_prompt: any) => null),
     });
 
     const runner = new MacroRunner(backend, security);
@@ -160,14 +160,14 @@ describe("MacroRunner", () => {
           reason: "permission: Network",
           macroId: "Macro1",
           workbookOriginPath: "/tmp/test.xlsx",
-          requested: ["network"],
+          requested: ["network" as const],
         },
         error: { message: "sandbox blocked" },
       })),
     };
 
     const security = makeSecurityController({
-      requestPermissions: vi.fn(async () => null),
+      requestPermissions: vi.fn(async (_prompt: any) => null),
     });
 
     const runner = new MacroRunner(backend, security);
@@ -224,7 +224,7 @@ describe("MacroRunner", () => {
     };
 
     const security = makeSecurityController({
-      requestTrustDecision: vi.fn(async () => "trusted_once"),
+      requestTrustDecision: vi.fn(async (_prompt: any) => "trusted_once" as const),
     });
 
     const runner = new MacroRunner(backend, security);

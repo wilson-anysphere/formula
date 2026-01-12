@@ -204,7 +204,7 @@ describe("runAgentTask (agent mode orchestrator)", () => {
 
     const auditStore = new MemoryAIAuditStore();
     const events: Array<{ type: string }> = [];
-    const onApprovalRequired = vi.fn(async () => true);
+    const onApprovalRequired = vi.fn(async (_prompt: any) => true);
 
     const result = await runAgentTask({
       goal: "Set A1 to 5 then read it back.",
@@ -262,7 +262,7 @@ describe("runAgentTask (agent mode orchestrator)", () => {
     const auditStore = new MemoryAIAuditStore();
     const events: string[] = [];
 
-    const onApprovalRequired = vi.fn(async () => false);
+    const onApprovalRequired = vi.fn(async (_prompt: any) => false);
 
     const result = await runAgentTask({
       goal: "Clear A1",
@@ -283,7 +283,7 @@ describe("runAgentTask (agent mode orchestrator)", () => {
     expect(events).toEqual(["planning", "tool_call", "tool_result", "cancelled"]);
 
     expect(onApprovalRequired).toHaveBeenCalledTimes(1);
-    const preview = onApprovalRequired.mock.calls[0]![0].preview;
+    const preview = onApprovalRequired.mock.calls[0]?.[0]?.preview as any;
     expect(preview.summary.deletes).toBe(1);
 
     const auditEntries = await auditStore.listEntries({ session_id: result.session_id });
@@ -371,7 +371,7 @@ describe("runAgentTask (agent mode orchestrator)", () => {
 
     const auditStore = new MemoryAIAuditStore();
     const events: string[] = [];
-    const onApprovalRequired = vi.fn(async () => false);
+    const onApprovalRequired = vi.fn(async (_prompt: any) => false);
 
     const result = await runAgentTask({
       goal: "Set A1 to 99",

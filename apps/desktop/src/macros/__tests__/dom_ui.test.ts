@@ -21,9 +21,17 @@ describe("renderMacroRunner", () => {
     ];
 
     const backend: MacroBackend = {
-      listMacros: vi.fn(async () => [{ id: "macro-1", name: "Macro1", language: "vba" }]),
-      getMacroSecurityStatus: vi.fn(async () => ({ hasMacros: true, trust: "trusted_once", signature: { status: "unsigned" } })),
-      setMacroTrust: vi.fn(async () => ({ hasMacros: true, trust: "trusted_once", signature: { status: "unsigned" } })),
+      listMacros: vi.fn(async (_workbookId: string) => [{ id: "macro-1", name: "Macro1", language: "vba" as const }]),
+      getMacroSecurityStatus: vi.fn(async (_workbookId: string) => ({
+        hasMacros: true,
+        trust: "trusted_once" as const,
+        signature: { status: "unsigned" as const },
+      })),
+      setMacroTrust: vi.fn(async (_workbookId: string) => ({
+        hasMacros: true,
+        trust: "trusted_once" as const,
+        signature: { status: "unsigned" as const },
+      })),
       runMacro: vi.fn(async () => ({ ok: true, output: ["Hello"], updates })),
     };
 
@@ -55,12 +63,16 @@ describe("renderMacroRunner", () => {
     vi.stubGlobal("prompt", vi.fn(() => "trusted_once"));
 
     const backend: MacroBackend = {
-      listMacros: vi.fn(async () => [{ id: "macro-1", name: "Macro1", language: "vba" }]),
-      getMacroSecurityStatus: vi.fn(async () => ({ hasMacros: true, trust: "blocked", signature: { status: "unsigned" } })),
-      setMacroTrust: vi.fn(async (_workbookId, decision) => ({
+      listMacros: vi.fn(async (_workbookId: string) => [{ id: "macro-1", name: "Macro1", language: "vba" as const }]),
+      getMacroSecurityStatus: vi.fn(async (_workbookId: string) => ({
         hasMacros: true,
-        trust: decision,
-        signature: { status: "unsigned" },
+        trust: "blocked" as const,
+        signature: { status: "unsigned" as const },
+      })),
+      setMacroTrust: vi.fn(async (_workbookId: string, decision) => ({
+        hasMacros: true,
+        trust: decision as any,
+        signature: { status: "unsigned" as const },
       })),
       runMacro: vi.fn(async () => ({
         ok: false,
@@ -69,8 +81,8 @@ describe("renderMacroRunner", () => {
           message: "Macros are blocked by Trust Center policy.",
           code: "macro_blocked",
           blocked: {
-            reason: "not_trusted",
-            status: { hasMacros: true, trust: "blocked", signature: { status: "unsigned" } },
+            reason: "not_trusted" as const,
+            status: { hasMacros: true, trust: "blocked" as const, signature: { status: "unsigned" as const } },
           },
         },
       })),

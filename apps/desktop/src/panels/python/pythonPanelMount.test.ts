@@ -52,7 +52,7 @@ import { mountPythonPanel } from "./pythonPanelMount.js";
 
 describe("pythonPanelMount", () => {
   it("invokes run_python_script when native runtime is selected", async () => {
-    const invoke = vi.fn(async () => ({ ok: true, stdout: "", stderr: "", updates: [] }));
+    const invoke = vi.fn(async (_cmd: string, _args?: any) => ({ ok: true, stdout: "", stderr: "", updates: [] }));
     (globalThis as any).__TAURI__ = { core: { invoke } };
 
     const container = document.createElement("div");
@@ -91,7 +91,7 @@ describe("pythonPanelMount", () => {
   });
 
   it("applies native Python updates via applyExternalDeltas (and tags them as python)", async () => {
-    const invoke = vi.fn(async () => ({
+    const invoke = vi.fn(async (_cmd: string, _args?: any) => ({
       ok: true,
       stdout: "",
       stderr: "",

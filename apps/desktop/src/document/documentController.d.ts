@@ -5,9 +5,22 @@ export class DocumentController {
   [key: string]: any;
   constructor(...args: any[]);
 
+  on(event: string, listener: (payload: any) => void): () => void;
+
+  markSaved(): void;
+  readonly isDirty: boolean;
+
   getSheetIds(): string[];
+
+  getCell(sheetId: string, coord: unknown): any;
 
   setCellValue(sheetId: string, coord: unknown, value: unknown, options?: unknown): void;
   setCellFormula(sheetId: string, coord: unknown, formula: string | null, options?: unknown): void;
   setRangeFormat(sheetId: string, range: unknown, stylePatch: Record<string, any> | null, options?: unknown): void;
+
+  beginBatch(options?: unknown): void;
+  endBatch(): void;
+  cancelBatch(): void;
+
+  applyExternalDeltas(deltas: any[], options?: unknown): void;
 }

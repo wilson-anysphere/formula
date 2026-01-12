@@ -59,7 +59,7 @@ describe("AiCellFunctionEngine", () => {
   it("returns #GETTING_DATA while pending and resolves via cache", async () => {
     const deferred = defer<any>();
     const llmClient = {
-      chat: vi.fn(() => deferred.promise),
+      chat: vi.fn((_request: any) => deferred.promise),
     };
 
     const auditStore = new MemoryAIAuditStore();
@@ -98,7 +98,7 @@ describe("AiCellFunctionEngine", () => {
 
   it("cache hit avoids re-calling the LLM", async () => {
     const llmClient = {
-      chat: vi.fn(async () => ({
+      chat: vi.fn(async (_request: any) => ({
         message: { role: "assistant", content: "cached" },
         usage: { promptTokens: 1, completionTokens: 1 },
       })),
@@ -127,7 +127,7 @@ describe("AiCellFunctionEngine", () => {
     );
 
     const llmClient = {
-      chat: vi.fn(async () => ({
+      chat: vi.fn(async (_request: any) => ({
         message: { role: "assistant", content: "ok" },
         usage: { promptTokens: 1, completionTokens: 1 },
       })),
@@ -152,7 +152,7 @@ describe("AiCellFunctionEngine", () => {
   it("persists AI cell cache keys using hashes (no raw prompt/input strings)", async () => {
     const persistKey = "ai-cache-hashed";
     const llmClient = {
-      chat: vi.fn(async () => ({
+      chat: vi.fn(async (_request: any) => ({
         message: { role: "assistant", content: "ok" },
         usage: { promptTokens: 1, completionTokens: 1 },
       })),
@@ -183,7 +183,7 @@ describe("AiCellFunctionEngine", () => {
 
     let callCount = 0;
     const llmClient = {
-      chat: vi.fn(() => {
+      chat: vi.fn((_request: any) => {
         callCount += 1;
         return callCount === 1 ? deferred1.promise : deferred2.promise;
       }),
@@ -424,7 +424,7 @@ describe("AiCellFunctionEngine", () => {
   it("DLP redacts inputs before sending to the LLM", async () => {
     const workbookId = "dlp-redact-workbook";
     const llmClient = {
-      chat: vi.fn(async () => ({
+      chat: vi.fn(async (_request: any) => ({
         message: { role: "assistant", content: "ok" },
         usage: { promptTokens: 1, completionTokens: 1 },
       })),
@@ -452,7 +452,7 @@ describe("AiCellFunctionEngine", () => {
   it("DLP redacts only disallowed cells within a mixed-classification range", async () => {
     const workbookId = "dlp-redact-range-workbook";
     const llmClient = {
-      chat: vi.fn(async () => ({
+      chat: vi.fn(async (_request: any) => ({
         message: { role: "assistant", content: "ok" },
         usage: { promptTokens: 1, completionTokens: 1 },
       })),
@@ -487,7 +487,7 @@ describe("AiCellFunctionEngine", () => {
   it("DLP redacts only disallowed cells in provenance arrays without a range ref", async () => {
     const workbookId = "dlp-provenance-array";
     const llmClient = {
-      chat: vi.fn(async () => ({
+      chat: vi.fn(async (_request: any) => ({
         message: { role: "assistant", content: "ok" },
         usage: { promptTokens: 1, completionTokens: 1 },
       })),
@@ -581,7 +581,7 @@ describe("AiCellFunctionEngine", () => {
   it("does not treat arbitrary #prefixed strings as spreadsheet errors", async () => {
     const workbookId = "hash-text-workbook";
     const llmClient = {
-      chat: vi.fn(async () => ({
+      chat: vi.fn(async (_request: any) => ({
         message: { role: "assistant", content: "ok" },
         usage: { promptTokens: 1, completionTokens: 1 },
       })),
@@ -608,7 +608,7 @@ describe("AiCellFunctionEngine", () => {
   it("budgeting compacts large ranges in the prompt", async () => {
     const workbookId = "budget-workbook";
     const llmClient = {
-      chat: vi.fn(async () => ({
+      chat: vi.fn(async (_request: any) => ({
         message: { role: "assistant", content: "ok" },
         usage: { promptTokens: 1, completionTokens: 1 },
       })),
@@ -643,15 +643,14 @@ describe("AiCellFunctionEngine", () => {
     expect(occurrences).toBeLessThan(200);
 
     // Should include sampled cells beyond the first N rows (not just a prefix).
-    const maxCell = Math.max(
-      ...Array.from(userMessage.matchAll(/CELL_(\d{4})/g)).map((m) => Number(m[1])),
-    );
+    const matches = Array.from(userMessage.matchAll(/CELL_(\d{4})/g) as Iterable<RegExpMatchArray>);
+    const maxCell = Math.max(...matches.map((match) => Number(match[1])));
     expect(maxCell).toBeGreaterThan(200);
   });
 
   it("truncates large cell values before serializing inputs into the prompt", async () => {
     const llmClient = {
-      chat: vi.fn(async () => ({
+      chat: vi.fn(async (_request: any) => ({
         message: { role: "assistant", content: "ok" },
         usage: { promptTokens: 1, completionTokens: 1 },
       })),

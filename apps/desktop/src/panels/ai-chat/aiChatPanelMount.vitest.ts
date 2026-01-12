@@ -13,7 +13,7 @@ const TEST_TIMEOUT_MS = 30_000;
 
 const mocks = vi.hoisted(() => {
   return {
-    createAiChatOrchestrator: vi.fn(() => ({ sendMessage: vi.fn(), sessionId: "test-session" })),
+    createAiChatOrchestrator: vi.fn((_options: any) => ({ sendMessage: vi.fn(), sessionId: "test-session" })),
     getDesktopAIAuditStore: vi.fn(() => ({
       logEntry: vi.fn(async () => {}),
       listEntries: vi.fn(async () => []),

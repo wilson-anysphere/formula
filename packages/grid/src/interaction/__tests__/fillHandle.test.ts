@@ -36,11 +36,10 @@ describe("fillHandle interaction helpers", () => {
 
   it("hit-tests the selection handle", () => {
     const renderer = {
-      getSelectionHandleRect: () => ({ x: 100, y: 50, width: 8, height: 8 })
+      getFillHandleRect: () => ({ x: 100, y: 50, width: 8, height: 8 })
     } as any;
 
     expect(hitTestSelectionHandle(renderer, 101, 51)).toBe(true);
     expect(hitTestSelectionHandle(renderer, 10, 10)).toBe(false);
   });
 });
-

@@ -101,6 +101,7 @@ const openVbaMigratePanel = document.querySelector<HTMLButtonElement>('[data-tes
 if (!activeCell || !selectionRange || !activeValue || !sheetSwitcher) {
   throw new Error("Missing status bar elements");
 }
+const sheetSwitcherEl = sheetSwitcher;
 if (!openComments) {
   throw new Error("Missing comments panel toggle button");
 }
@@ -221,6 +222,7 @@ const sheetTabsRoot = document.getElementById("sheet-tabs");
 if (!sheetTabsRoot) {
   throw new Error("Missing #sheet-tabs container");
 }
+const sheetTabsRootEl = sheetTabsRoot;
 
 let lastSheetIds: string[] = [];
 
@@ -234,7 +236,7 @@ function listSheetsForUi(): SheetUiInfo[] {
 
 function renderSheetTabs(sheets: SheetUiInfo[] = listSheetsForUi()) {
   lastSheetIds = sheets.map((sheet) => sheet.id);
-  sheetTabsRoot.replaceChildren();
+  sheetTabsRootEl.replaceChildren();
 
   const active = app.getCurrentSheetId();
 
@@ -251,7 +253,7 @@ function renderSheetTabs(sheets: SheetUiInfo[] = listSheetsForUi()) {
       app.activateSheet(sheetId);
       app.focus();
     });
-    sheetTabsRoot.appendChild(button);
+    sheetTabsRootEl.appendChild(button);
   }
 }
 
@@ -335,6 +337,15 @@ if (
   splitHorizontal &&
   splitNone
 ) {
+  const dockLeftEl = dockLeft;
+  const dockRightEl = dockRight;
+  const dockBottomEl = dockBottom;
+  const floatingRootEl = floatingRoot;
+  const workspaceRootEl = workspaceRoot;
+  const gridSplitEl = gridSplit;
+  const gridSecondaryEl = gridSecondary;
+  const gridSplitterEl = gridSplitter;
+
   const workspaceManager = new LayoutWorkspaceManager({ storage: localStorage, panelRegistry });
   const layoutController = new LayoutController({
     workbookId,
@@ -404,13 +415,13 @@ if (
     const rightSize = zoneVisible(layout.docks.right) ? layout.docks.right.size : 0;
     const bottomSize = zoneVisible(layout.docks.bottom) ? layout.docks.bottom.size : 0;
 
-    workspaceRoot.style.setProperty("--dock-left-size", `${leftSize}px`);
-    workspaceRoot.style.setProperty("--dock-right-size", `${rightSize}px`);
-    workspaceRoot.style.setProperty("--dock-bottom-size", `${bottomSize}px`);
+    workspaceRootEl.style.setProperty("--dock-left-size", `${leftSize}px`);
+    workspaceRootEl.style.setProperty("--dock-right-size", `${rightSize}px`);
+    workspaceRootEl.style.setProperty("--dock-bottom-size", `${bottomSize}px`);
 
-    dockLeft.dataset.hidden = zoneVisible(layout.docks.left) ? "false" : "true";
-    dockRight.dataset.hidden = zoneVisible(layout.docks.right) ? "false" : "true";
-    dockBottom.dataset.hidden = zoneVisible(layout.docks.bottom) ? "false" : "true";
+    dockLeftEl.dataset.hidden = zoneVisible(layout.docks.left) ? "false" : "true";
+    dockRightEl.dataset.hidden = zoneVisible(layout.docks.right) ? "false" : "true";
+    dockBottomEl.dataset.hidden = zoneVisible(layout.docks.bottom) ? "false" : "true";
   }
 
   function renderSplitView() {
@@ -421,33 +432,33 @@ if (
     const secondaryPct = Math.round((100 - primaryPct) * 10) / 10;
 
     if (split.direction === "none") {
-      gridSplit.style.gridTemplateColumns = "1fr 0px 0px";
-      gridSplit.style.gridTemplateRows = "1fr";
-      gridSecondary.style.display = "none";
-      gridSplitter.style.display = "none";
+      gridSplitEl.style.gridTemplateColumns = "1fr 0px 0px";
+      gridSplitEl.style.gridTemplateRows = "1fr";
+      gridSecondaryEl.style.display = "none";
+      gridSplitterEl.style.display = "none";
       return;
     }
 
-    gridSecondary.style.display = "block";
-    gridSplitter.style.display = "block";
+    gridSecondaryEl.style.display = "block";
+    gridSplitterEl.style.display = "block";
 
     if (split.direction === "vertical") {
-      gridSplit.style.gridTemplateColumns = `${primaryPct}% 4px ${secondaryPct}%`;
-      gridSplit.style.gridTemplateRows = "1fr";
-      gridSplitter.style.cursor = "col-resize";
+      gridSplitEl.style.gridTemplateColumns = `${primaryPct}% 4px ${secondaryPct}%`;
+      gridSplitEl.style.gridTemplateRows = "1fr";
+      gridSplitterEl.style.cursor = "col-resize";
     } else {
-      gridSplit.style.gridTemplateColumns = "1fr";
-      gridSplit.style.gridTemplateRows = `${primaryPct}% 4px ${secondaryPct}%`;
-      gridSplitter.style.cursor = "row-resize";
+      gridSplitEl.style.gridTemplateColumns = "1fr";
+      gridSplitEl.style.gridTemplateRows = `${primaryPct}% 4px ${secondaryPct}%`;
+      gridSplitterEl.style.cursor = "row-resize";
     }
 
     const sheetLabel = split.panes.secondary.sheetId ?? "Sheet";
-    gridSecondary.textContent = `Secondary view (${sheetLabel})`;
-    gridSecondary.style.display = "flex";
-    gridSecondary.style.alignItems = "center";
-    gridSecondary.style.justifyContent = "center";
-    gridSecondary.style.color = "var(--text-secondary)";
-    gridSecondary.style.fontSize = "12px";
+    gridSecondaryEl.textContent = `Secondary view (${sheetLabel})`;
+    gridSecondaryEl.style.display = "flex";
+    gridSecondaryEl.style.alignItems = "center";
+    gridSecondaryEl.style.justifyContent = "center";
+    gridSecondaryEl.style.color = "var(--text-secondary)";
+    gridSecondaryEl.style.fontSize = "12px";
   }
 
   function panelTitle(panelId: string) {
@@ -1299,10 +1310,11 @@ if (
   }
 
   function renderFloating() {
-    floatingRoot.replaceChildren();
+    floatingRootEl.replaceChildren();
     const layout = layoutController.layout;
 
-    for (const [panelId, rect] of Object.entries(layout.floating)) {
+    type FloatingRect = { x: number; y: number; width: number; height: number };
+    for (const [panelId, rect] of Object.entries(layout.floating) as Array<[string, FloatingRect]>) {
       const panel = document.createElement("div");
       panel.className = "floating-panel";
       panel.style.left = `${rect.x}px`;
@@ -1359,16 +1371,16 @@ if (
       inner.appendChild(body);
 
       panel.appendChild(inner);
-      floatingRoot.appendChild(panel);
+      floatingRootEl.appendChild(panel);
     }
   }
 
   function renderLayout() {
     applyDockSizes();
     renderSplitView();
-    renderDock(dockLeft, layoutController.layout.docks.left, "left");
-    renderDock(dockRight, layoutController.layout.docks.right, "right");
-    renderDock(dockBottom, layoutController.layout.docks.bottom, "bottom");
+    renderDock(dockLeftEl, layoutController.layout.docks.left, "left");
+    renderDock(dockRightEl, layoutController.layout.docks.right, "right");
+    renderDock(dockBottomEl, layoutController.layout.docks.bottom, "bottom");
     renderFloating();
 
     const openPanels = openPanelIds();
@@ -1798,18 +1810,18 @@ registerFindReplaceShortcuts({
 installUnsavedChangesPrompt(window, app.getDocument());
 
 function renderSheetSwitcher(sheets: { id: string; name: string }[], activeId: string) {
-  sheetSwitcher.replaceChildren();
+  sheetSwitcherEl.replaceChildren();
   for (const sheet of sheets) {
     const option = document.createElement("option");
     option.value = sheet.id;
     option.textContent = sheet.name;
-    sheetSwitcher.appendChild(option);
+    sheetSwitcherEl.appendChild(option);
   }
-  sheetSwitcher.value = activeId;
+  sheetSwitcherEl.value = activeId;
 }
 
-sheetSwitcher.addEventListener("change", () => {
-  app.activateSheet(sheetSwitcher.value);
+sheetSwitcherEl.addEventListener("change", () => {
+  app.activateSheet(sheetSwitcherEl.value);
   app.focus();
 });
 

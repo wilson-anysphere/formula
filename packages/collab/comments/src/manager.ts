@@ -135,13 +135,13 @@ function normalizeCommentsRootToLocalTypes(doc: Y.Doc): void {
   // mix local Yjs types into it.
   if (!(root.map instanceof Y.Map)) return;
 
-  const replacements: Array<{ key: string; cloned: unknown }> = [];
+  const replacements: Array<{ key: string; cloned: Y.Map<unknown> }> = [];
   root.map.forEach((value, key) => {
     const map = getYMap(value);
     if (!map) return;
     // Already local.
     if (map instanceof Y.Map) return;
-    replacements.push({ key, cloned: cloneToLocalYjsValue(map) });
+    replacements.push({ key, cloned: cloneToLocalYjsValue(map) as Y.Map<unknown> });
   });
   if (replacements.length === 0) return;
 
@@ -259,7 +259,7 @@ export class CommentManager {
     const now = input.now ?? Date.now();
     const mapConstructor = (() => {
       // Local replies array => create local Y.Maps.
-      if (replies instanceof Y.Array) return undefined;
+      if ((replies as any) instanceof Y.Array) return undefined;
 
       // Prefer the constructor of any existing reply item.
       const existingReply = replies.toArray().find((reply) => getYMap(reply));
@@ -532,8 +532,7 @@ function findLegacyListCommentById(type: any, commentId: string): Y.Map<unknown>
 }
 
 function iterMapEntryComments(type: any): Array<{ key: string; value: Y.Map<unknown> }> {
-  /** @type {Array<{ key: string; value: Y.Map<unknown> }>} */
-  const out = [];
+  const out: Array<{ key: string; value: Y.Map<unknown> }> = [];
   const map = type?._map;
   if (!(map instanceof Map)) return out;
   for (const [key, item] of map.entries()) {
@@ -578,7 +577,7 @@ export function createYComment(input: {
   author: CommentAuthor;
   now: number;
   content: string;
-}): Y.Map<unknown>;
+}, opts?: { mapConstructor?: new () => any; arrayConstructor?: new () => any }): Y.Map<unknown>;
 
 export function createYComment(
   input: {
@@ -613,7 +612,7 @@ export function createYReply(input: {
   author: CommentAuthor;
   now: number;
   content: string;
-}): Y.Map<unknown>;
+}, opts?: { mapConstructor?: new () => any }): Y.Map<unknown>;
 
 export function createYReply(
   input: {

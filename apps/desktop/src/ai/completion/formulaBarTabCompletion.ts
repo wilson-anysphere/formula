@@ -9,7 +9,7 @@ import {
 
 import type { DocumentController } from "../../document/documentController.js";
 import type { FormulaBarView } from "../../formula-bar/FormulaBarView.js";
-import { evaluateFormula } from "../../spreadsheet/evaluateFormula.js";
+import { evaluateFormula, type SpreadsheetValue } from "../../spreadsheet/evaluateFormula.js";
 
 export interface FormulaBarTabCompletionControllerOptions {
   formulaBar: FormulaBarView;
@@ -360,10 +360,10 @@ function createPreviewEvaluator(params: {
     };
 
     let reads = 0;
-    const memo = new Map<string, unknown>();
+    const memo = new Map<string, SpreadsheetValue>();
     const stack = new Set<string>();
 
-    const getCellValue = (ref: string): unknown => {
+    const getCellValue = (ref: string): SpreadsheetValue => {
       reads += 1;
       if (reads > MAX_CELL_READS) {
         throw new Error("preview too large");
@@ -383,19 +383,20 @@ function createPreviewEvaluator(params: {
 
       const normalized = addr.replaceAll("$", "").toUpperCase();
       const key = `${targetSheet}:${normalized}`;
-      if (memo.has(key)) return memo.get(key) as unknown;
+      if (memo.has(key)) return memo.get(key) as SpreadsheetValue;
       if (stack.has(key)) return "#REF!";
 
       stack.add(key);
       const state = document.getCell(targetSheet, normalized) as { value: unknown; formula: string | null };
-      let value: unknown;
+      let value: SpreadsheetValue;
       if (state?.formula) {
         value = evaluateFormula(state.formula, getCellValue, {
           cellAddress: `${targetSheet}!${normalized}`,
           resolveNameToReference,
         });
       } else {
-        value = state?.value ?? null;
+        const raw = state?.value ?? null;
+        value = raw == null || typeof raw === "number" || typeof raw === "string" || typeof raw === "boolean" ? raw : null;
       }
       stack.delete(key);
       memo.set(key, value);

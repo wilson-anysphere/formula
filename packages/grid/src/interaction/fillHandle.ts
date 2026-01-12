@@ -106,7 +106,8 @@ export function computeFillPreview(sourceRange: CellRange, pointerCell: { row: n
 }
 
 export function getSelectionHandleRect(renderer: CanvasGridRenderer, options?: { size?: number }): RectLike | null {
-  return renderer.getSelectionHandleRect({ size: options?.size ?? DEFAULT_FILL_HANDLE_SIZE_PX });
+  void options;
+  return renderer.getFillHandleRect();
 }
 
 export function hitTestSelectionHandle(renderer: CanvasGridRenderer, viewportX: number, viewportY: number): boolean {
@@ -114,4 +115,3 @@ export function hitTestSelectionHandle(renderer: CanvasGridRenderer, viewportX: 
   if (!rect) return false;
   return pointInRect(viewportX, viewportY, rect);
 }
-

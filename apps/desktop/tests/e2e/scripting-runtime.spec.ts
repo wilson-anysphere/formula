@@ -117,7 +117,7 @@ export default async function main(ctx) {
     };
   };
 
-  let result;
+  let result: Awaited<ReturnType<typeof runInPage>> | undefined;
   // Vite may trigger a one-time full reload after dependency optimization. If
   // that happens mid-evaluate, retry once after the navigation completes.
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -135,7 +135,9 @@ export default async function main(ctx) {
     }
   }
 
-  expect(result).toBeTruthy();
+  if (!result) {
+    throw new Error("Failed to evaluate scripting runtime smoke test");
+  }
 
   expect(result.mainRun.error).toBeUndefined();
   expect(result.computed).toBe(42);
@@ -144,14 +146,14 @@ export default async function main(ctx) {
 
   expect(result.blockedNetwork.error?.message).toContain("Network access");
   expect(result.allowlistedNetwork.error).toBeUndefined();
-  expect(result.allowlistedNetwork.logs.some((entry) => entry.message.includes("status"))).toBe(true);
+  expect(result.allowlistedNetwork.logs.some((entry: any) => entry.message.includes("status"))).toBe(true);
 
   expect(result.allowlistDenied.error?.message).toContain("example.com");
   expect(result.allowlistWebSocketDenied.error?.message).toContain("example.com");
   expect(result.dynamicImportDenied.error?.message).toMatch(/dynamic import/i);
   expect(result.dynamicImportDenied.error?.message).toContain("example.com");
 
-  const workerTypeEntry = result.subworkerDenied.logs.find((entry) => entry.message.includes("WorkerType"));
+  const workerTypeEntry = result.subworkerDenied.logs.find((entry: any) => entry.message.includes("WorkerType"));
   const workerType = workerTypeEntry?.message ?? "";
   if (workerType.includes("undefined")) {
     expect(result.subworkerDenied.error).toBeUndefined();
@@ -159,7 +161,7 @@ export default async function main(ctx) {
     expect(result.subworkerDenied.error?.message).toContain("Workers are not permitted");
   }
 
-  const xhrTypeEntry = result.xhrDenied.logs.find((entry) => entry.message.includes("XHRType"));
+  const xhrTypeEntry = result.xhrDenied.logs.find((entry: any) => entry.message.includes("XHRType"));
   const xhrType = xhrTypeEntry?.message ?? "";
   if (xhrType.includes("undefined")) {
     expect(result.xhrDenied.error).toBeUndefined();
@@ -247,7 +249,7 @@ export default async function main(ctx) {
   });
 
   expect(result.error).toBeUndefined();
-  expect(result.logs.some((entry) => entry.message.includes("confirm"))).toBe(true);
+  expect(result.logs.some((entry: any) => entry.message.includes("confirm"))).toBe(true);
   expect(dialogs.map((d) => d.type)).toEqual(["confirm", "prompt", "alert"]);
   expect(dialogs[0]?.message).toBe("Proceed?");
   expect(dialogs[1]?.message).toBe("Name?");

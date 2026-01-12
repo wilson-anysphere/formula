@@ -177,6 +177,7 @@ export function startWorkbookSync(args: {
       }
     };
   }
+  const invokeFn = invoke;
 
   const pending = new Map<string, PendingEdit>();
 
@@ -234,7 +235,7 @@ export function startWorkbookSync(args: {
       while (pending.size > 0) {
         const batch = Array.from(pending.values());
         pending.clear();
-        await sendEditsViaTauri(invoke, batch);
+        await sendEditsViaTauri(invokeFn, batch);
       }
 
       // If the user undoes back to the last-saved state, the DocumentController becomes clean
@@ -242,7 +243,7 @@ export function startWorkbookSync(args: {
       // explicitly marked/saved, so we clear it here to keep close prompts aligned.
       if (!args.document.isDirty) {
         try {
-          await invoke("mark_saved", {});
+          await invokeFn("mark_saved", {});
         } catch {
           // Graceful degradation: older backends may not implement this command.
         }
@@ -280,7 +281,7 @@ export function startWorkbookSync(args: {
     },
     async markSaved() {
       await flushAllPending();
-      await invoke("save_workbook", {});
+      await invokeFn("save_workbook", {});
       args.document.markSaved();
     }
   };

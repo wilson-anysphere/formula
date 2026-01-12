@@ -90,12 +90,7 @@ function jsonSummary(value: unknown) {
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean") return String(value);
 
-  /**
-   * @param {unknown} inner
-   * @param {number} depth
-   * @returns {unknown}
-   */
-  function preview(inner, depth) {
+  const preview = (inner: unknown, depth: number): unknown => {
     if (inner === null || inner === undefined) return null;
     if (typeof inner === "string" || typeof inner === "number" || typeof inner === "boolean") return inner;
     if (depth >= 2) return "[Object]";
@@ -115,7 +110,6 @@ function jsonSummary(value: unknown) {
       return { meta: preview(obj.meta, depth + 1), cells: "[cells]" };
     }
 
-    /** @type {Record<string, unknown>} */
     const out: Record<string, unknown> = {};
 
     let count = 0;
@@ -131,7 +125,7 @@ function jsonSummary(value: unknown) {
     }
     if (hasMore) out["…"] = "…";
     return out;
-  }
+  };
 
   try {
     const json = JSON.stringify(preview(value, 0));

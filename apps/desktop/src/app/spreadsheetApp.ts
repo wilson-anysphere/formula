@@ -76,6 +76,10 @@ function isThenable(value: unknown): value is PromiseLike<unknown> {
   return typeof (value as { then?: unknown } | null)?.then === "function";
 }
 
+function isInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value);
+}
+
 /**
  * Tracks async engine work so tests can deterministically await "engine idle".
  *
@@ -136,11 +140,11 @@ class IdleTracker {
 }
 
 type EngineIntegration = {
-  applyChanges?: (changes: unknown) => unknown;
-  recalculate?: () => unknown;
-  syncNow?: () => unknown;
-  beginBatch?: () => unknown;
-  endBatch?: () => unknown;
+  applyChanges?(changes: unknown): unknown;
+  recalculate?(): unknown;
+  syncNow?(): unknown;
+  beginBatch?(): unknown;
+  endBatch?(): unknown;
 };
 
 class IdleTrackingEngine {
@@ -865,19 +869,17 @@ export class SpreadsheetApp {
               return `'${id.replaceAll("'", "''")}'!`;
             };
 
-            return Array.from(this.searchWorkbook.names.values())
-              .map((entry: any) => {
-                const name = typeof entry?.name === "string" ? entry.name : "";
-                if (!name) return null;
-                const sheetName = typeof entry?.sheetName === "string" ? entry.sheetName : "";
-                const range = entry?.range;
-                const rangeText =
-                  sheetName && range ? `${formatSheetPrefix(sheetName)}${rangeToA1(range)}` : undefined;
-                return { name, range: rangeText };
-              })
-              .filter((entry: { name: string; range?: string } | null): entry is { name: string; range?: string } =>
-                Boolean(entry?.name),
-              );
+            const out: Array<{ name: string; range?: string }> = [];
+            for (const entry of this.searchWorkbook.names.values()) {
+              const e: any = entry as any;
+              const name = typeof e?.name === "string" ? (e.name as string) : "";
+              if (!name) continue;
+              const sheetName = typeof e?.sheetName === "string" ? (e.sheetName as string) : "";
+              const range = e?.range;
+              const rangeText = sheetName && range ? `${formatSheetPrefix(sheetName)}${rangeToA1(range)}` : undefined;
+              out.push({ name, range: rangeText });
+            }
+            return out;
            },
            getTables: () =>
              Array.from(this.searchWorkbook.tables.values())
@@ -4702,7 +4704,7 @@ export class SpreadsheetApp {
             })
           )
         : externalGrid!.map((row) =>
-            row.map((cell) => {
+            row.map((cell: any) => {
               const format = cell.format ?? null;
               const rawFormula = cell.formula;
               const formula =
@@ -4829,7 +4831,7 @@ export class SpreadsheetApp {
     for (const change of changes) {
       const ref = change as EngineCellRef;
       const sheetId = typeof ref.sheetId === "string" ? ref.sheetId : this.sheetId;
-      if (!Number.isInteger(ref.row) || !Number.isInteger(ref.col)) continue;
+      if (!isInteger(ref.row) || !isInteger(ref.col)) continue;
       const address = cellToA1({ row: ref.row, col: ref.col });
       this.computedValues.delete(this.computedKey(sheetId, address));
     }
@@ -4847,7 +4849,7 @@ export class SpreadsheetApp {
       if (!sheetId) sheetId = this.sheetId;
 
       let address = typeof ref.address === "string" ? ref.address : undefined;
-      if (!address && Number.isInteger(ref.row) && Number.isInteger(ref.col)) {
+      if (!address && isInteger(ref.row) && isInteger(ref.col)) {
         address = cellToA1({ row: ref.row, col: ref.col });
       }
       if (!address) continue;
