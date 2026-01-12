@@ -76,6 +76,36 @@ test.describe("command palette go to", () => {
     await expect(page.getByTestId("active-value")).toHaveText("Hello from named range");
   });
 
+  test("typing a structured table reference navigates immediately", async ({ page }) => {
+    await gotoDesktop(page);
+
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
+      const workbook = app.getSearchWorkbook?.();
+      if (!workbook || typeof workbook.addTable !== "function") throw new Error("Missing search workbook adapter");
+
+      workbook.addTable({
+        name: "Table1",
+        sheetName: "Sheet1",
+        startRow: 0,
+        endRow: 9,
+        startCol: 0,
+        endCol: 1,
+        columns: ["Col1", "Col2"],
+      });
+    });
+
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    await page.keyboard.press(`${modifier}+Shift+P`);
+    await expect(page.getByTestId("command-palette-input")).toBeVisible();
+    await page.getByTestId("command-palette-input").fill("Table1[#All]");
+    await page.keyboard.press("Enter");
+
+    await expect(page.getByTestId("selection-range")).toHaveText("A1:B10");
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+  });
+
   test("sheet-qualified Go To resolves sheet display names to stable ids (no phantom sheets)", async ({ page }) => {
     await gotoDesktop(page);
 
