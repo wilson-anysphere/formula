@@ -1,9 +1,11 @@
 use std::io::{Cursor, Write};
 
 use formula_vba::{
-    compress_container, forms_normalized_data, project_normalized_data_v3,
+    compress_container, contents_hash_v3, forms_normalized_data, project_normalized_data_v3,
     v3_content_normalized_data,
 };
+use md5::Md5;
+use sha2::Digest as _;
 
 fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
     out.extend_from_slice(&id.to_le_bytes());
@@ -70,6 +72,77 @@ fn build_two_module_project_v3(module_order: [&str; 2]) -> Vec<u8> {
     {
         let mut s = ole.create_stream("VBA/ModuleB").expect("module B stream");
         s.write_all(&module_b_container).expect("write module B");
+    }
+
+    ole.into_inner().into_inner()
+}
+
+fn build_contents_hash_v3_project(module_source: &[u8], designer_stream_bytes: &[u8]) -> Vec<u8> {
+    let module_container = compress_container(module_source);
+    let userform_code = b"Sub FormHello()\r\nEnd Sub\r\n";
+    let userform_container = compress_container(userform_code);
+
+    // `PROJECT` must reference the designer module via `BaseClass=` for FormsNormalizedData.
+    let project_stream = b"Name=\"VBAProject\"\r\nBaseClass=\"UserForm1\"\r\n";
+
+    // Minimal decompressed `VBA/dir` stream for:
+    // - one standard module (`Module1`)
+    // - one UserForm module (`UserForm1`) whose designer storage is `UserForm1/*`
+    let dir_decompressed = {
+        let mut out = Vec::new();
+
+        // Standard module.
+        push_record(&mut out, 0x0019, b"Module1");
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"Module1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes()); // standard
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes()); // text offset 0
+
+        // UserForm module (designer). `FormsNormalizedData` will include `UserForm1/*` streams.
+        push_record(&mut out, 0x0019, b"UserForm1");
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"UserForm1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+        push_record(&mut out, 0x0021, &0x0003u16.to_le_bytes()); // UserForm
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    ole.create_storage("UserForm1").expect("designer storage");
+
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(project_stream).expect("write PROJECT");
+    }
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        let mut s = ole.create_stream("VBA/Module1").expect("module stream");
+        s.write_all(&module_container).expect("write module bytes");
+    }
+    {
+        let mut s = ole
+            .create_stream("VBA/UserForm1")
+            .expect("userform module stream");
+        s.write_all(&userform_container)
+            .expect("write userform module bytes");
+    }
+    {
+        let mut s = ole
+            .create_stream("UserForm1/Payload")
+            .expect("designer stream");
+        s.write_all(designer_stream_bytes)
+            .expect("write designer bytes");
     }
 
     ole.into_inner().into_inner()
@@ -212,4 +285,126 @@ fn project_normalized_data_v3_is_v3_content_plus_forms_normalized_data() {
     expected.extend_from_slice(&content);
     expected.extend_from_slice(&forms);
     assert_eq!(project, expected);
+}
+
+#[test]
+fn contents_hash_v3_matches_explicit_normalized_transcript_md5() {
+    // Module source includes:
+    // - an Attribute line that must be stripped
+    // - mixed newline styles (CRLF / CR-only / lone-LF)
+    // - a final line without a newline terminator (must be normalized to CRLF)
+    let module_source = concat!(
+        "Attribute VB_Name = \"Module1\"\r\n",
+        "Option Explicit\r",
+        "Print \"Attribute\"\n",
+        "Sub Foo()\r\n",
+        "End Sub",
+    )
+    .as_bytes()
+    .to_vec();
+
+    let designer_bytes = b"FORMDATA";
+    let vba_project_bin = build_contents_hash_v3_project(&module_source, designer_bytes);
+
+    // ---- Expected normalized transcript per MS-OVBA §2.4.2 ----
+    //
+    // ContentsHashV3 = MD5(ProjectNormalizedData)
+    // ProjectNormalizedData = V3ContentNormalizedData || FormsNormalizedData
+    //
+    // V3ContentNormalizedData includes module identity/metadata (`MODULENAME`, `MODULESTREAMNAME`
+    // sans the reserved u16, and `MODULETYPE`) followed by the module's normalized source.
+    let mut expected = Vec::new();
+
+    // Module1 prefix: MODULENAME || MODULESTREAMNAME(trimmed) || MODULETYPE
+    expected.extend_from_slice(b"Module1");
+    expected.extend_from_slice(b"Module1");
+    expected.extend_from_slice(&0u16.to_le_bytes());
+
+    // Module1 normalized source.
+    expected.extend_from_slice(
+        concat!(
+            "Option Explicit\r\n",
+            "Print \"Attribute\"\r\n",
+            "Sub Foo()\r\n",
+            "End Sub\r\n",
+        )
+        .as_bytes(),
+    );
+
+    // UserForm1 prefix + source.
+    expected.extend_from_slice(b"UserForm1");
+    expected.extend_from_slice(b"UserForm1");
+    expected.extend_from_slice(&0x0003u16.to_le_bytes());
+    expected.extend_from_slice(b"Sub FormHello()\r\nEnd Sub\r\n");
+
+    // FormsNormalizedData: one 1023-byte block for the designer stream.
+    expected.extend_from_slice(designer_bytes);
+    expected.extend(std::iter::repeat(0u8).take(1023 - designer_bytes.len()));
+
+    let expected_digest = Md5::digest(&expected).to_vec();
+    let actual_digest = contents_hash_v3(&vba_project_bin).expect("ContentsHashV3");
+    assert_eq!(actual_digest, expected_digest);
+}
+
+#[test]
+fn contents_hash_v3_regressions_attribute_stripping_and_forms_inclusion() {
+    let designer_bytes = b"FORMDATA";
+
+    let module_source = concat!(
+        "Attribute VB_Name = \"Module1\"\r\n",
+        "Option Explicit\r\n",
+        "Sub Foo()\r\n",
+        "End Sub\r\n",
+    )
+    .as_bytes()
+    .to_vec();
+    let vba_project_bin = build_contents_hash_v3_project(&module_source, designer_bytes);
+    let digest = contents_hash_v3(&vba_project_bin).expect("base digest");
+
+    // Changing a stripped Attribute line should NOT affect the hash.
+    let module_source_attribute_changed = concat!(
+        "Attribute VB_Name = \"RenamedModule\"\r\n",
+        "Option Explicit\r\n",
+        "Sub Foo()\r\n",
+        "End Sub\r\n",
+    )
+    .as_bytes()
+    .to_vec();
+    let vba_project_bin_attr_changed =
+        build_contents_hash_v3_project(&module_source_attribute_changed, designer_bytes);
+    let digest_attr_changed =
+        contents_hash_v3(&vba_project_bin_attr_changed).expect("digest with attribute line changed");
+    assert_eq!(
+        digest_attr_changed, digest,
+        "stripped Attribute lines must not influence ContentsHashV3"
+    );
+
+    // Changing a non-Attribute code line should affect the hash.
+    let module_source_code_changed = concat!(
+        "Attribute VB_Name = \"Module1\"\r\n",
+        "Option Compare Database\r\n",
+        "Sub Foo()\r\n",
+        "End Sub\r\n",
+    )
+    .as_bytes()
+    .to_vec();
+    let vba_project_bin_code_changed =
+        build_contents_hash_v3_project(&module_source_code_changed, designer_bytes);
+    let digest_code_changed =
+        contents_hash_v3(&vba_project_bin_code_changed).expect("digest with code line changed");
+    assert_ne!(
+        digest_code_changed, digest,
+        "non-Attribute code changes must influence ContentsHashV3"
+    );
+
+    // Changing designer stream bytes must affect the hash (V3-specific inclusion of FormsNormalizedData).
+    let designer_bytes_changed = b"FORMDATA2";
+    let vba_project_bin_forms_changed =
+        build_contents_hash_v3_project(&module_source, designer_bytes_changed);
+    let digest_forms_changed =
+        contents_hash_v3(&vba_project_bin_forms_changed).expect("digest with designer bytes changed");
+    assert_ne!(
+        digest_forms_changed, digest,
+        "designer stream bytes must influence ContentsHashV3"
+    );
 }
