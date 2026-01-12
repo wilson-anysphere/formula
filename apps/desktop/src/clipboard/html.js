@@ -89,8 +89,33 @@ function normalizeClipboardHtml(html) {
     return null;
   };
 
+  /** @type {Uint8Array | null | undefined} */
+  let cachedUtf8Bytes;
+  const getUtf8Bytes = () => {
+    if (cachedUtf8Bytes !== undefined) return cachedUtf8Bytes;
+    cachedUtf8Bytes = encodeUtf8(input);
+    return cachedUtf8Bytes;
+  };
+
+  /** @type {TextDecoder | null | undefined} */
+  let cachedUtf8Decoder;
+  const getUtf8Decoder = () => {
+    if (cachedUtf8Decoder !== undefined) return cachedUtf8Decoder;
+    if (typeof TextDecoder === "undefined") {
+      cachedUtf8Decoder = null;
+      return cachedUtf8Decoder;
+    }
+    try {
+      cachedUtf8Decoder = new TextDecoder("utf-8", { fatal: false });
+    } catch {
+      cachedUtf8Decoder = null;
+    }
+    return cachedUtf8Decoder;
+  };
+
   const decodeUtf8 = (bytes) => {
-    if (typeof TextDecoder !== "undefined") return new TextDecoder().decode(bytes);
+    const decoder = getUtf8Decoder();
+    if (decoder) return decoder.decode(bytes);
     if (typeof Buffer !== "undefined") {
       // eslint-disable-next-line no-undef
       return Buffer.from(bytes).toString("utf8");
@@ -98,13 +123,12 @@ function normalizeClipboardHtml(html) {
     return null;
   };
 
-  const inputBytes = encodeUtf8(input);
-
   const safeSliceUtf8 = (start, end) => {
-    if (!inputBytes) return null;
     if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
-    if (start < 0 || end <= start || end > inputBytes.length) return null;
-    const decoded = decodeUtf8(inputBytes.subarray(start, end));
+    if (start < 0 || end <= start) return null;
+    const bytes = getUtf8Bytes();
+    if (!bytes || end > bytes.length) return null;
+    const decoded = decodeUtf8(bytes.subarray(start, end));
     return typeof decoded === "string" ? decoded : null;
   };
 
