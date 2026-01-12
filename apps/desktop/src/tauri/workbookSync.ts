@@ -514,6 +514,21 @@ export function startWorkbookSync(args: {
       // explicitly marked/saved, so we clear it here to keep close prompts aligned.
       if (!args.document.isDirty) {
         try {
+          // Some doc-driven sheet persistence (handled in `main.ts`, not workbookSync) batches backend
+          // commands in microtasks (e.g. reorder coalescing). Yield to the event loop once so those
+          // commands have a chance to enqueue before we clear the backend dirty flag; otherwise we
+          // could accidentally call `mark_saved` *before* a delayed `move_sheet`, leaving the backend
+          // dirty while the document is clean.
+          await new Promise<void>((resolve) => {
+            if (typeof setTimeout === "function") {
+              setTimeout(resolve, 0);
+            } else {
+              queueMicrotask(resolve);
+            }
+          });
+          if (stopped) return;
+          if (args.document.isDirty) return;
+          if (pendingCellEdits.size > 0 || pendingSheetActions.length > 0 || flushQueued) return;
           await invokeFn("mark_saved", {});
         } catch {
           // Graceful degradation: older backends may not implement this command.

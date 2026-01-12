@@ -9,6 +9,11 @@ async function flushMicrotasks(times = 4): Promise<void> {
   }
 }
 
+async function flushNextTick(): Promise<void> {
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  await flushMicrotasks();
+}
+
 function createMaterializedDocument(): DocumentController {
   const document = new DocumentController();
   // DocumentController lazily materializes sheets. workbookSync captures an initial sheet snapshot
@@ -232,6 +237,7 @@ describe("workbookSync", () => {
     expect(document.isDirty).toBe(false);
 
     await flushMicrotasks(8);
+    await flushNextTick();
 
     const cmds = invoke.mock.calls.map((c) => c[0]);
     expect(cmds[0]).toMatch(/set_(cell|range)/);
@@ -258,6 +264,7 @@ describe("workbookSync", () => {
     expect(document.isDirty).toBe(false);
 
     await flushMicrotasks(8);
+    await flushNextTick();
 
     const cmds = invoke.mock.calls.map((c) => c[0]);
     expect(cmds).toEqual(["mark_saved"]);
