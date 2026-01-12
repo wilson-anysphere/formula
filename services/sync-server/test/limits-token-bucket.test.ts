@@ -18,14 +18,14 @@ test("TokenBucketRateLimiter sweeps stale buckets to avoid unbounded growth", ()
   assert.equal((limiter as any).buckets.size, 1);
 });
 
-test("TokenBucketRateLimiter rejects when capacity is <= 0", () => {
+test("TokenBucketRateLimiter disables limiting when capacity is <= 0", () => {
   const limiter = new TokenBucketRateLimiter(0, 1_000);
-  assert.equal(limiter.consume("ip", 0), false);
+  assert.equal(limiter.consume("ip", 0), true);
   assert.equal((limiter as any).buckets.size, 0);
 });
 
-test("TokenBucketRateLimiter rejects when refill window is <= 0", () => {
+test("TokenBucketRateLimiter disables limiting when refill window is <= 0", () => {
   const limiter = new TokenBucketRateLimiter(10, 0);
-  assert.equal(limiter.consume("ip", 0), false);
+  assert.equal(limiter.consume("ip", 0), true);
   assert.equal((limiter as any).buckets.size, 0);
 });

@@ -1167,7 +1167,10 @@ export function createSyncServer(
 
     ws.on("message", (data) => {
       const messageBytes = rawDataByteLength(data);
-      if (messageBytes > config.limits.maxMessageBytes) {
+      if (
+        config.limits.maxMessageBytes > 0 &&
+        messageBytes > config.limits.maxMessageBytes
+      ) {
         logger.warn(
           {
             ip,
@@ -1182,21 +1185,23 @@ export function createSyncServer(
         return;
       }
 
-      const nowMs = Date.now();
-      if (messageWindowMs > 0 && nowMs - messageWindowStartedAtMs >= messageWindowMs) {
-        messageWindowStartedAtMs = nowMs;
-        messagesInWindow = 0;
-      }
+      if (maxMessagesPerWindow > 0 && messageWindowMs > 0) {
+        const nowMs = Date.now();
+        if (nowMs - messageWindowStartedAtMs >= messageWindowMs) {
+          messageWindowStartedAtMs = nowMs;
+          messagesInWindow = 0;
+        }
 
-      messagesInWindow += 1;
-      if (messagesInWindow > maxMessagesPerWindow) {
-        metrics.wsMessagesRateLimitedTotal.inc();
-        logger.warn(
-          { ip, docName, userId: authCtx?.userId },
-          "ws_message_rate_limited"
-        );
-        ws.close(1013, "Rate limit exceeded");
-        return;
+        messagesInWindow += 1;
+        if (messagesInWindow > maxMessagesPerWindow) {
+          metrics.wsMessagesRateLimitedTotal.inc();
+          logger.warn(
+            { ip, docName, userId: authCtx?.userId },
+            "ws_message_rate_limited"
+          );
+          ws.close(1013, "Rate limit exceeded");
+          return;
+        }
       }
 
       if (!docMessageLimiter.consume(docName)) {
