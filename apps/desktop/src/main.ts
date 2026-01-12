@@ -5007,6 +5007,21 @@ mountRibbon(ribbonRoot, {
   onCommand: (commandId) => {
     const doc = app.getDocument();
 
+    // Toggle buttons trigger both `onToggle` and `onCommand`. We handle most toggle
+    // semantics in `onToggle` (since it provides the `pressed` state). Avoid
+    // falling through to the default "unimplemented" toast here.
+    if (
+      commandId === "home.font.bold" ||
+      commandId === "home.font.italic" ||
+      commandId === "home.font.underline" ||
+      commandId === "home.alignment.wrapText" ||
+      commandId === "view.show.showFormulas" ||
+      commandId === "view.show.performanceStats" ||
+      commandId === "view.window.split"
+    ) {
+      return;
+    }
+
     if (
       commandId === "data.queriesConnections.refreshAll" ||
       commandId === "data.queriesConnections.refreshAll.refresh" ||
@@ -5047,6 +5062,7 @@ mountRibbon(ribbonRoot, {
       app.focus();
       return;
     }
+
     const openRibbonPanel = (panelId: string): void => {
       const layoutController = ribbonLayoutController;
       if (!layoutController) {

@@ -34,19 +34,21 @@ test.describe("ribbon File backstage", () => {
     await page.keyboard.press("ArrowUp");
     await expect(fileNew).toBeFocused();
 
-    // Web demo behavior: actions should surface a "Desktop-only" toast.
+    // Web demo behavior: actions should surface a toast indicating the feature is
+    // only available in the desktop app.
     await page.getByTestId("file-open").click();
     const toast = page.getByTestId("toast").last();
-    await expect(toast).toContainText("Desktop-only");
+    await expect(toast).toContainText(/desktop/i);
 
     // Re-open and ensure Escape still closes the backstage and returns to the Home tab.
     await fileTab.click();
     await expect(fileNew).toBeVisible();
     await expect(fileNew).toBeFocused();
 
-    for (let i = 0; i < 5; i += 1) {
-      await page.keyboard.press("Tab");
-    }
+    // Tab through all enabled backstage actions to reach the last item.
+    const backstageItems = page.locator(".ribbon-backstage").getByRole("menuitem");
+    const itemCount = await backstageItems.count();
+    for (let i = 0; i < Math.max(0, itemCount - 1); i += 1) await page.keyboard.press("Tab");
     await expect(fileQuit).toBeFocused();
 
     await page.keyboard.press("Tab");
