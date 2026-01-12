@@ -381,6 +381,127 @@ async fn odbc_sqlite_file_path_outside_scope_is_denied() {
 }
 
 #[tokio::test]
+async fn odbc_sqlite_file_path_within_scope_is_allowed() {
+    let roots = desktop_allowed_roots();
+    assert!(!roots.is_empty(), "expected at least one allowed root");
+
+    let allowed_dir = tempfile::tempdir_in(&roots[0]).expect("tempdir in allowed root");
+    let db_path = allowed_dir.path().join("allowed.sqlite");
+    create_sqlite_db(&db_path).await;
+
+    let conn_str = format!("Driver={{SQLite3}};Database={};", db_path.display());
+    let result = sql::sql_query(
+        json!({ "kind": "odbc", "connectionString": conn_str }),
+        "SELECT CAST(1 AS INTEGER) AS one".to_string(),
+        Vec::new(),
+        None,
+    )
+    .await
+    .expect("odbc sqlite query should succeed for scoped db path");
+
+    assert_eq!(result.columns, vec!["one".to_string()]);
+    assert_eq!(result.rows, vec![vec![json!(1)]]);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn odbc_sqlite_symlink_escape_is_denied() {
+    use std::os::unix::fs::symlink;
+
+    let roots = desktop_allowed_roots();
+    assert!(!roots.is_empty(), "expected at least one allowed root");
+
+    // Create a real database file outside the allowed roots.
+    let outside_dir = tempfile::tempdir().expect("tempdir");
+    let outside_dir_canon = std::fs::canonicalize(outside_dir.path()).expect("canonicalize");
+    if is_in_roots(&outside_dir_canon, &roots) {
+        eprintln!(
+            "skipping symlink escape odbc sqlite test: tempdir {} is within allowed roots {roots:?}",
+            outside_dir_canon.display()
+        );
+        return;
+    }
+    let outside_db = outside_dir.path().join("outside.sqlite");
+    create_sqlite_db(&outside_db).await;
+
+    // Create a symlink inside an allowed root pointing to the outside database.
+    let allowed_dir = tempfile::tempdir_in(&roots[0]).expect("tempdir in allowed root");
+    let link_path = allowed_dir.path().join("db.sqlite");
+    symlink(&outside_db, &link_path).expect("create symlink");
+
+    let conn_str = format!("Driver=SQLite3;Database={};", link_path.display());
+    let err = sql::sql_query(
+        json!({ "kind": "odbc", "connectionString": conn_str }),
+        "SELECT 1".to_string(),
+        Vec::new(),
+        None,
+    )
+    .await
+    .expect_err("expected odbc sqlite symlink escape to error");
+
+    assert!(
+        err.to_string().contains("Access denied: SQLite database path is outside the allowed filesystem scope"),
+        "unexpected error: {err}"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn odbc_sqlite_dotdot_traversal_escape_is_denied() {
+    use std::path::Component;
+
+    let roots = desktop_allowed_roots();
+    assert!(!roots.is_empty(), "expected at least one allowed root");
+
+    // Create a real database file outside the allowed roots.
+    let outside_dir = tempfile::tempdir().expect("tempdir");
+    let outside_dir_canon = std::fs::canonicalize(outside_dir.path()).expect("canonicalize");
+    if is_in_roots(&outside_dir_canon, &roots) {
+        eprintln!(
+            "skipping .. traversal odbc sqlite test: tempdir {} is within allowed roots {roots:?}",
+            outside_dir_canon.display()
+        );
+        return;
+    }
+    let outside_db = outside_dir.path().join("outside.sqlite");
+    create_sqlite_db(&outside_db).await;
+
+    // Craft a path that *appears* under the allowed root but uses `..` components to reach the
+    // outside db path.
+    let allowed_root = roots[0].clone();
+    let mut escape_path = allowed_root.clone();
+    let mut depth = 0usize;
+    for comp in allowed_root.components() {
+        if matches!(comp, Component::Normal(_)) {
+            depth += 1;
+        }
+    }
+    for _ in 0..depth {
+        escape_path.push("..");
+    }
+    for comp in outside_db.components() {
+        if matches!(comp, Component::Normal(_)) {
+            escape_path.push(comp.as_os_str());
+        }
+    }
+
+    let conn_str = format!("Driver=SQLite3;Database={};", escape_path.display());
+    let err = sql::sql_query(
+        json!({ "kind": "odbc", "connectionString": conn_str }),
+        "SELECT 1".to_string(),
+        Vec::new(),
+        None,
+    )
+    .await
+    .expect_err("expected odbc sqlite .. traversal escape to error");
+
+    assert!(
+        err.to_string().contains("Access denied: SQLite database path is outside the allowed filesystem scope"),
+        "unexpected error: {err}"
+    );
+}
+
+#[tokio::test]
 async fn sqlite_attach_cannot_read_out_of_scope_db_via_multi_statement() {
     let roots = desktop_allowed_roots();
     assert!(!roots.is_empty(), "expected at least one allowed root");
@@ -533,4 +654,27 @@ async fn odbc_sqlite_get_schema_file_path_outside_scope_is_denied() {
         err.to_string().contains("Access denied: SQLite database path is outside the allowed filesystem scope"),
         "unexpected error: {err}"
     );
+}
+
+#[tokio::test]
+async fn odbc_sqlite_get_schema_file_path_within_scope_is_allowed() {
+    let roots = desktop_allowed_roots();
+    assert!(!roots.is_empty(), "expected at least one allowed root");
+
+    let allowed_dir = tempfile::tempdir_in(&roots[0]).expect("tempdir in allowed root");
+    let db_path = allowed_dir.path().join("allowed.sqlite");
+    create_sqlite_db(&db_path).await;
+
+    let conn_str = format!("Driver={{SQLite3}};Database={};", db_path.display());
+    let result = sql::sql_get_schema(
+        json!({ "kind": "odbc", "connectionString": conn_str }),
+        "SELECT CAST(1 AS INTEGER) AS one".to_string(),
+        None,
+    )
+    .await
+    .expect("odbc sqlite get_schema should succeed for scoped db path");
+
+    assert_eq!(result.columns, vec!["one".to_string()]);
+    let types = result.types.expect("expected type map");
+    assert_eq!(types.get("one"), Some(&SqlDataType::Number));
 }
