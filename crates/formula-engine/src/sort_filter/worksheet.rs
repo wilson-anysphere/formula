@@ -417,9 +417,9 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
                                 _ => None,
                             };
 
-                            if parsed.is_some() {
-                                return parsed;
-                            }
+                             if parsed.is_some() {
+                                 return parsed;
+                             }
                         }
                     }
                 }

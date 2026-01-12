@@ -87,6 +87,135 @@ def _sanitize_fragment(text: str) -> str:
     return safe or "unknown"
 
 
+def _stable_path_string_from_payload(*, repo_root: Path, raw: object) -> str | None:
+    """
+    Normalize a case-set path string from a results payload so it is stable/portable when committed.
+
+    `run-excel-oracle.ps1` is often invoked with an absolute `-CasesPath` (especially from wrapper
+    scripts). If we record patch metadata into the pinned dataset, prefer a repo-relative path when
+    possible so it is not machine-specific.
+    """
+
+    if not isinstance(raw, str):
+        return None
+    raw = raw.strip()
+    if not raw:
+        return None
+
+    try:
+        p = Path(raw)
+        # Note: on non-Windows platforms, a Windows path like `C:\repo\cases.json` is not treated as
+        # absolute by pathlib. In that situation we just keep the raw string.
+        if p.is_absolute():
+            try:
+                rel = p.resolve().relative_to(repo_root.resolve())
+                return rel.as_posix()
+            except Exception:
+                return p.as_posix()
+        return p.as_posix()
+    except Exception:
+        return raw
+
+
+def _is_real_excel_source(source: dict[str, Any]) -> bool:
+    """
+    Heuristic: real Excel results come from `run-excel-oracle.ps1` and have `source.kind == "excel"`
+    with no `source.syntheticSource`.
+    """
+
+    return (
+        source.get("kind") == "excel"
+        and not isinstance(source.get("syntheticSource"), dict)
+    )
+
+
+def _record_excel_merge_patch(
+    *,
+    repo_root: Path,
+    pinned_payload: dict[str, Any],
+    merge_payload: dict[str, Any],
+    added: int,
+    overwritten: int,
+) -> None:
+    """
+    Record (optional) metadata about a real-Excel patch into the pinned dataset.
+
+    This is intentionally *best effort* and never blocks an update: it should not prevent CI/dev
+    workflows if the merge payload is missing metadata.
+    """
+
+    if added <= 0 and overwritten <= 0:
+        return
+
+    pinned_source = pinned_payload.get("source")
+    if not isinstance(pinned_source, dict):
+        return
+
+    merge_source = merge_payload.get("source")
+    merge_case_set = merge_payload.get("caseSet")
+    if not isinstance(merge_source, dict) or not isinstance(merge_case_set, dict):
+        return
+
+    if not _is_real_excel_source(merge_source):
+        return
+
+    raw_case_set_path = merge_case_set.get("path")
+    stable_case_set_path = _stable_path_string_from_payload(repo_root=repo_root, raw=raw_case_set_path)
+
+    patch_entry = {
+        "kind": "excel",
+        "version": str(merge_source.get("version", "unknown")),
+        "build": str(merge_source.get("build", "unknown")),
+        "operatingSystem": str(merge_source.get("operatingSystem", "unknown")),
+        "caseSet": {
+            "path": stable_case_set_path or str(raw_case_set_path or ""),
+            "sha256": str(merge_case_set.get("sha256", "")),
+            "count": int(merge_case_set.get("count", 0) or 0),
+        },
+        "applied": {"added": int(added), "overwritten": int(overwritten)},
+    }
+
+    patches = pinned_source.get("patches")
+    if patches is None:
+        pinned_source["patches"] = [patch_entry]
+    elif isinstance(patches, list):
+        # De-dupe: replace an existing entry for the same (Excel build, caseSet) instead of
+        # appending repeatedly (merge-friendly).
+        def key(entry: object) -> tuple[str, str, str, str, str] | None:
+            if not isinstance(entry, dict):
+                return None
+            cs = entry.get("caseSet")
+            if not isinstance(cs, dict):
+                return None
+            return (
+                str(entry.get("version", "")),
+                str(entry.get("build", "")),
+                str(entry.get("operatingSystem", "")),
+                str(cs.get("sha256", "")),
+                str(cs.get("path", "")),
+            )
+
+        patch_key = key(patch_entry)
+        if patch_key is None:
+            patches.append(patch_entry)
+        else:
+            for i, existing in enumerate(list(patches)):
+                if key(existing) == patch_key:
+                    patches[i] = patch_entry
+                    break
+            else:
+                patches.append(patch_entry)
+    else:
+        # Unexpected type; don't clobber it.
+        return
+
+    # If the pinned dataset is still tagged as a synthetic baseline, make the note accurate once
+    # real Excel patches have been applied.
+    note = pinned_source.get("note")
+    if isinstance(note, str) and "Synthetic CI baseline" in note and "real Excel patches" not in note:
+        pinned_source["note"] = note.rstrip() + " (Includes real Excel patches; see source.patches.)"
+
+
 def write_versioned_copy(*, pinned_path: Path, versioned_dir: Path) -> Path:
     """
     Write a version-tagged copy of `pinned_path` into `versioned_dir`.
@@ -338,6 +467,8 @@ def update_pinned_dataset(
     # Merge any provided results files before running the engine.
     for path in merge_results_paths:
         payload = _load_json(path)
+        merged_added = 0
+        merged_overwritten = 0
         for r in _iter_result_entries(payload):
             cid = r.get("caseId")
             if not isinstance(cid, str):
@@ -349,6 +480,7 @@ def update_pinned_dataset(
                 missing.remove(cid)
                 index_by_case_id[cid] = len(filtered_results)
                 filtered_results.append(r)
+                merged_added += 1
                 continue
 
             # Optional: allow merge-results to overwrite existing pinned results. This is useful
@@ -358,7 +490,17 @@ def update_pinned_dataset(
                 idx = index_by_case_id.get(cid)
                 if idx is not None and 0 <= idx < len(filtered_results):
                     filtered_results[idx] = r
+                    merged_overwritten += 1
                 continue
+
+        if isinstance(payload, dict):
+            _record_excel_merge_patch(
+                repo_root=repo_root,
+                pinned_payload=pinned_payload,
+                merge_payload=payload,
+                added=merged_added,
+                overwritten=merged_overwritten,
+            )
 
     # If still missing, optionally run the engine on a temp corpus containing only missing cases.
     if missing and run_engine_for_missing:
