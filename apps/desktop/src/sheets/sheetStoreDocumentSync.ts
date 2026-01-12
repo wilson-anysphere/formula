@@ -27,6 +27,7 @@ export function startSheetStoreDocumentSync(
 ): SyncHandle {
   let scheduled = false;
   let disposed = false;
+  let lastChangeSource: string | null = null;
 
   const schedule = () => {
     if (disposed) return;
@@ -86,6 +87,32 @@ export function startSheetStoreDocumentSync(
       }
     }
 
+    // When restoring document state (VersionManager restore, workbook open, etc), prefer the
+    // sheet ordering from the DocumentController snapshot so sheet tabs reflect the restored
+    // workbook navigation order.
+    if (lastChangeSource === "applyState") {
+      const desiredOrder = docSheetIds.slice();
+      const current = store.listAll().map((s) => s.id);
+      const currentSet = new Set(current);
+      const desired = desiredOrder.filter((id) => currentSet.has(id));
+      // Append any store-only ids (should be rare; e.g. removal guarded).
+      for (const id of current) {
+        if (!desired.includes(id)) desired.push(id);
+      }
+
+      for (let targetIndex = 0; targetIndex < desired.length; targetIndex += 1) {
+        const sheetId = desired[targetIndex]!;
+        const currentIndex = store.listAll().findIndex((s) => s.id === sheetId);
+        if (currentIndex === -1) continue;
+        if (currentIndex === targetIndex) continue;
+        try {
+          store.move(sheetId, targetIndex);
+        } catch {
+          // Best-effort: if the store rejects a move (shouldn't happen), continue syncing the rest.
+        }
+      }
+    }
+
     // If the active sheet is no longer valid, fall back to the first visible sheet.
     if (activeSheetId && !docSet.has(activeSheetId)) {
       const firstVisible = store.listVisible()[0] ?? store.listAll()[0] ?? null;
@@ -95,7 +122,10 @@ export function startSheetStoreDocumentSync(
     }
   };
 
-  const unsubscribeChange = doc.on("change", schedule);
+  const unsubscribeChange = doc.on("change", (payload) => {
+    lastChangeSource = typeof (payload as any)?.source === "string" ? (payload as any).source : null;
+    schedule();
+  });
   const unsubscribeUpdate = doc.on("update", schedule);
 
   // Run a first-pass sync on startup.

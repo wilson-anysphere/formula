@@ -134,4 +134,37 @@ describe("sheetStoreDocumentSync", () => {
 
     handle.dispose();
   });
+
+  test("reorders the store to match doc sheet order when restoring via applyState", async () => {
+    const doc = new MockDoc();
+    doc.sheetIds = ["Sheet1", "Sheet2"];
+
+    const store = new WorkbookSheetStore([
+      { id: "Sheet1", name: "Sheet1", visibility: "visible" },
+      { id: "Sheet2", name: "Sheet2", visibility: "visible" },
+    ]);
+
+    let activeSheetId = "Sheet1";
+
+    const handle = startSheetStoreDocumentSync(
+      doc,
+      store,
+      () => activeSheetId,
+      (id) => {
+        activeSheetId = id;
+      },
+    );
+
+    await flushMicrotasks();
+    expect(store.listAll().map((s) => s.id)).toEqual(["Sheet1", "Sheet2"]);
+
+    // Simulate an applyState restore that reorders sheets.
+    doc.sheetIds = ["Sheet2", "Sheet1"];
+    doc.emit("change", { source: "applyState" });
+    await flushMicrotasks();
+
+    expect(store.listAll().map((s) => s.id)).toEqual(["Sheet2", "Sheet1"]);
+
+    handle.dispose();
+  });
 });

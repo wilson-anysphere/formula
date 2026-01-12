@@ -2060,6 +2060,23 @@ function installSheetStoreSubscription(): void {
     // Guard against marking dirty during internal UI sync transactions.
     if (!syncingSheetUi) {
       app.getDocument().markDirty();
+
+      // Keep DocumentController sheet order aligned with the UI sheet store ordering so
+      // snapshot/restore flows (encodeState/applyState, VersionManager) preserve the user's
+      // tab ordering.
+      //
+      // In collab mode the Yjs workbook schema (`session.sheets`) is authoritative for
+      // ordering; avoid mutating the DocumentController sheet map there.
+      const session = app.getCollabSession?.() ?? null;
+      if (!session) {
+        const desired = workbookSheetStore.listAll().map((s) => s.id);
+        const current = app.getDocument().getSheetIds();
+        const desiredKey = desired.join("|");
+        const currentKey = current.join("|");
+        if (desiredKey && desiredKey !== currentKey) {
+          app.getDocument().reorderSheets(desired);
+        }
+      }
     }
 
     syncWorkbookSheetNamesFromSheetStore();

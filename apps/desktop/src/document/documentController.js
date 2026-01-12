@@ -1802,6 +1802,60 @@ export class DocumentController {
   }
 
   /**
+   * Reorder sheets to match a desired ordering.
+   *
+   * This updates the iteration order returned by `getSheetIds()` and therefore the sheet
+   * ordering encoded into `encodeState()` snapshots.
+   *
+   * Note: DocumentController does not currently model richer sheet metadata (names/visibility/etc).
+   * This only affects ordering of sheet ids.
+   *
+   * @param {string[]} sheetIdsInOrder
+   */
+  reorderSheets(sheetIdsInOrder) {
+    if (!Array.isArray(sheetIdsInOrder) || sheetIdsInOrder.length === 0) return;
+
+    // Ensure all ids are materialized (DocumentController is lazily sheet-creating).
+    for (const id of sheetIdsInOrder) {
+      if (typeof id !== "string" || id.length === 0) continue;
+      this.model.getCell(id, 0, 0);
+    }
+
+    const existing = Array.from(this.model.sheets.keys());
+    const seen = new Set();
+    /** @type {string[]} */
+    const desired = [];
+    for (const raw of sheetIdsInOrder) {
+      if (typeof raw !== "string") continue;
+      const id = raw;
+      if (seen.has(id)) continue;
+      if (!this.model.sheets.has(id)) continue;
+      seen.add(id);
+      desired.push(id);
+    }
+    for (const id of existing) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      desired.push(id);
+    }
+
+    if (desired.length === 0) return;
+    if (desired.length === existing.length && desired.every((id, idx) => id === existing[idx])) return;
+
+    for (const id of desired) {
+      const sheet = this.model.sheets.get(id);
+      if (!sheet) continue;
+      this.model.sheets.delete(id);
+      this.model.sheets.set(id, sheet);
+    }
+
+    // Treat sheet order changes as an "update" so downstream snapshot/versioning layers can observe it,
+    // but do not bump `contentVersion` since the cell grid content is unchanged.
+    this._updateVersion += 1;
+    this.#emit("update", {});
+  }
+
+  /**
    * Return the current content version counter for a sheet.
    *
    * This starts at 0 and increments whenever the sheet's value/formula grid changes.
