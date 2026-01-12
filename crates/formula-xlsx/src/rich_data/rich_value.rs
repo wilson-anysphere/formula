@@ -41,10 +41,24 @@ pub fn parse_rich_value_relationship_indices(
         Some(values) => values
             .descendants()
             .filter(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("rv"))
+            // Avoid treating nested `<rv>` blocks as separate records. The rich value schema uses a
+            // flat list of records under `<values>`.
+            .filter(|rv| {
+                !rv.ancestors()
+                    .skip(1)
+                    .filter(|n| n.is_element())
+                    .any(|n| n.tag_name().name().eq_ignore_ascii_case("rv"))
+            })
             .collect(),
         None => doc
             .descendants()
             .filter(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("rv"))
+            .filter(|rv| {
+                !rv.ancestors()
+                    .skip(1)
+                    .filter(|n| n.is_element())
+                    .any(|n| n.tag_name().name().eq_ignore_ascii_case("rv"))
+            })
             .collect(),
     };
 
@@ -61,6 +75,15 @@ fn parse_rv_relationship_index(rv: &roxmltree::Node<'_, '_>) -> Option<usize> {
         .descendants()
         .filter(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("v"))
     {
+        // Ensure `v` belongs to this `rv` (and not a nested one).
+        if v.ancestors()
+            .filter(|n| n.is_element())
+            .find(|n| n.tag_name().name().eq_ignore_ascii_case("rv"))
+            .is_some_and(|closest_rv| closest_rv != *rv)
+        {
+            continue;
+        }
+
         if !is_rel_kind(&v) {
             continue;
         }
@@ -133,10 +156,24 @@ pub fn parse_rich_values_xml(xml_bytes: &[u8]) -> Result<RichValues, XlsxError> 
         Some(values) => values
             .descendants()
             .filter(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("rv"))
+            // Avoid treating nested `<rv>` blocks as separate records. The rich value schema uses a
+            // flat list of records under `<values>`.
+            .filter(|rv| {
+                !rv.ancestors()
+                    .skip(1)
+                    .filter(|n| n.is_element())
+                    .any(|n| n.tag_name().name().eq_ignore_ascii_case("rv"))
+            })
             .collect(),
         None => doc
             .descendants()
             .filter(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("rv"))
+            .filter(|rv| {
+                !rv.ancestors()
+                    .skip(1)
+                    .filter(|n| n.is_element())
+                    .any(|n| n.tag_name().name().eq_ignore_ascii_case("rv"))
+            })
             .collect(),
     };
 
@@ -320,6 +357,27 @@ mod tests {
     }
 
     #[test]
+    fn rich_value_relationship_indices_ignores_nested_rv_values() {
+        // Ensure relationship indices from nested `<rv>` blocks don't shadow the parent `<rv>`.
+        let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <values>
+    <rv type="0">
+      <wrapper>
+        <rv type="0">
+          <v kind="rel">7</v>
+        </rv>
+      </wrapper>
+      <v kind="rel">1</v>
+    </rv>
+  </values>
+</rvData>"#;
+
+        let parsed = parse_rich_value_relationship_indices(xml.as_bytes()).expect("parse");
+        assert_eq!(parsed, vec![Some(1)]);
+    }
+
+    #[test]
     fn rich_values_xml_parses_fields_in_document_order() {
         let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <rd:rvData xmlns:rd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
@@ -395,6 +453,7 @@ mod tests {
 </rvData>"#;
 
         let parsed = parse_rich_values_xml(xml.as_bytes()).expect("parse");
+        assert_eq!(parsed.values.len(), 1);
         assert_eq!(
             parsed.values[0].fields,
             vec![RichValueFieldValue {
