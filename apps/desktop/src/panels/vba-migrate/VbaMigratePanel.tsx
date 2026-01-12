@@ -3,9 +3,9 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { analyzeVbaModule } from "../../../../../packages/vba-migrate/src/analyzer.js";
 import { VbaMigrator } from "../../../../../packages/vba-migrate/src/converter.js";
 
+import { createClipboardProvider } from "../../clipboard/index.js";
 import { getVbaProject, type VbaModuleSummary, type VbaProjectSummary } from "../../macros/vba_project.js";
 import { getDesktopLLMClient, purgeLegacyDesktopLLMSettings } from "../../ai/llm/desktopLLMClient.js";
-import { createClipboardProvider } from "../../clipboard/platform/provider.js";
 
 type TauriInvoke = (cmd: string, args?: any) => Promise<any>;
 
@@ -280,6 +280,7 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
   }, []);
 
   const llmClient = useMemo(() => getDesktopLLMClient(), []);
+  const clipboardProviderPromise = useMemo(() => createClipboardProvider(), []);
 
   const migrator = useMemo(() => {
     if (props.createMigrator) return props.createMigrator();
@@ -527,7 +528,7 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
 
   async function copyToClipboard(text: string) {
     try {
-      const provider = await createClipboardProvider();
+      const provider = await clipboardProviderPromise;
       await provider.write({ text });
     } catch {
       // ignore

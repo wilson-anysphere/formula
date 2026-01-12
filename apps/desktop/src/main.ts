@@ -1218,13 +1218,26 @@ function generateCollabDocId(): string {
   return `doc_${Date.now().toString(16)}_${Math.random().toString(16).slice(2)}`;
 }
 
+// Lazy-load the clipboard provider to avoid import-order issues in the main entrypoint.
+let clipboardProviderPromise: Promise<import("./clipboard/index.js").ClipboardProvider> | null = null;
+async function getClipboardProvider(): Promise<import("./clipboard/index.js").ClipboardProvider> {
+  if (!clipboardProviderPromise) {
+    clipboardProviderPromise = import("./clipboard/index.js").then((mod) => mod.createClipboardProvider());
+  }
+  return clipboardProviderPromise;
+}
+
 async function copyTextToClipboard(text: string): Promise<boolean> {
   const value = String(text ?? "");
   if (!value) return false;
 
   try {
-    if (typeof navigator !== "undefined" && navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
-      await navigator.clipboard.writeText(value);
+    // If the environment exposes a Clipboard API (or we're running under Tauri), prefer the shared
+    // provider so native clipboard fallbacks work consistently.
+    const canUseProvider = Boolean((globalThis as any).__TAURI__) || Boolean(globalThis.navigator?.clipboard);
+    if (canUseProvider) {
+      const provider = await getClipboardProvider();
+      await provider.write({ text: value });
       return true;
     }
   } catch {
