@@ -1,5 +1,6 @@
 use std::io::Write;
 
+use formula_engine::{parse_formula, ParseOptions};
 use formula_model::{CellRef, DefinedNameScope};
 
 mod common;
@@ -10,6 +11,11 @@ fn import_fixture(bytes: &[u8]) -> formula_xls::XlsImportResult {
     let mut tmp = tempfile::NamedTempFile::new().expect("temp file");
     tmp.write_all(bytes).expect("write xls bytes");
     formula_xls::import_xls_path(tmp.path()).expect("import xls")
+}
+
+fn assert_parseable(expr: &str) {
+    parse_formula(&format!("={expr}"), ParseOptions::default())
+        .unwrap_or_else(|e| panic!("expected expression to be parseable, expr={expr:?}, err={e:?}"));
 }
 
 #[test]
@@ -23,6 +29,7 @@ fn imports_defined_names_split_across_continue_records() {
         .expect("expected defined name to be imported");
 
     assert_eq!(name.refers_to, "DefinedNames!$A$1");
+    assert_parseable(&name.refers_to);
     assert_eq!(
         name.comment.as_deref(),
         Some("This is a long description used to test continued NAME records.")
@@ -38,4 +45,5 @@ fn imports_defined_names_split_across_continue_records() {
         .formula(CellRef::from_a1("A1").unwrap())
         .expect("expected formula in DefinedNames!A1");
     assert_eq!(formula, "MyContinuedName");
+    assert_parseable(formula);
 }

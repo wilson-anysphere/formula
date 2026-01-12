@@ -1,11 +1,17 @@
 use std::io::Write;
 
 use calamine::{open_workbook, Reader, Xls};
+use formula_engine::{parse_formula, ParseOptions};
 use formula_model::DefinedNameScope;
 
 mod common;
 
 use common::xls_fixture_builder;
+
+fn assert_parseable(expr: &str) {
+    parse_formula(&format!("={expr}"), ParseOptions::default())
+        .unwrap_or_else(|e| panic!("expected expression to be parseable, expr={expr:?}, err={e:?}"));
+}
 
 #[test]
 fn imports_defined_names_via_calamine_fallback_when_biff_is_unavailable() {
@@ -33,26 +39,34 @@ fn imports_defined_names_via_calamine_fallback_when_biff_is_unavailable() {
         let refers_to = refers_to
             .strip_prefix('=')
             .unwrap_or(refers_to)
-            .to_string();
+         .to_string();
         (name, refers_to)
     };
+    assert_parseable(&expected_refers_to);
 
     // Force BIFF workbook-stream parsing to be unavailable so the importer has to use the
     // calamine fallback path.
     let result = formula_xls::import_xls_path_without_biff(tmp.path()).expect("import xls");
 
-    assert!(
-        result.workbook.defined_names.iter().any(|n| {
+    let imported = result
+        .workbook
+        .defined_names
+        .iter()
+        .find(|n| {
             n.scope == DefinedNameScope::Workbook
                 && n.name == expected_name
                 && n.refers_to == expected_refers_to
                 && !n.hidden
                 && n.comment.is_none()
                 && n.xlsx_local_sheet_id.is_none()
-        }),
-        "expected imported workbook to contain defined name {expected_name:?}; defined_names={:?}",
-        result.workbook.defined_names
-    );
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "expected imported workbook to contain defined name {expected_name:?}; defined_names={:?}",
+                result.workbook.defined_names
+            )
+        });
+    assert_parseable(&imported.refers_to);
 
     assert!(
         result.warnings.iter().any(|w| w

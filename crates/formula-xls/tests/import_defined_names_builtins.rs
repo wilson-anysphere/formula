@@ -1,5 +1,6 @@
 use std::io::Write;
 
+use formula_engine::{parse_formula, ParseOptions};
 use formula_model::{DefinedNameScope, XLNM_FILTER_DATABASE, XLNM_PRINT_AREA, XLNM_PRINT_TITLES};
 
 mod common;
@@ -10,6 +11,11 @@ fn import_fixture(bytes: &[u8]) -> formula_xls::XlsImportResult {
     let mut tmp = tempfile::NamedTempFile::new().expect("temp file");
     tmp.write_all(bytes).expect("write xls bytes");
     formula_xls::import_xls_path(tmp.path()).expect("import xls")
+}
+
+fn assert_parseable(expr: &str) {
+    parse_formula(&format!("={expr}"), ParseOptions::default())
+        .unwrap_or_else(|e| panic!("expected expression to be parseable, expr={expr:?}, err={e:?}"));
 }
 
 #[test]
@@ -38,6 +44,7 @@ fn imports_biff8_builtin_defined_names_with_scope_and_hidden() {
         print_area.refers_to,
         "Sheet1!$A$1:$A$2,Sheet1!$C$1:$C$2"
     );
+    assert_parseable(&print_area.refers_to);
 
     let print_titles = workbook
         .get_defined_name(DefinedNameScope::Sheet(sheet2_id), XLNM_PRINT_TITLES)
@@ -47,6 +54,7 @@ fn imports_biff8_builtin_defined_names_with_scope_and_hidden() {
     assert!(!print_titles.hidden, "Print_Titles should not be hidden");
     assert_eq!(print_titles.xlsx_local_sheet_id, Some(1));
     assert_eq!(print_titles.refers_to, "Sheet2!$1:$1,Sheet2!$A:$A");
+    assert_parseable(&print_titles.refers_to);
 
     let filter_db = workbook
         .get_defined_name(DefinedNameScope::Sheet(sheet1_id), XLNM_FILTER_DATABASE)
@@ -56,6 +64,7 @@ fn imports_biff8_builtin_defined_names_with_scope_and_hidden() {
     assert!(filter_db.hidden, "_FilterDatabase should be hidden");
     assert_eq!(filter_db.xlsx_local_sheet_id, Some(0));
     assert_eq!(filter_db.refers_to, "Sheet1!$A$1:$C$10");
+    assert_parseable(&filter_db.refers_to);
 }
 
 #[test]
@@ -87,6 +96,7 @@ fn builtin_defined_name_prefers_rgchname_when_chkey_mismatched() {
         print_titles_sheet1.is_some(),
         "missing Print_Titles defined name on Sheet1"
     );
+    assert_parseable(&print_titles_sheet1.unwrap().refers_to);
 
     let print_titles_sheet2 =
         workbook.get_defined_name(DefinedNameScope::Sheet(sheet2_id), XLNM_PRINT_TITLES);
@@ -94,4 +104,5 @@ fn builtin_defined_name_prefers_rgchname_when_chkey_mismatched() {
         print_titles_sheet2.is_some(),
         "missing Print_Titles defined name on Sheet2"
     );
+    assert_parseable(&print_titles_sheet2.unwrap().refers_to);
 }

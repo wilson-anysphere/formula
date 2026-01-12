@@ -192,6 +192,7 @@ fn imports_workbook_defined_names_via_calamine_fallback_when_biff_unavailable() 
     });
     assert_eq!(name.scope, DefinedNameScope::Workbook);
     assert_eq!(name.refers_to, "Sheet1!$A$1:$A$1");
+    assert_parseable_refers_to(&name.refers_to);
 }
 
 #[test]
@@ -236,9 +237,10 @@ fn rewrites_calamine_defined_name_formulas_to_sanitized_sheet_names() {
                 "TestName missing; defined_names={:?}; warnings={:?}",
                 result.workbook.defined_names, result.warnings
             )
-        });
+    });
     assert_eq!(name.scope, DefinedNameScope::Workbook);
     assert_eq!(name.refers_to, "Bad_Name!$A$1:$A$1");
+    assert_parseable_refers_to(&name.refers_to);
 
     assert!(
         result
