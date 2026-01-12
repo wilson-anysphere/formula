@@ -16,7 +16,7 @@ export function approximateTokenCount(text) {
  *
  * Note: Formula's desktop workbook RAG uses deterministic, offline hash embeddings
  * (`HashEmbedder`) by default. Embeddings are not user-configurable (no API keys /
- * no local model configuration). A future Cursor-managed embedding service can
+ * no local model setup). A future Cursor-managed embedding service can
  * replace this to improve retrieval quality.
  *
  * @param {{

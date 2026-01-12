@@ -8,7 +8,7 @@ export function indexWorkbook(params: {
    *
    * Note: Formula's desktop workbook RAG uses deterministic, offline hash
    * embeddings (`HashEmbedder`) by default. Embeddings are not user-configurable
-   * (no API keys / no local model configuration). A future Cursor-managed
+   * (no API keys / no local model setup). A future Cursor-managed
    * embedding service can replace this to improve retrieval quality.
    */
   embedder: { embedTexts(texts: string[]): Promise<ArrayLike<number>[]> };
