@@ -616,12 +616,13 @@ export function startWorkbookSync(args: {
     const backendOriginated = source === "macro" || source === "python" || source === "pivot" || source === "backend";
 
     if (source === "applyState") {
-      // `applyState` replaces the entire DocumentController snapshot. It can create/delete sheets
-      // without emitting sheetMetaDeltas/sheetOrderDelta, so reconcile against a post-applyState
-      // snapshot in a microtask (after the controller finishes removing deleted sheets).
-      //
-      // Treat this as a reset boundary: pending backend sync for the old document state is no longer
-      // meaningful, so drop any queued edits and reconcile to the new snapshot.
+      // `applyState` replaces the entire DocumentController snapshot (restore/sync from an external source).
+      // Treat this as a reset boundary:
+      // - drop any queued edits/sheet actions from the prior state
+      // - do not echo applyState cell clears back via set_cell/set_range (can be huge sparse clears)
+      // - do not mirror applyState sheet structure changes (create/delete/reorder) back to the backend
+      // - refresh our local sheet snapshot after the controller finishes applying the snapshot so
+      //   subsequent *user* edits are scoped to the correct sheet ids.
       pendingCellEdits.clear();
       pendingSheetActions.length = 0;
       pendingCellFormats.clear();
