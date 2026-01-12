@@ -246,6 +246,8 @@
   top: calc(100% + 4px);
   left: 0;
   min-width: 180px;
+  max-height: min(360px, calc(100vh - 160px));
+  overflow: auto;
   padding: 4px;
   border-radius: 8px;
   border: 1px solid var(--border);
