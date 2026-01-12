@@ -210,6 +210,33 @@ fn ast_encoder_roundtrips_structured_ref_table_column() {
 }
 
 #[test]
+fn ast_encoder_roundtrips_structured_ref_this_row_without_table_name() {
+    let ctx = ctx_table1();
+
+    let encoded =
+        encode_rgce_with_context_ast("=[@Qty]", &ctx, CellCoord::new(0, 0)).expect("encode");
+    assert!(encoded.rgcb.is_empty());
+
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "[@Qty]");
+}
+
+#[test]
+fn ast_encoder_rejects_ambiguous_tableless_structured_ref() {
+    let mut ctx = ctx_table1();
+    ctx.add_table(2, "Table2");
+    ctx.add_table_column(2, 1, "Item");
+    ctx.add_table_column(2, 2, "Qty");
+
+    let err = encode_rgce_with_context_ast("=[@Qty]", &ctx, CellCoord::new(0, 0))
+        .expect_err("expected ambiguity error");
+    assert!(
+        err.to_string().to_ascii_lowercase().contains("ambiguous"),
+        "expected error to mention ambiguity, got: {err}"
+    );
+}
+
+#[test]
 fn ast_encoder_roundtrips_structured_ref_headers_column() {
     let ctx = ctx_table1();
     let encoded = encode_rgce_with_context_ast("=Table1[[#Headers],[Qty]]", &ctx, CellCoord::new(0, 0))

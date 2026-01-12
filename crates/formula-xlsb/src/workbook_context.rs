@@ -538,6 +538,18 @@ impl WorkbookContext {
             .filter_map(|(&id, col_name)| (normalize_key(col_name) == wanted).then_some(id))
             .min()
     }
+
+    /// Returns the table id if the workbook context contains exactly one table.
+    ///
+    /// This supports encoding "table-less" structured references like `[@Col]`, which Excel
+    /// interprets as referencing the current row of the containing table.
+    pub fn single_table_id(&self) -> Option<u32> {
+        if self.tables.len() == 1 {
+            self.tables.keys().next().copied()
+        } else {
+            None
+        }
+    }
 }
 
 fn normalize_key(s: &str) -> String {

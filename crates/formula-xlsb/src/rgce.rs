@@ -2337,15 +2337,17 @@ mod encode_ast {
             ));
         }
 
-        let table_name = r.table.as_deref().ok_or_else(|| {
-            EncodeError::Parse(
-                "structured references without an explicit table name are not supported"
-                    .to_string(),
-            )
-        })?;
-        let table_id = ctx.table_id_by_name(table_name).ok_or_else(|| {
-            EncodeError::Parse(format!("unknown table: {table_name}"))
-        })?;
+        let table_id = match r.table.as_deref() {
+            Some(table_name) => ctx
+                .table_id_by_name(table_name)
+                .ok_or_else(|| EncodeError::Parse(format!("unknown table: {table_name}")))?,
+            None => ctx.single_table_id().ok_or_else(|| {
+                EncodeError::Parse(
+                    "structured references without an explicit table name are ambiguous; specify TableName[...]"
+                        .to_string(),
+                )
+            })?,
+        };
 
         let (flags, col_first, col_last) = parse_structured_ref_spec(&r.spec, table_id, ctx)?;
 
