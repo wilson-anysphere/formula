@@ -105,4 +105,13 @@ fn imports_print_area_from_builtin_defined_name_with_unicode_quoted_sheet_name()
             Range::from_a1("C1:C2").unwrap()
         ])
     );
+
+    let sheet_id = workbook
+        .sheet_by_name("Ünicode Name")
+        .expect("Ünicode Name sheet missing")
+        .id;
+    let print_area = workbook
+        .get_defined_name(DefinedNameScope::Sheet(sheet_id), XLNM_PRINT_AREA)
+        .expect("missing Print_Area defined name");
+    assert_parseable(&print_area.refers_to);
 }
