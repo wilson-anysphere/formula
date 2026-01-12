@@ -126,6 +126,30 @@ test("Ctrl/Cmd+1 triggers Format Cells shortcut", () => {
   assert.equal(prevented, true);
 });
 
+test("Ctrl/Cmd+Digit1 triggers Format Cells even when event.key differs under keyboard layout", () => {
+  const target = new FakeEventTarget();
+  let count = 0;
+  installFormattingShortcuts(target, {
+    openFormatCells() {
+      count += 1;
+    },
+  });
+
+  let prevented = false;
+  // Example: on AZERTY layouts, `Digit1` may report `event.key === "&"` without Shift.
+  target.dispatchEvent("keydown", {
+    key: "&",
+    code: "Digit1",
+    ctrlKey: true,
+    preventDefault() {
+      prevented = true;
+    },
+  });
+
+  assert.equal(count, 1);
+  assert.equal(prevented, true);
+});
+
 test("toggleBold on a full column selection is fast + uses effective (layered) formats", () => {
   const doc = new DocumentController();
 

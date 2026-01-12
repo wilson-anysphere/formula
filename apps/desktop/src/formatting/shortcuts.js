@@ -1,5 +1,12 @@
 /**
- * @typedef {{ key?: string, ctrlKey?: boolean, metaKey?: boolean, shiftKey?: boolean, preventDefault?: () => void }} KeyboardEventLike
+ * @typedef {{
+ *   key?: string,
+ *   code?: string,
+ *   ctrlKey?: boolean,
+ *   metaKey?: boolean,
+ *   shiftKey?: boolean,
+ *   preventDefault?: () => void
+ * }} KeyboardEventLike
  */
 
 /**
@@ -9,8 +16,13 @@
  */
 export function isFormatCellsKeyboardEvent(event) {
   const key = (event.key ?? "").toLowerCase();
+  const code = event.code ?? "";
   const mod = Boolean(event.metaKey || event.ctrlKey);
-  return mod && !event.shiftKey && key === "1";
+  if (!mod || event.shiftKey) return false;
+
+  // Prefer `event.key` (layout-aware), but fall back to `event.code` so this shortcut
+  // remains usable on layouts where the digit requires Shift (e.g. AZERTY `Digit1` -> "&").
+  return key === "1" || code === "Digit1";
 }
 
 /**
@@ -29,4 +41,3 @@ export function installFormattingShortcuts(target, handlers) {
   target.addEventListener("keydown", onKeyDown);
   return () => target.removeEventListener("keydown", onKeyDown);
 }
-
