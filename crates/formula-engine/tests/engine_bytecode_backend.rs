@@ -478,6 +478,20 @@ fn bytecode_backend_matches_ast_for_let_with_iferror_short_circuit() {
 }
 
 #[test]
+fn bytecode_backend_matches_ast_for_let_with_iferror_on_error_local() {
+    let mut engine = Engine::new();
+
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LET(x, 1/0, IFERROR(x, 0))")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(0.0));
+    assert_engine_matches_ast(&engine, "=LET(x, 1/0, IFERROR(x, 0))", "A1");
+    assert_eq!(engine.bytecode_program_count(), 1);
+}
+
+#[test]
 fn bytecode_backend_reuses_program_for_filled_let_patterns() {
     let mut engine = Engine::new();
 
@@ -502,6 +516,31 @@ fn bytecode_backend_reuses_program_for_filled_let_patterns() {
     assert_engine_matches_ast(&engine, "=LET(x, A1, x+1)", "B1");
     assert_engine_matches_ast(&engine, "=LET(x, A2, x+1)", "B2");
     assert_engine_matches_ast(&engine, "=LET(x, A3, x+1)", "B3");
+}
+
+#[test]
+fn bytecode_backend_rejects_invalid_let_name_arg() {
+    // LET's binding "name" args must be identifiers; invalid name args should fall back to the AST
+    // evaluator (and produce #VALUE!).
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LET(1, 2, 3)")
+        .unwrap();
+    assert_eq!(engine.bytecode_program_count(), 0);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::Value));
+    assert_engine_matches_ast(&engine, "=LET(1, 2, 3)", "A1");
+
+    engine
+        .set_cell_formula("Sheet1", "A2", "=LET(A1, 2, 3)")
+        .unwrap();
+    // Still not bytecode-eligible because the binding "name" is a cell ref, not a bare identifier.
+    assert_eq!(engine.bytecode_program_count(), 0);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Error(ErrorKind::Value));
+    assert_engine_matches_ast(&engine, "=LET(A1, 2, 3)", "A2");
 }
 
 #[test]
