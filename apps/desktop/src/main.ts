@@ -71,6 +71,13 @@ import {
   toggleWrap,
   type CellRange,
 } from "./formatting/toolbar.js";
+import {
+  getDefaultSeedStoreStorage,
+  readContributedPanelsSeedStore,
+  removeSeedPanelsForExtension,
+  seedPanelRegistryFromContributedPanelsSeedStore,
+  setSeedPanelsForExtension,
+} from "./extensions/contributedPanelsSeedStore.js";
 
 import sampleHelloManifest from "../../../extensions/sample-hello/package.json";
 
@@ -126,6 +133,16 @@ const workbookSheetNames = new Map<string, string>();
 
 // Seed contributed panels early so layout persistence doesn't drop their ids before the
 // extension host finishes loading installed extensions.
+const contributedPanelsSeedStorage = getDefaultSeedStoreStorage();
+if (contributedPanelsSeedStorage) {
+  seedPanelRegistryFromContributedPanelsSeedStore(contributedPanelsSeedStorage, panelRegistry, {
+    onError: (message, err) => {
+      console.error(message, err);
+      showToast(message, "error");
+    },
+  });
+}
+
 const sampleHelloExtensionId = `${(sampleHelloManifest as any).publisher}.${(sampleHelloManifest as any).name}`;
 for (const panel of (sampleHelloManifest as any)?.contributes?.panels ?? []) {
   panelRegistry.registerPanel(
@@ -855,6 +872,7 @@ if (
 
   // Keybindings (foundation): execute contributed commands.
   const parsedKeybindings: Array<ReturnType<typeof parseKeybinding>> = [];
+  let lastLoadedExtensionIds = new Set<string>();
 
   const syncContributedCommands = () => {
     if (!extensionHostManager.ready || extensionHostManager.error) return;
@@ -873,25 +891,65 @@ if (
     const contributed = extensionHostManager.getContributedPanels() as Array<{ extensionId: string; id: string; title: string; icon?: string | null }>;
     const contributedIds = new Set(contributed.map((p) => p.id));
 
+    // Update the synchronous seed store from loaded extension manifests.
+    if (contributedPanelsSeedStorage) {
+      try {
+        const extensions = extensionHostManager.host.listExtensions?.() ?? [];
+        const currentLoadedExtensionIds = new Set<string>();
+        for (const ext of extensions as any[]) {
+          const id = typeof ext?.id === "string" ? ext.id : null;
+          if (!id) continue;
+          currentLoadedExtensionIds.add(id);
+          const panels = Array.isArray(ext?.manifest?.contributes?.panels) ? ext.manifest.contributes.panels : [];
+          setSeedPanelsForExtension(contributedPanelsSeedStorage, id, panels, {
+            onError: (message) => {
+              console.error(message);
+              showToast(message, "error");
+            },
+          });
+        }
+
+        // Uninstall/unload: when an extension disappears from the runtime, remove its
+        // contributed panel seeds so layouts stop preserving stale ids on future restarts.
+        for (const prevId of lastLoadedExtensionIds) {
+          if (currentLoadedExtensionIds.has(prevId)) continue;
+          removeSeedPanelsForExtension(contributedPanelsSeedStorage, prevId);
+        }
+        lastLoadedExtensionIds = currentLoadedExtensionIds;
+      } catch (err) {
+        console.error("Failed to update contributed panel seed store:", err);
+      }
+    }
+
+    // Remove contributed panels that are no longer installed (no longer present in the seed store).
+    const seededPanels = contributedPanelsSeedStorage ? readContributedPanelsSeedStore(contributedPanelsSeedStorage) : {};
+    const keepIds = new Set<string>([...contributedIds, ...Object.keys(seededPanels)]);
+
     for (const panel of contributed) {
-      panelRegistry.registerPanel(
-        panel.id,
-        {
-          title: panel.title,
-          icon: (panel as any).icon ?? null,
-          defaultDock: "right",
-          defaultFloatingRect: { x: 140, y: 140, width: 520, height: 640 },
-          source: { kind: "extension", extensionId: panel.extensionId, contributed: true },
-        },
-        { owner: panel.extensionId, overwrite: true },
-      );
+      const seeded = seededPanels[panel.id];
+      try {
+        panelRegistry.registerPanel(
+          panel.id,
+          {
+            title: panel.title,
+            icon: (panel as any).icon ?? seeded?.icon ?? null,
+            defaultDock: seeded?.defaultDock ?? "right",
+            defaultFloatingRect: { x: 140, y: 140, width: 520, height: 640 },
+            source: { kind: "extension", extensionId: panel.extensionId, contributed: true },
+          },
+          { owner: panel.extensionId, overwrite: true },
+        );
+      } catch (err) {
+        console.error("Failed to register extension panel:", err);
+        showToast(`Failed to register extension panel: ${panel.id}`, "error");
+      }
     }
 
     for (const id of panelRegistry.listPanelIds()) {
       const def = panelRegistry.get(id) as any;
       const source = def?.source;
       if (source?.kind !== "extension" || source.contributed !== true) continue;
-      if (contributedIds.has(id)) continue;
+      if (keepIds.has(id)) continue;
       panelRegistry.unregisterPanel(id, { owner: source.extensionId });
     }
   };
