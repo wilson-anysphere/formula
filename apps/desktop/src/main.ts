@@ -5382,7 +5382,7 @@ if (
   const MAX_ROW_HEIGHT_ROWS = MAX_AXIS_RESIZE_INDICES;
   const MAX_COL_WIDTH_COLS = MAX_AXIS_RESIZE_INDICES;
 
-  const selectedRowIndices = (ranges: Range[]): number[] => {
+  const selectedRowIndices = (ranges: Range[] = app.getSelectionRanges()): number[] => {
     const rows = new Set<number>();
     for (const range of ranges) {
       const r = normalizeSelectionRange(range);
@@ -5391,7 +5391,7 @@ if (
     return [...rows].sort((a, b) => a - b);
   };
 
-  const selectedColIndices = (ranges: Range[]): number[] => {
+  const selectedColIndices = (ranges: Range[] = app.getSelectionRanges()): number[] => {
     const cols = new Set<number>();
     for (const range of ranges) {
       const r = normalizeSelectionRange(range);
@@ -5483,6 +5483,13 @@ if (
           label: "Hide",
           enabled: allowEditCommands,
           onSelect: () => {
+            // Hide/Unhide is currently legacy-grid only. Avoid enumerating potentially huge
+            // shared-grid selections (e.g. select-all on Excel-scale sheets) just to show the
+            // "not supported" toast.
+            if (app.getGridMode() !== "legacy") {
+              app.hideRows([]);
+              return;
+            }
             app.hideRows(selectedRowIndices());
           },
         },
@@ -5491,6 +5498,10 @@ if (
           label: "Unhide",
           enabled: allowEditCommands,
           onSelect: () => {
+            if (app.getGridMode() !== "legacy") {
+              app.unhideRows([]);
+              return;
+            }
             app.unhideRows(selectedRowIndices());
           },
         },
@@ -5503,6 +5514,10 @@ if (
           label: "Hide",
           enabled: allowEditCommands,
           onSelect: () => {
+            if (app.getGridMode() !== "legacy") {
+              app.hideCols([]);
+              return;
+            }
             app.hideCols(selectedColIndices());
           },
         },
@@ -5511,6 +5526,10 @@ if (
           label: "Unhide",
           enabled: allowEditCommands,
           onSelect: () => {
+            if (app.getGridMode() !== "legacy") {
+              app.unhideCols([]);
+              return;
+            }
             app.unhideCols(selectedColIndices());
           },
         },
