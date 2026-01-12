@@ -19,6 +19,71 @@ use crate::{DateSystem, RecalcPolicy};
 use crate::theme::{parse_theme_palette, ThemePalette};
 use formula_model::{CellRef, CellValue, SheetVisibility, StyleTable, TabColor};
 
+/// Excel workbook "kind" that drives the `/xl/workbook.xml` content type override in
+/// `[Content_Types].xml`.
+///
+/// This is primarily used when exporting an XLSX package under a different extension (for example
+/// `.xltx` templates or `.xlam` add-ins).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkbookKind {
+    /// Standard workbook (`.xlsx`).
+    Workbook,
+    /// Macro-enabled workbook (`.xlsm`).
+    MacroEnabledWorkbook,
+    /// Workbook template (`.xltx`).
+    Template,
+    /// Macro-enabled workbook template (`.xltm`).
+    MacroEnabledTemplate,
+    /// Macro-enabled add-in (`.xlam`).
+    MacroEnabledAddIn,
+}
+
+impl WorkbookKind {
+    pub fn from_extension(ext: &str) -> Option<Self> {
+        match ext.to_ascii_lowercase().as_str() {
+            "xlsx" => Some(Self::Workbook),
+            "xlsm" => Some(Self::MacroEnabledWorkbook),
+            "xltx" => Some(Self::Template),
+            "xltm" => Some(Self::MacroEnabledTemplate),
+            "xlam" => Some(Self::MacroEnabledAddIn),
+            _ => None,
+        }
+    }
+
+    pub fn workbook_content_type(self) -> &'static str {
+        match self {
+            WorkbookKind::Workbook => {
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"
+            }
+            WorkbookKind::MacroEnabledWorkbook => {
+                "application/vnd.ms-excel.sheet.macroEnabled.main+xml"
+            }
+            WorkbookKind::Template => {
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml"
+            }
+            WorkbookKind::MacroEnabledTemplate => {
+                "application/vnd.ms-excel.template.macroEnabled.main+xml"
+            }
+            WorkbookKind::MacroEnabledAddIn => {
+                "application/vnd.ms-excel.addin.macroEnabled.main+xml"
+            }
+        }
+    }
+
+    pub fn is_macro_enabled(self) -> bool {
+        matches!(
+            self,
+            WorkbookKind::MacroEnabledWorkbook
+                | WorkbookKind::MacroEnabledTemplate
+                | WorkbookKind::MacroEnabledAddIn
+        )
+    }
+
+    pub fn is_macro_free(self) -> bool {
+        matches!(self, WorkbookKind::Workbook | WorkbookKind::Template)
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum XlsxError {
     #[error("zip error: {0}")]
@@ -407,6 +472,12 @@ impl XlsxPackage {
         let cursor = zip.finish()?;
         w.write_all(&cursor.into_inner())?;
         Ok(())
+    }
+
+    /// Ensure `[Content_Types].xml` advertises the correct workbook content type for the requested
+    /// workbook kind.
+    pub fn enforce_workbook_kind(&mut self, kind: WorkbookKind) -> Result<(), XlsxError> {
+        ensure_workbook_content_type(&mut self.parts, kind.workbook_content_type())
     }
 
     /// Return the ordered workbook sheets with their resolved worksheet part paths.
@@ -844,7 +915,16 @@ fn ensure_xlsm_content_types(parts: &mut BTreeMap<String, Vec<u8>>) -> Result<()
         let desired_content_type = match part_name.as_deref() {
             Some(part) if part_name_matches(part, WORKBOOK_PART_NAME) => {
                 *has_workbook_override = true;
-                Some(WORKBOOK_MACRO_CONTENT_TYPE)
+                // If the workbook content type is already macro-enabled (e.g. `.xltm` or `.xlam`),
+                // keep it. Otherwise, upgrade to the standard macro-enabled workbook type.
+                if content_type
+                    .as_deref()
+                    .is_some_and(|t| t.contains("macroEnabled.main+xml"))
+                {
+                    None
+                } else {
+                    Some(WORKBOOK_MACRO_CONTENT_TYPE)
+                }
             }
             Some(part) if part_name_matches(part, VBA_PART_NAME) => {
                 *has_vba_override = true;
@@ -1209,6 +1289,127 @@ fn ensure_workbook_rels_has_vba(parts: &mut BTreeMap<String, Vec<u8>>) -> Result
         parts.insert(rels_name.to_string(), writer.into_inner());
     }
     Ok(())
+}
+
+fn ensure_workbook_content_type(
+    parts: &mut BTreeMap<String, Vec<u8>>,
+    workbook_content_type: &str,
+) -> Result<(), XlsxError> {
+    let ct_name = "[Content_Types].xml";
+    let Some(existing) = parts.get(ct_name).cloned() else {
+        return Ok(());
+    };
+
+    let mut reader = XmlReader::from_reader(existing.as_slice());
+    reader.config_mut().trim_text(false);
+    let mut writer = XmlWriter::new(Vec::with_capacity(existing.len() + 128));
+    let mut buf = Vec::new();
+
+    let mut changed = false;
+    let mut found = false;
+    let mut skip_depth = 0usize;
+
+    loop {
+        let ev = reader.read_event_into(&mut buf)?;
+
+        if skip_depth > 0 {
+            match ev {
+                Event::Start(_) => skip_depth += 1,
+                Event::End(_) => skip_depth -= 1,
+                Event::Eof => break,
+                _ => {}
+            }
+            buf.clear();
+            continue;
+        }
+
+        match ev {
+            Event::Eof => break,
+            Event::Empty(ref e) if crate::openxml::local_name(e.name().as_ref()) == b"Override" => {
+                let (is_workbook, updated) = patched_workbook_override(e, workbook_content_type)?;
+                if is_workbook {
+                    found = true;
+                }
+                if let Some(updated) = updated {
+                    writer.write_event(Event::Empty(updated))?;
+                    changed = true;
+                } else {
+                    writer.write_event(Event::Empty(e.to_owned()))?;
+                }
+            }
+            Event::Start(ref e) if crate::openxml::local_name(e.name().as_ref()) == b"Override" => {
+                let (is_workbook, updated) = patched_workbook_override(e, workbook_content_type)?;
+                if is_workbook {
+                    found = true;
+                }
+                if let Some(updated) = updated {
+                    writer.write_event(Event::Empty(updated))?;
+                    changed = true;
+                    // Skip through the matching </Override>.
+                    skip_depth = 1;
+                } else {
+                    writer.write_event(Event::Start(e.to_owned()))?;
+                }
+            }
+            other => writer.write_event(other.into_owned())?,
+        }
+
+        buf.clear();
+    }
+
+    let mut out = writer.into_inner();
+    if !found {
+        // No workbook override found; insert one before </Types>.
+        let mut xml = String::from_utf8(out)?;
+        if let Some(idx) = xml.rfind("</Types>") {
+            let insert = format!(
+                r#"<Override PartName="/xl/workbook.xml" ContentType="{workbook_content_type}"/>"#
+            );
+            xml.insert_str(idx, &insert);
+            changed = true;
+        }
+        out = xml.into_bytes();
+    }
+
+    if changed {
+        parts.insert(ct_name.to_string(), out);
+    }
+    Ok(())
+}
+
+fn patched_workbook_override(
+    e: &BytesStart<'_>,
+    workbook_content_type: &str,
+) -> Result<(bool, Option<BytesStart<'static>>), XlsxError> {
+    let mut part_name = None;
+    let mut existing_content_type = None;
+
+    for attr in e.attributes().with_checks(false) {
+        let attr = attr?;
+        match crate::openxml::local_name(attr.key.as_ref()) {
+            b"PartName" => part_name = Some(attr.unescape_value()?.into_owned()),
+            b"ContentType" => existing_content_type = Some(attr.unescape_value()?.into_owned()),
+            _ => {}
+        }
+    }
+
+    let Some(part_name) = part_name else {
+        return Ok((false, None));
+    };
+
+    let normalized = part_name.strip_prefix('/').unwrap_or(part_name.as_str());
+    if normalized != "xl/workbook.xml" {
+        return Ok((false, None));
+    }
+
+    if existing_content_type.as_deref() == Some(workbook_content_type) {
+        return Ok((true, None));
+    }
+
+    let mut updated = BytesStart::new("Override");
+    updated.push_attribute(("PartName", "/xl/workbook.xml"));
+    updated.push_attribute(("ContentType", workbook_content_type));
+    Ok((true, Some(updated.into_owned())))
 }
 
 fn ensure_vba_project_rels_has_signature(

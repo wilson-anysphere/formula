@@ -757,8 +757,9 @@ impl AppState {
             sheet.clear_dirty_cells();
         }
 
-        // If the saved file is `.xlsx`, macros are not preserved; clear any in-memory macro
-        // payloads so the UI doesn't continue to treat the workbook as macro-enabled.
+        // If the saved file is macro-free (`.xlsx`/`.xltx`), macros are not preserved; clear any
+        // in-memory macro payloads so the UI doesn't continue to treat the workbook as
+        // macro-enabled.
         if ext.is_some_and(Self::is_macro_free_extension) {
             workbook.vba_project_bin = None;
             workbook.macro_fingerprint = None;

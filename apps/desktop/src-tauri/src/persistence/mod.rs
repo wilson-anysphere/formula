@@ -264,13 +264,25 @@ pub fn write_xlsx_from_storage(
         .extension()
         .and_then(|s| s.to_str())
         .map(|s| s.to_ascii_lowercase());
-    let wants_vba =
-        workbook_meta.vba_project_bin.is_some() && matches!(extension.as_deref(), Some("xlsm"));
+    let workbook_kind = extension
+        .as_deref()
+        .and_then(formula_xlsx::WorkbookKind::from_extension)
+        .unwrap_or(formula_xlsx::WorkbookKind::Workbook);
+
+    let wants_vba = workbook_meta.vba_project_bin.is_some() && workbook_kind.is_macro_enabled();
     let wants_preserved_drawings = workbook_meta.preserved_drawing_parts.is_some();
     let wants_preserved_pivots = workbook_meta.preserved_pivot_parts.is_some();
     let wants_power_query = workbook_meta.power_query_xml.is_some();
+    let wants_macro_strip = workbook_kind.is_macro_free() && workbook_meta.vba_project_bin.is_some();
+    let wants_content_type_enforcement = workbook_kind != formula_xlsx::WorkbookKind::Workbook;
 
-    if wants_vba || wants_preserved_drawings || wants_preserved_pivots || wants_power_query {
+    if wants_vba
+        || wants_preserved_drawings
+        || wants_preserved_pivots
+        || wants_power_query
+        || wants_macro_strip
+        || wants_content_type_enforcement
+    {
         let mut pkg = formula_xlsx::XlsxPackage::from_bytes(&bytes).context("parse generated xlsx")?;
 
         if wants_vba {
@@ -300,10 +312,20 @@ pub fn write_xlsx_from_storage(
             }
         }
 
+        if wants_macro_strip {
+            pkg.remove_vba_project().context("strip macros for macro-free export")?;
+        }
+
+        pkg.enforce_workbook_kind(workbook_kind)
+            .context("enforce workbook content type")?;
+
         bytes = pkg.write_to_bytes().context("repack xlsx package")?;
     }
 
-    if matches!(extension.as_deref(), Some("xlsx") | Some("xlsm")) {
+    if matches!(
+        extension.as_deref(),
+        Some("xlsx") | Some("xlsm") | Some("xltx") | Some("xltm") | Some("xlam")
+    ) {
         bytes = formula_xlsx::print::write_workbook_print_settings(&bytes, &workbook_meta.print_settings)
             .context("write workbook print settings")?;
     }

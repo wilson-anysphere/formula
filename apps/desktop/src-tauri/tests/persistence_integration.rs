@@ -5,6 +5,7 @@ use formula_storage::{CellRange, CellValue, Storage};
 use serde_json::json;
 use std::io::Cursor;
 use std::path::PathBuf;
+use std::collections::BTreeSet;
 
 #[tokio::test]
 async fn autosave_persists_and_exports_round_trip() {
@@ -190,5 +191,180 @@ async fn export_writes_cached_values_for_formula_cells() {
         cell.value,
         formula_model::CellValue::Number(3.0),
         "expected cached value for B1"
+    );
+}
+
+#[tokio::test]
+async fn export_xltx_enforces_template_content_type_and_writes_print_settings() {
+    use formula_xlsx::print::{
+        CellRange as PrintCellRange, ManualPageBreaks, Orientation, PageMargins, PageSetup, PaperSize,
+        Scaling, SheetPrintSettings, WorkbookPrintSettings,
+    };
+    use formula_xlsx::WorkbookKind;
+
+    let tmp_dir = tempfile::tempdir().expect("temp dir");
+    let db_path = tmp_dir.path().join("autosave.sqlite");
+
+    let mut workbook = Workbook::new_empty(None);
+    workbook.add_sheet("Sheet1".to_string());
+    // Simulate a workbook that currently has macros loaded in memory (e.g. from `.xltm`) but the
+    // user saves as `.xltx`.
+    workbook.vba_project_bin = Some(b"fake-vba-project".to_vec());
+
+    workbook.print_settings = WorkbookPrintSettings {
+        sheets: vec![SheetPrintSettings {
+            sheet_name: "Sheet1".to_string(),
+            print_area: Some(vec![PrintCellRange {
+                start_row: 1,
+                end_row: 2,
+                start_col: 1,
+                end_col: 2,
+            }]),
+            print_titles: None,
+            page_setup: PageSetup {
+                orientation: Orientation::Landscape,
+                paper_size: PaperSize::A4,
+                margins: PageMargins {
+                    left: 0.5,
+                    right: 0.5,
+                    top: 1.0,
+                    bottom: 1.0,
+                    header: 0.25,
+                    footer: 0.25,
+                },
+                scaling: Scaling::FitTo { width: 1, height: 2 },
+            },
+            manual_page_breaks: ManualPageBreaks {
+                row_breaks_after: BTreeSet::from([1]),
+                col_breaks_after: BTreeSet::new(),
+            },
+        }],
+    };
+
+    let mut state = AppState::new();
+    state
+        .load_workbook_persistent(workbook, WorkbookPersistenceLocation::OnDisk(db_path.clone()))
+        .expect("load persistent workbook");
+
+    state
+        .autosave_manager()
+        .expect("autosave")
+        .flush()
+        .await
+        .expect("flush autosave");
+
+    let export_storage = state.persistent_storage().expect("storage handle");
+    let export_id = state.persistent_workbook_id().expect("workbook id");
+    let export_meta = state.get_workbook().expect("workbook").clone();
+
+    let out_path = tmp_dir.path().join("export.xltx");
+    let bytes =
+        write_xlsx_from_storage(&export_storage, export_id, &export_meta, &out_path).expect("export xltx");
+
+    let pkg = formula_xlsx::XlsxPackage::from_bytes(bytes.as_ref()).expect("parse package");
+    assert!(
+        pkg.part("xl/vbaProject.bin").is_none(),
+        "expected .xltx export to not contain xl/vbaProject.bin"
+    );
+
+    let ct = std::str::from_utf8(pkg.part("[Content_Types].xml").expect("content types")).unwrap();
+    assert!(
+        ct.contains(WorkbookKind::Template.workbook_content_type()),
+        "expected template workbook content type, got:\n{ct}"
+    );
+
+    let read_settings =
+        formula_xlsx::print::read_workbook_print_settings(bytes.as_ref()).expect("read print settings");
+    assert_eq!(
+        read_settings, export_meta.print_settings,
+        "expected print settings to round-trip through storage export"
+    );
+}
+
+#[tokio::test]
+async fn export_xltm_enforces_macro_enabled_template_content_type_and_preserves_vba() {
+    use formula_xlsx::WorkbookKind;
+
+    let tmp_dir = tempfile::tempdir().expect("temp dir");
+    let db_path = tmp_dir.path().join("autosave.sqlite");
+
+    let mut workbook = Workbook::new_empty(None);
+    workbook.add_sheet("Sheet1".to_string());
+    workbook.vba_project_bin = Some(b"fake-vba-project".to_vec());
+
+    let mut state = AppState::new();
+    state
+        .load_workbook_persistent(workbook, WorkbookPersistenceLocation::OnDisk(db_path.clone()))
+        .expect("load persistent workbook");
+
+    state
+        .autosave_manager()
+        .expect("autosave")
+        .flush()
+        .await
+        .expect("flush autosave");
+
+    let export_storage = state.persistent_storage().expect("storage handle");
+    let export_id = state.persistent_workbook_id().expect("workbook id");
+    let export_meta = state.get_workbook().expect("workbook").clone();
+
+    let out_path = tmp_dir.path().join("export.xltm");
+    let bytes =
+        write_xlsx_from_storage(&export_storage, export_id, &export_meta, &out_path).expect("export xltm");
+
+    let pkg = formula_xlsx::XlsxPackage::from_bytes(bytes.as_ref()).expect("parse package");
+    assert!(
+        pkg.part("xl/vbaProject.bin").is_some(),
+        "expected .xltm export to contain xl/vbaProject.bin"
+    );
+
+    let ct = std::str::from_utf8(pkg.part("[Content_Types].xml").expect("content types")).unwrap();
+    assert!(
+        ct.contains(WorkbookKind::MacroEnabledTemplate.workbook_content_type()),
+        "expected macro-enabled template workbook content type, got:\n{ct}"
+    );
+}
+
+#[tokio::test]
+async fn export_xlam_enforces_addin_content_type() {
+    use formula_xlsx::WorkbookKind;
+
+    let tmp_dir = tempfile::tempdir().expect("temp dir");
+    let db_path = tmp_dir.path().join("autosave.sqlite");
+
+    let mut workbook = Workbook::new_empty(None);
+    workbook.add_sheet("Sheet1".to_string());
+    workbook.vba_project_bin = Some(b"fake-vba-project".to_vec());
+
+    let mut state = AppState::new();
+    state
+        .load_workbook_persistent(workbook, WorkbookPersistenceLocation::OnDisk(db_path.clone()))
+        .expect("load persistent workbook");
+
+    state
+        .autosave_manager()
+        .expect("autosave")
+        .flush()
+        .await
+        .expect("flush autosave");
+
+    let export_storage = state.persistent_storage().expect("storage handle");
+    let export_id = state.persistent_workbook_id().expect("workbook id");
+    let export_meta = state.get_workbook().expect("workbook").clone();
+
+    let out_path = tmp_dir.path().join("export.xlam");
+    let bytes =
+        write_xlsx_from_storage(&export_storage, export_id, &export_meta, &out_path).expect("export xlam");
+
+    let pkg = formula_xlsx::XlsxPackage::from_bytes(bytes.as_ref()).expect("parse package");
+    assert!(
+        pkg.part("xl/vbaProject.bin").is_some(),
+        "expected .xlam export to contain xl/vbaProject.bin"
+    );
+
+    let ct = std::str::from_utf8(pkg.part("[Content_Types].xml").expect("content types")).unwrap();
+    assert!(
+        ct.contains(WorkbookKind::MacroEnabledAddIn.workbook_content_type()),
+        "expected add-in workbook content type, got:\n{ct}"
     );
 }
