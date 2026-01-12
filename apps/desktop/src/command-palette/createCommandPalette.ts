@@ -409,6 +409,11 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     );
   }
 
+  // Cache command row DOM nodes by id so we don't create new nodes for the same
+  // results across renders. Keep this bounded so long-running sessions can't
+  // accumulate thousands of detached DOM nodes in memory.
+  const rowCacheMax = Math.max(300, limits.maxResults * 5);
+
   const commandRowCache = new Map<
     string,
     {
@@ -551,6 +556,10 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
 
           cached = { li, label, description, right, shortcutPill };
           commandRowCache.set(cmd.commandId, cached);
+        } else {
+          // Mark as most-recently-used (Map iteration order is insertion order).
+          commandRowCache.delete(cmd.commandId);
+          commandRowCache.set(cmd.commandId, cached);
         }
 
         cached.li.setAttribute("aria-selected", globalIndex === selectedIndex ? "true" : "false");
@@ -583,6 +592,13 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
       const el = visibleItemEls[selectedIndex];
       if (el && typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "nearest" });
     });
+
+    // Evict least-recently-used rows to keep the cache bounded.
+    while (commandRowCache.size > rowCacheMax) {
+      const oldest = commandRowCache.keys().next().value as string | undefined;
+      if (!oldest) break;
+      commandRowCache.delete(oldest);
+    }
   }
 
   function startChunkedSearch(querySnapshot: string): void {
