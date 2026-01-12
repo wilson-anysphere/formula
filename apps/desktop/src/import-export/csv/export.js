@@ -78,13 +78,33 @@ export function exportDocumentRangeToCsv(doc, sheetId, range, options = {}) {
 
   /** @type {CellGrid} */
   const grid = [];
+  /** @type {Map<string, any>} */
+  const formatCache = new Map();
+  const hasStyleIdTuple = typeof doc.getCellFormatStyleIds === "function";
 
   for (let row = r.start.row; row <= r.end.row; row++) {
     /** @type {CellState[]} */
     const outRow = [];
     for (let col = r.start.col; col <= r.end.col; col++) {
       const cell = doc.getCell(sheetId, { row, col });
-      const format = doc.getCellFormat(sheetId, { row, col });
+      let format = null;
+      if (hasStyleIdTuple) {
+        const tuple = doc.getCellFormatStyleIds(sheetId, { row, col });
+        if (Array.isArray(tuple) && tuple.length >= 4) {
+          const key = tuple.join(",");
+          if (formatCache.has(key)) {
+            format = formatCache.get(key) ?? null;
+          } else {
+            const hasAnyFormat = tuple.some((id) => id !== 0);
+            format = hasAnyFormat ? doc.getCellFormat(sheetId, { row, col }) : null;
+            formatCache.set(key, format);
+          }
+        } else {
+          format = doc.getCellFormat(sheetId, { row, col });
+        }
+      } else {
+        format = doc.getCellFormat(sheetId, { row, col });
+      }
       // Export paths expect `cell.format` (not `styleId`) so downstream serialization can
       // respect number formats (including layered formats inherited from row/col/sheet defaults).
       outRow.push({ ...cell, format });
