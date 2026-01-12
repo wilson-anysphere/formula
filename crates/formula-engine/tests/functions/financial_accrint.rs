@@ -19,6 +19,12 @@ fn accrintm_matches_yearfrac_based_interest() {
         &sheet.eval("=ACCRINTM(DATE(2020,1,1),DATE(2020,7,1),0.1,1000,1)"),
         expected,
     );
+
+    // Zero rate is allowed and should return 0 (matches Excel behavior across other bond funcs).
+    assert_number(
+        &sheet.eval("=ACCRINTM(DATE(2020,1,1),DATE(2020,7,1),0,1000,0)"),
+        0.0,
+    );
 }
 
 #[test]
@@ -68,11 +74,39 @@ fn accrint_supports_basis_variants() {
         expected_basis1,
     );
 
+    // Basis 2: Actual/360 uses actual days in numerator with a fixed 360/f denominator.
+    let expected_basis2 = 50.0 * (123.0 / 180.0);
+    assert_number(
+        &sheet.eval(
+            "=ACCRINT(DATE(2020,2,15),DATE(2020,5,15),DATE(2020,9,15),0.1,1000,2,2,FALSE)",
+        ),
+        expected_basis2,
+    );
+
+    // Basis 3: Actual/365 uses actual days in numerator with a fixed 365/f denominator.
+    let expected_basis3 = 50.0 * (123.0 / (365.0 / 2.0));
+    assert_number(
+        &sheet.eval(
+            "=ACCRINT(DATE(2020,2,15),DATE(2020,5,15),DATE(2020,9,15),0.1,1000,2,3,FALSE)",
+        ),
+        expected_basis3,
+    );
+
     // Basis 4: European 30/360 differs from US 30/360 around month ends.
     let expected_basis4 = 30.0 * (28.0 / 90.0);
     assert_number(
         &sheet.eval("=ACCRINT(DATE(2020,1,30),DATE(2020,4,30),DATE(2020,2,28),0.12,1000,4,4)"),
         expected_basis4,
+    );
+}
+
+#[test]
+fn accrint_allows_zero_rate() {
+    let mut sheet = TestSheet::new();
+
+    assert_number(
+        &sheet.eval("=ACCRINT(DATE(2020,2,15),DATE(2020,5,15),DATE(2020,4,15),0,1000,2,0)"),
+        0.0,
     );
 }
 
