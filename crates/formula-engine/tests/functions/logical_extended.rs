@@ -109,6 +109,20 @@ fn switch_matches_text_case_insensitively_in_array_mode() {
 }
 
 #[test]
+fn switch_matches_unicode_text_case_insensitively() {
+    let mut sheet = TestSheet::new();
+    assert_number(
+        &sheet.eval("=SWITCH(\"Straße\", \"STRASSE\", 1, \"x\", 2)"),
+        1.0,
+    );
+
+    sheet.set_formula("A1", "=SWITCH({\"Straße\",\"x\"}, \"STRASSE\", 1, \"x\", 2)");
+    sheet.recalc();
+    assert_number(&sheet.get("A1"), 1.0);
+    assert_number(&sheet.get("B1"), 2.0);
+}
+
+#[test]
 fn choose_spills_and_truncates_index() {
     let mut sheet = TestSheet::new();
     sheet.set_formula("A1", "=CHOOSE({1,2}, 10, 20)");

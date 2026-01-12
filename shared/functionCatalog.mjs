@@ -1551,7 +1551,7 @@ export default {
       "min_args": 0,
       "max_args": 5,
       "volatility": "volatile",
-      "return_type": "any",
+      "return_type": "number",
       "arg_types": [
         "number",
         "number",
