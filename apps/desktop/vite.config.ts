@@ -107,7 +107,7 @@ export default defineConfig({
       ["src/panels/ai-audit/AIAuditPanel.vitest.ts", "jsdom"],
       ["src/command-palette/commandPaletteController.vitest.ts", "jsdom"],
     ],
-    include: ["src/**/*.vitest.ts"],
+    include: ["src/**/*.vitest.ts", "src-tauri/capabilities/**/*.vitest.ts"],
     exclude: ["tests/**", "node_modules/**"],
   },
 });
