@@ -57,6 +57,31 @@ fn info_recalc_and_unknown_keys() {
         Value::Text("Manual".to_string())
     );
     assert_eq!(sheet.eval("=INFO(\"no_such_key\")"), Value::Error(ErrorKind::Value));
+
+    // INFO("recalc") should reflect CalcSettings when explicitly configured.
+    use formula_engine::calc_settings::{CalcSettings, CalculationMode};
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    engine.set_calc_settings(CalcSettings::default());
+    engine
+        .set_cell_formula("Sheet1", "A1", "=INFO(\"recalc\")")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Text("Automatic".to_string()));
+
+    let mut engine = Engine::new();
+    let mut settings = CalcSettings::default();
+    settings.calculation_mode = CalculationMode::AutomaticNoTable;
+    engine.set_calc_settings(settings);
+    engine
+        .set_cell_formula("Sheet1", "A1", "=INFO(\"recalc\")")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Text("Automatic except for tables".to_string())
+    );
 }
 
 #[test]
