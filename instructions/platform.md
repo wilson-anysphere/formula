@@ -294,11 +294,14 @@ TypeScript ↔ Rust communication:
 // In this repo, commands must also be:
 //  1) registered in `apps/desktop/src-tauri/src/main.rs` (`generate_handler![...]`)
 //
-// Note: the capability system primarily gates built-in core/plugin APIs (event/window/dialog/etc) and disables IPC
-// entirely for non-matching windows. This repo does **not** rely on a per-command capability allowlist for app-defined
-// `#[tauri::command]` invocation (no `core:allow-invoke` / per-command allowlist in the current schema). Commands must be
-// hardened in Rust (trusted-origin + window-label checks, argument validation,
-// filesystem/network scope checks, etc).
+// Note: the capability system gates built-in core/plugin APIs (event/window/dialog/etc) and disables IPC entirely for
+// non-matching windows.
+//
+// App-defined `#[tauri::command]` invocation is allowlisted via the application permission `allow-invoke`
+// (see `apps/desktop/src-tauri/permissions/allow-invoke.json` and `apps/desktop/src-tauri/capabilities/main.json`).
+//
+// Even with allowlisting, commands must be hardened in Rust (trusted-origin + window-label checks,
+// argument validation, filesystem/network scope checks, etc).
 //
 #[tauri::command]
 fn check_for_updates(app: tauri::AppHandle, source: crate::updater::UpdateCheckSource) -> Result<(), String> {

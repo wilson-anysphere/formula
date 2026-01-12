@@ -11,11 +11,15 @@ describe("Tauri capabilities", () => {
     return capability.permissions as unknown[];
   }
 
-  it("does not rely on core:allow-invoke permissions (commands must validate in Rust)", () => {
+  it("uses the application allow-invoke permission (not core:allow-invoke)", () => {
     const permissions = readPermissions();
 
-    // Some Tauri toolchains expose a `core:allow-invoke` permission for per-command allowlisting,
-    // but the current config/schema used in this repo does not.
+    // Application commands (`#[tauri::command]`) are allowlisted via `src-tauri/permissions/allow-invoke.json`
+    // and granted through `capabilities/main.json` as an application permission entry.
+    expect(permissions).toContain("allow-invoke");
+
+    // Some Tauri toolchains expose a `core:allow-invoke` permission for per-command allowlisting.
+    // This repo intentionally does not use it.
     const hasAllowInvoke = permissions.some(
       (permission) =>
         permission === "core:allow-invoke" ||
