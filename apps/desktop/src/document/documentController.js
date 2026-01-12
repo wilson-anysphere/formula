@@ -2,7 +2,6 @@ import {
   cellStateEquals,
   cloneCellState,
   emptyCellState,
-  isCellStateEmpty,
   normalizeCellState,
 } from "./cell.js";
 import { normalizeRange, parseA1, parseRangeA1 } from "./coords.js";
