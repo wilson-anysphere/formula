@@ -49,6 +49,30 @@ describe("CanvasGridRenderer.applyAxisSizeOverrides", () => {
     expect(renderer.getRowHeight(2)).toBe(35);
   });
 
+  it("preserves unspecified overrides when resetUnspecified is false", () => {
+    const provider: CellProvider = { getCell: () => null };
+    const renderer = new CanvasGridRenderer({ provider, rowCount: 10, colCount: 10, defaultRowHeight: 10, defaultColWidth: 10 });
+
+    renderer.applyAxisSizeOverrides({ rows: new Map([[1, 25]]) }, { resetUnspecified: true });
+    expect(renderer.getRowHeight(1)).toBe(25);
+
+    renderer.applyAxisSizeOverrides({ rows: new Map([[2, 30]]) }, { resetUnspecified: false });
+    expect(renderer.getRowHeight(1)).toBe(25);
+    expect(renderer.getRowHeight(2)).toBe(30);
+  });
+
+  it("treats default-sized entries as a request to clear the override", () => {
+    const provider: CellProvider = { getCell: () => null };
+    const renderer = new CanvasGridRenderer({ provider, rowCount: 10, colCount: 10, defaultRowHeight: 10, defaultColWidth: 10 });
+
+    renderer.applyAxisSizeOverrides({ rows: new Map([[1, 25]]) }, { resetUnspecified: true });
+    expect(renderer.getRowHeight(1)).toBe(25);
+
+    // Set row 1 back to the default (10). This should clear the override.
+    renderer.applyAxisSizeOverrides({ rows: new Map([[1, 10]]) }, { resetUnspecified: false });
+    expect(renderer.getRowHeight(1)).toBe(10);
+  });
+
   it("does nothing when applying the same overrides again (no extra invalidation)", () => {
     const provider: CellProvider = { getCell: () => null };
     const renderer = new CanvasGridRenderer({ provider, rowCount: 100, colCount: 100 });
