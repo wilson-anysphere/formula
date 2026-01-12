@@ -289,6 +289,14 @@ const result = spawnSync(
       CARGO_BUILD_JOBS: process.env.CARGO_BUILD_JOBS ?? "4",
       MAKEFLAGS: process.env.MAKEFLAGS ?? "-j4",
       RUSTFLAGS: process.env.RUSTFLAGS ?? "-C codegen-units=4",
+      // Rayon defaults to spawning one thread per core. On multi-agent hosts this can be very
+      // large and can even fail to initialize ("Resource temporarily unavailable"). Default it
+      // to our safe cargo job count unless explicitly overridden by the caller.
+      RAYON_NUM_THREADS:
+        process.env.RAYON_NUM_THREADS ??
+        process.env.FORMULA_RAYON_NUM_THREADS ??
+        process.env.CARGO_BUILD_JOBS ??
+        "4",
     },
   }
 );
