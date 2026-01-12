@@ -61,6 +61,10 @@ pub fn even(number: f64) -> ExcelResult<f64> {
     if !number.is_finite() {
         return Err(ExcelError::Num);
     }
+    if number == 0.0 {
+        // Excel does not preserve a negative-zero sign bit; treat -0 as 0.
+        return Ok(0.0);
+    }
     let sign = if number.is_sign_negative() { -1.0 } else { 1.0 };
     let n = number.abs();
     let mut i = n.ceil();
@@ -75,6 +79,10 @@ pub fn even(number: f64) -> ExcelResult<f64> {
 pub fn odd(number: f64) -> ExcelResult<f64> {
     if !number.is_finite() {
         return Err(ExcelError::Num);
+    }
+    if number == 0.0 {
+        // Excel does not preserve a negative-zero sign bit; treat -0 as 0.
+        return Ok(1.0);
     }
     let sign = if number.is_sign_negative() { -1.0 } else { 1.0 };
     let n = number.abs();

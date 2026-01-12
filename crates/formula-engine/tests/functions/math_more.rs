@@ -88,6 +88,9 @@ fn integer_helpers_match_excel_semantics() {
     assert_number(&sheet.eval("=ODD(2)"), 3.0);
     assert_number(&sheet.eval("=ODD(-2)"), -3.0);
     assert_number(&sheet.eval("=ODD(0)"), 1.0);
+    // Excel doesn't preserve a negative-zero sign bit; treat `-0` as `0`.
+    assert_number(&sheet.eval("=ODD(-0)"), 1.0);
+    assert_number(&sheet.eval("=EVEN(-0)"), 0.0);
 
     assert_eq!(sheet.eval("=ISEVEN(2.5)"), Value::Bool(true));
     assert_eq!(sheet.eval("=ISODD(2.5)"), Value::Bool(false));
