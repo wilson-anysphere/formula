@@ -22,6 +22,7 @@ import { trimMessagesToBudget } from "../../../../../packages/ai-context/src/tri
 import { getDefaultReserveForOutputTokens, getModeContextWindowTokens } from "../contextBudget.js";
 import { WorkbookContextBuilder, type WorkbookSchemaProvider } from "../context/WorkbookContextBuilder.js";
 import { getDesktopLLMClient, getDesktopModel } from "../llm/desktopLLMClient.js";
+import type { SheetNameResolver } from "../../sheet/sheetNameResolver";
 
 export interface InlineEditLLMClient {
   chat: (request: any) => Promise<any>;
@@ -37,6 +38,10 @@ export interface InlineEditControllerOptions {
    */
   workbookId?: string;
   getSheetId: () => string;
+  /**
+   * Optional sheet display-name resolver used for user-facing labels (UI only).
+   */
+  sheetNameResolver?: SheetNameResolver | null;
   getSelectionRange: () => Range | null;
   onApplied?: () => void;
   onClosed?: () => void;
@@ -77,7 +82,8 @@ export class InlineEditController {
     if (!range) return;
 
     const sheetId = this.options.getSheetId();
-    const selectionLabel = `${sheetId}!${rangeToA1(range)}`;
+    const sheetLabel = this.options.sheetNameResolver?.getSheetNameById(sheetId) ?? sheetId;
+    const selectionLabel = `${sheetLabel}!${rangeToA1(range)}`;
 
     this.overlay.open(selectionLabel, {
       onCancel: () => {
