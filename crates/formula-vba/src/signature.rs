@@ -885,7 +885,12 @@ fn signature_component_stream_kind(component: &str) -> Option<VbaSignatureStream
 
 fn signature_path_stream_kind(path: &str) -> Option<VbaSignatureStreamKind> {
     let mut best: Option<(u8, VbaSignatureStreamKind)> = None;
-    for component in path.split('/') {
+    // Stream paths are normally OLE paths (components separated by `/`), but higher-level wrappers
+    // (e.g. `formula-xlsx`) may prefix the OLE path with an OPC part name using `:`, like:
+    // `xl/vbaProjectSignature.bin:\x05DigitalSignatureExt`.
+    //
+    // Be permissive and scan both `/` and `:`-delimited components for `DigitalSignature*`.
+    for component in path.split(|c| c == '/' || c == ':') {
         let Some(kind) = signature_component_stream_kind(component) else {
             continue;
         };

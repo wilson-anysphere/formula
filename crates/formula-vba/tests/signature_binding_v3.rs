@@ -4,8 +4,8 @@ use std::io::{Cursor, Write};
 
 use formula_vba::{
     compress_container, compute_vba_project_digest_v3, verify_vba_digital_signature,
-    verify_vba_digital_signature_bound, DigestAlg, VbaProjectBindingVerification,
-    VbaSignatureBinding, VbaSignatureVerification,
+    verify_vba_digital_signature_bound, verify_vba_signature_binding_with_stream_path, DigestAlg,
+    VbaProjectBindingVerification, VbaSignatureBinding, VbaSignatureVerification,
 };
 
 mod signature_test_utils;
@@ -182,6 +182,21 @@ fn digital_signature_ext_uses_v3_project_digest_for_binding() {
         sig.stream_path.contains("DigitalSignatureExt"),
         "expected DigitalSignatureExt stream, got {}",
         sig.stream_path
+    );
+
+    // `formula-xlsx` prefixes OLE stream paths with the source part name
+    // (`xl/vbaProjectSignature.bin:<ole-path>`). Ensure stream-kind detection remains robust when
+    // callers pass such a prefixed path to the binding helper.
+    let prefixed_path = format!("xl/vbaProjectSignature.bin:{}", sig.stream_path);
+    let binding = verify_vba_signature_binding_with_stream_path(
+        &signed,
+        &prefixed_path,
+        &signature_stream,
+    );
+    assert_eq!(
+        binding,
+        VbaSignatureBinding::Bound,
+        "expected binding to remain Bound for prefixed stream path {prefixed_path}"
     );
 
     let bound = verify_vba_digital_signature_bound(&signed)
