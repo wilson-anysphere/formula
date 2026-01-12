@@ -29,6 +29,7 @@ test("auth:introspect enforces roles and caches introspection results", async (t
 
   const internalAdminToken = "internal-admin-token";
   const hitsByKey = new Map<string, number>();
+  const calls: Array<{ token: string; docId: string; clientIp: unknown; userAgent: unknown }> = [];
 
   const introspectionServer = http.createServer(async (req, res) => {
     if (req.method !== "POST" || req.url !== "/internal/sync/introspect") {
@@ -69,6 +70,8 @@ test("auth:introspect enforces roles and caches introspection results", async (t
 
     const token = body?.token;
     const docId = body?.docId;
+    const clientIp = body?.clientIp;
+    const userAgent = body?.userAgent;
 
     if (typeof token !== "string" || token.length === 0 || typeof docId !== "string" || docId.length === 0) {
       res.writeHead(403, { "content-type": "application/json" });
@@ -78,6 +81,7 @@ test("auth:introspect enforces roles and caches introspection results", async (t
 
     const key = `${token}\n${docId}`;
     hitsByKey.set(key, (hitsByKey.get(key) ?? 0) + 1);
+    calls.push({ token, docId, clientIp, userAgent });
 
     const role =
       token === "editor-token"
@@ -234,7 +238,7 @@ test("auth:introspect enforces roles and caches introspection results", async (t
   assert.equal(hitsByKey.get(doc1ViewerKey), 1);
 
   // The same token should be usable across multiple docs; caching is scoped per
-  // (token, docId).
+  // (token, docId, clientIp).
   const docEditor3 = new Y.Doc();
   const providerEditor3 = new WebsocketProvider(server.getWsUrl(), otherDocName, docEditor3, {
     WebSocketPolyfill: WebSocket,
@@ -248,4 +252,9 @@ test("auth:introspect enforces roles and caches introspection results", async (t
   await waitForProviderSync(providerEditor3);
 
   assert.equal(hitsByKey.get(`${editorToken}\n${otherDocName}`), 1);
+
+  for (const call of calls) {
+    assert.ok(typeof call.clientIp === "string" && call.clientIp.length > 0);
+    assert.notEqual(call.clientIp, "unknown");
+  }
 });

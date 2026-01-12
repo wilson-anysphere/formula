@@ -99,7 +99,7 @@ test("sync-server rejects connections when introspection marks token inactive", 
   });
 
   const introspectionAdminToken = "introspection-admin-token";
-  const calls: Array<{ token: string; docId: string }> = [];
+  const calls: Array<{ token: string; docId: string; clientIp: unknown }> = [];
 
   const introspectionPort = await getAvailablePort();
   const introspectionServer = http.createServer((req, res) => {
@@ -123,7 +123,11 @@ test("sync-server rejects connections when introspection marks token inactive", 
         chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
       }
       const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8")) as any;
-      calls.push({ token: parsed.token as string, docId: parsed.docId as string });
+      calls.push({
+        token: parsed.token as string,
+        docId: parsed.docId as string,
+        clientIp: parsed.clientIp,
+      });
 
       let body: any;
       let statusCode = 200;
@@ -207,4 +211,9 @@ test("sync-server rejects connections when introspection marks token inactive", 
   assert.ok(calls.some((c) => c.token === revokedToken && c.docId === docName));
   assert.ok(calls.some((c) => c.token === invalidClaimsToken && c.docId === docName));
   assert.ok(calls.some((c) => c.token === notMemberToken && c.docId === docName));
+
+  for (const call of calls) {
+    assert.ok(typeof call.clientIp === "string" && call.clientIp.length > 0);
+    assert.notEqual(call.clientIp, "unknown");
+  }
 });
