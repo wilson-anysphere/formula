@@ -447,7 +447,7 @@ export class FormulaConflictMonitor {
           // Treat clears on value-cells as value edits (also matches binder-style ordering).
           kind = "value";
         } else if (formulaChange?.action === "delete") {
-          // In formula-only mode, value writes clear formulas via key deletion.
+          // Some legacy/edge writers may still clear formulas via key deletion.
           // Treat those clears as part of the value edit so we don't accidentally
           // record them as local formula edits.
           kind = "value";
