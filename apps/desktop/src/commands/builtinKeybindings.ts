@@ -56,6 +56,13 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     when: null,
   },
   {
+    // Some keyboards (and remote desktop setups) can emit both ctrlKey+metaKey for the
+    // command palette chord. Add an explicit binding so the palette remains reachable.
+    command: "workbench.showCommandPalette",
+    key: "ctrl+cmd+shift+p",
+    when: null,
+  },
+  {
     command: "edit.editCell",
     key: "f2",
     mac: "f2",
