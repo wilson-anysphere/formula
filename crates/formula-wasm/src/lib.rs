@@ -3072,6 +3072,46 @@ mod tests {
     }
 
     #[test]
+    fn set_cell_rich_overwrites_existing_scalar_input() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!(5.0)).unwrap();
+        let before = wb.get_cell_data(DEFAULT_SHEET, "A1").unwrap();
+        assert_eq!(before.input, json!(5.0));
+        assert_eq!(before.value, json!(5.0));
+
+        let entity = CellValue::Entity(formula_model::EntityValue::new("Acme"));
+        wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", entity.clone())
+            .unwrap();
+
+        let after = wb.get_cell_data(DEFAULT_SHEET, "A1").unwrap();
+        assert_eq!(after.input, JsonValue::Null);
+        assert_eq!(after.value, json!("Acme"));
+
+        let rich = wb.get_cell_rich_data(DEFAULT_SHEET, "A1").unwrap();
+        assert_eq!(rich.input, entity);
+        assert_eq!(rich.value, rich.input);
+    }
+
+    #[test]
+    fn set_cell_overwrites_existing_rich_input() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+
+        let entity = CellValue::Entity(formula_model::EntityValue::new("Acme"));
+        wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", entity).unwrap();
+
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!(5.0)).unwrap();
+
+        let cell = wb.get_cell_data(DEFAULT_SHEET, "A1").unwrap();
+        assert_eq!(cell.input, json!(5.0));
+        assert_eq!(cell.value, json!(5.0));
+
+        let rich = wb.get_cell_rich_data(DEFAULT_SHEET, "A1").unwrap();
+        assert_eq!(rich.input, CellValue::Number(5.0));
+        assert_eq!(rich.value, CellValue::Number(5.0));
+    }
+
+    #[test]
     fn cell_value_json_roundtrips_entity_and_record() {
         let mut record_fields = BTreeMap::new();
         record_fields.insert("Name".to_string(), CellValue::String("Alice".to_string()));
