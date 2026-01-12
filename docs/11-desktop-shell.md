@@ -360,13 +360,19 @@ Events emitted by the Rust host (see `main.rs`, `tray.rs`, `updater.rs`):
 - Window lifecycle:
   - `close-prep` (payload: token `string`)
   - `close-requested` (payload: `{ token: string, updates: CellUpdate[] }`)
+  - `oauth-redirect` (payload: `string` URL, e.g. `formula://oauth/callback?...`)
   - `open-file` (payload: `string[]` paths)
   - `file-dropped` (payload: `string[]` paths)
+- Menu bar:
+  - `menu-open`, `menu-new`, `menu-save`, `menu-save-as`, `menu-close-window`, `menu-quit`
+  - `menu-undo`, `menu-redo`, `menu-cut`, `menu-copy`, `menu-paste`, `menu-select-all`
+  - `menu-about`, `menu-check-updates`
 - Tray:
   - `tray-new`, `tray-open`, `tray-quit`
 - Shortcuts:
   - `shortcut-quick-open`, `shortcut-command-palette`
 - Updates:
+  - `update-check-already-running` (payload: `{ source }`)
   - `update-check-started` (payload: `{ source }`)
   - `update-not-available` (payload: `{ source }`)
   - `update-check-error` (payload: `{ source, message }`)
@@ -381,6 +387,7 @@ Related frontend → backend events used as acknowledgements during close:
 - `close-prep-done` (token)
 - `close-handled` (token)
 - `open-file-ready` (signals that the frontend’s `open-file` listener is installed; causes the Rust host to flush queued open requests)
+- `updater-ui-ready` (signals the updater UI listeners are installed; triggers the startup update check)
 
 ---
 
@@ -442,12 +449,17 @@ Capabilities are assigned to windows by **label**.
 - `event:allow-listen` (scoped to a small allowlist of event names)
   - Allows the frontend to install listeners for host-emitted events used by the desktop shell:
     - close flow: `close-prep`, `close-requested`
-    - open flows: `file-dropped`
+    - open flows: `open-file`, `file-dropped`
+    - deep links / OAuth: `oauth-redirect`
+    - native menu bar: `menu-*` events (open/new/save/edit actions)
     - tray + shortcuts: `tray-open`, `tray-new`, `tray-quit`, `shortcut-quick-open`, `shortcut-command-palette`
     - updater: `update-check-already-running`, `update-check-started`, `update-not-available`, `update-check-error`, `update-available`
+    - startup timing instrumentation: `startup:*` events
 - `event:allow-emit` (scoped to a small allowlist of event names)
   - Allows the frontend to emit acknowledgement events during close handling:
     - `close-prep-done`, `close-handled`
+  - Allows the frontend to signal that its open-file listener is installed:
+    - `open-file-ready`
   - Allows the frontend to signal that its updater UI event listeners are installed:
     - `updater-ui-ready`
 - `dialog:allow-open`, `dialog:allow-save`
