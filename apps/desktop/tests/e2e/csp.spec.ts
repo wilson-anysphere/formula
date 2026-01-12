@@ -89,14 +89,16 @@ test.describe("Content Security Policy (Tauri parity)", () => {
     expect(cspHeader, "E2E server should emit Content-Security-Policy header").toBeTruthy();
 
     const connectSrc = getCspDirectiveSources(String(cspHeader), "connect-src");
-    expect(connectSrc, "CSP `connect-src` should allow remote APIs + collab endpoints").toContain("'self'");
-    expect(connectSrc).toContain("https:");
-    expect(connectSrc).toContain("wss:");
+    // In the desktop/Tauri security model, direct network access from the renderer
+    // is intentionally restricted. Network requests should flow through the Rust
+    // proxy layer (e.g. via `network_fetch`), not via `fetch()` in the webview.
+    expect(connectSrc, "CSP `connect-src` should restrict renderer network access").toContain("'self'");
     // Allow fetching the in-memory `blob:`/`data:` URLs used by the extension system.
     expect(connectSrc).toContain("blob:");
     expect(connectSrc).toContain("data:");
-    // Collaboration uses y-websocket (ws:// in local dev, wss:// in hosted environments).
-    expect(connectSrc).toContain("ws:");
+    expect(connectSrc).not.toContain("https:");
+    expect(connectSrc).not.toContain("wss:");
+    expect(connectSrc).not.toContain("ws:");
 
     // The CSP smoke test doesn't need the full UI to render; it only needs the
     // document to load so we can validate WASM + Worker execution under the
