@@ -397,6 +397,34 @@ fn open_workbook_model_sniffs_csv_with_wrong_extension_and_sanitizes_sheet_name(
 }
 
 #[test]
+fn open_workbook_model_sniffs_single_line_csv_with_wrong_extension() {
+    // Single-row exports (or temp files) may omit a trailing newline. We should still classify the
+    // content as CSV via sniffing even when the extension is wrong.
+    let csv_bytes = b"a,b";
+
+    let mut tmp = tempfile::Builder::new()
+        .prefix("single_line_wrong_ext_")
+        .suffix(".xlsx")
+        .tempfile()
+        .expect("tempfile");
+    tmp.write_all(csv_bytes).expect("write tempfile");
+
+    let workbook = formula_io::open_workbook_model(tmp.path()).expect("open workbook model");
+    assert_eq!(workbook.sheets.len(), 1);
+
+    let sheet_name = workbook.sheets[0].name.clone();
+    let sheet = workbook
+        .sheet_by_name(&sheet_name)
+        .expect("sheet missing");
+    let table = sheet.columnar_table().expect("expected columnar table");
+
+    assert_eq!(table.column_count(), 2);
+    assert_eq!(table.row_count(), 0);
+    assert_eq!(table.schema()[0].name, "a");
+    assert_eq!(table.schema()[1].name, "b");
+}
+
+#[test]
 fn open_workbook_model_sniffs_extensionless_csv() {
     let csv_bytes = b"col1,col2\n1,hello\n2,world\n";
 

@@ -196,11 +196,6 @@ fn looks_like_text_csv_prefix(prefix: &[u8]) -> bool {
 }
 
 fn looks_like_text_csv_str(decoded: &str) -> bool {
-    // Require at least one newline so we don't classify single-line text/binary fragments as CSV.
-    if !decoded.contains('\n') && !decoded.contains('\r') {
-        return false;
-    }
-
     // Require a plausible delimiter.
     if !(decoded.contains(',')
         || decoded.contains(';')
@@ -208,6 +203,34 @@ fn looks_like_text_csv_str(decoded: &str) -> bool {
         || decoded.contains('|'))
     {
         return false;
+    }
+
+    // Prefer to see at least one record terminator, but allow single-line delimited text. This is
+    // useful for extension-less temp files or single-row exports where the trailing newline is
+    // missing.
+    let has_newline = decoded.contains('\n') || decoded.contains('\r');
+    if !has_newline {
+        // Be conservative for single-line inputs to avoid misclassifying ordinary prose:
+        // - allow single occurrences of rarer delimiters (`;`, tab, `|`)
+        // - for comma, allow one or more commas but reject the common prose pattern ", " (so
+        //   "Hello, world" is not treated as CSV).
+        let mut commas = 0usize;
+        let mut non_comma = 0usize;
+        for b in decoded.as_bytes() {
+            match *b {
+                b',' => commas += 1,
+                b';' | b'\t' | b'|' => non_comma += 1,
+                _ => {}
+            }
+        }
+        if non_comma == 0 {
+            if commas == 0 {
+                return false;
+            }
+            if commas == 1 && decoded.contains(", ") {
+                return false;
+            }
+        }
     }
 
     // Conservative: reject inputs with a high proportion of control characters (excluding common

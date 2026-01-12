@@ -105,6 +105,26 @@ fn detect_workbook_format_sniffs_extensionless_csv() {
 }
 
 #[test]
+fn detect_workbook_format_sniffs_single_line_csv_with_wrong_extension() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("data.xlsx");
+    std::fs::write(&path, "a,b").expect("write csv");
+
+    let fmt = detect_workbook_format(&path).expect("detect format");
+    assert_eq!(fmt, WorkbookFormat::Csv);
+}
+
+#[test]
+fn detect_workbook_format_does_not_misclassify_single_line_prose_as_csv() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("note.txt");
+    std::fs::write(&path, "Hello, world").expect("write text");
+
+    let fmt = detect_workbook_format(&path).expect("detect format");
+    assert_eq!(fmt, WorkbookFormat::Unknown);
+}
+
+#[test]
 fn detect_workbook_format_sniffs_utf16le_tab_delimited_text() {
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("data.xlsx");

@@ -1,3 +1,4 @@
+use formula_columnar::ColumnType as ColumnarType;
 use formula_model::import::{
     import_csv_to_columnar_table, import_csv_to_worksheet, CsvDateOrder, CsvOptions,
     CsvTextEncoding, CsvTimestampTzPolicy,
@@ -85,6 +86,27 @@ fn csv_import_handles_utf8_inside_quoted_fields() {
         sheet.value(CellRef::new(0, 1)),
         CellValue::String("こんにちは,世界".to_string())
     );
+}
+
+#[test]
+fn csv_import_header_only_defaults_columns_to_string() {
+    let csv = "a,b,c";
+    let table = import_csv_to_columnar_table(Cursor::new(csv.as_bytes()), CsvOptions::default())
+        .expect("import header-only csv");
+    assert_eq!(table.row_count(), 0);
+    assert_eq!(table.column_count(), 3);
+    assert_eq!(table.schema()[0].column_type, ColumnarType::String);
+    assert_eq!(table.schema()[1].column_type, ColumnarType::String);
+    assert_eq!(table.schema()[2].column_type, ColumnarType::String);
+}
+
+#[test]
+fn csv_import_infers_string_type_for_all_empty_column() {
+    let csv = "a,b\n1,\n2,\n";
+    let table = import_csv_to_columnar_table(Cursor::new(csv.as_bytes()), CsvOptions::default())
+        .expect("import csv");
+    assert_eq!(table.schema()[0].column_type, ColumnarType::Number);
+    assert_eq!(table.schema()[1].column_type, ColumnarType::String);
 }
 
 #[test]

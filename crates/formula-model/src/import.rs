@@ -1148,8 +1148,13 @@ fn infer_column_types(
     column_count: usize,
     options: &CsvOptions,
 ) -> Vec<ColumnarType> {
+    if sample_rows.is_empty() {
+        return vec![ColumnarType::String; column_count];
+    }
+
     let mut out = Vec::with_capacity(column_count);
     for col in 0..column_count {
+        let mut saw_value = false;
         let mut is_bool = true;
         let mut saw_text_bool = false;
         let mut is_currency = true;
@@ -1162,6 +1167,7 @@ fn infer_column_types(
             if v.is_empty() {
                 continue;
             }
+            saw_value = true;
             match parse_bool(v) {
                 Some(_) => {
                     let lowered = v.trim().to_ascii_lowercase();
@@ -1185,7 +1191,9 @@ fn infer_column_types(
             }
         }
 
-        let ty = if is_bool && saw_text_bool {
+        let ty = if !saw_value {
+            ColumnarType::String
+        } else if is_bool && saw_text_bool {
             ColumnarType::Boolean
         } else if is_currency {
             ColumnarType::Currency { scale: 2 }
