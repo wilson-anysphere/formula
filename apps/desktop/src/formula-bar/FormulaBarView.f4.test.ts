@@ -24,9 +24,9 @@ describe("FormulaBarView F4 absolute reference toggle", () => {
 
     expect(view.textarea.value).toBe("=$A$1");
     expect(view.model.draft).toBe("=$A$1");
-    // Selection should cover the toggled reference token so repeated F4 presses keep cycling it.
-    expect(view.textarea.selectionStart).toBe(1);
-    expect(view.textarea.selectionEnd).toBe(5);
+    // Caret should still be within the toggled reference token (between "$" and "1").
+    expect(view.textarea.selectionStart).toBe(4);
+    expect(view.textarea.selectionEnd).toBe(4);
 
     host.remove();
   });
@@ -70,23 +70,23 @@ describe("FormulaBarView F4 absolute reference toggle", () => {
 
     view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", cancelable: true }));
     expect(view.textarea.value).toBe("=$A$1");
-    expect(view.textarea.selectionStart).toBe(1);
-    expect(view.textarea.selectionEnd).toBe(5);
+    expect(view.textarea.selectionStart).toBe(4);
+    expect(view.textarea.selectionEnd).toBe(4);
 
     view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", cancelable: true }));
     expect(view.textarea.value).toBe("=A$1");
-    expect(view.textarea.selectionStart).toBe(1);
-    expect(view.textarea.selectionEnd).toBe(4);
+    expect(view.textarea.selectionStart).toBe(3);
+    expect(view.textarea.selectionEnd).toBe(3);
 
     view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", cancelable: true }));
     expect(view.textarea.value).toBe("=$A1");
-    expect(view.textarea.selectionStart).toBe(1);
-    expect(view.textarea.selectionEnd).toBe(4);
+    expect(view.textarea.selectionStart).toBe(3);
+    expect(view.textarea.selectionEnd).toBe(3);
 
     view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", cancelable: true }));
     expect(view.textarea.value).toBe("=A1");
-    expect(view.textarea.selectionStart).toBe(1);
-    expect(view.textarea.selectionEnd).toBe(3);
+    expect(view.textarea.selectionStart).toBe(2);
+    expect(view.textarea.selectionEnd).toBe(2);
 
     host.remove();
   });

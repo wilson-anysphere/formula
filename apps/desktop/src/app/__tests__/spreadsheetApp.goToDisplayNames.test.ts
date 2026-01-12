@@ -116,6 +116,9 @@ describe("SpreadsheetApp goTo", () => {
     };
 
     const sheetNames = new Map<string, string>();
+    // SpreadsheetApp seeds a demo chart on the default sheet during initialization.
+    // Provide a baseline id->name mapping so chart range resolution can succeed.
+    sheetNames.set("Sheet1", "Sheet1");
     const app = new SpreadsheetApp(root, status, {
       sheetNameResolver: {
         getSheetNameById: (sheetId) => sheetNames.get(sheetId) ?? null,

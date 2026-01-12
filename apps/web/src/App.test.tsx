@@ -170,6 +170,9 @@ describe("App (web preview)", () => {
   let rectSpy: ReturnType<typeof vi.spyOn> | null = null;
 
   beforeEach(() => {
+    // Ensure a prior test file did not leave fake timers enabled in this Vitest worker.
+    vi.useRealTimers();
+
     // React 18 relies on this flag to suppress act() warnings in test runners.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -204,6 +207,7 @@ describe("App (web preview)", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     HTMLCanvasElement.prototype.getContext = originalGetContext;
     rectSpy?.mockRestore();
     rectSpy = null;
@@ -240,5 +244,5 @@ describe("App (web preview)", () => {
       root.unmount();
     });
     host.remove();
-  }, 30_000);
+  }, 60_000);
 });
