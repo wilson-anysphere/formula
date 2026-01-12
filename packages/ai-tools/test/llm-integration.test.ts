@@ -73,6 +73,38 @@ describe("llm integration helpers", () => {
     expect(workbook.getCell(parseA1Cell("Sheet1!A1")).value).toBe(42);
   });
 
+  it("SpreadsheetLLMToolExecutor resolves display sheet names when sheet_name_resolver is provided", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet2"]);
+    const sheetNameResolver = {
+      getSheetIdByName(name: string) {
+        return name.toLowerCase() === "budget" ? "Sheet2" : null;
+      },
+      getSheetNameById(id: string) {
+        return id === "Sheet2" ? "Budget" : null;
+      }
+    };
+
+    const executor = new SpreadsheetLLMToolExecutor(workbook, {
+      default_sheet: "Sheet2",
+      sheet_name_resolver: sheetNameResolver
+    });
+
+    const result = await executor.execute({
+      id: "call-1",
+      name: "write_cell",
+      arguments: { cell: "Budget!A1", value: 42 }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("write_cell");
+    if (!result.ok || result.tool !== "write_cell") throw new Error("Unexpected tool result");
+    expect(result.data?.cell).toBe("Budget!A1");
+
+    expect(workbook.getCell(parseA1Cell("Sheet2!A1")).value).toBe(42);
+    // InMemoryWorkbook would create missing sheets; ensure we did not create "Budget".
+    expect(workbook.listSheets()).toEqual(["Sheet2"]);
+  });
+
   it("does not expose fetch_external_data when host external fetch is disabled", () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const executor = new SpreadsheetLLMToolExecutor(workbook);
