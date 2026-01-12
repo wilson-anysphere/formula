@@ -60,46 +60,46 @@ export function registerBuiltinCommands(params: {
 
   commandRegistry.registerBuiltinCommand(
     "workbench.showCommandPalette",
-    "Show Command Palette",
+    t("command.workbench.showCommandPalette"),
     () => {
       // Intentionally a no-op: the desktop shell owns opening the palette, but we still
       // register the id so keybinding and menu systems can reference it.
     },
     {
-      category: "Navigation",
+      category: t("commandCategory.navigation"),
       icon: null,
-      description: "Show the command palette",
+      description: t("commandDescription.workbench.showCommandPalette"),
       keywords: ["command palette", "commands"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "workbook.previousSheet",
-    "Previous Sheet",
+    t("command.workbook.previousSheet"),
     () => activateRelativeSheet(-1),
     {
-      category: "Navigation",
+      category: t("commandCategory.navigation"),
       icon: null,
-      description: "Activate the previous visible sheet (wrap around)",
+      description: t("commandDescription.workbook.previousSheet"),
       keywords: ["sheet", "previous", "navigation", "pageup", "pgup"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "workbook.nextSheet",
-    "Next Sheet",
+    t("command.workbook.nextSheet"),
     () => activateRelativeSheet(1),
     {
-      category: "Navigation",
+      category: t("commandCategory.navigation"),
       icon: null,
-      description: "Activate the next visible sheet (wrap around)",
+      description: t("commandDescription.workbook.nextSheet"),
       keywords: ["sheet", "next", "navigation", "pagedown", "pgdn"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "view.insertPivotTable",
-    t("commandPalette.command.insertPivotTable"),
+    t("command.view.insertPivotTable"),
     () => {
       layoutController.openPanel(PanelIds.PIVOT_BUILDER);
       // If the panel is already open, we still want to refresh its source range from
@@ -107,40 +107,40 @@ export function registerBuiltinCommands(params: {
       window.dispatchEvent(new CustomEvent("pivot-builder:use-selection"));
     },
     {
-      category: "Data",
+      category: t("commandCategory.data"),
       icon: null,
-      description: "Open the Pivot Builder panel for the current selection",
+      description: t("commandDescription.view.insertPivotTable"),
       keywords: ["pivot", "pivot table", "pivotbuilder"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "view.togglePanel.aiChat",
-    "Toggle AI Chat",
+    t("command.view.togglePanel.aiChat"),
     () => toggleDockPanel(PanelIds.AI_CHAT),
     {
-      category: "AI",
+      category: t("commandCategory.ai"),
       icon: null,
-      description: "Toggle the AI Chat panel",
+      description: t("commandDescription.view.togglePanel.aiChat"),
       keywords: ["ai", "chat", "assistant", "panel"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "view.togglePanel.aiAudit",
-    "Toggle AI Audit",
+    t("command.view.togglePanel.aiAudit"),
     () => toggleDockPanel(PanelIds.AI_AUDIT),
     {
-      category: "AI",
+      category: t("commandCategory.ai"),
       icon: null,
-      description: "Toggle the AI Audit panel",
+      description: t("commandDescription.view.togglePanel.aiAudit"),
       keywords: ["ai", "audit", "log", "panel"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "view.togglePanel.extensions",
-    "Toggle Extensions",
+    t("command.view.togglePanel.extensions"),
     () => {
       if (ensureExtensionsLoaded) {
         void ensureExtensionsLoaded()
@@ -152,183 +152,183 @@ export function registerBuiltinCommands(params: {
       toggleDockPanel(PanelIds.EXTENSIONS);
     },
     {
-      category: "View",
+      category: t("commandCategory.view"),
       icon: null,
-      description: "Toggle the Extensions panel",
+      description: t("commandDescription.view.togglePanel.extensions"),
       keywords: ["extensions", "plugins", "panel"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "view.togglePanel.macros",
-    "Toggle Macros",
+    t("command.view.togglePanel.macros"),
     () => toggleDockPanel(PanelIds.MACROS),
     {
-      category: "View",
+      category: t("commandCategory.view"),
       icon: null,
-      description: "Toggle the Macros panel",
+      description: t("commandDescription.view.togglePanel.macros"),
       keywords: ["macros", "panel"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "view.togglePanel.dataQueries",
-    "Toggle Data Queries",
+    t("command.view.togglePanel.dataQueries"),
     () => toggleDockPanel(PanelIds.DATA_QUERIES),
     {
-      category: "View",
+      category: t("commandCategory.view"),
       icon: null,
-      description: "Toggle the Data / Queries panel",
+      description: t("commandDescription.view.togglePanel.dataQueries"),
       keywords: ["data", "queries", "power query", "panel"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "view.togglePanel.scriptEditor",
-    "Toggle Script Editor",
+    t("command.view.togglePanel.scriptEditor"),
     () => toggleDockPanel(PanelIds.SCRIPT_EDITOR),
     {
-      category: "View",
+      category: t("commandCategory.view"),
       icon: null,
-      description: "Toggle the Script Editor panel",
+      description: t("commandDescription.view.togglePanel.scriptEditor"),
       keywords: ["script", "editor", "panel"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "view.togglePanel.python",
-    "Toggle Python",
+    t("command.view.togglePanel.python"),
     () => toggleDockPanel(PanelIds.PYTHON),
     {
-      category: "View",
+      category: t("commandCategory.view"),
       icon: null,
-      description: "Toggle the Python panel",
+      description: t("commandDescription.view.togglePanel.python"),
       keywords: ["python", "panel"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "comments.togglePanel",
-    "Toggle Comments Panel",
+    t("command.comments.togglePanel"),
     () => app.toggleCommentsPanel(),
     {
-      category: "View",
+      category: t("commandCategory.comments"),
       icon: null,
-      description: "Toggle the Comments panel",
+      description: t("commandDescription.comments.togglePanel"),
       keywords: ["comments", "notes", "panel"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "comments.addComment",
-    "Add Comment",
+    t("command.comments.addComment"),
     () => {
       app.openCommentsPanel();
       app.focusNewCommentInput();
     },
     {
-      category: "Comments",
+      category: t("commandCategory.comments"),
       icon: null,
-      description: "Open the comments panel and focus the new comment input",
+      description: t("commandDescription.comments.addComment"),
       keywords: ["comment", "add comment", "new comment"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "view.freezePanes",
-    "Freeze Panes",
+    t("command.view.freezePanes"),
     () => {
       app.freezePanes();
       app.focus();
     },
     {
-      category: "View",
+      category: t("commandCategory.view"),
       icon: null,
-      description: "Freeze rows and columns based on the current selection",
+      description: t("commandDescription.view.freezePanes"),
       keywords: ["freeze", "panes"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "view.freezeTopRow",
-    "Freeze Top Row",
+    t("command.view.freezeTopRow"),
     () => {
       app.freezeTopRow();
       app.focus();
     },
     {
-      category: "View",
+      category: t("commandCategory.view"),
       icon: null,
-      description: "Freeze row 1",
+      description: t("commandDescription.view.freezeTopRow"),
       keywords: ["freeze", "top row"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "view.freezeFirstColumn",
-    "Freeze First Column",
+    t("command.view.freezeFirstColumn"),
     () => {
       app.freezeFirstColumn();
       app.focus();
     },
     {
-      category: "View",
+      category: t("commandCategory.view"),
       icon: null,
-      description: "Freeze column A",
+      description: t("commandDescription.view.freezeFirstColumn"),
       keywords: ["freeze", "first column"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "view.unfreezePanes",
-    "Unfreeze Panes",
+    t("command.view.unfreezePanes"),
     () => {
       app.unfreezePanes();
       app.focus();
     },
     {
-      category: "View",
+      category: t("commandCategory.view"),
       icon: null,
-      description: "Unfreeze all panes",
+      description: t("commandDescription.view.unfreezePanes"),
       keywords: ["unfreeze", "panes"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "audit.tracePrecedents",
-    "Trace Precedents",
+    t("command.audit.tracePrecedents"),
     () => {
       app.clearAuditing();
       app.toggleAuditingPrecedents();
       app.focus();
     },
     {
-      category: "View",
+      category: t("commandCategory.view"),
       icon: null,
-      description: "Show precedent arrows for the active cell",
+      description: t("commandDescription.audit.tracePrecedents"),
       keywords: ["audit", "precedents", "trace"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "audit.traceDependents",
-    "Trace Dependents",
+    t("command.audit.traceDependents"),
     () => {
       app.clearAuditing();
       app.toggleAuditingDependents();
       app.focus();
     },
     {
-      category: "View",
+      category: t("commandCategory.view"),
       icon: null,
-      description: "Show dependent arrows for the active cell",
+      description: t("commandDescription.audit.traceDependents"),
       keywords: ["audit", "dependents", "trace"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "audit.traceBoth",
-    "Trace Precedents + Dependents",
+    t("command.audit.traceBoth"),
     () => {
       app.clearAuditing();
       app.toggleAuditingPrecedents();
@@ -336,105 +336,105 @@ export function registerBuiltinCommands(params: {
       app.focus();
     },
     {
-      category: "View",
+      category: t("commandCategory.view"),
       icon: null,
-      description: "Show both precedent and dependent arrows for the active cell",
+      description: t("commandDescription.audit.traceBoth"),
       keywords: ["audit", "precedents", "dependents", "trace"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "audit.clearAuditing",
-    "Clear Auditing",
+    t("command.audit.clearAuditing"),
     () => {
       app.clearAuditing();
       app.focus();
     },
     {
-      category: "View",
+      category: t("commandCategory.view"),
       icon: null,
-      description: "Clear all auditing arrows",
+      description: t("commandDescription.audit.clearAuditing"),
       keywords: ["audit", "clear"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "audit.toggleTransitive",
-    "Toggle Transitive Auditing",
+    t("command.audit.toggleTransitive"),
     () => {
       app.toggleAuditingTransitive();
       app.focus();
     },
     {
-      category: "View",
+      category: t("commandCategory.view"),
       icon: null,
-      description: "Toggle whether auditing follows references transitively",
+      description: t("commandDescription.audit.toggleTransitive"),
       keywords: ["audit", "transitive", "toggle"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "edit.undo",
-    "Undo",
+    t("command.edit.undo"),
     () => {
       app.undo();
       app.focus();
     },
     {
-      category: "Editing",
+      category: t("commandCategory.editing"),
       icon: null,
-      description: "Undo the last action",
+      description: t("commandDescription.edit.undo"),
       keywords: ["undo"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "edit.redo",
-    "Redo",
+    t("command.edit.redo"),
     () => {
       app.redo();
       app.focus();
     },
     {
-      category: "Editing",
+      category: t("commandCategory.editing"),
       icon: null,
-      description: "Redo the last undone action",
+      description: t("commandDescription.edit.redo"),
       keywords: ["redo"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "clipboard.copy",
-    t("clipboard.copy"),
+    t("command.clipboard.copy"),
     () => app.copyToClipboard(),
     {
-      category: "Editing",
+      category: t("commandCategory.editing"),
       icon: null,
-      description: "Copy the current selection",
+      description: t("commandDescription.clipboard.copy"),
       keywords: ["copy", "clipboard"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "clipboard.cut",
-    t("clipboard.cut"),
+    t("command.clipboard.cut"),
     () => app.cutToClipboard(),
     {
-      category: "Editing",
+      category: t("commandCategory.editing"),
       icon: null,
-      description: "Cut the current selection",
+      description: t("commandDescription.clipboard.cut"),
       keywords: ["cut", "clipboard"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "clipboard.paste",
-    t("clipboard.paste"),
+    t("command.clipboard.paste"),
     () => app.pasteFromClipboard(),
     {
-      category: "Editing",
+      category: t("commandCategory.editing"),
       icon: null,
-      description: "Paste from the clipboard into the current selection",
+      description: t("commandDescription.clipboard.paste"),
       keywords: ["paste", "clipboard"],
     },
   );
@@ -444,9 +444,9 @@ export function registerBuiltinCommands(params: {
     t("clipboard.pasteSpecial.paste"),
     () => app.pasteFromClipboard(),
     {
-      category: "Editing",
+      category: t("commandCategory.editing"),
       icon: null,
-      description: "Paste everything (same as Paste)",
+      description: t("commandDescription.clipboard.pasteSpecial.all"),
       keywords: ["paste", "clipboard", "all"],
     },
   );
@@ -456,9 +456,9 @@ export function registerBuiltinCommands(params: {
     t("clipboard.pasteSpecial.pasteValues"),
     () => app.clipboardPasteSpecial("values"),
     {
-      category: "Editing",
+      category: t("commandCategory.editing"),
       icon: null,
-      description: "Paste values only",
+      description: t("commandDescription.clipboard.pasteSpecial.values"),
       keywords: ["paste", "clipboard", "values"],
     },
   );
@@ -468,9 +468,9 @@ export function registerBuiltinCommands(params: {
     t("clipboard.pasteSpecial.pasteFormulas"),
     () => app.clipboardPasteSpecial("formulas"),
     {
-      category: "Editing",
+      category: t("commandCategory.editing"),
       icon: null,
-      description: "Paste formulas only",
+      description: t("commandDescription.clipboard.pasteSpecial.formulas"),
       keywords: ["paste", "clipboard", "formulas"],
     },
   );
@@ -480,9 +480,9 @@ export function registerBuiltinCommands(params: {
     t("clipboard.pasteSpecial.pasteFormats"),
     () => app.clipboardPasteSpecial("formats"),
     {
-      category: "Editing",
+      category: t("commandCategory.editing"),
       icon: null,
-      description: "Paste formats only",
+      description: t("commandDescription.clipboard.pasteSpecial.formats"),
       keywords: ["paste", "clipboard", "formats"],
     },
   );
@@ -501,93 +501,93 @@ export function registerBuiltinCommands(params: {
       await commandRegistry.executeCommand(`clipboard.pasteSpecial.${picked === "all" ? "all" : picked}`);
     },
     {
-      category: "Editing",
+      category: t("commandCategory.editing"),
       icon: null,
-      description: "Paste with a specific mode (values, formulas, formats, etc.)",
+      description: t("commandDescription.clipboard.pasteSpecial"),
       keywords: ["paste", "paste special", "clipboard"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "edit.editCell",
-    "Edit Cell",
+    t("command.edit.editCell"),
     () => app.openCellEditorAtActiveCell(),
     {
-      category: "Edit",
+      category: t("commandCategory.editing"),
       icon: null,
-      description: "Edit the active cell (Excel: F2)",
+      description: t("commandDescription.edit.editCell"),
       keywords: ["edit", "cell", "f2"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "edit.clearContents",
-    "Clear Contents",
+    t("command.edit.clearContents"),
     () => app.clearContents(),
     {
-      category: "Editing",
+      category: t("commandCategory.editing"),
       icon: null,
-      description: "Clear cell contents in the current selection",
+      description: t("commandDescription.edit.clearContents"),
       keywords: ["clear", "contents", "delete"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "edit.fillDown",
-    "Fill Down",
+    t("command.edit.fillDown"),
     () => app.fillDown(),
     {
-      category: "Editing",
+      category: t("commandCategory.editing"),
       icon: null,
-      description: "Fill the selection down (Excel: Ctrl+D)",
+      description: t("commandDescription.edit.fillDown"),
       keywords: ["fill", "fill down", "excel"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "edit.fillRight",
-    "Fill Right",
+    t("command.edit.fillRight"),
     () => app.fillRight(),
     {
-      category: "Editing",
+      category: t("commandCategory.editing"),
       icon: null,
-      description: "Fill the selection right (Excel: Ctrl+R)",
+      description: t("commandDescription.edit.fillRight"),
       keywords: ["fill", "fill right", "excel"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "edit.insertDate",
-    "Insert Date",
+    t("command.edit.insertDate"),
     () => app.insertDate(),
     {
-      category: "Editing",
+      category: t("commandCategory.editing"),
       icon: null,
-      description: "Insert the current date into the selection (Excel: Ctrl+;)",
+      description: t("commandDescription.edit.insertDate"),
       keywords: ["date", "insert date", "excel"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "edit.insertTime",
-    "Insert Time",
+    t("command.edit.insertTime"),
     () => app.insertTime(),
     {
-      category: "Editing",
+      category: t("commandCategory.editing"),
       icon: null,
-      description: "Insert the current time into the selection (Excel: Ctrl+Shift+;)",
+      description: t("commandDescription.edit.insertTime"),
       keywords: ["time", "insert time", "excel"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "edit.autoSum",
-    "AutoSum",
+    t("command.edit.autoSum"),
     () => app.autoSum(),
     {
-      category: "Editing",
+      category: t("commandCategory.editing"),
       icon: null,
-      description: "Insert a SUM formula based on adjacent numeric cells (Excel: Alt+=)",
+      description: t("commandDescription.edit.autoSum"),
       keywords: ["autosum", "sum", "excel"],
     },
   );

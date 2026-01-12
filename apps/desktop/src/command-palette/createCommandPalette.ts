@@ -1,8 +1,16 @@
 import type { CommandContribution, CommandRegistry } from "../extensions/commandRegistry.js";
 import type { ContextKeyService } from "../extensions/contextKeys.js";
 
+import { t } from "../i18n/index.js";
+
 import { debounce } from "./debounce.js";
-import { compileFuzzyQuery, fuzzyMatchCommandPrepared, prepareCommandForFuzzy, type MatchRange, type PreparedCommandForFuzzy } from "./fuzzy.js";
+import {
+  compileFuzzyQuery,
+  fuzzyMatchCommandPrepared,
+  prepareCommandForFuzzy,
+  type MatchRange,
+  type PreparedCommandForFuzzy,
+} from "./fuzzy.js";
 import { getRecentCommandIdsForDisplay, installCommandRecentsTracker } from "./recents.js";
 import { searchShortcutCommands } from "./shortcutSearch.js";
 
@@ -58,7 +66,7 @@ export type CommandPaletteController = {
 
 function groupLabel(category: string | null): string {
   const value = String(category ?? "").trim();
-  return value ? value : "Other";
+  return value ? value : t("commandPalette.group.other");
 }
 
 function sortCommandsAlpha(a: CommandContribution, b: CommandContribution): number {
@@ -96,7 +104,7 @@ function buildGroupsForEmptyQuery(
   const groups: CommandGroup[] = [];
   let remainingSlots = Math.max(0, limits.maxResults - recents.length);
 
-  if (recents.length > 0) groups.push({ label: "RECENT", commands: recents });
+  if (recents.length > 0) groups.push({ label: t("commandPalette.group.recent"), commands: recents });
 
   const sortedCategoryLabels = [...categories.keys()].sort((a, b) => a.localeCompare(b));
   for (const label of sortedCategoryLabels) {
@@ -216,7 +224,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     keybindingIndex,
     ensureExtensionsLoaded,
     onCloseFocus,
-    placeholder = "Type a command…",
+    placeholder = t("commandPalette.placeholder"),
     extensionLoadDelayMs = 600,
     maxResults = 100,
     maxResultsPerGroup = 20,
@@ -246,7 +254,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
 
   const hint = document.createElement("div");
   hint.className = "command-palette__hint";
-  hint.textContent = "Shortcut search";
+  hint.textContent = t("commandPalette.shortcutSearch.hint");
   hint.hidden = true;
 
   const list = document.createElement("ul");
@@ -367,9 +375,13 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
       const empty = document.createElement("li");
       empty.className = "command-palette__empty";
       if (shortcutMode) {
-        empty.textContent = shortcutQuery ? "No matching shortcuts" : "No shortcuts";
+        empty.textContent = shortcutQuery
+          ? t("commandPalette.empty.noMatchingShortcuts")
+          : t("commandPalette.empty.noShortcuts");
       } else {
-        empty.textContent = trimmed ? "No matching commands" : "No commands";
+        empty.textContent = trimmed
+          ? t("commandPalette.empty.noMatchingCommands")
+          : t("commandPalette.empty.noCommands");
       }
       list.appendChild(empty);
       return;

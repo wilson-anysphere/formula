@@ -7537,6 +7537,7 @@ export class SpreadsheetApp {
   private clearSelectionContents(): void {
     const used = this.computeUsedRange();
     if (!used) return;
+    const label = t("command.edit.clearContents");
     for (const range of this.selection.ranges) {
       const clipped = intersectRanges(range, used);
       if (!clipped) continue;
@@ -7546,7 +7547,7 @@ export class SpreadsheetApp {
           start: { row: clipped.startRow, col: clipped.startCol },
           end: { row: clipped.endRow, col: clipped.endCol }
         },
-        { label: "Clear contents" }
+        { label }
       );
     }
   }

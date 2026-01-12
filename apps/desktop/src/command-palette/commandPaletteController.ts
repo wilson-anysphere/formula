@@ -1,5 +1,7 @@
 import type { CommandContribution, CommandRegistry } from "../extensions/commandRegistry.js";
 
+import { t, tWithVars } from "../i18n/index.js";
+
 type ExtensionHostManagerLike = {
   ready: boolean;
   error: unknown;
@@ -273,13 +275,15 @@ export class CommandPaletteController {
 
     if (mgr.error) {
       this.footer.dataset.variant = "warning";
-      this.footer.textContent = `Failed to load extensions: ${String((mgr.error as any)?.message ?? mgr.error)}`;
+      this.footer.textContent = tWithVars("commandPalette.extensions.failedToLoad", {
+        message: String((mgr.error as any)?.message ?? mgr.error),
+      });
       return;
     }
 
     if (this.extensionsLoadRequested && !mgr.ready) {
       this.footer.dataset.variant = "loading";
-      this.footer.textContent = "Loading extensions…";
+      this.footer.textContent = t("commandPalette.extensions.loading");
       return;
     }
 

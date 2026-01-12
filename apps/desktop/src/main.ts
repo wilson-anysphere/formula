@@ -2578,58 +2578,64 @@ if (
     app.focus();
   };
 
+  const commandCategoryFormat = t("commandCategory.format");
+
   commandRegistry.registerBuiltinCommand(
     "format.toggleBold",
-    "Bold",
-    () => applyToSelectionInCommandBatch("Bold", (sheetId, range) => toggleBold(app.getDocument(), sheetId, range)),
-    { category: "Format" },
+    t("command.format.toggleBold"),
+    () => applyToSelectionInCommandBatch(t("command.format.toggleBold"), (sheetId, range) => toggleBold(app.getDocument(), sheetId, range)),
+    { category: commandCategoryFormat },
   );
 
   commandRegistry.registerBuiltinCommand(
     "format.toggleItalic",
-    "Italic",
-    () => applyToSelectionInCommandBatch("Italic", (sheetId, range) => toggleItalic(app.getDocument(), sheetId, range)),
-    { category: "Format" },
+    t("command.format.toggleItalic"),
+    () =>
+      applyToSelectionInCommandBatch(t("command.format.toggleItalic"), (sheetId, range) => toggleItalic(app.getDocument(), sheetId, range)),
+    { category: commandCategoryFormat },
   );
 
   commandRegistry.registerBuiltinCommand(
     "format.toggleUnderline",
-    "Underline",
-    () => applyToSelectionInCommandBatch("Underline", (sheetId, range) => toggleUnderline(app.getDocument(), sheetId, range)),
-    { category: "Format" },
+    t("command.format.toggleUnderline"),
+    () =>
+      applyToSelectionInCommandBatch(t("command.format.toggleUnderline"), (sheetId, range) => toggleUnderline(app.getDocument(), sheetId, range)),
+    { category: commandCategoryFormat },
   );
 
   commandRegistry.registerBuiltinCommand(
     "format.numberFormat.currency",
-    "Currency",
+    t("command.format.numberFormat.currency"),
     () =>
-      applyToSelectionInCommandBatch("Currency", (sheetId, range) =>
+      applyToSelectionInCommandBatch(t("command.format.numberFormat.currency"), (sheetId, range) =>
         applyNumberFormatPreset(app.getDocument(), sheetId, range, "currency"),
       ),
-    { category: "Format" },
+    { category: commandCategoryFormat },
   );
 
   commandRegistry.registerBuiltinCommand(
     "format.numberFormat.percent",
-    "Percent",
+    t("command.format.numberFormat.percent"),
     () =>
-      applyToSelectionInCommandBatch("Percent", (sheetId, range) =>
+      applyToSelectionInCommandBatch(t("command.format.numberFormat.percent"), (sheetId, range) =>
         applyNumberFormatPreset(app.getDocument(), sheetId, range, "percent"),
       ),
-    { category: "Format" },
+    { category: commandCategoryFormat },
   );
 
   commandRegistry.registerBuiltinCommand(
     "format.numberFormat.date",
-    "Date",
+    t("command.format.numberFormat.date"),
     () =>
-      applyToSelectionInCommandBatch("Date", (sheetId, range) => applyNumberFormatPreset(app.getDocument(), sheetId, range, "date")),
-    { category: "Format" },
+      applyToSelectionInCommandBatch(t("command.format.numberFormat.date"), (sheetId, range) =>
+        applyNumberFormatPreset(app.getDocument(), sheetId, range, "date"),
+      ),
+    { category: commandCategoryFormat },
   );
 
   commandRegistry.registerBuiltinCommand(
     "format.openFormatCells",
-    "Format Cells…",
+    t("command.format.openFormatCells"),
     async () => {
       type Choice = "general" | "currency" | "percent" | "date";
       const choice = await showQuickPick<Choice>(
@@ -2654,7 +2660,7 @@ if (
         app.getDocument().setRangeFormat(sheetId, range, patch);
       });
     },
-    { category: "Format" },
+    { category: commandCategoryFormat },
   );
 
   extensionPanelBridge = new ExtensionPanelBridge({
@@ -2992,14 +2998,14 @@ if (
     const menuItems: ContextMenuItem[] = [
       {
         type: "item",
-        label: undoLabel ? `Undo ${undoLabel}` : "Undo",
+        label: undoLabel ? `${t("command.edit.undo")} ${undoLabel}` : t("command.edit.undo"),
         enabled: doc.canUndo,
         shortcut: getPrimaryCommandKeybindingDisplay("edit.undo", commandKeybindingDisplayIndex) ?? primaryShortcut("Z"),
         onSelect: () => executeBuiltinCommand("edit.undo"),
       },
       {
         type: "item",
-        label: redoLabel ? `Redo ${redoLabel}` : "Redo",
+        label: redoLabel ? `${t("command.edit.redo")} ${redoLabel}` : t("command.edit.redo"),
         enabled: doc.canRedo,
         shortcut:
           getPrimaryCommandKeybindingDisplay("edit.redo", commandKeybindingDisplayIndex) ?? (isMac ? "⇧⌘Z" : "Ctrl+Y"),
@@ -3036,7 +3042,7 @@ if (
       { type: "separator" },
       {
         type: "item",
-        label: "Clear Contents",
+        label: t("menu.clearContents"),
         shortcut:
           getPrimaryCommandKeybindingDisplay("edit.clearContents", commandKeybindingDisplayIndex) ?? (isMac ? "⌫" : "Del"),
         onSelect: () => executeBuiltinCommand("edit.clearContents"),
@@ -3044,24 +3050,24 @@ if (
       { type: "separator" },
       {
         type: "submenu",
-        label: "Format",
+        label: t("menu.format"),
         items: [
           {
             type: "item",
-            label: "Bold",
+            label: t("command.format.toggleBold"),
             shortcut: getPrimaryCommandKeybindingDisplay("format.toggleBold", commandKeybindingDisplayIndex) ?? primaryShortcut("B"),
             onSelect: () => executeBuiltinCommand("format.toggleBold"),
           },
           {
             type: "item",
-            label: "Italic",
+            label: t("command.format.toggleItalic"),
             shortcut:
               getPrimaryCommandKeybindingDisplay("format.toggleItalic", commandKeybindingDisplayIndex) ?? primaryShortcut("I"),
             onSelect: () => executeBuiltinCommand("format.toggleItalic"),
           },
           {
             type: "item",
-            label: "Underline",
+            label: t("command.format.toggleUnderline"),
             shortcut:
               getPrimaryCommandKeybindingDisplay("format.toggleUnderline", commandKeybindingDisplayIndex) ??
               primaryShortcut("U"),
@@ -3070,7 +3076,7 @@ if (
           { type: "separator" },
           {
             type: "item",
-            label: "Currency",
+            label: t("command.format.numberFormat.currency"),
             shortcut:
               getPrimaryCommandKeybindingDisplay("format.numberFormat.currency", commandKeybindingDisplayIndex) ??
               primaryShiftShortcut("$"),
@@ -3078,7 +3084,7 @@ if (
           },
           {
             type: "item",
-            label: "Percent",
+            label: t("command.format.numberFormat.percent"),
             shortcut:
               getPrimaryCommandKeybindingDisplay("format.numberFormat.percent", commandKeybindingDisplayIndex) ??
               primaryShiftShortcut("%"),
@@ -3086,7 +3092,7 @@ if (
           },
           {
             type: "item",
-            label: "Date",
+            label: t("command.format.numberFormat.date"),
             shortcut:
               getPrimaryCommandKeybindingDisplay("format.numberFormat.date", commandKeybindingDisplayIndex) ??
               primaryShiftShortcut("#"),
@@ -3095,7 +3101,7 @@ if (
           { type: "separator" },
           {
             type: "item",
-            label: "Format Cells…",
+            label: t("command.format.openFormatCells"),
             shortcut:
               getPrimaryCommandKeybindingDisplay("format.openFormatCells", commandKeybindingDisplayIndex) ?? primaryShortcut("1"),
             onSelect: () => executeBuiltinCommand("format.openFormatCells"),
@@ -3105,7 +3111,7 @@ if (
       { type: "separator" },
       {
         type: "item",
-        label: "Add Comment",
+        label: t("menu.addComment"),
         shortcut: getPrimaryCommandKeybindingDisplay("comments.addComment", commandKeybindingDisplayIndex) ?? undefined,
         onSelect: () => executeBuiltinCommand("comments.addComment"),
       },
@@ -4112,16 +4118,16 @@ if (
         );
       });
     },
-    { category: "Help" },
+    { category: t("commandCategory.help") },
   );
   if (import.meta.env.DEV) {
     commandRegistry.registerBuiltinCommand(
       "debugShowSystemNotification",
-      "Debug: Show system notification",
+      t("command.debugShowSystemNotification"),
       () => {
         void notify({ title: "Formula", body: "This is a test system notification." });
       },
-      { category: "Debug" },
+      { category: t("commandCategory.debug") },
     );
   }
 
@@ -4261,36 +4267,36 @@ function showDialogAndFocus(dialog: HTMLDialogElement): void {
 
 commandRegistry.registerBuiltinCommand(
   "edit.find",
-  "Find…",
+  t("command.edit.find"),
   () => showDialogAndFocus(findDialog as any),
   {
-    category: "Editing",
+    category: t("commandCategory.editing"),
     icon: null,
-    description: "Show the Find dialog",
+    description: t("commandDescription.edit.find"),
     keywords: ["find", "search"],
   },
 );
 
 commandRegistry.registerBuiltinCommand(
   "edit.replace",
-  "Replace…",
+  t("command.edit.replace"),
   () => showDialogAndFocus(replaceDialog as any),
   {
-    category: "Editing",
+    category: t("commandCategory.editing"),
     icon: null,
-    description: "Show the Replace dialog",
+    description: t("commandDescription.edit.replace"),
     keywords: ["replace", "find"],
   },
 );
 
 commandRegistry.registerBuiltinCommand(
   "navigation.goTo",
-  "Go To…",
+  t("command.navigation.goTo"),
   () => showDialogAndFocus(goToDialog as any),
   {
-    category: "Navigation",
+    category: t("commandCategory.navigation"),
     icon: null,
-    description: "Go to a reference or named range",
+    description: t("commandDescription.navigation.goTo"),
     keywords: ["go to", "goto", "reference", "name box"],
   },
 );
