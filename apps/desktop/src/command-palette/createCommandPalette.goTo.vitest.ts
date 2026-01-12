@@ -171,16 +171,17 @@ describe("createCommandPalette Go to suggestion", () => {
     const commandRegistry = new CommandRegistry();
     commandRegistry.registerBuiltinCommand("test.sheet2a1Mode", "Sheet2!A1 Mode", () => {}, { category: "Test" });
 
-    // `parseGoTo` doesn't validate sheet existence, so the command palette does a best-effort
-    // validation when the workbook adapter exposes a `getSheet(...)` helper.
-    const workbook = {
+    // `parseGoTo` validates sheet-qualified references when the workbook adapter exposes
+    // `getSheet(...)` (throwing for unknown sheets). The palette should therefore only
+    // show a Go to suggestion for resolvable sheets.
+    const workbook: GoToWorkbookLookup = {
       getTable: () => null,
       getName: () => null,
       getSheet: (name: string) => {
         if (name === "Sheet1") return { name: "Sheet1" };
         throw new Error(`Unknown sheet: ${name}`);
       },
-    } as unknown as GoToWorkbookLookup;
+    };
 
     const onGoTo = vi.fn();
 

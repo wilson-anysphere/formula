@@ -15,6 +15,17 @@ function parseStructuredRef(input) {
   return { tableName: m[1], spec: m[2] };
 }
 
+function resolveSheetName(name, workbook) {
+  const sheetName = String(name ?? "").trim();
+  if (!sheetName) return sheetName;
+  if (!workbook || typeof workbook.getSheet !== "function") return sheetName;
+
+  const sheet = workbook.getSheet(sheetName);
+  if (!sheet) throw new Error(`Unknown sheet: ${sheetName}`);
+  const canonical = typeof sheet.name === "string" ? String(sheet.name).trim() : "";
+  return canonical || sheetName;
+}
+
 /**
  * Parse Go To / Name box input.
  *
@@ -32,20 +43,21 @@ export function parseGoTo(input, { workbook, currentSheetName } = {}) {
   if (raw === "") throw new Error("parseGoTo: empty input");
 
   const { sheetName: qualifiedSheet, ref } = splitSheetQualifier(raw);
-  const sheetName = qualifiedSheet ?? currentSheetName;
+  const sheetName = resolveSheetName(qualifiedSheet ?? currentSheetName, workbook);
 
   // Structured reference
   const structured = parseStructuredRef(ref);
   if (structured) {
     const table = workbook.getTable(structured.tableName);
     if (!table) throw new Error(`Unknown table: ${structured.tableName}`);
+    const tableSheetName = resolveSheetName(table.sheetName, workbook);
 
     const specNorm = normalizeName(structured.spec);
     if (specNorm === "#ALL") {
       return {
         type: "range",
         source: "table",
-        sheetName: table.sheetName,
+        sheetName: tableSheetName,
         range: {
           startRow: table.startRow,
           endRow: table.endRow,
@@ -65,7 +77,7 @@ export function parseGoTo(input, { workbook, currentSheetName } = {}) {
     return {
       type: "range",
       source: "table",
-      sheetName: table.sheetName,
+      sheetName: tableSheetName,
       range: { startRow: table.startRow, endRow: table.endRow, startCol: col, endCol: col },
     };
   }
@@ -78,10 +90,11 @@ export function parseGoTo(input, { workbook, currentSheetName } = {}) {
   // Named range
   const named = workbook.getName(ref);
   if (named) {
+    const targetSheet = resolveSheetName(named.sheetName ?? sheetName, workbook);
     return {
       type: "range",
       source: "name",
-      sheetName: named.sheetName ?? sheetName,
+      sheetName: targetSheet,
       range: named.range,
     };
   }

@@ -35,6 +35,13 @@ export type GoToParseResult = {
 };
 
 export type GoToWorkbookLookup = {
+  /**
+   * Optional sheet lookup used by consumers that want to validate / canonicalize
+   * sheet-qualified references.
+   *
+   * When present, implementations should throw for unknown sheets (Excel-like).
+   */
+  getSheet?: (name: string) => { name: string };
   getTable(name: string): null | {
     sheetName: string;
     startRow: number;
@@ -50,4 +57,3 @@ export function parseGoTo(
   input: string,
   options: { workbook: GoToWorkbookLookup; currentSheetName: string }
 ): GoToParseResult;
-

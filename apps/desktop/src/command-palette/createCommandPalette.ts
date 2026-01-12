@@ -529,28 +529,11 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
                 workbook: goTo.workbook,
                 currentSheetName: goTo.getCurrentSheetName(),
               });
-
-              // `parseGoTo` intentionally does not validate that the referenced sheet exists.
-              // For command palette navigation we only want to surface a suggestion when we
-              // can resolve the target sheet in the current workbook, otherwise selecting it
-              // would be a no-op.
-              let resolvedSheetName = parsed.sheetName;
-              try {
-                // `GoToWorkbookLookup` doesn't include sheet enumeration; we rely on the
-                // concrete workbook adapter (DocumentWorkbookAdapter) to optionally expose it.
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const sheet = (goTo.workbook as any).getSheet?.(parsed.sheetName);
-                if (sheet && typeof sheet.name === "string" && sheet.name.trim() !== "") {
-                  resolvedSheetName = sheet.name;
-                }
-              } catch {
-                return null;
-              }
               return {
                 kind: "goTo" as const,
                 label: tWithVars("commandPalette.goToSuggestion", { query: trimmed }),
-                resolved: `${resolvedSheetName}!${formatA1Range(parsed.range)}`,
-                parsed: resolvedSheetName === parsed.sheetName ? parsed : { ...parsed, sheetName: resolvedSheetName },
+                resolved: `${parsed.sheetName}!${formatA1Range(parsed.range)}`,
+                parsed,
               };
             } catch {
               return null;
