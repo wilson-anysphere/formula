@@ -47,6 +47,8 @@ test.describe("freeze panes", () => {
     await page.keyboard.press(`${primary}+Shift+P`);
     await expect(page.getByTestId("command-palette")).toBeVisible();
     await page.keyboard.type("Freeze Panes");
+    // Bonus: verify category grouping renders in the list (stable UI affordance).
+    await expect(page.getByTestId("command-palette-list")).toContainText("View");
     await page.keyboard.press("Enter");
 
     await expect.poll(async () => {

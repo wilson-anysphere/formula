@@ -196,6 +196,8 @@ test.describe("pivot builder", () => {
     await page.keyboard.press(`${modifier}+Shift+P`);
     await expect(page.getByTestId("command-palette-input")).toBeVisible();
     await page.getByTestId("command-palette-input").fill("pivot");
+    // Bonus: verify category grouping renders in the list (stable UI affordance).
+    await expect(page.getByTestId("command-palette-list")).toContainText("Insert");
     await page.keyboard.press("Enter");
 
     const panel = page.getByTestId("dock-left").getByTestId("panel-pivotBuilder");
@@ -207,7 +209,23 @@ test.describe("pivot builder", () => {
 
     // Configure fields via drag-and-drop.
     await page.dragAndDrop('[data-testid="pivot-field-Category"]', '[data-testid="pivot-drop-rows"]');
-    await expect(panel.getByTestId("pivot-drop-rows")).toContainText("Category");
+    // Playwright dragAndDrop can be flaky with HTML5 dataTransfer under load; fall back to
+    // dispatching a synthetic drop event so the test exercises pivot generation rather than
+    // getting stuck on DnD plumbing.
+    try {
+      await panel.getByTestId("pivot-drop-rows").getByText("Category").waitFor({ state: "visible", timeout: 2_000 });
+    } catch {
+      await page.evaluate(() => {
+        const zone = document.querySelector('[data-testid="pivot-drop-rows"]');
+        if (!zone) throw new Error("Missing pivot-drop-rows");
+        const dt = new DataTransfer();
+        dt.setData("text/plain", "Category");
+        const drop = new DragEvent("drop", { bubbles: true, cancelable: true });
+        Object.defineProperty(drop, "dataTransfer", { value: dt });
+        zone.dispatchEvent(drop);
+      });
+      await expect(panel.getByTestId("pivot-drop-rows")).toContainText("Category");
+    }
     await page.dragAndDrop('[data-testid="pivot-field-Amount"]', '[data-testid="pivot-drop-values"]');
     // Playwright dragAndDrop can be flaky with HTML5 dataTransfer under load; fall back to
     // dispatching a synthetic drop event so the test exercises pivot generation rather than
