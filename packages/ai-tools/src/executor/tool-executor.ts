@@ -7,8 +7,11 @@ import { TOOL_REGISTRY, validateToolCall } from "../tool-schema.ts";
 
 import { DLP_ACTION } from "../../../security/dlp/src/actions.js";
 import { DLP_DECISION, evaluatePolicy } from "../../../security/dlp/src/policyEngine.js";
-import { CLASSIFICATION_LEVEL, DEFAULT_CLASSIFICATION, maxClassification } from "../../../security/dlp/src/classification.js";
+import { CLASSIFICATION_LEVEL, classificationRank } from "../../../security/dlp/src/classification.js";
 import { effectiveCellClassification, effectiveRangeClassification, normalizeRange } from "../../../security/dlp/src/selectors.js";
+
+const DEFAULT_CLASSIFICATION_RANK = classificationRank(CLASSIFICATION_LEVEL.PUBLIC);
+const RESTRICTED_CLASSIFICATION_RANK = classificationRank(CLASSIFICATION_LEVEL.RESTRICTED);
 
 function normalizeFormulaTextOpt(value: unknown): string | null {
   if (value == null) return null;
@@ -222,25 +225,25 @@ type DlpNormalizedRange = ReturnType<typeof normalizeRange>;
 
 type DlpRangeIndex = {
   /**
-   * Max document-level classification for the document in scope.
+   * Max document-level classification rank for the document in scope.
    */
-  docClassificationMax: any;
+  docRankMax: number;
   /**
-   * Max sheet-level classification for the sheet in scope.
+   * Max sheet-level classification rank for the sheet in scope.
    */
-  sheetClassificationMax: any;
+  sheetRankMax: number;
   /**
-   * Max classification for each 0-based column index in the sheet.
+   * Max classification rank for each 0-based column index in the sheet.
    */
-  columnClassificationByIndex: Map<number, any>;
+  columnRankByIndex: Map<number, number>;
   /**
-   * Max classification for each 0-based cell coordinate ("row,col") in the sheet.
+   * Max classification rank for each 0-based cell coordinate ("row,col") in the sheet.
    */
-  cellClassificationByCoord: Map<string, any>;
+  cellRankByCoord: Map<string, number>;
   /**
    * Range-scoped records for the sheet (normalized to ensure start <= end).
    */
-  rangeRecords: Array<{ range: DlpNormalizedRange; classification: any }>;
+  rangeRecords: Array<{ range: DlpNormalizedRange; rank: number }>;
   /**
    * Records that cannot be indexed by (row,col)/(columnIndex) (e.g. tableId/columnId selectors).
    * These are evaluated via the slower `effectiveCellClassification` path when present.
@@ -1148,6 +1151,11 @@ export class ToolExecutor {
      */
     index: DlpRangeIndex | null;
     includeRestrictedContent: boolean;
+    /**
+     * Precomputed policy details used by per-cell enforcement (`isDlpCellAllowed`).
+     */
+    maxAllowedRank: number | null;
+    policyAllowsRestrictedContent: boolean;
     policy: any;
     decision: any;
     selectionClassification: any;
@@ -1183,6 +1191,13 @@ export class ToolExecutor {
       options: { includeRestrictedContent }
     });
 
+    const maxAllowed = decision?.maxAllowed ?? null;
+    const maxAllowedRank = maxAllowed === null ? null : classificationRank(maxAllowed);
+
+    const policyAllowsRestrictedContent = Boolean(
+      dlp.policy?.rules?.[DLP_ACTION.AI_CLOUD_PROCESSING]?.allowRestrictedContent
+    );
+
     return {
       documentId,
       sheetId,
@@ -1190,6 +1205,8 @@ export class ToolExecutor {
       selectionRange: normalizedSelectionRange,
       index: null,
       includeRestrictedContent,
+      maxAllowedRank,
+      policyAllowsRestrictedContent,
       policy: dlp.policy,
       decision,
       selectionClassification,
@@ -1203,11 +1220,19 @@ export class ToolExecutor {
   ): DlpRangeIndex {
     const selectionRange = ref.range;
 
-    let docClassificationMax: any = { ...DEFAULT_CLASSIFICATION };
-    let sheetClassificationMax: any = { ...DEFAULT_CLASSIFICATION };
-    const columnClassificationByIndex = new Map<number, any>();
-    const cellClassificationByCoord = new Map<string, any>();
-    const rangeRecords: Array<{ range: DlpNormalizedRange; classification: any }> = [];
+    const rankFromClassification = (classification: any): number => {
+      if (!classification) return DEFAULT_CLASSIFICATION_RANK;
+      if (typeof classification !== "object") {
+        throw new Error("Classification must be an object");
+      }
+      return classificationRank((classification as any).level);
+    };
+
+    let docRankMax = DEFAULT_CLASSIFICATION_RANK;
+    let sheetRankMax = DEFAULT_CLASSIFICATION_RANK;
+    const columnRankByIndex = new Map<number, number>();
+    const cellRankByCoord = new Map<string, number>();
+    const rangeRecords: Array<{ range: DlpNormalizedRange; rank: number }> = [];
     const fallbackRecords: Array<{ selector: any; classification: any }> = [];
 
     for (const record of records || []) {
@@ -1217,12 +1242,14 @@ export class ToolExecutor {
 
       switch (selector.scope) {
         case "document": {
-          docClassificationMax = maxClassification(docClassificationMax, record.classification);
+          const recordRank = rankFromClassification(record.classification);
+          docRankMax = Math.max(docRankMax, recordRank);
           break;
         }
         case "sheet": {
           if (selector.sheetId === ref.sheetId) {
-            sheetClassificationMax = maxClassification(sheetClassificationMax, record.classification);
+            const recordRank = rankFromClassification(record.classification);
+            sheetRankMax = Math.max(sheetRankMax, recordRank);
           }
           break;
         }
@@ -1231,11 +1258,9 @@ export class ToolExecutor {
           if (typeof selector.columnIndex === "number") {
             const colIndex = selector.columnIndex;
             if (colIndex < selectionRange.start.col || colIndex > selectionRange.end.col) break;
-            const existing = columnClassificationByIndex.get(colIndex);
-            columnClassificationByIndex.set(
-              colIndex,
-              existing ? maxClassification(existing, record.classification) : record.classification
-            );
+            const recordRank = rankFromClassification(record.classification);
+            const existing = columnRankByIndex.get(colIndex) ?? DEFAULT_CLASSIFICATION_RANK;
+            columnRankByIndex.set(colIndex, Math.max(existing, recordRank));
           } else {
             // Table/columnId selectors require additional context (tableId/columnId) to evaluate.
             fallbackRecords.push(record);
@@ -1254,9 +1279,10 @@ export class ToolExecutor {
           ) {
             break;
           }
+          const recordRank = rankFromClassification(record.classification);
           const key = `${selector.row},${selector.col}`;
-          const existing = cellClassificationByCoord.get(key);
-          cellClassificationByCoord.set(key, existing ? maxClassification(existing, record.classification) : record.classification);
+          const existing = cellRankByCoord.get(key) ?? DEFAULT_CLASSIFICATION_RANK;
+          cellRankByCoord.set(key, Math.max(existing, recordRank));
           break;
         }
         case "range": {
@@ -1264,7 +1290,8 @@ export class ToolExecutor {
           if (!selector.range) break;
           const normalized = normalizeRange(selector.range);
           if (!rangesIntersectNormalized(normalized, selectionRange)) break;
-          rangeRecords.push({ range: normalized, classification: record.classification });
+          const recordRank = rankFromClassification(record.classification);
+          rangeRecords.push({ range: normalized, rank: recordRank });
           break;
         }
         default: {
@@ -1275,10 +1302,10 @@ export class ToolExecutor {
     }
 
     return {
-      docClassificationMax,
-      sheetClassificationMax,
-      columnClassificationByIndex,
-      cellClassificationByCoord,
+      docRankMax,
+      sheetRankMax,
+      columnRankByIndex,
+      cellRankByCoord,
       rangeRecords,
       fallbackRecords
     };
@@ -1289,6 +1316,10 @@ export class ToolExecutor {
     row: number,
     col: number
   ): boolean {
+    if (dlp.maxAllowedRank === null) {
+      return false;
+    }
+
     const index =
       dlp.index ??
       (dlp.index = this.buildDlpRangeIndex(
@@ -1299,46 +1330,69 @@ export class ToolExecutor {
     const row0 = row - 1;
     const col0 = col - 1;
 
-    let classification: any = { ...DEFAULT_CLASSIFICATION };
+    // If we're explicitly including restricted content and policy allows it, a cell can become
+    // ALLOW even if its classification exceeds `maxAllowed` (because `evaluatePolicy` short-circuits
+    // on Restricted + includeRestrictedContent).
+    const restrictedOverrideAllowed = dlp.includeRestrictedContent && dlp.policyAllowsRestrictedContent;
+    const canShortCircuitOverThreshold = !restrictedOverrideAllowed;
+    const maxAllowedRank = dlp.maxAllowedRank;
 
-    classification = maxClassification(classification, index.docClassificationMax);
-    if (classification.level !== CLASSIFICATION_LEVEL.RESTRICTED) {
-      classification = maxClassification(classification, index.sheetClassificationMax);
+    const decideAllowed = (rank: number): boolean => {
+      if (rank === RESTRICTED_CLASSIFICATION_RANK && dlp.includeRestrictedContent) {
+        return dlp.policyAllowsRestrictedContent;
+      }
+      return rank <= maxAllowedRank;
+    };
+
+    let rank = index.docRankMax;
+    if (index.sheetRankMax > rank) rank = index.sheetRankMax;
+
+    if (rank === RESTRICTED_CLASSIFICATION_RANK) {
+      return decideAllowed(rank);
+    }
+    if (canShortCircuitOverThreshold && rank > maxAllowedRank) {
+      return false;
     }
 
-    if (classification.level !== CLASSIFICATION_LEVEL.RESTRICTED) {
-      const colClassification = index.columnClassificationByIndex.get(col0);
-      if (colClassification) classification = maxClassification(classification, colClassification);
+    const colRank = index.columnRankByIndex.get(col0);
+    if (colRank !== undefined && colRank > rank) rank = colRank;
+    if (rank === RESTRICTED_CLASSIFICATION_RANK) {
+      return decideAllowed(rank);
+    }
+    if (canShortCircuitOverThreshold && rank > maxAllowedRank) {
+      return false;
     }
 
-    if (classification.level !== CLASSIFICATION_LEVEL.RESTRICTED) {
-      const cellClassification = index.cellClassificationByCoord.get(`${row0},${col0}`);
-      if (cellClassification) classification = maxClassification(classification, cellClassification);
+    const cellRank = index.cellRankByCoord.get(`${row0},${col0}`);
+    if (cellRank !== undefined && cellRank > rank) rank = cellRank;
+    if (rank === RESTRICTED_CLASSIFICATION_RANK) {
+      return decideAllowed(rank);
+    }
+    if (canShortCircuitOverThreshold && rank > maxAllowedRank) {
+      return false;
     }
 
-    if (classification.level !== CLASSIFICATION_LEVEL.RESTRICTED) {
-      for (const record of index.rangeRecords) {
-        if (!cellInNormalizedRange({ row: row0, col: col0 }, record.range)) continue;
-        classification = maxClassification(classification, record.classification);
-        if (classification.level === CLASSIFICATION_LEVEL.RESTRICTED) break;
+    for (const record of index.rangeRecords) {
+      if (!cellInNormalizedRange({ row: row0, col: col0 }, record.range)) continue;
+      if (record.rank > rank) rank = record.rank;
+      if (rank === RESTRICTED_CLASSIFICATION_RANK) {
+        return decideAllowed(rank);
+      }
+      if (canShortCircuitOverThreshold && rank > maxAllowedRank) {
+        return false;
       }
     }
 
-    if (classification.level !== CLASSIFICATION_LEVEL.RESTRICTED && index.fallbackRecords.length > 0) {
+    if (index.fallbackRecords.length > 0 && rank !== RESTRICTED_CLASSIFICATION_RANK) {
       const fallbackClassification = effectiveCellClassification(
         { documentId: dlp.documentId, sheetId: dlp.sheetId, row: row0, col: col0 },
         index.fallbackRecords
       );
-      classification = maxClassification(classification, fallbackClassification);
+      const fallbackRank = classificationRank(fallbackClassification.level);
+      if (fallbackRank > rank) rank = fallbackRank;
     }
 
-    const cellDecision = evaluatePolicy({
-      action: DLP_ACTION.AI_CLOUD_PROCESSING,
-      classification,
-      policy: dlp.policy,
-      options: { includeRestrictedContent: dlp.includeRestrictedContent }
-    });
-    return cellDecision.decision === DLP_DECISION.ALLOW;
+    return decideAllowed(rank);
   }
 
   private logToolDlpDecision(params: {
