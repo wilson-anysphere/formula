@@ -4,51 +4,65 @@ use std::path::PathBuf;
 use formula_engine::{eval, functions};
 use serde::Deserialize;
 
-#[test]
-fn excel_oracle_function_calls_are_registered() {
-    // Keep `tests/compatibility/excel-oracle/cases.json` aligned with the function registry so
-    // new oracle cases don't silently regress to `#NAME?`.
+#[derive(Debug, Deserialize)]
+struct OracleCorpus {
+    cases: Vec<OracleCase>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OracleCase {
+    id: String,
+    formula: String,
+    #[serde(default)]
+    inputs: Vec<OracleCellInput>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OracleCellInput {
+    cell: String,
+    #[serde(default)]
+    formula: Option<String>,
+}
+
+fn load_excel_oracle_cases() -> Vec<OracleCase> {
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("../../tests/compatibility/excel-oracle/cases.json");
     let corpus_bytes =
         std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
 
-    let corpus: serde_json::Value =
-        serde_json::from_str(&corpus_bytes).expect("parse excel oracle corpus JSON");
-    let cases = corpus
-        .get("cases")
-        .and_then(|v| v.as_array())
-        .expect("cases[]");
+    let corpus: OracleCorpus = serde_json::from_str(&corpus_bytes)
+        .unwrap_or_else(|e| panic!("parse excel oracle corpus JSON ({}): {e}", path.display()));
+    corpus.cases
+}
+
+#[test]
+fn excel_oracle_function_calls_are_registered() {
+    // Keep `tests/compatibility/excel-oracle/cases.json` aligned with the function registry so
+    // new oracle cases don't silently regress to `#NAME?`.
+    let cases = load_excel_oracle_cases();
 
     let mut unknown = BTreeSet::new();
     for case in cases {
-        let case_id = case.get("id").and_then(|v| v.as_str()).unwrap_or("<unknown>");
-        let formula = case
-            .get("formula")
-            .and_then(|v| v.as_str())
-            .expect("case.formula");
-        let parsed = eval::Parser::parse(formula).unwrap_or_else(|e| {
-            panic!("parse excel oracle formula ({case_id}) {formula:?}: {e}")
+        let parsed = eval::Parser::parse(&case.formula).unwrap_or_else(|e| {
+            panic!(
+                "parse excel oracle formula ({}) {:?}: {e}",
+                case.id, case.formula
+            )
         });
         collect_unknown_function_calls(&parsed, &mut unknown);
 
         // Input cells can also contain formulas (e.g. `=NA()`).
-        if let Some(inputs) = case.get("inputs").and_then(|v| v.as_array()) {
-            for input in inputs {
-                let input_cell = input
-                    .get("cell")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("<unknown>");
-                let Some(input_formula) = input.get("formula").and_then(|v| v.as_str()) else {
-                    continue;
-                };
-                let parsed = eval::Parser::parse(input_formula).unwrap_or_else(|e| {
-                    panic!(
-                        "parse excel oracle input formula ({case_id} {input_cell}) {input_formula:?}: {e}"
-                    )
-                });
+        for input in &case.inputs {
+            let Some(input_formula) = input.formula.as_deref() else {
+                continue;
+            };
+            let parsed = eval::Parser::parse(input_formula).unwrap_or_else(|e| {
+                panic!(
+                    "parse excel oracle input formula ({} {}) {input_formula:?}: {e}",
+                    case.id, input.cell
+                )
+            });
                 collect_unknown_function_calls(&parsed, &mut unknown);
-            }
         }
     }
 
@@ -80,46 +94,33 @@ fn excel_oracle_corpus_covers_nonvolatile_function_catalog() {
     // Keep `tests/compatibility/excel-oracle/cases.json` aligned with `shared/functionCatalog.json`
     // so we have at least one deterministic oracle case for every implemented non-volatile
     // function. Volatile functions are intentionally excluded from the oracle corpus.
-    let mut cases_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    cases_path.push("../../tests/compatibility/excel-oracle/cases.json");
-    let corpus_bytes = std::fs::read_to_string(&cases_path)
-        .unwrap_or_else(|e| panic!("read {}: {e}", cases_path.display()));
-    let corpus: serde_json::Value =
-        serde_json::from_str(&corpus_bytes).expect("parse excel oracle corpus JSON");
-    let cases = corpus
-        .get("cases")
-        .and_then(|v| v.as_array())
-        .expect("cases[]");
+    let cases = load_excel_oracle_cases();
 
-    let mut called = BTreeSet::new();
+    let mut called_in_case_formulas = BTreeSet::new();
+    let mut called_in_any_formula = BTreeSet::new();
     for case in cases {
-        let case_id = case.get("id").and_then(|v| v.as_str()).unwrap_or("<unknown>");
-        let formula = case
-            .get("formula")
-            .and_then(|v| v.as_str())
-            .expect("case.formula");
-        let parsed = eval::Parser::parse(formula).unwrap_or_else(|e| {
-            panic!("parse excel oracle formula ({case_id}) {formula:?}: {e}")
+        let parsed = eval::Parser::parse(&case.formula).unwrap_or_else(|e| {
+            panic!(
+                "parse excel oracle formula ({}) {:?}: {e}",
+                case.id, case.formula
+            )
         });
-        collect_function_calls(&parsed, &mut called);
+        collect_function_calls(&parsed, &mut called_in_case_formulas);
+        collect_function_calls(&parsed, &mut called_in_any_formula);
 
-        // Input cells can also contain formulas (e.g. `=NA()`).
-        if let Some(inputs) = case.get("inputs").and_then(|v| v.as_array()) {
-            for input in inputs {
-                let input_cell = input
-                    .get("cell")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("<unknown>");
-                let Some(input_formula) = input.get("formula").and_then(|v| v.as_str()) else {
-                    continue;
-                };
-                let parsed = eval::Parser::parse(input_formula).unwrap_or_else(|e| {
-                    panic!(
-                        "parse excel oracle input formula ({case_id} {input_cell}) {input_formula:?}: {e}"
-                    )
-                });
-                collect_function_calls(&parsed, &mut called);
-            }
+        // Input cells can also contain formulas (e.g. `=NA()`); these should not contain volatile
+        // functions, but they do not count towards coverage of `case.formula`.
+        for input in &case.inputs {
+            let Some(input_formula) = input.formula.as_deref() else {
+                continue;
+            };
+            let parsed = eval::Parser::parse(input_formula).unwrap_or_else(|e| {
+                panic!(
+                    "parse excel oracle input formula ({} {}) {input_formula:?}: {e}",
+                    case.id, input.cell
+                )
+            });
+            collect_function_calls(&parsed, &mut called_in_any_formula);
         }
     }
 
@@ -161,7 +162,10 @@ fn excel_oracle_corpus_covers_nonvolatile_function_catalog() {
     }
 
     // Volatile functions should not appear in the oracle corpus at all.
-    let present_volatile: BTreeSet<_> = volatile.intersection(&called).cloned().collect();
+    let present_volatile: BTreeSet<_> = volatile
+        .intersection(&called_in_any_formula)
+        .cloned()
+        .collect();
     assert!(
         present_volatile.is_empty(),
         "oracle corpus includes volatile functions:\n{}",
@@ -173,13 +177,13 @@ fn excel_oracle_corpus_covers_nonvolatile_function_catalog() {
     );
 
     let missing: BTreeSet<_> = nonvolatile
-        .difference(&called)
+        .difference(&called_in_case_formulas)
         .filter(|name| !EXCEPTIONS.contains(&name.as_str()))
         .cloned()
         .collect();
     assert!(
         missing.is_empty(),
-        "oracle corpus missing coverage for {} non-volatile functions from shared/functionCatalog.json:\n{}",
+        "oracle corpus missing coverage (case.formula) for {} non-volatile functions from shared/functionCatalog.json:\n{}",
         missing.len(),
         missing
             .iter()
