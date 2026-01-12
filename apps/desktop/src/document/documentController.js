@@ -520,12 +520,24 @@ function cloneRangeRunDelta(delta) {
 }
 
 /**
- * @param {TabColor | undefined | null} color
+ * Clone a tab color payload.
+ *
+ * Note: Some snapshot producers (e.g. BranchService) represent tab colors as an ARGB
+ * string. Be tolerant and normalize strings into `{ rgb }` objects so downstream
+ * consumers can treat `TabColor` as an object shape.
+ *
+ * @param {any} color
  * @returns {TabColor | undefined}
  */
 function cloneTabColor(color) {
   if (!color) return undefined;
-  return { ...color };
+  if (typeof color === "string") {
+    return { rgb: color };
+  }
+  if (typeof color === "object") {
+    return { ...color };
+  }
+  return undefined;
 }
 
 /**
@@ -3282,7 +3294,9 @@ export class DocumentController {
       const visibilityRaw = sheet?.visibility;
       const visibility =
         visibilityRaw === "hidden" || visibilityRaw === "veryHidden" || visibilityRaw === "visible" ? visibilityRaw : "visible";
-      const tabColor = isPlainObject(sheet?.tabColor) ? cloneTabColor(sheet.tabColor) : undefined;
+      const tabColorRaw = sheet?.tabColor;
+      const tabColor =
+        typeof tabColorRaw === "string" || isPlainObject(tabColorRaw) ? cloneTabColor(tabColorRaw) : undefined;
       nextSheetMeta.set(sheet.id, { name, visibility, ...(tabColor ? { tabColor } : {}) });
 
       const cellList = Array.isArray(sheet.cells) ? sheet.cells : [];

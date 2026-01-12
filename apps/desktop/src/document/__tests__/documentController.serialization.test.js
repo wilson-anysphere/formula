@@ -257,3 +257,31 @@ test("applyState accepts legacy snapshots without sheet metadata", () => {
   assert.deepEqual(doc.getSheetIds(), ["Sheet1"]);
   assert.deepEqual(doc.getSheetMeta("Sheet1"), { name: "Sheet1", visibility: "visible" });
 });
+
+test("applyState accepts tabColor as an ARGB string (branch/collab snapshots)", () => {
+  const snapshot = new TextEncoder().encode(
+    JSON.stringify({
+      schemaVersion: 1,
+      sheetOrder: ["Sheet1"],
+      sheets: [
+        {
+          id: "Sheet1",
+          name: "Sheet1",
+          visibility: "visible",
+          tabColor: "FF00FF00",
+          frozenRows: 0,
+          frozenCols: 0,
+          cells: [],
+        },
+      ],
+    })
+  );
+
+  const doc = new DocumentController();
+  doc.applyState(snapshot);
+  assert.deepEqual(doc.getSheetMeta("Sheet1"), {
+    name: "Sheet1",
+    visibility: "visible",
+    tabColor: { rgb: "FF00FF00" },
+  });
+});
