@@ -49,7 +49,14 @@ export function getMarketplaceBaseUrl(options?: {
    */
   env?: Record<string, unknown> | undefined;
 }): string {
-  const storage = options?.storage ?? ((globalThis as any).localStorage as Pick<Storage, "getItem"> | undefined);
+  const storage = (() => {
+    if (options?.storage) return options.storage;
+    try {
+      return (globalThis as any).localStorage as Pick<Storage, "getItem"> | undefined;
+    } catch {
+      return undefined;
+    }
+  })();
   const localValue = tryReadLocalStorage(storage);
   if (localValue) return localValue;
 
@@ -62,4 +69,3 @@ export function getMarketplaceBaseUrl(options?: {
   // - production: use the hosted marketplace API
   return isProductionEnv(metaEnv) ? DEFAULT_PRODUCTION_BASE_URL : "/api";
 }
-

@@ -1,9 +1,9 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { getMarketplaceBaseUrl } from "./getMarketplaceBaseUrl.js";
 
 describe("getMarketplaceBaseUrl", () => {
-  test("prefers localStorage override", () => {
+  it("prefers localStorage override", () => {
     const storage = {
       getItem(key: string) {
         if (key === "formula:marketplace:baseUrl") return " https://example.com/api/ ";
@@ -11,12 +11,15 @@ describe("getMarketplaceBaseUrl", () => {
       },
     };
 
-    expect(getMarketplaceBaseUrl({ storage, env: { PROD: true, VITE_FORMULA_MARKETPLACE_BASE_URL: "https://env.example/api" } })).toBe(
-      "https://example.com/api",
-    );
+    expect(
+      getMarketplaceBaseUrl({
+        storage,
+        env: { PROD: true, VITE_FORMULA_MARKETPLACE_BASE_URL: "https://env.example/api" },
+      }),
+    ).toBe("https://example.com/api");
   });
 
-  test("falls back to VITE_FORMULA_MARKETPLACE_BASE_URL", () => {
+  it("falls back to VITE_FORMULA_MARKETPLACE_BASE_URL", () => {
     const storage = {
       getItem() {
         return null;
@@ -28,11 +31,11 @@ describe("getMarketplaceBaseUrl", () => {
     );
   });
 
-  test("defaults to /api in dev/test", () => {
+  it("defaults to /api in dev/test", () => {
     expect(getMarketplaceBaseUrl({ env: { DEV: true, PROD: false } })).toBe("/api");
   });
 
-  test("defaults to hosted marketplace in production builds", () => {
+  it("defaults to hosted marketplace in production builds", () => {
     expect(getMarketplaceBaseUrl({ env: { PROD: true } })).toBe("https://marketplace.formula.app/api");
   });
 });
