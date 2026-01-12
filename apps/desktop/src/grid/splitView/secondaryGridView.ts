@@ -527,6 +527,7 @@ export class SecondaryGridView {
     const scroll = this.grid.getScroll();
     this.container.dataset.scrollX = String(scroll.x);
     this.container.dataset.scrollY = String(scroll.y);
+    this.repositionEditor();
   }
 
   private onAxisSizeChange(change: GridAxisSizeChange): void {
