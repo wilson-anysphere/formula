@@ -99,5 +99,24 @@ test.describe("in-cell editor F4 toggles absolute/relative references", () => {
       await page.keyboard.press("F4");
       await expect(editor).toHaveValue("=A1+B1");
     });
+
+    test(`F4 toggles sheet-qualified range references (${mode})`, async ({ page }) => {
+      await gotoDesktop(page, `/?grid=${mode}`);
+      await waitForIdle(page);
+
+      // Select B1 (avoid self-reference in A1).
+      await page.click("#grid", { position: { x: 160, y: 40 } });
+      await expect(page.getByTestId("active-cell")).toHaveText("B1");
+
+      await page.keyboard.press("F2");
+      const editor = page.locator("textarea.cell-editor");
+      await expect(editor).toBeVisible();
+      await editor.fill("='My Sheet'!A1:B2");
+      await editor.focus();
+      await page.keyboard.press("ArrowLeft"); // inside B2
+
+      await page.keyboard.press("F4");
+      await expect(editor).toHaveValue("='My Sheet'!$A$1:$B$2");
+    });
   }
 });

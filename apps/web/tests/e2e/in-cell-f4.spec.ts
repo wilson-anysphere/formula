@@ -94,3 +94,25 @@ test("in-cell editor F4 is a no-op when the selection is not contained within a 
   await editor.press("F4");
   await expect(editor).toHaveValue("=A1+B1");
 });
+
+test("in-cell editor F4 toggles sheet-qualified range references", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("engine-status")).toContainText("ready", { timeout: 30_000 });
+
+  const selectionCanvas = page.getByTestId("canvas-grid-selection");
+
+  // Click B1 (row 1, col 2) so the formula can reference A1 without being self-referential.
+  await selectionCanvas.click({ position: { x: 250, y: 31 } });
+  await expect(page.getByTestId("active-address")).toHaveText("B1");
+
+  await page.keyboard.type("=");
+  const editor = page.getByTestId("cell-editor");
+  await expect(editor).toBeVisible();
+  await editor.fill("='My Sheet'!A1:B2");
+
+  // Place caret inside the reference token.
+  await editor.press("ArrowLeft");
+
+  await editor.press("F4");
+  await expect(editor).toHaveValue("='My Sheet'!$A$1:$B$2");
+});
