@@ -157,6 +157,7 @@ impl Default for Sheet {
             cells: HashMap::new(),
             tables: Vec::new(),
             names: HashMap::new(),
+            // Default to Excel-compatible sheet bounds.
             row_count: EXCEL_MAX_ROWS,
             col_count: EXCEL_MAX_COLS,
         }
@@ -3841,7 +3842,7 @@ impl Engine {
             .calc_graph
             .precedents_of(cell_id)
             .into_iter()
-            .map(precedent_to_node)
+            .map(|precedent| precedent_to_node(precedent, &self.workbook))
             .collect();
         if let Some(cell) = self.workbook.get_cell(key) {
             if let Some(compiled) = cell.compiled.as_ref() {
@@ -3905,7 +3906,7 @@ impl Engine {
                 crate::graph::DependentEdgeKind::DirectCell => DirtyReason::Cell(from),
                 crate::graph::DependentEdgeKind::Range(range) => DirtyReason::ViaRange {
                     from,
-                    range: sheet_range_to_node(range),
+                    range: sheet_range_to_node(range, &self.workbook),
                 },
             };
             queue.push_back((reason, dep));
@@ -3924,7 +3925,7 @@ impl Engine {
                     crate::graph::DependentEdgeKind::DirectCell => DirtyReason::Cell(cell),
                     crate::graph::DependentEdgeKind::Range(range) => DirtyReason::ViaRange {
                         from: cell,
-                        range: sheet_range_to_node(range),
+                        range: sheet_range_to_node(range, &self.workbook),
                     },
                 };
                 queue.push_back((next_reason, dep));
@@ -3982,7 +3983,7 @@ impl Engine {
                         .calc_graph
                         .precedents_of(cell_id)
                         .into_iter()
-                        .map(precedent_to_node)
+                        .map(|precedent| precedent_to_node(precedent, &self.workbook))
                         .collect();
                     if let Some(cell) = self.workbook.get_cell(key) {
                         if let Some(compiled) = cell.compiled.as_ref() {
@@ -4492,21 +4493,38 @@ fn sheet_id_from_graph(sheet: u32) -> SheetId {
     usize::try_from(sheet).expect("sheet id exceeds usize")
 }
 
-fn sheet_range_to_node(range: SheetRange) -> PrecedentNode {
+fn sheet_range_to_node(range: SheetRange, workbook: &Workbook) -> PrecedentNode {
+    let sheet = sheet_id_from_graph(range.sheet_id);
+    let (rows, cols) = workbook
+        .sheets
+        .get(sheet)
+        .map(|s| (s.row_count, s.col_count))
+        .unwrap_or((EXCEL_MAX_ROWS, EXCEL_MAX_COLS));
+
+    let mut end_row = range.range.end.row;
+    let mut end_col = range.range.end.col;
+    // `u32::MAX` is reserved as a "sheet end" sentinel for full-row/full-column references.
+    if end_row == u32::MAX {
+        end_row = rows.saturating_sub(1);
+    }
+    if end_col == u32::MAX {
+        end_col = cols.saturating_sub(1);
+    }
+
     PrecedentNode::Range {
-        sheet: sheet_id_from_graph(range.sheet_id),
+        sheet,
         start: CellAddr {
             row: range.range.start.row,
             col: range.range.start.col,
         },
         end: CellAddr {
-            row: range.range.end.row,
-            col: range.range.end.col,
+            row: end_row,
+            col: end_col,
         },
     }
 }
 
-fn precedent_to_node(precedent: Precedent) -> PrecedentNode {
+fn precedent_to_node(precedent: Precedent, workbook: &Workbook) -> PrecedentNode {
     match precedent {
         Precedent::Cell(cell) => PrecedentNode::Cell {
             sheet: sheet_id_from_graph(cell.sheet_id),
@@ -4515,7 +4533,7 @@ fn precedent_to_node(precedent: Precedent) -> PrecedentNode {
                 col: cell.cell.col,
             },
         },
-        Precedent::Range(range) => sheet_range_to_node(range),
+        Precedent::Range(range) => sheet_range_to_node(range, workbook),
     }
 }
 

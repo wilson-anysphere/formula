@@ -5,11 +5,12 @@ use crate::eval::ast::{
 };
 use crate::value::ErrorKind;
 use crate::SheetRef;
+use formula_model::{EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 
-/// Excel-compatible column limit (0-indexed).
+/// Excel column limit (0-indexed).
 ///
-/// The engine data model assumes a fixed 16,384-column grid.
-const MAX_COL: u32 = 16_383;
+/// The engine data model assumes a fixed 16,384-column grid for now.
+const MAX_COL: u32 = EXCEL_MAX_COLS - 1;
 
 /// Maximum row index supported by the engine (0-indexed).
 ///
@@ -19,9 +20,8 @@ const MAX_ROW: u32 = u32::MAX;
 
 /// Excel-compatible row limit (0-indexed, 1,048,576 rows).
 ///
-/// Used for constructs that represent an "entire column" reference like `A:A` and as a fallback
-/// when sheet dimensions are unknown.
-const EXCEL_MAX_ROW: u32 = 1_048_575;
+/// Used as a fallback when sheet dimensions are unknown (e.g. external workbook references).
+const EXCEL_MAX_ROW: u32 = EXCEL_MAX_ROWS - 1;
 
 fn sheet_dim_for_ref(
     sheet: &SheetReference<usize>,
