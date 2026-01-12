@@ -1388,6 +1388,17 @@ fn format_namex_ref(
     }
 
     match sb.kind {
+        // Internal workbook EXTERNNAME (rare, but some producers use PtgNameX even for internal
+        // sheet-scoped names). If a usable internal sheet prefix is available via EXTERNSHEET,
+        // include it so the rendered formula matches Excel’s `Sheet1!Name` style.
+        SupBookKind::Internal => {
+            if sheet_ref_available {
+                if let Ok(prefix) = format_sheet_ref(ixti, ctx) {
+                    return Ok(format!("{prefix}{extern_name}"));
+                }
+            }
+            Ok(extern_name.clone())
+        }
         // Workbook- or sheet-scoped external name in another workbook.
         SupBookKind::ExternalWorkbook => {
             // If the EXTERNSHEET entry has a meaningful sheet ref (itab values), format
@@ -3103,6 +3114,44 @@ mod tests {
         let rgce = [0x39, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00];
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "'[Book2.xlsx]Sheet1'!MyName");
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_ptg_namex_internal_sheet_scoped_name() {
+        let sheet_names: Vec<String> = vec!["Sheet1".to_string()];
+        let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
+            supbook: 0,
+            itab_first: 0,
+            itab_last: 0,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+
+        let supbooks = vec![SupBookInfo {
+            ctab: 0,
+            virt_path: "\u{0001}".to_string(),
+            kind: SupBookKind::Internal,
+            workbook_name: None,
+            sheet_names: Vec::new(),
+            extern_names: vec!["MyName".to_string()],
+        }];
+
+        let ctx = RgceDecodeContext {
+            codepage: 1252,
+            sheet_names: &sheet_names,
+            externsheet: &externsheet,
+            supbooks: &supbooks,
+            defined_names: &defined_names,
+        };
+
+        let rgce = [0x39, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "Sheet1!MyName");
         assert!(
             decoded.warnings.is_empty(),
             "warnings={:?}",
