@@ -411,6 +411,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn decode_ansi_falls_back_to_lossless_mapping_for_unknown_codepage() {
+        let bytes = [0x41u8, 0x80, 0xFF];
+        let expected: String = bytes.iter().copied().map(char::from).collect();
+        let actual = decode_ansi(9999, &bytes);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
     fn parses_biff8_unicode_string_continued_across_fragments() {
         let s = "ABCDE";
 
