@@ -1062,7 +1062,19 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   });
 
   const disposeRecentsTracker = installCommandRecentsTracker(commandRegistry, storage, {
-    ignoreCommandIds: ["workbench.showCommandPalette", "clipboard.copy", "clipboard.cut", "clipboard.paste"],
+    ignoreCommandIds: [
+      "workbench.showCommandPalette",
+      // Clipboard commands are extremely high frequency (via keybindings/menus) and would
+      // otherwise dominate the "RECENT" group.
+      "clipboard.copy",
+      "clipboard.cut",
+      "clipboard.paste",
+      "clipboard.pasteSpecial",
+      "clipboard.pasteSpecial.all",
+      "clipboard.pasteSpecial.values",
+      "clipboard.pasteSpecial.formulas",
+      "clipboard.pasteSpecial.formats",
+    ],
   });
 
   const onOverlayClick = (e: MouseEvent) => {
