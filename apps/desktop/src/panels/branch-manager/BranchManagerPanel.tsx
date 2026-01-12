@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 
 import { t, tWithVars } from "../../i18n/index.js";
 import * as nativeDialogs from "../../tauri/nativeDialogs.js";
+import { showInputBox } from "../../extensions/ui.js";
 
 /**
  * The desktop app wires this panel to the real document controller + branch
@@ -119,10 +120,11 @@ export function BranchManagerPanel({
               <button
                 disabled={!canManage}
                 onClick={async () => {
-                  const newName = window.prompt(t("branchManager.prompt.rename"), b.name);
-                  if (!newName || newName.trim() === b.name) return;
+                  const newName = await showInputBox({ prompt: t("branchManager.prompt.rename"), value: b.name });
+                  const trimmed = newName?.trim();
+                  if (!trimmed || trimmed === b.name) return;
                   try {
-                    await branchService.renameBranch(actor, { oldName: b.name, newName: newName.trim() });
+                    await branchService.renameBranch(actor, { oldName: b.name, newName: trimmed });
                     await reload();
                   } catch (e) {
                     setError((e as Error).message);

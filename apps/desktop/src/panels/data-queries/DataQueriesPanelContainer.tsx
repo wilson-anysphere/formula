@@ -13,6 +13,7 @@ import {
   onDesktopPowerQueryServiceChanged,
 } from "../../power-query/service.js";
 import * as nativeDialogs from "../../tauri/nativeDialogs.js";
+import { showInputBox } from "../../extensions/ui.js";
 
 import { PanelIds } from "../panelRegistry.js";
 
@@ -565,11 +566,10 @@ export function DataQueriesPanelContainer(props: Props) {
   const setHttpHeaderCredential = useCallback(
     async (url: string) => {
       if (!credentialStore) return;
-      if (typeof window === "undefined" || typeof window.prompt !== "function") return;
       setGlobalError(null);
-      const headerName = window.prompt("Header name", "Authorization")?.trim();
+      const headerName = (await showInputBox({ prompt: "Header name", value: "Authorization" }))?.trim();
       if (!headerName) return;
-      const headerValue = window.prompt(`Value for header '${headerName}'`, "") ?? "";
+      const headerValue = (await showInputBox({ prompt: `Value for header '${headerName}'`, value: "" })) ?? "";
       if (!headerValue.trim()) return;
       try {
         const scope = safeHttpScope(url);
@@ -629,7 +629,6 @@ export function DataQueriesPanelContainer(props: Props) {
   const setSqlCredential = useCallback(
     async (connection: unknown) => {
       if (!credentialStore) return;
-      if (typeof window === "undefined" || typeof window.prompt !== "function") return;
       setGlobalError(null);
 
       const scope = resolveSqlScope(connection);
@@ -639,11 +638,11 @@ export function DataQueriesPanelContainer(props: Props) {
       }
 
       const defaultUser = inferSqlUser(connection);
-      const userValue = window.prompt("Database user (optional)", defaultUser) ?? null;
+      const userValue = await showInputBox({ prompt: "Database user (optional)", value: defaultUser });
       if (userValue == null) return;
       const user = userValue.trim();
 
-      const passwordValue = window.prompt("Database password", "") ?? null;
+      const passwordValue = await showInputBox({ prompt: "Database password", value: "", type: "password" });
       if (passwordValue == null) return;
       const password = passwordValue;
       if (!password.trim()) return;
@@ -772,16 +771,21 @@ export function DataQueriesPanelContainer(props: Props) {
   const closeProviderEditor = useCallback(() => setEditingProvider(null), []);
 
   const resolvePkceRedirect = useCallback(() => {
-    if (!pendingPkce) return;
-    if (supportsDesktopOAuthRedirectCapture(pendingPkce.redirectUri)) return;
-    if (typeof window === "undefined" || typeof window.prompt !== "function") return;
-    const redirectUrl = window.prompt(`Paste the full redirect URL (starts with ${pendingPkce.redirectUri})`, "");
-    if (!redirectUrl) return;
-    if (!matchesRedirectUri(pendingPkce.redirectUri, redirectUrl)) {
-      setGlobalError(`Redirect URL does not match expected redirect URI (${pendingPkce.redirectUri}).`);
-      return;
-    }
-    oauthBroker.resolveRedirect(pendingPkce.redirectUri, redirectUrl);
+    void (async () => {
+      if (!pendingPkce) return;
+      if (supportsDesktopOAuthRedirectCapture(pendingPkce.redirectUri)) return;
+      const redirectUrl = (await showInputBox({
+        prompt: `Paste the full redirect URL (starts with ${pendingPkce.redirectUri})`,
+        value: "",
+        type: "textarea",
+      }))?.trim();
+      if (!redirectUrl) return;
+      if (!matchesRedirectUri(pendingPkce.redirectUri, redirectUrl)) {
+        setGlobalError(`Redirect URL does not match expected redirect URI (${pendingPkce.redirectUri}).`);
+        return;
+      }
+      oauthBroker.resolveRedirect(pendingPkce.redirectUri, redirectUrl);
+    })();
   }, [pendingPkce]);
 
   const cancelPkceRedirect = useCallback(() => {

@@ -111,10 +111,6 @@ describe("MarketplacePanel", () => {
     toastRoot.id = "toast-root";
     document.body.appendChild(toastRoot);
 
-    // jsdom's default confirm() may be unimplemented; override it.
-    // eslint-disable-next-line no-global-assign
-    (window as any).confirm = vi.fn(() => false);
-
     const container = document.createElement("div");
     document.body.appendChild(container);
 
@@ -179,6 +175,13 @@ describe("MarketplacePanel", () => {
     const installButton = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Install");
     expect(installButton).toBeInstanceOf(HTMLButtonElement);
     installButton!.click();
+
+    // Marketplace install confirmations use the non-blocking <dialog>-based quick pick in web
+    // builds (instead of the browser's confirm dialog); cancel the prompt.
+    await waitFor(() => Boolean(document.querySelector('dialog[data-testid="quick-pick"]')));
+    const cancel = document.querySelector<HTMLButtonElement>('[data-testid="quick-pick-item-1"]');
+    expect(cancel).toBeInstanceOf(HTMLButtonElement);
+    cancel!.click();
 
     await waitFor(() => Boolean(document.querySelector('[data-testid="toast"][data-type="error"]')));
     const toast = document.querySelector<HTMLElement>('[data-testid="toast"][data-type="error"]');

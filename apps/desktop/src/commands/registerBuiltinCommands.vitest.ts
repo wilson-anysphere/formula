@@ -130,12 +130,12 @@ describe("registerBuiltinCommands: sheet navigation", () => {
     const app = {
       getDocument: () => doc,
       getCurrentSheetId: () => current,
+      isEditing: () => false,
       activateSheet: (id: string) => {
         current = id;
         activated.push(id);
       },
       focusAfterSheetNavigation: () => {},
-      isEditing: () => false,
     } as any;
 
     registerBuiltinCommands({ commandRegistry, app, layoutController });

@@ -1,0 +1,75 @@
+// @vitest-environment jsdom
+import { describe, expect, it } from "vitest";
+
+import { showInputBox } from "./ui";
+
+describe("extensions/ui showInputBox", () => {
+  it("resolves with input value when OK is clicked", async () => {
+    const promise = showInputBox({ prompt: "Name", value: "default" });
+    const dialog = document.querySelector('dialog[data-testid="input-box"]') as HTMLDialogElement | null;
+    expect(dialog).not.toBeNull();
+
+    const input = dialog!.querySelector('[data-testid="input-box-field"]') as HTMLInputElement | null;
+    expect(input).not.toBeNull();
+    input!.value = "hello";
+
+    const ok = dialog!.querySelector('[data-testid="input-box-ok"]') as HTMLButtonElement | null;
+    expect(ok).not.toBeNull();
+    ok!.click();
+
+    await expect(promise).resolves.toBe("hello");
+  });
+
+  it("resolves with null when Cancel is clicked", async () => {
+    const promise = showInputBox({ prompt: "Name", value: "default" });
+    const dialog = document.querySelector('dialog[data-testid="input-box"]') as HTMLDialogElement | null;
+    expect(dialog).not.toBeNull();
+
+    const cancel = dialog!.querySelector('[data-testid="input-box-cancel"]') as HTMLButtonElement | null;
+    expect(cancel).not.toBeNull();
+    cancel!.click();
+
+    await expect(promise).resolves.toBeNull();
+  });
+
+  it("supports password mode", async () => {
+    const promise = showInputBox({ prompt: "Password", value: "", type: "password" });
+    const dialog = document.querySelector('dialog[data-testid="input-box"]') as HTMLDialogElement | null;
+    expect(dialog).not.toBeNull();
+
+    const input = dialog!.querySelector('[data-testid="input-box-field"]') as HTMLInputElement | null;
+    expect(input).not.toBeNull();
+    expect(input!.tagName).toBe("INPUT");
+    expect(input!.type).toBe("password");
+
+    input!.value = "secret";
+
+    const ok = dialog!.querySelector('[data-testid="input-box-ok"]') as HTMLButtonElement | null;
+    ok!.click();
+
+    await expect(promise).resolves.toBe("secret");
+  });
+
+  it("supports textarea mode (Ctrl+Enter submits)", async () => {
+    const promise = showInputBox({ prompt: "JSON", value: "{}", type: "textarea" });
+    const dialog = document.querySelector('dialog[data-testid="input-box"]') as HTMLDialogElement | null;
+    expect(dialog).not.toBeNull();
+
+    const textarea = dialog!.querySelector('[data-testid="input-box-field"]') as HTMLTextAreaElement | null;
+    expect(textarea).not.toBeNull();
+    expect(textarea!.tagName).toBe("TEXTAREA");
+
+    textarea!.value = '{"a": 1}';
+    textarea!.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+
+    await expect(promise).resolves.toBe('{"a": 1}');
+  });
+});
+

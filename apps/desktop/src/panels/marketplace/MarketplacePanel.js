@@ -10,7 +10,7 @@ import {
   removeSeedPanelsForExtension,
   setSeedPanelsForExtension,
 } from "../../extensions/contributedPanelsSeedStore.js";
-import { showToast } from "../../extensions/ui.js";
+import { showQuickPick, showToast } from "../../extensions/ui.js";
 import * as nativeDialogs from "../../tauri/nativeDialogs.js";
 
 function tryShowToast(message, type = "info") {
@@ -256,15 +256,27 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
               try {
                 const record = await extensionManager.install(item.id, null, {
                   confirm: async (warning) => {
-                    // Best-effort: use a native dialog in desktop builds (with a safe web fallback).
-                    const hasTauriConfirm = typeof globalThis?.__TAURI__?.dialog?.confirm === "function";
-                    const hasWindowConfirm = typeof window?.confirm === "function";
-                    if (!hasTauriConfirm && !hasWindowConfirm) return true;
+                    const message = `${warning.message}\n\nProceed with install?`;
+
+                    // Prefer native dialogs in desktop builds when available.
                     try {
-                      return await nativeDialogs.confirm(`${warning.message}\n\nProceed with install?`);
+                      if (typeof globalThis?.__TAURI__?.dialog?.confirm === "function") {
+                        return await nativeDialogs.confirm(message, { title: "Install extension" });
+                      }
                     } catch {
-                      return true;
+                      // ignore
                     }
+
+                    // Web builds: use the non-blocking <dialog>-based picker.
+                    if (typeof document === "undefined" || !document.body) return true;
+                    const ok = await showQuickPick(
+                      [
+                        { label: "Proceed", value: true },
+                        { label: "Cancel", value: false },
+                      ],
+                      { placeHolder: message },
+                    );
+                    return ok ?? false;
                   },
                 });
                 if (Array.isArray(record?.warnings)) {

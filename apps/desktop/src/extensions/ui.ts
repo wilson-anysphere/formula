@@ -62,9 +62,19 @@ export function showToast(message: string, type: MessageType = "info", options: 
   });
 }
 
-type InputBoxOptions = { prompt?: string; value?: string; placeHolder?: string };
+export type InputBoxOptions = {
+  prompt?: string;
+  value?: string;
+  placeHolder?: string;
+  type?: "text" | "password" | "textarea";
+  rows?: number;
+  okLabel?: string;
+  cancelLabel?: string;
+};
 
 export async function showInputBox(options: InputBoxOptions = {}): Promise<string | null> {
+  if (typeof document === "undefined" || !document.body) return null;
+
   const dialog = document.createElement("dialog");
   dialog.className = "dialog extensions-ui";
   dialog.dataset.testid = "input-box";
@@ -75,33 +85,52 @@ export async function showInputBox(options: InputBoxOptions = {}): Promise<strin
   title.id = nextExtensionsUiDialogTitleId("input-box");
   dialog.setAttribute("aria-labelledby", title.id);
 
-  const input = document.createElement("input");
-  input.type = "text";
-  input.className = "dialog__field";
-  input.value = options.value ?? "";
-  if (options.placeHolder) input.placeholder = options.placeHolder;
-  // The dialog title doubles as the input label.
-  input.setAttribute("aria-labelledby", title.id);
-  input.dataset.testid = "input-box-field";
+  const mode = options.type ?? "text";
+  const field: HTMLInputElement | HTMLTextAreaElement = (() => {
+    if (mode === "textarea") {
+      const textarea = document.createElement("textarea");
+      textarea.className = "dialog__field";
+      textarea.value = options.value ?? "";
+      if (options.placeHolder) textarea.placeholder = options.placeHolder;
+      textarea.rows = Math.max(3, options.rows ?? 10);
+      textarea.style.resize = "vertical";
+      textarea.style.fontFamily =
+        "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
+      // The dialog title doubles as the textarea label.
+      textarea.setAttribute("aria-labelledby", title.id);
+      textarea.dataset.testid = "input-box-field";
+      return textarea;
+    }
+
+    const input = document.createElement("input");
+    input.type = mode === "password" ? "password" : "text";
+    input.className = "dialog__field";
+    input.value = options.value ?? "";
+    if (options.placeHolder) input.placeholder = options.placeHolder;
+    // The dialog title doubles as the input label.
+    input.setAttribute("aria-labelledby", title.id);
+    input.dataset.testid = "input-box-field";
+    return input;
+  })();
 
   const controls = document.createElement("div");
   controls.className = "dialog__controls";
 
   const cancelBtn = document.createElement("button");
   cancelBtn.type = "button";
-  cancelBtn.textContent = "Cancel";
+  cancelBtn.textContent = options.cancelLabel ?? "Cancel";
   cancelBtn.dataset.testid = "input-box-cancel";
 
   const okBtn = document.createElement("button");
   okBtn.type = "button";
-  okBtn.textContent = "OK";
+  okBtn.textContent = options.okLabel ?? "OK";
   okBtn.dataset.testid = "input-box-ok";
 
   controls.appendChild(cancelBtn);
   controls.appendChild(okBtn);
 
   dialog.appendChild(title);
-  dialog.appendChild(input);
+  dialog.appendChild(field);
   dialog.appendChild(controls);
 
   document.body.appendChild(dialog);
@@ -116,7 +145,7 @@ export async function showInputBox(options: InputBoxOptions = {}): Promise<strin
       () => {
         const returnValue = String((dialog as any).returnValue ?? dialog.returnValue ?? "");
         cleanup();
-        resolve(returnValue === "ok" ? input.value : null);
+        resolve(returnValue === "ok" ? field.value : null);
       },
       { once: true },
     );
@@ -130,9 +159,18 @@ export async function showInputBox(options: InputBoxOptions = {}): Promise<strin
     okBtn.addEventListener("click", () => closeDialog(dialog, "ok"));
 
     showModal(dialog);
-    input.focus();
+    field.focus();
 
-    input.addEventListener("keydown", (e) => {
+    field.addEventListener("keydown", (e) => {
+      if (mode === "textarea") {
+        // Let enter insert a newline; allow Ctrl/Cmd+Enter to submit.
+        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          closeDialog(dialog, "ok");
+        }
+        return;
+      }
+
       if (e.key === "Enter") {
         e.preventDefault();
         closeDialog(dialog, "ok");
@@ -150,6 +188,8 @@ export async function showQuickPick<T>(
   items: QuickPickItem<T>[],
   options: { placeHolder?: string } = {},
 ): Promise<T | null> {
+  if (typeof document === "undefined" || !document.body) return null;
+
   const dialog = document.createElement("dialog");
   dialog.className = "dialog extensions-ui";
   dialog.dataset.testid = "quick-pick";

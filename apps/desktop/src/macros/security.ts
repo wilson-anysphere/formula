@@ -1,5 +1,6 @@
 import type { MacroPermission, MacroPermissionRequest, MacroSecurityStatus, MacroTrustDecision } from "./types";
 import * as nativeDialogs from "../tauri/nativeDialogs.js";
+import { showQuickPick } from "../extensions/ui.js";
 
 export interface MacroTrustDecisionPrompt {
   workbookId: string;
@@ -47,45 +48,25 @@ function describeSignature(status: MacroSecurityStatus): string {
 }
 
 /**
- * A minimal built-in controller that uses `window.confirm` / `window.prompt`.
+ * A minimal built-in controller that uses non-blocking dialogs.
  * Desktop builds should replace this with an app-native modal.
  */
 export class DefaultMacroSecurityController implements MacroSecurityController {
   async requestTrustDecision(prompt: MacroTrustDecisionPrompt): Promise<MacroTrustDecision | null> {
     const workbook = describeWorkbook(prompt.status, prompt.workbookId);
     const signature = describeSignature(prompt.status);
-    const message =
-      `This workbook contains VBA macros.\n\n` +
-      `Workbook: ${workbook}\n` +
-      `Macro: ${prompt.macroId}\n` +
-      `Signature: ${signature}\n` +
-      `Current Trust Center decision: ${prompt.status.trust}\n\n` +
-      `Choose a Trust Center decision:\n` +
-      `  1) blocked\n` +
-      `  2) trusted_once\n` +
-      `  3) trusted_always\n` +
-      `  4) trusted_signed_only\n\n` +
-      `Enter 1-4:`;
-
-    const input = window.prompt(message, "2");
-    if (input == null) return null;
-    const value = input.trim();
-    switch (value) {
-      case "1":
-      case "blocked":
-        return "blocked";
-      case "2":
-      case "trusted_once":
-        return "trusted_once";
-      case "3":
-      case "trusted_always":
-        return "trusted_always";
-      case "4":
-      case "trusted_signed_only":
-        return "trusted_signed_only";
-      default:
-        return null;
-    }
+    const decision = await showQuickPick<MacroTrustDecision>(
+      [
+        { label: "Blocked", value: "blocked", description: "Do not run macros" },
+        { label: "Trust once", value: "trusted_once", description: "Allow macros for this run only" },
+        { label: "Trust always", value: "trusted_always", description: "Always allow macros for this workbook" },
+        { label: "Trust signed only", value: "trusted_signed_only", description: "Only allow signed macros" },
+      ],
+      {
+        placeHolder: `Macro Trust Center: ${prompt.macroId} (${workbook}) · signature ${signature}`,
+      },
+    );
+    return decision;
   }
 
   async requestPermissions(prompt: MacroPermissionPrompt): Promise<MacroPermission[] | null> {

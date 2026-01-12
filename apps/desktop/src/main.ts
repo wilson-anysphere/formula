@@ -4968,10 +4968,10 @@ if (
             openScriptEditor(generateTypeScriptMacro(actions));
           };
 
-          saveButton.onclick = async () => {
-            const actions = currentActions();
-            if (actions.length === 0) return;
-            const name = window.prompt("Macro name:", "Recorded Macro");
+           saveButton.onclick = async () => {
+             const actions = currentActions();
+             if (actions.length === 0) return;
+            const name = await showInputBox({ prompt: "Macro name:", value: "Recorded Macro" });
             if (!name) return;
             saveScriptsToStorage(name, { ts: generateTypeScriptMacro(actions), py: generatePythonMacro(actions) });
             await refreshRunner();

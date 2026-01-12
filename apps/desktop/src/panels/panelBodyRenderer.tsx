@@ -31,7 +31,8 @@ import { BranchService } from "../../../../packages/versioning/branches/src/Bran
 import { YjsBranchStore } from "../../../../packages/versioning/branches/src/store/YjsBranchStore.js";
 import { applyDocumentStateToYjsDoc, yjsDocToDocumentState } from "../../../../packages/versioning/branches/src/yjs/index.js";
 import { BRANCHING_APPLY_ORIGIN } from "../collab/conflict-monitors.js";
-import { getMarketplaceBaseUrl } from "./marketplace/getMarketplaceBaseUrl.js";
+import { getMarketplaceBaseUrl } from "./marketplace/getMarketplaceBaseUrl.ts";
+import { showInputBox } from "../extensions/ui.js";
 import * as nativeDialogs from "../tauri/nativeDialogs.js";
 
 function formatVersionTimestamp(timestampMs: number): string {
@@ -126,7 +127,7 @@ function CollabVersionHistoryPanel({ session }: { session: CollabSession }) {
         <button
           disabled={busy}
           onClick={async () => {
-            const name = window.prompt("Checkpoint name?");
+            const name = await showInputBox({ prompt: "Checkpoint name?" });
             if (!name || !name.trim()) return;
             try {
               setBusy(true);

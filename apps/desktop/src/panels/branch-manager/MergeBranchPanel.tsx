@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 
 import { t, tWithVars } from "../../i18n/index.js";
 import type { SheetNameResolver } from "../../sheet/sheetNameResolver";
+import { showInputBox } from "../../extensions/ui.js";
 
 export type Cell = { value?: unknown; formula?: string; format?: Record<string, unknown> };
 
@@ -276,20 +277,38 @@ export function MergeBranchPanel({
                   {t("branchMerge.chooseTheirs")}
                 </button>
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     try {
                       const manual =
                         c.type === "move"
-                          ? window.prompt(t("branchMerge.prompt.moveDestination"), c.ours?.to ?? "")
+                          ? await showInputBox({
+                              prompt: t("branchMerge.prompt.moveDestination"),
+                              value: c.ours?.to ?? "",
+                            })
                           : c.type === "sheet" && c.reason === "rename"
-                            ? window.prompt(t("branchMerge.prompt.manualJson"), String(c.ours ?? ""))
+                            ? await showInputBox({
+                                prompt: t("branchMerge.prompt.manualJson"),
+                                value: String(c.ours ?? ""),
+                              })
                             : c.type === "sheet" && c.reason === "order"
-                              ? window.prompt(t("branchMerge.prompt.manualJson"), JSON.stringify(c.ours ?? []))
+                              ? await showInputBox({
+                                  prompt: t("branchMerge.prompt.manualJson"),
+                                  value: JSON.stringify(c.ours ?? [], null, 2),
+                                  type: "textarea",
+                                })
                               : c.type === "sheet" && c.reason === "presence"
                                 ? // Presence conflicts can embed large cell maps; avoid
                                   // pre-populating the prompt with a giant JSON blob.
-                                  window.prompt(t("branchMerge.prompt.manualJson"), "")
-                                : window.prompt(t("branchMerge.prompt.manualJson"), JSON.stringify(c.ours ?? null));
+                                  await showInputBox({
+                                    prompt: t("branchMerge.prompt.manualJson"),
+                                    value: "",
+                                    type: "textarea",
+                                  })
+                                : await showInputBox({
+                                    prompt: t("branchMerge.prompt.manualJson"),
+                                    value: JSON.stringify(c.ours ?? null, null, 2),
+                                    type: "textarea",
+                                  });
 
                       if (manual === null) return;
 
@@ -313,7 +332,7 @@ export function MergeBranchPanel({
                         resolution.manualCommentValue = manual ? JSON.parse(manual) : null;
                       }
 
-                      setResolutions(new Map(resolutions).set(idx, resolution));
+                      setResolutions((prev) => new Map(prev).set(idx, resolution));
                     } catch (e) {
                       setError((e as Error).message);
                     }

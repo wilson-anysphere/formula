@@ -4,6 +4,7 @@ import { parseCronExpression, type Query } from "@formula/power-query";
 
 import { parseA1 } from "../../document/coords.js";
 import * as nativeDialogs from "../../tauri/nativeDialogs.js";
+import { showInputBox } from "../../extensions/ui.js";
 
 import type { QuerySheetDestination } from "../../power-query/applyToDocument.js";
 import { getContextForDocument } from "../../power-query/engine.js";
@@ -61,10 +62,8 @@ async function pickFile(extensions: string[]): Promise<string | null> {
     return result ?? null;
   }
 
-  if (typeof window !== "undefined" && typeof window.prompt === "function") {
-    const path = window.prompt(`Enter path to ${extensions.join("/").toUpperCase()} file`, "");
-    return path && path.trim() ? path.trim() : null;
-  }
+  const path = await showInputBox({ prompt: `Enter path to ${extensions.join("/").toUpperCase()} file`, value: "" });
+  return path && path.trim() ? path.trim() : null;
 
   return null;
 }
@@ -341,10 +340,7 @@ export function QueryEditorPanelContainer(props: Props) {
     const path = await pickFile(["json"]);
     if (!path) return;
 
-    const jsonPath =
-      typeof window !== "undefined" && typeof window.prompt === "function"
-        ? window.prompt("Optional JSON path (e.g. data.items)", "") ?? ""
-        : "";
+    const jsonPath = (await showInputBox({ prompt: "Optional JSON path (e.g. data.items)", value: "" })) ?? "";
 
     persistQuery({ ...query, source: { type: "json", path, jsonPath: jsonPath.trim() || undefined } });
   }
@@ -358,8 +354,7 @@ export function QueryEditorPanelContainer(props: Props) {
 
   async function setWebSource(): Promise<void> {
     setActionError(null);
-    const url =
-      typeof window !== "undefined" && typeof window.prompt === "function" ? window.prompt("Enter URL (GET)", "https://")?.trim() : null;
+    const url = (await showInputBox({ prompt: "Enter URL (GET)", value: "https://" }))?.trim();
     if (!url) return;
     persistQuery({ ...query, source: { type: "api", url, method: "GET" } });
   }
@@ -381,10 +376,7 @@ export function QueryEditorPanelContainer(props: Props) {
       const currentMs =
         query.refreshPolicy?.type === "interval" && typeof query.refreshPolicy.intervalMs === "number" ? query.refreshPolicy.intervalMs : 60_000;
 
-      const input =
-        typeof window !== "undefined" && typeof window.prompt === "function"
-          ? window.prompt("Refresh interval (milliseconds)", String(currentMs))
-          : String(currentMs);
+      const input = await showInputBox({ prompt: "Refresh interval (milliseconds)", value: String(currentMs) });
       if (input == null) return;
 
       const ms = Number(input);
@@ -399,10 +391,7 @@ export function QueryEditorPanelContainer(props: Props) {
 
     if (type === "cron") {
       const currentCron = query.refreshPolicy?.type === "cron" ? query.refreshPolicy.cron : "* * * * *";
-      const input =
-        typeof window !== "undefined" && typeof window.prompt === "function"
-          ? window.prompt("Cron schedule (minute hour day-of-month month day-of-week)", currentCron)
-          : currentCron;
+      const input = await showInputBox({ prompt: "Cron schedule (minute hour day-of-month month day-of-week)", value: currentCron });
       if (input == null) return;
 
       const cron = String(input).trim();
@@ -424,8 +413,7 @@ export function QueryEditorPanelContainer(props: Props) {
     const sheetId = activeSheetId();
     const existingDest = isQuerySheetDestination(current.destination) ? current.destination : null;
 
-    const startText =
-      typeof window !== "undefined" && typeof window.prompt === "function" ? window.prompt("Load query to sheet starting cell (A1)", "A1") : "A1";
+    const startText = await showInputBox({ prompt: "Load query to sheet starting cell (A1)", value: "A1" });
     if (startText == null) return;
 
     let start;
