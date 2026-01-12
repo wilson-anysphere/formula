@@ -391,6 +391,38 @@ test(
 );
 
 test(
+  "cursor AI policy guard rejects git submodules (gitlink entries) in a git repo",
+  { skip: !HAS_GIT },
+  async () => {
+    const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-git-submodule-fail-"));
+    try {
+      await writeFixtureFile(tmpRoot, "packages/example/src/index.js", "export const answer = 42;\n");
+
+      const init = spawnSync("git", ["init"], { cwd: tmpRoot, encoding: "utf8" });
+      assert.equal(init.status, 0, init.stderr);
+      const add = spawnSync("git", ["add", "packages/example/src/index.js"], { cwd: tmpRoot, encoding: "utf8" });
+      assert.equal(add.status, 0, add.stderr);
+
+      // Create a tracked gitlink entry without needing a real submodule checkout.
+      // `160000` is the git mode for submodules (gitlinks).
+      const gitlinkSha = "0123456789012345678901234567890123456789";
+      const addGitlink = spawnSync(
+        "git",
+        ["update-index", "--add", "--cacheinfo", "160000", gitlinkSha, "zz-submodule"],
+        { cwd: tmpRoot, encoding: "utf8" },
+      );
+      assert.equal(addGitlink.status, 0, addGitlink.stderr);
+
+      const result = await runPolicyApi(tmpRoot, { maxViolations: 1 });
+      assert.equal(result.ok, false);
+      assert.equal(result.violations[0]?.ruleId, "git-submodule");
+    } finally {
+      await fs.rm(tmpRoot, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
   "cursor AI policy guard rejects tracked symlinks in a large git repo (git grep path)",
   { skip: !HAS_GIT || process.platform === "win32" },
   async () => {
@@ -413,9 +445,21 @@ test(
       const add = spawnSync("git", ["add", "."], { cwd: tmpRoot, encoding: "utf8" });
       assert.equal(add.status, 0, add.stderr);
 
-      const result = await runPolicyApi(tmpRoot, { maxViolations: 1 });
+      // Also add a submodule gitlink entry to ensure the large-repo git-grep path still
+      // rejects submodules without relying on filesystem traversal.
+      const gitlinkSha = "0123456789012345678901234567890123456789";
+      const addGitlink = spawnSync(
+        "git",
+        ["update-index", "--add", "--cacheinfo", "160000", gitlinkSha, "zz-submodule"],
+        { cwd: tmpRoot, encoding: "utf8" },
+      );
+      assert.equal(addGitlink.status, 0, addGitlink.stderr);
+
+      const result = await runPolicyApi(tmpRoot, { maxViolations: 2 });
       assert.equal(result.ok, false);
-      assert.equal(result.violations[0]?.ruleId, "symlink");
+      assert.equal(result.violations.length, 2);
+      const ruleIds = new Set(result.violations.map((v) => v.ruleId));
+      assert.deepEqual(ruleIds, new Set(["symlink", "git-submodule"]));
     } finally {
       await fs.rm(tmpRoot, { recursive: true, force: true });
     }

@@ -614,7 +614,26 @@ export async function checkCursorAiPolicy(options = {}) {
     if (trackedToScan.length < GIT_GREP_MIN_FILES) {
       for (const entry of trackedToScan) {
         if (violations.length >= maxViolations) break;
-        await scanFile(path.join(rootDir, entry.path));
+        const rel = entry.path;
+        const relNormalized = rel.split(path.sep).join("/");
+        // Git mode can represent symlinks + submodules without relying on filesystem state.
+        if (String(entry.mode) === "120000") {
+          record({
+            file: relNormalized,
+            ruleId: "symlink",
+            message: "Forbidden: symlinked files/directories are not allowed (can bypass Cursor-only AI policy scans).",
+          });
+          continue;
+        }
+        if (String(entry.mode) === "160000") {
+          record({
+            file: relNormalized,
+            ruleId: "git-submodule",
+            message: "Forbidden: git submodules are not allowed (can bypass Cursor-only AI policy scans).",
+          });
+          continue;
+        }
+        await scanFile(path.join(rootDir, rel));
       }
       return { ok: violations.length === 0, violations };
     }
@@ -637,7 +656,25 @@ export async function checkCursorAiPolicy(options = {}) {
       // per-file Node scan so the guard remains correct.
       for (const entry of trackedToScan) {
         if (violations.length >= maxViolations) break;
-        await scanFile(path.join(rootDir, entry.path));
+        const rel = entry.path;
+        const relNormalized = rel.split(path.sep).join("/");
+        if (String(entry.mode) === "120000") {
+          record({
+            file: relNormalized,
+            ruleId: "symlink",
+            message: "Forbidden: symlinked files/directories are not allowed (can bypass Cursor-only AI policy scans).",
+          });
+          continue;
+        }
+        if (String(entry.mode) === "160000") {
+          record({
+            file: relNormalized,
+            ruleId: "git-submodule",
+            message: "Forbidden: git submodules are not allowed (can bypass Cursor-only AI policy scans).",
+          });
+          continue;
+        }
+        await scanFile(path.join(rootDir, rel));
       }
     } else {
       for (const match of matches) {
@@ -746,6 +783,16 @@ export async function checkCursorAiPolicy(options = {}) {
             file: relNormalized,
             ruleId: "symlink",
             message: "Forbidden: symlinked files/directories are not allowed (can bypass Cursor-only AI policy scans).",
+          });
+          continue;
+        }
+        // Git submodules (gitlinks) are also forbidden since `git ls-files` / `git grep`
+        // do not automatically recurse into them, and they can smuggle provider integrations.
+        if (String(entry.mode) === "160000") {
+          record({
+            file: relNormalized,
+            ruleId: "git-submodule",
+            message: "Forbidden: git submodules are not allowed (can bypass Cursor-only AI policy scans).",
           });
           continue;
         }
