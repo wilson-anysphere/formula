@@ -276,6 +276,53 @@ fn engine_accepts_localized_formulas_and_persists_canonical() {
 }
 
 #[test]
+fn engine_accepts_localized_external_data_formulas_and_persists_canonical() {
+    for (locale, localized_cube, localized_err) in [
+        (
+            &locale::DE_DE,
+            "=CUBEWERT(\"conn\";\"member\";1,5)",
+            "=#DATEN_ABRUFEN",
+        ),
+        (
+            &locale::FR_FR,
+            "=VALEUR.CUBE(\"conn\";\"member\";1,5)",
+            "=#OBTENTION_DONNEES",
+        ),
+        (
+            &locale::ES_ES,
+            "=VALOR.CUBO(\"conn\";\"member\";1,5)",
+            "=#OBTENIENDO_DATOS",
+        ),
+    ] {
+        let mut engine = Engine::new();
+
+        engine
+            .set_cell_formula_localized("Sheet1", "A1", "=RTD(\"my.server\";\"topic\";1,5)", locale)
+            .unwrap();
+        assert_eq!(
+            engine.get_cell_formula("Sheet1", "A1"),
+            Some("=RTD(\"my.server\",\"topic\",1.5)")
+        );
+
+        engine
+            .set_cell_formula_localized("Sheet1", "A2", localized_cube, locale)
+            .unwrap();
+        assert_eq!(
+            engine.get_cell_formula("Sheet1", "A2"),
+            Some("=CUBEVALUE(\"conn\",\"member\",1.5)")
+        );
+
+        engine
+            .set_cell_formula_localized("Sheet1", "A3", localized_err, locale)
+            .unwrap();
+        assert_eq!(
+            engine.get_cell_formula("Sheet1", "A3"),
+            Some("=#GETTING_DATA")
+        );
+    }
+}
+
+#[test]
 fn engine_accepts_localized_r1c1_formulas_and_persists_canonical_a1() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
