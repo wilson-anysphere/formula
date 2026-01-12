@@ -44,10 +44,12 @@ import { EyeIcon } from "./EyeIcon";
 import { EyeOffIcon } from "./EyeOffIcon";
 import { FileIcon } from "./FileIcon";
 import { ChartIcon } from "./ChartIcon";
+import { CodeIcon } from "./CodeIcon";
 import { FillColorIcon } from "./FillColorIcon";
 import { FillDownIcon } from "./FillDownIcon";
 import { FilterIcon } from "./FilterIcon";
 import { FindIcon } from "./FindIcon";
+import { FeedbackIcon } from "./FeedbackIcon";
 import { FolderIcon } from "./FolderIcon";
 import { FontColorIcon } from "./FontColorIcon";
 import { FontSizeIcon } from "./FontSizeIcon";
@@ -97,6 +99,8 @@ import { PlayIcon } from "./PlayIcon";
 import { PrintIcon } from "./PrintIcon";
 import { PrintAreaIcon } from "./PrintAreaIcon";
 import { PlusIcon } from "./PlusIcon";
+import { PlugIcon } from "./PlugIcon";
+import { PuzzleIcon } from "./PuzzleIcon";
 import { RedoIcon } from "./RedoIcon";
 import { RefreshIcon } from "./RefreshIcon";
 import { RecordIcon } from "./RecordIcon";
@@ -105,6 +109,7 @@ import { SaveIcon } from "./SaveIcon";
 import { SendBackwardIcon } from "./SendBackwardIcon";
 import { SettingsIcon } from "./SettingsIcon";
 import { ShareIcon } from "./ShareIcon";
+import { ShieldIcon } from "./ShieldIcon";
 import { ReplaceIcon } from "./ReplaceIcon";
 import { RowHeightIcon } from "./RowHeightIcon";
 import { SlidersIcon } from "./SlidersIcon";
@@ -136,6 +141,9 @@ import { WindowIcon } from "./WindowIcon";
 import { WrapTextIcon } from "./WrapTextIcon";
 import { ZoomInIcon } from "./ZoomInIcon";
 import { SyncScrollIcon } from "./SyncScrollIcon";
+import { HelpIcon } from "./HelpIcon";
+import { GraduationCapIcon } from "./GraduationCapIcon";
+import { PhoneIcon } from "./PhoneIcon";
 
 export type RibbonIconComponent = ComponentType<Omit<IconProps, "children">>;
 
@@ -496,6 +504,43 @@ export const ribbonIconMap = {
   "view.macros.recordMacro": RecordIcon,
   "view.macros.recordMacro.stop": StopIcon,
   "view.macros.useRelativeReferences": PinIcon,
+
+  // Developer
+  "developer.code.visualBasic": CodeIcon,
+  "developer.code.macros": MacroIcon,
+  "developer.code.macros.run": PlayIcon,
+  "developer.code.macros.edit": PencilIcon,
+  "developer.code.recordMacro": RecordIcon,
+  "developer.code.recordMacro.stop": StopIcon,
+  "developer.code.useRelativeReferences": PinIcon,
+  "developer.code.macroSecurity": LockIcon,
+  "developer.code.macroSecurity.trustCenter": ShieldIcon,
+
+  "developer.addins.addins": PuzzleIcon,
+  "developer.addins.addins.excelAddins": PuzzleIcon,
+  "developer.addins.addins.browse": FolderIcon,
+  "developer.addins.addins.manage": SettingsIcon,
+  "developer.addins.comAddins": PlugIcon,
+
+  "developer.controls.insert": PlusIcon,
+  "developer.controls.designMode": SlidersIcon,
+  "developer.controls.properties": SettingsIcon,
+  "developer.controls.properties.viewProperties": EyeIcon,
+  "developer.controls.viewCode": CodeIcon,
+  "developer.controls.runDialog": PlayIcon,
+
+  "developer.xml.source": FileIcon,
+  "developer.xml.source.refresh": RefreshIcon,
+  "developer.xml.mapProperties": GlobeIcon,
+  "developer.xml.import": ArrowDownIcon,
+  "developer.xml.export": ArrowUpIcon,
+  "developer.xml.refreshData": RefreshIcon,
+
+  // Help
+  "help.support.help": HelpIcon,
+  "help.support.training": GraduationCapIcon,
+  "help.support.contactSupport": PhoneIcon,
+  "help.support.feedback": FeedbackIcon,
 
   // Fallbacks (re-usable)
   sort: SortIcon,
