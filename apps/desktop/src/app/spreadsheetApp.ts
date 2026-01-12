@@ -1296,6 +1296,53 @@ export class SpreadsheetApp {
     this.sharedGrid.scrollTo(scroll.x, scroll.y);
   }
 
+  zoomToSelection(): void {
+    if (!this.sharedGrid) return;
+    const ranges = this.selection.ranges;
+    if (ranges.length === 0) return;
+
+    let startRow = Number.POSITIVE_INFINITY;
+    let startCol = Number.POSITIVE_INFINITY;
+    let endRow = Number.NEGATIVE_INFINITY;
+    let endCol = Number.NEGATIVE_INFINITY;
+
+    for (const range of ranges) {
+      const grid = this.gridRangeFromDocRange(range);
+      startRow = Math.min(startRow, grid.startRow);
+      startCol = Math.min(startCol, grid.startCol);
+      endRow = Math.max(endRow, grid.endRow);
+      endCol = Math.max(endCol, grid.endCol);
+    }
+
+    if (
+      !Number.isFinite(startRow) ||
+      !Number.isFinite(startCol) ||
+      !Number.isFinite(endRow) ||
+      !Number.isFinite(endCol)
+    ) {
+      return;
+    }
+
+    const renderer = this.sharedGrid.renderer;
+    const zoom = renderer.getZoom();
+    const { rows, cols } = renderer.scroll;
+    const selectionWidthPx = cols.positionOf(endCol) - cols.positionOf(startCol);
+    const selectionHeightPx = rows.positionOf(endRow) - rows.positionOf(startRow);
+    if (selectionWidthPx <= 0 || selectionHeightPx <= 0) return;
+
+    const selectionWidthBase = selectionWidthPx / zoom;
+    const selectionHeightBase = selectionHeightPx / zoom;
+
+    const viewport = renderer.scroll.getViewportState();
+    const padding = 8;
+    const availableWidth = Math.max(1, viewport.width - viewport.frozenWidth - padding * 2);
+    const availableHeight = Math.max(1, viewport.height - viewport.frozenHeight - padding * 2);
+
+    const nextZoom = Math.min(availableWidth / selectionWidthBase, availableHeight / selectionHeightBase);
+    this.setZoom(nextZoom);
+    this.sharedGrid.scrollToCell(startRow, startCol, { align: "start", padding });
+  }
+
   getShowFormulas(): boolean {
     return this.showFormulas;
   }

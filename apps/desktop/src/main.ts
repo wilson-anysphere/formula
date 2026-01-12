@@ -3359,6 +3359,11 @@ mountRibbon(ribbonRoot, {
           app.focus();
         })();
         return;
+      case "view.zoom.zoomToSelection":
+        app.zoomToSelection();
+        syncZoomControl();
+        app.focus();
+        return;
       default:
         showToast(`Ribbon: ${commandId}`);
         return;
