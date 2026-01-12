@@ -154,14 +154,13 @@ fn xlsx_document_roundtrip_preserves_richdata_parts_byte_for_byte() {
 
     let mut doc = formula_xlsx::load_from_bytes(&input_xlsx).expect("load_from_bytes should succeed");
 
-    // Mutate a normal worksheet cell to ensure we take the full XlsxDocument write path, but do
-    // not touch any RichData parts (Formula doesn't interpret them yet).
+    // Mutate a normal worksheet cell via the model to ensure we take the full XlsxDocument write
+    // path, but do not touch any RichData parts (Formula doesn't interpret them yet).
     let sheet_id = doc.workbook.sheets[0].id;
-    doc.set_cell_value(
-        sheet_id,
-        CellRef::from_a1("A1").unwrap(),
-        CellValue::Number(2.0),
-    );
+    doc.workbook
+        .sheet_mut(sheet_id)
+        .expect("sheet must exist")
+        .set_value(CellRef::from_a1("A1").unwrap(), CellValue::Number(2.0));
 
     let output_xlsx = doc.save_to_vec().expect("save_to_vec should succeed");
 
