@@ -1,0 +1,68 @@
+/*
+  Spreadsheet auditing legend overlay styles.
+
+  This file intentionally uses only design tokens from `tokens.css` and does not
+  hardcode colors (enforced by `noHardcodedColors.test.js`).
+*/
+
+.auditing-legend {
+  position: absolute;
+  /* row header width (48px) + offset (10px) */
+  left: 58px;
+  bottom: 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 12px;
+  pointer-events: none;
+  z-index: 20;
+}
+
+.auditing-legend__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.auditing-legend__modes {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.auditing-legend__item {
+  display: inline-flex;
+  align-items: center;
+}
+
+.auditing-legend__swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  margin-right: 6px;
+}
+
+.auditing-legend__swatch--precedents {
+  background: var(--accent);
+}
+
+.auditing-legend__swatch--dependents {
+  background: var(--success);
+}
+
+.auditing-legend__transitive {
+  opacity: 0.75;
+}
+
+.auditing-legend__errors {
+  margin-top: 6px;
+  opacity: 0.9;
+  max-width: 360px;
+  white-space: pre-wrap;
+}
+

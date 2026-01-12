@@ -2148,62 +2148,70 @@ export class SpreadsheetApp {
   private createAuditingLegend(): HTMLDivElement {
     const legend = document.createElement("div");
     legend.dataset.testid = "auditing-legend";
-    legend.style.position = "absolute";
-    legend.style.left = `${this.rowHeaderWidth + 10}px`;
-    legend.style.bottom = "10px";
-    legend.style.display = "none";
-    legend.style.padding = "6px 10px";
-    legend.style.border = "1px solid var(--border)";
-    legend.style.borderRadius = "8px";
-    legend.style.background = "var(--bg-tertiary)";
-    legend.style.color = "var(--text-primary)";
-    legend.style.fontSize = "12px";
-    legend.style.pointerEvents = "none";
-    legend.style.zIndex = "20";
+    legend.className = "auditing-legend";
+    legend.hidden = true;
     return legend;
   }
 
   private updateAuditingLegend(): void {
+    const legend = this.auditingLegend;
+
     if (this.auditingMode === "off") {
-      this.auditingLegend.style.display = "none";
-      this.auditingLegend.textContent = "";
+      legend.hidden = true;
+      legend.replaceChildren();
       return;
     }
 
     const wantsPrecedents = this.auditingMode === "precedents" || this.auditingMode === "both";
     const wantsDependents = this.auditingMode === "dependents" || this.auditingMode === "both";
 
-    const swatch = (colorVar: string) =>
-      `<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${colorVar};margin-right:6px;"></span>`;
+    legend.replaceChildren();
 
-    const escapeHtml = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const makeModeItem = (opts: { kind: "precedents" | "dependents"; label: string }): HTMLElement => {
+      const item = document.createElement("span");
+      item.className = "auditing-legend__item";
 
-    const entries: string[] = [];
-    if (wantsPrecedents) entries.push(`${swatch("var(--accent)")}Precedents`);
-    if (wantsDependents) entries.push(`${swatch("var(--success)")}Dependents`);
+      const swatch = document.createElement("span");
+      swatch.className = `auditing-legend__swatch auditing-legend__swatch--${opts.kind}`;
 
-    const modeText = entries.join(`<span style="margin:0 10px;"></span>`);
+      const text = document.createElement("span");
+      text.textContent = opts.label;
+
+      item.appendChild(swatch);
+      item.appendChild(text);
+      return item;
+    };
+
     const transitive = this.auditingTransitive ? "Transitive" : "Direct";
 
     const errors: string[] = [];
-    if (wantsPrecedents && this.auditingErrors.precedents)
-      errors.push(`Precedents: ${escapeHtml(this.auditingErrors.precedents)}`);
-    if (wantsDependents && this.auditingErrors.dependents)
-      errors.push(`Dependents: ${escapeHtml(this.auditingErrors.dependents)}`);
+    if (wantsPrecedents && this.auditingErrors.precedents) errors.push(`Precedents: ${this.auditingErrors.precedents}`);
+    if (wantsDependents && this.auditingErrors.dependents) errors.push(`Dependents: ${this.auditingErrors.dependents}`);
 
-    this.auditingLegend.innerHTML = `
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">${modeText}</div>
-        <span style="opacity:0.75">(${transitive})</span>
-      </div>
-      ${
-        errors.length > 0
-          ? `<div style="margin-top:6px;opacity:0.9;max-width:360px;white-space:pre-wrap;">${errors.join("\n")}</div>`
-          : ""
-      }
-    `;
+    const row = document.createElement("div");
+    row.className = "auditing-legend__row";
 
-    this.auditingLegend.style.display = "block";
+    const modeRow = document.createElement("div");
+    modeRow.className = "auditing-legend__modes";
+    if (wantsPrecedents) modeRow.appendChild(makeModeItem({ kind: "precedents", label: "Precedents" }));
+    if (wantsDependents) modeRow.appendChild(makeModeItem({ kind: "dependents", label: "Dependents" }));
+    row.appendChild(modeRow);
+
+    const transitiveEl = document.createElement("span");
+    transitiveEl.className = "auditing-legend__transitive";
+    transitiveEl.textContent = `(${transitive})`;
+    row.appendChild(transitiveEl);
+
+    legend.appendChild(row);
+
+    if (errors.length > 0) {
+      const errorsEl = document.createElement("div");
+      errorsEl.className = "auditing-legend__errors";
+      errorsEl.textContent = errors.join("\n");
+      legend.appendChild(errorsEl);
+    }
+
+    legend.hidden = false;
   }
 
   private hideCommentTooltip(): void {
