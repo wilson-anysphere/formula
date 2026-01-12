@@ -51,14 +51,14 @@ fn bytes_to_utf8(bytes: &[u8]) -> Option<String> {
 }
 
 #[cfg(feature = "desktop")]
-    mod gtk_backend {
-        use base64::{engine::general_purpose::STANDARD, Engine as _};
+mod gtk_backend {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
 
-        use super::super::{normalize_base64_str, string_within_limit, MAX_PNG_BYTES, MAX_TEXT_BYTES};
-        use super::{
-            bytes_to_utf8, choose_best_target, ClipboardContent, ClipboardError, ClipboardWritePayload,
-        };
-        use crate::clipboard_fallback;
+    use super::super::{normalize_base64_str, string_within_limit, MAX_PNG_BYTES, MAX_TEXT_BYTES};
+    use super::{
+        bytes_to_utf8, choose_best_target, ClipboardContent, ClipboardError, ClipboardWritePayload,
+    };
+    use crate::clipboard_fallback;
 
     // GTK clipboard APIs must be called on the GTK main thread.
     //
@@ -470,6 +470,38 @@ mod tests {
         );
     }
 
+    #[cfg(not(feature = "desktop"))]
+    #[test]
+    fn read_returns_unavailable_without_desktop_feature() {
+        let err =
+            super::read().expect_err("read should be unavailable without the `desktop` feature");
+        match err {
+            super::ClipboardError::Unavailable(msg) => {
+                assert!(
+                    msg.contains("GTK clipboard backend requires the `desktop` feature"),
+                    "unexpected error message: {msg}"
+                );
+            }
+            other => panic!("expected ClipboardError::Unavailable, got {other:?}"),
+        }
+    }
+
+    #[cfg(not(feature = "desktop"))]
+    #[test]
+    fn write_returns_unavailable_without_desktop_feature() {
+        let payload = super::ClipboardWritePayload::default();
+        let err = super::write(&payload)
+            .expect_err("write should be unavailable without the `desktop` feature");
+        match err {
+            super::ClipboardError::Unavailable(msg) => {
+                assert!(
+                    msg.contains("GTK clipboard backend requires the `desktop` feature"),
+                    "unexpected error message: {msg}"
+                );
+            }
+            other => panic!("expected ClipboardError::Unavailable, got {other:?}"),
+        }
+    }
     #[test]
     fn choose_best_target_prefers_exact_match() {
         let targets = vec!["text/html;charset=utf-8", "text/html"];

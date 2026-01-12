@@ -292,6 +292,7 @@ struct UndoEntry {
 pub type SharedAppState = std::sync::Arc<std::sync::Mutex<AppState>>;
 
 const AUDITING_RESULT_LIMIT: usize = 2_000;
+const FORMULA_UI_FORMATTING_METADATA_KEY: &str = "formula_ui_formatting";
 
 pub struct AppState {
     workbook: Option<Workbook>,
@@ -328,6 +329,11 @@ impl AppState {
 
     pub fn has_unsaved_changes(&self) -> bool {
         self.dirty
+    }
+
+    pub fn mark_dirty(&mut self) {
+        self.dirty = true;
+        self.redo_stack.clear();
     }
 
     pub fn workbook_info(&self) -> Result<WorkbookInfoData, AppStateError> {
@@ -1725,6 +1731,9 @@ impl AppState {
             let sheet_metas = storage
                 .list_sheets(workbook_meta.id)
                 .map_err(|e| AppStateError::Persistence(e.to_string()))?;
+
+            seed_sheet_formatting_metadata_from_model(&storage, &sheet_metas, &model)
+                .map_err(|e| AppStateError::Persistence(e.to_string()))?;
             (workbook_meta.id, sheet_metas, workbook)
         };
 
@@ -1765,6 +1774,17 @@ impl AppState {
 
     pub fn persistent_workbook_id(&self) -> Option<Uuid> {
         self.persistent.as_ref().map(|p| p.workbook_id)
+    }
+
+    pub fn persistent_sheet_uuid(&self, sheet_id: &str) -> Result<Uuid, AppStateError> {
+        let persistent = self.persistent.as_ref().ok_or_else(|| {
+            AppStateError::Persistence("workbook is not backed by persistent storage".to_string())
+        })?;
+        persistent.sheet_uuid(sheet_id).ok_or_else(|| {
+            AppStateError::Persistence(format!(
+                "missing persistence mapping for sheet id {sheet_id}"
+            ))
+        })
     }
 
     pub fn persistent_storage(&self) -> Option<formula_storage::Storage> {
@@ -4513,6 +4533,67 @@ fn ensure_sheet_print_settings<'a>(
     &mut sheets[idx]
 }
 
+fn seed_sheet_formatting_metadata_from_model(
+    storage: &formula_storage::Storage,
+    sheet_metas: &[formula_storage::SheetMeta],
+    model: &formula_model::Workbook,
+) -> formula_storage::storage::Result<()> {
+    for sheet_meta in sheet_metas {
+        let mut cell_formats = Vec::new();
+        if let Some(sheet) = model
+            .sheets
+            .iter()
+            .find(|s| sheet_name_eq_case_insensitive(&s.name, &sheet_meta.name))
+        {
+            for (cell_ref, cell) in sheet.iter_cells() {
+                if cell.style_id == 0 {
+                    continue;
+                }
+                let Some(style) = model.styles.get(cell.style_id) else {
+                    continue;
+                };
+                let format = serde_json::to_value(style)?;
+                cell_formats.push(serde_json::json!({
+                    "row": cell_ref.row,
+                    "col": cell_ref.col,
+                    "format": format,
+                }));
+            }
+        }
+
+        // Keep output deterministic regardless of hash map iteration order upstream.
+        cell_formats.sort_by(|a, b| {
+            let row_a = a.get("row").and_then(|v| v.as_u64()).unwrap_or(u64::MAX);
+            let row_b = b.get("row").and_then(|v| v.as_u64()).unwrap_or(u64::MAX);
+            if row_a == row_b {
+                let col_a = a.get("col").and_then(|v| v.as_u64()).unwrap_or(u64::MAX);
+                let col_b = b.get("col").and_then(|v| v.as_u64()).unwrap_or(u64::MAX);
+                col_a.cmp(&col_b)
+            } else {
+                row_a.cmp(&row_b)
+            }
+        });
+
+        let formatting = serde_json::json!({
+            "schemaVersion": 1,
+            "defaultFormat": null,
+            "rowFormats": [],
+            "colFormats": [],
+            "cellFormats": cell_formats,
+        });
+
+        storage.update_sheet_metadata(sheet_meta.id, move |metadata| {
+            let mut root = match metadata {
+                Some(JsonValue::Object(map)) => map,
+                _ => serde_json::Map::new(),
+            };
+            root.insert(FORMULA_UI_FORMATTING_METADATA_KEY.to_string(), formatting);
+            Ok(Some(JsonValue::Object(root)))
+        })?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5502,6 +5583,92 @@ mod tests {
         let cell = recovered.sheets[0].get_cell(0, 0);
         assert_eq!(cell.computed_value, CellScalar::Empty);
         assert_eq!(cell.number_format.as_deref(), Some("m/d/yyyy"));
+    }
+
+    #[test]
+    fn xlsx_style_only_cells_seed_sheet_formatting_metadata_on_first_import() {
+        use formula_model::{Cell as ModelCell, CellRef, CellValue as ModelCellValue, Font, Style};
+        use std::io::Cursor;
+
+        let mut model = formula_model::Workbook::new();
+        let sheet_id = model.add_sheet("Sheet1").expect("add sheet");
+        let style_id = model.intern_style(Style {
+            font: Some(Font {
+                bold: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+
+        let sheet = model.sheet_mut(sheet_id).expect("sheet exists");
+        let mut model_cell = ModelCell::new(ModelCellValue::Empty);
+        model_cell.style_id = style_id;
+        sheet.set_cell(CellRef::new(0, 0), model_cell);
+
+        let mut buf = Cursor::new(Vec::new());
+        formula_xlsx::write_workbook_to_writer(&model, &mut buf).expect("write xlsx bytes");
+        let bytes = buf.into_inner();
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let xlsx_path = tmp.path().join("formatting-seed.xlsx");
+        std::fs::write(&xlsx_path, &bytes).expect("write xlsx file");
+
+        let workbook = read_xlsx_blocking(&xlsx_path).expect("read xlsx workbook");
+        let mut state = AppState::new();
+        state
+            .load_workbook_persistent(workbook, WorkbookPersistenceLocation::InMemory)
+            .expect("load persistent workbook");
+
+        let persistent = state.persistent.as_ref().expect("persistent workbook");
+        let sheets = persistent
+            .storage
+            .list_sheets(persistent.workbook_id)
+            .expect("list sheets");
+        assert_eq!(sheets.len(), 1, "expected one sheet in persisted storage");
+
+        let sheet_meta = persistent
+            .storage
+            .get_sheet_meta(sheets[0].id)
+            .expect("get sheet meta");
+        let metadata = sheet_meta.metadata.expect("expected sheet metadata to be seeded");
+        let formatting = metadata
+            .get(FORMULA_UI_FORMATTING_METADATA_KEY)
+            .expect("expected formatting metadata key");
+
+        let cell_formats = formatting
+            .get("cellFormats")
+            .and_then(|v| v.as_array())
+            .expect("cellFormats array");
+        assert_eq!(cell_formats.len(), 1);
+
+        let entry = &cell_formats[0];
+        assert_eq!(entry.get("row").and_then(|v| v.as_u64()), Some(0));
+        assert_eq!(entry.get("col").and_then(|v| v.as_u64()), Some(0));
+
+        // Compare against the style payload as read from the XLSX bytes (so the test is resilient
+        // to XLSX round-trip normalization).
+        let reread_model =
+            formula_xlsx::read_workbook_from_reader(Cursor::new(bytes.as_slice())).expect("read model");
+        let reread_sheet = reread_model
+            .sheets
+            .iter()
+            .find(|s| s.name == "Sheet1")
+            .expect("Sheet1 exists");
+        let reread_cell = reread_sheet
+            .cell(CellRef::new(0, 0))
+            .expect("A1 exists in reread model");
+        let expected_style = reread_model
+            .styles
+            .get(reread_cell.style_id)
+            .expect("style exists");
+        let expected_format =
+            serde_json::to_value(expected_style).expect("serialize expected style");
+
+        assert_eq!(
+            entry.get("format"),
+            Some(&expected_format),
+            "expected seeded cell format to match the XLSX style payload"
+        );
     }
 
     #[test]

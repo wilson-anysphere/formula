@@ -1,7 +1,11 @@
 use formula_engine::pivot::PivotConfig;
 use formula_model::{SheetVisibility as ModelSheetVisibility, TabColor};
 use serde::{de, Deserialize, Serialize};
+#[cfg(feature = "desktop")]
+use serde_json::json;
 use serde_json::Value as JsonValue;
+#[cfg(feature = "desktop")]
+use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::macro_trust::MacroTrustDecision;
@@ -186,6 +190,69 @@ pub struct SheetUsedRange {
     pub end_row: usize,
     pub start_col: usize,
     pub end_col: usize,
+}
+
+#[cfg(feature = "desktop")]
+const SHEET_FORMATTING_METADATA_KEY: &str = "formula_ui_formatting";
+#[cfg(feature = "desktop")]
+const SHEET_FORMATTING_SCHEMA_VERSION: i64 = 1;
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SheetRowFormatDelta {
+    pub row: i64,
+    pub format: JsonValue,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SheetColFormatDelta {
+    pub col: i64,
+    pub format: JsonValue,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SheetCellFormatDelta {
+    pub row: i64,
+    pub col: i64,
+    pub format: JsonValue,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SheetFormatRunDelta {
+    pub start_row: i64,
+    pub end_row_exclusive: i64,
+    pub format: JsonValue,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SheetFormatRunsByColDelta {
+    pub col: i64,
+    pub runs: Vec<SheetFormatRunDelta>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplySheetFormattingDeltasRequest {
+    pub sheet_id: String,
+    /// If present: `null` clears the sheet default format; an object sets it.
+    #[serde(default)]
+    pub default_format: Option<Option<JsonValue>>,
+    /// Row formatting deltas; `format: null` clears the override for that row.
+    #[serde(default)]
+    pub row_formats: Option<Vec<SheetRowFormatDelta>>,
+    /// Column formatting deltas; `format: null` clears the override for that col.
+    #[serde(default)]
+    pub col_formats: Option<Vec<SheetColFormatDelta>>,
+    /// Replace range-run formatting for the specified columns (runs are replaced wholesale).
+    #[serde(default)]
+    pub format_runs_by_col: Option<Vec<SheetFormatRunsByColDelta>>,
+    /// Cell formatting deltas; `format: null` clears the override for that cell.
+    #[serde(default)]
+    pub cell_formats: Option<Vec<SheetCellFormatDelta>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -1713,6 +1780,346 @@ pub fn get_sheet_used_range(
         start_col: min_col,
         end_col: max_col,
     }))
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub fn get_sheet_formatting(
+    sheet_id: String,
+    state: State<'_, SharedAppState>,
+) -> Result<JsonValue, String> {
+    let state = state.inner().lock().unwrap();
+    let sheet_uuid = state.persistent_sheet_uuid(&sheet_id).map_err(app_error)?;
+    let Some(storage) = state.persistent_storage() else {
+        return Err(app_error(AppStateError::Persistence(
+            "workbook is not backed by persistent storage".to_string(),
+        )));
+    };
+
+    let meta = storage
+        .get_sheet_meta(sheet_uuid)
+        .map_err(|e| e.to_string())?;
+    let Some(metadata) = meta.metadata else {
+        return Ok(json!({ "schemaVersion": SHEET_FORMATTING_SCHEMA_VERSION }));
+    };
+
+    Ok(metadata
+        .get(SHEET_FORMATTING_METADATA_KEY)
+        .cloned()
+        .unwrap_or_else(|| json!({ "schemaVersion": SHEET_FORMATTING_SCHEMA_VERSION })))
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub fn apply_sheet_formatting_deltas(
+    payload: ApplySheetFormattingDeltasRequest,
+    state: State<'_, SharedAppState>,
+) -> Result<(), String> {
+    #[derive(Clone, Debug, PartialEq)]
+    struct FormatRun {
+        start_row: i64,
+        end_row_exclusive: i64,
+        format: JsonValue,
+    }
+
+    #[derive(Clone, Debug, Default)]
+    struct FormattingState {
+        default_format: JsonValue,
+        row_formats: BTreeMap<i64, JsonValue>,
+        col_formats: BTreeMap<i64, JsonValue>,
+        format_runs_by_col: BTreeMap<i64, Vec<FormatRun>>,
+        cell_formats: BTreeMap<(i64, i64), JsonValue>,
+    }
+
+    fn parse_non_negative_i64(raw: Option<&JsonValue>) -> Option<i64> {
+        let v = raw?;
+        let n = v
+            .as_i64()
+            .or_else(|| v.as_u64().and_then(|u| i64::try_from(u).ok()))?;
+        (n >= 0).then_some(n)
+    }
+
+    fn parse_formatting_state(raw: Option<&JsonValue>) -> FormattingState {
+        let mut out = FormattingState {
+            default_format: JsonValue::Null,
+            ..Default::default()
+        };
+
+        let Some(raw) = raw else {
+            return out;
+        };
+        let Some(obj) = raw.as_object() else {
+            return out;
+        };
+
+        out.default_format = obj.get("defaultFormat").cloned().unwrap_or(JsonValue::Null);
+
+        // Row formats.
+        if let Some(rows) = obj.get("rowFormats").and_then(|v| v.as_array()) {
+            for entry in rows {
+                let Some(row) =
+                    parse_non_negative_i64(entry.get("row").or_else(|| entry.get("index")))
+                else {
+                    continue;
+                };
+                let format = entry.get("format").cloned().unwrap_or(JsonValue::Null);
+                if !format.is_null() {
+                    out.row_formats.insert(row, format);
+                }
+            }
+        }
+
+        // Col formats.
+        if let Some(cols) = obj.get("colFormats").and_then(|v| v.as_array()) {
+            for entry in cols {
+                let Some(col) =
+                    parse_non_negative_i64(entry.get("col").or_else(|| entry.get("index")))
+                else {
+                    continue;
+                };
+                let format = entry.get("format").cloned().unwrap_or(JsonValue::Null);
+                if !format.is_null() {
+                    out.col_formats.insert(col, format);
+                }
+            }
+        }
+
+        // Range-run formats.
+        if let Some(cols) = obj.get("formatRunsByCol").and_then(|v| v.as_array()) {
+            for entry in cols {
+                let Some(col) =
+                    parse_non_negative_i64(entry.get("col").or_else(|| entry.get("index")))
+                else {
+                    continue;
+                };
+                let Some(runs) = entry.get("runs").and_then(|v| v.as_array()) else {
+                    continue;
+                };
+                let mut parsed: Vec<FormatRun> = Vec::new();
+                for run in runs {
+                    let Some(start_row) = parse_non_negative_i64(run.get("startRow")) else {
+                        continue;
+                    };
+                    let Some(end_row_exclusive) = run
+                        .get("endRowExclusive")
+                        .and_then(|v| v.as_i64())
+                        .or_else(|| {
+                            run.get("endRow")
+                                .and_then(|v| v.as_i64())
+                                .map(|end| end.saturating_add(1))
+                        })
+                    else {
+                        continue;
+                    };
+                    if end_row_exclusive <= start_row {
+                        continue;
+                    }
+                    let format = run.get("format").cloned().unwrap_or(JsonValue::Null);
+                    if format.is_null() {
+                        continue;
+                    }
+                    parsed.push(FormatRun {
+                        start_row,
+                        end_row_exclusive,
+                        format,
+                    });
+                }
+                parsed.sort_by(|a, b| {
+                    if a.start_row == b.start_row {
+                        a.end_row_exclusive.cmp(&b.end_row_exclusive)
+                    } else {
+                        a.start_row.cmp(&b.start_row)
+                    }
+                });
+                if !parsed.is_empty() {
+                    out.format_runs_by_col.insert(col, parsed);
+                }
+            }
+        }
+
+        // Cell formats.
+        if let Some(cells) = obj.get("cellFormats").and_then(|v| v.as_array()) {
+            for entry in cells {
+                let Some(row) = parse_non_negative_i64(entry.get("row")) else {
+                    continue;
+                };
+                let Some(col) = parse_non_negative_i64(entry.get("col")) else {
+                    continue;
+                };
+                let format = entry.get("format").cloned().unwrap_or(JsonValue::Null);
+                if !format.is_null() {
+                    out.cell_formats.insert((row, col), format);
+                }
+            }
+        }
+
+        out
+    }
+
+    fn serialize_formatting_state(state: FormattingState) -> JsonValue {
+        let row_formats = state
+            .row_formats
+            .into_iter()
+            .map(|(row, format)| json!({ "row": row, "format": format }))
+            .collect::<Vec<_>>();
+        let col_formats = state
+            .col_formats
+            .into_iter()
+            .map(|(col, format)| json!({ "col": col, "format": format }))
+            .collect::<Vec<_>>();
+
+        let mut out = serde_json::Map::new();
+        out.insert(
+            "schemaVersion".to_string(),
+            json!(SHEET_FORMATTING_SCHEMA_VERSION),
+        );
+        out.insert("defaultFormat".to_string(), state.default_format);
+        out.insert("rowFormats".to_string(), JsonValue::Array(row_formats));
+        out.insert("colFormats".to_string(), JsonValue::Array(col_formats));
+
+        if !state.format_runs_by_col.is_empty() {
+            let cols = state
+                .format_runs_by_col
+                .into_iter()
+                .map(|(col, runs)| {
+                    let runs = runs
+                        .into_iter()
+                        .map(|run| {
+                            json!({
+                                "startRow": run.start_row,
+                                "endRowExclusive": run.end_row_exclusive,
+                                "format": run.format,
+                            })
+                        })
+                        .collect::<Vec<_>>();
+                    json!({ "col": col, "runs": runs })
+                })
+                .collect::<Vec<_>>();
+            out.insert("formatRunsByCol".to_string(), JsonValue::Array(cols));
+        }
+
+        if !state.cell_formats.is_empty() {
+            let cells = state
+                .cell_formats
+                .into_iter()
+                .map(|((row, col), format)| json!({ "row": row, "col": col, "format": format }))
+                .collect::<Vec<_>>();
+            out.insert("cellFormats".to_string(), JsonValue::Array(cells));
+        }
+
+        JsonValue::Object(out)
+    }
+
+    let mut state = state.inner().lock().unwrap();
+    let sheet_uuid = state
+        .persistent_sheet_uuid(&payload.sheet_id)
+        .map_err(app_error)?;
+    let Some(storage) = state.persistent_storage() else {
+        return Err(app_error(AppStateError::Persistence(
+            "workbook is not backed by persistent storage".to_string(),
+        )));
+    };
+
+    let sheet_meta = storage
+        .get_sheet_meta(sheet_uuid)
+        .map_err(|e| e.to_string())?;
+    let mut metadata_root = match sheet_meta.metadata {
+        Some(JsonValue::Object(map)) => map,
+        _ => serde_json::Map::new(),
+    };
+    let current_formatting = metadata_root.get(SHEET_FORMATTING_METADATA_KEY).cloned();
+    let mut formatting_state = parse_formatting_state(current_formatting.as_ref());
+
+    // Apply deltas.
+    if let Some(default_format) = payload.default_format {
+        formatting_state.default_format = default_format.unwrap_or(JsonValue::Null);
+    }
+    if let Some(deltas) = payload.row_formats {
+        for delta in deltas {
+            if delta.row < 0 {
+                continue;
+            }
+            if delta.format.is_null() {
+                formatting_state.row_formats.remove(&delta.row);
+            } else {
+                formatting_state.row_formats.insert(delta.row, delta.format);
+            }
+        }
+    }
+    if let Some(deltas) = payload.col_formats {
+        for delta in deltas {
+            if delta.col < 0 {
+                continue;
+            }
+            if delta.format.is_null() {
+                formatting_state.col_formats.remove(&delta.col);
+            } else {
+                formatting_state.col_formats.insert(delta.col, delta.format);
+            }
+        }
+    }
+    if let Some(deltas) = payload.format_runs_by_col {
+        for delta in deltas {
+            if delta.col < 0 {
+                continue;
+            }
+            let mut runs = delta
+                .runs
+                .into_iter()
+                .filter(|r| {
+                    r.start_row >= 0 && r.end_row_exclusive > r.start_row && !r.format.is_null()
+                })
+                .map(|r| FormatRun {
+                    start_row: r.start_row,
+                    end_row_exclusive: r.end_row_exclusive,
+                    format: r.format,
+                })
+                .collect::<Vec<_>>();
+            runs.sort_by(|a, b| {
+                if a.start_row == b.start_row {
+                    a.end_row_exclusive.cmp(&b.end_row_exclusive)
+                } else {
+                    a.start_row.cmp(&b.start_row)
+                }
+            });
+            if runs.is_empty() {
+                formatting_state.format_runs_by_col.remove(&delta.col);
+            } else {
+                formatting_state.format_runs_by_col.insert(delta.col, runs);
+            }
+        }
+    }
+    if let Some(deltas) = payload.cell_formats {
+        for delta in deltas {
+            if delta.row < 0 || delta.col < 0 {
+                continue;
+            }
+            if delta.format.is_null() {
+                formatting_state
+                    .cell_formats
+                    .remove(&(delta.row, delta.col));
+            } else {
+                formatting_state
+                    .cell_formats
+                    .insert((delta.row, delta.col), delta.format);
+            }
+        }
+    }
+
+    metadata_root.insert(
+        SHEET_FORMATTING_METADATA_KEY.to_string(),
+        serialize_formatting_state(formatting_state),
+    );
+    storage
+        .set_sheet_metadata(sheet_uuid, Some(JsonValue::Object(metadata_root)))
+        .map_err(|e| e.to_string())?;
+
+    // Formatting changes affect persistence/export behavior; force full regeneration on save.
+    state.mark_dirty();
+    let workbook = state.get_workbook_mut().map_err(app_error)?;
+    workbook.origin_xlsx_bytes = None;
+
+    Ok(())
 }
 
 #[cfg(feature = "desktop")]

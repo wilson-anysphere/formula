@@ -1222,6 +1222,59 @@ impl Storage {
         row.ok_or(StorageError::SheetNotFound(sheet_id))
     }
 
+    /// Replace the `sheets.metadata` JSON payload for the given sheet.
+    ///
+    /// This is intended for application-specific per-sheet state that should be persisted alongside
+    /// core workbook data (e.g. UI formatting layers).
+    pub fn set_sheet_metadata(&self, sheet_id: Uuid, metadata: Option<JsonValue>) -> Result<()> {
+        let mut conn = self.conn.lock().expect("storage mutex poisoned");
+        let tx = conn.transaction()?;
+        let updated = tx.execute(
+            "UPDATE sheets SET metadata = ?1 WHERE id = ?2",
+            params![metadata, sheet_id.to_string()],
+        )?;
+        if updated == 0 {
+            return Err(StorageError::SheetNotFound(sheet_id));
+        }
+        touch_workbook_modified_at(&tx, sheet_id)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Read-modify-write helper for `sheets.metadata`.
+    ///
+    /// The callback receives the current parsed JSON (or `None` if unset/invalid) and returns the
+    /// updated JSON (or `None` to clear).
+    pub fn update_sheet_metadata<F>(&self, sheet_id: Uuid, f: F) -> Result<()>
+    where
+        F: FnOnce(Option<JsonValue>) -> Result<Option<JsonValue>>,
+    {
+        let mut conn = self.conn.lock().expect("storage mutex poisoned");
+        let tx = conn.transaction()?;
+
+        let raw_row: Option<Option<String>> = tx
+            .query_row(
+                "SELECT metadata FROM sheets WHERE id = ?1",
+                params![sheet_id.to_string()],
+                |r| Ok(r.get::<_, Option<String>>(0).ok().flatten()),
+            )
+            .optional()?;
+        let Some(raw_row) = raw_row else {
+            return Err(StorageError::SheetNotFound(sheet_id));
+        };
+
+        let current = parse_optional_json_value(raw_row);
+        let next = f(current)?;
+
+        tx.execute(
+            "UPDATE sheets SET metadata = ?1 WHERE id = ?2",
+            params![next, sheet_id.to_string()],
+        )?;
+        touch_workbook_modified_at(&tx, sheet_id)?;
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Rename a worksheet.
     pub fn rename_sheet(&self, sheet_id: Uuid, name: &str) -> Result<()> {
         validate_sheet_name(name).map_err(map_sheet_name_error)?;
