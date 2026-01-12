@@ -29,8 +29,10 @@ if (files.length === 0) {
 
 // Keep node:test parallelism conservative; some suites start background services and
 // in CI/agent environments we can hit process/thread limits if too many test files
-// run in parallel.
-const nodeArgs = ["--no-warnings", "--test-concurrency=1", "--test", ...files];
+// run in parallel. Allow opting into higher parallelism via FORMULA_NODE_TEST_CONCURRENCY.
+const parsedConcurrency = Number.parseInt(process.env.FORMULA_NODE_TEST_CONCURRENCY ?? "", 10);
+const concurrency = Number.isFinite(parsedConcurrency) && parsedConcurrency > 0 ? parsedConcurrency : 1;
+const nodeArgs = ["--no-warnings", `--test-concurrency=${concurrency}`, "--test", ...files];
 const child = spawn(process.execPath, nodeArgs, { stdio: "inherit" });
 child.on("exit", (code, signal) => {
   if (signal) {
