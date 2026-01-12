@@ -78,15 +78,22 @@ Compatibility:
 Each cell is stored as a `Y.Map` with the following relevant fields:
 
 - `value`: any JSON-serializable scalar/object (only when not a formula; when setting a formula string, set `value` to `null`)
-- `formula`: `string | null` (normalized; clears are represented as `null`)
+- `formula`: `string | null` (normalized; some writers may delete the `formula` key entirely for value cells, but when conflict monitoring is enabled the stack prefers an explicit `null` marker for clears—see note below)
 - `format`: JSON object for cell formatting (interned into `DocumentController.styleTable` on desktop)
 - `enc`: optional encrypted payload (see “Cell encryption” below)
 - `modified`: `number` (ms since epoch; best-effort)
 - `modifiedBy`: `string` (best-effort user id)
 
-Important: to clear a formula, write `formula = null` (don’t delete the `formula` key). Yjs map
-deletes do not create Items; a `null` marker preserves causal history for deterministic
-delete-vs-overwrite conflict detection.
+Important nuance (conflict monitoring): for deterministic delete-vs-overwrite detection,
+`@formula/collab-conflicts`’ `FormulaConflictMonitor` expects local formula clears to be
+written as `cell.set("formula", null)` (not `cell.delete("formula")`). Yjs map deletes do
+not create a new Item, which makes causality ambiguous.
+
+Implementation detail:
+
+- When `createCollabSession({ formulaConflicts: ... })` is enabled, `session.setCellFormula(...)`
+  delegates to `FormulaConflictMonitor.setLocalFormula(...)`, which writes the `null` marker for clears.
+- In `mode: "formula+value"`, value writes also clear formulas via a `null` marker to support formula-vs-value conflict detection.
 
 Formula normalization is consistent across the stack: formula strings are treated as canonical when they start with `"="` and have no leading/trailing whitespace (see binder/session implementations).
 
