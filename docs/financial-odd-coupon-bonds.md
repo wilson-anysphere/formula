@@ -99,6 +99,9 @@ If you modify these functions, re-check these areas carefully:
      backward from `maturity` in whole coupon periods (`12 / frequency` months).
    - The schedule is treated as EOM iff `maturity` is itself end-of-month, and month stepping uses
      `date_time::eomonth` (Excel’s `EOMONTH`) in that case (otherwise `date_time::edate`).
+   - Current implementation detail (ODDL\*): to compute the regular period length `E`, we step one
+     coupon period backward from `last_interest`; EOM detection for that step is based on
+     `last_interest` being end-of-month.
    - This logic lives in `crates/formula-engine/src/functions/financial/odd_coupon.rs` (see
      `coupon_schedule_from_maturity` and `coupon_date_with_eom`).
 3. **Error behavior**: Excel’s choice of `#NUM!` vs `#VALUE!` varies by argument and coercion path.
