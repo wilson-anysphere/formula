@@ -3908,4 +3908,29 @@ mod tests {
             other => panic!("expected FunctionCall, got {other:?}"),
         }
     }
+
+    #[test]
+    fn r1c1_cell_ref_followed_by_dot_lexes_as_cell_and_field_access() {
+        // Regression test: allow `.` after an R1C1 reference so expressions like `RC[-1].Price`
+        // are lexed as a reference token followed by field access, rather than a name-like token.
+        let opts = ParseOptions {
+            reference_style: ReferenceStyle::R1C1,
+            ..ParseOptions::default()
+        };
+
+        let tokens = lex("RC[-1].Price", &opts).unwrap();
+        let kinds: Vec<TokenKind> = tokens.into_iter().map(|t| t.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::R1C1Cell(R1C1CellToken {
+                    row: Coord::Offset(0),
+                    col: Coord::Offset(-1)
+                }),
+                TokenKind::Dot,
+                TokenKind::Ident("Price".to_string()),
+                TokenKind::Eof
+            ]
+        );
+    }
 }
