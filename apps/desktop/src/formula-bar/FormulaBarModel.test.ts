@@ -75,4 +75,11 @@ describe("FormulaBarModel", () => {
     model.beginEdit();
     expect(model.hoveredReference()).toEqual(parseA1Range("A1:B2"));
   });
+
+  it("setHoveredReference parses sheet-qualified ranges", () => {
+    const model = new FormulaBarModel();
+    model.setActiveCell({ address: "A1", input: "", value: null });
+    model.setHoveredReference("Sheet2!A1:B2");
+    expect(model.hoveredReference()).toEqual(parseA1Range("A1:B2"));
+  });
 });
