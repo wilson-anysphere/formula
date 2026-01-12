@@ -774,6 +774,17 @@ fn quote_sheet_name_if_needed(name: &str) -> String {
 }
 
 fn is_unquoted_sheet_name(name: &str) -> bool {
+    // Be conservative: quoting is always accepted by Excel, but the unquoted form is only valid
+    // for a subset of identifier-like sheet names. In particular, `TRUE` / `FALSE` and A1-style
+    // cell references must be quoted to avoid being tokenized as boolean/cell literals by our
+    // `formula-engine` lexer.
+    if name.eq_ignore_ascii_case("TRUE") || name.eq_ignore_ascii_case("FALSE") {
+        return false;
+    }
+    if starts_like_a1_cell_ref(name) {
+        return false;
+    }
+
     let mut chars = name.chars();
     let Some(first) = chars.next() else {
         return false;
@@ -787,6 +798,67 @@ fn is_unquoted_sheet_name(name: &str) -> bool {
         }
     }
     true
+}
+
+fn starts_like_a1_cell_ref(s: &str) -> bool {
+    let mut chars = s.chars().peekable();
+    if chars.peek() == Some(&'$') {
+        chars.next();
+    }
+
+    let mut col_letters = String::new();
+    while let Some(&ch) = chars.peek() {
+        if ch.is_ascii_alphabetic() {
+            col_letters.push(ch);
+            chars.next();
+        } else {
+            break;
+        }
+    }
+    if col_letters.is_empty() {
+        return false;
+    }
+
+    if chars.peek() == Some(&'$') {
+        chars.next();
+    }
+
+    let mut row_digits = String::new();
+    while let Some(&ch) = chars.peek() {
+        if ch.is_ascii_digit() {
+            row_digits.push(ch);
+            chars.next();
+        } else {
+            break;
+        }
+    }
+    if row_digits.is_empty() {
+        return false;
+    }
+
+    if col_from_a1(&col_letters).is_none() {
+        return false;
+    }
+    matches!(row_digits.parse::<u32>(), Ok(v) if v != 0)
+}
+
+fn col_from_a1(col: &str) -> Option<u32> {
+    let mut value: u32 = 0;
+    let mut count: usize = 0;
+    for ch in col.chars() {
+        if !ch.is_ascii_alphabetic() {
+            return None;
+        }
+        count += 1;
+        if count > 3 {
+            return None;
+        }
+        value = value * 26 + (ch.to_ascii_uppercase() as u32 - 'A' as u32 + 1);
+    }
+    if value == 0 || value > 16_384 {
+        return None;
+    }
+    Some(value - 1)
 }
 
 fn push_column(col: u32, out: &mut String) {

@@ -1,5 +1,6 @@
 use std::io::Write;
 
+use formula_engine::{parse_formula, ParseOptions};
 use formula_model::DefinedNameScope;
 
 mod common;
@@ -99,4 +100,30 @@ fn imports_biff_defined_names_with_scope_and_3d_refs() {
         .expect("MissingArgName missing");
     assert_eq!(miss.scope, DefinedNameScope::Workbook);
     assert_eq!(miss.refers_to, "IF(,1,2)");
+}
+
+#[test]
+fn defined_name_formulas_quote_sheet_names_and_are_parseable() {
+    let bytes = xls_fixture_builder::build_defined_names_quoting_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let cases = [
+        ("SpaceRef", "'Sheet One'!$A$1"),
+        ("QuoteRef", "'O''Brien'!$B$2"),
+        ("ReservedRef", "'TRUE'!$C$3"),
+        ("SpanRef", "'Sheet One':'O''Brien'!$D$4"),
+    ];
+
+    for (name, expected_refers_to) in cases {
+        let dn = result
+            .workbook
+            .defined_names
+            .iter()
+            .find(|n| n.name == name)
+            .unwrap_or_else(|| panic!("{name} missing"));
+        assert_eq!(dn.refers_to, expected_refers_to);
+
+        parse_formula(&format!("={}", dn.refers_to), ParseOptions::default())
+            .unwrap_or_else(|e| panic!("failed to parse {name} refers_to `{}`: {e}", dn.refers_to));
+    }
 }

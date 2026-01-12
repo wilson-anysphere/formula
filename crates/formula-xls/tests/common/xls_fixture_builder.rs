@@ -241,6 +241,26 @@ pub fn build_defined_names_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing workbook-scoped defined names that reference sheets
+/// requiring quoting (spaces, embedded quotes, reserved words), plus a 3D sheet span.
+///
+/// This is used to validate that our BIFF8 `rgce` decoder produces sheet-name prefixes that are:
+/// - accepted by Excel conventions (proper quoting/escaping), and
+/// - parseable by `formula-engine`.
+pub fn build_defined_names_quoting_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_defined_names_quoting_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a minimal BIFF8 `.xls` fixture containing a single sheet named `Notes`
 /// with a NOTE/OBJ/TXO comment anchored to `A1`.
 pub fn build_note_comment_fixture_xls() -> Vec<u8> {
@@ -1247,6 +1267,105 @@ fn build_defined_names_workbook_stream() -> Vec<u8> {
 
     globals.extend_from_slice(&sheet1);
     globals.extend_from_slice(&sheet2);
+
+    globals
+}
+
+fn build_defined_names_quoting_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS)); // BOF: workbook globals
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes()); // CODEPAGE: Windows-1252
+    push_record(&mut globals, RECORD_WINDOW1, &window1()); // WINDOW1
+    push_record(&mut globals, RECORD_FONT, &font("Arial")); // FONT
+
+    // XF table. Many readers expect at least 16 style XFs before cell XFs.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+
+    // One General cell XF.
+    let xf_general = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Three worksheets with names requiring quoting rules.
+    let boundsheet1_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "Sheet One");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet1_offset_pos = boundsheet1_start + 4;
+
+    let boundsheet2_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "O'Brien");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet2_offset_pos = boundsheet2_start + 4;
+
+    let boundsheet3_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "TRUE");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet3_offset_pos = boundsheet3_start + 4;
+
+    // Minimal EXTERNSHEET table with:
+    // - three internal sheet entries, plus
+    // - one sheet span entry (Sheet One -> O'Brien).
+    push_record(
+        &mut globals,
+        RECORD_EXTERNSHEET,
+        &externsheet_record(&[(0, 0), (1, 1), (2, 2), (0, 1)]),
+    );
+
+    // NAME records:
+    // Workbook-scoped names that reference each sheet + a 3D span.
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &name_record("SpaceRef", 0, false, None, &ptg_ref3d(0, 0, 0)),
+    ); // Sheet One!$A$1
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &name_record("QuoteRef", 0, false, None, &ptg_ref3d(1, 1, 1)),
+    ); // O'Brien!$B$2
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &name_record("ReservedRef", 0, false, None, &ptg_ref3d(2, 2, 2)),
+    ); // TRUE!$C$3 (must be quoted)
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &name_record("SpanRef", 0, false, None, &ptg_ref3d(3, 3, 3)),
+    ); // Sheet One:O'Brien!$D$4
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    // -- Sheet substreams -------------------------------------------------------
+    let sheet1_offset = globals.len();
+    let sheet1 = build_empty_sheet_stream(xf_general);
+    let sheet2_offset = sheet1_offset + sheet1.len();
+    let sheet2 = build_empty_sheet_stream(xf_general);
+    let sheet3_offset = sheet2_offset + sheet2.len();
+    let sheet3 = build_empty_sheet_stream(xf_general);
+
+    // Patch BoundSheet offsets.
+    globals[boundsheet1_offset_pos..boundsheet1_offset_pos + 4]
+        .copy_from_slice(&(sheet1_offset as u32).to_le_bytes());
+    globals[boundsheet2_offset_pos..boundsheet2_offset_pos + 4]
+        .copy_from_slice(&(sheet2_offset as u32).to_le_bytes());
+    globals[boundsheet3_offset_pos..boundsheet3_offset_pos + 4]
+        .copy_from_slice(&(sheet3_offset as u32).to_le_bytes());
+
+    globals.extend_from_slice(&sheet1);
+    globals.extend_from_slice(&sheet2);
+    globals.extend_from_slice(&sheet3);
 
     globals
 }
