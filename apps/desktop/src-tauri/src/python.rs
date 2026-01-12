@@ -1045,6 +1045,50 @@ mod tests {
     }
 
     #[test]
+    fn python_rpc_get_sheet_id_matches_unicode_case_insensitively() {
+        let mut workbook = crate::file_io::Workbook::new_empty(None);
+        workbook.add_sheet("é".to_string());
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let mut host = PythonRpcHost::new(&mut state, None).expect("host should init");
+        let res = host
+            .handle_rpc("get_sheet_id", Some(json!({ "name": "É" })))
+            .expect("get_sheet_id should succeed");
+        assert_eq!(res, JsonValue::String("é".to_string()));
+    }
+
+    #[test]
+    fn python_rpc_get_sheet_id_matches_unicode_nfkc_equivalence() {
+        let mut workbook = crate::file_io::Workbook::new_empty(None);
+        workbook.add_sheet("fi".to_string());
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let mut host = PythonRpcHost::new(&mut state, None).expect("host should init");
+        // The "fi" ligature (U+FB01) NFKC-normalizes to "fi".
+        let res = host
+            .handle_rpc("get_sheet_id", Some(json!({ "name": "\u{FB01}" })))
+            .expect("get_sheet_id should succeed");
+        assert_eq!(res, JsonValue::String("fi".to_string()));
+    }
+
+    #[test]
+    fn python_rpc_get_sheet_id_matches_unicode_case_folding_expansion() {
+        let mut workbook = crate::file_io::Workbook::new_empty(None);
+        workbook.add_sheet("straße".to_string());
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let mut host = PythonRpcHost::new(&mut state, None).expect("host should init");
+        // German ß uppercases to "SS".
+        let res = host
+            .handle_rpc("get_sheet_id", Some(json!({ "name": "STRASSE" })))
+            .expect("get_sheet_id should succeed");
+        assert_eq!(res, JsonValue::String("straße".to_string()));
+    }
+
+    #[test]
     fn python_rpc_rename_sheet_rejects_blank_name_with_canonical_error() {
         let mut workbook = crate::file_io::Workbook::new_empty(None);
         workbook.add_sheet("Sheet1".to_string());
