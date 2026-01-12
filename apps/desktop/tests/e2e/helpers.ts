@@ -28,7 +28,10 @@ export async function gotoDesktop(page: Page, path: string = "/", options: Deskt
   // happens mid-wait, retry once after the navigation completes.
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      await page.goto(path);
+      // Desktop e2e relies on waiting for `__formulaApp` (and `whenIdle`) rather than the
+      // window `load` event. Under heavy load, waiting for `load` can occasionally hang
+      // (e.g. if a long-lived request prevents the event from firing).
+      await page.goto(path, { waitUntil: "domcontentloaded" });
       await page.waitForFunction(() => Boolean((window as any).__formulaApp), undefined, { timeout: 60_000 });
       // `__formulaApp` is assigned early in `main.ts` so tests can still introspect failures,
       // but that means we need to explicitly wait for the app to settle before interacting.
