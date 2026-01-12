@@ -688,10 +688,10 @@ test.describe("sheet tabs", () => {
 
     // Hide Sheet2 so the visible tabs are [Sheet1, Sheet3] while the full order is
     // [Sheet1, Sheet2(hidden), Sheet3].
-    await page.evaluate(() => {
-      const app = (window as any).__formulaApp;
-      app.getWorkbookSheetStore().hide("Sheet2");
-    });
+    await page.getByTestId("sheet-tab-Sheet2").click({ button: "right" });
+    const menu = page.getByTestId("sheet-tab-context-menu");
+    await expect(menu).toBeVisible();
+    await menu.getByRole("button", { name: "Hide" }).click();
     await expect(page.locator('[data-testid="sheet-tab-Sheet2"]')).toHaveCount(0);
 
     // Drag Sheet3 before Sheet1.
@@ -733,10 +733,10 @@ test.describe("sheet tabs", () => {
       .toEqual(desiredAll);
 
     // Unhide Sheet2 and ensure it lands at the end (i.e. hidden sheet moved as expected).
-    await page.evaluate(() => {
-      const app = (window as any).__formulaApp;
-      app.getWorkbookSheetStore().unhide("Sheet2");
-    });
+    await page.getByTestId("sheet-tab-Sheet1").click({ button: "right" });
+    await expect(menu).toBeVisible();
+    await menu.getByRole("button", { name: "Unhide…" }).click();
+    await menu.getByRole("button", { name: "Sheet2" }).click();
     await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
 
     await expect
@@ -875,10 +875,10 @@ test.describe("sheet tabs", () => {
     await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveAttribute("data-active", "true");
 
     // Hide the middle sheet.
-    await page.evaluate(() => {
-      const app = (window as any).__formulaApp;
-      app.getWorkbookSheetStore().hide("Sheet2");
-    });
+    await page.getByTestId("sheet-tab-Sheet2").click({ button: "right" });
+    const menu = page.getByTestId("sheet-tab-context-menu");
+    await expect(menu).toBeVisible();
+    await menu.getByRole("button", { name: "Hide" }).click();
     await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveCount(0);
 
     // Sheet1 -> Sheet3 (Sheet2 is hidden).
