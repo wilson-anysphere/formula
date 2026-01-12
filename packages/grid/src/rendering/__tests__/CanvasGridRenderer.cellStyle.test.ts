@@ -602,4 +602,52 @@ describe("CanvasGridRenderer CellStyle primitives", () => {
     expect(grid.rec.lineWidths).toContain(2);
     expect(grid.rec.strokeStyles).not.toContain(thinColor);
   });
+
+  it("resolves shared-edge border conflicts deterministically on ties (prefer right/bottom)", () => {
+    const leftColor = "#ff0000";
+    const rightColor = "#0000ff";
+
+    const provider: CellProvider = {
+      getCell: (row, col) => {
+        if (row !== 0) return null;
+        if (col === 0) {
+          return { row, col, value: null, style: { borders: { right: { width: 1, style: "solid", color: leftColor } } } };
+        }
+        if (col === 1) {
+          return { row, col, value: null, style: { borders: { left: { width: 1, style: "solid", color: rightColor } } } };
+        }
+        return null;
+      }
+    };
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const grid = createRecordingContext(gridCanvas);
+    const content = createRecordingContext(contentCanvas);
+    const selection = createRecordingContext(selectionCanvas);
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+      [gridCanvas, grid.ctx],
+      [contentCanvas, content.ctx],
+      [selectionCanvas, selection.ctx]
+    ]);
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      const existing = contexts.get(this);
+      if (existing) return existing;
+      const created = createRecordingContext(this).ctx;
+      contexts.set(this, created);
+      return created;
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const renderer = new CanvasGridRenderer({ provider, rowCount: 1, colCount: 2, defaultColWidth: 50, defaultRowHeight: 20 });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(200, 80, 1);
+    renderer.renderImmediately();
+
+    expect(grid.rec.strokeStyles).toContain(rightColor);
+    expect(grid.rec.strokeStyles).not.toContain(leftColor);
+  });
 });
