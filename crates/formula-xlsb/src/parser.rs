@@ -2298,6 +2298,8 @@ fn is_extern_sheet_record(id: u32) -> bool {
         0x0017
             // Common BIFF12 candidate.
             | 0x0167
+            // MS-XLSB `BrtExternSheet` record id used by Excel (and Calamine).
+            | 0x016A
     )
 }
 
