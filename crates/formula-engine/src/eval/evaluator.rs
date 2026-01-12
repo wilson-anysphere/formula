@@ -613,6 +613,10 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         value: Value,
         args: &[CompiledExpr],
     ) -> Value {
+        if args.len() > crate::EXCEL_MAX_ARGS {
+            return Value::Error(ErrorKind::Value);
+        }
+
         match value {
             Value::Lambda(lambda) => self.call_lambda(call_name, lambda, args),
             Value::Error(e) => Value::Error(e),
