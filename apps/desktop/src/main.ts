@@ -707,6 +707,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       "home.alignment.alignRight": formatState.align === "right",
       "view.show.showFormulas": app.getShowFormulas(),
       "view.show.performanceStats": Boolean((app.getGridPerfStats() as any)?.enabled),
+      "view.window.split": ribbonLayoutController ? ribbonLayoutController.layout.splitView.direction !== "none" : false,
     };
 
     const numberFormatLabel = (() => {
@@ -3711,9 +3712,16 @@ if (
     toggleDockPanel(PanelIds.AI_CHAT);
   });
 
-  layoutController.on("change", () => renderLayout());
-  rerenderLayout = renderLayout;
+  layoutController.on("change", () => {
+    renderLayout();
+    scheduleRibbonSelectionFormatStateUpdate();
+  });
+  rerenderLayout = () => {
+    renderLayout();
+    scheduleRibbonSelectionFormatStateUpdate();
+  };
   renderLayout();
+  scheduleRibbonSelectionFormatStateUpdate();
 
   // Allow panel content to request opening another panel.
   window.addEventListener("formula:open-panel", (evt) => {
@@ -4183,6 +4191,22 @@ mountRibbon(ribbonRoot, {
         app.setGridPerfStatsEnabled(pressed);
         app.focus();
         return;
+      case "view.window.split": {
+        if (!ribbonLayoutController) {
+          showToast("Split view is not available.");
+          return;
+        }
+
+        const currentDirection = ribbonLayoutController.layout.splitView.direction;
+        if (!pressed) {
+          ribbonLayoutController.setSplitDirection("none");
+        } else if (currentDirection === "none") {
+          ribbonLayoutController.setSplitDirection("vertical", 0.5);
+        }
+
+        app.focus();
+        return;
+      }
       case "home.font.bold":
         applyToSelection("Bold", (sheetId, ranges) => toggleBold(app.getDocument(), sheetId, ranges, { next: pressed }));
         return;
@@ -4735,6 +4759,22 @@ mountRibbon(ribbonRoot, {
         return;
       case "pageLayout.export.exportPdf":
         void handleRibbonExportPdf();
+        return;
+      case "view.window.freezePanes.freezePanes":
+        app.freezePanes();
+        app.focus();
+        return;
+      case "view.window.freezePanes.freezeTopRow":
+        app.freezeTopRow();
+        app.focus();
+        return;
+      case "view.window.freezePanes.freezeFirstColumn":
+        app.freezeFirstColumn();
+        app.focus();
+        return;
+      case "view.window.freezePanes.unfreeze":
+        app.unfreezePanes();
+        app.focus();
         return;
       case "view.appearance.theme.system":
         themeController.setThemePreference("system");
