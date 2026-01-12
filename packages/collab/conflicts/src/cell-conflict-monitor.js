@@ -130,8 +130,9 @@ export class CellConflictMonitor {
       const oldValue = change.oldValue ?? null;
       const newValue = cellMap.get("value") ?? null;
       const currentModifiedBy = (cellMap.get("modifiedBy") ?? "").toString();
-      const remoteUserId =
-        modifiedByChange || currentModifiedBy !== this.localUserId ? currentModifiedBy : "";
+      // `modifiedBy` is best-effort metadata. Some writers may not update it.
+      // If it didn't change in this transaction, we can't reliably attribute the overwrite.
+      const remoteUserId = modifiedByChange ? currentModifiedBy : "";
       const oldModifiedBy = modifiedByChange ? (modifiedByChange.oldValue ?? "").toString() : currentModifiedBy;
       const action = change.action;
       const itemId = getItemId(cellMap, "value");
