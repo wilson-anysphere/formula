@@ -6494,19 +6494,11 @@ export class SpreadsheetApp {
     }
 
     // Sheet navigation (Excel-style): Ctrl+PgUp / Ctrl+PgDn.
-    if (primary && !e.altKey && (e.key === "PageUp" || e.key === "PageDown")) {
-      e.preventDefault();
-      const sheetIds = this.document.getSheetIds();
-      const sheets = sheetIds.length > 0 ? sheetIds : ["Sheet1"];
-      const idx = sheets.indexOf(this.sheetId);
-      if (idx === -1 || sheets.length === 0) return;
-      const delta = e.key === "PageUp" ? -1 : 1;
-      const next = sheets[(idx + delta + sheets.length) % sheets.length];
-      if (!next || next === this.sheetId) return;
-      this.activateSheet(next);
-      this.focusAfterSheetNavigation();
-      return;
-    }
+    //
+    // NOTE: The desktop shell owns sheet metadata (ordering + visibility) via a sheet store.
+    // Do not implement sheet navigation here based on DocumentController sheet ids; instead,
+    // allow the global keybinding layer to dispatch `workbook.previousSheet`/`workbook.nextSheet`
+    // using the sheet store's visible order.
 
     if (!primary && e.shiftKey && e.code === "Space") {
       // Shift+Space selects entire row.
