@@ -334,40 +334,29 @@ fn resolve_target_best_effort(
     Err(XlsxError::MissingPart(direct))
 }
 
-fn get_blip_embed_rel_id(blip_node: &roxmltree::Node<'_, '_>) -> Option<String> {
-    get_relationship_id_attr(blip_node, "embed")
+fn get_relationship_attr(blip_node: &roxmltree::Node<'_, '_>, local: &str) -> Option<String> {
+    // The canonical namespaces form.
+    blip_node
+        .attribute((REL_NS, local))
+        .or_else(|| blip_node.attribute(format!("r:{local}").as_str()))
+        .or_else(|| {
+            // Some XML libraries represent namespaced attributes using Clark notation:
+            // `{namespace}localname`.
+            let clark = format!("{{{REL_NS}}}{local}");
+            blip_node.attribute(clark.as_str())
+        })
+        .map(|s| s.to_string())
 }
 
-fn get_relationship_id_attr(node: &roxmltree::Node<'_, '_>, local: &str) -> Option<String> {
-    let prefixed = format!("r:{local}");
-    let clark = format!("{{{REL_NS}}}{local}");
-    // Prefer the canonical namespace-aware lookup.
-    node.attribute((REL_NS, local))
-        .or_else(|| node.attribute(prefixed.as_str()))
-        // Some XML libraries represent namespaced attributes using Clark notation:
-        // `{namespace}localname`.
-        .or_else(|| node.attribute(clark.as_str()))
-        .map(|s| s.to_string())
+fn get_blip_embed_rel_id(blip_node: &roxmltree::Node<'_, '_>) -> Option<String> {
+    get_relationship_attr(blip_node, "embed")
 }
 
 fn get_cell_image_rel_id(cell_image_node: &roxmltree::Node<'_, '_>) -> Option<String> {
     // Most recent Excel builds seem to use `r:id` on `<cellImage>`, but older variants may use
     // `r:embed` (mirroring `<a:blip r:embed>`). Treat either as a relationship ID.
-    cell_image_node
-        .attribute((REL_NS, "id"))
-        .or_else(|| cell_image_node.attribute("r:id"))
-        .or_else(|| {
-            // Clark notation: `{namespace}localname`.
-            let clark = format!("{{{REL_NS}}}id");
-            cell_image_node.attribute(clark.as_str())
-        })
-        .or_else(|| cell_image_node.attribute((REL_NS, "embed")))
-        .or_else(|| cell_image_node.attribute("r:embed"))
-        .or_else(|| {
-            let clark = format!("{{{REL_NS}}}embed");
-            cell_image_node.attribute(clark.as_str())
-        })
-        .map(|s| s.to_string())
+    get_relationship_attr(cell_image_node, "id")
+        .or_else(|| get_relationship_attr(cell_image_node, "embed"))
 }
 
 fn image_id_from_target_path(target_path: &str) -> ImageId {

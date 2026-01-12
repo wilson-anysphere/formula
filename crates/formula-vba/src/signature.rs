@@ -880,7 +880,6 @@ fn digest_alg_from_digest_len(len: usize) -> Option<DigestAlg> {
         _ => None,
     }
 }
-
 fn digest_name_from_oid_str(oid: &str) -> Option<&'static str> {
     digest_alg_from_oid_str(oid).map(|alg| match alg {
         crate::DigestAlg::Md5 => "MD5",
@@ -1509,9 +1508,7 @@ pub fn verify_vba_project_signature_binding(
             first_comparison = Some(debug.clone());
         }
 
-        if signed_digest == content_hash_md5
-            || matches!(agile_hash_md5, Some(h) if signed_digest == h)
-        {
+        if signed_digest == content_hash_md5 || matches!(agile_hash_md5, Some(h) if signed_digest == h) {
             return Ok(VbaProjectBindingVerification::BoundVerified(debug));
         }
     }
