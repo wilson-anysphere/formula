@@ -360,3 +360,200 @@ fn odd_coupon_yield_price_roundtrip() {
     .unwrap();
     assert_close(yld_out, yld_in, 1e-6);
 }
+
+#[test]
+fn odd_coupon_internal_functions_reject_non_finite_numeric_inputs() {
+    let system = ExcelDateSystem::EXCEL_1900;
+    // Use separate valid schedules for ODDF* and ODDL* so these assertions exercise the
+    // non-finite numeric guards (not chronology errors).
+    let oddf_settlement = ymd_to_serial(ExcelDate::new(2020, 3, 1), system).unwrap();
+    let oddf_maturity = ymd_to_serial(ExcelDate::new(2023, 7, 1), system).unwrap();
+    let oddf_issue = ymd_to_serial(ExcelDate::new(2020, 1, 1), system).unwrap();
+    let oddf_first_coupon = ymd_to_serial(ExcelDate::new(2020, 7, 1), system).unwrap();
+
+    let oddl_settlement = ymd_to_serial(ExcelDate::new(2022, 11, 1), system).unwrap();
+    let oddl_maturity = ymd_to_serial(ExcelDate::new(2023, 3, 1), system).unwrap();
+    let oddl_last_interest = ymd_to_serial(ExcelDate::new(2022, 7, 1), system).unwrap();
+
+    // ODDFPRICE
+    assert_eq!(
+        oddfprice(
+            oddf_settlement,
+            oddf_maturity,
+            oddf_issue,
+            oddf_first_coupon,
+            f64::INFINITY,
+            0.05,
+            100.0,
+            1,
+            0,
+            system
+        ),
+        Err(ExcelError::Num)
+    );
+    assert_eq!(
+        oddfprice(
+            oddf_settlement,
+            oddf_maturity,
+            oddf_issue,
+            oddf_first_coupon,
+            0.06,
+            f64::NAN,
+            100.0,
+            1,
+            0,
+            system
+        ),
+        Err(ExcelError::Num)
+    );
+    assert_eq!(
+        oddfprice(
+            oddf_settlement,
+            oddf_maturity,
+            oddf_issue,
+            oddf_first_coupon,
+            0.06,
+            0.05,
+            f64::NEG_INFINITY,
+            1,
+            0,
+            system
+        ),
+        Err(ExcelError::Num)
+    );
+
+    // ODDFYIELD
+    assert_eq!(
+        oddfyield(
+            oddf_settlement,
+            oddf_maturity,
+            oddf_issue,
+            oddf_first_coupon,
+            f64::NAN,
+            95.0,
+            100.0,
+            1,
+            0,
+            system
+        ),
+        Err(ExcelError::Num)
+    );
+    assert_eq!(
+        oddfyield(
+            oddf_settlement,
+            oddf_maturity,
+            oddf_issue,
+            oddf_first_coupon,
+            0.06,
+            f64::INFINITY,
+            100.0,
+            1,
+            0,
+            system
+        ),
+        Err(ExcelError::Num)
+    );
+    assert_eq!(
+        oddfyield(
+            oddf_settlement,
+            oddf_maturity,
+            oddf_issue,
+            oddf_first_coupon,
+            0.06,
+            95.0,
+            f64::NAN,
+            1,
+            0,
+            system
+        ),
+        Err(ExcelError::Num)
+    );
+
+    // ODDLPRICE
+    assert_eq!(
+        oddlprice(
+            oddl_settlement,
+            oddl_maturity,
+            oddl_last_interest,
+            f64::NEG_INFINITY,
+            0.05,
+            100.0,
+            1,
+            0,
+            system
+        ),
+        Err(ExcelError::Num)
+    );
+    assert_eq!(
+        oddlprice(
+            oddl_settlement,
+            oddl_maturity,
+            oddl_last_interest,
+            0.06,
+            f64::INFINITY,
+            100.0,
+            1,
+            0,
+            system
+        ),
+        Err(ExcelError::Num)
+    );
+    assert_eq!(
+        oddlprice(
+            oddl_settlement,
+            oddl_maturity,
+            oddl_last_interest,
+            0.06,
+            0.05,
+            f64::NAN,
+            1,
+            0,
+            system
+        ),
+        Err(ExcelError::Num)
+    );
+
+    // ODDLYIELD
+    assert_eq!(
+        oddlyield(
+            oddl_settlement,
+            oddl_maturity,
+            oddl_last_interest,
+            f64::INFINITY,
+            95.0,
+            100.0,
+            1,
+            0,
+            system
+        ),
+        Err(ExcelError::Num)
+    );
+    assert_eq!(
+        oddlyield(
+            oddl_settlement,
+            oddl_maturity,
+            oddl_last_interest,
+            0.06,
+            f64::NAN,
+            100.0,
+            1,
+            0,
+            system
+        ),
+        Err(ExcelError::Num)
+    );
+    assert_eq!(
+        oddlyield(
+            oddl_settlement,
+            oddl_maturity,
+            oddl_last_interest,
+            0.06,
+            95.0,
+            f64::NEG_INFINITY,
+            1,
+            0,
+            system
+        ),
+        Err(ExcelError::Num)
+    );
+}
