@@ -3395,12 +3395,24 @@ if (
     app.setScroll(pane.scrollX ?? 0, pane.scrollY ?? 0);
   };
 
+  let lastSplitPrimarySizeCss: string | null = null;
+  let lastSplitSecondarySizeCss: string | null = null;
   const applySplitRatioCss = (ratio: number): void => {
     const clamped = Math.max(0.1, Math.min(0.9, ratio));
     const primaryPct = Math.round(clamped * 1000) / 10;
     const secondaryPct = Math.round((100 - primaryPct) * 10) / 10;
-    gridSplitEl.style.setProperty("--split-primary-size", `${primaryPct}%`);
-    gridSplitEl.style.setProperty("--split-secondary-size", `${secondaryPct}%`);
+    const primaryCss = `${primaryPct}%`;
+    const secondaryCss = `${secondaryPct}%`;
+    // Updating CSS vars can trigger grid layout work; skip redundant writes when rounding
+    // yields the same percentages (e.g. during tiny pointer moves).
+    if (primaryCss !== lastSplitPrimarySizeCss) {
+      lastSplitPrimarySizeCss = primaryCss;
+      gridSplitEl.style.setProperty("--split-primary-size", primaryCss);
+    }
+    if (secondaryCss !== lastSplitSecondarySizeCss) {
+      lastSplitSecondarySizeCss = secondaryCss;
+      gridSplitEl.style.setProperty("--split-secondary-size", secondaryCss);
+    }
   };
 
   function renderSplitView() {
