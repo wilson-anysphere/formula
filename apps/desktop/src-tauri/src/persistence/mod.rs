@@ -241,14 +241,18 @@ fn rich_model_cell_value_to_scalar(value: &ModelCellValue) -> Option<CellScalar>
         "entity" => {
             let display_value = serialized
                 .get("value")?
-                .get("display_value")?
+                .get("displayValue")
+                .or_else(|| serialized.get("value")?.get("display"))?
                 .as_str()?
                 .to_string();
             Some(CellScalar::Text(display_value))
         }
         "record" => {
             let record = serialized.get("value")?;
-            let display_field = record.get("display_field")?.as_str()?;
+            let display_field = record
+                .get("displayField")
+                .or_else(|| record.get("display_field"))?
+                .as_str()?;
             let fields = record.get("fields")?.as_object()?;
             let display_value = fields.get(display_field)?;
             let display_value_type = display_value.get("type")?.as_str()?;

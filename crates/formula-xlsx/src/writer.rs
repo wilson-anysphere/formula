@@ -694,7 +694,7 @@ fn cell_xml(
             attrs.push_str(r#" t="s""#);
             let idx = shared_strings
                 .index
-                .get(&entity.display_value)
+                .get(entity.display_value.as_str())
                 .copied()
                 .unwrap_or_default();
             value_xml.push_str(&format!(r#"<v>{}</v>"#, idx));

@@ -1985,15 +1985,19 @@ fn value_semantics_eq(existing: &ExistingCellValue, patch_value: Option<&CellVal
             ExistingCellValue::SharedString(rich) => &rich.text == s,
             _ => false,
         },
-        CellValue::Entity(entity) => match existing {
-            ExistingCellValue::String(v) => v == &entity.display_value,
-            ExistingCellValue::SharedString(rich) => rich.text == entity.display_value,
-            _ => false,
-        },
+        CellValue::Entity(entity) => {
+            let display = entity.display_value.as_str();
+            match existing {
+                ExistingCellValue::String(v) => v == display,
+                ExistingCellValue::SharedString(rich) => rich.text == display,
+                _ => false,
+            }
+        }
         CellValue::Record(record) => {
             let display = record.to_string();
+            let display = display.as_str();
             match existing {
-                ExistingCellValue::String(v) => v == &display,
+                ExistingCellValue::String(v) => v == display,
                 ExistingCellValue::SharedString(rich) => rich.text == display,
                 _ => false,
             }

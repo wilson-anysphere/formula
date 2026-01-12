@@ -838,11 +838,11 @@ pub fn verify_vba_signature_certificate_trust(
 
 fn digest_alg_from_oid_str(oid: &str) -> Option<DigestAlg> {
     match oid.trim() {
-        // RFC 1321 / PKCS#1
+        // id-md5 (RFC 1321 / PKCS#1)
         "1.2.840.113549.2.5" => Some(DigestAlg::Md5),
-        // SHA-1 (OID 1.3.14.3.2.26)
+        // id-sha1 (RFC 3279)
         "1.3.14.3.2.26" => Some(DigestAlg::Sha1),
-        // SHA-256 (OID 2.16.840.1.101.3.4.2.1)
+        // id-sha256 (NIST)
         "2.16.840.1.101.3.4.2.1" => Some(DigestAlg::Sha256),
         _ => None,
     }
@@ -1357,6 +1357,7 @@ pub fn verify_vba_project_signature_binding(
 
     let mut any_signed_digest = None::<VbaProjectDigestDebugInfo>;
     let mut first_comparison = None::<VbaProjectDigestDebugInfo>;
+    let mut first_comparison_is_fallback = false;
     // Lazily computed MS-OVBA Content/Agile hashes for the project bytes.
     let mut content_hash_md5: Option<[u8; 16]> = None;
     // Outer Option = attempted; inner Option = computed successfully.
@@ -1451,6 +1452,9 @@ pub fn verify_vba_project_signature_binding(
     }
 
     if let Some(debug) = first_comparison {
+        if first_comparison_is_fallback {
+            return Ok(VbaProjectBindingVerification::BoundMismatch(debug));
+        }
         // If we couldn't compute the Agile hash, we can't distinguish "truly unbound" from "bound
         // but forms data missing/unparseable", so treat binding as unknown.
         let agile_hash_md5 = agile_hash_md5.unwrap_or(None);

@@ -871,11 +871,36 @@ fn estimate_style_bytes(style: &Style) -> usize {
 }
 
 fn estimate_cell_value_bytes(value: &CellValue) -> usize {
+    fn record_display_len(record: &formula_model::RecordValue) -> usize {
+        let Some(field) = record.display_field.as_deref() else {
+            return record.display_value.len();
+        };
+        let Some(value) = record.fields.get(field) else {
+            return record.display_value.len();
+        };
+        match value {
+            CellValue::String(s) => s.len(),
+            CellValue::Number(n) => n.to_string().len(),
+            CellValue::Boolean(b) => {
+                if *b {
+                    "TRUE".len()
+                } else {
+                    "FALSE".len()
+                }
+            }
+            CellValue::Error(err) => err.as_str().len(),
+            CellValue::RichText(rt) => rt.text.len(),
+            CellValue::Entity(entity) => entity.display_value.len(),
+            CellValue::Record(record) => record_display_len(record),
+            _ => record.display_value.len(),
+        }
+    }
+
     match value {
         CellValue::String(s) => s.len(),
         CellValue::RichText(rt) => rt.text.len().saturating_add(rt.runs.len().saturating_mul(32)),
         CellValue::Entity(entity) => entity.display_value.len(),
-        CellValue::Record(record) => record.display_value.len(),
+        CellValue::Record(record) => record_display_len(record),
         CellValue::Error(err) => err.as_str().len(),
         CellValue::Array(arr) => {
             let mut bytes = 64usize;
@@ -886,7 +911,7 @@ fn estimate_cell_value_bytes(value: &CellValue) -> usize {
                         CellValue::String(s) => s.len(),
                         CellValue::RichText(rt) => rt.text.len() + rt.runs.len() * 32,
                         CellValue::Entity(entity) => entity.display_value.len(),
-                        CellValue::Record(record) => record.display_value.len(),
+                        CellValue::Record(record) => record_display_len(record),
                         CellValue::Error(err) => err.as_str().len(),
                         CellValue::Array(_) => 64,
                         CellValue::Spill(_) => 16,

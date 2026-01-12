@@ -13,7 +13,6 @@ pub mod rich_value;
 pub mod rich_value_rel;
 pub mod rich_value_structure;
 pub mod rich_value_types;
-
 mod images;
 mod media_parts;
 mod rich_value_images;
