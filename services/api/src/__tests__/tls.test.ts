@@ -197,6 +197,59 @@ describe("fetchWithOrgTls", () => {
     });
   });
 
+  it("still enforces hostname verification when pinning is enabled", async () => {
+    const dir = fixturesDir();
+    const certPemLocalhostOnly = fs.readFileSync(path.join(dir, "localhost-dns-only.crt"));
+    const keyPemLocalhostOnly = fs.readFileSync(path.join(dir, "localhost-dns-only.key"));
+
+    let requestCount = 0;
+    const server = https.createServer({ key: keyPemLocalhostOnly, cert: certPemLocalhostOnly }, (_req, res) => {
+      requestCount += 1;
+      res.writeHead(200, { "content-type": "text/plain" });
+      res.end("ok");
+    });
+
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("expected https server to listen on tcp");
+
+    const url = `https://127.0.0.1:${address.port}/`;
+    const x509 = new crypto.X509Certificate(certPemLocalhostOnly);
+    const pin = sha256FingerprintHexFromCertRaw(x509.raw);
+
+    try {
+      const res = fetchWithOrgTls(
+        url,
+        { method: "GET" },
+        {
+          tls: {
+            certificatePinningEnabled: true,
+            certificatePins: [pin]
+          }
+        }
+      );
+
+      await expect(res).rejects.toThrow();
+      await res.catch((err: any) => {
+        expect(err?.cause?.retriable).toBe(false);
+        const message =
+          typeof err?.cause?.message === "string"
+            ? err.cause.message
+            : typeof err?.message === "string"
+              ? err.message
+              : String(err);
+        expect(message).toContain("Hostname/IP does not match certificate");
+      });
+      expect(requestCount).toBe(0);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((closeErr) => (closeErr ? reject(closeErr) : resolve()));
+      });
+    }
+  });
+
   it("fails fast when pinning is enabled for non-https URLs", async () => {
     const server = http.createServer((_req, res) => {
       res.writeHead(200, { "content-type": "text/plain" });
