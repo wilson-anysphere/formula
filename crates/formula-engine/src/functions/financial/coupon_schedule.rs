@@ -114,8 +114,7 @@ pub(crate) fn days_between(
 }
 
 /// Coupon-period length `E` (days) following Excel-compatible conventions:
-/// - basis 0/2: 360/frequency (constant)
-/// - basis 4: European 30/360 day count between coupon dates (variable)
+/// - basis 0/2/4: 360/frequency (constant)
 /// - basis 3: 365/frequency (constant)
 /// - basis 1: actual days between PCD and NCD (variable)
 pub(crate) fn coupon_period_e(
@@ -123,7 +122,7 @@ pub(crate) fn coupon_period_e(
     ncd: i32,
     frequency: i32,
     basis: i32,
-    system: ExcelDateSystem,
+    _system: ExcelDateSystem,
 ) -> ExcelResult<f64> {
     let freq = f64::from(frequency);
     if !freq.is_finite() || freq <= 0.0 {
@@ -132,8 +131,7 @@ pub(crate) fn coupon_period_e(
 
     let e = match basis {
         1 => (i64::from(ncd) - i64::from(pcd)) as f64,
-        0 | 2 => 360.0 / freq,
-        4 => days_between(pcd, ncd, 4, system)? as f64,
+        0 | 2 | 4 => 360.0 / freq,
         3 => 365.0 / freq,
         _ => return Err(ExcelError::Num),
     };
@@ -229,10 +227,8 @@ pub fn coupdaysnc(
     validate_coupon_args(settlement, maturity, frequency, basis, system)?;
     let (pcd, ncd, _n) = coupon_pcd_ncd_num(settlement, maturity, frequency, system)?;
     // Excel's COUPDAYSNC is not always the same day-count convention as `days_between`.
-    // For 30/360 bases, Excel treats the coupon period length `E` as a fixed 360/fraction,
-    // and computes DSC as the remaining portion of that modeled coupon period. For European
-    // 30/360 (basis 4), Excel's modeled period length is the 30/360 day count between coupon
-    // dates, which can differ from 360/frequency around month ends.
+    // For 30/360 bases (0 and 4), Excel models the coupon period length `E` as a fixed
+    // 360/frequency and computes DSC as the remaining portion of that modeled coupon period.
     let dsc = match basis {
         0 | 4 => {
             let e = coupon_period_e(pcd, ncd, frequency, basis, system)?;
