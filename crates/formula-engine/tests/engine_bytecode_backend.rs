@@ -3304,6 +3304,91 @@ fn bytecode_backend_bond_numeric_text_respects_value_locale() {
 }
 
 #[test]
+fn bytecode_backend_tbill_numeric_text_respects_value_locale() {
+    let mut engine = Engine::new();
+    engine.set_value_locale(ValueLocaleConfig::de_de());
+
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A1",
+            r#"=TBILLPRICE("2020-01-01","2020-07-01","0,05")"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A2",
+            r#"=TBILLPRICE("2020-01-01","2020-07-01",0.05)"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A3",
+            r#"=TBILLYIELD("2020-01-01","2020-07-01","97,5")"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A4",
+            r#"=TBILLYIELD("2020-01-01","2020-07-01",97.5)"#,
+        )
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 4);
+    assert_eq!(stats.compiled, 4);
+    assert_eq!(stats.fallback, 0);
+
+    engine.recalculate_single_threaded();
+
+    let Value::Number(p_text) = engine.get_cell_value("Sheet1", "A1") else {
+        panic!("expected TBILLPRICE with numeric text to return a number");
+    };
+    let Value::Number(p_num) = engine.get_cell_value("Sheet1", "A2") else {
+        panic!("expected TBILLPRICE with numeric literals to return a number");
+    };
+    assert!(
+        (p_text - p_num).abs() <= 1e-12,
+        "expected TBILLPRICE numeric text coercion to match numeric literals; got {p_text} vs {p_num}"
+    );
+
+    let Value::Number(y_text) = engine.get_cell_value("Sheet1", "A3") else {
+        panic!("expected TBILLYIELD with numeric text to return a number");
+    };
+    let Value::Number(y_num) = engine.get_cell_value("Sheet1", "A4") else {
+        panic!("expected TBILLYIELD with numeric literals to return a number");
+    };
+    assert!(
+        (y_text - y_num).abs() <= 1e-12,
+        "expected TBILLYIELD numeric text coercion to match numeric literals; got {y_text} vs {y_num}"
+    );
+
+    assert_engine_matches_ast(
+        &engine,
+        r#"=TBILLPRICE("2020-01-01","2020-07-01","0,05")"#,
+        "A1",
+    );
+    assert_engine_matches_ast(
+        &engine,
+        r#"=TBILLPRICE("2020-01-01","2020-07-01",0.05)"#,
+        "A2",
+    );
+    assert_engine_matches_ast(
+        &engine,
+        r#"=TBILLYIELD("2020-01-01","2020-07-01","97,5")"#,
+        "A3",
+    );
+    assert_engine_matches_ast(
+        &engine,
+        r#"=TBILLYIELD("2020-01-01","2020-07-01",97.5)"#,
+        "A4",
+    );
+}
+
+#[test]
 fn bytecode_backend_financial_date_text_respects_value_locale() {
     let mut engine = Engine::new();
     let formula = r#"=DISC("01/02/2020","01/03/2020",97,100)"#;
