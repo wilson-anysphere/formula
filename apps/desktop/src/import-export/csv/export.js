@@ -12,9 +12,15 @@ import { enforceExport } from "../../dlp/enforceExport.js";
  * @typedef {{
  *  delimiter?: string,
  *  newline?: "\n" | "\r\n",
+ *  maxCells?: number,
  *  dlp?: { documentId: string, classificationStore: any, policy: any }
  * }} CsvExportOptions
  */
+
+// Exporting large selections requires materializing a full 2D cell grid and building a
+// potentially huge CSV string. Keep this bounded so Excel-scale sheet limits don't allow
+// accidental multi-million-cell exports that would exhaust memory.
+const DEFAULT_MAX_EXPORT_CELLS = 200_000;
 
 function isLikelyDateNumberFormat(fmt) {
   if (typeof fmt !== "string") return false;
@@ -121,6 +127,24 @@ export function exportDocumentRangeToCsv(doc, sheetId, range, options = {}) {
       classificationStore: options.dlp.classificationStore,
       policy: options.dlp.policy,
     });
+  }
+
+  const rowCount = Math.max(0, r.end.row - r.start.row + 1);
+  const colCount = Math.max(0, r.end.col - r.start.col + 1);
+  const cellCount = rowCount * colCount;
+
+  const maxCells = (() => {
+    const raw = options?.maxCells;
+    if (raw === Infinity) return Infinity;
+    const n = Number(raw);
+    if (Number.isFinite(n) && Number.isInteger(n) && n > 0) return n;
+    return DEFAULT_MAX_EXPORT_CELLS;
+  })();
+
+  if (Number.isFinite(maxCells) && cellCount > maxCells) {
+    throw new Error(
+      `Selection too large to export (${cellCount.toLocaleString()} cells; max=${maxCells.toLocaleString()}). Select fewer cells and try again.`
+    );
   }
 
   /** @type {CellGrid} */

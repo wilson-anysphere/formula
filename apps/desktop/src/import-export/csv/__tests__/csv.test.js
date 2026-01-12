@@ -271,3 +271,22 @@ test("CSV export prefers cell formats over range-run formats (layer precedence)"
   const csv = exportDocumentRangeToCsv(doc, "Sheet1", "A50001");
   assert.equal(csv, dateTime.toISOString());
 });
+
+test("CSV export refuses to materialize extremely large selections", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", "hello");
+
+  let getCellCalls = 0;
+  const originalGetCell = doc.getCell.bind(doc);
+  // Ensure the max-cells guard fires before any range scanning begins.
+  doc.getCell = (...args) => {
+    getCellCalls += 1;
+    return originalGetCell(...args);
+  };
+
+  assert.throws(
+    () => exportDocumentRangeToCsv(doc, "Sheet1", "A1:A20", { maxCells: 10 }),
+    /Selection too large to export/,
+  );
+  assert.equal(getCellCalls, 0);
+});

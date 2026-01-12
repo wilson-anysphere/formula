@@ -1,6 +1,7 @@
 import type { CellRange, CellRange as GridCellRange, CellRichText, FillCommitEvent, GridAxisSizeChange } from "@formula/grid";
 import type { CellRange as FillEngineRange } from "@formula/fill-engine";
 import type { DocumentController } from "../../document/documentController.js";
+import { showToast } from "../../extensions/ui.js";
 import { applyFillCommitToDocumentController } from "../../fill/applyFillCommit";
 import { CellEditorOverlay } from "../../editor/cellEditorOverlay.js";
 import { DesktopSharedGrid, type DesktopSharedGridCallbacks } from "../shared/desktopSharedGrid.js";
@@ -8,6 +9,8 @@ import { DocumentCellProvider } from "../shared/documentCellProvider.js";
 import { applyPlainTextEdit } from "../text/rich-text/edit.js";
 
 type ScrollState = { scrollX: number; scrollY: number };
+
+const MAX_FILL_CELLS = 200_000;
 
 function clamp(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
@@ -62,6 +65,7 @@ export class SecondaryGridView {
   private pendingZoom: number | null = null;
   private zoomPersistTimer: number | null = null;
   private lastZoom = 1;
+  private suppressSelectionCallbacks = false;
 
   private readonly persistScroll?: (scroll: ScrollState) => void;
   private readonly persistZoom?: (zoom: number) => void;
@@ -217,11 +221,15 @@ export class SecondaryGridView {
           externalCallbacks.onAxisSizeChange?.(change);
         },
         onSelectionChange: (selection) => {
-          options.onSelectionChange?.(selection);
+          if (!this.suppressSelectionCallbacks) {
+            options.onSelectionChange?.(selection);
+          }
           externalCallbacks.onSelectionChange?.(selection);
         },
         onSelectionRangeChange: (range) => {
-          options.onSelectionRangeChange?.(range);
+          if (!this.suppressSelectionCallbacks) {
+            options.onSelectionRangeChange?.(range);
+          }
           externalCallbacks.onSelectionRangeChange?.(range);
         },
         onRequestCellEdit: (request) => {
@@ -479,6 +487,10 @@ export class SecondaryGridView {
     const sheetId = this.getSheetId();
     const { sourceRange, targetRange, mode } = event;
 
+    const prevSelection = this.grid.renderer.getSelection();
+    const prevRanges = this.grid.renderer.getSelectionRanges().map((r) => ({ ...r }));
+    const prevActiveIndex = this.grid.renderer.getActiveSelectionIndex();
+
     const toFillRange = (range: GridCellRange): FillEngineRange | null => {
       const startRow = Math.max(0, range.startRow - this.headerRows);
       const endRow = Math.max(0, range.endRow - this.headerRows);
@@ -491,6 +503,36 @@ export class SecondaryGridView {
     const source = toFillRange(sourceRange);
     const target = toFillRange(targetRange);
     if (!source || !target) return;
+
+    const sourceCells = (source.endRow - source.startRow) * (source.endCol - source.startCol);
+    const targetCells = (target.endRow - target.startRow) * (target.endCol - target.startCol);
+    if (sourceCells > MAX_FILL_CELLS || targetCells > MAX_FILL_CELLS) {
+      try {
+        showToast(
+          `Fill range too large (>${MAX_FILL_CELLS.toLocaleString()} cells). Select fewer cells and try again.`,
+          "warning",
+        );
+      } catch {
+        // `showToast` requires a #toast-root; unit tests don't always include it.
+      }
+
+      // DesktopSharedGrid will still expand selection to the dragged target range even if
+      // we skip applying edits. Suppress selection sync callbacks and restore the prior
+      // selection on the next microtask turn so split-view panes stay consistent.
+      this.suppressSelectionCallbacks = true;
+      queueMicrotask(() => {
+        try {
+          this.grid.setSelectionRanges(prevRanges, {
+            activeIndex: prevActiveIndex,
+            activeCell: prevSelection,
+            scrollIntoView: false,
+          });
+        } finally {
+          this.suppressSelectionCallbacks = false;
+        }
+      });
+      return;
+    }
 
     applyFillCommitToDocumentController({
       document: this.document,
