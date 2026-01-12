@@ -362,6 +362,19 @@ export class DesktopSharedGrid {
     this.emitScroll();
   }
 
+  getZoom(): number {
+    return this.renderer.getZoom();
+  }
+
+  setZoom(zoom: number): void {
+    this.renderer.setZoom(zoom);
+    this.syncScrollbars();
+    this.emitScroll();
+    // `renderer.setZoom()` already schedules a repaint via `markAllDirty()`, but
+    // request an additional frame in case the grid is already mid-frame.
+    this.renderer.requestRender();
+  }
+
   getCellRect(row: number, col: number): { x: number; y: number; width: number; height: number } | null {
     return this.renderer.getCellRect(row, col);
   }

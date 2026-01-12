@@ -1824,15 +1824,21 @@ export class SpreadsheetApp {
   }
 
   getZoom(): number {
-    return this.sharedGrid ? this.sharedGrid.renderer.getZoom() : 1;
+    return this.sharedGrid ? this.sharedGrid.getZoom() : 1;
   }
 
   setZoom(nextZoom: number): void {
     if (!this.sharedGrid) return;
-    this.sharedGrid.renderer.setZoom(nextZoom);
-    // Re-emit scroll so overlays (charts, auditing, etc) can re-layout at the new zoom level.
-    const scroll = this.sharedGrid.getScroll();
-    this.sharedGrid.scrollTo(scroll.x, scroll.y);
+    const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
+    const normalized = typeof nextZoom === "number" && Number.isFinite(nextZoom) ? nextZoom : 1;
+    const clamped = clamp(normalized, 0.25, 4);
+
+    const prev = this.sharedGrid.getZoom();
+    if (Math.abs(prev - clamped) < 1e-6) return;
+
+    // DesktopSharedGrid.setZoom will resync scrollbars + emit an onScroll callback
+    // (which is where shared-grid overlays and persisted axis sizes are re-applied).
+    this.sharedGrid.setZoom(clamped);
   }
 
   zoomToSelection(): void {

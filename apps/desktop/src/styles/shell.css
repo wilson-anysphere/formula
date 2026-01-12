@@ -38,6 +38,13 @@ body {
   min-width: 0;
 }
 
+/* Grid items default `min-width: auto`, which can cause horizontal overflow when
+   child content (e.g. ribbon controls) has a large min-content size. Allow app
+   rows to shrink to the viewport width. */
+#app > * {
+  min-width: 0;
+}
+
 /* --- Find/replace + go to dialogs --------------------------------------- */
 
 dialog.find-replace-dialog,

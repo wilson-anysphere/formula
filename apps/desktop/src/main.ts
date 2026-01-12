@@ -607,6 +607,7 @@ const selectionAverage = document.querySelector<HTMLElement>('[data-testid="sele
 const selectionCount = document.querySelector<HTMLElement>('[data-testid="selection-count"]');
 const sheetSwitcher = document.querySelector<HTMLSelectElement>('[data-testid="sheet-switcher"]');
 const zoomControl = document.querySelector<HTMLSelectElement>('[data-testid="zoom-control"]');
+const statusZoom = document.querySelector<HTMLElement>('[data-testid="status-zoom"]');
 const sheetPosition = document.querySelector<HTMLElement>('[data-testid="sheet-position"]');
 if (
   !activeCell ||
@@ -618,12 +619,14 @@ if (
   !statusMode ||
   !sheetSwitcher ||
   !zoomControl ||
+  !statusZoom ||
   !sheetPosition
 ) {
   throw new Error("Missing status bar elements");
 }
 const sheetSwitcherEl = sheetSwitcher;
 const zoomControlEl = zoomControl;
+const statusZoomEl = statusZoom;
 const sheetPositionEl = sheetPosition;
 
 const docIdParam = new URL(window.location.href).searchParams.get("docId");
@@ -1153,6 +1156,7 @@ function syncZoomControl(): void {
   const percent = Math.round(app.getZoom() * 100);
   ensureZoomOption(percent);
   zoomControlEl.value = String(percent);
+  statusZoomEl.textContent = `${percent}%`;
   zoomControlEl.disabled = !app.supportsZoom();
 }
 
@@ -1735,6 +1739,19 @@ if (
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (window as any).__layoutController = layoutController;
 
+  let lastAppliedZoom: number | null = null;
+
+  function applyPrimaryPaneZoomFromLayout(): void {
+    const zoom = (layoutController.layout as any)?.splitView?.panes?.primary?.zoom;
+    const next = typeof zoom === "number" && Number.isFinite(zoom) ? zoom : 1;
+    // Avoid redundant work on panel-only layout changes.
+    if (lastAppliedZoom == null || Math.abs(lastAppliedZoom - next) > 1e-6) {
+      app.setZoom(next);
+      lastAppliedZoom = app.getZoom();
+    }
+    syncZoomControl();
+  }
+
   const panelMounts = new Map<string, { container: HTMLElement; dispose: () => void }>();
 
   const scriptingWorkbook = new DocumentControllerWorkbookAdapter(app.getDocument(), {
@@ -1841,6 +1858,16 @@ if (
     splitPanePersistDirty = false;
     layoutController.persistNow();
   };
+
+  const persistPrimaryZoomFromApp = () => {
+    const pane = layoutController.layout.splitView.panes.primary;
+    const zoom = app.getZoom();
+    if (pane.zoom === zoom) return;
+    layoutController.setSplitPaneZoom("primary", zoom, { persist: false });
+    scheduleSplitPanePersist();
+  };
+
+  window.addEventListener("formula:zoom-changed", persistPrimaryZoomFromApp);
 
   const invalidateSecondaryProvider = () => {
     if (!secondaryGridView) return;
@@ -4117,6 +4144,7 @@ if (
   }
 
   function renderLayout() {
+    applyPrimaryPaneZoomFromLayout();
     applyDockSizes();
     renderSplitView();
     renderDock(dockLeftEl, layoutController.layout.docks.left, "left");

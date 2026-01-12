@@ -104,6 +104,8 @@ function clampIndex(value: number, min: number, max: number): number {
   return clamp(Math.trunc(value), min, max);
 }
 
+// Keep zoom bounds aligned with the desktop layout pane zoom clamp so the app can
+// persist values without "snapping" on reload.
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 4.0;
 
