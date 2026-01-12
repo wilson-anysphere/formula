@@ -168,6 +168,41 @@ fn opens_csv_with_wrong_extension() {
 }
 
 #[test]
+fn csv_opens_with_wrong_extension_and_sanitizes_sheet_name() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    // Note: extension intentionally wrong; content sniffing should still treat it as CSV.
+    let path = dir.path().join("bad[name].xlsx");
+
+    std::fs::write(&path, "col1,col2\n1,hello\n2,world\n").expect("write csv");
+
+    let wb = open_workbook(&path).expect("open csv workbook");
+    let model = match wb {
+        Workbook::Model(model) => model,
+        other => panic!("expected Workbook::Model, got {other:?}"),
+    };
+
+    let expected = sanitize_sheet_name("bad[name]");
+    assert!(
+        model.sheet_by_name("Sheet1").is_none(),
+        "should not fall back to Sheet1 for an invalid but non-empty stem"
+    );
+    let sheet = model
+        .sheet_by_name(&expected)
+        .expect("expected worksheet name to be sanitized from file stem");
+
+    assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(1.0));
+    assert_eq!(
+        sheet.value_a1("B1").unwrap(),
+        CellValue::String("hello".to_string())
+    );
+    assert_eq!(sheet.value_a1("A2").unwrap(), CellValue::Number(2.0));
+    assert_eq!(
+        sheet.value_a1("B2").unwrap(),
+        CellValue::String("world".to_string())
+    );
+}
+
+#[test]
 fn opens_csv_with_xls_extension() {
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("data.xls");
