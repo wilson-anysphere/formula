@@ -49,3 +49,16 @@ test("copyRangeToClipboardPayload uses effective formats (e.g. column defaults) 
   assert.ok(payload.html);
   assert.match(payload.html, /font-weight:bold/i);
 });
+
+test("copyRangeToClipboardPayload preserves column-level numberFormat for date serials", () => {
+  const doc = new DocumentController();
+
+  const serial = dateToExcelSerial(new Date(Date.UTC(2024, 0, 31)));
+  doc.setRangeFormat("Sheet1", "A1:A1048576", { numberFormat: "yyyy-mm-dd" }, { label: "Date Column" });
+  doc.setCellValue("Sheet1", "A500", serial);
+
+  const payload = copyRangeToClipboardPayload(doc, "Sheet1", "A500");
+  assert.equal(payload.text, "2024-01-31");
+  assert.ok(payload.html);
+  assert.match(payload.html, /data-number-format="yyyy-mm-dd"/);
+});
