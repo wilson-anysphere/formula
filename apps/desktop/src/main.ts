@@ -1290,6 +1290,14 @@ if (
   const commandKeybindingDisplayIndex = new Map<string, string[]>();
   let lastLoadedExtensionIds = new Set<string>();
 
+  const builtinKeybindings = [
+    { command: "clipboard.cut", key: "ctrl+x", mac: "cmd+x" },
+    { command: "clipboard.copy", key: "ctrl+c", mac: "cmd+c" },
+    { command: "clipboard.paste", key: "ctrl+v", mac: "cmd+v" },
+    { command: "clipboard.pasteSpecial", key: "ctrl+alt+v", mac: "cmd+option+v" },
+    { command: "edit.clearContents", key: "delete", mac: "backspace" },
+  ];
+
   const syncContributedCommands = () => {
     if (!extensionHostManager.ready || extensionHostManager.error) return;
     try {
@@ -1373,10 +1381,16 @@ if (
   const updateKeybindings = () => {
     parsedKeybindings.length = 0;
     commandKeybindingDisplayIndex.clear();
-    if (!extensionHostManager.ready) return;
     const platform = /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "mac" : "other";
-    const contributed = extensionHostManager.getContributedKeybindings() as ContributedKeybinding[];
-    const nextKeybindingsIndex = buildCommandKeybindingDisplayIndex({ platform, contributed });
+    const contributed =
+      extensionHostManager.ready && !extensionHostManager.error
+        ? (extensionHostManager.getContributedKeybindings() as ContributedKeybinding[])
+        : [];
+    const nextKeybindingsIndex = buildCommandKeybindingDisplayIndex({
+      platform,
+      builtin: builtinKeybindings,
+      contributed,
+    });
     for (const [commandId, bindings] of nextKeybindingsIndex.entries()) {
       commandKeybindingDisplayIndex.set(commandId, bindings);
     }
