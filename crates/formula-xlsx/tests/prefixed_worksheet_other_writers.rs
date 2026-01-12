@@ -1,6 +1,6 @@
 use std::io::{Cursor, Write};
 
-use formula_model::{CellRef, Hyperlink, HyperlinkTarget, Range, TabColor};
+use formula_model::{CellRef, Hyperlink, HyperlinkTarget, Range, SheetAutoFilter, TabColor};
 use formula_xlsx::XlsxPackage;
 
 fn build_minimal_xlsx(sheet_xml: &str) -> Vec<u8> {
@@ -183,6 +183,67 @@ fn hyperlinks_insertion_preserves_worksheet_prefix() -> Result<(), Box<dyn std::
     assert!(
         !updated.contains("<hyperlink"),
         "should not introduce an unprefixed <hyperlink> element"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn merge_cells_insertion_preserves_worksheet_prefix() -> Result<(), Box<dyn std::error::Error>> {
+    let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <x:sheetData/>
+</x:worksheet>"#;
+
+    let merges = vec![Range::from_a1("A1:B2")?];
+    let updated = formula_xlsx::merge_cells::update_worksheet_xml(sheet_xml, &merges)?;
+
+    roxmltree::Document::parse(&updated)?;
+    assert!(
+        updated.contains("<x:mergeCells") && updated.contains("</x:mergeCells>"),
+        "expected inserted <x:mergeCells> block, got:\n{updated}"
+    );
+    assert!(
+        updated.contains("<x:mergeCell"),
+        "expected inserted <x:mergeCell>, got:\n{updated}"
+    );
+    assert!(
+        !updated.contains("<mergeCells"),
+        "should not introduce an unprefixed <mergeCells> element"
+    );
+    assert!(
+        !updated.contains("<mergeCell"),
+        "should not introduce an unprefixed <mergeCell> element"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn autofilter_insertion_preserves_worksheet_prefix() -> Result<(), Box<dyn std::error::Error>> {
+    let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <x:sheetData/>
+</x:worksheet>"#;
+
+    let filter = SheetAutoFilter {
+        range: Range::from_a1("A1:A2")?,
+        filter_columns: Vec::new(),
+        sort_state: None,
+        raw_xml: Vec::new(),
+    };
+    let updated = formula_xlsx::autofilter::write_worksheet_autofilter(sheet_xml, Some(&filter))?;
+
+    roxmltree::Document::parse(&updated)?;
+    assert!(
+        updated.contains("<x:autoFilter") && updated.contains("</x:autoFilter>"),
+        "expected inserted <x:autoFilter> block, got:\n{updated}"
+    );
+    assert!(
+        !updated.contains("<autoFilter"),
+        "should not introduce an unprefixed <autoFilter> element"
     );
 
     Ok(())
