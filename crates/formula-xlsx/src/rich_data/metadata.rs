@@ -376,7 +376,8 @@ mod tests {
   </futureMetadata>
   <valueMetadata count="4">
     <bk><rc t="2" v="0"/></bk>
-    <bk><rc t="2" v="1"/></bk>
+    <!-- Same metadata type, but using a 0-based `t` index. -->
+    <bk><rc t="1" v="1"/></bk>
     <!-- Wrong metadata type (neither 0-based nor 1-based XLRICHVALUE); should be ignored. -->
     <bk><rc t="0" v="0"/></bk>
     <!-- Out-of-bounds v; should be ignored. -->
