@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import * as Y from "yjs";
 
-import { ConflictUiController } from "../apps/desktop/src/collab/conflicts-ui/index.js";
+import { ConflictUiController, StructuralConflictUiController } from "../apps/desktop/src/collab/conflicts-ui/index.js";
 import {
   BRANCHING_APPLY_ORIGIN,
   VERSIONING_RESTORE_ORIGIN,
@@ -158,6 +158,16 @@ test("Desktop wiring: branch checkout/merge origin does not surface formula conf
 });
 
 test("Desktop wiring: structural op log does not grow during version restore or branch checkout", () => {
+  const dom = new JSDOM('<div id="root"></div>', { url: "http://localhost" });
+
+  const prevWindow = globalThis.window;
+  const prevDocument = globalThis.document;
+  const prevEvent = globalThis.Event;
+
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.Event = dom.window.Event;
+
   const doc = new Y.Doc();
   const cells = doc.getMap("cells");
 
@@ -167,16 +177,26 @@ test("Desktop wiring: structural op log does not grow during version restore or 
   /** @type {any[]} */
   const conflicts = [];
 
+  /** @type {StructuralConflictUiController | null} */
+  let ui = null;
+
   const monitor = createDesktopCellStructuralConflictMonitor({
     doc,
     cells,
     localUserId: "alice",
     sessionOrigin,
     binderOrigin,
-    onConflict: (c) => conflicts.push(c),
+    onConflict: (c) => {
+      conflicts.push(c);
+      ui?.addConflict(c);
+    },
   });
 
   try {
+    const container = dom.window.document.getElementById("root");
+    assert.ok(container);
+    ui = new StructuralConflictUiController({ container, monitor });
+
     const ops = doc.getMap("cellStructuralOps");
     assert.equal(ops.size, 0);
 
@@ -197,6 +217,7 @@ test("Desktop wiring: structural op log does not grow during version restore or 
     // Neither bulk operation should be logged as a local structural op.
     assert.equal(ops.size, 0);
     assert.equal(conflicts.length, 0);
+    assert.equal(container.querySelector('[data-testid="structural-conflict-toast"]'), null);
 
     // A normal DocumentController-driven edit (binder origin) *should* be logged.
     doc.transact(() => {
@@ -210,5 +231,9 @@ test("Desktop wiring: structural op log does not grow during version restore or 
     assert.ok(ops.size > 0, "expected DocumentController edits to create structural op records");
   } finally {
     monitor.dispose();
+    ui?.destroy();
+    globalThis.window = prevWindow;
+    globalThis.document = prevDocument;
+    globalThis.Event = prevEvent;
   }
 });
