@@ -1069,6 +1069,11 @@ Binding plan (future work; see MS-OVBA):
 
 For more detail, see [`vba-digital-signatures.md`](./vba-digital-signatures.md).
 
+Relevant specs:
+
+- MS-OVBA (VBA project storage + project digest): https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-ovba/
+- MS-OFFCRYPTO (`DigSigInfoSerialized` wrapper): https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-offcrypto/
+
 ### Script Sandboxing
 
 ```typescript

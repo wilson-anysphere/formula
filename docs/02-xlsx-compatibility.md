@@ -445,7 +445,8 @@ vbaProject.bin (OLE container)
 
 **Challenges:**
 - Binary format with compression
-- Digital signatures must be preserved
+- Digital signatures must be preserved (and, for “signed-only” macro trust modes, validated/bound to
+  the project digest)
 - No standard library for creation (only preservation)
 - Security implications of execution
 
@@ -454,6 +455,9 @@ vbaProject.bin (OLE container)
 - Parse for display/inspection (MS-OVBA specification)
 - Defer execution to Phase 2 or via optional component
 - Offer migration path to Python/TypeScript
+
+See also: [`vba-digital-signatures.md`](./vba-digital-signatures.md) (signature stream location,
+payload variants, and MS-OVBA digest binding plan).
 
 ---
 
