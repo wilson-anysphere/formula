@@ -1011,13 +1011,55 @@ export class DesktopSharedGrid {
 
     const onPointerDown = (event: PointerEvent) => {
       const renderer = this.renderer;
+      const point = this.getViewportPoint(event);
+      this.lastPointerViewport = point;
+
+      // Excel/Sheets behavior: right-clicking inside an existing selection keeps the
+      // selection intact; right-clicking outside moves the active cell to the clicked
+      // cell. We intentionally only support sheet cells for now (not row/col header
+      // context menus).
+      if (event.pointerType === "mouse" && event.button !== 0) {
+        const picked = renderer.pickCellAt(point.x, point.y);
+        if (!picked) return;
+
+        const isHeaderCell = (this.headerRows > 0 && picked.row < this.headerRows) || (this.headerCols > 0 && picked.col < this.headerCols);
+        if (isHeaderCell) return;
+
+        const prevSelection = renderer.getSelection();
+        const prevRange = renderer.getSelectionRange();
+
+        const ranges = renderer.getSelectionRanges();
+        const inSelection = ranges.some(
+          (range) =>
+            picked.row >= range.startRow &&
+            picked.row < range.endRow &&
+            picked.col >= range.startCol &&
+            picked.col < range.endCol
+        );
+        if (!inSelection) {
+          renderer.setSelection(picked);
+        }
+
+        const nextSelection = renderer.getSelection();
+        const nextRange = renderer.getSelectionRange();
+        this.announceSelection(nextSelection, nextRange);
+        this.emitSelectionChange(prevSelection, nextSelection);
+        this.emitSelectionRangeChange(prevRange, nextRange);
+
+        // Best-effort: keep focus on the grid so keyboard navigation continues.
+        try {
+          (this.container as any).focus?.({ preventScroll: true });
+        } catch {
+          this.container.focus?.();
+        }
+        return;
+      }
+
       event.preventDefault();
       this.keyboardAnchor = null;
       this.dragMode = null;
       this.fillHandleState = null;
       renderer.setFillPreviewRange(null);
-      const point = this.getViewportPoint(event);
-      this.lastPointerViewport = point;
 
       if (options.enableResize) {
         const hit = this.getResizeHit(point.x, point.y);

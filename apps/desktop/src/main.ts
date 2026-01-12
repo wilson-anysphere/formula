@@ -978,6 +978,22 @@ if (
 
   gridRoot.addEventListener("contextmenu", (e) => {
     if (!extensionHostManager.ready) return;
+
+    const picked = app.pickCellAtClientPoint(e.clientX, e.clientY);
+    if (!picked) return;
+
+    const ranges = app.getSelectionRanges();
+    const inSelection = ranges.some((range) => {
+      const startRow = Math.min(range.startRow, range.endRow);
+      const endRow = Math.max(range.startRow, range.endRow);
+      const startCol = Math.min(range.startCol, range.endCol);
+      const endCol = Math.max(range.startCol, range.endCol);
+      return picked.row >= startRow && picked.row <= endRow && picked.col >= startCol && picked.col <= endCol;
+    });
+    if (!inSelection) {
+      app.activateCell({ row: picked.row, col: picked.col });
+    }
+
     const items = resolveMenuItems(extensionHostManager.getContributedMenu("cell/context"), contextKeys.asLookup());
     if (items.length === 0) return;
 

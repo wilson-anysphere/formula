@@ -171,4 +171,45 @@ test.describe("Extensions UI integration", () => {
 
     await expect(page.getByTestId("toast-root")).toContainText("Sum: 10");
   });
+
+  test("right-clicking outside a multi-cell selection moves the active cell before showing the menu", async ({ page }) => {
+    await gotoDesktop(page);
+
+    await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const app: any = (window as any).__formulaApp;
+      if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
+      const sheetId = app.getCurrentSheetId();
+      app.selectRange({
+        sheetId,
+        range: { startRow: 0, startCol: 0, endRow: 1, endCol: 1 },
+      });
+    });
+
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+    await expect(page.getByTestId("selection-range")).toHaveText("A1:B2");
+
+    // Ensure the extensions host is running so the contributed context menu renders.
+    await page.getByTestId("open-extensions-panel").click();
+    await expect(page.getByTestId("panel-extensions")).toBeVisible();
+    await expect(page.getByTestId("run-command-sampleHello.openPanel")).toBeVisible();
+
+    const d4 = await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const app: any = (window as any).__formulaApp;
+      return app.getCellRectA1("D4");
+    });
+    if (!d4) throw new Error("Missing D4 rect");
+
+    // Right-click a cell outside the current selection. Excel/Sheets move the active
+    // cell to the clicked cell before showing the menu so commands apply to it.
+    await page.locator("#grid").click({
+      button: "right",
+      position: { x: d4.x + d4.width / 2, y: d4.y + d4.height / 2 },
+    });
+
+    const menu = page.getByTestId("context-menu");
+    await expect(menu).toBeVisible();
+    await expect(page.getByTestId("active-cell")).toHaveText("D4");
+  });
 });

@@ -1696,6 +1696,44 @@ export class SpreadsheetApp {
     return { ...this.selection.active };
   }
 
+  /**
+   * Hit-test the grid and return the document cell (0-based row/col) under the
+   * provided client (viewport) coordinates.
+   *
+   * This is intentionally limited to sheet cells for now (it returns null when
+   * the point lands on row/column headers).
+   */
+  pickCellAtClientPoint(clientX: number, clientY: number): CellCoord | null {
+    const rootRect = this.root.getBoundingClientRect();
+    const x = clientX - rootRect.left;
+    const y = clientY - rootRect.top;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    if (x < 0 || y < 0 || x > rootRect.width || y > rootRect.height) return null;
+
+    // Only treat hits in the cell grid (exclude row/col headers).
+    if (!this.sharedGrid) {
+      if (x < this.rowHeaderWidth || y < this.colHeaderHeight) return null;
+      return this.cellFromPoint(x, y);
+    }
+
+    // Shared grid uses its own internal coordinate space anchored on the
+    // selection canvas.
+    const canvasRect = this.selectionCanvas.getBoundingClientRect();
+    const vx = clientX - canvasRect.left;
+    const vy = clientY - canvasRect.top;
+    if (!Number.isFinite(vx) || !Number.isFinite(vy)) return null;
+    if (vx < 0 || vy < 0 || vx > canvasRect.width || vy > canvasRect.height) return null;
+
+    const picked = this.sharedGrid.renderer.pickCellAt(vx, vy);
+    if (!picked) return null;
+
+    const headerRows = this.sharedHeaderRows();
+    const headerCols = this.sharedHeaderCols();
+    if (picked.row < headerRows || picked.col < headerCols) return null;
+
+    return { row: picked.row - headerRows, col: picked.col - headerCols };
+  }
+
   subscribeSelection(listener: (selection: SelectionState) => void): () => void {
     this.selectionListeners.add(listener);
     listener(this.selection);
