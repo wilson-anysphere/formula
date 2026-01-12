@@ -614,7 +614,8 @@ Where it’s defined:
     (currently `tauri-plugin-global-shortcut`, `tauri-plugin-single-instance`, `tauri-plugin-notification`, `tauri-plugin-shell`, `tauri-plugin-updater`),
     plus a few desktop-only helper crates (e.g. `http-range`, `percent-encoding`).
 - `apps/desktop/src-tauri/tauri.conf.json`
-  - `build.features: ["desktop"]` ensures `tauri dev` / `tauri build` compiles the real desktop binary with the correct feature set.
+  - `build.features: ["desktop"]` ensures the desktop binary is compiled with the correct feature set when running the Tauri CLI
+    (in agent environments: `cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri dev|build`).
 
 Practical effect:
 

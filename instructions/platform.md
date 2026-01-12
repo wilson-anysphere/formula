@@ -196,7 +196,7 @@ Run the native desktop shell (Tauri):
 cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri dev
 ```
 
-> Tip: depending on `build.beforeDevCommand`, `tauri dev` may start Vite for you.
+> Tip: depending on `build.beforeDevCommand`, `cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri dev` may start Vite for you.
 > Avoid running two dev servers on the same port.
 
 ### Production Build
