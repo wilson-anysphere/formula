@@ -1637,6 +1637,13 @@ impl Engine {
                     &self.workbook,
                     &self.spills,
                 );
+                let static_cell_precedents: HashSet<CellId> = new_precedents
+                    .iter()
+                    .filter_map(|p| match p {
+                        Precedent::Cell(c) => Some(*c),
+                        _ => None,
+                    })
+                    .collect();
                 for reference in trace.borrow().precedents() {
                     let crate::functions::SheetId::Local(sheet_id) = reference.sheet_id else {
                         // External references can't be represented in the internal dependency graph yet.
@@ -1657,6 +1664,30 @@ impl Engine {
                         );
                         new_precedents.insert(Precedent::Range(SheetRange::new(sheet_id, range)));
                     }
+                }
+
+                // Dynamic dependency tracing can record both a range and individual cells within
+                // that range (e.g. INDEX(OFFSET(...), ...) records the OFFSET range, then the
+                // evaluator dereferences a single cell from the INDEX result).
+                //
+                // Once a range precedent exists, the contained cells are redundant for calculation.
+                // However, preserve any cell precedents that were present in the static analysis
+                // (direct references in the formula) so auditing remains informative.
+                let ranges: Vec<SheetRange> = new_precedents
+                    .iter()
+                    .filter_map(|p| match p {
+                        Precedent::Range(r) => Some(*r),
+                        _ => None,
+                    })
+                    .collect();
+                if !ranges.is_empty() {
+                    new_precedents.retain(|p| match p {
+                        Precedent::Cell(cell) => {
+                            static_cell_precedents.contains(cell)
+                                || !ranges.iter().any(|r| r.contains(*cell))
+                        }
+                        _ => true,
+                    });
                 }
 
                 if new_precedents != old_precedents {

@@ -332,6 +332,10 @@ fn index_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             if area_num != 1 {
                 return Value::Error(ErrorKind::Ref);
             }
+            // Record the referenced input range for dynamic dependency tracing (e.g.
+            // INDEX(OFFSET(...), ...)). The evaluator will separately record any dereferenced
+            // output cell(s) when the result is consumed.
+            ctx.record_reference(&r);
             match index_reference(&r, row, col) {
                 Ok(reference) => Value::Reference(reference),
                 Err(e) => Value::Error(e),
@@ -355,6 +359,8 @@ fn index_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             let Some(r) = ranges.get(idx) else {
                 return Value::Error(ErrorKind::Ref);
             };
+            // Record the referenced input range for dynamic dependency tracing.
+            ctx.record_reference(r);
             match index_reference(r, row, col) {
                 Ok(reference) => Value::Reference(reference),
                 Err(e) => Value::Error(e),
