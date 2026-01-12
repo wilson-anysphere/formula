@@ -10,6 +10,8 @@ import {
 
 export type CheckServerIdentity = (hostname: string, cert: tls.PeerCertificate) => Error | undefined;
 
+const CERT_PINNING_ERROR_CODE = "ERR_CERT_PINNING";
+
 export function normalizeFingerprintHex(value: string): string {
   return value.replaceAll(":", "").toLowerCase();
 }
@@ -79,12 +81,14 @@ export function createPinnedCheckServerIdentity({ pins }: { pins: string[] }): C
     if (!fingerprint) {
       const err = new Error("Certificate pinning failed: certificate fingerprint not available");
       (err as { retriable?: boolean }).retriable = false;
+      (err as { code?: string }).code = CERT_PINNING_ERROR_CODE;
       return err;
     }
 
     if (!normalizedPins.has(normalizeFingerprintHex(fingerprint))) {
       const err = new Error("Certificate pinning failed: server certificate fingerprint mismatch");
       (err as { retriable?: boolean }).retriable = false;
+      (err as { code?: string }).code = CERT_PINNING_ERROR_CODE;
       return err;
     }
 
@@ -158,6 +162,7 @@ function createPinnedConnector(policy: OrgTlsPolicy): ReturnType<typeof buildCon
       if (typeof checkServerIdentity !== "function") {
         const error = new Error("Certificate pinning failed: TLS checkServerIdentity not configured");
         (error as { retriable?: boolean }).retriable = false;
+        (error as { code?: string }).code = CERT_PINNING_ERROR_CODE;
         (socket as any).destroy?.(error);
         return callback(error, null);
       }
@@ -167,6 +172,7 @@ function createPinnedConnector(policy: OrgTlsPolicy): ReturnType<typeof buildCon
       if (!cert) {
         const error = new Error("Certificate pinning failed: peer certificate not available");
         (error as { retriable?: boolean }).retriable = false;
+        (error as { code?: string }).code = CERT_PINNING_ERROR_CODE;
         (socket as any).destroy?.(error);
         return callback(error, null);
       }

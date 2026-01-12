@@ -28,6 +28,8 @@ function findCertificatePinningError(error: unknown): Error | undefined {
   while (current && typeof current === "object" && !visited.has(current)) {
     visited.add(current);
     if (current instanceof Error) {
+      const code = (current as any).code as unknown;
+      if (code === "ERR_CERT_PINNING") return current;
       if (current.message.startsWith("Certificate pinning failed:")) return current;
     }
     current = (current as any).cause;
