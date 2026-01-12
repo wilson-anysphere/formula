@@ -132,6 +132,31 @@ fn forecast_ets_accepts_monthly_date_timeline_excel1904() {
 }
 
 #[test]
+fn forecast_ets_dedupes_overlapping_reference_unions() {
+    let mut sheet = TestSheet::new();
+
+    sheet.set("A1", 10.0);
+    sheet.set("A2", 20.0);
+    sheet.set("A3", 30.0);
+
+    sheet.set("B1", 1.0);
+    sheet.set("B2", 2.0);
+    sheet.set("B3", 3.0);
+
+    // Use SUM aggregation (7) so duplicate timeline entries materially change the input series if
+    // we accidentally double-count overlapping union cells.
+    let base = sheet.eval("=FORECAST.ETS(4,A1:A3,B1:B3,1,1,7)");
+    let union = sheet.eval("=FORECAST.ETS(4,(A1:A3,A2:A3),(B1:B3,B2:B3),1,1,7)");
+
+    match (base, union) {
+        (Value::Number(a), Value::Number(b)) => {
+            assert!((a - b).abs() < 1e-9, "expected union to match base; got {a} vs {b}");
+        }
+        (a, b) => panic!("expected numbers, got {a:?} and {b:?}"),
+    }
+}
+
+#[test]
 fn forecast_ets_rejects_mismatched_series_lengths() {
     let mut sheet = TestSheet::new();
     assert_eq!(

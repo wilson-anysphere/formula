@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::eval::CompiledExpr;
 use crate::functions::statistical::ets::{self, AggregationMethod};
 use crate::functions::{eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec};
@@ -45,11 +47,15 @@ fn collect_optional_numbers_from_arg(
             Ok(out)
         }
         ArgValue::ReferenceUnion(ranges) => {
+            let mut seen = HashSet::new();
             let mut out = Vec::new();
             for r in ranges {
                 let r = r.normalized();
                 ctx.record_reference(&r);
                 for addr in r.iter_cells() {
+                    if !seen.insert((r.sheet_id.clone(), addr)) {
+                        continue;
+                    }
                     let v = ctx.get_cell_value(&r.sheet_id, addr);
                     out.push(coerce_cell(ctx, &v)?);
                 }
