@@ -1382,11 +1382,17 @@ pub fn verify_vba_project_signature_binding(
         // `vbaProject.bin` (e.g. `xl/vbaProjectSignature.bin`) we may not know the original stream
         // name; in that case use the digest length to select between legacy (v1/v2, always 16-byte
         // MD5 per MS-OSHARED §4.3) and v3 binding computation.
-        if matches!(
-            payload.stream_kind,
-            Some(VbaSignatureStreamKind::DigitalSignatureExt)
-        ) || signed_digest.len() != 16
-        {
+        //
+        // If we *do* know the stream kind and it is a legacy `DigitalSignature`/`DigitalSignatureEx`
+        // stream, keep legacy semantics even if the digest length is unexpected.
+        let treat_as_v3 = match payload.stream_kind {
+            Some(VbaSignatureStreamKind::DigitalSignatureExt) => true,
+            Some(VbaSignatureStreamKind::DigitalSignature)
+            | Some(VbaSignatureStreamKind::DigitalSignatureEx) => false,
+            Some(VbaSignatureStreamKind::Unknown) | None => signed_digest.len() != 16,
+        };
+
+        if treat_as_v3 {
             let Some(alg) = digest_alg_from_oid_str(&signed.digest_algorithm_oid) else {
                 continue;
             };
