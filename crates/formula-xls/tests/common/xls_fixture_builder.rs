@@ -659,6 +659,41 @@ pub fn build_note_comment_missing_txo_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a single sheet with a NOTE/OBJ/TXO comment where the
+/// TXO record header is empty/truncated.
+///
+/// The importer should still recover the text by falling back to decoding the `CONTINUE`
+/// fragments and surface a warning.
+pub fn build_note_comment_missing_txo_header_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_note_comment_missing_txo_header_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture containing a single sheet with a NOTE/OBJ/TXO comment where the
+/// TXO `cchText` field is stored at an alternate offset (4 instead of the spec-defined offset 6).
+pub fn build_note_comment_txo_cch_text_offset_4_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_note_comment_txo_cch_text_offset_4_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing a single external hyperlink on `A1`.
 ///
 /// This is used to ensure we preserve BIFF `HLINK` records when importing `.xls` workbooks.
@@ -1163,6 +1198,22 @@ fn build_note_comment_missing_txo_workbook_stream() -> Vec<u8> {
     )
 }
 
+fn build_note_comment_missing_txo_header_workbook_stream() -> Vec<u8> {
+    build_single_sheet_workbook_stream(
+        "NotesMissingTxoHeader",
+        &build_note_comment_missing_txo_header_sheet_stream(),
+        1252,
+    )
+}
+
+fn build_note_comment_txo_cch_text_offset_4_workbook_stream() -> Vec<u8> {
+    build_single_sheet_workbook_stream(
+        "NotesTxoCchOffset4",
+        &build_note_comment_txo_cch_text_offset_4_sheet_stream(),
+        1252,
+    )
+}
+
 fn build_single_sheet_workbook_stream(sheet_name: &str, sheet_stream: &[u8], codepage: u16) -> Vec<u8> {
     let mut globals = Vec::<u8>::new();
 
@@ -1380,6 +1431,102 @@ fn build_note_comment_missing_txo_sheet_stream() -> Vec<u8> {
         &note_record(0u16, 0u16, OBJECT_ID, AUTHOR),
     );
     push_record(&mut sheet, RECORD_OBJ, &obj_record_with_ftcmo(OBJECT_ID));
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn build_note_comment_missing_txo_header_sheet_stream() -> Vec<u8> {
+    const OBJECT_ID: u16 = 1;
+    const AUTHOR: &str = "Alice";
+    const TEXT: &str = "Hello";
+    const XF_GENERAL_CELL: u16 = 16;
+
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes());
+    dims.extend_from_slice(&1u32.to_le_bytes());
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    dims.extend_from_slice(&1u16.to_le_bytes());
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Ensure the anchor cell exists in the calamine value grid.
+    push_record(&mut sheet, RECORD_BLANK, &blank_cell(0, 0, XF_GENERAL_CELL));
+
+    push_record(
+        &mut sheet,
+        RECORD_NOTE,
+        &note_record(0u16, 0u16, OBJECT_ID, AUTHOR),
+    );
+    push_record(&mut sheet, RECORD_OBJ, &obj_record_with_ftcmo(OBJECT_ID));
+
+    // TXO record with an empty header, forcing best-effort fallback decoding from CONTINUE fragments.
+    push_record(&mut sheet, RECORD_TXO, &[]);
+
+    let mut cont = Vec::<u8>::new();
+    cont.push(0); // flags: compressed 8-bit chars
+    cont.extend_from_slice(TEXT.as_bytes());
+    push_record(&mut sheet, RECORD_CONTINUE, &cont);
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn build_note_comment_txo_cch_text_offset_4_sheet_stream() -> Vec<u8> {
+    const OBJECT_ID: u16 = 1;
+    const AUTHOR: &str = "Alice";
+    const TEXT: &str = "Hi";
+    const XF_GENERAL_CELL: u16 = 16;
+
+    let cch_text: u16 = TEXT
+        .len()
+        .try_into()
+        .expect("comment text too long for u16 length");
+
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes());
+    dims.extend_from_slice(&1u32.to_le_bytes());
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    dims.extend_from_slice(&1u16.to_le_bytes());
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Ensure the anchor cell exists in the calamine value grid.
+    push_record(&mut sheet, RECORD_BLANK, &blank_cell(0, 0, XF_GENERAL_CELL));
+
+    push_record(
+        &mut sheet,
+        RECORD_NOTE,
+        &note_record(0u16, 0u16, OBJECT_ID, AUTHOR),
+    );
+    push_record(&mut sheet, RECORD_OBJ, &obj_record_with_ftcmo(OBJECT_ID));
+
+    // TXO header (18 bytes) with `cchText` at offset 4 (non-standard) and `cbRuns` at offset 12.
+    let mut txo = [0u8; 18];
+    txo[4..6].copy_from_slice(&cch_text.to_le_bytes());
+    txo[12..14].copy_from_slice(&4u16.to_le_bytes()); // cbRuns
+    push_record(&mut sheet, RECORD_TXO, &txo);
+
+    // CONTINUE: [flags: u8][chars...]
+    let mut cont = Vec::<u8>::new();
+    cont.push(0); // flags: compressed 8-bit chars
+    cont.extend_from_slice(TEXT.as_bytes());
+    push_record(&mut sheet, RECORD_CONTINUE, &cont);
+
+    // Formatting runs continuation.
+    push_record(&mut sheet, RECORD_CONTINUE, &[0u8; 4]);
 
     push_record(&mut sheet, RECORD_EOF, &[]);
     sheet
