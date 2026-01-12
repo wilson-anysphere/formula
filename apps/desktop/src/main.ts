@@ -1477,9 +1477,11 @@ if (
   };
 
   extensionHostManager.subscribe(() => {
+    // Update keybinding hints before commands emit registry change events so the command
+    // palette renders shortcuts immediately after extensions finish loading.
+    updateKeybindings();
     syncContributedCommands();
     syncContributedPanels();
-    updateKeybindings();
     activateOpenExtensionPanels();
   });
   syncContributedCommands();
@@ -2556,9 +2558,9 @@ if (
   openExtensionsPanel?.addEventListener("click", () => {
     void ensureExtensionsLoaded().then(() => {
       // Ensure registries are up-to-date once the host finishes loading.
+      updateKeybindings();
       syncContributedCommands();
       syncContributedPanels();
-      updateKeybindings();
     });
     const placement = getPanelPlacement(layoutController.layout, PanelIds.EXTENSIONS);
     if (placement.kind === "closed") layoutController.openPanel(PanelIds.EXTENSIONS);
