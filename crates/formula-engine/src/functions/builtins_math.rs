@@ -1329,7 +1329,12 @@ fn maxifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         if let Value::Error(e) = crit_value {
             return Value::Error(e);
         }
-        let crit = match Criteria::parse_with_date_system(&crit_value, ctx.date_system()) {
+        let crit = match Criteria::parse_with_date_system_and_locale(
+            &crit_value,
+            ctx.date_system(),
+            ctx.value_locale(),
+            ctx.now_utc(),
+        ) {
             Ok(c) => c,
             Err(e) => return Value::Error(e),
         };
@@ -1434,7 +1439,12 @@ fn minifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         if let Value::Error(e) = crit_value {
             return Value::Error(e);
         }
-        let crit = match Criteria::parse_with_date_system(&crit_value, ctx.date_system()) {
+        let crit = match Criteria::parse_with_date_system_and_locale(
+            &crit_value,
+            ctx.date_system(),
+            ctx.value_locale(),
+            ctx.now_utc(),
+        ) {
             Ok(c) => c,
             Err(e) => return Value::Error(e),
         };

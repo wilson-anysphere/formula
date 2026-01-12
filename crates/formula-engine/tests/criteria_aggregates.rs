@@ -1,6 +1,7 @@
 use formula_engine::value::ErrorKind;
 use formula_engine::{Engine, PrecedentNode, Value};
 use formula_engine::eval::CellAddr;
+use formula_engine::locale::ValueLocaleConfig;
 
 struct TestSheet {
     engine: Engine,
@@ -492,6 +493,32 @@ fn maxifs_and_minifs_parse_date_criteria_strings() {
 
     assert_number(&sheet.eval(r#"=MAXIFS(B1:B3,A1:A3,">12/31/2019")"#), 3.0);
     assert_number(&sheet.eval(r#"=MINIFS(B1:B3,A1:A3,">12/31/2019")"#), 2.0);
+}
+
+#[test]
+fn maxifs_and_minifs_use_workbook_locale_for_numeric_criteria() {
+    let mut engine = Engine::new();
+    engine.set_value_locale(ValueLocaleConfig::de_de());
+
+    engine.set_cell_value("Sheet1", "A1", 1).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 2).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 3).unwrap();
+
+    engine.set_cell_value("Sheet1", "B1", 10).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 20).unwrap();
+    engine.set_cell_value("Sheet1", "B3", 30).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "Z1", r#"=MAXIFS(B1:B3,A1:A3,">1,5")"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "Z2", r#"=MINIFS(B1:B3,A1:A3,">1,5")"#)
+        .unwrap();
+
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "Z1"), Value::Number(30.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "Z2"), Value::Number(20.0));
 }
 
 #[test]
