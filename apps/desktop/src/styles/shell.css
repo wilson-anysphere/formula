@@ -1,0 +1,404 @@
+/*
+  Desktop app-shell styles extracted from `apps/desktop/index.html`.
+
+  This file intentionally avoids hardcoded colors and relies on CSS variables
+  defined in `tokens.css` (enforced by `noHardcodedColors.test.js`).
+*/
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+#app {
+  height: 100%;
+  display: grid;
+  /* titlebar, ribbon, formula bar, workspace, sheet tabs, status bar */
+  grid-template-rows: auto auto auto 1fr auto auto;
+  min-height: 0;
+}
+
+/* --- Formula bar --------------------------------------------------------- */
+
+.formula-bar-row {
+  display: grid;
+  grid-template-columns: 72px 24px 1fr 24px;
+  gap: 8px;
+  align-items: start;
+}
+
+.formula-bar-address {
+  font-size: 12px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  line-height: 16px;
+  user-select: text;
+  width: 100%;
+  box-sizing: border-box;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace;
+}
+
+.formula-bar-fx {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  padding-top: 6px;
+  user-select: none;
+}
+
+.formula-bar-editor {
+  position: relative;
+  min-width: 0;
+}
+
+.formula-bar-highlight {
+  margin: 0;
+  box-sizing: border-box;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  overflow: auto;
+  font:
+    14px/20px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace;
+  white-space: pre;
+}
+
+.formula-bar-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 2px 6px;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--text-primary);
+  font: inherit;
+  line-height: 20px;
+  overflow: auto;
+}
+
+.formula-bar-input::selection {
+  background: var(--selection-bg);
+}
+
+.formula-bar-highlight span[data-kind="function"] {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.formula-bar-highlight span[data-kind="reference"] {
+  color: var(--accent);
+}
+
+.formula-bar-highlight span.formula-bar-reference--active {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+}
+
+.formula-bar-highlight span[data-kind="string"] {
+  color: var(--warning);
+}
+
+.formula-bar-highlight span[data-kind="number"] {
+  color: var(--success);
+}
+
+.formula-bar-highlight span[data-kind="operator"] {
+  color: var(--text-primary);
+}
+
+.formula-bar-highlight span[data-kind="punctuation"] {
+  color: var(--text-secondary);
+}
+
+.formula-bar-highlight span[data-kind="error"] {
+  color: var(--error);
+  font-weight: 600;
+}
+
+.formula-bar-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 16px;
+  min-height: 16px;
+}
+
+.formula-bar-error-button {
+  height: 24px;
+  width: 24px;
+  margin-top: 2px;
+  border: 1px solid color-mix(in srgb, var(--error) 45%, var(--border));
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--error) 12%, var(--bg-primary));
+  color: var(--error);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.formula-bar-error-panel {
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--error) 45%, var(--border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--error) 8%, var(--bg-primary));
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.formula-bar-error-title {
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.formula-bar-error-desc {
+  margin-bottom: 6px;
+}
+
+.formula-bar-error-suggestions {
+  margin: 0;
+  padding-left: 18px;
+}
+
+/* --- Find/replace + go to dialogs --------------------------------------- */
+
+dialog.find-replace-dialog,
+dialog.goto-dialog {
+  width: min(680px, 92vw);
+  border: 1px solid var(--dialog-border);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--dialog-bg);
+  color: var(--text-primary);
+  box-shadow: var(--dialog-shadow);
+}
+
+dialog.find-replace-dialog::backdrop,
+dialog.goto-dialog::backdrop {
+  background: var(--dialog-backdrop);
+}
+
+.find-replace-dialog .row,
+.goto-dialog .row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.find-replace-dialog input,
+.goto-dialog input,
+.find-replace-dialog select,
+.goto-dialog select {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  min-width: 0;
+}
+
+.find-replace-dialog button,
+.goto-dialog button {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.goto-dialog .error {
+  color: var(--error);
+  font-size: 12px;
+}
+
+.find-results {
+  max-height: 240px;
+  overflow: auto;
+  padding-left: 18px;
+  margin: 8px 0 0;
+}
+
+.find-results li {
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+/* --- Grid canvas layering ------------------------------------------------ */
+
+.grid-root {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  outline: none;
+  background: var(--bg-primary);
+  user-select: none;
+}
+
+.grid-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.outline-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.outline-toggle {
+  position: absolute;
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font:
+    12px/12px system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+  cursor: pointer;
+}
+
+.outline-toggle:active {
+  background: var(--bg-tertiary);
+}
+
+.chart-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.cell-editor {
+  position: absolute;
+  box-sizing: border-box;
+  padding: 2px 4px;
+  border: 2px solid var(--accent);
+  outline: none;
+  resize: none;
+  font:
+    14px/20px system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  overflow: hidden;
+}
+
+/* --- Sheet tabs ---------------------------------------------------------- */
+
+.sheet-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-secondary);
+  align-items: center;
+  overflow-x: auto;
+}
+
+.sheet-tab {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sheet-tab[data-active="true"] {
+  border-color: var(--accent);
+  background: var(--accent-light);
+  font-weight: 600;
+}
+
+/* --- Status bar ---------------------------------------------------------- */
+
+.statusbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 12px;
+  align-items: center;
+  min-width: 0;
+}
+
+.statusbar code {
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace;
+}
+
+.statusbar button {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.statusbar select {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border-radius: 6px;
+}

@@ -4,6 +4,7 @@ import "./styles/ui.css";
 import "./styles/command-palette.css";
 import "./styles/workspace.css";
 import "./styles/comments.css";
+import "./styles/shell.css";
 
 import { ThemeController } from "./theme/themeController.js";
 
