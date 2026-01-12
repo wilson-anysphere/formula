@@ -14,20 +14,28 @@ pub struct VbaSignedDigest {
 
 #[derive(Debug, Error)]
 pub enum VbaSignatureSignedDigestError {
-    #[error("DER parse error: {0}")]
+    #[error("ASN.1 parse error: {0}")]
     Der(String),
     #[error("PKCS#7 SignedData is detached, but no detached content was found")]
     DetachedContentMissing,
 }
 
-const OID_PKCS7_SIGNED_DATA: &str = "1.2.840.113549.1.7.2";
+// PKCS#7 OID value-encoding bytes (no tag/length)
+const OID_PKCS7_SIGNED_DATA: &[u8] = b"\x2A\x86\x48\x86\xF7\x0D\x01\x07\x02"; // 1.2.840.113549.1.7.2
 
 /// Extract the signed Authenticode file digest (the `DigestInfo` inside
 /// `SpcIndirectDataContent`) from a raw VBA `\x05DigitalSignature*` stream.
 ///
+/// This is a best-effort parser intended for binding verification (MS-OVBA "project digest").
+///
 /// Returns:
 /// - `Ok(Some(_))` if a PKCS#7/CMS SignedData blob and `SpcIndirectDataContent` were found and parsed.
 /// - `Ok(None)` if no PKCS#7 SignedData could be located in the stream.
+///
+/// Notes:
+/// - Supports both strict DER and BER with indefinite-length encodings (OpenSSL `cms -stream`).
+/// - Handles detached signatures by treating any stream prefix (before the CMS blob) as the
+///   detached content.
 pub fn extract_vba_signature_signed_digest(
     signature_stream: &[u8],
 ) -> Result<Option<VbaSignedDigest>, VbaSignatureSignedDigestError> {
@@ -65,136 +73,120 @@ struct Pkcs7EncapsulatedContent {
 fn locate_pkcs7_signed_data<'a>(
     signature_stream: &'a [u8],
 ) -> Result<Option<Pkcs7Location<'a>>, VbaSignatureSignedDigestError> {
-    // Fast path: begins with a DER SEQUENCE.
-    if signature_stream.first() == Some(&0x30) {
-        if let Some(loc) = try_locate_pkcs7_at(signature_stream, 0)? {
-            return Ok(Some(loc));
-        }
+    // Fast path: begins with a SEQUENCE.
+    if signature_stream.first() == Some(&0x30)
+        && looks_like_pkcs7_signed_data_content_info(signature_stream)
+    {
+        return Ok(Some(Pkcs7Location {
+            der: signature_stream,
+            offset: 0,
+        }));
     }
 
+    // Best-effort scan for an embedded ContentInfo SEQUENCE.
+    // We do not rely on DER length decoding here because BER indefinite-length encodings are common
+    // (OpenSSL `-stream`) and some producers prepend a small header/prefix.
     for offset in 0..signature_stream.len() {
         if signature_stream[offset] != 0x30 {
             continue;
         }
-        if let Some(loc) = try_locate_pkcs7_at(signature_stream, offset)? {
-            return Ok(Some(loc));
+        if looks_like_pkcs7_signed_data_content_info(&signature_stream[offset..]) {
+            return Ok(Some(Pkcs7Location {
+                der: &signature_stream[offset..],
+                offset,
+            }));
         }
     }
+
     Ok(None)
 }
 
-fn try_locate_pkcs7_at<'a>(
-    bytes: &'a [u8],
-    offset: usize,
-) -> Result<Option<Pkcs7Location<'a>>, VbaSignatureSignedDigestError> {
-    if offset >= bytes.len() || bytes[offset] != 0x30 {
-        return Ok(None);
-    }
-    if offset + 2 > bytes.len() {
-        return Ok(None);
-    }
-
-    let (len_len, content_len) = match parse_der_length(&bytes[offset + 1..]) {
-        Ok(v) => v,
-        Err(_) => return Ok(None),
+fn looks_like_pkcs7_signed_data_content_info(bytes: &[u8]) -> bool {
+    // ContentInfo ::= SEQUENCE { contentType OID, content [0] EXPLICIT ANY OPTIONAL }
+    let Ok((tag, _len, rest)) = parse_tag_and_length(bytes) else {
+        return false;
     };
+    if tag.class != Asn1Class::Universal || !tag.constructed || tag.number != 16 {
+        return false;
+    }
 
-    let total_len = 1usize
-        .checked_add(len_len)
-        .and_then(|v| v.checked_add(content_len))
-        .ok_or_else(|| VbaSignatureSignedDigestError::Der("length overflow".to_owned()))?;
-
-    let end = match offset.checked_add(total_len) {
-        Some(end) => end,
-        None => return Ok(None),
+    let Ok((oid, after_oid)) = parse_oid(rest) else {
+        return false;
     };
-    if end > bytes.len() {
-        return Ok(None);
-    }
-
-    let candidate = &bytes[offset..end];
-    match is_pkcs7_signed_data_content_info(candidate) {
-        Ok(true) => Ok(Some(Pkcs7Location {
-            der: candidate,
-            offset,
-        })),
-        Ok(false) => Ok(None),
-        Err(_) => Ok(None),
-    }
-}
-
-fn is_pkcs7_signed_data_content_info(der: &[u8]) -> Result<bool, VbaSignatureSignedDigestError> {
-    let mut top = DerReader::new(der);
-    let mut content_info = top.read_sequence()?;
-    let oid = content_info.read_oid()?;
     if oid != OID_PKCS7_SIGNED_DATA {
-        return Ok(false);
+        return false;
     }
 
     // ContentInfo.content is [0] EXPLICIT for SignedData.
-    let mut explicit = match content_info.read_explicit(0) {
-        Ok(v) => v,
-        Err(_) => return Ok(false),
+    let Ok((tag2, _len2, _rest2)) = parse_tag_and_length(after_oid) else {
+        return false;
     };
-
-    // Validate it looks like SignedData.
-    let mut signed_data = match explicit.read_sequence() {
-        Ok(v) => v,
-        Err(_) => return Ok(false),
-    };
-    // version INTEGER
-    if signed_data.peek_tag() != Some(0x02) {
-        return Ok(false);
-    }
-    signed_data.skip_any()?;
-    // digestAlgorithms SET
-    if signed_data.peek_tag() != Some(0x31) {
-        return Ok(false);
-    }
-    signed_data.skip_any()?;
-    // encapContentInfo SEQUENCE
-    if signed_data.peek_tag() != Some(0x30) {
-        return Ok(false);
-    }
-    Ok(true)
+    tag2.class == Asn1Class::ContextSpecific && tag2.constructed && tag2.number == 0
 }
 
 fn parse_pkcs7_signed_data_encap_content(
-    pkcs7_der: &[u8],
+    pkcs7_bytes: &[u8],
 ) -> Result<Pkcs7EncapsulatedContent, VbaSignatureSignedDigestError> {
-    let mut top = DerReader::new(pkcs7_der);
-    let mut content_info = top.read_sequence()?;
-    let oid = content_info.read_oid()?;
-    if oid != OID_PKCS7_SIGNED_DATA {
-        return Err(VbaSignatureSignedDigestError::Der(format!(
+    // ContentInfo
+    let (tag, len, rest) = parse_tag_and_length(pkcs7_bytes)?;
+    if tag.class != Asn1Class::Universal || !tag.constructed || tag.number != 16 {
+        return Err(der_err("expected ContentInfo SEQUENCE"));
+    }
+    let content = slice_constructed_contents(rest, len)?;
+    let mut cur = content;
+
+    let (content_type, after_oid) = parse_oid(cur)?;
+    if content_type != OID_PKCS7_SIGNED_DATA {
+        return Err(der_err(format!(
             "expected PKCS#7 signedData ContentInfo ({}), got {}",
-            OID_PKCS7_SIGNED_DATA, oid
+            "1.2.840.113549.1.7.2",
+            oid_to_string(content_type).unwrap_or_else(|| "<invalid-oid>".to_string())
         )));
     }
+    cur = after_oid;
 
-    let mut explicit = content_info.read_explicit(0)?;
-    let mut signed_data = explicit.read_sequence()?;
+    // ContentInfo.content [0] EXPLICIT
+    let signed_data_wrapper = parse_context_specific_constructed(cur, 0)?;
+
+    // SignedData
+    let (tag, len, rest) = parse_tag_and_length(signed_data_wrapper)?;
+    if tag.class != Asn1Class::Universal || !tag.constructed || tag.number != 16 {
+        return Err(der_err("expected SignedData SEQUENCE"));
+    }
+    let sd_content = slice_constructed_contents(rest, len)?;
+    let mut sd_cur = sd_content;
 
     // version INTEGER
-    signed_data.skip_any()?;
+    sd_cur = skip_element(sd_cur)?;
     // digestAlgorithms SET OF AlgorithmIdentifier
-    signed_data.skip_any()?;
+    sd_cur = skip_element(sd_cur)?;
 
     // encapContentInfo
-    let mut encap = signed_data.read_sequence()?;
-    let econtent_type_oid = encap.read_oid()?;
+    let (tag, len, rest) = parse_tag_and_length(sd_cur)?;
+    if tag.class != Asn1Class::Universal || !tag.constructed || tag.number != 16 {
+        return Err(der_err("expected EncapsulatedContentInfo SEQUENCE"));
+    }
+    let encap_content = slice_constructed_contents(rest, len)?;
+    let mut encap_cur = encap_content;
 
-    let econtent = if encap.is_empty() {
+    let (econtent_type, after_encap_oid) = parse_oid(encap_cur)?;
+    let econtent_type_oid = oid_to_string(econtent_type).unwrap_or_else(|| "<invalid-oid>".to_string());
+    encap_cur = after_encap_oid;
+
+    // eContent [0] EXPLICIT OCTET STRING OPTIONAL
+    let econtent = if encap_cur.is_empty() {
         None
-    } else if encap.peek_tag() == Some(explicit_tag(0)) {
-        let mut econtent_explicit = encap.read_explicit(0)?;
-        let octets = econtent_explicit.read_octet_string()?;
-        Some(octets.to_vec())
     } else {
-        return Err(VbaSignatureSignedDigestError::Der(format!(
-            "unexpected EncapsulatedContentInfo field tag 0x{:02x}",
-            encap.peek_tag().unwrap_or(0)
-        )));
+        let (tag, len, rest) = parse_tag_and_length(encap_cur)?;
+        if tag.class != Asn1Class::ContextSpecific || !tag.constructed || tag.number != 0 {
+            return Err(der_err(format!(
+                "unexpected EncapsulatedContentInfo field tag class={:?} constructed={} number={}",
+                tag.class, tag.constructed, tag.number
+            )));
+        }
+        let wrapper_content = slice_constructed_contents(rest, len)?;
+        let (octets, _after_octets) = parse_octet_string(wrapper_content)?;
+        Some(octets)
     };
 
     Ok(Pkcs7EncapsulatedContent {
@@ -204,23 +196,40 @@ fn parse_pkcs7_signed_data_encap_content(
 }
 
 fn parse_spc_indirect_data_content(
-    der: &[u8],
+    bytes: &[u8],
 ) -> Result<VbaSignedDigest, VbaSignatureSignedDigestError> {
-    let mut top = DerReader::new(der);
-    let mut seq = top.read_sequence()?;
-
-    // data SpcAttributeTypeAndOptionalValue (ignored)
-    seq.skip_any()?;
-
-    // messageDigest DigestInfo
-    let mut digest_info = seq.read_sequence()?;
-    let mut alg = digest_info.read_sequence()?;
-    let digest_algorithm_oid = alg.read_oid()?;
-    // Optional parameters (often NULL) - ignore.
-    while !alg.is_empty() {
-        alg.skip_any()?;
+    // SpcIndirectDataContent ::= SEQUENCE { data, messageDigest DigestInfo }
+    let (tag, len, rest) = parse_tag_and_length(bytes)?;
+    if tag.class != Asn1Class::Universal || !tag.constructed || tag.number != 16 {
+        return Err(der_err("expected SpcIndirectDataContent SEQUENCE"));
     }
-    let digest = digest_info.read_octet_string()?.to_vec();
+    let content = slice_constructed_contents(rest, len)?;
+    let mut cur = content;
+
+    // data (ignored)
+    cur = skip_element(cur)?;
+
+    // DigestInfo
+    let (tag, len, rest) = parse_tag_and_length(cur)?;
+    if tag.class != Asn1Class::Universal || !tag.constructed || tag.number != 16 {
+        return Err(der_err("expected DigestInfo SEQUENCE"));
+    }
+    let digest_info = slice_constructed_contents(rest, len)?;
+    let mut di_cur = digest_info;
+
+    // digestAlgorithm AlgorithmIdentifier
+    let (tag, len, rest) = parse_tag_and_length(di_cur)?;
+    if tag.class != Asn1Class::Universal || !tag.constructed || tag.number != 16 {
+        return Err(der_err("expected AlgorithmIdentifier SEQUENCE"));
+    }
+    let alg_content = slice_constructed_contents(rest, len)?;
+    let (alg_oid, _after_alg_oid) = parse_oid(alg_content)?;
+    let digest_algorithm_oid = oid_to_string(alg_oid).unwrap_or_else(|| "<invalid-oid>".to_string());
+
+    // Skip over AlgorithmIdentifier to reach digest OCTET STRING.
+    di_cur = skip_element(di_cur)?;
+
+    let (digest, _after_digest) = parse_octet_string(di_cur)?;
 
     Ok(VbaSignedDigest {
         digest_algorithm_oid,
@@ -228,172 +237,258 @@ fn parse_spc_indirect_data_content(
     })
 }
 
-#[derive(Debug, Clone, Copy)]
-struct DerTlv<'a> {
-    tag: u8,
-    value: &'a [u8],
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Asn1Class {
+    Universal,
+    Application,
+    ContextSpecific,
+    Private,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct DerReader<'a> {
-    bytes: &'a [u8],
-    pos: usize,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Tag {
+    class: Asn1Class,
+    constructed: bool,
+    number: u32,
 }
 
-impl<'a> DerReader<'a> {
-    fn new(bytes: &'a [u8]) -> Self {
-        Self { bytes, pos: 0 }
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Length {
+    Definite(usize),
+    Indefinite,
+}
 
-    fn is_empty(&self) -> bool {
-        self.pos >= self.bytes.len()
-    }
+fn parse_tag_and_length(
+    input: &[u8],
+) -> Result<(Tag, Length, &[u8]), VbaSignatureSignedDigestError> {
+    let (tag, tag_len) = parse_tag(input)?;
+    let (len, len_len) = parse_length(
+        input
+            .get(tag_len..)
+            .ok_or_else(|| der_err("unexpected EOF"))?,
+    )?;
+    let header_len = tag_len + len_len;
+    let rest = input
+        .get(header_len..)
+        .ok_or_else(|| der_err("unexpected EOF"))?;
+    Ok((tag, len, rest))
+}
 
-    fn peek_tag(&self) -> Option<u8> {
-        self.bytes.get(self.pos).copied()
-    }
+fn parse_tag(input: &[u8]) -> Result<(Tag, usize), VbaSignatureSignedDigestError> {
+    let b0 = *input.first().ok_or_else(|| der_err("unexpected EOF"))?;
 
-    fn read_tlv(&mut self) -> Result<DerTlv<'a>, VbaSignatureSignedDigestError> {
-        let tag = *self
-            .bytes
-            .get(self.pos)
-            .ok_or_else(|| VbaSignatureSignedDigestError::Der("unexpected EOF".to_owned()))?;
-        if tag & 0x1F == 0x1F {
-            return Err(VbaSignatureSignedDigestError::Der(
-                "high-tag-number form not supported".to_owned(),
-            ));
+    let class = match b0 >> 6 {
+        0 => Asn1Class::Universal,
+        1 => Asn1Class::Application,
+        2 => Asn1Class::ContextSpecific,
+        3 => Asn1Class::Private,
+        _ => return Err(der_err("invalid tag class")),
+    };
+    let constructed = b0 & 0x20 != 0;
+    let mut number: u32 = (b0 & 0x1F) as u32;
+    let mut idx = 1;
+
+    if number == 0x1F {
+        // High-tag-number form (base-128).
+        number = 0;
+        loop {
+            let b = *input.get(idx).ok_or_else(|| der_err("unexpected EOF"))?;
+            idx += 1;
+            let v = (b & 0x7F) as u32;
+            number = number
+                .checked_shl(7)
+                .ok_or_else(|| der_err("tag number overflow"))?;
+            number |= v;
+            if b & 0x80 == 0 {
+                break;
+            }
+            if idx > 6 {
+                return Err(der_err("tag number too large"));
+            }
         }
-        self.pos += 1;
-
-        let (len_len, len) = parse_der_length(&self.bytes[self.pos..])?;
-        self.pos += len_len;
-        let end = self
-            .pos
-            .checked_add(len)
-            .ok_or_else(|| VbaSignatureSignedDigestError::Der("length overflow".to_owned()))?;
-        if end > self.bytes.len() {
-            return Err(VbaSignatureSignedDigestError::Der(
-                "DER length exceeds input".to_owned(),
-            ));
-        }
-        let value = &self.bytes[self.pos..end];
-        self.pos = end;
-        Ok(DerTlv { tag, value })
     }
 
-    fn read_expected(
-        &mut self,
-        expected_tag: u8,
-    ) -> Result<DerTlv<'a>, VbaSignatureSignedDigestError> {
-        let tlv = self.read_tlv()?;
-        if tlv.tag != expected_tag {
-            return Err(VbaSignatureSignedDigestError::Der(format!(
-                "expected tag 0x{:02x}, got 0x{:02x}",
-                expected_tag, tlv.tag
-            )));
-        }
-        Ok(tlv)
-    }
-
-    fn read_sequence(&mut self) -> Result<DerReader<'a>, VbaSignatureSignedDigestError> {
-        let tlv = self.read_expected(0x30)?;
-        Ok(DerReader::new(tlv.value))
-    }
-
-    fn read_explicit(
-        &mut self,
-        tag_no: u8,
-    ) -> Result<DerReader<'a>, VbaSignatureSignedDigestError> {
-        let tlv = self.read_expected(explicit_tag(tag_no))?;
-        Ok(DerReader::new(tlv.value))
-    }
-
-    fn read_oid(&mut self) -> Result<String, VbaSignatureSignedDigestError> {
-        let tlv = self.read_expected(0x06)?;
-        decode_der_oid(tlv.value)
-    }
-
-    fn read_octet_string(&mut self) -> Result<&'a [u8], VbaSignatureSignedDigestError> {
-        let tlv = self.read_expected(0x04)?;
-        Ok(tlv.value)
-    }
-
-    fn skip_any(&mut self) -> Result<(), VbaSignatureSignedDigestError> {
-        let _ = self.read_tlv()?;
-        Ok(())
-    }
+    Ok((
+        Tag {
+            class,
+            constructed,
+            number,
+        },
+        idx,
+    ))
 }
 
-fn explicit_tag(tag_no: u8) -> u8 {
-    0xA0u8 | (tag_no & 0x1F)
-}
+fn parse_length(input: &[u8]) -> Result<(Length, usize), VbaSignatureSignedDigestError> {
+    let b0 = *input.first().ok_or_else(|| der_err("unexpected EOF"))?;
+    if b0 < 0x80 {
+        return Ok((Length::Definite(b0 as usize), 1));
+    }
+    if b0 == 0x80 {
+        return Ok((Length::Indefinite, 1));
+    }
 
-fn parse_der_length(input: &[u8]) -> Result<(usize, usize), VbaSignatureSignedDigestError> {
-    let first = *input
-        .get(0)
-        .ok_or_else(|| VbaSignatureSignedDigestError::Der("unexpected EOF".to_owned()))?;
-    if first & 0x80 == 0 {
-        return Ok((1, first as usize));
+    let count = (b0 & 0x7F) as usize;
+    if count == 0 || count > 8 {
+        return Err(der_err("invalid length"));
     }
-    let num_bytes = (first & 0x7F) as usize;
-    if num_bytes == 0 {
-        return Err(VbaSignatureSignedDigestError::Der(
-            "indefinite length form is not supported".to_owned(),
-        ));
+    if input.len() < 1 + count {
+        return Err(der_err("unexpected EOF parsing length"));
     }
-    if num_bytes > 8 {
-        return Err(VbaSignatureSignedDigestError::Der(
-            "length too large".to_owned(),
-        ));
-    }
-    if input.len() < 1 + num_bytes {
-        return Err(VbaSignatureSignedDigestError::Der(
-            "unexpected EOF parsing length".to_owned(),
-        ));
-    }
+
     let mut len: usize = 0;
-    for &b in &input[1..1 + num_bytes] {
-        len = (len << 8) | (b as usize);
+    for &b in &input[1..1 + count] {
+        len = len
+            .checked_shl(8)
+            .ok_or_else(|| der_err("length overflow"))?;
+        len |= b as usize;
     }
-    Ok((1 + num_bytes, len))
+    Ok((Length::Definite(len), 1 + count))
 }
 
-fn decode_der_oid(bytes: &[u8]) -> Result<String, VbaSignatureSignedDigestError> {
-    if bytes.is_empty() {
-        return Err(VbaSignatureSignedDigestError::Der(
-            "OID has empty value".to_owned(),
-        ));
+fn slice_constructed_contents<'a>(
+    rest_after_header: &'a [u8],
+    len: Length,
+) -> Result<&'a [u8], VbaSignatureSignedDigestError> {
+    match len {
+        Length::Definite(l) => rest_after_header
+            .get(..l)
+            .ok_or_else(|| der_err("length exceeds input")),
+        Length::Indefinite => Ok(rest_after_header),
     }
-    let first = bytes[0];
-    let first_arc = (first / 40) as u32;
-    let second_arc = (first % 40) as u32;
+}
 
-    let mut arcs = vec![first_arc, second_arc];
-    let mut value: u32 = 0;
+fn parse_context_specific_constructed<'a>(
+    input: &'a [u8],
+    tag_number: u32,
+) -> Result<&'a [u8], VbaSignatureSignedDigestError> {
+    let (tag, len, rest) = parse_tag_and_length(input)?;
+    if tag.class != Asn1Class::ContextSpecific || !tag.constructed || tag.number != tag_number {
+        return Err(der_err("unexpected tag"));
+    }
+    slice_constructed_contents(rest, len)
+}
+
+fn parse_oid<'a>(
+    input: &'a [u8],
+) -> Result<(&'a [u8], &'a [u8]), VbaSignatureSignedDigestError> {
+    let (tag, len, rest) = parse_tag_and_length(input)?;
+    if tag.class != Asn1Class::Universal || tag.constructed || tag.number != 6 {
+        return Err(der_err("expected OBJECT IDENTIFIER"));
+    }
+    let Length::Definite(l) = len else {
+        return Err(der_err("OID uses indefinite length"));
+    };
+    let val = rest
+        .get(..l)
+        .ok_or_else(|| der_err("OID length exceeds input"))?;
+    let after = rest
+        .get(l..)
+        .ok_or_else(|| der_err("unexpected EOF"))?;
+    Ok((val, after))
+}
+
+fn parse_octet_string(
+    input: &[u8],
+) -> Result<(Vec<u8>, &[u8]), VbaSignatureSignedDigestError> {
+    let (tag, len, rest) = parse_tag_and_length(input)?;
+    if tag.class != Asn1Class::Universal || tag.number != 4 {
+        return Err(der_err("expected OCTET STRING"));
+    }
+
+    if !tag.constructed {
+        let Length::Definite(l) = len else {
+            return Err(der_err("primitive OCTET STRING uses indefinite length"));
+        };
+        let val = rest
+            .get(..l)
+            .ok_or_else(|| der_err("OCTET STRING length exceeds input"))?;
+        let after = rest
+            .get(l..)
+            .ok_or_else(|| der_err("unexpected EOF"))?;
+        Ok((val.to_vec(), after))
+    } else {
+        // BER constructed OCTET STRING: concatenate child OCTET STRING values.
+        let content = slice_constructed_contents(rest, len)?;
+        let mut cur = content;
+        let mut out = Vec::new();
+
+        loop {
+            if cur.is_empty() {
+                break;
+            }
+            if cur.len() >= 2 && cur[0] == 0x00 && cur[1] == 0x00 {
+                // End-of-contents for indefinite length.
+                break;
+            }
+            let (seg, rest2) = parse_octet_string(cur)?;
+            out.extend_from_slice(&seg);
+            cur = rest2;
+        }
+
+        let after = skip_element(input)?;
+        Ok((out, after))
+    }
+}
+
+fn skip_element(input: &[u8]) -> Result<&[u8], VbaSignatureSignedDigestError> {
+    let (tag, len, rest) = parse_tag_and_length(input)?;
+    match len {
+        Length::Definite(l) => rest
+            .get(l..)
+            .ok_or_else(|| der_err("length exceeds input")),
+        Length::Indefinite => {
+            if !tag.constructed {
+                return Err(der_err("indefinite length used with primitive tag"));
+            }
+            let mut cur = rest;
+            loop {
+                if cur.len() < 2 {
+                    return Err(der_err("unexpected EOF"));
+                }
+                if cur[0] == 0x00 && cur[1] == 0x00 {
+                    return Ok(&cur[2..]);
+                }
+                cur = skip_element(cur)?;
+            }
+        }
+    }
+}
+
+fn oid_to_string(oid: &[u8]) -> Option<String> {
+    if oid.is_empty() {
+        return None;
+    }
+
+    let first = oid[0];
+    let (a, b) = if first < 40 {
+        (0u32, first as u32)
+    } else if first < 80 {
+        (1u32, (first - 40) as u32)
+    } else {
+        (2u32, (first - 80) as u32)
+    };
+
+    let mut parts = vec![a.to_string(), b.to_string()];
+    let mut cur: u64 = 0;
     let mut in_arc = false;
 
-    for &b in &bytes[1..] {
+    for &byte in &oid[1..] {
         in_arc = true;
-        value = value
-            .checked_shl(7)
-            .and_then(|v| v.checked_add((b & 0x7F) as u32))
-            .ok_or_else(|| VbaSignatureSignedDigestError::Der("OID arc overflow".to_owned()))?;
-        if b & 0x80 == 0 {
-            arcs.push(value);
-            value = 0;
+        cur = (cur << 7) | u64::from(byte & 0x7F);
+        if byte & 0x80 == 0 {
+            parts.push(cur.to_string());
+            cur = 0;
             in_arc = false;
         }
     }
 
     if in_arc {
-        return Err(VbaSignatureSignedDigestError::Der(
-            "OID has truncated base128 arc".to_owned(),
-        ));
+        return None;
     }
 
-    Ok(arcs
-        .iter()
-        .map(|n| n.to_string())
-        .collect::<Vec<_>>()
-        .join("."))
+    Some(parts.join("."))
+}
+
+fn der_err(msg: impl Into<String>) -> VbaSignatureSignedDigestError {
+    VbaSignatureSignedDigestError::Der(msg.into())
 }
