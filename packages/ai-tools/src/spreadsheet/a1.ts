@@ -89,10 +89,95 @@ export function parseA1Cell(input: string, defaultSheet: string = DEFAULT_SHEET_
   return { sheet, row, col };
 }
 
+function isAsciiLetter(ch: string): boolean {
+  return ch >= "A" && ch <= "Z" ? true : ch >= "a" && ch <= "z";
+}
+
+function isAsciiDigit(ch: string): boolean {
+  return ch >= "0" && ch <= "9";
+}
+
+function isAsciiAlphaNum(ch: string): boolean {
+  return isAsciiLetter(ch) || isAsciiDigit(ch);
+}
+
+function isReservedUnquotedSheetName(name: string): boolean {
+  // Excel boolean literals are tokenized as keywords; quoting avoids ambiguity in formulas.
+  const lower = String(name ?? "").toLowerCase();
+  return lower === "true" || lower === "false";
+}
+
+function looksLikeA1CellReference(name: string): boolean {
+  // If an unquoted sheet name looks like a cell reference (e.g. "A1" or "XFD1048576"),
+  // Excel requires quoting to disambiguate.
+  let i = 0;
+  let letters = "";
+  while (i < name.length) {
+    const ch = name[i];
+    if (!ch || !isAsciiLetter(ch)) break;
+    if (letters.length >= 3) return false;
+    letters += ch;
+    i += 1;
+  }
+
+  if (letters.length === 0) return false;
+
+  let digits = "";
+  while (i < name.length) {
+    const ch = name[i];
+    if (!ch || !isAsciiDigit(ch)) break;
+    digits += ch;
+    i += 1;
+  }
+
+  if (digits.length === 0) return false;
+  if (i !== name.length) return false;
+
+  const col = letters
+    .split("")
+    .reduce((acc, c) => acc * 26 + (c.toUpperCase().charCodeAt(0) - "A".charCodeAt(0) + 1), 0);
+  return col <= 16_384;
+}
+
+function looksLikeR1C1CellReference(name: string): boolean {
+  // In R1C1 notation, `R`/`C` are valid relative references. Excel may also treat
+  // `R123C456` as a cell reference even when the workbook is in A1 mode.
+  const upper = String(name ?? "").toUpperCase();
+  if (upper === "R" || upper === "C") return true;
+  if (!upper.startsWith("R")) return false;
+
+  let i = 1;
+  while (i < upper.length && isAsciiDigit(upper[i] ?? "")) i += 1;
+  if (i >= upper.length) return false;
+  if (upper[i] !== "C") return false;
+
+  i += 1;
+  while (i < upper.length && isAsciiDigit(upper[i] ?? "")) i += 1;
+  return i === upper.length;
+}
+
+function isValidUnquotedSheetNameForA1(name: string): boolean {
+  if (!name) return false;
+  const first = name[0];
+  if (!first || isAsciiDigit(first)) return false;
+  if (!(first === "_" || isAsciiLetter(first))) return false;
+  for (let i = 1; i < name.length; i += 1) {
+    const ch = name[i]!;
+    if (!(isAsciiAlphaNum(ch) || ch === "_" || ch === ".")) return false;
+  }
+
+  if (isReservedUnquotedSheetName(name)) return false;
+  if (looksLikeA1CellReference(name) || looksLikeR1C1CellReference(name)) return false;
+
+  return true;
+}
+
 function formatSheetName(sheet: string): string {
   // Excel style: quote sheet names containing spaces/special characters
   // using single quotes and escaping embedded quotes via doubling.
-  if (/^[A-Za-z0-9_]+$/.test(sheet)) return sheet;
+  //
+  // Avoid emitting ambiguous identifiers like `TRUE!A1`, `A1!A1`, or `R1C1!A1`.
+  if (isValidUnquotedSheetNameForA1(sheet)) return sheet;
   return `'${sheet.replace(/'/g, "''")}'`;
 }
 

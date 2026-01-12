@@ -57,4 +57,46 @@ describe("A1 utilities (sheet quoting)", () => {
       }),
     ).toBe("'Bob''s Sheet'!A1");
   });
+
+  it("quotes reserved/ambiguous sheet names (TRUE, A1, R1C1, leading digits)", () => {
+    expect(
+      rangeToA1({
+        sheetName: "TRUE",
+        startRow: 0,
+        startCol: 0,
+        endRow: 0,
+        endCol: 0,
+      }),
+    ).toBe("'TRUE'!A1");
+
+    expect(
+      rangeToA1({
+        sheetName: "A1",
+        startRow: 0,
+        startCol: 0,
+        endRow: 0,
+        endCol: 0,
+      }),
+    ).toBe("'A1'!A1");
+
+    expect(
+      rangeToA1({
+        sheetName: "R1C1",
+        startRow: 0,
+        startCol: 0,
+        endRow: 0,
+        endCol: 0,
+      }),
+    ).toBe("'R1C1'!A1");
+
+    expect(
+      rangeToA1({
+        sheetName: "1Sheet",
+        startRow: 0,
+        startCol: 0,
+        endRow: 0,
+        endCol: 0,
+      }),
+    ).toBe("'1Sheet'!A1");
+  });
 });
