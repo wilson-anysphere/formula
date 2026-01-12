@@ -1473,8 +1473,16 @@ fn format_internal_sheet_ref(
 fn format_external_workbook_name(workbook: &str) -> String {
     // Excel external workbook refs wrap the workbook in brackets: `[Book1.xlsx]`.
     //
-    // Some producers may already include brackets; normalize to a single set.
-    let trimmed = workbook.trim();
+    // Some producers may include an absolute/relative path in the SUPBOOK virtPath. For formula
+    // rendering we want a best-effort workbook *basename*.
+    //
+    // Some producers may also already include brackets; normalize to a single set.
+    let without_nuls = workbook.replace('\0', "");
+    let basename = without_nuls
+        .rsplit(['\\', '/'])
+        .next()
+        .unwrap_or(&without_nuls);
+    let trimmed = basename.trim();
     let inner = trimmed
         .strip_prefix('[')
         .and_then(|s| s.strip_suffix(']'))
@@ -3332,6 +3340,64 @@ mod tests {
     }
 
     #[test]
+    fn decodes_ptg_ref3d_external_workbook_sheet_ref_strips_paths_from_virtpath() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
+            supbook: 1,
+            itab_first: 0,
+            itab_last: 0,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+
+        // Some producers store `SUPBOOK.virtPath` as a path (or already bracketed workbook name).
+        // Even if workbook_name metadata is missing, we should render the workbook basename.
+        let supbooks = vec![
+            SupBookInfo {
+                ctab: 0,
+                virt_path: "\u{0001}".to_string(),
+                kind: SupBookKind::Internal,
+                workbook_name: None,
+                sheet_names: Vec::new(),
+                extern_names: Vec::new(),
+            },
+            SupBookInfo {
+                ctab: 0,
+                virt_path: r"C:\work\[Book2.xlsx]".to_string(),
+                kind: SupBookKind::ExternalWorkbook,
+                workbook_name: None,
+                sheet_names: vec!["Sheet1".to_string()],
+                extern_names: Vec::new(),
+            },
+        ];
+
+        let ctx = RgceDecodeContext {
+            codepage: 1252,
+            sheet_names: &sheet_names,
+            externsheet: &externsheet,
+            supbooks: &supbooks,
+            defined_names: &defined_names,
+        };
+
+        // '[Book2.xlsx]Sheet1'!A1
+        let col_field = encode_col_field(0, true, true);
+        let rgce = [
+            0x3A, // PtgRef3d
+            0x00, 0x00, // ixti=0
+            0x00, 0x00, // row=0
+            col_field.to_le_bytes()[0],
+            col_field.to_le_bytes()[1],
+        ];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "'[Book2.xlsx]Sheet1'!A1");
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
     fn decodes_ptg_namex_udf_function_name_for_ptg_funcvar_00ff() {
         let sheet_names: Vec<String> = Vec::new();
         let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
@@ -3377,6 +3443,55 @@ mod tests {
 
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "MyFunc(1)");
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_ptg_namex_external_workbook_workbook_scoped_name_strips_paths_from_virtpath() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
+            supbook: 1,
+            itab_first: -1,
+            itab_last: -1,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+
+        let supbooks = vec![
+            SupBookInfo {
+                ctab: 0,
+                virt_path: "\u{0001}".to_string(),
+                kind: SupBookKind::Internal,
+                workbook_name: None,
+                sheet_names: Vec::new(),
+                extern_names: Vec::new(),
+            },
+            SupBookInfo {
+                ctab: 0,
+                virt_path: r"C:\work\Book2.xlsx".to_string(),
+                kind: SupBookKind::ExternalWorkbook,
+                workbook_name: None,
+                sheet_names: vec!["Sheet1".to_string()],
+                extern_names: vec!["MyName".to_string()],
+            },
+        ];
+
+        let ctx = RgceDecodeContext {
+            codepage: 1252,
+            sheet_names: &sheet_names,
+            externsheet: &externsheet,
+            supbooks: &supbooks,
+            defined_names: &defined_names,
+        };
+
+        // Workbook-scoped external name (sheet indices are negative, so we fall back to `[Book]Name`).
+        let rgce = [0x39, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "'[Book2.xlsx]MyName'");
         assert!(
             decoded.warnings.is_empty(),
             "warnings={:?}",
