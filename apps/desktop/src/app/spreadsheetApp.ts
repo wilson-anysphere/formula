@@ -111,6 +111,10 @@ const MAX_KEYBOARD_FORMATTING_CELLS = DEFAULT_FORMATTING_APPLY_CELL_LIMIT;
 // and (for internal pastes) a per-cell snapshot of effective formats. Keep this bounded so
 // Excel-scale sheet limits don't allow accidental multi-million-cell allocations.
 const MAX_CLIPBOARD_CELLS = 200_000;
+// Fill-handle + fill shortcut operations materialize per-cell edits (and, in some cases, a
+// source snapshot) in JS. Keep this bounded so users can't accidentally generate millions
+// of edits on Excel-scale sheets.
+const MAX_FILL_CELLS = 200_000;
 // Chart rendering is synchronous and (today) materializes the full series ranges into JS arrays.
 // Keep charts bounded so a large A1 range doesn't allocate millions of values on every render.
 const MAX_CHART_DATA_CELLS = 100_000;
@@ -1249,6 +1253,39 @@ export class SpreadsheetApp {
             const source = toFillRange(sourceRange);
             const target = toFillRange(targetRange);
             if (!source || !target) return;
+
+            const sourceCells = (source.endRow - source.startRow) * (source.endCol - source.startCol);
+            const targetCells = (target.endRow - target.startRow) * (target.endCol - target.startCol);
+            if (sourceCells > MAX_FILL_CELLS || targetCells > MAX_FILL_CELLS) {
+              try {
+                showToast(
+                  `Fill range too large (>${MAX_FILL_CELLS.toLocaleString()} cells). Select fewer cells and try again.`,
+                  "warning"
+                );
+              } catch {
+                // `showToast` requires a #toast-root; unit tests don't always include it.
+              }
+
+              // DesktopSharedGrid will still expand the selection to the dragged target range
+              // after this callback runs. Revert selection back to the pre-fill state on the
+              // next microtask turn so the UI reflects that no fill occurred.
+              const selectionSnapshot = {
+                ranges: this.selection.ranges.map((r) => ({ ...r })),
+                active: { ...this.selection.active },
+                anchor: { ...this.selection.anchor },
+                activeRangeIndex: this.selection.activeRangeIndex
+              };
+              queueMicrotask(() => {
+                if (!this.sharedGrid) return;
+                if (this.disposed) return;
+                this.selection = buildSelection(selectionSnapshot, this.limits);
+                this.syncSharedGridSelectionFromState({ scrollIntoView: false });
+                this.renderSelection();
+                this.updateStatus();
+                this.focus();
+              });
+              return;
+            }
 
             applyFillCommitToDocumentController({
               document: this.document,
@@ -6760,7 +6797,14 @@ export class SpreadsheetApp {
         targetRange.endCol !== sourceRange.endCol;
 
       if (changed && shouldCommit) {
-        this.applyFill(sourceRange, targetRange, fillMode);
+        const applied = this.applyFill(sourceRange, targetRange, fillMode);
+        if (!applied) {
+          // Clear any preview overlay and keep selection stable.
+          this.renderSelection();
+          this.updateStatus();
+          this.focus();
+          return;
+        }
 
         const existingRanges = this.selection.ranges;
         const nextActiveIndex = Math.max(0, Math.min(existingRanges.length - 1, activeRangeIndex));
@@ -6803,7 +6847,7 @@ export class SpreadsheetApp {
     }
   }
 
-  private applyFill(sourceRange: Range, targetRange: Range, mode: FillHandleMode): void {
+  private applyFill(sourceRange: Range, targetRange: Range, mode: FillHandleMode): boolean {
     const toFillRange = (range: Range): FillEngineRange => ({
       startRow: range.startRow,
       endRow: range.endRow + 1,
@@ -6839,7 +6883,21 @@ export class SpreadsheetApp {
       return null;
     })();
 
-    if (!deltaRange) return;
+    if (!deltaRange) return false;
+
+    const sourceCells = (source.endRow - source.startRow) * (source.endCol - source.startCol);
+    const targetCells = (deltaRange.endRow - deltaRange.startRow) * (deltaRange.endCol - deltaRange.startCol);
+    if (sourceCells > MAX_FILL_CELLS || targetCells > MAX_FILL_CELLS) {
+      try {
+        showToast(
+          `Fill range too large (>${MAX_FILL_CELLS.toLocaleString()} cells). Select fewer cells and try again.`,
+          "warning"
+        );
+      } catch {
+        // `showToast` requires a #toast-root; unit tests don't always include it.
+      }
+      return false;
+    }
 
     applyFillCommitToDocumentController({
       document: this.document,
@@ -6849,6 +6907,7 @@ export class SpreadsheetApp {
       mode,
       getCellComputedValue: (row, col) => this.getCellComputedValue({ row, col }) as any
     });
+    return true;
   }
 
   private applyFillShortcut(direction: "down" | "right"): void {
@@ -6913,6 +6972,26 @@ export class SpreadsheetApp {
     }
 
     if (operations.length === 0) return;
+
+    let totalTargetCells = 0;
+    for (const op of operations) {
+      const rows = Math.max(0, op.targetRange.endRow - op.targetRange.startRow);
+      const cols = Math.max(0, op.targetRange.endCol - op.targetRange.startCol);
+      totalTargetCells += rows * cols;
+      if (totalTargetCells > MAX_FILL_CELLS) break;
+    }
+
+    if (totalTargetCells > MAX_FILL_CELLS) {
+      try {
+        showToast(
+          `Selection too large to fill (>${MAX_FILL_CELLS.toLocaleString()} cells). Select fewer cells and try again.`,
+          "warning"
+        );
+      } catch {
+        // `showToast` requires a #toast-root; unit tests don't always include it.
+      }
+      return;
+    }
 
     const label = direction === "down" ? t("command.edit.fillDown") : t("command.edit.fillRight");
 
