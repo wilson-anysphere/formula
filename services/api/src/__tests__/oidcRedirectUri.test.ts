@@ -7,7 +7,7 @@ import type { Pool } from "pg";
 import { buildApp } from "../app";
 import type { AppConfig } from "../config";
 import { runMigrations } from "../db/migrations";
-import { deriveSecretStoreKey } from "../secrets/secretStore";
+import { deriveSecretStoreKey, putSecret } from "../secrets/secretStore";
 
 function getMigrationsDir(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -130,6 +130,8 @@ describe("OIDC redirect_uri construction", () => {
       `,
       [orgId, "mock", issuerUrl, "client", JSON.stringify(["openid", "email"]), true]
     );
+
+    await putSecret(db, config.secretStoreKeys, `oidc:${orgId}:mock`, "test-client-secret");
 
     const startRes = await app.inject({
       method: "GET",
