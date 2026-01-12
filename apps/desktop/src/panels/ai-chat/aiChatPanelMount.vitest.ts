@@ -47,6 +47,9 @@ vi.mock("../../ai/llm/desktopLLMClient.js", () => ({
 
 // Import the panel modules at file-evaluation time so Vite transform work does not
 // count toward the per-test timeout.
+//
+// Keep these as dynamic imports (not static `import` statements) so the `vi.mock(...)`
+// declarations above apply before the modules are evaluated.
 const [{ createPanelBodyRenderer }, { PanelIds }] = await Promise.all([
   import("../panelBodyRenderer.js"),
   import("../panelRegistry.js"),
