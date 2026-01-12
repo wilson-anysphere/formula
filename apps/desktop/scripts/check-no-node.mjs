@@ -54,8 +54,9 @@ const sideEffectImportRe = /\bimport\s+["']([^"']+)["']/g;
 const dynamicImportRe = /\bimport\(\s*["']([^"']+)["']\s*\)/g;
 const requireCallRe = /\brequire\(\s*["']([^"']+)["']\s*\)/g;
 
-// Catch optional chaining variants too (process?.versions?.node, etc).
-const processVersionsNodeRe = /\bprocess(?:\?\.)?\.versions(?:\?\.)?\.node\b/g;
+// Catch `process.versions.node` in a few variants (including optional chaining and TS casts),
+// but keep it line-local to reduce false positives.
+const processVersionsNodeRe = /\bprocess\b[^\n]{0,120}\.versions(?:\?\.)?\.node\b/g;
 
 /** @type {Map<string, boolean>} */
 const isFileCache = new Map();

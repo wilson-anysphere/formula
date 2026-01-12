@@ -322,14 +322,24 @@ function bytesToDataUrl(bytes: Uint8Array, mime: string): string {
   return `data:${mime};base64,${bytesToBase64(bytes)}`;
 }
 
+function isNodeRuntime(): boolean {
+  // Avoid relying on Node-only `process.versions` fields (some bundlers/polyfills might provide
+  // them inconsistently). We only need a best-effort detector to avoid `blob:` module URLs in
+  // Node-based test runners.
+  const proc = (globalThis as any).process as any;
+  if (!proc || typeof proc !== "object") return false;
+  if (proc.release && typeof proc.release === "object" && proc.release.name === "node") return true;
+  return typeof proc.version === "string" && proc.version.startsWith("v");
+}
+
 function createModuleUrl(bytes: Uint8Array, mime = "text/javascript"): { url: string; revoke: () => void } {
-  const isNodeRuntime = typeof process !== "undefined" && typeof (process as any)?.versions?.node === "string";
+  const nodeRuntime = isNodeRuntime();
 
   const normalized: Uint8Array<ArrayBuffer> =
     bytes.buffer instanceof ArrayBuffer ? (bytes as Uint8Array<ArrayBuffer>) : new Uint8Array(bytes);
 
   if (
-    !isNodeRuntime &&
+    !nodeRuntime &&
     typeof URL !== "undefined" &&
     typeof URL.createObjectURL === "function" &&
     typeof Blob !== "undefined"
