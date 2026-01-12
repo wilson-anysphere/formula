@@ -143,7 +143,7 @@ test.describe("comments", () => {
     await expect(page.getByTestId("new-comment-input")).toBeFocused();
   });
 
-  test("cell context menu disables Add Comment while editing", async ({ page }) => {
+  test("opening the grid context menu commits an in-progress in-cell edit", async ({ page }) => {
     await gotoDesktop(page);
 
     await page.waitForFunction(() => {
@@ -159,15 +159,26 @@ test.describe("comments", () => {
       height: number;
     };
 
-    // Select A1 and enter in-cell edit mode (F2 semantics).
+    // Ensure the cell starts empty so commit assertions are deterministic.
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const doc = app.getDocument();
+      const sheetId = app.getCurrentSheetId();
+      doc.setCellValue(sheetId, "A1", null, { label: "Clear A1" });
+    });
+
     const grid = page.locator("#grid");
     await grid.click({ position: { x: a1.x + a1.width / 2, y: a1.y + a1.height / 2 } });
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
 
     await page.keyboard.press("F2");
-    await expect(page.getByTestId("cell-editor")).toBeVisible();
+    const editor = page.getByTestId("cell-editor");
+    await expect(editor).toBeVisible();
+    await page.keyboard.type("hello");
+    await expect(editor).toHaveValue("hello");
 
-    // Open the context menu while editing. (Dispatch the event directly to avoid flaky right-click handling.)
+    // Open the context menu while editing. This should commit the edit via the editor blur handler.
+    // (Dispatch the event directly to avoid flaky right-click handling.)
     await page.evaluate(
       ({ x, y }) => {
         const gridEl = document.getElementById("grid");
@@ -188,9 +199,54 @@ test.describe("comments", () => {
 
     const menu = page.getByTestId("context-menu");
     await expect(menu).toBeVisible();
+    await expect(editor).toBeHidden();
 
+    await page.evaluate(() => (window as any).__formulaApp.whenIdle());
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"))).toBe("hello");
+
+    // Add Comment should remain available after the edit is committed.
     const addComment = menu.getByRole("button", { name: "Add Comment" });
-    await expect(addComment).toBeDisabled();
+    await expect(addComment).toBeEnabled();
+  });
+
+  test("comments shortcuts do not interrupt in-cell editing", async ({ page }) => {
+    await gotoDesktop(page);
+
+    await page.waitForFunction(() => {
+      const app = (window as any).__formulaApp;
+      const rect = app?.getCellRectA1?.("A1");
+      return rect && rect.width > 0 && rect.height > 0;
+    });
+
+    const a1 = (await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("A1"))) as {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    };
+
+    const grid = page.locator("#grid");
+    await grid.click({ position: { x: a1.x + a1.width / 2, y: a1.y + a1.height / 2 } });
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+
+    await page.keyboard.press("F2");
+    const editor = page.getByTestId("cell-editor");
+    await expect(editor).toBeVisible();
+    await expect(editor).toBeFocused();
+
+    const panel = page.getByTestId("comments-panel");
+    await expect(panel).not.toBeVisible();
+
+    // Shift+F2 should not open comments while the inline editor is active.
+    await page.keyboard.press("Shift+F2");
+    await expect(panel).not.toBeVisible();
+    await expect(editor).toBeVisible();
+
+    // Ctrl/Cmd+Shift+M should also not toggle comments while editing.
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    await page.keyboard.press(`${modifier}+Shift+M`);
+    await expect(panel).not.toBeVisible();
+    await expect(editor).toBeVisible();
   });
 
   test("Shift+F2 opens the comments panel and focuses the input", async ({ page }) => {
