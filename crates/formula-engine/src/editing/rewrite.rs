@@ -1891,4 +1891,24 @@ mod tests {
         assert!(changed);
         assert_eq!(out, "=A2.Price");
     }
+
+    #[test]
+    fn copy_delta_drops_sheet_prefix_when_reference_becomes_ref_error() {
+        // The formula grammar does not allow sheet-qualified error literals like `Sheet1!#REF!`.
+        // When rewriting creates a `#REF!`, the sheet prefix should be dropped.
+        let (out, changed) =
+            rewrite_formula_for_copy_delta("=Sheet1!A1", "Sheet1", CellAddr::new(0, 0), 0, -1);
+        assert!(changed);
+        assert_eq!(out, "=#REF!");
+
+        let (out, changed) = rewrite_formula_for_copy_delta(
+            "='Sheet Name'!A1",
+            "Sheet1",
+            CellAddr::new(0, 0),
+            0,
+            -1,
+        );
+        assert!(changed);
+        assert_eq!(out, "=#REF!");
+    }
 }
