@@ -1796,6 +1796,69 @@ fn project_normalized_data_matches_baseclass_key_case_insensitively_but_preserve
 }
 
 #[test]
+fn project_normalized_data_matches_baseclass_value_case_insensitively_but_preserves_token_value_case()
+{
+    // Regression: module identifiers used in `BaseClass=` can differ in ASCII case from the
+    // corresponding `VBA/dir` MODULENAME. We should resolve the designer storage in a
+    // case-insensitive way, but preserve the original value bytes in the emitted tokens.
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+
+    // PROJECT stream uses lowercase module identifier.
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(b"BaseClass=formb\r\n")
+            .expect("write PROJECT");
+    }
+
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let dir_decompressed = {
+            let mut out = Vec::new();
+            push_record(&mut out, 0x0003, &1252u16.to_le_bytes()); // PROJECTCODEPAGE
+
+            push_record(&mut out, 0x0019, b"FormB"); // MODULENAME
+            let mut stream_name = Vec::new();
+            stream_name.extend_from_slice(b"FormB");
+            stream_name.extend_from_slice(&0u16.to_le_bytes());
+            push_record(&mut out, 0x001A, &stream_name); // MODULESTREAMNAME (+ reserved u16)
+            push_record(&mut out, 0x0021, &3u16.to_le_bytes()); // MODULETYPE (UserForm)
+            out
+        };
+        let dir_container = compress_container(&dir_decompressed);
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+
+    ole.create_storage("FormB").expect("FormB storage");
+    {
+        let mut s = ole.create_stream("FormB/Payload").expect("FormB stream");
+        s.write_all(b"B").expect("write FormB bytes");
+    }
+
+    let vba_project_bin = ole.into_inner().into_inner();
+    let normalized = project_normalized_data(&vba_project_bin).expect("ProjectNormalizedData");
+
+    let mut formb_padded = Vec::new();
+    formb_padded.extend_from_slice(b"B");
+    formb_padded.extend(std::iter::repeat_n(0u8, 1022));
+
+    let idx_formb = find_subslice(&normalized, &formb_padded).expect("FormB designer bytes");
+    let idx_tokens =
+        find_subslice(&normalized, b"BaseClassformb").expect("BaseClassformb tokens");
+
+    assert!(
+        idx_formb < idx_tokens,
+        "expected designer bytes to appear before the BaseClass property tokens"
+    );
+    assert!(
+        find_subslice(&normalized, b"BaseClassFormB").is_none(),
+        "expected BaseClass value bytes to be preserved (no case normalization)"
+    );
+}
+
+#[test]
 fn project_normalized_data_decodes_baseclass_value_using_project_stream_codepage() {
     // Regression: BaseClass values can contain non-ASCII module identifiers encoded in the VBA
     // project's codepage. `project_normalized_data()` should:
