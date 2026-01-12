@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
 pub struct ClipboardContent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
@@ -11,11 +10,10 @@ pub struct ClipboardContent {
     pub rtf: Option<String>,
     /// PNG bytes encoded as base64.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub png_base64: Option<String>,
+    pub image_png_base64: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
 pub struct ClipboardWritePayload {
     pub text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -24,7 +22,7 @@ pub struct ClipboardWritePayload {
     pub rtf: Option<String>,
     /// PNG bytes encoded as base64.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub png_base64: Option<String>,
+    pub image_png_base64: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -61,4 +59,3 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
     #[allow(unreachable_code)]
     Err(ClipboardError::UnsupportedPlatform)
 }
-

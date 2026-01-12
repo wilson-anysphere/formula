@@ -3487,6 +3487,37 @@ pub fn report_cross_origin_isolation(cross_origin_isolated: bool, shared_array_b
     );
 }
 
+// Clipboard bridge commands.
+//
+// The frontend prefers the browser Clipboard API when available (so we can copy/paste rich HTML
+// tables inside the WebView), but falls back to these commands for formats that are not reliably
+// available via WebView clipboard integrations on Linux (Wayland/X11).
+//
+// These commands are intentionally thin wrappers around `crate::clipboard`, which handles
+// platform dispatch and GTK main-thread requirements.
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub fn read_clipboard() -> Result<crate::clipboard::ClipboardContent, String> {
+    crate::clipboard::read().map_err(|e| e.to_string())
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub fn write_clipboard(
+    text: String,
+    html: Option<String>,
+    rtf: Option<String>,
+    image_png_base64: Option<String>,
+) -> Result<(), String> {
+    let payload = crate::clipboard::ClipboardWritePayload {
+        text,
+        html,
+        rtf,
+        image_png_base64,
+    };
+    crate::clipboard::write(&payload).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

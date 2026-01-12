@@ -83,13 +83,13 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
         let text = clipboard.wait_for_text().map(|s| s.to_string());
         let html = wait_for_utf8_targets(&clipboard, &["text/html", "text/html;charset=utf-8"]);
         let rtf = wait_for_utf8_targets(&clipboard, &["text/rtf", "application/rtf"]);
-        let png_base64 = wait_for_bytes_base64(&clipboard, "image/png");
+        let image_png_base64 = wait_for_bytes_base64(&clipboard, "image/png");
 
         Ok(ClipboardContent {
             text,
             html,
             rtf,
-            png_base64,
+            image_png_base64,
         })
     })
 }
@@ -99,7 +99,7 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
     let html = payload.html.clone();
     let rtf = payload.rtf.clone();
     let png_bytes = payload
-        .png_base64
+        .image_png_base64
         .as_deref()
         .filter(|s| !s.is_empty())
         .map(|s| {

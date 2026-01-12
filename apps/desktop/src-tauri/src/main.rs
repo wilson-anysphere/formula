@@ -435,6 +435,8 @@ fn main() {
             commands::read_binary_file_range,
             commands::stat_file,
             commands::list_dir,
+            commands::read_clipboard,
+            commands::write_clipboard,
             commands::power_query_cache_key_get_or_create,
             commands::power_query_credential_get,
             commands::power_query_credential_set,
