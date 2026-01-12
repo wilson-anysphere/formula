@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { getMarketplaceBaseUrl } from "./getMarketplaceBaseUrl.js";
+import { getMarketplaceBaseUrl } from "../panels/marketplace/getMarketplaceBaseUrl.js";
 
 describe("getMarketplaceBaseUrl", () => {
   it("prefers localStorage override", () => {
