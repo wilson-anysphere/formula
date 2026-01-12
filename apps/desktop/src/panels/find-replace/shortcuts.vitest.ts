@@ -1,10 +1,20 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 
+import { builtinKeybindings } from "../../commands/builtinKeybindings.js";
+import { CommandRegistry } from "../../extensions/commandRegistry.js";
+import { ContextKeyService } from "../../extensions/contextKeys.js";
+import { KeybindingService } from "../../extensions/keybindingService.js";
 import { registerFindReplaceShortcuts } from "./shortcuts.js";
 
+async function flushMicrotasks(times = 6): Promise<void> {
+  for (let i = 0; i < times; i++) {
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+  }
+}
+
 describe("find/replace shortcuts", () => {
-  it("binds Replace to Cmd+Option+F on macOS (and avoids Cmd+H)", () => {
+  it("binds Replace to Cmd+Option+F on macOS (and avoids Cmd+H)", async () => {
     // JSDOM doesn't provide requestAnimationFrame by default.
     // `registerFindReplaceShortcuts` uses it to focus/select the first input.
     (globalThis as any).requestAnimationFrame ??= (cb: FrameRequestCallback) => {
@@ -58,23 +68,52 @@ describe("find/replace shortcuts", () => {
       };
     }
 
+    const commandRegistry = new CommandRegistry();
+    const contextKeys = new ContextKeyService();
+    const keybindingService = new KeybindingService({ commandRegistry, contextKeys, platform: "mac" });
+    keybindingService.setBuiltinKeybindings(builtinKeybindings);
+    const disposeKeybindings = keybindingService.installWindowListener(window);
+
+    function showDialogAndFocus(dialog: HTMLDialogElement): void {
+      if (!dialog.open) {
+        dialog.showModal();
+      }
+
+      const focusInput = () => {
+        const input = dialog.querySelector<HTMLInputElement | HTMLTextAreaElement>("input, textarea");
+        if (!input) return;
+        input.focus();
+        input.select?.();
+      };
+
+      requestAnimationFrame(focusInput);
+    }
+
+    commandRegistry.registerBuiltinCommand("edit.find", "Find", () => showDialogAndFocus(findDialog as any));
+    commandRegistry.registerBuiltinCommand("edit.replace", "Replace", () => showDialogAndFocus(replaceDialog as any));
+
     expect(replaceDialog.hasAttribute("open")).toBe(false);
 
     // Cmd+H (macOS Hide) should no longer open Replace.
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "h", metaKey: true, bubbles: true }));
+    await flushMicrotasks();
     expect(replaceDialog.hasAttribute("open")).toBe(false);
 
     // Cmd+Option+F should open Replace (and should not open Find).
     window.dispatchEvent(
       new KeyboardEvent("keydown", { key: "f", code: "KeyF", metaKey: true, altKey: true, bubbles: true }),
     );
+    await flushMicrotasks();
     expect(replaceDialog.hasAttribute("open")).toBe(true);
     expect(findDialog.hasAttribute("open")).toBe(false);
 
     // Ctrl+H continues to work for Windows/Linux-style replace.
     (replaceDialog as any).close();
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "h", ctrlKey: true, bubbles: true }));
+    await flushMicrotasks();
     expect(replaceDialog.hasAttribute("open")).toBe(true);
+
+    disposeKeybindings();
+    mount.remove();
   });
 });
-

@@ -27,7 +27,7 @@ import { CLASSIFICATION_LEVEL } from "../../../../../../packages/security/dlp/sr
 import { LocalClassificationStore, createMemoryStorage } from "../../../../../../packages/security/dlp/src/classificationStore.js";
 
 import { DocumentControllerSpreadsheetApi } from "../../tools/documentControllerSpreadsheetApi.js";
-import { WorkbookContextBuilder, type WorkbookContextPayload } from "../WorkbookContextBuilder.js";
+import { WorkbookContextBuilder } from "../WorkbookContextBuilder.js";
 
 describe("WorkbookContextBuilder", () => {
   beforeEach(() => {
@@ -548,7 +548,7 @@ describe("WorkbookContextBuilder", () => {
     expect(second.cache.block.hits).toBeGreaterThanOrEqual(1);
   });
 
-  it("builds a deterministic promptContext with compact stable JSON", async () => {
+  it("builds a deterministic, human-readable promptContext", async () => {
     const documentController = new DocumentController();
     const header = Array.from({ length: 8 }, (_v, idx) => `Col${idx + 1}`);
     const rows = Array.from({ length: 14 }, (_v, rIdx) =>
@@ -579,15 +579,11 @@ describe("WorkbookContextBuilder", () => {
     // Deterministic output is critical for caching and for stable prompt packing decisions.
     expect(ctx1.promptContext).toEqual(ctx2.promptContext);
 
-    // Prompt context should contain stable, compact JSON (token-efficient + machine-readable).
-    expect(ctx1.promptContext).not.toContain('\n  "');
-    expect(ctx1.promptContext).toContain('"kind":"selection"');
-    // Ensure we don't regress to pretty JSON for core fields.
-    expect(ctx1.promptContext).not.toContain('"kind": "selection"');
-
-    const pretty = buildPrettyPromptContext(ctx1.payload);
-    expect(ctx1.promptContext.length).toBeLessThan(pretty.length);
-    expect(pretty.length - ctx1.promptContext.length).toBeGreaterThan(100);
+    // Prompt context should contain stable, pretty-printed JSON (human-readable).
+    expect(ctx1.promptContext).toContain('\n  "');
+    expect(ctx1.promptContext).toContain('"kind": "selection"');
+    // Ensure we don't regress to minified JSON for core fields.
+    expect(ctx1.promptContext).not.toContain('"kind":"selection"');
   });
 
   it("respects a custom tokenEstimator when packing promptContext sections", async () => {
@@ -747,43 +743,3 @@ describe("WorkbookContextBuilder", () => {
     spy.mockRestore();
   });
 });
-
-function buildPrettyPromptContext(payload: WorkbookContextPayload): string {
-  const priorities = { workbook_summary: 5, sheet_schemas: 4, data_blocks: 3, retrieved: 2, attachments: 1 };
-
-  const sheets = payload.sheets.map((s) => ({ sheetId: s.sheetId, schema: s.schema }));
-  const blocks = payload.blocks;
-
-  const workbookSummary = {
-    id: payload.workbookId,
-    activeSheetId: payload.activeSheetId,
-    sheets: payload.sheets.map((s) => s.sheetId).sort(),
-    tables: payload.tables,
-    namedRanges: payload.namedRanges,
-    ...(payload.selection ? { selection: payload.selection } : {}),
-  };
-
-  const sections = [
-    {
-      key: "workbook_summary",
-      priority: priorities.workbook_summary,
-      text: `Workbook summary:\n${JSON.stringify(workbookSummary, null, 2)}`,
-    },
-    {
-      key: "sheet_schemas",
-      priority: priorities.sheet_schemas,
-      text: `Sheet schemas (schema-first):\n${JSON.stringify(sheets, null, 2)}`,
-    },
-    {
-      key: "data_blocks",
-      priority: priorities.data_blocks,
-      text: blocks.length ? `Sampled data blocks:\n${JSON.stringify(blocks, null, 2)}` : "",
-    },
-  ].filter((s) => s.text);
-
-  sections.sort((a, b) => b.priority - a.priority);
-  return sections.map((s) => `## ${s.key}\n${s.text}`).join("\n\n");
-}
-
-// Note: Prompt context intentionally uses compact, stable JSON for token efficiency and machine parsing.
-// Payload snapshot serialization remains pretty via WorkbookContextBuilder.serializePayload().

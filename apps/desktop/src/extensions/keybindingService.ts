@@ -95,15 +95,26 @@ export class KeybindingService {
   setBuiltinKeybindings(bindings: BuiltinKeybinding[]): void {
     const next: StoredKeybinding[] = [];
     for (const kb of bindings) {
-      const raw = pickPlatformKeybinding(kb, this.platform);
-      const parsed = parseKeybinding(kb.command, raw, kb.when ?? null);
-      if (!parsed) continue;
-      next.push({
-        source: { kind: "builtin" },
-        binding: parsed,
-        weight: typeof kb.weight === "number" ? kb.weight : 0,
-        order: ++this.orderCounter,
-      });
+      const primary = pickPlatformKeybinding(kb, this.platform);
+      const candidates = new Set<string>([primary]);
+
+      // On macOS, allow the base keybinding as a fallback when a mac-specific variant exists.
+      // Example: Replace is `Cmd+Option+F` on macOS to avoid the system `Cmd+H` shortcut, but
+      // we still want `Ctrl+H` to work for users accustomed to the Windows/Linux shortcut.
+      if (this.platform === "mac" && kb.mac && kb.key && kb.key !== primary) {
+        candidates.add(kb.key);
+      }
+
+      for (const raw of candidates) {
+        const parsed = parseKeybinding(kb.command, raw, kb.when ?? null);
+        if (!parsed) continue;
+        next.push({
+          source: { kind: "builtin" },
+          binding: parsed,
+          weight: typeof kb.weight === "number" ? kb.weight : 0,
+          order: ++this.orderCounter,
+        });
+      }
     }
     this.builtin = next;
   }
