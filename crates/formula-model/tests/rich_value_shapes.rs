@@ -50,6 +50,51 @@ fn entity_and_record_serialize_compactly_when_only_display_is_present() {
 }
 
 #[test]
+fn rich_entity_serializes_with_entity_type_id_and_properties() {
+    let entity_value = CellValue::Entity(
+        EntityValue::new("Apple Inc.")
+            .with_entity_type("stock")
+            .with_entity_id("AAPL")
+            .with_property("Price", 178.5),
+    );
+
+    let json = serde_json::to_value(&entity_value).unwrap();
+    assert_eq!(json["type"], "entity");
+    assert_eq!(json["value"]["displayValue"], "Apple Inc.");
+    assert_eq!(json["value"]["entityType"], "stock");
+    assert_eq!(json["value"]["entityId"], "AAPL");
+    assert_eq!(
+        json["value"]["properties"]["Price"],
+        serde_json::json!({ "type": "number", "value": 178.5 })
+    );
+}
+
+#[test]
+fn rich_record_serializes_fields_and_display_field_without_display_value() {
+    let record_value = CellValue::Record(
+        RecordValue::new("")
+            .with_field("name", "Ada")
+            .with_display_field("name"),
+    );
+
+    let json = serde_json::to_value(&record_value).unwrap();
+    assert_eq!(json["type"], "record");
+    assert_eq!(json["value"]["displayField"], "name");
+    assert_eq!(
+        json["value"]["fields"]["name"],
+        serde_json::json!({ "type": "string", "value": "Ada" })
+    );
+
+    let value_obj = json["value"]
+        .as_object()
+        .expect("record value should serialize as object");
+    assert!(
+        value_obj.get("displayValue").is_none(),
+        "displayValue should be omitted when empty"
+    );
+}
+
+#[test]
 fn rich_entity_and_record_json_roundtrip() {
     let entity = EntityValue::new("Apple Inc.")
         .with_entity_type("stock")
