@@ -11,6 +11,42 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
 
+let cliArgs = process.argv.slice(2);
+// pnpm forwards a literal `--` delimiter into scripts. Strip the first occurrence so
+// `pnpm test:node -- foo` behaves the same as `pnpm test:node foo`.
+const delimiterIdx = cliArgs.indexOf("--");
+if (delimiterIdx >= 0) {
+  cliArgs = [...cliArgs.slice(0, delimiterIdx), ...cliArgs.slice(delimiterIdx + 1)];
+}
+
+if (cliArgs.includes("--help") || cliArgs.includes("-h")) {
+  console.log(
+    [
+      "Run node:test suites in this repo (with safe defaults for multi-agent hosts).",
+      "",
+      "Usage:",
+      "  pnpm test:node",
+      "  pnpm test:node <pattern> [pattern...]",
+      "",
+      "Notes:",
+      "  - Additional args are treated as substring filters over test file paths.",
+      "  - pnpm forwards a literal `--` delimiter; this script strips it automatically.",
+      "",
+      "Examples:",
+      "  pnpm test:node collab",
+      "  pnpm test:node startSyncServer",
+      "  pnpm test:node -- desktop",
+      "",
+    ].join("\n"),
+  );
+  process.exit(0);
+}
+
+const fileFilters = cliArgs
+  .filter((arg) => typeof arg === "string")
+  .map((arg) => arg.trim())
+  .filter((arg) => arg !== "" && !arg.startsWith("-"));
+
 /**
  * @param {string} dir
  * @param {string[]} out
@@ -56,6 +92,19 @@ const testFiles = [];
 await collect(repoRoot, testFiles);
 testFiles.sort();
 
+let filteredTestFiles = testFiles;
+if (fileFilters.length > 0) {
+  const lowered = fileFilters.map((filter) => filter.toLowerCase());
+  filteredTestFiles = testFiles.filter((file) => {
+    const rel = path.relative(repoRoot, file).split(path.sep).join("/");
+    const haystack = rel.toLowerCase();
+    return lowered.some((needle) => haystack.includes(needle));
+  });
+  console.log(
+    `[node:test] Filtering ${testFiles.length} test file(s) by ${fileFilters.length} pattern(s): ${fileFilters.join(", ")}`,
+  );
+}
+
 const tsLoaderArgs = resolveTypeScriptLoaderArgs();
 const builtInTypeScript = getBuiltInTypeScriptSupport();
 const canExecuteTypeScript = builtInTypeScript.enabled || tsLoaderArgs.length > 0;
@@ -67,11 +116,13 @@ let runnableTestFiles = testFiles;
 let typeScriptFilteredCount = 0;
 let typeScriptTsxFilteredCount = 0;
 if (!canExecuteTypeScript) {
-  runnableTestFiles = await filterTypeScriptImportTests(testFiles, ["ts", "tsx"]);
-  typeScriptFilteredCount = testFiles.length - runnableTestFiles.length;
+  runnableTestFiles = await filterTypeScriptImportTests(filteredTestFiles, ["ts", "tsx"]);
+  typeScriptFilteredCount = filteredTestFiles.length - runnableTestFiles.length;
 } else if (!canExecuteTsx) {
-  runnableTestFiles = await filterTypeScriptImportTests(testFiles, ["tsx"]);
-  typeScriptTsxFilteredCount = testFiles.length - runnableTestFiles.length;
+  runnableTestFiles = await filterTypeScriptImportTests(filteredTestFiles, ["tsx"]);
+  typeScriptTsxFilteredCount = filteredTestFiles.length - runnableTestFiles.length;
+} else {
+  runnableTestFiles = filteredTestFiles;
 }
 
 const hasDeps = await hasNodeModules();
@@ -90,8 +141,8 @@ if (!hasDeps) {
   missingWorkspaceDepsFilteredCount = before - runnableTestFiles.length;
 }
 
-if (runnableTestFiles.length !== testFiles.length) {
-  const skipped = testFiles.length - runnableTestFiles.length;
+if (runnableTestFiles.length !== filteredTestFiles.length) {
+  const skipped = filteredTestFiles.length - runnableTestFiles.length;
   /** @type {string[]} */
   const reasons = [];
   if (typeScriptFilteredCount > 0) {
@@ -111,7 +162,11 @@ if (runnableTestFiles.length !== testFiles.length) {
 }
 
 if (runnableTestFiles.length === 0) {
-  console.log("No node:test files found.");
+  if (fileFilters.length > 0) {
+    console.log(`No node:test files matched: ${fileFilters.join(", ")}`);
+  } else {
+    console.log("No node:test files found.");
+  }
   process.exit(0);
 }
 

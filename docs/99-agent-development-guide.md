@@ -192,6 +192,15 @@ FORMULA_NODE_TEST_CONCURRENCY=4 pnpm test:node
 # (or: NODE_TEST_CONCURRENCY=4)
 ```
 
+To run a smaller subset of node:test suites, pass one or more substring filters
+(matched against test file paths):
+
+```bash
+pnpm test:node collab
+pnpm test:node startSyncServer
+pnpm test:node -- desktop  # `--` delimiter is stripped for pnpm compatibility
+```
+
 ### Vitest: run single files without accidentally running the full suite
 
 When debugging a specific Vitest file, **avoid** passing a bare `--` before the
