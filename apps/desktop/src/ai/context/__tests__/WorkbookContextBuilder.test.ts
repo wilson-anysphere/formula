@@ -590,6 +590,8 @@ describe("WorkbookContextBuilder", () => {
     expect(first.blockCellCountByKind.sheet_sample).toBeGreaterThan(0);
     expect(first.promptContextChars).toBe(ctx1.promptContext.length);
     expect(first.promptContextTokens).toBe(ctx1.payload.budget.usedPromptContextTokens);
+    expect(first.promptContextBudgetTokens).toBe(ctx1.payload.budget.maxPromptContextTokens);
+    expect(first.promptContextTrimmedSectionCount).toBeGreaterThanOrEqual(0);
     expect(first.cache.schema.misses).toBeGreaterThanOrEqual(1);
     expect(first.cache.block.misses).toBeGreaterThanOrEqual(1);
     expect(first.cache.schema.entries).toBeGreaterThanOrEqual(1);
@@ -613,6 +615,8 @@ describe("WorkbookContextBuilder", () => {
     expect(second.blockCellCountByKind.sheet_sample).toBeGreaterThan(0);
     expect(second.promptContextChars).toBe(ctx2.promptContext.length);
     expect(second.promptContextTokens).toBe(ctx2.payload.budget.usedPromptContextTokens);
+    expect(second.promptContextBudgetTokens).toBe(ctx2.payload.budget.maxPromptContextTokens);
+    expect(second.promptContextTrimmedSectionCount).toBeGreaterThanOrEqual(0);
   });
 
   it("builds a deterministic promptContext with compact stable JSON", async () => {
@@ -667,6 +671,7 @@ describe("WorkbookContextBuilder", () => {
       selectedRange: { sheetId: "Sheet1", range: { startRow: 0, endRow: 2, startCol: 0, endCol: 1 } },
     };
 
+    const onBuildStatsDefault = vi.fn();
     // With the default heuristic estimator, this should fit without trimming.
     const builderDefault = new WorkbookContextBuilder({
       workbookId: "wb_estimator_default",
@@ -677,11 +682,15 @@ describe("WorkbookContextBuilder", () => {
       model: "unit-test-model",
       // Large enough to be resilient to future schema/payload expansions.
       maxPromptContextTokens: 2_000,
+      onBuildStats: onBuildStatsDefault,
     });
     const ctxDefault = await builderDefault.build(input);
     expect(ctxDefault.promptContext).not.toContain("trimmed to fit token budget");
+    expect(onBuildStatsDefault).toHaveBeenCalledTimes(1);
+    expect(onBuildStatsDefault.mock.calls[0]![0].promptContextTrimmedSectionCount).toBe(0);
 
     // With a much stricter estimator, the exact same context should be trimmed.
+    const onBuildStatsStrict = vi.fn();
     const strictEstimator = {
       estimateTextTokens: (text: string) => text.length * 10,
       estimateMessageTokens: (_message: any) => 0,
@@ -696,9 +705,12 @@ describe("WorkbookContextBuilder", () => {
       model: "unit-test-model",
       maxPromptContextTokens: 2_000,
       tokenEstimator: strictEstimator as any,
+      onBuildStats: onBuildStatsStrict,
     });
     const ctxStrict = await builderStrict.build(input);
     expect(ctxStrict.promptContext).toContain("trimmed to fit token budget");
+    expect(onBuildStatsStrict).toHaveBeenCalledTimes(1);
+    expect(onBuildStatsStrict.mock.calls[0]![0].promptContextTrimmedSectionCount).toBeGreaterThan(0);
   });
 
   it("reuses cached sheet summaries + blocks when the workbook hasn't changed, and invalidates on content edits", async () => {

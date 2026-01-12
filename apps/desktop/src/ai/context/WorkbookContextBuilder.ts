@@ -108,6 +108,20 @@ export interface WorkbookContextBuildStats {
    */
   promptContextTokens: number;
   /**
+   * Token budget used for packing prompt context sections.
+   *
+   * This is the `maxPromptContextTokens` from the builder's computed budget (after
+   * applying any overrides).
+   */
+  promptContextBudgetTokens: number;
+  /**
+   * Number of times the prompt context packer inserted the standard
+   * `"(trimmed to fit token budget)"` marker.
+   *
+   * This is an approximate indicator that one or more sections were truncated.
+   */
+  promptContextTrimmedSectionCount: number;
+  /**
    * Number of actual `read_range` tool calls executed during the build (cache misses only).
    */
   readBlockCount: number;
@@ -430,13 +444,15 @@ export class WorkbookContextBuilder {
           blockCount: 0,
           blockCountByKind: { selection: 0, sheet_sample: 0, retrieved: 0 },
           blockCellCount: 0,
-          blockCellCountByKind: { selection: 0, sheet_sample: 0, retrieved: 0 },
-          promptContextChars: 0,
-          promptContextTokens: 0,
-          readBlockCount: 0,
-          readBlockCellCount: 0,
-          readBlockCountByKind: { selection: 0, sheet_sample: 0, retrieved: 0 },
-          readBlockCellCountByKind: { selection: 0, sheet_sample: 0, retrieved: 0 },
+           blockCellCountByKind: { selection: 0, sheet_sample: 0, retrieved: 0 },
+           promptContextChars: 0,
+           promptContextTokens: 0,
+           promptContextBudgetTokens: 0,
+           promptContextTrimmedSectionCount: 0,
+           readBlockCount: 0,
+           readBlockCellCount: 0,
+           readBlockCountByKind: { selection: 0, sheet_sample: 0, retrieved: 0 },
+           readBlockCellCountByKind: { selection: 0, sheet_sample: 0, retrieved: 0 },
           cache: {
             schema: { hits: 0, misses: 0, entries: 0 },
             block: { hits: 0, misses: 0, entries: 0, entriesByKind: { selection: 0, sheet_sample: 0, retrieved: 0 } },
@@ -670,6 +686,8 @@ export class WorkbookContextBuilder {
       stats.cache.block.entriesByKind = cacheEntriesByKind;
       stats.promptContextChars = promptContext.length;
       stats.promptContextTokens = usedPromptContextTokens;
+      stats.promptContextBudgetTokens = budget.maxPromptContextTokens;
+      stats.promptContextTrimmedSectionCount = countSubstringOccurrences(promptContext, "trimmed to fit token budget");
       stats.rag.retrievedBlockCount = blocks.filter((b) => b.kind === "retrieved").length;
       try {
         onBuildStats?.(stats);
@@ -1464,6 +1482,17 @@ function countCellMatrix(values: CellScalar[][]): number {
     if (Array.isArray(row)) out += row.length;
   }
   return out;
+}
+
+function countSubstringOccurrences(haystack: string, needle: string): number {
+  if (!haystack || !needle) return 0;
+  let count = 0;
+  let idx = haystack.indexOf(needle);
+  while (idx !== -1) {
+    count += 1;
+    idx = haystack.indexOf(needle, idx + needle.length);
+  }
+  return count;
 }
 
 function columnIndexToA1(columnIndex: number): string {
