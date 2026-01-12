@@ -224,6 +224,9 @@ like `pnpm test:vitest -- run <file>` (the leading `run` is ignored). It also pr
 calling package’s local `node_modules/.bin/vitest` so workspace packages can pin different
 Vitest versions.
 
+When running from within a package directory (e.g. `pnpm -C packages/grid test ...`), it also
+normalizes repo-rooted paths like `packages/grid/src/foo.vitest.ts` to `src/foo.vitest.ts`.
+
 Or run Vitest directly:
 
 ```bash
