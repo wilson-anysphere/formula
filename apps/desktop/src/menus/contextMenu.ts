@@ -188,20 +188,26 @@ export class ContextMenu {
     const activeLabelText = activeIsMenuButton
       ? (active.querySelector<HTMLElement>(".context-menu__label")?.textContent ?? active.textContent ?? "")
       : "";
+    const focusInSubmenu = Boolean(this.submenu && active instanceof Node && this.submenu.contains(active));
+    const submenuParentLabelText = focusInSubmenu
+      ? (this.submenuParent?.querySelector<HTMLElement>(".context-menu__label")?.textContent ??
+          this.submenuParent?.textContent ??
+          "")
+      : "";
 
     this.menu.replaceChildren();
     this.closeSubmenu();
     this.buildMenuContents(this.menu, items, { level: "menu" });
     this.positionMenu(this.lastAnchor.x, this.lastAnchor.y);
 
-    if (activeIsMenuButton) {
+    if (activeIsMenuButton || focusInSubmenu) {
       const enabled = this.getEnabledButtons(this.menu);
       const match =
-        activeLabelText.trim() === ""
+        (activeIsMenuButton ? activeLabelText : submenuParentLabelText).trim() === ""
           ? null
           : enabled.find((btn) => {
               const label = btn.querySelector<HTMLElement>(".context-menu__label")?.textContent ?? btn.textContent ?? "";
-              return label === activeLabelText;
+              return label === (activeIsMenuButton ? activeLabelText : submenuParentLabelText);
             }) ?? null;
       if (match) {
         this.setRovingTabIndex(enabled, match);
