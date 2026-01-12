@@ -45,6 +45,9 @@
 
 .PARAMETER Visible
   Make Excel visible while running (passed through to run-excel-oracle.ps1).
+
+.PARAMETER DryRun
+  Print the commands that would be executed and exit without running Excel or modifying the pinned dataset.
 #>
 
 [CmdletBinding()]
