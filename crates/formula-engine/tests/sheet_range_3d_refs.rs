@@ -127,6 +127,46 @@ fn evaluates_sum_over_sheet_range_row_range() {
 }
 
 #[test]
+fn union_over_sheet_range_refs_is_ref_error() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet2", "A1", 2.0).unwrap();
+    engine.set_cell_value("Sheet3", "A1", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 10.0).unwrap();
+
+    // Union inside a function argument must be parenthesized to avoid being parsed as multiple
+    // arguments. Excel's union/intersection reference algebra does not allow combining references
+    // that resolve to different sheets, so 3D spans cannot participate (they expand to multiple
+    // per-sheet areas).
+    engine
+        .set_cell_formula("Summary", "A1", "=SUM((Sheet1:Sheet3!A1,Sheet1!A2))")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.get_cell_value("Summary", "A1"),
+        Value::Error(formula_engine::ErrorKind::Ref)
+    );
+}
+
+#[test]
+fn evaluates_sum_over_sheet_range_ref_and_additional_argument() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet2", "A1", 2.0).unwrap();
+    engine.set_cell_value("Sheet3", "A1", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 10.0).unwrap();
+
+    // Use separate function arguments rather than the reference union operator.
+    engine
+        .set_cell_formula("Summary", "A1", "=SUM(Sheet1:Sheet3!A1,Sheet1!A2)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Summary", "A1"), Value::Number(16.0));
+}
+
+#[test]
 fn recalculates_when_intermediate_sheet_changes() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
