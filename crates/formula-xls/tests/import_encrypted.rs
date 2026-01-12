@@ -23,4 +23,3 @@ fn errors_on_encrypted_xls_filepass() {
         "expected error message to mention password protection; got: {msg}"
     );
 }
-

@@ -226,6 +226,13 @@ fn import_xls_path_with_biff_reader(
     let mut biff_globals: Option<biff::globals::BiffWorkbookGlobals> = None;
 
     if let Some(workbook_stream) = workbook_stream.as_deref() {
+        // Detect encrypted/password-protected `.xls` files before attempting to parse workbook
+        // globals or opening via calamine. Encrypted BIFF streams contain a `FILEPASS` record in
+        // the workbook globals substream.
+        if biff::records::workbook_globals_has_filepass_record(workbook_stream) {
+            return Err(ImportError::EncryptedWorkbook);
+        }
+
         let detected_biff_version = biff::detect_biff_version(workbook_stream);
         let codepage = biff::parse_biff_codepage(workbook_stream);
         biff_version = Some(detected_biff_version);

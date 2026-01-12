@@ -4,6 +4,13 @@ use std::borrow::Cow;
 pub(crate) const RECORD_CONTINUE: u16 = 0x003C;
 /// BIFF `EOF` record id.
 pub(crate) const RECORD_EOF: u16 = 0x000A;
+/// BIFF `FILEPASS` record id (workbook encryption / password protection).
+///
+/// Presence of this record in the workbook globals substream indicates the file
+/// is encrypted. We do not currently support decrypting legacy `.xls` files, so
+/// the importer uses this as a preflight check to surface a clear error instead
+/// of confusing BIFF parse failures from downstream libraries.
+pub(crate) const RECORD_FILEPASS: u16 = 0x002F;
 /// BIFF8 `BOF` record id.
 pub(crate) const RECORD_BOF_BIFF8: u16 = 0x0809;
 /// BIFF5 `BOF` record id.
@@ -11,6 +18,27 @@ pub(crate) const RECORD_BOF_BIFF5: u16 = 0x0009;
 
 pub(crate) fn is_bof_record(record_id: u16) -> bool {
     record_id == RECORD_BOF_BIFF8 || record_id == RECORD_BOF_BIFF5
+}
+
+/// Returns true if the workbook globals substream contains a `FILEPASS` record.
+///
+/// This is a best-effort scan: malformed/truncated streams simply return `false`.
+pub(crate) fn workbook_globals_has_filepass_record(workbook_stream: &[u8]) -> bool {
+    let Ok(iter) = BestEffortSubstreamIter::from_offset(workbook_stream, 0) else {
+        return false;
+    };
+
+    for record in iter {
+        if record.record_id == RECORD_FILEPASS {
+            return true;
+        }
+
+        if record.record_id == RECORD_EOF {
+            break;
+        }
+    }
+
+    false
 }
 
 /// Read a single physical BIFF record at `offset`.
