@@ -221,13 +221,13 @@ export class WorkbookContextBuilder {
   >;
   private readonly estimator: TokenEstimator;
 
-  // Context caching:
-  // - Keyed off DocumentController `contentVersion` so view-only edits (frozen panes,
-  //   row/col sizing) do not invalidate caches.
-  // - Cleared whenever contentVersion changes.
-  private cachedContentVersion: number | null = null;
-  private readonly blockCache = new Map<string, WorkbookContextDataBlock>();
-  private readonly sheetSummaryCache = new Map<string, WorkbookContextSheetSummary>();
+  private readonly sheetSummaryCache = new Map<
+    string,
+    { contentVersion: number; schemaVersion: number; summary: WorkbookContextSheetSummary }
+  >();
+
+  private readonly blockCache = new Map<string, { contentVersion: number; block: WorkbookContextDataBlock }>();
+
   private cachedSchemaMetadata:
     | {
         provider: WorkbookSchemaProvider | null;
@@ -254,7 +254,6 @@ export class WorkbookContextBuilder {
   }
 
   async build(input: BuildWorkbookContextInput): Promise<BuildWorkbookContextResult> {
-    this.ensureCacheVersion();
     const sheetIds =
       this.options.mode === "inline_edit" ? [input.activeSheetId] : this.resolveSheetIds({ activeSheetId: input.activeSheetId });
 
@@ -468,17 +467,19 @@ export class WorkbookContextBuilder {
       tables?: Array<{ name: string; range: string }>;
     },
   ): Promise<WorkbookContextSheetSummary> {
-    this.ensureCacheVersion();
+    const contentVersion = this.options.documentController.getSheetContentVersion?.(sheetId) ?? 0;
     const schemaVersion =
       typeof extras?.schemaVersion === "number" && Number.isFinite(extras.schemaVersion) ? Math.trunc(extras.schemaVersion) : 0;
-    const cacheKey = `${sheetId}\u0000${schemaVersion}`;
-    const cached = this.sheetSummaryCache.get(cacheKey);
-    if (cached) return cached;
+
+    const cached = this.sheetSummaryCache.get(sheetId);
+    if (cached && cached.contentVersion === contentVersion && cached.schemaVersion === schemaVersion) {
+      return cached.summary;
+    }
 
     const used = this.options.documentController.getUsedRange(sheetId);
     if (!used) {
       const summary = { sheetId, schema: { name: sheetId, tables: [], namedRanges: [], dataRegions: [] } };
-      this.sheetSummaryCache.set(cacheKey, summary);
+      this.sheetSummaryCache.set(sheetId, { contentVersion, schemaVersion, summary });
       return summary;
     }
 
@@ -498,7 +499,9 @@ export class WorkbookContextBuilder {
     // If we couldn't read the sheet sample (DLP denied, runtime error, etc), do not attempt
     // schema extraction from placeholder values (it would create misleading fake tables).
     if (block.error) {
-      return { sheetId, analyzedRange, schema: { name: sheetId, tables: [], namedRanges: [], dataRegions: [] } };
+      const summary = { sheetId, analyzedRange, schema: { name: sheetId, tables: [], namedRanges: [], dataRegions: [] } };
+      this.sheetSummaryCache.set(sheetId, { contentVersion, schemaVersion, summary });
+      return summary;
     }
 
     const schemaValues: unknown[][] = block.values;
@@ -512,7 +515,7 @@ export class WorkbookContextBuilder {
     } as any);
 
     const summary = { sheetId, analyzedRange, schema };
-    this.sheetSummaryCache.set(cacheKey, summary);
+    this.sheetSummaryCache.set(sheetId, { contentVersion, schemaVersion, summary });
     return summary;
   }
 
@@ -662,13 +665,15 @@ export class WorkbookContextBuilder {
       maxCols: number;
     },
   ): Promise<WorkbookContextDataBlock> {
-    this.ensureCacheVersion();
     const clamped = clampRange(params.range, { maxRows: params.maxRows, maxCols: params.maxCols });
     const rangeRef = this.rangeRef(params.sheetId, clamped);
 
-    const cacheKey = `${params.kind}\u0000${rangeRef}`;
+    const contentVersion = this.options.documentController.getSheetContentVersion?.(params.sheetId) ?? 0;
+    const cacheKey = `${params.kind}\u0000${params.sheetId}\u0000${rangeRef}`;
     const cached = this.blockCache.get(cacheKey);
-    if (cached) return cached;
+    if (cached && cached.contentVersion === contentVersion) {
+      return cached.block;
+    }
 
     const toolResult = await executor.execute({
       name: "read_range",
@@ -685,7 +690,7 @@ export class WorkbookContextBuilder {
         colHeaders: colHeaders(clamped),
         values,
       };
-      this.blockCache.set(cacheKey, block);
+      this.blockCache.set(cacheKey, { contentVersion, block });
       return block;
     }
 
@@ -701,7 +706,7 @@ export class WorkbookContextBuilder {
       values: [[placeholder]],
       error: { code: String(error.code ?? "runtime_error"), message: String(error.message ?? "Unknown error") },
     };
-    this.blockCache.set(cacheKey, block);
+    this.blockCache.set(cacheKey, { contentVersion, block });
     return block;
   }
 
@@ -805,23 +810,6 @@ export class WorkbookContextBuilder {
 
   private schemaRangeRef(sheetId: string, range: Range): string {
     return `${formatSheetNameForA1(sheetId)}!${rangeToA1Selection(range)}`;
-  }
-
-  private getContentVersionForCache(): number {
-    const controller = this.options.documentController as any;
-    const contentVersion = controller?.contentVersion;
-    if (typeof contentVersion === "number" && Number.isFinite(contentVersion)) return contentVersion;
-    const updateVersion = controller?.updateVersion;
-    if (typeof updateVersion === "number" && Number.isFinite(updateVersion)) return updateVersion;
-    return 0;
-  }
-
-  private ensureCacheVersion(): void {
-    const version = this.getContentVersionForCache();
-    if (this.cachedContentVersion === version) return;
-    this.cachedContentVersion = version;
-    this.blockCache.clear();
-    this.sheetSummaryCache.clear();
   }
 }
 

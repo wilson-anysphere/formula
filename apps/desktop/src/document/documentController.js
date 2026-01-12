@@ -953,6 +953,17 @@ export class DocumentController {
 
     /** @type {Map<string, Set<(payload: any) => void>>} */
     this.listeners = new Map();
+
+    /**
+     * Per-sheet monotonically increasing counter that increments whenever that sheet's
+     * *content* changes (value/formula), but ignores formatting/view changes.
+     *
+     * This is used by downstream caches (e.g. AI workbook context building) to avoid
+     * invalidating work for unrelated sheets.
+     *
+     * @type {Map<string, number>}
+     */
+    this.contentVersionBySheet = new Map();
   }
 
   /**
@@ -1257,6 +1268,18 @@ export class DocumentController {
    */
   getSheetIds() {
     return Array.from(this.model.sheets.keys());
+  }
+
+  /**
+   * Return the current content version counter for a sheet.
+   *
+   * This starts at 0 and increments whenever the sheet's value/formula grid changes.
+   *
+   * @param {string} sheetId
+   * @returns {number}
+   */
+  getSheetContentVersion(sheetId) {
+    return this.contentVersionBySheet.get(sheetId) ?? 0;
   }
 
   /**
@@ -2145,12 +2168,13 @@ export class DocumentController {
     const existingSheetIds = new Set(this.model.sheets.keys());
     const nextSheetIds = new Set(nextSheets.keys());
     const allSheetIds = new Set([...existingSheetIds, ...nextSheetIds]);
-    const removedSheetIds = Array.from(existingSheetIds).filter((id) => !nextSheetIds.has(id));
     const addedSheetIds = Array.from(nextSheetIds).filter((id) => !existingSheetIds.has(id));
+    const removedSheetIds = Array.from(existingSheetIds).filter((id) => !nextSheetIds.has(id));
     const sheetStructureChanged = removedSheetIds.length > 0 || addedSheetIds.length > 0;
 
     /** @type {CellDelta[]} */
     const deltas = [];
+    const contentChangedSheetIds = new Set();
     for (const sheetId of allSheetIds) {
       const nextCellMap = nextSheets.get(sheetId) ?? new Map();
       const existingSheet = this.model.sheets.get(sheetId);
@@ -2163,6 +2187,7 @@ export class DocumentController {
         const before = this.model.getCell(sheetId, row, col);
         const after = nextCellMap.get(key) ?? emptyCellState();
         if (cellStateEquals(before, after)) continue;
+        if (!cellContentEquals(before, after)) contentChangedSheetIds.add(sheetId);
         deltas.push({ sheetId, row, col, before, after: cloneCellState(after) });
       }
     }
@@ -2240,6 +2265,19 @@ export class DocumentController {
     });
     this.engine?.endBatch?.();
     this.engine?.recalculate();
+
+    // `applyState` can create/delete sheets without emitting any cell deltas (e.g. empty sheets).
+    // Treat those as content changes for sheet-level caches.
+    for (const sheetId of addedSheetIds) {
+      if (!contentChangedSheetIds.has(sheetId)) {
+        this.contentVersionBySheet.set(sheetId, (this.contentVersionBySheet.get(sheetId) ?? 0) + 1);
+      }
+    }
+    for (const sheetId of removedSheetIds) {
+      if (!contentChangedSheetIds.has(sheetId)) {
+        this.contentVersionBySheet.set(sheetId, (this.contentVersionBySheet.get(sheetId) ?? 0) + 1);
+      }
+    }
 
     for (const sheetId of removedSheetIds) {
       this.model.sheets.delete(sheetId);
@@ -2866,9 +2904,7 @@ export class DocumentController {
    * @param {{ recalc: boolean, emitChange: boolean, source?: string }} options
    */
   #applyEdits(cellDeltas, sheetViewDeltas, formatDeltas, options) {
-    const shouldBumpContentVersion =
-      Boolean(options?.sheetStructureChanged) || cellDeltas.some((d) => !cellContentEquals(d.before, d.after));
-
+    const contentChangedSheetIds = new Set();
     // Apply to the canonical model first.
     for (const delta of formatDeltas) {
       // Ensure sheet exists for format-only changes.
@@ -2894,7 +2930,10 @@ export class DocumentController {
     }
     for (const delta of cellDeltas) {
       this.model.setCell(delta.sheetId, delta.row, delta.col, delta.after);
+      if (!cellContentEquals(delta.before, delta.after)) contentChangedSheetIds.add(delta.sheetId);
     }
+
+    const shouldBumpContentVersion = Boolean(options?.sheetStructureChanged) || contentChangedSheetIds.size > 0;
 
     /** @type {CellChange[] | null} */
     let engineChanges = null;
@@ -2942,6 +2981,11 @@ export class DocumentController {
     // Update versions before emitting events so observers can synchronously read the latest value.
     this._updateVersion += 1;
     if (shouldBumpContentVersion) this._contentVersion += 1;
+
+    // Bump per-sheet content versions (only after the engine accepts the changes).
+    for (const sheetId of contentChangedSheetIds) {
+      this.contentVersionBySheet.set(sheetId, (this.contentVersionBySheet.get(sheetId) ?? 0) + 1);
+    }
 
     if (options.emitChange) {
       /** @type {any[]} */

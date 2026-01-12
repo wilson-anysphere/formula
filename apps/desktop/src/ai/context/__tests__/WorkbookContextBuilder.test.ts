@@ -419,10 +419,7 @@ describe("WorkbookContextBuilder", () => {
 
   it("reuses cached sheet samples when only sheet view changes (no extra read_range calls)", async () => {
     const documentController = new DocumentController();
-    documentController.setRangeValues("Sheet1", "A1", [
-      ["Header"],
-      ["Value"],
-    ]);
+    documentController.setRangeValues("Sheet1", "A1", [["Header"], ["Value"]]);
 
     const spreadsheet = new DocumentControllerSpreadsheetApi(documentController);
     const readSpy = vi.spyOn(spreadsheet, "readRange");
@@ -439,11 +436,59 @@ describe("WorkbookContextBuilder", () => {
     await builder.build({ activeSheetId: "Sheet1" });
     const readsAfterFirst = readSpy.mock.calls.length;
 
-    // Sheet view only: should not bump DocumentController.contentVersion, so context cache stays valid.
+    // Sheet view only: should not bump DocumentController sheet content versions, so context cache stays valid.
     documentController.setFrozen("Sheet1", 1, 0);
 
     await builder.build({ activeSheetId: "Sheet1" });
     expect(readSpy.mock.calls.length).toBe(readsAfterFirst);
+
+    readSpy.mockRestore();
+  });
+
+  it("keeps other sheets cached when only one sheet changes (per-sheet content versioning)", async () => {
+    const documentController = new DocumentController();
+    documentController.setRangeValues("Sheet1", "A1", [
+      ["Name", "Age"],
+      ["Alice", 30],
+    ]);
+    documentController.setRangeValues("Sheet2", "A1", [
+      ["Product", "Price"],
+      ["Widget", 10],
+    ]);
+
+    const spreadsheet = new DocumentControllerSpreadsheetApi(documentController);
+
+    const readRangeCalls: Record<string, number> = {};
+    const originalReadRange = spreadsheet.readRange.bind(spreadsheet);
+    const spy = vi.spyOn(spreadsheet, "readRange").mockImplementation((range: any) => {
+      const sheet = String(range?.sheet ?? "");
+      readRangeCalls[sheet] = (readRangeCalls[sheet] ?? 0) + 1;
+      return originalReadRange(range);
+    });
+
+    const builder = new WorkbookContextBuilder({
+      workbookId: "wb_cache_multi_sheet",
+      documentController,
+      spreadsheet,
+      ragService: null,
+      mode: "chat",
+      model: "unit-test-model",
+      maxSheets: 2,
+    });
+
+    await builder.build({ activeSheetId: "Sheet1" });
+    const firstSheet2Reads = readRangeCalls["Sheet2"] ?? 0;
+    expect(firstSheet2Reads).toBeGreaterThan(0);
+
+    // Mutate only Sheet1.
+    documentController.setCellValue("Sheet1", "A2", "Alicia");
+
+    await builder.build({ activeSheetId: "Sheet1" });
+
+    // Sheet2 should be a cache hit: no additional read_range calls.
+    expect(readRangeCalls["Sheet2"] ?? 0).toBe(firstSheet2Reads);
+
+    spy.mockRestore();
   });
 });
 

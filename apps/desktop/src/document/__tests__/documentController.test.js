@@ -658,3 +658,22 @@ test("cancelBatch reverts uncommitted batch changes without affecting history", 
   assert.equal(doc.isDirty, false);
   assert.deepEqual(doc.getStackDepths(), { undo: 0, redo: 0 });
 });
+
+test("per-sheet content versions increment only on content changes (not formatting)", () => {
+  const doc = new DocumentController();
+
+  assert.equal(doc.getSheetContentVersion("Sheet1"), 0);
+  assert.equal(doc.getSheetContentVersion("Sheet2"), 0);
+
+  doc.setCellValue("Sheet1", "A1", 1);
+  const v1 = doc.getSheetContentVersion("Sheet1");
+  assert.equal(v1, 1);
+  assert.equal(doc.getSheetContentVersion("Sheet2"), 0);
+
+  // Formatting-only edits should not bump the content version.
+  doc.setRangeFormat("Sheet1", "A1", { font: { bold: true } });
+  assert.equal(doc.getSheetContentVersion("Sheet1"), v1);
+
+  doc.setCellFormula("Sheet1", "A1", "=1+1");
+  assert.equal(doc.getSheetContentVersion("Sheet1"), v1 + 1);
+});
