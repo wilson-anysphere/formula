@@ -120,7 +120,7 @@ The user experience must honor Excel's familiar mental model while introducing m
 | `Cmd+K` / `Ctrl+K` | Inline AI edit (transform selection) |
 
 ### Navigation
-
+ 
 | Shortcut | Action |
 |----------|--------|
 | `Arrow keys` | Move selection |
@@ -131,6 +131,7 @@ The user experience must honor Excel's familiar mental model while introducing m
 | `Tab` | Move right, wrap to next row |
 | `Enter` | Move down, wrap to next column |
 | `Page Up/Down` | Scroll viewport |
+| `F6` / `Shift+F6` | Cycle focus between ribbon, formula bar, grid, sheet tabs, and status bar |
 
 ### Selection
 
