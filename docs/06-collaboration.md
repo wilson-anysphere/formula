@@ -327,6 +327,7 @@ When you pass `connection: { wsUrl, docId, token }`, `@formula/collab-session` c
 Useful lifecycle helpers:
 
 - `await session.whenLocalPersistenceLoaded()` — resolves when `options.persistence` has loaded any saved updates into the doc
+- `await session.flushLocalPersistence()` — best-effort: forces any pending local persistence work to be durably written (useful before app teardown)
 - `await session.whenSynced()` — resolves when the sync provider reports `sync=true`
 
 If you use `persistence` or offline auto-connect gating, the initial WebSocket connection may be delayed until hydration completes (so offline edits are present before syncing).
