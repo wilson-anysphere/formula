@@ -8109,6 +8109,9 @@ fn fn_match(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if matches!(lookup_value, Value::Lambda(_)) {
         return Value::Error(ErrorKind::Value);
     }
+    if matches!(lookup_value, Value::Lambda(_)) {
+        return Value::Error(ErrorKind::Value);
+    }
     if matches!(
         lookup_value,
         Value::Array(_) | Value::Range(_) | Value::MultiRange(_)
