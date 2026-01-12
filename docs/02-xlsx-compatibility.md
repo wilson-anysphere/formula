@@ -738,7 +738,8 @@ If a `cellImages` part is present, we should preserve it for round-trip safety.
 From a **packaging / round-trip** perspective, the important thing is the relationship chain that connects this part to the actual image blobs under `xl/media/*`.
 
 **Schema note:** `xl/cellImages.xml` is a Microsoft extension part; the root namespace / element vocabulary
-has been observed to vary across Excel versions (e.g. `…/2019/cellimages`, `…/2022/cellimages`). For
+varies across producers and Excel builds. In this repo, `…/2022/cellimages` is confirmed in a real
+Excel fixture, while `…/2019/cellimages` is only observed in synthetic fixtures/tests so far. For
 round-trip, treat the **part path** (including its original casing) as authoritative, not the root namespace.
 
 #### How it’s usually connected
