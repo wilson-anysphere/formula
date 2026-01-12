@@ -137,6 +137,51 @@ fn tauri_main_capability_scopes_to_main_window() {
         permissions.iter().any(|p| p.as_str() == Some("allow-invoke")),
         "capabilities/main.json must include the application permission `allow-invoke` so the explicit IPC command allowlist is enforced"
     );
+
+    assert!(
+        !permissions.iter().any(|p| p.as_str() == Some("core:allow-invoke")),
+        "capabilities/main.json must not include `core:allow-invoke` as a string; if present it must be scoped via the object form with an explicit per-command allowlist"
+    );
+
+    // Some Tauri toolchains expose a `core:allow-invoke` permission for per-command allowlisting.
+    //
+    // We primarily rely on the application permission defined in `permissions/allow-invoke.json`,
+    // but if `core:allow-invoke` is present it must be scoped explicitly (no wildcard/pattern
+    // matches).
+    if let Some(core_allow_invoke) = permissions.iter().find(|p| {
+        p.get("identifier")
+            .and_then(|v| v.as_str())
+            .is_some_and(|id| id == "core:allow-invoke")
+    }) {
+        let allow = core_allow_invoke
+            .get("allow")
+            .and_then(|v| v.as_array())
+            .unwrap_or_else(|| panic!("`core:allow-invoke` must include an `allow` array"));
+        assert!(
+            !allow.is_empty(),
+            "`core:allow-invoke` must not have an empty allowlist"
+        );
+
+        let mut commands = BTreeSet::new();
+        for entry in allow {
+            let cmd = entry
+                .get("command")
+                .and_then(|v| v.as_str())
+                .unwrap_or_else(|| panic!("`core:allow-invoke` allow entry missing `command`"));
+            assert!(
+                !cmd.trim().is_empty(),
+                "`core:allow-invoke` allow entry command must not be empty"
+            );
+            assert!(
+                !cmd.contains('*'),
+                "`core:allow-invoke` command must not contain wildcard patterns: {cmd}"
+            );
+            assert!(
+                commands.insert(cmd.to_string()),
+                "`core:allow-invoke` contains duplicate command: {cmd}"
+            );
+        }
+    }
 }
 
 #[test]
