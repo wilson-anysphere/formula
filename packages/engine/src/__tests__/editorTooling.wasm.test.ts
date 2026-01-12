@@ -211,5 +211,64 @@ describeWasm("EngineWorker editor tooling RPCs (wasm)", () => {
       engine.terminate();
     }
   });
-});
 
+  it("lexFormula honors localeId options (argument separator)", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      const tokens = await engine.lexFormula("=SUMME(1;2)", { localeId: "de-DE" });
+      expect(tokens.some((t) => t.kind === "ArgSep")).toBe(true);
+
+      await expect(engine.lexFormula("=SUMME(1;2)")).rejects.toThrow(/Unexpected character `;`/);
+    } finally {
+      engine.terminate();
+    }
+  });
+
+  it("lexFormula honors referenceStyle options (R1C1 vs A1)", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      const tokens = await engine.lexFormula("=R1C1", { referenceStyle: "R1C1" });
+      expect(tokens.some((t) => t.kind === "R1C1Cell")).toBe(true);
+
+      const defaultTokens = await engine.lexFormula("=R1C1");
+      expect(defaultTokens.some((t) => t.kind === "R1C1Cell")).toBe(false);
+    } finally {
+      engine.terminate();
+    }
+  });
+
+  it("parseFormulaPartial honors localeId options (argument separator)", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      const localized = await engine.parseFormulaPartial("=SUMME(1;2)", undefined, { localeId: "de-DE" });
+      expect(localized.error).toBeNull();
+
+      const defaultResult = await engine.parseFormulaPartial("=SUMME(1;2)");
+      expect(defaultResult.error?.message).toContain("Unexpected character `;`");
+      expect(defaultResult.error?.span).toEqual({ start: 8, end: 9 });
+    } finally {
+      engine.terminate();
+    }
+  });
+});
