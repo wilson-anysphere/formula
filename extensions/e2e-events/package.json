@@ -11,7 +11,7 @@
   "engines": {
     "formula": "^1.0.0"
   },
-  "activationEvents": ["onStartupFinished", "onView:sampleHello.panel"],
+  "activationEvents": ["onStartupFinished"],
   "contributes": {},
   "permissions": ["storage"]
 }

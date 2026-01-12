@@ -81,8 +81,8 @@ test.describe("IndexedDB extension install corruption", () => {
       name: "corrupt-ext",
       publisher: "test",
       version,
-      main: "./dist/extension.mjs",
-      browser: "./dist/extension.mjs",
+      main: "./dist/extension.js",
+      browser: "./dist/extension.js",
       engines: { formula: "^1.0.0" },
       activationEvents: [`onCommand:${commandId}`],
       permissions: ["ui.commands"],
@@ -91,7 +91,7 @@ test.describe("IndexedDB extension install corruption", () => {
 
     await fs.writeFile(path.join(extDir, "package.json"), JSON.stringify(manifest, null, 2));
     await fs.writeFile(
-      path.join(extDir, "dist", "extension.mjs"),
+      path.join(extDir, "dist", "extension.js"),
       `import * as formula from "@formula/extension-api";\nexport async function activate(context) {\n  context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
         commandId,
       )}, async () => {\n    await formula.ui.showMessage("Hello from repaired extension");\n    return "ok";\n  }));\n}\n`,
@@ -141,6 +141,7 @@ test.describe("IndexedDB extension install corruption", () => {
             "x-package-sha256": pkgSha256,
             "x-package-format-version": "2",
             "x-publisher": "test",
+            "x-package-scan-status": "passed",
           },
         });
       },
@@ -200,13 +201,21 @@ test.describe("IndexedDB extension install corruption", () => {
     await waitForDesktopReady(page);
 
     // Opening the extensions panel triggers extension host startup + auto-load of installed extensions.
-    await page.getByTestId("open-extensions-panel").click();
+    // `index.html` includes a fallback toolbar with `data-testid="open-extensions-panel"`, and the
+    // ribbon UI also exposes a command button with the same test id. Prefer the ribbon button so
+    // we exercise the real command dispatch that triggers lazy extension loading.
+    await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
     await expect(page.getByTestId("panel-extensions")).toBeVisible();
+    // Wait for the Extensions panel to finish lazy-loading the extension host manager (built-ins +
+    // marketplace-installed extensions). Until `manager.ready` flips, the panel only shows a
+    // "Loading extensions…" placeholder and does not render the IndexedDB install status section.
+    await expect(page.getByText("Installed (IndexedDB)")).toBeVisible({ timeout: 30_000 });
 
     // Corrupted extension should be quarantined (not loaded into host).
     await expect(page.locator(`[data-testid="run-command-${commandId}"]`)).toHaveCount(0);
 
     // UI should reflect corrupted state and expose a repair button.
+    await expect(page.getByTestId(`installed-extension-${extensionId}`)).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId(`installed-extension-status-${extensionId}`)).toContainText("Corrupted");
     await page.getByTestId(`repair-extension-${extensionId}`).click();
 
