@@ -5153,6 +5153,7 @@ export class CanvasGridRenderer {
           addMerge(candidate);
         }
       } else if (provider.getMergedRangeAt) {
+        const getMergedRangeAt = provider.getMergedRangeAt.bind(provider);
         const startRow = expanded.startRow;
         const endRow = expanded.endRow;
         const startCol = expanded.startCol;
@@ -5176,7 +5177,7 @@ export class CanvasGridRenderer {
 
         const scanVerticalEdge = (col: number) => {
           for (let row = startRow; row < endRow; ) {
-            const normalized = normalizeMerge(provider.getMergedRangeAt(row, col));
+            const normalized = normalizeMerge(getMergedRangeAt(row, col));
             if (normalized) {
               addMerge(normalized);
               // Jump to the first row after this merged region.
@@ -5189,7 +5190,7 @@ export class CanvasGridRenderer {
 
         const scanHorizontalEdge = (row: number) => {
           for (let col = startCol; col < endCol; ) {
-            const normalized = normalizeMerge(provider.getMergedRangeAt(row, col));
+            const normalized = normalizeMerge(getMergedRangeAt(row, col));
             if (normalized) {
               addMerge(normalized);
               // Jump to the first column after this merged region.
