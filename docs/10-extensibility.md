@@ -227,6 +227,8 @@ the `:` key on layouts where that shares the same physical key.
 
 - Extension keybindings only run when the event has not already been handled (`event.defaultPrevented === false`) and
   focus is not in a text input/textarea/contenteditable element.
+- The extension keybinding listener runs in the **bubble** phase so the core spreadsheet keyboard handling can
+  `preventDefault()` first.
 - Desktop lazily loads extensions for performance; extension-contributed keybindings become active once extensions
   have been loaded in the current session (e.g. after opening the Extensions panel or triggering an extension UI surface).
 - Built-in keybindings always win over extension keybindings (extensions cannot override core shortcuts).
