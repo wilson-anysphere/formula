@@ -6,7 +6,7 @@ import { AIAuditRecorder } from "../../../../packages/ai-audit/src/recorder.js";
 import { DLP_ACTION } from "../../../../packages/security/dlp/src/actions.js";
 import { CLASSIFICATION_LEVEL, DEFAULT_CLASSIFICATION, maxClassification, normalizeClassification } from "../../../../packages/security/dlp/src/classification.js";
 import { DLP_DECISION, evaluatePolicy } from "../../../../packages/security/dlp/src/policyEngine.js";
-import { effectiveCellClassification, effectiveRangeClassification } from "../../../../packages/security/dlp/src/selectors.js";
+import { effectiveCellClassification, effectiveRangeClassification, normalizeRange } from "../../../../packages/security/dlp/src/selectors.js";
 
 import { parseA1Range, rangeToA1, type RangeAddress } from "./a1.js";
 import {
@@ -38,6 +38,18 @@ const MAX_RANGE_HEADER_VALUES = 20;
 const MAX_RANGE_PREVIEW_VALUES = 30;
 const MAX_RANGE_SAMPLE_VALUES = 30;
 const MAX_USER_MESSAGE_CHARS = 16_000;
+
+type DlpNormalizedRange = ReturnType<typeof normalizeRange>;
+
+type DlpCellIndex = {
+  documentId: string;
+  docClassificationMax: any;
+  sheetClassificationMaxBySheetId: Map<string, any>;
+  columnClassificationBySheetId: Map<string, Map<number, any>>;
+  cellClassificationBySheetId: Map<string, Map<string, any>>;
+  rangeRecordsBySheetId: Map<string, Array<{ range: DlpNormalizedRange; classification: any }>>;
+  fallbackRecordsBySheetId: Map<string, Array<{ selector: any; classification: any }>>;
+};
 
 export interface AiCellFunctionEngineOptions {
   llmClient?: LLMClient;
@@ -171,6 +183,23 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
       sheetNameResolver: this.sheetNameResolver,
     });
 
+    const referencedSheetIds = collectReferencedSheetIds({
+      provenance: alignedProvenance,
+      defaultSheetId,
+      sheetNameResolver: this.sheetNameResolver,
+    });
+
+    const hasCellRefs = alignedProvenance.some((prov) => (prov?.cells?.length ?? 0) > 0);
+    const hasAnyRefs = alignedProvenance.some((prov) => (prov?.cells?.length ?? 0) > 0 || (prov?.ranges?.length ?? 0) > 0);
+    let classificationIndex: DlpCellIndex | null =
+      hasCellRefs && dlp.classificationRecords.length > 0
+        ? buildDlpCellIndex({
+            documentId: this.workbookId,
+            sheetIds: referencedSheetIds,
+            records: dlp.classificationRecords,
+          })
+        : null;
+
     // AI prompts are authored directly in formulas, so we can safely inspect a bit more text
     // for heuristic DLP classification than we allow for arbitrary cell values.
     const literalMaxChars = Math.max(this.maxCellChars, MAX_PROMPT_CHARS);
@@ -182,6 +211,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
       defaultSheetId,
       maxCellChars: literalMaxChars,
       classificationRecords: dlp.classificationRecords,
+      classificationIndex,
       sheetNameResolver: this.sheetNameResolver,
     });
 
@@ -192,6 +222,14 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
       options: { includeRestrictedContent: false },
     });
 
+    if (!classificationIndex && decision.decision !== DLP_DECISION.ALLOW && hasAnyRefs && dlp.classificationRecords.length > 0) {
+      classificationIndex = buildDlpCellIndex({
+        documentId: this.workbookId,
+        sheetIds: referencedSheetIds,
+        records: dlp.classificationRecords,
+      });
+    }
+
     const { prompt, inputs, inputsHash, inputsCompaction, redactedCount } = preparePromptAndInputs({
       functionName: fn,
       args: params.args,
@@ -201,6 +239,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
       defaultSheetId,
       policy: dlp.policy,
       classificationRecords: dlp.classificationRecords,
+      classificationIndex,
       maxCellChars: this.maxCellChars,
       maxLiteralChars: literalMaxChars,
       sheetNameResolver: this.sheetNameResolver,
@@ -671,6 +710,7 @@ function computeSelectionClassification(params: {
   provenance: AiFunctionArgumentProvenance[];
   maxCellChars: number;
   classificationRecords: Array<{ selector: any; classification: any }>;
+  classificationIndex: DlpCellIndex | null;
   sheetNameResolver: SheetNameResolver | null;
 }): { selectionClassification: any; references: AiCellFunctionReferences } {
   const references = summarizeReferences(params.provenance);
@@ -690,10 +730,17 @@ function computeSelectionClassification(params: {
   for (const cellRef of references.cells) {
     const parsed = parseProvenanceRef(cellRef, params.defaultSheetId, params.sheetNameResolver);
     if (!parsed || !parsed.isCell) continue;
-    const classification = effectiveCellClassification(
-      { documentId: params.documentId, sheetId: parsed.sheetId, row: parsed.range.start.row, col: parsed.range.start.col } as any,
-      params.classificationRecords,
-    );
+    const classification = params.classificationIndex
+      ? effectiveCellClassificationFromIndex(params.classificationIndex, {
+          documentId: params.documentId,
+          sheetId: parsed.sheetId,
+          row: parsed.range.start.row,
+          col: parsed.range.start.col,
+        })
+      : effectiveCellClassification(
+          { documentId: params.documentId, sheetId: parsed.sheetId, row: parsed.range.start.row, col: parsed.range.start.col } as any,
+          params.classificationRecords,
+        );
     selectionClassification = maxClassification(selectionClassification, classification);
     if (selectionClassification.level === CLASSIFICATION_LEVEL.RESTRICTED) break;
   }
@@ -737,6 +784,7 @@ function preparePromptAndInputs(params: {
   defaultSheetId: string;
   policy: any;
   classificationRecords: Array<{ selector: any; classification: any }>;
+  classificationIndex: DlpCellIndex | null;
   maxCellChars: number;
   maxLiteralChars: number;
   sheetNameResolver: SheetNameResolver | null;
@@ -761,6 +809,7 @@ function preparePromptAndInputs(params: {
     defaultSheetId: params.defaultSheetId,
     policy: params.policy,
     classificationRecords: params.classificationRecords,
+    classificationIndex: params.classificationIndex,
     maxCellChars: params.maxCellChars,
     maxLiteralChars: params.maxLiteralChars,
     sheetNameResolver: params.sheetNameResolver,
@@ -781,6 +830,7 @@ function preparePromptAndInputs(params: {
       defaultSheetId: params.defaultSheetId,
       policy: params.policy,
       classificationRecords: params.classificationRecords,
+      classificationIndex: params.classificationIndex,
       maxCellChars: params.maxCellChars,
       maxLiteralChars: params.maxLiteralChars,
       sheetNameResolver: params.sheetNameResolver,
@@ -813,6 +863,7 @@ function compactArgForPrompt(params: {
   defaultSheetId: string;
   policy: any;
   classificationRecords: Array<{ selector: any; classification: any }>;
+  classificationIndex: DlpCellIndex | null;
   maxCellChars: number;
   maxLiteralChars: number;
   sheetNameResolver: SheetNameResolver | null;
@@ -829,6 +880,7 @@ function compactArgForPrompt(params: {
       defaultSheetId: params.defaultSheetId,
       policy: params.policy,
       classificationRecords: params.classificationRecords,
+      classificationIndex: params.classificationIndex,
       maxCellChars: params.maxCellChars,
       sheetNameResolver: params.sheetNameResolver,
     });
@@ -843,6 +895,7 @@ function compactArgForPrompt(params: {
     defaultSheetId: params.defaultSheetId,
     policy: params.policy,
     classificationRecords: params.classificationRecords,
+    classificationIndex: params.classificationIndex,
     maxCellChars: params.maxCellChars,
     maxLiteralChars: params.maxLiteralChars,
     sheetNameResolver: params.sheetNameResolver,
@@ -854,6 +907,7 @@ function classificationForProvenance(params: {
   defaultSheetId: string;
   provenance: AiFunctionArgumentProvenance;
   classificationRecords: Array<{ selector: any; classification: any }>;
+  classificationIndex: DlpCellIndex | null;
   sheetNameResolver: SheetNameResolver | null;
 }): any {
   let classification = { ...DEFAULT_CLASSIFICATION };
@@ -865,10 +919,17 @@ function classificationForProvenance(params: {
     if (parsed.isCell) {
       classification = maxClassification(
         classification,
-        effectiveCellClassification(
-          { documentId: params.documentId, sheetId: parsed.sheetId, row: parsed.range.start.row, col: parsed.range.start.col } as any,
-          params.classificationRecords,
-        ),
+        params.classificationIndex
+          ? effectiveCellClassificationFromIndex(params.classificationIndex, {
+              documentId: params.documentId,
+              sheetId: parsed.sheetId,
+              row: parsed.range.start.row,
+              col: parsed.range.start.col,
+            })
+          : effectiveCellClassification(
+              { documentId: params.documentId, sheetId: parsed.sheetId, row: parsed.range.start.row, col: parsed.range.start.col } as any,
+              params.classificationRecords,
+            ),
       );
       return;
     }
@@ -892,19 +953,32 @@ function compactScalarForPrompt(params: {
   defaultSheetId: string;
   policy: any;
   classificationRecords: Array<{ selector: any; classification: any }>;
+  classificationIndex: DlpCellIndex | null;
   maxCellChars: number;
   maxLiteralChars: number;
   sheetNameResolver: SheetNameResolver | null;
 }): { value: string; compaction: unknown; redactedCount: number } {
-  let classification = { ...DEFAULT_CLASSIFICATION };
-
   const hasRefs = Boolean((params.provenance.cells?.length ?? 0) > 0 || (params.provenance.ranges?.length ?? 0) > 0);
+  const maxChars = hasRefs ? params.maxCellChars : params.maxLiteralChars;
+
+  // Fast path: when the overall AI request is allowed, we never redact individual scalar
+  // values and don't need to compute per-argument DLP classifications.
+  if (!params.shouldRedact) {
+    return {
+      value: formatScalar(params.value, { maxChars }),
+      compaction: { kind: "scalar", redacted: false },
+      redactedCount: 0,
+    };
+  }
+
+  let classification = { ...DEFAULT_CLASSIFICATION };
   if (hasRefs) {
     classification = classificationForProvenance({
       documentId: params.documentId,
       defaultSheetId: params.defaultSheetId,
       provenance: params.provenance,
       classificationRecords: params.classificationRecords,
+      classificationIndex: params.classificationIndex,
       sheetNameResolver: params.sheetNameResolver,
     });
   } else {
@@ -923,7 +997,7 @@ function compactScalarForPrompt(params: {
   }
 
   return {
-    value: formatScalar(params.value, { maxChars: hasRefs ? params.maxCellChars : params.maxLiteralChars }),
+    value: formatScalar(params.value, { maxChars }),
     compaction: { kind: "scalar", redacted: false },
     redactedCount: 0,
   };
@@ -940,6 +1014,7 @@ function compactArrayForPrompt(params: {
   defaultSheetId: string;
   policy: any;
   classificationRecords: Array<{ selector: any; classification: any }>;
+  classificationIndex: DlpCellIndex | null;
   maxCellChars: number;
   sheetNameResolver: SheetNameResolver | null;
 }): { value: unknown; compaction: unknown; redactedCount: number } {
@@ -1017,10 +1092,17 @@ function compactArrayForPrompt(params: {
       if (parsed.isCell) {
         classification = maxClassification(
           classification,
-          effectiveCellClassification(
-            { documentId: params.documentId, sheetId: parsed.sheetId, row: parsed.range.start.row, col: parsed.range.start.col } as any,
-            params.classificationRecords,
-          ),
+          params.classificationIndex
+            ? effectiveCellClassificationFromIndex(params.classificationIndex, {
+                documentId: params.documentId,
+                sheetId: parsed.sheetId,
+                row: parsed.range.start.row,
+                col: parsed.range.start.col,
+              })
+            : effectiveCellClassification(
+                { documentId: params.documentId, sheetId: parsed.sheetId, row: parsed.range.start.row, col: parsed.range.start.col } as any,
+                params.classificationRecords,
+              ),
         );
       } else {
         classification = maxClassification(
@@ -1048,6 +1130,8 @@ function compactArrayForPrompt(params: {
         defaultSheetId: params.defaultSheetId,
         provenance: params.provenance,
         classificationRecords: params.classificationRecords,
+        classificationIndex: params.classificationIndex,
+        sheetNameResolver: params.sheetNameResolver,
       });
       const decision = evaluatePolicy({
         action: DLP_ACTION.AI_CLOUD_PROCESSING,
@@ -1110,10 +1194,12 @@ function compactArrayForPrompt(params: {
         const row = range.start.row + rowOffset;
         const col = range.start.col + colOffset;
 
-        const classification = effectiveCellClassification(
-          { documentId: params.documentId, sheetId: rangeSheetId, row, col } as any,
-          params.classificationRecords,
-        );
+        const classification = params.classificationIndex
+          ? effectiveCellClassificationFromIndex(params.classificationIndex, { documentId: params.documentId, sheetId: rangeSheetId, row, col })
+          : effectiveCellClassification(
+              { documentId: params.documentId, sheetId: rangeSheetId, row, col } as any,
+              params.classificationRecords,
+            );
         const cellDecision = evaluatePolicy({
           action: DLP_ACTION.AI_CLOUD_PROCESSING,
           classification,
@@ -1185,6 +1271,206 @@ function compactArrayForPrompt(params: {
   };
 
   return { value, compaction, redactedCount };
+}
+
+function collectReferencedSheetIds(params: {
+  provenance: AiFunctionArgumentProvenance[];
+  defaultSheetId: string;
+  sheetNameResolver: SheetNameResolver | null;
+}): Set<string> {
+  const sheetIds = new Set<string>();
+  sheetIds.add(params.defaultSheetId);
+
+  for (const prov of params.provenance ?? []) {
+    for (const cellRef of prov?.cells ?? []) {
+      for (const part of String(cellRef).split(PROVENANCE_REF_SEPARATOR)) {
+        const parsed = parseProvenanceRef(part, params.defaultSheetId, params.sheetNameResolver);
+        if (parsed?.sheetId) sheetIds.add(parsed.sheetId);
+      }
+    }
+    for (const rangeRef of prov?.ranges ?? []) {
+      for (const part of String(rangeRef).split(PROVENANCE_REF_SEPARATOR)) {
+        const parsed = parseProvenanceRef(part, params.defaultSheetId, params.sheetNameResolver);
+        if (parsed?.sheetId) sheetIds.add(parsed.sheetId);
+      }
+    }
+  }
+
+  return sheetIds;
+}
+
+function buildDlpCellIndex(params: {
+  documentId: string;
+  sheetIds: Set<string>;
+  records: Array<{ selector: any; classification: any }>;
+}): DlpCellIndex {
+  let docClassificationMax: any = { ...DEFAULT_CLASSIFICATION };
+  const sheetClassificationMaxBySheetId = new Map<string, any>();
+  const columnClassificationBySheetId = new Map<string, Map<number, any>>();
+  const cellClassificationBySheetId = new Map<string, Map<string, any>>();
+  const rangeRecordsBySheetId = new Map<string, Array<{ range: DlpNormalizedRange; classification: any }>>();
+  const fallbackRecordsBySheetId = new Map<string, Array<{ selector: any; classification: any }>>();
+
+  function ensureSheetMax(sheetId: string): any {
+    const existing = sheetClassificationMaxBySheetId.get(sheetId);
+    if (existing) return existing;
+    const init: any = { ...DEFAULT_CLASSIFICATION };
+    sheetClassificationMaxBySheetId.set(sheetId, init);
+    return init;
+  }
+
+  function ensureColMap(sheetId: string): Map<number, any> {
+    const existing = columnClassificationBySheetId.get(sheetId);
+    if (existing) return existing;
+    const init = new Map<number, any>();
+    columnClassificationBySheetId.set(sheetId, init);
+    return init;
+  }
+
+  function ensureCellMap(sheetId: string): Map<string, any> {
+    const existing = cellClassificationBySheetId.get(sheetId);
+    if (existing) return existing;
+    const init = new Map<string, any>();
+    cellClassificationBySheetId.set(sheetId, init);
+    return init;
+  }
+
+  function ensureRangeList(sheetId: string): Array<{ range: DlpNormalizedRange; classification: any }> {
+    const existing = rangeRecordsBySheetId.get(sheetId);
+    if (existing) return existing;
+    const init: Array<{ range: DlpNormalizedRange; classification: any }> = [];
+    rangeRecordsBySheetId.set(sheetId, init);
+    return init;
+  }
+
+  function ensureFallbackList(sheetId: string): Array<{ selector: any; classification: any }> {
+    const existing = fallbackRecordsBySheetId.get(sheetId);
+    if (existing) return existing;
+    const init: Array<{ selector: any; classification: any }> = [];
+    fallbackRecordsBySheetId.set(sheetId, init);
+    return init;
+  }
+
+  for (const record of params.records || []) {
+    if (!record || !record.selector || typeof record.selector !== "object") continue;
+    const selector = record.selector;
+    if (selector.documentId !== params.documentId) continue;
+
+    switch (selector.scope) {
+      case "document": {
+        docClassificationMax = maxClassification(docClassificationMax, record.classification);
+        break;
+      }
+      case "sheet": {
+        if (typeof selector.sheetId !== "string" || !params.sheetIds.has(selector.sheetId)) break;
+        const existing = ensureSheetMax(selector.sheetId);
+        sheetClassificationMaxBySheetId.set(selector.sheetId, maxClassification(existing, record.classification));
+        break;
+      }
+      case "column": {
+        if (typeof selector.sheetId !== "string" || !params.sheetIds.has(selector.sheetId)) break;
+        if (typeof selector.columnIndex === "number") {
+          const colMap = ensureColMap(selector.sheetId);
+          const existing = colMap.get(selector.columnIndex);
+          colMap.set(selector.columnIndex, existing ? maxClassification(existing, record.classification) : record.classification);
+        } else {
+          ensureFallbackList(selector.sheetId).push(record);
+        }
+        break;
+      }
+      case "cell": {
+        if (typeof selector.sheetId !== "string" || !params.sheetIds.has(selector.sheetId)) break;
+        if (typeof selector.row !== "number" || typeof selector.col !== "number") break;
+        const key = `${selector.row},${selector.col}`;
+        const cellMap = ensureCellMap(selector.sheetId);
+        const existing = cellMap.get(key);
+        cellMap.set(key, existing ? maxClassification(existing, record.classification) : record.classification);
+        break;
+      }
+      case "range": {
+        if (typeof selector.sheetId !== "string" || !params.sheetIds.has(selector.sheetId)) break;
+        if (!selector.range) break;
+        try {
+          const normalized = normalizeRange(selector.range);
+          ensureRangeList(selector.sheetId).push({ range: normalized, classification: record.classification });
+        } catch {
+          // Ignore invalid persisted ranges.
+        }
+        break;
+      }
+      default: {
+        if (typeof selector.sheetId === "string" && params.sheetIds.has(selector.sheetId)) {
+          ensureFallbackList(selector.sheetId).push(record);
+        }
+        break;
+      }
+    }
+  }
+
+  return {
+    documentId: params.documentId,
+    docClassificationMax,
+    sheetClassificationMaxBySheetId,
+    columnClassificationBySheetId,
+    cellClassificationBySheetId,
+    rangeRecordsBySheetId,
+    fallbackRecordsBySheetId,
+  };
+}
+
+function cellInNormalizedRange(cell: { row: number; col: number }, range: DlpNormalizedRange): boolean {
+  return (
+    cell.row >= range.start.row &&
+    cell.row <= range.end.row &&
+    cell.col >= range.start.col &&
+    cell.col <= range.end.col
+  );
+}
+
+function effectiveCellClassificationFromIndex(
+  index: DlpCellIndex,
+  cellRef: { documentId: string; sheetId: string; row: number; col: number },
+): any {
+  if (cellRef.documentId !== index.documentId) return { ...DEFAULT_CLASSIFICATION };
+
+  let classification: any = { ...DEFAULT_CLASSIFICATION };
+
+  classification = maxClassification(classification, index.docClassificationMax);
+  if (classification.level !== CLASSIFICATION_LEVEL.RESTRICTED) {
+    const sheetMax = index.sheetClassificationMaxBySheetId.get(cellRef.sheetId);
+    if (sheetMax) classification = maxClassification(classification, sheetMax);
+  }
+
+  if (classification.level !== CLASSIFICATION_LEVEL.RESTRICTED) {
+    const colMap = index.columnClassificationBySheetId.get(cellRef.sheetId);
+    const colClassification = colMap?.get(cellRef.col);
+    if (colClassification) classification = maxClassification(classification, colClassification);
+  }
+
+  if (classification.level !== CLASSIFICATION_LEVEL.RESTRICTED) {
+    const cellMap = index.cellClassificationBySheetId.get(cellRef.sheetId);
+    const cellClassification = cellMap?.get(`${cellRef.row},${cellRef.col}`);
+    if (cellClassification) classification = maxClassification(classification, cellClassification);
+  }
+
+  if (classification.level !== CLASSIFICATION_LEVEL.RESTRICTED) {
+    const rangeRecords = index.rangeRecordsBySheetId.get(cellRef.sheetId) ?? [];
+    for (const record of rangeRecords) {
+      if (!cellInNormalizedRange(cellRef, record.range)) continue;
+      classification = maxClassification(classification, record.classification);
+      if (classification.level === CLASSIFICATION_LEVEL.RESTRICTED) break;
+    }
+  }
+
+  if (classification.level !== CLASSIFICATION_LEVEL.RESTRICTED) {
+    const fallbackRecords = index.fallbackRecordsBySheetId.get(cellRef.sheetId) ?? [];
+    if (fallbackRecords.length > 0) {
+      const fallback = effectiveCellClassification(cellRef as any, fallbackRecords as any);
+      classification = maxClassification(classification, fallback);
+    }
+  }
+
+  return classification;
 }
 
 function mulberry32(seed: number): () => number {
