@@ -2091,6 +2091,21 @@ export default {
       ]
     },
     {
+      "name": "TEXTSPLIT",
+      "min_args": 2,
+      "max_args": 6,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "text",
+        "any",
+        "any",
+        "bool",
+        "number",
+        "any"
+      ]
+    },
+    {
       "name": "TIME",
       "min_args": 3,
       "max_args": 3,
