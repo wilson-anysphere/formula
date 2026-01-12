@@ -63,10 +63,10 @@ const XF_FLAG_STYLE: u16 = 0x0004;
 //
 // Bit 0 (`fHidden`) indicates the workbook window is hidden (View -> Window -> Hide).
 // Bit 1 (`fIconic`) indicates the workbook window is minimized.
-// Bit 5 (`fMaximized`) indicates the workbook window is maximized.
+// Bit 6 (`fMaximized`) indicates the workbook window is maximized.
 const WINDOW1_GRBIT_HIDDEN: u16 = 0x0001;
 const WINDOW1_GRBIT_ICONIC: u16 = 0x0002;
-const WINDOW1_GRBIT_MAXIMIZED: u16 = 0x0020;
+const WINDOW1_GRBIT_MAXIMIZED: u16 = 0x0040;
 
 fn strip_embedded_nuls(s: &mut String) {
     if s.contains('\0') {

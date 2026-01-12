@@ -4723,7 +4723,7 @@ fn build_workbook_window_workbook_stream() -> Vec<u8> {
 
 fn build_window_geometry_workbook_stream() -> Vec<u8> {
     // WINDOW1 grbit flags.
-    const WINDOW1_GRBIT_MAXIMIZED: u16 = 0x0020;
+    const WINDOW1_GRBIT_MAXIMIZED: u16 = 0x0040;
 
     let mut globals = Vec::<u8>::new();
 
