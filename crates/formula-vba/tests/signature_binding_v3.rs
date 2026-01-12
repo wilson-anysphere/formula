@@ -296,9 +296,12 @@ fn verify_v3_md5_digest_does_not_bind_when_stream_kind_is_unknown() {
 
     // When the signature bytes are provided without an OLE stream name (for example, raw PKCS#7
     // bytes from an external signature part), we still want best-effort binding verification.
-    // However, binding is against ContentsHashV3 (SHA-256) for `DigitalSignatureExt`, and legacy
-    // content/agile hashes for other signature streams. An out-of-spec MD5 digest over the v3
-    // transcript should therefore not bind.
+    //
+    // In that situation we use a heuristic based on digest length:
+    // - 16-byte digests are treated as legacy v1/v2 candidates (MD5)
+    // - 32-byte digests are treated as v3 candidates (`contents_hash_v3`, currently SHA-256)
+    //
+    // An out-of-spec MD5 digest over the v3 transcript should therefore not bind.
     let binding = verify_vba_signature_binding(&project_ole, &signature_stream_payload);
     assert_eq!(binding, VbaSignatureBinding::NotBound);
 
@@ -380,8 +383,8 @@ fn digital_signature_ext_does_not_bind_md5_digest_bytes_even_when_oid_is_sha256(
 
     // ---- 3) Construct SpcIndirectDataContent with SHA-256 OID but MD5 digest bytes ----
     //
-    // For `\x05DigitalSignatureExt`, binding is against MS-OVBA v3 `ContentsHashV3` (SHA-256). This
-    // signature therefore must *not* be considered bound.
+    // For `\x05DigitalSignatureExt`, binding uses the v3 digest (`contents_hash_v3` in this crate,
+    // currently SHA-256). This signature therefore must *not* be considered bound.
     let signed_content = build_spc_indirect_data_content_sha256(&digest_md5);
 
     // ---- 4) Sign and store in \x05DigitalSignatureExt ----
@@ -497,8 +500,8 @@ fn verify_vba_project_signature_binding_v3_reports_mismatch_when_digest_len_is_m
     let project_ole = build_minimal_vba_project_bin_v3(None, b"ABC");
 
     // Construct an out-of-spec `DigitalSignatureExt` binding digest (MD5-sized) and ensure the
-    // v3 binder does not treat it as a valid v3 binding: `DigitalSignatureExt` binds against
-    // MS-OVBA `ContentsHashV3` (SHA-256).
+    // v3 binder does not treat it as a valid v3 binding: `DigitalSignatureExt` binds against the
+    // v3 digest (`contents_hash_v3` in this crate, currently a 32-byte SHA-256).
     let digest = compute_vba_project_digest_v3(&project_ole, DigestAlg::Md5).expect("digest v3");
     assert_eq!(digest.len(), 16, "MD5 digest must be 16 bytes");
     let expected = contents_hash_v3(&project_ole).expect("ContentsHashV3");
@@ -532,8 +535,8 @@ fn verify_vba_digital_signature_bound_v3_reports_mismatch_when_digest_len_is_md5
     let unsigned = build_minimal_vba_project_bin_v3(None, b"ABC");
 
     // Compute an out-of-spec MD5 v3 digest and wrap it in a DigestInfo that *claims* to be SHA-256.
-    // For `\x05DigitalSignatureExt`, binding is against MS-OVBA `ContentsHashV3` (SHA-256), so this
-    // must produce a binding mismatch.
+    // For `\x05DigitalSignatureExt`, binding is against the v3 digest (`contents_hash_v3` in this
+    // crate, currently a 32-byte SHA-256), so this must produce a binding mismatch.
     let digest = compute_vba_project_digest_v3(&unsigned, DigestAlg::Md5).expect("digest v3");
     assert_eq!(digest.len(), 16, "MD5 digest must be 16 bytes");
     let expected = contents_hash_v3(&unsigned).expect("ContentsHashV3");

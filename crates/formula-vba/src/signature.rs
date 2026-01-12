@@ -583,7 +583,8 @@ pub fn verify_vba_digital_signature_bound(
                     }
                 }
 
-                // ContentsHashV3 is SHA-256 (32 bytes).
+                // In this crate, `contents_hash_v3` is a 32-byte SHA-256 digest. If the signed
+                // digest is 32 bytes, attempt v3 binding comparison.
                 if signed_digest.len() == 32 {
                     match crate::contents_hash_v3(vba_project_bin) {
                         Ok(v3) => {
@@ -941,7 +942,8 @@ pub fn verify_vba_signature_binding_with_stream_path(
                     }
                 }
 
-                // ContentsHashV3 is SHA-256 (32 bytes).
+                // In this crate, `contents_hash_v3` is a 32-byte SHA-256 digest. If the signed
+                // digest is 32 bytes, attempt v3 binding comparison.
                 if signed_digest.len() == 32 {
                     match crate::contents_hash_v3(vba_project_bin) {
                         Ok(computed) => {
@@ -1580,7 +1582,7 @@ pub fn verify_vba_project_signature_binding(
     let mut content_normalized: Option<Vec<u8>> = None;
     let mut agile_hash_md5: Option<Option<[u8; 16]>> = None;
 
-    // Lazily computed MS-OVBA v3 digest (ContentsHashV3, SHA-256).
+    // Lazily computed v3 binding digest (`contents_hash_v3`, currently a 32-byte SHA-256).
     // Outer Option = attempted; inner Option = computed successfully.
     let mut contents_hash_v3: Option<Option<Vec<u8>>> = None;
 
