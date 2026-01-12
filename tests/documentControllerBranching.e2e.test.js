@@ -118,6 +118,40 @@ test("DocumentController + BranchService: commitCurrentState preserves sheet ord
   assert.equal(state.sheets.metaById.SheetB?.tabColor, null);
 });
 
+test("DocumentController + BranchService: commitCurrentState preserves sheet order when DocumentController supports reordering", async () => {
+  const actor = { userId: "u1", role: "owner" };
+
+  const doc = new DocumentController();
+  // Create sheets in a deliberate (non-lexicographic) order.
+  doc.setCellValue("SheetB", "A1", 1);
+  doc.setCellValue("SheetA", "A1", 2);
+
+  const store = new InMemoryBranchStore();
+  const branchService = new BranchService({ docId: "doc-sheet-order-only", store });
+
+  await branchService.init(actor, {
+    schemaVersion: 1,
+    sheets: {
+      // Start in the opposite order to verify the commit updates it.
+      order: ["SheetA", "SheetB"],
+      metaById: {
+        SheetA: { id: "SheetA", name: "SheetA" },
+        SheetB: { id: "SheetB", name: "SheetB" },
+      },
+    },
+    cells: { SheetA: {}, SheetB: {} },
+    metadata: {},
+    namedRanges: {},
+    comments: {},
+  });
+
+  const workflow = new DocumentBranchingWorkflow({ doc, branchService });
+  await workflow.commitCurrentState(actor, "update sheet order");
+
+  const state = await branchService.getCurrentState();
+  assert.deepEqual(state.sheets.order, ["SheetB", "SheetA"]);
+});
+
 test("DocumentController + BranchService: format-only conflicts round-trip through adapter", async () => {
   const actor = { userId: "u1", role: "owner" };
 

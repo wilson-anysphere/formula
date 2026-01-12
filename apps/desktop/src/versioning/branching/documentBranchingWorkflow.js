@@ -87,6 +87,11 @@ export class DocumentBranchingWorkflow {
       this.doc.sheetMetadataById != null ||
       this.doc.sheetMeta != null;
 
+    // Sheet order can be preserved independently of richer sheet metadata (names/visibility/tab color).
+    // Feature-detect a dedicated reordering API to avoid treating legacy insertion order as
+    // user-controlled tab order.
+    const supportsSheetOrder = typeof this.doc.reorderSheets === "function";
+
     const MASKED_CELL_VALUE = "###";
 
     // DocumentController snapshot is authoritative for cell contents *except*
@@ -177,9 +182,9 @@ export class DocumentBranchingWorkflow {
       }
     }
 
-    if (supportsSheetMetadata) {
-      // Once DocumentController tracks sheet metadata, treat it as the canonical
-      // sheet ordering source so branch commits preserve user-visible tab order.
+    if (supportsSheetOrder) {
+      // Treat the DocumentController's sheet ordering as canonical so branch commits
+      // preserve user-visible tab order.
       const desired = nextState.sheets.order;
       /** @type {string[]} */
       const nextOrder = [];
