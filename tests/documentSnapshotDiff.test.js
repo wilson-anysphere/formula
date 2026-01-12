@@ -136,6 +136,27 @@ test("exportSheetForSemanticDiff exports effective formats from row defaults", (
   assert.deepEqual(exported.cells.get(cellKey(0, 0))?.format, { font: { italic: true } });
 });
 
+test("exportSheetForSemanticDiff treats empty nested style objects as null", () => {
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", 1);
+  const snapshot = doc.encodeState();
+
+  const parsed = JSON.parse(decoder.decode(snapshot));
+  const sheet = parsed.sheets.find((s) => s?.id === "Sheet1");
+  assert.ok(sheet);
+  // Force a per-cell style object that is semantically empty but structurally non-empty.
+  sheet.cells[0].format = { font: {} };
+
+  const restored = new DocumentController();
+  restored.applyState(encoder.encode(JSON.stringify(parsed)));
+
+  const exported = restored.exportSheetForSemanticDiff("Sheet1");
+  assert.equal(exported.cells.get(cellKey(0, 0))?.format, null);
+});
+
 test("diffDocumentVersionAgainstCurrent uses exportSheetForSemanticDiff (and includes layered formats)", async () => {
   const doc = new DocumentController();
   doc.setCellValue("Sheet1", "A1", 1);

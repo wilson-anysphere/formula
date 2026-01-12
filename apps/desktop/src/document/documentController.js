@@ -64,6 +64,48 @@ function encodeUtf8(text) {
   return Buffer.from(text, "utf8");
 }
 
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Remove empty nested objects from a style tree.
+ *
+ * This matches the normalization used by versioning snapshot parsers so semantic diffs
+ * don't treat `{ font: {} }` as meaningfully different from `{}`.
+ *
+ * @param {any} value
+ * @returns {any}
+ */
+function pruneEmptyObjects(value) {
+  if (!isPlainObject(value)) return value;
+  /** @type {Record<string, any>} */
+  const out = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if (raw === undefined) continue;
+    const pruned = pruneEmptyObjects(raw);
+    if (isPlainObject(pruned) && Object.keys(pruned).length === 0) continue;
+    out[key] = pruned;
+  }
+  return out;
+}
+
+/**
+ * Normalize an effective style object for semantic diff exports.
+ *
+ * - Prunes empty nested objects (e.g. `{ font: {} }`).
+ * - Treats empty styles as `null` for backwards compatibility.
+ *
+ * @param {any} style
+ * @returns {any | null}
+ */
+function normalizeSemanticDiffFormat(style) {
+  if (!isPlainObject(style)) return null;
+  const pruned = pruneEmptyObjects(style);
+  if (!isPlainObject(pruned) || Object.keys(pruned).length === 0) return null;
+  return pruned;
+}
+
 const NUMERIC_LITERAL_RE = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
 
 // Excel grid limits (used by the UI selection model and for scalable formatting ops).
@@ -2368,13 +2410,13 @@ export class DocumentController {
 
     for (const [key, cell] of sheet.cells.entries()) {
       const { row, col } = parseRowColKey(key);
-      const effectiveStyle = this.getCellFormat(sheetId, { row, col });
+      const effectiveStyle = normalizeSemanticDiffFormat(this.getCellFormat(sheetId, { row, col }));
       cells.set(semanticDiffCellKey(row, col), {
         value: cell.value ?? null,
         formula: cell.formula ?? null,
         // Semantic diff consumers expect the *effective* format for stored cells so inherited
         // row/col/sheet formatting is visible even when `styleId === 0`.
-        format: effectiveStyle && Object.keys(effectiveStyle).length > 0 ? effectiveStyle : null,
+        format: effectiveStyle,
       });
     }
     return { cells };
