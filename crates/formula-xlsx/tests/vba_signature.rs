@@ -1,3 +1,5 @@
+#![cfg(feature = "vba")]
+
 use std::io::{Cursor, Write};
 
 use base64::{engine::general_purpose, Engine as _};
@@ -100,4 +102,3 @@ fn verify_vba_digital_signature_returns_none_without_vba_project_bin() {
         .expect("signature inspection should succeed");
     assert!(sig.is_none(), "expected Ok(None) when vbaProject.bin is absent");
 }
-

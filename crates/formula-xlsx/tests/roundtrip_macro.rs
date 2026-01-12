@@ -42,6 +42,7 @@ fn roundtrip_preserves_signed_vba_project_bytes() {
 }
 
 #[test]
+#[cfg(feature = "vba")]
 fn parses_vba_modules_for_ui_display() {
     let fixture_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/xlsx/macros/basic.xlsm");
     let bytes = std::fs::read(fixture_path).expect("read fixture");
