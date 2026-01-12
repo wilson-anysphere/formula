@@ -31,13 +31,33 @@ function createStorageMock(): Storage {
 }
 
 describe("createCommandPalette function results", () => {
+  const originalGlobalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  const originalWindowLocalStorage = Object.getOwnPropertyDescriptor(window, "localStorage");
+
   beforeEach(() => {
     document.body.innerHTML = "";
-    vi.stubGlobal("localStorage", createStorageMock());
+    // Node 25 ships an experimental `globalThis.localStorage` accessor that throws unless started
+    // with `--localstorage-file`. Provide a stable in-memory implementation for tests.
+    const storage = createStorageMock();
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
+    Object.defineProperty(window, "localStorage", { configurable: true, value: storage });
+    localStorage.clear();
   });
 
   afterEach(() => {
-    vi.unstubAllGlobals();
+    if (originalGlobalLocalStorage) {
+      Object.defineProperty(globalThis, "localStorage", originalGlobalLocalStorage);
+    } else {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete (globalThis as any).localStorage;
+    }
+
+    if (originalWindowLocalStorage) {
+      Object.defineProperty(window, "localStorage", originalWindowLocalStorage);
+    } else {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete (window as any).localStorage;
+    }
   });
 
   it("invokes onSelectFunction when selecting a function result", () => {
@@ -79,4 +99,3 @@ describe("createCommandPalette function results", () => {
     vi.useRealTimers();
   });
 });
-
