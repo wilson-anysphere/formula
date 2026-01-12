@@ -60,69 +60,69 @@ export function registerBuiltinCommands(params: {
 
   commandRegistry.registerBuiltinCommand(
     "edit.undo",
-    "Undo",
+    t("command.edit.undo"),
     () => app.undo(),
     {
-      category: "Edit",
+      category: t("commandCategory.editing"),
       icon: null,
-      description: "Undo the last action",
+      description: t("commandDescription.edit.undo"),
       keywords: ["undo", "history"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "edit.redo",
-    "Redo",
+    t("command.edit.redo"),
     () => app.redo(),
     {
-      category: "Edit",
+      category: t("commandCategory.editing"),
       icon: null,
-      description: "Redo the last undone action",
+      description: t("commandDescription.edit.redo"),
       keywords: ["redo", "history"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "view.toggleShowFormulas",
-    "Toggle Show Formulas",
+    t("command.view.toggleShowFormulas"),
     () => {
       if (app.isEditing()) return;
       app.toggleShowFormulas();
     },
     {
-      category: "View",
+      category: t("commandCategory.view"),
       icon: null,
-      description: "Toggle between displaying formulas and computed values in cells",
+      description: t("commandDescription.view.toggleShowFormulas"),
       keywords: ["show formulas", "formulas", "values", "display"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "audit.togglePrecedents",
-    "Toggle Trace Precedents",
+    t("command.audit.togglePrecedents"),
     () => {
       if (app.isEditing()) return;
       app.toggleAuditingPrecedents();
     },
     {
-      category: "Audit",
+      category: t("commandCategory.audit"),
       icon: null,
-      description: "Toggle precedent arrows for the active cell",
+      description: t("commandDescription.audit.togglePrecedents"),
       keywords: ["audit", "precedents", "trace", "toggle"],
     },
   );
 
   commandRegistry.registerBuiltinCommand(
     "audit.toggleDependents",
-    "Toggle Trace Dependents",
+    t("command.audit.toggleDependents"),
     () => {
       if (app.isEditing()) return;
       app.toggleAuditingDependents();
     },
     {
-      category: "Audit",
+      category: t("commandCategory.audit"),
       icon: null,
-      description: "Toggle dependent arrows for the active cell",
+      description: t("commandDescription.audit.toggleDependents"),
       keywords: ["audit", "dependents", "trace", "toggle"],
     },
   );
@@ -384,7 +384,7 @@ export function registerBuiltinCommands(params: {
       app.focus();
     },
     {
-      category: t("commandCategory.view"),
+      category: t("commandCategory.audit"),
       icon: null,
       description: t("commandDescription.audit.tracePrecedents"),
       keywords: ["audit", "precedents", "trace"],
@@ -400,7 +400,7 @@ export function registerBuiltinCommands(params: {
       app.focus();
     },
     {
-      category: t("commandCategory.view"),
+      category: t("commandCategory.audit"),
       icon: null,
       description: t("commandDescription.audit.traceDependents"),
       keywords: ["audit", "dependents", "trace"],
@@ -417,7 +417,7 @@ export function registerBuiltinCommands(params: {
       app.focus();
     },
     {
-      category: t("commandCategory.view"),
+      category: t("commandCategory.audit"),
       icon: null,
       description: t("commandDescription.audit.traceBoth"),
       keywords: ["audit", "precedents", "dependents", "trace"],
@@ -432,7 +432,7 @@ export function registerBuiltinCommands(params: {
       app.focus();
     },
     {
-      category: t("commandCategory.view"),
+      category: t("commandCategory.audit"),
       icon: null,
       description: t("commandDescription.audit.clearAuditing"),
       keywords: ["audit", "clear"],
@@ -447,40 +447,10 @@ export function registerBuiltinCommands(params: {
       app.focus();
     },
     {
-      category: t("commandCategory.view"),
+      category: t("commandCategory.audit"),
       icon: null,
       description: t("commandDescription.audit.toggleTransitive"),
       keywords: ["audit", "transitive", "toggle"],
-    },
-  );
-
-  commandRegistry.registerBuiltinCommand(
-    "edit.undo",
-    t("command.edit.undo"),
-    () => {
-      app.undo();
-      app.focus();
-    },
-    {
-      category: t("commandCategory.editing"),
-      icon: null,
-      description: t("commandDescription.edit.undo"),
-      keywords: ["undo"],
-    },
-  );
-
-  commandRegistry.registerBuiltinCommand(
-    "edit.redo",
-    t("command.edit.redo"),
-    () => {
-      app.redo();
-      app.focus();
-    },
-    {
-      category: t("commandCategory.editing"),
-      icon: null,
-      description: t("commandDescription.edit.redo"),
-      keywords: ["redo"],
     },
   );
 

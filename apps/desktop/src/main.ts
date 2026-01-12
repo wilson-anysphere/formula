@@ -3216,8 +3216,14 @@ if (
 
   const buildGridContextMenuItems = (): ContextMenuItem[] => {
     const undoRedo = app.getUndoRedoState();
-    const undoLabel = undoRedo.undoLabel ? `${t("command.edit.undo")} ${undoRedo.undoLabel}` : t("command.edit.undo");
-    const redoLabel = undoRedo.redoLabel ? `${t("command.edit.redo")} ${undoRedo.redoLabel}` : t("command.edit.redo");
+    const undoLabelText = typeof undoRedo.undoLabel === "string" ? undoRedo.undoLabel.trim() : "";
+    const redoLabelText = typeof undoRedo.redoLabel === "string" ? undoRedo.redoLabel.trim() : "";
+    const undoLabel = undoLabelText
+      ? tWithVars("menu.undoWithLabel", { label: undoLabelText })
+      : t("command.edit.undo");
+    const redoLabel = redoLabelText
+      ? tWithVars("menu.redoWithLabel", { label: redoLabelText })
+      : t("command.edit.redo");
     const allowEditCommands = !app.isEditing();
 
     const menuItems: ContextMenuItem[] = [
@@ -3342,7 +3348,7 @@ if (
       },
       {
         type: "item",
-        label: "Show Formulas",
+        label: t("command.view.toggleShowFormulas"),
         enabled: allowEditCommands,
         shortcut:
           getPrimaryCommandKeybindingDisplay("view.toggleShowFormulas", commandKeybindingDisplayIndex) ?? primaryShortcut("`"),
@@ -3350,7 +3356,7 @@ if (
       },
       {
         type: "item",
-        label: "Toggle Trace Precedents",
+        label: t("command.audit.togglePrecedents"),
         enabled: allowEditCommands,
         shortcut:
           getPrimaryCommandKeybindingDisplay("audit.togglePrecedents", commandKeybindingDisplayIndex) ?? primaryShortcut("["),
@@ -3358,7 +3364,7 @@ if (
       },
       {
         type: "item",
-        label: "Toggle Trace Dependents",
+        label: t("command.audit.toggleDependents"),
         enabled: allowEditCommands,
         shortcut:
           getPrimaryCommandKeybindingDisplay("audit.toggleDependents", commandKeybindingDisplayIndex) ?? primaryShortcut("]"),
@@ -3372,7 +3378,7 @@ if (
       menuItems.push({ type: "separator" });
       menuItems.push({
         type: "item",
-        label: "Loading extensions…",
+        label: t("contextMenu.extensions.loading"),
         enabled: false,
         onSelect: () => {
           // Disabled placeholder item.
@@ -3385,7 +3391,7 @@ if (
       menuItems.push({ type: "separator" });
       menuItems.push({
         type: "item",
-        label: "Extensions failed to load",
+        label: t("contextMenu.extensions.failedToLoad"),
         enabled: false,
         onSelect: () => {
           // Disabled error item.

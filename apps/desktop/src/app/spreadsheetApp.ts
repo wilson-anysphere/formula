@@ -2132,19 +2132,19 @@ export class SpreadsheetApp {
 
   freezePanes(): void {
     const active = this.selection.active;
-    this.document.setFrozen(this.sheetId, active.row, active.col, { label: "Freeze Panes" });
+    this.document.setFrozen(this.sheetId, active.row, active.col, { label: t("command.view.freezePanes") });
   }
 
   freezeTopRow(): void {
-    this.document.setFrozen(this.sheetId, 1, 0, { label: "Freeze Top Row" });
+    this.document.setFrozen(this.sheetId, 1, 0, { label: t("command.view.freezeTopRow") });
   }
 
   freezeFirstColumn(): void {
-    this.document.setFrozen(this.sheetId, 0, 1, { label: "Freeze First Column" });
+    this.document.setFrozen(this.sheetId, 0, 1, { label: t("command.view.freezeFirstColumn") });
   }
 
   unfreezePanes(): void {
-    this.document.setFrozen(this.sheetId, 0, 0, { label: "Unfreeze Panes" });
+    this.document.setFrozen(this.sheetId, 0, 0, { label: t("command.view.unfreezePanes") });
   }
 
   addChart(spec: CreateChartSpec): CreateChartResult {
@@ -6106,8 +6106,10 @@ export class SpreadsheetApp {
 
     if (operations.length === 0) return;
 
+    const label = direction === "down" ? t("command.edit.fillDown") : t("command.edit.fillRight");
+
     // Explicit batch so multi-range selections become a single undo step.
-    this.document.beginBatch({ label: direction === "down" ? "Fill Down" : "Fill Right" });
+    this.document.beginBatch({ label });
     try {
       for (const op of operations) {
         applyFillCommitToDocumentController({
@@ -6510,7 +6512,7 @@ export class SpreadsheetApp {
       const minutes = String(now.getMinutes()).padStart(2, "0");
       return `${hour}:${minutes}`;
     })();
-    const label = kind === "date" ? "Insert Date" : "Insert Time";
+    const label = kind === "date" ? t("command.edit.insertDate") : t("command.edit.insertTime");
 
     const normalizeRange = (range: Range): Range => ({
       startRow: Math.min(range.startRow, range.endRow),
@@ -6610,7 +6612,7 @@ export class SpreadsheetApp {
     if (!sumRange) return;
 
     const formula = `=SUM(${rangeToA1(sumRange)})`;
-    this.document.setCellInput(this.sheetId, active, formula, { label: "AutoSum" });
+    this.document.setCellInput(this.sheetId, active, formula, { label: t("command.edit.autoSum") });
   }
 
   private shouldHandleSpreadsheetClipboardCommand(): boolean {
