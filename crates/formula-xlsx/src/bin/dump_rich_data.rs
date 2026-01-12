@@ -137,15 +137,7 @@ fn dump_metadata(pkg: &XlsxPackage) -> Option<HashMap<u32, u32>> {
     println!();
     println!("{part_name}:");
 
-    let xml = match std::str::from_utf8(&bytes) {
-        Ok(xml) => xml,
-        Err(err) => {
-            println!("  (not utf-8: {err})");
-            return None;
-        }
-    };
-
-    match parse_metadata_xml(xml) {
+    match parse_metadata_xml(&bytes) {
         Ok(doc) => {
             println!("  metadataTypes ({}):", doc.metadata_types.len());
             for (idx, ty) in doc.metadata_types.iter().enumerate() {

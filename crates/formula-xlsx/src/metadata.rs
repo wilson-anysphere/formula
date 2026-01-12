@@ -1,17 +1,25 @@
 //! SpreadsheetML metadata (`xl/metadata.xml`) parser.
 //!
-//! Excel stores additional metadata for cells/values in the workbook part
-//! `xl/metadata.xml`. Sheet cells can reference these blocks using the `cm`
-//! (cell metadata) and `vm` (value metadata) indices on `<c>` elements.
+//! Excel stores additional metadata for cells/values in the workbook part `xl/metadata.xml`.
+//! Worksheet cells can reference these blocks using the `cm` (cell metadata) and `vm` (value
+//! metadata) indices on `<c>` elements.
 //!
-//! Formula currently treats the rich/linked data payloads as opaque, but having
-//! a parser makes it possible to:
-//! - debug/work with linked data types and rich values
-//! - map `cm`/`vm` indices to concrete metadata records
-//! - eventually connect metadata records to `xl/richData/*`
+//! This module provides a best-effort, namespace-agnostic parser that is sufficient to resolve a
+//! worksheet cell's `vm` (value metadata) index to the rich value record index used by Excel rich
+//! data types / images-in-cell (`XLRICHVALUE`).
 //!
-//! The data model intentionally captures only the stable core (`<metadataTypes>`
-//! and `<rc>` records) while preserving unknown/extension payloads as raw XML.
+//! The relevant indirection chain looks like:
+//!
+//! - `c/@vm` → `<valueMetadata><bk>` index
+//! - `<bk><rc t="…" v="…"/>` → `t` indexes `<metadataTypes><metadataType name="…"/>`
+//! - When the referenced metadataType is `XLRICHVALUE`, `v` indexes
+//!   `<futureMetadata name="XLRICHVALUE"><bk>…</bk></futureMetadata>`
+//! - Inside the futureMetadata `<bk>`, an extension element (commonly `xlrd:rvb`) has an `i="N"`
+//!   attribute, where `N` is the rich value record index.
+//!
+//! Real-world files sometimes vary between 0-based and 1-based indices. The resolver uses a
+//! defensive strategy: it tries the raw index as 0-based first, and falls back to `raw - 1` if the
+//! initial candidate doesn't resolve.
 
 use std::collections::BTreeMap;
 use std::io::Cursor;
@@ -22,23 +30,27 @@ use quick_xml::Writer;
 use thiserror::Error;
 
 /// Parsed representation of `xl/metadata.xml`.
+///
+/// The data model captures only the stable core (`<metadataTypes>` and `<rc>` records) while also
+/// preserving unknown/extension payloads from `<futureMetadata>` as raw inner XML.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct MetadataDocument {
+pub struct MetadataPart {
     /// `<metadataTypes>` entries (at least `name=` + all attributes).
     pub metadata_types: Vec<MetadataType>,
     /// Raw inner XML payloads from `<futureMetadata><bk>...</bk></futureMetadata>`.
-    ///
-    /// Excel uses `futureMetadata` for forward-compatible extension blocks (often containing
-    /// `extLst` payloads in non-SpreadsheetML namespaces). We keep the inner XML so higher-level
-    /// tooling can inspect/debug it without needing to understand every schema.
     pub future_metadata_blocks: Vec<MetadataBlockRaw>,
     /// `<cellMetadata>` blocks referenced via the `cm` index on worksheet `<c>` elements.
     pub cell_metadata: Vec<MetadataBlock>,
     /// `<valueMetadata>` blocks referenced via the `vm` index on worksheet `<c>` elements.
     pub value_metadata: Vec<MetadataBlock>,
+    /// `rvb/@i` values from `<futureMetadata name="XLRICHVALUE">`, indexed by `<bk>` position.
+    xlrichvalue_future_bks: Vec<Option<u32>>,
 }
 
-impl MetadataDocument {
+/// Backwards-compatible name for the parsed `xl/metadata.xml` representation.
+pub type MetadataDocument = MetadataPart;
+
+impl MetadataPart {
     /// Lookup a cell metadata block by index.
     ///
     /// Excel's indexing has historically been ambiguous across parts. To be resilient we attempt
@@ -59,6 +71,43 @@ impl MetadataDocument {
         blocks
             .get(idx as usize)
             .or_else(|| idx.checked_sub(1).and_then(|i| blocks.get(i as usize)))
+    }
+
+    /// Resolve a worksheet cell's `vm=` index to the rich value record index (`XLRICHVALUE`).
+    ///
+    /// This method is best-effort and intentionally tolerant:
+    /// - ignores unrelated metadata types and tags
+    /// - handles missing/invalid numeric attributes by skipping those entries
+    /// - tries both 0-based and 1-based interpretations for `vm`, `rc/@t`, and `rc/@v`
+    pub fn vm_to_rich_value_index(&self, vm_raw: u32) -> Option<u32> {
+        // `vm` chooses which `<valueMetadata><bk>` block applies to the cell.
+        for vm_idx in index_candidates(vm_raw, self.value_metadata.len()) {
+            let Some(vm_bk) = self.value_metadata.get(vm_idx) else {
+                continue;
+            };
+
+            // A `<bk>` may contain multiple `<rc>` records for different metadata types.
+            for rc in &vm_bk.records {
+                // `t` indexes into `<metadataTypes>`.
+                for t_idx in index_candidates(rc.t, self.metadata_types.len()) {
+                    let Some(metadata_type) = self.metadata_types.get(t_idx) else {
+                        continue;
+                    };
+                    if !metadata_type.name.eq_ignore_ascii_case("XLRICHVALUE") {
+                        continue;
+                    }
+
+                    // `v` indexes into `<futureMetadata name="XLRICHVALUE"><bk>...</bk></futureMetadata>`.
+                    for v_idx in index_candidates(rc.v, self.xlrichvalue_future_bks.len()) {
+                        if let Some(Some(rich_idx)) = self.xlrichvalue_future_bks.get(v_idx).copied() {
+                            return Some(rich_idx);
+                        }
+                    }
+                }
+            }
+        }
+
+        None
     }
 }
 
@@ -112,12 +161,16 @@ pub enum MetadataError {
 /// - ignores namespaces/prefixes by matching on local-name only
 /// - ignores unknown elements
 /// - does not require `count=` attributes to be present or correct
-pub fn parse_metadata_xml(xml: &str) -> Result<MetadataDocument, MetadataError> {
+pub fn parse_metadata_xml(bytes: &[u8]) -> Result<MetadataPart, MetadataError> {
+    let xml = std::str::from_utf8(bytes)?;
+    // Be tolerant of leading whitespace/newlines before the XML declaration and optional UTF-8 BOM.
+    let xml = xml.trim_start_matches('\u{feff}').trim_start();
+
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(false);
 
     let mut buf = Vec::new();
-    let mut doc = MetadataDocument::default();
+    let mut doc = MetadataPart::default();
 
     loop {
         match reader.read_event_into(&mut buf)? {
@@ -126,12 +179,18 @@ pub fn parse_metadata_xml(xml: &str) -> Result<MetadataDocument, MetadataError> 
                     // Root element; its children contain the data we care about.
                 }
                 b"metadataTypes" => {
-                    doc.metadata_types
-                        .extend(parse_metadata_types(&mut reader)?);
+                    doc.metadata_types.extend(parse_metadata_types(&mut reader)?);
                 }
                 b"futureMetadata" => {
-                    doc.future_metadata_blocks
-                        .extend(parse_future_metadata(&mut reader)?);
+                    let name = read_attr_local_string(&e, b"name")?;
+                    let is_xlrichvalue = name
+                        .as_deref()
+                        .is_some_and(|n| n.eq_ignore_ascii_case("XLRICHVALUE"));
+                    let (blocks, rvb_indices) = parse_future_metadata(&mut reader, is_xlrichvalue)?;
+                    doc.future_metadata_blocks.extend(blocks);
+                    if is_xlrichvalue {
+                        doc.xlrichvalue_future_bks.extend(rvb_indices);
+                    }
                 }
                 b"cellMetadata" => {
                     doc.cell_metadata
@@ -198,17 +257,27 @@ fn parse_metadata_types(reader: &mut Reader<&[u8]>) -> Result<Vec<MetadataType>,
     Ok(types)
 }
 
-fn parse_future_metadata(reader: &mut Reader<&[u8]>) -> Result<Vec<MetadataBlockRaw>, MetadataError> {
+fn parse_future_metadata(
+    reader: &mut Reader<&[u8]>,
+    is_xlrichvalue: bool,
+) -> Result<(Vec<MetadataBlockRaw>, Vec<Option<u32>>), MetadataError> {
     let mut buf = Vec::new();
     let mut blocks = Vec::new();
+    let mut rvb_indices: Vec<Option<u32>> = Vec::new();
 
     loop {
         match reader.read_event_into(&mut buf)? {
             Event::Start(e) if e.local_name().as_ref() == b"bk" => {
                 let inner_xml = capture_inner_xml(reader, b"bk")?;
+                if is_xlrichvalue {
+                    rvb_indices.push(extract_rvb_i(&inner_xml));
+                }
                 blocks.push(MetadataBlockRaw { inner_xml });
             }
             Event::Empty(e) if e.local_name().as_ref() == b"bk" => {
+                if is_xlrichvalue {
+                    rvb_indices.push(None);
+                }
                 blocks.push(MetadataBlockRaw {
                     inner_xml: String::new(),
                 });
@@ -228,7 +297,7 @@ fn parse_future_metadata(reader: &mut Reader<&[u8]>) -> Result<Vec<MetadataBlock
         buf.clear();
     }
 
-    Ok(blocks)
+    Ok((blocks, rvb_indices))
 }
 
 fn parse_metadata_blocks(
@@ -267,12 +336,16 @@ fn parse_metadata_block(reader: &mut Reader<&[u8]>) -> Result<MetadataBlock, Met
     loop {
         match reader.read_event_into(&mut buf)? {
             Event::Start(e) if e.local_name().as_ref() == b"rc" => {
-                records.push(parse_record(&e)?);
+                if let Some(record) = parse_record(&e)? {
+                    records.push(record);
+                }
                 // Skip any unexpected children.
                 reader.read_to_end_into(e.name(), &mut Vec::new())?;
             }
             Event::Empty(e) if e.local_name().as_ref() == b"rc" => {
-                records.push(parse_record(&e)?);
+                if let Some(record) = parse_record(&e)? {
+                    records.push(record);
+                }
             }
             Event::Start(e) => {
                 // Skip unknown subtree.
@@ -288,22 +361,28 @@ fn parse_metadata_block(reader: &mut Reader<&[u8]>) -> Result<MetadataBlock, Met
     Ok(MetadataBlock { records })
 }
 
-fn parse_record(e: &quick_xml::events::BytesStart<'_>) -> Result<MetadataRecord, MetadataError> {
-    let mut t: u32 = 0;
-    let mut v: u32 = 0;
+fn parse_record(e: &quick_xml::events::BytesStart<'_>) -> Result<Option<MetadataRecord>, MetadataError> {
+    let mut t: Option<u32> = None;
+    let mut v: Option<u32> = None;
     for attr in e.attributes().with_checks(false) {
         let attr = attr.map_err(quick_xml::Error::from)?;
-        match attr.key.as_ref() {
+        match crate::openxml::local_name(attr.key.as_ref()) {
             b"t" => {
-                t = attr.unescape_value()?.parse().unwrap_or(0);
+                let val = attr.unescape_value()?;
+                t = val.parse::<u32>().ok();
             }
             b"v" => {
-                v = attr.unescape_value()?.parse().unwrap_or(0);
+                let val = attr.unescape_value()?;
+                v = val.parse::<u32>().ok();
             }
             _ => {}
         }
     }
-    Ok(MetadataRecord { t, v })
+
+    Ok(match (t, v) {
+        (Some(t), Some(v)) => Some(MetadataRecord { t, v }),
+        _ => None,
+    })
 }
 
 fn collect_attributes(
@@ -312,14 +391,17 @@ fn collect_attributes(
     let mut out = BTreeMap::new();
     for attr in e.attributes().with_checks(false) {
         let attr = attr.map_err(quick_xml::Error::from)?;
-        let key = std::str::from_utf8(attr.key.as_ref())?.to_string();
+        let key = std::str::from_utf8(crate::openxml::local_name(attr.key.as_ref()))?.to_string();
         let val = attr.unescape_value()?.into_owned();
         out.insert(key, val);
     }
     Ok(out)
 }
 
-fn capture_inner_xml(reader: &mut Reader<&[u8]>, end_local_name: &'static [u8]) -> Result<String, MetadataError> {
+fn capture_inner_xml(
+    reader: &mut Reader<&[u8]>,
+    end_local_name: &'static [u8],
+) -> Result<String, MetadataError> {
     let mut buf = Vec::new();
     let mut writer = Writer::new(Cursor::new(Vec::new()));
 
@@ -352,6 +434,62 @@ fn capture_inner_xml(reader: &mut Reader<&[u8]>, end_local_name: &'static [u8]) 
     Ok(std::str::from_utf8(&bytes)?.to_string())
 }
 
+fn extract_rvb_i(inner_xml: &str) -> Option<u32> {
+    // `bk` payloads are extension-heavy (often include non-SpreadsheetML prefixes). quick_xml is
+    // intentionally namespace-agnostic so we can scan by local-name only.
+    let mut reader = Reader::from_str(inner_xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e) | Event::Empty(e)) if e.local_name().as_ref() == b"rvb" => {
+                for attr in e.attributes().with_checks(false) {
+                    let attr = attr.ok()?;
+                    if crate::openxml::local_name(attr.key.as_ref()) == b"i" {
+                        let val = attr.unescape_value().ok()?;
+                        return val.parse::<u32>().ok();
+                    }
+                }
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(_) => break,
+        }
+        buf.clear();
+    }
+
+    None
+}
+
+fn index_candidates(raw: u32, len: usize) -> impl Iterator<Item = usize> {
+    let mut out = Vec::with_capacity(2);
+    let raw_idx = raw as usize;
+    if raw_idx < len {
+        out.push(raw_idx);
+    }
+    if raw > 0 {
+        let fallback = (raw - 1) as usize;
+        if fallback < len && fallback != raw_idx {
+            out.push(fallback);
+        }
+    }
+    out.into_iter()
+}
+
+fn read_attr_local_string(
+    e: &quick_xml::events::BytesStart<'_>,
+    key: &'static [u8],
+) -> Result<Option<String>, MetadataError> {
+    for attr in e.attributes().with_checks(false) {
+        let attr = attr.map_err(quick_xml::Error::from)?;
+        if crate::openxml::local_name(attr.key.as_ref()) == key {
+            return Ok(Some(attr.unescape_value()?.into_owned()));
+        }
+    }
+    Ok(None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -367,7 +505,7 @@ mod tests {
   </metadataTypes>
 </metadata>"#;
 
-        let doc = parse_metadata_xml(xml).expect("parse metadata.xml");
+        let doc = parse_metadata_xml(xml.as_bytes()).expect("parse metadata.xml");
         assert_eq!(doc.metadata_types.len(), 2);
         assert_eq!(doc.metadata_types[0].name, "XLDAPR");
         assert_eq!(
@@ -405,7 +543,7 @@ mod tests {
   </valueMetadata>
 </metadata>"#;
 
-        let doc = parse_metadata_xml(xml).expect("parse metadata.xml");
+        let doc = parse_metadata_xml(xml.as_bytes()).expect("parse metadata.xml");
         assert_eq!(doc.cell_metadata.len(), 2);
         assert_eq!(doc.cell_metadata[0].records.len(), 2);
         assert_eq!(doc.cell_metadata[0].records[0], MetadataRecord { t: 0, v: 1 });
@@ -430,12 +568,10 @@ mod tests {
   </futureMetadata>
 </metadata>"#;
 
-        let doc = parse_metadata_xml(xml).expect("parse metadata.xml");
+        let doc = parse_metadata_xml(xml.as_bytes()).expect("parse metadata.xml");
         assert_eq!(doc.future_metadata_blocks.len(), 1);
         assert!(
-            doc.future_metadata_blocks[0]
-                .inner_xml
-                .contains("foo:bar"),
+            doc.future_metadata_blocks[0].inner_xml.contains("foo:bar"),
             "inner_xml was: {}",
             doc.future_metadata_blocks[0].inner_xml
         );
@@ -454,7 +590,7 @@ mod tests {
   </valueMetadata>
 </metadata>"#;
 
-        let doc = parse_metadata_xml(xml).expect("parse metadata.xml");
+        let doc = parse_metadata_xml(xml.as_bytes()).expect("parse metadata.xml");
 
         // 0-based direct lookup
         assert_eq!(
@@ -490,4 +626,66 @@ mod tests {
         assert!(doc.value_block_by_index(1).is_some()); // fallback to idx-1
         assert!(doc.value_block_by_index(2).is_none());
     }
+
+    #[test]
+    fn vm_to_rich_value_index_zero_based() {
+        let xml = r#"
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <metadataTypes>
+    <metadataType name="XLRICHVALUE"/>
+  </metadataTypes>
+  <futureMetadata name="XLRICHVALUE">
+    <bk>
+      <extLst>
+        <ext uri="{00000000-0000-0000-0000-000000000000}">
+          <xlrd:rvb i="7"/>
+        </ext>
+      </extLst>
+    </bk>
+  </futureMetadata>
+  <valueMetadata>
+    <bk>
+      <rc t="0" v="0"/>
+    </bk>
+  </valueMetadata>
+</metadata>
+"#;
+
+        let metadata = parse_metadata_xml(xml.as_bytes()).unwrap();
+        assert_eq!(metadata.vm_to_rich_value_index(0), Some(7));
+    }
+
+    #[test]
+    fn vm_to_rich_value_index_one_based_fallback() {
+        let xml = r#"
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <metadataTypes>
+    <metadataType name="xlrichvalue"/>
+  </metadataTypes>
+  <futureMetadata name="XLRICHVALUE">
+    <bk>
+      <extLst>
+        <ext uri="{00000000-0000-0000-0000-000000000000}">
+          <xlrd:rvb i="7"/>
+        </ext>
+      </extLst>
+    </bk>
+  </futureMetadata>
+  <valueMetadata>
+    <bk>
+      <!-- All of these indices are 1-based in this synthetic example. -->
+      <rc t="1" v="1"/>
+    </bk>
+  </valueMetadata>
+</metadata>
+"#;
+
+        let metadata = parse_metadata_xml(xml.as_bytes()).unwrap();
+        assert_eq!(metadata.vm_to_rich_value_index(1), Some(7));
+    }
 }
+

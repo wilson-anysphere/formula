@@ -75,16 +75,8 @@ fn dump_metadata_xml(pkg: &XlsxPackage) {
     };
 
     println!("  size: {} bytes", bytes.len());
-    let xml = match std::str::from_utf8(bytes) {
-        Ok(s) => s,
-        Err(err) => {
-            println!("  warning: metadata.xml is not valid UTF-8: {err}");
-            println!();
-            return;
-        }
-    };
 
-    match parse_metadata_xml(xml) {
+    match parse_metadata_xml(bytes) {
         Ok(doc) => {
             println!("  metadataTypes: {}", doc.metadata_types.len());
             for (idx, ty) in doc.metadata_types.iter().enumerate() {
