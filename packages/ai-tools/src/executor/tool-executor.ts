@@ -1329,6 +1329,7 @@ export class ToolExecutor {
 
     const row0 = row - 1;
     const col0 = col - 1;
+    const coordKey = `${row0},${col0}`;
 
     // If we're explicitly including restricted content and policy allows it, a cell can become
     // ALLOW even if its classification exceeds `maxAllowed` (because `evaluatePolicy` short-circuits
@@ -1363,7 +1364,7 @@ export class ToolExecutor {
       return false;
     }
 
-    const cellRank = index.cellRankByCoord.get(`${row0},${col0}`);
+    const cellRank = index.cellRankByCoord.get(coordKey);
     if (cellRank !== undefined && cellRank > rank) rank = cellRank;
     if (rank === RESTRICTED_CLASSIFICATION_RANK) {
       return decideAllowed(rank);
