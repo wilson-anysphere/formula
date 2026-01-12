@@ -749,10 +749,6 @@ pub fn verify_vba_signature_binding_with_stream_path(
         let stream_kind = signature_path_stream_kind(signature_stream_path);
         // Prefer v3 when the stream kind indicates `DigitalSignatureExt`. If the stream kind is
         // unknown (or not provided), fall back to digest-length heuristics.
-        //
-        // Note: per MS-OSHARED §4.3 (and MS-OVBA §2.4.2.7), the **binding digest bytes** embedded in
-        // the VBA signature are always a 16-byte MD5. Non-16-byte digests should be treated as
-        // non-spec/legacy behavior and only used for best-effort inference.
         let treat_as_v3 = match stream_kind {
             Some(VbaSignatureStreamKind::DigitalSignatureExt) => true,
             Some(VbaSignatureStreamKind::DigitalSignature)
@@ -809,6 +805,20 @@ pub fn verify_vba_signature_binding_with_stream_path(
         if let Some(h) = agile_hash_md5 {
             if signed_digest == h {
                 return VbaSignatureBinding::Bound;
+            }
+        }
+
+        // If the stream kind is unknown (or not provided), the digest length heuristic above might
+        // incorrectly classify a v3 signature with an MD5 digest as a legacy signature. As a
+        // best-effort fallback, attempt v3 binding even for 16-byte digests when we couldn't match
+        // the legacy Content/Agile hash.
+        if matches!(stream_kind, Some(VbaSignatureStreamKind::Unknown) | None) {
+            if let Some(alg) = digest_alg_from_oid_str(&signed.digest_algorithm_oid) {
+                if let Ok(computed) = compute_vba_project_digest_v3(vba_project_bin, alg) {
+                    if signed_digest == computed.as_slice() {
+                        return VbaSignatureBinding::Bound;
+                    }
+                }
             }
         }
 
@@ -1515,6 +1525,32 @@ pub fn verify_vba_project_signature_binding(
 
         if signed_digest == content_hash_md5 || matches!(agile_hash_md5, Some(h) if signed_digest == h) {
             return Ok(VbaProjectBindingVerification::BoundVerified(debug));
+        }
+
+        // Best-effort fallback: if we couldn't match the legacy Content/Agile hash and we don't
+        // know which signature stream kind we're verifying, attempt v3 digest binding even when
+        // the digest length looks legacy (16-byte MD5).
+        //
+        // This handles cases where callers pass raw `\x05DigitalSignatureExt` stream bytes (or a
+        // detached `content || pkcs7` blob) without an accompanying stream path/CFB container.
+        if matches!(payload.stream_kind, Some(VbaSignatureStreamKind::Unknown) | None) {
+            if let Some(alg) = digest_alg_from_oid_str(&signed.digest_algorithm_oid) {
+                let computed = match v3_digest.as_ref() {
+                    Some((cached_alg, bytes)) if *cached_alg == alg => bytes.clone(),
+                    _ => match compute_vba_project_digest_v3(project_ole, alg) {
+                        Ok(v) => {
+                            v3_digest = Some((alg, v.clone()));
+                            v
+                        }
+                        Err(_) => continue,
+                    },
+                };
+
+                if signed_digest == computed.as_slice() {
+                    debug.computed_digest = Some(computed);
+                    return Ok(VbaProjectBindingVerification::BoundVerified(debug));
+                }
+            }
         }
     }
 

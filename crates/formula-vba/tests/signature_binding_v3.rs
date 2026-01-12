@@ -413,3 +413,50 @@ fn verify_vba_digital_signature_bound_v3_uses_digest_len_when_oid_is_inconsisten
         other => panic!("expected BoundVerified, got {other:?}"),
     }
 }
+
+#[test]
+fn verify_vba_project_signature_binding_infers_v3_for_md5_digests_when_stream_kind_is_unknown() {
+    let project_ole = build_minimal_vba_project_bin_v3(None, b"ABC");
+
+    // This is a v3 project digest, but it is still 16 bytes (MD5).
+    // Ensure we don't accidentally match legacy binding digests.
+    let legacy_content = content_hash_md5(&project_ole).expect("Content hash MD5");
+    let legacy_agile = agile_content_hash_md5(&project_ole)
+        .expect("Agile content hash MD5")
+        .expect("designer present");
+
+    let digest = compute_vba_project_digest_v3(&project_ole, DigestAlg::Md5).expect("digest v3");
+    assert_eq!(digest.len(), 16, "MD5 digest must be 16 bytes");
+    assert_ne!(digest.as_slice(), legacy_content.as_ref());
+    assert_ne!(digest.as_slice(), legacy_agile.as_ref());
+
+    // Construct a raw signature stream payload (`signed_content || pkcs7`) without any surrounding
+    // CFB container or stream-path metadata.
+    let signed_content = build_spc_indirect_data_content_md5(&digest);
+    let pkcs7 = signature_test_utils::make_pkcs7_detached_signature(&signed_content);
+    let mut signature_stream_payload = signed_content.clone();
+    signature_stream_payload.extend_from_slice(&pkcs7);
+
+    // `verify_vba_project_signature_binding` should be able to recover by attempting both legacy
+    // and v3 comparisons when the stream kind is unknown.
+    let binding = verify_vba_project_signature_binding(&project_ole, &signature_stream_payload)
+        .expect("binding");
+    match binding {
+        VbaProjectBindingVerification::BoundVerified(debug) => {
+            assert_eq!(
+                debug.hash_algorithm_oid.as_deref(),
+                Some("1.2.840.113549.2.5")
+            );
+            assert_eq!(debug.hash_algorithm_name.as_deref(), Some("MD5"));
+            assert_eq!(debug.signed_digest.as_deref(), Some(digest.as_slice()));
+            assert_eq!(debug.computed_digest.as_deref(), Some(digest.as_slice()));
+        }
+        other => panic!("expected BoundVerified, got {other:?}"),
+    }
+
+    // Also cover the simpler binding helper (no debug info).
+    assert_eq!(
+        verify_vba_signature_binding(&project_ole, &signature_stream_payload),
+        VbaSignatureBinding::Bound
+    );
+}
