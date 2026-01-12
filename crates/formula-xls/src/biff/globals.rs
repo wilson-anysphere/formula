@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use formula_model::DateSystem;
+use formula_model::{CalculationMode, DateSystem};
 
 use super::{records, strings, BiffVersion};
 
@@ -20,9 +20,15 @@ pub(crate) struct BoundSheetInfo {
 const RECORD_CODEPAGE: u16 = 0x0042;
 const RECORD_BOUNDSHEET: u16 = 0x0085;
 const RECORD_1904: u16 = 0x0022;
+const RECORD_CALCCOUNT: u16 = 0x000C;
+const RECORD_CALCMODE: u16 = 0x000D;
+const RECORD_PRECISION: u16 = 0x000E;
+const RECORD_DELTA: u16 = 0x0010;
+const RECORD_ITERATION: u16 = 0x0011;
 const RECORD_FORMAT_BIFF8: u16 = 0x041E;
 const RECORD_FORMAT2_BIFF5: u16 = 0x001E;
 const RECORD_XF: u16 = 0x00E0;
+const RECORD_SAVERECALC: u16 = 0x005F;
 
 // XF type/protection flags: bit 2 is fStyle in BIFF5/8.
 const XF_FLAG_STYLE: u16 = 0x0004;
@@ -109,6 +115,12 @@ pub(crate) fn parse_biff_bound_sheets(
 #[derive(Debug, Clone)]
 pub(crate) struct BiffWorkbookGlobals {
     pub(crate) date_system: DateSystem,
+    pub(crate) calculation_mode: Option<CalculationMode>,
+    pub(crate) iterative_enabled: Option<bool>,
+    pub(crate) iterative_max_iterations: Option<u32>,
+    pub(crate) iterative_max_change: Option<f64>,
+    pub(crate) full_precision: Option<bool>,
+    pub(crate) calculate_before_save: Option<bool>,
     formats: HashMap<u16, String>,
     xfs: Vec<BiffXf>,
     pub(crate) warnings: Vec<String>,
@@ -118,6 +130,12 @@ impl Default for BiffWorkbookGlobals {
     fn default() -> Self {
         Self {
             date_system: DateSystem::Excel1900,
+            calculation_mode: None,
+            iterative_enabled: None,
+            iterative_max_iterations: None,
+            iterative_max_change: None,
+            full_precision: None,
+            calculate_before_save: None,
             formats: HashMap::new(),
             xfs: Vec::new(),
             warnings: Vec::new(),
@@ -218,6 +236,81 @@ pub(crate) fn parse_biff_workbook_globals(
                     }
                 }
             }
+            // CALCCOUNT [MS-XLS 2.4.40]
+            RECORD_CALCCOUNT => {
+                if data.len() < 2 {
+                    out.warnings.push(format!(
+                        "truncated CALCCOUNT record at offset {}",
+                        record.offset
+                    ));
+                    continue;
+                }
+                let count = u16::from_le_bytes([data[0], data[1]]);
+                out.iterative_max_iterations = Some(count as u32);
+            }
+            // CALCMODE [MS-XLS 2.4.41]
+            RECORD_CALCMODE => {
+                if data.len() < 2 {
+                    out.warnings.push(format!(
+                        "truncated CALCMODE record at offset {}",
+                        record.offset
+                    ));
+                    continue;
+                }
+                let raw = u16::from_le_bytes([data[0], data[1]]);
+                let mode = match raw {
+                    0 => Some(CalculationMode::Manual),
+                    1 => Some(CalculationMode::Automatic),
+                    2 => Some(CalculationMode::AutomaticNoTable),
+                    _ => None,
+                };
+                if let Some(mode) = mode {
+                    out.calculation_mode = Some(mode);
+                } else {
+                    out.warnings.push(format!(
+                        "ignored unknown CALCMODE value {raw} at offset {}",
+                        record.offset
+                    ));
+                }
+            }
+            // PRECISION [MS-XLS 2.4.201]
+            RECORD_PRECISION => {
+                if data.len() < 2 {
+                    out.warnings.push(format!(
+                        "truncated PRECISION record at offset {}",
+                        record.offset
+                    ));
+                    continue;
+                }
+                let flag = u16::from_le_bytes([data[0], data[1]]);
+                // Non-zero means use full precision; zero means "precision as displayed".
+                out.full_precision = Some(flag != 0);
+            }
+            // DELTA [MS-XLS 2.4.76]
+            RECORD_DELTA => {
+                if data.len() < 8 {
+                    out.warnings.push(format!(
+                        "truncated DELTA record at offset {}",
+                        record.offset
+                    ));
+                    continue;
+                }
+                let mut bytes = [0u8; 8];
+                bytes.copy_from_slice(&data[..8]);
+                out.iterative_max_change = Some(f64::from_le_bytes(bytes));
+            }
+            // ITERATION [MS-XLS 2.4.118]
+            RECORD_ITERATION => {
+                if data.len() < 2 {
+                    out.warnings.push(format!(
+                        "truncated ITERATION record at offset {}",
+                        record.offset
+                    ));
+                    continue;
+                }
+                let flag = u16::from_le_bytes([data[0], data[1]]);
+                out.iterative_enabled = Some(flag != 0);
+            }
             // FORMAT / FORMAT2 [MS-XLS 2.4.90]
             RECORD_FORMAT_BIFF8 | RECORD_FORMAT2_BIFF5 => {
                 match parse_biff_format_record_strict(&record, codepage) {
@@ -240,6 +333,18 @@ pub(crate) fn parse_biff_workbook_globals(
                 if let Ok(xf) = parse_biff_xf_record(data) {
                     out.xfs.push(xf);
                 }
+            }
+            // SAVERECALC [MS-XLS 2.4.248]
+            RECORD_SAVERECALC => {
+                if data.len() < 2 {
+                    out.warnings.push(format!(
+                        "truncated SAVERECALC record at offset {}",
+                        record.offset
+                    ));
+                    continue;
+                }
+                let flag = u16::from_le_bytes([data[0], data[1]]);
+                out.calculate_before_save = Some(flag != 0);
             }
             // EOF terminates the workbook global substream.
             records::RECORD_EOF => {

@@ -186,6 +186,24 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
         match biff::parse_biff_workbook_globals(workbook_stream, biff_version, codepage) {
             Ok(mut globals) => {
                 out.date_system = globals.date_system;
+                if let Some(mode) = globals.calculation_mode {
+                    out.calc_settings.calculation_mode = mode;
+                }
+                if let Some(value) = globals.calculate_before_save {
+                    out.calc_settings.calculate_before_save = value;
+                }
+                if let Some(enabled) = globals.iterative_enabled {
+                    out.calc_settings.iterative.enabled = enabled;
+                }
+                if let Some(max_iterations) = globals.iterative_max_iterations {
+                    out.calc_settings.iterative.max_iterations = max_iterations;
+                }
+                if let Some(max_change) = globals.iterative_max_change {
+                    out.calc_settings.iterative.max_change = max_change;
+                }
+                if let Some(full_precision) = globals.full_precision {
+                    out.calc_settings.full_precision = full_precision;
+                }
                 warnings.extend(globals.warnings.drain(..).map(ImportWarning::new));
 
                 let mut cache: HashMap<String, u32> = HashMap::new();

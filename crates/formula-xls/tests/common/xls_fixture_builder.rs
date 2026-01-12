@@ -10,10 +10,16 @@ const RECORD_CODEPAGE: u16 = 0x0042;
 const RECORD_DATEMODE: u16 = 0x0022;
 const RECORD_WINDOW1: u16 = 0x003D;
 const RECORD_FONT: u16 = 0x0031;
+const RECORD_CALCCOUNT: u16 = 0x000C;
+const RECORD_CALCMODE: u16 = 0x000D;
+const RECORD_PRECISION: u16 = 0x000E;
+const RECORD_DELTA: u16 = 0x0010;
+const RECORD_ITERATION: u16 = 0x0011;
 const RECORD_FORMAT: u16 = 0x041E;
 const RECORD_CONTINUE: u16 = 0x003C;
 const RECORD_XF: u16 = 0x00E0;
 const RECORD_BOUNDSHEET: u16 = 0x0085;
+const RECORD_SAVERECALC: u16 = 0x005F;
 const RECORD_WINDOW2: u16 = 0x023E;
 const RECORD_DIMENSIONS: u16 = 0x0200;
 const RECORD_MERGEDCELLS: u16 = 0x00E5;
@@ -188,6 +194,24 @@ pub fn build_hyperlink_fixture_xls() -> Vec<u8> {
         "Links",
         hlink_external_url(0, 0, 0, 0, "https://example.com", "Example", "Example tooltip"),
     );
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture with workbook calculation settings set to non-default values.
+///
+/// This is used to verify BIFF `CALCMODE`/`ITERATION`/`CALCCOUNT`/`DELTA`/`PRECISION`/`SAVERECALC`
+/// records are imported into [`formula_model::Workbook::calc_settings`].
+pub fn build_calc_settings_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_calc_settings_workbook_stream();
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -601,6 +625,61 @@ fn build_hyperlink_workbook_stream(sheet_name: &str, hlink: Vec<u8>) -> Vec<u8> 
 
     globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
         .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+
+    globals.extend_from_slice(&sheet);
+    globals
+}
+
+fn build_calc_settings_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS)); // BOF: workbook globals
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes()); // CODEPAGE: Windows-1252
+
+    // Workbook calculation settings (non-default values).
+    // - CALCMODE: 0 = manual.
+    push_record(&mut globals, RECORD_CALCMODE, &0u16.to_le_bytes());
+    // - ITERATION: 1 = iterative calc enabled.
+    push_record(&mut globals, RECORD_ITERATION, &1u16.to_le_bytes());
+    // - CALCCOUNT: max iterations.
+    push_record(&mut globals, RECORD_CALCCOUNT, &7u16.to_le_bytes());
+    // - DELTA: max change.
+    push_record(&mut globals, RECORD_DELTA, &0.01f64.to_le_bytes());
+    // - PRECISION: 0 = precision as displayed (not full precision).
+    push_record(&mut globals, RECORD_PRECISION, &0u16.to_le_bytes());
+    // - SAVERECALC: 0 = don't recalc before saving.
+    push_record(&mut globals, RECORD_SAVERECALC, &0u16.to_le_bytes());
+
+    // Remaining required/standard globals.
+    push_record(&mut globals, RECORD_DATEMODE, &0u16.to_le_bytes()); // DATEMODE: 1900 system
+    push_record(&mut globals, RECORD_WINDOW1, &window1()); // WINDOW1
+    push_record(&mut globals, RECORD_FONT, &font("Arial")); // FONT
+
+    // XF table. Many readers expect at least 16 style XFs before cell XFs.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+    let xf_general = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "CalcSettings");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    let sheet_offset = globals.len();
+    let sheet = build_calc_settings_sheet_stream(xf_general);
+
+    // Patch BoundSheet offset.
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+
     globals.extend_from_slice(&sheet);
     globals
 }
@@ -627,6 +706,29 @@ fn build_hyperlink_sheet_stream(xf_cell: u16, hlink: Vec<u8>) -> Vec<u8> {
     push_record(&mut sheet, RECORD_HLINK, &hlink);
 
     push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn build_calc_settings_sheet_stream(xf: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1) (A1 only).
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
+
+    // A1: NUMBER record (value doesn't matter; ensures calamine sees a used cell).
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf, 42.0));
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
     sheet
 }
 
