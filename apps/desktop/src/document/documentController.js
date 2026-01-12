@@ -72,7 +72,20 @@ function normalizeFormula(formula) {
 }
 
 /**
- * @typedef {{ frozenRows: number, frozenCols: number }} SheetViewState
+ * @typedef {{
+ *   frozenRows: number,
+ *   frozenCols: number,
+ *   /**
+ *    * Sparse column width overrides (base units, zoom=1), keyed by 0-based column index.
+ *    * Values are interpreted by the UI layer (e.g. shared grid) and are not validated against
+ *    * a default width here.
+ *    *\/
+ *   colWidths?: Record<string, number>,
+ *   /**
+ *    * Sparse row height overrides (base units, zoom=1), keyed by 0-based row index.
+ *    *\/
+ *   rowHeights?: Record<string, number>,
+ * }} SheetViewState
  */
 
 /**
@@ -90,9 +103,50 @@ function normalizeFrozenCount(value) {
  * @returns {SheetViewState}
  */
 function normalizeSheetViewState(view) {
+  const normalizeAxisSize = (value) => {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return null;
+    if (num <= 0) return null;
+    return num;
+  };
+
+  const normalizeAxisOverrides = (raw) => {
+    if (!raw) return null;
+
+    /** @type {Record<string, number>} */
+    const out = {};
+
+    if (Array.isArray(raw)) {
+      for (const entry of raw) {
+        const index = Array.isArray(entry) ? entry[0] : entry?.index;
+        const size = Array.isArray(entry) ? entry[1] : entry?.size;
+        const idx = Number(index);
+        if (!Number.isInteger(idx) || idx < 0) continue;
+        const normalized = normalizeAxisSize(size);
+        if (normalized == null) continue;
+        out[String(idx)] = normalized;
+      }
+    } else if (typeof raw === "object") {
+      for (const [key, value] of Object.entries(raw)) {
+        const idx = Number(key);
+        if (!Number.isInteger(idx) || idx < 0) continue;
+        const normalized = normalizeAxisSize(value);
+        if (normalized == null) continue;
+        out[String(idx)] = normalized;
+      }
+    }
+
+    return Object.keys(out).length === 0 ? null : out;
+  };
+
+  const colWidths = normalizeAxisOverrides(view?.colWidths);
+  const rowHeights = normalizeAxisOverrides(view?.rowHeights);
+
   return {
     frozenRows: normalizeFrozenCount(view?.frozenRows),
     frozenCols: normalizeFrozenCount(view?.frozenCols),
+    ...(colWidths ? { colWidths } : {}),
+    ...(rowHeights ? { rowHeights } : {}),
   };
 }
 
@@ -108,7 +162,11 @@ function emptySheetViewState() {
  * @returns {SheetViewState}
  */
 function cloneSheetViewState(view) {
-  return { frozenRows: view.frozenRows, frozenCols: view.frozenCols };
+  /** @type {SheetViewState} */
+  const next = { frozenRows: view.frozenRows, frozenCols: view.frozenCols };
+  if (view.colWidths) next.colWidths = { ...view.colWidths };
+  if (view.rowHeights) next.rowHeights = { ...view.rowHeights };
+  return next;
 }
 
 /**
@@ -118,7 +176,30 @@ function cloneSheetViewState(view) {
  */
 function sheetViewStateEquals(a, b) {
   if (a === b) return true;
-  return a.frozenRows === b.frozenRows && a.frozenCols === b.frozenCols;
+
+  const axisEquals = (left, right) => {
+    if (left === right) return true;
+    const leftKeys = left ? Object.keys(left) : [];
+    const rightKeys = right ? Object.keys(right) : [];
+    if (leftKeys.length !== rightKeys.length) return false;
+    leftKeys.sort((x, y) => Number(x) - Number(y));
+    rightKeys.sort((x, y) => Number(x) - Number(y));
+    for (let i = 0; i < leftKeys.length; i++) {
+      const key = leftKeys[i];
+      if (key !== rightKeys[i]) return false;
+      const lv = left[key];
+      const rv = right[key];
+      if (Math.abs(lv - rv) > 1e-6) return false;
+    }
+    return true;
+  };
+
+  return (
+    a.frozenRows === b.frozenRows &&
+    a.frozenCols === b.frozenCols &&
+    axisEquals(a.colWidths, b.colWidths) &&
+    axisEquals(a.rowHeights, b.rowHeights)
+  );
 }
 
 /**
@@ -796,6 +877,92 @@ export class DocumentController {
   }
 
   /**
+   * Set a single column width override for a sheet (base units, zoom=1).
+   *
+   * @param {string} sheetId
+   * @param {number} col
+   * @param {number | null} width
+   * @param {{ label?: string, mergeKey?: string }} [options]
+   */
+  setColWidth(sheetId, col, width, options = {}) {
+    const colIdx = Number(col);
+    if (!Number.isInteger(colIdx) || colIdx < 0) return;
+
+    const before = this.model.getSheetView(sheetId);
+    const after = cloneSheetViewState(before);
+
+    const nextWidth = width == null ? null : Number(width);
+    const validWidth = nextWidth != null && Number.isFinite(nextWidth) && nextWidth > 0 ? nextWidth : null;
+
+    if (validWidth == null) {
+      if (after.colWidths) {
+        delete after.colWidths[String(colIdx)];
+        if (Object.keys(after.colWidths).length === 0) delete after.colWidths;
+      }
+    } else {
+      if (!after.colWidths) after.colWidths = {};
+      after.colWidths[String(colIdx)] = validWidth;
+    }
+
+    if (sheetViewStateEquals(before, after)) return;
+    this.#applyUserSheetViewDeltas([{ sheetId, before, after: normalizeSheetViewState(after) }], options);
+  }
+
+  /**
+   * Reset a column width to the default by removing any override.
+   *
+   * @param {string} sheetId
+   * @param {number} col
+   * @param {{ label?: string, mergeKey?: string }} [options]
+   */
+  resetColWidth(sheetId, col, options = {}) {
+    this.setColWidth(sheetId, col, null, options);
+  }
+
+  /**
+   * Set a single row height override for a sheet (base units, zoom=1).
+   *
+   * @param {string} sheetId
+   * @param {number} row
+   * @param {number | null} height
+   * @param {{ label?: string, mergeKey?: string }} [options]
+   */
+  setRowHeight(sheetId, row, height, options = {}) {
+    const rowIdx = Number(row);
+    if (!Number.isInteger(rowIdx) || rowIdx < 0) return;
+
+    const before = this.model.getSheetView(sheetId);
+    const after = cloneSheetViewState(before);
+
+    const nextHeight = height == null ? null : Number(height);
+    const validHeight = nextHeight != null && Number.isFinite(nextHeight) && nextHeight > 0 ? nextHeight : null;
+
+    if (validHeight == null) {
+      if (after.rowHeights) {
+        delete after.rowHeights[String(rowIdx)];
+        if (Object.keys(after.rowHeights).length === 0) delete after.rowHeights;
+      }
+    } else {
+      if (!after.rowHeights) after.rowHeights = {};
+      after.rowHeights[String(rowIdx)] = validHeight;
+    }
+
+    if (sheetViewStateEquals(before, after)) return;
+    this.#applyUserSheetViewDeltas([{ sheetId, before, after: normalizeSheetViewState(after) }], options);
+  }
+
+  /**
+   * Reset a row height to the default by removing any override.
+   *
+   * @param {string} sheetId
+   * @param {number} row
+   * @param {{ label?: string, mergeKey?: string }} [options]
+   */
+  resetRowHeight(sheetId, row, options = {}) {
+    this.setRowHeight(sheetId, row, null, options);
+  }
+
+  /**
    * Export a single sheet in the `SheetState` shape expected by the versioning `semanticDiff`.
    *
    * @param {string} sheetId
@@ -841,7 +1008,11 @@ export class DocumentController {
         };
       });
       cells.sort((a, b) => (a.row - b.row === 0 ? a.col - b.col : a.row - b.row));
-      return { id, frozenRows: view.frozenRows, frozenCols: view.frozenCols, cells };
+      /** @type {any} */
+      const out = { id, frozenRows: view.frozenRows, frozenCols: view.frozenCols, cells };
+      if (view.colWidths && Object.keys(view.colWidths).length > 0) out.colWidths = view.colWidths;
+      if (view.rowHeights && Object.keys(view.rowHeights).length > 0) out.rowHeights = view.rowHeights;
+      return out;
     });
 
     return encodeUtf8(JSON.stringify({ schemaVersion: 1, sheets }));
@@ -866,7 +1037,12 @@ export class DocumentController {
     for (const sheet of sheets) {
       if (!sheet?.id) continue;
       const cellList = Array.isArray(sheet.cells) ? sheet.cells : [];
-      const view = normalizeSheetViewState({ frozenRows: sheet?.frozenRows, frozenCols: sheet?.frozenCols });
+      const view = normalizeSheetViewState({
+        frozenRows: sheet?.frozenRows,
+        frozenCols: sheet?.frozenCols,
+        colWidths: sheet?.colWidths,
+        rowHeights: sheet?.rowHeights,
+      });
       /** @type {Map<string, CellState>} */
       const cellMap = new Map();
       for (const entry of cellList) {

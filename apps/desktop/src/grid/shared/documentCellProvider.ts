@@ -188,6 +188,13 @@ export class DocumentCellProvider implements CellProvider {
       this.unsubscribeDoc = this.options.document.on("change", (payload: any) => {
         const deltas = Array.isArray(payload?.deltas) ? payload.deltas : [];
         if (deltas.length === 0) {
+          // Sheet view deltas (frozen panes, row/col sizes, etc.) do not affect cell contents.
+          // Avoid evicting the provider cache in those cases; the renderer will be updated by
+          // the view sync code (e.g. `syncFrozenPanes` / shared grid axis sync).
+          const sheetViewDeltas = Array.isArray(payload?.sheetViewDeltas) ? payload.sheetViewDeltas : [];
+          if (sheetViewDeltas.length > 0 && payload?.recalc !== true) {
+            return;
+          }
           this.invalidateAll();
           return;
         }

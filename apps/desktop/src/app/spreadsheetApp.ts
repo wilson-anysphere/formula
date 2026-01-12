@@ -53,7 +53,7 @@ import { colToName as colToNameA1, fromA1 as fromA1A1 } from "@formula/spreadshe
 import { shiftA1References } from "@formula/spreadsheet-frontend";
 import { InlineEditController, type InlineEditLLMClient } from "../ai/inline-edit/inlineEditController";
 import type { AIAuditStore } from "../../../../packages/ai-audit/src/store.js";
-import type { CellRange as GridCellRange } from "@formula/grid";
+import type { CellRange as GridCellRange, GridAxisSizeChange } from "@formula/grid";
 import { resolveDesktopGridMode, type DesktopGridMode } from "../grid/shared/desktopGridMode.js";
 import { DocumentCellProvider } from "../grid/shared/documentCellProvider.js";
 import { DesktopSharedGrid } from "../grid/shared/desktopSharedGrid.js";
@@ -275,6 +275,8 @@ export class SpreadsheetApp {
   private sharedProvider: DocumentCellProvider | null = null;
   private readonly commentMeta = new Map<string, { resolved: boolean }>();
   private sharedGridSelectionSyncInProgress = false;
+  private readonly sharedGridAxisCols = new Set<number>();
+  private readonly sharedGridAxisRows = new Set<number>();
 
   private wasmEngine: EngineClient | null = null;
   private wasmSyncSuspended = false;
@@ -707,6 +709,9 @@ export class SpreadsheetApp {
           onRequestCellEdit: (request) => {
             this.openEditorFromSharedGrid(request);
           },
+          onAxisSizeChange: (change) => {
+            this.onSharedGridAxisSizeChange(change);
+          },
           onRangeSelectionStart: (range) => this.onSharedRangeSelectionStart(range),
           onRangeSelectionChange: (range) => this.onSharedRangeSelectionChange(range),
           onRangeSelectionEnd: () => this.onSharedRangeSelectionEnd()
@@ -1091,6 +1096,7 @@ export class SpreadsheetApp {
       const headerRows = 1;
       const headerCols = 1;
       this.sharedGrid.renderer.setFrozen(headerRows + frozenRows, headerCols + frozenCols);
+      this.syncSharedGridAxisSizesFromDocument();
       // Force scrollbars + overlay layers to re-measure frozen extents.
       this.sharedGrid.scrollTo(this.scrollX, this.scrollY);
       return;
@@ -1099,6 +1105,62 @@ export class SpreadsheetApp {
     this.clampScroll();
     this.syncScrollbars();
     this.refresh();
+  }
+
+  private syncSharedGridAxisSizesFromDocument(): void {
+    if (!this.sharedGrid) return;
+
+    const view = this.document.getSheetView(this.sheetId) as {
+      colWidths?: Record<string, number>;
+      rowHeights?: Record<string, number>;
+    } | null;
+
+    const zoom = this.sharedGrid.renderer.getZoom();
+    const headerRows = this.sharedHeaderRows();
+    const headerCols = this.sharedHeaderCols();
+
+    const nextCols = new Map<number, number>();
+    for (const [key, value] of Object.entries(view?.colWidths ?? {})) {
+      const col = Number(key);
+      if (!Number.isInteger(col) || col < 0) continue;
+      const size = Number(value);
+      if (!Number.isFinite(size) || size <= 0) continue;
+      nextCols.set(col, size);
+    }
+
+    const nextRows = new Map<number, number>();
+    for (const [key, value] of Object.entries(view?.rowHeights ?? {})) {
+      const row = Number(key);
+      if (!Number.isInteger(row) || row < 0) continue;
+      const size = Number(value);
+      if (!Number.isFinite(size) || size <= 0) continue;
+      nextRows.set(row, size);
+    }
+
+    const allCols = new Set<number>();
+    for (const col of this.sharedGridAxisCols) allCols.add(col);
+    for (const col of nextCols.keys()) allCols.add(col);
+    for (const col of allCols) {
+      const base = nextCols.get(col);
+      const gridCol = col + headerCols;
+      if (base === undefined) this.sharedGrid.renderer.resetColWidth(gridCol);
+      else this.sharedGrid.renderer.setColWidth(gridCol, base * zoom);
+    }
+
+    const allRows = new Set<number>();
+    for (const row of this.sharedGridAxisRows) allRows.add(row);
+    for (const row of nextRows.keys()) allRows.add(row);
+    for (const row of allRows) {
+      const base = nextRows.get(row);
+      const gridRow = row + headerRows;
+      if (base === undefined) this.sharedGrid.renderer.resetRowHeight(gridRow);
+      else this.sharedGrid.renderer.setRowHeight(gridRow, base * zoom);
+    }
+
+    this.sharedGridAxisCols.clear();
+    for (const col of nextCols.keys()) this.sharedGridAxisCols.add(col);
+    this.sharedGridAxisRows.clear();
+    for (const row of nextRows.keys()) this.sharedGridAxisRows.add(row);
   }
 
   freezePanes(): void {
@@ -1318,6 +1380,7 @@ export class SpreadsheetApp {
       const headerRows = 1;
       const headerCols = 1;
       this.sharedGrid.renderer.setFrozen(headerRows + frozenRows, headerCols + frozenCols);
+      this.syncSharedGridAxisSizesFromDocument();
       this.sharedGrid.scrollTo(this.scrollX, this.scrollY);
     } else {
       this.clampScroll();
@@ -1353,6 +1416,7 @@ export class SpreadsheetApp {
         const headerRows = 1;
         const headerCols = 1;
         this.sharedGrid.renderer.setFrozen(headerRows + frozenRows, headerCols + frozenCols);
+        this.syncSharedGridAxisSizesFromDocument();
         this.sharedGrid.scrollTo(this.scrollX, this.scrollY);
       } else {
         this.clampScroll();
@@ -1533,6 +1597,41 @@ export class SpreadsheetApp {
     if (!rect) return;
     const initialValue = request.initialKey ?? this.getCellInputText(docCell);
     this.editor.open(docCell, rect, initialValue, { cursor: "end" });
+  }
+
+  private onSharedGridAxisSizeChange(change: GridAxisSizeChange): void {
+    if (!this.sharedGrid) return;
+
+    const headerRows = this.sharedHeaderRows();
+    const headerCols = this.sharedHeaderCols();
+    const baseSize = change.size / change.zoom;
+    const baseDefault = change.defaultSize / change.zoom;
+    const isDefault = Math.abs(baseSize - baseDefault) < 1e-6;
+
+    if (change.kind === "col") {
+      const docCol = change.index - headerCols;
+      if (docCol < 0) return;
+      const label = change.source === "autoFit" ? "Autofit Column Width" : "Resize Column";
+      if (isDefault) {
+        this.document.resetColWidth(this.sheetId, docCol, { label });
+        this.sharedGridAxisCols.delete(docCol);
+      } else {
+        this.document.setColWidth(this.sheetId, docCol, baseSize, { label });
+        this.sharedGridAxisCols.add(docCol);
+      }
+      return;
+    }
+
+    const docRow = change.index - headerRows;
+    if (docRow < 0) return;
+    const label = change.source === "autoFit" ? "Autofit Row Height" : "Resize Row";
+    if (isDefault) {
+      this.document.resetRowHeight(this.sheetId, docRow, { label });
+      this.sharedGridAxisRows.delete(docRow);
+    } else {
+      this.document.setRowHeight(this.sheetId, docRow, baseSize, { label });
+      this.sharedGridAxisRows.add(docRow);
+    }
   }
 
   private syncSharedGridInteractionMode(): void {

@@ -1,4 +1,4 @@
-import type { CellProvider, CellRange, GridPerfStats, GridViewportState, ScrollToCellAlign } from "@formula/grid";
+import type { CellProvider, CellRange, GridAxisSizeChange, GridPerfStats, GridViewportState, ScrollToCellAlign } from "@formula/grid";
 import { CanvasGridRenderer, computeScrollbarThumb, resolveGridThemeFromCssVars } from "@formula/grid";
 
 export type DesktopGridInteractionMode = "default" | "rangeSelection";
@@ -8,6 +8,7 @@ export interface DesktopSharedGridCallbacks {
   onSelectionChange?: (selection: { row: number; col: number } | null) => void;
   onSelectionRangeChange?: (range: CellRange | null) => void;
   onRequestCellEdit?: (request: { row: number; col: number; initialKey?: string }) => void;
+  onAxisSizeChange?: (change: GridAxisSizeChange) => void;
 
   onRangeSelectionStart?: (range: CellRange) => void;
   onRangeSelectionChange?: (range: CellRange) => void;
@@ -1055,6 +1056,7 @@ export class DesktopSharedGrid {
 
     const endDrag = (event: PointerEvent) => {
       if (this.resizePointerId != null && event.pointerId === this.resizePointerId) {
+        const drag = this.resizeDrag;
         this.resizePointerId = null;
         this.resizeDrag = null;
         selectionCanvas.style.cursor = "default";
@@ -1062,6 +1064,22 @@ export class DesktopSharedGrid {
           selectionCanvas.releasePointerCapture?.(event.pointerId);
         } catch {
           // Ignore.
+        }
+
+        if (drag) {
+          const endSize = drag.kind === "col" ? this.renderer.getColWidth(drag.index) : this.renderer.getRowHeight(drag.index);
+          const defaultSize = drag.kind === "col" ? this.renderer.scroll.cols.defaultSize : this.renderer.scroll.rows.defaultSize;
+          if (endSize !== drag.startSize) {
+            this.callbacks.onAxisSizeChange?.({
+              kind: drag.kind,
+              index: drag.index,
+              size: endSize,
+              previousSize: drag.startSize,
+              defaultSize,
+              zoom: this.renderer.getZoom(),
+              source: "resize"
+            });
+          }
         }
       }
 
@@ -1107,10 +1125,24 @@ export class DesktopSharedGrid {
         const hit = this.getResizeHit(point.x, point.y);
         if (hit) {
           event.preventDefault();
-          if (hit.kind === "col") renderer.autoFitCol(hit.index, { maxWidth: 500 });
-          else renderer.autoFitRow(hit.index, { maxHeight: 500 });
+          const prevSize = hit.kind === "col" ? renderer.getColWidth(hit.index) : renderer.getRowHeight(hit.index);
+          const defaultSize = hit.kind === "col" ? renderer.scroll.cols.defaultSize : renderer.scroll.rows.defaultSize;
+          const nextSize =
+            hit.kind === "col" ? renderer.autoFitCol(hit.index, { maxWidth: 500 }) : renderer.autoFitRow(hit.index, { maxHeight: 500 });
           this.syncScrollbars();
           this.emitScroll();
+
+          if (nextSize !== prevSize) {
+            this.callbacks.onAxisSizeChange?.({
+              kind: hit.kind,
+              index: hit.index,
+              size: nextSize,
+              previousSize: prevSize,
+              defaultSize,
+              zoom: renderer.getZoom(),
+              source: "autoFit"
+            });
+          }
           return;
         }
       }

@@ -155,6 +155,37 @@ test("setFrozen is undoable", () => {
   assert.deepEqual(doc.getSheetView("Sheet1"), { frozenRows: 2, frozenCols: 1 });
 });
 
+test("setColWidth/setRowHeight are undoable", () => {
+  const doc = new DocumentController();
+
+  doc.setColWidth("Sheet1", 0, 120, { label: "Resize Column" });
+  doc.setRowHeight("Sheet1", 1, 40, { label: "Resize Row" });
+
+  assert.deepEqual(doc.getSheetView("Sheet1"), {
+    frozenRows: 0,
+    frozenCols: 0,
+    colWidths: { "0": 120 },
+    rowHeights: { "1": 40 },
+  });
+
+  doc.undo();
+  assert.deepEqual(doc.getSheetView("Sheet1"), { frozenRows: 0, frozenCols: 0, colWidths: { "0": 120 } });
+
+  doc.undo();
+  assert.deepEqual(doc.getSheetView("Sheet1"), { frozenRows: 0, frozenCols: 0 });
+
+  doc.redo();
+  assert.deepEqual(doc.getSheetView("Sheet1"), { frozenRows: 0, frozenCols: 0, colWidths: { "0": 120 } });
+
+  doc.redo();
+  assert.deepEqual(doc.getSheetView("Sheet1"), {
+    frozenRows: 0,
+    frozenCols: 0,
+    colWidths: { "0": 120 },
+    rowHeights: { "1": 40 },
+  });
+});
+
 test("mergeKey collapses consecutive edits into one history entry, but saving stops merging", () => {
   const doc = new DocumentController({ mergeWindowMs: 10_000 });
 
