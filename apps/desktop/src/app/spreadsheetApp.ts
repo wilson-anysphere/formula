@@ -1885,7 +1885,7 @@ export class SpreadsheetApp {
     this.commentTooltip.textContent = preview;
     this.commentTooltip.style.left = `${x + 12}px`;
     this.commentTooltip.style.top = `${y + 12}px`;
-    this.commentTooltip.style.display = "block";
+    this.commentTooltip.classList.add("comment-tooltip--visible");
   }
 
   private goTo(reference: string): void {
@@ -2003,7 +2003,7 @@ export class SpreadsheetApp {
 
   toggleCommentsPanel(): void {
     this.commentsPanelVisible = !this.commentsPanelVisible;
-    this.commentsPanel.style.display = this.commentsPanelVisible ? "flex" : "none";
+    this.commentsPanel.classList.toggle("comments-panel--visible", this.commentsPanelVisible);
     if (this.commentsPanelVisible) {
       this.renderCommentsPanel();
       this.newCommentInput.focus();
@@ -2140,7 +2140,7 @@ export class SpreadsheetApp {
   }
 
   private hideCommentTooltip(): void {
-    this.commentTooltip.style.display = "none";
+    this.commentTooltip.classList.remove("comment-tooltip--visible");
   }
 
   private reindexCommentCells(): void {
@@ -4524,7 +4524,7 @@ export class SpreadsheetApp {
     this.commentTooltip.textContent = preview;
     this.commentTooltip.style.left = `${x + 12}px`;
     this.commentTooltip.style.top = `${y + 12}px`;
-    this.commentTooltip.style.display = "block";
+    this.commentTooltip.classList.add("comment-tooltip--visible");
   }
 
   private onPointerUp(e: PointerEvent): void {

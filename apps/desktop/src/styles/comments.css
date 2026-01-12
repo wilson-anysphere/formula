@@ -21,6 +21,10 @@
   z-index: 20;
 }
 
+.comments-panel--visible {
+  display: flex;
+}
+
 .comments-panel__header {
   display: flex;
   align-items: center;
@@ -165,3 +169,6 @@
   z-index: 30;
 }
 
+.comment-tooltip--visible {
+  display: block;
+}
