@@ -22,6 +22,10 @@ fn bahttext_examples() {
         sheet.eval("=BAHTTEXT(11.25)"),
         Value::Text("สิบเอ็ดบาทยี่สิบห้าสตางค์".to_string())
     );
+    assert_eq!(
+        sheet.eval("=BAHTTEXT(-11.25)"),
+        Value::Text("ลบสิบเอ็ดบาทยี่สิบห้าสตางค์".to_string())
+    );
 }
 
 #[test]
@@ -32,8 +36,16 @@ fn thainumstring_and_thainumsound_examples() {
         Value::Text("๑๒๓๔.๕".to_string())
     );
     assert_eq!(
+        sheet.eval("=THAINUMSTRING(-1234.5)"),
+        Value::Text("-๑๒๓๔.๕".to_string())
+    );
+    assert_eq!(
         sheet.eval("=THAINUMSOUND(1234.5)"),
         Value::Text("หนึ่งพันสองร้อยสามสิบสี่จุดห้า".to_string())
+    );
+    assert_eq!(
+        sheet.eval("=THAINUMSOUND(-1234.5)"),
+        Value::Text("ลบหนึ่งพันสองร้อยสามสิบสี่จุดห้า".to_string())
     );
 }
 
@@ -52,6 +64,18 @@ fn thai_date_functions() {
         sheet.eval("=THAIDAYOFWEEK(DATE(2020,1,1))"),
         Value::Text("วันพุธ".to_string())
     );
+    assert_eq!(
+        sheet.eval("=THAIDAYOFWEEK(DATE(2020,1,5))"),
+        Value::Text("วันอาทิตย์".to_string())
+    );
+    assert_eq!(
+        sheet.eval("=THAIMONTHOFYEAR(DATE(2020,12,31))"),
+        Value::Text("ธันวาคม".to_string())
+    );
+    assert_eq!(
+        sheet.eval("=THAIYEAR(DATE(1900,1,1))"),
+        Value::Number(2443.0)
+    );
 }
 
 #[test]
@@ -67,7 +91,9 @@ fn roundbaht_examples() {
 fn isthaidigit_and_thaidigit_roundtrip() {
     let mut sheet = TestSheet::new();
     assert_eq!(sheet.eval("=THAIDIGIT(\"123\")"), Value::Text("๑๒๓".to_string()));
+    assert_eq!(sheet.eval("=THAIDIGIT(1234)"), Value::Text("๑๒๓๔".to_string()));
     assert_eq!(sheet.eval("=ISTHAIDIGIT(THAIDIGIT(\"123\"))"), Value::Bool(true));
+    assert_eq!(sheet.eval("=ISTHAIDIGIT(\"๑๒๓\")"), Value::Bool(true));
     assert_eq!(sheet.eval("=ISTHAIDIGIT(\"123\")"), Value::Bool(false));
 }
 
