@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use formula_model::DefinedNameScope;
+use formula_model::{DefinedNameScope, XLNM_PRINT_AREA};
 
 mod common;
 
@@ -107,6 +107,20 @@ fn imports_biff_defined_names_with_scope_and_3d_refs() {
         .expect("MissingArgName missing");
     assert_eq!(miss.scope, DefinedNameScope::Workbook);
     assert_eq!(miss.refers_to, "IF(,1,2)");
+
+    let print_area = result
+        .workbook
+        .defined_names
+        .iter()
+        .find(|n| n.name == XLNM_PRINT_AREA)
+        .expect("Print_Area missing");
+    assert_eq!(print_area.scope, DefinedNameScope::Sheet(sheet1_id));
+    assert!(print_area.hidden);
+    assert_eq!(
+        print_area.refers_to,
+        "Sheet1!$A$1:$B$2,Sheet1!$D$4:$E$5"
+    );
+    assert_eq!(print_area.xlsx_local_sheet_id, Some(0));
 }
 
 #[test]

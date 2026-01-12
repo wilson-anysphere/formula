@@ -1469,7 +1469,8 @@ fn build_defined_names_workbook_stream() -> Vec<u8> {
     );
 
     // 7) Union inside a function argument must be parenthesized: UnionFunc -> SUM((Sheet1!$A$1,Sheet1!$B$1))
-    let mut union_func_rgce = [ptg_ref3d(0, 0, 0), ptg_ref3d(0, 0, 1), vec![0x10u8]].concat();
+    let mut union_func_rgce =
+        [ptg_ref3d(0, 0, 0), ptg_ref3d(0, 0, 1), vec![0x10u8]].concat();
     union_func_rgce.extend_from_slice(&[0x22u8, 0x01, 0x04, 0x00]); // SUM
     push_record(
         &mut globals,
@@ -1488,6 +1489,19 @@ fn build_defined_names_workbook_stream() -> Vec<u8> {
         &mut globals,
         RECORD_NAME,
         &name_record("MissingArgName", 0, false, None, &miss_rgce),
+    );
+
+    // 9) Built-in Print_Area (sheet-scoped, hidden) -> Sheet1!$A$1:$B$2,Sheet1!$D$4:$E$5
+    let print_area_rgce = [
+        ptg_area3d(0, 0, 1, 0, 1),
+        ptg_area3d(0, 3, 4, 3, 4),
+        vec![0x10u8],
+    ]
+    .concat();
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &builtin_name_record(true, 1, 0x06, &print_area_rgce),
     );
 
     push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
