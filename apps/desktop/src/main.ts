@@ -1656,33 +1656,6 @@ function canRunGridFormattingShortcuts(event: KeyboardEvent): boolean {
   return true;
 }
 
-function canRunAiPanelShortcut(event: KeyboardEvent): boolean {
-  if (event.defaultPrevented) return false;
-  if (isSpreadsheetEditing()) return false;
-  if (isTextInputTarget(event.target)) return false;
-  return true;
-}
-
-// Global shortcut: Meta+I toggles the AI chat panel (Cmd+I on macOS).
-// Install in the capture phase so we can preempt SpreadsheetApp's Ctrl+I formatting shortcut.
-window.addEventListener(
-  "keydown",
-  (e) => {
-    if (!canRunAiPanelShortcut(e)) return;
-    if (e.repeat) return;
-    if (!e.metaKey) return;
-    if (e.altKey || e.shiftKey) return;
-
-    const keyLower = (e.key ?? "").toLowerCase();
-    if (keyLower !== "i") return;
-
-    e.preventDefault();
-    e.stopPropagation();
-    toggleDockPanel(PanelIds.AI_CHAT);
-  },
-  { capture: true },
-);
-
 window.addEventListener("keydown", (e) => {
   if (!canRunGridFormattingShortcuts(e)) return;
   if (e.repeat) return;
