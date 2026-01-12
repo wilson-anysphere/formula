@@ -619,7 +619,7 @@ fn parse_txo_text_biff5(
         .map(|v| u16::from_le_bytes([v[0], v[1]]) as usize)
         .unwrap_or(0);
     let total_continue_bytes: usize = continues.iter().map(|frag| frag.len()).sum();
-    let text_continue_bytes = total_continue_bytes.saturating_sub(cb_runs);
+    let mut text_continue_bytes = total_continue_bytes.saturating_sub(cb_runs);
     if cb_runs > total_continue_bytes {
         push_warning(
             warnings,
@@ -628,6 +628,10 @@ fn parse_txo_text_biff5(
                 record.offset
             ),
         );
+        // Best-effort: if the header's `cbRuns` is corrupt and exceeds the observed continuation
+        // payload, ignore it and fall back to heuristics (`looks_like_txo_formatting_runs`) to stop
+        // before formatting-run bytes.
+        text_continue_bytes = total_continue_bytes;
     }
 
     // Compute capacities using only the text-bytes region (excluding the trailing cbRuns bytes).
@@ -825,7 +829,7 @@ fn parse_txo_text_biff8(
         .map(|v| u16::from_le_bytes([v[0], v[1]]) as usize)
         .unwrap_or(0);
     let total_continue_bytes: usize = continues.iter().map(|frag| frag.len()).sum();
-    let text_continue_bytes = total_continue_bytes.saturating_sub(cb_runs);
+    let mut text_continue_bytes = total_continue_bytes.saturating_sub(cb_runs);
     if cb_runs > total_continue_bytes {
         push_warning(
             warnings,
@@ -834,6 +838,10 @@ fn parse_txo_text_biff8(
                 record.offset
             ),
         );
+        // Best-effort: if the header's `cbRuns` is corrupt and exceeds the observed continuation
+        // payload, ignore it and fall back to heuristics (`looks_like_txo_formatting_runs`) to stop
+        // before formatting-run bytes.
+        text_continue_bytes = total_continue_bytes;
     }
 
     let max_chars = estimate_max_chars_with_byte_limit(continues, text_continue_bytes);
@@ -1619,6 +1627,33 @@ mod tests {
     }
 
     #[test]
+    fn parses_biff8_txo_text_when_cb_runs_exceeds_continuation_payload() {
+        // Some corrupt files contain a `cbRuns` value that exceeds the actual continuation payload.
+        // Best-effort parsing should ignore the invalid `cbRuns` (rather than treating all bytes as
+        // formatting runs) so we can still recover the text.
+        let stream = [
+            bof(),
+            note(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            txo_with_cch_text_and_cb_runs(5, 1000),
+            continue_text_compressed_bytes(b"Hello"),
+            // Formatting runs CONTINUE payload (dummy bytes).
+            record(records::RECORD_CONTINUE, &[0u8; 4]),
+            eof(),
+        ]
+        .concat();
+
+        let ParsedSheetNotes { notes, warnings } =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].text, "Hello");
+        assert!(
+            warnings.iter().any(|w| w.contains("cbRuns (1000)")),
+            "expected cbRuns warning; warnings={warnings:?}"
+        );
+    }
+
+    #[test]
     fn parses_biff5_txo_text_from_continue_without_flags_using_codepage() {
         // Include a non-ASCII byte in the BIFF5 text (0xC0 => Cyrillic 'А' in Windows-1251) to
         // ensure codepage decoding is applied.
@@ -1646,6 +1681,31 @@ mod tests {
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].author, "Alice");
         assert_eq!(notes[0].text, "Hi А");
+    }
+
+    #[test]
+    fn parses_biff5_txo_text_when_cb_runs_exceeds_continuation_payload() {
+        let stream = [
+            bof_biff5(),
+            note_biff5(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            txo_with_cch_text_and_cb_runs(5, 1000),
+            continue_text_biff5(b"Hello"),
+            // Formatting CONTINUE payload (dummy bytes).
+            continue_text_biff5(&[0u8; 4]),
+            eof(),
+        ]
+        .concat();
+
+        let ParsedSheetNotes { notes, warnings } =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff5, 1252).expect("parse");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].author, "Alice");
+        assert_eq!(notes[0].text, "Hello");
+        assert!(
+            warnings.iter().any(|w| w.contains("cbRuns (1000)")),
+            "expected cbRuns warning; warnings={warnings:?}"
+        );
     }
 
     #[test]
