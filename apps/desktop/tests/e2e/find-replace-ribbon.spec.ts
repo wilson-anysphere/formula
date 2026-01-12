@@ -16,7 +16,7 @@ test.describe("ribbon Find & Select", () => {
 
     // --- Find ---
     await findSelect.click();
-    await page.getByTestId("ribbon-find").click();
+    await page.getByTestId("ribbon-root").getByTestId("ribbon-find").click();
     const findDialog = page.locator("dialog.find-replace-dialog[open]");
     await expect(findDialog).toBeVisible();
     await expect(findDialog.locator("input").first()).toBeFocused();
@@ -25,7 +25,7 @@ test.describe("ribbon Find & Select", () => {
 
     // --- Replace ---
     await findSelect.click();
-    await page.getByTestId("ribbon-replace").click();
+    await page.getByTestId("ribbon-root").getByTestId("ribbon-replace").click();
     const replaceDialog = page.locator("dialog.find-replace-dialog[open]");
     await expect(replaceDialog).toBeVisible();
     await expect(replaceDialog.locator('input[placeholder="Replace with…"]')).toBeVisible();
@@ -35,7 +35,7 @@ test.describe("ribbon Find & Select", () => {
 
     // --- Go To ---
     await findSelect.click();
-    await page.getByTestId("ribbon-goto").click();
+    await page.getByTestId("ribbon-root").getByTestId("ribbon-goto").click();
     const goToDialog = page.locator("dialog.goto-dialog[open]");
     await expect(goToDialog).toBeVisible();
     await expect(goToDialog.locator("input").first()).toBeFocused();

@@ -106,7 +106,7 @@ test.describe("dockable panels layout persistence", () => {
     await waitForDesktopReady(page);
 
     await page.getByRole("tab", { name: "View", exact: true }).click();
-    await page.getByTestId("open-version-history-panel").click();
+    await page.getByTestId("ribbon-root").getByTestId("open-version-history-panel").click();
     await expect(
       page.locator(
         "[data-testid='dock-left'] [data-testid='panel-versionHistory'], [data-testid='dock-right'] [data-testid='panel-versionHistory'], [data-testid='dock-bottom'] [data-testid='panel-versionHistory']",
@@ -121,7 +121,7 @@ test.describe("dockable panels layout persistence", () => {
     await waitForDesktopReady(page);
 
     await page.getByRole("tab", { name: "View", exact: true }).click();
-    await page.getByTestId("open-branch-manager-panel").click();
+    await page.getByTestId("ribbon-root").getByTestId("open-branch-manager-panel").click();
     await expect(
       page.locator(
         "[data-testid='dock-left'] [data-testid='panel-branchManager'], [data-testid='dock-right'] [data-testid='panel-branchManager'], [data-testid='dock-bottom'] [data-testid='panel-branchManager']",

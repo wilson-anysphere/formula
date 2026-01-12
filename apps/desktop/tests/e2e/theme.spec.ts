@@ -8,7 +8,7 @@ test.describe("theme selector", () => {
 
     await page.getByRole("tab", { name: "View", exact: true }).click();
 
-    const themeDropdown = page.getByTestId("theme-selector");
+    const themeDropdown = page.getByTestId("ribbon-root").getByTestId("theme-selector");
     await expect(themeDropdown).toBeVisible();
     await themeDropdown.click();
 

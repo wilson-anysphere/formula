@@ -43,7 +43,7 @@ test.describe("ribbon view toggles", () => {
     const viewTab = page.getByRole("tab", { name: "View", exact: true });
     await expect(viewTab).toBeVisible();
     await viewTab.click();
-    const showFormulasToggle = page.getByTestId("ribbon-show-formulas");
+    const showFormulasToggle = page.getByTestId("ribbon-root").getByTestId("ribbon-show-formulas");
     await expect(showFormulasToggle).toHaveAttribute("aria-pressed", "false");
 
     const defaultRenderText = await page.evaluate(() => (window as any).__formulaApp.getCellDisplayTextForRenderA1("C1"));
@@ -77,7 +77,7 @@ test.describe("ribbon view toggles", () => {
     await waitForIdle(page);
 
     await page.getByRole("tab", { name: "View", exact: true }).click();
-    const perfStatsToggle = page.getByTestId("ribbon-perf-stats");
+    const perfStatsToggle = page.getByTestId("ribbon-root").getByTestId("ribbon-perf-stats");
 
     const initialEnabled = await page.evaluate(() => Boolean((window as any).__formulaApp.getGridPerfStats()?.enabled));
     await expect(perfStatsToggle).toHaveAttribute("aria-pressed", initialEnabled ? "true" : "false");

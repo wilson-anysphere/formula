@@ -26,7 +26,7 @@ test.describe("marketplace panel", () => {
     await expect(viewTab).toBeVisible();
     await viewTab.click();
 
-    const openMarketplacePanel = page.getByTestId("open-marketplace-panel");
+    const openMarketplacePanel = page.getByTestId("ribbon-root").getByTestId("open-marketplace-panel");
     await expect(openMarketplacePanel).toBeVisible();
     await openMarketplacePanel.click();
 
@@ -78,7 +78,7 @@ test.describe("marketplace panel", () => {
     await waitForDesktopReady(page);
 
     await page.getByRole("tab", { name: "View", exact: true }).click();
-    await page.getByTestId("open-marketplace-panel").click();
+    await page.getByTestId("ribbon-root").getByTestId("open-marketplace-panel").click();
 
     const panel = page.getByTestId("panel-marketplace");
     await expect(panel).toBeVisible();

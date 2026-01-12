@@ -12,8 +12,8 @@ test.describe("ribbon File backstage", () => {
     const fileTab = ribbon.getByRole("tab", { name: "File" });
     await fileTab.click();
 
-    const fileNew = page.getByTestId("file-new");
-    const fileQuit = page.getByTestId("file-quit");
+    const fileNew = ribbon.getByTestId("file-new");
+    const fileQuit = ribbon.getByTestId("file-quit");
 
     await expect(fileNew).toBeVisible();
     await expect(fileNew).toBeFocused();
@@ -30,13 +30,13 @@ test.describe("ribbon File backstage", () => {
 
     // Arrow navigation should move focus between menuitems.
     await page.keyboard.press("ArrowDown");
-    await expect(page.getByTestId("file-open")).toBeFocused();
+    await expect(ribbon.getByTestId("file-open")).toBeFocused();
     await page.keyboard.press("ArrowUp");
     await expect(fileNew).toBeFocused();
 
     // Web demo behavior: actions should surface a toast indicating the feature is
     // only available in the desktop app.
-    await page.getByTestId("file-open").click();
+    await ribbon.getByTestId("file-open").click();
     const toast = page.getByTestId("toast").last();
     await expect(toast).toContainText(/desktop/i);
 

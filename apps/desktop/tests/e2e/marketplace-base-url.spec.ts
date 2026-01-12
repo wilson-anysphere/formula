@@ -98,7 +98,7 @@ test.describe("Marketplace base URL configuration", () => {
       await gotoDesktop(page);
 
       await page.getByRole("tab", { name: "View", exact: true }).click();
-      await page.getByTestId("open-marketplace-panel").click();
+      await page.getByTestId("ribbon-root").getByTestId("open-marketplace-panel").click();
 
       const panel = page.getByTestId("panel-marketplace");
       await expect(panel).toBeVisible();
