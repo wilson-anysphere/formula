@@ -164,7 +164,9 @@ function normalizeCssColorViaDom(color) {
  * Convert a CSS color string into the DocumentController's ARGB color format (`#AARRGGBB`).
  *
  * This intentionally supports:
+ * - `#RGB` (CSS shorthand)
  * - `#RRGGBB`
+ * - `#RGBA` (CSS shorthand)
  * - `#AARRGGBB` (Excel/OOXML style)
  * - `rgb(r,g,b)` / `rgb(r g b)`
  * - `rgba(r,g,b,a)`
@@ -187,7 +189,21 @@ function cssColorToArgb(value) {
   if (lower === "none") return null;
 
   const hex = trimmed.replace(/^#/, "");
+  if (/^[0-9a-fA-F]{3}$/.test(hex)) {
+    const r = hex[0];
+    const g = hex[1];
+    const b = hex[2];
+    return `#FF${r}${r}${g}${g}${b}${b}`.toUpperCase();
+  }
   if (/^[0-9a-fA-F]{6}$/.test(hex)) return `#FF${hex.toUpperCase()}`;
+  if (/^[0-9a-fA-F]{4}$/.test(hex)) {
+    // CSS `#RGBA` uses alpha as the last nibble; expand it and rearrange to DocumentController's `#AARRGGBB`.
+    const r = hex[0];
+    const g = hex[1];
+    const b = hex[2];
+    const a = hex[3];
+    return `#${a}${a}${r}${r}${g}${g}${b}${b}`.toUpperCase();
+  }
   if (/^[0-9a-fA-F]{8}$/.test(hex)) return `#${hex.toUpperCase()}`;
 
   const rgb = parseCssRgbFunction(trimmed);

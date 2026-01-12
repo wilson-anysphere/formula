@@ -42,6 +42,7 @@ test("pasteClipboardContent converts rgb()/rgba() + #AARRGGBB CSS colors to ARGB
       <td style="color:rgb(255,0,0);background-color:rgb(0 255 0)">A</td>
       <td style="color:rgba(0,0,255,0.5);background-color:rgba(255,0,0,0.25)">B</td>
       <td style="color:#80FF0000;background-color:#4000FF00">C</td>
+      <td style="color:#f00;background-color:#0f08">D</td>
     </tr>
   </table></body></html>`;
 
@@ -51,6 +52,7 @@ test("pasteClipboardContent converts rgb()/rgba() + #AARRGGBB CSS colors to ARGB
   const a1 = doc.getCell("Sheet1", "A1");
   const b1 = doc.getCell("Sheet1", "B1");
   const c1 = doc.getCell("Sheet1", "C1");
+  const d1 = doc.getCell("Sheet1", "D1");
 
   const styleA1 = doc.styleTable.get(a1.styleId);
   assert.equal(styleA1.font?.color, "#FFFF0000");
@@ -63,4 +65,8 @@ test("pasteClipboardContent converts rgb()/rgba() + #AARRGGBB CSS colors to ARGB
   const styleC1 = doc.styleTable.get(c1.styleId);
   assert.equal(styleC1.font?.color, "#80FF0000");
   assert.equal(styleC1.fill?.fgColor, "#4000FF00");
+
+  const styleD1 = doc.styleTable.get(d1.styleId);
+  assert.equal(styleD1.font?.color, "#FFFF0000");
+  assert.equal(styleD1.fill?.fgColor, "#8800FF00");
 });
