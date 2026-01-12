@@ -460,6 +460,50 @@ test.describe("sheet tabs", () => {
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe(initialSheetId);
   });
 
+  test("Ctrl+PgUp/PgDn switches sheets while the formula bar is actively editing a formula", async ({ page }) => {
+    await gotoDesktop(page);
+
+    // Create Sheet2 so sheet navigation is observable.
+    await page.getByTestId("sheet-add").click();
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+
+    // Start on Sheet1.
+    await page.getByTestId("sheet-tab-Sheet1").click();
+    await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveAttribute("data-active", "true");
+
+    // Enter formula bar edit mode and ensure the draft is a *formula* (starts with "="),
+    // which should allow sheet navigation (Excel behavior for cross-sheet references).
+    await page.getByTestId("formula-highlight").click();
+    const formulaInput = page.getByTestId("formula-input");
+    await expect(formulaInput).toBeVisible();
+    await expect(formulaInput).toBeFocused();
+    await formulaInput.fill("=");
+    await expect(formulaInput).toHaveValue("=");
+
+    // Dispatch Ctrl+PgDn directly to the textarea so the global handler must allow it.
+    await page.evaluate(() => {
+      const input = document.querySelector('[data-testid="formula-input"]') as HTMLTextAreaElement | null;
+      if (!input) throw new Error("Missing formula bar input");
+      const evt = new KeyboardEvent("keydown", { key: "PageDown", ctrlKey: true, bubbles: true, cancelable: true });
+      input.dispatchEvent(evt);
+    });
+
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveAttribute("data-active", "true");
+    await expect(formulaInput).toBeFocused();
+
+    // And Ctrl+PgUp should bring us back while staying in formula edit mode.
+    await page.evaluate(() => {
+      const input = document.querySelector('[data-testid="formula-input"]') as HTMLTextAreaElement | null;
+      if (!input) throw new Error("Missing formula bar input");
+      const evt = new KeyboardEvent("keydown", { key: "PageUp", ctrlKey: true, bubbles: true, cancelable: true });
+      input.dispatchEvent(evt);
+    });
+
+    await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveAttribute("data-active", "true");
+    await expect(formulaInput).toBeFocused();
+    await expect(formulaInput).toHaveValue("=");
+  });
+
   test("Ctrl+PgUp/PgDn does not switch sheets while the cell editor is open", async ({ page }) => {
     await gotoDesktop(page);
 
