@@ -1073,20 +1073,19 @@ export async function installUpdaterUi(listenArg?: TauriListen): Promise<void> {
     "update-download-error",
   ];
 
-  const installs = events.map((eventName) => {
+  const installs = events.map(async (eventName) => {
     try {
-      return listen(eventName, (event) => {
+      await listen(eventName, (event) => {
         const payload = (event as any)?.payload as UpdaterEventPayload;
         void handleUpdaterEvent(eventName, payload).catch((err) => {
           console.error(`[formula][updater-ui] Failed to handle ${eventName}:`, err);
         });
-      }).catch((err) => {
-        console.error(`[formula][updater-ui] Failed to listen for ${eventName}:`, err);
-        throw err;
       });
     } catch (err) {
+      // Best-effort: if a single event name is blocked by capabilities or missing in a given
+      // runtime, keep the rest of the updater UI functional (and still allow the backend startup
+      // check to proceed via the `updater-ui-ready` handshake).
       console.error(`[formula][updater-ui] Failed to listen for ${eventName}:`, err);
-      return Promise.reject(err);
     }
   });
 
