@@ -26,6 +26,7 @@ Then commit the resulting diffs.
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -34,14 +35,44 @@ from pathlib import Path
 from typing import Sequence
 
 
-def _run(*, cmd: Sequence[str], cwd: Path) -> None:
+def _run(*, cmd: Sequence[str], cwd: Path, env: dict[str, str]) -> None:
     rendered = " ".join(cmd)
     print(f"+ {rendered}")
-    subprocess.run(list(cmd), cwd=str(cwd), check=True)
+    subprocess.run(list(cmd), cwd=str(cwd), env=env, check=True)
 
 
 def _have_command(name: str) -> bool:
     return shutil.which(name) is not None
+
+
+def _tool_env(repo_root: Path) -> dict[str, str]:
+    """
+    Build a conservative environment for running Cargo/Node/Python tools.
+
+    In agent/CI environments we often want to avoid:
+    - global Cargo home lock contention across concurrent processes
+    - user/global Cargo config (which can set `build.rustc-wrapper = "sccache"` and be flaky)
+    """
+
+    env = dict(os.environ)
+
+    default_global_cargo_home = Path.home() / ".cargo"
+    cargo_home = env.get("CARGO_HOME")
+    cargo_home_path = Path(cargo_home).expanduser() if cargo_home else None
+
+    if not cargo_home or (
+        not env.get("CI")
+        and not env.get("FORMULA_ALLOW_GLOBAL_CARGO_HOME")
+        and cargo_home_path == default_global_cargo_home
+    ):
+        env["CARGO_HOME"] = str(repo_root / "target" / "cargo-home")
+
+    # Some environments configure Cargo to use `sccache` via a global config file. Prefer
+    # compiling locally for determinism/reliability unless the user explicitly opted in.
+    env.setdefault("RUSTC_WRAPPER", "")
+    env.setdefault("RUSTC_WORKSPACE_WRAPPER", "")
+
+    return env
 
 
 def main() -> int:
@@ -72,12 +103,14 @@ def main() -> int:
     cases_path = repo_root / "tests/compatibility/excel-oracle/cases.json"
     pinned_path = repo_root / "tests/compatibility/excel-oracle/datasets/excel-oracle.pinned.json"
 
+    env = _tool_env(repo_root)
+
     if not args.skip_function_catalog:
         if not _have_command("node"):
             raise SystemExit(
                 "node was not found on PATH. Install node, or re-run with --skip-function-catalog."
             )
-        _run(cmd=("node", "scripts/generate-function-catalog.js"), cwd=repo_root)
+        _run(cmd=("node", "scripts/generate-function-catalog.js"), cwd=repo_root, env=env)
 
     if not args.skip_cases:
         _run(
@@ -88,6 +121,7 @@ def main() -> int:
                 str(cases_path),
             ),
             cwd=repo_root,
+            env=env,
         )
 
     if not args.skip_pinned:
@@ -100,6 +134,7 @@ def main() -> int:
                     "--quiet",
                     "-p",
                     "formula-excel-oracle",
+                    "--locked",
                     "--",
                     "--cases",
                     str(cases_path),
@@ -107,6 +142,7 @@ def main() -> int:
                     str(engine_results_path),
                 ),
                 cwd=repo_root,
+                env=env,
             )
             _run(
                 cmd=(
@@ -118,20 +154,28 @@ def main() -> int:
                     str(pinned_path),
                 ),
                 cwd=repo_root,
+                env=env,
             )
 
     if args.run_tests:
         # Prefer `scripts/cargo_agent.sh` when bash is available (it sets conservative defaults for
         # high-core-count environments), but fall back to plain `cargo test` on platforms without bash.
         if _have_command("bash") and (repo_root / "scripts/cargo_agent.sh").is_file():
-            _run(cmd=("bash", "scripts/cargo_agent.sh", "test", "-p", "formula-engine"), cwd=repo_root)
+            _run(
+                cmd=("bash", "scripts/cargo_agent.sh", "test", "-p", "formula-engine"),
+                cwd=repo_root,
+                env=env,
+            )
         else:
-            _run(cmd=("cargo", "test", "-p", "formula-engine"), cwd=repo_root)
-        _run(cmd=(sys.executable, "-m", "unittest", "discover", "-s", "tools/excel-oracle/tests"), cwd=repo_root)
+            _run(cmd=("cargo", "test", "-p", "formula-engine"), cwd=repo_root, env=env)
+        _run(
+            cmd=(sys.executable, "-m", "unittest", "discover", "-s", "tools/excel-oracle/tests"),
+            cwd=repo_root,
+            env=env,
+        )
 
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
