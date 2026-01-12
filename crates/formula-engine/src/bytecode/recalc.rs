@@ -253,7 +253,6 @@ mod tests {
         locale_config.decimal_separator = de_de_locale.separators.decimal_sep;
         locale_config.thousands_separator = Some(de_de_locale.separators.thousands_sep);
 
-        let locale_config = crate::LocaleConfig::en_us();
         let mut vm = Vm::with_capacity(32);
         let de_de_value = vm.eval(&program, &empty_grid, origin, &locale_config);
         let en_us_value = vm.eval_with_coercion_context(

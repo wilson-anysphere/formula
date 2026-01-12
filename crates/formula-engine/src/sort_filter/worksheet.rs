@@ -211,6 +211,7 @@ fn rewrite_formula_for_move(formula: &str, from: CellAddr, to: CellAddr) -> Opti
 }
 
 fn model_cell_value_to_sort_value(value: &ModelCellValue) -> CellValue {
+    #[allow(unreachable_patterns)]
     match value {
         ModelCellValue::Empty => CellValue::Blank,
         ModelCellValue::Number(n) => CellValue::Number(*n),
@@ -220,5 +221,197 @@ fn model_cell_value_to_sort_value(value: &ModelCellValue) -> CellValue {
         ModelCellValue::RichText(rt) => CellValue::Text(rt.plain_text().to_string()),
         ModelCellValue::Array(_) => CellValue::Blank,
         ModelCellValue::Spill(_) => CellValue::Blank,
+        // Rich value variants (Entity/Record) are not part of `formula-model` yet on older
+        // versions of this repository. Once added, this wildcard arm prevents the match from
+        // becoming non-exhaustive, while still allowing us to map those values for sorting and
+        // filtering by inspecting their stable `{type, value}` serialized representation.
+        _ => rich_model_cell_value_to_sort_value(value).unwrap_or(CellValue::Blank),
+    }
+}
+
+fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellValue> {
+    let serialized = serde_json::to_value(value).ok()?;
+    let value_type = serialized.get("type")?.as_str()?;
+
+    match value_type {
+        "entity" => {
+            let display_value = serialized
+                .get("value")?
+                .get("display_value")?
+                .as_str()?
+                .to_string();
+            Some(CellValue::Text(display_value))
+        }
+        "record" => {
+            let record = serialized.get("value")?;
+            let display_field = record.get("display_field")?.as_str()?;
+            let fields = record.get("fields")?.as_object()?;
+            let display_value = fields.get(display_field)?;
+
+            let display_value_type = display_value.get("type")?.as_str()?;
+            match display_value_type {
+                "number" => Some(CellValue::Number(display_value.get("value")?.as_f64()?)),
+                "string" => Some(CellValue::Text(
+                    display_value.get("value")?.as_str()?.to_string(),
+                )),
+                "boolean" => Some(CellValue::Bool(display_value.get("value")?.as_bool()?)),
+                "error" => Some(CellValue::Text(
+                    display_value.get("value")?.as_str()?.to_string(),
+                )),
+                "rich_text" => Some(CellValue::Text(
+                    display_value
+                        .get("value")?
+                        .get("text")?
+                        .as_str()?
+                        .to_string(),
+                )),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::model_cell_value_to_sort_value;
+    use crate::sort_filter::CellValue;
+    use formula_model::CellValue as ModelCellValue;
+    use serde_json::json;
+
+    #[test]
+    fn model_cell_value_to_sort_value_entity_record() {
+        let entity: ModelCellValue = match serde_json::from_value(json!({
+            "type": "entity",
+            "value": {
+                "display_value": "Entity display"
+            }
+        })) {
+            Ok(value) => value,
+            // Older versions of `formula-model` won't have Entity/Record variants yet.
+            // Skip this test until they're added.
+            Err(_) => return,
+        };
+        assert_eq!(
+            model_cell_value_to_sort_value(&entity),
+            CellValue::Text("Entity display".to_string())
+        );
+
+        let record_string: ModelCellValue = match serde_json::from_value(json!({
+            "type": "record",
+            "value": {
+                "display_field": "name",
+                "fields": {
+                    "name": { "type": "string", "value": "Alice" },
+                    "age": { "type": "number", "value": 42.0 }
+                }
+            }
+        })) {
+            Ok(value) => value,
+            Err(_) => return,
+        };
+        assert_eq!(
+            model_cell_value_to_sort_value(&record_string),
+            CellValue::Text("Alice".to_string())
+        );
+
+        let record_number: ModelCellValue = match serde_json::from_value(json!({
+            "type": "record",
+            "value": {
+                "display_field": "age",
+                "fields": {
+                    "name": { "type": "string", "value": "Alice" },
+                    "age": { "type": "number", "value": 42.0 }
+                }
+            }
+        })) {
+            Ok(value) => value,
+            Err(_) => return,
+        };
+        assert_eq!(
+            model_cell_value_to_sort_value(&record_number),
+            CellValue::Number(42.0)
+        );
+
+        let record_bool: ModelCellValue = match serde_json::from_value(json!({
+            "type": "record",
+            "value": {
+                "display_field": "active",
+                "fields": {
+                    "active": { "type": "boolean", "value": true }
+                }
+            }
+        })) {
+            Ok(value) => value,
+            Err(_) => return,
+        };
+        assert_eq!(model_cell_value_to_sort_value(&record_bool), CellValue::Bool(true));
+
+        let record_error: ModelCellValue = match serde_json::from_value(json!({
+            "type": "record",
+            "value": {
+                "display_field": "err",
+                "fields": {
+                    "err": { "type": "error", "value": "#REF!" }
+                }
+            }
+        })) {
+            Ok(value) => value,
+            Err(_) => return,
+        };
+        assert_eq!(
+            model_cell_value_to_sort_value(&record_error),
+            CellValue::Text("#REF!".to_string())
+        );
+
+        let record_rich_text: ModelCellValue = match serde_json::from_value(json!({
+            "type": "record",
+            "value": {
+                "display_field": "rt",
+                "fields": {
+                    "rt": { "type": "rich_text", "value": { "text": "Hello", "runs": [] } }
+                }
+            }
+        })) {
+            Ok(value) => value,
+            Err(_) => return,
+        };
+        assert_eq!(
+            model_cell_value_to_sort_value(&record_rich_text),
+            CellValue::Text("Hello".to_string())
+        );
+
+        // Records only use the display field if it's a primitive sort/filter value.
+        // Rich values fall back to blank.
+        let record_entity_display_field: ModelCellValue = serde_json::from_value(json!({
+            "type": "record",
+            "value": {
+                "display_field": "entity",
+                "fields": {
+                    "entity": { "type": "entity", "value": { "display_value": "Nested entity" } }
+                }
+            }
+        }))
+        .expect("record should deserialize");
+        assert_eq!(
+            model_cell_value_to_sort_value(&record_entity_display_field),
+            CellValue::Blank
+        );
+
+        // Missing display field should fall back to blank.
+        let record_missing_display_field: ModelCellValue = serde_json::from_value(json!({
+            "type": "record",
+            "value": {
+                "display_field": "missing",
+                "fields": {
+                    "name": { "type": "string", "value": "Alice" }
+                }
+            }
+        }))
+        .expect("record should deserialize");
+        assert_eq!(
+            model_cell_value_to_sort_value(&record_missing_display_field),
+            CellValue::Blank
+        );
     }
 }
