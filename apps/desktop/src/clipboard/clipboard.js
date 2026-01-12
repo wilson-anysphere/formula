@@ -437,9 +437,9 @@ export function getCellGridFromRange(doc, sheetId, range) {
     }
 
     // DocumentController internal model shape (layered formatting).
-    // - Sheet style layer: `sheet.sheetStyleId`
-    // - Column style layer: `sheet.colStyles`
-    // - Row style layer: `sheet.rowStyles`
+    // - Sheet style layer: `sheet.defaultStyleId` (legacy: `sheet.sheetStyleId`)
+    // - Column style layer: `sheet.colStyleIds` (legacy: `sheet.colStyles`)
+    // - Row style layer: `sheet.rowStyleIds` (legacy: `sheet.rowStyles`)
     //
     // The public `getCellFormat()` API returns the merged style, but does not expose
     // the style-id tuple needed for caching. When possible, derive it from the
@@ -448,11 +448,11 @@ export function getCellGridFromRange(doc, sheetId, range) {
       doc?.model?.sheets?.get && typeof doc.model.sheets.get === "function" ? doc.model.sheets.get(sheetId) : null;
     if (sheetModel && typeof sheetModel === "object") {
       const sheetDefaultStyleId = normalizeStyleId(
-        sheetModel.sheetStyleId ?? sheetModel.sheetDefaultStyleId ?? sheetModel.defaultStyleId
+        sheetModel.defaultStyleId ?? sheetModel.sheetStyleId ?? sheetModel.sheetDefaultStyleId
       );
 
-      const rowStyles = sheetModel.rowStyles ?? sheetModel.rowStyleIds ?? sheetModel.rowStyleIdByRow;
-      const colStyles = sheetModel.colStyles ?? sheetModel.colStyleIds ?? sheetModel.colStyleIdByCol;
+      const rowStyles = sheetModel.rowStyleIds ?? sheetModel.rowStyles ?? sheetModel.rowStyleIdByRow;
+      const colStyles = sheetModel.colStyleIds ?? sheetModel.colStyles ?? sheetModel.colStyleIdByCol;
 
       const rowStyleId = (() => {
         if (!rowStyles) return 0;
