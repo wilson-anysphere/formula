@@ -3009,6 +3009,31 @@ mod tests {
     }
 
     #[test]
+    fn set_cell_rich_rich_text_roundtrips_input_and_degrades_value() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+
+        let rich_text = formula_model::RichText::from_segments(vec![(
+            "Hello".to_string(),
+            formula_model::rich_text::RichTextRunStyle {
+                bold: Some(true),
+                ..Default::default()
+            },
+        )]);
+        let input = CellValue::RichText(rich_text.clone());
+
+        wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", input.clone())
+            .unwrap();
+
+        let cell = wb.get_cell_rich_data(DEFAULT_SHEET, "A1").unwrap();
+        assert_eq!(cell.input, input);
+        assert_eq!(cell.value, CellValue::String("Hello".to_string()));
+
+        let scalar = wb.get_cell_data(DEFAULT_SHEET, "A1").unwrap();
+        assert_eq!(scalar.input, json!("Hello"));
+        assert_eq!(scalar.value, json!("Hello"));
+    }
+
+    #[test]
     fn set_cell_rich_image_roundtrips_and_degrades_in_get_cell() {
         let mut wb = WorkbookState::new_with_default_sheet();
 
