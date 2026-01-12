@@ -9918,6 +9918,14 @@ mod tests {
 
     fn assert_bytecode_matches_ast(formula: &str, expected: Value) {
         let addr = "A1";
+        let recalc_ctx = crate::eval::RecalcContext {
+            now_utc: chrono::Utc
+                .timestamp_opt(1_700_000_000, 123_456_789)
+                .single()
+                .unwrap(),
+            recalc_id: 42,
+            number_locale: crate::value::NumberLocale::en_us(),
+        };
 
         // Bytecode-enabled engine.
         let mut engine_bc = Engine::new();
@@ -9939,7 +9947,14 @@ mod tests {
             ),
             "expected compiled formula to take the bytecode path"
         );
-        engine_bc.recalculate_single_threaded();
+        let levels = engine_bc.calc_graph.calc_levels_for_dirty().expect("calc levels");
+        let _ = engine_bc.recalculate_levels(
+            levels,
+            RecalcMode::SingleThreaded,
+            &recalc_ctx,
+            engine_bc.date_system,
+            None,
+        );
         let value_bc = engine_bc.get_cell_value("Sheet1", addr);
         assert_eq!(value_bc, expected);
 
@@ -9952,11 +9967,82 @@ mod tests {
             0,
             "bytecode-disabled engine should not compile programs"
         );
-        engine_ast.recalculate_single_threaded();
+        let levels = engine_ast.calc_graph.calc_levels_for_dirty().expect("calc levels");
+        let _ = engine_ast.recalculate_levels(
+            levels,
+            RecalcMode::SingleThreaded,
+            &recalc_ctx,
+            engine_ast.date_system,
+            None,
+        );
         let value_ast = engine_ast.get_cell_value("Sheet1", addr);
         assert_eq!(value_ast, expected);
 
         assert_eq!(value_bc, value_ast);
+    }
+
+    fn assert_bytecode_eq_ast(formula: &str) -> Value {
+        let addr = "A1";
+        let recalc_ctx = crate::eval::RecalcContext {
+            now_utc: chrono::Utc
+                .timestamp_opt(1_700_000_000, 123_456_789)
+                .single()
+                .unwrap(),
+            recalc_id: 42,
+            number_locale: crate::value::NumberLocale::en_us(),
+        };
+
+        // Bytecode-enabled engine.
+        let mut engine_bc = Engine::new();
+        engine_bc.set_cell_formula("Sheet1", addr, formula).unwrap();
+        assert_eq!(
+            engine_bc.bytecode_program_count(),
+            1,
+            "expected formula to compile to bytecode"
+        );
+        let sheet_id = engine_bc.workbook.sheet_id("Sheet1").expect("sheet exists");
+        let key = CellKey {
+            sheet: sheet_id,
+            addr: parse_a1(addr).unwrap(),
+        };
+        assert!(
+            matches!(
+                engine_bc.workbook.get_cell(key).and_then(|c| c.compiled.as_ref()),
+                Some(CompiledFormula::Bytecode(_))
+            ),
+            "expected compiled formula to take the bytecode path"
+        );
+        let levels = engine_bc.calc_graph.calc_levels_for_dirty().expect("calc levels");
+        let _ = engine_bc.recalculate_levels(
+            levels,
+            RecalcMode::SingleThreaded,
+            &recalc_ctx,
+            engine_bc.date_system,
+            None,
+        );
+        let value_bc = engine_bc.get_cell_value("Sheet1", addr);
+
+        // Bytecode-disabled engine (AST-only).
+        let mut engine_ast = Engine::new();
+        engine_ast.set_bytecode_enabled(false);
+        engine_ast.set_cell_formula("Sheet1", addr, formula).unwrap();
+        assert_eq!(
+            engine_ast.bytecode_program_count(),
+            0,
+            "bytecode-disabled engine should not compile programs"
+        );
+        let levels = engine_ast.calc_graph.calc_levels_for_dirty().expect("calc levels");
+        let _ = engine_ast.recalculate_levels(
+            levels,
+            RecalcMode::SingleThreaded,
+            &recalc_ctx,
+            engine_ast.date_system,
+            None,
+        );
+        let value_ast = engine_ast.get_cell_value("Sheet1", addr);
+
+        assert_eq!(value_bc, value_ast);
+        value_bc
     }
 
     #[test]
@@ -10010,6 +10096,33 @@ mod tests {
     }
 
     #[test]
+    fn bytecode_if_short_circuits_unused_volatile_branch() {
+        let v = assert_bytecode_eq_ast("=IF(TRUE, 1, RAND()) + RAND()");
+        match v {
+            Value::Number(n) => assert!((1.0..2.0).contains(&n), "got {n}"),
+            other => panic!("expected number, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bytecode_iferror_short_circuits_unused_volatile_fallback() {
+        let v = assert_bytecode_eq_ast("=IFERROR(1, RAND()) + RAND()");
+        match v {
+            Value::Number(n) => assert!((1.0..2.0).contains(&n), "got {n}"),
+            other => panic!("expected number, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bytecode_ifna_short_circuits_unused_volatile_fallback() {
+        let v = assert_bytecode_eq_ast("=IFNA(1, RAND()) + RAND()");
+        match v {
+            Value::Number(n) => assert!((1.0..2.0).contains(&n), "got {n}"),
+            other => panic!("expected number, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn bytecode_ifs_short_circuits_later_conditions() {
         assert_bytecode_matches_ast("=IFS(TRUE, 1, 1/0, 2)", Value::Number(1.0));
     }
@@ -10020,6 +10133,15 @@ mod tests {
     }
 
     #[test]
+    fn bytecode_ifs_short_circuits_unused_volatile_args() {
+        let v = assert_bytecode_eq_ast("=IFS(TRUE, 1, TRUE, RAND()) + RAND()");
+        match v {
+            Value::Number(n) => assert!((1.0..2.0).contains(&n), "got {n}"),
+            other => panic!("expected number, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn bytecode_switch_short_circuits_later_case_values() {
         assert_bytecode_matches_ast("=SWITCH(1, 1, 10, 1/0, 20)", Value::Number(10.0));
     }
@@ -10027,6 +10149,15 @@ mod tests {
     #[test]
     fn bytecode_switch_short_circuits_results_for_unmatched_cases() {
         assert_bytecode_matches_ast("=SWITCH(2, 1, 1/0, 2, 20)", Value::Number(20.0));
+    }
+
+    #[test]
+    fn bytecode_switch_short_circuits_unused_volatile_default() {
+        let v = assert_bytecode_eq_ast("=SWITCH(1, 1, 10, RAND()) + RAND()");
+        match v {
+            Value::Number(n) => assert!((10.0..11.0).contains(&n), "got {n}"),
+            other => panic!("expected number, got {other:?}"),
+        }
     }
 
     #[test]
