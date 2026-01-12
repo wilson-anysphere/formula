@@ -182,10 +182,10 @@ variant shapes are documented further below.
 - Whether Excel ever uses multiple numbered parts like `cellImages1.xml` / `cellimages1.xml` (only a single
   `cellImages.xml` / `cellimages.xml` part has been observed in this repo so far).
 - The full set of namespaces used by real Excel builds for `cellImages` across versions.
-  - Confirmed in fixtures:
-    - `http://schemas.microsoft.com/office/spreadsheetml/2023/02/main`
+  - Confirmed in the real Excel fixture `fixtures/xlsx/rich-data/images-in-cell.xlsx`:
     - `http://schemas.microsoft.com/office/spreadsheetml/2022/cellimages`
-  - Also observed in tests/synthetic inputs (treat as opaque and preserve):
+  - Also observed in synthetic fixtures/tests (treat as opaque and preserve):
+    - `http://schemas.microsoft.com/office/spreadsheetml/2023/02/main`
     - `http://schemas.microsoft.com/office/spreadsheetml/2019/cellimages`
     - `http://schemas.microsoft.com/office/spreadsheetml/2020/07/main`
     - `http://schemas.microsoft.com/office/spreadsheetml/2019/11/main`
