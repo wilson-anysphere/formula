@@ -7017,6 +7017,11 @@ mountRibbon(ribbonReactRoot, {
       case "open-panel-ai-chat":
         toggleDockPanel(PanelIds.AI_CHAT);
         return;
+      case "open-inline-ai-edit":
+        void commandRegistry.executeCommand("ai.inlineEdit").catch((err) => {
+          showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
+        });
+        return;
       case "open-ai-audit-panel":
       case "open-panel-ai-audit":
         toggleDockPanel(PanelIds.AI_AUDIT);

@@ -507,6 +507,14 @@ export const defaultRibbonSchema: RibbonSchema = {
               size: "icon",
             },
             {
+              id: "open-inline-ai-edit",
+              label: "Inline Edit",
+              ariaLabel: "Inline AI Edit",
+              icon: "🪄",
+              testId: "open-inline-ai-edit",
+              size: "icon",
+            },
+            {
               id: "open-ai-panel",
               label: "AI (legacy)",
               ariaLabel: "Toggle AI panel",
