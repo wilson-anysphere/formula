@@ -55,4 +55,34 @@ describe("DocumentCellProvider numberFormat display rendering", () => {
     // A1 and A4 share the same numberFormat preset (currency), so the aligned style should be reused.
     expect(a1?.style).toBe(a4?.style);
   });
+
+  it("does not override an explicit horizontal alignment when applying number formats", () => {
+    const doc = new DocumentController();
+    const sheetId = "Sheet1";
+
+    doc.setCellValue(sheetId, "A1", 1234.5);
+    applyNumberFormatPreset(doc, sheetId, "A1", "currency");
+    // Explicitly left-align the cell; the provider should preserve this even though the formatted
+    // value is rendered as a string.
+    doc.setRangeFormat(sheetId, "A1", { alignment: { horizontal: "left" } });
+
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => sheetId,
+      headerRows: 1,
+      headerCols: 1,
+      rowCount: 10,
+      colCount: 10,
+      showFormulas: () => false,
+      getComputedValue: ({ row, col }) => {
+        const cell = doc.getCell(sheetId, { row, col });
+        return cell.formula ? null : cell.value;
+      }
+    });
+
+    const cell = provider.getCell(1, 1);
+    expect(cell?.value).toBe("$1,234.50");
+    // Explicit left alignment wins.
+    expect(cell?.style?.textAlign).toBe("start");
+  });
 });
