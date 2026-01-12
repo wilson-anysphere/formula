@@ -3112,6 +3112,62 @@ mod tests {
     }
 
     #[test]
+    fn decodes_ptg_ref3d_external_workbook_sheet_ref() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
+            supbook: 1,
+            itab_first: 0,
+            itab_last: 0,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+
+        let supbooks = vec![
+            SupBookInfo {
+                ctab: 0,
+                virt_path: "\u{0001}".to_string(),
+                kind: SupBookKind::Internal,
+                workbook_name: None,
+                sheet_names: Vec::new(),
+                extern_names: Vec::new(),
+            },
+            SupBookInfo {
+                ctab: 0,
+                virt_path: "Book2.xlsx".to_string(),
+                kind: SupBookKind::ExternalWorkbook,
+                workbook_name: Some("Book2.xlsx".to_string()),
+                sheet_names: vec!["Sheet1".to_string()],
+                extern_names: Vec::new(),
+            },
+        ];
+
+        let ctx = RgceDecodeContext {
+            codepage: 1252,
+            sheet_names: &sheet_names,
+            externsheet: &externsheet,
+            supbooks: &supbooks,
+            defined_names: &defined_names,
+        };
+
+        // '[Book2.xlsx]Sheet1'!A1
+        let col_field = encode_col_field(0, true, true);
+        let rgce = [
+            0x3A, // PtgRef3d
+            0x00, 0x00, // ixti=0
+            0x00, 0x00, // row=0
+            col_field.to_le_bytes()[0],
+            col_field.to_le_bytes()[1],
+        ];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "'[Book2.xlsx]Sheet1'!A1");
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
     fn decodes_ptg_namex_udf_function_name_for_ptg_funcvar_00ff() {
         let sheet_names: Vec<String> = Vec::new();
         let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
