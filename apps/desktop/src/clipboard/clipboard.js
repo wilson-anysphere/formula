@@ -381,8 +381,10 @@ export function serializeCellGridToClipboardPayload(grid) {
  * @returns {CellGrid | null}
  */
 export function parseClipboardContentToCellGrid(content) {
-  const html = content.html?.trim();
-  if (html) {
+  const html = typeof content.html === "string" ? content.html : null;
+  // Avoid trimming the raw HTML string before parsing: CF_HTML offset fields are byte offsets into
+  // the *original* payload, so stripping whitespace can invalidate otherwise-correct offsets.
+  if (html && html.trim() !== "") {
     const parsed = parseHtmlToCellGrid(html);
     if (parsed) return parsed;
   }

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { parseClipboardContentToCellGrid } from "../clipboard.js";
 import { parseHtmlToCellGrid, serializeCellGridToHtml } from "../html.js";
 
 function buildCfHtmlPayload(
@@ -9,17 +10,23 @@ function buildCfHtmlPayload(
     beforeFragmentHtml = "",
     includeFragmentMarkers = true,
     offsets = "codeUnits", // "codeUnits" | "bytes"
+    afterHtml = "",
+    fragmentEnd = "innerHtml", // "innerHtml" | "htmlEnd"
   } = {}
 ) {
   const markerStart = "<!--StartFragment-->";
   const markerEnd = "<!--EndFragment-->";
   const prefix = `<!DOCTYPE html><html><body>${beforeFragmentHtml}${includeFragmentMarkers ? markerStart : ""}`;
   const suffix = `${includeFragmentMarkers ? markerEnd : ""}</body></html>`;
-  const html = `${prefix}${innerHtml}${suffix}`;
+  const html = `${prefix}${innerHtml}${suffix}${afterHtml}`;
 
   const pad8 = (n) => String(n).padStart(8, "0");
 
-  const byteLength = (s) => new TextEncoder().encode(s).length;
+  const byteLength = (s) => {
+    if (typeof TextEncoder !== "undefined") return new TextEncoder().encode(s).length;
+    // eslint-disable-next-line no-undef
+    return Buffer.from(s, "utf8").length;
+  };
 
   // Use fixed-width offset placeholders so the header length stays constant after substitution.
   const headerTemplate = [
@@ -40,7 +47,9 @@ function buildCfHtmlPayload(
   const startFragment =
     startHTML + (offsets === "bytes" ? byteLength(prefix) : prefix.length);
   const endFragment =
-    startFragment + (offsets === "bytes" ? byteLength(innerHtml) : innerHtml.length);
+    fragmentEnd === "htmlEnd"
+      ? endHTML
+      : startFragment + (offsets === "bytes" ? byteLength(innerHtml) : innerHtml.length);
 
   const header = headerTemplate
     .replace("StartHTML:00000000", `StartHTML:${pad8(startHTML)}`)
@@ -218,6 +227,19 @@ test("clipboard HTML honors CF_HTML offsets when payload has leading NUL padding
   }
 
   const grid = parseHtmlToCellGrid(cfHtml);
+  assert.ok(grid);
+  assert.equal(grid[0][0].value, "RIGHT");
+});
+
+test("parseClipboardContentToCellGrid does not trim CF_HTML payloads (offsets are relative to the original string)", () => {
+  const cfHtml = buildCfHtmlPayload("<table><tr><td>RIGHT</td></tr></table>", {
+    beforeFragmentHtml: "<table><tr><td>WRONG</td></tr></table>",
+    includeFragmentMarkers: false,
+    afterHtml: "\n\n", // would be stripped by .trim(), invalidating EndHTML/EndFragment.
+    fragmentEnd: "htmlEnd",
+  });
+
+  const grid = parseClipboardContentToCellGrid({ html: cfHtml });
   assert.ok(grid);
   assert.equal(grid[0][0].value, "RIGHT");
 });
