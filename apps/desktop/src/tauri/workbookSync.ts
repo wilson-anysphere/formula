@@ -509,7 +509,12 @@ export function startWorkbookSync(args: {
         const refreshedSnapshot = captureSheetSnapshot(args.document);
         if (refreshedSnapshot) sheetMirror = refreshedSnapshot;
 
-        const existingSheetIds = sheetMirror ? new Set(sheetMirror.order) : null;
+        // `DocumentController` materializes sheets lazily: a brand new controller reports zero
+        // sheets until the first cell is accessed/edited. In that state, `sheetMirror.order`
+        // can be empty even though the backend workbook has a default sheet. Treat an empty
+        // mirror as "unknown" rather than "no sheets" so we don't silently drop edits.
+        const existingSheetIds =
+          sheetMirror && sheetMirror.order.length > 0 ? new Set(sheetMirror.order) : null;
         const filteredCellBatch = existingSheetIds ? cellBatch.filter((e) => existingSheetIds.has(e.sheetId)) : cellBatch;
         const updates = await sendEditsViaTauri(invokeFn, filteredCellBatch);
         applyBackendUpdates(args.document, updates);
