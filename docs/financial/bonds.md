@@ -68,17 +68,23 @@ For `ACCRINTM`:
 
 Where `frequency` exists (`COUP*`, `ACCRINT`, `PRICE`, `YIELD`, `DURATION`, `MDURATION`):
 
-- Allowed values: `1`, `2`, `4`
-- Anything else → `#NUM!`
-- Do not accept non-integer values (Excel treats them as invalid); the function argument coercion layer should provide an integer already, but the function should defensively reject if `frequency` is not exactly one of those values.
+- Excel-style coercion: numeric `frequency` inputs are **truncated toward zero** before validation (`frequency = trunc(frequency)`).
+- After truncation, allowed values are: `{1, 2, 4}`. Anything else → `#NUM!`.
+- Examples:
+  - `2.9 → 2` (valid)
+  - `1.999999999 → 1` (valid)
+  - `0.9 → 0 → #NUM!` (invalid after truncation)
+
+> Implementation note: the core Rust helpers typically accept integer `frequency` / `basis` and rely on the builtin argument-coercion layer to apply Excel-style truncation; the helpers still validate membership in `{1,2,4}` and `0..=4`.
 
 ### Allowed `basis`
 
 Where `basis` exists:
 
-- Allowed values: `0..=4`
-- Missing `basis` defaults to `0`
-- Anything else → `#NUM!`
+- Missing `basis` defaults to `0`.
+- Excel-style coercion: numeric `basis` inputs are **truncated toward zero** before validation (`basis = trunc(basis)`).
+- After truncation, allowed values are: `0..=4`. Anything else → `#NUM!`.
+- Example: `3.7 → 3` (valid), `5.0 → 5 → #NUM!`
 
 ### Numeric domain checks (non-date)
 
@@ -270,7 +276,7 @@ while settlement >= ncd:
 
 ### Accrued-interest start date (`calc_method`)
 
-Let `calc_method` default to `0`.
+`calc_method` is a boolean flag. Missing `calc_method` defaults to `FALSE` (`0`).
 
 - For `settlement < first_interest`:
   - `calc_method = 0`: accrue from `issue`
