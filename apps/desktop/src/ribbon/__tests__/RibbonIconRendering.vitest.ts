@@ -30,7 +30,7 @@ function renderRibbon(actions: RibbonActions = {}) {
 }
 
 describe("Ribbon icon rendering", () => {
-  it("renders SVG icons for mapped command ids (and no icon otherwise)", () => {
+  it("renders SVG icons for schema buttons with iconId (and no icon otherwise)", () => {
     const { container, root } = renderRibbon();
 
     const bold = container.querySelector<HTMLButtonElement>('[data-command-id="home.font.bold"]');
@@ -45,7 +45,7 @@ describe("Ribbon icon rendering", () => {
     act(() => root.unmount());
   });
 
-  it("does not render icons for dropdown menu items when no SVG mapping exists", async () => {
+  it("does not render icons for dropdown menu items when they have no iconId", async () => {
     const { container, root } = renderRibbon();
 
     const paste = container.querySelector<HTMLButtonElement>('[data-command-id="home.clipboard.paste"]');
@@ -65,7 +65,7 @@ describe("Ribbon icon rendering", () => {
     act(() => root.unmount());
   });
 
-  it("renders SVG icons for dropdown menu items when their command ids are mapped", async () => {
+  it("renders SVG icons for dropdown menu items when they have an iconId", async () => {
     const { container, root } = renderRibbon();
 
     const viewTab = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="tab"]')).find(
