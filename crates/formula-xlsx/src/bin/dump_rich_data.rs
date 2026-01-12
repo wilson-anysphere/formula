@@ -117,6 +117,9 @@ fn dump_one(
 
     println!("workbook: {}", xlsx_path.display());
 
+    dump_required_part_presence(&pkg);
+    dump_workbook_relationships(&pkg);
+
     if print_parts {
         print_interesting_parts(&pkg);
     }
@@ -143,6 +146,128 @@ fn dump_one(
     }
 
     Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn dump_required_part_presence(pkg: &XlsxPackage) {
+    println!();
+    println!("required parts:");
+
+    // xl/metadata.xml
+    let mut metadata: Option<(String, usize)> = None;
+    for name in pkg.part_names() {
+        let normalized = name.strip_prefix('/').unwrap_or(name);
+        if normalized.eq_ignore_ascii_case("xl/metadata.xml") {
+            let len = pkg.part(name).map(|b| b.len()).unwrap_or(0);
+            metadata = Some((name.to_string(), len));
+            break;
+        }
+    }
+    match metadata {
+        Some((name, len)) => println!("  {name}: present ({len} bytes)"),
+        None => println!("  xl/metadata.xml: missing"),
+    }
+
+    // xl/richData/*
+    let mut rich_data_parts: Vec<(String, usize)> = pkg
+        .part_names()
+        .filter_map(|name| {
+            let normalized = name.strip_prefix('/').unwrap_or(name);
+            let lower = normalized.to_ascii_lowercase();
+            if lower.starts_with("xl/richdata/") {
+                let len = pkg.part(name).map(|b| b.len()).unwrap_or(0);
+                Some((name.to_string(), len))
+            } else {
+                None
+            }
+        })
+        .collect();
+    rich_data_parts.sort_by(|a, b| a.0.cmp(&b.0));
+    if rich_data_parts.is_empty() {
+        println!("  xl/richData/: (none)");
+    } else {
+        println!("  xl/richData/: {} part(s)", rich_data_parts.len());
+        for (name, len) in rich_data_parts {
+            println!("    {name} ({len} bytes)");
+        }
+    }
+
+    // Potential in-cell image related parts.
+    let mut image_parts: Vec<(String, usize)> = pkg
+        .part_names()
+        .filter_map(|name| {
+            let normalized = name.strip_prefix('/').unwrap_or(name);
+            let lower = normalized.to_ascii_lowercase();
+            let candidate = lower.starts_with("xl/cellimages")
+                || lower.starts_with("xl/_rels/cellimages")
+                || is_cell_images_part_name(normalized)
+                || is_probable_image_target(normalized);
+            if candidate {
+                let len = pkg.part(name).map(|b| b.len()).unwrap_or(0);
+                Some((name.to_string(), len))
+            } else {
+                None
+            }
+        })
+        .collect();
+    image_parts.sort_by(|a, b| a.0.cmp(&b.0));
+    if image_parts.is_empty() {
+        println!("  in-cell image candidates: (none)");
+    } else {
+        println!("  in-cell image candidates: {} part(s)", image_parts.len());
+        for (name, len) in image_parts {
+            println!("    {name} ({len} bytes)");
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn dump_workbook_relationships(pkg: &XlsxPackage) {
+    let Some((part_name, bytes)) = find_part_case_insensitive(pkg, "xl/_rels/workbook.xml.rels") else {
+        println!();
+        println!("xl/_rels/workbook.xml.rels: (missing)");
+        return;
+    };
+
+    println!();
+    println!("{part_name} (filtered metadata/richData):");
+
+    let relationships = match openxml::parse_relationships(&bytes) {
+        Ok(r) => r,
+        Err(err) => {
+            println!("  (failed to parse relationships: {err})");
+            return;
+        }
+    };
+
+    let mut matched = 0usize;
+    for rel in relationships {
+        let target_lower = rel.target.to_ascii_lowercase();
+        let type_lower = rel.type_uri.to_ascii_lowercase();
+        if target_lower.contains("metadata")
+            || target_lower.contains("richdata")
+            || type_lower.contains("metadata")
+            || type_lower.contains("richdata")
+        {
+            matched += 1;
+            let resolved = openxml::resolve_target("xl/workbook.xml", &rel.target);
+            if let Some(mode) = rel.target_mode.as_deref() {
+                println!(
+                    "  Id={} Type={} Target={} TargetMode={} (resolved: {})",
+                    rel.id, rel.type_uri, rel.target, mode, resolved
+                );
+            } else {
+                println!(
+                    "  Id={} Type={} Target={} (resolved: {})",
+                    rel.id, rel.type_uri, rel.target, resolved
+                );
+            }
+        }
+    }
+
+    if matched == 0 {
+        println!("  (none)");
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -346,6 +471,10 @@ struct VmCmUsage {
 fn scan_worksheet_vm_cm_usage(pkg: &XlsxPackage) -> VmCmUsage {
     let mut usage = VmCmUsage::default();
 
+    let shared_strings: Option<Vec<String>> = pkg
+        .part("xl/sharedStrings.xml")
+        .and_then(|bytes| parse_shared_strings(bytes).ok());
+
     let sheets = match pkg.worksheet_parts() {
         Ok(parts) => parts,
         Err(err) => {
@@ -375,42 +504,79 @@ fn scan_worksheet_vm_cm_usage(pkg: &XlsxPackage) -> VmCmUsage {
         let mut sheet_vm_counts: HashMap<u32, u64> = HashMap::new();
         let mut sheet_cm_counts: HashMap<u32, u64> = HashMap::new();
 
+        #[derive(Debug, Clone)]
+        struct SampleCell {
+            cell_ref: String,
+            vm: Option<u32>,
+            cm: Option<u32>,
+            value: Option<String>,
+        }
+
+        const MAX_SAMPLES: usize = 5;
+        let mut samples: Vec<SampleCell> = Vec::new();
+
+        #[derive(Debug, Clone)]
+        struct CurrentCell {
+            r: Option<String>,
+            t: Option<String>,
+            vm: Option<u32>,
+            cm: Option<u32>,
+            v_text: String,
+            inline_text: String,
+            in_v: bool,
+            in_is: bool,
+            in_is_t: bool,
+        }
+
+        let mut current: Option<CurrentCell> = None;
+
         let mut reader = quick_xml::Reader::from_reader(Cursor::new(bytes));
-        reader.config_mut().trim_text(true);
+        reader.config_mut().trim_text(false);
         let mut buf = Vec::new();
 
         loop {
             match reader.read_event_into(&mut buf) {
-                Ok(quick_xml::events::Event::Start(e))
-                | Ok(quick_xml::events::Event::Empty(e)) => {
-                    if openxml::local_name(e.name().as_ref()).eq_ignore_ascii_case(b"c") {
+                Ok(quick_xml::events::Event::Start(e)) => {
+                    let qname = e.name();
+                    let name = openxml::local_name(qname.as_ref());
+                    if name.eq_ignore_ascii_case(b"c") {
                         sheet_total_cells += 1;
                         let mut has_vm = false;
                         let mut has_cm = false;
+                        let mut r: Option<String> = None;
+                        let mut t: Option<String> = None;
+                        let mut vm_val: Option<u32> = None;
+                        let mut cm_val: Option<u32> = None;
                         for attr in e.attributes().with_checks(false) {
                             let attr = match attr {
                                 Ok(attr) => attr,
                                 Err(_) => continue,
                             };
                             let key = openxml::local_name(attr.key.as_ref());
-                            if !key.eq_ignore_ascii_case(b"vm") && !key.eq_ignore_ascii_case(b"cm") {
-                                continue;
-                            }
                             let val = match attr.unescape_value() {
                                 Ok(v) => v,
                                 Err(_) => continue,
                             };
-                            let Ok(parsed) = val.parse::<u32>() else {
-                                continue;
-                            };
                             if key.eq_ignore_ascii_case(b"vm") {
+                                let Ok(parsed) = val.parse::<u32>() else {
+                                    continue;
+                                };
                                 has_vm = true;
+                                vm_val = Some(parsed);
                                 *sheet_vm_counts.entry(parsed).or_insert(0) += 1;
                                 *usage.vm_counts.entry(parsed).or_insert(0) += 1;
-                            } else {
+                            } else if key.eq_ignore_ascii_case(b"cm") {
+                                let Ok(parsed) = val.parse::<u32>() else {
+                                    continue;
+                                };
                                 has_cm = true;
+                                cm_val = Some(parsed);
                                 *sheet_cm_counts.entry(parsed).or_insert(0) += 1;
                                 *usage.cm_counts.entry(parsed).or_insert(0) += 1;
+                            } else if key.eq_ignore_ascii_case(b"r") {
+                                r = Some(val.into_owned());
+                            } else if key.eq_ignore_ascii_case(b"t") {
+                                t = Some(val.into_owned());
                             }
                         }
                         if has_vm {
@@ -418,6 +584,158 @@ fn scan_worksheet_vm_cm_usage(pkg: &XlsxPackage) -> VmCmUsage {
                         }
                         if has_cm {
                             sheet_cm_cells += 1;
+                        }
+
+                        if samples.len() < MAX_SAMPLES && (has_vm || has_cm) {
+                            current = Some(CurrentCell {
+                                r,
+                                t,
+                                vm: vm_val,
+                                cm: cm_val,
+                                v_text: String::new(),
+                                inline_text: String::new(),
+                                in_v: false,
+                                in_is: false,
+                                in_is_t: false,
+                            });
+                        } else {
+                            current = None;
+                        }
+                    } else if let Some(cell) = current.as_mut() {
+                        if name.eq_ignore_ascii_case(b"v") {
+                            cell.in_v = true;
+                        } else if name.eq_ignore_ascii_case(b"is") {
+                            cell.in_is = true;
+                        } else if cell.in_is && name.eq_ignore_ascii_case(b"t") {
+                            cell.in_is_t = true;
+                        }
+                    }
+                }
+                Ok(quick_xml::events::Event::Empty(e)) => {
+                    let qname = e.name();
+                    let name = openxml::local_name(qname.as_ref());
+                    if name.eq_ignore_ascii_case(b"c") {
+                        sheet_total_cells += 1;
+                        let mut has_vm = false;
+                        let mut has_cm = false;
+                        let mut r: Option<String> = None;
+                        let mut vm_val: Option<u32> = None;
+                        let mut cm_val: Option<u32> = None;
+                        for attr in e.attributes().with_checks(false) {
+                            let Ok(attr) = attr else {
+                                continue;
+                            };
+                            let key = openxml::local_name(attr.key.as_ref());
+                            let Ok(val) = attr.unescape_value() else {
+                                continue;
+                            };
+                            if key.eq_ignore_ascii_case(b"vm") {
+                                let Ok(parsed) = val.parse::<u32>() else {
+                                    continue;
+                                };
+                                has_vm = true;
+                                vm_val = Some(parsed);
+                                *sheet_vm_counts.entry(parsed).or_insert(0) += 1;
+                                *usage.vm_counts.entry(parsed).or_insert(0) += 1;
+                            } else if key.eq_ignore_ascii_case(b"cm") {
+                                let Ok(parsed) = val.parse::<u32>() else {
+                                    continue;
+                                };
+                                has_cm = true;
+                                cm_val = Some(parsed);
+                                *sheet_cm_counts.entry(parsed).or_insert(0) += 1;
+                                *usage.cm_counts.entry(parsed).or_insert(0) += 1;
+                            } else if key.eq_ignore_ascii_case(b"r") {
+                                r = Some(val.into_owned());
+                            }
+                        }
+                        if has_vm {
+                            sheet_vm_cells += 1;
+                        }
+                        if has_cm {
+                            sheet_cm_cells += 1;
+                        }
+
+                        if samples.len() < MAX_SAMPLES && (has_vm || has_cm) {
+                            samples.push(SampleCell {
+                                cell_ref: r.unwrap_or_else(|| "<missing r>".to_string()),
+                                vm: vm_val,
+                                cm: cm_val,
+                                value: None,
+                            });
+                        }
+                    }
+                }
+                Ok(quick_xml::events::Event::Text(t)) => {
+                    if let Some(cell) = current.as_mut() {
+                        let text = match t.unescape() {
+                            Ok(v) => v,
+                            Err(_) => {
+                                buf.clear();
+                                continue;
+                            }
+                        };
+                        if cell.in_v {
+                            cell.v_text.push_str(&text);
+                        } else if cell.in_is_t {
+                            cell.inline_text.push_str(&text);
+                        }
+                    }
+                }
+                Ok(quick_xml::events::Event::CData(t)) => {
+                    if let Some(cell) = current.as_mut() {
+                        let text = String::from_utf8_lossy(t.as_ref());
+                        if cell.in_v {
+                            cell.v_text.push_str(&text);
+                        } else if cell.in_is_t {
+                            cell.inline_text.push_str(&text);
+                        }
+                    }
+                }
+                Ok(quick_xml::events::Event::End(e)) => {
+                    let qname = e.name();
+                    let name = openxml::local_name(qname.as_ref());
+                    if let Some(cell) = current.as_mut() {
+                        if name.eq_ignore_ascii_case(b"v") {
+                            cell.in_v = false;
+                        } else if name.eq_ignore_ascii_case(b"t") {
+                            cell.in_is_t = false;
+                        } else if name.eq_ignore_ascii_case(b"is") {
+                            cell.in_is = false;
+                        }
+                    }
+
+                    if name.eq_ignore_ascii_case(b"c") {
+                        if let Some(cell) = current.take() {
+                            if samples.len() < MAX_SAMPLES && (cell.vm.is_some() || cell.cm.is_some()) {
+                                let raw = if !cell.inline_text.is_empty() {
+                                    Some(cell.inline_text)
+                                } else if !cell.v_text.is_empty() {
+                                    Some(cell.v_text)
+                                } else {
+                                    None
+                                };
+
+                                let mut value = raw;
+                                if cell.t.as_deref() == Some("s") {
+                                    if let (Some(shared), Some(raw)) =
+                                        (shared_strings.as_ref(), value.as_deref())
+                                    {
+                                        if let Ok(idx) = raw.parse::<usize>() {
+                                            if let Some(s) = shared.get(idx) {
+                                                value = Some(s.clone());
+                                            }
+                                        }
+                                    }
+                                }
+
+                                samples.push(SampleCell {
+                                    cell_ref: cell.r.unwrap_or_else(|| "<missing r>".to_string()),
+                                    vm: cell.vm,
+                                    cm: cell.cm,
+                                    value,
+                                });
+                            }
                         }
                     }
                 }
@@ -438,6 +756,17 @@ fn scan_worksheet_vm_cm_usage(pkg: &XlsxPackage) -> VmCmUsage {
         );
         print_top_counts("vm", &sheet_vm_counts, 10);
         print_top_counts("cm", &sheet_cm_counts, 10);
+
+        if !samples.is_empty() {
+            println!("    samples (first {}):", samples.len().min(MAX_SAMPLES));
+            for sample in samples.iter().take(MAX_SAMPLES) {
+                let value = sample.value.as_deref().unwrap_or("<no value>");
+                println!(
+                    "      {}: vm={:?} cm={:?} value={}",
+                    sample.cell_ref, sample.vm, sample.cm, value
+                );
+            }
+        }
     }
 
     println!(
@@ -1284,4 +1613,65 @@ fn find_part_case_insensitive(pkg: &XlsxPackage, desired: &str) -> Option<(Strin
         }
     }
     None
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn parse_shared_strings(xml: &[u8]) -> Result<Vec<String>, quick_xml::Error> {
+    let mut reader = quick_xml::Reader::from_reader(Cursor::new(xml));
+    reader.config_mut().trim_text(false);
+
+    let mut buf = Vec::new();
+    let mut out: Vec<String> = Vec::new();
+
+    let mut current_si: Option<String> = None;
+    let mut in_t = false;
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            quick_xml::events::Event::Start(start) => {
+                let qname = start.name();
+                let name = openxml::local_name(qname.as_ref());
+                if name.eq_ignore_ascii_case(b"si") {
+                    current_si = Some(String::new());
+                } else if name.eq_ignore_ascii_case(b"t") {
+                    in_t = true;
+                }
+            }
+            quick_xml::events::Event::Empty(start) => {
+                let qname = start.name();
+                let name = openxml::local_name(qname.as_ref());
+                if name.eq_ignore_ascii_case(b"si") {
+                    out.push(String::new());
+                }
+            }
+            quick_xml::events::Event::Text(text) => {
+                if in_t {
+                    if let Some(si) = current_si.as_mut() {
+                        si.push_str(&text.unescape()?.into_owned());
+                    }
+                }
+            }
+            quick_xml::events::Event::CData(text) => {
+                if in_t {
+                    if let Some(si) = current_si.as_mut() {
+                        si.push_str(&String::from_utf8_lossy(text.as_ref()));
+                    }
+                }
+            }
+            quick_xml::events::Event::End(end) => {
+                let qname = end.name();
+                let name = openxml::local_name(qname.as_ref());
+                if name.eq_ignore_ascii_case(b"t") {
+                    in_t = false;
+                } else if name.eq_ignore_ascii_case(b"si") {
+                    out.push(current_si.take().unwrap_or_default());
+                }
+            }
+            quick_xml::events::Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(out)
 }
