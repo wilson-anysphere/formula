@@ -25,6 +25,24 @@ describe("defaultRibbonSchema", () => {
     }
   });
 
+  it("exposes Version History + Branch Manager panel toggles in the View tab", () => {
+    const viewTab = defaultRibbonSchema.tabs.find((tab) => tab.id === "view");
+    expect(viewTab, "Expected View tab to exist").toBeTruthy();
+    if (!viewTab) return;
+
+    const panelsGroup = viewTab.groups.find((group) => group.id === "view.panels");
+    expect(panelsGroup, "Expected View → Panels group to exist").toBeTruthy();
+    if (!panelsGroup) return;
+
+    const versionHistory = panelsGroup.buttons.find((button) => button.id === "open-version-history-panel");
+    expect(versionHistory, "Expected open-version-history-panel button").toBeTruthy();
+    expect(versionHistory?.testId).toBe("open-version-history-panel");
+
+    const branchManager = panelsGroup.buttons.find((button) => button.id === "open-branch-manager-panel");
+    expect(branchManager, "Expected open-branch-manager-panel button").toBeTruthy();
+    expect(branchManager?.testId).toBe("open-branch-manager-panel");
+  });
+
   it("ensures sibling ids are unique (tabs, groups, buttons, menu items)", () => {
     expectUniqueIds(
       defaultRibbonSchema.tabs.map((tab) => tab.id),
@@ -80,4 +98,3 @@ describe("defaultRibbonSchema", () => {
     }
   });
 });
-
