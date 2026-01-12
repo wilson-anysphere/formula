@@ -115,6 +115,15 @@ export const DEFAULT_RESERVED_EXTENSION_SHORTCUTS = [
   "f2",
   // Add Comment (Excel-style).
   "shift+f2",
+  // Workbook sheet navigation (Excel-style).
+  "ctrl+pageup",
+  "cmd+pageup",
+  // Some keyboards emit both ctrl+meta on the same chord.
+  "ctrl+cmd+pageup",
+  "ctrl+pagedown",
+  "cmd+pagedown",
+  // Some keyboards emit both ctrl+meta on the same chord.
+  "ctrl+cmd+pagedown",
   // AI Chat toggle (core UX shortcut; extensions should not claim it).
   // - Windows/Linux: Ctrl+Shift+A
   // - macOS: Cmd+I (with Ctrl+Cmd+I fallback for some remote/VM keyboard setups)

@@ -92,8 +92,12 @@ describe("KeybindingService", () => {
 
     const extRun = vi.fn();
     commandRegistry.setExtensionCommands(
-      [{ extensionId: "ext", command: "ext.stealCopy", title: "Ext" }],
-      async () => extRun(),
+      [
+        { extensionId: "ext", command: "ext.stealCopy", title: "Ext" },
+        { extensionId: "ext", command: "ext.stealPreviousSheet", title: "Ext" },
+        { extensionId: "ext", command: "ext.stealNextSheet", title: "Ext" },
+      ],
+      async (commandId) => extRun(commandId),
     );
 
     const service = new KeybindingService({ commandRegistry, contextKeys, platform: "other" });
@@ -138,6 +142,12 @@ describe("KeybindingService", () => {
       { extensionId: "ext", command: "ext.stealQuit", key: "ctrl+q", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealQuit", key: "cmd+q", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealQuit", key: "ctrl+cmd+q", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealPreviousSheet", key: "ctrl+pageup", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealPreviousSheet", key: "cmd+pageup", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealPreviousSheet", key: "ctrl+cmd+pageup", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealNextSheet", key: "ctrl+pagedown", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealNextSheet", key: "cmd+pagedown", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealNextSheet", key: "ctrl+cmd+pagedown", mac: null, when: null },
     ]);
 
     // Safety net: even if an extension keybinding for a reserved shortcut slips through filtering,
@@ -277,6 +287,47 @@ describe("KeybindingService", () => {
     const handled18 = await service.dispatchKeydown(event18);
     expect(handled18).toBe(false);
     expect(event18.defaultPrevented).toBe(false);
+    expect(extRun).not.toHaveBeenCalled();
+
+    // Workbook sheet navigation (Excel-style): Ctrl/Cmd+PgUp/PgDn.
+    const event19 = makeKeydownEvent({ key: "PageUp", ctrlKey: true });
+    const handled19 = await service.dispatchKeydown(event19);
+    expect(handled19).toBe(false);
+    expect(event19.defaultPrevented).toBe(false);
+    expect(extRun).not.toHaveBeenCalled();
+
+    const event20 = makeKeydownEvent({ key: "PageUp", metaKey: true });
+    const handled20 = await service.dispatchKeydown(event20);
+    expect(handled20).toBe(false);
+    expect(event20.defaultPrevented).toBe(false);
+    expect(extRun).not.toHaveBeenCalled();
+
+    // Some environments emit both Ctrl+Meta for a single chord.
+    const event21 = makeKeydownEvent({ key: "PageUp", ctrlKey: true, metaKey: true });
+    const handled21 = await service.dispatchKeydown(event21);
+    expect(handled21).toBe(false);
+    expect(event21.defaultPrevented).toBe(false);
+    expect(extRun).not.toHaveBeenCalled();
+
+    const event22 = makeKeydownEvent({ key: "PageDown", ctrlKey: true });
+    const handled22 = await service.dispatchKeydown(event22);
+    expect(handled22).toBe(false);
+    expect(event22.defaultPrevented).toBe(false);
+    expect(extRun).not.toHaveBeenCalled();
+
+    const event23 = makeKeydownEvent({ key: "PageDown", metaKey: true });
+    const handled23 = await service.dispatchKeydown(event23);
+    expect(handled23).toBe(false);
+    expect(event23.defaultPrevented).toBe(false);
+    expect(extRun).not.toHaveBeenCalled();
+
+    // Some environments emit both Ctrl+Meta for a single chord.
+    const event24 = makeKeydownEvent({ key: "PageDown", ctrlKey: true, metaKey: true });
+    const handled24 = await service.dispatchKeydown(event24);
+    expect(handled24).toBe(false);
+    expect(event24.defaultPrevented).toBe(false);
+    expect(extRun).not.toHaveBeenCalled();
+
     // File shortcuts: Ctrl/Cmd + N/O/S/W/Q.
     const fileEvent1 = makeKeydownEvent({ key: "n", ctrlKey: true });
     const fileHandled1 = await service.dispatchKeydown(fileEvent1);
@@ -385,6 +436,12 @@ describe("KeybindingService", () => {
       { extensionId: "ext", command: "ext.stealInlineAI", key: "ctrl+k", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealEditCell", key: "f2", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealAddComment", key: "shift+f2", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealPreviousSheet", key: "ctrl+pageup", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealPreviousSheet", key: "cmd+pageup", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealPreviousSheet", key: "ctrl+cmd+pageup", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealNextSheet", key: "ctrl+pagedown", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealNextSheet", key: "cmd+pagedown", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealNextSheet", key: "ctrl+cmd+pagedown", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealAIChat", key: "ctrl+shift+a", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealAIChat", key: "cmd+i", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealAIChat", key: "ctrl+cmd+i", mac: null, when: null },
@@ -422,6 +479,8 @@ describe("KeybindingService", () => {
     expect(index.get("ext.stealInlineAI")).toBeUndefined();
     expect(index.get("ext.stealEditCell")).toBeUndefined();
     expect(index.get("ext.stealAddComment")).toBeUndefined();
+    expect(index.get("ext.stealPreviousSheet")).toBeUndefined();
+    expect(index.get("ext.stealNextSheet")).toBeUndefined();
     expect(index.get("ext.stealAIChat")).toBeUndefined();
     expect(index.get("ext.stealCommentsPanel")).toBeUndefined();
     expect(index.get("ext.stealEscape")).toBeUndefined();
