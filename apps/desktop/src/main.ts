@@ -778,6 +778,7 @@ if (
   const panelBodyRenderer = createPanelBodyRenderer({
     getDocumentController: () => app.getDocument(),
     getActiveSheetId: () => app.getCurrentSheetId(),
+    getSearchWorkbook: () => app.getSearchWorkbook(),
     getSelection: () => {
       const selection = currentSelectionRect();
       return {

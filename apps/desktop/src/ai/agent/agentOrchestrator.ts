@@ -20,7 +20,7 @@ import { getDesktopToolPolicy } from "../toolPolicy.js";
 import { createDesktopRagService, type DesktopRagService, type DesktopRagServiceOptions } from "../rag/ragService.js";
 import { getDesktopAIAuditStore } from "../audit/auditStore.js";
 import { getDefaultReserveForOutputTokens, getModeContextWindowTokens } from "../contextBudget.js";
-import { WorkbookContextBuilder } from "../context/WorkbookContextBuilder.js";
+import { WorkbookContextBuilder, type WorkbookSchemaProvider } from "../context/WorkbookContextBuilder.js";
 
 export interface AgentApprovalRequest {
   call: ToolCall;
@@ -86,6 +86,7 @@ export interface RunAgentTaskParams {
   workbookId: string;
   documentController: DocumentController;
   llmClient: LLMClient;
+  schemaProvider?: WorkbookSchemaProvider | null;
   auditStore?: AIAuditStore;
   /**
    * Default sheet used when tool calls omit a sheet prefix (e.g. "A1" instead of "Sheet2!A1").
@@ -302,6 +303,7 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
       documentController: params.documentController,
       spreadsheet,
       ragService,
+      schemaProvider: params.schemaProvider ?? null,
       dlp,
       mode: "agent",
       model: modelName,

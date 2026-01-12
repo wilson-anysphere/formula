@@ -51,6 +51,7 @@ import { parseGoTo } from "../../../../packages/search/index.js";
 import type { CreateChartResult, CreateChartSpec } from "../../../../packages/ai-tools/src/spreadsheet/api.js";
 import { colToName as colToNameA1, fromA1 as fromA1A1 } from "@formula/spreadsheet-frontend/a1";
 import { shiftA1References } from "@formula/spreadsheet-frontend";
+import { createSchemaProviderFromSearchWorkbook } from "../ai/context/searchWorkbookSchemaProvider.js";
 import { InlineEditController, type InlineEditLLMClient } from "../ai/inline-edit/inlineEditController";
 import type { AIAuditStore } from "../../../../packages/ai-audit/src/store.js";
 import type { CellRange as GridCellRange, GridAxisSizeChange, GridViewportState } from "@formula/grid";
@@ -642,6 +643,7 @@ export class SpreadsheetApp {
       container: this.root,
       document: this.document,
       workbookId: opts.workbookId,
+      schemaProvider: createSchemaProviderFromSearchWorkbook(this.searchWorkbook),
       getSheetId: () => this.sheetId,
       getSelectionRange: () => this.getInlineEditSelectionRange(),
       onApplied: () => {

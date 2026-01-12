@@ -24,7 +24,7 @@ import type { TokenEstimator } from "../../../../../packages/ai-context/src/toke
 import { createHeuristicTokenEstimator, estimateToolDefinitionTokens } from "../../../../../packages/ai-context/src/tokenBudget.js";
 import { trimMessagesToBudget } from "../../../../../packages/ai-context/src/trimMessagesToBudget.js";
 import { getDefaultReserveForOutputTokens, getModeContextWindowTokens } from "../contextBudget.js";
-import { WorkbookContextBuilder } from "../context/WorkbookContextBuilder.js";
+import { WorkbookContextBuilder, type WorkbookSchemaProvider } from "../context/WorkbookContextBuilder.js";
 
 export interface InlineEditLLMClient {
   chat: (request: any) => Promise<any>;
@@ -33,6 +33,7 @@ export interface InlineEditLLMClient {
 export interface InlineEditControllerOptions {
   container: HTMLElement;
   document: DocumentController;
+  schemaProvider?: WorkbookSchemaProvider | null;
   /**
    * Identifier for the active workbook. Used to correlate audit entries with the
    * audit log viewer (which defaults to filtering by workbook id).
@@ -167,6 +168,7 @@ export class InlineEditController {
         documentController: this.options.document,
         spreadsheet: api,
         ragService: null,
+        schemaProvider: this.options.schemaProvider ?? null,
         dlp,
         mode: "inline_edit",
         model,

@@ -73,8 +73,9 @@ export interface WorkbookContextPayload {
   selection?: { sheetId: string; range: string };
   sheets: WorkbookContextSheetSummary[];
   /**
-   * Named ranges are not yet first-class in the desktop DocumentController model.
-   * Kept for forward-compat so AI surfaces can rely on the field existing.
+   * Named ranges, when available from the host application.
+   *
+   * Desktop surfaces can provide them via `WorkbookContextBuilderOptions.schemaProvider`.
    */
   namedRanges: Array<{ name: string; range: string }>;
   /**
@@ -121,10 +122,21 @@ export interface BuildWorkbookContextResult {
   indexStats?: unknown;
 }
 
+export interface WorkbookSchemaProvider {
+  getNamedRanges?: () => Array<{ name: string; sheetId: string; range: Range }>;
+  getTables?: () => Array<{ name: string; sheetId: string; range: Range }>;
+}
+
 export interface WorkbookContextBuilderOptions {
   workbookId: string;
   documentController: DocumentController;
   spreadsheet: SpreadsheetApi;
+  /**
+   * Optional schema metadata provider for workbook-level objects that are not
+   * currently exposed via the `SpreadsheetApi` tool surface (named ranges,
+   * explicit table definitions, etc).
+   */
+  schemaProvider?: WorkbookSchemaProvider | null;
   /**
    * Optional RAG-capable provider (DesktopRagService or ContextManager).
    * Must implement `buildWorkbookContextFromSpreadsheetApi`.
@@ -183,12 +195,18 @@ export class WorkbookContextBuilder {
   private readonly options: Required<
     Omit<
       WorkbookContextBuilderOptions,
-      "ragService" | "dlp" | "tokenEstimator" | "maxPromptContextTokens" | "contextWindowTokens" | "reserveForOutputTokens"
+      | "ragService"
+      | "dlp"
+      | "tokenEstimator"
+      | "maxPromptContextTokens"
+      | "contextWindowTokens"
+      | "reserveForOutputTokens"
+      | "schemaProvider"
     >
   > &
     Pick<
       WorkbookContextBuilderOptions,
-      "ragService" | "dlp" | "tokenEstimator" | "maxPromptContextTokens" | "contextWindowTokens" | "reserveForOutputTokens"
+      "ragService" | "dlp" | "tokenEstimator" | "maxPromptContextTokens" | "contextWindowTokens" | "reserveForOutputTokens" | "schemaProvider"
     >;
   private readonly estimator: TokenEstimator;
 
@@ -211,6 +229,65 @@ export class WorkbookContextBuilder {
       this.options.mode === "inline_edit" ? [input.activeSheetId] : this.resolveSheetIds({ activeSheetId: input.activeSheetId });
 
     const selection = input.selectedRange;
+    const schemaProvider = this.options.schemaProvider ?? null;
+
+    const namedRangeDefs = safeList(() => schemaProvider?.getNamedRanges?.() ?? []);
+    const explicitTableDefs = safeList(() => schemaProvider?.getTables?.() ?? []);
+
+    const schemaNamedRangesBySheet = new Map<string, Array<{ name: string; range: string }>>();
+    for (const nr of namedRangeDefs) {
+      const name = typeof nr?.name === "string" ? nr.name.trim() : "";
+      const sheetId = typeof nr?.sheetId === "string" ? nr.sheetId : "";
+      if (!name || !sheetId) continue;
+      let range: string;
+      try {
+        range = this.schemaRangeRef(sheetId, nr.range);
+      } catch {
+        continue;
+      }
+      const list = schemaNamedRangesBySheet.get(sheetId) ?? [];
+      list.push({ name, range });
+      schemaNamedRangesBySheet.set(sheetId, list);
+    }
+
+    const schemaTablesBySheet = new Map<string, Array<{ name: string; range: string }>>();
+    for (const t of explicitTableDefs) {
+      const name = typeof t?.name === "string" ? t.name.trim() : "";
+      const sheetId = typeof t?.sheetId === "string" ? t.sheetId : "";
+      if (!name || !sheetId) continue;
+      let range: string;
+      try {
+        range = this.schemaRangeRef(sheetId, t.range);
+      } catch {
+        continue;
+      }
+      const list = schemaTablesBySheet.get(sheetId) ?? [];
+      list.push({ name, range });
+      schemaTablesBySheet.set(sheetId, list);
+    }
+
+    for (const [_sheetId, list] of schemaNamedRangesBySheet) {
+      list.sort((a, b) => {
+        const ak = `${a.name}\u0000${a.range}`;
+        const bk = `${b.name}\u0000${b.range}`;
+        return ak.localeCompare(bk);
+      });
+    }
+    for (const [_sheetId, list] of schemaTablesBySheet) {
+      list.sort((a, b) => {
+        const ak = `${a.name}\u0000${a.range}`;
+        const bk = `${b.name}\u0000${b.range}`;
+        return ak.localeCompare(bk);
+      });
+    }
+
+    const namedRanges = Array.from(schemaNamedRangesBySheet.entries())
+      .flatMap(([sheetId, list]) => list.map((r) => ({ name: r.name, range: r.range })))
+      .sort((a, b) => {
+        const ak = `${a.name}\u0000${a.range}`;
+        const bk = `${b.name}\u0000${b.range}`;
+        return ak.localeCompare(bk);
+      });
 
     // Retrieval (semantic search) is optional and query-driven.
     const ragResult =
@@ -248,7 +325,10 @@ export class WorkbookContextBuilder {
     if (selectionBlock) blocks.push(selectionBlock);
 
     for (const sheetId of sheetsToSummarize) {
-      const summary = await this.buildSheetSummary(sheetId);
+      const summary = await this.buildSheetSummary(sheetId, {
+        namedRanges: schemaNamedRangesBySheet.get(sheetId),
+        tables: schemaTablesBySheet.get(sheetId),
+      });
       sheetSummaries.push(summary);
 
       // Only include an explicit sample block for the active sheet (or for inline edit, the only sheet).
@@ -295,13 +375,27 @@ export class WorkbookContextBuilder {
       return a.range.localeCompare(b.range);
     });
 
-    const tables = sheetSummaries
-      .flatMap((s) => s.schema.tables.map((t) => ({ sheetId: s.sheetId, name: t.name, range: t.range })))
-      .sort((a, b) => {
-        const ak = `${a.sheetId}\u0000${a.name}\u0000${a.range}`;
-        const bk = `${b.sheetId}\u0000${b.name}\u0000${b.range}`;
-        return ak.localeCompare(bk);
-      });
+    const tablesByRange = new Map<string, { sheetId: string; name: string; range: string }>();
+    for (const entry of sheetSummaries.flatMap((s) => s.schema.tables.map((t) => ({ sheetId: s.sheetId, name: t.name, range: t.range })))) {
+      tablesByRange.set(`${entry.sheetId}\u0000${entry.range}`, entry);
+    }
+    for (const t of explicitTableDefs) {
+      const name = typeof t?.name === "string" ? String(t.name).trim() : "";
+      const sheetId = typeof t?.sheetId === "string" ? String(t.sheetId) : "";
+      if (!name || !sheetId) continue;
+      let range: string;
+      try {
+        range = this.schemaRangeRef(sheetId, t.range);
+      } catch {
+        continue;
+      }
+      tablesByRange.set(`${sheetId}\u0000${range}`, { sheetId, name, range });
+    }
+    const tables = Array.from(tablesByRange.values()).sort((a, b) => {
+      const ak = `${a.sheetId}\u0000${a.name}\u0000${a.range}`;
+      const bk = `${b.sheetId}\u0000${b.name}\u0000${b.range}`;
+      return ak.localeCompare(bk);
+    });
 
     const budget = this.computeBudget();
 
@@ -310,11 +404,10 @@ export class WorkbookContextBuilder {
       workbookId: this.options.workbookId,
       activeSheetId: input.activeSheetId,
       ...(selection
-        ? { selection: { sheetId: selection.sheetId, range: this.rangeRef(selection.sheetId, selection.range) } }
-        : {}),
+         ? { selection: { sheetId: selection.sheetId, range: this.rangeRef(selection.sheetId, selection.range) } }
+         : {}),
       sheets: sheetSummaries,
-      // Desktop doesn't expose named ranges yet (forward-compatible field).
-      namedRanges: [],
+      namedRanges,
       tables,
       blocks,
       ...(input.focusQuestion
@@ -373,7 +466,10 @@ export class WorkbookContextBuilder {
     return out;
   }
 
-  private async buildSheetSummary(sheetId: string): Promise<WorkbookContextSheetSummary> {
+  private async buildSheetSummary(
+    sheetId: string,
+    extras?: { namedRanges?: Array<{ name: string; range: string }>; tables?: Array<{ name: string; range: string }> },
+  ): Promise<WorkbookContextSheetSummary> {
     const used = this.options.documentController.getUsedRange(sheetId);
     if (!used) {
       return { sheetId, schema: { name: sheetId, tables: [], namedRanges: [], dataRegions: [] } };
@@ -404,6 +500,8 @@ export class WorkbookContextBuilder {
       values: schemaValues,
       // When schema is built from a capped window, preserve the original coordinates.
       origin: { row: analyzedRange.startRow, col: analyzedRange.startCol },
+      ...(extras?.namedRanges?.length ? { namedRanges: extras.namedRanges } : {}),
+      ...(extras?.tables?.length ? { tables: extras.tables } : {}),
     } as any);
 
     return { sheetId, analyzedRange, schema };
@@ -583,6 +681,21 @@ export class WorkbookContextBuilder {
 
   private rangeRef(sheetId: string, range: Range): string {
     return `${formatSheetNameForA1(sheetId)}!${rangeToA1Selection(range)}`;
+  }
+
+  private schemaRangeRef(sheetId: string, range: Range): string {
+    // `packages/ai-context`'s A1 parser does not implement Excel-style quoted sheet names.
+    // Keep sheet names unquoted here so schema extraction can safely parse its own ranges.
+    return `${sheetId}!${rangeToA1Selection(range)}`;
+  }
+}
+
+function safeList<T>(fn: () => T[] | null | undefined): T[] {
+  try {
+    const out = fn();
+    return Array.isArray(out) ? out : [];
+  } catch {
+    return [];
   }
 }
 

@@ -160,6 +160,53 @@ describe("ai chat orchestrator (desktop integration)", () => {
     expect(firstRequest.messages?.[0]?.content).toContain("Sheet1!A1:B3");
   });
 
+  it("includes named ranges and explicit tables when a schemaProvider is supplied", async () => {
+    const controller = new DocumentController();
+    controller.setRangeValues("Sheet1", "A1", [
+      ["Region", "Revenue"],
+      ["North", 1000],
+      ["South", 2000],
+    ]);
+
+    const embedder = new HashEmbedder({ dimension: 128 });
+    const vectorStore = new InMemoryVectorStore({ dimension: 128 });
+    const contextManager = new ContextManager({
+      tokenBudgetTokens: 800,
+      workbookRag: { vectorStore, embedder, topK: 3 },
+    });
+
+    const auditStore = new MemoryAIAuditStore();
+    const mock = createMockLlmClient({ cell: "C1", value: 99 });
+    const onApprovalRequired = vi.fn(async () => true);
+
+    const orchestrator = createAiChatOrchestrator({
+      documentController: controller,
+      workbookId: "wb_schema_provider",
+      llmClient: mock.client as any,
+      model: "mock-model",
+      getActiveSheetId: () => "Sheet1",
+      schemaProvider: {
+        getNamedRanges: () => [
+          { name: "SalesData", sheetId: "Sheet1", range: { startRow: 0, endRow: 2, startCol: 0, endCol: 1 } },
+        ],
+        getTables: () => [
+          { name: "SalesTable", sheetId: "Sheet1", range: { startRow: 0, endRow: 2, startCol: 0, endCol: 1 } },
+        ],
+      },
+      auditStore,
+      sessionId: "session_schema_provider",
+      contextManager,
+      onApprovalRequired,
+      previewOptions: { approval_cell_threshold: 0 },
+    });
+
+    await orchestrator.sendMessage({ text: "Set C1 to 99", history: [] });
+    const firstRequest = mock.requests[0];
+    expect(firstRequest.messages?.[0]?.role).toBe("system");
+    expect(firstRequest.messages?.[0]?.content).toContain("SalesData");
+    expect(firstRequest.messages?.[0]?.content).toContain("SalesTable");
+  });
+
   it("can be cancelled while building workbook context (does not call model)", async () => {
     const controller = new DocumentController();
     controller.setCellValue("Sheet1", "A1", 1);

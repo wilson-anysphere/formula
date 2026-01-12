@@ -20,6 +20,7 @@ export interface PanelBodyRendererOptions {
   getDocumentController: () => unknown;
   getActiveSheetId?: () => string;
   getSelection?: () => unknown;
+  getSearchWorkbook?: () => unknown;
   workbookId?: string;
   /**
    * Optional invoke wrapper (typically a queued/serialized Tauri invoke).
@@ -135,6 +136,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
           getDocumentController={options.getDocumentController}
           getActiveSheetId={options.getActiveSheetId}
           getSelection={options.getSelection as any}
+          getSearchWorkbook={options.getSearchWorkbook}
           workbookId={workbookId}
           createChart={options.createChart}
         />,

@@ -33,7 +33,7 @@ import { getDesktopAIAuditStore } from "../audit/auditStore.js";
 import { maybeGetAiCloudDlpOptions } from "../dlp/aiDlp.js";
 import { getDefaultReserveForOutputTokens, getModeContextWindowTokens } from "../contextBudget.js";
 import { getDesktopToolPolicy } from "../toolPolicy.js";
-import { WorkbookContextBuilder } from "../context/WorkbookContextBuilder.js";
+import { WorkbookContextBuilder, type WorkbookSchemaProvider } from "../context/WorkbookContextBuilder.js";
 
 export type AiChatAttachment =
   | { type: "range"; reference: string; data?: unknown }
@@ -135,6 +135,11 @@ export interface AiChatOrchestratorOptions {
    * Expected coordinates are 0-based (desktop `Range`).
    */
   getSelectedRange?: () => { sheetId: string; range: Range } | null;
+  /**
+   * Optional provider for workbook metadata not exposed via SpreadsheetApi (named
+   * ranges, explicit tables, etc).
+   */
+  schemaProvider?: WorkbookSchemaProvider | null;
   /**
    * Optional chart host implementation. When provided, tool calls like
    * `create_chart` will add a chart to the desktop UI (via SpreadsheetApi
@@ -285,6 +290,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
         documentController: options.documentController,
         spreadsheet,
         ragService: contextProvider as any,
+        schemaProvider: options.schemaProvider ?? null,
         dlp,
         mode: "chat",
         model: options.model,

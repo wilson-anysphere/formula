@@ -6,6 +6,7 @@ import { createLLMClient } from "../../../../../packages/llm/src/createLLMClient
 import { createAiChatOrchestrator } from "../../ai/chat/orchestrator.js";
 import { runAgentTask, type AgentProgressEvent, type AgentTaskResult } from "../../ai/agent/agentOrchestrator.js";
 import { createDesktopRagService } from "../../ai/rag/ragService.js";
+import { createSchemaProviderFromSearchWorkbook } from "../../ai/context/searchWorkbookSchemaProvider.js";
 import type { LLMToolCall } from "../../../../../packages/ai-tools/src/llm/integration.js";
 import type { ToolPlanPreview } from "../../../../../packages/ai-tools/src/preview/preview-engine.js";
 import type { SpreadsheetApi } from "../../../../../packages/ai-tools/src/spreadsheet/api.js";
@@ -109,6 +110,13 @@ export interface AIChatPanelContainerProps {
    * explicit attachment.
    */
   getSelection?: () => { sheetId: string; range: { startRow: number; startCol: number; endRow: number; endCol: number } } | null;
+  /**
+   * Optional workbook metadata provider (defined names / tables) used by other
+   * desktop features like the name box and formula tab completion.
+   *
+   * When provided, chat/agent can include this metadata in workbook context.
+   */
+  getSearchWorkbook?: () => unknown;
   workbookId?: string;
   createChart?: SpreadsheetApi["createChart"];
 }
@@ -377,6 +385,14 @@ function AIChatPanelRuntime(
   const auditStore = useMemo(() => getDesktopAIAuditStore(), []);
 
   const documentController = useMemo(() => props.getDocumentController() as any, [props.getDocumentController]);
+  const schemaProvider = useMemo(() => {
+    try {
+      const wb = props.getSearchWorkbook?.();
+      return wb ? createSchemaProviderFromSearchWorkbook(wb as any) : null;
+    } catch {
+      return null;
+    }
+  }, [props.getSearchWorkbook]);
 
   const ragService = useMemo(() => {
     return createDesktopRagService({
@@ -403,6 +419,7 @@ function AIChatPanelRuntime(
       model: (client as any).model ?? "gpt-4o-mini",
       getActiveSheetId: props.getActiveSheetId,
       getSelectedRange: props.getSelection as any,
+      schemaProvider,
       createChart: props.createChart,
       auditStore,
       onApprovalRequired,
@@ -418,6 +435,7 @@ function AIChatPanelRuntime(
     props.createChart,
     props.getActiveSheetId,
     props.getSelection,
+    schemaProvider,
     ragService,
     workbookId,
   ]);
@@ -513,6 +531,7 @@ function AIChatPanelRuntime(
         llmClient: client as any,
         auditStore,
         createChart: props.createChart,
+        schemaProvider,
         onProgress: (event) =>
           setAgentEvents((prev) => {
             const last = prev.at(-1);
@@ -550,6 +569,7 @@ function AIChatPanelRuntime(
     onApprovalRequired,
     props,
     ragService,
+    schemaProvider,
     workbookId
   ]);
 

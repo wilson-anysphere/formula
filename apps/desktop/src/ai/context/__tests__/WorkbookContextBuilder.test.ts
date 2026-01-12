@@ -43,6 +43,43 @@ describe("WorkbookContextBuilder", () => {
     expect(table.columns.map((c) => c.type)).toEqual(["string", "number"]);
   });
 
+  it("includes explicit named ranges and tables when provided by a schemaProvider", async () => {
+    const documentController = new DocumentController();
+    documentController.setRangeValues("Sheet1", "A1", [
+      ["Region", "Revenue"],
+      ["North", 1000],
+      ["South", 2000],
+    ]);
+
+    const spreadsheet = new DocumentControllerSpreadsheetApi(documentController);
+    const builder = new WorkbookContextBuilder({
+      workbookId: "wb_meta",
+      documentController,
+      spreadsheet,
+      ragService: null,
+      mode: "chat",
+      model: "unit-test-model",
+      schemaProvider: {
+        getNamedRanges: () => [
+          { name: "SalesData", sheetId: "Sheet1", range: { startRow: 0, endRow: 2, startCol: 0, endCol: 1 } },
+        ],
+        getTables: () => [
+          { name: "SalesTable", sheetId: "Sheet1", range: { startRow: 0, endRow: 2, startCol: 0, endCol: 1 } },
+        ],
+      },
+    });
+
+    const ctx = await builder.build({ activeSheetId: "Sheet1" });
+    expect(ctx.payload.namedRanges).toEqual([{ name: "SalesData", range: "Sheet1!A1:B3" }]);
+
+    const sheet = ctx.payload.sheets.find((s) => s.sheetId === "Sheet1");
+    expect(sheet).toBeTruthy();
+    expect(sheet!.schema.namedRanges).toEqual([{ name: "SalesData", range: "Sheet1!A1:B3" }]);
+    expect(sheet!.schema.tables[0]!.name).toBe("SalesTable");
+
+    expect(ctx.payload.tables).toEqual([{ sheetId: "Sheet1", name: "SalesTable", range: "Sheet1!A1:B3" }]);
+  });
+
   it("redacts restricted cells in sampled blocks (DLP)", async () => {
     const workbookId = "wb_dlp";
     const documentController = new DocumentController();
