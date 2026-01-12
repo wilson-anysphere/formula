@@ -9,6 +9,23 @@ fn stdev_s_matches_known_value() {
 }
 
 #[test]
+fn statistical_functions_reject_lambda_values() {
+    let mut sheet = TestSheet::new();
+    assert_eq!(
+        sheet.eval("=STDEV.S({1,LAMBDA(x,x)})"),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
+        sheet.eval("=VARA({1,LAMBDA(x,x)})"),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
+        sheet.eval("=CORREL({1,2},{LAMBDA(x,x),2})"),
+        Value::Error(ErrorKind::Value)
+    );
+}
+
+#[test]
 fn legacy_stat_functions_are_accepted_as_aliases() {
     let mut sheet = TestSheet::new();
     assert_number(&sheet.eval("=STDEV({1,2,3})"), 1.0);
@@ -48,7 +65,10 @@ fn mode_sngl_returns_most_frequent_value() {
 #[test]
 fn mode_sngl_returns_na_when_no_duplicates() {
     let mut sheet = TestSheet::new();
-    assert_eq!(sheet.eval("=MODE.SNGL({1,2,3})"), Value::Error(ErrorKind::NA));
+    assert_eq!(
+        sheet.eval("=MODE.SNGL({1,2,3})"),
+        Value::Error(ErrorKind::NA)
+    );
 }
 
 #[test]
@@ -72,8 +92,14 @@ fn large_small_return_expected_order_stats() {
 #[test]
 fn large_returns_num_for_invalid_k() {
     let mut sheet = TestSheet::new();
-    assert_eq!(sheet.eval("=LARGE({1,2,3},0)"), Value::Error(ErrorKind::Num));
-    assert_eq!(sheet.eval("=SMALL({1,2,3},4)"), Value::Error(ErrorKind::Num));
+    assert_eq!(
+        sheet.eval("=LARGE({1,2,3},0)"),
+        Value::Error(ErrorKind::Num)
+    );
+    assert_eq!(
+        sheet.eval("=SMALL({1,2,3},4)"),
+        Value::Error(ErrorKind::Num)
+    );
 }
 
 #[test]
@@ -137,7 +163,10 @@ fn percentrank_errors_on_out_of_range_x_and_invalid_significance() {
         Value::Error(ErrorKind::Num)
     );
 
-    assert_eq!(sheet.eval("=PERCENTRANK.INC({1},1)"), Value::Error(ErrorKind::Div0));
+    assert_eq!(
+        sheet.eval("=PERCENTRANK.INC({1},1)"),
+        Value::Error(ErrorKind::Div0)
+    );
 }
 
 #[test]
@@ -199,7 +228,10 @@ fn forecast_linear_matches_identity_relationship() {
     let mut sheet = TestSheet::new();
     assert_number(&sheet.eval("=FORECAST(4,{1,2,3},{1,2,3})"), 4.0);
     assert_number(&sheet.eval("=FORECAST.LINEAR(4,{1,2,3},{1,2,3})"), 4.0);
-    assert_number(&sheet.eval("=_xlfn.FORECAST.LINEAR(4,{1,2,3},{1,2,3})"), 4.0);
+    assert_number(
+        &sheet.eval("=_xlfn.FORECAST.LINEAR(4,{1,2,3},{1,2,3})"),
+        4.0,
+    );
 }
 
 #[test]

@@ -114,17 +114,17 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             Value::Error(e) => return Value::Error(*e),
                             Value::Number(n) => acc += n,
                             Value::Lambda(_) => return Value::Error(ErrorKind::Value),
-                             Value::Bool(_)
-                             | Value::Text(_)
-                             | Value::Blank
-                             | Value::Array(_)
-                             | Value::Spill { .. }
-                             | Value::Reference(_)
-                             | Value::ReferenceUnion(_) => {}
-                         }
-                      }
-                  }
-                 Value::Lambda(_) => return Value::Error(ErrorKind::Value),
+                            Value::Bool(_)
+                            | Value::Text(_)
+                            | Value::Blank
+                            | Value::Array(_)
+                            | Value::Spill { .. }
+                            | Value::Reference(_)
+                            | Value::ReferenceUnion(_) => {}
+                        }
+                    }
+                }
+                Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                 Value::Spill { .. } => return Value::Error(ErrorKind::Value),
                 Value::Reference(_) | Value::ReferenceUnion(_) => {
                     return Value::Error(ErrorKind::Value)
@@ -138,17 +138,17 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         Value::Number(n) => acc += n,
                         Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                         // Excel quirk: logicals/text in references are ignored by SUM.
-                         Value::Bool(_)
-                         | Value::Text(_)
-                         | Value::Blank
-                         | Value::Array(_)
-                         | Value::Spill { .. }
-                         | Value::Reference(_)
-                         | Value::ReferenceUnion(_) => {}
-                      }
-                  }
-              }
-             ArgValue::ReferenceUnion(ranges) => {
+                        Value::Bool(_)
+                        | Value::Text(_)
+                        | Value::Blank
+                        | Value::Array(_)
+                        | Value::Spill { .. }
+                        | Value::Reference(_)
+                        | Value::ReferenceUnion(_) => {}
+                    }
+                }
+            }
+            ArgValue::ReferenceUnion(ranges) => {
                 let mut seen = std::collections::HashSet::new();
                 for r in ranges {
                     for addr in ctx.iter_reference_cells(&r) {
@@ -156,23 +156,23 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             continue;
                         }
                         let v = ctx.get_cell_value(&r.sheet_id, addr);
-                         match v {
-                             Value::Error(e) => return Value::Error(e),
-                             Value::Number(n) => acc += n,
-                             Value::Lambda(_) => return Value::Error(ErrorKind::Value),
-                             // Excel quirk: logicals/text in references are ignored by SUM.
-                              Value::Bool(_)
-                              | Value::Text(_)
-                              | Value::Blank
-                              | Value::Array(_)
-                              | Value::Spill { .. }
-                              | Value::Reference(_)
-                              | Value::ReferenceUnion(_) => {}
-                          }
-                      }
-                  }
-             }
-         }
+                        match v {
+                            Value::Error(e) => return Value::Error(e),
+                            Value::Number(n) => acc += n,
+                            Value::Lambda(_) => return Value::Error(ErrorKind::Value),
+                            // Excel quirk: logicals/text in references are ignored by SUM.
+                            Value::Bool(_)
+                            | Value::Text(_)
+                            | Value::Blank
+                            | Value::Array(_)
+                            | Value::Spill { .. }
+                            | Value::Reference(_)
+                            | Value::ReferenceUnion(_) => {}
+                        }
+                    }
+                }
+            }
+        }
     }
 
     Value::Number(acc)
@@ -225,17 +225,17 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                                 count += 1;
                             }
                             Value::Lambda(_) => return Value::Error(ErrorKind::Value),
-                             Value::Bool(_)
-                             | Value::Text(_)
-                             | Value::Blank
-                             | Value::Array(_)
-                             | Value::Spill { .. }
-                             | Value::Reference(_)
-                             | Value::ReferenceUnion(_) => {}
-                         }
-                      }
-                  }
-                 Value::Lambda(_) => return Value::Error(ErrorKind::Value),
+                            Value::Bool(_)
+                            | Value::Text(_)
+                            | Value::Blank
+                            | Value::Array(_)
+                            | Value::Spill { .. }
+                            | Value::Reference(_)
+                            | Value::ReferenceUnion(_) => {}
+                        }
+                    }
+                }
+                Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                 Value::Spill { .. } => return Value::Error(ErrorKind::Value),
                 Value::Reference(_) | Value::ReferenceUnion(_) => {
                     return Value::Error(ErrorKind::Value)
@@ -244,25 +244,25 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             ArgValue::Reference(r) => {
                 for addr in ctx.iter_reference_cells(&r) {
                     let v = ctx.get_cell_value(&r.sheet_id, addr);
-                     match v {
-                         Value::Error(e) => return Value::Error(e),
-                         Value::Number(n) => {
-                             acc += n;
-                             count += 1;
-                         }
-                         Value::Lambda(_) => return Value::Error(ErrorKind::Value),
-                         // Ignore logical/text/blank in references.
-                          Value::Bool(_)
-                          | Value::Text(_)
-                          | Value::Blank
-                          | Value::Array(_)
-                          | Value::Spill { .. }
-                          | Value::Reference(_)
-                          | Value::ReferenceUnion(_) => {}
-                      }
-                  }
-              }
-             ArgValue::ReferenceUnion(ranges) => {
+                    match v {
+                        Value::Error(e) => return Value::Error(e),
+                        Value::Number(n) => {
+                            acc += n;
+                            count += 1;
+                        }
+                        Value::Lambda(_) => return Value::Error(ErrorKind::Value),
+                        // Ignore logical/text/blank in references.
+                        Value::Bool(_)
+                        | Value::Text(_)
+                        | Value::Blank
+                        | Value::Array(_)
+                        | Value::Spill { .. }
+                        | Value::Reference(_)
+                        | Value::ReferenceUnion(_) => {}
+                    }
+                }
+            }
+            ArgValue::ReferenceUnion(ranges) => {
                 let mut seen = std::collections::HashSet::new();
                 for r in ranges {
                     for addr in ctx.iter_reference_cells(&r) {
@@ -270,26 +270,26 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             continue;
                         }
                         let v = ctx.get_cell_value(&r.sheet_id, addr);
-                         match v {
-                             Value::Error(e) => return Value::Error(e),
-                             Value::Number(n) => {
-                                 acc += n;
-                                 count += 1;
-                             }
-                             Value::Lambda(_) => return Value::Error(ErrorKind::Value),
-                             // Ignore logical/text/blank in references.
-                              Value::Bool(_)
-                              | Value::Text(_)
-                              | Value::Blank
-                              | Value::Array(_)
-                              | Value::Spill { .. }
-                              | Value::Reference(_)
-                              | Value::ReferenceUnion(_) => {}
-                          }
-                      }
-                  }
-             }
-         }
+                        match v {
+                            Value::Error(e) => return Value::Error(e),
+                            Value::Number(n) => {
+                                acc += n;
+                                count += 1;
+                            }
+                            Value::Lambda(_) => return Value::Error(ErrorKind::Value),
+                            // Ignore logical/text/blank in references.
+                            Value::Bool(_)
+                            | Value::Text(_)
+                            | Value::Blank
+                            | Value::Array(_)
+                            | Value::Spill { .. }
+                            | Value::Reference(_)
+                            | Value::ReferenceUnion(_) => {}
+                        }
+                    }
+                }
+            }
+        }
     }
 
     if count == 0 {
@@ -367,22 +367,22 @@ fn min_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             continue;
                         }
                         let v = ctx.get_cell_value(&r.sheet_id, addr);
-                         match v {
-                             Value::Error(e) => return Value::Error(e),
-                             Value::Number(n) => best = Some(best.map(|b| b.min(n)).unwrap_or(n)),
-                             Value::Lambda(_) => return Value::Error(ErrorKind::Value),
-                              Value::Bool(_)
-                              | Value::Text(_)
-                              | Value::Blank
-                              | Value::Array(_)
-                              | Value::Spill { .. }
-                              | Value::Reference(_)
-                              | Value::ReferenceUnion(_) => {}
-                          }
-                      }
-                  }
-             }
-         }
+                        match v {
+                            Value::Error(e) => return Value::Error(e),
+                            Value::Number(n) => best = Some(best.map(|b| b.min(n)).unwrap_or(n)),
+                            Value::Lambda(_) => return Value::Error(ErrorKind::Value),
+                            Value::Bool(_)
+                            | Value::Text(_)
+                            | Value::Blank
+                            | Value::Array(_)
+                            | Value::Spill { .. }
+                            | Value::Reference(_)
+                            | Value::ReferenceUnion(_) => {}
+                        }
+                    }
+                }
+            }
+        }
     }
 
     Value::Number(best.unwrap_or(0.0))
@@ -457,22 +457,22 @@ fn max_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             continue;
                         }
                         let v = ctx.get_cell_value(&r.sheet_id, addr);
-                         match v {
-                             Value::Error(e) => return Value::Error(e),
-                             Value::Number(n) => best = Some(best.map(|b| b.max(n)).unwrap_or(n)),
-                             Value::Lambda(_) => return Value::Error(ErrorKind::Value),
-                              Value::Bool(_)
-                              | Value::Text(_)
-                              | Value::Blank
-                              | Value::Array(_)
-                              | Value::Spill { .. }
-                              | Value::Reference(_)
-                              | Value::ReferenceUnion(_) => {}
-                          }
-                      }
-                  }
-             }
-         }
+                        match v {
+                            Value::Error(e) => return Value::Error(e),
+                            Value::Number(n) => best = Some(best.map(|b| b.max(n)).unwrap_or(n)),
+                            Value::Lambda(_) => return Value::Error(ErrorKind::Value),
+                            Value::Bool(_)
+                            | Value::Text(_)
+                            | Value::Blank
+                            | Value::Array(_)
+                            | Value::Spill { .. }
+                            | Value::Reference(_)
+                            | Value::ReferenceUnion(_) => {}
+                        }
+                    }
+                }
+            }
+        }
     }
 
     Value::Number(best.unwrap_or(0.0))
@@ -667,7 +667,12 @@ fn countifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             }
         }
 
-        fn value_at_offset(&self, ctx: &dyn FunctionContext, row_off: usize, col_off: usize) -> Value {
+        fn value_at_offset(
+            &self,
+            ctx: &dyn FunctionContext,
+            row_off: usize,
+            col_off: usize,
+        ) -> Value {
             match self {
                 CriteriaRange::Reference(r) => {
                     let addr = CellAddr {
@@ -676,7 +681,9 @@ fn countifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                     };
                     ctx.get_cell_value(&r.sheet_id, addr)
                 }
-                CriteriaRange::Array(arr) => arr.get(row_off, col_off).cloned().unwrap_or(Value::Blank),
+                CriteriaRange::Array(arr) => {
+                    arr.get(row_off, col_off).cloned().unwrap_or(Value::Blank)
+                }
             }
         }
 
@@ -705,7 +712,9 @@ fn countifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         let criteria_range = match ctx.eval_arg(&pair[0]) {
             ArgValue::Reference(r) => CriteriaRange::Reference(r.normalized()),
             ArgValue::Scalar(Value::Array(arr)) => CriteriaRange::Array(arr),
-            ArgValue::ReferenceUnion(_) | ArgValue::Scalar(_) => return Value::Error(ErrorKind::Value),
+            ArgValue::ReferenceUnion(_) | ArgValue::Scalar(_) => {
+                return Value::Error(ErrorKind::Value)
+            }
         };
 
         let (rows, cols) = criteria_range.shape();
@@ -739,13 +748,20 @@ fn countifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Number(0.0);
     }
 
-    let blank_matches: Vec<bool> = criteria.iter().map(|crit| crit.matches(&Value::Blank)).collect();
+    let blank_matches: Vec<bool> = criteria
+        .iter()
+        .map(|crit| crit.matches(&Value::Blank))
+        .collect();
 
     // When all criteria match blank cells and all ranges are references, implicit blanks contribute
     // to the result. Avoid scanning the full shape by counting total cells minus the set of
     // explicitly-stored cells that fail any criteria.
     let all_blank_matches = blank_matches.iter().all(|matches_blank| *matches_blank);
-    if all_blank_matches && ranges.iter().all(|r| matches!(r, CriteriaRange::Reference(_))) {
+    if all_blank_matches
+        && ranges
+            .iter()
+            .all(|r| matches!(r, CriteriaRange::Reference(_)))
+    {
         let total_cells = (rows as u64).saturating_mul(cols as u64);
         let mut mismatches: std::collections::HashSet<u64> = std::collections::HashSet::new();
 
@@ -892,6 +908,7 @@ fn sumif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 match ctx.get_cell_value(&sum_ref.sheet_id, addr) {
                     Value::Number(n) => sum += n,
                     Value::Error(e) => return Value::Error(e),
+                    Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                     _ => {}
                 }
             }
@@ -905,6 +922,7 @@ fn sumif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 match crit_val {
                     Value::Number(n) => sum += n,
                     Value::Error(e) => return Value::Error(e),
+                    Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                     _ => {}
                 }
             }
@@ -925,6 +943,7 @@ fn sumif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                     match sum_val {
                         Value::Number(n) => sum += n,
                         Value::Error(e) => return Value::Error(e),
+                        Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                         _ => {}
                     }
                 }
@@ -1012,6 +1031,7 @@ fn sumifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 match ctx.get_cell_value(&sum_ref.sheet_id, addr) {
                     Value::Number(n) => sum += n,
                     Value::Error(e) => return Value::Error(e),
+                    Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                     _ => {}
                 }
             }
@@ -1034,6 +1054,7 @@ fn sumifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                     match sum_range.get(ctx, row, col) {
                         Value::Number(n) => sum += n,
                         Value::Error(e) => return Value::Error(e),
+                        Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                         _ => {}
                     }
                 }
@@ -1117,6 +1138,7 @@ fn averageif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         count += 1;
                     }
                     Value::Error(e) => return Value::Error(e),
+                    Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                     _ => {}
                 }
             }
@@ -1133,6 +1155,7 @@ fn averageif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         count += 1;
                     }
                     Value::Error(e) => return Value::Error(e),
+                    Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                     _ => {}
                 }
             }
@@ -1156,6 +1179,7 @@ fn averageif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             count += 1;
                         }
                         Value::Error(e) => return Value::Error(e),
+                        Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                         _ => {}
                     }
                 }
@@ -1250,6 +1274,7 @@ fn averageifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         count += 1;
                     }
                     Value::Error(e) => return Value::Error(e),
+                    Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                     _ => {}
                 }
             }
@@ -1275,6 +1300,7 @@ fn averageifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             count += 1;
                         }
                         Value::Error(e) => return Value::Error(e),
+                        Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                         _ => {}
                     }
                 }
@@ -1361,7 +1387,7 @@ fn maxifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 let value = ctx.get_cell_value(&max_ref.sheet_id, addr);
                 let (row, col) = match value {
                     // Only numeric values contribute; errors propagate only when the row is included.
-                    Value::Number(_) | Value::Error(_) => (
+                    Value::Number(_) | Value::Error(_) | Value::Lambda(_) => (
                         (addr.row - max_ref.start.row) as usize,
                         (addr.col - max_ref.start.col) as usize,
                     ),
@@ -1390,6 +1416,19 @@ fn maxifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             }
                         }
                     }
+                    Value::Lambda(_) => {
+                        if row == 0 && col == 0 {
+                            return Value::Error(ErrorKind::Value);
+                        }
+                        match earliest_error {
+                            None => earliest_error = Some((row, col, ErrorKind::Value)),
+                            Some((best_row, best_col, _)) => {
+                                if (row, col) < (best_row, best_col) {
+                                    earliest_error = Some((row, col, ErrorKind::Value));
+                                }
+                            }
+                        }
+                    }
                     _ => unreachable!("filtered above"),
                 }
             }
@@ -1399,7 +1438,7 @@ fn maxifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 'col: for col in 0..cols {
                     let value = max_range.get(ctx, row, col);
                     match value {
-                        Value::Number(_) | Value::Error(_) => {}
+                        Value::Number(_) | Value::Error(_) | Value::Lambda(_) => {}
                         _ => continue,
                     }
 
@@ -1421,6 +1460,19 @@ fn maxifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                                 Some((best_row, best_col, _)) => {
                                     if (row, col) < (best_row, best_col) {
                                         earliest_error = Some((row, col, e));
+                                    }
+                                }
+                            }
+                        }
+                        Value::Lambda(_) => {
+                            if row == 0 && col == 0 {
+                                return Value::Error(ErrorKind::Value);
+                            }
+                            match earliest_error {
+                                None => earliest_error = Some((row, col, ErrorKind::Value)),
+                                Some((best_row, best_col, _)) => {
+                                    if (row, col) < (best_row, best_col) {
+                                        earliest_error = Some((row, col, ErrorKind::Value));
                                     }
                                 }
                             }
@@ -1508,7 +1560,7 @@ fn minifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             'cell: for addr in ctx.iter_reference_cells(min_ref) {
                 let value = ctx.get_cell_value(&min_ref.sheet_id, addr);
                 let (row, col) = match value {
-                    Value::Number(_) | Value::Error(_) => (
+                    Value::Number(_) | Value::Error(_) | Value::Lambda(_) => (
                         (addr.row - min_ref.start.row) as usize,
                         (addr.col - min_ref.start.col) as usize,
                     ),
@@ -1537,6 +1589,19 @@ fn minifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             }
                         }
                     }
+                    Value::Lambda(_) => {
+                        if row == 0 && col == 0 {
+                            return Value::Error(ErrorKind::Value);
+                        }
+                        match earliest_error {
+                            None => earliest_error = Some((row, col, ErrorKind::Value)),
+                            Some((best_row, best_col, _)) => {
+                                if (row, col) < (best_row, best_col) {
+                                    earliest_error = Some((row, col, ErrorKind::Value));
+                                }
+                            }
+                        }
+                    }
                     _ => unreachable!("filtered above"),
                 }
             }
@@ -1546,7 +1611,7 @@ fn minifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 'col: for col in 0..cols {
                     let value = min_range.get(ctx, row, col);
                     match value {
-                        Value::Number(_) | Value::Error(_) => {}
+                        Value::Number(_) | Value::Error(_) | Value::Lambda(_) => {}
                         _ => continue,
                     }
 
@@ -1568,6 +1633,19 @@ fn minifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                                 Some((best_row, best_col, _)) => {
                                     if (row, col) < (best_row, best_col) {
                                         earliest_error = Some((row, col, e));
+                                    }
+                                }
+                            }
+                        }
+                        Value::Lambda(_) => {
+                            if row == 0 && col == 0 {
+                                return Value::Error(ErrorKind::Value);
+                            }
+                            match earliest_error {
+                                None => earliest_error = Some((row, col, ErrorKind::Value)),
+                                Some((best_row, best_col, _)) => {
+                                    if (row, col) < (best_row, best_col) {
+                                        earliest_error = Some((row, col, ErrorKind::Value));
                                     }
                                 }
                             }
@@ -2016,7 +2094,9 @@ inventory::submit! {
 
 fn int_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let value = array_lift::eval_arg(ctx, &args[0]);
-    array_lift::lift1(value, |v| Ok(Value::Number(v.coerce_to_number_with_ctx(ctx)?.floor())))
+    array_lift::lift1(value, |v| {
+        Ok(Value::Number(v.coerce_to_number_with_ctx(ctx)?.floor()))
+    })
 }
 
 inventory::submit! {
@@ -2035,7 +2115,9 @@ inventory::submit! {
 
 fn abs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let value = array_lift::eval_arg(ctx, &args[0]);
-    array_lift::lift1(value, |v| Ok(Value::Number(v.coerce_to_number_with_ctx(ctx)?.abs())))
+    array_lift::lift1(value, |v| {
+        Ok(Value::Number(v.coerce_to_number_with_ctx(ctx)?.abs()))
+    })
 }
 
 inventory::submit! {

@@ -40,6 +40,19 @@ fn and_or_ignore_text_and_blank_in_ranges_but_error_on_scalar_text() {
 }
 
 #[test]
+fn and_or_reject_lambda_values_in_arrays() {
+    let mut sheet = TestSheet::new();
+    assert_eq!(
+        sheet.eval("=AND({LAMBDA(x,x),TRUE})"),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
+        sheet.eval("=OR({FALSE,LAMBDA(x,x)})"),
+        Value::Error(ErrorKind::Value)
+    );
+}
+
+#[test]
 fn and_or_propagate_errors_even_if_result_known() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", false);
@@ -123,14 +136,8 @@ fn switch_selects_first_matching_case_and_is_lazy() {
     );
 
     // Short-circuit: unselected case/result expressions are not evaluated.
-    assert_eq!(
-        sheet.eval("=SWITCH(1, 1, 10, 2, 1/0)"),
-        Value::Number(10.0)
-    );
-    assert_eq!(
-        sheet.eval("=SWITCH(2, 1, 1/0, 2, 20)"),
-        Value::Number(20.0)
-    );
+    assert_eq!(sheet.eval("=SWITCH(1, 1, 10, 2, 1/0)"), Value::Number(10.0));
+    assert_eq!(sheet.eval("=SWITCH(2, 1, 1/0, 2, 20)"), Value::Number(20.0));
     assert_eq!(
         sheet.eval("=SWITCH(1, 1, \"ok\", 1/0, \"bad\")"),
         Value::Text("ok".to_string())
@@ -150,10 +157,7 @@ fn switch_selects_first_matching_case_and_is_lazy() {
     );
 
     // Argument pairs are required; default can be supplied as a trailing arg.
-    assert_eq!(
-        sheet.eval("=SWITCH(1, 1)"),
-        Value::Error(ErrorKind::Value)
-    );
+    assert_eq!(sheet.eval("=SWITCH(1, 1)"), Value::Error(ErrorKind::Value));
     assert_eq!(
         sheet.eval("=SWITCH(1, 1, \"a\", 2)"),
         Value::Text("a".to_string())

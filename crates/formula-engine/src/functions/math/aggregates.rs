@@ -1,8 +1,8 @@
 use chrono::{DateTime, Utc};
 
 use crate::coercion::ValueLocaleConfig;
-use crate::functions::math::criteria::Criteria;
 use crate::date::ExcelDateSystem;
+use crate::functions::math::criteria::Criteria;
 use crate::value::{parse_number, NumberLocale};
 use crate::{ErrorKind, Value};
 
@@ -30,6 +30,7 @@ pub fn sumif(
             match sum_val {
                 Value::Number(n) => sum += n,
                 Value::Error(e) => return Err(*e),
+                Value::Lambda(_) => return Err(ErrorKind::Value),
                 _ => {}
             }
         }
@@ -72,6 +73,7 @@ pub fn sumifs(
         match &sum_range[idx] {
             Value::Number(n) => sum += n,
             Value::Error(e) => return Err(*e),
+            Value::Lambda(_) => return Err(ErrorKind::Value),
             _ => {}
         }
     }
@@ -148,6 +150,7 @@ pub fn averageif(
                     count += 1;
                 }
                 Value::Error(e) => return Err(*e),
+                Value::Lambda(_) => return Err(ErrorKind::Value),
                 _ => {}
             }
         }
@@ -198,6 +201,7 @@ pub fn averageifs(
                 count += 1;
             }
             Value::Error(e) => return Err(*e),
+            Value::Lambda(_) => return Err(ErrorKind::Value),
             _ => {}
         }
     }
@@ -243,6 +247,7 @@ pub fn maxifs(
         match &max_range[idx] {
             Value::Number(n) => best = Some(best.map_or(*n, |b| b.max(*n))),
             Value::Error(e) => return Err(*e),
+            Value::Lambda(_) => return Err(ErrorKind::Value),
             _ => {}
         }
     }
@@ -285,6 +290,7 @@ pub fn minifs(
         match &min_range[idx] {
             Value::Number(n) => best = Some(best.map_or(*n, |b| b.min(*n))),
             Value::Error(e) => return Err(*e),
+            Value::Lambda(_) => return Err(ErrorKind::Value),
             _ => {}
         }
     }
@@ -331,10 +337,9 @@ fn coerce_sumproduct_number(value: &Value, locale: NumberLocale) -> Result<f64, 
         Value::Blank => Ok(0.0),
         Value::Error(e) => Err(*e),
         Value::Lambda(_) => Err(ErrorKind::Value),
-        Value::Reference(_)
-        | Value::ReferenceUnion(_)
-        | Value::Array(_)
-        | Value::Spill { .. } => Ok(0.0),
+        Value::Reference(_) | Value::ReferenceUnion(_) | Value::Array(_) | Value::Spill { .. } => {
+            Ok(0.0)
+        }
     }
 }
 
@@ -393,6 +398,7 @@ fn sum(values: &[Value], ignore_errors: bool) -> Result<f64, ErrorKind> {
         match value {
             Value::Number(n) => out += n,
             Value::Error(e) if !ignore_errors => return Err(*e),
+            Value::Lambda(_) if !ignore_errors => return Err(ErrorKind::Value),
             _ => {}
         }
     }
@@ -409,6 +415,7 @@ fn average(values: &[Value], ignore_errors: bool) -> Result<f64, ErrorKind> {
                 count += 1;
             }
             Value::Error(e) if !ignore_errors => return Err(*e),
+            Value::Lambda(_) if !ignore_errors => return Err(ErrorKind::Value),
             _ => {}
         }
     }
@@ -447,6 +454,7 @@ fn max(values: &[Value], ignore_errors: bool) -> Result<f64, ErrorKind> {
         match value {
             Value::Number(n) => best = Some(best.map_or(*n, |b| b.max(*n))),
             Value::Error(e) if !ignore_errors => return Err(*e),
+            Value::Lambda(_) if !ignore_errors => return Err(ErrorKind::Value),
             _ => {}
         }
     }
@@ -459,6 +467,7 @@ fn min(values: &[Value], ignore_errors: bool) -> Result<f64, ErrorKind> {
         match value {
             Value::Number(n) => best = Some(best.map_or(*n, |b| b.min(*n))),
             Value::Error(e) if !ignore_errors => return Err(*e),
+            Value::Lambda(_) if !ignore_errors => return Err(ErrorKind::Value),
             _ => {}
         }
     }
@@ -475,6 +484,7 @@ fn product(values: &[Value], ignore_errors: bool) -> Result<f64, ErrorKind> {
                 out *= n;
             }
             Value::Error(e) if !ignore_errors => return Err(*e),
+            Value::Lambda(_) if !ignore_errors => return Err(ErrorKind::Value),
             _ => {}
         }
     }
@@ -494,6 +504,7 @@ fn variance(values: &[Value], ignore_errors: bool) -> Result<(usize, f64, f64), 
         match value {
             Value::Number(n) => nums.push(*n),
             Value::Error(e) if !ignore_errors => return Err(*e),
+            Value::Lambda(_) if !ignore_errors => return Err(ErrorKind::Value),
             _ => {}
         }
     }

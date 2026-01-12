@@ -166,11 +166,11 @@ fn and_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                                     all_true = false;
                                 }
                             }
+                            Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                             // Text and blanks in arrays are ignored (same as references).
                             Value::Text(_)
                             | Value::Blank
                             | Value::Array(_)
-                            | Value::Lambda(_)
                             | Value::Spill { .. }
                             | Value::Reference(_)
                             | Value::ReferenceUnion(_) => {}
@@ -197,11 +197,11 @@ fn and_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                                 all_true = false;
                             }
                         }
+                        Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                         // Text and blanks in references are ignored.
                         Value::Text(_)
                         | Value::Blank
                         | Value::Array(_)
-                        | Value::Lambda(_)
                         | Value::Spill { .. }
                         | Value::Reference(_)
                         | Value::ReferenceUnion(_) => {}
@@ -230,11 +230,11 @@ fn and_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                                     all_true = false;
                                 }
                             }
+                            Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                             // Text and blanks in references are ignored.
                             Value::Text(_)
                             | Value::Blank
                             | Value::Array(_)
-                            | Value::Lambda(_)
                             | Value::Spill { .. }
                             | Value::Reference(_)
                             | Value::ReferenceUnion(_) => {}
@@ -306,10 +306,10 @@ fn or_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                                     any_true = true;
                                 }
                             }
+                            Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                             Value::Text(_)
                             | Value::Blank
                             | Value::Array(_)
-                            | Value::Lambda(_)
                             | Value::Spill { .. }
                             | Value::Reference(_)
                             | Value::ReferenceUnion(_) => {}
@@ -336,10 +336,10 @@ fn or_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                                 any_true = true;
                             }
                         }
+                        Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                         Value::Text(_)
                         | Value::Blank
                         | Value::Array(_)
-                        | Value::Lambda(_)
                         | Value::Spill { .. }
                         | Value::Reference(_)
                         | Value::ReferenceUnion(_) => {}
@@ -368,10 +368,10 @@ fn or_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                                     any_true = true;
                                 }
                             }
+                            Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                             Value::Text(_)
                             | Value::Blank
                             | Value::Array(_)
-                            | Value::Lambda(_)
                             | Value::Spill { .. }
                             | Value::Reference(_)
                             | Value::ReferenceUnion(_) => {}

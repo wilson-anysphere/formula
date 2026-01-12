@@ -173,6 +173,35 @@ fn criteria_aggregates_support_ranges_and_arrays() {
 }
 
 #[test]
+fn criteria_aggregates_reject_lambda_values() {
+    let mut sheet = TestSheet::new();
+    assert_eq!(
+        sheet.eval("=SUMIF({1,2},\">0\",{LAMBDA(x,x),1})"),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
+        sheet.eval("=SUMIFS({LAMBDA(x,x),1},{1,2},\">0\")"),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
+        sheet.eval("=AVERAGEIF({1,2},\">0\",{LAMBDA(x,x),1})"),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
+        sheet.eval("=AVERAGEIFS({LAMBDA(x,x),1},{1,2},\">0\")"),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
+        sheet.eval("=MAXIFS({LAMBDA(x,x),1},{1,2},\">0\")"),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
+        sheet.eval("=MINIFS({1,LAMBDA(x,x)},{1,2},\">0\")"),
+        Value::Error(ErrorKind::Value)
+    );
+}
+
+#[test]
 fn countif_counts_implicit_blanks() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", 1.0);
@@ -234,5 +263,14 @@ fn subtotal_and_aggregate_cover_common_subtypes() {
     assert_eq!(
         sheet.eval("=AGGREGATE(9,4,E1:E3)"),
         Value::Error(ErrorKind::Div0)
+    );
+
+    assert_eq!(
+        sheet.eval("=SUBTOTAL(9,{LAMBDA(x,x),1})"),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
+        sheet.eval("=AGGREGATE(9,0,{LAMBDA(x,x),1})"),
+        Value::Error(ErrorKind::Value)
     );
 }

@@ -31,11 +31,11 @@ fn push_numbers_from_scalar(out: &mut Vec<f64>, value: Value) -> Result<(), Erro
                 match v {
                     Value::Error(e) => return Err(*e),
                     Value::Number(n) => out.push(*n),
+                    Value::Lambda(_) => return Err(ErrorKind::Value),
                     Value::Bool(_)
                     | Value::Text(_)
                     | Value::Blank
                     | Value::Array(_)
-                    | Value::Lambda(_)
                     | Value::Spill { .. }
                     | Value::Reference(_)
                     | Value::ReferenceUnion(_) => {}
@@ -59,11 +59,11 @@ fn push_numbers_from_reference(
         match v {
             Value::Error(e) => return Err(e),
             Value::Number(n) => out.push(n),
+            Value::Lambda(_) => return Err(ErrorKind::Value),
             Value::Bool(_)
             | Value::Text(_)
             | Value::Blank
             | Value::Array(_)
-            | Value::Lambda(_)
             | Value::Spill { .. }
             | Value::Reference(_)
             | Value::ReferenceUnion(_) => {}
@@ -87,11 +87,11 @@ fn push_numbers_from_reference_union(
             match v {
                 Value::Error(e) => return Err(e),
                 Value::Number(n) => out.push(n),
+                Value::Lambda(_) => return Err(ErrorKind::Value),
                 Value::Bool(_)
                 | Value::Text(_)
                 | Value::Blank
                 | Value::Array(_)
-                | Value::Lambda(_)
                 | Value::Spill { .. }
                 | Value::Reference(_)
                 | Value::ReferenceUnion(_) => {}
@@ -101,7 +101,11 @@ fn push_numbers_from_reference_union(
     Ok(())
 }
 
-fn push_numbers_from_arg(ctx: &dyn FunctionContext, out: &mut Vec<f64>, arg: ArgValue) -> Result<(), ErrorKind> {
+fn push_numbers_from_arg(
+    ctx: &dyn FunctionContext,
+    out: &mut Vec<f64>,
+    arg: ArgValue,
+) -> Result<(), ErrorKind> {
     match arg {
         ArgValue::Scalar(v) => push_numbers_from_scalar(out, v),
         ArgValue::Reference(r) => push_numbers_from_reference(ctx, out, r),
@@ -109,7 +113,10 @@ fn push_numbers_from_arg(ctx: &dyn FunctionContext, out: &mut Vec<f64>, arg: Arg
     }
 }
 
-fn collect_numbers(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Result<Vec<f64>, ErrorKind> {
+fn collect_numbers(
+    ctx: &dyn FunctionContext,
+    args: &[CompiledExpr],
+) -> Result<Vec<f64>, ErrorKind> {
     let mut out = Vec::new();
     for expr in args {
         push_numbers_from_arg(ctx, &mut out, ctx.eval_arg(expr))?;
@@ -139,8 +146,8 @@ fn push_numbers_a_from_scalar(out: &mut Vec<f64>, value: Value) -> Result<(), Er
                     Value::Number(n) => out.push(*n),
                     Value::Bool(b) => out.push(if *b { 1.0 } else { 0.0 }),
                     Value::Blank | Value::Text(_) => out.push(0.0),
+                    Value::Lambda(_) => return Err(ErrorKind::Value),
                     Value::Array(_)
-                    | Value::Lambda(_)
                     | Value::Spill { .. }
                     | Value::Reference(_)
                     | Value::ReferenceUnion(_) => out.push(0.0),
@@ -166,8 +173,8 @@ fn push_numbers_a_from_reference(
             Value::Number(n) => out.push(n),
             Value::Bool(b) => out.push(if b { 1.0 } else { 0.0 }),
             Value::Blank | Value::Text(_) => out.push(0.0),
+            Value::Lambda(_) => return Err(ErrorKind::Value),
             Value::Array(_)
-            | Value::Lambda(_)
             | Value::Spill { .. }
             | Value::Reference(_)
             | Value::ReferenceUnion(_) => out.push(0.0),
@@ -193,8 +200,8 @@ fn push_numbers_a_from_reference_union(
                 Value::Number(n) => out.push(n),
                 Value::Bool(b) => out.push(if b { 1.0 } else { 0.0 }),
                 Value::Blank | Value::Text(_) => out.push(0.0),
+                Value::Lambda(_) => return Err(ErrorKind::Value),
                 Value::Array(_)
-                | Value::Lambda(_)
                 | Value::Spill { .. }
                 | Value::Reference(_)
                 | Value::ReferenceUnion(_) => out.push(0.0),
@@ -204,7 +211,11 @@ fn push_numbers_a_from_reference_union(
     Ok(())
 }
 
-fn push_numbers_a_from_arg(ctx: &dyn FunctionContext, out: &mut Vec<f64>, arg: ArgValue) -> Result<(), ErrorKind> {
+fn push_numbers_a_from_arg(
+    ctx: &dyn FunctionContext,
+    out: &mut Vec<f64>,
+    arg: ArgValue,
+) -> Result<(), ErrorKind> {
     match arg {
         ArgValue::Scalar(v) => push_numbers_a_from_scalar(out, v),
         ArgValue::Reference(r) => push_numbers_a_from_reference(ctx, out, r),
@@ -212,7 +223,10 @@ fn push_numbers_a_from_arg(ctx: &dyn FunctionContext, out: &mut Vec<f64>, arg: A
     }
 }
 
-fn collect_numbers_a(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Result<Vec<f64>, ErrorKind> {
+fn collect_numbers_a(
+    ctx: &dyn FunctionContext,
+    args: &[CompiledExpr],
+) -> Result<Vec<f64>, ErrorKind> {
     let mut out = Vec::new();
     for expr in args {
         push_numbers_a_from_arg(ctx, &mut out, ctx.eval_arg(expr))?;
@@ -482,7 +496,10 @@ fn standardize_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     })
 }
 
-fn arg_to_numeric_sequence(ctx: &dyn FunctionContext, arg: ArgValue) -> Result<Vec<Option<f64>>, ErrorKind> {
+fn arg_to_numeric_sequence(
+    ctx: &dyn FunctionContext,
+    arg: ArgValue,
+) -> Result<Vec<Option<f64>>, ErrorKind> {
     match arg {
         ArgValue::Scalar(v) => match v {
             Value::Error(e) => Err(e),
@@ -496,11 +513,11 @@ fn arg_to_numeric_sequence(ctx: &dyn FunctionContext, arg: ArgValue) -> Result<V
                     match v {
                         Value::Error(e) => return Err(*e),
                         Value::Number(n) => out.push(Some(*n)),
+                        Value::Lambda(_) => return Err(ErrorKind::Value),
                         Value::Bool(_)
                         | Value::Text(_)
                         | Value::Blank
                         | Value::Array(_)
-                        | Value::Lambda(_)
                         | Value::Spill { .. }
                         | Value::Reference(_)
                         | Value::ReferenceUnion(_) => out.push(None),
@@ -508,9 +525,10 @@ fn arg_to_numeric_sequence(ctx: &dyn FunctionContext, arg: ArgValue) -> Result<V
                 }
                 Ok(out)
             }
-            Value::Reference(_) | Value::ReferenceUnion(_) | Value::Lambda(_) | Value::Spill { .. } => {
-                Err(ErrorKind::Value)
-            }
+            Value::Reference(_)
+            | Value::ReferenceUnion(_)
+            | Value::Lambda(_)
+            | Value::Spill { .. } => Err(ErrorKind::Value),
         },
         ArgValue::Reference(r) => {
             let r = r.normalized();
@@ -523,11 +541,11 @@ fn arg_to_numeric_sequence(ctx: &dyn FunctionContext, arg: ArgValue) -> Result<V
                 match v {
                     Value::Error(e) => return Err(e),
                     Value::Number(n) => out.push(Some(n)),
+                    Value::Lambda(_) => return Err(ErrorKind::Value),
                     Value::Bool(_)
                     | Value::Text(_)
                     | Value::Blank
                     | Value::Array(_)
-                    | Value::Lambda(_)
                     | Value::Spill { .. }
                     | Value::Reference(_)
                     | Value::ReferenceUnion(_) => out.push(None),
@@ -552,11 +570,11 @@ fn arg_to_numeric_sequence(ctx: &dyn FunctionContext, arg: ArgValue) -> Result<V
                     match v {
                         Value::Error(e) => return Err(e),
                         Value::Number(n) => out.push(Some(n)),
+                        Value::Lambda(_) => return Err(ErrorKind::Value),
                         Value::Bool(_)
                         | Value::Text(_)
                         | Value::Blank
                         | Value::Array(_)
-                        | Value::Lambda(_)
                         | Value::Spill { .. }
                         | Value::Reference(_)
                         | Value::ReferenceUnion(_) => out.push(None),
@@ -1296,7 +1314,11 @@ enum PercentrankVariant {
     Exclusive,
 }
 
-fn percentrank_impl(ctx: &dyn FunctionContext, args: &[CompiledExpr], variant: PercentrankVariant) -> Value {
+fn percentrank_impl(
+    ctx: &dyn FunctionContext,
+    args: &[CompiledExpr],
+    variant: PercentrankVariant,
+) -> Value {
     let mut values = Vec::new();
     if let Err(e) = push_numbers_from_arg(ctx, &mut values, ctx.eval_arg(&args[0])) {
         return Value::Error(e);

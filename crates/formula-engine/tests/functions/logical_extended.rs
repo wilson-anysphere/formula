@@ -116,7 +116,10 @@ fn switch_matches_unicode_text_case_insensitively() {
         1.0,
     );
 
-    sheet.set_formula("A1", "=SWITCH({\"Straße\",\"x\"}, \"STRASSE\", 1, \"x\", 2)");
+    sheet.set_formula(
+        "A1",
+        "=SWITCH({\"Straße\",\"x\"}, \"STRASSE\", 1, \"x\", 2)",
+    );
     sheet.recalc();
     assert_number(&sheet.get("A1"), 1.0);
     assert_number(&sheet.get("B1"), 2.0);
@@ -230,9 +233,21 @@ fn xor_handles_scalar_vs_range_semantics() {
     assert_eq!(sheet.eval("=XOR(A1:A4)"), Value::Bool(true));
     assert_eq!(sheet.eval("=XOR(A2, TRUE)"), Value::Bool(true));
     assert_eq!(sheet.eval("=XOR(\"TRUE\", FALSE)"), Value::Bool(true));
-    assert_eq!(sheet.eval("=XOR(\"x\", TRUE)"), Value::Error(ErrorKind::Value));
+    assert_eq!(
+        sheet.eval("=XOR(\"x\", TRUE)"),
+        Value::Error(ErrorKind::Value)
+    );
     assert_eq!(sheet.eval("=XOR(A5, TRUE)"), Value::Error(ErrorKind::Div0));
     assert_eq!(sheet.eval("=XOR({TRUE,FALSE,TRUE})"), Value::Bool(false));
+}
+
+#[test]
+fn xor_rejects_lambda_values_in_arrays() {
+    let mut sheet = TestSheet::new();
+    assert_eq!(
+        sheet.eval("=XOR({LAMBDA(x,x),TRUE})"),
+        Value::Error(ErrorKind::Value)
+    );
 }
 
 #[test]

@@ -44,11 +44,11 @@ fn xor_update(acc: &mut bool, value: &Value) -> Result<(), ErrorKind> {
                     Value::Error(e) => return Err(*e),
                     Value::Number(n) => *acc ^= *n != 0.0,
                     Value::Bool(b) => *acc ^= *b,
+                    Value::Lambda(_) => return Err(ErrorKind::Value),
                     // Text and blanks in arrays are ignored (same as references).
                     Value::Text(_)
                     | Value::Blank
                     | Value::Array(_)
-                    | Value::Lambda(_)
                     | Value::Spill { .. }
                     | Value::Reference(_)
                     | Value::ReferenceUnion(_) => {}
@@ -56,10 +56,9 @@ fn xor_update(acc: &mut bool, value: &Value) -> Result<(), ErrorKind> {
             }
             Ok(())
         }
-        Value::Reference(_)
-        | Value::ReferenceUnion(_)
-        | Value::Lambda(_)
-        | Value::Spill { .. } => Err(ErrorKind::Value),
+        Value::Reference(_) | Value::ReferenceUnion(_) | Value::Lambda(_) | Value::Spill { .. } => {
+            Err(ErrorKind::Value)
+        }
     }
 }
 
@@ -80,11 +79,11 @@ fn xor_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         Value::Error(e) => return Value::Error(e),
                         Value::Number(n) => acc ^= n != 0.0,
                         Value::Bool(b) => acc ^= b,
+                        Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                         // Text and blanks in references are ignored.
                         Value::Text(_)
                         | Value::Blank
                         | Value::Array(_)
-                        | Value::Lambda(_)
                         | Value::Spill { .. }
                         | Value::Reference(_)
                         | Value::ReferenceUnion(_) => {}
@@ -103,10 +102,10 @@ fn xor_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             Value::Error(e) => return Value::Error(e),
                             Value::Number(n) => acc ^= n != 0.0,
                             Value::Bool(b) => acc ^= b,
+                            Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                             Value::Text(_)
                             | Value::Blank
                             | Value::Array(_)
-                            | Value::Lambda(_)
                             | Value::Spill { .. }
                             | Value::Reference(_)
                             | Value::ReferenceUnion(_) => {}
