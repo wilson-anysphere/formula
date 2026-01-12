@@ -33,7 +33,9 @@ function findDuplicateTestIdsInIndexHtml(html) {
 
 function extractRibbonTestIdsFromSource(source) {
   const testIdRegex = /\btestId\s*:\s*(["'])(.*?)\1/g;
-  const dataTestIdRegex = /\bdata-testid\s*=\s*(["'])(.*?)\1/g;
+  // Heuristic: only treat `data-testid="..."` occurrences preceded by whitespace as "definitions".
+  // This avoids false positives from selector strings like `[data-testid="foo"]`.
+  const dataTestIdRegex = /(?<=\s)data-testid\s*=\s*(["'])([^"']+)\1(?=\s|>|\/)/g;
   /** @type {string[]} */
   const ids = [];
   for (const match of source.matchAll(testIdRegex)) {
