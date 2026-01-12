@@ -801,27 +801,26 @@ fn project_normalized_data_multiple_baseclass_entries_preserve_order_and_precede
     let idx_forma = find_subslice(&normalized, &forma_padded).expect("FormA designer bytes");
     assert!(idx_formb < idx_forma, "expected FormB before FormA (PROJECT order)");
 
-    let idx_base_1 = find_subslice(&normalized, b"BaseClass").expect("BaseClass token 1");
-    let idx_base_2 = find_subslice(&normalized[idx_base_1 + 1..], b"BaseClass")
-        .map(|idx| idx + idx_base_1 + 1)
-        .expect("BaseClass token 2");
+    // Assert that the BaseClass property *tokens* preserve PROJECT stream order too.
+    //
+    // This is stricter than just counting `BaseClass` occurrences: it ensures we don't (for example)
+    // sort BaseClass properties or incorrectly associate designer bytes with the wrong token group.
+    let idx_base_formb =
+        find_subslice(&normalized, b"BaseClassFormB").expect("BaseClass tokens for FormB");
+    let idx_base_forma =
+        find_subslice(&normalized, b"BaseClassFormA").expect("BaseClass tokens for FormA");
+    assert!(
+        idx_base_formb < idx_base_forma,
+        "expected BaseClass tokens for FormB to precede FormA (PROJECT order)"
+    );
 
     assert!(
-        idx_formb < idx_base_1,
-        "expected FormB designer bytes before BaseClass token for FormB"
+        idx_formb < idx_base_formb,
+        "expected FormB designer bytes before BaseClass tokens for FormB"
     );
     assert!(
-        idx_forma < idx_base_2,
-        "expected FormA designer bytes before BaseClass token for FormA"
-    );
-
-    assert!(
-        find_subslice(&normalized, b"FormB").is_some(),
-        "expected FormB value token"
-    );
-    assert!(
-        find_subslice(&normalized, b"FormA").is_some(),
-        "expected FormA value token"
+        idx_forma < idx_base_forma,
+        "expected FormA designer bytes before BaseClass tokens for FormA"
     );
 }
 
