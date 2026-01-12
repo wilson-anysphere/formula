@@ -41,6 +41,7 @@ import { LayoutController } from "./layout/layoutController.js";
 import { LayoutWorkspaceManager } from "./layout/layoutPersistence.js";
 import { getPanelPlacement } from "./layout/layoutState.js";
 import { SecondaryGridView } from "./grid/splitView/secondaryGridView.js";
+import { handleSecondaryGridKeyDown } from "./grid/splitView/secondaryGridShortcuts.js";
 import { resolveDesktopGridMode } from "./grid/shared/desktopGridMode.js";
 import { getPanelTitle, panelRegistry, PanelIds } from "./panels/panelRegistry.js";
 import { createPanelBodyRenderer } from "./panels/panelBodyRenderer.js";
@@ -3221,56 +3222,16 @@ if (
 
   // --- Split view secondary pane keyboard shortcuts ---------------------------------
   //
-  // The primary grid wires clipboard + delete via SpreadsheetApp.onKeyDown, which only
-  // runs when `#grid` is focused. When focus is in the secondary pane we need to map
-  // Excel-style shortcuts back into SpreadsheetApp command APIs.
+  // SpreadsheetApp owns most Excel-style shortcuts, but its grid-level keydown handler only runs
+  // when the primary grid element (`#grid`) has focus. When focus is in the secondary pane we need
+  // to map the same keystrokes back into SpreadsheetApp command APIs.
   gridSecondaryEl.addEventListener("keydown", (e) => {
-    if (e.defaultPrevented) return;
-
-    // Match SpreadsheetApp guards: never steal shortcuts from active text editing.
-    if (isTextInputTarget(e.target)) return;
-    if (isSpreadsheetEditing()) return;
-
-    // Excel semantics: Shift+F2 opens the comments panel.
-    if (e.key === "F2" && e.shiftKey) {
-      e.preventDefault();
-      app.openCommentsPanel();
-      return;
-    }
-
-    // Cancel an in-progress fill handle drag (matches primary-grid Escape semantics).
-    if (e.key === "Escape") {
-      if (secondaryGridView?.grid.cancelFillHandleDrag()) {
-        e.preventDefault();
-        return;
-      }
-    }
-
-    const primary = e.ctrlKey || e.metaKey;
-    const key = e.key.toLowerCase();
-
-    if (primary && !e.altKey && !e.shiftKey) {
-      if (key === "c") {
-        e.preventDefault();
-        app.copy();
-        return;
-      }
-      if (key === "x") {
-        e.preventDefault();
-        app.cut();
-        return;
-      }
-      if (key === "v") {
-        e.preventDefault();
-        app.paste();
-        return;
-      }
-    }
-
-    if (e.key === "Delete" || e.key === "Backspace") {
-      e.preventDefault();
-      app.clearSelection();
-    }
+    handleSecondaryGridKeyDown(e, {
+      app,
+      isSpreadsheetEditing,
+      isTextInputTarget,
+      cancelFillHandleDrag: () => secondaryGridView?.grid.cancelFillHandleDrag() ?? false,
+    });
   });
 
   const workspaceManager = new LayoutWorkspaceManager({ storage: localStorage, panelRegistry });
