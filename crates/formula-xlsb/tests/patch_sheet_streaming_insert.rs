@@ -18,7 +18,7 @@ fn read_sheet_bin(xlsb_bytes: Vec<u8>) -> Vec<u8> {
 }
 
 fn read_dimension_bounds(sheet_bin: &[u8]) -> Option<(u32, u32, u32, u32)> {
-    const DIMENSION: u32 = 0x0194;
+    const DIMENSION: u32 = 0x0094;
 
     let mut cursor = Cursor::new(sheet_bin);
     loop {
@@ -37,8 +37,8 @@ fn read_dimension_bounds(sheet_bin: &[u8]) -> Option<(u32, u32, u32, u32)> {
 }
 
 fn move_dimension_record_to_end(sheet_bin: &[u8]) -> Vec<u8> {
-    const DIMENSION: u32 = 0x0194;
-    const WORKSHEET_END: u32 = 0x0182;
+    const DIMENSION: u32 = 0x0094;
+    const WORKSHEET_END: u32 = 0x0082;
 
     let mut cursor = Cursor::new(sheet_bin);
     let mut ranges: Vec<(u32, usize, usize)> = Vec::new();
@@ -82,8 +82,8 @@ fn move_dimension_record_to_end(sheet_bin: &[u8]) -> Vec<u8> {
 }
 
 fn cell_coords_in_stream_order(sheet_bin: &[u8]) -> Vec<(u32, u32)> {
-    const SHEETDATA: u32 = 0x0191;
-    const SHEETDATA_END: u32 = 0x0192;
+    const SHEETDATA: u32 = 0x0091;
+    const SHEETDATA_END: u32 = 0x0092;
     const ROW: u32 = 0x0000;
 
     let mut cursor = Cursor::new(sheet_bin);
@@ -127,8 +127,8 @@ fn cell_coords_in_stream_order(sheet_bin: &[u8]) -> Vec<(u32, u32)> {
 }
 
 fn find_cell_record(sheet_bin: &[u8], target_row: u32, target_col: u32) -> Option<(u32, Vec<u8>)> {
-    const SHEETDATA: u32 = 0x0191;
-    const SHEETDATA_END: u32 = 0x0192;
+    const SHEETDATA: u32 = 0x0091;
+    const SHEETDATA_END: u32 = 0x0092;
     const ROW: u32 = 0x0000;
 
     let mut cursor = Cursor::new(sheet_bin);
@@ -173,7 +173,7 @@ fn find_cell_record(sheet_bin: &[u8], target_row: u32, target_col: u32) -> Optio
 }
 
 fn rewrite_dimension_len_as_two_byte_varint(sheet_bin: &[u8]) -> Vec<u8> {
-    const DIMENSION: u32 = 0x0194;
+    const DIMENSION: u32 = 0x0094;
 
     let mut cursor = Cursor::new(sheet_bin);
     let mut out = Vec::with_capacity(sheet_bin.len() + 4);
@@ -214,7 +214,7 @@ fn rewrite_dimension_len_as_two_byte_varint(sheet_bin: &[u8]) -> Vec<u8> {
 }
 
 fn dimension_header_raw(sheet_bin: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
-    const DIMENSION: u32 = 0x0194;
+    const DIMENSION: u32 = 0x0094;
 
     let mut cursor = Cursor::new(sheet_bin);
     loop {
@@ -234,6 +234,20 @@ fn dimension_header_raw(sheet_bin: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
             ));
         }
     }
+}
+
+fn decode_rk_number(raw: u32) -> f64 {
+    let raw_i = raw as i32;
+    let mut v = if raw_i & 0x02 != 0 {
+        (raw_i >> 2) as f64
+    } else {
+        let shifted = raw & 0xFFFFFFFC;
+        f64::from_bits((shifted as u64) << 32)
+    };
+    if raw_i & 0x01 != 0 {
+        v /= 100.0;
+    }
+    v
 }
 
 #[test]
@@ -906,4 +920,145 @@ fn patch_sheet_bin_streaming_inserts_formula_string_cell_matches_in_memory() {
     let cce = u32::from_le_bytes(payload[utf16_end..utf16_end + 4].try_into().unwrap()) as usize;
     assert_eq!(payload[utf16_end + 4..utf16_end + 4 + cce], rgce);
     assert!(payload[utf16_end + 4 + cce..].is_empty());
+}
+
+#[test]
+fn patch_sheet_bin_streaming_patches_rk_cell_preserving_rk_record_when_possible() {
+    const NUM: u32 = 0x0002;
+
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_number_rk(0, 1, 0.0);
+    let sheet_bin = read_sheet_bin(builder.build_bytes());
+
+    let edits = [CellEdit {
+        row: 0,
+        col: 1,
+        new_value: CellValue::Number(0.125),
+        new_formula: None,
+        new_rgcb: None,
+        shared_string_index: None,
+    }];
+
+    let patched_in_mem = patch_sheet_bin(&sheet_bin, &edits).expect("patch_sheet_bin");
+
+    let mut patched_stream = Vec::new();
+    let changed = patch_sheet_bin_streaming(Cursor::new(&sheet_bin), &mut patched_stream, &edits)
+        .expect("patch_sheet_bin_streaming");
+    assert!(changed);
+
+    assert_eq!(patched_stream, patched_in_mem);
+
+    let (id, payload) = find_cell_record(&patched_stream, 0, 1).expect("find patched cell");
+    assert_eq!(id, NUM, "expected RK NUM record id");
+    let rk = u32::from_le_bytes(payload[8..12].try_into().unwrap());
+    assert_eq!(decode_rk_number(rk).to_bits(), 0.125f64.to_bits());
+}
+
+#[test]
+fn patch_sheet_bin_streaming_converts_rk_cell_to_float_when_needed() {
+    const FLOAT: u32 = 0x0005;
+
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_number_rk(0, 1, 0.0);
+    let sheet_bin = read_sheet_bin(builder.build_bytes());
+
+    let edits = [CellEdit {
+        row: 0,
+        col: 1,
+        new_value: CellValue::Number(0.1234),
+        new_formula: None,
+        new_rgcb: None,
+        shared_string_index: None,
+    }];
+
+    let patched_in_mem = patch_sheet_bin(&sheet_bin, &edits).expect("patch_sheet_bin");
+
+    let mut patched_stream = Vec::new();
+    let changed = patch_sheet_bin_streaming(Cursor::new(&sheet_bin), &mut patched_stream, &edits)
+        .expect("patch_sheet_bin_streaming");
+    assert!(changed);
+
+    assert_eq!(patched_stream, patched_in_mem);
+
+    let (id, payload) = find_cell_record(&patched_stream, 0, 1).expect("find patched cell");
+    assert_eq!(id, FLOAT, "expected FLOAT record id");
+    let v = f64::from_le_bytes(payload[8..16].try_into().unwrap());
+    assert_eq!(v.to_bits(), 0.1234f64.to_bits());
+}
+
+#[test]
+fn patch_sheet_bin_streaming_patches_shared_string_cell_when_isst_provided() {
+    const STRING: u32 = 0x0007;
+
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.add_shared_string("Hello");
+    builder.add_shared_string("World");
+    builder.set_cell_sst(0, 0, 0);
+    let sheet_bin = read_sheet_bin(builder.build_bytes());
+
+    let edits = [CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Text("World".to_string()),
+        new_formula: None,
+        new_rgcb: None,
+        shared_string_index: Some(1),
+    }];
+
+    let patched_in_mem = patch_sheet_bin(&sheet_bin, &edits).expect("patch_sheet_bin");
+
+    let mut patched_stream = Vec::new();
+    let changed = patch_sheet_bin_streaming(Cursor::new(&sheet_bin), &mut patched_stream, &edits)
+        .expect("patch_sheet_bin_streaming");
+    assert!(changed);
+
+    assert_eq!(patched_stream, patched_in_mem);
+
+    let (id, payload) = find_cell_record(&patched_stream, 0, 0).expect("find patched cell");
+    assert_eq!(id, STRING, "expected BrtCellIsst/STRING record id");
+    assert_eq!(
+        u32::from_le_bytes(payload[8..12].try_into().unwrap()),
+        1,
+        "expected patched cell to reference shared string index 1"
+    );
+}
+
+#[test]
+fn patch_sheet_bin_streaming_converts_shared_string_cell_to_inline_string_when_isst_missing() {
+    const CELL_ST: u32 = 0x0006;
+
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.add_shared_string("Hello");
+    builder.add_shared_string("World");
+    builder.set_cell_sst(0, 0, 0);
+    let sheet_bin = read_sheet_bin(builder.build_bytes());
+
+    let edits = [CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Text("World".to_string()),
+        new_formula: None,
+        new_rgcb: None,
+        shared_string_index: None,
+    }];
+
+    let patched_in_mem = patch_sheet_bin(&sheet_bin, &edits).expect("patch_sheet_bin");
+
+    let mut patched_stream = Vec::new();
+    let changed = patch_sheet_bin_streaming(Cursor::new(&sheet_bin), &mut patched_stream, &edits)
+        .expect("patch_sheet_bin_streaming");
+    assert!(changed);
+
+    assert_eq!(patched_stream, patched_in_mem);
+
+    let (id, payload) = find_cell_record(&patched_stream, 0, 0).expect("find patched cell");
+    assert_eq!(id, CELL_ST, "expected BrtCellSt/CELL_ST record id");
+
+    let cch = u32::from_le_bytes(payload[8..12].try_into().unwrap()) as usize;
+    let raw = &payload[12..12 + cch * 2];
+    let mut units = Vec::with_capacity(cch);
+    for chunk in raw.chunks_exact(2) {
+        units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+    }
+    assert_eq!(String::from_utf16_lossy(&units), "World");
 }
