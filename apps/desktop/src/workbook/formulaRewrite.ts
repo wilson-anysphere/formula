@@ -58,6 +58,107 @@ export function rewriteSheetNamesInFormula(
   return out.join("");
 }
 
+/**
+ * Rewrite sheet references inside a formula after deleting a sheet.
+ *
+ * Excel behavior (approximated):
+ * - Direct references to the deleted sheet become `#REF!` (e.g. `=Sheet2!A1` → `=#REF!`).
+ * - 3D references shift boundaries when the deleted sheet is a boundary
+ *   (e.g. `=SUM(Sheet1:Sheet3!A1)` with `Sheet1` deleted → `=SUM(Sheet2:Sheet3!A1)`).
+ *
+ * This implementation is intentionally conservative: it only rewrites tokens that parse as sheet
+ * references and it does not touch string literals.
+ */
+export function rewriteDeletedSheetReferencesInFormula(
+  formula: string,
+  deletedSheet: string,
+  sheetOrder: string[],
+): string {
+  const out: string[] = [];
+  let i = 0;
+  let inString = false;
+
+  while (i < formula.length) {
+    const ch = formula[i];
+
+    if (inString) {
+      out.push(ch);
+      if (ch === '"') {
+        if (formula[i + 1] === '"') {
+          out.push('"');
+          i += 2;
+          continue;
+        }
+        inString = false;
+      }
+      i += 1;
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      out.push('"');
+      i += 1;
+      continue;
+    }
+
+    if (ch === "#") {
+      const parsed = parseErrorLiteral(formula, i);
+      if (parsed) {
+        out.push(parsed.raw);
+        i = parsed.nextIndex;
+        continue;
+      }
+    }
+
+    if (ch === "'") {
+      const parsed = parseQuotedSheetSpec(formula, i);
+      if (parsed) {
+        const raw = formula.slice(i, parsed.nextIndex); // includes trailing '!'
+        const rewrite = rewriteSheetSpecForDelete(parsed.sheetSpec, deletedSheet, sheetOrder);
+        if (rewrite.kind === "unchanged") {
+          out.push(raw);
+          i = parsed.nextIndex;
+          continue;
+        }
+        if (rewrite.kind === "adjusted") {
+          out.push(rewrite.spec, "!");
+          i = parsed.nextIndex;
+          continue;
+        }
+        // invalidate
+        out.push("#REF!");
+        i = sheetRefTailEnd(formula, parsed.nextIndex);
+        continue;
+      }
+    }
+
+    const parsedUnquoted = parseUnquotedSheetSpec(formula, i);
+    if (parsedUnquoted) {
+      const raw = formula.slice(i, parsedUnquoted.nextIndex); // includes trailing '!'
+      const rewrite = rewriteSheetSpecForDelete(parsedUnquoted.sheetSpec, deletedSheet, sheetOrder);
+      if (rewrite.kind === "unchanged") {
+        out.push(raw);
+        i = parsedUnquoted.nextIndex;
+        continue;
+      }
+      if (rewrite.kind === "adjusted") {
+        out.push(rewrite.spec, "!");
+        i = parsedUnquoted.nextIndex;
+        continue;
+      }
+      out.push("#REF!");
+      i = sheetRefTailEnd(formula, parsedUnquoted.nextIndex);
+      continue;
+    }
+
+    out.push(ch);
+    i += 1;
+  }
+
+  return out.join("");
+}
+
 function parseQuotedSheetSpec(
   formula: string,
   startIndex: number,
@@ -123,13 +224,15 @@ function rewriteSheetSpec(sheetSpec: string, oldName: string, newName: string): 
 }
 
 function splitWorkbookPrefix(sheetSpec: string): { workbookPrefix: string | null; remainder: string } {
-  if (!sheetSpec.startsWith("[")) return { workbookPrefix: null, remainder: sheetSpec };
-  const closeIdx = sheetSpec.indexOf("]");
+  // External references can include `[` / `]` inside a path component
+  // (e.g. `'C:\\[foo]\\[Book.xlsx]Sheet1'!A1`). The workbook delimiter is the last `[...]` pair.
+  const openIdx = sheetSpec.lastIndexOf("[");
+  if (openIdx === -1) return { workbookPrefix: null, remainder: sheetSpec };
+  const closeIdx = sheetSpec.indexOf("]", openIdx);
   if (closeIdx === -1) return { workbookPrefix: null, remainder: sheetSpec };
-  return {
-    workbookPrefix: sheetSpec.slice(0, closeIdx + 1),
-    remainder: sheetSpec.slice(closeIdx + 1),
-  };
+  const prefixEnd = closeIdx + 1;
+  if (prefixEnd >= sheetSpec.length) return { workbookPrefix: null, remainder: sheetSpec };
+  return { workbookPrefix: sheetSpec.slice(0, prefixEnd), remainder: sheetSpec.slice(prefixEnd) };
 }
 
 function split3d(remainder: string): [string, string | null] {
@@ -185,5 +288,153 @@ function isAsciiDigit(ch: string): boolean {
 
 function isAsciiAlphaNum(ch: string): boolean {
   return isAsciiLetter(ch) || isAsciiDigit(ch);
+}
+
+type DeleteSheetSpecRewrite =
+  | { kind: "unchanged" }
+  | { kind: "adjusted"; spec: string }
+  | { kind: "invalidate" };
+
+function rewriteSheetSpecForDelete(
+  sheetSpec: string,
+  deletedSheet: string,
+  sheetOrder: string[],
+): DeleteSheetSpecRewrite {
+  const { workbookPrefix, remainder } = splitWorkbookPrefix(sheetSpec);
+  const [start, end] = split3d(remainder);
+
+  if (end == null) {
+    return startEquals(start, deletedSheet) ? { kind: "invalidate" } : { kind: "unchanged" };
+  }
+
+  const startMatches = startEquals(start, deletedSheet);
+  const endMatches = startEquals(end, deletedSheet);
+  if (!startMatches && !endMatches) return { kind: "unchanged" };
+
+  const startIdx = sheetIndexInOrder(sheetOrder, start);
+  const endIdx = sheetIndexInOrder(sheetOrder, end);
+  if (startIdx == null || endIdx == null) return { kind: "invalidate" };
+
+  // Span references only the deleted sheet.
+  if (startIdx === endIdx) return { kind: "invalidate" };
+
+  const dir = endIdx > startIdx ? 1 : -1;
+  let newStartIdx = startIdx;
+  let newEndIdx = endIdx;
+
+  if (startMatches) newStartIdx += dir;
+  if (endMatches) newEndIdx -= dir;
+
+  const newStart = sheetOrder[newStartIdx];
+  const newEnd = sheetOrder[newEndIdx];
+  if (!newStart || !newEnd) return { kind: "invalidate" };
+
+  const nextEnd = startEquals(newStart, newEnd) ? null : newEnd;
+  return { kind: "adjusted", spec: formatSheetReference(workbookPrefix, newStart, nextEnd) };
+}
+
+function sheetIndexInOrder(sheetOrder: string[], name: string): number | null {
+  const target = name.toLowerCase();
+  for (let i = 0; i < sheetOrder.length; i += 1) {
+    if (sheetOrder[i]?.toLowerCase() === target) return i;
+  }
+  return null;
+}
+
+function parseErrorLiteral(formula: string, startIndex: number): { nextIndex: number; raw: string } | null {
+  if (formula[startIndex] !== "#") return null;
+  let i = startIndex + 1;
+  while (i < formula.length) {
+    const ch = formula[i];
+    if (isAsciiAlphaNum(ch) || ch === "/" || ch === "_" || ch === ".") {
+      i += 1;
+      continue;
+    }
+    if (ch === "!" || ch === "?") {
+      i += 1;
+      break;
+    }
+    break;
+  }
+  if (i === startIndex + 1) return null;
+  return { nextIndex: i, raw: formula.slice(startIndex, i) };
+}
+
+function sheetRefTailEnd(formula: string, startIndex: number): number {
+  let i = startIndex;
+  let bracketDepth = 0;
+  let parenDepth = 0;
+  let inString = false;
+
+  while (i < formula.length) {
+    const ch = formula[i];
+
+    if (inString) {
+      if (ch === '"') {
+        if (formula[i + 1] === '"') {
+          i += 2;
+          continue;
+        }
+        inString = false;
+      }
+      i += 1;
+      continue;
+    }
+
+    switch (ch) {
+      case '"':
+        inString = true;
+        i += 1;
+        continue;
+      case "[":
+        bracketDepth += 1;
+        i += 1;
+        continue;
+      case "]":
+        bracketDepth = Math.max(0, bracketDepth - 1);
+        i += 1;
+        continue;
+      case "(":
+        parenDepth += 1;
+        i += 1;
+        continue;
+      case ")":
+        if (parenDepth === 0) return i;
+        parenDepth = Math.max(0, parenDepth - 1);
+        i += 1;
+        continue;
+      default:
+        break;
+    }
+
+    if (bracketDepth === 0 && parenDepth === 0) {
+      if (
+        ch === " " ||
+        ch === "\t" ||
+        ch === "\n" ||
+        ch === "\r" ||
+        ch === "," ||
+        ch === ";" ||
+        ch === "+" ||
+        ch === "-" ||
+        ch === "*" ||
+        ch === "/" ||
+        ch === "^" ||
+        ch === "&" ||
+        ch === "=" ||
+        ch === "<" ||
+        ch === ">" ||
+        ch === "{" ||
+        ch === "}" ||
+        ch === "%"
+      ) {
+        return i;
+      }
+    }
+
+    i += 1;
+  }
+
+  return i;
 }
 

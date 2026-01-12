@@ -647,6 +647,19 @@ fn read_text_file_blocking(path: &std::path::Path) -> Result<String, String> {
     String::from_utf8(buf).map_err(|e| e.to_string())
 }
 
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn delete_sheet(sheet_id: String, state: State<'_, SharedAppState>) -> Result<(), String> {
+    let shared = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut state = shared.lock().unwrap();
+        state.delete_sheet(&sheet_id).map_err(app_error)?;
+        Ok::<_, String>(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Read a local text file on behalf of the frontend.
 ///
 /// This exists so the desktop webview can power-query local sources (CSV/JSON) without

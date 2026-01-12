@@ -252,8 +252,8 @@ impl MemoryManager {
     pub fn clear_cache(&self) {
         let mut inner = self.inner.lock().expect("memory manager mutex poisoned");
         inner.pages.clear();
-        inner.sheet_meta.clear();
         inner.dirty_pages.clear();
+        inner.sheet_meta.clear();
         inner.bytes = 0;
         inner.needs_persist = false;
     }

@@ -10,24 +10,29 @@ import {
 describe("sheetFormulaRewrite", () => {
   describe("rewriteDeletedSheetReferencesInFormula", () => {
     it("rewrites quoted sheet-qualified refs to #REF!", () => {
-      expect(rewriteDeletedSheetReferencesInFormula("=SUM('My Sheet'!A1,2)", "My Sheet")).toBe("=SUM(#REF!,2)");
+      expect(
+        rewriteDeletedSheetReferencesInFormula("=SUM('My Sheet'!A1,2)", "My Sheet", ["Sheet1", "My Sheet"]),
+      ).toBe("=SUM(#REF!,2)");
     });
 
     it("handles escaped apostrophes in quoted sheet names", () => {
-      expect(rewriteDeletedSheetReferencesInFormula("='O''Brien'!A1+1", "O'Brien")).toBe("=#REF!+1");
+      expect(rewriteDeletedSheetReferencesInFormula("='O''Brien'!A1+1", "O'Brien", ["O'Brien", "Sheet1"])).toBe("=#REF!+1");
     });
 
     it("rewrites unquoted sheet-qualified refs case-insensitively", () => {
-      expect(rewriteDeletedSheetReferencesInFormula("=sheet1!A1+1", "Sheet1")).toBe("=#REF!+1");
+      expect(rewriteDeletedSheetReferencesInFormula("=sheet1!A1+1", "Sheet1", ["Sheet1", "Sheet2"])).toBe("=#REF!+1");
     });
 
     it("rewrites 3D refs when deleted sheet is start/end", () => {
-      expect(rewriteDeletedSheetReferencesInFormula("=SUM(Sheet1:Sheet3!A1)", "Sheet1")).toBe("=SUM(#REF!)");
-      expect(rewriteDeletedSheetReferencesInFormula("=SUM(Sheet1:Sheet3!A1)", "Sheet3")).toBe("=SUM(#REF!)");
+      const order = ["Sheet1", "Sheet2", "Sheet3"];
+      expect(rewriteDeletedSheetReferencesInFormula("=SUM(Sheet1:Sheet3!A1)", "Sheet1", order)).toBe("=SUM(Sheet2:Sheet3!A1)");
+      expect(rewriteDeletedSheetReferencesInFormula("=SUM(Sheet1:Sheet3!A1)", "Sheet3", order)).toBe("=SUM(Sheet1:Sheet2!A1)");
     });
 
     it("does not rewrite inside string literals", () => {
-      expect(rewriteDeletedSheetReferencesInFormula('="Sheet1!A1"&Sheet1!A1', "Sheet1")).toBe('="Sheet1!A1"&#REF!');
+      expect(rewriteDeletedSheetReferencesInFormula('="Sheet1!A1"&Sheet1!A1', "Sheet1", ["Sheet1"])).toBe(
+        '="Sheet1!A1"&#REF!',
+      );
     });
   });
 
@@ -71,7 +76,7 @@ describe("sheetFormulaRewrite", () => {
       doc.setCellFormula("S1", { row: 0, col: 0 }, "='My Sheet'!A1+1");
       doc.setCellFormula("S1", { row: 0, col: 1 }, "=SUM(Sheet1:Sheet3!A1)");
 
-      rewriteDocumentFormulasForSheetDelete(doc, "My Sheet");
+      rewriteDocumentFormulasForSheetDelete(doc, "My Sheet", ["Sheet1", "Sheet2", "Sheet3", "My Sheet"]);
 
       expect(doc.getCell("S1", { row: 0, col: 0 }).formula).toBe("=#REF!+1");
       // Unrelated formula stays intact.
@@ -82,9 +87,9 @@ describe("sheetFormulaRewrite", () => {
       const doc = new DocumentController();
       doc.setCellFormula("S1", { row: 0, col: 0 }, "=SUM(Sheet1:Sheet3!A1)");
 
-      rewriteDocumentFormulasForSheetDelete(doc, "Sheet1");
+      rewriteDocumentFormulasForSheetDelete(doc, "Sheet1", ["Sheet1", "Sheet2", "Sheet3"]);
 
-      expect(doc.getCell("S1", { row: 0, col: 0 }).formula).toBe("=SUM(#REF!)");
+      expect(doc.getCell("S1", { row: 0, col: 0 }).formula).toBe("=SUM(Sheet2:Sheet3!A1)");
     });
   });
 });

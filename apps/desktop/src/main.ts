@@ -2440,13 +2440,33 @@ function renderSheetTabs(): void {
         await invoke("set_sheet_tab_color", { sheet_id: sheetId, tab_color: tabColor ?? null });
       },
       onSheetsReordered: () => restoreFocusAfterSheetNavigation(),
-      onSheetDeleted: ({ sheetId, name }) => {
+      onSheetRenamed: ({ oldName, newName }) => {
+        try {
+          rewriteDocumentFormulasForSheetRename(app.getDocument(), oldName, newName);
+        } catch (err) {
+          showToast(`Failed to update formulas after rename: ${String((err as any)?.message ?? err)}`, "error");
+        }
+        // Renaming sheets affects workbook metadata but does not produce cell deltas, so
+        // mark the document dirty explicitly for unsaved-changes prompts.
+        app.getDocument().markDirty();
+      },
+      onSheetDeleted: ({ sheetId, name, sheetOrder }) => {
         const doc = app.getDocument() as any;
         try {
-          rewriteDocumentFormulasForSheetDelete(doc, name);
+          doc?.model?.sheets?.delete?.(sheetId);
+        } catch {
+          // ignore
+        }
+
+        try {
+          rewriteDocumentFormulasForSheetDelete(doc, name, sheetOrder);
         } catch (err) {
           showToast(`Failed to update formulas after delete: ${String((err as any)?.message ?? err)}`, "error");
         }
+
+        // Deleting sheets affects workbook metadata but does not always produce cell deltas. Mark
+        // the document dirty explicitly so unsaved-changes prompts behave as expected.
+        app.getDocument().markDirty();
       },
       onSheetMoved: async ({ sheetId, toIndex }) => {
         const collabSession = app.getCollabSession?.() ?? null;

@@ -690,19 +690,6 @@ fn cell_xml(
             let idx = shared_strings.index.get(s).copied().unwrap_or_default();
             value_xml.push_str(&format!(r#"<v>{}</v>"#, idx));
         }
-        CellValue::Error(e) => {
-            attrs.push_str(r#" t="e""#);
-            value_xml.push_str(&format!(r#"<v>{}</v>"#, escape_xml(e.as_str())));
-        }
-        CellValue::RichText(r) => {
-            attrs.push_str(r#" t="s""#);
-            let idx = shared_strings
-                .index
-                .get(&r.text)
-                .copied()
-                .unwrap_or_default();
-            value_xml.push_str(&format!(r#"<v>{}</v>"#, idx));
-        }
         CellValue::Entity(entity) => {
             attrs.push_str(r#" t="s""#);
             let idx = shared_strings
@@ -716,6 +703,19 @@ fn cell_xml(
             let display = record_display_string(record);
             attrs.push_str(r#" t="s""#);
             let idx = shared_strings.index.get(&display).copied().unwrap_or_default();
+            value_xml.push_str(&format!(r#"<v>{}</v>"#, idx));
+        }
+        CellValue::Error(e) => {
+            attrs.push_str(r#" t="e""#);
+            value_xml.push_str(&format!(r#"<v>{}</v>"#, escape_xml(e.as_str())));
+        }
+        CellValue::RichText(r) => {
+            attrs.push_str(r#" t="s""#);
+            let idx = shared_strings
+                .index
+                .get(&r.text)
+                .copied()
+                .unwrap_or_default();
             value_xml.push_str(&format!(r#"<v>{}</v>"#, idx));
         }
         CellValue::Image(image) => {
@@ -822,7 +822,7 @@ fn build_shared_strings(workbook: &Workbook) -> SharedStrings {
                     }
                 }
                 CellValue::Record(record) => {
-                    let s = record.to_string();
+                    let s = record_display_string(record);
                     if !index.contains_key(&s) {
                         let idx = values.len();
                         values.push(s.clone());

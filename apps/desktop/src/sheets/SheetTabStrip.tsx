@@ -142,7 +142,7 @@ type Props = {
    *
    * Used by `main.ts` to rewrite DocumentController formulas referencing the deleted sheet name.
    */
-  onSheetDeleted?: (event: { sheetId: string; name: string }) => void;
+  onSheetDeleted?: (event: { sheetId: string; name: string; sheetOrder: string[] }) => void;
   /**
    * Optional hook invoked when a sheet tab reorder is committed (drag-and-drop).
    *
@@ -698,6 +698,7 @@ export function SheetTabStrip({
     if (!ok) return;
 
     const deletedName = sheet.name;
+    const sheetOrder = store.listAll().map((s) => s.name);
 
     try {
       await onPersistSheetDelete?.(sheet.id);
@@ -727,7 +728,7 @@ export function SheetTabStrip({
     }
 
     try {
-      onSheetDeleted?.({ sheetId: sheet.id, name: deletedName });
+      onSheetDeleted?.({ sheetId: sheet.id, name: deletedName, sheetOrder });
     } catch (err) {
       onError?.(err instanceof Error ? err.message : String(err));
     }

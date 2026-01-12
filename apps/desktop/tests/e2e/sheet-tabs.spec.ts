@@ -1283,4 +1283,36 @@ test.describe("sheet tabs", () => {
     // Tab color should persist after hide/unhide.
     await expect(sheet2Tab.locator(".sheet-tab__color")).toBeVisible();
   });
+
+  test("deleting a sheet via the tab context menu removes it (but cannot delete last sheet)", async ({ page }) => {
+    await page.addInitScript(() => {
+      window.confirm = () => true;
+    });
+
+    await gotoDesktop(page);
+
+    // Create Sheet2 by writing a value into it (DocumentController creates sheets lazily).
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      app.getDocument().setCellValue("Sheet2", "A1", "Hello from Sheet2");
+    });
+
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+
+    // Delete Sheet2 via context menu.
+    await page.getByTestId("sheet-tab-Sheet2").click({ button: "right" });
+    await page.getByTestId("sheet-tab-context-menu").getByRole("button", { name: "Delete" }).click();
+
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveCount(0);
+    await expect(page.getByTestId("sheet-tab-Sheet1")).toBeVisible();
+
+    // App remains usable (can still read values on the remaining sheet).
+    await page.getByTestId("sheet-tab-Sheet1").click();
+    await expect(page.getByTestId("active-value")).toHaveText("Seed");
+
+    // Deleting the last remaining sheet is blocked.
+    await page.getByTestId("sheet-tab-Sheet1").click({ button: "right" });
+    const deleteBtn = page.getByTestId("sheet-tab-context-menu").getByRole("button", { name: "Delete" });
+    await expect(deleteBtn).toBeDisabled();
+  });
 });
