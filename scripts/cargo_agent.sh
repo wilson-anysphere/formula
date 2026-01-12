@@ -20,6 +20,7 @@ set -euo pipefail
 #   FORMULA_CARGO_LIMIT_AS   Address-space cap (default: 14G)
 #   FORMULA_RUST_TEST_THREADS  Default RUST_TEST_THREADS for cargo test (default: min(nproc, 16))
 #   FORMULA_RAYON_NUM_THREADS  Default RAYON_NUM_THREADS (default: FORMULA_CARGO_JOBS)
+#   FORMULA_OPENSSL_VENDOR   Set to 1 to disable auto-setting OPENSSL_NO_VENDOR (allow vendored OpenSSL)
 #   FORMULA_CARGO_RETRY_ATTEMPTS  Retry count for transient rustc EAGAIN panics (default: 5)
 #   FORMULA_LLD_THREADS      When linking with lld via a cc driver, pass `--threads=<n>` (default: 1 on Linux)
 #
@@ -41,6 +42,7 @@ Environment:
   FORMULA_CARGO_LIMIT_AS     Address-space cap (default: 14G)
   FORMULA_RUST_TEST_THREADS  RUST_TEST_THREADS for cargo test (default: min(nproc, 16))
   FORMULA_RAYON_NUM_THREADS  RAYON_NUM_THREADS (default: FORMULA_CARGO_JOBS)
+  FORMULA_OPENSSL_VENDOR     Set to 1 to disable auto-setting OPENSSL_NO_VENDOR (allow vendored OpenSSL)
   FORMULA_CARGO_RETRY_ATTEMPTS  Retry count for transient rustc EAGAIN panics (default: 5)
   FORMULA_LLD_THREADS        lld thread pool size for link steps (default: 1 on Linux)
 EOF

@@ -107,6 +107,7 @@ Environment variables to tune behavior:
 - `FORMULA_CARGO_LIMIT_AS` - address space limit (default: 14G)
 - `FORMULA_RUST_TEST_THREADS` - test parallelism (default: min(nproc, 16))
 - `FORMULA_RAYON_NUM_THREADS` - Rayon thread pool size (`RAYON_NUM_THREADS`) (default: `FORMULA_CARGO_JOBS`)
+- `FORMULA_OPENSSL_VENDOR=1` - disable the wrapper's auto-setting of `OPENSSL_NO_VENDOR` (useful if you need vendored OpenSSL)
 
 #### npm/pnpm/yarn
 
