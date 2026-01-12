@@ -8,7 +8,7 @@ use formula_columnar::{
     TableOptions, Value,
 };
 use formula_io::{open_workbook, save_workbook, Workbook};
-use formula_model::CellValue;
+use formula_model::{sanitize_sheet_name, CellValue};
 
 fn parquet_fixture_path(rel: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -93,4 +93,31 @@ fn parquet_fixture_can_export_to_xlsx() {
     );
     assert_eq!(sheet.value_a1("C2").unwrap(), CellValue::Boolean(false));
     assert_eq!(sheet.value_a1("D3").unwrap(), CellValue::Number(3.75));
+}
+
+#[test]
+fn parquet_import_sanitizes_sheet_name_from_file_stem() {
+    let parquet_path = parquet_fixture_path("simple.parquet");
+
+    let dir = tempfile::tempdir().expect("temp dir");
+    let bad_path = dir.path().join("bad[name].parquet");
+    std::fs::copy(&parquet_path, &bad_path).expect("copy parquet fixture");
+
+    let wb = open_workbook(&bad_path).expect("open parquet workbook");
+
+    let out_path = dir.path().join("export.xlsx");
+    save_workbook(&wb, &out_path).expect("save workbook as xlsx");
+
+    let file = std::fs::File::open(&out_path).expect("open exported xlsx");
+    let exported = formula_xlsx::read_workbook_from_reader(file).expect("read exported workbook");
+
+    let expected = sanitize_sheet_name("bad[name]");
+    assert_ne!(expected, "Sheet1", "expected sanitized name to not be the default");
+    assert!(
+        exported.sheet_by_name("Sheet1").is_none(),
+        "should not fall back to Sheet1 for an invalid but non-empty stem"
+    );
+    exported
+        .sheet_by_name(&expected)
+        .expect("expected worksheet name to be sanitized from file stem");
 }

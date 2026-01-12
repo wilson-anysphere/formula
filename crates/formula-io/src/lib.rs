@@ -747,16 +747,22 @@ fn open_parquet_model_workbook(path: &Path) -> Result<formula_model::Workbook, E
     use formula_model::CellRef;
     use std::sync::Arc;
 
-    let table =
-        formula_columnar::parquet::read_parquet_to_columnar(path).map_err(|source| Error::OpenParquet {
+    let table = formula_columnar::parquet::read_parquet_to_columnar(path).map_err(|source| {
+        Error::OpenParquet {
             path: path.to_path_buf(),
             source: Box::new(source),
-        })?;
+        }
+    })?;
 
     let mut workbook = formula_model::Workbook::new();
 
+    // Match CSV behavior: prefer the file stem if it is already a valid Excel sheet name,
+    // otherwise sanitize it.
     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-    let sheet_name = sanitize_sheet_name(stem);
+    let sheet_name = formula_model::validate_sheet_name(stem)
+        .ok()
+        .map(|_| stem.to_string())
+        .unwrap_or_else(|| sanitize_sheet_name(stem));
 
     let sheet_id = workbook
         .add_sheet(sheet_name)
@@ -779,8 +785,7 @@ fn open_parquet_model_workbook(path: &Path) -> Result<formula_model::Workbook, E
 /// - [`Workbook::Xls`] is exported as `.xlsx` (writing `.xls` is out of scope).
 /// - [`Workbook::Xlsb`] can be saved losslessly back to `.xlsb` (package copy),
 ///   or exported to `.xlsx` depending on the output extension.
-/// - [`Workbook::Model`] is exported as `.xlsx` via [`formula_xlsx::write_workbook`] after
-///   materializing any columnar-backed data.
+/// - [`Workbook::Model`] is exported as `.xlsx` via [`formula_xlsx::write_workbook`].
 pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), Error> {
     let path = path.as_ref();
     let ext = path
@@ -985,9 +990,8 @@ pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), 
                     "xlam" => xlsx::WorkbookKind::MacroEnabledAddIn,
                     _ => unreachable!(),
                 };
-                let export = materialize_columnar_tables_for_export(model);
                 atomic_write(path, |file| {
-                    xlsx::write_workbook_to_writer_with_kind(&export, file, kind)
+                    xlsx::write_workbook_to_writer_with_kind(model, file, kind)
                 })
                 .map_err(|err| match err {
                     AtomicWriteError::Io(source) => Error::SaveIo {
@@ -1006,51 +1010,6 @@ pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), 
             }),
         },
     }
-}
-
-fn materialize_columnar_tables_for_export(
-    workbook: &formula_model::Workbook,
-) -> formula_model::Workbook {
-    use formula_model::{CellRef, CellValue};
-
-    let mut out = workbook.clone();
-    for sheet in &mut out.sheets {
-        let Some((origin, rows, cols)) = sheet.columnar_table_extent() else {
-            continue;
-        };
-
-        // The columnar backend is currently used for imported data. To export to
-        // XLSX, materialize values into the sparse cell map, preserving any
-        // existing overlay cells (edits / formulas / styles).
-        for r in 0..rows {
-            let Ok(r_u32) = u32::try_from(r) else {
-                break;
-            };
-            let row = origin.row.saturating_add(r_u32);
-            for c in 0..cols {
-                let Ok(c_u32) = u32::try_from(c) else {
-                    break;
-                };
-                let col = origin.col.saturating_add(c_u32);
-                let cell_ref = CellRef::new(row, col);
-
-                if sheet.cell(cell_ref).is_some() {
-                    continue;
-                }
-
-                let value = sheet.value(cell_ref);
-                if value != CellValue::Empty {
-                    sheet.set_value(cell_ref, value);
-                }
-            }
-        }
-
-        // Drop the columnar reference from the exported workbook so callers don't
-        // accidentally treat the output as still virtualized.
-        sheet.clear_columnar_table();
-    }
-
-    out
 }
 
 fn xlsb_error_code_to_model_error(code: u8) -> formula_model::ErrorValue {
