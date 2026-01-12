@@ -6,6 +6,7 @@ import { matchesRedirectUri, oauthBroker } from "../../power-query/oauthBroker.j
 import { createPowerQueryRefreshStateStore } from "../../power-query/refreshStateStore.js";
 import { loadOAuth2ProviderConfigs, saveOAuth2ProviderConfigs, type OAuth2ProviderConfig } from "../../power-query/oauthProviders.ts";
 import { deriveQueryListRows, reduceQueryRuntimeState, type QueryRuntimeState } from "../../power-query/queryRuntime.ts";
+import type { SheetNameResolver } from "../../sheet/sheetNameResolver";
 import {
   DesktopPowerQueryService,
   getDesktopPowerQueryService,
@@ -18,6 +19,7 @@ import { PanelIds } from "../panelRegistry.js";
 type Props = {
   getDocumentController: () => any;
   workbookId?: string;
+  sheetNameResolver?: SheetNameResolver | null;
 };
 
 type PendingPkce = { providerId: string; redirectUri: string };
@@ -337,8 +339,8 @@ export function DataQueriesPanelContainer(props: Props) {
   }, [service]);
 
   const rows = useMemo(
-    () => deriveQueryListRows(queries, runtimeState, lastRunAtMsByQueryId),
-    [queries, runtimeState, lastRunAtMsByQueryId],
+    () => deriveQueryListRows(queries, runtimeState, lastRunAtMsByQueryId, { sheetNameResolver: props.sheetNameResolver }),
+    [queries, runtimeState, lastRunAtMsByQueryId, props.sheetNameResolver],
   );
 
   const refreshQuery = useCallback(

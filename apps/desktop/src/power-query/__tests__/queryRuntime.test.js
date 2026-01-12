@@ -74,3 +74,25 @@ test("deriveQueryListRows uses runtime + persisted metadata", () => {
   assert.equal(row2.lastRefreshAtMs, 60);
   assert.equal(row2.errorSummary, "Permission denied");
 });
+
+test("deriveQueryListRows formats destinations using sheet display names when provided", () => {
+  const queries = [
+    {
+      id: "q1",
+      name: "Query 1",
+      source: { type: "range", range: { values: [["A"], [1]], hasHeaders: true } },
+      steps: [],
+      destination: { sheetId: "sheet_123", start: { row: 0, col: 0 }, includeHeader: true, lastOutputSize: { rows: 1, cols: 1 } },
+      refreshPolicy: { type: "manual" },
+    },
+  ];
+
+  const rows = deriveQueryListRows(queries, { q1: { status: "idle" } }, {}, {
+    sheetNameResolver: {
+      getSheetNameById: (id) => (id === "sheet_123" ? "My Sheet" : null),
+      getSheetIdByName: () => null,
+    },
+  });
+
+  assert.equal(rows[0].destination, "'My Sheet'!A1");
+});

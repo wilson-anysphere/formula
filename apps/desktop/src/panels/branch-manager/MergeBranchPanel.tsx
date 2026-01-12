@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 
 import { t, tWithVars } from "../../i18n/index.js";
+import type { SheetNameResolver } from "../../sheet/sheetNameResolver";
 
 export type Cell = { value?: unknown; formula?: string; format?: Record<string, unknown> };
 
@@ -135,14 +136,28 @@ function jsonSummary(value: unknown) {
   }
 }
 
-function conflictHeader(c: MergeConflict) {
+function formatSheetNameForA1(sheetName: string): string {
+  const name = String(sheetName ?? "").trim();
+  if (!name) return "";
+  if (/^[A-Za-z0-9_]+$/.test(name)) return name;
+  return `'${name.replace(/'/g, "''")}'`;
+}
+
+function conflictHeader(c: MergeConflict, sheetNameResolver: SheetNameResolver | null) {
+  const displayName = (sheetId: string | null | undefined): string => {
+    const id = String(sheetId ?? "").trim();
+    if (!id) return "?";
+    return sheetNameResolver?.getSheetNameById(id) ?? id;
+  };
+
   if (c.type === "cell" || c.type === "move") {
-    return `${c.sheetId}!${c.cell} (${c.reason})`;
+    const sheetName = displayName(c.sheetId);
+    return `${formatSheetNameForA1(sheetName)}!${c.cell} (${c.reason})`;
   }
   if (c.type === "sheet") {
-    if (c.reason === "rename") return `sheet rename: ${c.sheetId ?? "?"}`;
+    if (c.reason === "rename") return `sheet rename: ${displayName(c.sheetId)}`;
     if (c.reason === "order") return "sheet order";
-    if (c.reason === "presence") return `sheet presence: ${c.sheetId ?? "?"}`;
+    if (c.reason === "presence") return `sheet presence: ${displayName(c.sheetId)}`;
     return "sheet";
   }
   if (c.type === "namedRange") return `named range: ${c.key}`;
@@ -156,11 +171,13 @@ export function MergeBranchPanel({
   actor,
   branchService,
   sourceBranch,
+  sheetNameResolver = null,
   onClose
 }: {
   actor: Actor;
   branchService: BranchService;
   sourceBranch: string;
+  sheetNameResolver?: SheetNameResolver | null;
   onClose: () => void;
 }) {
   const [preview, setPreview] = useState<MergePreview | null>(null);
@@ -200,12 +217,12 @@ export function MergeBranchPanel({
             {tWithVars("branchMerge.conflictsCount", { count: preview.conflicts.length })}
           </div>
 
-          {preview.conflicts.map((c, idx) => (
-            <div
-              key={`${c.type}-${idx}`}
-              style={{ border: "1px solid var(--border)", padding: 8, marginBottom: 8 }}
-            >
-              <div style={{ fontWeight: 600 }}>{conflictHeader(c)}</div>
+           {preview.conflicts.map((c, idx) => (
+             <div
+               key={`${c.type}-${idx}`}
+               style={{ border: "1px solid var(--border)", padding: 8, marginBottom: 8 }}
+             >
+              <div style={{ fontWeight: 600 }}>{conflictHeader(c, sheetNameResolver)}</div>
               {c.type === "cell" ? (
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
                   <div>

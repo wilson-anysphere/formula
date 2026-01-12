@@ -209,7 +209,13 @@ function CollabVersionHistoryPanel({ session }: { session: CollabSession }) {
   );
 }
 
-function CollabBranchManagerPanel({ session }: { session: CollabSession }) {
+function CollabBranchManagerPanel({
+  session,
+  sheetNameResolver,
+}: {
+  session: CollabSession;
+  sheetNameResolver?: SheetNameResolver | null;
+}) {
   const actor = useMemo<BranchActor>(() => {
     const userId = session.presence?.localPresence?.id ?? "desktop";
     return { userId, role: "owner" };
@@ -298,6 +304,7 @@ function CollabBranchManagerPanel({ session }: { session: CollabSession }) {
         actor={actor}
         branchService={workflow}
         sourceBranch={mergeSource}
+        sheetNameResolver={sheetNameResolver ?? null}
         onClose={() => setMergeSource(null)}
       />
     );
@@ -317,6 +324,12 @@ export interface PanelBodyRendererOptions {
   getActiveSheetId?: () => string;
   getSelection?: () => unknown;
   getSearchWorkbook?: () => unknown;
+  /**
+   * Optional stable-id <-> display-name resolver for sheet-qualified strings.
+   *
+   * Panels that surface sheet locations to users should prefer the display name
+   * (e.g. `Budget!A1`) over stable ids (e.g. `sheet_<uuid>!A1`).
+   */
   sheetNameResolver?: SheetNameResolver | null;
   workbookId?: string;
   /**
@@ -569,6 +582,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
           key={workbookId ?? "default"}
           getDocumentController={options.getDocumentController}
           workbookId={workbookId}
+          sheetNameResolver={options.sheetNameResolver ?? null}
         />,
       );
       return;
@@ -642,7 +656,11 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
         return;
       }
       makeBodyFillAvailableHeight(body);
-      renderReactPanel(panelId, body, <CollabBranchManagerPanel session={session} />);
+      renderReactPanel(
+        panelId,
+        body,
+        <CollabBranchManagerPanel session={session} sheetNameResolver={options.sheetNameResolver ?? null} />,
+      );
       return;
     }
 

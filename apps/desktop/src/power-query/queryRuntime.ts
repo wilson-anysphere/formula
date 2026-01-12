@@ -1,5 +1,6 @@
 import type { Query } from "@formula/power-query";
 import { formatDlpDecisionMessage } from "../../../../packages/security/dlp/src/errors.js";
+import type { SheetNameResolver } from "../sheet/sheetNameResolver";
 
 export type QueryRunStatus = "idle" | "queued" | "refreshing" | "applying" | "success" | "error" | "cancelled";
 
@@ -147,18 +148,33 @@ function isQuerySheetDestination(dest: unknown): dest is { sheetId: string; star
   return true;
 }
 
-function describeDestination(query: Query): string {
+function formatSheetNameForA1(sheetName: string): string {
+  const name = String(sheetName ?? "").trim();
+  if (!name) return "";
+  if (/^[A-Za-z0-9_]+$/.test(name)) return name;
+  return `'${name.replace(/'/g, "''")}'`;
+}
+
+function sheetDisplayName(sheetId: string, sheetNameResolver?: SheetNameResolver | null): string {
+  const id = String(sheetId ?? "").trim();
+  if (!id) return "";
+  return sheetNameResolver?.getSheetNameById(id) ?? id;
+}
+
+function describeDestination(query: Query, sheetNameResolver?: SheetNameResolver | null): string {
   const dest = isQuerySheetDestination(query.destination) ? query.destination : null;
   if (!dest) return "Not loaded";
+  const sheetName = sheetDisplayName(dest.sheetId, sheetNameResolver);
+  const sheetPrefix = formatSheetNameForA1(sheetName || dest.sheetId);
   const lastOutputSize = (dest as any)?.lastOutputSize;
   const rows = typeof lastOutputSize?.rows === "number" ? lastOutputSize.rows : null;
   const cols = typeof lastOutputSize?.cols === "number" ? lastOutputSize.cols : null;
   if (typeof rows === "number" && typeof cols === "number" && Number.isFinite(rows) && Number.isFinite(cols) && rows > 0 && cols > 0) {
     const start = coordToA1(dest.start.row, dest.start.col);
     const end = coordToA1(dest.start.row + rows - 1, dest.start.col + cols - 1);
-    return start === end ? `${dest.sheetId}!${start}` : `${dest.sheetId}!${start}:${end}`;
+    return start === end ? `${sheetPrefix}!${start}` : `${sheetPrefix}!${start}:${end}`;
   }
-  return `${dest.sheetId}!${coordToA1(dest.start.row, dest.start.col)}`;
+  return `${sheetPrefix}!${coordToA1(dest.start.row, dest.start.col)}`;
 }
 
 function coordToA1(row: number, col: number): string {
@@ -203,7 +219,9 @@ export function deriveQueryListRows(
   queries: Query[],
   runtime: QueryRuntimeState,
   lastRunAtMsByQueryId: Record<string, number> = {},
+  options: { sheetNameResolver?: SheetNameResolver | null } = {},
 ): QueryListRow[] {
+  const sheetNameResolver = options.sheetNameResolver ?? null;
   return queries.map((query) => {
     const run = runtimeFor(runtime, query.id);
     const auth = describeAuth(query);
@@ -212,7 +230,7 @@ export function deriveQueryListRows(
     return {
       id: query.id,
       name: query.name,
-      destination: describeDestination(query),
+      destination: describeDestination(query, sheetNameResolver),
       lastRefreshAtMs,
       status: run.status,
       errorSummary,
