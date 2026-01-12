@@ -14,7 +14,11 @@ jobs:
       - name: Fail if merge conflict markers are present
         run: |
           set -euo pipefail
-          if git grep -n -e '<<<<<<<' -e '|||||||' -e '=======' -e '>>>>>>>' ; then
+          # Detect common Git conflict markers:
+          #   <<<<<<<, |||||||, =======, >>>>>>>
+          # Only match them at the start of a line (and require the `=======` marker to be exact)
+          # to avoid false positives from docs/scripts that use long `=====` separators.
+          if git grep -n -E '^(<{7}|\|{7}|={7}$|>{7})' ; then
             echo "Merge conflict markers detected. Resolve conflicts and remove conflict markers before pushing." >&2
             exit 1
           fi
