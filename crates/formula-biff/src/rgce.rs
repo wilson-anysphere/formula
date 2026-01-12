@@ -211,6 +211,74 @@ pub fn decode_rgce(rgce: &[u8]) -> Result<String, DecodeRgceError> {
                 let escaped = s.replace('"', "\"\"");
                 stack.push(ExprFragment::new(format!("\"{escaped}\"")));
             }
+            // PtgExtend / PtgExtendV / PtgExtendA.
+            //
+            // MS-XLSB encodes newer operand tokens (including structured references / table refs)
+            // as a `PtgExtend*` token followed by an `etpg` subtype byte.
+            //
+            // We support the structured reference subtype (`etpg=0x19`, "PtgList") so formulas
+            // extracted from real XLSB files can be decoded.
+            0x18 | 0x38 | 0x58 => {
+                if input.is_empty() {
+                    return Err(DecodeRgceError::UnexpectedEof);
+                }
+                let etpg = input[0];
+                input = &input[1..];
+
+                match etpg {
+                    // MS-XLSB 2.5.198.51 PtgList (structured reference / table ref).
+                    //
+                    // Canonical 12-byte payload:
+                    //   [table_id: u32]
+                    //   [flags: u16]
+                    //   [col_first: u16]
+                    //   [col_last: u16]
+                    //   [reserved: u16]
+                    0x19 => {
+                        if input.len() < 12 {
+                            return Err(DecodeRgceError::UnexpectedEof);
+                        }
+
+                        let table_id =
+                            u32::from_le_bytes([input[0], input[1], input[2], input[3]]);
+                        let flags = u16::from_le_bytes([input[4], input[5]]);
+                        let col_first = u16::from_le_bytes([input[6], input[7]]);
+                        let col_last = u16::from_le_bytes([input[8], input[9]]);
+                        // Skip reserved u16.
+                        input = &input[12..];
+
+                        // Best-effort: map table/column IDs to placeholder names (we don't have
+                        // workbook context in this crate).
+                        let table_name = format!("Table{table_id}");
+                        let columns = structured_columns_from_ids(col_first, col_last);
+
+                        let item = structured_ref_item_from_flags(flags);
+                        let display_table_name = match item {
+                            Some(StructuredRefItem::ThisRow) => None,
+                            _ => Some(table_name.as_str()),
+                        };
+
+                        let mut text = format_structured_ref(display_table_name, item, &columns);
+
+                        let mut precedence = 100;
+                        let is_value_class = ptg == 0x38;
+                        if is_value_class && !structured_ref_is_single_cell(item, &columns) {
+                            // Value-class list tokens represent legacy implicit intersection,
+                            // mirroring PtgAreaV behavior.
+                            text = format!("@{text}");
+                            precedence = 70;
+                        }
+
+                        stack.push(ExprFragment {
+                            text,
+                            precedence,
+                            contains_union: false,
+                            is_missing: false,
+                        });
+                    }
+                    _ => return Err(DecodeRgceError::UnsupportedToken { ptg }),
+                }
+            }
             // Error literal.
             0x1C => {
                 if input.is_empty() {
@@ -422,24 +490,19 @@ pub fn decode_rgce(rgce: &[u8]) -> Result<String, DecodeRgceError> {
                 }
                 stack.push(frag);
             }
-            // PtgList (structured reference).
+            // Legacy placeholder "PtgList" (structured reference).
             //
-            // NOTE: This implementation is intentionally small-scope: it supports the subset of
-            // structured references needed for round-tripping common Excel Table formulas (e.g.
-            // `Table1[Col]`, `[@Col]`, `Table1[[#Headers],[Col]]`, `Table1[#All]`,
-            // `Table1[[Col1]:[Col2]]`).
+            // NOTE: This is **not** Excel's on-disk BIFF12 encoding for structured references.
+            // Older versions of `formula-biff` used this self-contained, string-based token
+            // format for internal round-tripping. We keep decode support for backwards
+            // compatibility only.
             //
-            // The token layout mirrors what our encoder emits:
+            // Token layout:
             //   [ptg: u8]
             //   [flags: u16]  (item + column selector)
             //   [table: XLUnicodeString(u16-len)]
             //   [col1: XLUnicodeString(u16-len)]
             //   [col2: XLUnicodeString(u16-len)]
-            //
-            // NOTE: Excel's on-disk token layout for structured references is not yet implemented
-            // in `formula-biff`. For now we use a `PtgList`-like placeholder token id (0x30) with a
-            // self-contained string payload so rgce streams can be round-tripped by our own
-            // decoder/encoder.
             0x30 | 0x50 | 0x70 => {
                 if input.len() < 2 {
                     return Err(DecodeRgceError::UnexpectedEof);
@@ -471,26 +534,29 @@ pub fn decode_rgce(rgce: &[u8]) -> Result<String, DecodeRgceError> {
                 };
 
                 let is_value_class = (ptg & 0x60) == 0x40;
-                let is_single_cell = is_structured_ref_single_cell(item.as_ref(), &cols);
+                let is_single_cell = structured_ref_is_single_cell(item, &cols);
 
-                let mut text = String::new();
+                let table_name = if table.is_empty() {
+                    None
+                } else {
+                    Some(table.as_str())
+                };
+
+                let mut text = format_structured_ref(table_name, item, &cols);
+
+                let mut precedence = 100;
                 if is_value_class && !is_single_cell {
                     // Preserve legacy implicit intersection semantics (same approach as PtgAreaV).
-                    text.push('@');
+                    text = format!("@{text}");
+                    precedence = 70;
                 }
 
-                if !table.is_empty() {
-                    text.push_str(&table);
-                }
-                text.push('[');
-                push_structured_ref_spec(&mut text, item.as_ref(), &cols);
-                text.push(']');
-
-                let mut frag = ExprFragment::new(text);
-                if is_value_class && !is_single_cell {
-                    frag.precedence = 70;
-                }
-                stack.push(frag);
+                stack.push(ExprFragment {
+                    text,
+                    precedence,
+                    contains_union: false,
+                    is_missing: false,
+                });
             }
             _ => return Err(DecodeRgceError::UnsupportedToken { ptg }),
         }
@@ -556,12 +622,44 @@ fn take_utf16_len_prefixed(input: &mut &[u8]) -> Result<String, DecodeRgceError>
     String::from_utf16(&units).map_err(|_| DecodeRgceError::InvalidUtf16)
 }
 
-fn escape_structured_ref_name(name: &str) -> String {
-    // Excel escapes `]` as `]]` within structured reference bracketed identifiers.
-    name.replace(']', "]]")
+fn structured_ref_item_from_flags(flags: u16) -> Option<StructuredRefItem> {
+    const FLAG_ALL: u16 = 0x0001;
+    const FLAG_HEADERS: u16 = 0x0002;
+    const FLAG_DATA: u16 = 0x0004;
+    const FLAG_TOTALS: u16 = 0x0008;
+    const FLAG_THIS_ROW: u16 = 0x0010;
+
+    // Flags are not strictly documented as mutually exclusive. Prefer the same priority order as
+    // `formula-xlsb`'s decoder.
+    if flags & FLAG_THIS_ROW != 0 {
+        Some(StructuredRefItem::ThisRow)
+    } else if flags & FLAG_HEADERS != 0 {
+        Some(StructuredRefItem::Headers)
+    } else if flags & FLAG_TOTALS != 0 {
+        Some(StructuredRefItem::Totals)
+    } else if flags & FLAG_ALL != 0 {
+        Some(StructuredRefItem::All)
+    } else if flags & FLAG_DATA != 0 {
+        Some(StructuredRefItem::Data)
+    } else {
+        None
+    }
 }
 
-fn is_structured_ref_single_cell(item: Option<&StructuredRefItem>, cols: &StructuredColumns) -> bool {
+fn structured_columns_from_ids(col_first: u16, col_last: u16) -> StructuredColumns {
+    if col_first == 0 && col_last == 0 {
+        StructuredColumns::All
+    } else if col_first == col_last {
+        StructuredColumns::Single(format!("Column{col_first}"))
+    } else {
+        StructuredColumns::Range {
+            start: format!("Column{col_first}"),
+            end: format!("Column{col_last}"),
+        }
+    }
+}
+
+fn structured_ref_is_single_cell(item: Option<StructuredRefItem>, cols: &StructuredColumns) -> bool {
     match (item, cols) {
         (Some(StructuredRefItem::ThisRow), StructuredColumns::Single(_)) => true,
         // `Table1[[#Headers],[Col]]` and `Table1[[#Totals],[Col]]` resolve to a single cell.
@@ -570,70 +668,86 @@ fn is_structured_ref_single_cell(item: Option<&StructuredRefItem>, cols: &Struct
     }
 }
 
-fn push_structured_ref_spec(out: &mut String, item: Option<&StructuredRefItem>, cols: &StructuredColumns) {
-    match (item, cols) {
-        (Some(StructuredRefItem::ThisRow), StructuredColumns::Single(col)) => {
-            out.push('@');
-            out.push_str(&escape_structured_ref_name(col));
+fn structured_ref_item_literal(item: StructuredRefItem) -> &'static str {
+    match item {
+        StructuredRefItem::All => "#All",
+        StructuredRefItem::Data => "#Data",
+        StructuredRefItem::Headers => "#Headers",
+        StructuredRefItem::Totals => "#Totals",
+        StructuredRefItem::ThisRow => "#This Row",
+    }
+}
+
+fn escape_structured_ref_bracket_content(s: &str) -> String {
+    // Excel escapes `]` as `]]` within structured reference bracketed identifiers.
+    if !s.contains(']') {
+        return s.to_string();
+    }
+    s.replace(']', "]]")
+}
+
+fn format_structured_ref(
+    table_name: Option<&str>,
+    item: Option<StructuredRefItem>,
+    columns: &StructuredColumns,
+) -> String {
+    // This-row shorthand: `[@Col]`, `[@]`, and `[@[Col1]:[Col2]]`.
+    if matches!(item, Some(StructuredRefItem::ThisRow)) {
+        match columns {
+            StructuredColumns::Single(col) => {
+                return format!("[@{}]", escape_structured_ref_bracket_content(col));
+            }
+            StructuredColumns::All => return "[@]".to_string(),
+            StructuredColumns::Range { start, end } => {
+                let start = escape_structured_ref_bracket_content(start);
+                let end = escape_structured_ref_bracket_content(end);
+                return format!("[@[{start}]:[{end}]]");
+            }
         }
-        (Some(item), StructuredColumns::All) => out.push_str(match item {
-            StructuredRefItem::All => "#All",
-            StructuredRefItem::Data => "#Data",
-            StructuredRefItem::Headers => "#Headers",
-            StructuredRefItem::Totals => "#Totals",
-            StructuredRefItem::ThisRow => "#ThisRow",
-        }),
-        (None, StructuredColumns::Single(col)) => out.push_str(&escape_structured_ref_name(col)),
-        (None, StructuredColumns::Range { start, end }) => {
-            out.push('[');
-            out.push_str(&escape_structured_ref_name(start));
-            out.push(']');
-            out.push(':');
-            out.push('[');
-            out.push_str(&escape_structured_ref_name(end));
-            out.push(']');
+    }
+
+    let table = table_name.unwrap_or("");
+
+    // Item-only selections: `Table1[#All]`, `Table1[#Headers]`, etc.
+    if columns == &StructuredColumns::All {
+        if let Some(item) = item {
+            return format!("{table}[{}]", structured_ref_item_literal(item));
         }
-        // Canonicalize item+column selections to the nested bracket form:
-        // `Table1[[#Headers],[Col]]`, `Table1[[#All],[Col1]:[Col2]]`, etc.
-        (Some(item), StructuredColumns::Single(col)) => {
-            out.push('[');
-            out.push_str(match item {
-                StructuredRefItem::All => "#All",
-                StructuredRefItem::Data => "#Data",
-                StructuredRefItem::Headers => "#Headers",
-                StructuredRefItem::Totals => "#Totals",
-                StructuredRefItem::ThisRow => "#ThisRow",
-            });
-            out.push(']');
-            out.push(',');
-            out.push('[');
-            out.push_str(&escape_structured_ref_name(col));
-            out.push(']');
+        // Default row selector with no column selection: treat as `[#Data]`.
+        return format!("{table}[#Data]");
+    }
+
+    // Single-column selection with default/data item: `Table1[Col]`.
+    if matches!(item, None | Some(StructuredRefItem::Data)) {
+        match columns {
+            StructuredColumns::Single(col) => {
+                return format!("{table}[{}]", escape_structured_ref_bracket_content(col));
+            }
+            StructuredColumns::Range { start, end } => {
+                let start = escape_structured_ref_bracket_content(start);
+                let end = escape_structured_ref_bracket_content(end);
+                return format!("{table}[[{start}]:[{end}]]");
+            }
+            StructuredColumns::All => {}
         }
-        (Some(item), StructuredColumns::Range { start, end }) => {
-            out.push('[');
-            out.push_str(match item {
-                StructuredRefItem::All => "#All",
-                StructuredRefItem::Data => "#Data",
-                StructuredRefItem::Headers => "#Headers",
-                StructuredRefItem::Totals => "#Totals",
-                StructuredRefItem::ThisRow => "#ThisRow",
-            });
-            out.push(']');
-            out.push(',');
-            out.push('[');
-            out.push_str(&escape_structured_ref_name(start));
-            out.push(']');
-            out.push(':');
-            out.push('[');
-            out.push_str(&escape_structured_ref_name(end));
-            out.push(']');
+    }
+
+    // General nested form: `Table1[[#Headers],[Col]]` or `Table1[[#Headers],[Col1]:[Col2]]`.
+    let item = item.expect("handled None above");
+    match columns {
+        StructuredColumns::Single(col) => {
+            let col = escape_structured_ref_bracket_content(col);
+            format!("{table}[[{}],[{col}]]", structured_ref_item_literal(item))
         }
-        (None, StructuredColumns::All) => {
-            // Default "all columns" selection is not representable without additional context.
-            // Emit an explicit `#All` so the text is parseable and round-trips through our encoder.
-            out.push_str("#All");
+        StructuredColumns::Range { start, end } => {
+            let start = escape_structured_ref_bracket_content(start);
+            let end = escape_structured_ref_bracket_content(end);
+            format!(
+                "{table}[[{}],[{start}]:[{end}]]",
+                structured_ref_item_literal(item)
+            )
         }
+        StructuredColumns::All => unreachable!("handled above"),
     }
 }
 
@@ -819,8 +933,8 @@ fn encode_expr(expr: &formula_engine::Expr, out: &mut Vec<u8>) -> Result<(), Enc
                     out.extend_from_slice(&row.to_le_bytes());
                     out.extend_from_slice(&encode_col_with_flags(col, col_abs, row_abs));
                 }
-                Expr::StructuredRef(r) => {
-                    encode_structured_ref(r, out, StructuredRefClass::Value)?;
+                Expr::StructuredRef(_) => {
+                    return Err(EncodeRgceError::Unsupported("structured references"));
                 }
                 Expr::Binary(b) if b.op == BinaryOp::Range => {
                     // Encode `@A1:A2` as PtgAreaV.
@@ -932,127 +1046,10 @@ fn encode_expr(expr: &formula_engine::Expr, out: &mut Vec<u8>) -> Result<(), Enc
         Expr::NameRef(_) => return Err(EncodeRgceError::Unsupported("named references")),
         Expr::ColRef(_) => return Err(EncodeRgceError::Unsupported("column references")),
         Expr::RowRef(_) => return Err(EncodeRgceError::Unsupported("row references")),
-        Expr::StructuredRef(r) => {
-            encode_structured_ref(r, out, StructuredRefClass::Ref)?;
-        }
+        Expr::StructuredRef(_) => return Err(EncodeRgceError::Unsupported("structured references")),
         Expr::Array(_) => return Err(EncodeRgceError::Unsupported("array literals")),
     }
 
-    Ok(())
-}
-
-#[cfg(feature = "encode")]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum StructuredRefClass {
-    Ref,
-    Value,
-}
-
-#[cfg(feature = "encode")]
-fn encode_structured_ref(
-    r: &formula_engine::StructuredRef,
-    out: &mut Vec<u8>,
-    class: StructuredRefClass,
-) -> Result<(), EncodeRgceError> {
-    if r.workbook.is_some() || r.sheet.is_some() {
-        return Err(EncodeRgceError::Unsupported(
-            "3D/sheet-qualified structured references",
-        ));
-    }
-
-    let mut sref_text = String::new();
-    if let Some(table) = &r.table {
-        sref_text.push_str(table);
-    }
-    sref_text.push('[');
-    sref_text.push_str(&r.spec);
-    sref_text.push(']');
-
-    let Some((sref, end)) = formula_engine::structured_refs::parse_structured_ref(&sref_text, 0) else {
-        return Err(EncodeRgceError::Unsupported("invalid structured reference syntax"));
-    };
-    if end != sref_text.len() {
-        return Err(EncodeRgceError::Unsupported("invalid structured reference syntax"));
-    }
-
-    let (item_code, col_kind, col1, col2) = match (sref.item, sref.columns) {
-        (None, formula_engine::structured_refs::StructuredColumns::All) => {
-            (0u16, 0u16, String::new(), String::new())
-        }
-        (Some(item), formula_engine::structured_refs::StructuredColumns::All) => {
-            (structured_ref_item_code(item), 0u16, String::new(), String::new())
-        }
-        (item, formula_engine::structured_refs::StructuredColumns::Single(col)) => {
-            (item.map(structured_ref_item_code).unwrap_or(0u16), 1u16, col, String::new())
-        }
-        (item, formula_engine::structured_refs::StructuredColumns::Range { start, end }) => (
-            item.map(structured_ref_item_code).unwrap_or(0u16),
-            2u16,
-            start,
-            end,
-        ),
-        (item, formula_engine::structured_refs::StructuredColumns::Multi(cols)) => {
-            // BIFF12 `PtgList` can encode either a single column or a contiguous range. For
-            // multi-column unions, only accept the degenerate case of a single selection.
-            let item_code = item.map(structured_ref_item_code).unwrap_or(0u16);
-            let mut cols = cols.into_iter();
-            let Some(first) = cols.next() else {
-                return Err(EncodeRgceError::Unsupported("empty structured reference column list"));
-            };
-            if cols.next().is_some() {
-                return Err(EncodeRgceError::Unsupported("structured reference column unions"));
-            }
-            match first {
-                formula_engine::structured_refs::StructuredColumn::Single(col) => {
-                    (item_code, 1u16, col, String::new())
-                }
-                formula_engine::structured_refs::StructuredColumn::Range { start, end } => {
-                    (item_code, 2u16, start, end)
-                }
-            }
-        }
-    };
-
-    const PTG_LIST: u8 = 0x30;
-    let ptg = match class {
-        StructuredRefClass::Ref => PTG_LIST,
-        StructuredRefClass::Value => PTG_LIST.wrapping_add(0x20),
-    };
-
-    let flags: u16 = item_code | (col_kind << 3);
-
-    out.push(ptg);
-    out.extend_from_slice(&flags.to_le_bytes());
-
-    encode_utf16_len_prefixed(sref.table_name.as_deref().unwrap_or(""), out)?;
-    encode_utf16_len_prefixed(&col1, out)?;
-    encode_utf16_len_prefixed(&col2, out)?;
-
-    Ok(())
-}
-
-#[cfg(feature = "encode")]
-fn structured_ref_item_code(item: formula_engine::structured_refs::StructuredRefItem) -> u16 {
-    match item {
-        formula_engine::structured_refs::StructuredRefItem::All => 1,
-        formula_engine::structured_refs::StructuredRefItem::Data => 2,
-        formula_engine::structured_refs::StructuredRefItem::Headers => 3,
-        formula_engine::structured_refs::StructuredRefItem::Totals => 4,
-        formula_engine::structured_refs::StructuredRefItem::ThisRow => 5,
-    }
-}
-
-#[cfg(feature = "encode")]
-fn encode_utf16_len_prefixed(s: &str, out: &mut Vec<u8>) -> Result<(), EncodeRgceError> {
-    let units: Vec<u16> = s.encode_utf16().collect();
-    let cch: u16 = units
-        .len()
-        .try_into()
-        .map_err(|_| EncodeRgceError::Unsupported("structured reference identifier too long"))?;
-    out.extend_from_slice(&cch.to_le_bytes());
-    for u in units {
-        out.extend_from_slice(&u.to_le_bytes());
-    }
     Ok(())
 }
 
