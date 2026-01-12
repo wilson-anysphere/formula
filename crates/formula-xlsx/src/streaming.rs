@@ -148,10 +148,16 @@ pub fn patch_xlsx_streaming_with_recalc_policy<R: Read + Seek, W: Write + Seek>(
 ) -> Result<(), StreamingPatchError> {
     let mut patches_by_part: HashMap<String, Vec<WorksheetCellPatch>> = HashMap::new();
     for patch in cell_patches {
-        patches_by_part
-            .entry(patch.worksheet_part.clone())
-            .or_default()
-            .push(patch.clone());
+        // ZIP entry names in valid XLSX/XLSM packages should not start with `/`, but tolerate
+        // callers that include it by normalizing the patch target part name.
+        let worksheet_part = patch
+            .worksheet_part
+            .strip_prefix('/')
+            .unwrap_or(patch.worksheet_part.as_str())
+            .to_string();
+        let mut patch = patch.clone();
+        patch.worksheet_part = worksheet_part.clone();
+        patches_by_part.entry(worksheet_part).or_default().push(patch);
     }
     // Deterministic patching within a worksheet.
     for patches in patches_by_part.values_mut() {
@@ -2525,18 +2531,19 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
         }
 
         let name = file.name().to_string();
+        let canonical_name = name.strip_prefix('/').unwrap_or(name.as_str());
 
         // Track worksheet patch targets so we can report `MissingWorksheetPart` accurately even if
         // a caller overrides the part (e.g. removes or replaces it).
-        missing_parts.remove(&name);
+        missing_parts.remove(canonical_name);
 
-        if recalc_policy.drop_calc_chain_on_formula_change && name == "xl/calcChain.xml" {
+        if recalc_policy.drop_calc_chain_on_formula_change && canonical_name == "xl/calcChain.xml" {
             // Drop calcChain.xml entirely when formulas change, matching the in-memory patcher.
             continue;
         }
 
-        if let Some(override_op) = part_overrides.get(&name) {
-            applied_part_overrides.insert(name.clone());
+        if let Some(override_op) = part_overrides.get(canonical_name) {
+            applied_part_overrides.insert(canonical_name.to_string());
             match override_op {
                 PartOverride::Remove => {
                     continue;
@@ -2549,27 +2556,27 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
             }
         }
 
-        if let Some(patches) = effective_patches_by_part.get(&name) {
+        if let Some(patches) = effective_patches_by_part.get(canonical_name) {
             zip.start_file(name.clone(), options)?;
-            let indices = shared_string_indices.get(&name);
+            let indices = shared_string_indices.get(canonical_name);
             let worksheet_meta = worksheet_metadata_by_part
-                .get(&name)
+                .get(canonical_name)
                 .copied()
                 .unwrap_or_default();
             patch_worksheet_xml_streaming(
                 &mut file,
                 &mut zip,
-                &name,
+                canonical_name,
                 patches,
                 indices,
                 worksheet_meta,
                 drop_vm_on_patched_cells,
                 recalc_policy,
             )?;
-        } else if let Some(bytes) = updated_parts.get(&name) {
+        } else if let Some(bytes) = updated_parts.get(canonical_name) {
             zip.start_file(name.clone(), options)?;
             zip.write_all(bytes)?;
-        } else if shared_strings_part.as_deref() == Some(name.as_str())
+        } else if shared_strings_part.as_deref() == Some(canonical_name)
             && shared_strings_updated.is_some()
         {
             zip.start_file(name.clone(), options)?;
@@ -2578,17 +2585,18 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
                     .as_deref()
                     .expect("checked is_some above"),
             )?;
-        } else if let Some(bytes) = pre_read_parts.get(&name) {
-            if should_patch_recalc_part(&name, recalc_policy) {
+        } else if let Some(bytes) = pre_read_parts.get(canonical_name) {
+            if should_patch_recalc_part(canonical_name, recalc_policy) {
                 zip.start_file(name.clone(), options)?;
-                let bytes = maybe_patch_recalc_part(&name, bytes, recalc_policy)?;
+                let bytes = maybe_patch_recalc_part(canonical_name, bytes, recalc_policy)?;
                 zip.write_all(&bytes)?;
             } else {
                 // We buffered this part earlier for metadata resolution, but it doesn't need to be
                 // rewritten. Raw-copy it to avoid recompression.
                 zip.raw_copy_file(file)?;
             }
-        } else if let Some(updated) = patch_recalc_part_from_file(&name, &mut file, recalc_policy)?
+        } else if let Some(updated) =
+            patch_recalc_part_from_file(canonical_name, &mut file, recalc_policy)?
         {
             zip.start_file(name.clone(), options)?;
             zip.write_all(&updated)?;

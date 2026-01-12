@@ -1,7 +1,10 @@
 use std::io::{Cursor, Write};
 
-use formula_model::Range;
-use formula_xlsx::{load_from_bytes, read_workbook_model_from_bytes, worksheet_parts_from_reader};
+use formula_model::{CellRef, CellValue, Range};
+use formula_xlsx::{
+    load_from_bytes, patch_xlsx_streaming, read_workbook_model_from_bytes, worksheet_parts_from_reader,
+    WorksheetCellPatch, XlsxPackage,
+};
 use zip::write::FileOptions;
 use zip::ZipArchive;
 use zip::ZipWriter;
@@ -92,3 +95,26 @@ fn merge_cells_reader_tolerates_leading_slash_entries() {
     assert_eq!(merges, vec![Range::from_a1("A1:B2").unwrap()]);
 }
 
+#[test]
+fn streaming_patcher_tolerates_leading_slash_entries() {
+    let bytes = build_minimal_xlsx_with_leading_slash_entries();
+    let patch = WorksheetCellPatch::new(
+        "xl/worksheets/sheet1.xml",
+        CellRef::new(0, 0),
+        CellValue::Number(42.0),
+        None,
+    );
+    let mut out = Cursor::new(Vec::new());
+    patch_xlsx_streaming(Cursor::new(bytes), &mut out, &[patch]).expect("streaming patch");
+
+    let pkg = XlsxPackage::from_bytes(&out.into_inner()).expect("read patched package");
+    let sheet_xml = std::str::from_utf8(
+        pkg.part("xl/worksheets/sheet1.xml")
+            .expect("worksheet part present"),
+    )
+    .expect("worksheet xml utf-8");
+    assert!(
+        sheet_xml.contains("<v>42</v>") || sheet_xml.contains("<v>42.0</v>"),
+        "expected patched worksheet XML to contain cell value 42 (got {sheet_xml:?})"
+    );
+}
