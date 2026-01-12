@@ -2246,6 +2246,37 @@ def generate_cases() -> dict[str, Any]:
         description="ODDLYIELD boundary: last_interest == maturity (expected #NUM!)",
     )
 
+    # Odd-coupon bond functions: deterministic coercion/error cases (avoid NaN/Inf which can be
+    # awkward for the Excel oracle harness).
+    _add_case(
+        cases,
+        prefix="oddfprice_value",
+        tags=["financial", "odd_coupon", "ODDFPRICE", "error"],
+        formula='=ODDFPRICE("nope",DATE(2025,1,1),DATE(2019,1,1),DATE(2020,7,1),0.05,0.05,100,2)',
+        description="Unparseable settlement date should return #VALUE!",
+    )
+    _add_case(
+        cases,
+        prefix="oddfyield_value",
+        tags=["financial", "odd_coupon", "ODDFYIELD", "error"],
+        formula='=ODDFYIELD("nope",DATE(2025,1,1),DATE(2019,1,1),DATE(2020,7,1),0.05,95,100,2)',
+        description="Unparseable settlement date should return #VALUE!",
+    )
+    _add_case(
+        cases,
+        prefix="oddlprice_value",
+        tags=["financial", "odd_coupon", "ODDLPRICE", "error"],
+        formula='=ODDLPRICE(DATE(2020,1,1),"nope",DATE(2024,7,1),0.05,0.05,100,2)',
+        description="Unparseable maturity date should return #VALUE!",
+    )
+    _add_case(
+        cases,
+        prefix="oddlyield_value",
+        tags=["financial", "odd_coupon", "ODDLYIELD", "error"],
+        formula='=ODDLYIELD(DATE(2020,1,1),"nope",DATE(2024,7,1),0.05,95,100,2)',
+        description="Unparseable maturity date should return #VALUE!",
+    )
+
     # Range-based cashflow functions.
     cashflows = [-100.0, 30.0, 40.0, 50.0]
     cf_inputs = [CellInput(f"A{i+1}", v) for i, v in enumerate(cashflows)]

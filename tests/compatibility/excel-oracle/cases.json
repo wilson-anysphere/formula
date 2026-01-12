@@ -31790,6 +31790,58 @@
       "id": "oddlyield_last_interest_eq_maturity_c75c41078dc0"
     },
     {
+      "formula": "=ODDFPRICE(\"nope\",DATE(2025,1,1),DATE(2019,1,1),DATE(2020,7,1),0.05,0.05,100,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDFPRICE",
+        "error"
+      ],
+      "description": "Unparseable settlement date should return #VALUE!",
+      "id": "oddfprice_value_d32731821526"
+    },
+    {
+      "formula": "=ODDFYIELD(\"nope\",DATE(2025,1,1),DATE(2019,1,1),DATE(2020,7,1),0.05,95,100,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDFYIELD",
+        "error"
+      ],
+      "description": "Unparseable settlement date should return #VALUE!",
+      "id": "oddfyield_value_dc18162c0719"
+    },
+    {
+      "formula": "=ODDLPRICE(DATE(2020,1,1),\"nope\",DATE(2024,7,1),0.05,0.05,100,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLPRICE",
+        "error"
+      ],
+      "description": "Unparseable maturity date should return #VALUE!",
+      "id": "oddlprice_value_84ac96c6a9a1"
+    },
+    {
+      "formula": "=ODDLYIELD(DATE(2020,1,1),\"nope\",DATE(2024,7,1),0.05,95,100,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLYIELD",
+        "error"
+      ],
+      "description": "Unparseable maturity date should return #VALUE!",
+      "id": "oddlyield_value_733c24f148d2"
+    },
+    {
       "formula": "=NPV(0.1,A1:A4)",
       "outputCell": "C1",
       "inputs": [

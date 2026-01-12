@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-01-12T09:57:46.788859085Z",
+  "generatedAt": "2026-01-12T10:28:59.54671309Z",
   "source": {
     "kind": "excel",
     "version": "unknown",
@@ -17,8 +17,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "724b5a364413d8b7b5b7fcfda674f8f800f8c50a63b2141fbec4e4bf06b8188f",
-    "count": 1611
+    "sha256": "9dcdbd8c54c70ae1fbdf7b2c8a57e759a4b4b6b18e8b953689b2bd5f4fecaa5c",
+    "count": 1615
   },
   "results": [
     {
@@ -15208,41 +15208,41 @@
       "caseId": "oddfprice_issue_eq_settlement_a2010fe89d14",
       "outputCell": "C1",
       "result": {
-        "t": "n",
-        "v": 104.49129250312109
+        "t": "e",
+        "v": "#NUM!"
       },
       "address": "C1",
-      "displayText": "104.49129250312109"
+      "displayText": "#NUM!"
     },
     {
       "caseId": "oddfyield_issue_eq_settlement_c09bb6a4ba69",
       "outputCell": "C1",
       "result": {
-        "t": "n",
-        "v": 0.04000000000000014
+        "t": "e",
+        "v": "#NUM!"
       },
       "address": "C1",
-      "displayText": "0.04000000000000014"
+      "displayText": "#NUM!"
     },
     {
       "caseId": "oddfprice_settlement_eq_first_coupon_1ea1c9b63a8c",
       "outputCell": "C1",
       "result": {
-        "t": "n",
-        "v": 104.08111835318353
+        "t": "e",
+        "v": "#NUM!"
       },
       "address": "C1",
-      "displayText": "104.08111835318353"
+      "displayText": "#NUM!"
     },
     {
       "caseId": "oddfyield_settlement_eq_first_coupon_8d835f172837",
       "outputCell": "C1",
       "result": {
-        "t": "n",
-        "v": 0.039999999999979614
+        "t": "e",
+        "v": "#NUM!"
       },
       "address": "C1",
-      "displayText": "0.039999999999979614"
+      "displayText": "#NUM!"
     },
     {
       "caseId": "oddfprice_first_coupon_eq_maturity_9d33aace26e7",
@@ -15288,21 +15288,21 @@
       "caseId": "oddlprice_settlement_eq_last_interest_2aaeec2068c7",
       "outputCell": "C1",
       "result": {
-        "t": "n",
-        "v": 100.49019607843137
+        "t": "e",
+        "v": "#NUM!"
       },
       "address": "C1",
-      "displayText": "100.49019607843137"
+      "displayText": "#NUM!"
     },
     {
       "caseId": "oddlyield_settlement_eq_last_interest_478517910c3d",
       "outputCell": "C1",
       "result": {
-        "t": "n",
-        "v": 0.039999999999999813
+        "t": "e",
+        "v": "#NUM!"
       },
       "address": "C1",
-      "displayText": "0.039999999999999813"
+      "displayText": "#NUM!"
     },
     {
       "caseId": "oddlprice_last_interest_eq_maturity_6a12d560c779",
@@ -15323,6 +15323,46 @@
       },
       "address": "C1",
       "displayText": "#NUM!"
+    },
+    {
+      "caseId": "oddfprice_value_d32731821526",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#VALUE!"
+      },
+      "address": "C1",
+      "displayText": "#VALUE!"
+    },
+    {
+      "caseId": "oddfyield_value_dc18162c0719",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#VALUE!"
+      },
+      "address": "C1",
+      "displayText": "#VALUE!"
+    },
+    {
+      "caseId": "oddlprice_value_84ac96c6a9a1",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#VALUE!"
+      },
+      "address": "C1",
+      "displayText": "#VALUE!"
+    },
+    {
+      "caseId": "oddlyield_value_733c24f148d2",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#VALUE!"
+      },
+      "address": "C1",
+      "displayText": "#VALUE!"
     },
     {
       "caseId": "npv_b9b2bb2deab1",
