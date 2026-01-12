@@ -445,6 +445,8 @@ enum SniffedWorkbookFormat {
     Xlsb,
 }
 
+const PARQUET_MAGIC: [u8; 4] = *b"PAR1";
+
 fn sniff_workbook_format(path: &Path) -> Option<SniffedWorkbookFormat> {
     use std::io::{Read, Seek, SeekFrom};
 
@@ -481,6 +483,20 @@ fn sniff_workbook_format(path: &Path) -> Option<SniffedWorkbookFormat> {
 }
 
 pub(crate) fn looks_like_workbook(path: &Path) -> bool {
+    #[cfg(feature = "parquet")]
+    {
+        use std::io::Read;
+
+        let mut file = match std::fs::File::open(path) {
+            Ok(file) => file,
+            Err(_) => return false,
+        };
+        let mut magic = [0u8; 4];
+        if file.read_exact(&mut magic).is_ok() && magic == PARQUET_MAGIC {
+            return true;
+        }
+    }
+
     sniff_workbook_format(path).is_some()
 }
 
@@ -704,7 +720,6 @@ fn read_xls_blocking(path: &Path) -> anyhow::Result<Workbook> {
 pub fn read_workbook_blocking(path: &Path) -> anyhow::Result<Workbook> {
     use std::io::Read;
 
-    const PARQUET_MAGIC: [u8; 4] = *b"PAR1";
     const TEXT_SNIFF_BYTES: usize = 4096;
 
     fn looks_like_text(buf: &[u8]) -> bool {

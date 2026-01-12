@@ -27,8 +27,9 @@ const SUPPORTED_EXTENSIONS: &[&str] = &[
 /// - accepts: `xlsx`, `xls`, `xlsm`, `xltx`, `xltm`, `xlam`, `xlsb`, `csv` (case-insensitive)
 ///   - plus `parquet` when compiled with the `parquet` feature
 /// - if the extension is missing/unsupported, performs a lightweight file signature sniff to
-///   detect valid Excel workbooks (OLE `.xls` or ZIP-based `.xlsx`/`.xlsm`/`.xlsb`) so downloads
-///   and renamed files can still be opened via OS open-file events
+///   detect valid workbooks (OLE `.xls`, ZIP-based `.xlsx`/`.xlsm`/`.xlsb`, plus Parquet when the
+///   `parquet` feature is enabled) so downloads and renamed files can still be opened via OS
+///   open-file events
 /// - handles `file://...` URLs (via [`Url::to_file_path`])
 /// - resolves relative paths using `cwd` when provided (falls back to `std::env::current_dir()`)
 /// - ignores args that look like flags (start with `-`)
@@ -216,5 +217,21 @@ mod tests {
 
         let paths = extract_open_file_paths_from_argv(&argv, Some(cwd));
         assert_eq!(paths, vec![cwd.join("data.parquet"), cwd.join("other.csv")]);
+    }
+
+    #[cfg(feature = "parquet")]
+    #[test]
+    fn parquet_without_extension_is_supported_via_sniffing_when_feature_enabled() {
+        let dir = tempdir().unwrap();
+        let cwd = dir.path();
+
+        let fixture_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../packages/data-io/test/fixtures/simple.parquet");
+        let renamed = cwd.join("simple");
+        std::fs::copy(&fixture_path, &renamed).expect("copy fixture");
+
+        let argv = vec!["formula-desktop".to_string(), "simple".to_string()];
+        let paths = extract_open_file_paths_from_argv(&argv, Some(cwd));
+        assert_eq!(paths, vec![renamed]);
     }
 }
