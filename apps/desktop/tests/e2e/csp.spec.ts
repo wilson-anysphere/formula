@@ -683,16 +683,26 @@ test.describe("Content Security Policy (Tauri parity)", () => {
     await expect(page.locator("#grid")).toHaveCount(1);
     await page.waitForFunction(() => Boolean((window as any).__formulaExtensionHost), undefined, { timeout: 60_000 });
 
-    const manifestUrl = viteFsUrl(path.join(repoRoot, "extensions/sample-hello/package.json"));
-
-    await page.evaluate(async ({ manifestUrl }) => {
+    await page.evaluate(async () => {
+      // Auto-approve extension permission prompts so the test exercises panel CSP
+      // behavior rather than hanging on modal UI.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const host: any = (window as any).__formulaExtensionHost;
-      if (!host) throw new Error("Missing window.__formulaExtensionHost (desktop e2e harness)");
-      await host.loadExtensionFromUrl(manifestUrl);
-      await host.executeCommand("sampleHello.openPanel");
-    }, {
-      manifestUrl
+      (globalThis as any).__formulaPermissionPrompt = async () => true;
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const manager: any = (window as any).__formulaExtensionHostManager;
+      if (!manager) throw new Error("Missing window.__formulaExtensionHostManager (desktop e2e harness)");
+
+      // First-run module compilation can exceed the BrowserExtensionHost default activation timeout
+      // under CI load. Bump timeouts for this CSP-only test suite so it exercises the iframe
+      // sandbox CSP rather than failing due to startup latency.
+      manager.host._activationTimeoutMs = 20_000;
+      manager.host._commandTimeoutMs = 20_000;
+
+      // Use the built-in (bundled) sample extension so this test doesn't depend on Vite `/@fs`
+      // module transforms (which can trip the strict import preflight).
+      await manager.loadBuiltInExtensions();
+      await manager.executeCommand("sampleHello.openPanel");
     });
 
     const iframe = page.locator('[data-testid="extension-webview-sampleHello.panel"]');
