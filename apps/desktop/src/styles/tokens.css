@@ -17,17 +17,34 @@
   --bg-secondary: #f5f5f5;
   --bg-tertiary: #e8e8e8;
 
+  /*
+    Extended surfaces (app chrome)
+
+    These tokens map more directly to the UI mockups (titlebar/ribbon/statusbar)
+    so new shell UI can be built without introducing hardcoded colors.
+  */
+  --bg-app: var(--bg-secondary);
+  --bg-surface: #fafafa;
+  --bg-elevated: var(--bg-primary);
+  --bg-hover: #eeeeee;
+  --bg-active: #e4e4e4;
+  --bg-inset: #f0f0f0;
+
   /* Base text */
   --text-primary: #1a1a1a;
   --text-secondary: #666666;
+  --text-tertiary: #8a8a8a;
   --text-muted: var(--text-secondary);
 
   /* Lines / separators */
   --border: #d4d4d4;
+  --border-strong: #c8c8c8;
 
   /* Brand / interactive */
   --accent: #0066cc;
   --accent-light: #e6f0ff;
+  --accent-bg: var(--accent-light);
+  --accent-border: var(--accent);
 
   /* Semantic */
   --error: #d32f2f;
@@ -39,8 +56,8 @@
   --text-on-accent: #ffffff;
 
   /* Selection / focus */
-  --selection-bg: var(--accent-light);
-  --selection-border: var(--accent);
+  --selection-bg: var(--accent-bg);
+  --selection-border: var(--accent-border);
   --selection-text: var(--text-primary);
 
   /* Grid chrome */
@@ -85,6 +102,11 @@
   --formula-bar-bg: var(--bg-secondary);
   --formula-bar-border: var(--border);
 
+  /* Shape / depth */
+  --radius: 6px;
+  --radius-sm: 4px;
+  --shadow-surface: 0 1px 2px rgba(0, 0, 0, 0.08);
+
   /* Motion */
   --motion-duration: 160ms;
   --motion-duration-fast: 80ms;
@@ -98,10 +120,19 @@
   --bg-secondary: #252526;
   --bg-tertiary: #333333;
 
+  --bg-app: var(--bg-primary);
+  --bg-surface: var(--bg-secondary);
+  --bg-elevated: var(--bg-tertiary);
+  --bg-hover: #2f2f2f;
+  --bg-active: #3a3a3a;
+  --bg-inset: var(--bg-primary);
+
   --text-primary: #e4e4e4;
   --text-secondary: #a0a0a0;
+  --text-tertiary: #7a7a7a;
 
   --border: #404040;
+  --border-strong: #5a5a5a;
 
   --accent: #4da6ff;
   --accent-light: #1a3a5c;
@@ -113,6 +144,8 @@
 
   /* Accent backgrounds in dark are typically light, so dark text reads best. */
   --text-on-accent: #1e1e1e;
+
+  --shadow-surface: 0 1px 2px rgba(0, 0, 0, 0.5);
 
   --panel-shadow: -2px 0 10px rgba(0, 0, 0, 0.4);
   --tooltip-bg: rgba(0, 0, 0, 0.85);
@@ -130,13 +163,24 @@
   --bg-secondary: Canvas;
   --bg-tertiary: Canvas;
 
+  --bg-app: Canvas;
+  --bg-surface: Canvas;
+  --bg-elevated: Canvas;
+  --bg-hover: Canvas;
+  --bg-active: Canvas;
+  --bg-inset: Canvas;
+
   --text-primary: CanvasText;
   --text-secondary: CanvasText;
+  --text-tertiary: CanvasText;
 
   --border: CanvasText;
+  --border-strong: CanvasText;
 
   --accent: Highlight;
   --accent-light: Highlight;
+  --accent-bg: Highlight;
+  --accent-border: Highlight;
 
   --error: CanvasText;
   --warning: CanvasText;
@@ -147,6 +191,7 @@
   --selection-text: HighlightText;
 
   --panel-shadow: none;
+  --shadow-surface: none;
   --tooltip-bg: CanvasText;
   --tooltip-text: Canvas;
 
@@ -162,16 +207,29 @@
     --bg-secondary: Canvas;
     --bg-tertiary: Canvas;
 
+    --bg-app: Canvas;
+    --bg-surface: Canvas;
+    --bg-elevated: Canvas;
+    --bg-hover: Canvas;
+    --bg-active: Canvas;
+    --bg-inset: Canvas;
+
     --text-primary: CanvasText;
     --text-secondary: CanvasText;
+    --text-tertiary: CanvasText;
 
     --border: CanvasText;
+    --border-strong: CanvasText;
 
     --accent: Highlight;
     --accent-light: Highlight;
+    --accent-bg: Highlight;
+    --accent-border: Highlight;
 
     --text-on-accent: HighlightText;
     --selection-text: HighlightText;
+
+    --shadow-surface: none;
   }
 }
 
