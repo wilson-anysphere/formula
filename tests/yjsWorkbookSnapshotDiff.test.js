@@ -126,6 +126,103 @@ test("diffYjsWorkbookSnapshots reports workbook-level metadata changes", () => {
   assert.equal(diff.metadata.modified[0].key, "title");
 });
 
+test("diffYjsWorkbookSnapshots reports formatOnly edits when column default formats change (layered formats)", () => {
+  const doc = new Y.Doc();
+  const sheets = doc.getArray("sheets");
+  const cells = doc.getMap("cells");
+
+  const sheet1 = new Y.Map();
+  sheet1.set("id", "sheet1");
+  sheet1.set("name", "Sheet1");
+  sheets.push([sheet1]);
+
+  doc.transact(() => {
+    const cell = new Y.Map();
+    cell.set("value", "x");
+    cells.set("sheet1:0:0", cell);
+  });
+
+  const beforeSnapshot = Y.encodeStateAsUpdate(doc);
+
+  doc.transact(() => {
+    const colFormats = new Y.Map();
+    colFormats.set("0", { font: { bold: true } });
+    sheet1.set("colFormats", colFormats);
+  });
+
+  const afterSnapshot = Y.encodeStateAsUpdate(doc);
+
+  const diff = diffYjsWorkbookSnapshots({ beforeSnapshot, afterSnapshot });
+  const sheet1Diff = diff.cellsBySheet.find((entry) => entry.sheetId === "sheet1")?.diff;
+  assert.ok(sheet1Diff);
+  assert.equal(sheet1Diff.formatOnly.length, 1);
+  assert.deepEqual(sheet1Diff.formatOnly[0].cell, { row: 0, col: 0 });
+});
+
+test("diffYjsWorkbookSnapshots reports formatOnly edits when row default formats change (layered formats)", () => {
+  const doc = new Y.Doc();
+  const sheets = doc.getArray("sheets");
+  const cells = doc.getMap("cells");
+
+  const sheet1 = new Y.Map();
+  sheet1.set("id", "sheet1");
+  sheet1.set("name", "Sheet1");
+  sheets.push([sheet1]);
+
+  doc.transact(() => {
+    const cell = new Y.Map();
+    cell.set("value", "x");
+    cells.set("sheet1:0:0", cell);
+  });
+
+  const beforeSnapshot = Y.encodeStateAsUpdate(doc);
+
+  doc.transact(() => {
+    const rowFormats = new Y.Map();
+    rowFormats.set("0", { font: { italic: true } });
+    sheet1.set("rowFormats", rowFormats);
+  });
+
+  const afterSnapshot = Y.encodeStateAsUpdate(doc);
+
+  const diff = diffYjsWorkbookSnapshots({ beforeSnapshot, afterSnapshot });
+  const sheet1Diff = diff.cellsBySheet.find((entry) => entry.sheetId === "sheet1")?.diff;
+  assert.ok(sheet1Diff);
+  assert.equal(sheet1Diff.formatOnly.length, 1);
+  assert.deepEqual(sheet1Diff.formatOnly[0].cell, { row: 0, col: 0 });
+});
+
+test("diffYjsWorkbookSnapshots reports formatOnly edits when sheet default formats change (layered formats)", () => {
+  const doc = new Y.Doc();
+  const sheets = doc.getArray("sheets");
+  const cells = doc.getMap("cells");
+
+  const sheet1 = new Y.Map();
+  sheet1.set("id", "sheet1");
+  sheet1.set("name", "Sheet1");
+  sheets.push([sheet1]);
+
+  doc.transact(() => {
+    const cell = new Y.Map();
+    cell.set("value", "x");
+    cells.set("sheet1:0:0", cell);
+  });
+
+  const beforeSnapshot = Y.encodeStateAsUpdate(doc);
+
+  doc.transact(() => {
+    sheet1.set("defaultFormat", { fill: { fgColor: "#FFFF0000" } });
+  });
+
+  const afterSnapshot = Y.encodeStateAsUpdate(doc);
+
+  const diff = diffYjsWorkbookSnapshots({ beforeSnapshot, afterSnapshot });
+  const sheet1Diff = diff.cellsBySheet.find((entry) => entry.sheetId === "sheet1")?.diff;
+  assert.ok(sheet1Diff);
+  assert.equal(sheet1Diff.formatOnly.length, 1);
+  assert.deepEqual(sheet1Diff.formatOnly[0].cell, { row: 0, col: 0 });
+});
+
 test("diffYjsWorkbookSnapshots supports comments stored as a Y.Array", () => {
   const doc = new Y.Doc();
   const sheets = doc.getArray("sheets");
