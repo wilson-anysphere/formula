@@ -243,6 +243,31 @@ fn setup_range_aggregate_engine_ast(size: usize) -> (Engine, String, String) {
     (engine, sum_cell, countif_cell)
 }
 
+fn setup_bytecode_array_aggregate_engine(size: usize) -> (Engine, String) {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_value("Sheet1", "A1", 0.0_f64)
+        .expect("seed cell");
+
+    let out_cell = "B1".to_string();
+    let half = size / 2;
+    // Use ROW over a row-range to produce a large in-memory array on the bytecode backend, then
+    // aggregate it. This exercises bytecode `Value::Array` aggregate fast paths (SUM/COUNTIF).
+    let formula = format!(
+        "=LET(x,A1,r,ROW(1:{size}),SUM(r)+COUNTIF(r, \">{half}\")+x)"
+    );
+    engine
+        .set_cell_formula("Sheet1", &out_cell, &formula)
+        .expect("set bytecode array aggregate formula");
+
+    // This benchmark is intended to cover the bytecode backend. If the formula ever stops being
+    // bytecode-eligible, fail loudly so we don't silently lose perf coverage.
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    (engine, out_cell)
+}
+
 pub fn run_benchmarks() -> Vec<BenchmarkResult> {
     let parse_inputs: Vec<String> = (0..1000)
         .map(|i| format!("=SUM(A{}:A{})", i + 1, i + 100))
@@ -350,6 +375,26 @@ pub fn run_benchmarks() -> Vec<BenchmarkResult> {
             let a = engine_range.get_cell_value("Sheet1", &sum_cell);
             let b = engine_range.get_cell_value("Sheet1", &countif_cell);
             std::hint::black_box((a, b));
+        },
+    ));
+
+    // Bytecode large array aggregation: this covers in-memory array aggregates (not reference
+    // aggregates), which happen for array-producing functions and array literals.
+    let (mut engine_bytecode_array, out_cell) = setup_bytecode_array_aggregate_engine(50_000);
+    let mut counter_array = 0_i64;
+    results.push(run_benchmark(
+        "calc.recalc_sum_countif_row_array_50k_cells_bytecode.p95",
+        8,
+        2,
+        250.0,
+        || {
+            counter_array += 1;
+            engine_bytecode_array
+                .set_cell_value("Sheet1", "A1", (counter_array % 1000) as f64)
+                .expect("update");
+            engine_bytecode_array.recalculate_single_threaded();
+            let v = engine_bytecode_array.get_cell_value("Sheet1", &out_cell);
+            std::hint::black_box(v);
         },
     ));
 
