@@ -19,6 +19,13 @@ test.describe("formatting shortcuts (Excel presets)", () => {
         app.focus();
       });
       await waitForIdle(page);
+      // Ensure we're not in an edit context (formula bar/cell editor), since the shortcut
+      // handler intentionally ignores key events coming from editable targets.
+      await page.keyboard.press("Escape");
+      await waitForIdle(page);
+      await page.focus("#grid");
+      await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.isEditing())).toBe(false);
+      await expect.poll(() => page.evaluate(() => (document.activeElement as HTMLElement | null)?.id)).toBe("grid");
 
       // ---- Bold --------------------------------------------------------------
       const initialBold = await page.evaluate(() => {
@@ -28,24 +35,26 @@ test.describe("formatting shortcuts (Excel presets)", () => {
         return doc.getCellFormat(sheetId, "A1").font?.bold === true;
       });
       await page.keyboard.press("ControlOrMeta+B");
-      await waitForIdle(page);
-      let bold = await page.evaluate(() => {
-        const app = (window as any).__formulaApp;
-        const sheetId = app.getCurrentSheetId();
-        const doc = app.getDocument();
-        return doc.getCellFormat(sheetId, "A1").font?.bold === true;
-      });
-      expect(bold).toBe(!initialBold);
+      await expect.poll(async () => {
+        await waitForIdle(page);
+        return page.evaluate(() => {
+          const app = (window as any).__formulaApp;
+          const sheetId = app.getCurrentSheetId();
+          const doc = app.getDocument();
+          return doc.getCellFormat(sheetId, "A1").font?.bold === true;
+        });
+      }).toBe(!initialBold);
 
       await page.keyboard.press("ControlOrMeta+B");
-      await waitForIdle(page);
-      bold = await page.evaluate(() => {
-        const app = (window as any).__formulaApp;
-        const sheetId = app.getCurrentSheetId();
-        const doc = app.getDocument();
-        return doc.getCellFormat(sheetId, "A1").font?.bold === true;
-      });
-      expect(bold).toBe(initialBold);
+      await expect.poll(async () => {
+        await waitForIdle(page);
+        return page.evaluate(() => {
+          const app = (window as any).__formulaApp;
+          const sheetId = app.getCurrentSheetId();
+          const doc = app.getDocument();
+          return doc.getCellFormat(sheetId, "A1").font?.bold === true;
+        });
+      }).toBe(initialBold);
 
       // ---- Underline ---------------------------------------------------------
       const initialUnderline = await page.evaluate(() => {
@@ -55,55 +64,60 @@ test.describe("formatting shortcuts (Excel presets)", () => {
         return doc.getCellFormat(sheetId, "A1").font?.underline === true;
       });
       await page.keyboard.press("ControlOrMeta+U");
-      await waitForIdle(page);
-      let underline = await page.evaluate(() => {
-        const app = (window as any).__formulaApp;
-        const sheetId = app.getCurrentSheetId();
-        const doc = app.getDocument();
-        return doc.getCellFormat(sheetId, "A1").font?.underline === true;
-      });
-      expect(underline).toBe(!initialUnderline);
+      await expect.poll(async () => {
+        await waitForIdle(page);
+        return page.evaluate(() => {
+          const app = (window as any).__formulaApp;
+          const sheetId = app.getCurrentSheetId();
+          const doc = app.getDocument();
+          return doc.getCellFormat(sheetId, "A1").font?.underline === true;
+        });
+      }).toBe(!initialUnderline);
 
       await page.keyboard.press("ControlOrMeta+U");
-      await waitForIdle(page);
-      underline = await page.evaluate(() => {
-        const app = (window as any).__formulaApp;
-        const sheetId = app.getCurrentSheetId();
-        const doc = app.getDocument();
-        return doc.getCellFormat(sheetId, "A1").font?.underline === true;
-      });
-      expect(underline).toBe(initialUnderline);
+      await expect.poll(async () => {
+        await waitForIdle(page);
+        return page.evaluate(() => {
+          const app = (window as any).__formulaApp;
+          const sheetId = app.getCurrentSheetId();
+          const doc = app.getDocument();
+          return doc.getCellFormat(sheetId, "A1").font?.underline === true;
+        });
+      }).toBe(initialUnderline);
 
       // ---- Number format presets --------------------------------------------
       await page.keyboard.press("ControlOrMeta+Shift+Digit4");
-      await waitForIdle(page);
-      let numberFormat = await page.evaluate(() => {
-        const app = (window as any).__formulaApp;
-        const sheetId = app.getCurrentSheetId();
-        const doc = app.getDocument();
-        return doc.getCellFormat(sheetId, "A1").numberFormat;
-      });
-      expect(numberFormat).toBe("$#,##0.00");
+      await expect.poll(async () => {
+        await waitForIdle(page);
+        return page.evaluate(() => {
+          const app = (window as any).__formulaApp;
+          const sheetId = app.getCurrentSheetId();
+          const doc = app.getDocument();
+          return doc.getCellFormat(sheetId, "A1").numberFormat;
+        });
+      }).toBe("$#,##0.00");
 
       await page.keyboard.press("ControlOrMeta+Shift+Digit5");
-      await waitForIdle(page);
-      numberFormat = await page.evaluate(() => {
-        const app = (window as any).__formulaApp;
-        const sheetId = app.getCurrentSheetId();
-        const doc = app.getDocument();
-        return doc.getCellFormat(sheetId, "A1").numberFormat;
-      });
-      expect(numberFormat).toBe("0%");
+      await expect.poll(async () => {
+        await waitForIdle(page);
+        return page.evaluate(() => {
+          const app = (window as any).__formulaApp;
+          const sheetId = app.getCurrentSheetId();
+          const doc = app.getDocument();
+          return doc.getCellFormat(sheetId, "A1").numberFormat;
+        });
+      }).toBe("0%");
 
       await page.keyboard.press("ControlOrMeta+Shift+Digit3");
-      await waitForIdle(page);
-      numberFormat = await page.evaluate(() => {
-        const app = (window as any).__formulaApp;
-        const sheetId = app.getCurrentSheetId();
-        const doc = app.getDocument();
-        return doc.getCellFormat(sheetId, "A1").numberFormat;
-      });
-      expect(numberFormat).toBe("m/d/yyyy");
+      await expect.poll(async () => {
+        await waitForIdle(page);
+        return page.evaluate(() => {
+          const app = (window as any).__formulaApp;
+          const sheetId = app.getCurrentSheetId();
+          const doc = app.getDocument();
+          return doc.getCellFormat(sheetId, "A1").numberFormat;
+        });
+      }).toBe("m/d/yyyy");
     });
   }
 });
