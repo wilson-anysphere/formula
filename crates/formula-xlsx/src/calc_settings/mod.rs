@@ -130,6 +130,25 @@ pub fn write_calc_settings_to_workbook_xml(
                 workbook_ns.get_or_insert(workbook_xml_namespaces_from_workbook_start(&e)?);
                 writer.write_event(Event::Start(e.to_owned()))?;
             }
+            Event::Empty(e) if e.local_name().as_ref() == b"workbook" => {
+                // Some workbooks may have a self-closing `<workbook/>` root. In that case there
+                // is no corresponding `</workbook>` event where we can insert `<calcPr/>`, so we
+                // need to expand it into an explicit start/end pair and insert the calc settings.
+                let workbook_tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                let ns = workbook_xml_namespaces_from_workbook_start(&e)?;
+                let calc_pr_tag =
+                    crate::xml::prefixed_tag(ns.spreadsheetml_prefix.as_deref(), "calcPr");
+
+                writer.write_event(Event::Start(e.to_owned()))?;
+                write_calc_pr_event(
+                    &mut writer,
+                    settings,
+                    CalcPrEventKind::Empty,
+                    calc_pr_tag.as_str(),
+                )?;
+                wrote_calc_pr = true;
+                writer.write_event(Event::End(BytesEnd::new(workbook_tag.as_str())))?;
+            }
             Event::Empty(e) if e.local_name().as_ref() == b"calcPr" => {
                 let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
                 write_calc_pr_event(&mut writer, settings, CalcPrEventKind::Empty, tag.as_str())?;
@@ -261,5 +280,26 @@ mod tests {
         assert!(settings.iterative.enabled);
         assert_eq!(settings.iterative.max_iterations, 42);
         assert!((settings.iterative.max_change - 0.25).abs() < 1e-12);
+    }
+
+    #[test]
+    fn write_calc_pr_into_prefixed_self_closing_workbook_root() {
+        let xml = br#"<x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>"#;
+        let updated = write_calc_settings_to_workbook_xml(xml, &CalcSettings::default()).unwrap();
+        let updated = std::str::from_utf8(&updated).unwrap();
+
+        assert!(updated.contains("<x:calcPr"));
+        assert!(updated.contains("</x:workbook>"));
+    }
+
+    #[test]
+    fn write_calc_pr_into_default_ns_self_closing_workbook_root() {
+        let xml = br#"<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>"#;
+        let updated = write_calc_settings_to_workbook_xml(xml, &CalcSettings::default()).unwrap();
+        let updated = std::str::from_utf8(&updated).unwrap();
+
+        assert!(updated.contains("<calcPr"));
+        assert!(updated.contains("</workbook>"));
+        assert!(!updated.contains(":calcPr"));
     }
 }
