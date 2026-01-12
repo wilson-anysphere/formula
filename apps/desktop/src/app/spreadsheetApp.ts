@@ -94,10 +94,7 @@ import { getCollabUserIdentity, type CollabUserIdentity } from "../collab/userId
 import { PresenceRenderer } from "../grid/presence-renderer/presenceRenderer.js";
 import { ConflictUiController } from "../collab/conflicts-ui/conflict-ui-controller.js";
 import { StructuralConflictUiController } from "../collab/conflicts-ui/structural-conflict-ui-controller.js";
-import {
-  createDesktopCellStructuralConflictMonitor,
-  createDesktopFormulaConflictMonitor,
-} from "../collab/conflict-monitors.js";
+import { createDesktopFormulaConflictMonitor } from "../collab/conflict-monitors.js";
 
 type EngineCellRef = { sheetId?: string; sheet?: string; row?: number; col?: number; address?: string; value?: unknown };
 type AuditingCacheEntry = {
@@ -688,9 +685,6 @@ export class SpreadsheetApp {
   private collabPresenceUnsubscribe: (() => void) | null = null;
   private formulaConflictMonitor: { dispose: () => void; resolveConflict: (id: string, chosen: unknown) => boolean } | null =
     null;
-  private cellStructuralConflictMonitor:
-    | { dispose: () => void; resolveConflict: (id: string, resolution: unknown) => boolean }
-    | null = null;
   private conflictUi: ConflictUiController | null = null;
   private conflictUiContainer: HTMLDivElement | null = null;
   private structuralConflictUi: StructuralConflictUiController | null = null;
@@ -799,6 +793,19 @@ export class SpreadsheetApp {
             }
           : {}),
         presence: { user: collab.user, activeSheet: this.sheetId },
+        // Enable structural conflict monitoring (move/delete-vs-edit/content/format) in collab mode.
+        cellConflicts: {
+          localUserId: collab.user.id,
+          onConflict: (conflict) => {
+            if (this.structuralConflictUi) {
+              this.structuralConflictUi.addConflict(conflict);
+            } else {
+              // Conflicts can be detected before the UI overlay is mounted (e.g. from persisted
+              // structural op logs). Queue them until the conflict UI overlay is mounted.
+              this.pendingStructuralConflicts.push(conflict);
+            }
+          },
+        },
       });
       // Populate `modifiedBy` metadata for any direct `CollabSession.setCell*` writes
       // (used by some conflict resolution + versioning flows) and ensure downstream
@@ -848,15 +855,11 @@ export class SpreadsheetApp {
         this.collabSession.localOrigins.add(origin);
       }
 
-      // Desktop wiring: create conflict monitors explicitly so we can use different
-      // local-origin policies for formula/value vs structural conflict tracking.
-      //
-      // In particular:
-      // - Version restore uses origin "versioning-restore" and should not surface
-      //   formula/value conflict UI.
-      // - Branch checkout/merge uses origin "branching-apply" and should not surface
-      //   formula/value conflict UI or be logged into `cellStructuralOps` by the
-      //   structural conflict monitor.
+      // Desktop wiring:
+      // - Structural conflicts are monitored by `CollabSession.cellConflictMonitor` (enabled above via `cellConflicts`).
+      // - Formula/value conflicts are monitored by a desktop-configured monitor so we can ignore
+      //   bulk "time travel" operations (version restore / branching apply) and avoid surfacing
+      //   spurious conflict UI.
       this.formulaConflictMonitor = createDesktopFormulaConflictMonitor({
         doc: this.collabSession.doc,
         cells: this.collabSession.cells as any,
@@ -874,25 +877,6 @@ export class SpreadsheetApp {
             // Conflicts can be detected before the UI overlay is mounted (e.g. during
             // initial sync). Queue until the UI is ready.
             this.pendingFormulaConflicts.push(conflict);
-          }
-        },
-      });
-
-      this.cellStructuralConflictMonitor = createDesktopCellStructuralConflictMonitor({
-        doc: this.collabSession.doc,
-        cells: this.collabSession.cells as any,
-        localUserId: collab.user.id,
-        sessionOrigin: this.collabSession.origin,
-        binderOrigin,
-        undoLocalOrigins: undoService.localOrigins,
-        onConflict: (conflict) => {
-          // Structural move/delete-vs-edit/content/format conflicts.
-          if (this.structuralConflictUi) {
-            this.structuralConflictUi.addConflict(conflict);
-          } else {
-            // Conflicts can be detected before the UI overlay is mounted (e.g. from persisted
-            // structural op logs). Queue them until the conflict UI overlay is mounted.
-            this.pendingStructuralConflicts.push(conflict);
           }
         },
       });
@@ -1745,7 +1729,7 @@ export class SpreadsheetApp {
         monitor: {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           resolveConflict: (id: string, resolution: any) => {
-            const monitor = this.cellStructuralConflictMonitor;
+            const monitor = this.collabSession?.cellConflictMonitor;
             return monitor ? monitor.resolveConflict(id, resolution) : false;
           },
         },
@@ -1869,8 +1853,6 @@ export class SpreadsheetApp {
     this.collabBinder = null;
     this.formulaConflictMonitor?.dispose();
     this.formulaConflictMonitor = null;
-    this.cellStructuralConflictMonitor?.dispose();
-    this.cellStructuralConflictMonitor = null;
     // Tests sometimes inject a minimal collab session stub (e.g. `{ presence }`)
     // to exercise presence behavior without spinning up a provider. Use optional
     // method calls so teardown remains resilient.
