@@ -82,4 +82,30 @@ describe("command-palette shortcut search", () => {
     // 2 from CatA (ctrl+a, ctrl+b) + 2 from CatB (ctrl+d, ctrl+e).
     expect(result.map((c) => c.commandId)).toEqual(["catA.one", "catA.two", "catB.four", "catB.five"]);
   });
+
+  test("supports result limiting without sorting huge match sets (empty query)", () => {
+    const commands = [
+      { commandId: "catA.one", title: "Alpha", category: "CatA", source: { kind: "builtin" as const } },
+      { commandId: "catA.two", title: "Beta", category: "CatA", source: { kind: "builtin" as const } },
+      { commandId: "catA.three", title: "Gamma", category: "CatA", source: { kind: "builtin" as const } },
+      { commandId: "catB.one", title: "Delta", category: "CatB", source: { kind: "builtin" as const } },
+      { commandId: "catB.two", title: "Epsilon", category: "CatB", source: { kind: "builtin" as const } },
+    ];
+    const keybindingIndex = new Map<string, readonly string[]>([
+      ["catA.one", ["ctrl+a"]],
+      ["catA.two", ["ctrl+b"]],
+      ["catA.three", ["ctrl+c"]],
+      ["catB.one", ["ctrl+a"]],
+      ["catB.two", ["ctrl+b"]],
+    ]);
+
+    const result = searchShortcutCommands({
+      commands,
+      keybindingIndex,
+      query: "",
+      limits: { maxResults: 3, maxResultsPerCategory: 2 },
+    });
+
+    expect(result.map((cmd) => cmd.commandId)).toEqual(["catA.one", "catA.two", "catB.one"]);
+  });
 });
