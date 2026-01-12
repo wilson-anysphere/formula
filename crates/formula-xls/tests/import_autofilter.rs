@@ -265,3 +265,30 @@ fn attaches_workbook_scoped_unqualified_filterdatabase_range_to_only_sheet_with_
     assert_parseable_formula(&filter_db.refers_to);
     assert!(!filter_db.refers_to.contains('!'));
 }
+
+#[test]
+fn attaches_workbook_scoped_unqualified_filterdatabase_range_to_only_sheet_with_autofilter_without_biff(
+) {
+    // Same as `attaches_workbook_scoped_unqualified_filterdatabase_range_to_only_sheet_with_autofilter`,
+    // but force the importer down the "no BIFF available" path. This ensures the fallback workbook-stream
+    // recovery logic can still map the workbook-scoped unqualified `_FilterDatabase` range to the correct
+    // sheet.
+    let bytes = xls_fixture_builder::build_autofilter_workbook_scope_unqualified_multisheet_fixture_xls();
+    let result = import_fixture_without_biff(&bytes);
+
+    let unqualified = result
+        .workbook
+        .sheet_by_name("Unqualified")
+        .expect("Unqualified sheet missing");
+    let other = result.workbook.sheet_by_name("Other").expect("Other sheet missing");
+
+    let af = unqualified.auto_filter.as_ref().unwrap_or_else(|| {
+        panic!(
+            "expected Unqualified.auto_filter to be set; defined_names={:?}; warnings={:?}",
+            result.workbook.defined_names, result.warnings
+        )
+    });
+    assert_eq!(af.range, Range::from_a1("A1:B3").unwrap());
+
+    assert!(other.auto_filter.is_none());
+}

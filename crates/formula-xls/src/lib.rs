@@ -1570,18 +1570,86 @@ fn import_xls_path_with_biff_reader(
             let biff_version = biff::detect_biff_version(workbook_stream_bytes);
             let codepage = biff::parse_biff_codepage(workbook_stream_bytes);
 
-            let sheet_names_by_biff_idx =
-                biff::parse_biff_bound_sheets(workbook_stream_bytes, biff_version, codepage)
-                    .ok()
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|s| s.name)
-                    .collect::<Vec<_>>();
+            let biff_bound_sheets = biff::parse_biff_bound_sheets(
+                workbook_stream_bytes,
+                biff_version,
+                codepage,
+            )
+            .ok()
+            .unwrap_or_default();
 
-            let sheet_names_by_biff_idx = if sheet_names_by_biff_idx.is_empty() {
-                sheets.iter().map(|s| s.name.clone()).collect::<Vec<_>>()
-            } else {
+            let (sheet_names_by_biff_idx, sheet_offsets_by_biff_idx): (Vec<String>, Vec<usize>) =
+                if biff_bound_sheets.is_empty() {
+                    (sheets.iter().map(|s| s.name.clone()).collect(), Vec::new())
+                } else {
+                    (
+                        biff_bound_sheets
+                            .iter()
+                            .map(|s| s.name.clone())
+                            .collect::<Vec<_>>(),
+                        biff_bound_sheets.iter().map(|s| s.offset).collect::<Vec<_>>(),
+                    )
+                };
+
+            let resolve_sheet_id_for_biff_idx = |biff_sheet_idx: usize| {
+                // Best-effort mapping of BIFF sheet index -> output WorksheetId.
+                //
+                // Prefer sheet-name match (more robust when sheet orders differ), but fall
+                // back to assuming BIFF sheet indices align with calamine's sheet order.
                 sheet_names_by_biff_idx
+                    .get(biff_sheet_idx)
+                    .and_then(|biff_name| {
+                        out.sheets
+                            .iter()
+                            .find(|s| sheet_name_eq_case_insensitive(&s.name, biff_name))
+                            .map(|s| s.id)
+                    })
+                    .or_else(|| sheet_ids_by_calamine_idx.get(biff_sheet_idx).copied())
+            };
+
+            // Best-effort: infer which BIFF sheet contains AutoFilter metadata from its worksheet
+            // substream. This is used to map workbook-scoped `_FilterDatabase` names that do not
+            // specify a sheet (e.g. `=$A$1:$B$3`).
+            //
+            // We only use this heuristic when exactly one sheet has AutoFilter records.
+            let biff_sheet_idx_with_sheet_stream_autofilter = if sheet_offsets_by_biff_idx.is_empty()
+            {
+                None
+            } else {
+                const RECORD_AUTOFILTERINFO: u16 = 0x009D;
+                const RECORD_FILTERMODE: u16 = 0x009B;
+
+                let mut matches = Vec::<usize>::new();
+                for (idx, &offset) in sheet_offsets_by_biff_idx.iter().enumerate() {
+                    if matches.len() > 1 {
+                        break;
+                    }
+                    if offset >= workbook_stream_bytes.len() {
+                        continue;
+                    }
+                    let Ok(iter) = biff::records::BestEffortSubstreamIter::from_offset(
+                        workbook_stream_bytes,
+                        offset,
+                    ) else {
+                        continue;
+                    };
+                    for record in iter {
+                        match record.record_id {
+                            RECORD_AUTOFILTERINFO | RECORD_FILTERMODE => {
+                                matches.push(idx);
+                                break;
+                            }
+                            biff::records::RECORD_EOF => break,
+                            _ => {}
+                        }
+                    }
+                }
+
+                if matches.len() == 1 {
+                    Some(matches[0])
+                } else {
+                    None
+                }
             };
 
             // Attempt to recover AutoFilter ranges even when `_FilterDatabase` is workbook-scoped.
@@ -1604,19 +1672,7 @@ fn import_xls_path_with_biff_reader(
                     }
 
                     for (biff_sheet_idx, range) in parsed.by_sheet {
-                        // Best-effort mapping of BIFF sheet index -> output WorksheetId.
-                        //
-                        // Prefer sheet-name match (more robust when sheet orders differ), but fall
-                        // back to assuming BIFF sheet indices align with calamine's sheet order.
-                        let sheet_id = sheet_names_by_biff_idx
-                            .get(biff_sheet_idx)
-                            .and_then(|biff_name| {
-                                out.sheets
-                                    .iter()
-                                    .find(|s| sheet_name_eq_case_insensitive(&s.name, biff_name))
-                                    .map(|s| s.id)
-                            })
-                            .or_else(|| sheet_ids_by_calamine_idx.get(biff_sheet_idx).copied());
+                        let sheet_id = resolve_sheet_id_for_biff_idx(biff_sheet_idx);
 
                         let Some(sheet_id) = sheet_id else {
                             warnings.push(ImportWarning::new(format!(
@@ -1646,37 +1702,83 @@ fn import_xls_path_with_biff_reader(
                         if !is_filter_database_defined_name(&name.name) {
                             continue;
                         }
-                        let Some(biff_sheet_idx) = name.scope_sheet else {
-                            continue;
-                        };
-                        let Some(&sheet_id) = sheet_ids_by_calamine_idx.get(biff_sheet_idx) else {
-                            warnings.push(ImportWarning::new(format!(
-                                "skipping `.xls` AutoFilter defined name `{}`: out-of-range sheet index {} (sheet count={})",
-                                name.name,
-                                biff_sheet_idx.saturating_add(1),
-                                sheet_ids_by_calamine_idx.len()
-                            )));
-                            continue;
+                        let range = match parse_autofilter_range_from_defined_name(&name.refers_to) {
+                            Ok(range) => range,
+                            Err(err) => {
+                                warnings.push(ImportWarning::new(format!(
+                                    "failed to parse `.xls` AutoFilter range `{}` from defined name `{}`: {err}",
+                                    name.refers_to, name.name
+                                )));
+                                continue;
+                            }
                         };
 
-                        let mut a1 = name.refers_to.trim();
-                        if let Some(rest) = a1.strip_prefix('=') {
-                            a1 = rest.trim();
-                        }
-                        if let Some(rest) = a1.strip_prefix('@') {
-                            a1 = rest.trim();
-                        }
-                        if let Some((_, rhs)) = a1.rsplit_once('!') {
-                            a1 = rhs;
-                        }
+                        let sheet_id = match name.scope_sheet {
+                            Some(biff_sheet_idx) => {
+                                let sheet_id = resolve_sheet_id_for_biff_idx(biff_sheet_idx);
+                                if sheet_id.is_none() {
+                                    warnings.push(ImportWarning::new(format!(
+                                        "skipping `.xls` AutoFilter defined name `{}`: out-of-range sheet index {} (sheet count={})",
+                                        name.name,
+                                        biff_sheet_idx.saturating_add(1),
+                                        out.sheets.len()
+                                    )));
+                                }
+                                sheet_id
+                            }
+                            None => {
+                                // Attempt to infer the sheet target of workbook-scoped AutoFilter
+                                // names. Some `.xls` files store `_FilterDatabase` as workbook-scope
+                                // but use an unqualified 2D range formula.
+                                let warnings_before_infer = warnings.len();
+                                let inferred = infer_sheet_name_from_workbook_scoped_defined_name(
+                                    &out,
+                                    &name.name,
+                                    &name.refers_to,
+                                    &mut warnings,
+                                )
+                                .and_then(|sheet_name| out.sheet_by_name(&sheet_name).map(|s| s.id))
+                                .or_else(|| (out.sheets.len() == 1).then(|| out.sheets[0].id))
+                                .or_else(|| {
+                                    // Best-effort: if exactly one sheet already has AutoFilter
+                                    // metadata, assume this FilterDatabase range belongs to it.
+                                    //
+                                    // Do not guess when multiple sheets have AutoFilter metadata.
+                                    if warnings.len() != warnings_before_infer {
+                                        return None;
+                                    }
+                                    if name.refers_to.contains('!') {
+                                        return None;
+                                    }
+                                    let mut sheets_with_autofilter =
+                                        out.sheets.iter().filter(|s| s.auto_filter.is_some());
+                                    let only = sheets_with_autofilter.next()?;
+                                    sheets_with_autofilter.next().is_none().then_some(only.id)
+                                })
+                                .or_else(|| {
+                                    // Best-effort: infer sheet from the worksheet substream's
+                                    // AutoFilter metadata (AUTOFILTERINFO / FILTERMODE).
+                                    if warnings.len() != warnings_before_infer {
+                                        return None;
+                                    }
+                                    let biff_sheet_idx = biff_sheet_idx_with_sheet_stream_autofilter?;
+                                    resolve_sheet_id_for_biff_idx(biff_sheet_idx)
+                                });
 
-                        match Range::from_a1(a1) {
-                            Ok(range) => autofilters.push((sheet_id, range)),
-                            Err(err) => warnings.push(ImportWarning::new(format!(
-                                "failed to parse `.xls` AutoFilter range `{}` from defined name `{}`: {err}",
-                                name.refers_to, name.name
-                            ))),
-                        }
+                                if inferred.is_none() && warnings.len() == warnings_before_infer {
+                                    warnings.push(ImportWarning::new(format!(
+                                        "skipping `.xls` AutoFilter defined name `{}`: workbook-scoped and sheet scope could not be inferred from `{}`",
+                                        name.name, name.refers_to
+                                    )));
+                                }
+                                inferred
+                            }
+                        };
+
+                        let Some(sheet_id) = sheet_id else {
+                            continue;
+                        };
+                        autofilters.push((sheet_id, range));
                     }
                 }
                 Err(err) => warnings.push(ImportWarning::new(format!(
