@@ -155,6 +155,7 @@ test.describe("sheet tabs", () => {
     await page.getByTestId("sheet-add").click();
     await expect(page.getByTestId("sheet-tab-Sheet3")).toBeVisible();
     await expect(page.getByTestId("sheet-tab-Sheet3")).toHaveAttribute("data-active", "true");
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 3 of 3");
 
     // Move Sheet3 before Sheet1.
     try {
@@ -205,6 +206,7 @@ test.describe("sheet tabs", () => {
         ),
       ),
     ).toEqual(desiredOrder);
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 3");
 
     // Ctrl+PgDn should follow the new order. We dispatch the key event directly to avoid
     // platform/browser-specific tab switching behavior.
@@ -213,18 +215,21 @@ test.describe("sheet tabs", () => {
       window.dispatchEvent(evt);
     });
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet1");
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 3");
 
     await page.evaluate(() => {
       const evt = new KeyboardEvent("keydown", { key: "PageDown", ctrlKey: true, bubbles: true, cancelable: true });
       window.dispatchEvent(evt);
     });
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet2");
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 3 of 3");
 
     await page.evaluate(() => {
       const evt = new KeyboardEvent("keydown", { key: "PageDown", ctrlKey: true, bubbles: true, cancelable: true });
       window.dispatchEvent(evt);
     });
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet3");
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 3");
   });
 
   test("sheet position indicator uses visible sheets (hide/unhide)", async ({ page }) => {
