@@ -80,6 +80,86 @@ fn add_sheet_rejects_names_longer_than_31_chars() {
 }
 
 #[test]
+fn add_sheet_truncates_base_name_to_fit_unique_suffix() {
+    let long = "a".repeat(31);
+    let mut workbook = Workbook::new_empty(None);
+    workbook.add_sheet(long.clone());
+    workbook.add_sheet("Sheet2".to_string());
+
+    let mut state = AppState::new();
+    state.load_workbook(workbook);
+
+    let added = state
+        .add_sheet(long, None, None)
+        .expect("expected add_sheet to succeed with a unique suffix");
+    assert_eq!(added.name, format!("{} 2", "a".repeat(29)));
+    assert_eq!(added.name.len(), 31);
+}
+
+#[test]
+fn create_sheet_rejects_invalid_character() {
+    let (mut state, _sheet1_id, _sheet2_id) = loaded_state_with_two_sheets();
+    let err = state
+        .create_sheet("Bad/Name".to_string())
+        .expect_err("expected invalid sheet name error");
+    match err {
+        AppStateError::WhatIf(msg) => assert!(
+            msg.contains("invalid character"),
+            "expected invalid character error, got {msg:?}"
+        ),
+        other => panic!("expected WhatIf error, got {other:?}"),
+    }
+}
+
+#[test]
+fn create_sheet_rejects_empty_string() {
+    let (mut state, _sheet1_id, _sheet2_id) = loaded_state_with_two_sheets();
+    let err = state
+        .create_sheet("   ".to_string())
+        .expect_err("expected empty sheet name error");
+    match err {
+        AppStateError::WhatIf(msg) => assert!(
+            msg.contains("cannot be blank"),
+            "expected blank name error, got {msg:?}"
+        ),
+        other => panic!("expected WhatIf error, got {other:?}"),
+    }
+}
+
+#[test]
+fn create_sheet_rejects_leading_or_trailing_apostrophe() {
+    let (mut state, _sheet1_id, _sheet2_id) = loaded_state_with_two_sheets();
+
+    for name in ["'Leading", "Trailing'"] {
+        let err = state
+            .create_sheet(name.to_string())
+            .expect_err("expected invalid sheet name error");
+        match err {
+            AppStateError::WhatIf(msg) => assert!(
+                msg.contains("apostrophe"),
+                "expected apostrophe error, got {msg:?}"
+            ),
+            other => panic!("expected WhatIf error, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn create_sheet_rejects_duplicate_name_case_insensitive() {
+    let (mut state, _sheet1_id, _sheet2_id) = loaded_state_with_two_sheets();
+    let err = state
+        .create_sheet("sheet1".to_string())
+        .expect_err("expected duplicate sheet name error");
+    match err {
+        AppStateError::WhatIf(msg) => assert!(
+            msg.contains("already exists"),
+            "expected duplicate error, got {msg:?}"
+        ),
+        other => panic!("expected WhatIf error, got {other:?}"),
+    }
+}
+
+#[test]
 fn create_sheet_rejects_names_longer_than_31_chars() {
     let (mut state, _sheet1_id, _sheet2_id) = loaded_state_with_two_sheets();
     let long_name = "a".repeat(32);
