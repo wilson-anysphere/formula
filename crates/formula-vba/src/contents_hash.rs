@@ -82,11 +82,50 @@ pub fn project_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
 
     let mut offset = 0usize;
     while offset < dir_decompressed.len() {
-        if offset + 6 > dir_decompressed.len() {
+        if offset + 2 > dir_decompressed.len() {
             return Err(DirParseError::Truncated.into());
         }
 
         let id = u16::from_le_bytes([dir_decompressed[offset], dir_decompressed[offset + 1]]);
+
+        // PROJECTVERSION (0x0009) is fixed-length in spec-compliant `VBA/dir` streams, but some
+        // synthetic fixtures encode it in a TLV form (`Id || Size || Data`). Disambiguate by
+        // checking which interpretation yields a plausible next record boundary.
+        if id == PROJECTVERSION {
+            if offset + 6 > dir_decompressed.len() {
+                return Err(DirParseError::Truncated.into());
+            }
+            let size_or_reserved = u32::from_le_bytes([
+                dir_decompressed[offset + 2],
+                dir_decompressed[offset + 3],
+                dir_decompressed[offset + 4],
+                dir_decompressed[offset + 5],
+            ]) as usize;
+            let tlv_end = offset.saturating_add(6).saturating_add(size_or_reserved);
+            let fixed_end = offset.saturating_add(12);
+
+            let tlv_next_ok =
+                looks_like_projectversion_following_record(&dir_decompressed, tlv_end);
+            let fixed_next_ok =
+                looks_like_projectversion_following_record(&dir_decompressed, fixed_end);
+
+            // Prefer the fixed-length interpretation when the TLV interpretation would leave us at
+            // an implausible record boundary, or when the u32 field is `0` (a common reserved value
+            // for fixed-length PROJECTVERSION records).
+            if fixed_end <= dir_decompressed.len()
+                && fixed_next_ok
+                && (!tlv_next_ok || size_or_reserved == 0)
+            {
+                out.extend_from_slice(&dir_decompressed[offset + 2..fixed_end]);
+                offset = fixed_end;
+                continue;
+            }
+        }
+
+        if offset + 6 > dir_decompressed.len() {
+            return Err(DirParseError::Truncated.into());
+        }
+
         let len = u32::from_le_bytes([
             dir_decompressed[offset + 2],
             dir_decompressed[offset + 3],
@@ -224,6 +263,32 @@ fn peek_next_record_id(bytes: &[u8], offset: usize) -> Option<u16> {
         return None;
     }
     Some(u16::from_le_bytes([bytes[offset], bytes[offset + 1]]))
+}
+
+fn looks_like_projectversion_following_record(bytes: &[u8], offset: usize) -> bool {
+    if offset == bytes.len() {
+        return true;
+    }
+    if offset + 6 > bytes.len() {
+        return false;
+    }
+    let id = u16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
+    // After PROJECTVERSION, we expect either PROJECTCONSTANTS (0x000C), a reference record, the
+    // ProjectModules header, or (in some real-world streams) module records.
+    if !matches!(
+        id,
+        0x000C | 0x003C | 0x004A | 0x000D | 0x000E | 0x0016 | 0x002F | 0x0030 | 0x0033 | 0x000F
+            | 0x0013 | 0x0010 | 0x0019 | 0x0047 | 0x001A | 0x0032
+    ) {
+        return false;
+    }
+    let len = u32::from_le_bytes([
+        bytes[offset + 2],
+        bytes[offset + 3],
+        bytes[offset + 4],
+        bytes[offset + 5],
+    ]) as usize;
+    offset + 6 + len <= bytes.len()
 }
 
 fn host_extender_info_normalized_bytes(project_stream_bytes: &[u8]) -> Vec<u8> {

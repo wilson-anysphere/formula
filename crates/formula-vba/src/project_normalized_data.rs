@@ -279,19 +279,27 @@ fn read_dir_record(buf: &[u8], offset: usize) -> Result<(u16, &[u8], usize), Dir
     // For v3 transcripts, we want to be able to scan past this record even when it uses the
     // spec-compliant fixed-length form.
     if id == 0x0009 {
-        let reserved_or_size = u32::from_le_bytes([
+        // PROJECTVERSION (0x0009) is fixed-length in MS-OVBA, but many fixtures (and some
+        // producers) encode it as a normal TLV record (`Id || Size || Data`).
+        //
+        // Disambiguate by checking which interpretation yields a plausible next record header.
+        let size_or_reserved = u32::from_le_bytes([
             buf[offset + 2],
             buf[offset + 3],
             buf[offset + 4],
             buf[offset + 5],
         ]) as usize;
-        if reserved_or_size == 0 {
-            let end = offset + 12;
-            if end > buf.len() {
-                return Err(DirParseError::Truncated);
-            }
-            // Return the record "data" bytes following the Id.
-            return Ok((id, &buf[offset + 2..end], end));
+        let tlv_end = offset.saturating_add(6).saturating_add(size_or_reserved);
+        let fixed_end = offset.saturating_add(12);
+
+        let tlv_next_ok = looks_like_projectversion_following_record(buf, tlv_end);
+        let fixed_next_ok = looks_like_projectversion_following_record(buf, fixed_end);
+
+        // Prefer the fixed-length interpretation when the TLV interpretation would leave us at an
+        // implausible record boundary, or when the `Size` field is `0` (which is a common reserved
+        // value in fixed-length PROJECTVERSION records).
+        if fixed_end <= buf.len() && fixed_next_ok && (!tlv_next_ok || size_or_reserved == 0) {
+            return Ok((id, &buf[offset + 2..fixed_end], fixed_end));
         }
     }
 
@@ -307,6 +315,32 @@ fn read_dir_record(buf: &[u8], offset: usize) -> Result<(u16, &[u8], usize), Dir
         return Err(DirParseError::BadRecordLength { id, len });
     }
     Ok((id, &buf[data_start..data_end], data_end))
+}
+
+fn looks_like_projectversion_following_record(bytes: &[u8], offset: usize) -> bool {
+    if offset == bytes.len() {
+        return true;
+    }
+    if offset + 6 > bytes.len() {
+        return false;
+    }
+    let id = u16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
+    // After PROJECTVERSION, we expect either PROJECTCONSTANTS (0x000C), a reference record, the
+    // ProjectModules header, or (in some real-world streams) PROJECTCOMPATVERSION.
+    if !matches!(
+        id,
+        0x000C | 0x003C | 0x004A | 0x000D | 0x000E | 0x0016 | 0x002F | 0x0030 | 0x0033 | 0x000F
+            | 0x0013 | 0x0010 | 0x0019 | 0x0047 | 0x001A | 0x0032
+    ) {
+        return false;
+    }
+    let len = u32::from_le_bytes([
+        bytes[offset + 2],
+        bytes[offset + 3],
+        bytes[offset + 4],
+        bytes[offset + 5],
+    ]) as usize;
+    offset + 6 + len <= bytes.len()
 }
 
 fn trim_reserved_u16(bytes: &[u8]) -> &[u8] {

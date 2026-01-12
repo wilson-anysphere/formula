@@ -132,7 +132,7 @@ fn dump_dir_records(decompressed: &[u8]) {
         }
 
         let id = u16::from_le_bytes([decompressed[offset], decompressed[offset + 1]]);
-        let raw_len_or_reserved = u32::from_le_bytes([
+        let len_field = u32::from_le_bytes([
             decompressed[offset + 2],
             decompressed[offset + 3],
             decompressed[offset + 4],
@@ -143,11 +143,18 @@ fn dump_dir_records(decompressed: &[u8]) {
         //
         // However, real-world projects can store PROJECTVERSION (0x0009) in the fixed-length form:
         //   Id(u16) || Reserved(u32) || VersionMajor(u32) || VersionMinor(u16)
-        // (12 bytes total). When Reserved is 0, a naive TLV parser would interpret it as `Size=0`
-        // and mis-align parsing for all following records.
-        let (data, record_len, next_offset) = if id == 0x0009 && raw_len_or_reserved == 0 {
-            let end = record_offset + 12;
-            if end > decompressed.len() {
+        // (12 bytes total).
+        //
+        // Many of our fixtures and some producers instead encode it as TLV (`Id || Size || Data`).
+        // Disambiguate by checking which interpretation yields a plausible next record boundary.
+        let (data, record_len, next_offset) = if id == 0x0009 {
+            let tlv_end = record_offset.saturating_add(6).saturating_add(len_field);
+            let fixed_end = record_offset.saturating_add(12);
+
+            let tlv_next_ok = looks_like_projectversion_following_record(decompressed, tlv_end);
+            let fixed_next_ok = looks_like_projectversion_following_record(decompressed, fixed_end);
+
+            if len_field == 0 && fixed_end > decompressed.len() {
                 println!(
                     "[{:03}] offset=0x{record_offset:08x} id={id:#06x} <truncated PROJECTVERSION: need 12 bytes, have {}>",
                     idx + 1,
@@ -156,26 +163,41 @@ fn dump_dir_records(decompressed: &[u8]) {
                 break;
             }
 
-            (
-                &decompressed[record_offset + 2..end],
-                10usize,
-                end,
-            )
+            if fixed_end <= decompressed.len()
+                && fixed_next_ok
+                && (!tlv_next_ok || len_field == 0)
+            {
+                let data = &decompressed[record_offset + 2..fixed_end];
+                (data, data.len(), fixed_end)
+            } else {
+                let data_start = record_offset + 6;
+                let data_end = data_start.saturating_add(len_field);
+                if data_end > decompressed.len() {
+                    println!(
+                        "[{:03}] offset=0x{record_offset:08x} id={id:#06x} len={len_field} <bad record length: need {} bytes, have {}>",
+                        idx + 1,
+                        len_field,
+                        decompressed.len().saturating_sub(data_start)
+                    );
+                    break;
+                }
+                (&decompressed[data_start..data_end], len_field, data_end)
+            }
         } else {
-            let len = raw_len_or_reserved;
             let data_start = record_offset + 6;
-            let data_end = data_start + len;
+            let data_end = data_start.saturating_add(len_field);
             if data_end > decompressed.len() {
                 println!(
-                    "[{:03}] offset=0x{record_offset:08x} id={id:#06x} len={len} <bad record length: need {} bytes, have {}>",
+                    "[{:03}] offset=0x{record_offset:08x} id={id:#06x} len={len_field} <bad record length: need {} bytes, have {}>",
                     idx + 1,
-                    len,
+                    len_field,
                     decompressed.len().saturating_sub(data_start)
                 );
                 break;
             }
-            (&decompressed[data_start..data_end], len, data_end)
+            (&decompressed[data_start..data_end], len_field, data_end)
         };
+
         offset = next_offset;
 
         idx += 1;
@@ -239,6 +261,30 @@ fn dump_dir_records(decompressed: &[u8]) {
         println!();
         println!("records: {idx} (stopped early at offset=0x{offset:08x})");
     }
+}
+
+fn looks_like_projectversion_following_record(bytes: &[u8], offset: usize) -> bool {
+    if offset == bytes.len() {
+        return true;
+    }
+    if offset + 6 > bytes.len() {
+        return false;
+    }
+    let id = u16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
+    if !matches!(
+        id,
+        0x000C | 0x003C | 0x004A | 0x000D | 0x000E | 0x0016 | 0x002F | 0x0030 | 0x0033 | 0x000F
+            | 0x0013 | 0x0010 | 0x0019 | 0x0047 | 0x001A | 0x0032
+    ) {
+        return false;
+    }
+    let len = u32::from_le_bytes([
+        bytes[offset + 2],
+        bytes[offset + 3],
+        bytes[offset + 4],
+        bytes[offset + 5],
+    ]) as usize;
+    offset + 6 + len <= bytes.len()
 }
 
 fn bytes_to_hex_spaced(bytes: &[u8]) -> String {
