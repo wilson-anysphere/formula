@@ -4260,17 +4260,12 @@ if (
       }
     }
 
-    function sanitizeDomId(value: string): string {
-      // HTML `id` must not contain ASCII whitespace.
-      return String(value).replace(/\s+/g, "-");
-    }
-
     function dockTabDomId(panelId: string): string {
-      return sanitizeDomId(`dock-tab-${panelId}`);
+      return `dock-tab-${encodeURIComponent(panelId)}`;
     }
 
     function dockTabPanelDomId(panelId: string): string {
-      return sanitizeDomId(`dock-tabpanel-${panelId}`);
+      return `dock-tabpanel-${encodeURIComponent(panelId)}`;
     }
 
     const panel = document.createElement("div");
