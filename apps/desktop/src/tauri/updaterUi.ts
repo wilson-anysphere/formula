@@ -392,7 +392,11 @@ function ensureUpdateDialog(): DialogElements {
     // Tests (and potentially custom host integrations) may remove the dialog from the DOM.
     // If it exists but is detached, reattach so update-available events can still surface UI.
     if (!updateDialog.dialog.isConnected && document.body) {
-      document.body.appendChild(updateDialog.dialog);
+      try {
+        document.body.appendChild(updateDialog.dialog);
+      } catch {
+        // Best-effort.
+      }
     }
     return updateDialog;
   }

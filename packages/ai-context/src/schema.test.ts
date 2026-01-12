@@ -119,4 +119,35 @@ describe("extractSheetSchema", () => {
     expect(regions).toHaveLength(1);
     expect(regions[0]).toEqual({ startRow: 0, startCol: 0, endRow: size - 1, endCol: size - 1 });
   });
+
+  it("quotes non-identifier sheet names in generated A1 ranges", () => {
+    const sheet = {
+      name: "My Sheet",
+      values: [
+        ["Product", "Sales"],
+        ["Alpha", 10],
+        ["Beta", 20]
+      ]
+    };
+
+    const schema = extractSheetSchema(sheet);
+    expect(schema.name).toBe("My Sheet");
+    expect(schema.tables[0].range).toBe("'My Sheet'!A1:B3");
+    expect(schema.dataRegions[0].range).toBe("'My Sheet'!A1:B3");
+  });
+
+  it("escapes single quotes in quoted sheet prefixes", () => {
+    const sheet = {
+      name: "Bob's Sheet",
+      values: [
+        ["Product", "Sales"],
+        ["Alpha", 10],
+        ["Beta", 20]
+      ]
+    };
+
+    const schema = extractSheetSchema(sheet);
+    expect(schema.tables[0].range).toBe("'Bob''s Sheet'!A1:B3");
+    expect(schema.dataRegions[0].range).toBe("'Bob''s Sheet'!A1:B3");
+  });
 });

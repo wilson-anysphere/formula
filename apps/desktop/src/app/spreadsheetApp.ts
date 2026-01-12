@@ -4069,7 +4069,7 @@ export class SpreadsheetApp {
       // without running the constructor/field initializers, so `this.document` may be undefined.
       const ids = this.document?.getSheetIds?.() ?? [];
       if (ids.includes("Sheet1")) return "Sheet1";
-      // When mixing `??` and `||`, parenthesize explicitly to avoid precedence pitfalls.
+      // When mixing `??` and `||`, parenthesize explicitly (required by JS syntax).
       return ids[0] ?? (this.sheetId || "Sheet1");
     })();
 
