@@ -588,7 +588,7 @@ export function SheetTabStrip({
               // Best-effort: use the current tab color as the initial value when it's a #RRGGBB hex string.
               // Otherwise, reset the picker to a token-backed default (so we don't leak the last selection from
               // a different sheet / previous open).
-              const currentCss = normalizeExcelColorToCss(sheet.tabColor?.rgb);
+              const currentCss = normalizeExcelColorToCss(sheet.tabColor);
               const defaultValue = tabColorPickerDefaultValueRef.current ?? input.value;
               const initialValue = (() => {
                 const normalized = String(currentCss ?? "").trim();
