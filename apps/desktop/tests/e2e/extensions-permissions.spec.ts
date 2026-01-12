@@ -507,4 +507,73 @@ test.describe("Extensions permissions UI", () => {
       await page.unroute("http://two.example/**").catch(() => {});
     }
   });
+
+  test("reset permissions for this extension clears granted permissions", async ({ page }) => {
+    const url = "http://allowed.example/";
+    const extensionId = "formula.sample-hello";
+
+    await page.route("http://allowed.example/**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/plain",
+        headers: { "Access-Control-Allow-Origin": "*" },
+        body: "hello",
+      });
+    });
+
+    try {
+      await page.addInitScript(() => {
+        try {
+          localStorage.removeItem("formula.extensionHost.permissions");
+        } catch {
+          // ignore
+        }
+      });
+
+      await gotoDesktop(page);
+
+      await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
+      await expect(page.getByTestId("panel-extensions")).toBeVisible();
+
+      // Grant permissions (ui.commands + network) by running fetchText once.
+      await page.getByTestId("run-command-with-args-sampleHello.fetchText").click();
+      await expect(page.getByTestId("input-box")).toBeVisible();
+      await page.getByTestId("input-box-field").fill(JSON.stringify([url]));
+      await page.getByTestId("input-box-ok").click();
+
+      await expect(page.getByTestId("extension-permission-prompt")).toBeVisible();
+      await page.getByTestId("extension-permission-allow").click();
+      await expect(page.getByTestId("extension-permission-prompt")).toBeVisible();
+      await page.getByTestId("extension-permission-allow").click();
+
+      await expect(page.getByTestId("toast-root")).toContainText("Fetched: hello");
+      await expect(page.getByTestId(`permission-row-${extensionId}-ui.commands`)).toContainText("granted");
+      await expect(page.getByTestId(`permission-row-${extensionId}-network`)).toContainText("allowed.example");
+
+      // Reset permissions for this extension.
+      await page.getByTestId(`reset-extension-permissions-${extensionId}`).click();
+
+      await expect(page.getByTestId(`permission-row-${extensionId}-ui.commands`)).toContainText("not granted");
+      await expect(page.getByTestId(`permission-row-${extensionId}-network`)).toContainText("not granted");
+
+      // Running again should prompt again.
+      await page.getByTestId("run-command-with-args-sampleHello.fetchText").click();
+      await expect(page.getByTestId("input-box")).toBeVisible();
+      await page.getByTestId("input-box-field").fill(JSON.stringify([url]));
+      await page.getByTestId("input-box-ok").click();
+
+      await expect(page.getByTestId("extension-permission-prompt")).toBeVisible();
+      await expect(page.getByTestId("extension-permission-ui.commands")).toBeVisible();
+      await page.getByTestId("extension-permission-allow").click();
+      await expect(page.getByTestId("extension-permission-ui.commands")).toHaveCount(0);
+
+      await expect(page.getByTestId("extension-permission-prompt")).toBeVisible();
+      await expect(page.getByTestId("extension-permission-network")).toBeVisible();
+      await page.getByTestId("extension-permission-deny").click();
+      await expect(page.getByTestId("toast-root")).toContainText("Permission denied");
+      await expect(page.getByTestId(`permission-row-${extensionId}-network`)).toContainText("not granted");
+    } finally {
+      await page.unroute("http://allowed.example/**").catch(() => {});
+    }
+  });
 });
