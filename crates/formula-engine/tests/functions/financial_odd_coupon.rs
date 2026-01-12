@@ -49,7 +49,6 @@ fn eval_value_or_skip(sheet: &mut TestSheet, formula: &str) -> Option<Value> {
         other => Some(other),
     }
 }
-
 #[test]
 fn oddfprice_zero_coupon_rate_reduces_to_discounted_redemption() {
     let system = ExcelDateSystem::EXCEL_1900;

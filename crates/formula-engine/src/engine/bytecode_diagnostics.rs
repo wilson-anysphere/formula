@@ -15,6 +15,12 @@ pub enum BytecodeCompileReason {
     Volatile,
     /// The formula calls a non-thread-safe function and cannot be evaluated in the bytecode VM.
     NotThreadSafe,
+    /// The formula uses dynamic dependency functions (e.g. `OFFSET`, `INDIRECT`) which require
+    /// dependency tracing during evaluation.
+    ///
+    /// The bytecode backend does not yet implement dynamic dependency tracing, so these formulas
+    /// must fall back to the AST evaluator.
+    DynamicDependencies,
     /// Lowering the canonical formula AST into the bytecode AST failed.
     LowerError(bytecode::LowerError),
     /// The bytecode backend does not yet support this expression shape (even if lowering succeeded).

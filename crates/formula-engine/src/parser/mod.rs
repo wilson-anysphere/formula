@@ -3352,8 +3352,9 @@ fn estimate_tokenized_bytes(expr: &Expr) -> usize {
                 // Approximate as a small operator overhead plus a string-like payload for the field
                 // name, and include the base expression size.
                 total = total.saturating_add(1);
-                total = total
-                    .saturating_add(3usize.saturating_add(access.field.chars().count().saturating_mul(2)));
+                total = total.saturating_add(
+                    3usize.saturating_add(access.field.chars().count().saturating_mul(2)),
+                );
                 stack.push(access.base.as_ref());
             }
             Expr::Array(arr) => {

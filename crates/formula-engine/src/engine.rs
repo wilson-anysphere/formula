@@ -2912,7 +2912,7 @@ impl Engine {
         // Dynamic-dependency formulas (e.g. OFFSET/INDIRECT) require dependency tracing during
         // evaluation, which the bytecode backend does not yet implement.
         if dynamic_deps {
-            return Err(BytecodeCompileReason::IneligibleExpr);
+            return Err(BytecodeCompileReason::DynamicDependencies);
         }
 
         // The bytecode engine currently assumes Excel's fixed worksheet bounds. When callers
@@ -4807,7 +4807,9 @@ fn canonical_expr_contains_external_workbook_refs(expr: &crate::Expr) -> bool {
         crate::Expr::ColRef(r) => r.workbook.is_some(),
         crate::Expr::RowRef(r) => r.workbook.is_some(),
         crate::Expr::StructuredRef(r) => r.workbook.is_some(),
-        crate::Expr::FieldAccess(access) => canonical_expr_contains_external_workbook_refs(access.base.as_ref()),
+        crate::Expr::FieldAccess(access) => {
+            canonical_expr_contains_external_workbook_refs(access.base.as_ref())
+        },
         crate::Expr::FunctionCall(call) => call
             .args
             .iter()
@@ -4846,6 +4848,7 @@ fn canonical_expr_contains_let_or_lambda(expr: &crate::Expr) -> bool {
             }
             call.args.iter().any(canonical_expr_contains_let_or_lambda)
         }
+        crate::Expr::FieldAccess(access) => canonical_expr_contains_let_or_lambda(access.base.as_ref()),
         crate::Expr::Call(call) => {
             canonical_expr_contains_let_or_lambda(call.callee.as_ref())
                 || call
@@ -5557,7 +5560,7 @@ fn rewrite_defined_name_constants_for_bytecode(
                         field: access.field.clone(),
                     })
                 })
-            }
+            },
             crate::Expr::FunctionCall(call) => {
                 if matches!(
                     bytecode::ast::Function::from_name(&call.name.name_upper),
