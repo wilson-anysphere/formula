@@ -298,13 +298,15 @@ pub fn diff_archives_with_options(
                 (Err(_), Ok(_)) | (Ok(_), Err(_)) => {
                     // For non-standard extensions, fall back to binary compare.
                     if expected_bytes != actual_bytes {
+                        let (expected_summary, actual_summary) =
+                            binary_diff_summary(expected_bytes, actual_bytes);
                         report.differences.push(Difference::new(
                             severity_for_part(part),
                             part.to_string(),
                             "",
                             "binary_diff",
-                            Some(format!("{} bytes", expected_bytes.len())),
-                            Some(format!("{} bytes", actual_bytes.len())),
+                            Some(expected_summary),
+                            Some(actual_summary),
                         ));
                     }
                 }
@@ -318,25 +320,28 @@ pub fn diff_archives_with_options(
                 )),
                 (Err(_), Err(_)) => {
                     if expected_bytes != actual_bytes {
+                        let (expected_summary, actual_summary) =
+                            binary_diff_summary(expected_bytes, actual_bytes);
                         report.differences.push(Difference::new(
                             severity_for_part(part),
                             part.to_string(),
                             "",
                             "binary_diff",
-                            Some(format!("{} bytes", expected_bytes.len())),
-                            Some(format!("{} bytes", actual_bytes.len())),
+                            Some(expected_summary),
+                            Some(actual_summary),
                         ));
                     }
                 }
             }
         } else if expected_bytes != actual_bytes {
+            let (expected_summary, actual_summary) = binary_diff_summary(expected_bytes, actual_bytes);
             report.differences.push(Difference::new(
                 severity_for_part(part),
                 part.to_string(),
                 "",
                 "binary_diff",
-                Some(format!("{} bytes", expected_bytes.len())),
-                Some(format!("{} bytes", actual_bytes.len())),
+                Some(expected_summary),
+                Some(actual_summary),
             ));
         }
     }
@@ -646,6 +651,32 @@ fn is_calc_chain_relationship(ty: &str, target: &str) -> bool {
     }
 
     ty.to_ascii_lowercase().contains("relationships/calcchain")
+}
+
+fn binary_diff_summary(expected: &[u8], actual: &[u8]) -> (String, String) {
+    let expected_len = expected.len();
+    let actual_len = actual.len();
+
+    let min_len = expected_len.min(actual_len);
+    let mut first_diff = None;
+    for idx in 0..min_len {
+        if expected[idx] != actual[idx] {
+            first_diff = Some(idx);
+            break;
+        }
+    }
+    if first_diff.is_none() && expected_len != actual_len {
+        first_diff = Some(min_len);
+    }
+
+    let mut expected_summary = format!("{expected_len} bytes");
+    let mut actual_summary = format!("{actual_len} bytes");
+    if let Some(offset) = first_diff {
+        expected_summary.push_str(&format!(" (first diff at offset {offset})"));
+        actual_summary.push_str(&format!(" (first diff at offset {offset})"));
+    }
+
+    (expected_summary, actual_summary)
 }
 
 /// A minimal “load → save” round-trip that preserves each part byte-for-byte.
