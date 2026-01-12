@@ -83,6 +83,18 @@ fn locate_pkcs7_signed_data<'a>(
         }));
     }
 
+    // Office commonly wraps the PKCS#7 blob in a [MS-OFFCRYPTO] DigSigInfoSerialized structure.
+    // Parsing the header is deterministic and avoids worst-case behavior from scanning every 0x30.
+    if let Some(info) = crate::offcrypto::parse_digsig_info_serialized(signature_stream) {
+        let end = info.pkcs7_offset.saturating_add(info.pkcs7_len);
+        if end <= signature_stream.len() {
+            return Ok(Some(Pkcs7Location {
+                der: &signature_stream[info.pkcs7_offset..end],
+                offset: info.pkcs7_offset,
+            }));
+        }
+    }
+
     // Best-effort scan for an embedded ContentInfo SEQUENCE.
     // We do not rely on DER length decoding here because BER indefinite-length encodings are common
     // (OpenSSL `-stream`) and some producers prepend a small header/prefix.

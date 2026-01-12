@@ -31,20 +31,35 @@ fn extracts_spc_indirect_data_digest_from_signed_vba_fixture() {
         sig.stream_path
     );
 
-    // Excel commonly prefixes the stream with a serialized header (e.g. DigSigInfoSerialized)
-    // before the DER PKCS#7 blob. Ensure we can still locate the PKCS#7 payload.
+    // Many real-world files wrap the PKCS#7 blob in a [MS-OFFCRYPTO] DigSigInfoSerialized header.
     assert_ne!(sig.signature.first(), Some(&0x30));
-    assert_eq!(sig.signature.get(4), Some(&0x30));
+    assert!(
+        sig.signature.len() >= 12,
+        "expected at least DigSigInfoSerialized header"
+    );
+
+    let cb_signature = u32::from_le_bytes(sig.signature[0..4].try_into().unwrap()) as usize;
+    let cb_cert_store = u32::from_le_bytes(sig.signature[4..8].try_into().unwrap()) as usize;
+    let cch_project_name = u32::from_le_bytes(sig.signature[8..12].try_into().unwrap()) as usize;
+    let project_name_bytes = cch_project_name * 2;
+
+    let cert_store_offset = 12 + project_name_bytes;
+    let pkcs7_offset = cert_store_offset + cb_cert_store;
+
+    // The fixture intentionally includes a *decoy* PKCS#7 blob inside the certificate store bytes
+    // so that naive scanning would pick the wrong payload. Correct handling should use the
+    // DigSigInfoSerialized length fields to locate the real signature.
+    assert_eq!(sig.signature.get(cert_store_offset), Some(&0x30));
+    assert_eq!(sig.signature.get(pkcs7_offset), Some(&0x30));
+    assert_eq!(cb_signature, sig.signature.len().saturating_sub(pkcs7_offset));
 
     let signed_digest = extract_vba_signature_signed_digest(&sig.signature)
         .expect("digest extraction should succeed")
         .expect("digest info should be present");
 
-    match signed_digest.digest_algorithm_oid.as_str() {
-        // SHA-1
-        "1.3.14.3.2.26" => assert_eq!(signed_digest.digest.len(), 20),
-        // SHA-256
-        "2.16.840.1.101.3.4.2.1" => assert_eq!(signed_digest.digest.len(), 32),
-        other => panic!("unexpected digest algorithm OID: {}", other),
-    }
+    assert_eq!(
+        signed_digest.digest_algorithm_oid,
+        "2.16.840.1.101.3.4.2.1"
+    );
+    assert_eq!(signed_digest.digest, (0u8..32).collect::<Vec<_>>());
 }
