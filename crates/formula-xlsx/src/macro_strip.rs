@@ -583,7 +583,12 @@ fn patched_override(
     };
 
     if content_type.contains("macroEnabled.main+xml") {
-        let mut updated = BytesStart::new("Override");
+        // Preserve the original element name (including any namespace prefix) so we don't produce
+        // namespace-less `<Override>` elements when stripping macros from prefix-only
+        // `[Content_Types].xml` documents (e.g. `<ct:Types xmlns:ct=\"...\">`).
+        let tag_name = e.name();
+        let tag_name = std::str::from_utf8(tag_name.as_ref()).unwrap_or("Override");
+        let mut updated = BytesStart::new(tag_name);
         updated.push_attribute(("PartName", part_name.as_str()));
         updated.push_attribute((
             "ContentType",
