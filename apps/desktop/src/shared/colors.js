@@ -8,7 +8,7 @@
  * - XLSX/OOXML color reference objects (formula-model + common tooling variants):
  *   - `{ argb: string, tint?: number }`
  *   - `{ rgb: string, tint?: number }`
- *   - `{ indexed: number }` (Excel indexed palette, 0..=63; 64 is "auto")
+ *   - `{ indexed: number, tint?: number }` (Excel indexed palette, 0..=63; 64 is "auto")
  *   - `{ theme: number, tint?: number }` (Office 2013 default theme palette)
  *   - `{ auto: true }`
  * - Any other non-hex string (e.g. `"red"`, `"rgb(…)"`) is returned as-is.
@@ -18,8 +18,6 @@
  * - fractions in `[-1, 1]` (OOXML-style, e.g. `-0.5`).
  *
  * Alpha is rounded to 3 decimal places for deterministic outputs (e.g. `0x80 / 255` -> `0.502`).
- * Tint supports both formula-model's thousandths encoding (e.g. `-500`) and the OOXML float
- * encoding (e.g. `-0.5`).
  *
  * @param {unknown} input
  * @returns {string | undefined}
