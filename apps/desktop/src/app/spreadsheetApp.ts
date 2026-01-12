@@ -2940,7 +2940,7 @@ export class SpreadsheetApp {
 
     const docCell = this.docCellFromGridCell(picked);
     const metaKey = docCell.row * COMMENT_COORD_COL_STRIDE + docCell.col;
-    if (!this.commentMetaByCoord.has(metaKey)) {
+    if (!this.commentMetaByCoord.get(metaKey)) {
       this.hideCommentTooltip();
       return;
     }
@@ -5907,7 +5907,7 @@ export class SpreadsheetApp {
 
     const cell = this.cellFromPoint(x, y);
     const metaKey = cell.row * COMMENT_COORD_COL_STRIDE + cell.col;
-    if (!this.commentMetaByCoord.has(metaKey)) {
+    if (!this.commentMetaByCoord.get(metaKey)) {
       this.hideCommentTooltip();
       return;
     }
