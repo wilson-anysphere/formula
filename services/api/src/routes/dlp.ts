@@ -22,9 +22,11 @@ async function requireDocRead(
   }
   const membership = await request.server.db.query(
     `
-      SELECT d.org_id, dm.role, os.ip_allowlist
+      SELECT d.org_id, dm.role, om.role AS org_member_role, os.ip_allowlist
       FROM documents d
       LEFT JOIN org_settings os ON os.org_id = d.org_id
+      LEFT JOIN org_members om
+        ON om.org_id = d.org_id AND om.user_id = $2
       LEFT JOIN document_members dm
         ON dm.document_id = d.id AND dm.user_id = $2
       WHERE d.id = $1
@@ -38,12 +40,22 @@ async function requireDocRead(
     return null;
   }
 
-  const row = membership.rows[0] as { org_id: string; role: DocumentRole | null; ip_allowlist: unknown };
+  const row = membership.rows[0] as {
+    org_id: string;
+    role: DocumentRole | null;
+    org_member_role: string | null;
+    ip_allowlist: unknown;
+  };
   if (request.authOrgId && request.authOrgId !== row.org_id) {
     reply.code(404).send({ error: "doc_not_found" });
     return null;
   }
   if (!(await enforceOrgIpAllowlistForSessionWithAllowlist(request, reply, row.org_id, row.ip_allowlist))) {
+    return null;
+  }
+
+  if (!row.org_member_role) {
+    reply.code(403).send({ error: "forbidden" });
     return null;
   }
 

@@ -360,6 +360,55 @@ describe("API e2e: DLP enforcement on public share links", () => {
     });
   }, 20_000);
 
+  it("requires org membership to evaluate DLP for a document", async () => {
+    const ownerRegister = await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: {
+        email: "dlp-eval-membership-owner@example.com",
+        password: "password1234",
+        name: "Owner",
+        orgName: "DLP Eval Membership Org"
+      }
+    });
+    expect(ownerRegister.statusCode).toBe(200);
+    const ownerCookie = extractCookie(ownerRegister.headers["set-cookie"]);
+    const ownerBody = ownerRegister.json() as any;
+    const orgId = ownerBody.organization.id as string;
+    const userId = ownerBody.user.id as string;
+
+    const createDoc = await app.inject({
+      method: "POST",
+      url: "/docs",
+      headers: { cookie: ownerCookie },
+      payload: { orgId, title: "DLP eval doc" }
+    });
+    expect(createDoc.statusCode).toBe(200);
+    const docId = (createDoc.json() as any).document.id as string;
+
+    const evaluateBefore = await app.inject({
+      method: "POST",
+      url: `/docs/${docId}/dlp/evaluate`,
+      headers: { cookie: ownerCookie },
+      payload: { action: "sharing.externalLink" }
+    });
+    expect(evaluateBefore.statusCode).toBe(200);
+
+    // Simulate an inconsistent DB state where the user is still a document member but
+    // no longer an org member. DLP evaluation should follow the same org-membership
+    // requirement as other document APIs.
+    await db.query("DELETE FROM org_members WHERE org_id = $1 AND user_id = $2", [orgId, userId]);
+
+    const evaluateAfter = await app.inject({
+      method: "POST",
+      url: `/docs/${docId}/dlp/evaluate`,
+      headers: { cookie: ownerCookie },
+      payload: { action: "sharing.externalLink" }
+    });
+    expect(evaluateAfter.statusCode).toBe(403);
+    expect(evaluateAfter.json()).toEqual({ error: "forbidden" });
+  }, 20_000);
+
   it("uses the most restrictive classification in the document when evaluating external share links", async () => {
     const ownerRegister = await app.inject({
       method: "POST",
