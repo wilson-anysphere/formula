@@ -189,6 +189,23 @@ describe("mountTitlebar", () => {
     });
   }, TEST_TIMEOUT_MS);
 
+  it("strips an em dash prefix even when there is no whitespace after it", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    let handle: ReturnType<typeof mountTitlebar> | null = null;
+    await act(async () => {
+      handle = mountTitlebar(container, { documentName: "—Untitled.xlsx", actions: [] });
+    });
+
+    expect(container.querySelector('[data-testid="titlebar-document-name"]')?.textContent).toBe("Untitled.xlsx");
+    expect(container.querySelector('[data-testid="titlebar-document-name"]')?.getAttribute("title")).toBe("Untitled.xlsx");
+
+    act(() => {
+      handle?.dispose();
+    });
+  }, TEST_TIMEOUT_MS);
+
   it("supports updating props via handle.update()", async () => {
     const container = document.createElement("div");
     container.classList.add("formula-titlebar");

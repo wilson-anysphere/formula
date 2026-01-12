@@ -97,7 +97,10 @@ function stripLeadingDocSeparator(documentName: string): string {
   // Remove leading separator characters only when they're clearly used as a
   // prefix (e.g. `— Foo.xlsx`). Avoid stripping a leading `-` from legitimate
   // filenames like `-report.xlsx`.
-  return trimmed.replace(/^[—–-]+\s+/, "");
+  if (/^[—–]/.test(trimmed)) {
+    return trimmed.replace(/^[—–-]+\s*/, "");
+  }
+  return trimmed.replace(/^-+\s+/, "");
 }
 
 export function Titlebar({
