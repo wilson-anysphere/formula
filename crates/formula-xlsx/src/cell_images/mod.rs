@@ -1,8 +1,16 @@
-//! Workbook-level "images in cells" (`xl/cellimages*.xml`) parsing.
+//! Workbook-level "images in cells" (`xl/cellimages*.xml`) parsing (when present).
 //!
-//! Modern Excel features like "Place in Cell" images and the `IMAGE()` function
-//! appear to rely on a workbook-level `xl/cellimages*.xml` part containing
-//! DrawingML `<pic>` payloads that reference media via relationships.
+//! Some workbooks include a workbook-level `xl/cellimages*.xml` part containing DrawingML image
+//! payloads (`<pic>`, `<a:blip r:embed="…">`, etc.) that reference `xl/media/*` via relationships.
+//! This module provides best-effort parsing for that optional schema.
+//!
+//! Modern Excel "Place in Cell" embedded images commonly do **not** use `xl/cellimages.xml`.
+//! Instead Excel typically stores the image association via `xl/metadata.xml` plus the rich value
+//! store: `xl/richData/{rdrichvalue*.xml,rdrichvaluestructure.xml,rdRichValueTypes.xml,richValueRel.xml}`
+//! (and relationships) together with `xl/media/*`.
+//!
+//! For a concrete walkthrough of the current Excel schema(s), see
+//! `docs/xlsx-embedded-images-in-cells.md`.
 mod part_info;
 
 pub use part_info::{CellImageEmbed, CellImagesPartInfo};

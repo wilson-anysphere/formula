@@ -2,9 +2,17 @@
 //!
 //! Excel stores cell-level rich values (data types, images-in-cells, etc.) via:
 //! - `xl/worksheets/sheet*.xml` `c/@vm` (value-metadata index)
+//! - `xl/_rels/workbook.xml.rels` relationship type
+//!   `http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata`
+//!   (as emitted by Excel) to locate `xl/metadata.xml`
 //! - `xl/metadata.xml` `<valueMetadata>` + rich-data extension payloads
-//! - `xl/richData/richValue*.xml` / `xl/richData/richValues*.xml` (rich-value records)
+//! - rich-value record parts, which appear in two naming families:
+//!   - `xl/richData/richValue*.xml` (also observed as `xl/richData/richValues*.xml`)
+//!   - `xl/richData/rdrichvalue*.xml`
 //! - `xl/richData/richValueRel.xml` + `xl/richData/_rels/richValueRel.xml.rels` (relationship indirection)
+//!
+//! For a concrete schema walkthrough (including images-in-cells), see
+//! `docs/xlsx-embedded-images-in-cells.md`.
 //!
 //! This module exposes best-effort parsing helpers without integrating into `formula-model` yet.
 
