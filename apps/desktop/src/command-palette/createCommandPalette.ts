@@ -1078,23 +1078,6 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   input.addEventListener("keydown", onInputKeyDown);
   list.addEventListener("keydown", onInputKeyDown);
 
-  const onGlobalKeyDown = (e: KeyboardEvent) => {
-    if (e.defaultPrevented) return;
-    const primary = e.ctrlKey || e.metaKey;
-    if (!primary || !e.shiftKey) return;
-    if (e.key !== "P" && e.key !== "p") return;
-
-    const target = e.target as HTMLElement | null;
-    if (target) {
-      const tag = target.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return;
-    }
-
-    e.preventDefault();
-    open();
-  };
-  window.addEventListener("keydown", onGlobalKeyDown);
-
   function dispose(): void {
     document.removeEventListener("focusin", handleDocumentFocusIn);
     debouncedRender.cancel();
@@ -1110,7 +1093,6 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     input.removeEventListener("input", onInput);
     input.removeEventListener("keydown", onInputKeyDown);
     list.removeEventListener("keydown", onInputKeyDown);
-    window.removeEventListener("keydown", onGlobalKeyDown);
     overlay.remove();
   }
 
