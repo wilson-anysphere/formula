@@ -2611,6 +2611,9 @@ if (
         restoreFocusAfterSheetNavigation();
 
         // Note: `??` cannot be mixed with `||` without parentheses (syntax error in JS).
+        // Prefer the name we just inserted into the workbook sheet store. When it is
+        // unavailable (should be rare), fall back to the backend-resolved name, then
+        // the requested name, then finally the id.
         return { id, name: workbookSheetStore.getName(id) ?? (resolvedName || sheetName || id) };
       }
 
