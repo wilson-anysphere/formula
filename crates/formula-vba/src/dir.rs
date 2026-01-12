@@ -53,6 +53,10 @@ impl DirStream {
         let mut constants = None;
         let mut modules: Vec<ModuleRecord> = Vec::new();
         let mut current_module: Option<ModuleRecord> = None;
+        // Some `VBA/dir` layouts store the Unicode module stream name as a separate record
+        // immediately following MODULESTREAMNAME (0x001A). Track that expectation so we can support
+        // alternate record IDs without misinterpreting unrelated records.
+        let mut expect_stream_name_unicode = false;
 
         while offset < decompressed.len() {
             if offset + 2 > decompressed.len() {
@@ -69,6 +73,8 @@ impl DirStream {
             // If we treat the u32 as a generic `Size` field, we can mis-align parsing and fail to
             // reach the module record groups.
             if id == 0x0009 {
+                expect_stream_name_unicode = false;
+
                 // Attempt to disambiguate between:
                 // - a TLV-ish variant: Id(u16) || Size(u32) || Data(Size)
                 // - the MS-OVBA fixed-length layout described above.
@@ -130,6 +136,10 @@ impl DirStream {
             let data = &decompressed[offset..offset + len];
             offset += len;
 
+            if expect_stream_name_unicode && !matches!(id, 0x0032 | 0x0048) {
+                expect_stream_name_unicode = false;
+            }
+
             match id {
                 0x0003 => {
                     // PROJECTCODEPAGE (u16 LE). We currently use the `PROJECT` stream as the
@@ -145,6 +155,7 @@ impl DirStream {
                     if let Some(m) = current_module.take() {
                         modules.push(m);
                     }
+                    expect_stream_name_unicode = false;
                     current_module = Some(ModuleRecord {
                         name: decode_bytes(data, encoding),
                         stream_name: String::new(),
@@ -186,6 +197,7 @@ impl DirStream {
                     // MODULESTREAMNAME. Some files include a reserved u16 at the end.
                     if let Some(m) = current_module.as_mut() {
                         m.stream_name = decode_bytes(trim_reserved_u16(data), encoding);
+                        expect_stream_name_unicode = true;
                     }
                 }
                 0x0032 => {
@@ -200,7 +212,8 @@ impl DirStream {
                         // - length == remaining bytes (byte count), or
                         // - length*2 == remaining bytes (UTF-16 code units).
                         if data.len() >= 4 {
-                            let n = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
+                            let n =
+                                u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
                             let remaining = data.len() - 4;
                             if n == remaining || n.saturating_mul(2) == remaining {
                                 utf16_bytes = &data[4..];
@@ -213,13 +226,21 @@ impl DirStream {
                         s.retain(|c| c != '\u{0000}');
                         m.stream_name = s;
                     }
+                    expect_stream_name_unicode = false;
+                }
+                0x0048 if expect_stream_name_unicode => {
+                    // Some producers use 0x0048 as the module stream name Unicode record id.
+                    if let Some(m) = current_module.as_mut() {
+                        m.stream_name = decode_unicode_bytes(data);
+                    }
+                    expect_stream_name_unicode = false;
                 }
                 0x0031 => {
                     // MODULETEXTOFFSET (u32 LE)
                     if let Some(m) = current_module.as_mut() {
                         if data.len() >= 4 {
-                            let n = u32::from_le_bytes([data[0], data[1], data[2], data[3]])
-                                as usize;
+                            let n =
+                                u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
                             m.text_offset = Some(n);
                         }
                     }

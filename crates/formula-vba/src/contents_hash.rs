@@ -427,6 +427,10 @@ pub fn content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
     let mut out = Vec::new();
     let mut modules: Vec<ModuleInfo> = Vec::new();
     let mut current_module: Option<ModuleInfo> = None;
+    // Some `VBA/dir` layouts encode the Unicode module stream name as a trailing sub-record after
+    // MODULESTREAMNAME (0x001A). Track whether we're expecting that sub-record so we can handle
+    // alternate record IDs (and avoid misinterpreting unrelated records that might share an ID).
+    let mut expect_module_stream_name_unicode = false;
 
     let mut offset = 0usize;
     while offset < dir_decompressed.len() {
@@ -447,6 +451,12 @@ pub fn content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
         }
         let data = &dir_decompressed[offset..offset + len];
         offset += len;
+
+        // If we just saw MODULESTREAMNAME and were expecting a Unicode stream name sub-record, any
+        // other record indicates the Unicode name is absent.
+        if expect_module_stream_name_unicode && !matches!(id, 0x0032 | 0x0048) {
+            expect_module_stream_name_unicode = false;
+        }
 
         match id {
             // PROJECTNAME.ProjectName
@@ -479,6 +489,7 @@ pub fn content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
                 if let Some(m) = current_module.take() {
                     modules.push(m);
                 }
+                expect_module_stream_name_unicode = false;
                 current_module = Some(ModuleInfo {
                     stream_name: decode_dir_string(data, encoding),
                     text_offset: None,
@@ -501,6 +512,7 @@ pub fn content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
                     if let Some(m) = current_module.take() {
                         modules.push(m);
                     }
+                    expect_module_stream_name_unicode = false;
                     current_module = Some(ModuleInfo {
                         stream_name: decode_dir_unicode_string(data),
                         text_offset: None,
@@ -519,6 +531,7 @@ pub fn content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
                 if let Some(m) = current_module.as_mut() {
                     m.stream_name = decode_dir_string(trim_reserved_u16(data), encoding);
                     m.seen_non_name_record = true;
+                    expect_module_stream_name_unicode = true;
                 }
             }
 
@@ -528,6 +541,18 @@ pub fn content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
                     m.stream_name = decode_dir_unicode_string(data);
                     m.seen_non_name_record = true;
                 }
+                expect_module_stream_name_unicode = false;
+            }
+
+            // Some producers use the MS-OVBA Unicode record id for MODULESTREAMNAMEUNICODE (commonly
+            // 0x0048) rather than the reserved marker 0x0032. Treat it as a stream-name Unicode
+            // variant only when it follows MODULESTREAMNAME.
+            0x0048 if expect_module_stream_name_unicode => {
+                if let Some(m) = current_module.as_mut() {
+                    m.stream_name = decode_dir_unicode_string(data);
+                    m.seen_non_name_record = true;
+                }
+                expect_module_stream_name_unicode = false;
             }
 
             // MODULETEXTOFFSET (u32 LE).
@@ -739,7 +764,11 @@ fn parse_fixed_record(cur: &mut DirCursor<'_>, expected_id: u16, expected_size: 
     Some(())
 }
 
-fn parse_record_u16_u16(cur: &mut DirCursor<'_>, expected_id: u16, expected_size: u32) -> Option<u16> {
+fn parse_record_u16_u16(
+    cur: &mut DirCursor<'_>,
+    expected_id: u16,
+    expected_size: u32,
+) -> Option<u16> {
     let id = cur.read_u16()?;
     let size = cur.read_u32()?;
     if id != expected_id || size != expected_size {
@@ -765,13 +794,17 @@ fn parse_projectdocstring_record(cur: &mut DirCursor<'_>) -> Option<()> {
     }
     let size = cur.read_u32()? as usize;
     cur.skip(size)?;
-    // Reserved (0x0040) + SizeOfDocStringUnicode + DocStringUnicode
-    let reserved = cur.read_u16()?;
-    if reserved != 0x0040 {
-        return None;
+    // Optional Unicode sub-record:
+    //   Reserved marker (commonly 0x0040) + SizeOfDocStringUnicode + DocStringUnicode
+    //
+    // Some producers omit the Unicode form entirely; accept that and continue parsing.
+    if let Some(reserved) = cur.peek_u16() {
+        if matches!(reserved, 0x0040 | 0x0041) {
+            cur.read_u16()?;
+            let size_unicode = cur.read_u32()? as usize;
+            cur.skip(size_unicode)?;
+        }
     }
-    let size_unicode = cur.read_u32()? as usize;
-    cur.skip(size_unicode)?;
     Some(())
 }
 
@@ -782,12 +815,15 @@ fn parse_projecthelpfilepath_record(cur: &mut DirCursor<'_>) -> Option<()> {
     }
     let size1 = cur.read_u32()? as usize;
     cur.skip(size1)?;
-    let reserved = cur.read_u16()?;
-    if reserved != 0x003D {
-        return None;
+    // Optional second path / Unicode form:
+    //   Reserved marker (commonly 0x003D) + SizeOfHelpFile2 + HelpFile2
+    if let Some(reserved) = cur.peek_u16() {
+        if matches!(reserved, 0x003D | 0x0042) {
+            cur.read_u16()?;
+            let size2 = cur.read_u32()? as usize;
+            cur.skip(size2)?;
+        }
     }
-    let size2 = cur.read_u32()? as usize;
-    cur.skip(size2)?;
     Some(())
 }
 
@@ -809,13 +845,15 @@ fn parse_projectconstants_record(cur: &mut DirCursor<'_>) -> Option<Vec<u8>> {
     }
     let size = cur.read_u32()? as usize;
     let constants = cur.take(size)?.to_vec();
-    // Reserved (0x003C) + SizeOfConstantsUnicode + ConstantsUnicode
-    let reserved = cur.read_u16()?;
-    if reserved != 0x003C {
-        return None;
+    // Optional Unicode form:
+    //   Reserved marker (commonly 0x003C) + SizeOfConstantsUnicode + ConstantsUnicode
+    if let Some(reserved) = cur.peek_u16() {
+        if matches!(reserved, 0x003C | 0x0043) {
+            cur.read_u16()?;
+            let size_unicode = cur.read_u32()? as usize;
+            cur.skip(size_unicode)?;
+        }
     }
-    let size_unicode = cur.read_u32()? as usize;
-    cur.skip(size_unicode)?;
     Some(constants)
 }
 
@@ -1013,7 +1051,10 @@ fn parse_modulename_record(cur: &mut DirCursor<'_>, expected_id: u16) -> Option<
     cur.take(size).map(|b| b.to_vec())
 }
 
-fn parse_module_stream_name(cur: &mut DirCursor<'_>, encoding: &'static Encoding) -> Option<String> {
+fn parse_module_stream_name(
+    cur: &mut DirCursor<'_>,
+    encoding: &'static Encoding,
+) -> Option<String> {
     let id = cur.read_u16()?;
     if id != 0x001A {
         return None;
@@ -1021,10 +1062,14 @@ fn parse_module_stream_name(cur: &mut DirCursor<'_>, encoding: &'static Encoding
     let size_name = cur.read_u32()? as usize;
     let raw_name = cur.take(size_name)?.to_vec();
 
-    // Spec-compliant MODULESTREAMNAME includes Reserved (0x0032) + Unicode name, but many fixtures
-    // omit those fields. Only parse them when the Reserved marker is present.
-    let unicode_name = if cur.peek_u16() == Some(0x0032) {
-        let _reserved = cur.read_u16()?;
+    // Spec-compliant MODULESTREAMNAME can include a Reserved marker + Unicode stream name, but many
+    // fixtures omit those fields. Only parse them when the marker is present.
+    //
+    // Marker values seen in the wild:
+    // - 0x0032 (common)
+    // - 0x0048 (alternate; some producers use the Unicode record id)
+    let unicode_name = if matches!(cur.peek_u16(), Some(0x0032) | Some(0x0048)) {
+        cur.read_u16()?;
         let size_unicode = cur.read_u32()? as usize;
         Some(cur.take(size_unicode)?.to_vec())
     } else {
@@ -1040,17 +1085,21 @@ fn parse_module_stream_name(cur: &mut DirCursor<'_>, encoding: &'static Encoding
 
 fn parse_moduledocstring_record(cur: &mut DirCursor<'_>) -> Option<()> {
     let id = cur.read_u16()?;
-    if id != 0x001C {
+    // MS-OVBA record IDs vary across producers; accept both 0x001B and 0x001C for MODULEDOCSTRING.
+    if id != 0x001B && id != 0x001C {
         return None;
     }
     let size = cur.read_u32()? as usize;
     cur.skip(size)?;
-    let reserved = cur.read_u16()?;
-    if reserved != 0x0048 {
-        return None;
+    // Optional Unicode docstring form:
+    //   Reserved marker (commonly 0x0048) + SizeOfDocStringUnicode + DocStringUnicode
+    if let Some(reserved) = cur.peek_u16() {
+        if matches!(reserved, 0x0048 | 0x0049) {
+            cur.read_u16()?;
+            let size_unicode = cur.read_u32()? as usize;
+            cur.skip(size_unicode)?;
+        }
     }
-    let size_unicode = cur.read_u32()? as usize;
-    cur.skip(size_unicode)?;
     Some(())
 }
 
@@ -1066,7 +1115,10 @@ fn parse_moduleoffset_record(cur: &mut DirCursor<'_>) -> Option<u32> {
     cur.read_u32()
 }
 
-fn parse_dir_for_hash_strict(dir_decompressed: &[u8], encoding: &'static Encoding) -> Option<DirForHash> {
+fn parse_dir_for_hash_strict(
+    dir_decompressed: &[u8],
+    encoding: &'static Encoding,
+) -> Option<DirForHash> {
     let mut cur = DirCursor::new(dir_decompressed);
 
     // PROJECTINFORMATION record (MS-OVBA §2.3.4.2.1)
@@ -1078,6 +1130,14 @@ fn parse_dir_for_hash_strict(dir_decompressed: &[u8], encoding: &'static Encodin
     parse_fixed_record(&mut cur, 0x0014, 0x0000_0004)?; // PROJECTLCIDINVOKE
     parse_record_u16_u16(&mut cur, 0x0003, 0x0000_0002)?; // PROJECTCODEPAGE
     let project_name = parse_projectname_record(&mut cur)?;
+    // Optional PROJECTNAMEUNICODE (record id 0x0040 in many layouts).
+    //
+    // This record is not incorporated in the v1/v2 ContentNormalizedData transcript (we use the
+    // ANSI PROJECTNAME bytes), but we must skip it so parsing remains aligned for spec-compliant
+    // `VBA/dir` streams that include it.
+    if cur.peek_u16()? == 0x0040 {
+        parse_modulename_record(&mut cur, 0x0040)?;
+    }
     parse_projectdocstring_record(&mut cur)?;
     parse_projecthelpfilepath_record(&mut cur)?;
     parse_fixed_record(&mut cur, 0x0007, 0x0000_0004)?; // PROJECTHELPCONTEXT
@@ -1147,7 +1207,7 @@ fn parse_dir_for_hash_strict(dir_decompressed: &[u8], encoding: &'static Encodin
             return None;
         }
         cur.read_u32()?; // Reserved
-        // Optional MODULEREADONLY (0x0025) and MODULEPRIVATE (0x0028)
+                         // Optional MODULEREADONLY (0x0025) and MODULEPRIVATE (0x0028)
         if cur.peek_u16()? == 0x0025 {
             cur.read_u16()?;
             cur.read_u32()?;
@@ -1450,13 +1510,19 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
 
             // PROJECTDOCSTRING (0x0005): include header only.
             0x0005 => out.extend_from_slice(&dir_decompressed[record_start..header_end]),
-            // PROJECTDOCSTRING unicode sub-record (0x0040): include header only.
-            0x0040 => out.extend_from_slice(&dir_decompressed[record_start..header_end]),
+            // PROJECTDOCSTRING unicode sub-record: include header only.
+            // Common IDs seen:
+            // - 0x0040 (reserved marker)
+            // - 0x0041 (Unicode record id in some producers)
+            0x0040 | 0x0041 => out.extend_from_slice(&dir_decompressed[record_start..header_end]),
 
             // PROJECTHELPFILEPATH (0x0006): include header only.
             0x0006 => out.extend_from_slice(&dir_decompressed[record_start..header_end]),
-            // PROJECTHELPFILEPATH "HelpFile2" sub-record (0x003D): include header only.
-            0x003D => out.extend_from_slice(&dir_decompressed[record_start..header_end]),
+            // PROJECTHELPFILEPATH "HelpFile2" / Unicode sub-record: include header only.
+            // Common IDs seen:
+            // - 0x003D (reserved marker)
+            // - 0x0042 (Unicode record id in some producers)
+            0x003D | 0x0042 => out.extend_from_slice(&dir_decompressed[record_start..header_end]),
 
             // PROJECTHELPCONTEXT (0x0007): include header only.
             0x0007 => out.extend_from_slice(&dir_decompressed[record_start..header_end]),
@@ -1466,8 +1532,11 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
 
             // PROJECTCONSTANTS (0x000C): include full record.
             0x000C => out.extend_from_slice(&dir_decompressed[record_start..record_end]),
-            // PROJECTCONSTANTS unicode sub-record (0x003C): include full record.
-            0x003C => out.extend_from_slice(&dir_decompressed[record_start..record_end]),
+            // PROJECTCONSTANTS unicode sub-record: include full record.
+            // Common IDs seen:
+            // - 0x003C (reserved marker)
+            // - 0x0043 (Unicode record id in some producers)
+            0x003C | 0x0043 => out.extend_from_slice(&dir_decompressed[record_start..record_end]),
 
             // ---- References ----
             //
