@@ -195,26 +195,17 @@ fn encode_json_value(value: serde_json::Value) -> Result<Value> {
 }
 
 fn coord_to_a1(row: u32, col: u32) -> String {
-    fn col_to_name(col: u32) -> String {
-        let mut n = col + 1;
-        let mut out = Vec::<u8>::new();
-        while n > 0 {
-            let rem = (n - 1) % 26;
-            out.push(b'A' + rem as u8);
-            n = (n - 1) / 26;
-        }
-        out.reverse();
-        String::from_utf8(out).expect("column letters are ASCII")
-    }
-    format!("{}{}", col_to_name(col), row + 1)
+    // Prefer the shared A1 formatter so very large row/col indices (e.g. u32::MAX) do not
+    // overflow when converting from 0-based internal coordinates to 1-based A1 notation.
+    formula_engine::eval::CellAddr { row, col }.to_a1()
 }
 
 fn range_to_a1(
     start: formula_engine::eval::CellAddr,
     end: formula_engine::eval::CellAddr,
 ) -> String {
-    let start_a1 = coord_to_a1(start.row, start.col);
-    let end_a1 = coord_to_a1(end.row, end.col);
+    let start_a1 = start.to_a1();
+    let end_a1 = end.to_a1();
     if start == end {
         start_a1
     } else {

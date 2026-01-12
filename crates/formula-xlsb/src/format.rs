@@ -2,17 +2,17 @@ use std::fmt::Write;
 
 /// Format helpers intended for diagnostics and developer tooling.
 pub fn format_a1(row: u32, col: u32) -> String {
-    let mut out = String::new();
-    push_column_label(col, &mut out);
-    // XLSB row/col indices are 0-based.
-    let _ = write!(&mut out, "{}", row + 1);
-    out
+    // XLSB row/col indices are 0-based, matching `formula-model::CellRef`.
+    //
+    // Delegate formatting to `CellRef::to_a1` so row/col arithmetic is done in u64 and
+    // remains robust for very large indices (e.g. u32::MAX) without debug overflow panics.
+    formula_model::CellRef::new(row, col).to_a1()
 }
 
 /// Convert a 0-based column index to an Excel column label and append it to `out`.
-pub fn push_column_label(mut col: u32, out: &mut String) {
+pub fn push_column_label(col: u32, out: &mut String) {
     // Excel column labels are 1-based.
-    col += 1;
+    let mut col = u64::from(col) + 1;
     let mut buf = [0u8; 10];
     let mut i = 0usize;
     while col > 0 {
@@ -37,4 +37,3 @@ pub fn format_hex(bytes: &[u8]) -> String {
     }
     out
 }
-

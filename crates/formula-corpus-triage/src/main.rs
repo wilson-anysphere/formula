@@ -712,10 +712,21 @@ fn render_smoke(doc: &formula_xlsx::XlsxDocument) -> Result<RenderDetails> {
     let max_rows = 20u32;
     let max_cols = 10u32;
 
-    let start_row = used.start.row + 1;
-    let start_col = used.start.col + 1;
-    let end_row = (used.end.row + 1).min(start_row.saturating_add(max_rows.saturating_sub(1)));
-    let end_col = (used.end.col + 1).min(start_col.saturating_add(max_cols.saturating_sub(1)));
+    // `used` stores 0-based row/col indexes. Convert to the 1-based coordinates expected by the
+    // print subsystem using saturating math so we don't panic on extremely large indexes
+    // (e.g. u32::MAX).
+    let start_row = used.start.row.saturating_add(1);
+    let start_col = used.start.col.saturating_add(1);
+    let end_row = used
+        .end
+        .row
+        .saturating_add(1)
+        .min(start_row.saturating_add(max_rows.saturating_sub(1)));
+    let end_col = used
+        .end
+        .col
+        .saturating_add(1)
+        .min(start_col.saturating_add(max_cols.saturating_sub(1)));
 
     let print_area = formula_xlsx::print::CellRange {
         start_row,
