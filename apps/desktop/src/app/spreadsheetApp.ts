@@ -73,7 +73,6 @@ import * as nativeDialogs from "../tauri/nativeDialogs.js";
 import { shellOpen } from "../tauri/shellOpen.js";
 import { applyFillCommitToDocumentController } from "../fill/applyFillCommit";
 import type { CellRange as FillEngineRange, FillMode as FillHandleMode } from "@formula/fill-engine";
-import { dateToExcelSerial } from "../shared/valueParsing.js";
 
 import * as Y from "yjs";
 import { CommentManager, bindDocToStorage, getCommentsRoot } from "@formula/collab-comments";
@@ -6408,24 +6407,22 @@ export class SpreadsheetApp {
   private insertCurrentDateTimeIntoSelection(kind: "date" | "time"): void {
     const now = new Date();
 
-    const serialValue = (() => {
+    const textValue = (() => {
       if (kind === "date") {
-        // Excel treats date serial values as "naive" calendar dates (no timezone).
-        // Use the *local* calendar date, but construct the serial using a UTC date so
-        // the stored number is stable/deterministic.
-        const dateUtc = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
-        return dateToExcelSerial(dateUtc);
+        // Excel's Ctrl+; shortcut inserts a *string* representation of the local
+        // calendar date. We intentionally avoid serial numbers / number formats for
+        // this shortcut path.
+        const month = now.getMonth() + 1;
+        const day = now.getDate();
+        const year = now.getFullYear();
+        return `${month}/${day}/${year}`;
       }
 
-      // Time-only: Excel stores times as the fractional part of a day. Use the local
-      // time-of-day and round to the nearest second (Excel's Ctrl+Shift+; resolution).
-      const totalSeconds =
-        now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds() + now.getMilliseconds() / 1000;
-      const roundedSeconds = Math.round(totalSeconds) % 86_400;
-      return roundedSeconds / 86_400;
+      // Excel's Ctrl+Shift+; shortcut inserts a time string without seconds.
+      const hour = now.getHours();
+      const minutes = String(now.getMinutes()).padStart(2, "0");
+      return `${hour}:${minutes}`;
     })();
-
-    const numberFormat = kind === "date" ? "yyyy-mm-dd" : "hh:mm:ss";
     const label = kind === "date" ? "Insert Date" : "Insert Time";
 
     const normalizeRange = (range: Range): Range => ({
@@ -6435,24 +6432,42 @@ export class SpreadsheetApp {
       endCol: Math.max(range.startCol, range.endCol),
     });
 
-    this.document.beginBatch({ label });
-    try {
+    const MAX_SELECTED_CELLS = 10_000;
+    const selectedCellCount = (() => {
+      let count = 0;
       for (const rawRange of this.selection.ranges) {
         const range = normalizeRange(rawRange);
         const rowCount = range.endRow - range.startRow + 1;
         const colCount = range.endCol - range.startCol + 1;
         if (rowCount <= 0 || colCount <= 0) continue;
+        count += rowCount * colCount;
+        if (count > MAX_SELECTED_CELLS) break;
+      }
+      return count;
+    })();
 
-        const values = Array.from({ length: rowCount }, () => Array.from({ length: colCount }, () => serialValue));
+    const targetRanges: Range[] =
+      selectedCellCount > MAX_SELECTED_CELLS
+        ? [
+            {
+              startRow: this.selection.active.row,
+              endRow: this.selection.active.row,
+              startCol: this.selection.active.col,
+              endCol: this.selection.active.col,
+            },
+          ]
+        : this.selection.ranges;
+
+    this.document.beginBatch({ label });
+    try {
+      for (const rawRange of targetRanges) {
+        const range = normalizeRange(rawRange);
+        const rowCount = range.endRow - range.startRow + 1;
+        const colCount = range.endCol - range.startCol + 1;
+        if (rowCount <= 0 || colCount <= 0) continue;
+
+        const values = Array.from({ length: rowCount }, () => Array.from({ length: colCount }, () => textValue));
         this.document.setRangeValues(this.sheetId, { row: range.startRow, col: range.startCol }, values);
-        this.document.setRangeFormat(
-          this.sheetId,
-          {
-            start: { row: range.startRow, col: range.startCol },
-            end: { row: range.endRow, col: range.endCol },
-          },
-          { numberFormat },
-        );
       }
     } finally {
       this.document.endBatch();
