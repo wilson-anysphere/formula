@@ -8251,21 +8251,49 @@ fn array_1d_shape_len(array: &ArrayValue) -> Option<(XlookupVectorShape, usize)>
     None
 }
 
-fn parse_xmatch_match_mode(arg: Option<&Value>) -> Result<lookup::MatchMode, ErrorKind> {
+fn parse_xmatch_match_mode(
+    arg: Option<&Value>,
+    grid: &dyn Grid,
+    base: CellCoord,
+) -> Result<lookup::MatchMode, ErrorKind> {
     match arg {
         None | Some(Value::Missing) => Ok(lookup::MatchMode::Exact),
         Some(v) => {
-            let n = coerce_to_i64(v)?;
+            // match_mode is a scalar argument; when provided as a range reference Excel applies
+            // implicit intersection based on the formula cell (matching `eval_scalar_arg` in the
+            // AST evaluator).
+            let v = match v {
+                Value::Range(_) | Value::MultiRange(_) => apply_implicit_intersection(v.clone(), grid, base),
+                _ => v.clone(),
+            };
+            if let Value::Error(e) = v {
+                return Err(e);
+            }
+            let n = coerce_to_i64(&v)?;
             lookup::MatchMode::try_from(n).map_err(ErrorKind::from)
         }
     }
 }
 
-fn parse_xmatch_search_mode(arg: Option<&Value>) -> Result<lookup::SearchMode, ErrorKind> {
+fn parse_xmatch_search_mode(
+    arg: Option<&Value>,
+    grid: &dyn Grid,
+    base: CellCoord,
+) -> Result<lookup::SearchMode, ErrorKind> {
     match arg {
         None | Some(Value::Missing) => Ok(lookup::SearchMode::FirstToLast),
         Some(v) => {
-            let n = coerce_to_i64(v)?;
+            // search_mode is a scalar argument; when provided as a range reference Excel applies
+            // implicit intersection based on the formula cell (matching `eval_scalar_arg` in the
+            // AST evaluator).
+            let v = match v {
+                Value::Range(_) | Value::MultiRange(_) => apply_implicit_intersection(v.clone(), grid, base),
+                _ => v.clone(),
+            };
+            if let Value::Error(e) = v {
+                return Err(e);
+            }
+            let n = coerce_to_i64(&v)?;
             lookup::SearchMode::try_from(n).map_err(ErrorKind::from)
         }
     }
@@ -8301,11 +8329,11 @@ fn fn_xmatch(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         return Value::Error(ErrorKind::Spill);
     }
 
-    let match_mode = match parse_xmatch_match_mode(args.get(2)) {
+    let match_mode = match parse_xmatch_match_mode(args.get(2), grid, base) {
         Ok(m) => m,
         Err(e) => return Value::Error(e),
     };
-    let search_mode = match parse_xmatch_search_mode(args.get(3)) {
+    let search_mode = match parse_xmatch_search_mode(args.get(3), grid, base) {
         Ok(m) => m,
         Err(e) => return Value::Error(e),
     };
@@ -8426,11 +8454,11 @@ fn fn_xlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         _ => None,
     });
 
-    let match_mode = match parse_xmatch_match_mode(args.get(4)) {
+    let match_mode = match parse_xmatch_match_mode(args.get(4), grid, base) {
         Ok(m) => m,
         Err(e) => return Value::Error(e),
     };
-    let search_mode = match parse_xmatch_search_mode(args.get(5)) {
+    let search_mode = match parse_xmatch_search_mode(args.get(5), grid, base) {
         Ok(m) => m,
         Err(e) => return Value::Error(e),
     };

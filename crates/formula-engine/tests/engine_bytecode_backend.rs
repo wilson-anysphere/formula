@@ -5001,6 +5001,115 @@ fn bytecode_backend_xlookup_applies_implicit_intersection_for_if_not_found_range
 }
 
 #[test]
+fn bytecode_backend_applies_implicit_intersection_for_xlookup_xmatch_mode_ranges() {
+    let mut engine = Engine::new();
+
+    // match_mode varies by row via implicit intersection.
+    engine.set_cell_value("Sheet1", "D1", 0.0).unwrap(); // exact
+    engine.set_cell_value("Sheet1", "D2", 1.0).unwrap(); // exact or next larger
+    engine.set_cell_value("Sheet1", "D3", 0.0).unwrap(); // exact
+
+    // search_mode varies by row via implicit intersection.
+    engine.set_cell_value("Sheet1", "E1", 1.0).unwrap(); // first-to-last
+    engine.set_cell_value("Sheet1", "E2", -1.0).unwrap(); // last-to-first
+    engine.set_cell_value("Sheet1", "E3", 1.0).unwrap(); // first-to-last
+
+    // match_mode implicit intersection.
+    for cell in ["B1", "B2", "B5"] {
+        engine
+            .set_cell_formula("Sheet1", cell, "=XMATCH(2.5,{1;2;3},D1:D3)")
+            .unwrap();
+    }
+    for cell in ["C1", "C2", "C5"] {
+        engine
+            .set_cell_formula(
+                "Sheet1",
+                cell,
+                r#"=XLOOKUP(2.5,{1;2;3},{10;20;30},"missing",D1:D3)"#,
+            )
+            .unwrap();
+    }
+
+    // search_mode implicit intersection.
+    for cell in ["F1", "F2", "F5"] {
+        engine
+            .set_cell_formula("Sheet1", cell, "=XMATCH(2,{1;2;2;3},,E1:E3)")
+            .unwrap();
+    }
+    for cell in ["G1", "G2", "G5"] {
+        engine
+            .set_cell_formula(
+                "Sheet1",
+                cell,
+                "=XLOOKUP(2,{1;2;2;3},{10;20;21;30},,0,E1:E3)",
+            )
+            .unwrap();
+    }
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 12);
+    assert_eq!(
+        stats.compiled, 12,
+        "expected XLOOKUP/XMATCH to compile with match/search mode range args"
+    );
+    assert_eq!(stats.fallback, 0);
+
+    engine.recalculate_single_threaded();
+
+    // XMATCH match_mode varies per row.
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Error(ErrorKind::NA));
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(3.0));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B5"),
+        Value::Error(ErrorKind::Value)
+    );
+
+    // XLOOKUP match_mode varies per row.
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "C1"),
+        Value::Text("missing".into())
+    );
+    assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(30.0));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "C5"),
+        Value::Error(ErrorKind::Value)
+    );
+
+    // XMATCH search_mode varies per row (first vs last match).
+    assert_eq!(engine.get_cell_value("Sheet1", "F1"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "F2"), Value::Number(3.0));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "F5"),
+        Value::Error(ErrorKind::Value)
+    );
+
+    // XLOOKUP search_mode varies per row (first vs last return value).
+    assert_eq!(engine.get_cell_value("Sheet1", "G1"), Value::Number(20.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "G2"), Value::Number(21.0));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "G5"),
+        Value::Error(ErrorKind::Value)
+    );
+
+    for (formula, cell) in [
+        ("=XMATCH(2.5,{1;2;3},D1:D3)", "B1"),
+        ("=XMATCH(2.5,{1;2;3},D1:D3)", "B2"),
+        ("=XMATCH(2.5,{1;2;3},D1:D3)", "B5"),
+        (r#"=XLOOKUP(2.5,{1;2;3},{10;20;30},"missing",D1:D3)"#, "C1"),
+        (r#"=XLOOKUP(2.5,{1;2;3},{10;20;30},"missing",D1:D3)"#, "C2"),
+        (r#"=XLOOKUP(2.5,{1;2;3},{10;20;30},"missing",D1:D3)"#, "C5"),
+        ("=XMATCH(2,{1;2;2;3},,E1:E3)", "F1"),
+        ("=XMATCH(2,{1;2;2;3},,E1:E3)", "F2"),
+        ("=XMATCH(2,{1;2;2;3},,E1:E3)", "F5"),
+        ("=XLOOKUP(2,{1;2;2;3},{10;20;21;30},,0,E1:E3)", "G1"),
+        ("=XLOOKUP(2,{1;2;2;3},{10;20;21;30},,0,E1:E3)", "G2"),
+        ("=XLOOKUP(2,{1;2;2;3},{10;20;21;30},,0,E1:E3)", "G5"),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
 fn bytecode_backend_xlookup_xmatch_accept_let_single_cell_reference_locals() {
     let mut engine = Engine::new();
 

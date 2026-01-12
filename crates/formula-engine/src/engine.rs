@@ -8534,10 +8534,14 @@ fn bytecode_expr_is_eligible_inner(
                 let lookup_array_ok = lookup_array_is_range_like
                     && bytecode_expr_is_eligible_inner(&args[1], true, true, lexical_scopes);
                 let match_mode_ok = args.get(2).map_or(true, |arg| {
-                    bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
+                    // match_mode is a scalar argument, but Excel applies implicit intersection when
+                    // it is provided as a range reference.
+                    bytecode_expr_is_eligible_inner(arg, true, false, lexical_scopes)
                 });
                 let search_mode_ok = args.get(3).map_or(true, |arg| {
-                    bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
+                    // search_mode is a scalar argument, but Excel applies implicit intersection when
+                    // it is provided as a range reference.
+                    bytecode_expr_is_eligible_inner(arg, true, false, lexical_scopes)
                 });
                 lookup_ok && lookup_array_ok && match_mode_ok && search_mode_ok
             }
@@ -8579,10 +8583,14 @@ fn bytecode_expr_is_eligible_inner(
                     bytecode_expr_is_eligible_inner(arg, true, true, lexical_scopes)
                 });
                 let match_mode_ok = args.get(4).map_or(true, |arg| {
-                    bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
+                    // match_mode is a scalar argument, but Excel applies implicit intersection when
+                    // it is provided as a range reference.
+                    bytecode_expr_is_eligible_inner(arg, true, false, lexical_scopes)
                 });
                 let search_mode_ok = args.get(5).map_or(true, |arg| {
-                    bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
+                    // search_mode is a scalar argument, but Excel applies implicit intersection when
+                    // it is provided as a range reference.
+                    bytecode_expr_is_eligible_inner(arg, true, false, lexical_scopes)
                 });
                 lookup_ok
                     && lookup_array_ok
