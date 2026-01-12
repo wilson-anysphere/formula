@@ -6,6 +6,8 @@
       "commands": {
         "allow": [
           "add_sheet",
+          "add_sheet_with_id",
+          "apply_sheet_formatting_deltas",
           "check_for_updates",
           "clipboard_read",
           "clipboard_write",
