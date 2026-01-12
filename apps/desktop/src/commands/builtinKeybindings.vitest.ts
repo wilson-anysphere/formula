@@ -48,7 +48,9 @@ describe("builtin keybinding catalog", () => {
     expect(getPrimaryCommandKeybindingDisplay("edit.fillDown", otherIndex)).toBe("Ctrl+D");
     expect(getPrimaryCommandKeybindingDisplay("edit.fillRight", otherIndex)).toBe("Ctrl+R");
     expect(getPrimaryCommandKeybindingDisplay("edit.selectCurrentRegion", otherIndex)).toBe("Ctrl+Shift+*");
-    expect(otherIndex.get("edit.selectCurrentRegion")).toEqual(expect.arrayContaining(["Ctrl+Shift+*", "Ctrl+Shift+8"]));
+    expect(otherIndex.get("edit.selectCurrentRegion")).toEqual(
+      expect.arrayContaining(["Ctrl+Shift+*", "Ctrl+Shift+8", "Ctrl+*"]),
+    );
     expect(getPrimaryCommandKeybindingDisplay("edit.insertDate", otherIndex)).toBe("Ctrl+;");
     expect(getPrimaryCommandKeybindingDisplay("edit.insertTime", otherIndex)).toBe("Ctrl+Shift+;");
     expect(getPrimaryCommandKeybindingDisplay("edit.autoSum", otherIndex)).toBe("Alt+=");
@@ -73,7 +75,7 @@ describe("builtin keybinding catalog", () => {
     expect(getPrimaryCommandKeybindingDisplay("edit.fillDown", macIndex)).toBe("⌘D");
     expect(getPrimaryCommandKeybindingDisplay("edit.fillRight", macIndex)).toBe("⌘R");
     expect(getPrimaryCommandKeybindingDisplay("edit.selectCurrentRegion", macIndex)).toBe("⇧⌘*");
-    expect(macIndex.get("edit.selectCurrentRegion")).toEqual(expect.arrayContaining(["⇧⌘*", "⇧⌘8"]));
+    expect(macIndex.get("edit.selectCurrentRegion")).toEqual(expect.arrayContaining(["⇧⌘*", "⇧⌘8", "⌘*"]));
     expect(getPrimaryCommandKeybindingDisplay("edit.insertDate", macIndex)).toBe("⌘;");
     expect(getPrimaryCommandKeybindingDisplay("edit.insertTime", macIndex)).toBe("⇧⌘;");
     expect(getPrimaryCommandKeybindingDisplay("edit.autoSum", macIndex)).toBe("⌥=");

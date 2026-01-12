@@ -184,6 +184,13 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     when: null,
   },
   {
+    // Dedicated numpad multiply key. Excel accepts Ctrl/Cmd+* there without Shift.
+    command: "edit.selectCurrentRegion",
+    key: "ctrl+*",
+    mac: "cmd+*",
+    when: null,
+  },
+  {
     command: "edit.insertDate",
     key: "ctrl+;",
     mac: "cmd+;",
