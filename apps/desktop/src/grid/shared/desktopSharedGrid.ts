@@ -12,7 +12,7 @@ import { CanvasGridRenderer, computeScrollbarThumb, resolveGridThemeFromCssVars 
 
 import { openExternalHyperlink } from "../../hyperlinks/openExternal.js";
 import * as nativeDialogs from "../../tauri/nativeDialogs.js";
-import { shellOpen } from "../../tauri/shellOpen";
+import { shellOpen } from "../../tauri/shellOpen.js";
 
 export type DesktopGridInteractionMode = "default" | "rangeSelection";
 

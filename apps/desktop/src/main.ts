@@ -142,6 +142,14 @@ import {
 import { openExternalHyperlink } from "./hyperlinks/openExternal.js";
 import { clampUsedRange, resolveWorkbookLoadLimits } from "./workbook/load/clampUsedRange.js";
 
+// Best-effort: older desktop builds persisted provider selection + API keys in localStorage.
+// Cursor desktop no longer supports user-provided keys; proactively delete stale secrets on startup.
+try {
+  purgeLegacyDesktopLLMSettings();
+} catch {
+  // ignore
+}
+
 // Apply theme + reduced motion settings as early as possible to avoid rendering with
 // default tokens before the user's preference is known.
 const themeController = new ThemeController();
