@@ -184,7 +184,7 @@ class InMemorySpreadsheet {
       endCol: range.endCol
     };
 
-    const payload = { selection: this.getSelection() };
+    const payload = { sheetId: sheet.id, selection: this.getSelection() };
     for (const listener of this._selectionListeners) listener(payload);
   }
 
@@ -218,7 +218,7 @@ class InMemorySpreadsheet {
   _setCellInSheet(sheet, row, col, value, { emitCellChanged = true } = {}) {
     sheet.cells.set(cellKey(row, col), value);
     if (!emitCellChanged) return;
-    const payload = { row, col, value };
+    const payload = { sheetId: sheet.id, row, col, value };
     for (const listener of this._cellListeners) listener(payload);
   }
 
