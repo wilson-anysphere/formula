@@ -106,6 +106,7 @@ describe("KeybindingService", () => {
       { extensionId: "ext", command: "ext.stealInlineAI", key: "ctrl+k", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealInlineAI", key: "cmd+k", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealInlineAI", key: "ctrl+cmd+k", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealEditCell", key: "f2", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealAIChat", key: "ctrl+shift+a", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealAIChat", key: "cmd+shift+a", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealAIChat", key: "ctrl+cmd+shift+a", mac: null, when: null },
@@ -197,6 +198,13 @@ describe("KeybindingService", () => {
     expect(handled13).toBe(false);
     expect(event13.defaultPrevented).toBe(false);
     expect(extRun).not.toHaveBeenCalled();
+
+    // Edit Cell (Excel-style): F2.
+    const event14 = makeKeydownEvent({ key: "F2" });
+    const handled14 = await service.dispatchKeydown(event14);
+    expect(handled14).toBe(false);
+    expect(event14.defaultPrevented).toBe(false);
+    expect(extRun).not.toHaveBeenCalled();
   });
 
   it("does not advertise reserved shortcuts in the command keybinding display index", () => {
@@ -209,6 +217,7 @@ describe("KeybindingService", () => {
       { extensionId: "ext", command: "ext.stealPasteSpecial", key: "ctrl+cmd+shift+v", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealQuickOpen", key: "ctrl+shift+o", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealInlineAI", key: "ctrl+k", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealEditCell", key: "f2", mac: null, when: null },
       { extensionId: "ext", command: "ext.allowed", key: "ctrl+j", mac: null, when: null },
     ]);
 
@@ -220,6 +229,7 @@ describe("KeybindingService", () => {
     expect(index.get("ext.stealPasteSpecial")).toBeUndefined();
     expect(index.get("ext.stealQuickOpen")).toBeUndefined();
     expect(index.get("ext.stealInlineAI")).toBeUndefined();
+    expect(index.get("ext.stealEditCell")).toBeUndefined();
   });
 
   it("matches shifted punctuation keybindings via KeyboardEvent.code fallback", async () => {

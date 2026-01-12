@@ -74,6 +74,8 @@ const DEFAULT_RESERVED_EXTENSION_SHORTCUTS = [
   "cmd+k",
   // Some keyboards emit both ctrl+meta on the same chord.
   "ctrl+cmd+k",
+  // Edit cell (Excel-style).
+  "f2",
   // AI Chat toggle (core UX shortcut; extensions should not claim it).
   // - Windows/Linux: Ctrl+Shift+A
   // - macOS: Cmd+Shift+A (with Ctrl+Cmd+Shift+A fallback for some remote/VM keyboard setups)
