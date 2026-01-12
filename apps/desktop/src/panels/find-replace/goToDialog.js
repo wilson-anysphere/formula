@@ -41,7 +41,7 @@ export function createGoToDialog({ workbook, getCurrentSheetName, setActiveCell,
     el("div", { className: "row" }, [input]),
     el("div", { className: "row" }, [
       el("button", { type: "button", onClick: onGo }, ["Go"]),
-      el("button", { type: "button", onClick: () => dialog.close(), style: "margin-left: 8px" }, [
+      el("button", { type: "button", onClick: () => dialog.close(), className: "goto-dialog__cancel" }, [
         "Cancel",
       ]),
     ]),

@@ -80,6 +80,22 @@ dialog.page-setup-dialog::backdrop {
   margin-bottom: 8px;
 }
 
+.find-replace-dialog__look-in-label {
+  margin-left: 8px;
+}
+
+.find-replace-dialog__whole-cell-label {
+  margin-left: 12px;
+}
+
+.find-replace-dialog__close {
+  margin-left: auto;
+}
+
+.goto-dialog__cancel {
+  margin-left: 8px;
+}
+
 .find-replace-dialog input,
 .goto-dialog input,
 .find-replace-dialog select,

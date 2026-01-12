@@ -18,7 +18,7 @@ export function createFindReplaceDialog(controller, { mode = "find" } = {}) {
 
   const findInput = el("input", { type: "text", placeholder: "Find what…" });
   const replaceInput = el("input", { type: "text", placeholder: "Replace with…" });
-  replaceInput.style.display = mode === "replace" ? "" : "none";
+  replaceInput.hidden = mode !== "replace";
 
   const scopeSelect = el(
     "select",
@@ -87,32 +87,29 @@ export function createFindReplaceDialog(controller, { mode = "find" } = {}) {
     el("div", { className: "row" }, [
       el("label", {}, ["Within: "]),
       scopeSelect,
-      el("label", { style: "margin-left: 8px" }, ["Look in: "]),
+      el("label", { className: "find-replace-dialog__look-in-label" }, ["Look in: "]),
       lookInSelect,
     ]),
     el("div", { className: "row" }, [
       el("label", {}, [matchCase, " Match case"]),
-      el("label", { style: "margin-left: 12px" }, [wholeCell, " Match entire cell"]),
+      el("label", { className: "find-replace-dialog__whole-cell-label" }, [wholeCell, " Match entire cell"]),
     ]),
-    el("div", { className: "row" }, [
-      el("button", { onClick: onFindNext, type: "button" }, ["Find Next"]),
-      el("button", { onClick: onFindAll, type: "button" }, ["Find All"]),
-      el(
-        "button",
-        { onClick: onReplaceNext, type: "button", style: mode === "replace" ? "" : "display:none" },
-        ["Replace"],
-      ),
-      el(
-        "button",
-        { onClick: onReplaceAll, type: "button", style: mode === "replace" ? "" : "display:none" },
-        ["Replace All"],
-      ),
-      el(
-        "button",
-        { onClick: () => dialog.close(), type: "button", style: "margin-left: auto" },
-        ["Close"],
-      ),
-    ]),
+    (() => {
+      const row = el("div", { className: "row" });
+      row.append(el("button", { onClick: onFindNext, type: "button" }, ["Find Next"]));
+      row.append(el("button", { onClick: onFindAll, type: "button" }, ["Find All"]));
+
+      const replaceBtn = el("button", { onClick: onReplaceNext, type: "button" }, ["Replace"]);
+      replaceBtn.hidden = mode !== "replace";
+      row.append(replaceBtn);
+
+      const replaceAllBtn = el("button", { onClick: onReplaceAll, type: "button" }, ["Replace All"]);
+      replaceAllBtn.hidden = mode !== "replace";
+      row.append(replaceAllBtn);
+
+      row.append(el("button", { onClick: () => dialog.close(), type: "button", className: "find-replace-dialog__close" }, ["Close"]));
+      return row;
+    })(),
     resultsList,
   );
 
