@@ -989,6 +989,9 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       "view.show.showFormulas": app.getShowFormulas(),
       "view.show.performanceStats": Boolean((app.getGridPerfStats() as any)?.enabled),
       "view.window.split": ribbonLayoutController ? ribbonLayoutController.layout.splitView.direction !== "none" : false,
+      "data.queriesConnections.queriesConnections":
+        ribbonLayoutController != null &&
+        getPanelPlacement(ribbonLayoutController.layout, PanelIds.DATA_QUERIES).kind !== "closed",
     };
 
     const numberFormatLabel = (() => {
@@ -4672,6 +4675,11 @@ mountRibbon(ribbonRoot, {
   },
   onToggle: (commandId, pressed) => {
     switch (commandId) {
+      case "data.queriesConnections.queriesConnections":
+        if (pressed) ribbonLayoutController?.openPanel(PanelIds.DATA_QUERIES);
+        else ribbonLayoutController?.closePanel(PanelIds.DATA_QUERIES);
+        app.focus();
+        return;
       case "view.show.showFormulas":
         app.toggleShowFormulas();
         app.focus();
@@ -4718,6 +4726,42 @@ mountRibbon(ribbonRoot, {
   },
   onCommand: (commandId) => {
     const doc = app.getDocument();
+
+    if (
+      commandId === "data.queriesConnections.refreshAll" ||
+      commandId === "data.queriesConnections.refreshAll.refreshAllQueries"
+    ) {
+      void (async () => {
+        const service = powerQueryService;
+        if (!service) {
+          showToast("Queries service not available");
+          return;
+        }
+
+        try {
+          await service.ready;
+        } catch (err) {
+          console.error("Power Query service failed to initialize:", err);
+          showToast("Queries service not available", "error");
+          return;
+        }
+
+        const queries = service.getQueries();
+        if (!queries.length) {
+          showToast("No queries to refresh");
+          return;
+        }
+
+        try {
+          const handle = service.refreshAll();
+          await handle.promise;
+        } catch (err) {
+          console.error("Failed to refresh all queries:", err);
+          showToast(`Failed to refresh queries: ${String(err)}`, "error");
+        }
+      })();
+      return;
+    }
 
     const openCustomZoomQuickPick = async (): Promise<void> => {
       if (!app.supportsZoom()) return;
