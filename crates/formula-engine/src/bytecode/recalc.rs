@@ -120,6 +120,7 @@ impl RecalcEngine {
     }
 
     pub fn recalc(&self, graph: &CalcGraph, grid: &mut dyn GridMut) {
+        let locale = crate::LocaleConfig::en_us();
         let mut results: Vec<Value> = Vec::with_capacity(graph.max_level_width);
         let now_utc = chrono::Utc::now();
         let date_system = ExcelDateSystem::EXCEL_1900;
@@ -148,7 +149,7 @@ impl RecalcEngine {
                             },
                             |(vm, _guard), (out, &idx)| {
                                 let node = &graph.nodes[idx];
-                                *out = vm.eval(&node.program, g, node.coord);
+                                *out = vm.eval(&node.program, g, node.coord, &locale);
                             },
                         );
                 }
@@ -162,7 +163,7 @@ impl RecalcEngine {
                     );
                     for (out, &idx) in results.iter_mut().zip(level.iter()) {
                         let node = &graph.nodes[idx];
-                        *out = vm.eval(&node.program, g, node.coord);
+                        *out = vm.eval(&node.program, g, node.coord, &locale);
                     }
                 }
             }

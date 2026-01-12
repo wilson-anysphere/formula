@@ -89,18 +89,18 @@ fn parse_value_from_text(s: &str) -> Result<f64, ErrorKind> {
     })
 }
 
-pub fn eval_ast(expr: &Expr, grid: &dyn Grid, base: CellCoord) -> Value {
+pub fn eval_ast(expr: &Expr, grid: &dyn Grid, base: CellCoord, locale: &crate::LocaleConfig) -> Value {
     match expr {
         Expr::Literal(v) => v.clone(),
         Expr::CellRef(r) => grid.get_value(r.resolve(base)),
         Expr::RangeRef(r) => Value::Range(*r),
         Expr::Unary { op, expr } => {
-            let v = eval_ast(expr, grid, base);
+            let v = eval_ast(expr, grid, base, locale);
             apply_unary(*op, v)
         }
         Expr::Binary { op, left, right } => {
-            let l = eval_ast(left, grid, base);
-            let r = eval_ast(right, grid, base);
+            let l = eval_ast(left, grid, base, locale);
+            let r = eval_ast(right, grid, base, locale);
             apply_binary(*op, l, r)
         }
         Expr::FuncCall { func, args } => {
@@ -135,9 +135,9 @@ pub fn eval_ast(expr: &Expr, grid: &dyn Grid, base: CellCoord) -> Value {
                     }
                 }
 
-                evaluated.push(eval_ast(arg, grid, base));
+                evaluated.push(eval_ast(arg, grid, base, locale));
             }
-            call_function(func, &evaluated, grid, base)
+            call_function(func, &evaluated, grid, base, locale)
         }
     }
 }
@@ -418,14 +418,20 @@ fn numeric_binop(
     }
 }
 
-pub fn call_function(func: &Function, args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
+pub fn call_function(
+    func: &Function,
+    args: &[Value],
+    grid: &dyn Grid,
+    base: CellCoord,
+    locale: &crate::LocaleConfig,
+) -> Value {
     match func {
         Function::Sum => fn_sum(args, grid, base),
         Function::Average => fn_average(args, grid, base),
         Function::Min => fn_min(args, grid, base),
         Function::Max => fn_max(args, grid, base),
         Function::Count => fn_count(args, grid, base),
-        Function::CountIf => fn_countif(args, grid, base),
+        Function::CountIf => fn_countif(args, grid, base, locale),
         Function::SumProduct => fn_sumproduct(args, grid, base),
         Function::Abs => fn_abs(args),
         Function::Int => fn_int(args),
@@ -767,7 +773,7 @@ fn fn_count(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     Value::Number(count as f64)
 }
 
-fn fn_countif(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
+fn fn_countif(args: &[Value], grid: &dyn Grid, base: CellCoord, locale: &crate::LocaleConfig) -> Value {
     if args.len() != 2 {
         return Value::Error(ErrorKind::Value);
     }
@@ -776,7 +782,7 @@ fn fn_countif(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         Value::Array(a) => RangeArg::Array(a),
         _ => return Value::Error(ErrorKind::Value),
     };
-    let criteria = match parse_countif_criteria(&args[1]) {
+    let criteria = match parse_countif_criteria(&args[1], locale) {
         Ok(c) => c,
         Err(e) => return Value::Error(e),
     };
@@ -872,7 +878,10 @@ fn bytecode_value_to_engine(value: Value) -> EngineValue {
     }
 }
 
-fn parse_countif_criteria(criteria: &Value) -> Result<EngineCriteria, ErrorKind> {
+fn parse_countif_criteria(
+    criteria: &Value,
+    locale: &crate::LocaleConfig,
+) -> Result<EngineCriteria, ErrorKind> {
     // Errors in the criteria argument always propagate (they don't act as "match error" criteria).
     if let Value::Error(e) = criteria {
         return Err(*e);
@@ -887,11 +896,12 @@ fn parse_countif_criteria(criteria: &Value) -> Result<EngineCriteria, ErrorKind>
         Value::Array(_) | Value::Range(_) => return Err(ErrorKind::Value),
     };
 
-    EngineCriteria::parse_with_date_system_and_locale(
+    EngineCriteria::parse_with_date_system_and_locales(
         &criteria_value,
         thread_date_system(),
         thread_value_locale(),
         thread_now_utc(),
+        locale.clone(),
     )
     .map_err(engine_error_to_bytecode)
 }

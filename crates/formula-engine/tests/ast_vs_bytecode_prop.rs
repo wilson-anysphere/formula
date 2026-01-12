@@ -5,6 +5,7 @@ use formula_engine::bytecode::{
     eval_ast, parse_formula, BytecodeCache, CellCoord, ColumnarGrid, Expr, RangeRef, Ref, Value,
     Vm,
 };
+use formula_engine::LocaleConfig;
 use proptest::prelude::*;
 use std::sync::Arc;
 
@@ -158,11 +159,12 @@ proptest! {
             }
         }
 
-        let ast_val = eval_ast(&expr, &grid, base);
         let cache = BytecodeCache::new();
         let program = cache.get_or_compile(&expr);
         let mut vm = Vm::with_capacity(32);
-        let bc_val = vm.eval(&program, &grid, base);
+        let locale = LocaleConfig::en_us();
+        let ast_val = eval_ast(&expr, &grid, base, &locale);
+        let bc_val = vm.eval(&program, &grid, base, &locale);
 
         prop_assert_eq!(ast_val, bc_val);
     }

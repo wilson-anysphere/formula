@@ -5,6 +5,7 @@ use crate::date::ExcelDateSystem;
 use crate::eval::{CellAddr, CompiledExpr};
 use crate::locale::ValueLocaleConfig;
 use crate::value::{ErrorKind, Lambda, Value};
+use crate::LocaleConfig;
 
 pub mod date_time;
 pub mod financial;
@@ -157,6 +158,14 @@ pub trait FunctionContext {
     fn current_cell_addr(&self) -> CellAddr;
     fn resolve_sheet_name(&self, _name: &str) -> Option<usize> {
         None
+    }
+
+    /// Locale configuration used when parsing locale-sensitive strings at runtime.
+    ///
+    /// This is primarily used for parsing numbers that appear inside string literals, such as
+    /// criteria arguments (`">1,5"` in `de-DE`).
+    fn locale_config(&self) -> LocaleConfig {
+        LocaleConfig::en_us()
     }
 
     /// Locale used for implicit numeric coercion (text -> number).

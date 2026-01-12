@@ -30,6 +30,7 @@ impl Vm {
         program: &Program,
         grid: &dyn Grid,
         base: CellCoord,
+        locale: &crate::LocaleConfig,
     ) -> Value {
         self.stack.clear();
         for inst in program.instrs() {
@@ -87,7 +88,7 @@ impl Vm {
                     let func = &program.funcs[inst.a() as usize];
                     let argc = inst.b() as usize;
                     let start = self.stack.len().saturating_sub(argc);
-                    let result = call_function(func, &self.stack[start..], grid, base);
+                    let result = call_function(func, &self.stack[start..], grid, base, locale);
                     self.stack.truncate(start);
                     self.stack.push(result);
                 }
@@ -106,7 +107,14 @@ impl Vm {
         // Preserve the existing public API while ensuring locale-aware coercion for text values
         // matches the main evaluator. This uses Excel's default 1900 date system and the current
         // wall-clock time for any date strings that omit a year.
-        self.eval_with_coercion_context(program, grid, base, ExcelDateSystem::EXCEL_1900, value_locale, Utc::now())
+        self.eval_with_coercion_context(
+            program,
+            grid,
+            base,
+            ExcelDateSystem::EXCEL_1900,
+            value_locale,
+            Utc::now(),
+        )
     }
 
     pub fn eval_with_coercion_context(
@@ -119,7 +127,12 @@ impl Vm {
         now_utc: DateTime<Utc>,
     ) -> Value {
         let _guard = super::runtime::set_thread_eval_context(date_system, value_locale, now_utc);
-        self.eval(program, grid, base)
+
+        // Criteria strings inside quotes should follow the workbook/value locale for numeric parsing.
+        let mut locale_config = crate::LocaleConfig::en_us();
+        locale_config.decimal_separator = value_locale.separators.decimal_sep;
+        locale_config.thousands_separator = Some(value_locale.separators.thousands_sep);
+        self.eval(program, grid, base, &locale_config)
     }
 }
 

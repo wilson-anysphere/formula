@@ -130,6 +130,129 @@ impl LocaleConfig {
             thousands_separator: Some('.'),
         }
     }
+
+    /// Parse a number from a locale-aware string in a deterministic, Excel-like way.
+    ///
+    /// This is primarily intended for parsing numbers that appear in string literals, such
+    /// as criteria arguments (e.g. `">1,5"` in `de-DE`).
+    ///
+    /// Rules:
+    /// - Accept both the locale decimal separator *and* the canonical `.` decimal separator.
+    /// - Strip the locale thousands separator when present.
+    /// - Return `None` if the input cannot be interpreted as a number after normalization.
+    pub fn parse_number(&self, raw: &str) -> Option<f64> {
+        let raw = raw.trim();
+        if raw.is_empty() {
+            return None;
+        }
+
+        let (mantissa, exponent) = split_numeric_exponent(raw);
+
+        let (sign, mantissa) = match mantissa.as_bytes().first().copied() {
+            Some(b'+' | b'-') => (Some(mantissa.as_bytes()[0] as char), &mantissa[1..]),
+            _ => (None, mantissa),
+        };
+
+        if mantissa.is_empty() {
+            return None;
+        }
+
+        let mut decimal = if mantissa.contains(self.decimal_separator) {
+            Some(self.decimal_separator)
+        } else if mantissa.contains('.') {
+            Some('.')
+        } else {
+            None
+        };
+
+        // Disambiguate locales where the thousands separator collides with the canonical decimal
+        // separator (e.g. `de-DE` uses `.` for grouping and `,` for decimals).
+        //
+        // If the input only contains `.` and it matches a typical thousands grouping pattern
+        // (`1.234.567`), treat `.` as thousands separators rather than a decimal point.
+        if decimal == Some('.')
+            && self.decimal_separator != '.'
+            && self.thousands_separator == Some('.')
+            && looks_like_thousands_grouping(mantissa, '.')
+        {
+            decimal = None;
+        }
+
+        let mut out = String::with_capacity(raw.len());
+        if let Some(sign) = sign {
+            out.push(sign);
+        }
+
+        let mut decimal_used = false;
+        for ch in mantissa.chars() {
+            if ch.is_ascii_digit() {
+                out.push(ch);
+                continue;
+            }
+
+            if Some(ch) == decimal {
+                if decimal_used {
+                    return None;
+                }
+                out.push('.');
+                decimal_used = true;
+                continue;
+            }
+
+            if Some(ch) == self.thousands_separator && Some(ch) != decimal {
+                // Strip locale grouping separators.
+                continue;
+            }
+
+            // Reject any other character (including locale separators that don't apply to this input).
+            return None;
+        }
+
+        out.push_str(exponent);
+        out.parse::<f64>().ok()
+    }
+}
+
+fn split_numeric_exponent(raw: &str) -> (&str, &str) {
+    // Fast path: no exponent marker.
+    if !raw.as_bytes().iter().any(|b| matches!(b, b'e' | b'E')) {
+        return (raw, "");
+    }
+
+    // Find the first valid exponent marker (`e`/`E` followed by `[+-]?digits`).
+    for (idx, ch) in raw.char_indices() {
+        if !matches!(ch, 'e' | 'E') {
+            continue;
+        }
+        let rest = &raw[idx + ch.len_utf8()..];
+        let rest = rest.strip_prefix('+').or_else(|| rest.strip_prefix('-')).unwrap_or(rest);
+        if rest.is_empty() || !rest.chars().all(|c| c.is_ascii_digit()) {
+            continue;
+        }
+        return (&raw[..idx], &raw[idx..]);
+    }
+
+    (raw, "")
+}
+
+fn looks_like_thousands_grouping(raw: &str, sep: char) -> bool {
+    let mut parts = raw.split(sep);
+    let Some(first) = parts.next() else {
+        return false;
+    };
+    if first.is_empty() || first.len() > 3 || !first.chars().all(|c| c.is_ascii_digit()) {
+        return false;
+    }
+
+    let mut saw_sep = false;
+    for part in parts {
+        saw_sep = true;
+        if part.len() != 3 || !part.chars().all(|c| c.is_ascii_digit()) {
+            return false;
+        }
+    }
+
+    saw_sep
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

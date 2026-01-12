@@ -6,7 +6,7 @@ use crate::date::ExcelDateSystem;
 use crate::functions::wildcard::WildcardPattern;
 use crate::simd::{CmpOp, NumericCriteria};
 use crate::value::{parse_number, NumberLocale};
-use crate::{ErrorKind, Value};
+use crate::{ErrorKind, LocaleConfig, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CriteriaOp {
@@ -77,9 +77,31 @@ impl Criteria {
         value_locale: ValueLocaleConfig,
         now_utc: DateTime<Utc>,
     ) -> Result<Self, ErrorKind> {
+        // `LocaleConfig::en_us()` disables thousands separators during lexing because `,` collides
+        // with argument separators. Criteria values are already strings, so we can safely enable
+        // grouping separators and reuse `LocaleConfig::parse_number`.
         let separators = value_locale.separators;
-        let number_locale =
-            NumberLocale::new(separators.decimal_sep, Some(separators.thousands_sep));
+        let mut criteria_locale = LocaleConfig::en_us();
+        criteria_locale.decimal_separator = separators.decimal_sep;
+        criteria_locale.thousands_separator = Some(separators.thousands_sep);
+
+        Self::parse_with_date_system_and_locales(input, system, value_locale, now_utc, criteria_locale)
+    }
+
+    /// Parse an Excel criteria value using separate value (text -> number/date parsing) and
+    /// formula locales.
+    ///
+    /// This is primarily used to parse numbers that appear inside string literals, such as
+    /// criteria arguments entered in the workbook locale (e.g. `">1,5"` in `de-DE`).
+    pub fn parse_with_date_system_and_locales(
+        input: &Value,
+        system: ExcelDateSystem,
+        value_locale: ValueLocaleConfig,
+        now_utc: DateTime<Utc>,
+        locale: LocaleConfig,
+    ) -> Result<Self, ErrorKind> {
+        let separators = value_locale.separators;
+        let number_locale = NumberLocale::new(separators.decimal_sep, Some(separators.thousands_sep));
 
         match input {
             Value::Number(n) => Ok(Criteria {
@@ -102,7 +124,7 @@ impl Criteria {
                 rhs: CriteriaRhs::Blank,
                 number_locale,
             }),
-            Value::Text(s) => parse_criteria_string(s, system, value_locale, now_utc, number_locale),
+            Value::Text(s) => parse_criteria_string(s, system, value_locale, now_utc, number_locale, &locale),
             Value::Reference(_)
             | Value::ReferenceUnion(_)
             | Value::Array(_)
@@ -242,6 +264,7 @@ fn parse_criteria_string(
     value_locale: ValueLocaleConfig,
     now_utc: DateTime<Utc>,
     number_locale: NumberLocale,
+    locale: &LocaleConfig,
 ) -> Result<Criteria, ErrorKind> {
     let (op, rhs_str) = split_op(raw);
     let rhs_trimmed = rhs_str.trim();
@@ -303,6 +326,17 @@ fn parse_criteria_string(
         });
     }
 
+    // Prefer locale-aware numeric parsing for values that appear inside string literals (e.g.
+    // `">1,5"` in `de-DE`). This accepts both the locale decimal separator and canonical `.`.
+    if let Some(num) = locale.parse_number(rhs_str) {
+        return Ok(Criteria {
+            op,
+            rhs: CriteriaRhs::Number(num),
+            number_locale,
+        });
+    }
+
+    // Fall back to VALUE-like parsing for date/time strings (and a few other numeric formats).
     if let Ok(serial) = parse_value_text(rhs_str, value_locale, now_utc, system) {
         return Ok(Criteria {
             op,

@@ -12,6 +12,7 @@ use formula_engine::bytecode::{
     RecalcEngine, Vm,
 };
 #[cfg(not(target_arch = "wasm32"))]
+use formula_engine::LocaleConfig;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -60,13 +61,12 @@ fn bench_eval_single(c: &mut Criterion) {
     let cache = BytecodeCache::new();
     let program = cache.get_or_compile(&expr);
 
+    let locale = LocaleConfig::en_us();
     let mut vm = Vm::with_capacity(32);
     c.bench_function("eval_bytecode_single", |b| {
-        b.iter(|| vm.eval(&program, &grid, origin))
+        b.iter(|| vm.eval(&program, &grid, origin, &locale))
     });
-    c.bench_function("eval_ast_single", |b| {
-        b.iter(|| eval_ast(&expr, &grid, origin))
-    });
+    c.bench_function("eval_ast_single", |b| b.iter(|| eval_ast(&expr, &grid, origin, &locale)));
 }
 
 #[cfg(not(target_arch = "wasm32"))]

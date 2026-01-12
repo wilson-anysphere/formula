@@ -5,6 +5,7 @@ use crate::eval::ast::{BinaryOp, CompareOp, CompiledExpr, Expr, PostfixOp, Sheet
 use crate::functions::{ArgValue as FnArgValue, FunctionContext, Reference as FnReference, SheetId as FnSheetId};
 use crate::locale::ValueLocaleConfig;
 use crate::value::{casefold, cmp_case_insensitive, Array, ErrorKind, Lambda, NumberLocale, Value};
+use crate::LocaleConfig;
 use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -200,6 +201,7 @@ pub struct Evaluator<'a, R: ValueResolver> {
     date_system: ExcelDateSystem,
     value_locale: ValueLocaleConfig,
     rng_counter: Rc<Cell<u64>>,
+    locale: LocaleConfig,
 }
 
 struct LexicalScopeGuard {
@@ -215,7 +217,14 @@ impl Drop for LexicalScopeGuard {
 
 impl<'a, R: ValueResolver> Evaluator<'a, R> {
     pub fn new(resolver: &'a R, ctx: EvalContext, recalc_ctx: &'a RecalcContext) -> Self {
-        Self::new_with_date_system(resolver, ctx, recalc_ctx, ExcelDateSystem::EXCEL_1900)
+        Self::new_with_date_system_and_locales(
+            resolver,
+            ctx,
+            recalc_ctx,
+            ExcelDateSystem::EXCEL_1900,
+            ValueLocaleConfig::default(),
+            LocaleConfig::en_us(),
+        )
     }
 
     pub fn new_with_date_system(
@@ -224,7 +233,14 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         recalc_ctx: &'a RecalcContext,
         date_system: ExcelDateSystem,
     ) -> Self {
-        Self::new_with_date_system_and_locale(resolver, ctx, recalc_ctx, date_system, ValueLocaleConfig::default())
+        Self::new_with_date_system_and_locales(
+            resolver,
+            ctx,
+            recalc_ctx,
+            date_system,
+            ValueLocaleConfig::default(),
+            LocaleConfig::en_us(),
+        )
     }
 
     pub fn new_with_date_system_and_locale(
@@ -233,6 +249,24 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         recalc_ctx: &'a RecalcContext,
         date_system: ExcelDateSystem,
         value_locale: ValueLocaleConfig,
+    ) -> Self {
+        Self::new_with_date_system_and_locales(
+            resolver,
+            ctx,
+            recalc_ctx,
+            date_system,
+            value_locale,
+            LocaleConfig::en_us(),
+        )
+    }
+
+    pub fn new_with_date_system_and_locales(
+        resolver: &'a R,
+        ctx: EvalContext,
+        recalc_ctx: &'a RecalcContext,
+        date_system: ExcelDateSystem,
+        value_locale: ValueLocaleConfig,
+        locale: LocaleConfig,
     ) -> Self {
         Self {
             resolver,
@@ -245,6 +279,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             date_system,
             value_locale,
             rng_counter: Rc::new(Cell::new(0)),
+            locale,
         }
     }
 
@@ -260,6 +295,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             date_system: self.date_system,
             value_locale: self.value_locale,
             rng_counter: Rc::clone(&self.rng_counter),
+            locale: self.locale.clone(),
         }
     }
 
@@ -275,6 +311,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             date_system: self.date_system,
             value_locale: self.value_locale,
             rng_counter: Rc::clone(&self.rng_counter),
+            locale: self.locale.clone(),
         }
     }
 
@@ -1205,6 +1242,10 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
 
     fn record_reference(&self, reference: &FnReference) {
         self.trace_reference(reference);
+    }
+
+    fn locale_config(&self) -> LocaleConfig {
+        self.locale.clone()
     }
 
     fn now_utc(&self) -> chrono::DateTime<chrono::Utc> {
