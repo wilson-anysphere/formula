@@ -85,17 +85,8 @@ export function registerInternalRoutes(app: FastifyInstance): void {
       userAgent: parsed.data.userAgent ?? null
     });
 
-    const wantsVerbose = Boolean(parsed.data.clientIp || parsed.data.userAgent);
-
     if (!result.active) {
       app.metrics.syncTokenIntrospectFailuresTotal.inc();
-
-      // Legacy shape for sync-server `auth.mode=introspect` (expects 403 on invalid).
-      if (!wantsVerbose) {
-        return reply.code(403).send({ ok: false, error: "forbidden" });
-      }
-
-      // Verbose shape for callers that want introspection-style responses.
       return reply.send({
         ok: false,
         active: false,

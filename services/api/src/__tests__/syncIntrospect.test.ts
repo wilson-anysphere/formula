@@ -167,8 +167,16 @@ describe("internal sync token introspection", () => {
       headers: { "x-internal-admin-token": config.internalAdminToken! },
       payload: { token: syncToken, docId }
     });
-    expect(membershipRemovedRes.statusCode).toBe(403);
-    expect(membershipRemovedRes.json()).toEqual({ ok: false, error: "forbidden" });
+    expect(membershipRemovedRes.statusCode).toBe(200);
+    expect(membershipRemovedRes.json()).toMatchObject({
+      ok: false,
+      active: false,
+      error: "forbidden",
+      reason: "not_member",
+      userId: bobId,
+      orgId,
+      role: "editor"
+    });
 
     const metricsRes = await app.inject({ method: "GET", url: "/metrics" });
     const failures = getCounterValue(metricsRes.body, "sync_token_introspect_failures_total");
@@ -272,8 +280,13 @@ describe("internal sync token introspection", () => {
       headers: { "x-internal-admin-token": config.internalAdminToken! },
       payload: { token: syncToken, docId }
     });
-    expect(revokedRes.statusCode).toBe(403);
-    expect(revokedRes.json()).toEqual({ ok: false, error: "forbidden" });
+    expect(revokedRes.statusCode).toBe(200);
+    expect(revokedRes.json()).toMatchObject({
+      ok: false,
+      active: false,
+      error: "forbidden",
+      reason: "session_revoked"
+    });
 
     const metricsRes = await app.inject({ method: "GET", url: "/metrics" });
     const failures = getCounterValue(metricsRes.body, "sync_token_introspect_failures_total");
