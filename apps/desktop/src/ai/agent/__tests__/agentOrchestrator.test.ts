@@ -68,6 +68,8 @@ describe("runAgentTask (agent mode orchestrator)", () => {
     expect(stats.mode).toBe("agent");
     expect(stats.model).toBe("unit-test-model");
     expect(stats.durationMs).toBeGreaterThanOrEqual(0);
+    expect(stats.blockCountByKind.sheet_sample).toBeGreaterThanOrEqual(1);
+    expect(stats.blockCellCountByKind.sheet_sample).toBeGreaterThan(0);
   });
 
   it("does not re-index workbook RAG when workbook has not changed", async () => {

@@ -142,6 +142,8 @@ describe("ai chat orchestrator", () => {
     expect(stats.durationMs).toBeGreaterThanOrEqual(0);
     expect(stats.promptContextChars).toBeGreaterThan(0);
     expect(stats.promptContextTokens).toBeGreaterThan(0);
+    expect(stats.blockCountByKind.sheet_sample).toBeGreaterThanOrEqual(1);
+    expect(stats.blockCellCountByKind.sheet_sample).toBeGreaterThan(0);
 
     await orchestrator.dispose();
   });
