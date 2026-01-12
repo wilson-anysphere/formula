@@ -419,8 +419,8 @@ The workbook uses an Excel-style **sheet tab strip** at the bottom of the window
 
 | Shortcut | Action |
 |----------|--------|
-| `Ctrl+PgUp` | Activate previous visible sheet (wrap around) |
-| `Ctrl+PgDn` | Activate next visible sheet (wrap around) |
+| `Ctrl+PgUp` / `Cmd+PgUp` | Activate previous visible sheet (wrap around) |
+| `Ctrl+PgDn` / `Cmd+PgDn` | Activate next visible sheet (wrap around) |
 
 ---
 
