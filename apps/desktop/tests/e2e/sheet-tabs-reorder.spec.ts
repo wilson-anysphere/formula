@@ -12,6 +12,14 @@ async function getVisibleSheetTabOrder(page: Page): Promise<string[]> {
   });
 }
 
+async function getSheetSwitcherOptionValues(page: Page): Promise<string[]> {
+  return await page.evaluate(() => {
+    const select = document.querySelector('[data-testid="sheet-switcher"]') as HTMLSelectElement | null;
+    if (!select) throw new Error("Missing sheet switcher");
+    return Array.from(select.querySelectorAll("option")).map((opt) => (opt as HTMLOptionElement).value);
+  });
+}
+
 test.describe("sheet tabs", () => {
   test("drag-and-drop reorders tabs and marks the document dirty", async ({ page }) => {
     await gotoDesktop(page);
@@ -26,6 +34,10 @@ test.describe("sheet tabs", () => {
 
     await expect
       .poll(async () => await getVisibleSheetTabOrder(page), { timeout: 5_000 })
+      .toEqual(["Sheet1", "Sheet2", "Sheet3"]);
+
+    await expect
+      .poll(async () => await getSheetSwitcherOptionValues(page), { timeout: 5_000 })
       .toEqual(["Sheet1", "Sheet2", "Sheet3"]);
 
     // Ensure the dirty assertion is specifically caused by sheet reordering.
@@ -61,6 +73,11 @@ test.describe("sheet tabs", () => {
         .poll(async () => await getVisibleSheetTabOrder(page), { timeout: 2_000 })
         .toEqual(["Sheet3", "Sheet1", "Sheet2"]);
     }
+
+    // Sheet switcher ordering should match the visible tab strip ordering (store-driven).
+    await expect
+      .poll(async () => await getSheetSwitcherOptionValues(page), { timeout: 2_000 })
+      .toEqual(["Sheet3", "Sheet1", "Sheet2"]);
 
     // Dirty tracking: sheet reorder is a metadata edit and should still prompt for saving.
     expect(await page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(true);
