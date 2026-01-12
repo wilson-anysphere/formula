@@ -6,6 +6,9 @@ import { CellEditorOverlay } from "../../editor/cellEditorOverlay.js";
 import { DesktopSharedGrid, type DesktopSharedGridCallbacks } from "../shared/desktopSharedGrid.js";
 import { DocumentCellProvider } from "../shared/documentCellProvider.js";
 import { applyPlainTextEdit } from "../text/rich-text/edit.js";
+import { navigateSelectionByKey } from "../../selection/navigation.js";
+import { buildSelection } from "../../selection/selection.js";
+import type { GridLimits, Range, SelectionState, UsedRangeProvider } from "../../selection/types";
 
 type ScrollState = { scrollX: number; scrollY: number };
 
@@ -154,6 +157,78 @@ export class SecondaryGridView {
       onCommit: (commit) => {
         this.editingCell = null;
         this.applyEdit(commit.cell, commit.value);
+        if (commit.reason !== "command") {
+          const gridSelection = this.grid.renderer.getSelection();
+          const gridRanges = this.grid.renderer.getSelectionRanges();
+          const activeIndex = this.grid.renderer.getActiveSelectionIndex();
+          const counts = this.grid.renderer.scroll.getCounts();
+          const limits: GridLimits = {
+            maxRows: Math.max(1, counts.rowCount - this.headerRows),
+            maxCols: Math.max(1, counts.colCount - this.headerCols),
+          };
+
+          const docRanges: Range[] =
+            gridRanges.length > 0
+              ? gridRanges.map((r) => ({
+                  startRow: Math.max(0, r.startRow - this.headerRows),
+                  endRow: Math.max(0, r.endRow - this.headerRows - 1),
+                  startCol: Math.max(0, r.startCol - this.headerCols),
+                  endCol: Math.max(0, r.endCol - this.headerCols - 1),
+                }))
+              : [
+                  {
+                    startRow: commit.cell.row,
+                    endRow: commit.cell.row,
+                    startCol: commit.cell.col,
+                    endCol: commit.cell.col,
+                  },
+                ];
+
+          const activeCell = gridSelection
+            ? { row: Math.max(0, gridSelection.row - this.headerRows), col: Math.max(0, gridSelection.col - this.headerCols) }
+            : { ...commit.cell };
+
+          const selectionState: SelectionState = buildSelection(
+            {
+              ranges: docRanges,
+              active: activeCell,
+              anchor: activeCell,
+              activeRangeIndex: Math.max(0, Math.min(activeIndex, docRanges.length - 1)),
+            },
+            limits
+          );
+
+          const sheetId = this.getSheetId();
+          const data: UsedRangeProvider = {
+            getUsedRange: () => this.document.getUsedRange(sheetId),
+            isCellEmpty: (cell) => {
+              const state = this.document.getCell(sheetId, cell) as { value: unknown; formula: string | null } | null;
+              return state?.value == null && state?.formula == null;
+            },
+            // Shared-grid mode currently doesn't hide outline rows/cols; match SpreadsheetApp behavior.
+            isRowHidden: () => false,
+            isColHidden: () => false,
+          };
+
+          const next = navigateSelectionByKey(
+            selectionState,
+            commit.reason === "enter" ? "Enter" : "Tab",
+            { shift: commit.shift, primary: false },
+            data,
+            limits
+          );
+
+          if (next) {
+            const nextGridRanges: CellRange[] = next.ranges.map((r) => ({
+              startRow: r.startRow + this.headerRows,
+              endRow: r.endRow + this.headerRows + 1,
+              startCol: r.startCol + this.headerCols,
+              endCol: r.endCol + this.headerCols + 1,
+            }));
+            const nextActive = { row: next.active.row + this.headerRows, col: next.active.col + this.headerCols };
+            this.grid.setSelectionRanges(nextGridRanges, { activeIndex: next.activeRangeIndex, activeCell: nextActive });
+          }
+        }
         this.onRequestRefresh?.();
         this.advanceSelectionAfterEdit(commit);
         focusWithoutScroll(this.container);

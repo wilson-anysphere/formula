@@ -164,7 +164,7 @@ test.describe("split view", () => {
 
     // Type a value and commit (Enter moves selection down).
     await page.keyboard.press("h");
-    const editor = page.locator("textarea.cell-editor");
+    const editor = secondary.locator("textarea.cell-editor");
     await expect(editor).toBeVisible();
     await page.keyboard.type("ello");
     await page.keyboard.press("Enter");
