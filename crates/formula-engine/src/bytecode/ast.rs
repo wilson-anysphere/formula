@@ -27,6 +27,7 @@ pub enum BinaryOp {
 pub enum Function {
     Let,
     If,
+    Ifs,
     And,
     Or,
     IfError,
@@ -34,6 +35,7 @@ pub enum Function {
     IsError,
     IsNa,
     Na,
+    Switch,
     Sum,
     SumIf,
     SumIfs,
@@ -72,6 +74,7 @@ impl Function {
         match base {
             "LET" => Function::Let,
             "IF" => Function::If,
+            "IFS" => Function::Ifs,
             "AND" => Function::And,
             "OR" => Function::Or,
             "IFERROR" => Function::IfError,
@@ -79,6 +82,7 @@ impl Function {
             "ISERROR" => Function::IsError,
             "ISNA" => Function::IsNa,
             "NA" => Function::Na,
+            "SWITCH" => Function::Switch,
             "SUM" => Function::Sum,
             "SUMIF" => Function::SumIf,
             "SUMIFS" => Function::SumIfs,
@@ -115,6 +119,7 @@ impl Function {
         match self {
             Function::Let => "LET",
             Function::If => "IF",
+            Function::Ifs => "IFS",
             Function::And => "AND",
             Function::Or => "OR",
             Function::IfError => "IFERROR",
@@ -122,6 +127,7 @@ impl Function {
             Function::IsError => "ISERROR",
             Function::IsNa => "ISNA",
             Function::Na => "NA",
+            Function::Switch => "SWITCH",
             Function::Sum => "SUM",
             Function::SumIf => "SUMIF",
             Function::SumIfs => "SUMIFS",

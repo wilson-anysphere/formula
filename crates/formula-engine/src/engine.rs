@@ -6401,6 +6401,14 @@ fn bytecode_expr_is_eligible_inner(
                     bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
                 })
             }
+            bytecode::ast::Function::Ifs => {
+                if args.len() < 2 || args.len() % 2 != 0 {
+                    return false;
+                }
+                args.iter().all(|arg| {
+                    bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
+                })
+            }
             bytecode::ast::Function::And | bytecode::ast::Function::Or => {
                 if args.is_empty() {
                     return false;
@@ -6423,6 +6431,20 @@ fn bytecode_expr_is_eligible_inner(
                 bytecode_expr_is_eligible_inner(&args[0], false, false, lexical_scopes)
             }
             bytecode::ast::Function::Na => args.is_empty(),
+            bytecode::ast::Function::Switch => {
+                if args.len() < 3 {
+                    return false;
+                }
+                let has_default = (args.len() - 1) % 2 != 0;
+                let pairs_end = if has_default { args.len() - 1 } else { args.len() };
+                let pairs = &args[1..pairs_end];
+                if pairs.len() < 2 || pairs.len() % 2 != 0 {
+                    return false;
+                }
+                args.iter().all(|arg| {
+                    bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
+                })
+            }
             bytecode::ast::Function::Let => {
                 if args.len() < 3 || args.len() % 2 == 0 {
                     return false;

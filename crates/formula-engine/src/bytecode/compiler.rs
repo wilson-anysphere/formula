@@ -176,6 +176,7 @@ impl<'a> CompileCtx<'a> {
                     self.program.instrs[jump_end_idx] =
                         Instruction::new(OpCode::Jump, end_target, 0);
                 }
+                Function::Ifs => self.compile_ifs(args),
                 Function::IfError if args.len() == 2 => {
                     // Evaluate the first argument. If it's not an error, short-circuit and
                     // return it without evaluating the fallback.
@@ -208,6 +209,7 @@ impl<'a> CompileCtx<'a> {
                     self.program.instrs[jump_idx] =
                         Instruction::new(OpCode::JumpIfNotNaError, end_target, 0);
                 }
+                Function::Switch => self.compile_switch(args),
                 _ => {
                     for (arg_idx, arg) in args.iter().enumerate() {
                         self.compile_func_arg(func, arg_idx, arg);
@@ -255,6 +257,158 @@ impl<'a> CompileCtx<'a> {
         self.lexical_scopes.pop();
     }
 
+    fn alloc_temp_local(&mut self, label: &'static str) -> u32 {
+        self.alloc_local(Arc::from(label))
+    }
+
+    fn compile_ifs(&mut self, args: &[Expr]) {
+        // IFS requires at least one condition/value pair, and the argument count must be even.
+        if args.len() < 2 {
+            self.push_error_const(ErrorKind::Value);
+            return;
+        }
+        if args.len() % 2 != 0 {
+            self.push_error_const(ErrorKind::Value);
+            return;
+        }
+
+        let mut jump_if_idxs: Vec<usize> = Vec::new();
+        let mut jump_end_idxs: Vec<usize> = Vec::new();
+
+        for pair in args.chunks_exact(2) {
+            self.compile_expr(&pair[0]);
+            let jump_idx = self.program.instrs.len();
+            // Patched below: a=next_case_target, b=end_target (for error propagation).
+            self.program
+                .instrs
+                .push(Instruction::new(OpCode::JumpIfFalseOrError, 0, 0));
+
+            // TRUE branch.
+            self.compile_expr(&pair[1]);
+            let jump_end_idx = self.program.instrs.len();
+            self.program
+                .instrs
+                .push(Instruction::new(OpCode::Jump, 0, 0));
+
+            // Next condition/value pair (or the final #N/A block).
+            let next_case_target = self.program.instrs.len() as u32;
+            self.program.instrs[jump_idx] =
+                Instruction::new(OpCode::JumpIfFalseOrError, next_case_target, 0);
+
+            jump_if_idxs.push(jump_idx);
+            jump_end_idxs.push(jump_end_idx);
+        }
+
+        // If no condition is true, IFS returns #N/A.
+        self.push_error_const(ErrorKind::NA);
+        let end_target = self.program.instrs.len() as u32;
+
+        for idx in jump_if_idxs {
+            let a = self.program.instrs[idx].a();
+            self.program.instrs[idx] = Instruction::new(OpCode::JumpIfFalseOrError, a, end_target);
+        }
+        for idx in jump_end_idxs {
+            self.program.instrs[idx] = Instruction::new(OpCode::Jump, end_target, 0);
+        }
+    }
+
+    fn compile_switch(&mut self, args: &[Expr]) {
+        // SWITCH(expr, value1, result1, [value2, result2], ..., [default])
+        if args.len() < 3 {
+            self.push_error_const(ErrorKind::Value);
+            return;
+        }
+
+        let has_default = (args.len() - 1) % 2 != 0;
+        let pairs_end = if has_default { args.len() - 1 } else { args.len() };
+        let pairs = &args[1..pairs_end];
+        let default = if has_default { Some(&args[args.len() - 1]) } else { None };
+
+        if pairs.len() < 2 || pairs.len() % 2 != 0 {
+            self.push_error_const(ErrorKind::Value);
+            return;
+        }
+
+        // Evaluate the discriminant expression once and store it in a temp local.
+        self.compile_expr(&args[0]);
+        let expr_local = self.alloc_temp_local("\u{0}SWITCH_EXPR");
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::StoreLocal, expr_local, 0));
+
+        // If the discriminant is an error, return it without evaluating any case expressions.
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::LoadLocal, expr_local, 0));
+        let jump_not_error_idx = self.program.instrs.len();
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::JumpIfNotError, 0, 0));
+        // Error path: reload the error and jump to end.
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::LoadLocal, expr_local, 0));
+        let jump_error_end_idx = self.program.instrs.len();
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::Jump, 0, 0));
+
+        let cases_start = self.program.instrs.len() as u32;
+        self.program.instrs[jump_not_error_idx] =
+            Instruction::new(OpCode::JumpIfNotError, cases_start, 0);
+
+        let mut jump_if_idxs: Vec<usize> = Vec::new();
+        let mut jump_end_idxs: Vec<usize> = vec![jump_error_end_idx];
+
+        for (idx, pair) in pairs.chunks_exact(2).enumerate() {
+            if idx != 0 {
+                self.program
+                    .instrs
+                    .push(Instruction::new(OpCode::LoadLocal, expr_local, 0));
+            }
+
+            // Compare discriminant == case value.
+            self.compile_expr(&pair[0]);
+            self.program
+                .instrs
+                .push(Instruction::new(OpCode::Eq, 0, 0));
+
+            let jump_idx = self.program.instrs.len();
+            // Patched below: a=next_case_target, b=end_target (for error propagation).
+            self.program
+                .instrs
+                .push(Instruction::new(OpCode::JumpIfFalseOrError, 0, 0));
+
+            // Match branch: evaluate result and jump to end.
+            self.compile_expr(&pair[1]);
+            let jump_end_idx = self.program.instrs.len();
+            self.program
+                .instrs
+                .push(Instruction::new(OpCode::Jump, 0, 0));
+
+            let next_case_target = self.program.instrs.len() as u32;
+            self.program.instrs[jump_idx] =
+                Instruction::new(OpCode::JumpIfFalseOrError, next_case_target, 0);
+            jump_if_idxs.push(jump_idx);
+            jump_end_idxs.push(jump_end_idx);
+        }
+
+        // No match: return default if provided, otherwise #N/A.
+        match default {
+            Some(expr) => self.compile_expr(expr),
+            None => self.push_error_const(ErrorKind::NA),
+        }
+        let end_target = self.program.instrs.len() as u32;
+
+        for idx in jump_if_idxs {
+            let a = self.program.instrs[idx].a();
+            self.program.instrs[idx] = Instruction::new(OpCode::JumpIfFalseOrError, a, end_target);
+        }
+        for idx in jump_end_idxs {
+            self.program.instrs[idx] = Instruction::new(OpCode::Jump, end_target, 0);
+        }
+    }
+
     fn compile_func_arg(&mut self, func: &Function, arg_idx: usize, arg: &Expr) {
         // Excel-style aggregate functions have a quirk: a cell reference passed directly as an
         // argument (e.g. `SUM(A1)`) is treated as a *reference* argument, not a scalar, which means
@@ -278,11 +432,13 @@ impl<'a> CompileCtx<'a> {
             Function::SumProduct => true,
             Function::VLookup | Function::HLookup | Function::Match => arg_idx == 1,
             Function::If
+            | Function::Ifs
             | Function::IfError
             | Function::IfNa
             | Function::IsError
             | Function::IsNa
             | Function::Na
+            | Function::Switch
             | Function::Let
             | Function::Abs
             | Function::Int

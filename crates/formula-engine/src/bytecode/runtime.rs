@@ -161,9 +161,9 @@ fn eval_ast_inner(
                 return result;
             }
 
-            // Some logical/error functions are lazy in Excel: avoid evaluating unused branches/
-            // fallbacks. This mirrors the bytecode VM which compiles these functions into explicit
-            // control flow.
+            // Some logical/error/select functions are lazy in Excel: avoid evaluating unused
+            // branches/fallbacks. This mirrors the bytecode VM which compiles these functions into
+            // explicit control flow.
             match func {
                 Function::If => {
                     if args.len() < 2 || args.len() > 3 {
@@ -182,6 +182,26 @@ fn eval_ast_inner(
                     }
                     // Engine behavior: missing false branch defaults to FALSE (not blank).
                     return Value::Bool(false);
+                }
+                Function::Ifs => {
+                    if args.len() % 2 != 0 {
+                        return Value::Error(ErrorKind::Value);
+                    }
+                    if args.len() < 2 {
+                        return Value::Error(ErrorKind::Value);
+                    }
+
+                    for pair in args.chunks_exact(2) {
+                        let cond_val = eval_ast_inner(&pair[0], grid, base, locale, lexical_scopes);
+                        let cond = match coerce_to_bool(cond_val) {
+                            Ok(b) => b,
+                            Err(e) => return Value::Error(e),
+                        };
+                        if cond {
+                            return eval_ast_inner(&pair[1], grid, base, locale, lexical_scopes);
+                        }
+                    }
+                    return Value::Error(ErrorKind::NA);
                 }
                 Function::IfError => {
                     if args.len() != 2 {
@@ -202,6 +222,46 @@ fn eval_ast_inner(
                         return eval_ast_inner(&args[1], grid, base, locale, lexical_scopes);
                     }
                     return first;
+                }
+                Function::Switch => {
+                    if args.len() < 3 {
+                        return Value::Error(ErrorKind::Value);
+                    }
+
+                    let expr_val = eval_ast_inner(&args[0], grid, base, locale, lexical_scopes);
+                    if let Value::Error(e) = expr_val {
+                        return Value::Error(e);
+                    }
+
+                    let has_default = (args.len() - 1) % 2 != 0;
+                    let pairs_end = if has_default { args.len() - 1 } else { args.len() };
+                    let pairs = &args[1..pairs_end];
+                    let default = if has_default { Some(&args[args.len() - 1]) } else { None };
+
+                    if pairs.len() < 2 || pairs.len() % 2 != 0 {
+                        return Value::Error(ErrorKind::Value);
+                    }
+
+                    for pair in pairs.chunks_exact(2) {
+                        let case_val = eval_ast_inner(&pair[0], grid, base, locale, lexical_scopes);
+                        if let Value::Error(e) = case_val {
+                            return Value::Error(e);
+                        }
+                        let matches = apply_binary(BinaryOp::Eq, expr_val.clone(), case_val);
+                        match matches {
+                            Value::Bool(true) => {
+                                return eval_ast_inner(&pair[1], grid, base, locale, lexical_scopes);
+                            }
+                            Value::Bool(false) => continue,
+                            Value::Error(e) => return Value::Error(e),
+                            _ => return Value::Error(ErrorKind::Value),
+                        }
+                    }
+
+                    if let Some(default_expr) = default {
+                        return eval_ast_inner(default_expr, grid, base, locale, lexical_scopes);
+                    }
+                    return Value::Error(ErrorKind::NA);
                 }
                 _ => {}
             }
@@ -229,11 +289,13 @@ fn eval_ast_inner(
                     Function::SumProduct => true,
                     Function::VLookup | Function::HLookup | Function::Match => arg_idx == 1,
                     Function::If
+                    | Function::Ifs
                     | Function::IfError
                     | Function::IfNa
                     | Function::IsError
                     | Function::IsNa
                     | Function::Na
+                    | Function::Switch
                     | Function::Let
                     | Function::Abs
                     | Function::Int
@@ -594,6 +656,7 @@ pub fn call_function(
         // generic function-call path (its "name" arguments are not evaluated values).
         Function::Let => Value::Error(ErrorKind::Value),
         Function::If => fn_if(args),
+        Function::Ifs => fn_ifs(args),
         Function::And => fn_and(args, grid, base),
         Function::Or => fn_or(args, grid, base),
         Function::IfError => fn_iferror(args),
@@ -601,6 +664,7 @@ pub fn call_function(
         Function::IsError => fn_iserror(args),
         Function::IsNa => fn_isna(args),
         Function::Na => fn_na(args),
+        Function::Switch => fn_switch(args),
         Function::Sum => fn_sum(args, grid, base),
         Function::SumIf => fn_sumif(args, grid, base, locale),
         Function::SumIfs => fn_sumifs(args, grid, base, locale),
@@ -824,6 +888,59 @@ fn fn_if(args: &[Value]) -> Value {
         // Engine behavior: missing false branch defaults to FALSE (not blank).
         Value::Bool(false)
     }
+}
+
+fn fn_ifs(args: &[Value]) -> Value {
+    if args.len() % 2 != 0 {
+        return Value::Error(ErrorKind::Value);
+    }
+    if args.len() < 2 {
+        return Value::Error(ErrorKind::Value);
+    }
+    for pair in args.chunks_exact(2) {
+        let cond = match coerce_to_bool(pair[0].clone()) {
+            Ok(b) => b,
+            Err(e) => return Value::Error(e),
+        };
+        if cond {
+            return pair[1].clone();
+        }
+    }
+    Value::Error(ErrorKind::NA)
+}
+
+fn fn_switch(args: &[Value]) -> Value {
+    if args.len() < 3 {
+        return Value::Error(ErrorKind::Value);
+    }
+    let expr_val = args[0].clone();
+    if let Value::Error(e) = expr_val {
+        return Value::Error(e);
+    }
+
+    let has_default = (args.len() - 1) % 2 != 0;
+    let pairs_end = if has_default { args.len() - 1 } else { args.len() };
+    let pairs = &args[1..pairs_end];
+    let default = if has_default { Some(&args[args.len() - 1]) } else { None };
+
+    if pairs.len() < 2 || pairs.len() % 2 != 0 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    for pair in pairs.chunks_exact(2) {
+        let matches = apply_binary(BinaryOp::Eq, expr_val.clone(), pair[0].clone());
+        match matches {
+            Value::Bool(true) => return pair[1].clone(),
+            Value::Bool(false) => continue,
+            Value::Error(e) => return Value::Error(e),
+            _ => return Value::Error(ErrorKind::Value),
+        }
+    }
+
+    if let Some(default_val) = default {
+        return default_val.clone();
+    }
+    Value::Error(ErrorKind::NA)
 }
 
 fn fn_iferror(args: &[Value]) -> Value {

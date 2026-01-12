@@ -368,4 +368,76 @@ mod tests {
         assert_eq!(value, Value::Empty); // A1 is empty.
         assert_eq!(grid.reads(), 1, "IFNA fallback should be evaluated for #N/A");
     }
+
+    #[test]
+    fn vm_short_circuits_ifs_pairs() {
+        let origin = CellCoord::new(0, 0);
+        let locale = crate::LocaleConfig::en_us();
+
+        // IFS(TRUE, 1, A1, 2) should not evaluate later conditions.
+        let expr = super::super::parse_formula("=IFS(TRUE, 1, A1, 2)", origin).expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+        let grid = CountingGrid::new(10, 10);
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval(&program, &grid, origin, &locale);
+        assert_eq!(value, Value::Number(1.0));
+        assert_eq!(grid.reads(), 0, "unused IFS condition should not be evaluated");
+
+        // IFS(FALSE, A1, TRUE, 2) should not evaluate the value for a FALSE condition.
+        let expr = super::super::parse_formula("=IFS(FALSE, A1, TRUE, 2)", origin).expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+        let grid = CountingGrid::new(10, 10);
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval(&program, &grid, origin, &locale);
+        assert_eq!(value, Value::Number(2.0));
+        assert_eq!(
+            grid.reads(),
+            0,
+            "unused IFS value expression should not be evaluated"
+        );
+    }
+
+    #[test]
+    fn vm_short_circuits_switch_cases() {
+        let origin = CellCoord::new(0, 0);
+        let locale = crate::LocaleConfig::en_us();
+
+        // SWITCH(1, 1, 10, A1, 20) should not evaluate later case values after a match.
+        let expr =
+            super::super::parse_formula("=SWITCH(1, 1, 10, A1, 20)", origin).expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+        let grid = CountingGrid::new(10, 10);
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval(&program, &grid, origin, &locale);
+        assert_eq!(value, Value::Number(10.0));
+        assert_eq!(grid.reads(), 0, "unused SWITCH case value should not be evaluated");
+
+        // SWITCH(2, 1, A1, 2, 20) should not evaluate the result for a non-matching case.
+        let expr =
+            super::super::parse_formula("=SWITCH(2, 1, A1, 2, 20)", origin).expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+        let grid = CountingGrid::new(10, 10);
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval(&program, &grid, origin, &locale);
+        assert_eq!(value, Value::Number(20.0));
+        assert_eq!(
+            grid.reads(),
+            0,
+            "unused SWITCH result expression should not be evaluated"
+        );
+
+        // If the discriminant expression is an error, SWITCH should not evaluate any case values.
+        let expr =
+            super::super::parse_formula("=SWITCH(1/0, 1, 10, A1, 20)", origin).expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+        let grid = CountingGrid::new(10, 10);
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval(&program, &grid, origin, &locale);
+        assert_eq!(value, Value::Error(super::super::value::ErrorKind::Div0));
+        assert_eq!(
+            grid.reads(),
+            0,
+            "SWITCH should not evaluate case values when discriminant is an error"
+        );
+    }
 }
