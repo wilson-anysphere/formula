@@ -1,0 +1,103 @@
+/*
+  Styles for the DOM-based macro runner UI (src/macros/dom_ui.ts).
+
+  This file intentionally uses only design tokens from `tokens.css` and does not
+  hardcode colors (enforced by `noHardcodedColors.test.js`).
+*/
+
+.macros-runner {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+
+.macros-runner__header {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.macros-runner__security-banner {
+  white-space: pre-wrap;
+  padding: 8px;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.macros-runner__controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.macros-runner__select {
+  flex: 1 1 180px;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.macros-runner__select:focus {
+  outline: none;
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
+.macros-runner__button {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease);
+}
+
+.macros-runner__button:hover {
+  background: var(--bg-tertiary);
+}
+
+.macros-runner__button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.macros-runner__button:focus-visible {
+  outline: 2px solid var(--selection-border);
+  outline-offset: 2px;
+}
+
+.macros-runner__output {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font:
+    12px/16px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace;
+  white-space: pre-wrap;
+  overflow: auto;
+}
+

@@ -31,12 +31,15 @@ export async function renderMacroRunner(
   container.classList.add("macros-runner");
 
   const header = document.createElement("div");
-  header.className = "macros-runner__title";
+  header.className = "macros-runner__header";
   header.textContent = "Macros";
 
   const securityBanner = document.createElement("div");
   securityBanner.dataset["testid"] = "macro-security-banner";
-  securityBanner.className = "macros-runner__banner";
+  securityBanner.className = "macros-runner__security-banner";
+
+  const controls = document.createElement("div");
+  controls.className = "macros-runner__controls";
 
   const select = document.createElement("select");
   select.className = "macros-runner__select";
@@ -47,15 +50,14 @@ export async function renderMacroRunner(
     select.appendChild(opt);
   }
 
-  const actions = document.createElement("div");
-  actions.className = "macros-runner__actions";
-
   const trustButton = document.createElement("button");
   trustButton.type = "button";
+  trustButton.className = "macros-runner__button";
   trustButton.textContent = "Trust Center…";
 
   const runButton = document.createElement("button");
   runButton.type = "button";
+  runButton.className = "macros-runner__button";
   runButton.textContent = "Run";
 
   const output = document.createElement("pre");
@@ -143,12 +145,12 @@ export async function renderMacroRunner(
     }
   };
 
-  actions.appendChild(select);
-  actions.appendChild(trustButton);
-  actions.appendChild(runButton);
+  controls.appendChild(select);
+  controls.appendChild(trustButton);
+  controls.appendChild(runButton);
 
   container.appendChild(header);
   container.appendChild(securityBanner);
-  container.appendChild(actions);
+  container.appendChild(controls);
   container.appendChild(output);
 }
