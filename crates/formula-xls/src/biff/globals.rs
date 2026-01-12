@@ -1947,6 +1947,27 @@ mod tests {
     }
 
     #[test]
+    fn workbook_protection_password_hash_zero_is_none() {
+        let stream = [
+            record(RECORD_PROTECT, &1u16.to_le_bytes()),
+            record(RECORD_WINDOWPROTECT, &1u16.to_le_bytes()),
+            // Hash value 0 indicates "no password" in Excel's legacy protection scheme.
+            record(RECORD_PASSWORD, &0u16.to_le_bytes()),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+        let globals = parse_biff_workbook_globals(&stream, BiffVersion::Biff8, 1252).expect("parse");
+        assert_eq!(globals.workbook_protection.lock_structure, true);
+        assert_eq!(globals.workbook_protection.lock_windows, true);
+        assert_eq!(globals.workbook_protection.password_hash, None);
+        assert!(
+            globals.warnings.is_empty(),
+            "expected no warnings, got {:?}",
+            globals.warnings
+        );
+    }
+
+    #[test]
     fn workbook_protection_warns_on_truncated_protect_but_continues() {
         // PROTECT record with a 1-byte payload (too short for u16).
         let stream = [

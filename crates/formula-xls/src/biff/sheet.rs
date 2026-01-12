@@ -1720,6 +1720,26 @@ mod tests {
     }
 
     #[test]
+    fn sheet_protection_password_hash_zero_is_none() {
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_PROTECT, &1u16.to_le_bytes()),
+            // Hash value 0 indicates "no password" in Excel's legacy protection scheme.
+            record(RECORD_PASSWORD, &0u16.to_le_bytes()),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+        let parsed = parse_biff_sheet_protection(&stream, 0).expect("parse");
+        assert_eq!(parsed.protection.enabled, true);
+        assert_eq!(parsed.protection.password_hash, None);
+        assert!(
+            parsed.warnings.is_empty(),
+            "expected no warnings, got {:?}",
+            parsed.warnings
+        );
+    }
+
+    #[test]
     fn sheet_protection_scan_stops_at_next_bof() {
         let stream = [
             record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
