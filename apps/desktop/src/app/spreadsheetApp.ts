@@ -1642,8 +1642,11 @@ export class SpreadsheetApp {
     this.formulaConflictMonitor = null;
     this.cellStructuralConflictMonitor?.dispose();
     this.cellStructuralConflictMonitor = null;
-    this.collabSession?.disconnect();
-    this.collabSession?.destroy();
+    // Tests sometimes inject a minimal collab session stub (e.g. `{ presence }`)
+    // to exercise presence behavior without spinning up a provider. Use optional
+    // method calls so teardown remains resilient.
+    this.collabSession?.disconnect?.();
+    this.collabSession?.destroy?.();
     this.collabSession = null;
     this.stopCommentsRootObserver?.();
     this.stopCommentsRootObserver = null;
