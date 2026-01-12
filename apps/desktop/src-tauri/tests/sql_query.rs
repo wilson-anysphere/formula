@@ -24,6 +24,36 @@ async fn sqlite_in_memory_query_returns_rows_and_columns() {
 }
 
 #[tokio::test]
+async fn sqlite_path_memory_query_executes() {
+    let result = sql::sql_query(
+        json!({ "kind": "sqlite", "path": ":memory:" }),
+        "SELECT CAST(1 AS INTEGER) AS one".to_string(),
+        Vec::new(),
+        None,
+    )
+    .await
+    .expect("sqlite :memory: query should succeed");
+
+    assert_eq!(result.columns, vec!["one".to_string()]);
+    assert_eq!(result.rows, vec![vec![json!(1)]]);
+}
+
+#[tokio::test]
+async fn sqlite_path_memory_get_schema_executes() {
+    let result = sql::sql_get_schema(
+        json!({ "kind": "sqlite", "path": ":memory:" }),
+        "SELECT CAST(1 AS INTEGER) AS one".to_string(),
+        None,
+    )
+    .await
+    .expect("sqlite :memory: get_schema should succeed");
+
+    assert_eq!(result.columns, vec!["one".to_string()]);
+    let types = result.types.expect("expected type map");
+    assert_eq!(types.get("one"), Some(&SqlDataType::Number));
+}
+
+#[tokio::test]
 async fn unsupported_connection_kind_returns_clear_error() {
     let err = sql::sql_query(
         json!({ "kind": "mysql", "url": "mysql://localhost" }),
@@ -67,6 +97,21 @@ async fn odbc_sqlite_in_memory_query_executes() {
     )
     .await
     .expect("odbc sqlite query should succeed");
+
+    assert_eq!(result.columns, vec!["one".to_string()]);
+    assert_eq!(result.rows, vec![vec![json!(1)]]);
+}
+
+#[tokio::test]
+async fn odbc_sqlite_in_memory_query_accepts_memory_alias() {
+    let result = sql::sql_query(
+        json!({ "kind": "odbc", "connectionString": "Driver=SQLite3;Database=memory" }),
+        "SELECT CAST(1 AS INTEGER) AS one".to_string(),
+        Vec::new(),
+        None,
+    )
+    .await
+    .expect("odbc sqlite query should succeed with Database=memory alias");
 
     assert_eq!(result.columns, vec!["one".to_string()]);
     assert_eq!(result.rows, vec![vec![json!(1)]]);
