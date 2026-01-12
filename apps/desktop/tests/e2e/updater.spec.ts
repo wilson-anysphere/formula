@@ -6,6 +6,8 @@ function installTauriStubForUpdaterTests(): void {
   const listeners: Record<string, any[]> = {};
   (window as any).__tauriListeners = listeners;
 
+  (window as any).__tauriInvokeCalls = [];
+
   (window as any).__tauriWindowHidden = false;
   (window as any).__tauriWindowShowCalls = 0;
   (window as any).__tauriWindowFocusCalls = 0;
@@ -26,7 +28,15 @@ function installTauriStubForUpdaterTests(): void {
 
   (window as any).__TAURI__ = {
     core: {
-      invoke: async (_cmd: string, _args: any) => null,
+      invoke: async (cmd: string, args: any) => {
+        const calls = (window as any).__tauriInvokeCalls;
+        if (Array.isArray(calls)) {
+          calls.push({ cmd, args });
+        } else {
+          (window as any).__tauriInvokeCalls = [{ cmd, args }];
+        }
+        return null;
+      },
     },
     event: {
       listen: async (name: string, handler: any) => {
@@ -104,6 +114,21 @@ test.describe("updater UI wiring", () => {
     await expect(dialog).toBeVisible();
     await expect(page.getByTestId("updater-version")).toContainText("9.9.9");
     await expect(page.getByTestId("updater-body")).toContainText("Notes");
+
+    await page.evaluate(() => {
+      (window as any).__tauriInvokeCalls = [];
+    });
+    await page.getByTestId("updater-view-versions").click();
+    await page.waitForFunction(() => {
+      const calls = (window as any).__tauriInvokeCalls;
+      return Array.isArray(calls) && calls.some((call) => call && call.cmd === "open_external_url");
+    });
+    const openExternalCalls = await page.evaluate(() => {
+      const calls = (window as any).__tauriInvokeCalls;
+      return Array.isArray(calls) ? calls.filter((call) => call?.cmd === "open_external_url") : [];
+    });
+    expect(openExternalCalls.at(-1)?.args?.url).toBe("https://github.com/wilson-anysphere/formula/releases");
+    await expect(dialog).toBeHidden();
   });
 
   test("manual update events show + focus the window when hidden-to-tray", async ({ page }) => {
@@ -123,9 +148,38 @@ test.describe("updater UI wiring", () => {
   test("update-downloaded shows a ready-to-restart toast when dialog is closed", async ({ page }) => {
     await gotoDesktop(page);
 
+    await page.evaluate(() => {
+      (window as any).__tauriInvokeCalls = [];
+    });
+
     await fireTauriEvent(page, "update-downloaded", { source: "startup", version: "9.9.9" });
     await expect(page.getByTestId("update-ready-toast")).toBeVisible();
     await expect(page.getByTestId("update-ready-toast")).toContainText(/download/i);
+
+    await page.getByTestId("update-ready-view-versions").click();
+    await expect(page.getByTestId("update-ready-toast")).toHaveCount(0);
+    await page.waitForFunction(() => {
+      const calls = (window as any).__tauriInvokeCalls;
+      return Array.isArray(calls) && calls.some((call) => call && call.cmd === "open_external_url");
+    });
+    const openExternalCalls = await page.evaluate(() => {
+      const calls = (window as any).__tauriInvokeCalls;
+      return Array.isArray(calls) ? calls.filter((call) => call?.cmd === "open_external_url") : [];
+    });
+    expect(openExternalCalls.at(-1)?.args?.url).toBe("https://github.com/wilson-anysphere/formula/releases");
+
+    await fireTauriEvent(page, "update-downloaded", { source: "startup", version: "9.9.8" });
+    await expect(page.getByTestId("update-ready-toast")).toBeVisible();
+    await page.getByTestId("update-ready-later").click();
+    await expect(page.getByTestId("update-ready-toast")).toHaveCount(0);
+    const dismissal = await page.evaluate(() => {
+      return {
+        version: localStorage.getItem("formula.updater.dismissedVersion"),
+        dismissedAt: localStorage.getItem("formula.updater.dismissedAt"),
+      };
+    });
+    expect(dismissal.version).toBe("9.9.8");
+    expect(Number(dismissal.dismissedAt)).toBeGreaterThan(0);
   });
 
   test("download error events update the dialog when open", async ({ page }) => {
