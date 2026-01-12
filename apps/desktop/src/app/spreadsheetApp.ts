@@ -75,6 +75,7 @@ import { shellOpen } from "../tauri/shellOpen.js";
 import { applyFillCommitToDocumentController } from "../fill/applyFillCommit";
 import type { CellRange as FillEngineRange, FillMode as FillHandleMode } from "@formula/fill-engine";
 import { bindSheetViewToCollabSession, type SheetViewBinder } from "../collab/sheetViewBinder";
+import { dateToExcelSerial } from "../shared/valueParsing.js";
 
 import * as Y from "yjs";
 import { CommentManager, bindDocToStorage, getCommentsRoot } from "@formula/collab-comments";
@@ -7100,22 +7101,21 @@ export class SpreadsheetApp {
   private insertCurrentDateTimeIntoSelection(kind: "date" | "time"): void {
     const now = new Date();
 
-    const textValue = (() => {
+    const serialValue = (() => {
       if (kind === "date") {
-        // Excel's Ctrl+; shortcut inserts a *string* representation of the local
-        // calendar date. We intentionally avoid serial numbers / number formats for
-        // this shortcut path.
-        const month = now.getMonth() + 1;
-        const day = now.getDate();
-        const year = now.getFullYear();
-        return `${month}/${day}/${year}`;
+        // Excel treats date serials as naive calendar dates (no timezone). Use the *local*
+        // calendar date but encode it as a UTC date so the stored serial is stable.
+        const dateUtc = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+        return dateToExcelSerial(dateUtc);
       }
 
-      // Excel's Ctrl+Shift+; shortcut inserts a time string without seconds.
-      const hour = now.getHours();
-      const minutes = String(now.getMinutes()).padStart(2, "0");
-      return `${hour}:${minutes}`;
+      // Time-only values are stored as a fractional day. Use local time-of-day at
+      // second resolution (Excel Ctrl+Shift+;).
+      const totalSeconds = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+      return (totalSeconds % 86_400) / 86_400;
     })();
+
+    const numberFormat = kind === "date" ? "yyyy-mm-dd" : "hh:mm:ss";
     const label = kind === "date" ? t("command.edit.insertDate") : t("command.edit.insertTime");
 
     const normalizeRange = (range: Range): Range => ({
@@ -7159,8 +7159,16 @@ export class SpreadsheetApp {
         const colCount = range.endCol - range.startCol + 1;
         if (rowCount <= 0 || colCount <= 0) continue;
 
-        const values = Array.from({ length: rowCount }, () => Array.from({ length: colCount }, () => textValue));
+        const values = Array.from({ length: rowCount }, () => Array(colCount).fill(serialValue));
         this.document.setRangeValues(this.sheetId, { row: range.startRow, col: range.startCol }, values);
+        this.document.setRangeFormat(
+          this.sheetId,
+          {
+            start: { row: range.startRow, col: range.startCol },
+            end: { row: range.endRow, col: range.endCol },
+          },
+          { numberFormat },
+        );
       }
     } finally {
       this.document.endBatch();
