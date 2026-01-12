@@ -2505,6 +2505,49 @@ if (
   let splitPanePersistTimer: number | null = null;
   let splitPanePersistDirty = false;
 
+  const syncSecondaryGridReferenceHighlights = () => {
+    if (!secondaryGridView) return;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const formulaBar = (app as any).formulaBar as any;
+    const model = formulaBar?.model as any;
+    const highlights = typeof model?.referenceHighlights === "function" ? model.referenceHighlights() : null;
+
+    if (!Array.isArray(highlights) || highlights.length === 0) {
+      secondaryGridView.grid.renderer.setReferenceHighlights(null);
+      return;
+    }
+
+    const sheetId = app.getCurrentSheetId();
+
+    const gridHighlights = highlights
+      .filter((h: any) => {
+        const sheet = h?.range?.sheet;
+        if (!sheet) return true;
+        const resolved = app.getSheetIdByName(String(sheet));
+        if (!resolved) return false;
+        return resolved.toLowerCase() === sheetId.toLowerCase();
+      })
+      .map((h: any) => {
+        const range = h.range;
+        const startRow = Math.min(range.startRow, range.endRow);
+        const endRow = Math.max(range.startRow, range.endRow);
+        const startCol = Math.min(range.startCol, range.endCol);
+        const endCol = Math.max(range.startCol, range.endCol);
+
+        const gridRange: GridCellRange = {
+          startRow: startRow + SPLIT_HEADER_ROWS,
+          endRow: endRow + SPLIT_HEADER_ROWS + 1,
+          startCol: startCol + SPLIT_HEADER_COLS,
+          endCol: endCol + SPLIT_HEADER_COLS + 1,
+        };
+
+        return { range: gridRange, color: String(h.color), active: Boolean(h.active) };
+      });
+
+    secondaryGridView.grid.renderer.setReferenceHighlights(gridHighlights.length > 0 ? gridHighlights : null);
+  };
+
   const syncSecondaryGridInteractionMode = () => {
     if (!secondaryGridView) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2517,6 +2560,8 @@ if (
       // the secondary pane).
       secondaryGridView.grid.clearRangeSelection();
     }
+
+    syncSecondaryGridReferenceHighlights();
   };
 
   const syncSecondaryGridInteractionModeSoon = () => {
@@ -2534,6 +2579,8 @@ if (
   if (formulaBar?.textarea instanceof HTMLTextAreaElement) {
     formulaBar.textarea.addEventListener("input", () => syncSecondaryGridInteractionMode());
     formulaBar.textarea.addEventListener("focus", () => syncSecondaryGridInteractionMode());
+    formulaBar.textarea.addEventListener("keyup", () => syncSecondaryGridInteractionMode());
+    formulaBar.textarea.addEventListener("select", () => syncSecondaryGridInteractionMode());
     // `blur` fires before FormulaBarView updates its model state during commit/cancel; sync on a microtask.
     formulaBar.textarea.addEventListener("blur", () => syncSecondaryGridInteractionModeSoon());
   }
