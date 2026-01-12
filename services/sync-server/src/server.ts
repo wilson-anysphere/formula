@@ -1014,6 +1014,10 @@ export function createSyncServer(
 
   const handler: http.RequestListener = (req, res) => {
     void (async () => {
+      // This server does not accept request bodies. Drain and discard any bytes
+      // to avoid holding sockets open (or buffering data) under hostile clients.
+      req.resume();
+
       if (!req.url) {
         res.writeHead(400).end();
         return;
@@ -1065,8 +1069,6 @@ export function createSyncServer(
       }
 
       if (pathname.startsWith("/internal/")) {
-        req.resume();
-
         if (!config.internalAdminToken) {
           sendJson(res, 404, { error: "not_found" });
           return;
