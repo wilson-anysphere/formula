@@ -1312,7 +1312,11 @@ fn or_range(
     None
 }
 
-fn deref_single_cell_range(grid: &dyn Grid, range: RangeRef, base: CellCoord) -> Result<Value, ErrorKind> {
+fn deref_single_cell_range(
+    grid: &dyn Grid,
+    range: RangeRef,
+    base: CellCoord,
+) -> Result<Value, ErrorKind> {
     let resolved = range.resolve(base);
     if resolved.rows() == 1 && resolved.cols() == 1 {
         Ok(grid.get_value(CellCoord {
@@ -1324,7 +1328,11 @@ fn deref_single_cell_range(grid: &dyn Grid, range: RangeRef, base: CellCoord) ->
     }
 }
 
-fn scalar_or_single_cell_range(arg: Value, grid: &dyn Grid, base: CellCoord) -> Result<Value, ErrorKind> {
+fn scalar_or_single_cell_range(
+    arg: Value,
+    grid: &dyn Grid,
+    base: CellCoord,
+) -> Result<Value, ErrorKind> {
     match arg {
         Value::Range(r) => deref_single_cell_range(grid, r, base),
         Value::Array(_) => Err(ErrorKind::Spill),

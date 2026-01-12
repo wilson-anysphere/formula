@@ -1121,6 +1121,101 @@ fn bytecode_backend_matches_ast_for_scalar_math_and_comparisons() {
 }
 
 #[test]
+fn bytecode_backend_matches_ast_for_scalar_information_functions() {
+    let mut engine = Engine::new();
+
+    // A1 left blank
+    engine.set_cell_value("Sheet1", "A2", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", "hello").unwrap();
+    engine.set_cell_value("Sheet1", "A4", true).unwrap();
+    engine
+        .set_cell_value("Sheet1", "A5", Value::Error(ErrorKind::Div0))
+        .unwrap();
+    engine
+        .set_cell_value("Sheet1", "A6", Value::Error(ErrorKind::NA))
+        .unwrap();
+
+    // IS* functions.
+    engine
+        .set_cell_formula("Sheet1", "B1", "=ISBLANK(A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=ISNUMBER(A2)")
+        .unwrap();
+    engine.set_cell_formula("Sheet1", "B3", "=ISTEXT(A3)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B4", "=ISLOGICAL(A4)")
+        .unwrap();
+    engine.set_cell_formula("Sheet1", "B5", "=ISERR(A5)").unwrap();
+    engine.set_cell_formula("Sheet1", "B6", "=ISERR(A6)").unwrap();
+
+    // TYPE.
+    engine.set_cell_formula("Sheet1", "C1", "=TYPE(A1)").unwrap();
+    engine.set_cell_formula("Sheet1", "C2", "=TYPE(A2)").unwrap();
+    engine.set_cell_formula("Sheet1", "C3", "=TYPE(A3)").unwrap();
+    engine.set_cell_formula("Sheet1", "C4", "=TYPE(A4)").unwrap();
+    engine.set_cell_formula("Sheet1", "C5", "=TYPE(A5)").unwrap();
+
+    // ERROR.TYPE.
+    engine
+        .set_cell_formula("Sheet1", "D2", "=ERROR.TYPE(A2)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "D5", "=ERROR.TYPE(A5)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "D6", "=ERROR.TYPE(A6)")
+        .unwrap();
+
+    // N.
+    engine.set_cell_formula("Sheet1", "E1", "=N(A1)").unwrap();
+    engine.set_cell_formula("Sheet1", "E2", "=N(A2)").unwrap();
+    engine.set_cell_formula("Sheet1", "E3", "=N(A3)").unwrap();
+    engine.set_cell_formula("Sheet1", "E4", "=N(A4)").unwrap();
+    engine.set_cell_formula("Sheet1", "E5", "=N(A5)").unwrap();
+
+    // T.
+    engine.set_cell_formula("Sheet1", "F1", "=T(A1)").unwrap();
+    engine.set_cell_formula("Sheet1", "F2", "=T(A2)").unwrap();
+    engine.set_cell_formula("Sheet1", "F3", "=T(A3)").unwrap();
+    engine.set_cell_formula("Sheet1", "F5", "=T(A5)").unwrap();
+
+    // Ensure all supported functions were compiled to bytecode (one program per distinct formula
+    // pattern/function name).
+    assert_eq!(engine.bytecode_program_count(), 9);
+
+    engine.recalculate_single_threaded();
+
+    for (formula, cell) in [
+        ("=ISBLANK(A1)", "B1"),
+        ("=ISNUMBER(A2)", "B2"),
+        ("=ISTEXT(A3)", "B3"),
+        ("=ISLOGICAL(A4)", "B4"),
+        ("=ISERR(A5)", "B5"),
+        ("=ISERR(A6)", "B6"),
+        ("=TYPE(A1)", "C1"),
+        ("=TYPE(A2)", "C2"),
+        ("=TYPE(A3)", "C3"),
+        ("=TYPE(A4)", "C4"),
+        ("=TYPE(A5)", "C5"),
+        ("=ERROR.TYPE(A2)", "D2"),
+        ("=ERROR.TYPE(A5)", "D5"),
+        ("=ERROR.TYPE(A6)", "D6"),
+        ("=N(A1)", "E1"),
+        ("=N(A2)", "E2"),
+        ("=N(A3)", "E3"),
+        ("=N(A4)", "E4"),
+        ("=N(A5)", "E5"),
+        ("=T(A1)", "F1"),
+        ("=T(A2)", "F2"),
+        ("=T(A3)", "F3"),
+        ("=T(A5)", "F5"),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_concat_operator() {
     let mut engine = Engine::new();
 
