@@ -89,6 +89,17 @@ describe("builtin keybinding catalog", () => {
     contextKeys.batch({ "spreadsheet.isEditing": true, "focus.inTextInput": false });
     expect(evaluateWhenClause(copyWhen, lookup)).toBe(false);
 
+    // Edit cell (F2) should be handled by the active grid when a grid has focus.
+    // The global keybinding is intended as a fallback when focus is elsewhere.
+    const editCellWhen = builtinKeybindings.find((kb) => kb.command === "edit.editCell" && kb.key === "f2")?.when;
+    expect(typeof editCellWhen).toBe("string");
+
+    contextKeys.batch({ "spreadsheet.isEditing": false, "focus.inTextInput": false, "focus.inGrid": true });
+    expect(evaluateWhenClause(editCellWhen, lookup)).toBe(false);
+
+    contextKeys.batch({ "spreadsheet.isEditing": false, "focus.inTextInput": false, "focus.inGrid": false });
+    expect(evaluateWhenClause(editCellWhen, lookup)).toBe(true);
+
     // Sheet navigation should allow the formula bar "formula editing" exception, but
     // remain blocked while renaming a sheet tab.
     contextKeys.batch({

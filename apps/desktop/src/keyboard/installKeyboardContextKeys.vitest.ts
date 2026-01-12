@@ -63,6 +63,10 @@ describe("installKeyboardContextKeys", () => {
   });
 
   it("tracks focus and spreadsheet editing state", async () => {
+    const gridRoot = document.createElement("div");
+    gridRoot.tabIndex = 0;
+    document.body.appendChild(gridRoot);
+
     const formulaBarRoot = document.createElement("div");
     const formulaInput = document.createElement("input");
     formulaBarRoot.appendChild(formulaInput);
@@ -95,6 +99,7 @@ describe("installKeyboardContextKeys", () => {
       app,
       formulaBarRoot,
       sheetTabsRoot,
+      gridRoot,
       isCommandPaletteOpen: () => commandPaletteOpen,
       isSplitViewSecondaryEditing: () => splitViewSecondaryEditing,
     });
@@ -105,10 +110,17 @@ describe("installKeyboardContextKeys", () => {
     expect(contextKeys.get(KeyboardContextKeyIds.focusInFormulaBar)).toBe(false);
     expect(contextKeys.get(KeyboardContextKeyIds.focusInSheetTabs)).toBe(false);
     expect(contextKeys.get(KeyboardContextKeyIds.focusInSheetTabRename)).toBe(false);
+    expect(contextKeys.get(KeyboardContextKeyIds.focusInGrid)).toBe(false);
     expect(contextKeys.get(KeyboardContextKeyIds.spreadsheetIsEditing)).toBe(false);
     expect(contextKeys.get(KeyboardContextKeyIds.spreadsheetFormulaBarEditing)).toBe(false);
     expect(contextKeys.get(KeyboardContextKeyIds.spreadsheetFormulaBarFormulaEditing)).toBe(false);
     expect(contextKeys.get(KeyboardContextKeyIds.workbenchCommandPaletteOpen)).toBe(false);
+
+    // Focus: grid root.
+    gridRoot.focus();
+    await flushMicrotasks();
+    expect(contextKeys.get(KeyboardContextKeyIds.focusInGrid)).toBe(true);
+    expect(contextKeys.get(KeyboardContextKeyIds.focusInTextInput)).toBe(false);
 
     // Focus: formula bar.
     formulaInput.focus();
@@ -118,6 +130,7 @@ describe("installKeyboardContextKeys", () => {
     expect(contextKeys.get(KeyboardContextKeyIds.focusInFormulaBar)).toBe(true);
     expect(contextKeys.get(KeyboardContextKeyIds.focusInSheetTabs)).toBe(false);
     expect(contextKeys.get(KeyboardContextKeyIds.focusInSheetTabRename)).toBe(false);
+    expect(contextKeys.get(KeyboardContextKeyIds.focusInGrid)).toBe(false);
 
     // Focus: sheet tab rename.
     renameInput.focus();
@@ -127,6 +140,7 @@ describe("installKeyboardContextKeys", () => {
     expect(contextKeys.get(KeyboardContextKeyIds.focusInFormulaBar)).toBe(false);
     expect(contextKeys.get(KeyboardContextKeyIds.focusInSheetTabs)).toBe(true);
     expect(contextKeys.get(KeyboardContextKeyIds.focusInSheetTabRename)).toBe(true);
+    expect(contextKeys.get(KeyboardContextKeyIds.focusInGrid)).toBe(false);
 
     // Focus: sheet tabs root but outside the tab strip.
     sheetAddButton.focus();
@@ -145,6 +159,7 @@ describe("installKeyboardContextKeys", () => {
     expect(contextKeys.get(KeyboardContextKeyIds.focusInFormulaBar)).toBe(false);
     expect(contextKeys.get(KeyboardContextKeyIds.focusInSheetTabs)).toBe(false);
     expect(contextKeys.get(KeyboardContextKeyIds.focusInSheetTabRename)).toBe(false);
+    expect(contextKeys.get(KeyboardContextKeyIds.focusInGrid)).toBe(false);
 
     // Spreadsheet edit state.
     app.setBaseEditing(true);

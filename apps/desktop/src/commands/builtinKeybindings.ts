@@ -21,6 +21,7 @@ const WHEN_COMMAND_PALETTE_CLOSED = "workbench.commandPaletteOpen == false";
 // Dialog-style shortcuts (Find/Replace/Go To, comments panel) should not steal focus while
 // the user is typing in a text input (notably the formula bar editor).
 const WHEN_COMMAND_PALETTE_CLOSED_AND_NOT_IN_TEXT_INPUT = "workbench.commandPaletteOpen == false && focus.inTextInput == false";
+const WHEN_EDIT_CELL = `${WHEN_SPREADSHEET_READY} && focus.inGrid == false`;
 
 /**
  * Built-in keybindings that power UI affordances (Command Palette + context menus)
@@ -119,7 +120,10 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     command: "edit.editCell",
     key: "f2",
     mac: "f2",
-    when: WHEN_SPREADSHEET_READY,
+    // When focus is inside a grid, let the grid's own handler open the correct editor
+    // (primary vs split-view secondary). Use the built-in keybinding only as a global
+    // fallback when focus is elsewhere (ribbon/menus/etc).
+    when: WHEN_EDIT_CELL,
   },
   {
     command: "view.togglePanel.aiChat",

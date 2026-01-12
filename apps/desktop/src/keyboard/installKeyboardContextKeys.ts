@@ -12,6 +12,7 @@ import type { SpreadsheetApp } from "../app/spreadsheetApp";
  * - `focus.inFormulaBar`: `document.activeElement` is within the formula bar root
  * - `focus.inSheetTabs`: `document.activeElement` is within the sheet tab strip (tablist)
  * - `focus.inSheetTabRename`: `document.activeElement` is within sheet tabs root *and* is a text input
+ * - `focus.inGrid`: `document.activeElement` is within either the primary or secondary grid root
  * - `spreadsheet.isEditing`: SpreadsheetApp is editing *or* split-view secondary editor is editing
  * - `spreadsheet.formulaBarEditing`: `app.isFormulaBarEditing()`
  * - `spreadsheet.formulaBarFormulaEditing`: `app.isFormulaBarFormulaEditing()`
@@ -23,6 +24,7 @@ export const KeyboardContextKeyIds = {
   focusInFormulaBar: "focus.inFormulaBar",
   focusInSheetTabs: "focus.inSheetTabs",
   focusInSheetTabRename: "focus.inSheetTabRename",
+  focusInGrid: "focus.inGrid",
   spreadsheetIsEditing: "spreadsheet.isEditing",
   spreadsheetFormulaBarEditing: "spreadsheet.formulaBarEditing",
   spreadsheetFormulaBarFormulaEditing: "spreadsheet.formulaBarFormulaEditing",
@@ -45,6 +47,8 @@ export type KeyboardContextKeysParams = {
   app: SpreadsheetAppKeyboardContext;
   formulaBarRoot: HTMLElement;
   sheetTabsRoot: HTMLElement;
+  gridRoot: HTMLElement;
+  gridSecondaryRoot?: HTMLElement | null;
   // Optional hooks:
   isCommandPaletteOpen?: () => boolean;
   isSplitViewSecondaryEditing?: () => boolean;
@@ -77,7 +81,8 @@ function safeContains(root: HTMLElement, el: HTMLElement | null): boolean {
 }
 
 export function installKeyboardContextKeys(params: KeyboardContextKeysParams): KeyboardContextKeysDisposer {
-  const { contextKeys, app, formulaBarRoot, sheetTabsRoot, isCommandPaletteOpen, isSplitViewSecondaryEditing } = params;
+  const { contextKeys, app, formulaBarRoot, sheetTabsRoot, gridRoot, gridSecondaryRoot, isCommandPaletteOpen, isSplitViewSecondaryEditing } =
+    params;
 
   let disposed = false;
 
@@ -100,6 +105,7 @@ export function installKeyboardContextKeys(params: KeyboardContextKeysParams): K
     const inSheetTabs = safeContains(sheetTabStripRoot, active);
     const inSheetTabsRoot = safeContains(sheetTabsRoot, active);
     const inSheetTabRename = inSheetTabsRoot && inTextInput;
+    const inGrid = safeContains(gridRoot, active) || (gridSecondaryRoot ? safeContains(gridSecondaryRoot, active) : false);
 
     const secondaryEditing = isSplitViewSecondaryEditing?.() === true;
     const isEditing = Boolean(app.isEditing() || secondaryEditing);
@@ -109,6 +115,7 @@ export function installKeyboardContextKeys(params: KeyboardContextKeysParams): K
       [KeyboardContextKeyIds.focusInFormulaBar]: inFormulaBar,
       [KeyboardContextKeyIds.focusInSheetTabs]: inSheetTabs,
       [KeyboardContextKeyIds.focusInSheetTabRename]: inSheetTabRename,
+      [KeyboardContextKeyIds.focusInGrid]: inGrid,
       [KeyboardContextKeyIds.spreadsheetIsEditing]: isEditing,
       [KeyboardContextKeyIds.spreadsheetFormulaBarEditing]: Boolean(app.isFormulaBarEditing()),
       [KeyboardContextKeyIds.spreadsheetFormulaBarFormulaEditing]: Boolean(app.isFormulaBarFormulaEditing()),

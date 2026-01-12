@@ -4168,6 +4168,8 @@ if (
     app,
     formulaBarRoot,
     sheetTabsRoot: sheetTabsRootEl,
+    gridRoot,
+    gridSecondaryRoot: gridSecondaryEl,
     isCommandPaletteOpen: () => {
       // The palette is mounted lazily; treat "overlay exists and is visible" as open.
       const overlay = document.querySelector<HTMLElement>(".command-palette-overlay");
