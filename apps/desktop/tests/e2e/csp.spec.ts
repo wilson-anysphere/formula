@@ -95,7 +95,8 @@ test.describe("Content Security Policy (Tauri parity)", () => {
     // Allow fetching the in-memory `blob:`/`data:` URLs used by the extension system.
     expect(connectSrc).toContain("blob:");
     expect(connectSrc).toContain("data:");
-    expect(connectSrc).not.toContain("ws:");
+    // Collaboration uses y-websocket (ws:// in local dev, wss:// in hosted environments).
+    expect(connectSrc).toContain("ws:");
 
     // The CSP smoke test doesn't need the full UI to render; it only needs the
     // document to load so we can validate WASM + Worker execution under the

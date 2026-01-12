@@ -116,7 +116,11 @@ download the required Pyodide files into `apps/desktop/public/pyodide/` via
 
 The desktop app ships with a strict CSP in `apps/desktop/src-tauri/tauri.conf.json`.
 
-In packaged Tauri builds, `connect-src` allows TLS-only outbound network (`'self' https: wss: blob: data:`).
+In packaged Tauri builds, `connect-src` allows outbound network for:
+
+- HTTPS (`https:`)
+- WebSockets (`ws:`/`wss:`) — required for collaboration (Yjs via `y-websocket`)
+- Local `blob:`/`data:` URLs used by the extension system
 
 The extensions + marketplace runtime prefer using Rust-backed Tauri IPC commands for outbound HTTP(S):
 
@@ -126,7 +130,7 @@ The extensions + marketplace runtime prefer using Rust-backed Tauri IPC commands
 This avoids relying on browser CORS behavior and keeps network policy centralized (see `docs/11-desktop-shell.md` → “Network strategy”).
 
 Note: Rust IPC network requests are not governed by the WebView CSP. `network_fetch` / `marketplace_*` currently allow
-`http:` URLs as well as `https:` (useful for local dev servers), even though `connect-src` does not include `http:`.
+`http:` URLs as well as `https:` (useful for local dev servers), even though `connect-src` still does not include `http:`.
 
 To fetch the assets without starting Vite:
 
