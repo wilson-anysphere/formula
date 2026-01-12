@@ -152,12 +152,13 @@ impl RichDataVmIndex {
         })
     }
 
-    /// Resolve a canonical worksheet value-metadata index (`c/@vm`) into rich value + relationship
-    /// indices and a target part.
+    /// Resolve a worksheet value-metadata index (`c/@vm`) into rich value + relationship indices
+    /// and a target part.
     ///
     /// Note: Excel has been observed to encode worksheet `c/@vm` as either 1-based (canonical) or
-    /// 0-based. This index stores the canonical 1-based mapping from `xl/metadata.xml`; callers
-    /// should normalize 0-based worksheet indices by adding 1 before calling `resolve_vm`.
+    /// 0-based. [`Self::build`] records a best-effort `vm_offset` when the workbook appears to use
+    /// 0-based worksheet indices, so callers should pass the raw `vm` value as it appears on the
+    /// worksheet cell.
     pub fn resolve_vm(&self, vm: u32) -> RichDataVmResolution {
         let vm = vm.saturating_add(self.vm_offset);
         let rich_value_index = self.vm_to_rich_value_index.get(&vm).copied();
