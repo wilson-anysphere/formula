@@ -10,6 +10,12 @@ test.describe("dockable panels layout persistence", () => {
     await waitForDesktopReady(page);
 
     const ribbon = page.getByTestId("ribbon-root");
+    // Collaboration panels should be discoverable via the status bar toggles.
+    await page.locator(".statusbar__main").getByTestId("open-version-history-panel").click();
+    await expect(page.getByTestId("dock-right").getByTestId("panel-versionHistory")).toBeVisible();
+
+    await page.locator(".statusbar__main").getByTestId("open-branch-manager-panel").click();
+    await expect(page.getByTestId("dock-right").getByTestId("panel-branchManager")).toBeVisible();
 
     // Open AI panel (defaults to right dock via panel registry).
     await ribbon.getByTestId("open-panel-ai-chat").click();

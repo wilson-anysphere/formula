@@ -300,7 +300,7 @@ panelRegistry.registerPanel(
   PanelIds.BRANCH_MANAGER,
   {
     title: "Branches",
-    defaultDock: "left",
+    defaultDock: "right",
     defaultFloatingRect: { x: 140, y: 160, width: 520, height: 640 },
     source: { kind: "builtin" },
   },
