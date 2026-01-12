@@ -2,6 +2,8 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{App, AppHandle, Emitter, Manager};
 
+use desktop::tray_status::TrayStatusState;
+
 const ITEM_NEW: &str = "new";
 const ITEM_OPEN: &str = "open";
 const ITEM_CHECK_UPDATES: &str = "check_updates";
@@ -33,8 +35,9 @@ pub fn init(app: &mut App) -> tauri::Result<()> {
         ],
     )?;
 
-    TrayIconBuilder::new()
+    let tray = TrayIconBuilder::new()
         .icon(tauri::include_image!("icons/tray.png"))
+        .tooltip("Formula")
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
             ITEM_NEW => {
@@ -69,6 +72,8 @@ pub fn init(app: &mut App) -> tauri::Result<()> {
             }
         })
         .build(app)?;
+
+    app.state::<TrayStatusState>().inner().set_tray(tray);
 
     Ok(())
 }

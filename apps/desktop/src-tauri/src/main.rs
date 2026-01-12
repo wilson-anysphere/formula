@@ -14,6 +14,7 @@ use desktop::macro_trust::{
 use desktop::macros::MacroExecutionOptions;
 use desktop::open_file;
 use desktop::state::{AppState, CellUpdateData, SharedAppState};
+use desktop::tray_status::{self, TrayStatusState};
 use serde::Serialize;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -266,6 +267,7 @@ fn main() {
         .manage(state)
         .manage(macro_trust)
         .manage(open_file_state)
+        .manage(TrayStatusState::default())
         .invoke_handler(tauri::generate_handler![
             commands::open_workbook,
             commands::new_workbook,
@@ -323,6 +325,7 @@ fn main() {
             commands::fire_workbook_before_close,
             commands::fire_worksheet_change,
             commands::fire_selection_change,
+            tray_status::set_tray_status,
         ])
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {

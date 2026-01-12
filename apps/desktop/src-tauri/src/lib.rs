@@ -9,3 +9,6 @@ pub mod resource_limits;
 pub mod sql;
 pub mod state;
 pub mod storage;
+
+#[cfg(feature = "desktop")]
+pub mod tray_status;

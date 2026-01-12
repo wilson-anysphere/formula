@@ -37,6 +37,7 @@ import { normalizeFormulaTextOpt } from "@formula/engine";
 import { startWorkbookSync } from "./tauri/workbookSync";
 import { TauriWorkbookBackend } from "./tauri/workbookBackend";
 import * as nativeDialogs from "./tauri/nativeDialogs";
+import { setTrayStatus } from "./tauri/trayStatus";
 import type { WorkbookInfo } from "@formula/workbook-backend";
 import { chartThemeFromWorkbookPalette } from "./charts/theme";
 import { parseA1Range, splitSheetQualifier } from "../../../packages/search/index.js";
@@ -338,6 +339,14 @@ auditTransitive.addEventListener("click", () => {
 
 let powerQueryService: DesktopPowerQueryService | null = null;
 let powerQueryServiceWorkbookId: string | null = null;
+let stopPowerQueryTrayListener: (() => void) | null = null;
+const powerQueryTrayJobs = new Set<string>();
+let powerQueryTrayHadError = false;
+
+function updateTrayFromPowerQuery(): void {
+  const status = powerQueryTrayJobs.size > 0 ? "syncing" : powerQueryTrayHadError ? "error" : "idle";
+  void setTrayStatus(status);
+}
 
 function currentPowerQueryWorkbookId(): string {
   return activePanelWorkbookId;
@@ -354,14 +363,43 @@ function startPowerQueryService(): void {
     batchSize: 1024,
   });
   setDesktopPowerQueryService(serviceWorkbookId, powerQueryService);
+
+  stopPowerQueryTrayListener?.();
+  powerQueryTrayJobs.clear();
+  powerQueryTrayHadError = false;
+  updateTrayFromPowerQuery();
+
+  stopPowerQueryTrayListener = powerQueryService.onEvent((evt) => {
+    if (!evt || typeof evt !== "object") return;
+    const type = (evt as any).type;
+    if (type !== "apply:started" && type !== "apply:completed" && type !== "apply:cancelled" && type !== "apply:error") return;
+    const jobId = (evt as any).jobId;
+    if (typeof jobId !== "string" || jobId.trim() === "") return;
+
+    if (type === "apply:started") {
+      powerQueryTrayHadError = false;
+      powerQueryTrayJobs.add(jobId);
+    } else {
+      powerQueryTrayJobs.delete(jobId);
+      if (type === "apply:error") powerQueryTrayHadError = true;
+    }
+
+    updateTrayFromPowerQuery();
+  });
 }
 
 function stopPowerQueryService(): void {
   const existingWorkbookId = powerQueryServiceWorkbookId;
   powerQueryServiceWorkbookId = null;
   if (existingWorkbookId) setDesktopPowerQueryService(existingWorkbookId, null);
+  stopPowerQueryTrayListener?.();
+  stopPowerQueryTrayListener = null;
   powerQueryService?.dispose();
   powerQueryService = null;
+
+  powerQueryTrayJobs.clear();
+  powerQueryTrayHadError = false;
+  updateTrayFromPowerQuery();
 }
 
 startPowerQueryService();
@@ -2904,6 +2942,9 @@ try {
     (globalThis as any).__FORMULA_WORKBOOK_INVOKE__ = queuedInvoke;
     (globalThis as any).__formulaQueuedInvoke = queuedInvoke;
   }
+
+  // Ensure the tray indicator starts in a known-good state once the desktop backend is available.
+  void setTrayStatus("idle");
   window.addEventListener("unload", () => {
     vbaEventMacros?.dispose();
     workbookSync?.stop();
