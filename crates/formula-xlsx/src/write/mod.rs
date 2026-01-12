@@ -3311,7 +3311,6 @@ fn append_cell_xml(
             }
         }
     }
-
     out.push('>');
 
     let model_formula = cell.formula.as_deref();

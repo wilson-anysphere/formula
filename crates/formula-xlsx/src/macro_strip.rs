@@ -709,7 +709,7 @@ mod tests {
         let mut delete_parts = BTreeSet::new();
         delete_parts.insert("xl/vbaProject.bin".to_string());
 
-        let updated = strip_content_types(xml, &delete_parts)
+        let updated = strip_content_types(xml, &delete_parts, WorkbookKind::Workbook)
             .expect("strip_content_types ok")
             .expect("expected content types update");
 
@@ -741,7 +741,7 @@ mod tests {
 </ct:Types>"#;
 
         let delete_parts = BTreeSet::new();
-        let updated = strip_content_types(xml, &delete_parts)
+        let updated = strip_content_types(xml, &delete_parts, WorkbookKind::Workbook)
             .expect("strip_content_types ok")
             .expect("expected content types update");
 
