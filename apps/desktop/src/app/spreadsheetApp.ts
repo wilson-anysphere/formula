@@ -76,7 +76,7 @@ import type { AIAuditStore } from "../../../../packages/ai-audit/src/store.js";
 import type { CellRange as GridCellRange, GridAxisSizeChange, GridPresence, GridViewportState } from "@formula/grid";
 import { resolveDesktopGridMode, type DesktopGridMode } from "../grid/shared/desktopGridMode.js";
 import { DocumentCellProvider } from "../grid/shared/documentCellProvider.js";
-import { DesktopSharedGrid } from "../grid/shared/desktopSharedGrid.js";
+import { DesktopSharedGrid, type DesktopSharedGridCallbacks } from "../grid/shared/desktopSharedGrid.js";
 import { openExternalHyperlink } from "../hyperlinks/openExternal.js";
 import * as nativeDialogs from "../tauri/nativeDialogs.js";
 import { shellOpen } from "../tauri/shellOpen.js";
@@ -3171,6 +3171,31 @@ export class SpreadsheetApp {
 
     const docRange = this.docRangeFromGridRange(activeRange);
     this.selectRange({ range: docRange }, { scrollIntoView, focus });
+  }
+
+  /**
+   * Returns the shared-grid (CanvasGridRenderer) provider when the app is running in shared-grid mode.
+   *
+   * This is used by the split-view secondary pane so it can reuse the primary grid's provider/cache
+   * when available.
+   */
+  getSharedGridProvider(): DocumentCellProvider | null {
+    return this.sharedProvider;
+  }
+
+  /**
+   * Callbacks that allow a shared-grid instance (e.g. split-view secondary pane) to drive the
+   * formula bar range-selection UX.
+   */
+  getSharedGridRangeSelectionCallbacks(): Pick<
+    DesktopSharedGridCallbacks,
+    "onRangeSelectionStart" | "onRangeSelectionChange" | "onRangeSelectionEnd"
+  > {
+    return {
+      onRangeSelectionStart: (range) => this.onSharedRangeSelectionStart(range),
+      onRangeSelectionChange: (range) => this.onSharedRangeSelectionChange(range),
+      onRangeSelectionEnd: () => this.onSharedRangeSelectionEnd(),
+    };
   }
 
   getSelectionRanges(): Range[] {

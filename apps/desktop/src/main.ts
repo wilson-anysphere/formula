@@ -3305,7 +3305,7 @@ if (
     // changes so the secondary pane matches the primary pane behavior (only show highlights that
     // belong to the currently-visible sheet).
     syncSecondaryGridReferenceHighlights();
-    const sharedProvider = (app as any).sharedProvider ?? null;
+    const sharedProvider = app.getSharedGridProvider();
     // In shared-grid mode we reuse the primary provider, and SpreadsheetApp already
     // invalidates it on sheet changes / show-formulas toggles. Avoid extra churn.
     if (sharedProvider && secondaryGridView.provider === sharedProvider) return;
@@ -3525,7 +3525,7 @@ if (
 
       secondaryGridView = new SecondaryGridView({
         container: gridSecondaryEl,
-        provider: (app as any).sharedProvider ?? undefined,
+        provider: app.getSharedGridProvider() ?? undefined,
         document: app.getDocument(),
         getSheetId: getSecondarySheetId,
         rowCount,
@@ -3535,11 +3535,7 @@ if (
         onRequestRefresh: () => app.refresh(),
         onSelectionChange: () => syncPrimarySelectionFromSecondary(),
         onSelectionRangeChange: () => syncPrimarySelectionFromSecondary(),
-        callbacks: {
-          onRangeSelectionStart: (range) => (app as any).onSharedRangeSelectionStart(range),
-          onRangeSelectionChange: (range) => (app as any).onSharedRangeSelectionChange(range),
-          onRangeSelectionEnd: () => (app as any).onSharedRangeSelectionEnd(),
-        },
+        callbacks: app.getSharedGridRangeSelectionCallbacks(),
         initialScroll,
         initialZoom,
         persistScroll: (scroll) => {
