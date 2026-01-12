@@ -14,6 +14,8 @@ export const ar = {
   "commandPalette.group.functions": "الدوال",
   "commandPalette.group.other": "أخرى",
   "commandPalette.shortcutSearch.hint": "بحث عن الاختصارات",
+  "commandPalette.empty.noMatchingCommands": "لا توجد أوامر مطابقة",
+  "commandPalette.empty.noCommands": "لا توجد أوامر",
   "commandPalette.empty.noMatchingShortcuts": "لا توجد اختصارات مطابقة",
   "commandPalette.empty.noShortcuts": "لا توجد اختصارات",
   "commandPalette.searching": "جارٍ البحث…",

@@ -14,6 +14,8 @@ export const deDE = {
   "commandPalette.group.functions": "FUNKTIONEN",
   "commandPalette.group.other": "Andere",
   "commandPalette.shortcutSearch.hint": "Tastenkürzel suchen",
+  "commandPalette.empty.noMatchingCommands": "Keine passenden Befehle",
+  "commandPalette.empty.noCommands": "Keine Befehle",
   "commandPalette.empty.noMatchingShortcuts": "Keine passenden Tastenkürzel",
   "commandPalette.empty.noShortcuts": "Keine Tastenkürzel",
   "commandPalette.searching": "Suche…",
