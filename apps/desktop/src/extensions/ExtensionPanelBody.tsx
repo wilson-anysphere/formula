@@ -23,7 +23,7 @@ const WEBVIEW_CSP = [
 export function injectWebviewCsp(html: string): string {
   const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${WEBVIEW_CSP}">`;
   const hardenTauriGlobalsScript = `<script>
-(() => {
+ (() => {
   "use strict";
   const keys = ["__TAURI__", "__TAURI_IPC__", "__TAURI_INTERNALS__", "__TAURI_METADATA__"];
   let tauriGlobalsPresent = false;
@@ -140,37 +140,23 @@ export function injectWebviewCsp(html: string): string {
   const injectedHeadContent = `${cspMeta}${hardenTauriGlobalsScript}`;
   const src = String(html ?? "");
 
-  const headMatch = /<head(\s[^>]*)?>/i.exec(src);
-  const scriptMatch = /<script\b/i.exec(src);
-  if (headMatch && typeof headMatch.index === "number" && (!scriptMatch || headMatch.index < scriptMatch.index)) {
-    const insertAt = headMatch.index + headMatch[0].length;
-    return `${src.slice(0, insertAt)}${injectedHeadContent}${src.slice(insertAt)}`;
+  // If the markup doesn't include an `<html>`, wrap it so the iframe always runs in standards mode
+  // and the CSP meta tag is guaranteed to be parsed as a head directive.
+  if (!/<html(\s[^>]*)?>/i.test(src)) {
+    return `<!doctype html><html><head>${injectedHeadContent}</head><body>${src}</body></html>`;
   }
 
-  const htmlMatch = /<html(\s[^>]*)?>/i.exec(src);
-  if (htmlMatch && typeof htmlMatch.index === "number" && (!scriptMatch || htmlMatch.index < scriptMatch.index)) {
-    const insertAt = htmlMatch.index + htmlMatch[0].length;
-    // If the extension's markup is malformed (e.g. scripts before `<head>`), inserting right
-    // after `<html>` ensures our CSP and hardening script execute before any extension scripts.
-    // We intentionally avoid closing a `<head>` tag here so any extension-provided head markup
-    // still ends up inside the parsed `<head>` element.
-    return `${src.slice(0, insertAt)}${injectedHeadContent}${src.slice(insertAt)}`;
+  // Ensure the CSP applies before any extension-provided markup is parsed (including malformed
+  // HTML that places tags before `<html>`/`<head>`). We do this by injecting immediately after the
+  // document doctype when present, otherwise by prefixing a doctype and injecting right after it.
+  const withDoctype = /^\s*<!doctype\b/i.test(src) ? src : `<!doctype html>${src}`;
+  const doctypeMatch = /^\s*<!doctype[^>]*>/i.exec(withDoctype);
+  if (doctypeMatch) {
+    const insertAt = doctypeMatch.index + doctypeMatch[0].length;
+    return `${withDoctype.slice(0, insertAt)}${injectedHeadContent}${withDoctype.slice(insertAt)}`;
   }
 
-  if (scriptMatch && typeof scriptMatch.index === "number") {
-    // If we can't safely inject via `<head>` or `<html>`, inject as early as possible (after an
-    // initial doctype when present) so the CSP/hardening code runs before any extension scripts.
-    let insertAt = 0;
-    const doctypeMatch = /^\s*<!doctype[^>]*>/i.exec(src);
-    if (doctypeMatch && typeof doctypeMatch.index === "number") {
-      const doctypeEnd = doctypeMatch.index + doctypeMatch[0].length;
-      if (doctypeEnd <= scriptMatch.index) insertAt = doctypeEnd;
-    }
-    return `${src.slice(0, insertAt)}${injectedHeadContent}${src.slice(insertAt)}`;
-  }
-
-  // Fall back to wrapping arbitrary markup in a full document.
-  return `<!doctype html><html><head>${injectedHeadContent}</head><body>${src}</body></html>`;
+  return `${injectedHeadContent}${withDoctype}`;
 }
 
 export function ExtensionPanelBody({ panelId, bridge }: { panelId: string; bridge: ExtensionPanelBridge }) {

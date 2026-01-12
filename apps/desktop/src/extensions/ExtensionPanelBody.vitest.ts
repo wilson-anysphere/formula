@@ -29,6 +29,17 @@ describe("injectWebviewCsp", () => {
     expect(cspIdx).toBeLessThan(firstScriptIdx);
   });
 
+  it("injects before tags that appear before <html>", () => {
+    const html = "<img src=\"data:,\"><html><head></head><body></body></html>";
+    const out = injectWebviewCsp(html);
+
+    const cspIdx = out.indexOf('<meta http-equiv="Content-Security-Policy"');
+    const imgIdx = out.indexOf("<img");
+    expect(cspIdx).toBeGreaterThanOrEqual(0);
+    expect(imgIdx).toBeGreaterThanOrEqual(0);
+    expect(cspIdx).toBeLessThan(imgIdx);
+  });
+
   it("wraps arbitrary markup in a full document and injects CSP + hardening", () => {
     const html = "<h1>Hello</h1>";
     const out = injectWebviewCsp(html);
@@ -51,4 +62,3 @@ describe("injectWebviewCsp", () => {
     expect(cspIdx).toBeLessThan(originalScriptIdx);
   });
 });
-
