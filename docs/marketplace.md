@@ -78,6 +78,19 @@ Authenticated/mutation endpoints are served with `Cache-Control: no-store`.
 
 Returns extension metadata, including versions and the publisher signing key(s).
 
+**Security flags**
+
+The extension record includes security metadata that clients **must** honor:
+
+- `blocked: boolean` — extension is blocked and must not be installed.
+- `malicious: boolean` — extension is marked as malicious and must not be installed.
+- `deprecated: boolean` — extension is deprecated; clients may allow install but should warn.
+- `publisherRevoked?: boolean` — the publisher has been revoked; clients must not install.
+
+Each entry in `versions` may also include:
+
+- `scanStatus: string` — package scan status (for UI/display and client policy decisions).
+
 **Response headers**
 
 - `ETag`: changes when the extension metadata changes.
@@ -105,6 +118,9 @@ Downloads raw package bytes.
 - `X-Package-Format-Version`: `1` or `2`
 - `X-Publisher`: publisher id
 - `X-Publisher-Key-Id`: key id (sha256 fingerprint) identifying which publisher key signed this version
+- `X-Package-Scan-Status`: package scan status (e.g. `passed`, `pending`, `failed`, `unknown`)
+- `X-Package-Files-Sha256`: sha256 of the signed file inventory (defense-in-depth integrity metadata)
+- `X-Package-Published-At`: ISO timestamp when the version was published (optional)
 
 **Client integrity requirement**
 
