@@ -231,6 +231,34 @@ test(
   },
 );
 
+test(
+  "cursor AI policy guard detects violations in large git repos (git grep path)",
+  { skip: !HAS_GIT },
+  async () => {
+    const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-git-grep-fail-"));
+    try {
+      // Ensure we cross the `GIT_GREP_MIN_FILES` threshold so the policy guard uses
+      // its git-grep fast path (as it does in the real repo).
+      const extraFileCount = 510;
+      for (let i = 0; i < extraFileCount; i += 1) {
+        await writeFixtureFile(tmpRoot, `packages/example/src/many/file-${i}.js`, "export const x = 1;\n");
+      }
+      await writeFixtureFile(tmpRoot, "packages/example/src/index.js", 'const provider = "OpenAI";\n');
+
+      const init = spawnSync("git", ["init"], { cwd: tmpRoot, encoding: "utf8" });
+      assert.equal(init.status, 0, init.stderr);
+      const add = spawnSync("git", ["add", "."], { cwd: tmpRoot, encoding: "utf8" });
+      assert.equal(add.status, 0, add.stderr);
+
+      const result = await runPolicyApi(tmpRoot, { maxViolations: 1 });
+      assert.equal(result.ok, false);
+      assert.match(formatViolations(result.violations), /openai/i);
+    } finally {
+      await fs.rm(tmpRoot, { recursive: true, force: true });
+    }
+  },
+);
+
 test("cursor AI policy guard scans Dockerfiles for provider strings", async () => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-dockerfile-fail-"));
   try {
