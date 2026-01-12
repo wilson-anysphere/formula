@@ -188,10 +188,11 @@ At a high level:
     IndexedDB-installed extensions on demand.
 
 Extension panels (`contributes.panels` / `formula.ui.createPanel`) are rendered in a sandboxed `<iframe>` with a
-restrictive CSP (see `apps/desktop/src/extensions/ExtensionPanelBody.tsx`), so panel HTML cannot load remote scripts or
-make network requests directly. The desktop also scrubs Tauri IPC globals (`__TAURI__`, etc) from the iframe as a
-defense-in-depth measure (see `window.__formulaWebviewSandbox` marker inside the iframe). Panels should communicate with
-extension code via `postMessage`.
+ restrictive CSP (see `apps/desktop/src/extensions/ExtensionPanelBody.tsx`), so panel HTML cannot load remote scripts,
+ cannot make network requests directly, and cannot run inline `<script>` blocks (scripts must be loaded via `data:`/`blob:`
+ URLs). The desktop also scrubs Tauri IPC globals (`__TAURI__`, etc) from the iframe as a defense-in-depth measure (see
+ `window.__formulaWebviewSandbox` marker inside the iframe). Panels should communicate with extension code via
+ `postMessage`.
 
 The extension worker runtime also locks down Tauri globals (`__TAURI__`, `__TAURI_IPC__`, etc) before loading extension
 modules (defense-in-depth so untrusted extension code can't call native commands directly).
