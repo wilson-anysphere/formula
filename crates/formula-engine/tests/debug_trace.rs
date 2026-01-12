@@ -430,6 +430,65 @@ fn trace_preserves_reference_context_for_sum() {
 }
 
 #[test]
+fn debug_trace_supports_row_and_column_ranges_with_sheet_dimensions() {
+    let mut engine = Engine::new();
+    engine.set_sheet_dimensions("Sheet1", 3, 5).unwrap(); // 3 rows, 5 cols (A..E)
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "B1", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "C1", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "D1", 4.0).unwrap();
+    engine.set_cell_value("Sheet1", "E1", 5.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 100.0).unwrap();
+
+    engine.set_cell_formula("Sheet1", "B2", "=SUM(A:A)").unwrap();
+    engine.set_cell_formula("Sheet1", "B3", "=SUM(1:1)").unwrap();
+    engine.recalculate();
+
+    let dbg_col = engine.debug_evaluate("Sheet1", "B2").unwrap();
+    assert_eq!(dbg_col.value, Value::Number(111.0));
+    assert_eq!(slice(&dbg_col.formula, dbg_col.trace.span), "SUM(A:A)");
+    assert!(matches!(dbg_col.trace.kind, TraceKind::FunctionCall { .. }));
+    let range_node = &dbg_col.trace.children[0];
+    assert_eq!(slice(&dbg_col.formula, range_node.span), "A:A");
+    assert_eq!(
+        range_node.reference,
+        Some(TraceRef::Range {
+            sheet: formula_engine::functions::SheetId::Local(0),
+            start: CellAddr { row: 0, col: 0 },
+            end: CellAddr { row: 2, col: 0 },
+        })
+    );
+
+    let dbg_row = engine.debug_evaluate("Sheet1", "B3").unwrap();
+    assert_eq!(dbg_row.value, Value::Number(15.0));
+    assert_eq!(slice(&dbg_row.formula, dbg_row.trace.span), "SUM(1:1)");
+    assert!(matches!(dbg_row.trace.kind, TraceKind::FunctionCall { .. }));
+    let range_node = &dbg_row.trace.children[0];
+    assert_eq!(slice(&dbg_row.formula, range_node.span), "1:1");
+    assert_eq!(
+        range_node.reference,
+        Some(TraceRef::Range {
+            sheet: formula_engine::functions::SheetId::Local(0),
+            start: CellAddr { row: 0, col: 0 },
+            end: CellAddr { row: 0, col: 4 },
+        })
+    );
+}
+
+#[test]
+fn debug_trace_does_not_materialize_huge_references() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=A1:XFD1048576")
+        .unwrap();
+
+    let dbg = engine.debug_evaluate("Sheet1", "A1").unwrap();
+    assert_eq!(dbg.value, Value::Error(formula_engine::ErrorKind::Spill));
+    assert!(matches!(dbg.trace.kind, TraceKind::RangeRef));
+}
+
+#[test]
 fn debug_trace_for_vlookup_includes_reference_arg_and_matches_result() {
     let mut engine = Engine::new();
     // Lookup key.

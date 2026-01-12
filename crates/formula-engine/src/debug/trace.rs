@@ -6,6 +6,12 @@ use crate::functions::{ArgValue as FnArgValue, FunctionContext, SheetId as FnShe
 use crate::value::{Array, ErrorKind, Value};
 use std::cmp::Ordering;
 
+/// Maximum number of cells the debug trace evaluator will materialize when a formula result is a
+/// range reference.
+///
+/// Keep this aligned with `eval::Evaluator` to avoid OOMs for formulas like `=A1:XFD1048576`.
+const MAX_REFERENCE_DEREF_CELLS: usize = 5_000_000;
+
 /// Half-open byte span into the original formula string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Span {
@@ -736,6 +742,61 @@ fn parse_bracket_quoted_field_name(raw: &str) -> Result<String, ()> {
     Ok(out)
 }
 
+fn parse_col_ref_str(input: &str) -> Option<u32> {
+    let input = input.trim();
+    let input = input.strip_prefix('$').unwrap_or(input);
+    if input.is_empty() {
+        return None;
+    }
+
+    let mut col: u32 = 0;
+    for ch in input.chars() {
+        if !ch.is_ascii_alphabetic() {
+            return None;
+        }
+        let up = ch.to_ascii_uppercase();
+        let digit = (up as u8 - b'A' + 1) as u32;
+        col = col.checked_mul(26)?.checked_add(digit)?;
+    }
+    if col == 0 || col > formula_model::EXCEL_MAX_COLS {
+        return None;
+    }
+    Some(col - 1)
+}
+
+fn parse_row_ref_str(input: &str) -> Option<u32> {
+    let input = input.trim();
+    let input = input.strip_prefix('$').unwrap_or(input);
+    if input.is_empty() {
+        return None;
+    }
+
+    let mut row: u32 = 0;
+    for ch in input.chars() {
+        if !ch.is_ascii_digit() {
+            return None;
+        }
+        row = row
+            .checked_mul(10)?
+            .checked_add((ch as u8 - b'0') as u32)?;
+    }
+    if row == 0 {
+        return None;
+    }
+    Some(row - 1)
+}
+
+fn parse_row_ref_number(n: f64) -> Option<u32> {
+    if !n.is_finite() || n.fract() != 0.0 || n < 1.0 || n > (u32::MAX as f64) {
+        return None;
+    }
+    let row = n as u32;
+    if row == 0 {
+        return None;
+    }
+    Some(row - 1)
+}
+
 struct ParserImpl {
     tokens: Vec<Token>,
     pos: usize,
@@ -903,6 +964,34 @@ impl ParserImpl {
         let tok = self.peek().clone();
         let mut expr = match &tok.kind {
             TokenKind::Number(n) => {
+                // Row range refs like `1:3` are lexed as number literals. Treat them as a
+                // reference operator when they appear in a `:<row>` context; otherwise they
+                // remain numeric constants.
+                if matches!(self.peek_n(1).kind, TokenKind::Colon) {
+                    let start_row = parse_row_ref_number(*n);
+                    let end_row = match &self.peek_n(2).kind {
+                        TokenKind::Number(m) => parse_row_ref_number(*m),
+                        TokenKind::Ident(s) => parse_row_ref_str(s),
+                        _ => None,
+                    };
+                    if let (Some(start_row), Some(end_row)) = (start_row, end_row) {
+                        let start_tok = self.next();
+                        self.next(); // ':'
+                        let end_tok = self.next();
+                        return Ok(SpannedExpr {
+                            span: Span::new(start_tok.span.start, end_tok.span.end),
+                            kind: SpannedExprKind::RangeRef(crate::eval::RangeRef {
+                                sheet: SheetReference::Current,
+                                start: CellAddr { row: start_row, col: 0 },
+                                end: CellAddr {
+                                    row: end_row,
+                                    col: CellAddr::SHEET_END,
+                                },
+                            }),
+                        });
+                    }
+                }
+
                 self.next();
                 Ok(SpannedExpr {
                     span: tok.span,
@@ -1017,18 +1106,90 @@ impl ParserImpl {
                 span,
                 kind: SpannedExprKind::Bool(false),
             }),
-            _ => match parse_a1(id) {
-                Ok(addr) => {
-                    self.parse_cell_or_range(SheetReference::Current, span.start, addr, span.end)
+            _ => {
+                if let Ok(addr) = parse_a1(id) {
+                    return self.parse_cell_or_range(
+                        SheetReference::Current,
+                        span.start,
+                        addr,
+                        span.end,
+                    );
                 }
-                Err(_) => Ok(SpannedExpr {
+
+                // Whole-column / whole-row ranges like `A:C` and `1:3` don't fit `parse_a1`.
+                // For debug tracing, treat these as range references only when used with the
+                // `:<ref>` range operator (otherwise they remain name refs).
+                if matches!(self.peek().kind, TokenKind::Colon) {
+                    if let Some(start_col) = parse_col_ref_str(id) {
+                        self.next(); // ':'
+                        let end_tok = self.next();
+                        let end_str = match end_tok.kind {
+                            TokenKind::Ident(s) => s,
+                            other => {
+                                return Err(FormulaParseError::Expected {
+                                    expected: "column reference".to_string(),
+                                    got: format!("{other:?}"),
+                                })
+                            }
+                        };
+                        let Some(end_col) = parse_col_ref_str(&end_str) else {
+                            return Err(FormulaParseError::InvalidAddress(
+                                crate::eval::AddressParseError::ColumnOutOfRange,
+                            ));
+                        };
+                        return Ok(SpannedExpr {
+                            span: Span::new(span.start, end_tok.span.end),
+                            kind: SpannedExprKind::RangeRef(crate::eval::RangeRef {
+                                sheet: SheetReference::Current,
+                                start: CellAddr { row: 0, col: start_col },
+                                end: CellAddr {
+                                    row: CellAddr::SHEET_END,
+                                    col: end_col,
+                                },
+                            }),
+                        });
+                    }
+
+                    if let Some(start_row) = parse_row_ref_str(id) {
+                        self.next(); // ':'
+                        let end_tok = self.next();
+                        let end_row = match &end_tok.kind {
+                            TokenKind::Number(n) => parse_row_ref_number(*n),
+                            TokenKind::Ident(s) => parse_row_ref_str(s),
+                            other => {
+                                return Err(FormulaParseError::Expected {
+                                    expected: "row reference".to_string(),
+                                    got: format!("{other:?}"),
+                                })
+                            }
+                        };
+                        let Some(end_row) = end_row else {
+                            return Err(FormulaParseError::InvalidAddress(
+                                crate::eval::AddressParseError::RowOutOfRange,
+                            ));
+                        };
+                        return Ok(SpannedExpr {
+                            span: Span::new(span.start, end_tok.span.end),
+                            kind: SpannedExprKind::RangeRef(crate::eval::RangeRef {
+                                sheet: SheetReference::Current,
+                                start: CellAddr { row: start_row, col: 0 },
+                                end: CellAddr {
+                                    row: end_row,
+                                    col: CellAddr::SHEET_END,
+                                },
+                            }),
+                        });
+                    }
+                }
+
+                Ok(SpannedExpr {
                     span,
                     kind: SpannedExprKind::NameRef(crate::eval::NameRef {
                         sheet: SheetReference::Current,
                         name: id.to_string(),
                     }),
-                }),
-            },
+                })
+            }
         }
     }
 
@@ -1506,35 +1667,141 @@ impl ParserImpl {
             });
         }
 
-        let addr_tok = self.next();
-        let addr_str = match addr_tok.kind {
-            TokenKind::Ident(s) => s,
-            other => {
-                return Err(FormulaParseError::Expected {
-                    expected: "cell address".to_string(),
-                    got: format!("{other:?}"),
+        let first_tok = self.next();
+        match first_tok.kind {
+            TokenKind::Ident(addr_str) => {
+                if addr_str.contains('.') {
+                    return self.parse_dotted_identifier_with_sheet(
+                        sheet_tok.span.start,
+                        first_tok.span,
+                        &addr_str,
+                        &sheet,
+                    );
+                }
+
+                if let Ok(addr) = parse_a1(&addr_str) {
+                    return self.parse_cell_or_range(
+                        sheet,
+                        sheet_tok.span.start,
+                        addr,
+                        first_tok.span.end,
+                    );
+                }
+
+                if matches!(self.peek().kind, TokenKind::Colon) {
+                    if let Some(start_col) = parse_col_ref_str(&addr_str) {
+                        self.next(); // ':'
+                        let end_tok = self.next();
+                        let end_str = match end_tok.kind {
+                            TokenKind::Ident(s) => s,
+                            other => {
+                                return Err(FormulaParseError::Expected {
+                                    expected: "column reference".to_string(),
+                                    got: format!("{other:?}"),
+                                })
+                            }
+                        };
+                        let Some(end_col) = parse_col_ref_str(&end_str) else {
+                            return Err(FormulaParseError::InvalidAddress(
+                                crate::eval::AddressParseError::ColumnOutOfRange,
+                            ));
+                        };
+                        return Ok(SpannedExpr {
+                            span: Span::new(sheet_tok.span.start, end_tok.span.end),
+                            kind: SpannedExprKind::RangeRef(crate::eval::RangeRef {
+                                sheet,
+                                start: CellAddr { row: 0, col: start_col },
+                                end: CellAddr {
+                                    row: CellAddr::SHEET_END,
+                                    col: end_col,
+                                },
+                            }),
+                        });
+                    }
+
+                    if let Some(start_row) = parse_row_ref_str(&addr_str) {
+                        self.next(); // ':'
+                        let end_tok = self.next();
+                        let end_row = match &end_tok.kind {
+                            TokenKind::Number(n) => parse_row_ref_number(*n),
+                            TokenKind::Ident(s) => parse_row_ref_str(s),
+                            other => {
+                                return Err(FormulaParseError::Expected {
+                                    expected: "row reference".to_string(),
+                                    got: format!("{other:?}"),
+                                })
+                            }
+                        };
+                        let Some(end_row) = end_row else {
+                            return Err(FormulaParseError::InvalidAddress(
+                                crate::eval::AddressParseError::RowOutOfRange,
+                            ));
+                        };
+                        return Ok(SpannedExpr {
+                            span: Span::new(sheet_tok.span.start, end_tok.span.end),
+                            kind: SpannedExprKind::RangeRef(crate::eval::RangeRef {
+                                sheet,
+                                start: CellAddr { row: start_row, col: 0 },
+                                end: CellAddr {
+                                    row: end_row,
+                                    col: CellAddr::SHEET_END,
+                                },
+                            }),
+                        });
+                    }
+                }
+
+                Ok(SpannedExpr {
+                    span: Span::new(sheet_tok.span.start, first_tok.span.end),
+                    kind: SpannedExprKind::NameRef(crate::eval::NameRef {
+                        sheet,
+                        name: addr_str,
+                    }),
                 })
             }
-        };
-
-        if addr_str.contains('.') {
-            return self.parse_dotted_identifier_with_sheet(
-                sheet_tok.span.start,
-                addr_tok.span,
-                &addr_str,
-                &sheet,
-            );
-        }
-        match parse_a1(&addr_str) {
-            Ok(addr) => {
-                self.parse_cell_or_range(sheet, sheet_tok.span.start, addr, addr_tok.span.end)
+            TokenKind::Number(n) => {
+                // Row ranges like `Sheet1!1:3` are lexed as number literals.
+                if matches!(self.peek().kind, TokenKind::Colon) {
+                    let Some(start_row) = parse_row_ref_number(n) else {
+                        return Err(FormulaParseError::InvalidAddress(
+                            crate::eval::AddressParseError::RowOutOfRange,
+                        ));
+                    };
+                    self.next(); // ':'
+                    let end_tok = self.next();
+                    let end_row = match &end_tok.kind {
+                        TokenKind::Number(m) => parse_row_ref_number(*m),
+                        TokenKind::Ident(s) => parse_row_ref_str(s),
+                        other => {
+                            return Err(FormulaParseError::Expected {
+                                expected: "row reference".to_string(),
+                                got: format!("{other:?}"),
+                            })
+                        }
+                    };
+                    let Some(end_row) = end_row else {
+                        return Err(FormulaParseError::InvalidAddress(
+                            crate::eval::AddressParseError::RowOutOfRange,
+                        ));
+                    };
+                    Ok(SpannedExpr {
+                        span: Span::new(sheet_tok.span.start, end_tok.span.end),
+                        kind: SpannedExprKind::RangeRef(crate::eval::RangeRef {
+                            sheet,
+                            start: CellAddr { row: start_row, col: 0 },
+                            end: CellAddr {
+                                row: end_row,
+                                col: CellAddr::SHEET_END,
+                            },
+                        }),
+                    })
+                } else {
+                    Err(FormulaParseError::UnexpectedToken("number".to_string()))
+                }
             }
-            Err(_) => Ok(SpannedExpr {
-                span: Span::new(sheet_tok.span.start, addr_tok.span.end),
-                kind: SpannedExprKind::NameRef(crate::eval::NameRef {
-                    sheet,
-                    name: addr_str,
-                }),
+            other => Err(FormulaParseError::Expected {
+                expected: "cell address".to_string(),
+                got: format!("{other:?}"),
             }),
         }
     }
@@ -1655,6 +1922,54 @@ struct TracedEvaluator<'a, R: crate::eval::ValueResolver> {
 }
 
 impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
+    fn resolve_range_bounds(
+        &self,
+        sheet_id: &FnSheetId,
+        start: CellAddr,
+        end: CellAddr,
+    ) -> Option<(CellAddr, CellAddr)> {
+        let (rows, cols) = match sheet_id {
+            FnSheetId::Local(id) => {
+                if !self.resolver.sheet_exists(*id) {
+                    return None;
+                }
+                self.resolver.sheet_dimensions(*id)
+            }
+            // External workbooks do not expose dimensions via the ValueResolver interface, so treat
+            // the bounds as unknown and only resolve whole-row/whole-column sentinels using Excel's
+            // default grid size.
+            FnSheetId::External(_) => (formula_model::EXCEL_MAX_ROWS, formula_model::EXCEL_MAX_COLS),
+        };
+
+        let max_row = rows.saturating_sub(1);
+        let max_col = cols.saturating_sub(1);
+
+        let start = CellAddr {
+            row: if start.row == CellAddr::SHEET_END {
+                max_row
+            } else {
+                start.row
+            },
+            col: if start.col == CellAddr::SHEET_END {
+                max_col
+            } else {
+                start.col
+            },
+        };
+        let end = CellAddr {
+            row: if end.row == CellAddr::SHEET_END { max_row } else { end.row },
+            col: if end.col == CellAddr::SHEET_END { max_col } else { end.col },
+        };
+
+        if matches!(sheet_id, FnSheetId::Local(_))
+            && (start.row >= rows || end.row >= rows || start.col >= cols || end.col >= cols)
+        {
+            return None;
+        }
+
+        Some((start, end))
+    }
+
     fn eval_formula(&self, expr: &SpannedExpr<usize>) -> (Value, TraceNode) {
         let (v, mut trace) = self.eval_value(expr);
         match v {
@@ -1699,9 +2014,15 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
             return self.get_sheet_cell_value(&range.sheet_id, range.start);
         }
         let range = range.normalized();
-        let rows = (range.end.row - range.start.row + 1) as usize;
-        let cols = (range.end.col - range.start.col + 1) as usize;
-        let mut values = Vec::with_capacity(rows.saturating_mul(cols));
+        let rows_u64 = u64::from(range.end.row).saturating_sub(u64::from(range.start.row)) + 1;
+        let cols_u64 = u64::from(range.end.col).saturating_sub(u64::from(range.start.col)) + 1;
+        let cell_count = rows_u64.saturating_mul(cols_u64);
+        if cell_count > (MAX_REFERENCE_DEREF_CELLS as u64) {
+            return Value::Error(ErrorKind::Spill);
+        }
+        let rows = rows_u64 as usize;
+        let cols = cols_u64 as usize;
+        let mut values = Vec::with_capacity(cell_count as usize);
         for row in range.start.row..=range.end.row {
             for col in range.start.col..=range.end.col {
                 values.push(self.get_sheet_cell_value(&range.sheet_id, CellAddr { row, col }));
@@ -1850,26 +2171,55 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                             !matches!(sheet_id, FnSheetId::Local(id) if !self.resolver.sheet_exists(*id))
                         }) =>
                 {
-                    let reference = if sheet_ids.len() == 1 {
+                    let mut ranges = Vec::with_capacity(sheet_ids.len());
+                    for sheet_id in sheet_ids {
+                        if matches!(&sheet_id, FnSheetId::Local(id) if !self.resolver.sheet_exists(*id))
+                        {
+                            let value = Value::Error(ErrorKind::Ref);
+                            return (
+                                EvalValue::Scalar(value.clone()),
+                                TraceNode {
+                                    kind: TraceKind::CellRef,
+                                    span: expr.span,
+                                    value,
+                                    reference: None,
+                                    children: Vec::new(),
+                                },
+                            );
+                        }
+                        let Some((start, end)) =
+                            self.resolve_range_bounds(&sheet_id, r.addr, r.addr)
+                        else {
+                            let value = Value::Error(ErrorKind::Ref);
+                            return (
+                                EvalValue::Scalar(value.clone()),
+                                TraceNode {
+                                    kind: TraceKind::CellRef,
+                                    span: expr.span,
+                                    value,
+                                    reference: None,
+                                    children: Vec::new(),
+                                },
+                            );
+                        };
+                        ranges.push(ResolvedRange {
+                            sheet_id,
+                            start,
+                            end,
+                        });
+                    }
+
+                    let reference = if ranges.len() == 1 {
                         Some(TraceRef::Cell {
-                            sheet: sheet_ids[0].clone(),
-                            addr: r.addr,
+                            sheet: ranges[0].sheet_id.clone(),
+                            addr: ranges[0].start,
                         })
                     } else {
                         None
                     };
 
                     (
-                        EvalValue::Reference(
-                            sheet_ids
-                                .into_iter()
-                                .map(|sheet_id| ResolvedRange {
-                                    sheet_id,
-                                    start: r.addr,
-                                    end: r.addr,
-                                })
-                                .collect(),
-                        ),
+                        EvalValue::Reference(ranges),
                         TraceNode {
                             kind: TraceKind::CellRef,
                             span: expr.span,
@@ -1900,27 +2250,55 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                             !matches!(sheet_id, FnSheetId::Local(id) if !self.resolver.sheet_exists(*id))
                         }) =>
                 {
-                    let reference = if sheet_ids.len() == 1 {
+                    let mut ranges = Vec::with_capacity(sheet_ids.len());
+                    for sheet_id in sheet_ids {
+                        if matches!(&sheet_id, FnSheetId::Local(id) if !self.resolver.sheet_exists(*id))
+                        {
+                            let value = Value::Error(ErrorKind::Ref);
+                            return (
+                                EvalValue::Scalar(value.clone()),
+                                TraceNode {
+                                    kind: TraceKind::RangeRef,
+                                    span: expr.span,
+                                    value,
+                                    reference: None,
+                                    children: Vec::new(),
+                                },
+                            );
+                        }
+                        let Some((start, end)) = self.resolve_range_bounds(&sheet_id, r.start, r.end)
+                        else {
+                            let value = Value::Error(ErrorKind::Ref);
+                            return (
+                                EvalValue::Scalar(value.clone()),
+                                TraceNode {
+                                    kind: TraceKind::RangeRef,
+                                    span: expr.span,
+                                    value,
+                                    reference: None,
+                                    children: Vec::new(),
+                                },
+                            );
+                        };
+                        ranges.push(ResolvedRange {
+                            sheet_id,
+                            start,
+                            end,
+                        });
+                    }
+
+                    let reference = if ranges.len() == 1 {
                         Some(TraceRef::Range {
-                            sheet: sheet_ids[0].clone(),
-                            start: r.start,
-                            end: r.end,
+                            sheet: ranges[0].sheet_id.clone(),
+                            start: ranges[0].start,
+                            end: ranges[0].end,
                         })
                     } else {
                         None
                     };
 
                     (
-                        EvalValue::Reference(
-                            sheet_ids
-                                .into_iter()
-                                .map(|sheet_id| ResolvedRange {
-                                    sheet_id,
-                                    start: r.start,
-                                    end: r.end,
-                                })
-                                .collect(),
-                        ),
+                        EvalValue::Reference(ranges),
                         TraceNode {
                             kind: TraceKind::RangeRef,
                             span: expr.span,
