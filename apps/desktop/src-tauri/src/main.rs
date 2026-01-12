@@ -571,6 +571,9 @@ async fn oauth_loopback_listen(
     let port = parsed
         .port()
         .ok_or_else(|| "Loopback OAuth redirect URI must include an explicit port".to_string())?;
+    if port == 0 {
+        return Err("Loopback OAuth redirect URI must not use port 0".to_string());
+    }
 
     let expected_path = parsed.path().to_string();
     let redirect_uri = parsed.to_string();
