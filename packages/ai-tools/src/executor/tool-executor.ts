@@ -7,7 +7,8 @@ import { TOOL_REGISTRY, validateToolCall } from "../tool-schema.js";
 
 import { DLP_ACTION } from "../../../security/dlp/src/actions.js";
 import { DLP_DECISION, evaluatePolicy } from "../../../security/dlp/src/policyEngine.js";
-import { effectiveCellClassification, effectiveRangeClassification } from "../../../security/dlp/src/selectors.js";
+import { CLASSIFICATION_LEVEL, DEFAULT_CLASSIFICATION, maxClassification } from "../../../security/dlp/src/classification.js";
+import { effectiveCellClassification, effectiveRangeClassification, normalizeRange } from "../../../security/dlp/src/selectors.js";
 
 function normalizeFormulaTextOpt(value: unknown): string | null {
   if (value == null) return null;
@@ -184,6 +185,36 @@ export interface ToolExecutorOptions {
 const DLP_REDACTION_PLACEHOLDER = "[REDACTED]";
 
 type ResolvedToolExecutorOptions = Required<Omit<ToolExecutorOptions, "dlp">> & { dlp?: ToolExecutorOptions["dlp"] };
+
+type DlpNormalizedRange = ReturnType<typeof normalizeRange>;
+
+type DlpRangeIndex = {
+  /**
+   * Max document-level classification for the document in scope.
+   */
+  docClassificationMax: any;
+  /**
+   * Max sheet-level classification for the sheet in scope.
+   */
+  sheetClassificationMax: any;
+  /**
+   * Max classification for each 0-based column index in the sheet.
+   */
+  columnClassificationByIndex: Map<number, any>;
+  /**
+   * Max classification for each 0-based cell coordinate ("row,col") in the sheet.
+   */
+  cellClassificationByCoord: Map<string, any>;
+  /**
+   * Range-scoped records for the sheet (normalized to ensure start <= end).
+   */
+  rangeRecords: Array<{ range: DlpNormalizedRange; classification: any }>;
+  /**
+   * Records that cannot be indexed by (row,col)/(columnIndex) (e.g. tableId/columnId selectors).
+   * These are evaluated via the slower `effectiveCellClassification` path when present.
+   */
+  fallbackRecords: Array<{ selector: any; classification: any }>;
+};
 
 export class ToolExecutor {
   readonly spreadsheet: SpreadsheetApi;
@@ -966,6 +997,7 @@ export class ToolExecutor {
     documentId: string;
     sheetId: string;
     records: Array<{ selector: any; classification: any }>;
+    index: DlpRangeIndex;
     includeRestrictedContent: boolean;
     policy: any;
     decision: any;
@@ -981,14 +1013,16 @@ export class ToolExecutor {
     const records = dlp.classification_records ?? dlp.classification_store?.list(documentId) ?? [];
     const includeRestrictedContent = dlp.include_restricted_content ?? false;
 
+    const normalizedSelectionRange = normalizeRange({
+      start: { row: range.startRow - 1, col: range.startCol - 1 },
+      end: { row: range.endRow - 1, col: range.endCol - 1 }
+    });
+
     const selectionClassification = effectiveRangeClassification(
       {
         documentId,
         sheetId,
-        range: {
-          start: { row: range.startRow - 1, col: range.startCol - 1 },
-          end: { row: range.endRow - 1, col: range.endCol - 1 }
-        }
+        range: normalizedSelectionRange
       },
       records
     );
@@ -1000,10 +1034,13 @@ export class ToolExecutor {
       options: { includeRestrictedContent }
     });
 
+    const index = this.buildDlpRangeIndex({ documentId, sheetId, range: normalizedSelectionRange }, records);
+
     return {
       documentId,
       sheetId,
       records,
+      index,
       includeRestrictedContent,
       policy: dlp.policy,
       decision,
@@ -1012,15 +1049,133 @@ export class ToolExecutor {
     };
   }
 
+  private buildDlpRangeIndex(
+    ref: { documentId: string; sheetId: string; range: DlpNormalizedRange },
+    records: Array<{ selector: any; classification: any }>
+  ): DlpRangeIndex {
+    const selectionRange = ref.range;
+
+    let docClassificationMax: any = { ...DEFAULT_CLASSIFICATION };
+    let sheetClassificationMax: any = { ...DEFAULT_CLASSIFICATION };
+    const columnClassificationByIndex = new Map<number, any>();
+    const cellClassificationByCoord = new Map<string, any>();
+    const rangeRecords: Array<{ range: DlpNormalizedRange; classification: any }> = [];
+    const fallbackRecords: Array<{ selector: any; classification: any }> = [];
+
+    for (const record of records || []) {
+      if (!record || !record.selector || typeof record.selector !== "object") continue;
+      const selector = record.selector;
+      if (selector.documentId !== ref.documentId) continue;
+
+      switch (selector.scope) {
+        case "document": {
+          docClassificationMax = maxClassification(docClassificationMax, record.classification);
+          break;
+        }
+        case "sheet": {
+          if (selector.sheetId === ref.sheetId) {
+            sheetClassificationMax = maxClassification(sheetClassificationMax, record.classification);
+          }
+          break;
+        }
+        case "column": {
+          if (selector.sheetId !== ref.sheetId) break;
+          if (typeof selector.columnIndex === "number") {
+            const colIndex = selector.columnIndex;
+            const existing = columnClassificationByIndex.get(colIndex);
+            columnClassificationByIndex.set(
+              colIndex,
+              existing ? maxClassification(existing, record.classification) : record.classification
+            );
+          } else {
+            // Table/columnId selectors require additional context (tableId/columnId) to evaluate.
+            fallbackRecords.push(record);
+          }
+          break;
+        }
+        case "cell": {
+          if (selector.sheetId !== ref.sheetId) break;
+          if (typeof selector.row !== "number" || typeof selector.col !== "number") break;
+          // Only cells that could apply to this selection need to be indexed.
+          if (
+            selector.row < selectionRange.start.row ||
+            selector.row > selectionRange.end.row ||
+            selector.col < selectionRange.start.col ||
+            selector.col > selectionRange.end.col
+          ) {
+            break;
+          }
+          const key = `${selector.row},${selector.col}`;
+          const existing = cellClassificationByCoord.get(key);
+          cellClassificationByCoord.set(key, existing ? maxClassification(existing, record.classification) : record.classification);
+          break;
+        }
+        case "range": {
+          if (selector.sheetId !== ref.sheetId) break;
+          if (!selector.range) break;
+          const normalized = normalizeRange(selector.range);
+          if (!rangesIntersectNormalized(normalized, selectionRange)) break;
+          rangeRecords.push({ range: normalized, classification: record.classification });
+          break;
+        }
+        default: {
+          fallbackRecords.push(record);
+          break;
+        }
+      }
+    }
+
+    return {
+      docClassificationMax,
+      sheetClassificationMax,
+      columnClassificationByIndex,
+      cellClassificationByCoord,
+      rangeRecords,
+      fallbackRecords
+    };
+  }
+
   private isDlpCellAllowed(
     dlp: NonNullable<ReturnType<ToolExecutor["evaluateDlpForRange"]>>,
     row: number,
     col: number
   ): boolean {
-    const classification = effectiveCellClassification(
-      { documentId: dlp.documentId, sheetId: dlp.sheetId, row: row - 1, col: col - 1 },
-      dlp.records
-    );
+    const row0 = row - 1;
+    const col0 = col - 1;
+
+    let classification: any = { ...DEFAULT_CLASSIFICATION };
+
+    classification = maxClassification(classification, dlp.index.docClassificationMax);
+    if (classification.level !== CLASSIFICATION_LEVEL.RESTRICTED) {
+      classification = maxClassification(classification, dlp.index.sheetClassificationMax);
+    }
+
+    if (classification.level !== CLASSIFICATION_LEVEL.RESTRICTED) {
+      const colClassification = dlp.index.columnClassificationByIndex.get(col0);
+      if (colClassification) classification = maxClassification(classification, colClassification);
+    }
+
+    if (classification.level !== CLASSIFICATION_LEVEL.RESTRICTED) {
+      const cellClassification = dlp.index.cellClassificationByCoord.get(`${row0},${col0}`);
+      if (cellClassification) classification = maxClassification(classification, cellClassification);
+    }
+
+    if (classification.level !== CLASSIFICATION_LEVEL.RESTRICTED) {
+      for (const record of dlp.index.rangeRecords) {
+        if (!cellInNormalizedRange({ row: row0, col: col0 }, record.range)) continue;
+        classification = maxClassification(classification, record.classification);
+        if (classification.level === CLASSIFICATION_LEVEL.RESTRICTED) break;
+      }
+    }
+
+    if (classification.level !== CLASSIFICATION_LEVEL.RESTRICTED && dlp.index.fallbackRecords.length > 0) {
+      const fallbackClassification = effectiveCellClassification(
+        { documentId: dlp.documentId, sheetId: dlp.sheetId, row: row0, col: col0 },
+        dlp.index.fallbackRecords
+      );
+      classification = maxClassification(classification, fallbackClassification);
+    }
+
     const cellDecision = evaluatePolicy({
       action: DLP_ACTION.AI_CLOUD_PROCESSING,
       classification,
@@ -1626,6 +1781,19 @@ function buildPivotTableOutput(request: PivotBuildRequest): CellScalar[][] {
 function nowMs(): number {
   if (typeof performance !== "undefined" && typeof performance.now === "function") return performance.now();
   return Date.now();
+}
+
+function cellInNormalizedRange(cell: { row: number; col: number }, range: DlpNormalizedRange): boolean {
+  return (
+    cell.row >= range.start.row &&
+    cell.row <= range.end.row &&
+    cell.col >= range.start.col &&
+    cell.col <= range.end.col
+  );
+}
+
+function rangesIntersectNormalized(a: DlpNormalizedRange, b: DlpNormalizedRange): boolean {
+  return a.start.row <= b.end.row && b.start.row <= a.end.row && a.start.col <= b.end.col && b.start.col <= a.end.col;
 }
 
 function rangeCellCount(range: { startRow: number; endRow: number; startCol: number; endCol: number }): number {
