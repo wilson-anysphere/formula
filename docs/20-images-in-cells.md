@@ -399,6 +399,9 @@ does not “orphan” images or break Excel’s internal references.
   - `crates/formula-xlsx/tests/cell_metadata_preservation.rs`
 - **Best-effort `xl/metadata.xml` parsing for rich values (`vm` -> richValue index)**
   - `crates/formula-xlsx/src/rich_data/metadata.rs`
+- **SpreadsheetML `xl/metadata.xml` parser (opaque-preserving)**
+  - `crates/formula-xlsx/src/metadata.rs` parses the core `<metadataTypes>` + `<cellMetadata>` / `<valueMetadata>`
+    `<rc>` records and preserves `<futureMetadata>` `<bk>` payloads as raw inner XML for inspection/debugging.
 - **`_xlfn.` prefix handling** exists in:
   - `crates/formula-xlsx/src/formula_text.rs`
   - includes an explicit `IMAGE()` round-trip test (`xlfn_roundtrip_preserves_image_function`)
