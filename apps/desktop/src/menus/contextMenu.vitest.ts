@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 import { ContextMenu } from "./contextMenu.js";
 
@@ -11,7 +11,6 @@ describe("ContextMenu (DOM)", () => {
       menu.open({
         x: 0,
         y: 0,
-        focusFirst: true,
         items: [
           {
             type: "item",
@@ -39,5 +38,43 @@ describe("ContextMenu (DOM)", () => {
       menu.close();
     }
   });
-});
 
+  it("ignores outside scroll events immediately after open (prevents instant-dismiss flake)", () => {
+    const menu = new ContextMenu();
+    const scroller = document.createElement("div");
+    document.body.appendChild(scroller);
+
+    // Deterministic timing: ContextMenu uses `performance.now()` to set a short grace period.
+    let now = 0;
+    const nowSpy = vi.spyOn(performance, "now").mockImplementation(() => now);
+
+    try {
+      menu.open({
+        x: 0,
+        y: 0,
+        items: [
+          {
+            type: "item",
+            label: "Test Item",
+            onSelect: () => {},
+          },
+        ],
+      });
+
+      expect(menu.isOpen()).toBe(true);
+
+      // Simulate a scroll event occurring right after the menu opens (e.g. focus-induced scrollIntoView).
+      scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
+      expect(menu.isOpen()).toBe(true);
+
+      // After the grace period, outside scroll events should close the menu.
+      now = 200;
+      scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
+      expect(menu.isOpen()).toBe(false);
+    } finally {
+      nowSpy.mockRestore();
+      scroller.remove();
+      menu.close();
+    }
+  });
+});
