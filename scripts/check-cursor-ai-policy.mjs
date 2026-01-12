@@ -250,6 +250,58 @@ function listGitTrackedFiles(rootDir) {
 }
 
 /**
+ * Run `git grep` for the given needles and return parsed matches.
+ *
+ * We use `git grep` (instead of reading every file in Node) because it is much
+ * faster for scanning a large tracked codebase in CI, and it naturally ignores
+ * untracked developer files (like `.env.local`) the same way `git ls-files` does.
+ *
+ * @param {string} rootDir
+ * @param {string[]} needles
+ * @returns {Array<{ file: string, line: number, text: string }> | null}
+ */
+function gitGrepMatches(rootDir, needles) {
+  try {
+    const args = ["-C", rootDir, "grep", "-I", "-n", "-i"];
+    for (const needle of needles) {
+      args.push("-e", needle);
+    }
+    args.push("--", ".");
+    const proc = spawnSync("git", args, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      maxBuffer: 50 * 1024 * 1024,
+    });
+
+    // `git grep` exits 1 when no matches are found.
+    if (proc.status === 1) return [];
+    if (proc.status !== 0) return null;
+
+    const out = String(proc.stdout || "");
+    if (!out.trim()) return [];
+
+    /** @type {Array<{ file: string, line: number, text: string }>} */
+    const matches = [];
+    const lines = out.split(/\r?\n/).filter(Boolean);
+    for (const raw of lines) {
+      // Format is: file:line:text
+      const first = raw.indexOf(":");
+      if (first === -1) continue;
+      const second = raw.indexOf(":", first + 1);
+      if (second === -1) continue;
+      const file = raw.slice(0, first);
+      const line = Number.parseInt(raw.slice(first + 1, second), 10);
+      if (!Number.isFinite(line)) continue;
+      const text = raw.slice(second + 1);
+      matches.push({ file, line, text });
+    }
+    return matches;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Allowlisting for unit tests: tests may only mention forbidden patterns if they
  * are explicitly testing this guard script.
  *
@@ -431,9 +483,27 @@ export async function checkCursorAiPolicy(options = {}) {
     if (violations.length >= maxViolations) return;
 
     const rel = relativeToRoot(filePath, rootDir);
-    if (shouldExcludeRootRelativePath(rel)) return;
 
     const relLower = rel.toLowerCase();
+
+    // Symlinks are disallowed because they can bypass root-based scanning by
+    // pointing into excluded/unscanned directories.
+    let st;
+    try {
+      st = await lstat(filePath);
+    } catch {
+      return;
+    }
+    if (st.isSymbolicLink()) {
+      record({
+        file: rel,
+        ruleId: "symlink",
+        message: "Forbidden: symlinked files/directories are not allowed (can bypass Cursor-only AI policy scans).",
+      });
+      return;
+    }
+
+    if (shouldExcludeRootRelativePath(rel)) return;
 
     // Forbidden filename/path patterns.
     if (relLower.includes("openai")) {
@@ -450,23 +520,6 @@ export async function checkCursorAiPolicy(options = {}) {
     }
     if (relLower.includes("ollama")) {
       record({ file: rel, ruleId: "path-ollama", message: "Forbidden: `ollama` in file path (Cursor-only AI)." });
-      return;
-    }
-
-    // Symlinks are disallowed because they can bypass root-based scanning by
-    // pointing into excluded/unscanned directories.
-    let st;
-    try {
-      st = await lstat(filePath);
-    } catch {
-      return;
-    }
-    if (st.isSymbolicLink()) {
-      record({
-        file: rel,
-        ruleId: "symlink",
-        message: "Forbidden: symlinked files/directories are not allowed (can bypass Cursor-only AI policy scans).",
-      });
       return;
     }
 
@@ -532,18 +585,196 @@ export async function checkCursorAiPolicy(options = {}) {
 
   const tracked = listGitTrackedFiles(rootDir);
   if (tracked) {
-    const includedDirPrefixes = restrictToIncludedDirs
-      ? includedDirs.map((d) => (d.endsWith("/") ? d : `${d}/`))
-      : [];
-    for (const rel of tracked) {
-      if (violations.length >= maxViolations) break;
-      if (restrictToIncludedDirs) {
-        // Always scan root-level files; scan included directories by prefix.
-        const isRootFile = !rel.includes("/");
-        const isInIncludedDir = includedDirPrefixes.some((prefix) => rel.startsWith(prefix));
-        if (!isRootFile && !isInIncludedDir) continue;
+    const includedDirPrefixes = restrictToIncludedDirs ? includedDirs.map((d) => (d.endsWith("/") ? d : `${d}/`)) : [];
+    const isAllowedByIncludedDirs = (rel) => {
+      if (!restrictToIncludedDirs) return true;
+      // Always scan root-level files; scan included directories by prefix.
+      const isRootFile = !rel.includes("/");
+      const isInIncludedDir = includedDirPrefixes.some((prefix) => rel.startsWith(prefix));
+      return isRootFile || isInIncludedDir;
+    };
+    const trackedToScan = tracked.filter(isAllowedByIncludedDirs);
+
+    // `git grep` is substantially faster than reading every file in Node for large
+    // repos (like this one), but has noticeable process-spawn overhead. For small
+    // temp repos (unit tests, fixtures) the simple per-file scan is quicker.
+    const GIT_GREP_MIN_FILES = 500;
+    if (trackedToScan.length < GIT_GREP_MIN_FILES) {
+      for (const rel of trackedToScan) {
+        if (violations.length >= maxViolations) break;
+        await scanFile(path.join(rootDir, rel));
       }
-      await scanFile(path.join(rootDir, rel));
+      return { ok: violations.length === 0, violations };
+    }
+
+    // Use `git grep` to find content violations quickly.
+    /** @type {Map<string, { priority: number, violation: Violation }>} */
+    const bestContentViolationByFile = new Map();
+    const grepNeedles = [
+      // Provider identifiers and endpoints.
+      "openai",
+      "anthropic",
+      "ollama",
+      // Legacy / localStorage key prefixes.
+      "formula:llm:",
+      "formula:aicompletion:localmodelenabled",
+    ];
+    const matches = gitGrepMatches(rootDir, grepNeedles);
+    if (matches === null) {
+      // If `git grep` isn't available for some reason, fall back to the slower
+      // per-file Node scan so the guard remains correct.
+      for (const rel of trackedToScan) {
+        if (violations.length >= maxViolations) break;
+        await scanFile(path.join(rootDir, rel));
+      }
+    } else {
+      for (const match of matches) {
+        const rel = match.file;
+        if (!isAllowedByIncludedDirs(rel)) continue;
+        if (shouldExcludeRootRelativePath(rel)) continue;
+
+        const abs = path.join(rootDir, rel);
+        if (!shouldScanFile(abs)) continue;
+
+        const isTest = isTestFile(rel);
+        if (isTest && isPolicyGuardTestFile(rel)) continue;
+
+        const relLower = rel.toLowerCase();
+        const ext = path.extname(relLower);
+        const lineLower = String(match.text || "").toLowerCase();
+
+        /** @type {{ priority: number, violation: Violation } | null} */
+        let candidate = null;
+
+        // Config files: any mention of OpenAI identifiers is a hard fail (with a clearer error message).
+        if (CONFIG_FILE_EXTENSIONS.has(ext)) {
+          const idx = lineLower.indexOf(OPENAI_IN_CONFIG_RULE.needleLower);
+          if (idx !== -1) {
+            candidate = {
+              priority: -2,
+              violation: {
+                file: rel,
+                ruleId: OPENAI_IN_CONFIG_RULE.id,
+                message: OPENAI_IN_CONFIG_RULE.message,
+                line: match.line,
+                column: idx + 1,
+              },
+            };
+          }
+        }
+
+        // Unit tests: OpenAI string references are forbidden unless this is a test of the policy guard itself.
+        if (!candidate && isTest) {
+          const idx = lineLower.indexOf(OPENAI_IN_TEST_RULE.needleLower);
+          if (idx !== -1) {
+            candidate = {
+              priority: -1,
+              violation: {
+                file: rel,
+                ruleId: OPENAI_IN_TEST_RULE.id,
+                message: OPENAI_IN_TEST_RULE.message,
+                line: match.line,
+                column: idx + 1,
+              },
+            };
+          }
+        }
+
+        // General content rules (ordered by precedence).
+        if (!candidate) {
+          for (let i = 0; i < CONTENT_SUBSTRING_RULES.length; i += 1) {
+            const rule = CONTENT_SUBSTRING_RULES[i];
+            const idx = lineLower.indexOf(rule.needleLower);
+            if (idx === -1) continue;
+            candidate = {
+              priority: i,
+              violation: { file: rel, ruleId: rule.id, message: rule.message, line: match.line, column: idx + 1 },
+            };
+            break;
+          }
+        }
+
+        if (!candidate) continue;
+
+        const current = bestContentViolationByFile.get(rel);
+        if (!current) {
+          bestContentViolationByFile.set(rel, candidate);
+          continue;
+        }
+
+        if (candidate.priority < current.priority) {
+          bestContentViolationByFile.set(rel, candidate);
+          continue;
+        }
+        if (candidate.priority > current.priority) continue;
+
+        // Same rule priority: prefer earliest location.
+        const aLine = candidate.violation.line ?? Number.POSITIVE_INFINITY;
+        const bLine = current.violation.line ?? Number.POSITIVE_INFINITY;
+        if (aLine < bLine) {
+          bestContentViolationByFile.set(rel, candidate);
+          continue;
+        }
+        if (aLine > bLine) continue;
+
+        const aCol = candidate.violation.column ?? Number.POSITIVE_INFINITY;
+        const bCol = current.violation.column ?? Number.POSITIVE_INFINITY;
+        if (aCol < bCol) bestContentViolationByFile.set(rel, candidate);
+      }
+
+      // Preserve stable output order by iterating the tracked file list in order.
+      for (const rel of trackedToScan) {
+        if (violations.length >= maxViolations) break;
+
+        const abs = path.join(rootDir, rel);
+        const relNormalized = rel.split(path.sep).join("/");
+
+        // Symlinks are always forbidden (even in excluded directories), since they can bypass scanning.
+        try {
+          const st = await lstat(abs);
+          if (st.isSymbolicLink()) {
+            record({
+              file: relNormalized,
+              ruleId: "symlink",
+              message: "Forbidden: symlinked files/directories are not allowed (can bypass Cursor-only AI policy scans).",
+            });
+            continue;
+          }
+        } catch {
+          continue;
+        }
+
+        if (shouldExcludeRootRelativePath(relNormalized)) continue;
+
+        const relLower = relNormalized.toLowerCase();
+        if (relLower.includes("openai")) {
+          record({
+            file: relNormalized,
+            ruleId: "path-openai",
+            message: "Forbidden: `openai` in file path (Cursor-only AI).",
+          });
+          continue;
+        }
+        if (relLower.includes("anthropic")) {
+          record({
+            file: relNormalized,
+            ruleId: "path-anthropic",
+            message: "Forbidden: `anthropic` in file path (Cursor-only AI).",
+          });
+          continue;
+        }
+        if (relLower.includes("ollama")) {
+          record({
+            file: relNormalized,
+            ruleId: "path-ollama",
+            message: "Forbidden: `ollama` in file path (Cursor-only AI).",
+          });
+          continue;
+        }
+
+        const contentCandidate = bestContentViolationByFile.get(rel);
+        if (contentCandidate) record(contentCandidate.violation);
+      }
     }
   } else {
     const dirsToScan = [];
