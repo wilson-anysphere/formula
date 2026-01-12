@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::io::{Cursor, Write};
 
 // This fixture builder writes just enough BIFF8 to exercise the importer. Keep record ids and
@@ -17,6 +19,7 @@ const RECORD_DIMENSIONS: u16 = 0x0200;
 const RECORD_MERGEDCELLS: u16 = 0x00E5;
 const RECORD_BLANK: u16 = 0x0201;
 const RECORD_NUMBER: u16 = 0x0203;
+const RECORD_HLINK: u16 = 0x01B8;
 
 const BOF_VERSION_BIFF8: u16 = 0x0600;
 const BOF_DT_WORKBOOK_GLOBALS: u16 = 0x0005;
@@ -165,6 +168,23 @@ pub fn build_continued_format_fixture_xls() -> Vec<u8> {
 /// `__builtin_numFmtId:60`.
 pub fn build_unknown_builtin_numfmtid_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_unknown_builtin_numfmtid_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture containing a single external hyperlink on `A1`.
+///
+/// This is used to ensure we preserve BIFF `HLINK` records when importing `.xls` workbooks.
+pub fn build_hyperlink_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_hyperlink_workbook_stream();
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -544,6 +564,133 @@ fn build_unknown_builtin_numfmtid_workbook_stream() -> Vec<u8> {
 
     globals.extend_from_slice(&sheet);
     globals
+}
+
+fn build_hyperlink_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // XF table: 16 style XFs + one cell XF for the A1 cell value.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+    let xf_cell = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "Links");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    push_record(&mut globals, RECORD_EOF, &[]);
+
+    let sheet_offset = globals.len();
+    let sheet = build_hyperlink_sheet_stream(xf_cell);
+
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&sheet);
+    globals
+}
+
+fn build_hyperlink_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // A1: NUMBER record so calamine reports at least one used cell.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
+
+    // A1: HLINK record pointing to https://example.com.
+    push_record(
+        &mut sheet,
+        RECORD_HLINK,
+        &hlink_external_url(0, 0, 0, 0, "https://example.com", "Example", "Example tooltip"),
+    );
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn hlink_external_url(
+    rw_first: u16,
+    rw_last: u16,
+    col_first: u16,
+    col_last: u16,
+    url: &str,
+    display: &str,
+    tooltip: &str,
+) -> Vec<u8> {
+    // HLINK record layout (BIFF8) [MS-XLS 2.4.110], matching the importer’s best-effort parser.
+    //
+    // ref8 (8) + guid (16) + streamVersion (4) + linkOpts (4) + variable data.
+    const STREAM_VERSION: u32 = 2;
+    const LINK_OPTS_HAS_MONIKER: u32 = 0x0000_0001;
+    const LINK_OPTS_HAS_DISPLAY: u32 = 0x0000_0014;
+    const LINK_OPTS_HAS_TOOLTIP: u32 = 0x0000_0020;
+
+    // URL moniker CLSID: 79EAC9E0-BAF9-11CE-8C82-00AA004BA90B (COM GUID little-endian fields).
+    const CLSID_URL_MONIKER: [u8; 16] = [
+        0xE0, 0xC9, 0xEA, 0x79, 0xF9, 0xBA, 0xCE, 0x11, 0x8C, 0x82, 0x00, 0xAA, 0x00, 0x4B,
+        0xA9, 0x0B,
+    ];
+
+    let link_opts = LINK_OPTS_HAS_MONIKER | LINK_OPTS_HAS_DISPLAY | LINK_OPTS_HAS_TOOLTIP;
+
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&rw_first.to_le_bytes());
+    out.extend_from_slice(&rw_last.to_le_bytes());
+    out.extend_from_slice(&col_first.to_le_bytes());
+    out.extend_from_slice(&col_last.to_le_bytes());
+
+    out.extend_from_slice(&[0u8; 16]); // hyperlink GUID (unused)
+    out.extend_from_slice(&STREAM_VERSION.to_le_bytes());
+    out.extend_from_slice(&link_opts.to_le_bytes());
+
+    write_hyperlink_string(&mut out, display);
+
+    // URL moniker: CLSID + length (bytes) + UTF-16LE URL (NUL terminated).
+    out.extend_from_slice(&CLSID_URL_MONIKER);
+    let mut url_utf16: Vec<u16> = url.encode_utf16().collect();
+    url_utf16.push(0); // NUL terminator
+    let url_bytes_len: u32 = (url_utf16.len() * 2) as u32;
+    out.extend_from_slice(&url_bytes_len.to_le_bytes());
+    for code_unit in url_utf16 {
+        out.extend_from_slice(&code_unit.to_le_bytes());
+    }
+
+    write_hyperlink_string(&mut out, tooltip);
+
+    out
+}
+
+fn write_hyperlink_string(out: &mut Vec<u8>, s: &str) {
+    // HyperlinkString: u32 cch + UTF-16LE (including trailing NUL).
+    let mut u16s: Vec<u16> = s.encode_utf16().collect();
+    u16s.push(0);
+    out.extend_from_slice(&(u16s.len() as u32).to_le_bytes());
+    for code_unit in u16s {
+        out.extend_from_slice(&code_unit.to_le_bytes());
+    }
 }
 
 fn build_merged_formatted_blank_sheet_stream(xf_percent: u16) -> Vec<u8> {

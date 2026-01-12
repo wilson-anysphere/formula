@@ -175,10 +175,12 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
     let mut row_col_props: Option<Vec<biff::SheetRowColProperties>> = None;
     let mut cell_xf_indices: Option<Vec<HashMap<CellRef, u16>>> = None;
     let mut cell_xf_parse_failed: Option<Vec<bool>> = None;
+    let mut biff_codepage: Option<u16> = None;
 
     if let Some(workbook_stream) = workbook_stream.as_deref() {
         let biff_version = biff::detect_biff_version(workbook_stream);
         let codepage = biff::parse_biff_codepage(workbook_stream);
+        biff_codepage = Some(codepage);
 
         match biff::parse_biff_workbook_globals(workbook_stream, biff_version, codepage) {
             Ok(mut globals) => {
@@ -430,6 +432,41 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                 sheet.set_value(anchor, value);
                 if let Some(style_id) = style_id {
                     sheet.set_style_id(anchor, style_id);
+                }
+            }
+        }
+
+        // Extract BIFF hyperlinks after merged regions have been populated so callers can resolve
+        // anchors consistently with the model's merged-cell semantics.
+        if let (Some(workbook_stream), Some(codepage), Some(biff_idx)) = (
+            workbook_stream.as_deref(),
+            biff_codepage,
+            biff_idx,
+        ) {
+            if let Some(sheet_info) = biff_sheets.as_ref().and_then(|s| s.get(biff_idx)) {
+                if sheet_info.offset >= workbook_stream.len() {
+                    warnings.push(ImportWarning::new(format!(
+                        "failed to import `.xls` hyperlinks for sheet `{sheet_name}`: out-of-bounds stream offset {}",
+                        sheet_info.offset
+                    )));
+                } else {
+                    match biff::parse_biff_sheet_hyperlinks(
+                        workbook_stream,
+                        sheet_info.offset,
+                        codepage,
+                    ) {
+                        Ok(parsed) => {
+                            sheet.hyperlinks.extend(parsed.hyperlinks);
+                            warnings.extend(parsed.warnings.into_iter().map(|w| {
+                                ImportWarning::new(format!(
+                                    "failed to import `.xls` hyperlink in sheet `{sheet_name}`: {w}"
+                                ))
+                            }));
+                        }
+                        Err(err) => warnings.push(ImportWarning::new(format!(
+                            "failed to import `.xls` hyperlinks for sheet `{sheet_name}`: {err}"
+                        ))),
+                    }
                 }
             }
         }
