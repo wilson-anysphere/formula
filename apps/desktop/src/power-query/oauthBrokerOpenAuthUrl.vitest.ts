@@ -17,13 +17,15 @@ describe("DesktopOAuthBroker.openAuthUrl", () => {
     const tauriOpen = vi.fn().mockResolvedValue(undefined);
     (globalThis as any).__TAURI__ = { core: { invoke }, plugin: { shell: { open: tauriOpen } } };
     // Guard against accidental webview navigation fallback.
-    (globalThis as any).window = { open: vi.fn() };
+    const windowOpen = vi.fn();
+    (globalThis as any).window = { open: windowOpen };
 
     const broker = new DesktopOAuthBroker();
     await broker.openAuthUrl("https://example.com/auth");
 
     expect(invoke).toHaveBeenCalledTimes(1);
     expect(invoke).toHaveBeenCalledWith("open_external_url", { url: "https://example.com/auth" });
+    expect(windowOpen).not.toHaveBeenCalled();
     expect(tauriOpen).not.toHaveBeenCalled();
   });
 
