@@ -1,0 +1,95 @@
+import fs from "node:fs";
+import path from "node:path";
+import test from "node:test";
+import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+test("Ribbon schema includes Formulas → Formula Auditing command ids", () => {
+  const schemaPath = path.join(__dirname, "..", "src", "ribbon", "ribbonSchema.ts");
+  const schema = fs.readFileSync(schemaPath, "utf8");
+
+  const commandIds = [
+    "formulas.formulaAuditing.tracePrecedents",
+    "formulas.formulaAuditing.traceDependents",
+    "formulas.formulaAuditing.removeArrows",
+    "formulas.formulaAuditing.showFormulas",
+  ];
+
+  for (const commandId of commandIds) {
+    assert.match(
+      schema,
+      new RegExp(`\\bid:\\s*["']${escapeRegExp(commandId)}["']`),
+      `Expected ribbon schema to include ${commandId}`,
+    );
+  }
+});
+
+test("Desktop main.ts wires Formulas → Formula Auditing commands to SpreadsheetApp", () => {
+  const mainPath = path.join(__dirname, "..", "src", "main.ts");
+  const main = fs.readFileSync(mainPath, "utf8");
+
+  assert.match(
+    main,
+    new RegExp(
+      `case\\s+["']formulas\\.formulaAuditing\\.tracePrecedents["']:\\s*\\n` +
+        `\\s*app\\.clearAuditing\\(\\);\\s*\\n` +
+        `\\s*app\\.toggleAuditingPrecedents\\(\\);\\s*\\n` +
+        `\\s*app\\.focus\\(\\);`,
+      "m",
+    ),
+    'Expected main.ts to handle formulas.formulaAuditing.tracePrecedents via clearAuditing/toggleAuditingPrecedents/focus',
+  );
+
+  assert.match(
+    main,
+    new RegExp(
+      `case\\s+["']formulas\\.formulaAuditing\\.traceDependents["']:\\s*\\n` +
+        `\\s*app\\.clearAuditing\\(\\);\\s*\\n` +
+        `\\s*app\\.toggleAuditingDependents\\(\\);\\s*\\n` +
+        `\\s*app\\.focus\\(\\);`,
+      "m",
+    ),
+    'Expected main.ts to handle formulas.formulaAuditing.traceDependents via clearAuditing/toggleAuditingDependents/focus',
+  );
+
+  assert.match(
+    main,
+    new RegExp(
+      `case\\s+["']formulas\\.formulaAuditing\\.removeArrows["']:\\s*\\n` +
+        `\\s*app\\.clearAuditing\\(\\);\\s*\\n` +
+        `\\s*app\\.focus\\(\\);`,
+      "m",
+    ),
+    'Expected main.ts to handle formulas.formulaAuditing.removeArrows via clearAuditing/focus',
+  );
+
+  assert.match(
+    main,
+    new RegExp(
+      `case\\s+["']formulas\\.formulaAuditing\\.showFormulas["']:\\s*\\n` +
+        `\\s*app\\.setShowFormulas\\(pressed\\);\\s*\\n` +
+        `\\s*app\\.focus\\(\\);`,
+      "m",
+    ),
+    "Expected main.ts to handle formulas.formulaAuditing.showFormulas via app.setShowFormulas(pressed)",
+  );
+
+  assert.match(
+    main,
+    /"formulas\.formulaAuditing\.showFormulas":\s*app\.getShowFormulas\(\)/,
+    "Expected ribbon pressed state to include formulas.formulaAuditing.showFormulas",
+  );
+
+  assert.match(
+    main,
+    /commandId\s*===\s*["']formulas\.formulaAuditing\.showFormulas["']/,
+    "Expected onCommand to ignore formulas.formulaAuditing.showFormulas (toggle semantics handled in onToggle)",
+  );
+});
+
