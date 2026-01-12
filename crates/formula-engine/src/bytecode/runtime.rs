@@ -162,6 +162,15 @@ fn multirange_unique_areas(r: &MultiRangeRef, base: CellCoord) -> Vec<ResolvedSh
 /// bytecode runtime can still compute aggregates correctly by iterating only stored cells.
 pub(crate) const BYTECODE_SPARSE_RANGE_ROW_THRESHOLD: i32 = 262_144;
 
+// Array aggregates (e.g. SUM({1,2,3,...})) are executed inside the bytecode runtime even when no
+// cell/range references are involved. These can be hot for large array literals or array-producing
+// functions that are bytecode-eligible.
+//
+// Use the same stack-buffer chunking strategy as the AST evaluator to avoid allocating full-length
+// `Vec<f64>` buffers.
+const SIMD_AGGREGATE_BLOCK: usize = 1024;
+const SIMD_ARRAY_MIN_LEN: usize = 32;
+
 pub(crate) struct BytecodeEvalContextGuard {
     prev_date_system: ExcelDateSystem,
     prev_value_locale: ValueLocaleConfig,
@@ -3958,17 +3967,58 @@ fn fn_sum(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             Value::Number(v) => sum += v,
             Value::Bool(v) => sum += if *v { 1.0 } else { 0.0 },
             Value::Array(a) => {
-                for v in a.iter() {
-                    match v {
-                        Value::Number(n) => sum += n,
-                        Value::Error(e) => return Value::Error(*e),
-                        Value::Bool(_)
-                        | Value::Text(_)
-                        | Value::Empty
-                        | Value::Missing
-                        | Value::Array(_)
-                        | Value::Range(_)
-                        | Value::MultiRange(_) => {}
+                if a.len() >= SIMD_ARRAY_MIN_LEN {
+                    let mut buf = [0.0_f64; SIMD_AGGREGATE_BLOCK];
+                    let mut len = 0usize;
+                    let mut local_sum = 0.0;
+                    let mut saw_nan = false;
+
+                    for v in a.iter() {
+                        match v {
+                            Value::Error(e) => return Value::Error(*e),
+                            Value::Number(n) => {
+                                if n.is_nan() {
+                                    saw_nan = true;
+                                } else if !saw_nan {
+                                    buf[len] = *n;
+                                    len += 1;
+                                    if len == SIMD_AGGREGATE_BLOCK {
+                                        local_sum += simd::sum_ignore_nan_f64(&buf);
+                                        len = 0;
+                                    }
+                                }
+                            }
+                            Value::Bool(_)
+                            | Value::Text(_)
+                            | Value::Empty
+                            | Value::Missing
+                            | Value::Array(_)
+                            | Value::Range(_)
+                            | Value::MultiRange(_) => {}
+                        }
+                    }
+
+                    if saw_nan {
+                        sum += f64::NAN;
+                    } else {
+                        if len > 0 {
+                            local_sum += simd::sum_ignore_nan_f64(&buf[..len]);
+                        }
+                        sum += local_sum;
+                    }
+                } else {
+                    for v in a.iter() {
+                        match v {
+                            Value::Number(n) => sum += n,
+                            Value::Error(e) => return Value::Error(*e),
+                            Value::Bool(_)
+                            | Value::Text(_)
+                            | Value::Empty
+                            | Value::Missing
+                            | Value::Array(_)
+                            | Value::Range(_)
+                            | Value::MultiRange(_) => {}
+                        }
                     }
                 }
             }
@@ -4001,38 +4051,93 @@ fn fn_average(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     }
     let mut sum = 0.0;
     let mut count = 0usize;
+    let mut saw_nan = false;
     for arg in args {
         match arg {
             Value::Number(v) => {
-                sum += v;
-                count += 1;
+                if v.is_nan() {
+                    saw_nan = true;
+                    count += 1;
+                } else if !saw_nan {
+                    sum += v;
+                    count += 1;
+                }
             }
             Value::Bool(v) => {
-                sum += if *v { 1.0 } else { 0.0 };
-                count += 1;
+                if !saw_nan {
+                    sum += if *v { 1.0 } else { 0.0 };
+                    count += 1;
+                }
             }
             Value::Array(a) => {
-                for v in a.iter() {
-                    match v {
-                        Value::Number(n) => {
-                            sum += n;
-                            count += 1;
+                if a.len() >= SIMD_ARRAY_MIN_LEN {
+                    let mut buf = [0.0_f64; SIMD_AGGREGATE_BLOCK];
+                    let mut len = 0usize;
+                    let mut local_sum = 0.0;
+
+                    for v in a.iter() {
+                        match v {
+                            Value::Error(e) => return Value::Error(*e),
+                            Value::Number(n) => {
+                                if n.is_nan() {
+                                    saw_nan = true;
+                                    count += 1;
+                                } else if !saw_nan {
+                                    buf[len] = *n;
+                                    len += 1;
+                                    count += 1;
+                                    if len == SIMD_AGGREGATE_BLOCK {
+                                        local_sum += simd::sum_ignore_nan_f64(&buf);
+                                        len = 0;
+                                    }
+                                }
+                            }
+                             Value::Bool(_)
+                             | Value::Text(_)
+                             | Value::Empty
+                             | Value::Missing
+                             | Value::Array(_)
+                             | Value::Range(_)
+                             | Value::MultiRange(_) => {}
+                         }
+                     }
+
+                    if !saw_nan {
+                        if len > 0 {
+                            local_sum += simd::sum_ignore_nan_f64(&buf[..len]);
                         }
-                        Value::Error(e) => return Value::Error(*e),
-                        Value::Bool(_)
-                        | Value::Text(_)
-                        | Value::Empty
-                        | Value::Missing
-                        | Value::Array(_)
-                        | Value::Range(_)
-                        | Value::MultiRange(_) => {}
+                        sum += local_sum;
+                    }
+                } else {
+                    for v in a.iter() {
+                        match v {
+                            Value::Number(n) => {
+                                if n.is_nan() {
+                                    saw_nan = true;
+                                    count += 1;
+                                } else if !saw_nan {
+                                    sum += n;
+                                    count += 1;
+                                }
+                            }
+                            Value::Error(e) => return Value::Error(*e),
+                            Value::Bool(_)
+                            | Value::Text(_)
+                            | Value::Empty
+                            | Value::Missing
+                            | Value::Array(_)
+                            | Value::Range(_)
+                            | Value::MultiRange(_) => {}
+                        }
                     }
                 }
             }
             Value::Range(r) => match sum_count_range(grid, r.resolve(base)) {
                 Ok((s, c)) => {
-                    sum += s;
-                    count += c;
+                    if !saw_nan {
+                        sum += s;
+                        count += c;
+                    }
                 }
                 Err(e) => return Value::Error(e),
             },
@@ -4040,8 +4145,10 @@ fn fn_average(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 for area in multirange_unique_areas(r, base) {
                     match sum_count_range_on_sheet(grid, area.sheet, area.range) {
                         Ok((s, c)) => {
-                            sum += s;
-                            count += c;
+                            if !saw_nan {
+                                sum += s;
+                                count += c;
+                            }
                         }
                         Err(e) => return Value::Error(e),
                     }
@@ -4051,8 +4158,13 @@ fn fn_average(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             Value::Error(e) => return Value::Error(*e),
             Value::Text(s) => match parse_value_from_text(s) {
                 Ok(v) => {
-                    sum += v;
-                    count += 1;
+                    if v.is_nan() {
+                        saw_nan = true;
+                        count += 1;
+                    } else if !saw_nan {
+                        sum += v;
+                        count += 1;
+                    }
                 }
                 Err(e) => return Value::Error(e),
             },
@@ -4061,7 +4173,11 @@ fn fn_average(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if count == 0 {
         return Value::Error(ErrorKind::Div0);
     }
-    Value::Number(sum / count as f64)
+    if saw_nan {
+        Value::Number(f64::NAN)
+    } else {
+        Value::Number(sum / count as f64)
+    }
 }
 
 fn fn_min(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
@@ -4069,29 +4185,84 @@ fn fn_min(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         return Value::Error(ErrorKind::Value);
     }
     let mut out: Option<f64> = None;
+    let mut saw_nan_number = false;
     for arg in args {
         match arg {
-            Value::Number(v) => out = Some(out.map_or(*v, |prev| prev.min(*v))),
+            Value::Number(v) => {
+                if v.is_nan() {
+                    saw_nan_number = true;
+                } else {
+                    out = Some(out.map_or(*v, |prev| prev.min(*v)))
+                }
+            }
             Value::Bool(v) => {
                 out = Some(out.map_or(if *v { 1.0 } else { 0.0 }, |prev| {
                     prev.min(if *v { 1.0 } else { 0.0 })
                 }))
             }
             Value::Array(a) => {
-                for v in a.iter() {
-                    match v {
-                        Value::Number(n) => out = Some(out.map_or(*n, |prev| prev.min(*n))),
-                        Value::Error(e) => return Value::Error(*e),
-                        Value::Bool(_)
-                        | Value::Text(_)
-                        | Value::Empty
-                        | Value::Missing
-                        | Value::Array(_)
-                        | Value::Range(_)
-                        | Value::MultiRange(_) => {}
+                if a.len() >= SIMD_ARRAY_MIN_LEN {
+                    let mut buf = [0.0_f64; SIMD_AGGREGATE_BLOCK];
+                    let mut len = 0usize;
+                    let mut local_best: Option<f64> = None;
+
+                    for v in a.iter() {
+                        match v {
+                            Value::Error(e) => return Value::Error(*e),
+                            Value::Number(n) => {
+                                if n.is_nan() {
+                                    saw_nan_number = true;
+                                    continue;
+                                }
+                                buf[len] = *n;
+                                len += 1;
+                                if len == SIMD_AGGREGATE_BLOCK {
+                                    if let Some(m) = simd::min_ignore_nan_f64(&buf) {
+                                        local_best = Some(local_best.map_or(m, |b| b.min(m)));
+                                    }
+                                    len = 0;
+                                }
+                            }
+                             Value::Bool(_)
+                             | Value::Text(_)
+                             | Value::Empty
+                             | Value::Missing
+                             | Value::Array(_)
+                             | Value::Range(_)
+                             | Value::MultiRange(_) => {}
+                         }
+                     }
+
+                    if len > 0 {
+                        if let Some(m) = simd::min_ignore_nan_f64(&buf[..len]) {
+                            local_best = Some(local_best.map_or(m, |b| b.min(m)));
+                        }
                     }
-                }
-            }
+                    if let Some(m) = local_best {
+                        out = Some(out.map_or(m, |prev| prev.min(m)));
+                    }
+                } else {
+                    for v in a.iter() {
+                        match v {
+                            Value::Number(n) => {
+                                if n.is_nan() {
+                                    saw_nan_number = true;
+                                } else {
+                                    out = Some(out.map_or(*n, |prev| prev.min(*n)))
+                                }
+                            }
+                            Value::Error(e) => return Value::Error(*e),
+                             Value::Bool(_)
+                             | Value::Text(_)
+                             | Value::Empty
+                             | Value::Missing
+                             | Value::Array(_)
+                             | Value::Range(_)
+                             | Value::MultiRange(_) => {}
+                         }
+                     }
+                 }
+             }
             Value::Range(r) => match min_range(grid, r.resolve(base)) {
                 Ok(Some(m)) => out = Some(out.map_or(m, |prev| prev.min(m))),
                 Ok(None) => {}
@@ -4109,12 +4280,22 @@ fn fn_min(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             Value::Empty | Value::Missing => out = Some(out.map_or(0.0, |prev| prev.min(0.0))),
             Value::Error(e) => return Value::Error(*e),
             Value::Text(s) => match parse_value_from_text(s) {
-                Ok(v) => out = Some(out.map_or(v, |prev| prev.min(v))),
+                Ok(v) => {
+                    if v.is_nan() {
+                        saw_nan_number = true;
+                    } else {
+                        out = Some(out.map_or(v, |prev| prev.min(v)))
+                    }
+                }
                 Err(e) => return Value::Error(e),
             },
         }
     }
-    Value::Number(out.unwrap_or(0.0))
+    Value::Number(match out {
+        Some(v) => v,
+        None if saw_nan_number => f64::NAN,
+        None => 0.0,
+    })
 }
 
 fn fn_max(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
@@ -4122,26 +4303,81 @@ fn fn_max(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         return Value::Error(ErrorKind::Value);
     }
     let mut out: Option<f64> = None;
+    let mut saw_nan_number = false;
     for arg in args {
         match arg {
-            Value::Number(v) => out = Some(out.map_or(*v, |prev| prev.max(*v))),
+            Value::Number(v) => {
+                if v.is_nan() {
+                    saw_nan_number = true;
+                } else {
+                    out = Some(out.map_or(*v, |prev| prev.max(*v)))
+                }
+            }
             Value::Bool(v) => {
                 out = Some(out.map_or(if *v { 1.0 } else { 0.0 }, |prev| {
                     prev.max(if *v { 1.0 } else { 0.0 })
                 }))
             }
             Value::Array(a) => {
-                for v in a.iter() {
-                    match v {
-                        Value::Number(n) => out = Some(out.map_or(*n, |prev| prev.max(*n))),
-                        Value::Error(e) => return Value::Error(*e),
-                        Value::Bool(_)
-                        | Value::Text(_)
-                        | Value::Empty
-                        | Value::Missing
-                        | Value::Array(_)
-                        | Value::Range(_)
-                        | Value::MultiRange(_) => {}
+                if a.len() >= SIMD_ARRAY_MIN_LEN {
+                    let mut buf = [0.0_f64; SIMD_AGGREGATE_BLOCK];
+                    let mut len = 0usize;
+                    let mut local_best: Option<f64> = None;
+
+                    for v in a.iter() {
+                        match v {
+                            Value::Error(e) => return Value::Error(*e),
+                            Value::Number(n) => {
+                                if n.is_nan() {
+                                    saw_nan_number = true;
+                                    continue;
+                                }
+                                buf[len] = *n;
+                                len += 1;
+                                if len == SIMD_AGGREGATE_BLOCK {
+                                    if let Some(m) = simd::max_ignore_nan_f64(&buf) {
+                                        local_best = Some(local_best.map_or(m, |b| b.max(m)));
+                                    }
+                                    len = 0;
+                                }
+                            }
+                            Value::Bool(_)
+                            | Value::Text(_)
+                            | Value::Empty
+                            | Value::Missing
+                            | Value::Array(_)
+                            | Value::Range(_)
+                            | Value::MultiRange(_) => {}
+                        }
+                    }
+
+                    if len > 0 {
+                        if let Some(m) = simd::max_ignore_nan_f64(&buf[..len]) {
+                            local_best = Some(local_best.map_or(m, |b| b.max(m)));
+                        }
+                    }
+                    if let Some(m) = local_best {
+                        out = Some(out.map_or(m, |prev| prev.max(m)));
+                    }
+                } else {
+                    for v in a.iter() {
+                        match v {
+                            Value::Number(n) => {
+                                if n.is_nan() {
+                                    saw_nan_number = true;
+                                } else {
+                                    out = Some(out.map_or(*n, |prev| prev.max(*n)))
+                                }
+                            }
+                            Value::Error(e) => return Value::Error(*e),
+                            Value::Bool(_)
+                            | Value::Text(_)
+                            | Value::Empty
+                            | Value::Missing
+                            | Value::Array(_)
+                            | Value::Range(_)
+                            | Value::MultiRange(_) => {}
+                        }
                     }
                 }
             }
@@ -4162,12 +4398,22 @@ fn fn_max(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             Value::Empty | Value::Missing => out = Some(out.map_or(0.0, |prev| prev.max(0.0))),
             Value::Error(e) => return Value::Error(*e),
             Value::Text(s) => match parse_value_from_text(s) {
-                Ok(v) => out = Some(out.map_or(v, |prev| prev.max(v))),
+                Ok(v) => {
+                    if v.is_nan() {
+                        saw_nan_number = true;
+                    } else {
+                        out = Some(out.map_or(v, |prev| prev.max(v)))
+                    }
+                }
                 Err(e) => return Value::Error(e),
             },
         }
     }
-    Value::Number(out.unwrap_or(0.0))
+    Value::Number(match out {
+        Some(v) => v,
+        None if saw_nan_number => f64::NAN,
+        None => 0.0,
+    })
 }
 
 fn fn_count(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
@@ -4176,7 +4422,30 @@ fn fn_count(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         match arg {
             Value::Number(_) => count += 1,
             Value::Array(a) => {
-                count += a.iter().filter(|v| matches!(v, Value::Number(_))).count();
+                if a.len() >= SIMD_ARRAY_MIN_LEN {
+                    let mut buf = [f64::NAN; SIMD_AGGREGATE_BLOCK];
+                    let mut len = 0usize;
+                    let mut local_count = 0usize;
+
+                    for v in a.iter() {
+                        buf[len] = if matches!(v, Value::Number(_)) {
+                            0.0
+                        } else {
+                            f64::NAN
+                        };
+                        len += 1;
+                        if len == SIMD_AGGREGATE_BLOCK {
+                            local_count += simd::count_ignore_nan_f64(&buf);
+                            len = 0;
+                        }
+                    }
+                    if len > 0 {
+                        local_count += simd::count_ignore_nan_f64(&buf[..len]);
+                    }
+                    count += local_count;
+                } else {
+                    count += a.iter().filter(|v| matches!(v, Value::Number(_))).count();
+                }
             }
             Value::Range(r) => match count_range(grid, r.resolve(base)) {
                 Ok(c) => count += c,
@@ -6354,14 +6623,46 @@ fn count_if_array_criteria(arr: &ArrayValue, criteria: &EngineCriteria) -> usize
 }
 
 fn count_if_array_numeric_criteria(arr: &ArrayValue, criteria: NumericCriteria) -> usize {
-    arr.iter()
-        .filter(|v| {
-            let Some(n) = coerce_countif_value_to_number(*v) else {
-                return false;
-            };
-            matches_numeric_criteria(n, criteria)
-        })
-        .count()
+    if arr.len() < SIMD_ARRAY_MIN_LEN {
+        return arr
+            .iter()
+            .filter(|v| {
+                let Some(n) = coerce_countif_value_to_number(*v) else {
+                    return false;
+                };
+                matches_numeric_criteria(n, criteria)
+            })
+            .count();
+    }
+
+    let mut count = 0usize;
+    let mut buf = [0.0_f64; SIMD_AGGREGATE_BLOCK];
+    let mut len = 0usize;
+
+    for v in arr.iter() {
+        let Some(n) = coerce_countif_value_to_number(v) else {
+            continue;
+        };
+        if n.is_nan() {
+            if matches_numeric_criteria(n, criteria) {
+                count += 1;
+            }
+            continue;
+        }
+
+        buf[len] = n;
+        len += 1;
+        if len == SIMD_AGGREGATE_BLOCK {
+            count += simd::count_if_f64(&buf, criteria);
+            len = 0;
+        }
+    }
+
+    if len > 0 {
+        count += simd::count_if_f64(&buf[..len], criteria);
+    }
+
+    count
 }
 
 #[inline]
@@ -7564,5 +7865,94 @@ mod tests {
 
         let criteria_gt = NumericCriteria::new(CmpOp::Gt, 0.0);
         assert_eq!(count_if_range_on_sheet(&grid, 0, range, criteria_gt), Ok(2));
+    }
+
+    #[test]
+    fn array_aggregates_preserve_error_precedence_with_nan() {
+        let grid = ColumnarGrid::new(1, 1);
+        let base = CellCoord { row: 0, col: 0 };
+
+        let mut values = Vec::new();
+        // Ensure we exceed the SIMD threshold.
+        for i in 0..(SIMD_ARRAY_MIN_LEN + 8) {
+            values.push(Value::Number(i as f64));
+        }
+        // Inject a NaN value that should not short-circuit error handling.
+        values[3] = Value::Number(f64::NAN);
+        // Error after NaN should still propagate.
+        values.push(Value::Error(ErrorKind::Div0));
+
+        let arr = ArrayValue::new(1, values.len(), values);
+
+        assert_eq!(
+            fn_sum(&[Value::Array(arr.clone())], &grid, base),
+            Value::Error(ErrorKind::Div0)
+        );
+        assert_eq!(
+            fn_average(&[Value::Array(arr)], &grid, base),
+            Value::Error(ErrorKind::Div0)
+        );
+    }
+
+    #[test]
+    fn count_counts_nan_numbers_in_arrays() {
+        let grid = ColumnarGrid::new(1, 1);
+        let base = CellCoord { row: 0, col: 0 };
+
+        let mut values = Vec::new();
+        for i in 0..SIMD_ARRAY_MIN_LEN {
+            values.push(Value::Number(i as f64));
+        }
+        values.push(Value::Number(f64::NAN));
+        values.push(Value::Bool(true));
+        values.push(Value::Text(Arc::from("x")));
+        values.push(Value::Error(ErrorKind::Div0));
+
+        let expected_numbers = SIMD_ARRAY_MIN_LEN + 1;
+        let arr = ArrayValue::new(1, values.len(), values);
+
+        assert_eq!(
+            fn_count(&[Value::Array(arr)], &grid, base),
+            Value::Number(expected_numbers as f64)
+        );
+    }
+
+    #[test]
+    fn minmax_return_nan_when_only_nan_numbers_present() {
+        let grid = ColumnarGrid::new(1, 1);
+        let base = CellCoord { row: 0, col: 0 };
+
+        let mut values = vec![Value::Number(f64::NAN); SIMD_ARRAY_MIN_LEN + 4];
+        // Mix in some ignored values to ensure they don't affect the result.
+        values[0] = Value::Text(Arc::from("x"));
+        values[1] = Value::Bool(true);
+
+        let arr = ArrayValue::new(1, values.len(), values);
+
+        let min = fn_min(&[Value::Array(arr.clone())], &grid, base);
+        let max = fn_max(&[Value::Array(arr)], &grid, base);
+
+        assert!(matches!(min, Value::Number(n) if n.is_nan()));
+        assert!(matches!(max, Value::Number(n) if n.is_nan()));
+    }
+
+    #[test]
+    fn countif_array_numeric_criteria_counts_nan_for_not_equal() {
+        let mut values = vec![Value::Text(Arc::from("x")); SIMD_ARRAY_MIN_LEN + 5];
+        values[0] = Value::Number(f64::NAN);
+        values[1] = Value::Number(1.0);
+        values[2] = Value::Empty; // coerces to 0.0
+        values[3] = Value::Text(Arc::from("2")); // numeric text coerces to 2.0
+        values[4] = Value::Number(0.0);
+
+        let arr = ArrayValue::new(1, values.len(), values);
+
+        let ne_zero = NumericCriteria::new(CmpOp::Ne, 0.0);
+        // NaN != 0 => true, 1 != 0 => true, empty(0) != 0 => false, 2 != 0 => true.
+        assert_eq!(count_if_array_numeric_criteria(&arr, ne_zero), 3);
+
+        let eq_zero = NumericCriteria::new(CmpOp::Eq, 0.0);
+        // NaN == 0 => false, explicit 0 == 0 => true, empty(0) == 0 => true.
+        assert_eq!(count_if_array_numeric_criteria(&arr, eq_zero), 2);
     }
 }
