@@ -681,10 +681,11 @@ fn array_literal_errors_propagate_in_sum() {
         .set_cell_formula("Sheet1", "A1", "=SUM({1,#DIV/0!})")
         .unwrap();
 
+    // Ensure this stays on the bytecode backend (array literals can contain error literals).
+    assert_eq!(engine.bytecode_program_count(), 1);
+
     engine.recalculate_single_threaded();
 
-    // Array literals containing errors are not supported by the bytecode backend yet, but they
-    // must still evaluate with correct error propagation (either via AST fallback or bytecode).
     assert_engine_matches_ast(&engine, "=SUM({1,#DIV/0!})", "A1");
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::Div0));
 }
