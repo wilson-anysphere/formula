@@ -732,7 +732,7 @@ In this repo’s fixture corpus, mapping `vm`/`metadata.xml` → rich value indi
 `futureMetadata`/`xlrd:rvb` indirection described below. Other schemas may exist in the wild; preserve and
 round-trip unknown metadata byte-for-byte.
 
-### Variant A: `futureMetadata` / `rvb` indirection
+### Observed mapping: `futureMetadata` / `rvb` indirection
 
 1. **Worksheet cell** (`xl/worksheets/sheetN.xml`)
    - Cell has `c/@vm="0"` or `c/@vm="1"` (value metadata index; **0-based or 1-based** in observed files).
