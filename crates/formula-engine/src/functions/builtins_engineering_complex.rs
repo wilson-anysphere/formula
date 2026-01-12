@@ -89,7 +89,7 @@ fn complex_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         'i'
     };
 
-    match format_complex(Complex64::new(re, im), suffix) {
+    match format_complex(Complex64::new(re, im), suffix, ctx) {
         Ok(s) => Value::Text(s),
         Err(e) => Value::Error(e),
     }
@@ -210,7 +210,7 @@ fn imconjugate_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    match format_complex(value.conj(), suffix) {
+    match format_complex(value.conj(), suffix, ctx) {
         Ok(s) => Value::Text(s),
         Err(e) => Value::Error(e),
     }
@@ -243,7 +243,7 @@ fn imsum_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         };
         acc += z;
     }
-    match format_complex(acc, first.suffix) {
+    match format_complex(acc, first.suffix, ctx) {
         Ok(s) => Value::Text(s),
         Err(e) => Value::Error(e),
     }
@@ -276,7 +276,7 @@ fn improduct_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         };
         acc *= z;
     }
-    match format_complex(acc, first.suffix) {
+    match format_complex(acc, first.suffix, ctx) {
         Ok(s) => Value::Text(s),
         Err(e) => Value::Error(e),
     }
@@ -309,7 +309,7 @@ fn imsub_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    match format_complex(out, a.suffix) {
+    match format_complex(out, a.suffix, ctx) {
         Ok(s) => Value::Text(s),
         Err(e) => Value::Error(e),
     }
@@ -345,7 +345,7 @@ fn imdiv_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    match format_complex(out, a.suffix) {
+    match format_complex(out, a.suffix, ctx) {
         Ok(s) => Value::Text(s),
         Err(e) => Value::Error(e),
     }
@@ -393,7 +393,7 @@ fn impower_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    match format_complex(out, a.suffix) {
+    match format_complex(out, a.suffix, ctx) {
         Ok(s) => Value::Text(s),
         Err(e) => Value::Error(e),
     }
@@ -422,7 +422,7 @@ fn imsqrt_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    match format_complex(out, a.suffix) {
+    match format_complex(out, a.suffix, ctx) {
         Ok(s) => Value::Text(s),
         Err(e) => Value::Error(e),
     }
@@ -451,7 +451,7 @@ fn imln_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    match format_complex(out, a.suffix) {
+    match format_complex(out, a.suffix, ctx) {
         Ok(s) => Value::Text(s),
         Err(e) => Value::Error(e),
     }
@@ -480,7 +480,7 @@ fn imlog2_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    match format_complex(out, a.suffix) {
+    match format_complex(out, a.suffix, ctx) {
         Ok(s) => Value::Text(s),
         Err(e) => Value::Error(e),
     }
@@ -509,7 +509,7 @@ fn imlog10_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    match format_complex(out, a.suffix) {
+    match format_complex(out, a.suffix, ctx) {
         Ok(s) => Value::Text(s),
         Err(e) => Value::Error(e),
     }
@@ -538,7 +538,7 @@ fn imsin_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    match format_complex(out, a.suffix) {
+    match format_complex(out, a.suffix, ctx) {
         Ok(s) => Value::Text(s),
         Err(e) => Value::Error(e),
     }
@@ -567,7 +567,7 @@ fn imcos_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    match format_complex(out, a.suffix) {
+    match format_complex(out, a.suffix, ctx) {
         Ok(s) => Value::Text(s),
         Err(e) => Value::Error(e),
     }
@@ -596,7 +596,7 @@ fn imexp_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    match format_complex(out, a.suffix) {
+    match format_complex(out, a.suffix, ctx) {
         Ok(s) => Value::Text(s),
         Err(e) => Value::Error(e),
     }

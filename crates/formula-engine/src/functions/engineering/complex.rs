@@ -1,6 +1,8 @@
 use num_complex::Complex64;
 
-use crate::value::{parse_number, ErrorKind, NumberLocale, Value};
+use crate::functions::FunctionContext;
+use crate::value::{ErrorKind, NumberLocale, Value};
+use crate::LocaleConfig;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct ParsedComplex {
@@ -9,9 +11,17 @@ pub(crate) struct ParsedComplex {
 }
 
 fn parse_component(text: &str, locale: NumberLocale) -> Result<f64, ErrorKind> {
-    // Excel's complex-number functions surface invalid parsing as #NUM!,
-    // even when the underlying numeric coercion would normally yield #VALUE!.
-    parse_number(text, locale).map_err(|_| ErrorKind::Num)
+    // Excel's complex-number functions surface invalid parsing as #NUM!, even when the
+    // underlying numeric coercion would normally yield #VALUE!.
+    //
+    // Use `LocaleConfig::parse_number` rather than `value::parse_number` so complex strings can
+    // accept both:
+    // - the workbook decimal separator (e.g. `1,5` in `de-DE`)
+    // - the canonical `.` decimal separator (e.g. `1.5`), mirroring criteria parsing behavior.
+    let mut cfg = LocaleConfig::en_us();
+    cfg.decimal_separator = locale.decimal_separator;
+    cfg.thousands_separator = locale.group_separator;
+    cfg.parse_number(text).ok_or(ErrorKind::Num)
 }
 
 /// Parse an Excel-style complex number string (engineering functions).
@@ -126,7 +136,11 @@ pub(crate) fn parse_complex(text: &str, locale: NumberLocale) -> Result<ParsedCo
     }
 }
 
-pub(crate) fn format_complex(mut z: Complex64, suffix: char) -> Result<String, ErrorKind> {
+pub(crate) fn format_complex(
+    mut z: Complex64,
+    suffix: char,
+    ctx: &dyn FunctionContext,
+) -> Result<String, ErrorKind> {
     if !z.re.is_finite() || !z.im.is_finite() {
         return Err(ErrorKind::Num);
     }
@@ -140,7 +154,7 @@ pub(crate) fn format_complex(mut z: Complex64, suffix: char) -> Result<String, E
     }
 
     if z.im == 0.0 {
-        return Value::Number(z.re).coerce_to_string();
+        return Value::Number(z.re).coerce_to_string_with_ctx(ctx);
     }
 
     let suffix = match suffix {
@@ -149,10 +163,10 @@ pub(crate) fn format_complex(mut z: Complex64, suffix: char) -> Result<String, E
     };
 
     if z.re == 0.0 {
-        return Ok(format_imag_only(z.im, suffix)?);
+        return Ok(format_imag_only(z.im, suffix, ctx)?);
     }
 
-    let re_str = Value::Number(z.re).coerce_to_string()?;
+    let re_str = Value::Number(z.re).coerce_to_string_with_ctx(ctx)?;
     let (sign, abs_im) = if z.im.is_sign_negative() {
         ('-', -z.im)
     } else {
@@ -162,20 +176,19 @@ pub(crate) fn format_complex(mut z: Complex64, suffix: char) -> Result<String, E
     let im_coeff = if abs_im == 1.0 {
         String::new()
     } else {
-        Value::Number(abs_im).coerce_to_string()?
+        Value::Number(abs_im).coerce_to_string_with_ctx(ctx)?
     };
 
     Ok(format!("{re_str}{sign}{im_coeff}{suffix}"))
 }
 
-fn format_imag_only(im: f64, suffix: char) -> Result<String, ErrorKind> {
+fn format_imag_only(im: f64, suffix: char, ctx: &dyn FunctionContext) -> Result<String, ErrorKind> {
     if im == 1.0 {
         return Ok(suffix.to_string());
     }
     if im == -1.0 {
         return Ok(format!("-{suffix}"));
     }
-    let coeff = Value::Number(im).coerce_to_string()?;
+    let coeff = Value::Number(im).coerce_to_string_with_ctx(ctx)?;
     Ok(format!("{coeff}{suffix}"))
 }
-
