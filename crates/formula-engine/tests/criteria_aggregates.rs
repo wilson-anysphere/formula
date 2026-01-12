@@ -60,7 +60,20 @@ fn sumif_basic_and_optional_sum_range() {
 
     assert_number(&sheet.eval(r#"=SUMIF(A1:A4,">2",B1:B4)"#), 70.0);
     assert_number(&sheet.eval(r#"=SUMIF(A1:A4,">2")"#), 7.0);
+    assert_number(&sheet.eval(r#"=SUMIF(A1:A4,">2",)"#), 7.0);
     assert_number(&sheet.eval(r#"=SUMIF(A1:A4,2,B1:B4)"#), 20.0);
+}
+
+#[test]
+fn averageif_treats_blank_average_range_as_omitted() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", 1);
+    sheet.set("A2", 2);
+    sheet.set("A3", 3);
+    sheet.set("A4", 4);
+
+    assert_number(&sheet.eval(r#"=AVERAGEIF(A1:A4,">2")"#), 3.5);
+    assert_number(&sheet.eval(r#"=AVERAGEIF(A1:A4,">2",)"#), 3.5);
 }
 
 #[test]

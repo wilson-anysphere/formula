@@ -856,13 +856,14 @@ fn sumif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
-    let sum_range = if args.len() >= 3 {
-        Some(match Range2D::try_from_arg(ctx.eval_arg(&args[2])) {
+    // Excel treats `SUMIF(range, criteria,)` the same as omitting the optional sum_range
+    // argument entirely (i.e. `SUMIF(range, criteria)`).
+    let sum_range = match args.get(2) {
+        None | Some(CompiledExpr::Blank) => None,
+        Some(expr) => Some(match Range2D::try_from_arg(ctx.eval_arg(expr)) {
             Ok(r) => r,
             Err(e) => return Value::Error(e),
-        })
-    } else {
-        None
+        }),
     };
     if let Some(ref sum_range) = sum_range {
         sum_range.record_reference(ctx);
@@ -1076,13 +1077,14 @@ fn averageif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
-    let average_range = if args.len() >= 3 {
-        Some(match Range2D::try_from_arg(ctx.eval_arg(&args[2])) {
+    // Excel treats `AVERAGEIF(range, criteria,)` the same as omitting the optional average_range
+    // argument entirely (i.e. `AVERAGEIF(range, criteria)`).
+    let average_range = match args.get(2) {
+        None | Some(CompiledExpr::Blank) => None,
+        Some(expr) => Some(match Range2D::try_from_arg(ctx.eval_arg(expr)) {
             Ok(r) => r,
             Err(e) => return Value::Error(e),
-        })
-    } else {
-        None
+        }),
     };
     if let Some(ref average_range) = average_range {
         average_range.record_reference(ctx);
