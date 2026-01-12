@@ -549,7 +549,7 @@ test.describe("split view", () => {
   const modes = ["legacy", "shared"] as const;
 
   for (const mode of modes) {
-    test(`dragging a range in the secondary pane inserts it into the formula bar and commit clears the overlay (${mode})`, async ({
+    test(`dragging a range in the secondary pane inserts it into the formula bar (commit + cancel) (${mode})`, async ({
       page,
     }) => {
       await gotoDesktop(page, `/?grid=${mode}`);
@@ -596,9 +596,36 @@ test.describe("split view", () => {
 
       await expect(input).toHaveValue("=SUM(A1:A2");
       await expect(secondaryStatus).toContainText("Selection A1:A2");
+      await expect(input).toBeFocused();
+
+      // Cancel should clear the split-view range selection overlay and not apply the edit.
+      await page.keyboard.press("Escape");
+      await waitForIdle(page);
+
+      const { c1FormulaAfterCancel } = await page.evaluate(() => {
+        const app = (window as any).__formulaApp;
+        const doc = app.getDocument();
+        const sheetId = app.getCurrentSheetId();
+        return { c1FormulaAfterCancel: doc.getCell(sheetId, "C1").formula };
+      });
+      expect(c1FormulaAfterCancel).toBeNull();
+      await expect(secondaryStatus).toContainText("Selection C1");
+
+      // Start editing again.
+      await page.getByTestId("formula-highlight").click();
+      await expect(input).toBeVisible();
+      await input.fill("=SUM(");
+
+      // Drag-select again; focus should return to the formula bar so typing continues.
+      await page.mouse.move(gridBox.x + 60, gridBox.y + 40);
+      await page.mouse.down();
+      await page.mouse.move(gridBox.x + 60, gridBox.y + 64);
+      await page.mouse.up();
+
+      await expect(input).toHaveValue("=SUM(A1:A2");
+      await expect(input).toBeFocused();
 
       // Commit the formula; the split-view transient range selection overlay should clear.
-      await input.focus();
       await page.keyboard.type(")");
       await page.keyboard.press("Enter");
       await waitForIdle(page);
