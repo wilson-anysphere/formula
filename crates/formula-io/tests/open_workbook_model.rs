@@ -283,6 +283,22 @@ fn open_workbook_model_xls() {
 }
 
 #[test]
+fn open_workbook_model_xlt_and_xla() {
+    let src = xls_fixture_path("basic.xls");
+    let tmp = tempfile::tempdir().expect("temp dir");
+
+    for ext in ["xlt", "xla"] {
+        let dst = tmp.path().join(format!("basic.{ext}"));
+        std::fs::copy(&src, &dst).expect("copy xls fixture to legacy template/add-in extension");
+
+        let workbook = formula_io::open_workbook_model(&dst).expect("open workbook model");
+        assert_eq!(workbook.sheets.len(), 2);
+        assert_eq!(workbook.sheets[0].name, "Sheet1");
+        assert_eq!(workbook.sheets[1].name, "Second");
+    }
+}
+
+#[test]
 fn open_workbook_model_sniffs_extensionless_xls() {
     let path = xls_fixture_path("basic.xls");
     let bytes = std::fs::read(&path).expect("read fixture");

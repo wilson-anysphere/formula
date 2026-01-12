@@ -60,6 +60,36 @@ fn ole_container_with_xls_extension_falls_back_to_xls_open_error() {
 }
 
 #[test]
+fn ole_container_with_xlt_or_xla_extension_falls_back_to_xls_open_error() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let bytes = non_xls_ole_bytes();
+
+    for ext in ["xlt", "xla"] {
+        let path = tmp.path().join(format!("document.{ext}"));
+        std::fs::write(&path, &bytes).expect("write ole bytes");
+
+        // Content sniffing should not classify non-Excel OLE containers as `.xls`.
+        let fmt = detect_workbook_format(&path).expect("detect format");
+        assert_eq!(fmt, WorkbookFormat::Unknown);
+
+        // `.xlt`/`.xla` are legacy BIFF/OLE extensions; we should still attempt to open them as
+        // `.xls` and surface an `.xls`-specific open error, rather than claiming the extension is
+        // unsupported.
+        let err = open_workbook(&path).expect_err("expected open_workbook to fail");
+        assert!(
+            matches!(err, Error::OpenXls { .. }),
+            "expected OpenXls, got {err:?}"
+        );
+
+        let err = open_workbook_model(&path).expect_err("expected open_workbook_model to fail");
+        assert!(
+            matches!(err, Error::OpenXls { .. }),
+            "expected OpenXls, got {err:?}"
+        );
+    }
+}
+
+#[test]
 fn ole_container_with_xlsx_extension_falls_back_to_xlsx_open_error() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let path = tmp.path().join("document.xlsx");

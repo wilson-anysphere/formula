@@ -410,7 +410,9 @@ fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
         // packages for extension-based fallback dispatch.
         "xlsx" | "xltx" | "xltm" | "xlam" => Some(WorkbookFormat::Xlsx),
         "xlsm" => Some(WorkbookFormat::Xlsm),
-        "xls" => Some(WorkbookFormat::Xls),
+        // `.xlt`/`.xla` are legacy BIFF8 OLE compound files, so treat them like `.xls` for fallback
+        // dispatch (when sniffing can't run due to an I/O error).
+        "xls" | "xlt" | "xla" => Some(WorkbookFormat::Xls),
         "xlsb" => Some(WorkbookFormat::Xlsb),
         "csv" => Some(WorkbookFormat::Csv),
         "parquet" => Some(WorkbookFormat::Parquet),
@@ -582,7 +584,7 @@ fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
 /// workflows:
 /// - For `.xlsx`/`.xlsm`/`.xltx`/`.xltm`/`.xlam`, this uses the streaming reader in `formula-xlsx`
 ///   and avoids inflating the entire OPC package into memory.
-/// - For `.xls`, this returns the imported model workbook from `formula-xls`.
+/// - For `.xls`/`.xlt`/`.xla`, this returns the imported model workbook from `formula-xls`.
 /// - For `.xlsb`, this converts the parsed workbook into a model workbook.
 /// - For `.csv`, this imports the CSV into a columnar-backed worksheet.
 /// - For `.parquet`, this imports the Parquet file into a columnar-backed worksheet (requires the
@@ -770,7 +772,7 @@ fn ole_workbook_has_biff_filepass_record<R: std::io::Read + std::io::Write + std
 /// inflating every package part into memory.
 ///
 /// Currently supports:
-/// - `.xls` (via `formula-xls`)
+/// - `.xls` / `.xlt` / `.xla` (via `formula-xls`)
 /// - `.xlsb` (via `formula-xlsb`)
 /// - `.xlsx` / `.xlsm` / `.xltx` / `.xltm` / `.xlam` (via `formula-xlsx`)
 /// - `.csv` (via `formula-model` CSV import)

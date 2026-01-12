@@ -99,6 +99,24 @@ fn detects_xls() {
 }
 
 #[test]
+fn detects_xlt_and_xla_as_xls() {
+    let src = xls_fixture_path("basic.xls");
+    let tmp = tempfile::tempdir().expect("temp dir");
+
+    for ext in ["xlt", "xla"] {
+        let dst = tmp.path().join(format!("basic.{ext}"));
+        std::fs::copy(&src, &dst).expect("copy .xls fixture to legacy template/add-in extension");
+
+        // `.xlt` and `.xla` are legacy BIFF/OLE containers; format detection should classify by
+        // content, not extension.
+        assert_eq!(
+            detect_workbook_format(&dst).expect("detect"),
+            WorkbookFormat::Xls
+        );
+    }
+}
+
+#[test]
 fn detects_csv_by_extension() {
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("data.csv");
