@@ -1,5 +1,6 @@
 use std::io::Write;
 
+use calamine::{open_workbook, Reader, Xls};
 use formula_model::{DefinedNameScope, XLNM_PRINT_AREA};
 
 mod common;
@@ -169,7 +170,25 @@ fn imports_workbook_defined_names_via_calamine_fallback_when_biff_unavailable() 
 #[test]
 fn rewrites_calamine_defined_name_formulas_to_sanitized_sheet_names() {
     let bytes = xls_fixture_builder::build_defined_name_sheet_name_sanitization_fixture_xls();
-    let result = import_fixture_without_biff(&bytes);
+    let mut tmp = tempfile::NamedTempFile::new().expect("temp file");
+    tmp.write_all(&bytes).expect("write xls bytes");
+
+    // Sanity check: calamine should surface the original invalid sheet name in the defined name.
+    let calamine_refers_to = {
+        let wb: Xls<_> = open_workbook(tmp.path()).expect("open xls fixture via calamine");
+        wb.defined_names()
+            .iter()
+            .find(|(name, _)| name.replace('\0', "") == "TestName")
+            .map(|(_, refers_to)| refers_to.as_str())
+            .unwrap_or("<missing>")
+            .to_string()
+    };
+    assert!(
+        calamine_refers_to.contains("Bad:Name"),
+        "expected calamine refers_to to reference original sheet name; refers_to={calamine_refers_to:?}"
+    );
+
+    let result = formula_xls::import_xls_path_without_biff(tmp.path()).expect("import xls");
 
     assert!(
         result.workbook.sheet_by_name("Bad:Name").is_none(),
@@ -188,4 +207,13 @@ fn rewrites_calamine_defined_name_formulas_to_sanitized_sheet_names() {
         .unwrap_or_else(|| panic!("TestName missing; defined_names={:?}", result.workbook.defined_names));
     assert_eq!(name.scope, DefinedNameScope::Workbook);
     assert_eq!(name.refers_to, "Bad_Name!$A$1:$A$1");
+
+    assert!(
+        result
+            .warnings
+            .iter()
+            .any(|w| w.message.contains("sanitized sheet name `Bad:Name` -> `Bad_Name`")),
+        "expected import warnings to mention sheet name sanitization; warnings={:?}",
+        result.warnings
+    );
 }

@@ -1201,9 +1201,9 @@ mod tests {
         let expr = expr.trim();
         assert!(!expr.is_empty(), "decoded expression must be non-empty");
         let formula = format!("={expr}");
-        if let Err(err) = parse_formula(&formula, ParseOptions::default()) {
+        parse_formula(&formula, ParseOptions::default()).unwrap_or_else(|err| {
             panic!("expected decoded expression to be parseable, expr={expr:?}, err={err:?}");
-        }
+        });
     }
 
     fn assert_print_area_parseable(sheet_name: &str, expr: &str) {
