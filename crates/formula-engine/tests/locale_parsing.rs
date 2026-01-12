@@ -1,4 +1,4 @@
-use formula_engine::{eval::parse_a1, locale, Engine, Value};
+use formula_engine::{eval::parse_a1, locale, Engine, ErrorKind, Value};
 
 #[test]
 fn canonicalize_and_localize_round_trip_for_de_de() {
@@ -441,6 +441,16 @@ fn engine_accepts_localized_external_data_formulas_and_persists_canonical() {
             engine.get_cell_formula("Sheet1", "A3"),
             Some("=#GETTING_DATA")
         );
+
+        // Without an external data provider, RTD/CUBE* functions should be recognized and return
+        // `#N/A` rather than `#NAME?`.
+        engine.recalculate();
+        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::NA));
+        assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Error(ErrorKind::NA));
+        assert_eq!(
+            engine.get_cell_value("Sheet1", "A3"),
+            Value::Error(ErrorKind::GettingData)
+        );
     }
 }
 
@@ -492,6 +502,14 @@ fn engine_accepts_localized_external_data_r1c1_formulas_and_persists_canonical_a
             .set_cell_formula_localized_r1c1("Sheet1", "A1", localized_err, locale)
             .unwrap();
         assert_eq!(engine.get_cell_formula("Sheet1", "A1"), Some("=#GETTING_DATA"));
+
+        engine.recalculate();
+        assert_eq!(engine.get_cell_value("Sheet1", "C5"), Value::Error(ErrorKind::NA));
+        assert_eq!(engine.get_cell_value("Sheet1", "C6"), Value::Error(ErrorKind::NA));
+        assert_eq!(
+            engine.get_cell_value("Sheet1", "A1"),
+            Value::Error(ErrorKind::GettingData)
+        );
     }
 }
 
