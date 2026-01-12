@@ -51,8 +51,9 @@ impl CellEdit {
     /// Convenience helper for updating a formula cell from Excel formula text using workbook
     /// context.
     ///
-    /// This uses [`crate::rgce::encode_rgce_with_context`] which can produce both `rgce` and any
-    /// required trailing `rgcb` bytes.
+    /// When the `write` feature is enabled, this prefers the AST-based encoder
+    /// ([`crate::rgce::encode_rgce_with_context_ast`]) for improved grammar coverage. Without
+    /// `write`, it falls back to [`crate::rgce::encode_rgce_with_context`].
     ///
     /// `formula` may include a leading `=`.
     pub fn with_formula_text_with_context(
@@ -62,11 +63,17 @@ impl CellEdit {
         formula: &str,
         ctx: &crate::workbook_context::WorkbookContext,
     ) -> Result<Self, crate::rgce::EncodeError> {
-        let encoded = crate::rgce::encode_rgce_with_context(
-            formula,
-            ctx,
-            crate::rgce::CellCoord::new(row, col),
-        )?;
+        let base = crate::rgce::CellCoord::new(row, col);
+        let encoded = {
+            #[cfg(feature = "write")]
+            {
+                crate::rgce::encode_rgce_with_context_ast(formula, ctx, base)?
+            }
+            #[cfg(not(feature = "write"))]
+            {
+                crate::rgce::encode_rgce_with_context(formula, ctx, base)?
+            }
+        };
         Ok(Self {
             row,
             col,
@@ -80,8 +87,9 @@ impl CellEdit {
     /// Replace `new_formula` + `new_rgcb` by encoding the provided formula text using workbook
     /// context.
     ///
-    /// This uses [`crate::rgce::encode_rgce_with_context`] which can produce both `rgce` and any
-    /// required trailing `rgcb` bytes.
+    /// When the `write` feature is enabled, this prefers the AST-based encoder
+    /// ([`crate::rgce::encode_rgce_with_context_ast`]) for improved grammar coverage. Without
+    /// `write`, it falls back to [`crate::rgce::encode_rgce_with_context`].
     ///
     /// `formula` may include a leading `=`.
     pub fn set_formula_text_with_context(
@@ -89,11 +97,17 @@ impl CellEdit {
         formula: &str,
         ctx: &crate::workbook_context::WorkbookContext,
     ) -> Result<(), crate::rgce::EncodeError> {
-        let encoded = crate::rgce::encode_rgce_with_context(
-            formula,
-            ctx,
-            crate::rgce::CellCoord::new(self.row, self.col),
-        )?;
+        let base = crate::rgce::CellCoord::new(self.row, self.col);
+        let encoded = {
+            #[cfg(feature = "write")]
+            {
+                crate::rgce::encode_rgce_with_context_ast(formula, ctx, base)?
+            }
+            #[cfg(not(feature = "write"))]
+            {
+                crate::rgce::encode_rgce_with_context(formula, ctx, base)?
+            }
+        };
         self.new_formula = Some(encoded.rgce);
         self.new_rgcb = Some(encoded.rgcb);
         Ok(())
@@ -1426,6 +1440,15 @@ fn patch_fmla_num<W: io::Write>(
             ),
         )));
     }
+    if new_extra.is_empty() && rgce_references_rgcb(new_rgce) {
+        return Err(Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "formula update for BrtFmlaNum at ({}, {}) requires rgcb bytes (PtgArray present); set CellEdit.new_rgcb",
+                edit.row, edit.col
+            ),
+        )));
+    }
     let cached = match &edit.new_value {
         CellValue::Number(v) => *v,
         _ => {
@@ -1499,6 +1522,15 @@ fn patch_fmla_bool<W: io::Write>(
             io::ErrorKind::InvalidInput,
             format!(
                 "cannot replace formula rgce for BrtFmlaBool at ({}, {}) with existing trailing rgcb bytes; provide CellEdit.new_rgcb (even empty) to replace them",
+                edit.row, edit.col
+            ),
+        )));
+    }
+    if new_extra.is_empty() && rgce_references_rgcb(new_rgce) {
+        return Err(Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "formula update for BrtFmlaBool at ({}, {}) requires rgcb bytes (PtgArray present); set CellEdit.new_rgcb",
                 edit.row, edit.col
             ),
         )));
@@ -1577,6 +1609,15 @@ fn patch_fmla_error<W: io::Write>(
             io::ErrorKind::InvalidInput,
             format!(
                 "cannot replace formula rgce for BrtFmlaError at ({}, {}) with existing trailing rgcb bytes; provide CellEdit.new_rgcb (even empty) to replace them",
+                edit.row, edit.col
+            ),
+        )));
+    }
+    if new_extra.is_empty() && rgce_references_rgcb(new_rgce) {
+        return Err(Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "formula update for BrtFmlaError at ({}, {}) requires rgcb bytes (PtgArray present); set CellEdit.new_rgcb",
                 edit.row, edit.col
             ),
         )));
@@ -1660,6 +1701,15 @@ fn patch_fmla_string<W: io::Write>(
             io::ErrorKind::InvalidInput,
             format!(
                 "cannot replace formula rgce for BrtFmlaString at ({}, {}) with existing trailing rgcb bytes; provide CellEdit.new_rgcb (even empty) to replace them",
+                edit.row, edit.col
+            ),
+        )));
+    }
+    if new_extra.is_empty() && rgce_references_rgcb(new_rgce) {
+        return Err(Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "formula update for BrtFmlaString at ({}, {}) requires rgcb bytes (PtgArray present); set CellEdit.new_rgcb",
                 edit.row, edit.col
             ),
         )));
@@ -1836,6 +1886,104 @@ fn parse_fmla_string_cached_value_offsets(payload: &[u8]) -> Result<WideStringOf
         }
         (false, false) => Err(Error::UnexpectedEof),
     }
+}
+
+fn rgce_references_rgcb(rgce: &[u8]) -> bool {
+    // `rgcb` is a trailing data stream referenced by certain ptgs. Today we only *write* `rgcb`
+    // for `PtgArray` (array constants), so treat it as required when `PtgArray` is present.
+    //
+    // Note: this intentionally does a minimal parse so we don't accidentally match the `0x20`
+    // byte inside token payloads (e.g. row indices).
+    let mut i = 0usize;
+    while i < rgce.len() {
+        let ptg = rgce[i];
+        i += 1;
+        match ptg {
+            // PtgArray (any class)
+            0x20 | 0x40 | 0x60 => return true,
+
+            // Binary operators and simple operators with no payload.
+            0x03..=0x16 | 0x2F => {}
+
+            // PtgStr: [cch: u16][utf16 chars...]
+            0x17 => {
+                if rgce.len().saturating_sub(i) < 2 {
+                    return false;
+                }
+                let cch = u16::from_le_bytes([rgce[i], rgce[i + 1]]) as usize;
+                i += 2;
+                let byte_len = match cch.checked_mul(2) {
+                    Some(v) => v,
+                    None => return false,
+                };
+                if rgce.len().saturating_sub(i) < byte_len {
+                    return false;
+                }
+                i += byte_len;
+            }
+
+            // PtgAttr: [grbit: u8][wAttr: u16] + optional jump table for tAttrChoose.
+            0x19 => {
+                if rgce.len().saturating_sub(i) < 3 {
+                    return false;
+                }
+                let grbit = rgce[i];
+                let w_attr = u16::from_le_bytes([rgce[i + 1], rgce[i + 2]]) as usize;
+                i += 3;
+
+                const T_ATTR_CHOOSE: u8 = 0x04;
+                if grbit & T_ATTR_CHOOSE != 0 {
+                    let needed = match w_attr.checked_mul(2) {
+                        Some(v) => v,
+                        None => return false,
+                    };
+                    if rgce.len().saturating_sub(i) < needed {
+                        return false;
+                    }
+                    i += needed;
+                }
+            }
+
+            // PtgErr: [code: u8]
+            0x1C => i = i.saturating_add(1),
+            // PtgBool: [b: u8]
+            0x1D => i = i.saturating_add(1),
+            // PtgInt: [u16]
+            0x1E => i = i.saturating_add(2),
+            // PtgNum: [f64]
+            0x1F => i = i.saturating_add(8),
+
+            // PtgFunc: [iftab: u16]
+            0x21 | 0x41 | 0x61 => i = i.saturating_add(2),
+            // PtgFuncVar: [argc: u8][iftab: u16]
+            0x22 | 0x42 | 0x62 => i = i.saturating_add(3),
+
+            // PtgName: [nameIndex: u32][unused: u16]
+            0x23 | 0x43 | 0x63 => i = i.saturating_add(6),
+
+            // PtgRef: [row: u32][col: u16]
+            0x24 | 0x44 | 0x64 => i = i.saturating_add(6),
+            // PtgArea: [rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
+            0x25 | 0x45 | 0x65 => i = i.saturating_add(12),
+
+            // PtgNameX: [ixti: u16][nameIndex: u16]
+            0x39 | 0x59 | 0x79 => i = i.saturating_add(4),
+
+            // PtgRef3d: [ixti: u16][row: u32][col: u16]
+            0x3A | 0x5A | 0x7A => i = i.saturating_add(8),
+            // PtgArea3d: [ixti: u16][rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
+            0x3B | 0x5B | 0x7B => i = i.saturating_add(14),
+
+            // Unknown ptg: stop scanning to avoid desync/false positives.
+            _ => return false,
+        }
+
+        if i > rgce.len() {
+            return false;
+        }
+    }
+
+    false
 }
 
 fn read_u16(data: &[u8], offset: usize) -> Result<u16, Error> {

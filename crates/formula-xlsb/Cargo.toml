@@ -6,7 +6,7 @@ edition = "2021"
 [features]
 # Keep the default reader minimal; enabling `write` pulls in the formula parser
 # (via `formula-engine`) so worksheet patchers can emit BIFF12 formulas.
-write = ["formula-biff/encode"]
+write = ["formula-biff/encode", "dep:formula-engine"]
 
 [dependencies]
 formula-format = { path = "../formula-format" }
@@ -17,6 +17,7 @@ serde_json = "1.0"
 thiserror = "1.0"
 zip = { version = "0.6", default-features = false, features = ["deflate"] }
 formula-biff = { path = "../formula-biff", default-features = false }
+formula-engine = { path = "../formula-engine", optional = true }
 
 [dev-dependencies]
 assert_cmd = "2.0"

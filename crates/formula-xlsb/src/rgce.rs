@@ -1579,12 +1579,649 @@ pub struct EncodedRgce {
 pub enum EncodeError {
     #[error("invalid formula: {0}")]
     Parse(String),
+    #[error("unsupported expression in BIFF12 encoder: {0}")]
+    Unsupported(&'static str),
     #[error("unknown sheet reference: {0}")]
     UnknownSheet(String),
     #[error("unknown name: {name}")]
     UnknownName { name: String },
     #[error("unknown function: {name}")]
     UnknownFunction { name: String },
+}
+
+/// Encode an A1-style formula to an XLSB `rgce` token stream using the full `formula-engine` AST
+/// and workbook context for 3D references, defined names, and add-in/UDF calls.
+///
+/// The input may include a leading `=`; it will be ignored.
+#[cfg(feature = "write")]
+pub fn encode_rgce_with_context_ast(
+    formula: &str,
+    ctx: &WorkbookContext,
+    base: CellCoord,
+) -> Result<EncodedRgce, EncodeError> {
+    encode_ast::encode_rgce_with_context_ast(formula, ctx, base)
+}
+
+#[cfg(feature = "write")]
+mod encode_ast {
+    use super::{
+        error_code_from_literal, ptg_with_class, ArrayConst, ArrayElem, CellCoord, EncodeError,
+        EncodedRgce, PtgClass, WorkbookContext, COL_INDEX_MASK, COL_RELATIVE_MASK, PTG_AREA,
+        PTG_AREA3D, PTG_FUNCVAR, PTG_NAME, PTG_NAMEX, PTG_REF, PTG_REF3D, PTG_SPILL, PTG_UPLUS,
+        PTG_UMINUS, ROW_RELATIVE_MASK,
+    };
+
+    use formula_engine as fe;
+
+    const PTG_ERR: u8 = 0x1C;
+    const PTG_BOOL: u8 = 0x1D;
+    const PTG_INT: u8 = 0x1E;
+    const PTG_NUM: u8 = 0x1F;
+    const PTG_STR: u8 = 0x17;
+    const PTG_FUNC: u8 = 0x21;
+    const PTG_MISS_ARG: u8 = 0x16;
+    const PTG_PERCENT: u8 = 0x14;
+
+    // Binary operators.
+    const PTG_ADD: u8 = 0x03;
+    const PTG_SUB: u8 = 0x04;
+    const PTG_MUL: u8 = 0x05;
+    const PTG_DIV: u8 = 0x06;
+    const PTG_POW: u8 = 0x07;
+    const PTG_CONCAT: u8 = 0x08;
+    const PTG_LT: u8 = 0x09;
+    const PTG_LE: u8 = 0x0A;
+    const PTG_EQ: u8 = 0x0B;
+    const PTG_GT: u8 = 0x0C;
+    const PTG_GE: u8 = 0x0D;
+    const PTG_NE: u8 = 0x0E;
+    const PTG_INTERSECT: u8 = 0x0F;
+    const PTG_UNION: u8 = 0x10;
+    const PTG_RANGE: u8 = 0x11;
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    enum SheetSpec {
+        Current,
+        Single(String),
+        Range(String, String),
+    }
+
+    #[derive(Debug, Clone, PartialEq)]
+    struct CellRefInfo {
+        sheet: SheetSpec,
+        row: u32,
+        col: u32,
+        abs_row: bool,
+        abs_col: bool,
+    }
+
+    pub(super) fn encode_rgce_with_context_ast(
+        formula: &str,
+        ctx: &WorkbookContext,
+        base: CellCoord,
+    ) -> Result<EncodedRgce, EncodeError> {
+        let ast = fe::parse_formula(formula, fe::ParseOptions::default()).map_err(|e| {
+            EncodeError::Parse(format!("{} (span {}..{})", e.message, e.span.start, e.span.end))
+        })?;
+
+        let mut rgce = Vec::new();
+        let mut rgcb = Vec::new();
+        emit_expr(&ast.expr, ctx, base, &mut rgce, &mut rgcb)?;
+        Ok(EncodedRgce { rgce, rgcb })
+    }
+
+    fn emit_expr(
+        expr: &fe::Expr,
+        ctx: &WorkbookContext,
+        base: CellCoord,
+        rgce: &mut Vec<u8>,
+        rgcb: &mut Vec<u8>,
+    ) -> Result<(), EncodeError> {
+        match expr {
+            fe::Expr::Number(raw) => {
+                let n: f64 = raw
+                    .parse()
+                    .map_err(|_| EncodeError::Parse(format!("invalid number literal: {raw}")))?;
+                emit_number(n, rgce);
+            }
+            fe::Expr::String(s) => {
+                rgce.push(PTG_STR);
+                let units: Vec<u16> = s.encode_utf16().collect();
+                let cch: u16 = units
+                    .len()
+                    .try_into()
+                    .map_err(|_| EncodeError::Parse("string literal too long".to_string()))?;
+                rgce.extend_from_slice(&cch.to_le_bytes());
+                for unit in units {
+                    rgce.extend_from_slice(&unit.to_le_bytes());
+                }
+            }
+            fe::Expr::Boolean(b) => {
+                rgce.push(PTG_BOOL);
+                rgce.push(u8::from(*b));
+            }
+            fe::Expr::Error(raw) => {
+                let code = error_code_from_literal(raw).ok_or_else(|| {
+                    EncodeError::Parse(format!("unsupported error literal: {raw}"))
+                })?;
+                rgce.push(PTG_ERR);
+                rgce.push(code);
+            }
+            fe::Expr::Missing => {
+                rgce.push(PTG_MISS_ARG);
+            }
+            fe::Expr::CellRef(r) => {
+                emit_cell_ref(r, ctx, base, rgce, PtgClass::Ref)?;
+            }
+            fe::Expr::NameRef(name) => {
+                emit_defined_name(name, ctx, rgce, PtgClass::Ref)?;
+            }
+            fe::Expr::Array(arr) => {
+                let array_const = array_literal_to_const(arr)?;
+                // Reuse the existing `PtgArray` + rgcb serialization.
+                super::emit_array(&array_const, rgce, rgcb)?;
+            }
+            fe::Expr::FunctionCall(call) => {
+                for arg in &call.args {
+                    if matches!(arg, fe::Expr::Missing) {
+                        rgce.push(PTG_MISS_ARG);
+                    } else {
+                        emit_expr(arg, ctx, base, rgce, rgcb)?;
+                    }
+                }
+                emit_function_call(&call.name, call.args.len(), ctx, rgce)?;
+            }
+            fe::Expr::Call(_) => {
+                return Err(EncodeError::Unsupported(
+                    "call expressions (e.g. LAMBDA invocation)",
+                ))
+            }
+            fe::Expr::Unary(u) => match u.op {
+                fe::UnaryOp::ImplicitIntersection => {
+                    emit_reference_expr(&u.expr, ctx, base, rgce, rgcb, PtgClass::Value)?;
+                }
+                fe::UnaryOp::Plus => {
+                    emit_expr(&u.expr, ctx, base, rgce, rgcb)?;
+                    rgce.push(PTG_UPLUS);
+                }
+                fe::UnaryOp::Minus => {
+                    emit_expr(&u.expr, ctx, base, rgce, rgcb)?;
+                    rgce.push(PTG_UMINUS);
+                }
+            },
+            fe::Expr::Postfix(p) => {
+                emit_expr(&p.expr, ctx, base, rgce, rgcb)?;
+                match p.op {
+                    fe::PostfixOp::Percent => rgce.push(PTG_PERCENT),
+                    fe::PostfixOp::SpillRange => rgce.push(PTG_SPILL),
+                }
+            }
+            fe::Expr::Binary(b) => match b.op {
+                fe::BinaryOp::Range => emit_range_binary(b, ctx, base, rgce, rgcb)?,
+                _ => {
+                    emit_expr(&b.left, ctx, base, rgce, rgcb)?;
+                    emit_expr(&b.right, ctx, base, rgce, rgcb)?;
+                    rgce.push(match b.op {
+                        fe::BinaryOp::Add => PTG_ADD,
+                        fe::BinaryOp::Sub => PTG_SUB,
+                        fe::BinaryOp::Mul => PTG_MUL,
+                        fe::BinaryOp::Div => PTG_DIV,
+                        fe::BinaryOp::Pow => PTG_POW,
+                        fe::BinaryOp::Concat => PTG_CONCAT,
+                        fe::BinaryOp::Lt => PTG_LT,
+                        fe::BinaryOp::Le => PTG_LE,
+                        fe::BinaryOp::Eq => PTG_EQ,
+                        fe::BinaryOp::Gt => PTG_GT,
+                        fe::BinaryOp::Ge => PTG_GE,
+                        fe::BinaryOp::Ne => PTG_NE,
+                        fe::BinaryOp::Intersect => PTG_INTERSECT,
+                        fe::BinaryOp::Union => PTG_UNION,
+                        fe::BinaryOp::Range => PTG_RANGE,
+                    });
+                }
+            },
+            fe::Expr::ColRef(_) => return Err(EncodeError::Unsupported("column references")),
+            fe::Expr::RowRef(_) => return Err(EncodeError::Unsupported("row references")),
+            fe::Expr::StructuredRef(_) => return Err(EncodeError::Unsupported("structured references")),
+        }
+
+        Ok(())
+    }
+
+    fn emit_number(n: f64, rgce: &mut Vec<u8>) {
+        if n.fract() == 0.0 && (0.0..=65535.0).contains(&n) {
+            rgce.push(PTG_INT);
+            rgce.extend_from_slice(&(n as u16).to_le_bytes());
+        } else {
+            rgce.push(PTG_NUM);
+            rgce.extend_from_slice(&n.to_le_bytes());
+        }
+    }
+
+    fn emit_reference_expr(
+        expr: &fe::Expr,
+        ctx: &WorkbookContext,
+        base: CellCoord,
+        rgce: &mut Vec<u8>,
+        _rgcb: &mut Vec<u8>,
+        class: PtgClass,
+    ) -> Result<(), EncodeError> {
+        match expr {
+            fe::Expr::CellRef(r) => emit_cell_ref(r, ctx, base, rgce, class),
+            fe::Expr::NameRef(name) => emit_defined_name(name, ctx, rgce, class),
+            fe::Expr::Binary(b) if b.op == fe::BinaryOp::Range => {
+                if let Some(area) = area_ref_from_range_operands(&b.left, &b.right, ctx, base)? {
+                    return emit_area_ref_info(&area.0, &area.1, &area.2, ctx, rgce, class);
+                }
+
+                Err(EncodeError::Parse(
+                    "implicit intersection (@) is only supported on simple references".to_string(),
+                ))
+            }
+            _ => Err(EncodeError::Parse(
+                "implicit intersection (@) is only supported on references".to_string(),
+            )),
+        }
+    }
+
+    fn emit_range_binary(
+        b: &fe::BinaryExpr,
+        ctx: &WorkbookContext,
+        base: CellCoord,
+        rgce: &mut Vec<u8>,
+        rgcb: &mut Vec<u8>,
+    ) -> Result<(), EncodeError> {
+        // Prefer encoding simple references as `PtgArea`/`PtgArea3d` for Excel-compatible rgce.
+        if let Some(area) = area_ref_from_range_operands(&b.left, &b.right, ctx, base)? {
+            return emit_area_ref_info(&area.0, &area.1, &area.2, ctx, rgce, PtgClass::Ref);
+        }
+
+        // Fallback: encode as the `:` operator.
+        emit_expr(&b.left, ctx, base, rgce, rgcb)?;
+        emit_expr(&b.right, ctx, base, rgce, rgcb)?;
+        rgce.push(PTG_RANGE);
+        Ok(())
+    }
+
+    fn area_ref_from_range_operands(
+        left: &fe::Expr,
+        right: &fe::Expr,
+        ctx: &WorkbookContext,
+        base: CellCoord,
+    ) -> Result<Option<(CellRefInfo, CellRefInfo, SheetSpec)>, EncodeError> {
+        let Some(a) = cell_ref_info(left, ctx, base)? else {
+            return Ok(None);
+        };
+        let Some(b) = cell_ref_info(right, ctx, base)? else {
+            return Ok(None);
+        };
+
+        let merged = merge_sheets(&a.sheet, &b.sheet).ok_or_else(|| {
+            EncodeError::Parse("range operands refer to different sheets".to_string())
+        })?;
+
+        Ok(Some((a, b, merged)))
+    }
+
+    fn cell_ref_info(
+        expr: &fe::Expr,
+        _ctx: &WorkbookContext,
+        base: CellCoord,
+    ) -> Result<Option<CellRefInfo>, EncodeError> {
+        match expr {
+            fe::Expr::CellRef(r) => Ok(Some(cell_ref_info_from_cell_ref(r, base)?)),
+            _ => Ok(None),
+        }
+    }
+
+    fn cell_ref_info_from_cell_ref(r: &fe::CellRef, base: CellCoord) -> Result<CellRefInfo, EncodeError> {
+        let (row, abs_row) = coord_to_a1_index(&r.row, base.row)?;
+        let (col, abs_col) = coord_to_a1_index(&r.col, base.col)?;
+        let sheet = sheet_spec_from_ref_prefix(&r.workbook, &r.sheet);
+        Ok(CellRefInfo {
+            sheet,
+            row,
+            col,
+            abs_row,
+            abs_col,
+        })
+    }
+
+    fn sheet_spec_from_ref_prefix(
+        workbook: &Option<String>,
+        sheet: &Option<fe::SheetRef>,
+    ) -> SheetSpec {
+        match (workbook.as_ref(), sheet.as_ref()) {
+            (None, None) => SheetSpec::Current,
+            (None, Some(fe::SheetRef::Sheet(sheet))) => SheetSpec::Single(sheet.clone()),
+            (None, Some(fe::SheetRef::SheetRange { start, end })) => {
+                SheetSpec::Range(start.clone(), end.clone())
+            }
+            (Some(book), None) => SheetSpec::Single(format!("[{book}]")),
+            (Some(book), Some(fe::SheetRef::Sheet(sheet))) => {
+                SheetSpec::Single(format!("[{book}]{sheet}"))
+            }
+            (Some(book), Some(fe::SheetRef::SheetRange { start, end })) => {
+                SheetSpec::Range(format!("[{book}]{start}"), format!("[{book}]{end}"))
+            }
+        }
+    }
+
+    fn merge_sheets(a: &SheetSpec, b: &SheetSpec) -> Option<SheetSpec> {
+        match (a, b) {
+            (SheetSpec::Current, SheetSpec::Current) => Some(SheetSpec::Current),
+            (SheetSpec::Current, other) | (other, SheetSpec::Current) => Some(other.clone()),
+            (SheetSpec::Single(a), SheetSpec::Single(b)) if a.eq_ignore_ascii_case(b) => {
+                Some(SheetSpec::Single(a.clone()))
+            }
+            (SheetSpec::Range(af, al), SheetSpec::Range(bf, bl))
+                if af.eq_ignore_ascii_case(bf) && al.eq_ignore_ascii_case(bl) =>
+            {
+                Some(SheetSpec::Range(af.clone(), al.clone()))
+            }
+            _ => None,
+        }
+    }
+
+    fn emit_cell_ref(
+        r: &fe::CellRef,
+        ctx: &WorkbookContext,
+        base: CellCoord,
+        rgce: &mut Vec<u8>,
+        class: PtgClass,
+    ) -> Result<(), EncodeError> {
+        let info = cell_ref_info_from_cell_ref(r, base)?;
+        emit_cell_ref_info(&info, ctx, rgce, class)
+    }
+
+    fn emit_cell_ref_info(
+        r: &CellRefInfo,
+        ctx: &WorkbookContext,
+        rgce: &mut Vec<u8>,
+        class: PtgClass,
+    ) -> Result<(), EncodeError> {
+        match &r.sheet {
+            SheetSpec::Current => {
+                rgce.push(ptg_with_class(PTG_REF, class));
+                rgce.extend_from_slice(&r.row.to_le_bytes());
+                rgce.extend_from_slice(&encode_col_field(r.col, r.abs_row, r.abs_col).to_le_bytes());
+            }
+            SheetSpec::Single(sheet) => {
+                let ixti = ctx
+                    .extern_sheet_range_index(sheet, sheet)
+                    .ok_or_else(|| EncodeError::UnknownSheet(sheet.clone()))?;
+                rgce.push(ptg_with_class(PTG_REF3D, class));
+                rgce.extend_from_slice(&ixti.to_le_bytes());
+                rgce.extend_from_slice(&r.row.to_le_bytes());
+                rgce.extend_from_slice(&encode_col_field(r.col, r.abs_row, r.abs_col).to_le_bytes());
+            }
+            SheetSpec::Range(first, last) => {
+                let ixti = ctx
+                    .extern_sheet_range_index(first, last)
+                    .ok_or_else(|| EncodeError::UnknownSheet(format!("{first}:{last}")))?;
+                rgce.push(ptg_with_class(PTG_REF3D, class));
+                rgce.extend_from_slice(&ixti.to_le_bytes());
+                rgce.extend_from_slice(&r.row.to_le_bytes());
+                rgce.extend_from_slice(&encode_col_field(r.col, r.abs_row, r.abs_col).to_le_bytes());
+            }
+        }
+        Ok(())
+    }
+
+    fn emit_area_ref_info(
+        a: &CellRefInfo,
+        b: &CellRefInfo,
+        sheet: &SheetSpec,
+        ctx: &WorkbookContext,
+        rgce: &mut Vec<u8>,
+        class: PtgClass,
+    ) -> Result<(), EncodeError> {
+        let row_first = a.row.min(b.row);
+        let row_last = a.row.max(b.row);
+        let col_first = a.col.min(b.col);
+        let col_last = a.col.max(b.col);
+
+        let abs_row_first = if a.row <= b.row { a.abs_row } else { b.abs_row };
+        let abs_row_last = if a.row >= b.row { a.abs_row } else { b.abs_row };
+        let abs_col_first = if a.col <= b.col { a.abs_col } else { b.abs_col };
+        let abs_col_last = if a.col >= b.col { a.abs_col } else { b.abs_col };
+
+        match sheet {
+            SheetSpec::Current => {
+                rgce.push(ptg_with_class(PTG_AREA, class));
+                rgce.extend_from_slice(&row_first.to_le_bytes());
+                rgce.extend_from_slice(&row_last.to_le_bytes());
+                rgce.extend_from_slice(
+                    &encode_col_field(col_first, abs_row_first, abs_col_first).to_le_bytes(),
+                );
+                rgce.extend_from_slice(
+                    &encode_col_field(col_last, abs_row_last, abs_col_last).to_le_bytes(),
+                );
+            }
+            SheetSpec::Single(name) => {
+                let ixti = ctx
+                    .extern_sheet_range_index(name, name)
+                    .ok_or_else(|| EncodeError::UnknownSheet(name.clone()))?;
+                rgce.push(ptg_with_class(PTG_AREA3D, class));
+                rgce.extend_from_slice(&ixti.to_le_bytes());
+                rgce.extend_from_slice(&row_first.to_le_bytes());
+                rgce.extend_from_slice(&row_last.to_le_bytes());
+                rgce.extend_from_slice(
+                    &encode_col_field(col_first, abs_row_first, abs_col_first).to_le_bytes(),
+                );
+                rgce.extend_from_slice(
+                    &encode_col_field(col_last, abs_row_last, abs_col_last).to_le_bytes(),
+                );
+            }
+            SheetSpec::Range(first, last) => {
+                let ixti = ctx
+                    .extern_sheet_range_index(first, last)
+                    .ok_or_else(|| EncodeError::UnknownSheet(format!("{first}:{last}")))?;
+                rgce.push(ptg_with_class(PTG_AREA3D, class));
+                rgce.extend_from_slice(&ixti.to_le_bytes());
+                rgce.extend_from_slice(&row_first.to_le_bytes());
+                rgce.extend_from_slice(&row_last.to_le_bytes());
+                rgce.extend_from_slice(
+                    &encode_col_field(col_first, abs_row_first, abs_col_first).to_le_bytes(),
+                );
+                rgce.extend_from_slice(
+                    &encode_col_field(col_last, abs_row_last, abs_col_last).to_le_bytes(),
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    fn emit_defined_name(
+        name: &fe::NameRef,
+        ctx: &WorkbookContext,
+        rgce: &mut Vec<u8>,
+        class: PtgClass,
+    ) -> Result<(), EncodeError> {
+        if name.workbook.is_some() {
+            return Err(EncodeError::Unsupported("external workbook defined names"));
+        }
+
+        let sheet = match name.sheet.as_ref() {
+            None => None,
+            Some(fe::SheetRef::Sheet(sheet)) => Some(sheet.as_str()),
+            Some(fe::SheetRef::SheetRange { .. }) => {
+                return Err(EncodeError::Unsupported("sheet-range scoped defined names"))
+            }
+        };
+
+        let idx = ctx
+            .name_index(&name.name, sheet)
+            .ok_or_else(|| EncodeError::UnknownName {
+                name: name.name.clone(),
+            })?;
+
+        rgce.push(ptg_with_class(PTG_NAME, class));
+        rgce.extend_from_slice(&idx.to_le_bytes());
+        rgce.extend_from_slice(&0u16.to_le_bytes());
+        Ok(())
+    }
+
+    fn emit_function_call(
+        name: &fe::FunctionName,
+        argc: usize,
+        ctx: &WorkbookContext,
+        rgce: &mut Vec<u8>,
+    ) -> Result<(), EncodeError> {
+        let upper = name.name_upper.as_str();
+
+        if let Some(iftab) = formula_biff::function_name_to_id(upper).filter(|id| *id != 0x00FF) {
+            let spec = formula_biff::function_spec_from_id(iftab).ok_or_else(|| {
+                EncodeError::Parse(format!("unknown function id: {iftab}"))
+            })?;
+
+            if argc < spec.min_args as usize || argc > spec.max_args as usize {
+                return Err(EncodeError::Parse(format!(
+                    "invalid argument count for {upper}: got {argc}, expected {}..={}",
+                    spec.min_args, spec.max_args
+                )));
+            }
+
+            if spec.min_args == spec.max_args {
+                // Fixed-arity -> PtgFunc.
+                rgce.push(PTG_FUNC);
+                rgce.extend_from_slice(&iftab.to_le_bytes());
+                return Ok(());
+            }
+
+            // Variable arity -> PtgFuncVar.
+            let argc_u8: u8 = argc
+                .try_into()
+                .map_err(|_| EncodeError::Parse("too many function arguments".to_string()))?;
+            rgce.push(PTG_FUNCVAR);
+            rgce.push(argc_u8);
+            rgce.extend_from_slice(&iftab.to_le_bytes());
+            return Ok(());
+        }
+
+        // Add-in / UDF call pattern: args..., PtgNameX(func), PtgFuncVar(argc+1, 0x00FF)
+        if let Some((ixti, name_index)) = ctx.namex_function_ref(upper) {
+            let argc_total = argc
+                .checked_add(1)
+                .ok_or_else(|| EncodeError::Parse("too many function arguments".to_string()))?;
+            let argc_total_u8: u8 = argc_total
+                .try_into()
+                .map_err(|_| EncodeError::Parse("too many function arguments".to_string()))?;
+
+            rgce.push(PTG_NAMEX);
+            rgce.extend_from_slice(&ixti.to_le_bytes());
+            rgce.extend_from_slice(&name_index.to_le_bytes());
+
+            rgce.push(PTG_FUNCVAR);
+            rgce.push(argc_total_u8);
+            rgce.extend_from_slice(&0x00FFu16.to_le_bytes());
+            return Ok(());
+        }
+
+        Err(EncodeError::UnknownFunction {
+            name: upper.to_string(),
+        })
+    }
+
+    fn coord_to_a1_index(coord: &fe::Coord, base_axis: u32) -> Result<(u32, bool), EncodeError> {
+        match coord {
+            fe::Coord::A1 { index, abs } => Ok((*index, *abs)),
+            fe::Coord::Offset(delta) => {
+                let idx = base_axis as i32 + *delta;
+                if idx < 0 {
+                    return Err(EncodeError::Parse(
+                        "relative reference moved before A1".to_string(),
+                    ));
+                }
+                Ok((idx as u32, false))
+            }
+        }
+    }
+
+    fn encode_col_field(col: u32, abs_row: bool, abs_col: bool) -> u16 {
+        let mut v = (col as u16) & COL_INDEX_MASK;
+        if !abs_row {
+            v |= ROW_RELATIVE_MASK;
+        }
+        if !abs_col {
+            v |= COL_RELATIVE_MASK;
+        }
+        v
+    }
+
+    fn array_literal_to_const(arr: &fe::ArrayLiteral) -> Result<ArrayConst, EncodeError> {
+        if arr.rows.is_empty() {
+            return Err(EncodeError::Parse("array literal cannot be empty".to_string()));
+        }
+        let cols = arr.rows[0].len();
+        if cols == 0 {
+            return Err(EncodeError::Parse("array literal cannot be empty".to_string()));
+        }
+        if arr.rows.iter().any(|r| r.len() != cols) {
+            return Err(EncodeError::Parse(
+                "array literal rows must have the same number of columns".to_string(),
+            ));
+        }
+
+        let mut rows = Vec::with_capacity(arr.rows.len());
+        for row in &arr.rows {
+            let mut out_row = Vec::with_capacity(row.len());
+            for el in row {
+                out_row.push(array_elem_from_expr(el)?);
+            }
+            rows.push(out_row);
+        }
+
+        Ok(ArrayConst { rows })
+    }
+
+    fn array_elem_from_expr(expr: &fe::Expr) -> Result<ArrayElem, EncodeError> {
+        match expr {
+            fe::Expr::Missing => Ok(ArrayElem::Empty),
+            fe::Expr::Number(raw) => {
+                let n: f64 = raw
+                    .parse()
+                    .map_err(|_| EncodeError::Parse(format!("invalid number literal: {raw}")))?;
+                Ok(ArrayElem::Number(n))
+            }
+            fe::Expr::String(s) => Ok(ArrayElem::Str(s.clone())),
+            fe::Expr::Boolean(b) => Ok(ArrayElem::Bool(*b)),
+            fe::Expr::Error(raw) => {
+                let code = error_code_from_literal(raw).ok_or_else(|| {
+                    EncodeError::Parse(format!("unsupported error literal: {raw}"))
+                })?;
+                Ok(ArrayElem::Error(code))
+            }
+            fe::Expr::Unary(u) if u.op == fe::UnaryOp::Plus => match u.expr.as_ref() {
+                fe::Expr::Number(raw) => {
+                    let n: f64 = raw.parse().map_err(|_| {
+                        EncodeError::Parse(format!("invalid number literal: {raw}"))
+                    })?;
+                    Ok(ArrayElem::Number(n))
+                }
+                _ => Err(EncodeError::Parse(
+                    "unsupported unary '+' in array literal".to_string(),
+                )),
+            },
+            fe::Expr::Unary(u) if u.op == fe::UnaryOp::Minus => match u.expr.as_ref() {
+                fe::Expr::Number(raw) => {
+                    let n: f64 = raw.parse().map_err(|_| {
+                        EncodeError::Parse(format!("invalid number literal: {raw}"))
+                    })?;
+                    Ok(ArrayElem::Number(-n))
+                }
+                _ => Err(EncodeError::Parse(
+                    "unsupported unary '-' in array literal".to_string(),
+                )),
+            },
+            _ => Err(EncodeError::Parse(
+                "unsupported expression in array literal".to_string(),
+            )),
+        }
+    }
+
+    // Keep module-local helpers below.
 }
 
 /// Encode an A1-style formula to an XLSB `rgce` token stream using workbook context for 3D

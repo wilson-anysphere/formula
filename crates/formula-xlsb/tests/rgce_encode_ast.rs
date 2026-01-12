@@ -1,0 +1,72 @@
+#![cfg(feature = "write")]
+
+use formula_xlsb::rgce::{
+    decode_rgce_with_context, decode_rgce_with_rgcb, encode_rgce_with_context_ast, CellCoord,
+};
+use formula_xlsb::workbook_context::WorkbookContext;
+use formula_xlsb::XlsbWorkbook;
+use pretty_assertions::assert_eq;
+
+#[test]
+fn ast_encoder_roundtrips_3d_ref() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet("Sheet2", "Sheet2", 0);
+
+    let encoded =
+        encode_rgce_with_context_ast("=Sheet2!A1+1", &ctx, CellCoord::new(0, 0)).expect("encode");
+    assert!(encoded.rgcb.is_empty());
+
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "Sheet2!A1+1");
+}
+
+#[test]
+fn ast_encoder_roundtrips_defined_name() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_workbook_name("MyNamedRange", 1);
+
+    let encoded =
+        encode_rgce_with_context_ast("=MyNamedRange", &ctx, CellCoord::new(0, 0)).expect("encode");
+    assert!(encoded.rgcb.is_empty());
+
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "MyNamedRange");
+}
+
+#[test]
+fn ast_encoder_roundtrips_array_literal_inside_function() {
+    let ctx = WorkbookContext::default();
+
+    let encoded = encode_rgce_with_context_ast("=SUM({1,2;3,4})", &ctx, CellCoord::new(0, 0))
+        .expect("encode");
+    assert!(!encoded.rgcb.is_empty(), "array literals must emit rgcb");
+
+    let decoded = decode_rgce_with_rgcb(&encoded.rgce, &encoded.rgcb).expect("decode");
+    assert_eq!(decoded, "SUM({1,2;3,4})");
+}
+
+#[test]
+fn ast_encoder_encodes_udf_call_via_namex() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/udf.xlsb");
+    let wb = XlsbWorkbook::open(path).expect("open xlsb");
+    let ctx = wb.workbook_context();
+
+    let encoded =
+        encode_rgce_with_context_ast("=MyAddinFunc(1,2)", ctx, CellCoord::new(0, 0)).expect("encode");
+    assert!(encoded.rgcb.is_empty());
+
+    // args..., PtgNameX(func), PtgFuncVar(argc+1, 0x00FF)
+    assert_eq!(
+        encoded.rgce,
+        vec![
+            0x1E, 0x01, 0x00, // 1
+            0x1E, 0x02, 0x00, // 2
+            0x39, 0x00, 0x00, 0x01, 0x00, // PtgNameX(ixti=0, nameIndex=1)
+            0x22, 0x03, 0xFF, 0x00, // PtgFuncVar(argc=3, iftab=0x00FF)
+        ]
+    );
+
+    let decoded = decode_rgce_with_context(&encoded.rgce, ctx).expect("decode");
+    assert_eq!(decoded, "MyAddinFunc(1,2)");
+}
+
