@@ -118,12 +118,16 @@ The host application must provide an `api` object implementing (or dispatching) 
 - `create_sheet({ name, index? }) -> str`
 - `get_sheet_name({ sheet_id }) -> str`
 - `rename_sheet({ sheet_id, name }) -> null`
+- `get_selection() -> { sheet_id, start_row, start_col, end_row, end_col }`
+- `set_selection({ selection }) -> null`
 - `get_range_values({ range }) -> any[][]`
 - `set_range_values({ range, values }) -> null`
 - `set_cell_value({ range, value }) -> null`
 - `get_cell_formula({ range }) -> str | null`
 - `set_cell_formula({ range, formula }) -> null`
 - `clear_range({ range }) -> null`
+- `set_range_format({ range, format }) -> null`
+- `get_range_format({ range }) -> any`
 
 `range` is a JSON object:
 
