@@ -16,7 +16,8 @@ describe("computeCurrentRegionRange", () => {
     setValue(0, 1, "up");
     setValue(2, 1, "down");
     setValue(1, 0, "left");
-    setValue(1, 2, "right");
+    // Formula-only cells should count as non-empty.
+    setValue(1, 2, null, "=A1");
 
     // Isolated cell elsewhere should not affect the current region for the active cell.
     setValue(4, 4, "isolated");
@@ -59,4 +60,3 @@ describe("computeCurrentRegionRange", () => {
     expect(rangeToA1(range)).toBe("F11");
   });
 });
-
