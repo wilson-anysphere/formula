@@ -111,7 +111,7 @@ Current engine behavior:
   (see `tools/excel-oracle/odd_coupon_boundary_cases.json` and
   `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`).
 - **ODDL\*** requires `settlement < maturity` and `last_interest < maturity`, but allows settlement
-  dates **on or before** `last_interest` (as well as inside the odd-last stub).
+  dates **before, on, or after** `last_interest` (as well as inside the odd-last stub).
   - `settlement == last_interest` is allowed (it implies zero accrued interest).
   - `settlement == maturity` and `last_interest == maturity` are rejected with `#NUM!`.
 
@@ -213,7 +213,6 @@ excel-oracle dataset used in CI) accepts the ODDF\* boundary equalities `issue =
 `settlement == first_coupon` (as well as `first_coupon == maturity`). This diverges from the strict
 ordering documented in Microsoft’s `WorksheetFunction` docs; re-validate against real Excel by
 generating a dataset via `tools/excel-oracle/run-excel-oracle.ps1` (Task 393).
-
 The current engine implementation enforces:
 
 - ODDF\*: `issue <= settlement <= first_coupon <= maturity` with `issue < first_coupon` and `settlement < maturity`
@@ -225,8 +224,20 @@ These boundaries are covered by:
 
 - Unit tests:
   - `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`
-- Excel oracle corpus cases tagged `odd_coupon` + `boundary`:
-  - `tests/compatibility/excel-oracle/cases.json` (search for e.g. “ODDFPRICE boundary: settlement == first_coupon”)
+- Excel oracle corpus cases in `tests/compatibility/excel-oracle/cases.json` (search by `id`):
+
+| Case ID | Scenario | Engine result (pinned baseline) |
+|---|---|---|
+| `oddfprice_issue_eq_settlement_a2010fe89d14` | `issue == settlement` | numeric |
+| `oddfyield_issue_eq_settlement_c09bb6a4ba69` | `issue == settlement` | numeric |
+| `oddfprice_settlement_eq_first_coupon_1ea1c9b63a8c` | `settlement == first_coupon` | numeric |
+| `oddfyield_settlement_eq_first_coupon_8d835f172837` | `settlement == first_coupon` | numeric |
+| `oddfprice_invalid_schedule_settlement_after_first_1bc49b18aff1` | `settlement > first_coupon` | `#NUM!` |
+| `oddfyield_invalid_schedule_settlement_after_first_938531ed93bc` | `settlement > first_coupon` | `#NUM!` |
+| `oddlprice_settlement_eq_last_interest_2aaeec2068c7` | `settlement == last_interest` | numeric |
+| `oddlyield_settlement_eq_last_interest_478517910c3d` | `settlement == last_interest` | numeric |
+| `oddlprice_settlement_before_last_interest_41d8bf60782e` | `settlement < last_interest` | numeric |
+| `oddlyield_settlement_before_last_interest_05b68d486085` | `settlement < last_interest` | numeric |
 
 Note: the engine currently allows `first_coupon == maturity` for ODDF\* (a single odd coupon paid
 at maturity). This behavior is covered by `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`

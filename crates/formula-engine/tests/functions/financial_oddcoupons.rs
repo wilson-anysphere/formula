@@ -223,8 +223,9 @@ fn odd_coupon_settlement_boundary_behavior() {
     .expect("ODDFYIELD should converge when settlement == first_coupon");
     assert_close(yld_out, yld_in, 1e-6);
 
-    // ODDF*: settlement > first_coupon => #NUM! (excel-oracle case id prefix:
-    // fin_oddfprice_settle_after_first_b0_*)
+    // ODDF*: settlement > first_coupon => #NUM! (excel-oracle cases:
+    // - `oddfprice_invalid_schedule_settlement_after_first_1bc49b18aff1`
+    // - `oddfyield_invalid_schedule_settlement_after_first_938531ed93bc`)
     let settlement_after_first = ymd_to_serial(ExcelDate::new(2023, 2, 1), system).unwrap();
     let result = oddfprice(
         settlement_after_first,
