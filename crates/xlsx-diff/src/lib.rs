@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
 use globset::{Glob, GlobSet, GlobSetBuilder};
+use roxmltree::Document;
 use zip::write::FileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
@@ -238,9 +239,28 @@ pub fn diff_archives_with_options(
             ) {
                 (Ok(expected_xml), Ok(actual_xml)) => {
                     let base = severity_for_part(part);
+                    let calc_chain_rel_ids = if part.ends_with(".rels") {
+                        // Merge calcChain relationship ids from both sides so diffs can be
+                        // downgraded even when the relationship is newly added (as opposed to
+                        // removed).
+                        let mut ids =
+                            calc_chain_relationship_ids(part, expected_bytes).unwrap_or_default();
+                        ids.extend(calc_chain_relationship_ids(part, actual_bytes).unwrap_or_default());
+                        ids
+                    } else {
+                        BTreeSet::new()
+                    };
                     for diff in diff_xml(&expected_xml, &actual_xml, base) {
-                        report.differences.push(Difference::new(
+                        let severity = adjust_xml_diff_severity(
+                            part,
                             diff.severity,
+                            &diff.path,
+                            diff.expected.as_deref(),
+                            diff.actual.as_deref(),
+                            &calc_chain_rel_ids,
+                        );
+                        report.differences.push(Difference::new(
+                            severity,
                             part.to_string(),
                             diff.path,
                             diff.kind,
@@ -364,7 +384,8 @@ fn severity_for_extra_part(part: &str) -> Severity {
 }
 
 fn is_calc_chain_part(part: &str) -> bool {
-    part == "xl/calcChain.xml" || part == "xl/calcChain.bin"
+    let part = part.trim_start_matches('/');
+    part.eq_ignore_ascii_case("xl/calcChain.xml") || part.eq_ignore_ascii_case("xl/calcChain.bin")
 }
 
 struct IgnoreMatcher<'a> {
@@ -391,6 +412,91 @@ impl<'a> IgnoreMatcher<'a> {
     fn matches(&self, part: &str) -> bool {
         self.exact.contains(part) || self.globs.is_match(part)
     }
+}
+
+fn adjust_xml_diff_severity(
+    part: &str,
+    severity: Severity,
+    path: &str,
+    expected: Option<&str>,
+    actual: Option<&str>,
+    calc_chain_rel_ids: &BTreeSet<String>,
+) -> Severity {
+    if severity != Severity::Critical {
+        return severity;
+    }
+
+    // CalcChain invalidation intentionally rewrites workbook relationships and content types.
+    // Downgrade diffs that are clearly about calcChain so tests can assert “no unexpected
+    // critical diffs” for patch/streaming flows.
+    if part == "[Content_Types].xml"
+        && (mentions_calc_chain(path)
+            || expected.is_some_and(mentions_calc_chain)
+            || actual.is_some_and(mentions_calc_chain))
+    {
+        return Severity::Warning;
+    }
+
+    if part.ends_with(".rels") {
+        if mentions_calc_chain(path)
+            || expected.is_some_and(mentions_calc_chain)
+            || actual.is_some_and(mentions_calc_chain)
+        {
+            return Severity::Warning;
+        }
+
+        if let Some(id) = relationship_id_from_path(path) {
+            if calc_chain_rel_ids.contains(id) {
+                return Severity::Warning;
+            }
+        }
+    }
+
+    severity
+}
+
+fn mentions_calc_chain(value: &str) -> bool {
+    value.to_ascii_lowercase().contains("calcchain")
+}
+
+fn relationship_id_from_path(path: &str) -> Option<&str> {
+    let needle = "[@Id=\"";
+    let start = path.find(needle)? + needle.len();
+    let rest = &path[start..];
+    let end = rest.find('"')?;
+    Some(&rest[..end])
+}
+
+fn calc_chain_relationship_ids(part_name: &str, bytes: &[u8]) -> Result<BTreeSet<String>> {
+    let text = std::str::from_utf8(bytes)
+        .with_context(|| format!("part {part_name} is not valid UTF-8"))?;
+    let doc = Document::parse(text).with_context(|| format!("parse xml for {part_name}"))?;
+
+    let mut ids = BTreeSet::new();
+    for node in doc
+        .descendants()
+        .filter(|node| node.is_element() && node.tag_name().name() == "Relationship")
+    {
+        let Some(id) = node.attribute("Id") else {
+            continue;
+        };
+        let ty = node.attribute("Type").unwrap_or_default();
+        let target = node.attribute("Target").unwrap_or_default();
+        if is_calc_chain_relationship(ty, target) {
+            ids.insert(id.to_string());
+        }
+    }
+
+    Ok(ids)
+}
+
+fn is_calc_chain_relationship(ty: &str, target: &str) -> bool {
+    let target = target.replace('\\', "/").to_ascii_lowercase();
+    if target.ends_with("calcchain.xml") || target.ends_with("calcchain.bin") {
+        return true;
+    }
+
+    ty.to_ascii_lowercase().contains("relationships/calcchain")
 }
 
 /// A minimal “load → save” round-trip that preserves each part byte-for-byte.
