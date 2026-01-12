@@ -145,3 +145,43 @@ test("CSV export respects range-run formats for large rectangles (styleId may be
   const csv = exportDocumentRangeToCsv(doc, "Sheet1", "A50001");
   assert.equal(csv, "2024-01-31");
 });
+
+test("CSV export prefers range-run formats over row formats (layer precedence)", () => {
+  const doc = new DocumentController();
+  const dateTime = new Date(Date.UTC(2024, 0, 31, 12, 34, 56));
+  const serial = dateToExcelSerial(dateTime);
+
+  // Create a range-run style (higher precedence than row/col defaults).
+  doc.setRangeFormat("Sheet1", "A1:A50001", { numberFormat: "yyyy-mm-dd" });
+  // Set a conflicting row format (lower precedence than range runs).
+  // A50001 is 1-based row 50001 -> 0-based row index 50000.
+  doc.setRowFormat("Sheet1", 50000, { numberFormat: "yyyy-mm-dd hh:mm:ss" });
+
+  doc.setCellValue("Sheet1", "A50001", serial);
+  assert.equal(doc.getCell("Sheet1", "A50001").styleId, 0);
+
+  const tuple = doc.getCellFormatStyleIds("Sheet1", "A50001");
+  assert.notEqual(tuple[1], 0); // row style id
+  assert.notEqual(tuple[4], 0); // range-run style id
+
+  const csv = exportDocumentRangeToCsv(doc, "Sheet1", "A50001");
+  assert.equal(csv, "2024-01-31");
+});
+
+test("CSV export prefers cell formats over range-run formats (layer precedence)", () => {
+  const doc = new DocumentController();
+  const dateTime = new Date(Date.UTC(2024, 0, 31, 12, 34, 56));
+  const serial = dateToExcelSerial(dateTime);
+
+  // Create a range-run style.
+  doc.setRangeFormat("Sheet1", "A1:A50001", { numberFormat: "yyyy-mm-dd" });
+  // Then apply an explicit per-cell format with higher precedence than range runs.
+  doc.setCellInput("Sheet1", "A50001", { value: serial, format: { numberFormat: "yyyy-mm-dd hh:mm:ss" } });
+
+  const tuple = doc.getCellFormatStyleIds("Sheet1", "A50001");
+  assert.notEqual(tuple[3], 0); // cell style id
+  assert.notEqual(tuple[4], 0); // range-run style id
+
+  const csv = exportDocumentRangeToCsv(doc, "Sheet1", "A50001");
+  assert.equal(csv, dateTime.toISOString());
+});
