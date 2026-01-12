@@ -26,14 +26,13 @@ workbook.xlsx (ZIP archive)
 │   ├── workbook.xml             # Workbook structure, sheet refs
 │   ├── styles.xml               # All cell formatting
 │   ├── sharedStrings.xml        # Deduplicated text strings
-│   ├── cellimages.xml           # Excel “image in cell” definitions (in-cell pictures)
-│   ├── metadata.xml             # Workbook metadata tables (rich values / linked data types)
 │   ├── calcChain.xml            # Calculation order hints
-│   ├── richData/                # RichData tables (images-in-cell, linked data types)
-│   │   ├── richValue.xml
-│   │   ├── richValueRel.xml
-│   │   ├── richValueTypes.xml
-│   │   └── richValueStructure.xml
+│   ├── metadata.xml             # Cell/value metadata (Excel "Rich Data")
+│   ├── richData/                # Excel 365+ rich values (data types, in-cell images)
+│   │   ├── rdrichvalue.xml
+│   │   ├── rdrichvaluestructure.xml
+│   │   ├── rdrichvaluetypes.xml
+│   │   └── richValueRel.xml     # Indirection to rich-value relationships (e.g. images)
 │   ├── theme/
 │   │   └── theme1.xml           # Color/font theme
 │   ├── worksheets/
@@ -60,9 +59,7 @@ workbook.xlsx (ZIP archive)
 │   ├── customXml/               # Power Query definitions (base64)
 │   └── vbaProject.bin           # VBA macros (binary)
 └── xl/_rels/
-    ├── workbook.xml.rels        # Workbook relationships
-    ├── cellimages.xml.rels      # Relationships for in-cell images (to xl/media/*)
-    └── metadata.xml.rels        # Relationships from metadata.xml to xl/richData/*
+    └── workbook.xml.rels        # Workbook relationships
 ```
 
 See also:
@@ -180,19 +177,144 @@ Notes:
 | `t="b"` | Boolean | 0 or 1 |
 | `t="e"` | Error | Error string (#VALUE!, etc.) |
 
-### Images in Cells (`IMAGE()` / “Place in Cell”)
+#### Images in Cells (`IMAGE()` / “Place in Cell”) (Rich Data + `metadata.xml`)
 
-Newer Excel builds can store **images as cell values** (“Place in Cell” pictures, and the `IMAGE()`
-function) using additional OOXML parts (`xl/cellimages.xml`, `xl/metadata.xml`, `xl/richData/*`) and
-worksheet cell attributes like `c/@vm` and `c/@cm`.
+Newer Excel builds can store **images as cell values** (“Place in Cell” pictures, and the `IMAGE()` function) using workbook-level Rich Data parts (`xl/metadata.xml` + `xl/richData/*`) and worksheet cell metadata attributes like `c/@vm`.
 
 This is distinct from legacy “floating” images stored under `xl/drawings/*`.
 
-**Detail spec:** [20-images-in-cells.md](./20-images-in-cells.md)
-**RichData deep dive:** [20-images-in-cells-richdata.md](./20-images-in-cells-richdata.md)
+Further reading:
+- [20-images-in-cells.md](./20-images-in-cells.md)
+- [20-images-in-cells-richdata.md](./20-images-in-cells-richdata.md)
+- [20-xlsx-rich-data.md](./20-xlsx-rich-data.md)
 
-**Packaging note:** see [In-cell images (cellimages.xml)](#in-cell-images-cellimagesxml) for the OPC
-part/relationships conventions that must be preserved for round-trip safety.
+##### Worksheet cell encoding
+
+Key observed behavior for “Place in Cell” images: the worksheet cell is encoded as an **error** (`t="e"`) with cached `#VALUE!`, and the real value is referenced through the `vm` (**value metadata**) attribute.
+
+```xml
+<c t="e" vm="N"><v>#VALUE!</v></c>
+```
+
+##### Mapping chain (high-level)
+
+`sheetN.xml c@vm` → `xl/metadata.xml <valueMetadata>` → `xl/richData/rdrichvalue.xml` (or `xl/richData/richValue*.xml`) → `xl/richData/richValueRel.xml` → `xl/richData/_rels/richValueRel.xml.rels` → `xl/media/imageN.*`
+
+##### 1) `vm="N"` maps into `xl/metadata.xml`
+
+`xl/metadata.xml` stores workbook-level metadata tables. For rich values, `vm="N"` selects the `N`th `<bk>` (“metadata block”) inside `<valueMetadata>`, which then links (via extension metadata) to a rich value record stored under `xl/richData/`.
+
+Example (`xl/metadata.xml`, representative):
+
+```xml
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <metadataTypes count="1">
+    <metadataType name="XLRICHVALUE" minSupportedVersion="120000"/>
+  </metadataTypes>
+
+  <!-- Rich-value indirection table (referenced from <rc v="…">) -->
+  <futureMetadata name="XLRICHVALUE" count="1">
+    <bk>
+      <extLst>
+        <ext uri="{...}">
+          <!-- i = index into xl/richData/rdrichvalue.xml (or xl/richData/richValue*.xml) -->
+          <xlrd:rvb i="0"/>
+        </ext>
+      </extLst>
+    </bk>
+  </futureMetadata>
+
+  <!-- vm="1" selects the first <bk> (Excel often uses 1-based vm). -->
+  <valueMetadata count="1">
+    <bk>
+      <!-- t = (1-based) index into <metadataTypes>, v = (0-based) index into <futureMetadata> -->
+      <rc t="1" v="0"/>
+    </bk>
+  </valueMetadata>
+</metadata>
+```
+
+##### 2) Workbook relationship types (workbook → richData parts)
+
+Excel wires the rich-data parts via OPC relationships. The relationship type URIs we observed for in-cell images are:
+
+- `http://schemas.microsoft.com/office/2022/10/relationships/richValueRel`
+- `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValue`
+- `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueStructure`
+- `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueTypes`
+- (inside `xl/richData/_rels/richValueRel.xml.rels`) `http://schemas.openxmlformats.org/officeDocument/2006/relationships/image`
+
+Representative `xl/_rels/workbook.xml.rels` snippet:
+
+```xml
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <!-- ... -->
+  <Relationship Id="rIdMeta"
+                Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata"
+                Target="metadata.xml"/>
+
+  <Relationship Id="rIdRV"
+                Type="http://schemas.microsoft.com/office/2017/06/relationships/rdRichValue"
+                Target="richData/rdrichvalue.xml"/>
+  <Relationship Id="rIdRVS"
+                Type="http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueStructure"
+                Target="richData/rdrichvaluestructure.xml"/>
+  <Relationship Id="rIdRVT"
+                Type="http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueTypes"
+                Target="richData/rdrichvaluetypes.xml"/>
+
+  <Relationship Id="rIdRel"
+                Type="http://schemas.microsoft.com/office/2022/10/relationships/richValueRel"
+                Target="richData/richValueRel.xml"/>
+</Relationships>
+```
+
+##### 3) `richValueRel.xml` → `xl/media/*` via `.rels`
+
+`xl/richData/richValueRel.xml` is an **ordered table** that maps a small integer slot index (referenced from rich values) to an `r:id`, which is then resolved via `xl/richData/_rels/richValueRel.xml.rels`.
+
+`xl/richData/richValueRel.xml`:
+
+```xml
+<richValueRels xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata"
+               xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <!-- slot 0 -->
+  <rel r:id="rId1"/>
+</richValueRels>
+```
+
+`xl/richData/_rels/richValueRel.xml.rels`:
+
+```xml
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+                Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+                Target="../media/image1.png"/>
+</Relationships>
+```
+
+##### 4) `[Content_Types].xml` overrides
+
+Workbooks that include in-cell images typically include overrides like:
+
+```xml
+<Override PartName="/xl/metadata.xml"
+          ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"/>
+
+<Override PartName="/xl/richData/rdrichvalue.xml"
+          ContentType="application/vnd.ms-excel.rdrichvalue+xml"/>
+<Override PartName="/xl/richData/rdrichvaluestructure.xml"
+          ContentType="application/vnd.ms-excel.rdrichvaluestructure+xml"/>
+<Override PartName="/xl/richData/rdrichvaluetypes.xml"
+          ContentType="application/vnd.ms-excel.rdrichvaluetypes+xml"/>
+<Override PartName="/xl/richData/richValueRel.xml"
+          ContentType="application/vnd.ms-excel.richValueRel+xml"/>
+```
+
+##### Note: `xl/cellimages.xml` was not observed
+
+Some online discussions reference `xl/cellimages.xml` for in-cell pictures. In the Excel fixtures we inspected for “Place in Cell”, in-cell images were represented using `xl/metadata.xml` + `xl/richData/*` + `xl/media/*`, and `xl/cellimages.xml` was not present.
 
 ### Linked data types / Rich values (Stocks, Geography, etc.)
 
@@ -249,8 +371,8 @@ Minimal sketch of `xl/metadata.xml` structure:
 ```
 
 The structured payloads referenced by this metadata live under `xl/richData/` (commonly
-`richValueTypes.xml` + `richValue.xml` / `richValues.xml`, plus related supporting tables such as
-`richValueRel.xml`).
+`rdrichvaluetypes.xml` + `rdrichvalue.xml`, plus related supporting tables such as `richValueRel.xml`.
+Some Excel builds use the unprefixed naming (`richValue*.xml`) for rich value instances/types/structure.
 
 These pieces are connected via OPC relationships:
 
@@ -396,10 +518,12 @@ Further reading:
 
 ### In-cell images (cellimages.xml)
 
-Newer versions of Excel can store “images in cell” (pictures that behave like cell content rather than floating drawing objects) in a dedicated workbook-level OPC part, commonly:
+Some producer tooling (and possibly some Excel builds) can store “images in cell” (pictures that behave like cell content rather than floating drawing objects) in a dedicated workbook-level OPC part:
 
 - Part: `xl/cellimages.xml`
 - Relationships: `xl/_rels/cellimages.xml.rels`
+
+However, in the Excel 365 “Place in Cell” fixtures we inspected, in-cell images were represented via `xl/metadata.xml` + `xl/richData/*` + `xl/media/*` and `xl/cellimages.xml` was not present. If we encounter `xl/cellimages.xml` in the wild, we should preserve it for round-trip safety.
 
 From a **packaging / round-trip** perspective, the important thing is the relationship chain that connects this part to the actual image blobs under `xl/media/*`.
 
