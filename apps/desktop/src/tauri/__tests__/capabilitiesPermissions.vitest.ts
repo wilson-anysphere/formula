@@ -174,12 +174,35 @@ describe("Tauri capabilities", () => {
     }
 
     for (const cmd of invokedCommands) {
-      expect(allowlistedCommands.has(cmd)).toBe(true);
-      expect(coreAllowlistedCommands.has(cmd)).toBe(true);
+      expect(cmd.trim(), "invoke() command names must not be empty/whitespace").not.toBe("");
+      // Keep the command allowlist explicit.
+      expect(cmd).not.toContain("*");
     }
 
-    // Keep the `core:allow-invoke` allowlist as small as possible: it should match actual invoke usage.
-    expect(Array.from(coreAllowlistedCommands).sort()).toEqual(Array.from(invokedCommands).sort());
+    const missingInAllowInvoke = Array.from(invokedCommands)
+      .filter((cmd) => !allowlistedCommands.has(cmd))
+      .sort();
+    expect(
+      missingInAllowInvoke,
+      `allow-invoke.json is missing commands used by the frontend: ${missingInAllowInvoke.join(", ")}`,
+    ).toEqual([]);
+
+    // Keep the `core:allow-invoke` allowlist as small as possible: it should match actual invoke() usage.
+    const missingInCore = Array.from(invokedCommands)
+      .filter((cmd) => !coreAllowlistedCommands.has(cmd))
+      .sort();
+    expect(
+      missingInCore,
+      `capabilities/main.json core:allow-invoke is missing commands used by the frontend: ${missingInCore.join(", ")}`,
+    ).toEqual([]);
+
+    const extraInCore = Array.from(coreAllowlistedCommands)
+      .filter((cmd) => !invokedCommands.has(cmd))
+      .sort();
+    expect(
+      extraInCore,
+      `capabilities/main.json core:allow-invoke should match actual invoke() usage; remove unused commands: ${extraInCore.join(", ")}`,
+    ).toEqual([]);
   });
 
   it("grants the dialog + clipboard permissions required by the frontend", () => {
