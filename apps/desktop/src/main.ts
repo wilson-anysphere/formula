@@ -5620,10 +5620,24 @@ function showDialogAndFocus(dialog: HTMLDialogElement): void {
   requestAnimationFrame(focusInput);
 }
 
+const findReplaceDialogs = [findDialog, replaceDialog, goToDialog] as HTMLDialogElement[];
+
+function showExclusiveFindReplaceDialog(dialog: HTMLDialogElement): void {
+  for (const other of findReplaceDialogs) {
+    if (other === dialog) continue;
+    try {
+      if (other.open) other.close();
+    } catch {
+      // ignore
+    }
+  }
+  showDialogAndFocus(dialog);
+}
+
 commandRegistry.registerBuiltinCommand(
   "edit.find",
   t("command.edit.find"),
-  () => showDialogAndFocus(findDialog as any),
+  () => showExclusiveFindReplaceDialog(findDialog as any),
   {
     category: t("commandCategory.editing"),
     icon: null,
@@ -5635,7 +5649,7 @@ commandRegistry.registerBuiltinCommand(
 commandRegistry.registerBuiltinCommand(
   "edit.replace",
   t("command.edit.replace"),
-  () => showDialogAndFocus(replaceDialog as any),
+  () => showExclusiveFindReplaceDialog(replaceDialog as any),
   {
     category: t("commandCategory.editing"),
     icon: null,
@@ -5647,7 +5661,7 @@ commandRegistry.registerBuiltinCommand(
 commandRegistry.registerBuiltinCommand(
   "navigation.goTo",
   t("command.navigation.goTo"),
-  () => showDialogAndFocus(goToDialog as any),
+  () => showExclusiveFindReplaceDialog(goToDialog as any),
   {
     category: t("commandCategory.navigation"),
     icon: null,
