@@ -1026,9 +1026,9 @@ Important notes:
   when the PKCS#7/CMS signature verifies **and** the digest binding check reports `Bound`.
 - Per MS-OSHARED §4.3, the VBA project hash is always **MD5** (16 bytes), even when the PKCS#7/CMS
   signature uses SHA-256 (or another algorithm).
-- Certificate chain trust is not currently enforced (OpenSSL `NOVERIFY`), so a valid signature does
-  not imply a trusted publisher. This can be extended in the future with an explicit `untrusted`
-  state.
+- Certificate chain trust ("trusted publisher") is not enforced by default (OpenSSL `NOVERIFY`), but
+  can be evaluated as an **opt-in** step by calling `formula-vba`'s
+  `verify_vba_digital_signature_with_trust` with an explicit root certificate set.
 - Timestamp validation may be incomplete.
 
 #### VBA digital signatures: stream location, payload variants, and digest binding

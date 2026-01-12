@@ -140,6 +140,41 @@ pub enum VbaSignatureVerification {
     SignedButUnverified,
 }
 
+/// Best-effort trust evaluation state for a VBA signature's signing certificate.
+///
+/// This is intentionally separate from [`VbaSignatureVerification`]:
+/// - [`VbaSignatureVerification`] describes whether the PKCS#7/CMS blob is internally valid.
+/// - [`VbaCertificateTrust`] describes whether the signing certificate chains to a caller-provided
+///   trust anchor set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VbaCertificateTrust {
+    /// Signing certificate chains to a trusted root in the provided store.
+    Trusted,
+    /// Signing certificate is well-formed but does not chain to a trusted root in the provided
+    /// store.
+    Untrusted,
+    /// Trust was not evaluated (e.g. no trust anchors provided, verification not supported on the
+    /// current platform, or the signature wasn't internally valid).
+    Unknown,
+}
+
+/// Options controlling optional certificate trust evaluation for VBA signatures.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct VbaSignatureTrustOptions {
+    /// Trusted root certificates (DER-encoded) to use when evaluating "trusted publisher" policy.
+    ///
+    /// When empty, certificate trust is not evaluated and the result will be
+    /// [`VbaCertificateTrust::Unknown`].
+    pub trusted_root_certs_der: Vec<Vec<u8>>,
+}
+
+/// A VBA digital signature along with the result of optional publisher trust evaluation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VbaDigitalSignatureTrusted {
+    pub signature: VbaDigitalSignature,
+    pub cert_trust: VbaCertificateTrust,
+}
+
 #[derive(Debug, Error)]
 pub enum SignatureError {
     #[error("OLE error: {0}")]
@@ -435,6 +470,79 @@ pub fn verify_vba_digital_signature(
     Ok(first)
 }
 
+/// Parse and verify a VBA digital signature, optionally evaluating publisher trust.
+///
+/// This is an opt-in extension of [`verify_vba_digital_signature`]:
+/// - First, we perform the same "internal" PKCS#7/CMS verification as
+///   [`verify_vba_digital_signature`]. This does *not* validate the certificate chain.
+/// - If that internal verification succeeds and the caller provides one or more trusted root
+///   certificates in `options`, we then re-run verification with certificate-chain validation
+///   enabled.
+///
+/// Returns `Ok(None)` when the project appears unsigned.
+pub fn verify_vba_digital_signature_with_trust(
+    vba_project_bin: &[u8],
+    options: &VbaSignatureTrustOptions,
+) -> Result<Option<VbaDigitalSignatureTrusted>, SignatureError> {
+    let mut ole = OleFile::open(vba_project_bin)?;
+    let streams = ole.list_streams()?;
+
+    let mut candidates = streams
+        .into_iter()
+        .filter(|path| path.split('/').any(is_signature_component))
+        .collect::<Vec<_>>();
+
+    if candidates.is_empty() {
+        return Ok(None);
+    }
+
+    candidates.sort_by(|a, b| signature_path_rank(a).cmp(&signature_path_rank(b)).then(a.cmp(b)));
+
+    let mut first: Option<VbaDigitalSignatureTrusted> = None;
+    for path in candidates {
+        let signature_bytes = ole.read_stream_opt(&path)?.unwrap_or_default();
+        let signer_subject = extract_first_certificate_subject(&signature_bytes);
+
+        // Internal signature verification (equivalent to `verify_vba_digital_signature`).
+        let verification = verify_signature_blob(&signature_bytes);
+        let binding = match verification {
+            VbaSignatureVerification::SignedVerified => {
+                verify_signature_binding(vba_project_bin, &signature_bytes)
+            }
+            _ => VbaSignatureBinding::Unknown,
+        };
+
+        let cert_trust = if verification == VbaSignatureVerification::SignedVerified
+            && !options.trusted_root_certs_der.is_empty()
+        {
+            verify_pkcs7_trust(&signature_bytes, &options.trusted_root_certs_der)
+        } else {
+            VbaCertificateTrust::Unknown
+        };
+
+        let sig = VbaDigitalSignature {
+            stream_path: path,
+            signer_subject,
+            signature: signature_bytes,
+            verification,
+            binding,
+        };
+        let sig = VbaDigitalSignatureTrusted {
+            signature: sig,
+            cert_trust,
+        };
+
+        if sig.signature.verification == VbaSignatureVerification::SignedVerified {
+            return Ok(Some(sig));
+        }
+        if first.is_none() {
+            first = Some(sig);
+        }
+    }
+
+    Ok(first)
+}
+
 fn verify_signature_binding(vba_project_bin: &[u8], signature: &[u8]) -> VbaSignatureBinding {
     #[cfg(target_arch = "wasm32")]
     {
@@ -577,6 +685,93 @@ fn scan_for_embedded_der_certificates(bytes: &[u8]) -> impl Iterator<Item = &[u8
         }
         Some(&slice[..consumed_len])
     })
+}
+
+fn verify_pkcs7_trust(
+    _signature: &[u8],
+    _trusted_root_certs_der: &[Vec<u8>],
+) -> VbaCertificateTrust {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (_signature, _trusted_root_certs_der);
+        // `openssl` isn't available on wasm targets.
+        VbaCertificateTrust::Unknown
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        verify_pkcs7_trust_openssl(_signature, _trusted_root_certs_der)
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn verify_pkcs7_trust_openssl(
+    signature: &[u8],
+    trusted_root_certs_der: &[Vec<u8>],
+) -> VbaCertificateTrust {
+    use openssl::pkcs7::Pkcs7Flags;
+    use openssl::stack::Stack;
+    use openssl::x509::store::X509StoreBuilder;
+    use openssl::x509::X509;
+
+    let Some((pkcs7, pkcs7_offset)) = parse_pkcs7_with_offset(signature) else {
+        // Internal verification succeeded, but we can't re-parse for trust evaluation.
+        return VbaCertificateTrust::Untrusted;
+    };
+
+    let mut builder = match X509StoreBuilder::new() {
+        Ok(builder) => builder,
+        Err(_) => return VbaCertificateTrust::Untrusted,
+    };
+
+    for root_der in trusted_root_certs_der {
+        let cert = match X509::from_der(root_der) {
+            Ok(cert) => cert,
+            Err(_) => return VbaCertificateTrust::Untrusted,
+        };
+        if builder.add_cert(cert).is_err() {
+            return VbaCertificateTrust::Untrusted;
+        }
+    }
+
+    let store = builder.build();
+
+    let empty_certs = match Stack::<X509>::new() {
+        Ok(stack) => stack,
+        Err(_) => return VbaCertificateTrust::Untrusted,
+    };
+    let certs = pkcs7
+        .signed()
+        .and_then(|s| s.certificates())
+        .unwrap_or(&empty_certs);
+
+    let flags = Pkcs7Flags::BINARY;
+
+    // Verify with embedded content first.
+    if pkcs7.verify(certs, &store, None, None, flags).is_ok() {
+        return VbaCertificateTrust::Trusted;
+    }
+
+    // If the PKCS#7 blob was found after a prefix/header, try treating the prefix as detached
+    // content.
+    if pkcs7_offset > 0 {
+        let prefix = &signature[..pkcs7_offset];
+        if pkcs7
+            .verify(
+                certs,
+                &store,
+                Some(prefix),
+                None,
+                flags | Pkcs7Flags::DETACHED,
+            )
+            .is_ok()
+            || pkcs7.verify(certs, &store, Some(prefix), None, flags).is_ok()
+        {
+            return VbaCertificateTrust::Trusted;
+        }
+    }
+
+    VbaCertificateTrust::Untrusted
 }
 
 #[cfg(not(target_arch = "wasm32"))]

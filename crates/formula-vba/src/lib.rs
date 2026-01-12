@@ -28,7 +28,9 @@ pub use signature::{
     verify_vba_digital_signature_bound, verify_vba_signature_blob, SignatureError,
     VbaDigitalSignature, VbaDigitalSignatureBound, VbaDigitalSignatureStream,
     VbaProjectBindingVerification, VbaProjectDigestDebugInfo, VbaSignatureBinding,
-    VbaSignatureBlobInfo, VbaSignatureVerification, VbaSignerCertificateInfo,
+    VbaSignatureBlobInfo, VbaSignatureTrustOptions, VbaSignatureVerification,
+    VbaSignerCertificateInfo,
+    verify_vba_digital_signature_with_trust, VbaCertificateTrust, VbaDigitalSignatureTrusted,
 };
 
 use std::collections::BTreeMap;
