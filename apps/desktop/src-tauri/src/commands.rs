@@ -690,6 +690,12 @@ pub async fn set_sheet_visibility(
     visibility: SheetVisibility,
     state: State<'_, SharedAppState>,
 ) -> Result<(), String> {
+    // The desktop UI only supports toggling visible/hidden. Preserve veryHidden when present in a
+    // workbook file, but refuse to set it from the webview.
+    if matches!(visibility, SheetVisibility::VeryHidden) {
+        return Err("setting veryHidden sheet visibility is not supported".to_string());
+    }
+
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();
@@ -4675,6 +4681,49 @@ mod tests {
     use std::io::Write;
     use std::path::Path;
     use tempfile::TempDir;
+
+    #[test]
+    fn normalize_tab_color_rgb_normalizes_hex_strings() {
+        assert_eq!(
+            normalize_tab_color_rgb("#00ff00").expect("should normalize rgb"),
+            "FF00FF00"
+        );
+        assert_eq!(
+            normalize_tab_color_rgb("00ff00").expect("should normalize rgb"),
+            "FF00FF00"
+        );
+        assert_eq!(
+            normalize_tab_color_rgb("80ff0000").expect("should preserve alpha"),
+            "80FF0000"
+        );
+        assert_eq!(
+            normalize_tab_color_rgb("#80ff0000").expect("should preserve alpha"),
+            "80FF0000"
+        );
+    }
+
+    #[test]
+    fn normalize_tab_color_rgb_rejects_invalid_values() {
+        assert!(
+            normalize_tab_color_rgb("").is_err(),
+            "expected empty rgb to fail"
+        );
+        assert!(
+            normalize_tab_color_rgb("   ").is_err(),
+            "expected whitespace rgb to fail"
+        );
+
+        let err = normalize_tab_color_rgb("#xyz").expect_err("expected invalid hex to fail");
+        assert!(
+            err.contains("6-digit") || err.contains("8-digit"),
+            "unexpected error: {err}"
+        );
+        let err = normalize_tab_color_rgb("#12345").expect_err("expected wrong length to fail");
+        assert!(
+            err.contains("6-digit") || err.contains("8-digit"),
+            "unexpected error: {err}"
+        );
+    }
 
     #[test]
     fn limited_range_cell_edits_deserializes_small_payloads() {
