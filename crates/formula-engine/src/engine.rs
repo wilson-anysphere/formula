@@ -9942,6 +9942,26 @@ mod tests {
     }
 
     #[test]
+    fn bytecode_ifs_short_circuits_later_conditions() {
+        assert_bytecode_matches_ast("=IFS(TRUE, 1, 1/0, 2)", Value::Number(1.0));
+    }
+
+    #[test]
+    fn bytecode_ifs_short_circuits_values_for_false_conditions() {
+        assert_bytecode_matches_ast("=IFS(FALSE, 1/0, TRUE, 2)", Value::Number(2.0));
+    }
+
+    #[test]
+    fn bytecode_switch_short_circuits_later_case_values() {
+        assert_bytecode_matches_ast("=SWITCH(1, 1, 10, 1/0, 20)", Value::Number(10.0));
+    }
+
+    #[test]
+    fn bytecode_switch_short_circuits_results_for_unmatched_cases() {
+        assert_bytecode_matches_ast("=SWITCH(2, 1, 1/0, 2, 20)", Value::Number(20.0));
+    }
+
+    #[test]
     fn bytecode_compiler_allows_huge_ranges_for_implicit_intersection() {
         let mut engine = Engine::new();
 
