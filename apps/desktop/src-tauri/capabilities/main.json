@@ -4,8 +4,24 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "event:allow-listen",
-    "event:allow-emit",
+    {
+      "identifier": "event:allow-listen",
+      "allow": [
+        { "event": "close-prep" },
+        { "event": "close-requested" },
+        { "event": "file-dropped" },
+        { "event": "tray-open" },
+        { "event": "tray-new" },
+        { "event": "tray-quit" },
+        { "event": "shortcut-quick-open" },
+        { "event": "shortcut-command-palette" },
+        { "event": "update-available" }
+      ]
+    },
+    {
+      "identifier": "event:allow-emit",
+      "allow": [{ "event": "close-prep-done" }, { "event": "close-handled" }]
+    },
     "dialog:allow-open",
     "dialog:allow-save",
     "window:allow-hide",
