@@ -1598,6 +1598,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                 let mut rr = RecordReader::new(rec.data);
                 let col = rr.read_u32()?;
                 let style = rr.read_u32()?;
+                let base = crate::rgce::CellCoord::new(row, col);
 
                 let (value, formula, preserved_string) = match rec.id {
                     biff12::BLANK => (CellValue::Blank, None, None),
@@ -1723,7 +1724,6 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                         }
 
                         let (text, warnings) = if decode_formulas {
-                            let base = crate::rgce::CellCoord::new(row, col);
                             let decoded = decode_formula_text(&rgce, rgcb_for_decode, ctx, base);
                             (decoded.text, decoded.warnings)
                         } else {
@@ -1758,7 +1758,6 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                             }
                         }
                         let (text, warnings) = if decode_formulas {
-                            let base = crate::rgce::CellCoord::new(row, col);
                             let decoded = decode_formula_text(&rgce, rgcb_for_decode, ctx, base);
                             (decoded.text, decoded.warnings)
                         } else {
@@ -1793,7 +1792,6 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                             }
                         }
                         let (text, warnings) = if decode_formulas {
-                            let base = crate::rgce::CellCoord::new(row, col);
                             let decoded = decode_formula_text(&rgce, rgcb_for_decode, ctx, base);
                             (decoded.text, decoded.warnings)
                         } else {
@@ -1828,7 +1826,6 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                             }
                         }
                         let (text, warnings) = if decode_formulas {
-                            let base = crate::rgce::CellCoord::new(row, col);
                             let decoded = decode_formula_text(&rgce, rgcb_for_decode, ctx, base);
                             (decoded.text, decoded.warnings)
                         } else {
