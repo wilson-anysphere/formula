@@ -1,8 +1,15 @@
 # Excel “Place in Cell” embedded images: OOXML schema + mapping
 
-This document records the **OOXML parts and relationship chain** Excel uses for **embedded images in cells** (Excel UI: *Insert → Pictures → Place in Cell*).
+This document records a **concrete OOXML parts + relationship chain** for **embedded images in cells**
+(Excel UI: *Insert → Pictures → Place in Cell*).
 
 The schema described below was confirmed by generating a minimal `.xlsx` using `rust_xlsxwriter` (and inspecting the resulting package). It is recorded here so future engine/model work can round-trip these files without treating them as “mysterious metadata”.
+
+See also (broader context + variant coverage):
+
+- [`docs/20-images-in-cells.md`](./20-images-in-cells.md) — overall “Images in Cell” packaging + round-trip constraints
+- [`docs/20-images-in-cells-richdata.md`](./20-images-in-cells-richdata.md) — RichData (`richValue*` / `rdrichvalue*`) tables + index-base notes
+- [`docs/20-xlsx-rich-data.md`](./20-xlsx-rich-data.md) — shorter overview of the rich-data wiring
 
 ## High-level mapping chain (cell → image bytes)
 
