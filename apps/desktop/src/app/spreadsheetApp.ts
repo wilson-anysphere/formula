@@ -8396,7 +8396,8 @@ export class SpreadsheetApp {
       // Text formatting.
       if (primary && !e.shiftKey && keyLower === "b") return { kind: "bold" };
       if (primary && !e.shiftKey && keyLower === "u") return { kind: "underline" };
-      if (primary && !e.shiftKey && keyLower === "i") return { kind: "italic" };
+      // Cmd+I is reserved for toggling the AI sidebar. Only bind italic to Ctrl+I.
+      if (!e.shiftKey && keyLower === "i" && e.ctrlKey && !e.metaKey) return { kind: "italic" };
 
       // Number formats.
       if (primary && e.shiftKey && (e.key === "$" || e.code === "Digit4"))

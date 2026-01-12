@@ -164,7 +164,7 @@ test.describe("dockable panels layout persistence", () => {
     await expect(page.getByTestId("panel-branchManager")).toHaveCount(0);
   });
 
-  test("Cmd+Shift+A toggles AI chat panel open/closed", async ({ page }) => {
+  test("Cmd+I (macOS) / Ctrl+Shift+A (Win/Linux) toggles AI chat panel open/closed", async ({ page }) => {
     await gotoDesktop(page);
     await page.evaluate(() => localStorage.clear());
     await page.reload({ waitUntil: "domcontentloaded" });
@@ -174,14 +174,16 @@ test.describe("dockable panels layout persistence", () => {
     // Avoid clicking the shared-grid corner header (select-all), which can be slow/flaky under Playwright.
     await page.locator("#grid").focus();
 
-    await page.keyboard.press("Meta+Shift+A");
+    const shortcut = process.platform === "darwin" ? "Meta+I" : "Control+Shift+A";
+
+    await page.keyboard.press(shortcut);
     await expect(page.getByTestId("dock-right").getByTestId("panel-aiChat")).toBeVisible();
 
-    await page.keyboard.press("Meta+Shift+A");
+    await page.keyboard.press(shortcut);
     await expect(page.getByTestId("panel-aiChat")).toHaveCount(0);
   });
 
-  test("Cmd+Shift+A does not toggle AI chat while typing in the formula bar", async ({ page }) => {
+  test("Cmd+I (macOS) / Ctrl+Shift+A (Win/Linux) does not toggle AI chat while typing in the formula bar", async ({ page }) => {
     await gotoDesktop(page);
     await page.evaluate(() => localStorage.clear());
     await page.reload({ waitUntil: "domcontentloaded" });
@@ -192,7 +194,8 @@ test.describe("dockable panels layout persistence", () => {
     await expect(page.getByTestId("formula-input")).toBeVisible();
     await expect(page.getByTestId("formula-input")).toBeFocused();
 
-    await page.keyboard.press("Meta+Shift+A");
+    const shortcut = process.platform === "darwin" ? "Meta+I" : "Control+Shift+A";
+    await page.keyboard.press(shortcut);
     await expect(page.getByTestId("panel-aiChat")).toHaveCount(0);
   });
 });

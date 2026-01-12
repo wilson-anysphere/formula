@@ -80,10 +80,10 @@ export const DEFAULT_RESERVED_EXTENSION_SHORTCUTS = [
   "shift+f2",
   // AI Chat toggle (core UX shortcut; extensions should not claim it).
   // - Windows/Linux: Ctrl+Shift+A
-  // - macOS: Cmd+Shift+A (with Ctrl+Cmd+Shift+A fallback for some remote/VM keyboard setups)
+  // - macOS: Cmd+I (with Ctrl+Cmd+I fallback for some remote/VM keyboard setups)
   "ctrl+shift+a",
-  "cmd+shift+a",
-  "ctrl+cmd+shift+a",
+  "cmd+i",
+  "ctrl+cmd+i",
   // Comments panel toggle (core UX shortcut; extensions should not claim it).
   "ctrl+shift+m",
   "cmd+shift+m",

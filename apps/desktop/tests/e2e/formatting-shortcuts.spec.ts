@@ -63,7 +63,7 @@ test.describe("formatting shortcuts", () => {
     expect(await getA1FontProp(page, "bold")).toBe(before);
   });
 
-  test("Ctrl/Cmd+I toggles italic; Ctrl/Cmd+Shift+A opens AI panel without changing formatting", async ({ page }) => {
+  test("Ctrl+I toggles italic; Cmd+I (macOS) / Ctrl+Shift+A (Win/Linux) opens AI panel without changing formatting", async ({ page }) => {
     await gotoDesktop(page);
     await page.evaluate(() => localStorage.clear());
     await page.reload({ waitUntil: "domcontentloaded" });
@@ -80,18 +80,18 @@ test.describe("formatting shortcuts", () => {
 
     const initialItalic = await getA1FontProp(page, "italic");
 
-    await page.keyboard.press("ControlOrMeta+I");
+    await page.keyboard.press("Control+I");
     await waitForIdle(page);
     expect(await getA1FontProp(page, "italic")).toBe(!initialItalic);
 
-    await page.keyboard.press("ControlOrMeta+I");
+    await page.keyboard.press("Control+I");
     await waitForIdle(page);
     const italicAfterToggles = await getA1FontProp(page, "italic");
     expect(italicAfterToggles).toBe(initialItalic);
 
     await expect(page.getByTestId("panel-aiChat")).toHaveCount(0);
 
-    const aiShortcut = process.platform === "darwin" ? "Meta+Shift+A" : "Control+Shift+A";
+    const aiShortcut = process.platform === "darwin" ? "Meta+I" : "Control+Shift+A";
     await page.keyboard.press(aiShortcut);
     await expect(page.getByTestId("panel-aiChat")).toBeVisible();
 
