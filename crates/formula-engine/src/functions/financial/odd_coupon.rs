@@ -329,12 +329,23 @@ fn oddf_equation(
         return Err(ExcelError::Num);
     }
 
-    // Excel-style chronology: `issue < settlement < first_coupon <= maturity`.
+    // Excel-style chronology constraints.
     //
-    // In particular, Excel rejects equality boundaries like `issue == settlement` and
-    // `settlement == first_coupon` (see `tests/odd_coupon_date_boundaries.rs` and the
-    // excel-oracle pinned dataset).
-    if !(issue < settlement && settlement < first_coupon && first_coupon <= maturity) {
+    // Excel's published docs describe strict inequalities for ODDF* inputs, but parity testing
+    // against the curated excel-oracle corpus shows that the boundary equalities are accepted:
+    // - `issue == settlement` implies zero accrued interest.
+    // - `settlement == first_coupon` implies settlement on the first coupon date.
+    //
+    // Model this as:
+    // - `issue <= settlement <= first_coupon <= maturity`
+    // - `issue < first_coupon` (otherwise there is no first coupon period)
+    // - `settlement < maturity`
+    if !(issue <= settlement
+        && settlement <= first_coupon
+        && issue < first_coupon
+        && first_coupon <= maturity
+        && settlement < maturity)
+    {
         return Err(ExcelError::Num);
     }
 
