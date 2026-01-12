@@ -191,6 +191,25 @@ fn arb_expr(base: CellCoord, rows: i32, cols: i32) -> impl Strategy<Value = Expr
                         },
                     ],
                 }),
+                // LET(X, v1, X, X+v2, X+v3) exercises rebinding semantics in a single LET.
+                (inner.clone(), inner.clone(), inner.clone()).prop_map(|(v1, v2, v3)| Expr::FuncCall {
+                    func: Function::Let,
+                    args: vec![
+                        Expr::NameRef(Arc::from("X")),
+                        v1,
+                        Expr::NameRef(Arc::from("X")),
+                        Expr::Binary {
+                            op: BinaryOp::Add,
+                            left: Box::new(Expr::NameRef(Arc::from("X"))),
+                            right: Box::new(v2),
+                        },
+                        Expr::Binary {
+                            op: BinaryOp::Add,
+                            left: Box::new(Expr::NameRef(Arc::from("X"))),
+                            right: Box::new(v3),
+                        },
+                    ],
+                }),
                 // Percent postfix lowering: expr% -> expr / 100
                 inner.clone().prop_map(|e| Expr::Binary {
                     op: BinaryOp::Div,

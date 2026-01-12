@@ -517,6 +517,30 @@ fn bytecode_backend_matches_ast_for_let_with_iferror_on_error_local() {
 }
 
 #[test]
+fn bytecode_backend_short_circuits_let_in_if_branches() {
+    let mut engine = Engine::new();
+
+    engine
+        .set_cell_formula("Sheet1", "A1", "=IF(FALSE, LET(x, 1/0, 1), 2)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=IF(TRUE, 2, LET(x, 1/0, 1))")
+        .unwrap();
+
+    // Both formulas should compile to bytecode; the LET inside the untaken IF branch should not be
+    // evaluated (so the #DIV/0! is never observed).
+    assert_eq!(engine.bytecode_program_count(), 2);
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(2.0));
+
+    assert_engine_matches_ast(&engine, "=IF(FALSE, LET(x, 1/0, 1), 2)", "A1");
+    assert_engine_matches_ast(&engine, "=IF(TRUE, 2, LET(x, 1/0, 1))", "A2");
+}
+
+#[test]
 fn bytecode_backend_reuses_program_for_filled_let_patterns() {
     let mut engine = Engine::new();
 
