@@ -4352,6 +4352,81 @@ mountRibbon(ribbonRoot, {
     }
 
     switch (commandId) {
+      case "file.new.new":
+      case "file.new.blankWorkbook": {
+        if (!tauriBackend) {
+          showToast("Creating new workbooks is available in the desktop app.");
+          return;
+        }
+        void handleNewWorkbook().catch((err) => {
+          console.error("Failed to create workbook:", err);
+          showToast(`Failed to create workbook: ${String(err)}`, "error");
+        });
+        return;
+      }
+
+      case "file.open.open": {
+        if (!tauriBackend) {
+          showToast("Opening workbooks is available in the desktop app.");
+          return;
+        }
+        void promptOpenWorkbook().catch((err) => {
+          console.error("Failed to open workbook:", err);
+          showToast(`Failed to open workbook: ${String(err)}`, "error");
+        });
+        return;
+      }
+
+      case "file.save.save": {
+        if (!tauriBackend) {
+          showToast("Saving workbooks is available in the desktop app.");
+          return;
+        }
+        void handleSave().catch((err) => {
+          console.error("Failed to save workbook:", err);
+          showToast(`Failed to save workbook: ${String(err)}`, "error");
+        });
+        return;
+      }
+
+      case "file.save.saveAs": {
+        if (!tauriBackend) {
+          showToast("Save As is available in the desktop app.");
+          return;
+        }
+        void handleSaveAs().catch((err) => {
+          console.error("Failed to save workbook:", err);
+          showToast(`Failed to save workbook: ${String(err)}`, "error");
+        });
+        return;
+      }
+
+      case "file.print.pageSetup": {
+        void handleRibbonPageSetup().catch((err) => {
+          console.error("Failed to open page setup:", err);
+          showToast(`Failed to open page setup: ${String(err)}`, "error");
+        });
+        return;
+      }
+
+      case "file.print.print": {
+        const invokeAvailable = typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
+        if (!invokeAvailable) {
+          showToast("Print is available in the desktop app.");
+          return;
+        }
+        showToast("Print is not implemented yet. Try Export PDF instead.");
+        return;
+      }
+
+      case "file.options.close": {
+        void hideTauriWindow().catch((err) => {
+          console.error("Failed to close window:", err);
+          showToast(`Failed to close window: ${String(err)}`, "error");
+        });
+        return;
+      }
+
       case "home.clipboard.cut":
         void app.clipboardCut();
         app.focus();
