@@ -238,21 +238,9 @@ pub fn coupdaysnc(
     // For basis=0 (US 30/360), this preserves the additivity invariant `A + DSC == E` even though
     // `DAYS360(..., FALSE)` is not additive for some month-end schedules.
     //
-    // For basis=4 (European 30E/360), Excel still models the coupon period length `E` as the fixed
-    // `360/frequency` value for COUPDAYS/COUPDAYSNC (even when the European `DAYS360(PCD, NCD, TRUE)`
-    // between coupon dates differs due to EOM / February handling).
     let dsc = match basis {
-        0 => {
+        0 | 4 => {
             let e = coupon_period_e(pcd, ncd, frequency, basis, system)?;
-            let a = days_between(pcd, settlement, basis, system)? as f64;
-            e - a
-        }
-        4 => {
-            let freq = f64::from(frequency);
-            if !freq.is_finite() || freq <= 0.0 {
-                return Err(ExcelError::Num);
-            }
-            let e = 360.0 / freq;
             let a = days_between(pcd, settlement, basis, system)? as f64;
             e - a
         }
@@ -274,18 +262,5 @@ pub fn coupdays(
 ) -> ExcelResult<f64> {
     validate_coupon_args(settlement, maturity, frequency, basis, system)?;
     let (pcd, ncd, _n) = coupon_pcd_ncd_num(settlement, maturity, frequency, system)?;
-    if basis == 4 {
-        let freq = f64::from(frequency);
-        if !freq.is_finite() || freq <= 0.0 {
-            return Err(ExcelError::Num);
-        }
-        let e = 360.0 / freq;
-        if !e.is_finite() || e <= 0.0 {
-            Err(ExcelError::Num)
-        } else {
-            Ok(e)
-        }
-    } else {
-        coupon_period_e(pcd, ncd, frequency, basis, system)
-    }
+    coupon_period_e(pcd, ncd, frequency, basis, system)
 }

@@ -334,8 +334,7 @@ fn oddf_equation(
     // Excel-style chronology constraints.
     //
     // Excel's published docs describe strict inequalities for ODDF* inputs, but parity testing
-    // against the curated excel-oracle corpus shows that some boundary equalities are accepted:
-    //
+    // against the curated excel-oracle corpus shows that the boundary equalities are accepted:
     // - `issue == settlement` implies zero accrued interest.
     // - `settlement == first_coupon` implies settlement on the first coupon date.
     //
