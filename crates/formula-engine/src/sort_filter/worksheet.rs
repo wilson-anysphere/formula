@@ -378,17 +378,6 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
                                 "entity" | "record" => serde_json::from_value(display_value.clone())
                                     .ok()
                                     .map(|v: ModelCellValue| model_cell_value_to_sort_value(&v)),
-                                "image" => display_value
-                                    .get("value")
-                                    .and_then(|v| {
-                                        v.get("altText").or_else(|| v.get("alt_text"))
-                                    })
-                                    .and_then(|v| v.as_str())
-                                    .map(|s| {
-                                        let display = if s.is_empty() { "[Image]" } else { s };
-                                        CellValue::Text(display.to_string())
-                                    })
-                                    .or_else(|| Some(CellValue::Text("[Image]".to_string()))),
                                 _ => None,
                             };
 
@@ -414,16 +403,6 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
                 };
             }
             None
-        }
-        "image" => {
-            let image = serialized.get("value")?;
-            let alt_text = image
-                .get("altText")
-                .or_else(|| image.get("alt_text"))
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty())
-                .unwrap_or("[Image]");
-            Some(CellValue::Text(alt_text.to_string()))
         }
         _ => None,
     }
