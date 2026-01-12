@@ -131,7 +131,9 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
     return { ...pressedById, ...uiState.pressedById };
   }, [pressedById, uiState.pressedById]);
 
-  React.useEffect(() => {
+  // Use a layout effect so narrow windows don't briefly flash the full ribbon on mount
+  // before we measure width.
+  React.useLayoutEffect(() => {
     const root = rootRef.current;
     if (!root) return;
 
@@ -428,11 +430,16 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
               data-testid="ribbon-tab-menu-toggle"
               ref={tabMenuButtonRef}
               onClick={() => {
-                setTabMenuOpen((prev) => !prev);
+                setTabMenuOpen((prev) => {
+                  const next = !prev;
+                  if (next) setFlyoutOpen(false);
+                  return next;
+                });
               }}
               onKeyDown={(event) => {
                 if (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ") {
                   event.preventDefault();
+                  setFlyoutOpen(false);
                   setTabMenuOpen(true);
                 }
               }}
