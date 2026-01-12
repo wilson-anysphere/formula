@@ -98,6 +98,31 @@ fn function_catalog_sync() {
         )
     });
 
+    // Keep the catalog stable for deterministic diffs and downstream tooling.
+    let catalog_names: Vec<String> = catalog
+        .functions
+        .iter()
+        .map(|entry| entry.name.clone())
+        .collect();
+    for name in &catalog_names {
+        assert_eq!(
+            name,
+            &name.to_ascii_uppercase(),
+            "expected functionCatalog.json function names to be uppercase, got {name}"
+        );
+    }
+    let mut sorted_names = catalog_names.clone();
+    sorted_names.sort();
+    assert_eq!(
+        catalog_names, sorted_names,
+        "expected functionCatalog.json to be sorted by name for deterministic diffs"
+    );
+    assert_eq!(
+        catalog_names.len(),
+        catalog_names.iter().collect::<BTreeSet<_>>().len(),
+        "expected functionCatalog.json to contain unique names"
+    );
+
     let mut catalog_specs: BTreeMap<String, ComparableFunctionSpec> = BTreeMap::new();
     for entry in catalog.functions {
         let key = entry.name.to_ascii_uppercase();
