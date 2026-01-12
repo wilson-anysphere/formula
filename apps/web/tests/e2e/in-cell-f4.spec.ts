@@ -21,23 +21,23 @@ test("in-cell editor F4 toggles absolute/relative A1 references", async ({ page 
 
   await editor.press("F4");
   await expect(editor).toHaveValue("=$A$1");
-  await expect(editor).toHaveJSProperty("selectionStart", 4);
-  await expect(editor).toHaveJSProperty("selectionEnd", 4);
+  await expect(editor).toHaveJSProperty("selectionStart", 1);
+  await expect(editor).toHaveJSProperty("selectionEnd", 5);
 
   await editor.press("F4");
   await expect(editor).toHaveValue("=A$1");
-  await expect(editor).toHaveJSProperty("selectionStart", 3);
-  await expect(editor).toHaveJSProperty("selectionEnd", 3);
+  await expect(editor).toHaveJSProperty("selectionStart", 1);
+  await expect(editor).toHaveJSProperty("selectionEnd", 4);
 
   await editor.press("F4");
   await expect(editor).toHaveValue("=$A1");
-  await expect(editor).toHaveJSProperty("selectionStart", 3);
-  await expect(editor).toHaveJSProperty("selectionEnd", 3);
+  await expect(editor).toHaveJSProperty("selectionStart", 1);
+  await expect(editor).toHaveJSProperty("selectionEnd", 4);
 
   await editor.press("F4");
   await expect(editor).toHaveValue("=A1");
-  await expect(editor).toHaveJSProperty("selectionStart", 2);
-  await expect(editor).toHaveJSProperty("selectionEnd", 2);
+  await expect(editor).toHaveJSProperty("selectionStart", 1);
+  await expect(editor).toHaveJSProperty("selectionEnd", 3);
 });
 
 test("in-cell editor F4 expands full-token selections to cover the toggled token", async ({ page }) => {

@@ -13,23 +13,23 @@ test("formula bar F4 cycles absolute/relative A1 references", async ({ page }) =
 
   await input.press("F4");
   await expect(input).toHaveValue("=$A$1");
-  await expect(input).toHaveJSProperty("selectionStart", 4);
-  await expect(input).toHaveJSProperty("selectionEnd", 4);
+  await expect(input).toHaveJSProperty("selectionStart", 1);
+  await expect(input).toHaveJSProperty("selectionEnd", 5);
 
   await input.press("F4");
   await expect(input).toHaveValue("=A$1");
-  await expect(input).toHaveJSProperty("selectionStart", 3);
-  await expect(input).toHaveJSProperty("selectionEnd", 3);
+  await expect(input).toHaveJSProperty("selectionStart", 1);
+  await expect(input).toHaveJSProperty("selectionEnd", 4);
 
   await input.press("F4");
   await expect(input).toHaveValue("=$A1");
-  await expect(input).toHaveJSProperty("selectionStart", 3);
-  await expect(input).toHaveJSProperty("selectionEnd", 3);
+  await expect(input).toHaveJSProperty("selectionStart", 1);
+  await expect(input).toHaveJSProperty("selectionEnd", 4);
 
   await input.press("F4");
   await expect(input).toHaveValue("=A1");
-  await expect(input).toHaveJSProperty("selectionStart", 2);
-  await expect(input).toHaveJSProperty("selectionEnd", 2);
+  await expect(input).toHaveJSProperty("selectionStart", 1);
+  await expect(input).toHaveJSProperty("selectionEnd", 3);
 });
 
 test("formula bar F4 expands full-token selections to cover the toggled token", async ({ page }) => {
