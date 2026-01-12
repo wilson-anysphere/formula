@@ -347,6 +347,7 @@ export class SpreadsheetApp {
   private sharedProvider: DocumentCellProvider | null = null;
   private readonly commentMeta = new Map<string, { resolved: boolean }>();
   private sharedGridSelectionSyncInProgress = false;
+  private sharedGridZoom = 1;
   private readonly sharedGridAxisCols = new Set<number>();
   private readonly sharedGridAxisRows = new Set<number>();
 
@@ -751,11 +752,25 @@ export class SpreadsheetApp {
         },
           callbacks: {
             onScroll: (scroll, viewport) => {
+              let effectiveViewport = viewport;
+              const prevZoom = this.sharedGridZoom;
+              const nextZoom = this.sharedGrid?.renderer.getZoom() ?? prevZoom;
+
+              if (nextZoom !== prevZoom) {
+                this.sharedGridZoom = nextZoom;
+                // Document sheet views store base axis sizes at zoom=1. When zoom changes via
+                // gestures (e.g. Ctrl/Cmd+wheel), the renderer scales its internal state but we
+                // still need to reapply persisted axis overrides at the new zoom level.
+                this.syncSharedGridAxisSizesFromDocument();
+                this.dispatchZoomChanged();
+                effectiveViewport = this.sharedGrid?.renderer.getViewportState() ?? viewport;
+              }
+
               const prevX = this.scrollX;
               const prevY = this.scrollY;
               this.scrollX = scroll.x;
               this.scrollY = scroll.y;
-              this.syncSharedChartPanes(viewport);
+              this.syncSharedChartPanes(effectiveViewport);
               this.hideCommentTooltip();
               this.renderCharts(false);
               this.renderAuditing();
@@ -819,6 +834,7 @@ export class SpreadsheetApp {
       // Match the legacy header sizing so existing click offsets and overlays stay aligned.
       this.sharedGrid.renderer.setColWidth(0, this.rowHeaderWidth);
       this.sharedGrid.renderer.setRowHeight(0, this.colHeaderHeight);
+      this.sharedGridZoom = this.sharedGrid.renderer.getZoom();
 
       // Keep legacy overlay ordering: charts above cells, selection above charts.
       this.chartLayer.style.zIndex = "2";
@@ -1050,6 +1066,11 @@ export class SpreadsheetApp {
     // via keyboard shortcuts).
     if (typeof window === "undefined") return;
     window.dispatchEvent(new CustomEvent("formula:view-changed"));
+  }
+
+  private dispatchZoomChanged(): void {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(new CustomEvent("formula:zoom-changed"));
   }
 
   destroy(): void {
@@ -1318,11 +1339,13 @@ export class SpreadsheetApp {
   setZoom(nextZoom: number): void {
     if (!this.sharedGrid) return;
     this.sharedGrid.renderer.setZoom(nextZoom);
+    this.sharedGridZoom = this.sharedGrid.renderer.getZoom();
     // Document sheet views store base axis sizes at zoom=1; apply zoom scaling and resync.
     this.syncSharedGridAxisSizesFromDocument();
     // Re-emit scroll so overlays (charts, auditing, etc) can re-layout at the new zoom level.
     const scroll = this.sharedGrid.getScroll();
     this.sharedGrid.scrollTo(scroll.x, scroll.y);
+    this.dispatchZoomChanged();
   }
 
   zoomToSelection(): void {

@@ -492,6 +492,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
 app.subscribeSelection(() => scheduleRibbonSelectionFormatStateUpdate());
 app.getDocument().on("change", () => scheduleRibbonSelectionFormatStateUpdate());
 window.addEventListener("formula:view-changed", () => scheduleRibbonSelectionFormatStateUpdate());
+window.addEventListener("formula:zoom-changed", () => syncZoomControl());
 scheduleRibbonSelectionFormatStateUpdate();
 
 function isTextInputTarget(target: EventTarget | null): boolean {
