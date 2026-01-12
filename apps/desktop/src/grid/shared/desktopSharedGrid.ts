@@ -344,7 +344,10 @@ export class DesktopSharedGrid {
     this.renderer.setPerfStatsEnabled(enabled);
   }
 
-  setSelectionRanges(ranges: CellRange[] | null, opts?: { activeIndex?: number; activeCell?: { row: number; col: number } | null }): void {
+  setSelectionRanges(
+    ranges: CellRange[] | null,
+    opts?: { activeIndex?: number; activeCell?: { row: number; col: number } | null; scrollIntoView?: boolean }
+  ): void {
     this.keyboardAnchor = null;
     this.transientRange = null;
     this.renderer.setRangeSelection(null);
@@ -361,7 +364,7 @@ export class DesktopSharedGrid {
     this.emitSelectionChange(prevSelection, nextSelection);
     this.emitSelectionRangeChange(prevRange, nextRange);
 
-    if (nextSelection) {
+    if (nextSelection && opts?.scrollIntoView !== false) {
       this.renderer.scrollToCell(nextSelection.row, nextSelection.col, { align: "auto", padding: 8 });
       this.syncScrollbars();
       this.emitScroll();
