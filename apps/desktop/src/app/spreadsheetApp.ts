@@ -1228,9 +1228,15 @@ export class SpreadsheetApp {
       this.root.addEventListener("keydown", (e) => this.onKeyDown(e), { signal: this.domAbort.signal });
     } else {
       this.root.addEventListener("pointerdown", (e) => this.onPointerDown(e), { signal: this.domAbort.signal });
-      this.root.addEventListener("pointermove", (e) => this.onPointerMove(e), { signal: this.domAbort.signal });
-      this.root.addEventListener("pointerup", (e) => this.onPointerUp(e), { signal: this.domAbort.signal });
-      this.root.addEventListener("pointercancel", (e) => this.onPointerUp(e), { signal: this.domAbort.signal });
+      this.root.addEventListener("pointermove", (e) => this.onPointerMove(e), {
+        passive: true,
+        signal: this.domAbort.signal,
+      });
+      this.root.addEventListener("pointerup", (e) => this.onPointerUp(e), { passive: true, signal: this.domAbort.signal });
+      this.root.addEventListener("pointercancel", (e) => this.onPointerUp(e), {
+        passive: true,
+        signal: this.domAbort.signal,
+      });
       this.root.addEventListener(
         "pointerleave",
         () => {
