@@ -1587,7 +1587,11 @@ fn parse_workbook_metadata(
             }
             Event::End(e) if e.local_name().as_ref() == b"definedName" => {
                 if let Some(dn) = current_defined.take() {
-                    defined_names.push(dn);
+                    // Defined name `refersTo` values follow the same `_xlfn.` forward-compatibility
+                    // convention as cell formulas. Strip `_xlfn.` prefixes so the model uses the
+                    // UI-facing formula text (matching how we store `Cell::formula`).
+                    let value = crate::formula_text::strip_xlfn_prefixes(&dn.value);
+                    defined_names.push(ParsedDefinedName { value, ..dn });
                 }
             }
             Event::Eof => break,

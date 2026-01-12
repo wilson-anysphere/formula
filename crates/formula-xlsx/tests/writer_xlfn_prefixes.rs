@@ -1,6 +1,6 @@
 use std::io::{Cursor, Read};
 
-use formula_model::{CellRef, CellValue};
+use formula_model::{CellRef, CellValue, DefinedNameScope};
 use zip::ZipArchive;
 
 #[test]
@@ -108,6 +108,24 @@ fn write_workbook_to_writer_prefixes_xlfn_functions_in_cells_and_defined_names(
     assert!(
         workbook_xml.contains("_xlfn.FORECAST.ETS.STAT(1,2)"),
         "expected FORECAST.ETS.STAT defined name formula to be stored with _xlfn. prefix, got workbook xml: {workbook_xml}"
+    );
+
+    // Ensure the in-memory model stores formulas without the `_xlfn.` prefix (matching cell formula
+    // policy).
+    let doc = formula_xlsx::load_from_bytes(&zip.into_inner().into_inner())?;
+    let my_forecast = doc
+        .workbook
+        .get_defined_name(DefinedNameScope::Workbook, "MyForecast")
+        .expect("MyForecast defined name missing");
+    assert_eq!(my_forecast.refers_to, "FORECAST.ETS(1,2,3)");
+
+    let my_forecast_all = doc
+        .workbook
+        .get_defined_name(DefinedNameScope::Workbook, "MyForecastAll")
+        .expect("MyForecastAll defined name missing");
+    assert_eq!(
+        my_forecast_all.refers_to,
+        "FORECAST.ETS(1,2,3)+FORECAST.ETS.CONFINT(1,2,3)+FORECAST.ETS.SEASONALITY(1,2)+FORECAST.ETS.STAT(1,2)"
     );
 
     Ok(())
