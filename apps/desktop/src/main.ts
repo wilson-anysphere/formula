@@ -2944,6 +2944,164 @@ mountRibbon(ribbonRoot, {
     }
   },
   onCommand: (commandId) => {
+    const doc = app.getDocument();
+
+    const fontSizePrefix = "home.font.fontSize.";
+    if (commandId.startsWith(fontSizePrefix)) {
+      const size = Number(commandId.slice(fontSizePrefix.length));
+      if (!Number.isFinite(size) || size <= 0) return;
+      applyToSelection("Font size", (sheetId, ranges) => setFontSize(doc, sheetId, ranges, size));
+      return;
+    }
+
+    const fillColorPrefix = "home.font.fillColor.";
+    if (commandId.startsWith(fillColorPrefix)) {
+      const preset = commandId.slice(fillColorPrefix.length);
+      const argb = (() => {
+        switch (preset) {
+          case "yellow":
+            return ["#", "FF", "FFFF00"].join("");
+          case "blue":
+            return ["#", "FF", "0000FF"].join("");
+          case "green":
+            return ["#", "FF", "00FF00"].join("");
+          case "red":
+            return ["#", "FF", "FF0000"].join("");
+          default:
+            return null;
+        }
+      })();
+
+      if (preset === "none") {
+        applyToSelection("Fill color", (sheetId, ranges) => {
+          for (const range of ranges) {
+            doc.setRangeFormat(sheetId, range, { fill: null }, { label: "Fill color" });
+          }
+        });
+        return;
+      }
+
+      if (argb) {
+        applyToSelection("Fill color", (sheetId, ranges) => setFillColor(doc, sheetId, ranges, argb));
+      }
+      return;
+    }
+
+    const fontColorPrefix = "home.font.fontColor.";
+    if (commandId.startsWith(fontColorPrefix)) {
+      const preset = commandId.slice(fontColorPrefix.length);
+      const argb = (() => {
+        switch (preset) {
+          case "black":
+            return ["#", "FF", "000000"].join("");
+          case "blue":
+            return ["#", "FF", "0000FF"].join("");
+          case "green":
+            return ["#", "FF", "00FF00"].join("");
+          case "red":
+            return ["#", "FF", "FF0000"].join("");
+          default:
+            return null;
+        }
+      })();
+
+      if (preset === "automatic") {
+        applyToSelection("Font color", (sheetId, ranges) => {
+          for (const range of ranges) {
+            doc.setRangeFormat(sheetId, range, { font: { color: null } }, { label: "Font color" });
+          }
+        });
+        return;
+      }
+
+      if (argb) {
+        applyToSelection("Font color", (sheetId, ranges) => setFontColor(doc, sheetId, ranges, argb));
+      }
+      return;
+    }
+
+    const bordersPrefix = "home.font.borders.";
+    if (commandId.startsWith(bordersPrefix)) {
+      const kind = commandId.slice(bordersPrefix.length);
+      if (kind === "none") {
+        applyToSelection("Borders", (sheetId, ranges) => {
+          for (const range of ranges) {
+            doc.setRangeFormat(sheetId, range, { border: null }, { label: "Borders" });
+          }
+        });
+        return;
+      }
+
+      if (kind === "all" || kind === "outside") {
+        applyToSelection("Borders", (sheetId, ranges) => applyAllBorders(doc, sheetId, ranges));
+        return;
+      }
+
+      if (kind === "thickBox") {
+        applyToSelection("Borders", (sheetId, ranges) => applyAllBorders(doc, sheetId, ranges, { style: "thick" }));
+        return;
+      }
+
+      const defaultBorderColor = ["#", "FF", "000000"].join("");
+      const edge = { style: "thin", color: defaultBorderColor };
+      const borderPatch = (() => {
+        switch (kind) {
+          case "bottom":
+            return { border: { bottom: edge } };
+          case "top":
+            return { border: { top: edge } };
+          case "left":
+            return { border: { left: edge } };
+          case "right":
+            return { border: { right: edge } };
+          default:
+            return null;
+        }
+      })();
+
+      if (borderPatch) {
+        applyToSelection("Borders", (sheetId, ranges) => {
+          for (const range of ranges) {
+            doc.setRangeFormat(sheetId, range, borderPatch, { label: "Borders" });
+          }
+        });
+      }
+      return;
+    }
+
+    const numberFormatPrefix = "home.number.numberFormat.";
+    if (commandId.startsWith(numberFormatPrefix)) {
+      const kind = commandId.slice(numberFormatPrefix.length);
+      if (kind === "general") {
+        applyToSelection("Number format", (sheetId, ranges) => {
+          for (const range of ranges) {
+            doc.setRangeFormat(sheetId, range, { numberFormat: null }, { label: "Number format" });
+          }
+        });
+        return;
+      }
+      if (kind === "currency" || kind === "accounting") {
+        applyToSelection("Number format", (sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "currency"));
+        return;
+      }
+      if (kind === "percentage") {
+        applyToSelection("Number format", (sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "percent"));
+        return;
+      }
+      if (kind === "shortDate" || kind === "longDate") {
+        applyToSelection("Number format", (sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "date"));
+        return;
+      }
+      return;
+    }
+
+    const accountingPrefix = "home.number.accounting.";
+    if (commandId.startsWith(accountingPrefix)) {
+      // For now, treat all accounting currency picks as the default currency preset.
+      applyToSelection("Number format", (sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "currency"));
+      return;
+    }
+
     switch (commandId) {
       case "insert.tables.pivotTable":
         ribbonLayoutController?.openPanel(PanelIds.PIVOT_BUILDER);
@@ -2951,16 +3109,18 @@ mountRibbon(ribbonRoot, {
         return;
 
       case "home.font.borders":
-        applyToSelection("Borders", (sheetId, ranges) => applyAllBorders(app.getDocument(), sheetId, ranges));
+        // This command is a dropdown with menu items; the top-level command is not expected
+        // to fire when the menu is present. Keep this as a fallback.
+        applyToSelection("Borders", (sheetId, ranges) => applyAllBorders(doc, sheetId, ranges));
         return;
       case "home.font.fontColor":
         openColorPicker(fontColorPicker, "Font color", (sheetId, ranges, argb) =>
-          setFontColor(app.getDocument(), sheetId, ranges, argb),
+          setFontColor(doc, sheetId, ranges, argb),
         );
         return;
       case "home.font.fillColor":
         openColorPicker(fillColorPicker, "Fill color", (sheetId, ranges, argb) =>
-          setFillColor(app.getDocument(), sheetId, ranges, argb),
+          setFillColor(doc, sheetId, ranges, argb),
         );
         return;
       case "home.font.fontSize":
@@ -2985,7 +3145,7 @@ mountRibbon(ribbonRoot, {
             { placeHolder: "Font size" },
           );
           if (picked == null) return;
-          applyToSelection("Font size", (sheetId, ranges) => setFontSize(app.getDocument(), sheetId, ranges, picked));
+          applyToSelection("Font size", (sheetId, ranges) => setFontSize(doc, sheetId, ranges, picked));
         })();
         return;
 
