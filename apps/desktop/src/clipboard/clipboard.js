@@ -1,7 +1,7 @@
 import { normalizeRange, parseA1, parseRangeA1 } from "../document/coords.js";
 import { t } from "../i18n/index.js";
 import { parseHtmlToCellGrid, serializeCellGridToHtml } from "./html.js";
-import { serializeCellGridToRtf } from "./rtf.js";
+import { extractPlainTextFromRtf, serializeCellGridToRtf } from "./rtf.js";
 import { parseTsvToCellGrid, serializeCellGridToTsv } from "./tsv.js";
 import { enforceClipboardCopy } from "../dlp/enforceClipboardCopy.js";
 import { normalizeExcelColorToCss } from "../shared/colors.js";
@@ -336,7 +336,19 @@ export function parseClipboardContentToCellGrid(content) {
   }
 
   const text = content.text;
-  if (typeof text === "string") return parseTsvToCellGrid(text);
+  if (typeof text === "string") {
+    const parsed = parseTsvToCellGrid(text);
+    if (parsed) return parsed;
+  }
+
+  const rtf = content.rtf;
+  if (typeof rtf === "string") {
+    const extracted = extractPlainTextFromRtf(rtf);
+    if (extracted) {
+      const parsed = parseTsvToCellGrid(extracted);
+      if (parsed) return parsed;
+    }
+  }
 
   return null;
 }

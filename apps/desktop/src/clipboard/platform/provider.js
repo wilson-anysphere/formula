@@ -325,36 +325,33 @@ function createTauriClipboardProvider() {
         }
       }
 
-      // 2) Secondary path: Best-effort HTML write via ClipboardItem when available (WebView-dependent).
+      // 2) Secondary path: Best-effort rich write via ClipboardItem when available (WebView-dependent).
+      // Some platforms reject particular rich types (especially text/rtf). When that happens, retry
+      // with just HTML/plain so we don't regress HTML clipboard writes.
       const clipboard = globalThis.navigator?.clipboard;
-      if (html && typeof ClipboardItem !== "undefined" && clipboard?.write) {
+      if ((html || rtf) && typeof ClipboardItem !== "undefined" && clipboard?.write) {
         try {
           /** @type {Record<string, Blob>} */
           const itemPayload = {
             "text/plain": new Blob([payload.text], { type: "text/plain" }),
-            "text/html": new Blob([html], { type: "text/html" }),
           };
+          if (html) itemPayload["text/html"] = new Blob([html], { type: "text/html" });
           if (rtf) itemPayload["text/rtf"] = new Blob([rtf], { type: "text/rtf" });
 
-          try {
-            await clipboard.write([new ClipboardItem(itemPayload)]);
-          } catch {
-            // Some platforms reject unknown/unsupported types (e.g. text/rtf). Retry
-            // with the base formats so we don't regress HTML clipboard writes.
-            if (rtf) {
-              try {
-                const fallback = new ClipboardItem({
+          await clipboard.write([new ClipboardItem(itemPayload)]);
+        } catch {
+          if (html) {
+            try {
+              await clipboard.write([
+                new ClipboardItem({
                   "text/plain": new Blob([payload.text], { type: "text/plain" }),
                   "text/html": new Blob([html], { type: "text/html" }),
-                });
-                await clipboard.write([fallback]);
-              } catch {
-                // Ignore; some platforms deny rich clipboard writes.
-              }
+                }),
+              ]);
+            } catch {
+              // Ignore; some platforms deny rich clipboard writes.
             }
           }
-        } catch {
-          // Ignore; some platforms deny rich clipboard writes.
         }
       }
     },

@@ -1,8 +1,8 @@
 /**
- * RTF clipboard serialization.
+ * RTF clipboard helpers.
  *
- * We emit an RTF table so rich clipboard consumers (Excel/Word/etc) can preserve
- * basic cell formatting.
+ * - `serializeCellGridToRtf`: emit a basic RTF table (for rich clipboard consumers).
+ * - `extractPlainTextFromRtf`: best-effort RTF -> plain text extraction (for paste fallback).
  *
  * @typedef {import("./types.js").CellGrid} CellGrid
  * @typedef {import("../document/cell.js").CellState} CellState
@@ -214,7 +214,7 @@ function toRtfUnicodeValue(codePoint) {
 
 /**
  * Escape text for RTF.
- * - Escape `\`, `{`, `}`.
+ * - Escape `\\`, `{`, `}`.
  * - Replace newlines with `\line`.
  * - Replace tabs with `\tab`.
  * - Emit basic unicode via `\uN?`.
@@ -376,4 +376,200 @@ export function serializeCellGridToRtf(grid) {
 
   out.push("}");
   return out.join("\n");
+}
+
+/**
+ * Best-effort RTF -> plain text extraction.
+ *
+ * The clipboard can sometimes expose only `text/rtf` without `text/plain` or `text/html`
+ * (e.g. when using OS-native clipboard backends). We only need enough fidelity to
+ * recover tabular content for TSV parsing.
+ *
+ * This is intentionally conservative: we translate a small set of common control
+ * words and drop everything else (control words, groups, destinations).
+ *
+ * @param {string} rtf
+ * @returns {string}
+ */
+export function extractPlainTextFromRtf(rtf) {
+  if (typeof rtf !== "string" || rtf.trim() === "") return "";
+
+  /** @type {Set<string>} */
+  const IGNORED_DESTINATIONS = new Set([
+    "fonttbl",
+    "colortbl",
+    "stylesheet",
+    "info",
+    "pict",
+    "object",
+    "datastore",
+    "themedata",
+  ]);
+
+  let out = "";
+
+  // RTF state is scoped to groups; treat `\ucN` as state.
+  let ignorable = false;
+  let ucSkip = 1;
+  let atStart = true;
+  /** @type {{ ignorable: boolean, ucSkip: number, atStart: boolean }[]} */
+  const stack = [];
+
+  const len = rtf.length;
+  let i = 0;
+
+  while (i < len) {
+    const ch = rtf[i];
+
+    if (ch === "{") {
+      stack.push({ ignorable, ucSkip, atStart });
+      atStart = true;
+      i += 1;
+      continue;
+    }
+
+    if (ch === "}") {
+      const prev = stack.pop();
+      if (prev) {
+        ignorable = prev.ignorable;
+        ucSkip = prev.ucSkip;
+        atStart = prev.atStart;
+      }
+      i += 1;
+      continue;
+    }
+
+    // Newlines inside RTF are usually formatting artifacts, not literal content.
+    if (ch === "\r" || ch === "\n") {
+      i += 1;
+      continue;
+    }
+
+    if (ch !== "\\") {
+      if (!ignorable) out += ch;
+      atStart = false;
+      i += 1;
+      continue;
+    }
+
+    // Backslash-initiated control sequence.
+    if (i + 1 >= len) break;
+    const next = rtf[i + 1];
+
+    // Escaped literal.
+    if (next === "\\" || next === "{" || next === "}") {
+      if (!ignorable) out += next;
+      atStart = false;
+      i += 2;
+      continue;
+    }
+
+    // Hex-escaped character: \'hh
+    if (next === "'") {
+      const hex = rtf.slice(i + 2, i + 4);
+      if (/^[0-9a-fA-F]{2}$/.test(hex)) {
+        if (!ignorable) out += String.fromCharCode(Number.parseInt(hex, 16));
+        atStart = false;
+        i += 4;
+        continue;
+      }
+      // Malformed; drop the escape introducer.
+      i += 2;
+      continue;
+    }
+
+    // Control symbols are backslash + single non-letter.
+    if (!/[a-zA-Z]/.test(next)) {
+      if (!ignorable) {
+        if (next === "~") out += " ";
+        else if (next === "_") out += "-";
+        else if (next === "-") out += ""; // optional hyphen
+        // Else: drop unknown control symbols.
+      }
+
+      if (next === "*") {
+        // Destination marked as ignorable.
+        ignorable = true;
+      }
+
+      atStart = false;
+      i += 2;
+      continue;
+    }
+
+    // Control word: \wordN?
+    let j = i + 1;
+    while (j < len && /[a-zA-Z]/.test(rtf[j])) j += 1;
+    const word = rtf.slice(i + 1, j);
+
+    // Optional numeric parameter.
+    let sign = 1;
+    if (rtf[j] === "-") {
+      sign = -1;
+      j += 1;
+    } else if (rtf[j] === "+") {
+      j += 1;
+    }
+
+    let numStr = "";
+    while (j < len && /[0-9]/.test(rtf[j])) {
+      numStr += rtf[j];
+      j += 1;
+    }
+
+    const param = numStr ? sign * Number.parseInt(numStr, 10) : null;
+
+    // A space following a control word is a delimiter and should be consumed.
+    if (rtf[j] === " ") j += 1;
+
+    // Some destinations should be skipped entirely (font tables, embedded images, etc).
+    if (atStart) {
+      if (IGNORED_DESTINATIONS.has(word)) ignorable = true;
+      atStart = false;
+    }
+
+    if (!ignorable) {
+      if (word === "tab") {
+        out += "\t";
+      } else if (word === "par" || word === "line") {
+        out += "\n";
+      } else if (word === "u" && typeof param === "number") {
+        // `\uN` is a signed 16-bit integer; map negatives back into [0, 65535].
+        let code = param;
+        if (code < 0) code = 65536 + code;
+        out += String.fromCharCode(code);
+      } else if (word === "uc" && typeof param === "number") {
+        // Number of "fallback" characters to skip after a unicode escape.
+        ucSkip = Math.max(0, param);
+      }
+    } else if (word === "uc" && typeof param === "number") {
+      // Even in ignored destinations, maintain `\ucN` state so `\uN` skipping stays in sync.
+      ucSkip = Math.max(0, param);
+    }
+
+    i = j;
+
+    // After \uN, skip the ANSI fallback characters (usually a single '?'), which are
+    // not meaningful once we've emitted the unicode value.
+    if (word === "u" && typeof param === "number" && ucSkip > 0) {
+      let skipped = 0;
+      while (i < len && skipped < ucSkip) {
+        const c = rtf[i];
+        if (c === "{" || c === "}") break;
+        if (c === "\\") {
+          // Count a hex escape as one fallback char, otherwise stop before control words.
+          if (rtf[i + 1] === "'" && /^[0-9a-fA-F]{2}$/.test(rtf.slice(i + 2, i + 4))) {
+            i += 4;
+            skipped += 1;
+            continue;
+          }
+          break;
+        }
+        i += 1;
+        skipped += 1;
+      }
+    }
+  }
+
+  return out;
 }
