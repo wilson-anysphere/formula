@@ -674,6 +674,35 @@ fn ensure_workbook_rels_has_relationship_expands_self_closing_prefix_only_root()
 }
 
 #[test]
+fn ensure_workbook_rels_has_relationship_prefers_root_prefix_when_default_xmlns_is_unrelated() {
+    let rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pr:Relationships xmlns="urn:unused" xmlns:pr="http://schemas.openxmlformats.org/package/2006/relationships"/>"#;
+
+    let mut parts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    parts.insert(WORKBOOK_RELS_PART.to_string(), rels.as_bytes().to_vec());
+
+    ensure_workbook_rels_has_relationship(&mut parts, REL_TYPE_STYLES, "styles.xml")
+        .expect("patch workbook rels");
+
+    let out = std::str::from_utf8(
+        parts
+            .get(WORKBOOK_RELS_PART)
+            .expect("workbook rels present")
+            .as_slice(),
+    )
+    .expect("utf8");
+    assert_parses_xml(out);
+    assert!(
+        out.contains("<pr:Relationship"),
+        "expected inserted pr:Relationship; got:\n{out}"
+    );
+    assert!(
+        !out.contains("<Relationship"),
+        "must not introduce namespace-less <Relationship> tags, got:\n{out}"
+    );
+}
+
+#[test]
 fn patch_workbook_rels_for_sheet_edits_handles_prefixed_relationships() {
     let rels = format!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>

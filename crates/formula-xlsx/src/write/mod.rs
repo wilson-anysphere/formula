@@ -4735,7 +4735,9 @@ fn ensure_workbook_rels_has_relationship(
                 if !root_has_default_ns {
                     for attr in e.attributes() {
                         let attr = attr?;
-                        if attr.key.as_ref() == b"xmlns" {
+                        if attr.key.as_ref() == b"xmlns"
+                            && attr.value.as_ref() == crate::relationships::PACKAGE_REL_NS.as_bytes()
+                        {
                             root_has_default_ns = true;
                             break;
                         }
