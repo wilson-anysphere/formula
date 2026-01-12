@@ -59,6 +59,63 @@ fn bytecode_inlines_name_formula_into_scalar_math() {
 }
 
 #[test]
+fn bytecode_inlines_structured_ref_defined_name_references() {
+    use formula_model::table::TableColumn;
+    use formula_model::{Range, Table};
+
+    fn table_fixture(range: &str) -> Table {
+        Table {
+            id: 1,
+            name: "Table1".into(),
+            display_name: "Table1".into(),
+            range: Range::from_a1(range).unwrap(),
+            header_row_count: 1,
+            totals_row_count: 0,
+            columns: vec![TableColumn {
+                id: 1,
+                name: "Col1".into(),
+                formula: None,
+                totals_formula: None,
+            }],
+            style: None,
+            auto_filter: None,
+            relationship_id: None,
+            part_path: None,
+        }
+    }
+
+    let mut engine = Engine::new();
+    engine.ensure_sheet("Sheet1");
+    engine.set_sheet_tables("Sheet1", vec![table_fixture("A1:A3")]);
+
+    engine.set_cell_value("Sheet1", "A2", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 2.0).unwrap();
+
+    engine
+        .define_name(
+            "MyCol",
+            NameScope::Workbook,
+            NameDefinition::Reference("Table1[Col1]".to_string()),
+        )
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=SUM(MyCol)")
+        .unwrap();
+
+    // Ensure we're exercising the bytecode path (the structured ref is inlined into the formula
+    // and rewritten to a supported RangeRef).
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(3.0));
+
+    // Ensure the AST evaluator agrees with the bytecode backend.
+    let debug = engine.debug_evaluate("Sheet1", "B1").unwrap();
+    assert_eq!(debug.value, engine.get_cell_value("Sheet1", "B1"));
+}
+
+#[test]
 fn bytecode_defined_name_formula_cycles_fall_back_without_recursing_forever() {
     let mut engine = Engine::new();
 

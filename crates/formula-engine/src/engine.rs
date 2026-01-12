@@ -3569,6 +3569,12 @@ impl Engine {
                         visiting,
                         lexical_scopes,
                     ),
+                    crate::Expr::StructuredRef(_) => self.extract_static_ref_expr_for_bytecode(
+                        &ast.expr,
+                        sheet_id,
+                        visiting,
+                        lexical_scopes,
+                    ),
                     crate::Expr::NameRef(_) => {
                         // Allow reference definitions to alias other defined names as long as they
                         // ultimately resolve to a static reference that can be lowered to bytecode.
@@ -3927,6 +3933,9 @@ impl Engine {
                     left: Box::new(left),
                     right: Box::new(right),
                 }))
+            }
+            crate::Expr::StructuredRef(sref) => {
+                Some(crate::Expr::StructuredRef(sref.clone()))
             }
             crate::Expr::NameRef(nref) => self.try_inline_defined_name_ref_for_bytecode(
                 nref,
