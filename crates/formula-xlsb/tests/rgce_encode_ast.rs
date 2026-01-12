@@ -351,3 +351,27 @@ fn ast_encoder_encodes_sheet_range_column_ref_as_area3d() {
         ]
     );
 }
+
+#[test]
+fn ast_encoder_roundtrips_external_workbook_ref() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet_external_workbook("Book2.xlsx", "Sheet1", "Sheet1", 0);
+
+    let encoded = encode_rgce_with_context_ast("=[Book2.xlsx]Sheet1!A1+1", &ctx, CellCoord::new(0, 0))
+        .expect("encode");
+    assert!(encoded.rgcb.is_empty());
+
+    assert_eq!(
+        encoded.rgce,
+        vec![
+            0x3A, 0x00, 0x00, // PtgRef3d(ixti=0)
+            0x00, 0x00, 0x00, 0x00, // row=0
+            0x00, 0xC0, // col=A with row/col relative flags
+            0x1E, 0x01, 0x00, // 1
+            0x03, // +
+        ]
+    );
+
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "[Book2.xlsx]Sheet1!A1+1");
+}

@@ -145,7 +145,7 @@ impl WorkbookContext {
     }
 
     /// Registers an ExternSheet table entry targeting an external workbook so formulas can decode
-    /// 3D references like `'[Book2.xlsx]Sheet1'!A1`.
+    /// and encode 3D references like `'[Book2.xlsx]Sheet1'!A1`.
     pub fn add_extern_sheet_external_workbook(
         &mut self,
         workbook: impl Into<String>,
