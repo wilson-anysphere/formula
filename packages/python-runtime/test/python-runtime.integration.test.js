@@ -54,6 +54,41 @@ formula.create_sheet("AtStart", index=0)
   assert.deepEqual(sheetNames, ["AtStart", "Sheet1", "Second", "Inserted", "Third"]);
 });
 
+test("native python runtime resolves sheet names case-insensitively (get_sheet)", async () => {
+  const workbook = new MockWorkbook();
+  const runtime = new NativePythonRuntime({
+    timeoutMs: 10_000,
+    maxMemoryBytes: 256 * 1024 * 1024,
+    permissions: { filesystem: "none", network: "none" },
+  });
+
+  const script = `
+import formula
+
+sheet = formula.get_sheet("sheet1")
+sheet["A1"] = 5
+`;
+
+  await runtime.execute(script, { api: workbook });
+  assert.equal(workbook.get_cell_value({ sheet_id: workbook.activeSheetId, row: 0, col: 0 }), 5);
+});
+
+test("native python runtime surfaces duplicate sheet name errors from the host", async () => {
+  const workbook = new MockWorkbook();
+  const runtime = new NativePythonRuntime({
+    timeoutMs: 10_000,
+    maxMemoryBytes: 256 * 1024 * 1024,
+    permissions: { filesystem: "none", network: "none" },
+  });
+
+  const script = `
+import formula
+formula.create_sheet("Sheet1")
+`;
+
+  await assert.rejects(() => runtime.execute(script, { api: workbook }), /sheet name already exists/i);
+});
+
 test("native python runtime returns captured stderr output (print)", async () => {
   const workbook = new MockWorkbook();
   const runtime = new NativePythonRuntime({

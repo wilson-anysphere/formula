@@ -2,6 +2,16 @@ function sheetIdForIndex(index) {
   return `sheet_${index}`;
 }
 
+function normalizeSheetNameForCaseInsensitiveCompare(name) {
+  // Excel compares sheet names case-insensitively with Unicode NFKC normalization.
+  // Match the semantics used by the backend and desktop DocumentController.
+  try {
+    return String(name ?? "").normalize("NFKC").toUpperCase();
+  } catch {
+    return String(name ?? "").toUpperCase();
+  }
+}
+
 function cellKey(row, col) {
   return `${row},${col}`;
 }
@@ -203,16 +213,28 @@ export class MockWorkbook {
   }
 
   get_sheet_id({ name }) {
+    const desired = normalizeSheetNameForCaseInsensitiveCompare(name);
     for (const sheet of this.sheets.values()) {
-      if (sheet.name === name) return sheet.id;
+      if (normalizeSheetNameForCaseInsensitiveCompare(sheet.name) === desired) return sheet.id;
     }
     return null;
   }
 
   create_sheet({ name, index }) {
+    const desiredName = String(name ?? "").trim();
+    if (!desiredName) {
+      throw new Error("create_sheet expects a non-empty name");
+    }
+    const desiredNormalized = normalizeSheetNameForCaseInsensitiveCompare(desiredName);
+    for (const sheet of this.sheets.values()) {
+      if (normalizeSheetNameForCaseInsensitiveCompare(sheet.name) === desiredNormalized) {
+        throw new Error("sheet name already exists");
+      }
+    }
+
     const nextIndex = this.sheets.size + 1;
     const id = sheetIdForIndex(nextIndex);
-    const newSheet = { id, name, cells: new Map() };
+    const newSheet = { id, name: desiredName, cells: new Map() };
 
     const orderedIds = Array.from(this.sheets.keys());
 
@@ -249,7 +271,18 @@ export class MockWorkbook {
   rename_sheet({ sheet_id, name }) {
     const sheet = this.sheets.get(sheet_id);
     if (!sheet) throw new Error(`Unknown sheet_id "${sheet_id}"`);
-    sheet.name = name;
+    const desiredName = String(name ?? "").trim();
+    if (!desiredName) {
+      throw new Error("sheet name cannot be blank");
+    }
+    const desiredNormalized = normalizeSheetNameForCaseInsensitiveCompare(desiredName);
+    for (const other of this.sheets.values()) {
+      if (other.id === sheet_id) continue;
+      if (normalizeSheetNameForCaseInsensitiveCompare(other.name) === desiredNormalized) {
+        throw new Error("sheet name already exists");
+      }
+    }
+    sheet.name = desiredName;
     return null;
   }
 
