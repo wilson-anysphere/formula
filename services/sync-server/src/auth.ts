@@ -29,6 +29,13 @@ export class AuthError extends Error {
   }
 }
 
+function timingSafeEqualStrings(a: string, b: string): boolean {
+  const aBuf = Buffer.from(a);
+  const bBuf = Buffer.from(b);
+  if (aBuf.length !== bBuf.length) return false;
+  return crypto.timingSafeEqual(aBuf, bBuf);
+}
+
 function parseBearerAuthorizationHeader(value: string | undefined): string | null {
   if (!value) return null;
   const match = value.match(/^Bearer\s+(.+)$/i);
@@ -340,7 +347,7 @@ export async function authenticateRequest(
   if (!token) throw new AuthError("Missing token", 401);
 
   if (auth.mode === "opaque") {
-    if (token !== auth.token) throw new AuthError("Invalid token", 401);
+    if (!timingSafeEqualStrings(token, auth.token)) throw new AuthError("Invalid token", 401);
     return {
       userId: "opaque",
       tokenType: "opaque",

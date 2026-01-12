@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import http from "node:http";
 import type { IncomingMessage } from "node:http";
 import https from "node:https";
@@ -87,6 +88,13 @@ function pickIp(req: IncomingMessage, trustProxy: boolean): string {
   return remote.length > MAX_CLIENT_IP_CHARS
     ? remote.slice(0, MAX_CLIENT_IP_CHARS)
     : remote;
+}
+
+function timingSafeEqualStrings(a: string, b: string): boolean {
+  const aBuf = Buffer.from(a);
+  const bBuf = Buffer.from(b);
+  if (aBuf.length !== bBuf.length) return false;
+  return crypto.timingSafeEqual(aBuf, bBuf);
 }
 
 function rawPathnameFromUrl(requestUrl: string): string {
@@ -1071,7 +1079,10 @@ export function createSyncServer(
             : Array.isArray(header)
               ? header[0]
               : undefined;
-        if (provided !== config.internalAdminToken) {
+        if (
+          typeof provided !== "string" ||
+          !timingSafeEqualStrings(provided, config.internalAdminToken)
+        ) {
           sendJson(res, 403, { error: "forbidden" });
           return;
         }
