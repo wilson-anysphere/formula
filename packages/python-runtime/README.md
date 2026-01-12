@@ -113,7 +113,7 @@ The host application must provide an `api` object implementing (or dispatching) 
 
 - `get_active_sheet_id() -> str`
 - `get_sheet_id({ name }) -> str | null`
-- `create_sheet({ name }) -> str`
+- `create_sheet({ name, index? }) -> str`
 - `get_sheet_name({ sheet_id }) -> str`
 - `rename_sheet({ sheet_id, name }) -> null`
 - `get_range_values({ range }) -> any[][]`
