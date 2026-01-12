@@ -120,6 +120,7 @@ const COMMENT_COORD_COL_STRIDE = 16_384;
 const COMPUTED_COORD_COL_STRIDE = COMMENT_COORD_COL_STRIDE;
 // Plain A1 address (with optional `$` absolute markers) without sheet qualification.
 const A1_CELL_REF_RE = /^\$?[A-Za-z]+\$?[1-9][0-9]*$/;
+const AI_FUNCTION_CALL_RE = /\bAI(?:\.(?:EXTRACT|CLASSIFY|TRANSLATE))?\s*\(/i;
 
 function isThenable(value: unknown): value is PromiseLike<unknown> {
   return typeof (value as { then?: unknown } | null)?.then === "function";
@@ -8559,28 +8560,28 @@ export class SpreadsheetApp {
     if (stack.has(computedKey)) return "#REF!";
 
     stack.add(computedKey);
-    let value: SpreadsheetValue;
+    const hasAiFunction = AI_FUNCTION_CALL_RE.test(state.formula);
+    const address = hasAiFunction ? cellToA1(cell) : "";
+    const cellAddress = hasAiFunction ? `${sheetId}!${address}` : undefined;
 
-    const address = cellToA1(cell);
-    value = evaluateFormula(state.formula, (ref) => {
-        const normalized = ref.replaceAll("$", "").trim();
-        let targetSheet = sheetId;
-        let targetAddress = normalized;
-        if (normalized.includes("!")) {
-          const [maybeSheet, addr] = normalized.split("!", 2);
-          if (maybeSheet && addr) {
-            const resolved = this.resolveSheetIdByName(maybeSheet);
-            if (!resolved) return "#REF!";
-            targetSheet = resolved;
-            targetAddress = addr.trim();
-           }
-         }
-         const coord = parseA1(targetAddress);
-         return this.computeCellValue(targetSheet, coord, memo, stack, options);
-       }, {
-          ai: this.aiCellFunctions,
-          cellAddress: `${sheetId}!${address}`,
-        });
+    const value = evaluateFormula(state.formula, (ref) => {
+      const normalized = ref.replaceAll("$", "").trim();
+      let targetSheet = sheetId;
+      let targetAddress = normalized;
+      const bang = normalized.lastIndexOf("!");
+      if (bang >= 0) {
+        const maybeSheet = normalized.slice(0, bang);
+        const addr = normalized.slice(bang + 1);
+        if (maybeSheet && addr) {
+          const resolved = this.resolveSheetIdByName(maybeSheet);
+          if (!resolved) return "#REF!";
+          targetSheet = resolved;
+          targetAddress = addr.trim();
+        }
+      }
+      const coord = parseA1(targetAddress);
+      return this.computeCellValue(targetSheet, coord, memo, stack, options);
+    }, { ai: this.aiCellFunctions, cellAddress });
 
     stack.delete(computedKey);
     memo.set(computedKey, value);

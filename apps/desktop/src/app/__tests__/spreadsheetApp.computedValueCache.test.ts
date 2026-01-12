@@ -140,12 +140,13 @@ describe("SpreadsheetApp computed-value cache", () => {
     expect(sheetIdsSpy).not.toHaveBeenCalled();
 
     // Sanity check: when the numeric cache entry is missing, we should fall back and
-    // build an A1 address.
+    // evaluate the formula.
     byCoord.delete(key);
     doc.setCellFormula(sheetId, { row, col }, "=1+1");
     spy.mockClear();
     expect((app as any).getCellComputedValue({ row, col })).toBe(2);
-    expect(spy).toHaveBeenCalled();
+    // Non-AI formulas do not require cellAddress, so we should not need to allocate an A1 string.
+    expect(spy).not.toHaveBeenCalled();
 
     app.destroy();
     root.remove();
