@@ -412,8 +412,6 @@ use std::sync::Arc;
 use tauri::State;
 #[cfg(feature = "desktop")]
 use tauri_plugin_shell::ShellExt;
-#[cfg(feature = "desktop")]
-use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
 #[cfg(feature = "desktop")]
 fn app_error(err: AppStateError) -> String {
@@ -3784,41 +3782,29 @@ pub fn check_for_updates(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn open_external_url(window: tauri::Window, url: String) -> Result<(), String> {
-    let parsed = tauri::Url::parse(&url).map_err(|_| format!("Invalid URL: {url}"))?;
-    let protocol = parsed.scheme().to_ascii_lowercase();
+    let parsed =
+        tauri::Url::parse(url.trim()).map_err(|err| format!("Invalid URL: {err}"))?;
 
-    // Block protocols that can execute code in the WebView context.
-    if matches!(protocol.as_str(), "javascript" | "data") {
-        return Err(format!("Blocked external URL protocol: {protocol}:"));
-    }
-
-    // Only http/https/mailto are considered trusted; anything else requires explicit
-    // user confirmation before we hand it off to the OS.
-    if !matches!(protocol.as_str(), "http" | "https" | "mailto") {
-        let message = format!(
-            "Open link with untrusted protocol \"{protocol}\"?\n\n{url}\n\nOnly http/https/mailto are trusted by default.",
-        );
-        let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
-        window
-            .dialog()
-            .message(message)
-            .title("Open external link?")
-            .kind(MessageDialogKind::Warning)
-            .buttons(MessageDialogButtons::OkCancel)
-            .show(move |confirmed| {
-                let _ = tx.send(confirmed);
-            });
-        let ok = rx
-            .await
-            .map_err(|_| "Confirmation dialog closed unexpectedly".to_string())?;
-        if !ok {
-            return Err("User cancelled external URL open".to_string());
+    // SECURITY: enforce a strict scheme allowlist at the Rust boundary so a compromised webview
+    // cannot use this command as an "open arbitrary protocol" primitive.
+    match parsed.scheme() {
+        "http" | "https" | "mailto" => {}
+        "javascript" | "data" | "file" => {
+            return Err(format!(
+                "Refusing to open URL with blocked scheme \"{}:\"",
+                parsed.scheme()
+            ))
+        }
+        other => {
+            return Err(format!(
+                "Refusing to open URL with unsupported scheme \"{other}:\" (allowed: http, https, mailto)"
+            ))
         }
     }
 
     window
         .shell()
-        .open(&url, None)
+        .open(parsed.as_str(), None)
         .map_err(|e| format!("Failed to open URL: {e}"))?;
     Ok(())
 }
