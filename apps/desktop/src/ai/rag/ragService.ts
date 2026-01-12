@@ -35,8 +35,8 @@ export interface DesktopRagServiceOptions {
   sampleRows?: number;
 
   /**
-   * Embedding configuration. Desktop workbook RAG uses deterministic hash
-   * embeddings by default (offline; no API keys / local models).
+   * Embedding configuration. Desktop workbook RAG uses `HashEmbedder`
+   * (deterministic hash embeddings) by default (offline; no API keys / local models).
    */
   embedder?: DesktopRagEmbedderConfig;
 

@@ -13,6 +13,9 @@ function fnv1a32(str) {
 /**
  * A deterministic, offline embedder used by Formula for workbook RAG.
  *
+ * This is the supported default embedder until a Cursor-managed embedding
+ * service exists.
+ *
  * Formula intentionally uses a hash-based embedder so workbook indexing and
  * retrieval work without:
  * - user-supplied API keys
