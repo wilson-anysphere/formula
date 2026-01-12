@@ -57,6 +57,7 @@ export const ar = {
   "command.view.togglePanel.python": "تبديل بايثون",
   "command.view.togglePanel.versionHistory": "تبديل سجل الإصدارات",
   "command.view.togglePanel.branchManager": "تبديل مدير الفروع",
+  "command.edit.selectCurrentRegion": "تحديد المنطقة الحالية",
   "commandDescription.view.togglePanel.aiChat": "إظهار/إخفاء لوحة دردشة الذكاء الاصطناعي",
   "commandDescription.view.togglePanel.aiAudit": "إظهار/إخفاء لوحة تدقيق الذكاء الاصطناعي",
   "commandDescription.view.togglePanel.extensions": "إظهار/إخفاء لوحة الإضافات",
@@ -65,5 +66,6 @@ export const ar = {
   "commandDescription.view.togglePanel.scriptEditor": "إظهار/إخفاء لوحة محرر النصوص البرمجية",
   "commandDescription.view.togglePanel.python": "إظهار/إخفاء لوحة بايثون",
   "commandDescription.view.togglePanel.versionHistory": "إظهار/إخفاء لوحة سجل الإصدارات",
-  "commandDescription.view.togglePanel.branchManager": "إظهار/إخفاء لوحة مدير الفروع"
+  "commandDescription.view.togglePanel.branchManager": "إظهار/إخفاء لوحة مدير الفروع",
+  "commandDescription.edit.selectCurrentRegion": "تحديد المنطقة الحالية حول الخلية النشطة (Excel: Ctrl+Shift+*)"
 };
