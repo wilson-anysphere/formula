@@ -212,10 +212,16 @@ test("CollabSession↔DocumentController binder edits are treated as local by Fo
   // Reconnect and sync state.
   disconnect = connectDocs(docA, docB);
 
+  // Deterministic tie-break: remote (clientID=2) should win in the merged state.
+  await waitForCondition(async () => (await sessionA.getCell("Sheet1:0:0"))?.formula === "=2");
+  assert.equal((await sessionA.getCell("Sheet1:0:0"))?.modifiedBy, null);
+
   await waitForCondition(() => conflictsA.length >= 1);
   const conflict = conflictsA[0];
   assert.equal(conflict.kind, "formula");
   assert.equal(conflict.remoteUserId, "", "expected remoteUserId to be unknown when modifiedBy is missing");
+  assert.equal(conflict.localFormula.trim(), "=1");
+  assert.equal(conflict.remoteFormula.trim(), "=2");
 
   // Optional: resolve the conflict and assert convergence.
   assert.ok(sessionA.formulaConflictMonitor?.resolveConflict(conflict.id, conflict.localFormula));
