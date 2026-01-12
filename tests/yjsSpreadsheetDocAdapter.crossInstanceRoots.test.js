@@ -6,10 +6,23 @@ import * as Y from "yjs";
 
 import { createYjsSpreadsheetDocAdapter } from "../packages/versioning/src/yjs/yjsSpreadsheetDocAdapter.js";
 
-test("Yjs doc adapter: encode/apply work when roots were created by a different Yjs instance (CJS applyUpdate)", () => {
+function requireYjsCjs() {
   const require = createRequire(import.meta.url);
-  // eslint-disable-next-line import/no-named-as-default-member
-  const Ycjs = require("yjs");
+  const prevError = console.error;
+  console.error = (...args) => {
+    if (typeof args[0] === "string" && args[0].startsWith("Yjs was already imported.")) return;
+    prevError(...args);
+  };
+  try {
+    // eslint-disable-next-line import/no-named-as-default-member
+    return require("yjs");
+  } finally {
+    console.error = prevError;
+  }
+}
+
+test("Yjs doc adapter: encode/apply work when roots were created by a different Yjs instance (CJS applyUpdate)", () => {
+  const Ycjs = requireYjsCjs();
 
   const doc = new Y.Doc();
 

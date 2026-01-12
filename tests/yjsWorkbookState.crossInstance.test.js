@@ -7,10 +7,23 @@ import * as Y from "yjs";
 import { sheetStateFromYjsDoc } from "../packages/versioning/src/yjs/sheetState.js";
 import { workbookStateFromYjsDoc } from "../packages/versioning/src/yjs/workbookState.js";
 
-test("Yjs state extractors handle cross-instance nested Y.Maps (CJS updates applied into ESM doc)", () => {
+function requireYjsCjs() {
   const require = createRequire(import.meta.url);
-  // eslint-disable-next-line import/no-named-as-default-member
-  const Ycjs = require("yjs");
+  const prevError = console.error;
+  console.error = (...args) => {
+    if (typeof args[0] === "string" && args[0].startsWith("Yjs was already imported.")) return;
+    prevError(...args);
+  };
+  try {
+    // eslint-disable-next-line import/no-named-as-default-member
+    return require("yjs");
+  } finally {
+    console.error = prevError;
+  }
+}
+
+test("Yjs state extractors handle cross-instance nested Y.Maps (CJS updates applied into ESM doc)", () => {
+  const Ycjs = requireYjsCjs();
 
   const remote = new Ycjs.Doc();
   const sheets = remote.getArray("sheets");
@@ -41,4 +54,3 @@ test("Yjs state extractors handle cross-instance nested Y.Maps (CJS updates appl
   assert.ok(workbookState.sheets.some((s) => s.id === "sheet1"));
   assert.equal(workbookState.cellsBySheet.get("sheet1")?.cells.get("r0c0")?.value, 42);
 });
-

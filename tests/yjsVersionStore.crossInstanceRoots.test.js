@@ -6,10 +6,23 @@ import * as Y from "yjs";
 
 import { YjsVersionStore } from "../packages/versioning/src/store/yjsVersionStore.js";
 
-test("YjsVersionStore: can read and append versions when the roots were created by a different Yjs module instance (CJS applyUpdate)", async () => {
+function requireYjsCjs() {
   const require = createRequire(import.meta.url);
-  // eslint-disable-next-line import/no-named-as-default-member
-  const Ycjs = require("yjs");
+  const prevError = console.error;
+  console.error = (...args) => {
+    if (typeof args[0] === "string" && args[0].startsWith("Yjs was already imported.")) return;
+    prevError(...args);
+  };
+  try {
+    // eslint-disable-next-line import/no-named-as-default-member
+    return require("yjs");
+  } finally {
+    console.error = prevError;
+  }
+}
+
+test("YjsVersionStore: can read and append versions when the roots were created by a different Yjs module instance (CJS applyUpdate)", async () => {
+  const Ycjs = requireYjsCjs();
 
   const remote = new Ycjs.Doc();
   const versions = remote.getMap("versions");

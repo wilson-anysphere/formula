@@ -7,7 +7,22 @@ import * as Y from "yjs";
 import { DocumentController } from "../apps/desktop/src/document/documentController.js";
 import { bindYjsToDocumentController } from "../packages/collab/binder/index.js";
 import { maskCellValue } from "../packages/collab/permissions/index.js";
- 
+
+function requireYjsCjs() {
+  const require = createRequire(import.meta.url);
+  const prevError = console.error;
+  console.error = (...args) => {
+    if (typeof args[0] === "string" && args[0].startsWith("Yjs was already imported.")) return;
+    prevError(...args);
+  };
+  try {
+    // eslint-disable-next-line import/no-named-as-default-member
+    return require("yjs");
+  } finally {
+    console.error = prevError;
+  }
+}
+
 async function waitForCondition(predicate, timeoutMs = 2_000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -141,11 +156,9 @@ test("binder: encrypted Yjs cells are masked and refuse plaintext writes", async
     ydoc.destroy();
   }
 });
-
+ 
 test("binder: initializes when cells root was created by a different Yjs instance (CJS Doc.getMap)", async () => {
-  const require = createRequire(import.meta.url);
-  // eslint-disable-next-line import/no-named-as-default-member
-  const Ycjs = require("yjs");
+  const Ycjs = requireYjsCjs();
 
   const ydoc = new Y.Doc();
   const cells = Ycjs.Doc.prototype.getMap.call(ydoc, "cells");

@@ -6,13 +6,26 @@ import * as Y from "yjs";
 
 import { createYjsSpreadsheetDocAdapter } from "../packages/versioning/src/yjs/yjsSpreadsheetDocAdapter.js";
 
-test("Yjs doc adapter: works when the Y.Doc comes from a different Yjs module instance (CJS vs ESM)", () => {
+function requireYjsCjs() {
   const require = createRequire(import.meta.url);
+  const prevError = console.error;
+  console.error = (...args) => {
+    if (typeof args[0] === "string" && args[0].startsWith("Yjs was already imported.")) return;
+    prevError(...args);
+  };
+  try {
+    // eslint-disable-next-line import/no-named-as-default-member
+    return require("yjs");
+  } finally {
+    console.error = prevError;
+  }
+}
+
+test("Yjs doc adapter: works when the Y.Doc comes from a different Yjs module instance (CJS vs ESM)", () => {
   // y-websocket pulls in the CJS build of Yjs; in pnpm workspaces it's possible
   // for the app to end up with both ESM + CJS module instances. This test
   // ensures our adapter doesn't rely on `instanceof` checks.
-  // eslint-disable-next-line import/no-named-as-default-member
-  const Ycjs = require("yjs");
+  const Ycjs = requireYjsCjs();
 
   const source = new Ycjs.Doc();
   const sourceCells = source.getMap("cells");
@@ -47,4 +60,3 @@ test("Yjs doc adapter: works when the Y.Doc comes from a different Yjs module in
   assert.equal(replay.share.has("versions"), false, "expected versions root to be excluded");
   assert.equal(replay.getMap("cells").get("Sheet1:0:0")?.get("value"), "alpha");
 });
-

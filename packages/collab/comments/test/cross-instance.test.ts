@@ -6,11 +6,24 @@ import { describe, expect, it } from "vitest";
 import { CommentManager } from "../src/manager";
 import { getCommentsRoot, migrateCommentsArrayToMap } from "../src/yjs";
 
+function requireYjsCjs(): typeof import("yjs") {
+  const require = createRequire(import.meta.url);
+  const prevError = console.error;
+  console.error = (...args) => {
+    if (typeof args[0] === "string" && args[0].startsWith("Yjs was already imported.")) return;
+    prevError(...args);
+  };
+  try {
+    // eslint-disable-next-line import/no-named-as-default-member
+    return require("yjs");
+  } finally {
+    console.error = prevError;
+  }
+}
+
 describe("collab comments cross-instance Yjs roots (ESM doc + CJS applyUpdate)", () => {
   it("reads and mutates a comments map root created by a different Yjs instance", () => {
-    const require = createRequire(import.meta.url);
-    // eslint-disable-next-line import/no-named-as-default-member
-    const Ycjs = require("yjs");
+    const Ycjs = requireYjsCjs();
 
     const remote = new Ycjs.Doc();
     const comments = remote.getMap("comments");
@@ -58,9 +71,7 @@ describe("collab comments cross-instance Yjs roots (ESM doc + CJS applyUpdate)",
   });
 
   it("reads and appends to a legacy comments array root created by a different Yjs instance", () => {
-    const require = createRequire(import.meta.url);
-    // eslint-disable-next-line import/no-named-as-default-member
-    const Ycjs = require("yjs");
+    const Ycjs = requireYjsCjs();
 
     const remote = new Ycjs.Doc();
     const comments = remote.getArray("comments");
@@ -102,9 +113,7 @@ describe("collab comments cross-instance Yjs roots (ESM doc + CJS applyUpdate)",
   });
 
   it("can write to a doc created by a different Yjs module instance (CJS Doc)", () => {
-    const require = createRequire(import.meta.url);
-    // eslint-disable-next-line import/no-named-as-default-member
-    const Ycjs = require("yjs");
+    const Ycjs = requireYjsCjs();
 
     // Doc + root types are from the CJS build.
     const doc = new Ycjs.Doc();
@@ -140,9 +149,7 @@ describe("collab comments cross-instance Yjs roots (ESM doc + CJS applyUpdate)",
   });
 
   it("can write + migrate a legacy comments array root on a CJS Doc", () => {
-    const require = createRequire(import.meta.url);
-    // eslint-disable-next-line import/no-named-as-default-member
-    const Ycjs = require("yjs");
+    const Ycjs = requireYjsCjs();
 
     const doc = new Ycjs.Doc();
     doc.getArray("comments"); // force legacy schema
@@ -180,9 +187,7 @@ describe("collab comments cross-instance Yjs roots (ESM doc + CJS applyUpdate)",
   });
 
   it("migrates a legacy comments array root containing foreign maps (CJS applyUpdate into ESM Doc)", () => {
-    const require = createRequire(import.meta.url);
-    // eslint-disable-next-line import/no-named-as-default-member
-    const Ycjs = require("yjs");
+    const Ycjs = requireYjsCjs();
 
     const remote = new Ycjs.Doc();
     const comments = remote.getArray("comments");
