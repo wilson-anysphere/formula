@@ -340,29 +340,40 @@ fn parse_csv_sep_directive(prefix: &[u8]) -> Option<u8> {
         line = &line[3..];
     }
 
-    // Trim ASCII spaces/tabs.
+    // Skip leading ASCII whitespace.
     let mut start = 0usize;
-    let mut end = line.len();
-    while start < end && matches!(line[start], b' ' | b'\t') {
+    while start < line.len() && matches!(line[start], b' ' | b'\t') {
         start += 1;
     }
-    while start < end && matches!(line[end - 1], b' ' | b'\t') {
-        end -= 1;
-    }
-    let line = &line[start..end];
+    let line = &line[start..];
 
-    if line.len() != 5 {
+    // Parse `sep=` prefix (case-insensitive).
+    if line.len() < 5 || !line[..4].eq_ignore_ascii_case(b"sep=") {
         return None;
     }
-    if !line[..4].eq_ignore_ascii_case(b"sep=") {
+
+    // Excel's directive is typically `sep=<delim>` with no extra spacing, but be tolerant of an
+    // extra space after `=` (e.g. `sep= ;`). Only skip ASCII spaces here so we don't accidentally
+    // skip a tab delimiter.
+    let mut delim_idx = 4usize;
+    while delim_idx < line.len() && line[delim_idx] == b' ' {
+        delim_idx += 1;
+    }
+    let delimiter = *line.get(delim_idx)?;
+    if !CSV_SNIFF_DELIMITERS.contains(&delimiter) {
         return None;
     }
-    let delimiter = line[4];
-    if CSV_SNIFF_DELIMITERS.contains(&delimiter) {
-        Some(delimiter)
-    } else {
-        None
+
+    // Allow trailing ASCII whitespace after the delimiter.
+    let mut rest_idx = delim_idx + 1;
+    while rest_idx < line.len() && matches!(line[rest_idx], b' ' | b'\t') {
+        rest_idx += 1;
     }
+    if rest_idx != line.len() {
+        return None;
+    }
+
+    Some(delimiter)
 }
 
 fn sniff_csv_delimiter_prefix<R: Read>(reader: &mut R) -> Result<(Vec<u8>, u8), std::io::Error> {

@@ -66,3 +66,18 @@ fn csv_auto_detect_respects_excel_sep_directive() {
     assert_eq!(sheet.value(CellRef::new(0, 0)), CellValue::Number(1.0));
     assert_eq!(sheet.value(CellRef::new(0, 1)), CellValue::Number(2.0));
 }
+
+#[test]
+fn csv_auto_detect_respects_excel_sep_directive_tab() {
+    // Excel also supports `sep=<delimiter>` with tab as the delimiter. This should override the
+    // content-based delimiter sniffing even if the remaining rows contain commas.
+    let csv = "sep=\t\ncol1,col2\nhello,world\n";
+    let sheet = import_csv_to_worksheet(1, "Data", Cursor::new(csv.as_bytes()), CsvOptions::default())
+        .unwrap();
+
+    assert_eq!(
+        sheet.value(CellRef::new(0, 0)),
+        CellValue::String("hello,world".to_string())
+    );
+    assert_eq!(sheet.value(CellRef::new(0, 1)), CellValue::Empty);
+}
