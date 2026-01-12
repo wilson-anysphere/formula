@@ -30,15 +30,23 @@ export function registerFindReplaceShortcuts({
   mount.append(findDialog, replaceDialog, goToDialog);
 
   window.addEventListener("keydown", (e) => {
-    if (!isMod(e)) return;
-
-    if (e.key.toLowerCase() === "f") {
-      e.preventDefault();
-      showDialogWithFocus(findDialog);
-    } else if (e.key.toLowerCase() === "h") {
+    // Replace: Cmd+Option+F on macOS (Cmd+H is reserved for Hide).
+    const key = e.key.toLowerCase();
+    if (e.metaKey && e.altKey && (key === "f" || e.code === "KeyF")) {
       e.preventDefault();
       showDialogWithFocus(replaceDialog);
-    } else if (e.key.toLowerCase() === "g") {
+      return;
+    }
+
+    if (!isMod(e)) return;
+
+    if (key === "f") {
+      e.preventDefault();
+      showDialogWithFocus(findDialog);
+    } else if (key === "h" && e.ctrlKey) {
+      e.preventDefault();
+      showDialogWithFocus(replaceDialog);
+    } else if (key === "g") {
       e.preventDefault();
       showDialogWithFocus(goToDialog);
     }
