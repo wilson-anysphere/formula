@@ -76,7 +76,21 @@ export function registerBuiltinCommands(params: {
     if (sheetIds.length <= 1) return;
     const active = app.getCurrentSheetId();
     const activeIndex = sheetIds.indexOf(active);
-    const idx = activeIndex >= 0 ? activeIndex : 0;
+    if (activeIndex === -1) {
+      // Current sheet is no longer visible (should be rare; typically we auto-fallback elsewhere).
+      // Treat this as a "jump to first visible sheet" so navigation is deterministic.
+      const first = sheetIds[0];
+      if (!first || first === active) return;
+      app.activateSheet(first);
+      if (focusAfterSheetNavigation) {
+        focusAfterSheetNavigation();
+      } else {
+        app.focusAfterSheetNavigation();
+      }
+      return;
+    }
+
+    const idx = activeIndex;
     const nextIndex = (idx + delta + sheetIds.length) % sheetIds.length;
     const next = sheetIds[nextIndex];
     if (!next || next === active) return;
