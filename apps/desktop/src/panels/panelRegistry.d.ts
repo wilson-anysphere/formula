@@ -7,6 +7,7 @@ export const PanelIds: Readonly<{
   VBA_MIGRATE: string;
   SCRIPT_EDITOR: string;
   PIVOT_BUILDER: string;
+  DATA_QUERIES: string;
   QUERY_EDITOR: string;
   PYTHON: string;
   SOLVER: string;
