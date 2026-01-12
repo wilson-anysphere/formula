@@ -344,6 +344,58 @@ test.describe("desktop updater UI wiring (tauri)", () => {
     });
     expect(notificationStatus.notificationsCount).toBe(0);
     expect(notificationStatus.invoked).toBe(false);
+
+    // TTL expiry should re-enable startup notifications.
+    await page.evaluate(() => {
+      const eightDaysAgoMs = Date.now() - 8 * 24 * 60 * 60 * 1000;
+      localStorage.setItem("formula.updater.dismissedVersion", "9.9.9");
+      localStorage.setItem("formula.updater.dismissedAt", String(eightDaysAgoMs));
+
+      const notifications = (window as any).__tauriNotifications;
+      if (Array.isArray(notifications)) notifications.length = 0;
+      const invokes = (window as any).__tauriInvokes;
+      if (Array.isArray(invokes)) invokes.length = 0;
+    });
+
+    await dispatchTauriEvent(page, "update-available", { source: "startup", version: "9.9.9", body: "Notes" });
+    await flushMicrotasks(page);
+    await expect(dialog).toBeHidden();
+
+    const ttlResult = await page.evaluate(() => ({
+      version: localStorage.getItem("formula.updater.dismissedVersion"),
+      dismissedAt: localStorage.getItem("formula.updater.dismissedAt"),
+      notificationsCount: Array.isArray((window as any).__tauriNotifications) ? (window as any).__tauriNotifications.length : 0,
+      invoked: Array.isArray((window as any).__tauriInvokes) &&
+        (window as any).__tauriInvokes.some((entry: any) => entry?.cmd === "show_system_notification"),
+    }));
+    expect(ttlResult.version).toBeNull();
+    expect(ttlResult.dismissedAt).toBeNull();
+    expect(ttlResult.notificationsCount > 0 || ttlResult.invoked).toBe(true);
+
+    // A different startup version should also clear any stored dismissal and re-notify.
+    await page.evaluate(() => {
+      localStorage.setItem("formula.updater.dismissedVersion", "9.9.9");
+      localStorage.setItem("formula.updater.dismissedAt", String(Date.now()));
+
+      const notifications = (window as any).__tauriNotifications;
+      if (Array.isArray(notifications)) notifications.length = 0;
+      const invokes = (window as any).__tauriInvokes;
+      if (Array.isArray(invokes)) invokes.length = 0;
+    });
+
+    await dispatchTauriEvent(page, "update-available", { source: "startup", version: "9.9.10", body: "Notes" });
+    await flushMicrotasks(page);
+
+    const versionResult = await page.evaluate(() => ({
+      version: localStorage.getItem("formula.updater.dismissedVersion"),
+      dismissedAt: localStorage.getItem("formula.updater.dismissedAt"),
+      notificationsCount: Array.isArray((window as any).__tauriNotifications) ? (window as any).__tauriNotifications.length : 0,
+      invoked: Array.isArray((window as any).__tauriInvokes) &&
+        (window as any).__tauriInvokes.some((entry: any) => entry?.cmd === "show_system_notification"),
+    }));
+    expect(versionResult.version).toBeNull();
+    expect(versionResult.dismissedAt).toBeNull();
+    expect(versionResult.notificationsCount > 0 || versionResult.invoked).toBe(true);
   });
 
   test("startup update-available events do not open the in-app dialog and instead request a system notification", async ({
