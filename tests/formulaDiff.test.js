@@ -114,3 +114,16 @@ test("diffFormula: supports comparison operators (>, >=)", () => {
     { type: "equal", tokens: ["number:0", "punct:,", "number:1", "punct:,", "number:0", "punct:)"] },
   ]);
 });
+
+test("diffFormula: normalize=true treats identifier case changes as equal", () => {
+  const result = diffFormula("=sum(a1:a2)", "=SUM(A1:A2)", { normalize: true });
+  assert.equal(result.equal, true);
+  assert.deepEqual(simplifyOps(result.ops), [
+    { type: "equal", tokens: ["op:=", "ident:sum", "punct:(", "ident:a1", "op::", "ident:a2", "punct:)"] },
+  ]);
+});
+
+test("diffFormula: normalize=false treats identifier case changes as edits", () => {
+  const result = diffFormula("=sum(a1:a2)", "=SUM(A1:A2)", { normalize: false });
+  assert.equal(result.equal, false);
+});

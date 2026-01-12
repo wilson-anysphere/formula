@@ -10,9 +10,16 @@ import { tokenizeFormula } from "./tokenize.js";
 /**
  * @param {Token} a
  * @param {Token} b
+ * @param {{ normalize: boolean }} opts
  */
-function tokenEquals(a, b) {
-  return a.type === b.type && a.value === b.value;
+function tokenEquals(a, b, opts) {
+  if (a.type !== b.type) return false;
+  // Excel formulas are generally case-insensitive for identifiers/cell refs.
+  // Treat case-only edits as cosmetic when normalization is enabled.
+  if (opts.normalize && a.type === "ident") {
+    return a.value.toUpperCase() === b.value.toUpperCase();
+  }
+  return a.value === b.value;
 }
 
 /**
@@ -196,11 +203,10 @@ export function diffFormula(oldFormula, newFormula, opts) {
 
   const equal =
     oldTokens.length === newTokens.length &&
-    oldTokens.every((t, i) => tokenEquals(t, newTokens[i]));
+    oldTokens.every((t, i) => tokenEquals(t, newTokens[i], { normalize }));
 
-  const edits = myersDiff(oldTokens, newTokens, tokenEquals);
+  const edits = myersDiff(oldTokens, newTokens, (a, b) => tokenEquals(a, b, { normalize }));
   const ops = coalesceEdits(edits);
 
   return { equal, ops };
 }
-
