@@ -289,7 +289,8 @@ function mergeClipboardContent(target, source) {
     } else if (!image && typeof target.pngBase64 !== "string" && typeof pngBase64 === "string") {
       // Only preserve base64 when we couldn't decode it into bytes.
       if (estimateBase64Bytes(pngBase64) <= MAX_IMAGE_BYTES) {
-        target.pngBase64 = normalizeBase64String(pngBase64);
+        const normalized = normalizeBase64String(pngBase64);
+        if (normalized) target.pngBase64 = normalized;
       }
     }
   }

@@ -871,6 +871,27 @@ test("clipboard provider", async (t) => {
     );
   });
 
+  await t.test("tauri: read ignores empty data URL pngBase64 payloads", async () => {
+    await withGlobals(
+      {
+        __TAURI__: {
+          core: {
+            async invoke(cmd) {
+              assert.equal(cmd, "clipboard_read");
+              return { pngBase64: "data:image/png;base64," };
+            },
+          },
+        },
+        navigator: undefined,
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        const content = await provider.read();
+        assert.deepEqual(content, { text: undefined });
+      }
+    );
+  });
+
   await t.test("tauri: read falls back to web clipboard before tauri clipboard.readText", async () => {
     /** @type {number} */
     let tauriReadTextCalls = 0;
