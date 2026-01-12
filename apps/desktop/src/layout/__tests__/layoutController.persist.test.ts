@@ -72,6 +72,41 @@ describe("LayoutController persistence", () => {
     expect(storage.getItem(key)).not.toBe(persistedBefore);
   });
 
+  test("setSplitRatio can be applied without persisting/emitting, then flushed with persistNow()", () => {
+    const storage = new MemoryStorage();
+    const keyPrefix = "test.layout";
+    const workspaceManager = new LayoutWorkspaceManager({ storage, keyPrefix });
+    const workbookId = "workbook-split-ratio";
+    const controller = new LayoutController({ workbookId, workspaceManager });
+    const key = `${keyPrefix}.workbook.${encodeURIComponent(workbookId)}.v1`;
+ 
+    let changeCount = 0;
+    controller.on("change", () => {
+      changeCount += 1;
+    });
+ 
+    // Seed an initial persisted state.
+    controller.setSplitDirection("vertical");
+    const persistedBefore = storage.getItem(key);
+    expect(persistedBefore).not.toBeNull();
+    expect(changeCount).toBe(1);
+ 
+    controller.setSplitRatio(0.05, { persist: false, emit: false });
+    // Should clamp to [0.1, 0.9] even for silent updates.
+    expect(controller.layout.splitView.ratio).toBeCloseTo(0.1, 5);
+    // Silent + non-persisted updates should not write storage or emit.
+    expect(storage.getItem(key)).toBe(persistedBefore);
+    expect(changeCount).toBe(1);
+ 
+    controller.persistNow();
+    expect(changeCount).toBe(1);
+    const after = storage.getItem(key);
+    expect(after).not.toBe(persistedBefore);
+    expect(after).not.toBeNull();
+    const parsed = JSON.parse(after!);
+    expect(parsed.splitView.ratio).toBeCloseTo(0.1, 5);
+  });
+
   test("switching workspaces persists pending ephemeral updates before reloading", () => {
     const storage = new MemoryStorage();
     const keyPrefix = "test.layout";
