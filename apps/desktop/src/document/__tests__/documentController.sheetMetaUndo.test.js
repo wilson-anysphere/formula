@@ -66,3 +66,34 @@ test("deleteSheet undo restores the sheet and its cell contents", () => {
   assert.equal(doc.getCell("Sheet2", "A1").value, "hello");
 });
 
+test("setSheetTabColor -> undo -> redo restores tab color", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", 1);
+
+  doc.setSheetTabColor("Sheet1", "FF00FF00");
+  assert.deepEqual(doc.getSheetMeta("Sheet1")?.tabColor, { rgb: "FF00FF00" });
+
+  doc.undo();
+  assert.equal(doc.getSheetMeta("Sheet1")?.tabColor, undefined);
+
+  doc.redo();
+  assert.deepEqual(doc.getSheetMeta("Sheet1")?.tabColor, { rgb: "FF00FF00" });
+});
+
+test("addSheet -> undo -> redo restores sheet + metadata + order", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", 1);
+
+  const newId = doc.addSheet({ sheetId: "Sheet2", name: "Second" });
+  assert.equal(newId, "Sheet2");
+  assert.deepEqual(doc.getSheetIds(), ["Sheet1", "Sheet2"]);
+  assert.deepEqual(doc.getSheetMeta("Sheet2"), { name: "Second", visibility: "visible" });
+
+  doc.undo();
+  assert.deepEqual(doc.getSheetIds(), ["Sheet1"]);
+  assert.equal(doc.getSheetMeta("Sheet2"), null);
+
+  doc.redo();
+  assert.deepEqual(doc.getSheetIds(), ["Sheet1", "Sheet2"]);
+  assert.deepEqual(doc.getSheetMeta("Sheet2"), { name: "Second", visibility: "visible" });
+});
