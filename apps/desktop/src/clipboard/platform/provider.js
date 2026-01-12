@@ -377,7 +377,8 @@ function createTauriClipboardProvider() {
                 native.imagePng = imagePng;
               } else if (estimateBase64Bytes(pngBase64) <= MAX_IMAGE_BYTES) {
                 // Preserve base64 only when decoding fails (legacy/internal).
-                native.pngBase64 = normalizeBase64String(pngBase64);
+                const normalized = normalizeBase64String(pngBase64);
+                if (normalized) native.pngBase64 = normalized;
               }
             }
 
