@@ -54,6 +54,7 @@ function hasTauri(): boolean {
 }
 
 const RECOMMENDED_DESKTOP_OAUTH_REDIRECT_URI = "formula://oauth/callback";
+const EXAMPLE_LOOPBACK_OAUTH_REDIRECT_URI = "http://127.0.0.1:4242/oauth/callback";
 
 function hasTauriEventApi(): boolean {
   return typeof (globalThis as any).__TAURI__?.event?.listen === "function";
@@ -855,7 +856,8 @@ export function DataQueriesPanelContainer(props: Props) {
             />
             {hasTauri() ? (
               <div style={{ fontSize: 11, opacity: 0.75 }}>
-                Tip: Use <code>{RECOMMENDED_DESKTOP_OAUTH_REDIRECT_URI}</code> on desktop to enable automatic redirect capture.
+                Tip: Use <code>{RECOMMENDED_DESKTOP_OAUTH_REDIRECT_URI}</code> (preferred) or a loopback redirect like{" "}
+                <code>{EXAMPLE_LOOPBACK_OAUTH_REDIRECT_URI}</code> to enable automatic redirect capture.
               </div>
             ) : null}
           </label>
