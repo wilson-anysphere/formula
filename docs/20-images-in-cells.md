@@ -370,10 +370,22 @@ Representative skeleton (SpreadsheetML namespace is expected, but element detail
 ## `xl/richData/*` (rich values)
 
 Excel stores non-primitive “rich” cell values using a set of XML parts under `xl/richData/`.
-For images-in-cells, these rich values are expected to contain (directly or indirectly) a reference to:
+For images-in-cells, these rich values ultimately resolve to an **image binary** under `xl/media/*`,
+but there appear to be multiple packaging patterns in the ecosystem:
 
-- an entry in `xl/cellImages.xml` (or `xl/cellimages.xml`), and therefore
-- an image binary in `xl/media/*`.
+1. **RichData → RichValueRel → media (no `cellImages.xml` part)**
+   - Observed in this repo via `crates/formula-xlsx/tests/embedded_images_place_in_cell_roundtrip.rs`
+     (generated with `rust_xlsxwriter::Worksheet::embed_image_with_format`).
+   - The image bytes are resolved via:
+     - `xl/richData/richValueRel.xml` → `xl/richData/_rels/richValueRel.xml.rels` → `xl/media/*`
+2. **`cellImages.xml` “cell image store” → media**
+   - Observed in this repo via `crates/formula-xlsx/tests/cell_images.rs` and related preservation tests.
+   - The image bytes are resolved via:
+     - `xl/cellImages.xml` → `xl/_rels/cellImages.xml.rels` → `xl/media/*`
+
+The exact way that a worksheet cell points at a `cellImages.xml` entry (if that part is present) is
+still not fully verified against a real Excel-generated “Place in Cell” workbook; treat that linkage
+as **opaque** and preserve all related parts for safe round-trip.
 
 At minimum, `xl/richData/richValue.xml` is expected to exist when `xl/metadata.xml` contains
 `<futureMetadata name="XLRICHVALUE">` entries with `xlrd:rvb i="…"` references (see mapping details above).
@@ -557,7 +569,9 @@ does not “orphan” images or break Excel’s internal references.
 - **Best-effort image import during `XlsxDocument` load**
   - `crates/formula-xlsx/src/read/mod.rs` calls `load_cell_images_from_parts(...)` to populate `workbook.images`.
 - **Preservation of `xl/cellImages.xml` / `xl/cellimages.xml` + matching `.rels` + `xl/media/*` on cell edits**
-  - Test: `crates/formula-xlsx/tests/cellimages_preservation.rs`
+   - Test: `crates/formula-xlsx/tests/cellimages_preservation.rs`
+- **Preservation of RichData “Place in Cell” parts (`xl/metadata.xml` + `xl/richData/*` + `xl/media/*`) on edits**
+  - Test: `crates/formula-xlsx/tests/embedded_images_place_in_cell_roundtrip.rs`
 - **`vm` attribute preservation** on edit is covered by:
   - `crates/formula-xlsx/tests/sheetdata_row_col_attrs.rs` (`editing_a_cell_does_not_strip_unrelated_row_col_or_cell_attrs`)
   - `crates/formula-xlsx/tests/metadata_rich_values_vm_roundtrip.rs` (also asserts `xl/metadata.xml` is preserved and the workbook relationship to `metadata.xml` remains)
