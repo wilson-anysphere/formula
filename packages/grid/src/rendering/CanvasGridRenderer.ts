@@ -3017,7 +3017,7 @@ export class CanvasGridRenderer {
               const strikeSegments: DecorationSegment[] = [];
 
               const justifyEnabled =
-                horizontalAlign === "justify" && wrapMode !== "none" && rotationDeg === 0 && resolvedAlign === "left" && layout.lines.length > 1;
+                horizontalAlign === "justify" && rotationDeg === 0 && resolvedAlign === "left" && layout.lines.length > 1;
               const whitespaceRe = /^\s+$/;
 
               for (let i = 0; i < layout.lines.length; i++) {
@@ -3513,7 +3513,7 @@ export class CanvasGridRenderer {
             }
 
             const justifyEnabled =
-              horizontalAlign === "justify" && wrapMode !== "none" && rotationDeg === 0 && resolvedAlign === "left" && layout.lines.length > 1;
+              horizontalAlign === "justify" && rotationDeg === 0 && resolvedAlign === "left" && layout.lines.length > 1;
             const justifiedLineWidths: number[] | null = justifyEnabled ? new Array(layout.lines.length) : null;
 
             const drawLayoutText = () => {
