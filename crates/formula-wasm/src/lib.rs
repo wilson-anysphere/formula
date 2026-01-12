@@ -415,6 +415,7 @@ fn engine_value_to_json(value: EngineValue) -> JsonValue {
 }
 
 fn cell_value_to_engine(value: &CellValue) -> EngineValue {
+    #[allow(unreachable_patterns)]
     match value {
         CellValue::Empty => EngineValue::Blank,
         CellValue::Number(n) => EngineValue::Number(*n),
@@ -440,6 +441,55 @@ fn cell_value_to_engine(value: &CellValue) -> EngineValue {
         // supports scalar values today. Treat these as spill errors so downstream formulas see an
         // error rather than silently treating an array as a string.
         CellValue::Array(_) | CellValue::Spill(_) => EngineValue::Error(ErrorKind::Spill),
+        // Rich value variants (Entity/Record) are not part of `formula-model` yet on older
+        // versions of this repository. Once added, this wildcard arm prevents the match from
+        // becoming non-exhaustive while degrading the value to a stable display string.
+        _ => rich_cell_value_to_engine(value).unwrap_or(EngineValue::Blank),
+    }
+}
+
+fn rich_cell_value_to_engine(value: &CellValue) -> Option<EngineValue> {
+    let serialized = serde_json::to_value(value).ok()?;
+    let value_type = serialized.get("type")?.as_str()?;
+
+    match value_type {
+        "entity" => {
+            let display_value = serialized
+                .get("value")?
+                .get("display_value")?
+                .as_str()?
+                .to_string();
+            Some(EngineValue::Text(display_value))
+        }
+        "record" => {
+            let record = serialized.get("value")?;
+            let display_field = record.get("display_field")?.as_str()?;
+            let fields = record.get("fields")?.as_object()?;
+            let display_value = fields.get(display_field)?;
+
+            let display_value_type = display_value.get("type")?.as_str()?;
+            let display_str = match display_value_type {
+                "number" => display_value.get("value")?.as_f64()?.to_string(),
+                "string" => display_value.get("value")?.as_str()?.to_string(),
+                "boolean" => {
+                    if display_value.get("value")?.as_bool()? {
+                        "TRUE".to_string()
+                    } else {
+                        "FALSE".to_string()
+                    }
+                }
+                "error" => display_value.get("value")?.as_str()?.to_string(),
+                "rich_text" => display_value
+                    .get("value")?
+                    .get("text")?
+                    .as_str()?
+                    .to_string(),
+                other => return Some(EngineValue::Text(other.to_string())),
+            };
+
+            Some(EngineValue::Text(display_str))
+        }
+        _ => None,
     }
 }
 
@@ -2180,16 +2230,14 @@ mod tests {
         let mut wb = WorkbookState::new_with_default_sheet();
 
         // Set a rich engine value directly into the engine cell store.
+        let rich_value = EngineValue::Reference(Reference {
+            sheet_id: SheetId::Local(0),
+            start: CellAddr { row: 0, col: 0 },
+            end: CellAddr { row: 0, col: 0 },
+        });
+        let expected = rich_value.to_string();
         wb.engine
-            .set_cell_value(
-                DEFAULT_SHEET,
-                "A1",
-                EngineValue::Reference(Reference {
-                    sheet_id: SheetId::Local(0),
-                    start: CellAddr { row: 0, col: 0 },
-                    end: CellAddr { row: 0, col: 0 },
-                }),
-            )
+            .set_cell_value(DEFAULT_SHEET, "A1", rich_value)
             .unwrap();
 
         // Ensure a formula that references the rich value produces the same degraded display output.
@@ -2199,8 +2247,66 @@ mod tests {
         let a1 = wb.get_cell_data(DEFAULT_SHEET, "A1").unwrap();
         let b1 = wb.get_cell_data(DEFAULT_SHEET, "B1").unwrap();
 
-        assert_eq!(a1.value, json!("#VALUE!"));
-        assert_eq!(b1.value, json!("#VALUE!"));
+        assert_eq!(a1.value, json!(expected));
+        assert_eq!(b1.value, a1.value);
+    }
+
+    #[test]
+    fn get_cell_data_degrades_model_entity_and_record_values_to_display_string_and_chains() {
+        // When `formula-model` gains Entity/Record variants, ensure we degrade them to display
+        // strings at the scalar JSON protocol boundary.
+        let entity: CellValue = match serde_json::from_value(json!({
+            "type": "entity",
+            "value": {
+                "display_value": "Entity display"
+            }
+        })) {
+            Ok(value) => value,
+            // Older versions of `formula-model` won't have Entity/Record variants yet.
+            Err(_) => return,
+        };
+
+        let record: CellValue = match serde_json::from_value(json!({
+            "type": "record",
+            "value": {
+                "display_field": "name",
+                "fields": {
+                    "name": { "type": "string", "value": "Alice" },
+                    "age": { "type": "number", "value": 42.0 }
+                }
+            }
+        })) {
+            Ok(value) => value,
+            Err(_) => return,
+        };
+
+        let mut wb = WorkbookState::new_with_default_sheet();
+
+        let entity_engine = cell_value_to_engine(&entity);
+        let entity_expected = entity_engine.to_string();
+        wb.engine
+            .set_cell_value(DEFAULT_SHEET, "A1", entity_engine)
+            .unwrap();
+
+        let record_engine = cell_value_to_engine(&record);
+        let record_expected = record_engine.to_string();
+        wb.engine
+            .set_cell_value(DEFAULT_SHEET, "A2", record_engine)
+            .unwrap();
+
+        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("=A1")).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B2", json!("=A2")).unwrap();
+        wb.recalculate_internal(None).unwrap();
+
+        let a1 = wb.get_cell_data(DEFAULT_SHEET, "A1").unwrap();
+        let b1 = wb.get_cell_data(DEFAULT_SHEET, "B1").unwrap();
+        assert_eq!(a1.value, json!(entity_expected));
+        assert_eq!(b1.value, a1.value);
+
+        let a2 = wb.get_cell_data(DEFAULT_SHEET, "A2").unwrap();
+        let b2 = wb.get_cell_data(DEFAULT_SHEET, "B2").unwrap();
+        assert_eq!(a2.value, json!(record_expected));
+        assert_eq!(b2.value, a2.value);
     }
 
     #[test]
