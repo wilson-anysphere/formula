@@ -27,6 +27,13 @@ Running `pnpm -C apps/desktop dev` (or `pnpm -C apps/desktop build`) will
 download the required Pyodide files into `apps/desktop/public/pyodide/` via
 `scripts/ensure-pyodide-assets.mjs`.
 
+## Content Security Policy (Tauri)
+
+The desktop app ships with a strict CSP in `apps/desktop/src-tauri/tauri.conf.json`.
+Collaboration uses a WebSocket provider (`y-websocket`), so `connect-src` must allow
+`ws:`/`wss:` for the app to connect to a local dev sync-server (e.g. `ws://127.0.0.1:1234`)
+and future hosted collaboration endpoints.
+
 To fetch the assets without starting Vite:
 
 ```bash
