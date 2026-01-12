@@ -271,6 +271,7 @@
 
 .collab-panel__message {
   padding: 12px;
+  color: var(--text-primary);
 }
 
 .collab-panel__message--error {
@@ -280,6 +281,7 @@
 .collab-version-history {
   flex: 1;
   min-height: 0;
+  color: var(--text-primary);
   padding: 12px;
   overflow: auto;
 }
@@ -341,6 +343,7 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
+  color: var(--text-primary);
   padding: 12px;
 }
 
@@ -398,6 +401,7 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
+  color: var(--text-primary);
   padding: 12px;
 }
 

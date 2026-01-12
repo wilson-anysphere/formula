@@ -581,13 +581,14 @@ export function SheetTabStrip({
 
               // Best-effort: use current color as the initial value when it's a #RRGGBB hex string.
               const currentCss = normalizeExcelColorToCss(sheet.tabColor?.rgb);
-              const tokenFallback = resolveCssVar("--sheet-tab-gray", { fallback: "#" + "000000" });
-              const initialValue = /^#[0-9a-fA-F]{6}$/.test(String(currentCss ?? ""))
-                ? String(currentCss).toLowerCase()
-                : /^#[0-9a-fA-F]{6}$/.test(String(tokenFallback ?? ""))
-                  ? String(tokenFallback).toLowerCase()
-                  : "#" + "000000";
-              input.value = initialValue;
+              const initialValue = (() => {
+                const normalized = String(currentCss ?? "").trim();
+                if (/^#[0-9a-fA-F]{6}$/.test(normalized)) return normalized.toLowerCase();
+                const tokenFallback = resolveCssVar("--sheet-tab-gray", { fallback: "" }).trim();
+                if (/^#[0-9a-fA-F]{6}$/.test(tokenFallback)) return tokenFallback.toLowerCase();
+                return null;
+              })();
+              if (initialValue) input.value = initialValue;
 
               // Preserve the current focus target so keyboard users return where they started.
               const restore = document.activeElement instanceof HTMLElement ? document.activeElement : null;
