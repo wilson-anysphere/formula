@@ -253,12 +253,21 @@ fn parse_supbook_record(
 fn is_internal_virt_path(virt_path: &str) -> bool {
     // There are multiple conventions in the wild for internal marker strings. Excel typically uses
     // a single 0x0001 character, but some writers appear to use NUL or a multi-character marker.
-    virt_path == "\u{0001}" || virt_path == "\u{0000}" || virt_path == "\u{0001}\u{0004}"
+    //
+    // Be permissive about trailing NUL padding: some producers write marker strings with one or
+    // more trailing `\0` characters.
+    let trimmed = virt_path.trim_end_matches('\0');
+    // If the string is entirely NULs (e.g. `"\0"`), it represents the internal marker, but treat
+    // an actually-empty string as "unknown" (it may come from a decode failure).
+    if trimmed.is_empty() {
+        return !virt_path.is_empty();
+    }
+    trimmed == "\u{0001}" || trimmed == "\u{0000}" || trimmed == "\u{0001}\u{0004}"
 }
 
 fn is_addin_virt_path(virt_path: &str) -> bool {
     // Excel uses a single 0x0002 character for add-in references.
-    virt_path == "\u{0002}"
+    virt_path.trim_end_matches('\0') == "\u{0002}"
 }
 
 fn workbook_name_from_virt_path(virt_path: &str) -> String {
@@ -683,6 +692,48 @@ mod tests {
         assert_eq!(sb.workbook_name, None);
         assert!(sb.sheet_names.is_empty());
         assert!(sb.extern_names.is_empty());
+    }
+
+    #[test]
+    fn parses_internal_supbook_marker_with_trailing_nuls() {
+        // Some producers emit internal marker strings with trailing NUL padding.
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0u16.to_le_bytes()); // ctab
+        payload.extend_from_slice(&xl_unicode_string_compressed("\u{0001}\u{0000}"));
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_SUPBOOK, &payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff8_supbook_table(&stream, 1252);
+        assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
+        assert_eq!(parsed.supbooks.len(), 1);
+        let sb = &parsed.supbooks[0];
+        assert_eq!(sb.kind, SupBookKind::Internal);
+    }
+
+    #[test]
+    fn parses_addin_supbook_marker_with_trailing_nuls() {
+        // Excel uses a single 0x0002 marker for add-in references, but some producers add NULs.
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0u16.to_le_bytes()); // ctab
+        payload.extend_from_slice(&xl_unicode_string_compressed("\u{0002}\u{0000}"));
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_SUPBOOK, &payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff8_supbook_table(&stream, 1252);
+        assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
+        assert_eq!(parsed.supbooks.len(), 1);
+        let sb = &parsed.supbooks[0];
+        assert_eq!(sb.kind, SupBookKind::Other);
     }
 
     #[test]
