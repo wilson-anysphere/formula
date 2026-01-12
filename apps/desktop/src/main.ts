@@ -567,6 +567,15 @@ function activeCellFontSizePt(): number {
   return typeof size === "number" && Number.isFinite(size) && size > 0 ? size : 11;
 }
 
+function activeCellNumberFormat(): string | null {
+  const sheetId = app.getCurrentSheetId();
+  const cell = app.getActiveCell();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const docAny = app.getDocument() as any;
+  const format = docAny.getCellFormat?.(sheetId, cell)?.numberFormat;
+  return typeof format === "string" && format.trim() ? format : null;
+}
+
 function stepFontSize(current: number, direction: "increase" | "decrease"): number {
   const value = Number(current);
   const resolved = Number.isFinite(value) && value > 0 ? value : 11;
@@ -582,6 +591,39 @@ function stepFontSize(current: number, direction: "increase" | "decrease"): numb
     if (step < resolved - 1e-6) return step;
   }
   return resolved;
+}
+
+function parseDecimalPlaces(format: string): number {
+  const dot = format.indexOf(".");
+  if (dot === -1) return 0;
+  let count = 0;
+  for (let i = dot + 1; i < format.length; i++) {
+    const ch = format[i];
+    if (ch === "0" || ch === "#") count += 1;
+    else break;
+  }
+  return count;
+}
+
+function stepDecimalPlacesInNumberFormat(format: string | null, direction: "increase" | "decrease"): string | null {
+  const raw = (format ?? "").trim();
+  const section = (raw.split(";")[0] ?? "").trim();
+  const lower = section.toLowerCase();
+  // Avoid trying to manipulate date/time format codes.
+  if (lower.includes("m/d/yyyy") || lower.includes("yyyy-mm-dd")) return null;
+
+  const prefix = section.includes("$") ? "$" : "";
+  const suffix = section.includes("%") ? "%" : "";
+  const useThousands = section.includes(",");
+  const decimals = parseDecimalPlaces(section);
+
+  const nextDecimals =
+    direction === "increase" ? Math.min(10, decimals + 1) : Math.max(0, decimals - 1);
+  if (nextDecimals === decimals) return null;
+
+  const integer = useThousands ? "#,##0" : "0";
+  const fraction = nextDecimals > 0 ? `.${"0".repeat(nextDecimals)}` : "";
+  return `${prefix}${integer}${fraction}${suffix}`;
 }
 // Panels persist state keyed by a workbook/document identifier. For file-backed workbooks we use
 // their on-disk path; for unsaved sessions we generate a random session id so distinct new
@@ -4680,6 +4722,14 @@ mountRibbon(ribbonRoot, {
         });
         return;
       }
+      if (kind === "number") {
+        applyToSelection("Number format", (sheetId, ranges) => {
+          for (const range of ranges) {
+            doc.setRangeFormat(sheetId, range, { numberFormat: "0.00" }, { label: "Number format" });
+          }
+        });
+        return;
+      }
       if (kind === "currency" || kind === "accounting") {
         applyToSelection("Number format", (sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "currency"));
         return;
@@ -4911,6 +4961,33 @@ mountRibbon(ribbonRoot, {
       case "home.number.date":
         applyToSelection("Number format", (sheetId, ranges) => applyNumberFormatPreset(app.getDocument(), sheetId, ranges, "date"));
         return;
+      case "home.number.comma":
+        applyToSelection("Number format", (sheetId, ranges) => {
+          for (const range of ranges) {
+            doc.setRangeFormat(sheetId, range, { numberFormat: "#,##0.00" }, { label: "Number format" });
+          }
+        });
+        return;
+      case "home.number.increaseDecimal": {
+        const next = stepDecimalPlacesInNumberFormat(activeCellNumberFormat(), "increase");
+        if (!next) return;
+        applyToSelection("Number format", (sheetId, ranges) => {
+          for (const range of ranges) {
+            doc.setRangeFormat(sheetId, range, { numberFormat: next }, { label: "Number format" });
+          }
+        });
+        return;
+      }
+      case "home.number.decreaseDecimal": {
+        const next = stepDecimalPlacesInNumberFormat(activeCellNumberFormat(), "decrease");
+        if (!next) return;
+        applyToSelection("Number format", (sheetId, ranges) => {
+          for (const range of ranges) {
+            doc.setRangeFormat(sheetId, range, { numberFormat: next }, { label: "Number format" });
+          }
+        });
+        return;
+      }
       case "home.number.formatCells":
       case "home.number.moreFormats.formatCells":
       case "home.cells.format.formatCells":
