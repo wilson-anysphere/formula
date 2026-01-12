@@ -401,6 +401,120 @@ test.describe("clipboard shortcuts (copy/cut/paste)", () => {
     expect(styleId).toBe(0);
   });
 
+  test("Paste Special Formulas pastes the formula (not formats)", async ({ page }) => {
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await gotoDesktop(page);
+
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+
+    // Seed:
+    // - A1 = 1
+    // - B1 = =$A$1+1 (-> 2) + bold formatting (source)
+    // - C1 = KeepStyle + italic formatting (destination)
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const doc = app.getDocument();
+      const sheetId = app.getCurrentSheetId();
+      doc.beginBatch({ label: "Seed paste special formulas" });
+      doc.setCellValue(sheetId, "A1", 1);
+      doc.setCellInput(sheetId, "B1", "=$A$1+1");
+      doc.setRangeFormat(sheetId, "B1", { font: { bold: true } }, { label: "Bold" });
+      doc.setCellValue(sheetId, "C1", "KeepStyle");
+      doc.setRangeFormat(sheetId, "C1", { font: { italic: true } }, { label: "Italic" });
+      doc.endBatch();
+      app.refresh();
+    });
+    await waitForIdle(page);
+
+    // Copy B1.
+    await page.click("#grid", { position: { x: 160, y: 40 } }); // B1
+    await expect(page.getByTestId("active-cell")).toHaveText("B1");
+    await page.keyboard.press(`${modifier}+C`);
+    await waitForIdle(page);
+
+    // Paste Special Formulas into C1.
+    await page.click("#grid", { position: { x: 260, y: 40 } }); // C1
+    await expect(page.getByTestId("active-cell")).toHaveText("C1");
+
+    await page.keyboard.press(`${modifier}+Shift+V`);
+    await expect(page.getByTestId("quick-pick")).toBeVisible();
+    await page.getByTestId("quick-pick-item-2").click(); // Paste Formulas
+    await waitForIdle(page);
+
+    const c1Value = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C1"));
+    expect(c1Value).toBe("2");
+
+    const { formula, bold, italic } = await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const doc = app.getDocument();
+      const sheetId = app.getCurrentSheetId();
+      const cell = doc.getCell(sheetId, "C1");
+      const style = doc.styleTable.get(cell.styleId);
+      return { formula: cell.formula, bold: style?.font?.bold === true, italic: style?.font?.italic === true };
+    });
+
+    expect(formula).toBe("=$A$1+1");
+    // Paste Formulas should not paste formats; destination italic should remain,
+    // and source bold should not be applied.
+    expect(italic).toBe(true);
+    expect(bold).toBe(false);
+  });
+
+  test("Paste Special Formats pastes formats (not values)", async ({ page }) => {
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await gotoDesktop(page);
+
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+
+    // Seed:
+    // - B1 = Styled + bold formatting (source)
+    // - C1 = KeepValue + italic formatting (destination, should keep value but lose italic)
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const doc = app.getDocument();
+      const sheetId = app.getCurrentSheetId();
+      doc.beginBatch({ label: "Seed paste special formats" });
+      doc.setCellValue(sheetId, "B1", "Styled");
+      doc.setRangeFormat(sheetId, "B1", { font: { bold: true } }, { label: "Bold" });
+      doc.setCellValue(sheetId, "C1", "KeepValue");
+      doc.setRangeFormat(sheetId, "C1", { font: { italic: true } }, { label: "Italic" });
+      doc.endBatch();
+      app.refresh();
+    });
+    await waitForIdle(page);
+
+    // Copy B1.
+    await page.click("#grid", { position: { x: 160, y: 40 } }); // B1
+    await expect(page.getByTestId("active-cell")).toHaveText("B1");
+    await page.keyboard.press(`${modifier}+C`);
+    await waitForIdle(page);
+
+    // Paste Special Formats into C1.
+    await page.click("#grid", { position: { x: 260, y: 40 } }); // C1
+    await expect(page.getByTestId("active-cell")).toHaveText("C1");
+
+    await page.keyboard.press(`${modifier}+Shift+V`);
+    await expect(page.getByTestId("quick-pick")).toBeVisible();
+    await page.getByTestId("quick-pick-item-3").click(); // Paste Formats
+    await waitForIdle(page);
+
+    const c1Value = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C1"));
+    expect(c1Value).toBe("KeepValue");
+
+    const { formula, bold, italic } = await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const doc = app.getDocument();
+      const sheetId = app.getCurrentSheetId();
+      const cell = doc.getCell(sheetId, "C1");
+      const style = doc.styleTable.get(cell.styleId);
+      return { formula: cell.formula, bold: style?.font?.bold === true, italic: style?.font?.italic === true };
+    });
+
+    expect(formula).toBeNull();
+    expect(bold).toBe(true);
+    expect(italic).toBe(false);
+  });
+
   test("DLP blocks spreadsheet copy/cut for Restricted ranges (toast shown, clipboard unchanged)", async ({ page }) => {
     await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
     await gotoDesktop(page);
