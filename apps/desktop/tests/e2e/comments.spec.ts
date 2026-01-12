@@ -3,6 +3,52 @@ import { expect, test } from "@playwright/test";
 import { gotoDesktop } from "./helpers";
 
 test.describe("comments", () => {
+  test("clicking the comments panel input commits an in-progress in-cell edit without stealing focus", async ({ page }) => {
+    await gotoDesktop(page);
+
+    await page.waitForFunction(() => {
+      const app = (window as any).__formulaApp;
+      const rect = app?.getCellRectA1?.("A1");
+      return rect && rect.width > 0 && rect.height > 0;
+    });
+
+    const a1 = (await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("A1"))) as {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    };
+
+    const grid = page.locator("#grid");
+    await grid.click({ position: { x: a1.x + a1.width / 2, y: a1.y + a1.height / 2 } });
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+
+    // Open the comments panel (this focuses the comment input by design).
+    await page.getByTestId("ribbon-root").getByTestId("open-comments-panel").click();
+    const panel = page.getByTestId("comments-panel");
+    const newCommentInput = panel.getByTestId("new-comment-input");
+    await expect(panel).toBeVisible();
+    await expect(newCommentInput).toBeFocused();
+
+    // Return focus to the grid and start an in-cell edit, but do not press Enter.
+    await grid.click({ position: { x: a1.x + a1.width / 2, y: a1.y + a1.height / 2 } });
+    await page.keyboard.press("h");
+    const editor = page.locator("textarea.cell-editor");
+    await expect(editor).toBeVisible();
+    await page.keyboard.type("ello");
+    await expect(editor).toHaveValue("hello");
+
+    // Clicking the comments input should commit the edit but leave focus on the input
+    // (no focus ping-pong back to the grid).
+    await newCommentInput.click();
+    await expect(newCommentInput).toBeFocused();
+    await expect(editor).toBeHidden();
+
+    await page.evaluate(() => (window as any).__formulaApp.whenIdle());
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"))).toBe("hello");
+    await expect(newCommentInput).toBeFocused();
+  });
+
   test("add comment, reply, resolve", async ({ page }) => {
     await gotoDesktop(page);
 

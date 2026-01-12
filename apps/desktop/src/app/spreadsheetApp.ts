@@ -1190,7 +1190,11 @@ export class SpreadsheetApp {
     const onEditorBlur = (event: FocusEvent) => {
       if (!this.editor.isOpen()) return;
       const next = event.relatedTarget as Node | null;
-      this.suppressFocusRestoreOnNextCommandCommit = !next || !this.root.contains(next);
+      // Only restore focus to the grid when the blur target is the grid root itself (e.g.
+      // DesktopSharedGrid focusing the container during pointer interactions). If focus moved
+      // to any other element (including focusable overlays inside the grid root), don't steal
+      // it back.
+      this.suppressFocusRestoreOnNextCommandCommit = next !== this.root;
       this.editor.commit("command");
     };
     this.editor.element.addEventListener("blur", onEditorBlur, { signal: this.domAbort.signal });
