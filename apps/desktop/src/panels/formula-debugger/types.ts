@@ -8,12 +8,19 @@ export type TraceKind =
   | { type: "number" }
   | { type: "text" }
   | { type: "bool" }
+  | { type: "blank" }
+  | { type: "error" }
+  | { type: "array_literal"; rows: number; cols: number }
   | { type: "cell_ref" }
   | { type: "range_ref" }
   | { type: "structured_ref" }
+  | { type: "name_ref"; name: string }
   | { type: "group" }
+  | { type: "implicit_intersection" }
+  | { type: "spill_range" }
   | { type: "unary_op"; op: string }
   | { type: "binary_op"; op: string }
+  | { type: "compare_op"; op: string }
   | { type: "function_call"; name: string };
 
 export type TraceValue =
