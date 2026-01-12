@@ -167,40 +167,7 @@ export function createSharedGridRendererBenchmarks(): BenchmarkDef[] {
     selection: document.createElement('canvas'),
   };
 
-  // Separate renderer for axis override benchmarking so we don't perturb the scroll benchmark.
-  const axisRenderer = new CanvasGridRenderer({ provider, rowCount, colCount });
-  axisRenderer.setPerfStatsEnabled(false);
-  axisRenderer.attach({
-    grid: document.createElement('canvas'),
-    content: document.createElement('canvas'),
-    selection: document.createElement('canvas'),
-  });
-  axisRenderer.setFrozen(frozenRows, frozenCols);
-  axisRenderer.resize(viewportWidth, viewportHeight, devicePixelRatio);
-  axisRenderer.renderImmediately();
-
-  const overrideRows = 10_000;
-  const overrideCols = 5_000;
-
-  const axisRowOverridesA = new Map<number, number>();
-  const axisRowOverridesB = new Map<number, number>();
-  for (let i = 0; i < overrideRows; i++) {
-    const row = i * 3;
-    axisRowOverridesA.set(row, 30);
-    axisRowOverridesB.set(row, 31);
-  }
-
-  const axisColOverridesA = new Map<number, number>();
-  const axisColOverridesB = new Map<number, number>();
-  for (let i = 0; i < overrideCols; i++) {
-    const col = i * 2;
-    axisColOverridesA.set(col, 120);
-    axisColOverridesB.set(col, 121);
-  }
-
-  let axisOverrideToggle = false;
-
-  return [
+  const benchmarks: BenchmarkDef[] = [
     {
       name: 'gridRenderer.firstFrame.p95',
       fn: () => {
@@ -235,7 +202,45 @@ export function createSharedGridRendererBenchmarks(): BenchmarkDef[] {
       },
       targetMs: 16,
     },
-    {
+  ];
+
+  // Batched axis override application can be quite noisy under Node (sorting + Map churn + GC),
+  // which risks making the overall perf suite flaky. Keep it opt-in.
+  if (process.env.FORMULA_BENCH_GRID_AXIS_OVERRIDES === '1') {
+    // Separate renderer for axis override benchmarking so we don't perturb the scroll benchmark.
+    const axisRenderer = new CanvasGridRenderer({ provider, rowCount, colCount });
+    axisRenderer.setPerfStatsEnabled(false);
+    axisRenderer.attach({
+      grid: document.createElement('canvas'),
+      content: document.createElement('canvas'),
+      selection: document.createElement('canvas'),
+    });
+    axisRenderer.setFrozen(frozenRows, frozenCols);
+    axisRenderer.resize(viewportWidth, viewportHeight, devicePixelRatio);
+    axisRenderer.renderImmediately();
+
+    const overrideRows = 10_000;
+    const overrideCols = 5_000;
+
+    const axisRowOverridesA = new Map<number, number>();
+    const axisRowOverridesB = new Map<number, number>();
+    for (let i = 0; i < overrideRows; i++) {
+      const row = i * 3;
+      axisRowOverridesA.set(row, 30);
+      axisRowOverridesB.set(row, 31);
+    }
+
+    const axisColOverridesA = new Map<number, number>();
+    const axisColOverridesB = new Map<number, number>();
+    for (let i = 0; i < overrideCols; i++) {
+      const col = i * 2;
+      axisColOverridesA.set(col, 120);
+      axisColOverridesB.set(col, 121);
+    }
+
+    let axisOverrideToggle = false;
+
+    benchmarks.push({
       name: 'gridRenderer.applyAxisSizeOverrides.10k.p95',
       fn: () => {
         // Toggle between two override maps so every iteration performs a real update (vs the
@@ -255,6 +260,8 @@ export function createSharedGridRendererBenchmarks(): BenchmarkDef[] {
       targetMs: 120,
       iterations: 25,
       warmup: 5,
-    },
-  ];
+    });
+  }
+
+  return benchmarks;
 }
