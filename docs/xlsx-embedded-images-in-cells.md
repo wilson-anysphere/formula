@@ -228,7 +228,8 @@ Interpretation:
 * `5` has been observed for **embedded local images written into the file** (the “Place in Cell” scenario), in both:
   * a `rust_xlsxwriter`-generated file, and
   * the Excel-generated fixture `fixtures/xlsx/basic/image-in-cell.xlsx`.
-* `6` may occur in other workbooks (not yet checked into this repo) and may correspond to a **calculation-generated** image (for example, an image originating from an Excel function/result rather than an explicitly embedded local image).
+* `6` is not currently observed in the in-repo fixtures; if encountered, treat it as an opaque Excel flag and
+  preserve it when round-tripping.
 
 The exact enum definition is not documented publicly by Microsoft; treat `CalcOrigin` as an opaque Excel flag but preserve it when round-tripping.
 
