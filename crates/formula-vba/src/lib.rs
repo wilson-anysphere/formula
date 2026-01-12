@@ -192,10 +192,14 @@ fn detect_project_codepage(project_stream_bytes: &[u8]) -> Option<&'static Encod
     // decoding the entire stream.
     //
     // Be permissive: accept case-insensitive `CodePage` with optional whitespace around `=`.
-    for mut line in project_stream_bytes.split(|&b| b == b'\n') {
-        // Strip CR from CRLF.
-        if line.last() == Some(&b'\r') {
-            line = &line[..line.len() - 1];
+    for mut line in project_stream_bytes.split(|&b| b == b'\n' || b == b'\r') {
+        if line.is_empty() {
+            continue;
+        }
+
+        // Some producers may include a UTF-8 BOM at the start of the stream.
+        if line.starts_with(&[0xEF, 0xBB, 0xBF]) {
+            line = &line[3..];
         }
 
         // Trim leading ASCII whitespace.
@@ -469,6 +473,21 @@ mod tests {
     #[test]
     fn detects_project_codepage_with_whitespace_and_case() {
         let bytes = b"Name=\"VBAProject\"\r\ncodepage = 1251\r\n";
+        let enc = detect_project_codepage(bytes).expect("detect CodePage");
+        assert_eq!(enc, WINDOWS_1251);
+    }
+
+    #[test]
+    fn detects_project_codepage_with_cr_line_endings() {
+        // Some producers might use CR-only line endings. We should still find the CodePage line.
+        let bytes = b"ID={123}\rcodepage=1251\rName=VBAProject\r";
+        let enc = detect_project_codepage(bytes).expect("detect CodePage");
+        assert_eq!(enc, WINDOWS_1251);
+    }
+
+    #[test]
+    fn detects_project_codepage_with_utf8_bom() {
+        let bytes = b"\xEF\xBB\xBFCodePage=1251\r\n";
         let enc = detect_project_codepage(bytes).expect("detect CodePage");
         assert_eq!(enc, WINDOWS_1251);
     }
