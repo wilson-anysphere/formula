@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { gotoDesktop, waitForDesktopReady } from "./helpers";
+import { gotoDesktop, openExtensionsPanel, waitForDesktopReady } from "./helpers";
 
 // CJS helpers (shared/* is CommonJS). Playwright's TS loader may not always expose
 // named exports for CJS modules, so fall back to `.default`.
@@ -248,8 +248,7 @@ export async function activate(context) {
       // Verify the install triggers panel contribution sync too: open the Extensions panel and
       // open the contributed view (panel) without reloading.
       await page.getByRole("tab", { name: "Home", exact: true }).click();
-      await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
-      await expect(page.getByTestId("panel-extensions")).toBeVisible();
+      await openExtensionsPanel(page);
 
       await page.getByTestId("panel-extensions").getByTestId(`open-panel-${panelId}`).click();
       await expect(page.getByTestId(`panel-${panelId}`)).toBeVisible({ timeout: 30_000 });

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { gotoDesktop } from "./helpers";
+import { gotoDesktop, openExtensionsPanel } from "./helpers";
 
 test.describe("global keybindings", () => {
   test("routes command palette, find/replace, and extension bindings through a single handler with input focus scoping", async ({
@@ -111,7 +111,7 @@ test.describe("global keybindings", () => {
       });
     });
 
-    await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
+    await openExtensionsPanel(page);
     await expect(page.getByTestId("run-command-sampleHello.sumSelection")).toBeVisible();
 
     await page.keyboard.press(`${primary}+Shift+Y`);

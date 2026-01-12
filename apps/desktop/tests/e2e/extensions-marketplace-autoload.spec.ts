@@ -7,7 +7,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { gotoDesktop, waitForDesktopReady } from "./helpers";
+import { gotoDesktop, openExtensionsPanel, waitForDesktopReady } from "./helpers";
 
 const requireFromHere = createRequire(import.meta.url);
 
@@ -185,7 +185,7 @@ export async function activate(context) {
     await page.reload();
     await waitForDesktopReady(page);
 
-    await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
+    await openExtensionsPanel(page);
     await expect(page.getByTestId(`extension-card-${extensionId}`)).toBeVisible({ timeout: 30_000 });
 
     const runBtn = page.getByTestId(`run-command-${commandId}`);
