@@ -5,6 +5,7 @@ import type {
   EditOp,
   EditResult,
   FormulaPartialParseResult,
+  FormulaParseOptions,
   FormulaToken,
   RpcOptions,
 } from "./protocol";
@@ -87,7 +88,7 @@ export interface EngineClient {
    *
    * This call is independent of any loaded workbook.
    */
-  lexFormula(formula: string, options?: unknown, rpcOptions?: RpcOptions): Promise<FormulaToken[]>;
+  lexFormula(formula: string, options?: FormulaParseOptions, rpcOptions?: RpcOptions): Promise<FormulaToken[]>;
 
   /**
    * Best-effort partial parse for editor/autocomplete scenarios.
@@ -97,7 +98,7 @@ export interface EngineClient {
   parseFormulaPartial(
     formula: string,
     cursor?: number,
-    options?: unknown,
+    options?: FormulaParseOptions,
     rpcOptions?: RpcOptions
   ): Promise<FormulaPartialParseResult>;
   terminate(): void;

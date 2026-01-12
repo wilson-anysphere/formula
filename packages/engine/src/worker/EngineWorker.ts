@@ -5,6 +5,7 @@ import type {
   EditOp,
   EditResult,
   FormulaPartialParseResult,
+  FormulaParseOptions,
   FormulaToken,
   InitMessage,
   RpcCancel,
@@ -224,7 +225,7 @@ export class EngineWorker {
    * Note: this RPC is independent of workbook state and intentionally does NOT
    * flush pending `setCell` batches.
    */
-  async lexFormula(formula: string, options?: unknown, rpcOptions?: RpcOptions): Promise<FormulaToken[]> {
+  async lexFormula(formula: string, options?: FormulaParseOptions, rpcOptions?: RpcOptions): Promise<FormulaToken[]> {
     return (await this.invoke("lexFormula", { formula, options }, rpcOptions)) as FormulaToken[];
   }
 
@@ -237,7 +238,7 @@ export class EngineWorker {
   async parseFormulaPartial(
     formula: string,
     cursor?: number,
-    options?: unknown,
+    options?: FormulaParseOptions,
     rpcOptions?: RpcOptions
   ): Promise<FormulaPartialParseResult> {
     return (await this.invoke("parseFormulaPartial", { formula, cursor, options }, rpcOptions)) as FormulaPartialParseResult;

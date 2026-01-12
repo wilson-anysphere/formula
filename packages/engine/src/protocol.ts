@@ -127,6 +127,21 @@ export interface FormulaPartialParseResult {
   };
 }
 
+/**
+ * Parse options accepted by the WASM editor tooling helpers (`lexFormula` / `parseFormulaPartial`).
+ *
+ * This intentionally mirrors the JS-friendly DTO supported by `crates/formula-wasm`.
+ */
+export interface FormulaParseOptions {
+  /**
+   * Formula locale id (e.g. `"en-US"`, `"de-DE"`).
+   *
+   * Note: supported locales depend on the engine build.
+   */
+  localeId?: string;
+  referenceStyle?: "A1" | "R1C1";
+}
+
 export interface RpcOptions {
   signal?: AbortSignal;
   timeoutMs?: number;

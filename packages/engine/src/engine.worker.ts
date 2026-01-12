@@ -2,6 +2,7 @@
 
 import type {
   CellScalar,
+  FormulaParseOptions,
   InitMessage,
   RpcCancel,
   RpcRequest,
@@ -25,8 +26,8 @@ type WasmWorkbookInstance = {
 
 type WasmModule = {
   default?: (module_or_path?: unknown) => Promise<void> | void;
-  lexFormula: (formula: string, options?: unknown) => unknown;
-  parseFormulaPartial: (formula: string, cursor?: number, options?: unknown) => unknown;
+  lexFormula: (formula: string, options?: FormulaParseOptions) => unknown;
+  parseFormulaPartial: (formula: string, cursor?: number, options?: FormulaParseOptions) => unknown;
   WasmWorkbook: {
     new (): WasmWorkbookInstance;
     fromJson(json: string): WasmWorkbookInstance;
