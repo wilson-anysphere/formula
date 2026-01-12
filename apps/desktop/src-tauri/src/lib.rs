@@ -4,7 +4,10 @@ pub mod ed25519_verifier;
 mod fs_scope;
 #[cfg(any(feature = "desktop", test))]
 pub mod clipboard;
-#[cfg(target_os = "linux")]
+// Clipboard fallback helpers are only used by the Linux clipboard backend, which itself is behind
+// the `desktop` feature. Keep this module behind the same gate so non-desktop builds don't pick up
+// dead_code warnings.
+#[cfg(all(target_os = "linux", any(feature = "desktop", test)))]
 mod clipboard_fallback;
 pub mod file_io;
 #[cfg(any(feature = "desktop", test))]
