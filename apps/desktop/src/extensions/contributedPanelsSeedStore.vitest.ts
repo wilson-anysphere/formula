@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { MemoryStorage } from "../layout/layoutPersistence.js";
 import {
+  CONTRIBUTED_PANELS_SEED_STORE_KEY,
   readContributedPanelsSeedStore,
   removeSeedPanelsForExtension,
   setSeedPanelsForExtension,
@@ -53,6 +54,18 @@ describe("contributedPanelsSeedStore", () => {
     });
   });
 
+  it("removes the seed store key when the last contributed panel is removed", () => {
+    const storage = new MemoryStorage();
+
+    setSeedPanelsForExtension(storage as any, "acme.foo", [{ id: "acme.foo.panel", title: "Foo Panel" }]);
+    expect(storage.getItem(CONTRIBUTED_PANELS_SEED_STORE_KEY)).not.toBeNull();
+
+    removeSeedPanelsForExtension(storage as any, "acme.foo");
+
+    expect(readContributedPanelsSeedStore(storage as any)).toEqual({});
+    expect(storage.getItem(CONTRIBUTED_PANELS_SEED_STORE_KEY)).toBeNull();
+  });
+
   it("rejects conflicting panel ids across extensions without mutating the store", () => {
     const storage = new MemoryStorage();
 
@@ -73,4 +86,3 @@ describe("contributedPanelsSeedStore", () => {
     expect(data["shared.panel"]).toMatchObject({ extensionId: "acme.foo", title: "Foo Panel" });
   });
 });
-

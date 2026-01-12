@@ -101,6 +101,12 @@ export function writeContributedPanelsSeedStore(storage: StorageLike, data: Cont
       ...(defaultDock ? { defaultDock } : {}),
     };
   }
+  // When empty, remove the key entirely so uninstall behaves like a clean slate (consistent with
+  // WebExtensionManager's uninstall cleanup behavior).
+  if (Object.keys(normalized).length === 0) {
+    safeRemoveItem(storage, CONTRIBUTED_PANELS_SEED_STORE_KEY);
+    return;
+  }
   safeSetItem(storage, CONTRIBUTED_PANELS_SEED_STORE_KEY, JSON.stringify(normalized));
 }
 
