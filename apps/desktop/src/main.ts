@@ -6213,6 +6213,9 @@ mountRibbon(ribbonReactRoot, {
     versionHistory: () => {
       toggleDockPanel(PanelIds.VERSION_HISTORY);
     },
+    branchManager: () => {
+      toggleDockPanel(PanelIds.BRANCH_MANAGER);
+    },
     pageSetup: () => {
       void handleRibbonPageSetup().catch((err) => {
         console.error("Failed to open page setup:", err);

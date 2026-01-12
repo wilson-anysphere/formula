@@ -34,6 +34,7 @@ function enableFileActions(): RibbonActions {
       saveWorkbook: vi.fn(),
       saveWorkbookAs: vi.fn(),
       versionHistory: vi.fn(),
+      branchManager: vi.fn(),
       print: vi.fn(),
       pageSetup: vi.fn(),
       closeWindow: vi.fn(),
@@ -90,12 +91,14 @@ describe("FileBackstage", () => {
     const saveItem = overlay.querySelector<HTMLButtonElement>('[data-testid="file-save"]');
     const saveAsItem = overlay.querySelector<HTMLButtonElement>('[data-testid="file-save-as"]');
     const versionHistoryItem = overlay.querySelector<HTMLButtonElement>('[data-testid="file-version-history"]');
+    const branchManagerItem = overlay.querySelector<HTMLButtonElement>('[data-testid="file-branch-manager"]');
     const quitItem = overlay.querySelector<HTMLButtonElement>('[data-testid="file-quit"]');
     expect(newItem).toBeInstanceOf(HTMLButtonElement);
     expect(openItem).toBeInstanceOf(HTMLButtonElement);
     expect(saveItem).toBeInstanceOf(HTMLButtonElement);
     expect(saveAsItem).toBeInstanceOf(HTMLButtonElement);
     expect(versionHistoryItem).toBeInstanceOf(HTMLButtonElement);
+    expect(branchManagerItem).toBeInstanceOf(HTMLButtonElement);
     expect(quitItem).toBeInstanceOf(HTMLButtonElement);
 
     expect(document.activeElement).toBe(newItem);
@@ -131,9 +134,14 @@ describe("FileBackstage", () => {
     expect(document.activeElement).toBe(versionHistoryItem);
 
     act(() => {
-      versionHistoryItem?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+      versionHistoryItem?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
     });
-    expect(document.activeElement).toBe(saveAsItem);
+    expect(document.activeElement).toBe(branchManagerItem);
+
+    act(() => {
+      branchManagerItem?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+    });
+    expect(document.activeElement).toBe(versionHistoryItem);
 
     // Wrap around on ArrowUp from the first item.
     newItem?.focus();

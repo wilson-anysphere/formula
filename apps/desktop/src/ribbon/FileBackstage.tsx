@@ -97,6 +97,15 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         onInvoke: actions?.versionHistory,
       },
       {
+        iconId: "open-branch-manager-panel",
+        label: "Branches",
+        hint: "",
+        ariaKeyShortcuts: "",
+        testId: "file-branch-manager",
+        ariaLabel: "Branch manager",
+        onInvoke: actions?.branchManager,
+      },
+      {
         iconId: "file.print.print",
         label: "Print…",
         hint: shortcut("P"),
