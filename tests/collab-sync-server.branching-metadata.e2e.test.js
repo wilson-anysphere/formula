@@ -146,7 +146,10 @@ test("sync-server + BranchService (Yjs): merge preserves sheet metadata + namedR
   });
 
   // Apply merge result back into the shared Yjs document.
-  applyBranchStateToYjsDoc(clientA.ydoc, merge.state, { origin: clientA.session.origin });
+  //
+  // Use the dedicated "branching-apply" origin so this bulk rewrite is not
+  // treated as a normal local edit by collaborative undo/conflict tracking.
+  applyBranchStateToYjsDoc(clientA.ydoc, merge.state, { origin: "branching-apply" });
 
   await waitForCondition(() => {
     const stateB = branchStateFromYjsDoc(clientB.ydoc);
