@@ -55,7 +55,7 @@ fn bytes_to_utf8(bytes: &[u8]) -> Option<String> {
 mod gtk_backend {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
 
-    use super::super::{normalize_base64_str, MAX_IMAGE_BYTES, MAX_RICH_TEXT_BYTES};
+    use super::super::{normalize_base64_str, string_within_limit, MAX_PNG_BYTES, MAX_TEXT_BYTES};
     use super::{
         bytes_to_utf8, choose_best_target, ClipboardContent, ClipboardError, ClipboardWritePayload,
     };
@@ -196,9 +196,10 @@ mod gtk_backend {
                     .wait_for_text()
                     .map(|s| s.to_string())
                     .filter(|s| !s.is_empty())
+                    .and_then(|s| string_within_limit(s, MAX_TEXT_BYTES))
                     .or_else(|| match targets.as_deref() {
                         Some(targets) => choose_best_target(targets, &["text/plain"])
-                            .and_then(|t| wait_for_utf8_targets(clipboard, &[t], usize::MAX)),
+                            .and_then(|t| wait_for_utf8_targets(clipboard, &[t], MAX_TEXT_BYTES)),
                         None => wait_for_utf8_targets(
                             clipboard,
                             &[
@@ -206,12 +207,12 @@ mod gtk_backend {
                                 "text/plain;charset=utf-8",
                                 "text/plain; charset=utf-8",
                             ],
-                            usize::MAX,
+                            MAX_TEXT_BYTES,
                         ),
                     });
                 let html = match targets.as_deref() {
                     Some(targets) => choose_best_target(targets, &["text/html"])
-                        .and_then(|t| wait_for_utf8_targets(clipboard, &[t], MAX_RICH_TEXT_BYTES)),
+                        .and_then(|t| wait_for_utf8_targets(clipboard, &[t], MAX_TEXT_BYTES)),
                     // If target enumeration isn't available, fall back to the canonical target.
                     None => wait_for_utf8_targets(
                         clipboard,
@@ -220,7 +221,7 @@ mod gtk_backend {
                             "text/html;charset=utf-8",
                             "text/html; charset=utf-8",
                         ],
-                        MAX_RICH_TEXT_BYTES,
+                        MAX_TEXT_BYTES,
                     ),
                 };
                 let rtf = match targets.as_deref() {
@@ -228,7 +229,7 @@ mod gtk_backend {
                         targets,
                         &["text/rtf", "application/rtf", "application/x-rtf"],
                     )
-                    .and_then(|t| wait_for_utf8_targets(clipboard, &[t], MAX_RICH_TEXT_BYTES)),
+                    .and_then(|t| wait_for_utf8_targets(clipboard, &[t], MAX_TEXT_BYTES)),
                     None => wait_for_utf8_targets(
                         clipboard,
                         &[
@@ -238,20 +239,20 @@ mod gtk_backend {
                             "application/rtf",
                             "application/x-rtf",
                         ],
-                        MAX_RICH_TEXT_BYTES,
+                        MAX_TEXT_BYTES,
                     ),
                 };
                 let png_base64 = match targets.as_deref() {
                     Some(targets) => choose_best_target(targets, &["image/png"])
-                        .and_then(|t| wait_for_bytes_base64(clipboard, t, MAX_IMAGE_BYTES)),
-                    None => wait_for_bytes_base64(clipboard, "image/png", MAX_IMAGE_BYTES),
+                        .and_then(|t| wait_for_bytes_base64(clipboard, t, MAX_PNG_BYTES)),
+                    None => wait_for_bytes_base64(clipboard, "image/png", MAX_PNG_BYTES),
                 }
                 .or_else(|| {
                     // Some applications expose images on the clipboard without an `image/png` target.
                     // Fall back to GTK's pixbuf API and re-encode to PNG (requires image loaders).
                     let pixbuf = clipboard.wait_for_image()?;
                     let bytes = pixbuf.save_to_bufferv("png", &[]).ok()?;
-                    if bytes.len() > MAX_IMAGE_BYTES {
+                    if bytes.len() > MAX_PNG_BYTES {
                         return None;
                     }
                     Some(STANDARD.encode(bytes))

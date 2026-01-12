@@ -15,8 +15,8 @@ use objc2::runtime::AnyObject;
 use std::ffi::{c_void, CStr};
 
 use super::{
-    normalize_base64_str, ClipboardContent, ClipboardError, ClipboardWritePayload, MAX_IMAGE_BYTES,
-    MAX_RICH_TEXT_BYTES,
+    normalize_base64_str, string_within_limit, ClipboardContent, ClipboardError, ClipboardWritePayload,
+    MAX_PNG_BYTES, MAX_TEXT_BYTES,
 };
 
 // Ensure the framework crates are linked (and silence `unused_crate_dependencies`).
@@ -90,12 +90,6 @@ unsafe fn nsstring_to_rust_string(ns_str: *mut AnyObject) -> Option<String> {
         return None;
     }
     Some(CStr::from_ptr(c_str).to_string_lossy().into_owned())
-}
-
-unsafe fn pasteboard_string_for_type(pasteboard: *mut AnyObject, ty: &AnyObject) -> Option<String> {
-    // -[NSPasteboard stringForType:]
-    let ns_str: *mut AnyObject = objc2::msg_send![pasteboard, stringForType: ty];
-    nsstring_to_rust_string(ns_str)
 }
 
 unsafe fn pasteboard_string_for_type_limited(
@@ -179,13 +173,13 @@ unsafe fn tiff_to_png_bytes(tiff: &[u8]) -> Result<Vec<u8>, ClipboardError> {
             "converted PNG was empty".to_string(),
         ));
     }
-    if len > MAX_IMAGE_BYTES {
+    if len > MAX_PNG_BYTES {
         return Err(ClipboardError::OperationFailed(format!(
-            "converted PNG exceeds maximum size ({MAX_IMAGE_BYTES} bytes)"
+            "converted PNG exceeds maximum size ({MAX_PNG_BYTES} bytes)"
         )));
     }
 
-    let bytes = nsdata_to_vec(png_data, MAX_IMAGE_BYTES);
+    let bytes = nsdata_to_vec(png_data, MAX_PNG_BYTES);
     if bytes.is_empty() {
         return Err(ClipboardError::OperationFailed(
             "failed to copy converted PNG bytes".to_string(),
@@ -223,13 +217,13 @@ unsafe fn png_to_tiff_bytes(png: &[u8]) -> Result<Vec<u8>, ClipboardError> {
             "converted TIFF was empty".to_string(),
         ));
     }
-    if len > MAX_IMAGE_BYTES {
+    if len > MAX_PNG_BYTES {
         return Err(ClipboardError::OperationFailed(format!(
-            "converted TIFF exceeds maximum size ({MAX_IMAGE_BYTES} bytes)"
+            "converted TIFF exceeds maximum size ({MAX_PNG_BYTES} bytes)"
         )));
     }
 
-    let bytes = nsdata_to_vec(tiff_data, MAX_IMAGE_BYTES);
+    let bytes = nsdata_to_vec(tiff_data, MAX_PNG_BYTES);
     if bytes.is_empty() {
         return Err(ClipboardError::OperationFailed(
             "failed to copy converted TIFF bytes".to_string(),
@@ -258,30 +252,31 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
         let ty_png = nsstring_from_str(TYPE_PNG)?;
         let ty_tiff = nsstring_from_str(TYPE_TIFF)?;
 
-        let text = pasteboard_string_for_type(pasteboard, &*ty_string).or_else(|| {
-            pasteboard_data_for_type(pasteboard, &*ty_string, usize::MAX)
-                .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-        });
-
-        let html = pasteboard_string_for_type_limited(pasteboard, &*ty_html, MAX_RICH_TEXT_BYTES)
+        let text = pasteboard_string_for_type_limited(pasteboard, &*ty_string, MAX_TEXT_BYTES)
             .or_else(|| {
-                pasteboard_data_for_type(pasteboard, &*ty_html, MAX_RICH_TEXT_BYTES)
+                pasteboard_data_for_type(pasteboard, &*ty_string, MAX_TEXT_BYTES)
                     .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-            });
+            })
+            .and_then(|s| string_within_limit(s, MAX_TEXT_BYTES));
 
-        let rtf = pasteboard_data_for_type(pasteboard, &*ty_rtf, MAX_RICH_TEXT_BYTES)
-            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
+        let html = pasteboard_string_for_type_limited(pasteboard, &*ty_html, MAX_TEXT_BYTES)
+            .or_else(|| {
+                pasteboard_data_for_type(pasteboard, &*ty_html, MAX_TEXT_BYTES)
+                    .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+            })
+            .and_then(|s| string_within_limit(s, MAX_TEXT_BYTES));
+
+        let rtf = pasteboard_data_for_type(pasteboard, &*ty_rtf, MAX_TEXT_BYTES)
+            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+            .and_then(|s| string_within_limit(s, MAX_TEXT_BYTES));
 
         // Prefer PNG when present, but fall back to TIFF (converted to PNG) for interoperability
         // with macOS apps that primarily put `public.tiff` on the pasteboard.
-        let png_base64 = pasteboard_data_for_type(pasteboard, &*ty_png, MAX_IMAGE_BYTES)
+        let png_base64 = pasteboard_data_for_type(pasteboard, &*ty_png, MAX_PNG_BYTES)
             .map(|bytes| STANDARD.encode(&bytes))
             .or_else(|| {
-                let tiff = pasteboard_data_for_type(pasteboard, &*ty_tiff, MAX_IMAGE_BYTES)?;
+                let tiff = pasteboard_data_for_type(pasteboard, &*ty_tiff, MAX_PNG_BYTES)?;
                 let png = tiff_to_png_bytes(&tiff).ok()?;
-                if png.len() > MAX_IMAGE_BYTES {
-                    return None;
-                }
                 Some(STANDARD.encode(&png))
             });
 
@@ -379,9 +374,9 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
 
             // Also provide `public.tiff` (NSPasteboardTypeTIFF) for better macOS interoperability.
             // Many AppKit apps prefer TIFF even when PNG is present.
-            if bytes.len() <= MAX_IMAGE_BYTES {
+            if bytes.len() <= MAX_PNG_BYTES {
                 if let Ok(tiff) = png_to_tiff_bytes(bytes) {
-                    if !tiff.is_empty() && tiff.len() <= MAX_IMAGE_BYTES {
+                    if !tiff.is_empty() && tiff.len() <= MAX_PNG_BYTES {
                         let ty_tiff = nsstring_from_str(TYPE_TIFF)?;
                         let tiff_data = nsdata_from_bytes(&tiff)?;
                         let ok: bool =

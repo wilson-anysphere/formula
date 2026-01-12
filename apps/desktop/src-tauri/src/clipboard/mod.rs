@@ -1,3 +1,4 @@
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
 
 pub mod platform;
@@ -7,9 +8,23 @@ mod cf_html;
 // Clipboard items can contain extremely large rich payloads (especially images).
 // Guard against unbounded memory usage / IPC payload sizes by skipping oversized formats.
 //
-// These match the frontend clipboard provider limits.
-const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024; // 10 MiB
-const MAX_RICH_TEXT_BYTES: usize = 2 * 1024 * 1024; // 2 MiB (HTML / RTF)
+// Oversized clipboard items are omitted (not treated as an error) so paste operations remain
+// responsive.
+
+/// Maximum number of raw PNG bytes we will read from the OS clipboard.
+///
+/// Large images (e.g. screenshots) can easily reach tens of MB. Returning them requires base64
+/// encoding for IPC transport, which can cause expensive transfers and OOM the app. Oversized
+/// clipboard items are omitted (not treated as an error).
+pub const MAX_PNG_BYTES: usize = 5 * 1024 * 1024;
+
+/// Maximum number of UTF-8 bytes we will read for string clipboard formats (text/plain, text/html,
+/// text/rtf).
+pub const MAX_TEXT_BYTES: usize = 2 * 1024 * 1024;
+
+// Internal aliases used by the backend for "image" (PNG) and rich text limits.
+const MAX_IMAGE_BYTES: usize = MAX_PNG_BYTES;
+const MAX_RICH_TEXT_BYTES: usize = MAX_TEXT_BYTES;
 
 fn normalize_base64_str(mut base64: &str) -> &str {
     base64 = base64.trim();
@@ -74,6 +89,27 @@ mod linux;
 
 #[cfg(target_os = "macos")]
 mod macos;
+
+/// Returns `true` if a payload of `len` bytes is within the provided limit.
+#[inline]
+pub fn within_limit(len: usize, max_bytes: usize) -> bool {
+    len <= max_bytes
+}
+
+/// Returns `Some(value)` if the UTF-8 byte length is within `max_bytes`; otherwise `None`.
+#[inline]
+pub fn string_within_limit(value: String, max_bytes: usize) -> Option<String> {
+    within_limit(value.as_bytes().len(), max_bytes).then_some(value)
+}
+
+/// Returns `Some(base64)` if `bytes.len()` is within `max_bytes`; otherwise `None`.
+#[inline]
+pub fn bytes_to_base64_within_limit(bytes: &[u8], max_bytes: usize) -> Option<String> {
+    if !within_limit(bytes.len(), max_bytes) {
+        return None;
+    }
+    Some(STANDARD.encode(bytes))
+}
 
 /// Clipboard contents read from the OS.
 ///
@@ -179,6 +215,9 @@ fn sanitize_clipboard_content_with_limits(
     max_rich_text_bytes: usize,
     max_image_bytes: usize,
 ) -> ClipboardContent {
+    if matches!(content.text, Some(ref s) if s.as_bytes().len() > max_rich_text_bytes) {
+        content.text = None;
+    }
     if matches!(content.html, Some(ref s) if s.as_bytes().len() > max_rich_text_bytes) {
         content.html = None;
     }
@@ -265,10 +304,7 @@ pub async fn clipboard_write(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        estimate_base64_decoded_len, sanitize_clipboard_content_with_limits, ClipboardContent,
-        ClipboardError, ClipboardWritePayload, MAX_RICH_TEXT_BYTES,
-    };
+    use super::*;
 
     #[test]
     fn estimate_base64_decoded_len_handles_padding() {
@@ -339,7 +375,7 @@ mod tests {
     fn validate_rejects_oversized_html() {
         let payload = ClipboardWritePayload {
             text: Some("hello".to_string()),
-            html: Some("x".repeat(MAX_RICH_TEXT_BYTES + 1)),
+            html: Some("x".repeat(MAX_TEXT_BYTES + 1)),
             rtf: None,
             png_base64: None,
         };
@@ -356,7 +392,7 @@ mod tests {
         let payload = ClipboardWritePayload {
             text: Some("hello".to_string()),
             html: None,
-            rtf: Some("x".repeat(MAX_RICH_TEXT_BYTES + 1)),
+            rtf: Some("x".repeat(MAX_TEXT_BYTES + 1)),
             png_base64: None,
         };
 
@@ -402,5 +438,41 @@ mod tests {
             }
             other => panic!("unexpected error: {other:?}"),
         }
+    }
+
+    #[test]
+    fn within_limit_allows_equal() {
+        assert!(within_limit(10, 10));
+    }
+
+    #[test]
+    fn within_limit_rejects_over() {
+        assert!(!within_limit(11, 10));
+    }
+
+    #[test]
+    fn string_within_limit_keeps_small_strings() {
+        assert_eq!(
+            string_within_limit("abc".to_string(), 3),
+            Some("abc".to_string())
+        );
+    }
+
+    #[test]
+    fn string_within_limit_drops_large_strings() {
+        assert_eq!(string_within_limit("abcd".to_string(), 3), None);
+    }
+
+    #[test]
+    fn bytes_to_base64_within_limit_keeps_small_payloads() {
+        let bytes = b"hello";
+        let b64 = bytes_to_base64_within_limit(bytes, 5).expect("expected base64");
+        assert_eq!(b64, "aGVsbG8=");
+    }
+
+    #[test]
+    fn bytes_to_base64_within_limit_drops_large_payloads() {
+        let bytes = [0u8; 6];
+        assert_eq!(bytes_to_base64_within_limit(&bytes, 5), None);
     }
 }
