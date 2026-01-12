@@ -67,7 +67,7 @@ describe("tauri.conf.json security guardrails", () => {
     ).toEqual([]);
   });
 
-  it("enforces a hardened CSP (no framing, no plugins, no outbound network from WebView)", () => {
+  it("enforces a hardened CSP (no framing, no plugins, restricted outbound network from WebView)", () => {
     const config = loadTauriConfig();
     const csp = config?.app?.security?.csp as unknown;
     expect(typeof csp, "expected app.security.csp to be a string").toBe("string");
@@ -84,19 +84,23 @@ describe("tauri.conf.json security guardrails", () => {
     expect(defaultSrc).toContain("'self'");
 
     const connectSrc = requireCspDirective(directives, "connect-src");
+    // The desktop CSP allows outbound HTTPS + WebSockets (collaboration/remote APIs) while still
+    // disallowing plaintext HTTP and wildcard networking.
+    expect(connectSrc).toContain("'self'");
+    expect(connectSrc).toContain("https:");
+    expect(connectSrc).toContain("ws:");
+    expect(connectSrc).toContain("wss:");
+    expect(connectSrc).toContain("blob:");
+    expect(connectSrc).toContain("data:");
+
     const forbiddenConnectSrcTokens = connectSrc.filter((token) => {
       if (token === "*") return true;
-      return (
-        token.startsWith("http:") ||
-        token.startsWith("https:") ||
-        token.startsWith("ws:") ||
-        token.startsWith("wss:")
-      );
+      // `https:`/`ws:`/`wss:` are allowed; disallow only plaintext `http:`.
+      return token.startsWith("http:");
     });
     expect(
       forbiddenConnectSrcTokens,
-      `connect-src must not allow remote networking; found: ${forbiddenConnectSrcTokens.join(", ")}`,
+      `connect-src must not allow wildcard/plaintext HTTP networking; found: ${forbiddenConnectSrcTokens.join(", ")}`,
     ).toEqual([]);
   });
 });
-
