@@ -55,14 +55,14 @@ pub fn parse_value_metadata_vm_to_rich_value_index_map(
     // entries (the same `t` number can refer to different types depending on the base).
     //
     // To be robust without over-matching, compute both interpretations and pick the one that yields
-    // the most resolved `vm -> richValue` links.
+    // the most resolved `vm -> richValue` links. (Some producers also omit the `futureMetadata`
+    // indirection and store the rich value index directly in `rc/@v`; this helper supports both.)
     let Ok(xlrichvalue_t_zero_based) = u32::try_from(xlrichvalue_type_idx) else {
         return Ok(HashMap::new());
     };
     let Some(xlrichvalue_t_one_based) = xlrichvalue_t_zero_based.checked_add(1) else {
         return Ok(HashMap::new());
     };
-
     let rc_t_indexing = infer_value_metadata_rc_t_indexing(&doc, metadata_types_count);
     let future_bk_indices = parse_future_rich_value_indices(&doc, "XLRICHVALUE");
     if future_bk_indices.is_empty() {
