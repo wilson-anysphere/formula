@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { DocumentController } from "../../../document/documentController.js";
 import { applyAllBorders, setFillColor, setHorizontalAlign, toggleBold, toggleItalic, toggleUnderline, toggleWrap } from "../../../formatting/toolbar.js";
-import { DocumentCellProvider } from "../documentCellProvider";
+import { DocumentCellProvider } from "../documentCellProvider.js";
 
 describe("DocumentCellProvider (shared grid) style mapping", () => {
   it("maps DocumentController style table entries into @formula/grid CellStyle", () => {

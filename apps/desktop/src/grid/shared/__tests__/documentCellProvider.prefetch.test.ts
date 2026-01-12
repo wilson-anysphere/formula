@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { DocumentController } from "../../../document/documentController.js";
-import { DocumentCellProvider } from "../documentCellProvider";
+import { DocumentCellProvider } from "../documentCellProvider.js";
 
 describe("DocumentCellProvider.prefetch", () => {
   it("does not synchronously warm via getCell()", () => {
@@ -24,4 +24,3 @@ describe("DocumentCellProvider.prefetch", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 });
-

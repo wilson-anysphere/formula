@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { DocumentController } from "../../../document/documentController.js";
-import { DocumentCellProvider } from "../documentCellProvider";
+import { DocumentCellProvider } from "../documentCellProvider.js";
 import type { CellRichText } from "@formula/grid/node";
 
 describe("DocumentCellProvider (shared grid) rich text mapping", () => {
