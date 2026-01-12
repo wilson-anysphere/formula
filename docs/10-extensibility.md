@@ -12,6 +12,9 @@ The desktop app wires `@formula/extension-host` contribution points into the UI 
 - **Executing commands**: clicking a command routes to `BrowserExtensionHost.executeCommand(commandId, ...args)`. Errors surface as a toast.
 - **Panels / webviews**:
   - Contributed panels (`contributes.panels`) are registered in the panel registry so they can be persisted in layouts.
+  - Because layout normalization drops unknown panel ids at deserialize time, contributed panel metadata is also persisted in a
+    **synchronous localStorage seed store** (`formula.extensions.contributedPanels.v1`) so the desktop app can seed the panel
+    registry **before** deserializing persisted layouts on startup.
   - Panels created programmatically (`formula.ui.createPanel`) are opened automatically in the layout when created.
 - **Notifications + prompts**:
   - `formula.ui.showMessage` shows a **toast** in the desktop UI.
