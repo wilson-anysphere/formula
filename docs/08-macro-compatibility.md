@@ -1021,9 +1021,9 @@ Important notes:
   as "is signed".
 - Certificate chain trust is not currently evaluated (a valid signature does not imply a trusted
   publisher). This can be extended in the future with an explicit `untrusted` state.
-- We do not currently re-compute the MS-OVBA project digest and compare it to the signed digest
-  structure ("binding" the signature to the VBA project streams). This can be added later to match
-  Excel's behavior more closely.
+- We also attempt to re-compute the MS-OVBA "project digest" and compare it to the signed digest
+  stored inside the signature stream (binding the signature to the VBA project streams). This is
+  currently best-effort and exposed via `formula-vba` as `VbaDigitalSignature::binding`.
 
 #### VBA digital signatures: stream location, payload variants, and digest binding
 
