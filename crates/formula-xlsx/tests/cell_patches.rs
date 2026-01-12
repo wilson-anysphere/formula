@@ -424,3 +424,27 @@ fn apply_cell_patches_inserts_dimension_after_sheetpr_when_missing(
 
     Ok(())
 }
+
+#[test]
+fn apply_cell_patches_inserts_dimension_including_merge_cells(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let fixture_path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/merged-cells.xlsx");
+    let bytes = std::fs::read(&fixture_path)?;
+    let mut pkg = XlsxPackage::from_bytes(&bytes)?;
+
+    let mut patches = WorkbookCellPatches::default();
+    patches.set_cell(
+        "Sheet1",
+        CellRef::from_a1("A1")?,
+        CellPatch::set_value(CellValue::Number(42.0)),
+    );
+    pkg.apply_cell_patches(&patches)?;
+
+    let sheet_xml = pkg
+        .part("xl/worksheets/sheet1.xml")
+        .expect("worksheet part exists");
+    assert_eq!(worksheet_dimension_ref(sheet_xml)?, "A1:B2");
+
+    Ok(())
+}

@@ -150,3 +150,36 @@ fn streaming_patch_inserts_dimension_after_sheet_pr() -> Result<(), Box<dyn std:
 
     Ok(())
 }
+
+#[test]
+fn streaming_patch_inserts_dimension_including_merge_cells(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let fixture_path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/merged-cells.xlsx");
+    let bytes = fs::read(&fixture_path)?;
+
+    let patch = WorksheetCellPatch::new(
+        "xl/worksheets/sheet1.xml",
+        CellRef::from_a1("A1")?,
+        CellValue::Number(123.0),
+        None,
+    );
+
+    let mut out = Cursor::new(Vec::new());
+    patch_xlsx_streaming(Cursor::new(bytes), &mut out, &[patch])?;
+
+    let mut archive = ZipArchive::new(Cursor::new(out.into_inner()))?;
+    let mut sheet_xml = String::new();
+    archive
+        .by_name("xl/worksheets/sheet1.xml")?
+        .read_to_string(&mut sheet_xml)?;
+
+    let doc = roxmltree::Document::parse(&sheet_xml)?;
+    let dimension = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "dimension")
+        .expect("expected <dimension> element to be inserted");
+    assert_eq!(dimension.attribute("ref"), Some("A1:B2"));
+
+    Ok(())
+}

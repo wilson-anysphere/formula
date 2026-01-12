@@ -553,7 +553,8 @@ struct WorksheetXmlScan {
     has_dimension: bool,
     has_sheet_pr: bool,
     sheet_uses_row_spans: bool,
-    /// Best-effort used-range bounds derived from `c/@r` inside `<sheetData>`.
+    /// Best-effort used-range bounds derived from `c/@r` inside `<sheetData>` and any merged
+    /// ranges declared in `<mergeCells>`.
     existing_used_range: Option<(u32, u32, u32, u32)>,
 }
 
@@ -577,6 +578,22 @@ fn scan_worksheet_xml(original: &[u8]) -> Result<WorksheetXmlScan, XlsxError> {
                 b"dimension" => scan.has_dimension = true,
                 b"sheetPr" => scan.has_sheet_pr = true,
                 b"sheetData" => in_sheet_data = true,
+                b"mergeCell" => {
+                    for attr in e.attributes() {
+                        let attr = attr?;
+                        if local_name(attr.key.as_ref()) != b"ref" {
+                            continue;
+                        }
+                        let a1 = attr.unescape_value()?.into_owned();
+                        if let Some((r1, c1, r2, c2)) = parse_dimension_ref(&a1) {
+                            min_row = min_row.min(r1.min(r2));
+                            min_col = min_col.min(c1.min(c2));
+                            max_row = max_row.max(r1.max(r2));
+                            max_col = max_col.max(c1.max(c2));
+                        }
+                        break;
+                    }
+                }
                 b"row" if in_sheet_data => {
                     for attr in e.attributes() {
                         let attr = attr?;
@@ -609,6 +626,22 @@ fn scan_worksheet_xml(original: &[u8]) -> Result<WorksheetXmlScan, XlsxError> {
             Event::Empty(e) => match local_name(e.name().as_ref()) {
                 b"dimension" => scan.has_dimension = true,
                 b"sheetPr" => scan.has_sheet_pr = true,
+                b"mergeCell" => {
+                    for attr in e.attributes() {
+                        let attr = attr?;
+                        if local_name(attr.key.as_ref()) != b"ref" {
+                            continue;
+                        }
+                        let a1 = attr.unescape_value()?.into_owned();
+                        if let Some((r1, c1, r2, c2)) = parse_dimension_ref(&a1) {
+                            min_row = min_row.min(r1.min(r2));
+                            min_col = min_col.min(c1.min(c2));
+                            max_row = max_row.max(r1.max(r2));
+                            max_col = max_col.max(c1.max(c2));
+                        }
+                        break;
+                    }
+                }
                 // `<sheetData/>` has no children.
                 b"row" if in_sheet_data => {
                     for attr in e.attributes() {

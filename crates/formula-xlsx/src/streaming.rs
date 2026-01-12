@@ -836,12 +836,54 @@ fn scan_worksheet_xml_metadata<R: Read>(
                 has_sheet_pr = true;
             }
             Event::Start(ref e) | Event::Empty(ref e)
+                if local_name(e.name().as_ref()) == b"mergeCell" =>
+            {
+                let mut r: Option<String> = None;
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    if local_name(attr.key.as_ref()) == b"ref" {
+                        r = Some(attr.unescape_value()?.into_owned());
+                        break;
+                    }
+                }
+                if let Some(r) = r {
+                    let mut parts = r.split(':');
+                    let start = parts.next().unwrap_or_default();
+                    let start = CellRef::from_a1(start)
+                        .map_err(|_| StreamingPatchError::InvalidCellRef(r.clone()))?;
+                    let end = parts
+                        .next()
+                        .map(|p| {
+                            CellRef::from_a1(p)
+                                .map_err(|_| StreamingPatchError::InvalidCellRef(r.clone()))
+                        })
+                        .transpose()?
+                        .unwrap_or(start);
+                    let (min_row_0, max_row_0) = (start.row.min(end.row), start.row.max(end.row));
+                    let (min_col_0, max_col_0) = (start.col.min(end.col), start.col.max(end.col));
+                    used_range = Some(match used_range {
+                        Some(existing) => PatchBounds {
+                            min_row_0: existing.min_row_0.min(min_row_0),
+                            max_row_0: existing.max_row_0.max(max_row_0),
+                            min_col_0: existing.min_col_0.min(min_col_0),
+                            max_col_0: existing.max_col_0.max(max_col_0),
+                        },
+                        None => PatchBounds {
+                            min_row_0,
+                            max_row_0,
+                            min_col_0,
+                            max_col_0,
+                        },
+                    });
+                }
+            }
+            Event::Start(ref e) | Event::Empty(ref e)
                 if in_sheet_data && local_name(e.name().as_ref()) == b"c" =>
             {
                 let mut r: Option<String> = None;
                 for attr in e.attributes() {
                     let attr = attr?;
-                    if attr.key.as_ref() == b"r" {
+                    if local_name(attr.key.as_ref()) == b"r" {
                         r = Some(attr.unescape_value()?.into_owned());
                         break;
                     }
