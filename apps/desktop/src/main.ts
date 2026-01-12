@@ -4123,15 +4123,38 @@ if (
     // sheet-structure operations (add/delete/hide), the active sheet id can temporarily point at
     // a sheet that was just removed. Calling `getCell` in that window would re-materialize the
     // sheet without recording a history entry, breaking undo semantics and dirty tracking.
-    try {
-      const meta = (app.getDocument() as any).getSheetMeta?.(sheetId) ?? null;
-      if (!meta) return;
-    } catch {
-      // Best-effort: if metadata access fails, continue and let downstream logic handle it.
-    }
+    const doc: any = app.getDocument();
+    const sheetExistsInDoc = (() => {
+      // Prefer `getSheetMeta` when available because it can differentiate between
+      // an actually-deleted sheet vs. an active sheet id that hasn't been materialized
+      // yet (DocumentController creates sheets lazily on access).
+      if (typeof doc.getSheetMeta === "function") {
+        try {
+          return Boolean(doc.getSheetMeta(sheetId));
+        } catch {
+          // Best-effort: if metadata access fails, assume the sheet exists so we don't
+          // break context key updates in environments that don't expose this API.
+          return true;
+        }
+      }
+
+      // Fallback for older controllers without `getSheetMeta`: if we have a non-empty list
+      // of sheet ids and the active id is missing, treat the sheet as deleted.
+      try {
+        const ids = typeof doc.getSheetIds === "function" ? doc.getSheetIds() : [];
+        if (Array.isArray(ids) && ids.length > 0) {
+          return ids.includes(sheetId);
+        }
+      } catch {
+        // Best-effort: if `getSheetIds` fails, continue and let downstream logic handle it.
+      }
+
+      return true;
+    })();
+    if (!sheetExistsInDoc) return;
     const sheetName = workbookSheetStore.getName(sheetId) ?? sheetId;
     const active = resolvedSelection.active;
-    const cell = app.getDocument().getCell(sheetId, { row: active.row, col: active.col }) as any;
+    const cell = doc.getCell(sheetId, { row: active.row, col: active.col }) as any;
     const value = normalizeExtensionCellValue(cell?.value ?? null);
     const formula = typeof cell?.formula === "string" ? cell.formula : null;
     const selectionKeys = deriveSelectionContextKeys(resolvedSelection);
