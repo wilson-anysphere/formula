@@ -100,6 +100,10 @@ function normalizeSheetView(value) {
     } else if (Array.isArray(raw)) {
       for (const entry of raw) {
         if (!entry) continue;
+        if (Array.isArray(entry)) {
+          addColRuns(entry[0], entry[1]);
+          continue;
+        }
         addColRuns(entry?.col ?? entry?.index ?? entry?.column, entry?.runs ?? entry?.formatRuns ?? entry?.segments);
       }
     } else if (isRecord(raw)) {
@@ -196,7 +200,7 @@ function normalizeSheetView(value) {
     ...(defaultFormat ? { defaultFormat } : {}),
     ...(rowFormats ? { rowFormats } : {}),
     ...(colFormats ? { colFormats } : {}),
-    ...(formatRunsByCol ? { formatRunsByCol } : {}),
+    ...(formatRunsByCol != null ? { formatRunsByCol } : {}),
   };
 }
 
