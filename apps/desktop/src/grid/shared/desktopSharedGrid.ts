@@ -651,6 +651,15 @@ export class DesktopSharedGrid {
 
   private installKeyboardHandler(): void {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+
+      const target = event.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        // Never steal key events from active text editing (cell editor overlays, inputs in panels, etc).
+        if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return;
+      }
+
       if (this.interactionMode === "rangeSelection") return;
 
       const renderer = this.renderer;

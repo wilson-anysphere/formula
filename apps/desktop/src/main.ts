@@ -2504,6 +2504,7 @@ if (
         colCount,
         showFormulas: () => app.getShowFormulas(),
         getComputedValue: (cell) => app.getCellComputedValueForSheet(app.getCurrentSheetId(), cell),
+        onRequestRefresh: () => app.refresh(),
         onSelectionChange: () => syncPrimarySelectionFromSecondary(),
         onSelectionRangeChange: () => syncPrimarySelectionFromSecondary(),
         callbacks: {

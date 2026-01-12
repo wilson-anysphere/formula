@@ -570,6 +570,49 @@ test.describe("split view", () => {
       await expect(input).toHaveValue("=SUM(A1:A2");
     });
   }
+
+  test("secondary pane supports in-place editing without scrolling the primary pane", async ({ page }) => {
+    await gotoDesktop(page, "/?grid=shared");
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await waitForDesktopReady(page);
+    await waitForIdle(page);
+
+    // Enable split view.
+    await page.getByTestId("split-vertical").click();
+    const secondary = page.locator("#grid-secondary");
+    await expect(secondary).toBeVisible();
+    await expect(secondary.locator("canvas")).toHaveCount(3);
+
+    // Scroll the primary pane away from the origin so selection sync bugs are detectable.
+    const primary = page.locator("#grid");
+    await primary.hover({ position: { x: 60, y: 40 } });
+    await page.mouse.wheel(100 * 100, 0);
+    await expect.poll(async () => await page.evaluate(() => (window as any).__formulaApp.getScroll().x)).toBeGreaterThan(0);
+    await page.mouse.wheel(0, 200 * 24);
+    await expect.poll(async () => await page.evaluate(() => (window as any).__formulaApp.getScroll().y)).toBeGreaterThan(0);
+
+    const primaryScrollBefore = await page.evaluate(() => (window as any).__formulaApp.getScroll());
+
+    // Click C2 in the secondary pane (account for headers: row header ~48px, col header ~24px).
+    await secondary.click({ position: { x: 48 + 2 * 100 + 12, y: 24 + 1 * 24 + 12 } });
+    await expect(page.getByTestId("active-cell")).toHaveText("C2");
+    await expect(page.getByTestId("formula-address")).toHaveValue("C2");
+
+    // Start typing to begin editing (Excel semantics).
+    await page.keyboard.press("h");
+    const editor = secondary.locator("textarea.cell-editor");
+    await expect(editor).toBeVisible();
+    await page.keyboard.type("ello");
+    await page.keyboard.press("Enter");
+    await waitForIdle(page);
+
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C2"))).toBe("hello");
+
+    const primaryScrollAfter = await page.evaluate(() => (window as any).__formulaApp.getScroll());
+    expect(Math.abs(primaryScrollAfter.x - primaryScrollBefore.x)).toBeLessThan(0.1);
+    expect(Math.abs(primaryScrollAfter.y - primaryScrollBefore.y)).toBeLessThan(0.1);
+  });
 });
 
 test.describe("split view / shared grid zoom", () => {

@@ -1,13 +1,33 @@
 import type { CellRange, GridAxisSizeChange } from "@formula/grid";
 import type { DocumentController } from "../../document/documentController.js";
+import { CellEditorOverlay } from "../../editor/cellEditorOverlay.js";
 import { DesktopSharedGrid, type DesktopSharedGridCallbacks } from "../shared/desktopSharedGrid.js";
 import { DocumentCellProvider } from "../shared/documentCellProvider.js";
+import { applyPlainTextEdit } from "../text/rich-text/edit.js";
 
 type ScrollState = { scrollX: number; scrollY: number };
 
 function clamp(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
   return Math.min(max, Math.max(min, value));
+}
+
+type RichTextValue = { text: string; runs?: Array<{ start: number; end: number; style?: Record<string, unknown> }> };
+
+function isRichTextValue(value: unknown): value is RichTextValue {
+  if (typeof value !== "object" || value == null) return false;
+  const v = value as { text?: unknown; runs?: unknown };
+  if (typeof v.text !== "string") return false;
+  if (v.runs == null) return true;
+  return Array.isArray(v.runs);
+}
+
+function focusWithoutScroll(el: HTMLElement): void {
+  try {
+    (el as any).focus?.({ preventScroll: true });
+  } catch {
+    el.focus?.();
+  }
 }
 
 /**
@@ -22,8 +42,10 @@ export class SecondaryGridView {
 
   private readonly document: DocumentController;
   private readonly getSheetId: () => string;
+  private readonly onRequestRefresh?: () => void;
   private readonly headerRows = 1;
   private readonly headerCols = 1;
+  private readonly editor: CellEditorOverlay;
 
   private sheetId: string;
 
@@ -64,6 +86,11 @@ export class SecondaryGridView {
     persistScroll?: (scroll: ScrollState) => void;
     persistZoom?: (zoom: number) => void;
     persistDebounceMs?: number;
+    /**
+     * Optional hook to refresh non-grid UI when the secondary pane mutates the document
+     * (e.g. formula bar, charts, auditing overlays in the primary pane).
+     */
+    onRequestRefresh?: () => void;
   }) {
     this.container = options.container;
     this.document = options.document;
@@ -72,6 +99,7 @@ export class SecondaryGridView {
     this.persistZoom = options.persistZoom;
     this.persistDebounceMs = options.persistDebounceMs ?? 150;
     this.sheetId = options.getSheetId();
+    this.onRequestRefresh = options.onRequestRefresh;
 
     // Clear any placeholder content from the split-view scaffolding.
     this.container.replaceChildren();
@@ -116,6 +144,18 @@ export class SecondaryGridView {
     hTrack.appendChild(hThumb);
     this.container.appendChild(hTrack);
 
+    // Editor overlay for in-place cell editing in the secondary pane.
+    this.editor = new CellEditorOverlay(this.container, {
+      onCommit: (commit) => {
+        this.applyEdit(commit.cell, commit.value);
+        this.onRequestRefresh?.();
+        focusWithoutScroll(this.container);
+      },
+      onCancel: () => {
+        focusWithoutScroll(this.container);
+      }
+    });
+
     this.provider =
       options.provider ??
       new DocumentCellProvider({
@@ -142,7 +182,7 @@ export class SecondaryGridView {
       defaultRowHeight: 24,
       defaultColWidth: 100,
       enableResize: true,
-      enableKeyboard: false,
+      enableKeyboard: true,
       canvases: { grid: gridCanvas, content: contentCanvas, selection: selectionCanvas },
       scrollbars: { vTrack, vThumb, hTrack, hThumb },
       callbacks: {
@@ -173,8 +213,18 @@ export class SecondaryGridView {
           options.onSelectionRangeChange?.(range);
           externalCallbacks.onSelectionRangeChange?.(range);
         },
+        onRequestCellEdit: (request) => {
+          this.openEditor(request);
+          externalCallbacks.onRequestCellEdit?.(request);
+        },
       }
     });
+
+    // Clicking the canvas should behave like clicking a spreadsheet surface: focus the pane so
+    // keyboard navigation/editing works immediately.
+    const onPointerDown = () => focusWithoutScroll(this.container);
+    this.container.addEventListener("pointerdown", onPointerDown);
+    this.disposeFns.push(() => this.container.removeEventListener("pointerdown", onPointerDown));
 
     // Match SpreadsheetApp header sizing so cell hit targets line up.
     this.grid.renderer.setColWidth(0, 48);
@@ -222,9 +272,53 @@ export class SecondaryGridView {
     this.resizeObserver.disconnect();
     for (const dispose of this.disposeFns) dispose();
     this.disposeFns.length = 0;
+    this.editor.close();
     this.grid.destroy();
     // Remove any DOM we created (the container stays in place).
     this.container.replaceChildren();
+  }
+
+  private openEditor(request: { row: number; col: number; initialKey?: string }): void {
+    if (this.editor.isOpen()) return;
+    if (request.row < this.headerRows || request.col < this.headerCols) return;
+    const rect = this.grid.getCellRect(request.row, request.col);
+    if (!rect) return;
+
+    const cell = { row: request.row - this.headerRows, col: request.col - this.headerCols };
+    const initialValue = request.initialKey ?? this.getCellInputText(cell);
+    this.editor.open(cell, rect, initialValue, { cursor: "end" });
+  }
+
+  private getCellInputText(cell: { row: number; col: number }): string {
+    const state = this.document.getCell(this.getSheetId(), cell) as { value: unknown; formula: string | null };
+    if (state?.formula != null) return state.formula;
+    if (isRichTextValue(state?.value)) return state.value.text;
+    if (state?.value != null) return String(state.value);
+    return "";
+  }
+
+  private applyEdit(cell: { row: number; col: number }, rawValue: string): void {
+    const sheetId = this.getSheetId();
+    const original = this.document.getCell(sheetId, cell) as { value: unknown; formula: string | null };
+    if (rawValue.trim() === "") {
+      this.document.clearCell(sheetId, cell, { label: "Clear cell" });
+      return;
+    }
+
+    // Preserve rich-text formatting runs when editing a rich-text cell with plain text
+    // (but still allow formulas / leading apostrophes to override rich-text semantics).
+    const trimmedStart = rawValue.trimStart();
+    if (!trimmedStart.startsWith("=") && !rawValue.startsWith("'") && isRichTextValue(original?.value)) {
+      const updated = applyPlainTextEdit(original.value, rawValue);
+      if (original.formula == null && updated === original.value) {
+        // No-op edit: keep rich runs without creating a history entry.
+        return;
+      }
+      this.document.setCellValue(sheetId, cell, updated, { label: "Edit cell" });
+      return;
+    }
+
+    this.document.setCellInput(sheetId, cell, rawValue, { label: "Edit cell" });
   }
 
   private resizeToContainer(): void {
