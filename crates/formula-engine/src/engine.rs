@@ -5552,11 +5552,10 @@ fn rewrite_defined_name_constants_for_bytecode(
             Value::Bool(b) => Some(crate::Expr::Boolean(*b)),
             Value::Blank => Some(crate::Expr::Missing),
             Value::Error(e) => Some(crate::Expr::Error(e.as_code().to_string())),
-            | Value::Reference(_)
-            | Value::ReferenceUnion(_)
-            | Value::Array(_)
-            | Value::Lambda(_)
-            | Value::Spill { .. } => None,
+            // Treat any other value (including rich types like Entity/Record) as non-literal for
+            // bytecode inlining. This keeps name resolution conservative and avoids having to
+            // serialize opaque payloads into canonical formula strings.
+            _ => None,
         }
     }
 
