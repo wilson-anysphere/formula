@@ -129,6 +129,40 @@ test("Typing =_xlfn.EXPA suggests =_xlfn.EXPAND(", async () => {
   );
 });
 
+test("Typing =_xlfn.CHOOSECO suggests =_xlfn.CHOOSECOLS(", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=_xlfn.CHOOSECO";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=_xlfn.CHOOSECOLS("),
+    `Expected an _xlfn.CHOOSECOLS suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Typing =_xlfn.CHOOSERO suggests =_xlfn.CHOOSEROWS(", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=_xlfn.CHOOSERO";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=_xlfn.CHOOSEROWS("),
+    `Expected an _xlfn.CHOOSEROWS suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Typing =SUM(A suggests a contiguous range above the current cell", async () => {
   const engine = new TabCompletionEngine();
 
