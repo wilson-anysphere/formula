@@ -1533,8 +1533,8 @@ class BrowserExtensionHost {
         return this._sheets.find((s) => s.id === this._activeSheetId) ?? { id: "sheet1", name: "Sheet1" };
 
       case "cells.getSelection": {
-        const result = await this._spreadsheet.getSelection();
         const sheetId = await this._resolveActiveSheetId();
+        const result = await this._spreadsheet.getSelection();
         if (result && typeof result === "object") {
           this._taintExtensionRange(extension, {
             sheetId,
