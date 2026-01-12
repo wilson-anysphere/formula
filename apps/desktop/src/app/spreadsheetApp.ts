@@ -3220,6 +3220,15 @@ export class SpreadsheetApp {
         return;
       }
     }
+    // Fast path: if there are no comments indexed for the active sheet, we never
+    // need to pick cells or update the tooltip.
+    if (this.commentMetaByCoord.size === 0) {
+      if (this.sharedHoverCellKey != null || this.sharedHoverCellRect != null) {
+        this.clearSharedHoverCellCache();
+      }
+      if (this.lastHoveredCommentCellKey != null) this.hideCommentTooltip();
+      return;
+    }
     if (this.commentsPanelVisible) {
       this.hideCommentTooltip();
       return;
