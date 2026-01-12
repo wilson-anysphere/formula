@@ -112,3 +112,20 @@ test("CSV export respects sheet default formats (styleId may be 0)", () => {
   const csv = exportDocumentRangeToCsv(doc, "Sheet1", "B2");
   assert.equal(csv, "2024-01-31");
 });
+
+test("CSV export uses row formats to override column formats (layer precedence)", () => {
+  const doc = new DocumentController();
+  const dateTime = new Date(Date.UTC(2024, 0, 31, 12, 34, 56));
+  const serial = dateToExcelSerial(dateTime);
+
+  // Column sets date-only.
+  doc.setRangeFormat("Sheet1", "A1:A1048576", { numberFormat: "yyyy-mm-dd" });
+  // Row overrides with date+time.
+  doc.setRangeFormat("Sheet1", "A1000:XFD1000", { numberFormat: "yyyy-mm-dd hh:mm:ss" });
+  doc.setCellValue("Sheet1", "A1000", serial);
+
+  assert.equal(doc.getCell("Sheet1", "A1000").styleId, 0);
+
+  const csv = exportDocumentRangeToCsv(doc, "Sheet1", "A1000");
+  assert.equal(csv, dateTime.toISOString());
+});
