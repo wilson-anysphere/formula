@@ -16,6 +16,40 @@ Then open one of:
 - `http://localhost:5173/?demo=merged` — merged cells + text overflow demo
 - `http://localhost:5173/?demo=perf` — performance harness
 
+## Rich text (inline runs)
+
+Cells can optionally provide a `richText` payload to render inline formatting (bold/italic/underline/color/etc) within a single cell.
+
+```ts
+import type { CellData } from "@formula/grid";
+
+const cell: CellData = {
+  row: 0,
+  col: 0,
+  // `value` remains the plain-text fallback (used for a11y/status strings).
+  value: "Hello world",
+  richText: {
+    text: "Hello world",
+    runs: [
+      { start: 0, end: 5, style: { bold: true } },
+      { start: 5, end: 11, style: { italic: true, underline: "single", color: "#FFEF4444", size_100pt: 1200 } }
+    ]
+  }
+};
+```
+
+Notes:
+
+- `runs[].start/end` are **Unicode code point indexes** (not UTF-16 offsets).
+- Runs do **not** have to cover the entire string; the renderer fills gaps with default/cell-level styling.
+- Supported per-run style keys:
+  - `bold?: boolean`
+  - `italic?: boolean`
+  - `underline?: string | boolean` (anything except `"none"` is treated as underlined)
+  - `color?: string` (engine colors are serialized as `#AARRGGBB` and are converted to canvas `rgba(...)`)
+  - `font?: string`
+  - `size_100pt?: number` (font size in 1/100 points; converted at 96DPI)
+
 ## Theming
 
 `CanvasGrid` / `CanvasGridRenderer` use a `GridTheme` token set (no hard-coded UI colors). You can theme the grid in two ways:
