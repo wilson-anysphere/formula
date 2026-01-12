@@ -65,6 +65,23 @@
   --grid-header-text: var(--text-primary);
   --grid-line: var(--border);
 
+  /* @formula/grid theme bridge (shared-grid + legacy canvas rendering). */
+  --formula-grid-bg: var(--bg-primary);
+  --formula-grid-line: var(--grid-line);
+  --formula-grid-header-bg: var(--grid-header-bg);
+  --formula-grid-header-text: var(--grid-header-text);
+  --formula-grid-cell-text: var(--text-primary);
+  --formula-grid-error-text: var(--error);
+  --formula-grid-selection-fill: var(--selection-bg);
+  --formula-grid-selection-border: var(--selection-border);
+  --formula-grid-selection-handle: var(--selection-border);
+  --formula-grid-scrollbar-track: var(--bg-tertiary);
+  --formula-grid-scrollbar-thumb: var(--text-secondary);
+  --formula-grid-freeze-line: var(--border);
+  --formula-grid-comment-indicator: var(--warning);
+  --formula-grid-comment-indicator-resolved: var(--text-secondary);
+  --formula-grid-remote-presence-default: var(--accent);
+
   /* Charts */
   --chart-bg: var(--bg-primary);
   --chart-border: var(--border);
@@ -241,6 +258,11 @@
     --accent-light: Highlight;
     --accent-bg: Highlight;
     --accent-border: Highlight;
+
+    --error: CanvasText;
+    --warning: CanvasText;
+    --success: CanvasText;
+    --warning-bg: Highlight;
 
     --text-on-accent: HighlightText;
     --selection-text: HighlightText;
