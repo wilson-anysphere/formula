@@ -340,6 +340,7 @@ fn oddf_equation(
     // against the curated excel-oracle corpus shows that the boundary equalities are accepted:
     // - `issue == settlement` implies zero accrued interest.
     // - `settlement == first_coupon` implies settlement on the first coupon date.
+    // - `first_coupon == maturity` is allowed (single odd stub period).
     //
     // Model this as:
     // - `issue <= settlement <= first_coupon <= maturity`

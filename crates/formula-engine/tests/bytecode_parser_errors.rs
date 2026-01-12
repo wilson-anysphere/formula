@@ -95,3 +95,13 @@ fn parses_error_literals_without_equals_and_with_whitespace() {
         Expr::Literal(Value::Error(ErrorKind::Ref))
     );
 }
+
+#[test]
+fn parses_na_error_literal_with_bang_alias() {
+    // Excel surfaces `#N/A!` in some contexts; treat it as `#N/A` for parity with the main parser.
+    let origin = CellCoord::new(0, 0);
+    assert_eq!(
+        parse_formula("=#N/A!", origin).unwrap(),
+        Expr::Literal(Value::Error(ErrorKind::NA))
+    );
+}

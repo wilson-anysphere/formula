@@ -232,11 +232,12 @@ pub fn coupdaysnc(
     let (pcd, ncd, _n) = coupon_pcd_ncd_num(settlement, maturity, frequency, system)?;
     // Excel's COUPDAYSNC is not always computed as `days_between(settlement, NCD, basis)`.
     //
-    // For 30/360 bases, Excel computes DSC as the remaining portion of the modeled coupon period:
+    // For 30/360 bases (0=US 30/360, 4=European 30E/360), Excel computes DSC as the remaining
+    // portion of the modeled coupon period:
     //   DSC = E - A
     //
-    // This preserves the additivity invariant `A + DSC == E` even though DAYS360 is not additive
-    // for some month-end schedules.
+    // This preserves the additivity invariant `A + DSC == E`. For basis=0, this is required
+    // because `DAYS360(..., FALSE)` is not additive for some month-end schedules.
     //
     // For basis=4 (European 30E/360), day-counts like `A` use `DAYS360(..., TRUE)`, but Excel still
     // models the coupon period length `E` used by COUPDAYS/COUPDAYSNC as the fixed
