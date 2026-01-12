@@ -72,6 +72,7 @@ import { LightningIcon } from "./LightningIcon";
 import { LinkIcon } from "./LinkIcon";
 import { LockIcon } from "./LockIcon";
 import { MailIcon } from "./MailIcon";
+import { MacroIcon } from "./MacroIcon";
 import { MergeCenterIcon } from "./MergeCenterIcon";
 import { MinusIcon } from "./MinusIcon";
 import { MoreFormatsIcon } from "./MoreFormatsIcon";
@@ -92,11 +93,13 @@ import { PercentIcon } from "./PercentIcon";
 import { PiIcon } from "./PiIcon";
 import { PinIcon } from "./PinIcon";
 import { PictureIcon } from "./PictureIcon";
+import { PlayIcon } from "./PlayIcon";
 import { PrintIcon } from "./PrintIcon";
 import { PrintAreaIcon } from "./PrintAreaIcon";
 import { PlusIcon } from "./PlusIcon";
 import { RedoIcon } from "./RedoIcon";
 import { RefreshIcon } from "./RefreshIcon";
+import { RecordIcon } from "./RecordIcon";
 import { RulerIcon } from "./RulerIcon";
 import { SaveIcon } from "./SaveIcon";
 import { SendBackwardIcon } from "./SendBackwardIcon";
@@ -108,10 +111,14 @@ import { SlidersIcon } from "./SlidersIcon";
 import { SparklesIcon } from "./SparklesIcon";
 import { ShapesIcon } from "./ShapesIcon";
 import { HighlighterIcon } from "./HighlighterIcon";
+import { SideBySideIcon } from "./SideBySideIcon";
 import { SmartArtIcon } from "./SmartArtIcon";
+import { SnowflakeIcon } from "./SnowflakeIcon";
 import { SortFilterIcon } from "./SortFilterIcon";
 import { SortIcon } from "./SortIcon";
 import { StarIcon } from "./StarIcon";
+import { SplitIcon } from "./SplitIcon";
+import { StopIcon } from "./StopIcon";
 import { StrikethroughIcon } from "./StrikethroughIcon";
 import { SubscriptIcon } from "./SubscriptIcon";
 import { SuperscriptIcon } from "./SuperscriptIcon";
@@ -125,7 +132,10 @@ import { UnlockIcon } from "./UnlockIcon";
 import { UserIcon } from "./UserIcon";
 import { UsersIcon } from "./UsersIcon";
 import { WarningIcon } from "./WarningIcon";
+import { WindowIcon } from "./WindowIcon";
 import { WrapTextIcon } from "./WrapTextIcon";
+import { ZoomInIcon } from "./ZoomInIcon";
+import { SyncScrollIcon } from "./SyncScrollIcon";
 
 export type RibbonIconComponent = ComponentType<Omit<IconProps, "children">>;
 
@@ -452,6 +462,40 @@ export const ribbonIconMap = {
   "review.changes.shareWorkbook": UsersIcon,
   "review.changes.shareWorkbook.shareNow": ShareIcon,
   "review.changes.protectShareWorkbook": LockIcon,
+
+  // View
+  "view.workbookViews.normal": GridlinesIcon,
+  "view.workbookViews.pageBreakPreview": PageBreakIcon,
+  "view.workbookViews.pageLayout": PagePortraitIcon,
+  "view.workbookViews.customViews": EyeIcon,
+
+  "view.show.ruler": RulerIcon,
+  "view.show.gridlines": GridlinesIcon,
+  "view.show.formulaBar": FunctionIcon,
+  "view.show.headings": HeadingsIcon,
+
+  "view.zoom.zoom": ZoomInIcon,
+  "view.zoom.zoom100": PercentIcon,
+  "view.zoom.zoomToSelection": TargetIcon,
+
+  "view.window.newWindow": WindowIcon,
+  "view.window.arrangeAll": LayersIcon,
+  "view.window.freezePanes": SnowflakeIcon,
+  "view.window.split": SplitIcon,
+  "view.window.hide": EyeOffIcon,
+  "view.window.unhide": EyeIcon,
+  "view.window.viewSideBySide": SideBySideIcon,
+  "view.window.synchronousScrolling": SyncScrollIcon,
+  "view.window.resetWindowPosition": UndoIcon,
+  "view.window.switchWindows": ReplaceIcon,
+
+  "view.macros.viewMacros": MacroIcon,
+  "view.macros.viewMacros.run": PlayIcon,
+  "view.macros.viewMacros.edit": PencilIcon,
+  "view.macros.viewMacros.delete": TrashIcon,
+  "view.macros.recordMacro": RecordIcon,
+  "view.macros.recordMacro.stop": StopIcon,
+  "view.macros.useRelativeReferences": PinIcon,
 
   // Fallbacks (re-usable)
   sort: SortIcon,
