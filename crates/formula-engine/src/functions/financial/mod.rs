@@ -7,12 +7,14 @@ mod cashflows;
 mod depreciation;
 mod french_depreciation;
 mod iterative;
+mod odd_coupon;
 mod securities;
 mod time_value;
 
 pub use cashflows::{irr, mirr, npv, xirr, xnpv};
 pub use depreciation::{db, ddb, sln, syd, vdb};
 pub use french_depreciation::{amordegrec, amorlinc};
+pub use odd_coupon::{oddfprice, oddfyield, oddlprice, oddlyield};
 pub use securities::{
     disc, intrate, pricedisc, pricemat, received, tbilleq, tbillprice, tbillyield, yielddisc,
     yieldmat,

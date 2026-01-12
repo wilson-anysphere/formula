@@ -1,4 +1,5 @@
-use formula_engine::date::ExcelDateSystem;
+use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
+use formula_engine::functions::financial::{oddfprice, oddfyield, oddlprice, oddlyield};
 use formula_engine::{ErrorKind, Value};
 
 use super::harness::TestSheet;
@@ -25,6 +26,111 @@ fn cell_number_or_skip(sheet: &TestSheet, addr: &str) -> Option<f64> {
         Value::Number(n) => Some(n),
         Value::Error(ErrorKind::Name) => None,
         other => panic!("expected number, got {other:?} from cell {addr}"),
+    }
+}
+
+#[test]
+fn oddfyield_extreme_prices_roundtrip() {
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    // Odd first coupon: issue -> first_coupon is a short stub, followed by a regular period.
+    let issue = ymd_to_serial(ExcelDate::new(2020, 1, 1), system).unwrap();
+    let settlement = ymd_to_serial(ExcelDate::new(2020, 1, 15), system).unwrap();
+    let first_coupon = ymd_to_serial(ExcelDate::new(2020, 2, 15), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2020, 8, 15), system).unwrap();
+
+    let rate = 0.05;
+    let redemption = 100.0;
+    let frequency = 2;
+    let basis = 0;
+
+    for pr in [50.0, 200.0] {
+        let yld = oddfyield(
+            settlement,
+            maturity,
+            issue,
+            first_coupon,
+            rate,
+            pr,
+            redemption,
+            frequency,
+            basis,
+            system,
+        )
+        .expect("ODDFYIELD should converge");
+
+        assert!(yld.is_finite(), "yield should be finite, got {yld}");
+        assert!(
+            yld > -(frequency as f64),
+            "yield should be > -frequency, got {yld}"
+        );
+
+        let price = oddfprice(
+            settlement,
+            maturity,
+            issue,
+            first_coupon,
+            rate,
+            yld,
+            redemption,
+            frequency,
+            basis,
+            system,
+        )
+        .expect("ODDFPRICE should succeed");
+
+        assert_close(price, pr, 1e-6);
+    }
+}
+
+#[test]
+fn oddlyield_extreme_prices_roundtrip() {
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    // Odd last coupon: settlement is after the last interest date, with a long stub to maturity.
+    let last_interest = ymd_to_serial(ExcelDate::new(2020, 6, 30), system).unwrap();
+    let settlement = ymd_to_serial(ExcelDate::new(2020, 9, 15), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2021, 1, 15), system).unwrap();
+
+    let rate = 0.05;
+    let redemption = 100.0;
+    let frequency = 2;
+    let basis = 0;
+
+    for pr in [50.0, 200.0] {
+        let yld = oddlyield(
+            settlement,
+            maturity,
+            last_interest,
+            rate,
+            pr,
+            redemption,
+            frequency,
+            basis,
+            system,
+        )
+        .expect("ODDLYIELD should converge");
+
+        assert!(yld.is_finite(), "yield should be finite, got {yld}");
+        assert!(
+            yld > -(frequency as f64),
+            "yield should be > -frequency, got {yld}"
+        );
+
+        let price = oddlprice(
+            settlement,
+            maturity,
+            last_interest,
+            rate,
+            yld,
+            redemption,
+            frequency,
+            basis,
+            system,
+        )
+        .expect("ODDLPRICE should succeed");
+
+        assert_close(price, pr, 1e-6);
     }
 }
 
