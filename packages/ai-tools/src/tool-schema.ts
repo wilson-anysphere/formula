@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { columnLabelToIndex, parseA1Cell, parseA1Range, rangeSize } from "./spreadsheet/a1.js";
-import type { CellScalar } from "./spreadsheet/types.js";
+import { columnLabelToIndex, parseA1Cell, parseA1Range, rangeSize } from "./spreadsheet/a1.ts";
+import type { CellScalar } from "./spreadsheet/types.ts";
 
 export type ToolName =
   | "read_range"

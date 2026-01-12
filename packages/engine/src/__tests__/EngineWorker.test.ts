@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { EngineWorker, type MessageChannelLike, type WorkerLike } from "../worker/EngineWorker";
+import { EngineWorker, type MessageChannelLike, type WorkerLike } from "../worker/EngineWorker.ts";
 import type {
   InitMessage,
   RpcRequest,
   WorkerInboundMessage,
   WorkerOutboundMessage
-} from "../protocol";
+} from "../protocol.ts";
 
 class MockMessagePort {
   onmessage: ((event: MessageEvent<unknown>) => void) | null = null;

@@ -656,7 +656,12 @@ test("Binder-origin undo captures comment edits when comments root itself was cr
   if (root.kind !== "map") {
     throw new Error("Expected canonical comments root schema in this test");
   }
-  assert.equal(root.map instanceof Y.Map, false);
+  const nested = root.map.get("c1");
+  assert.ok(nested);
+  // The comments root can be instantiated locally via `getCommentsRoot`, but nested
+  // comment objects may still be created by a different Yjs module instance when
+  // updates are applied via the CJS build (e.g. y-websocket).
+  assert.equal(nested instanceof Y.Map, false);
 
   const binderOrigin = { type: "document-controller:binder" };
   const undoService = createUndoService({ mode: "collab", doc, scope: [root.map], origin: binderOrigin });

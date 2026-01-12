@@ -8,9 +8,9 @@ import type {
   FormulaParseOptions,
   FormulaToken,
   RpcOptions,
-} from "./protocol";
-import { defaultWasmBinaryUrl, defaultWasmModuleUrl } from "./wasm";
-import { EngineWorker } from "./worker/EngineWorker";
+} from "./protocol.ts";
+import { defaultWasmBinaryUrl, defaultWasmModuleUrl } from "./wasm.ts";
+import { EngineWorker } from "./worker/EngineWorker.ts";
 
 export interface EngineClient {
   /**

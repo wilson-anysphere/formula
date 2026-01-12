@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isFormulaInput, normalizeFormulaText, normalizeFormulaTextOpt } from "../formula";
+import { isFormulaInput, normalizeFormulaText, normalizeFormulaTextOpt } from "../formula.ts";
 
 describe("formula helpers", () => {
   describe("normalizeFormulaText", () => {

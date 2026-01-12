@@ -161,10 +161,30 @@ async function runTestBatch(files, concurrency) {
   });
 }
 
+/**
+ * Run files serially, each in their own `node --test` invocation.
+ *
+ * This is intentionally more expensive than batching (extra process startup), but avoids
+ * cross-file interference for heavyweight integration suites that start/stop background
+ * services (e.g. sync-server) and have been observed to flake/time out when run in a
+ * single shared node:test process.
+ *
+ * @param {string[]} files
+ * @param {number} concurrency
+ * @returns {Promise<number>} exit code
+ */
+async function runTestFilesIndividually(files, concurrency) {
+  for (const file of files) {
+    const code = await runTestBatch([file], concurrency);
+    if (code !== 0) return code;
+  }
+  return 0;
+}
+
 let exitCode = 0;
-exitCode = await runTestBatch(e2eTestFiles, 1);
+exitCode = await runTestFilesIndividually(e2eTestFiles, 1);
 if (exitCode !== 0) process.exit(exitCode);
-exitCode = await runTestBatch(syncServerTestFiles, 1);
+exitCode = await runTestFilesIndividually(syncServerTestFiles, 1);
 if (exitCode !== 0) process.exit(exitCode);
 exitCode = await runTestBatch(unitTestFiles, testConcurrency);
 process.exit(exitCode);

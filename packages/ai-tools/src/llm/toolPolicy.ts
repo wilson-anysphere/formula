@@ -1,4 +1,4 @@
-import { TOOL_CAPABILITIES, ToolNameSchema, type ToolName } from "../tool-schema.js";
+import { TOOL_CAPABILITIES, ToolNameSchema, type ToolName } from "../tool-schema.ts";
 
 export type ToolPolicyMode = "chat" | "agent" | "inline_edit" | "cell_function";
 

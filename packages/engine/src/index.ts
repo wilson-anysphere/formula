@@ -1,5 +1,5 @@
-export { createEngineClient } from "./client";
-export type { EngineClient } from "./client";
+export { createEngineClient } from "./client.ts";
+export type { EngineClient } from "./client.ts";
 export type {
   CellChange,
   CellData,
@@ -17,13 +17,13 @@ export type {
   FormulaToken,
   FunctionContext,
   RpcOptions,
-} from "./protocol";
-export { defaultWasmBinaryUrl, defaultWasmModuleUrl } from "./wasm";
+} from "./protocol.ts";
+export { defaultWasmBinaryUrl, defaultWasmModuleUrl } from "./wasm.ts";
 
-export { EngineWorker } from "./EngineWorker";
-export type { MessageChannelLike, MessagePortLike, WorkerLike } from "./EngineWorker";
+export { EngineWorker } from "./EngineWorker.ts";
+export type { MessageChannelLike, MessagePortLike, WorkerLike } from "./EngineWorker.ts";
 
-export { WasmWorkbookBackend } from "./backend/WasmWorkbookBackend";
+export { WasmWorkbookBackend } from "./backend/WasmWorkbookBackend.ts";
 export type {
   WorkbookBackend,
   WorkbookInfo,
@@ -36,17 +36,17 @@ export type {
   CellValue,
 } from "@formula/workbook-backend";
 
-export { isFormulaInput, normalizeFormulaText, normalizeFormulaTextOpt } from "./backend/formula";
+export { isFormulaInput, normalizeFormulaText, normalizeFormulaTextOpt } from "./backend/formula.ts";
 
 export {
   engineApplyDeltas,
   engineHydrateFromDocument,
   exportDocumentToEngineWorkbookJson,
-} from "./documentControllerSync";
+} from "./documentControllerSync.ts";
 export type {
   DocumentCellDelta,
   DocumentCellState,
   EngineCellScalar,
   EngineSyncTarget,
   EngineWorkbookJson,
-} from "./documentControllerSync";
+} from "./documentControllerSync.ts";

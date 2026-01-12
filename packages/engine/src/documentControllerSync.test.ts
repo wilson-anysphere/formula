@@ -3,13 +3,13 @@ import { describe, expect, it, vi } from "vitest";
 // DocumentController is authored in JS. We keep a minimal `.d.ts` next to it so this
 // TS test can import the runtime implementation under `strict` typechecking.
 import { DocumentController } from "../../../apps/desktop/src/document/documentController.js";
-import type { CellChange } from "./protocol";
+import type { CellChange } from "./protocol.ts";
 import {
   engineApplyDeltas,
   engineHydrateFromDocument,
   exportDocumentToEngineWorkbookJson,
   type EngineSyncTarget,
-} from "./documentControllerSync";
+} from "./documentControllerSync.ts";
 
 describe("DocumentController → engine workbook JSON exporter", () => {
   it("exports scalar values, rich text as plain text, and normalizes formulas", () => {

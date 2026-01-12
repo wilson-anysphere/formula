@@ -1,6 +1,6 @@
-import type { CellChange } from "./protocol";
-import { toA1 } from "./backend/a1";
-import { normalizeFormulaTextOpt } from "./backend/formula";
+import type { CellChange } from "./protocol.ts";
+import { toA1 } from "./backend/a1.ts";
+import { normalizeFormulaTextOpt } from "./backend/formula.ts";
 
 export type EngineCellScalar = number | string | boolean | null;
 

@@ -8,7 +8,7 @@ import type {
   RpcRequest,
   WorkerInboundMessage,
   WorkerOutboundMessage,
-} from "./protocol";
+} from "./protocol.ts";
 
 type WasmWorkbookInstance = {
   getCell(address: string, sheet?: string): unknown;

@@ -1,9 +1,9 @@
 import { ZodError } from "zod";
-import { columnLabelToIndex, formatA1Cell, formatA1Range, parseA1Cell, parseA1Range } from "../spreadsheet/a1.js";
-import type { ChartType, CreateChartResult, CreateChartSpec, SpreadsheetApi } from "../spreadsheet/api.js";
-import type { CellData, CellScalar } from "../spreadsheet/types.js";
-import type { PivotAggregationType, ToolCall, ToolName, UnknownToolCall } from "../tool-schema.js";
-import { TOOL_REGISTRY, validateToolCall } from "../tool-schema.js";
+import { columnLabelToIndex, formatA1Cell, formatA1Range, parseA1Cell, parseA1Range } from "../spreadsheet/a1.ts";
+import type { ChartType, CreateChartResult, CreateChartSpec, SpreadsheetApi } from "../spreadsheet/api.ts";
+import type { CellData, CellScalar } from "../spreadsheet/types.ts";
+import type { PivotAggregationType, ToolCall, ToolName, UnknownToolCall } from "../tool-schema.ts";
+import { TOOL_REGISTRY, validateToolCall } from "../tool-schema.ts";
 
 import { DLP_ACTION } from "../../../security/dlp/src/actions.js";
 import { DLP_DECISION, evaluatePolicy } from "../../../security/dlp/src/policyEngine.js";

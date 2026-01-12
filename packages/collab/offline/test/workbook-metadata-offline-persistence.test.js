@@ -49,8 +49,11 @@ test("attachOfflinePersistence restores workbook metadata (sheets + namedRanges 
     namedRanges.set("MyRange", { sheetId: "Sheet2", range: "A1:B2" });
     metadata.set("title", "Quarterly Budget");
 
-    // Give y-indexeddb a tick to commit its transaction before simulating a restart.
-    await sleep(25);
+    // Give the IndexedDB persistence queue time to flush writes before simulating a restart.
+    //
+    // The implementation batches updates behind an async write queue; under load a single
+    // event-loop tick may not be enough for the transaction to commit.
+    await sleep(100);
 
     persistence.destroy();
     doc.destroy();

@@ -1,7 +1,7 @@
-import { DEFAULT_SHEET_NAME } from "./a1.js";
-import type { CellAddress, RangeAddress } from "./a1.js";
-import type { CellEntry, CreateChartResult, CreateChartSpec, SpreadsheetApi } from "./api.js";
-import { cloneCell, isCellEmpty, type CellData, type CellFormat } from "./types.js";
+import { DEFAULT_SHEET_NAME } from "./a1.ts";
+import type { CellAddress, RangeAddress } from "./a1.ts";
+import type { CellEntry, CreateChartResult, CreateChartSpec, SpreadsheetApi } from "./api.ts";
+import { cloneCell, isCellEmpty, type CellData, type CellFormat } from "./types.ts";
 
 function cellKey(row: number, col: number): string {
   return `${row}:${col}`;

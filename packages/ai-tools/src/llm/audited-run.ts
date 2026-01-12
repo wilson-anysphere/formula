@@ -5,7 +5,7 @@ import { runChatWithToolsStreaming } from "../../../llm/src/toolCallingStreaming
 import { serializeToolResultForModel } from "../../../llm/src/toolResultSerialization.js";
 import type { ChatStreamEvent, ToolCall } from "../../../llm/src/types.js";
 
-import { classifyQueryNeedsTools, verifyAssistantClaims, verifyToolUsage, type VerificationResult } from "./verification.js";
+import { classifyQueryNeedsTools, verifyAssistantClaims, verifyToolUsage, type VerificationResult } from "./verification.ts";
 
 export interface AuditedRunOptions {
   audit_store: AIAuditStore;

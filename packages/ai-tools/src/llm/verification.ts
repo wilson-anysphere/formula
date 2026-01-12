@@ -1,4 +1,4 @@
-import { extractVerifiableClaims } from "./claim-extraction.js";
+import { extractVerifiableClaims } from "./claim-extraction.ts";
 
 export interface VerificationResult {
   /**
@@ -76,7 +76,7 @@ export interface ClaimVerificationSummary {
   warnings: string[];
 }
 
-export { extractVerifiableClaims, type ExtractedSpreadsheetClaim, type SpreadsheetClaimMeasure } from "./claim-extraction.js";
+export { extractVerifiableClaims, type ExtractedSpreadsheetClaim, type SpreadsheetClaimMeasure } from "./claim-extraction.ts";
 
 const A1_REFERENCE_RE = /\b[A-Z]{1,3}\d+\b/i;
 
@@ -198,7 +198,7 @@ export async function verifyAssistantClaims(params: VerifyAssistantClaimsParams)
   >();
 
   if (hasTool("compute_statistics")) {
-    const measuresByRange = new Map<string, Array<import("./claim-extraction.js").SpreadsheetClaimMeasure>>();
+    const measuresByRange = new Map<string, Array<import("./claim-extraction.ts").SpreadsheetClaimMeasure>>();
     const rangesInOrder: string[] = [];
 
     for (const claim of claimsToVerify) {
@@ -270,7 +270,7 @@ function isVerifiedToolName(name: string): boolean {
 }
 
 async function verifyRangeStatClaim(
-  claim: import("./claim-extraction.js").ExtractedSpreadsheetClaim,
+  claim: import("./claim-extraction.ts").ExtractedSpreadsheetClaim,
   ctx: {
     toolExecutor: VerifyAssistantClaimsParams["toolExecutor"];
     hasTool: (name: string) => boolean;
@@ -352,7 +352,7 @@ async function verifyRangeStatClaim(
 }
 
 async function verifyCellValueClaim(
-  claim: import("./claim-extraction.js").ExtractedSpreadsheetClaim,
+  claim: import("./claim-extraction.ts").ExtractedSpreadsheetClaim,
   ctx: { toolExecutor: VerifyAssistantClaimsParams["toolExecutor"]; hasTool: (name: string) => boolean }
 ): Promise<NonNullable<VerificationResult["claims"]>[number]> {
   if (claim.kind !== "cell_value") {
@@ -402,7 +402,7 @@ async function verifyCellValueClaim(
 }
 
 function formatRangeStatClaimLabel(
-  measure: import("./claim-extraction.js").SpreadsheetClaimMeasure,
+  measure: import("./claim-extraction.ts").SpreadsheetClaimMeasure,
   reference: string | undefined,
   expected: number
 ): string {
@@ -416,7 +416,7 @@ function sanitizeVerificationToolResult(result: unknown): unknown {
   return rest;
 }
 
-function extractStatisticValue(result: any, measure: import("./claim-extraction.js").SpreadsheetClaimMeasure): number | null {
+function extractStatisticValue(result: any, measure: import("./claim-extraction.ts").SpreadsheetClaimMeasure): number | null {
   const stats = result?.data?.statistics;
   if (!stats || typeof stats !== "object") return null;
   const value = (stats as any)[measure];
@@ -440,7 +440,7 @@ function numbersApproximatelyEqual(actual: number | null, expected: number): boo
 }
 
 function statisticMatchesExpected(
-  measure: import("./claim-extraction.js").SpreadsheetClaimMeasure,
+  measure: import("./claim-extraction.ts").SpreadsheetClaimMeasure,
   actual: number | null,
   expected: number
 ): boolean {

@@ -2,13 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import { formulaWasmNodeEntryUrl } from "../../../../scripts/build-formula-wasm-node.mjs";
 
-import { EngineWorker, type MessageChannelLike, type WorkerLike } from "../worker/EngineWorker";
+import { EngineWorker, type MessageChannelLike, type WorkerLike } from "../worker/EngineWorker.ts";
 import type {
   InitMessage,
   RpcRequest,
   WorkerInboundMessage,
   WorkerOutboundMessage
-} from "../protocol";
+} from "../protocol.ts";
 
 class MockMessagePort {
   onmessage: ((event: MessageEvent<unknown>) => void) | null = null;

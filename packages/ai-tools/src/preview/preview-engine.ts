@@ -1,8 +1,8 @@
-import type { SpreadsheetApi } from "../spreadsheet/api.js";
-import { formatA1Cell } from "../spreadsheet/a1.js";
-import { isCellEmpty, type CellData } from "../spreadsheet/types.js";
-import type { UnknownToolCall } from "../tool-schema.js";
-import { ToolExecutor, type ToolExecutionResult, type ToolExecutorOptions } from "../executor/tool-executor.js";
+import type { SpreadsheetApi } from "../spreadsheet/api.ts";
+import { formatA1Cell } from "../spreadsheet/a1.ts";
+import { isCellEmpty, type CellData } from "../spreadsheet/types.ts";
+import type { UnknownToolCall } from "../tool-schema.ts";
+import { ToolExecutor, type ToolExecutionResult, type ToolExecutorOptions } from "../executor/tool-executor.ts";
 
 export type CellChangeType = "create" | "modify" | "delete";
 

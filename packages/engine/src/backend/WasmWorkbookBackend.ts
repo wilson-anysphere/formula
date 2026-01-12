@@ -1,7 +1,7 @@
-import type { EngineClient } from "../client";
-import type { CellScalar } from "../protocol";
-import { fromA1, toA1, toA1Range } from "./a1";
-import { isFormulaInput, normalizeFormulaTextOpt } from "./formula";
+import type { EngineClient } from "../client.ts";
+import type { CellScalar } from "../protocol.ts";
+import { fromA1, toA1, toA1Range } from "./a1.ts";
+import { isFormulaInput, normalizeFormulaTextOpt } from "./formula.ts";
 import type { RangeCellEdit, RangeData, SheetInfo, SheetUsedRange, WorkbookBackend, WorkbookInfo } from "@formula/workbook-backend";
 
 type UsedRangeState = {
@@ -49,8 +49,11 @@ type EngineWorkbookJson = {
 export class WasmWorkbookBackend implements WorkbookBackend {
   private readonly usedRanges = new Map<string, UsedRangeState>();
   private workbookInfo: WorkbookInfo | null = null;
+  private readonly engine: EngineClient;
 
-  constructor(private readonly engine: EngineClient) {}
+  constructor(engine: EngineClient) {
+    this.engine = engine;
+  }
 
   async newWorkbook(): Promise<WorkbookInfo> {
     await this.engine.newWorkbook();

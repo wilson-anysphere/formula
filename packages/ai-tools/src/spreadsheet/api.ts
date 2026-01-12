@@ -1,5 +1,5 @@
-import type { CellAddress, RangeAddress } from "./a1.js";
-import type { CellData, CellFormat } from "./types.js";
+import type { CellAddress, RangeAddress } from "./a1.ts";
+import type { CellData, CellFormat } from "./types.ts";
 
 export interface CellEntry {
   address: CellAddress;

@@ -14,8 +14,8 @@ import type {
   RpcResponseErr,
   RpcResponseOk,
   WorkerOutboundMessage
-} from "../protocol";
-import { isFormulaInput, normalizeFormulaText } from "../backend/formula";
+} from "../protocol.ts";
+import { isFormulaInput, normalizeFormulaText } from "../backend/formula.ts";
 
 export interface WorkerLike {
   postMessage(message: unknown, transfer?: Transferable[]): void;

@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { EngineClient } from "../../client";
-import { colToName, fromA1, toA1, toA1Range } from "../a1";
-import { normalizeFormulaText } from "../formula";
-import { WasmWorkbookBackend } from "../WasmWorkbookBackend";
+import type { EngineClient } from "../../client.ts";
+import { colToName, fromA1, toA1, toA1Range } from "../a1.ts";
+import { normalizeFormulaText } from "../formula.ts";
+import { WasmWorkbookBackend } from "../WasmWorkbookBackend.ts";
 
 describe("A1 helpers", () => {
   it("converts 0-based columns to Excel column names", () => {

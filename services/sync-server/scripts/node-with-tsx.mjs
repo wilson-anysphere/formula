@@ -27,6 +27,21 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 }
 
 child.on("exit", (code, signal) => {
-  if (signal) process.kill(process.pid, signal);
+  if (signal) {
+    // Re-raise the signal on this wrapper process so callers (and CI) observe the same
+    // termination semantics as the underlying tsx child.
+    //
+    // Important: do this asynchronously. Some Node versions have been observed to hit
+    // an internal assertion (e.g. `env_->execution_async_id() == 0`) if we `process.kill`
+    // ourselves synchronously from inside the `exit` event callback.
+    setImmediate(() => {
+      try {
+        process.kill(process.pid, signal);
+      } catch {
+        process.exit(1);
+      }
+    });
+    return;
+  }
   process.exit(code ?? 0);
 });

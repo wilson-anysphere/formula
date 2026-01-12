@@ -1,7 +1,7 @@
-import type { SpreadsheetApi } from "../spreadsheet/api.js";
-import type { ToolExecutorOptions, ToolExecutionResult } from "../executor/tool-executor.js";
-import { ToolExecutor } from "../executor/tool-executor.js";
-import { PreviewEngine, type PreviewEngineOptions, type ToolPlanPreview } from "../preview/preview-engine.js";
+import type { SpreadsheetApi } from "../spreadsheet/api.ts";
+import type { ToolExecutorOptions, ToolExecutionResult } from "../executor/tool-executor.ts";
+import { ToolExecutor } from "../executor/tool-executor.ts";
+import { PreviewEngine, type PreviewEngineOptions, type ToolPlanPreview } from "../preview/preview-engine.ts";
 import {
   SPREADSHEET_TOOL_DEFINITIONS,
   TOOL_CAPABILITIES,
@@ -10,7 +10,7 @@ import {
   type ToolDefinition,
   type ToolName,
   type ToolPolicy
-} from "../tool-schema.js";
+} from "../tool-schema.ts";
 
 export interface LLMToolCall {
   id?: string;

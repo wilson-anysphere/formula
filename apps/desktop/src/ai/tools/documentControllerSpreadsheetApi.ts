@@ -3,9 +3,9 @@ import { applyStylePatch } from "../../formatting/styleTable.js";
 
 import { normalizeFormulaTextOpt } from "@formula/engine";
 
-import { formatA1Range, type CellAddress, type RangeAddress } from "../../../../../packages/ai-tools/src/spreadsheet/a1.js";
-import type { CellEntry, SpreadsheetApi } from "../../../../../packages/ai-tools/src/spreadsheet/api.js";
-import { isCellEmpty, type CellData, type CellFormat } from "../../../../../packages/ai-tools/src/spreadsheet/types.js";
+import { formatA1Range, type CellAddress, type RangeAddress } from "../../../../../packages/ai-tools/src/spreadsheet/a1.ts";
+import type { CellEntry, SpreadsheetApi } from "../../../../../packages/ai-tools/src/spreadsheet/api.ts";
+import { isCellEmpty, type CellData, type CellFormat } from "../../../../../packages/ai-tools/src/spreadsheet/types.ts";
 import type { SheetNameResolver } from "../../sheet/sheetNameResolver.js";
 
 type DocumentControllerStyle = Record<string, any>;

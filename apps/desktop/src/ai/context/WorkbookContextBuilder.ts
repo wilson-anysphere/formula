@@ -1,6 +1,6 @@
 import type { DocumentController } from "../../document/documentController.js";
-import { rangeToA1 as rangeToA1Selection } from "../../selection/a1";
-import type { Range } from "../../selection/types";
+import { rangeToA1 as rangeToA1Selection } from "../../selection/a1.ts";
+import type { Range } from "../../selection/types.ts";
 import type { SheetNameResolver } from "../../sheet/sheetNameResolver.js";
 
 import type { SheetSchema } from "../../../../../packages/ai-context/src/schema.js";
@@ -12,12 +12,12 @@ import {
   type TokenEstimator
 } from "../../../../../packages/ai-context/src/tokenBudget.js";
 import { rectToA1 } from "../../../../../packages/ai-rag/src/workbook/rect.js";
-import { ToolExecutor } from "../../../../../packages/ai-tools/src/executor/tool-executor.js";
-import type { SpreadsheetApi } from "../../../../../packages/ai-tools/src/spreadsheet/api.js";
-import type { CellScalar } from "../../../../../packages/ai-tools/src/spreadsheet/types.js";
+import { ToolExecutor } from "../../../../../packages/ai-tools/src/executor/tool-executor.ts";
+import type { SpreadsheetApi } from "../../../../../packages/ai-tools/src/spreadsheet/api.ts";
+import type { CellScalar } from "../../../../../packages/ai-tools/src/spreadsheet/types.ts";
 
-import type { ContextBudgetMode } from "../contextBudget.js";
-import { getDefaultReserveForOutputTokens, getModeContextWindowTokens } from "../contextBudget.js";
+import type { ContextBudgetMode } from "../contextBudget.ts";
+import { getDefaultReserveForOutputTokens, getModeContextWindowTokens } from "../contextBudget.ts";
 
 export type WorkbookContextBlockKind = "selection" | "sheet_sample" | "retrieved";
 
