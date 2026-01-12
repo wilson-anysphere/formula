@@ -324,7 +324,21 @@ export async function activate(context) {
         ({ extensionId, panelId }) => {
           if (localStorage.getItem(`formula.extensionHost.storage.${extensionId}`) !== null) return false;
           const seedsRaw = localStorage.getItem("formula.extensions.contributedPanels.v1");
-          if (seedsRaw != null) return false;
+          if (seedsRaw != null) {
+            try {
+              const parsed = JSON.parse(seedsRaw);
+              if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+              // Ensure this extension's panel seed is removed, but allow other extensions
+              // (e.g. built-in desktop e2e fixtures) to keep their seeded panels.
+              if (Object.prototype.hasOwnProperty.call(parsed, panelId)) return false;
+              for (const seed of Object.values(parsed)) {
+                const owner = typeof (seed as any)?.extensionId === "string" ? String((seed as any).extensionId) : "";
+                if (owner === extensionId) return false;
+              }
+            } catch {
+              return false;
+            }
+          }
           try {
             const permissionsRaw = localStorage.getItem("formula.extensionHost.permissions");
             if (!permissionsRaw) return false;
@@ -414,7 +428,13 @@ export async function activate(context) {
       }, { extensionId });
 
       expect(persistedState.storage).toBeNull();
-      expect(persistedState.seeds).toBeNull();
+      if (persistedState.seeds != null) {
+        const seeds = JSON.parse(String(persistedState.seeds));
+        expect(seeds?.[panelId]).toBeUndefined();
+        for (const seed of Object.values(seeds ?? {})) {
+          expect((seed as any)?.extensionId).not.toBe(extensionId);
+        }
+      }
       expect(persistedState.permissions?.[extensionId]).toBeUndefined();
       expect(persistedState.permissions?.["formula.e2e-events"]).toBeTruthy();
       expect(persistedState.dbState).toEqual({ installedPresent: false, packagesCount: 0 });
