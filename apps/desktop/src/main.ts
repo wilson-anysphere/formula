@@ -633,6 +633,9 @@ window.addEventListener("keydown", (e) => {
       return;
     }
     if (keyLower === "i") {
+      // Reserve Cmd+I for toggling the AI sidebar (see instructions/ui.md).
+      // Keep Ctrl+I working as the Excel-style italic shortcut on non-mac platforms.
+      if (e.metaKey && !e.ctrlKey) return;
       e.preventDefault();
       runWithOptionalBatch("Italic", () => toggleItalic(doc, sheetId, ranges));
       app.focus();
