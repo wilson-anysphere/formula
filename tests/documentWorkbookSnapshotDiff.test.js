@@ -215,7 +215,7 @@ test("diffDocumentWorkbookSnapshots reports formatOnly edits for sheet-default f
   assert.deepEqual(sheet1.diff.formatOnly[0].cell, { row: 0, col: 0 });
 });
 
-test("diffDocumentWorkbookSnapshots reports formatOnly edits for range-run formatting (DocumentController snapshots)", () => {
+test("diffDocumentWorkbookSnapshots reports formatOnly edits for formatRunsByCol range-run formatting (DocumentController snapshots)", () => {
   const doc = new DocumentController();
   doc.setCellValue("Sheet1", "A1", "x");
   const beforeSnapshot = doc.encodeState();

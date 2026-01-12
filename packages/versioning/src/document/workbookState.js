@@ -173,7 +173,7 @@ function normalizeRangeRuns(raw) {
  * `[{ col: 0, runs: [{ startRow, endRowExclusive, format }, ...] }, ...]`.
  *
  * We normalize this into the rectangle run shape used by `normalizeRangeRuns` so downstream
- * merge logic can reuse a single path.
+ * diff logic can reuse a single merge path.
  *
  * @param {any} raw
  * @returns {Array<{ startRow: number, startCol: number, endRow: number, endCol: number, format: Record<string, any> }>}
