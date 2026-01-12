@@ -1088,6 +1088,11 @@ fn odd_coupon_functions_truncate_frequency_like_excel() {
     let oddf_2_9_value =
         eval_number_or_skip(&mut sheet, oddf_2_9).expect("ODDFPRICE should truncate frequency");
     assert_close(oddf_2_9_value, oddf_baseline_2_value, 1e-9);
+    let oddf_text_2_9 =
+        r#"=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,"2.9",0)"#;
+    let oddf_text_2_9_value = eval_number_or_skip(&mut sheet, oddf_text_2_9)
+        .expect("ODDFPRICE should truncate frequency supplied as numeric text");
+    assert_close(oddf_text_2_9_value, oddf_baseline_2_value, 1e-9);
 
     // ODDFPRICE: 1.9 truncates to 1.
     let oddf_baseline_1 =
@@ -1132,6 +1137,11 @@ fn odd_coupon_functions_truncate_frequency_like_excel() {
     let oddl_2_9_value =
         eval_number_or_skip(&mut sheet, oddl_2_9).expect("ODDLPRICE should truncate frequency");
     assert_close(oddl_2_9_value, oddl_baseline_2_value, 1e-9);
+    let oddl_text_2_9 =
+        r#"=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,"2.9",0)"#;
+    let oddl_text_2_9_value = eval_number_or_skip(&mut sheet, oddl_text_2_9)
+        .expect("ODDLPRICE should truncate frequency supplied as numeric text");
+    assert_close(oddl_text_2_9_value, oddl_baseline_2_value, 1e-9);
 
     let oddl_baseline_1 =
         "=ODDLPRICE(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,0.05,100,1,0)";
@@ -1547,6 +1557,11 @@ fn odd_coupon_yield_functions_truncate_frequency_like_excel() {
     let oddf_2_9_value =
         eval_number_or_skip(&mut sheet, oddf_2_9).expect("ODDFYIELD should truncate frequency");
     assert_close(oddf_2_9_value, oddf_baseline_2_value, 1e-9);
+    let oddf_text_2_9 =
+        r#"=LET(pr,ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,0),ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,pr,100,"2.9",0))"#;
+    let oddf_text_2_9_value = eval_number_or_skip(&mut sheet, oddf_text_2_9)
+        .expect("ODDFYIELD should truncate frequency supplied as numeric text");
+    assert_close(oddf_text_2_9_value, oddf_baseline_2_value, 1e-9);
 
     // ODDFYIELD: 1.9 truncates to 1.
     let oddf_baseline_1 =
@@ -1589,6 +1604,11 @@ fn odd_coupon_yield_functions_truncate_frequency_like_excel() {
     let oddl_2_9_value =
         eval_number_or_skip(&mut sheet, oddl_2_9).expect("ODDLYIELD should truncate frequency");
     assert_close(oddl_2_9_value, oddl_baseline_2_value, 1e-9);
+    let oddl_text_2_9 =
+        r#"=LET(pr,ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,0),ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,pr,100,"2.9",0))"#;
+    let oddl_text_2_9_value = eval_number_or_skip(&mut sheet, oddl_text_2_9)
+        .expect("ODDLYIELD should truncate frequency supplied as numeric text");
+    assert_close(oddl_text_2_9_value, oddl_baseline_2_value, 1e-9);
 
     let oddl_baseline_1 =
         "=LET(pr,ODDLPRICE(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,0.05,100,1,0),ODDLYIELD(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,pr,100,1,0))";
@@ -1639,6 +1659,11 @@ fn odd_coupon_yield_functions_truncate_basis_like_excel() {
     let oddf_basis_0_9_value =
         eval_number_or_skip(&mut sheet, oddf_basis_0_9).expect("ODDFYIELD should truncate basis");
     assert_close(oddf_basis_0_9_value, oddf_basis_0_value, 1e-9);
+    let oddf_basis_text_0_9 =
+        r#"=LET(pr,ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,0),ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,pr,100,2,"0.9"))"#;
+    let oddf_basis_text_0_9_value = eval_number_or_skip(&mut sheet, oddf_basis_text_0_9)
+        .expect("ODDFYIELD should truncate basis supplied as numeric text");
+    assert_close(oddf_basis_text_0_9_value, oddf_basis_0_value, 1e-9);
 
     // ODDFYIELD: 1.9 truncates to 1.
     let oddf_basis_1 =
@@ -1681,6 +1706,11 @@ fn odd_coupon_yield_functions_truncate_basis_like_excel() {
     let oddl_basis_0_9_value =
         eval_number_or_skip(&mut sheet, oddl_basis_0_9).expect("ODDLYIELD should truncate basis");
     assert_close(oddl_basis_0_9_value, oddl_basis_0_value, 1e-9);
+    let oddl_basis_text_0_9 =
+        r#"=LET(pr,ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,0),ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,pr,100,2,"0.9"))"#;
+    let oddl_basis_text_0_9_value = eval_number_or_skip(&mut sheet, oddl_basis_text_0_9)
+        .expect("ODDLYIELD should truncate basis supplied as numeric text");
+    assert_close(oddl_basis_text_0_9_value, oddl_basis_0_value, 1e-9);
 
     let oddl_basis_1 =
         "=LET(pr,ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,1),ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,pr,100,2,1))";
@@ -1879,6 +1909,11 @@ fn odd_coupon_functions_truncate_basis_like_excel() {
     let oddf_basis_0_9_value =
         eval_number_or_skip(&mut sheet, oddf_basis_0_9).expect("ODDFPRICE should truncate basis");
     assert_close(oddf_basis_0_9_value, oddf_basis_0_value, 1e-9);
+    let oddf_basis_text_0_9 =
+        r#"=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,"0.9")"#;
+    let oddf_basis_text_0_9_value = eval_number_or_skip(&mut sheet, oddf_basis_text_0_9)
+        .expect("ODDFPRICE should truncate basis supplied as numeric text");
+    assert_close(oddf_basis_text_0_9_value, oddf_basis_0_value, 1e-9);
 
     let oddf_basis_1 =
         "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,1)";
@@ -1912,6 +1947,11 @@ fn odd_coupon_functions_truncate_basis_like_excel() {
     let oddl_basis_0_9_value =
         eval_number_or_skip(&mut sheet, oddl_basis_0_9).expect("ODDLPRICE should truncate basis");
     assert_close(oddl_basis_0_9_value, oddl_basis_0_value, 1e-9);
+    let oddl_basis_text_0_9 =
+        r#"=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,"0.9")"#;
+    let oddl_basis_text_0_9_value = eval_number_or_skip(&mut sheet, oddl_basis_text_0_9)
+        .expect("ODDLPRICE should truncate basis supplied as numeric text");
+    assert_close(oddl_basis_text_0_9_value, oddl_basis_0_value, 1e-9);
 
     let oddl_basis_1 =
         "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,1)";
