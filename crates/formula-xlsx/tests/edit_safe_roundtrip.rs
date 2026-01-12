@@ -21,6 +21,10 @@ fn direct_model_edits_write_correct_types_and_formulas() {
         CellValue::String("World".to_string()),
     );
     sheet.set_formula(CellRef::from_a1("C1").unwrap(), Some("SEQUENCE(2)".to_string()));
+    sheet.set_formula(
+        CellRef::from_a1("D1").unwrap(),
+        Some("FORECAST.ETS(1,2,3)".to_string()),
+    );
 
     let saved = doc.save_to_vec().expect("save");
 
@@ -40,6 +44,9 @@ fn direct_model_edits_write_correct_types_and_formulas() {
 
     let c1 = parse_cell(&sheet_xml, "C1");
     assert_eq!(c1.f.as_deref(), Some("_xlfn.SEQUENCE(2)"));
+
+    let d1 = parse_cell(&sheet_xml, "D1");
+    assert_eq!(d1.f.as_deref(), Some("_xlfn.FORECAST.ETS(1,2,3)"));
 }
 
 #[test]
@@ -52,11 +59,19 @@ fn editing_api_updates_formula_meta_file_text() {
         CellRef::from_a1("C1").unwrap(),
         Some("=SEQUENCE(3)".to_string()),
     ));
+    assert!(doc.set_cell_formula(
+        sheet_id,
+        CellRef::from_a1("D1").unwrap(),
+        Some("=FORECAST.ETS(1,2,3)".to_string()),
+    ));
 
     let saved = doc.save_to_vec().expect("save");
     let sheet_xml = zip_part(&saved, "xl/worksheets/sheet1.xml");
     let c1 = parse_cell(&sheet_xml, "C1");
     assert_eq!(c1.f.as_deref(), Some("_xlfn.SEQUENCE(3)"));
+
+    let d1 = parse_cell(&sheet_xml, "D1");
+    assert_eq!(d1.f.as_deref(), Some("_xlfn.FORECAST.ETS(1,2,3)"));
 }
 
 fn zip_part(zip_bytes: &[u8], name: &str) -> Vec<u8> {

@@ -230,6 +230,30 @@ fn streaming_patch_normalizes_formula_with_xlfn_prefixes() -> Result<(), Box<dyn
             CellValue::Number(1.0),
             Some("=VALUETOTEXT(1)".to_string()),
         ),
+        WorksheetCellPatch::new(
+            "xl/worksheets/sheet1.xml",
+            CellRef::from_a1("C5")?,
+            CellValue::Number(1.0),
+            Some("=FORECAST.ETS(1,2,3)".to_string()),
+        ),
+        WorksheetCellPatch::new(
+            "xl/worksheets/sheet1.xml",
+            CellRef::from_a1("C6")?,
+            CellValue::Number(1.0),
+            Some("=FORECAST.ETS.CONFINT(1,2,3)".to_string()),
+        ),
+        WorksheetCellPatch::new(
+            "xl/worksheets/sheet1.xml",
+            CellRef::from_a1("C7")?,
+            CellValue::Number(1.0),
+            Some("=FORECAST.ETS.SEASONALITY(1,2)".to_string()),
+        ),
+        WorksheetCellPatch::new(
+            "xl/worksheets/sheet1.xml",
+            CellRef::from_a1("C8")?,
+            CellValue::Number(1.0),
+            Some("=FORECAST.ETS.STAT(1,2)".to_string()),
+        ),
     ];
 
     let mut out = Cursor::new(Vec::new());
@@ -247,6 +271,10 @@ fn streaming_patch_normalizes_formula_with_xlfn_prefixes() -> Result<(), Box<dyn
         ("C2", r#"_xlfn.TEXTAFTER("a_b","_")"#),
         ("C3", r#"_xlfn.TEXTBEFORE("a_b","_")"#),
         ("C4", "_xlfn.VALUETOTEXT(1)"),
+        ("C5", "_xlfn.FORECAST.ETS(1,2,3)"),
+        ("C6", "_xlfn.FORECAST.ETS.CONFINT(1,2,3)"),
+        ("C7", "_xlfn.FORECAST.ETS.SEASONALITY(1,2)"),
+        ("C8", "_xlfn.FORECAST.ETS.STAT(1,2)"),
     ] {
         let cell = xml_doc
             .descendants()
@@ -272,6 +300,10 @@ fn streaming_patch_normalizes_formula_with_xlfn_prefixes() -> Result<(), Box<dyn
         ("C2", r#"TEXTAFTER("a_b","_")"#),
         ("C3", r#"TEXTBEFORE("a_b","_")"#),
         ("C4", "VALUETOTEXT(1)"),
+        ("C5", "FORECAST.ETS(1,2,3)"),
+        ("C6", "FORECAST.ETS.CONFINT(1,2,3)"),
+        ("C7", "FORECAST.ETS.SEASONALITY(1,2)"),
+        ("C8", "FORECAST.ETS.STAT(1,2)"),
     ] {
         let cell = sheet.cell(CellRef::from_a1(cell_ref)?).unwrap();
         assert_eq!(cell.formula.as_deref(), Some(expected_display));
