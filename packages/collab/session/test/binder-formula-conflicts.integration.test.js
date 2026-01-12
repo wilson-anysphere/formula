@@ -332,3 +332,92 @@ test("CollabSession↔DocumentController binder value edits are treated as local
   docA.destroy();
   docB.destroy();
 });
+
+test("CollabSession↔DocumentController binder content conflicts (local formula vs remote value) work without modifiedBy (formula+value mode)", async () => {
+  // Deterministic tie-break: higher clientID wins map entry overwrites.
+  const docA = new Y.Doc();
+  docA.clientID = 1;
+  const docB = new Y.Doc();
+  docB.clientID = 2;
+
+  let disconnect = connectDocs(docA, docB);
+
+  /** @type {Array<any>} */
+  const conflictsA = [];
+
+  const sessionA = createCollabSession({
+    doc: docA,
+    formulaConflicts: {
+      localUserId: "user-a",
+      mode: "formula+value",
+      onConflict: (c) => conflictsA.push(c),
+    },
+  });
+  const sessionB = createCollabSession({ doc: docB });
+
+  const dcA = new DocumentControllerStub();
+  const dcB = new DocumentControllerStub();
+  const binderA = await bindCollabSessionToDocumentController({
+    session: sessionA,
+    documentController: dcA,
+    userId: null,
+  });
+  const binderB = await bindCollabSessionToDocumentController({
+    session: sessionB,
+    documentController: dcB,
+    userId: null,
+  });
+
+  // Establish base without `modifiedBy`.
+  await sessionB.setCellValue("Sheet1:0:0", "base");
+  await waitForCondition(async () => (await sessionA.getCell("Sheet1:0:0"))?.value === "base");
+  assert.equal((await sessionA.getCell("Sheet1:0:0"))?.modifiedBy, null);
+
+  // Ensure both DocumentControllers have hydrated.
+  await waitForCondition(() => dcA.getCell("Sheet1", { row: 0, col: 0 }).value === "base");
+  await waitForCondition(() => dcB.getCell("Sheet1", { row: 0, col: 0 }).value === "base");
+
+  // Offline concurrent edits:
+  // - Local (A via binder): formula "=1"
+  // - Remote (B via binder): literal value "theirs"
+  disconnect();
+
+  dcA.setCellFormula("Sheet1", { row: 0, col: 0 }, "=1");
+  await waitForCondition(async () => (await sessionA.getCell("Sheet1:0:0"))?.formula === "=1");
+  assert.equal((await sessionA.getCell("Sheet1:0:0"))?.modifiedBy, null);
+
+  dcB.setCellValue("Sheet1", { row: 0, col: 0 }, "theirs");
+  await waitForCondition(async () => (await sessionB.getCell("Sheet1:0:0"))?.value === "theirs");
+  assert.equal((await sessionB.getCell("Sheet1:0:0"))?.modifiedBy, null);
+
+  // Reconnect.
+  disconnect = connectDocs(docA, docB);
+
+  // Remote value should win deterministically (clientID=2).
+  await waitForCondition(async () => {
+    const cell = await sessionA.getCell("Sheet1:0:0");
+    return cell?.value === "theirs" && cell?.formula == null;
+  });
+
+  await waitForCondition(() => conflictsA.some((c) => c.kind === "content"));
+  const conflict = conflictsA.find((c) => c.kind === "content");
+  assert.ok(conflict, "expected a content conflict to be detected");
+  assert.equal(conflict.remoteUserId, "", "expected remoteUserId to be unknown when modifiedBy is missing");
+  assert.equal(conflict.local.type, "formula");
+  assert.equal(conflict.local.formula, "=1");
+  assert.equal(conflict.remote.type, "value");
+  assert.equal(conflict.remote.value, "theirs");
+
+  // Resolve by choosing the local formula.
+  assert.ok(sessionA.formulaConflictMonitor?.resolveConflict(conflict.id, conflict.local));
+  await waitForCondition(async () => (await sessionA.getCell("Sheet1:0:0"))?.formula === "=1");
+  await waitForCondition(async () => (await sessionB.getCell("Sheet1:0:0"))?.formula === "=1");
+
+  binderA.destroy();
+  binderB.destroy();
+  sessionA.destroy();
+  sessionB.destroy();
+  disconnect();
+  docA.destroy();
+  docB.destroy();
+});
