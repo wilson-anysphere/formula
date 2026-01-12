@@ -148,6 +148,62 @@ fn bytecode_backend_matches_ast_for_sum_and_countif() {
 }
 
 #[test]
+fn bytecode_backend_inlines_defined_name_static_ranges() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 3.0).unwrap();
+    engine
+        .define_name(
+            "MyRange",
+            NameScope::Workbook,
+            NameDefinition::Reference("Sheet1!$A$1:$A$3".to_string()),
+        )
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=SUM(MyRange)")
+        .unwrap();
+
+    // Ensure the named range was inlined and compiled to bytecode.
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    let via_bytecode = engine.get_cell_value("Sheet1", "B1");
+
+    // Compare against the AST backend for the same workbook state.
+    engine.set_bytecode_enabled(false);
+    engine.recalculate_single_threaded();
+    let via_ast = engine.get_cell_value("Sheet1", "B1");
+
+    assert_eq!(via_bytecode, Value::Number(6.0));
+    assert_eq!(via_bytecode, via_ast);
+}
+
+#[test]
+fn bytecode_backend_does_not_inline_dynamic_defined_name_formulas() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine
+        .define_name(
+            "MyDyn",
+            NameScope::Workbook,
+            NameDefinition::Formula("=INDIRECT(\"A1\")".to_string()),
+        )
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=SUM(MyDyn)")
+        .unwrap();
+
+    // The dynamic name definition should not be inlined, so the formula should stay on the AST backend.
+    assert_eq!(engine.bytecode_program_count(), 0);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_countif_grouped_numeric_criteria() {
     let mut engine = Engine::new();
     engine
@@ -919,7 +975,7 @@ fn bytecode_backend_inlines_constant_defined_names() {
 }
 
 #[test]
-fn bytecode_backend_does_not_inline_reference_defined_names() {
+fn bytecode_backend_inlines_reference_defined_names_when_static_refs() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 0.1).unwrap();
     engine
@@ -933,9 +989,9 @@ fn bytecode_backend_does_not_inline_reference_defined_names() {
     engine.set_cell_formula("Sheet1", "B1", "=RATE*2").unwrap();
     engine.recalculate_single_threaded();
 
+    // RATE should be inlined to a cell reference and compile to bytecode.
+    assert_eq!(engine.bytecode_program_count(), 1);
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(0.2));
-    // NameRef is not supported by bytecode lowering and reference names should not be inlined.
-    assert_eq!(engine.bytecode_program_count(), 0);
 }
 
 #[test]

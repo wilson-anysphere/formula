@@ -2567,10 +2567,11 @@ impl Engine {
             row: key.addr.row as i32,
             col: key.addr.col as i32,
         };
+        let expr = self.inline_static_defined_names_for_bytecode(expr, key.sheet);
         let mut resolve_sheet = |name: &str| self.workbook.sheet_id(name);
         let rewritten =
-            rewrite_defined_name_constants_for_bytecode(expr, key.sheet, &self.workbook);
-        let expr_to_lower = rewritten.as_ref().unwrap_or(expr);
+            rewrite_defined_name_constants_for_bytecode(&expr, key.sheet, &self.workbook);
+        let expr_to_lower = rewritten.as_ref().unwrap_or(&expr);
         let expr = bytecode::lower_canonical_expr(
             expr_to_lower,
             origin_ast,
@@ -2583,6 +2584,355 @@ impl Engine {
         }
         bytecode_expr_within_grid_limits(&expr, origin)?;
         Ok(self.bytecode_cache.get_or_compile(&expr))
+    }
+
+    fn inline_static_defined_names_for_bytecode(
+        &self,
+        expr: &crate::Expr,
+        current_sheet: SheetId,
+    ) -> crate::Expr {
+        let mut visiting: HashSet<(SheetId, String)> = HashSet::new();
+        self.inline_static_defined_names_for_bytecode_inner(expr, current_sheet, &mut visiting)
+    }
+
+    fn inline_static_defined_names_for_bytecode_inner(
+        &self,
+        expr: &crate::Expr,
+        current_sheet: SheetId,
+        visiting: &mut HashSet<(SheetId, String)>,
+    ) -> crate::Expr {
+        match expr {
+            crate::Expr::NameRef(nref) => self
+                .try_inline_defined_name_ref_for_bytecode(nref, current_sheet, visiting)
+                .unwrap_or_else(|| expr.clone()),
+            crate::Expr::Array(arr) => crate::Expr::Array(crate::ArrayLiteral {
+                rows: arr
+                    .rows
+                    .iter()
+                    .map(|r| {
+                        r.iter()
+                            .map(|e| {
+                                self.inline_static_defined_names_for_bytecode_inner(
+                                    e,
+                                    current_sheet,
+                                    visiting,
+                                )
+                            })
+                            .collect()
+                    })
+                    .collect(),
+            }),
+            crate::Expr::FunctionCall(call) => crate::Expr::FunctionCall(crate::FunctionCall {
+                name: call.name.clone(),
+                args: call
+                    .args
+                    .iter()
+                    .map(|arg| {
+                        self.inline_static_defined_names_for_bytecode_inner(
+                            arg,
+                            current_sheet,
+                            visiting,
+                        )
+                    })
+                    .collect(),
+            }),
+            crate::Expr::Call(call) => crate::Expr::Call(crate::CallExpr {
+                callee: Box::new(self.inline_static_defined_names_for_bytecode_inner(
+                    &call.callee,
+                    current_sheet,
+                    visiting,
+                )),
+                args: call
+                    .args
+                    .iter()
+                    .map(|arg| {
+                        self.inline_static_defined_names_for_bytecode_inner(
+                            arg,
+                            current_sheet,
+                            visiting,
+                        )
+                    })
+                    .collect(),
+            }),
+            crate::Expr::Unary(u) => crate::Expr::Unary(crate::UnaryExpr {
+                op: u.op,
+                expr: Box::new(self.inline_static_defined_names_for_bytecode_inner(
+                    &u.expr,
+                    current_sheet,
+                    visiting,
+                )),
+            }),
+            crate::Expr::Postfix(p) => crate::Expr::Postfix(crate::PostfixExpr {
+                op: p.op,
+                expr: Box::new(self.inline_static_defined_names_for_bytecode_inner(
+                    &p.expr,
+                    current_sheet,
+                    visiting,
+                )),
+            }),
+            crate::Expr::Binary(b) => crate::Expr::Binary(crate::BinaryExpr {
+                op: b.op,
+                left: Box::new(self.inline_static_defined_names_for_bytecode_inner(
+                    &b.left,
+                    current_sheet,
+                    visiting,
+                )),
+                right: Box::new(self.inline_static_defined_names_for_bytecode_inner(
+                    &b.right,
+                    current_sheet,
+                    visiting,
+                )),
+            }),
+            crate::Expr::CellRef(_)
+            | crate::Expr::ColRef(_)
+            | crate::Expr::RowRef(_)
+            | crate::Expr::StructuredRef(_)
+            | crate::Expr::Number(_)
+            | crate::Expr::String(_)
+            | crate::Expr::Boolean(_)
+            | crate::Expr::Error(_)
+            | crate::Expr::Missing => expr.clone(),
+        }
+    }
+
+    fn try_inline_defined_name_ref_for_bytecode(
+        &self,
+        nref: &crate::NameRef,
+        current_sheet: SheetId,
+        visiting: &mut HashSet<(SheetId, String)>,
+    ) -> Option<crate::Expr> {
+        if nref.workbook.is_some() {
+            return None;
+        }
+        let name_key = normalize_defined_name(&nref.name);
+        if name_key.is_empty() {
+            return None;
+        }
+
+        let sheet_id = match nref.sheet.as_ref() {
+            None => Some(current_sheet),
+            Some(sheet_ref) => sheet_ref
+                .as_single_sheet()
+                .and_then(|name| self.workbook.sheet_id(name)),
+        }?;
+
+        self.resolve_defined_name_to_static_ref_for_bytecode(sheet_id, &name_key, visiting)
+    }
+
+    fn resolve_defined_name_to_static_ref_for_bytecode(
+        &self,
+        sheet_id: SheetId,
+        name_key: &str,
+        visiting: &mut HashSet<(SheetId, String)>,
+    ) -> Option<crate::Expr> {
+        let def = resolve_defined_name(&self.workbook, sheet_id, name_key)?;
+        let visit_key = (sheet_id, name_key.to_string());
+        if !visiting.insert(visit_key.clone()) {
+            return None;
+        }
+
+        let result = match &def.definition {
+            NameDefinition::Reference(formula) => {
+                let ast = match crate::parse_formula(
+                    formula,
+                    crate::ParseOptions {
+                        locale: crate::LocaleConfig::en_us(),
+                        reference_style: crate::ReferenceStyle::A1,
+                        normalize_relative_to: None,
+                    },
+                ) {
+                    Ok(ast) => ast,
+                    Err(_) => {
+                        visiting.remove(&visit_key);
+                        return None;
+                    }
+                };
+                match &ast.expr {
+                    crate::Expr::CellRef(_) => {
+                        self.extract_static_ref_expr_for_bytecode(&ast.expr, sheet_id, visiting)
+                    }
+                    crate::Expr::Binary(b) if b.op == crate::BinaryOp::Range => {
+                        // Reference definitions must be a direct cell/range reference.
+                        if !matches!(
+                            b.left.as_ref(),
+                            crate::Expr::CellRef(_) | crate::Expr::ColRef(_) | crate::Expr::RowRef(_)
+                        ) || !matches!(
+                            b.right.as_ref(),
+                            crate::Expr::CellRef(_) | crate::Expr::ColRef(_) | crate::Expr::RowRef(_)
+                        ) {
+                            None
+                        } else {
+                            self.extract_static_ref_expr_for_bytecode(&ast.expr, sheet_id, visiting)
+                        }
+                    }
+                    _ => None,
+                }
+            }
+            NameDefinition::Formula(formula) => {
+                let ast = match crate::parse_formula(
+                    formula,
+                    crate::ParseOptions {
+                        locale: crate::LocaleConfig::en_us(),
+                        reference_style: crate::ReferenceStyle::A1,
+                        normalize_relative_to: None,
+                    },
+                ) {
+                    Ok(ast) => ast,
+                    Err(_) => {
+                        visiting.remove(&visit_key);
+                        return None;
+                    }
+                };
+                self.extract_static_ref_expr_for_bytecode(&ast.expr, sheet_id, visiting)
+            }
+            NameDefinition::Constant(_) => None,
+        };
+
+        visiting.remove(&visit_key);
+        result
+    }
+
+    fn extract_static_ref_expr_for_bytecode(
+        &self,
+        expr: &crate::Expr,
+        current_sheet: SheetId,
+        visiting: &mut HashSet<(SheetId, String)>,
+    ) -> Option<crate::Expr> {
+        match expr {
+            crate::Expr::CellRef(r) => Some(crate::Expr::CellRef(
+                self.normalize_cell_ref_for_bytecode(r, current_sheet)?,
+            )),
+            crate::Expr::Binary(b) if b.op == crate::BinaryOp::Range => {
+                let left =
+                    self.normalize_range_endpoint_for_bytecode(&b.left, current_sheet, visiting)?;
+                let right =
+                    self.normalize_range_endpoint_for_bytecode(&b.right, current_sheet, visiting)?;
+                Some(crate::Expr::Binary(crate::BinaryExpr {
+                    op: crate::BinaryOp::Range,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                }))
+            }
+            crate::Expr::NameRef(nref) => {
+                self.try_inline_defined_name_ref_for_bytecode(nref, current_sheet, visiting)
+            }
+            _ => None,
+        }
+    }
+
+    fn normalize_range_endpoint_for_bytecode(
+        &self,
+        expr: &crate::Expr,
+        current_sheet: SheetId,
+        visiting: &mut HashSet<(SheetId, String)>,
+    ) -> Option<crate::Expr> {
+        match expr {
+            crate::Expr::CellRef(r) => Some(crate::Expr::CellRef(
+                self.normalize_cell_ref_for_bytecode(r, current_sheet)?,
+            )),
+            crate::Expr::ColRef(r) => Some(crate::Expr::ColRef(
+                self.normalize_col_ref_for_bytecode(r, current_sheet)?,
+            )),
+            crate::Expr::RowRef(r) => Some(crate::Expr::RowRef(
+                self.normalize_row_ref_for_bytecode(r, current_sheet)?,
+            )),
+            crate::Expr::NameRef(nref) => {
+                let resolved = self.try_inline_defined_name_ref_for_bytecode(
+                    nref,
+                    current_sheet,
+                    visiting,
+                )?;
+                match resolved {
+                    crate::Expr::CellRef(_) | crate::Expr::ColRef(_) | crate::Expr::RowRef(_) => {
+                        Some(resolved)
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn normalize_cell_ref_for_bytecode(
+        &self,
+        r: &crate::CellRef,
+        current_sheet: SheetId,
+    ) -> Option<crate::CellRef> {
+        if r.workbook.is_some() {
+            return None;
+        }
+        let sheet = match r.sheet.as_ref() {
+            None => Some(crate::SheetRef::Sheet(
+                self.workbook.sheet_names.get(current_sheet)?.clone(),
+            )),
+            Some(s) => Some(crate::SheetRef::Sheet(s.as_single_sheet()?.to_string())),
+        };
+
+        let col = match r.col {
+            crate::Coord::A1 { index, .. } => crate::Coord::A1 { index, abs: true },
+            crate::Coord::Offset(_) => return None,
+        };
+        let row = match r.row {
+            crate::Coord::A1 { index, .. } => crate::Coord::A1 { index, abs: true },
+            crate::Coord::Offset(_) => return None,
+        };
+
+        Some(crate::CellRef {
+            workbook: None,
+            sheet,
+            col,
+            row,
+        })
+    }
+
+    fn normalize_col_ref_for_bytecode(
+        &self,
+        r: &crate::ColRef,
+        current_sheet: SheetId,
+    ) -> Option<crate::ColRef> {
+        if r.workbook.is_some() {
+            return None;
+        }
+        let sheet = match r.sheet.as_ref() {
+            None => Some(crate::SheetRef::Sheet(
+                self.workbook.sheet_names.get(current_sheet)?.clone(),
+            )),
+            Some(s) => Some(crate::SheetRef::Sheet(s.as_single_sheet()?.to_string())),
+        };
+        let col = match r.col {
+            crate::Coord::A1 { index, .. } => crate::Coord::A1 { index, abs: true },
+            crate::Coord::Offset(_) => return None,
+        };
+        Some(crate::ColRef {
+            workbook: None,
+            sheet,
+            col,
+        })
+    }
+
+    fn normalize_row_ref_for_bytecode(
+        &self,
+        r: &crate::RowRef,
+        current_sheet: SheetId,
+    ) -> Option<crate::RowRef> {
+        if r.workbook.is_some() {
+            return None;
+        }
+        let sheet = match r.sheet.as_ref() {
+            None => Some(crate::SheetRef::Sheet(
+                self.workbook.sheet_names.get(current_sheet)?.clone(),
+            )),
+            Some(s) => Some(crate::SheetRef::Sheet(s.as_single_sheet()?.to_string())),
+        };
+        let row = match r.row {
+            crate::Coord::A1 { index, .. } => crate::Coord::A1 { index, abs: true },
+            crate::Coord::Offset(_) => return None,
+        };
+        Some(crate::RowRef {
+            workbook: None,
+            sheet,
+            row,
+        })
     }
 
     fn begin_recalc_context(&mut self) -> crate::eval::RecalcContext {
