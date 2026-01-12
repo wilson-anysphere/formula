@@ -46,6 +46,11 @@ test.describe("sheet tabs", () => {
     });
     expect(await page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(false);
 
+    // Simulate a typical user flow: focus the dragged tab before starting the drag gesture.
+    await page.getByTestId("sheet-tab-Sheet3").focus();
+    await expect(page.getByTestId("sheet-tab-Sheet3")).toBeFocused();
+    await expect(page.getByTestId("sheet-tab-Sheet3")).toHaveAttribute("data-active", "true");
+
     // Drag Sheet3 onto Sheet1.
     await page.dragAndDrop('[data-testid="sheet-tab-Sheet3"]', '[data-testid="sheet-tab-Sheet1"]', {
       // Drop near the left edge so the SheetTabStrip interprets this as "insert before".
@@ -78,6 +83,12 @@ test.describe("sheet tabs", () => {
     await expect
       .poll(async () => await getSheetSwitcherOptionValues(page), { timeout: 2_000 })
       .toEqual(["Sheet3", "Sheet1", "Sheet2"]);
+
+    // Reordering should not switch the active sheet; the dragged sheet remains active.
+    await expect(page.getByTestId("sheet-tab-Sheet3")).toHaveAttribute("data-active", "true");
+
+    // Reordering should restore focus back to the grid (Excel-like flow).
+    await expect(page.locator("#grid")).toBeFocused();
 
     // Dirty tracking: sheet reorder is a metadata edit and should still prompt for saving.
     expect(await page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(true);
