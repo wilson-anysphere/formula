@@ -68,7 +68,9 @@ export class ContextMenu {
 
     const menu = document.createElement("div");
     menu.className = "context-menu";
-    menu.setAttribute("role", "menu");
+    // We intentionally keep menu items as native <button> elements without overriding
+    // their implicit ARIA role so Playwright can locate them via role="button".
+    // (Some e2e tests depend on this.)
     menu.setAttribute("aria-orientation", "vertical");
     // Let us focus the menu container as a fallback when there are no enabled items.
     menu.tabIndex = -1;
@@ -475,7 +477,6 @@ export class ContextMenu {
 
     const submenu = document.createElement("div");
     submenu.className = "context-menu__submenu";
-    submenu.setAttribute("role", "menu");
     submenu.setAttribute("aria-orientation", "vertical");
     submenu.tabIndex = -1;
     submenu.addEventListener("contextmenu", (e) => e.preventDefault());
