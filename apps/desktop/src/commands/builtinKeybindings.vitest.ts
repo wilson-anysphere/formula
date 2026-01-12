@@ -42,6 +42,7 @@ describe("builtin keybinding catalog", () => {
     expect(getPrimaryCommandKeybindingDisplay("audit.togglePrecedents", otherIndex)).toBe("Ctrl+[");
     expect(getPrimaryCommandKeybindingDisplay("audit.toggleDependents", otherIndex)).toBe("Ctrl+]");
     expect(getPrimaryCommandKeybindingDisplay("edit.replace", otherIndex)).toBe("Ctrl+H");
+    expect(getPrimaryCommandKeybindingDisplay("edit.editCell", otherIndex)).toBe("F2");
     expect(getPrimaryCommandKeybindingDisplay("view.togglePanel.aiChat", otherIndex)).toBe("Ctrl+Shift+A");
     expect(getPrimaryCommandKeybindingDisplay("ai.inlineEdit", otherIndex)).toBe("Ctrl+K");
     expect(getPrimaryCommandKeybindingDisplay("format.toggleItalic", otherIndex)).toBe("Ctrl+I");
@@ -69,6 +70,7 @@ describe("builtin keybinding catalog", () => {
     expect(getPrimaryCommandKeybindingDisplay("audit.toggleDependents", macIndex)).toBe("⌘]");
     // macOS: avoid Cmd+H which is reserved for the system "Hide" shortcut.
     expect(getPrimaryCommandKeybindingDisplay("edit.replace", macIndex)).toBe("⌥⌘F");
+    expect(getPrimaryCommandKeybindingDisplay("edit.editCell", macIndex)).toBe("F2");
     expect(getPrimaryCommandKeybindingDisplay("view.togglePanel.aiChat", macIndex)).toBe("⇧⌘A");
     expect(getPrimaryCommandKeybindingDisplay("ai.inlineEdit", macIndex)).toBe("⌘K");
     expect(getPrimaryCommandKeybindingDisplay("format.toggleItalic", macIndex)).toBe("⌘I");
