@@ -5179,24 +5179,6 @@ if (
       keywords: ["command palette", "commands"],
     },
   );
-
-  // Paste Special… (Ctrl/Cmd+Shift+V)
-  window.addEventListener("keydown", (e) => {
-    if (e.defaultPrevented) return;
-    if (e.repeat) return;
-    const primary = e.ctrlKey || e.metaKey;
-    if (!primary || !e.shiftKey || e.altKey) return;
-    if (e.key !== "V" && e.key !== "v") return;
-
-    const target = (e.target instanceof HTMLElement ? e.target : null) ?? (document.activeElement as HTMLElement | null);
-    if (target) {
-      const tag = target.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return;
-    }
-
-    e.preventDefault();
-    executeBuiltinCommand("clipboard.pasteSpecial");
-  });
   layoutController.on("change", () => {
     renderLayout();
     scheduleRibbonSelectionFormatStateUpdate();
