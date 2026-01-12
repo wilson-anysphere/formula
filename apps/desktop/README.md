@@ -187,6 +187,9 @@ make network requests directly. The desktop also scrubs Tauri IPC globals (`__TA
 defense-in-depth measure (see `window.__formulaWebviewSandbox` marker inside the iframe). Panels should communicate with
 extension code via `postMessage`.
 
+The extension worker runtime also locks down Tauri globals (`__TAURI__`, `__TAURI_IPC__`, etc) before loading extension
+modules (defense-in-depth so untrusted extension code can't call native commands directly).
+
 ### Where extensions live / what persists
 
 **Installed packages (code):**

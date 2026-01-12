@@ -1211,8 +1211,10 @@ guardrails:
   WebRTC (`RTCPeerConnection`).
 - Disable nested script-loading/execution primitives (`importScripts`, `Worker`, `SharedWorker`) to
   avoid spawning a fresh worker with pristine globals.
+- In Desktop/WebView environments, lock down Tauri IPC globals (`__TAURI__`, `__TAURI_IPC__`, etc) inside the extension
+  worker so untrusted extension code cannot call native commands directly.
 - **Strict import policy (best-effort)**: before activating an extension, the worker fetches the
-   entrypoint module and its static dependency graph and rejects:
+  entrypoint module and its static dependency graph and rejects:
    - any static import specifier that is not relative (`./` / `../`) or `@formula/extension-api` (or `formula`)
      - Note: in production Desktop/Web marketplace installs, the loader rewrites these to an in-memory `blob:` module
        shim (workers do not have import maps), so extensions can still author `import * as formula from "@formula/extension-api"`.
