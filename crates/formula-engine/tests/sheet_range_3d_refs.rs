@@ -251,6 +251,32 @@ fn bytecode_compiles_sum_over_sheet_range_cell_ref_and_matches_ast() {
 }
 
 #[test]
+fn bytecode_compiles_sum_over_sheet_range_when_formula_on_other_sheet_and_matches_ast() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet2", "A1", 2.0).unwrap();
+    engine.set_cell_value("Sheet3", "A1", 3.0).unwrap();
+
+    // Place the formula on a sheet outside the span so bytecode evaluation must read values from
+    // other sheets explicitly.
+    engine
+        .set_cell_formula("Summary", "A1", "=SUM(Sheet1:Sheet3!A1)")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    let bytecode_value = engine.get_cell_value("Summary", "A1");
+
+    engine.set_bytecode_enabled(false);
+    engine.recalculate_single_threaded();
+    let ast_value = engine.get_cell_value("Summary", "A1");
+
+    assert_eq!(bytecode_value, ast_value);
+    assert_eq!(bytecode_value, Value::Number(6.0));
+}
+
+#[test]
 fn bytecode_compiles_count_over_sheet_range_area_ref_and_matches_ast() {
     let mut engine = Engine::new();
     for (sheet, values) in [
