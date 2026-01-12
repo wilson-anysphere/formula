@@ -57,6 +57,13 @@ Current policy allows:
 - `worker-src 'self' blob:` and `child-src 'self' blob:` (Workers; some bundlers bootstrap via `blob:` URLs)
 - `connect-src 'self'` (tight by default; expand intentionally when adding network access)
 
+### `app.windows[].capabilities` (Tauri permissions)
+
+Tauri v2 permissions are granted via **capabilities**, attached to windows in `tauri.conf.json`:
+
+- `apps/desktop/src-tauri/tauri.conf.json` → `app.windows[].capabilities`
+- `apps/desktop/src-tauri/capabilities/*.json` (for example: `capabilities/main.json`)
+
 ### Cross-origin isolation (COOP/COEP) for Pyodide / `SharedArrayBuffer`
 
 The Pyodide-based Python runtime prefers running in a **Worker** with a `SharedArrayBuffer + Atomics` bridge.
