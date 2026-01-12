@@ -2063,6 +2063,8 @@ if (
       const tabs = document.createElement("div");
       tabs.className = "dock-panel__tabs";
       tabs.setAttribute("role", "tablist");
+      tabs.setAttribute("aria-label", "Docked panels");
+      tabs.setAttribute("aria-orientation", "horizontal");
 
       for (const panelId of zone.panels) {
         const tab = document.createElement("button");
