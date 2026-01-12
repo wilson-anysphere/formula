@@ -319,7 +319,7 @@ export function SheetTabStrip({
     );
 
     if (!selected) return;
-    activateSheetWithRenameGuard(selected);
+    void activateSheetWithRenameGuard(selected);
   }, [activateSheetWithRenameGuard, commitRename, editingSheetId, visibleSheets]);
 
   const openSheetTabContextMenu = (sheetId: string, anchor: { x: number; y: number }) => {

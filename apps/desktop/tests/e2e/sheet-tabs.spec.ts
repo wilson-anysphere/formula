@@ -445,6 +445,36 @@ test.describe("sheet tabs", () => {
     await expect(input).toBeFocused();
   });
 
+  test("invalid rename blocks opening the sheet overflow menu", async ({ page }) => {
+    await gotoDesktop(page);
+
+    // Create a second sheet so the overflow menu would normally show multiple options.
+    await page.getByTestId("sheet-add").click();
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+
+    // Switch back to Sheet1 and begin renaming.
+    const sheet1Tab = page.getByTestId("sheet-tab-Sheet1");
+    await sheet1Tab.click();
+    await expect(sheet1Tab).toHaveAttribute("data-active", "true");
+
+    await sheet1Tab.dblclick();
+    const input = sheet1Tab.locator("input.sheet-tab__input");
+    await expect(input).toBeVisible();
+
+    // Trigger an invalid name and attempt to commit.
+    await input.fill("A/B");
+    await input.press("Enter");
+    await expect(input).toBeFocused();
+
+    // Attempt to open the overflow menu; invalid rename should block it and keep focus in rename mode.
+    await page.getByTestId("sheet-overflow").click();
+    await expect(page.getByTestId("quick-pick")).toHaveCount(0);
+    await expect(input).toBeVisible();
+    await expect(input).toBeFocused();
+
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet1");
+  });
+
   test("drag reordering sheet tabs updates Ctrl+PgUp/PgDn navigation order", async ({ page }) => {
     await gotoDesktop(page);
 
