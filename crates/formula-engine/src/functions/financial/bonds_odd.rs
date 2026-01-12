@@ -225,8 +225,8 @@
 //!
 //! - Chronology:
 //!   - `S < M` and `L < M` (both strict; settlement may be **before, on, or after** `L`).
-//!   - Boundary equalities `S == M` and `L == M` are rejected with `#NUM!` (see
-//!     `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`). The equality `S == L` is allowed.
+//!   - Boundary equalities `S == M` and `L == M` are rejected with `#NUM!`. The equality `S == L`
+//!     is allowed (see `crates/formula-engine/tests/functions/financial_odd_coupon.rs`).
 //! - `rate >= 0`, `yld` (or `pr`) finite, `redemption > 0`
 //! - `frequency ∈ {1,2,4}`, `basis ∈ 0..=4`
 //!

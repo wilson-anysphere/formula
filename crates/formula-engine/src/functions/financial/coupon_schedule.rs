@@ -241,10 +241,15 @@ pub fn coupdaysnc(
     // For basis=4 (European 30E/360), day-counts like `A` use `DAYS360(..., TRUE)`, but Excel still
     // models the coupon period length `E` used by COUPDAYS/COUPDAYSNC as the fixed
     // `360/frequency` value. This can therefore differ from `DAYS360(PCD, NCD, TRUE)` for some
-    // end-of-month schedules involving February, and is not equivalent to
+    // end-of-month schedules involving February, and `COUPDAYSNC = E - A` is not always equal to
     // `DAYS360(settlement, NCD, TRUE)`.
     let dsc = match basis {
-        0 | 4 => {
+        0 => {
+            let e = coupon_period_e(pcd, ncd, frequency, basis, system)?;
+            let a = days_between(pcd, settlement, basis, system)? as f64;
+            e - a
+        }
+        4 => {
             let e = coupon_period_e(pcd, ncd, frequency, basis, system)?;
             let a = days_between(pcd, settlement, basis, system)? as f64;
             e - a

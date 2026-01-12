@@ -344,6 +344,7 @@ fn oddf_equation(
     // `settlement == maturity`.
     //
     // Chronology:
+    // - `first_coupon == maturity` is allowed (single odd stub period).
     // - `issue <= settlement <= first_coupon <= maturity`
     // - `issue < first_coupon` (reject `issue == first_coupon`)
     // - `settlement < maturity` (reject `settlement == maturity`)
@@ -379,7 +380,8 @@ fn oddf_equation(
     let dfc = days_between(issue, first_coupon, basis, system)?;
     let dsc = days_between(settlement, first_coupon, basis, system)?;
 
-    // When settlement is on the first coupon date, `dsc` is 0.
+    // Defensive day-count guards (chronology checks above should ensure all are non-negative, and
+    // DFC > 0). When settlement is on the first coupon date, `dsc` is 0.
     //
     // For 30/360 bases, these day-counts are not strictly tied to calendar day differences. In
     // particular, `A`/`DSC` can be 0 even when the underlying serial dates differ (due to the
