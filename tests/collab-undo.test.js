@@ -75,7 +75,9 @@ function setFormula(opts) {
       if (nextFormula) {
         cell.set("formula", nextFormula);
       } else {
-        cell.delete("formula");
+        // Use an explicit null marker rather than deleting the key so the clear is
+        // represented in the CRDT history (Yjs map deletes do not create Items).
+        cell.set("formula", null);
       }
       cell.set("modified", Date.now());
       cell.set("modifiedBy", opts.userId);
