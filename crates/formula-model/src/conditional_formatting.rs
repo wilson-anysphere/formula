@@ -1080,10 +1080,13 @@ fn cell_value_truthy(value: &CellValue) -> bool {
             if let Some(field) = r.display_field.as_deref() {
                 if let Some(value) = r.fields.get(field) {
                     return match value {
+                        CellValue::Empty => false,
                         CellValue::String(s) => !s.is_empty(),
                         CellValue::RichText(rt) => !rt.text.is_empty(),
                         // Scalar display strings for these variants are always non-empty.
                         CellValue::Number(_) | CellValue::Boolean(_) | CellValue::Error(_) => true,
+                        CellValue::Entity(entity) => !entity.display_value.is_empty(),
+                        CellValue::Record(record) => !record.to_string().is_empty(),
                         // Non-scalar displayField values fall back to `display_value`.
                         _ => !r.display_value.is_empty(),
                     };
@@ -1408,26 +1411,12 @@ impl ValueKey {
             CellValue::Error(e) => Some(ValueKey::Error(e)),
             CellValue::Empty => None,
             CellValue::RichText(t) => Some(ValueKey::String(t.text)),
-            CellValue::Entity(e) => Some(ValueKey::String(e.display_value)),
-            CellValue::Record(r) => {
-                let from_field = r
-                    .display_field
-                    .as_deref()
-                    .and_then(|field| r.fields.get(field))
-                    .and_then(|value| match value {
-                        CellValue::String(s) => Some(s.clone()),
-                        CellValue::Number(n) => Some(n.to_string()),
-                        CellValue::Boolean(b) => Some(if *b { "TRUE" } else { "FALSE" }.to_string()),
-                        CellValue::Error(e) => Some(e.as_str().to_string()),
-                        CellValue::RichText(rt) => Some(rt.text.clone()),
-                        _ => None,
-                    });
-                Some(ValueKey::String(from_field.unwrap_or(r.display_value)))
-            }
-            CellValue::Array(_) => None,
-            CellValue::Spill(_) => None,
-        }
+        CellValue::Entity(e) => Some(ValueKey::String(e.display_value)),
+        CellValue::Record(r) => Some(ValueKey::String(r.to_string())),
+        CellValue::Array(_) => None,
+        CellValue::Spill(_) => None,
     }
+}
 }
 
 pub fn format_render_plan(visible: Range, eval: &CfEvaluationResult) -> String {
@@ -1956,6 +1945,73 @@ mod tests {
     }
 
     #[test]
+    fn expression_truthiness_treats_record_display_field_entities_like_text_display_string() {
+        let visible = parse_range_a1("A1:A2").unwrap();
+
+        let rule = CfRule {
+            schema: CfRuleSchema::Office2007,
+            id: None,
+            priority: 1,
+            applies_to: vec![visible],
+            dxf_id: Some(0),
+            stop_if_true: false,
+            kind: CfRuleKind::Expression {
+                formula: "RECORD_ENTITY".to_string(),
+            },
+            dependencies: vec![],
+        };
+
+        let dxfs = vec![CfStyleOverride {
+            fill: Some(Color::new_argb(0xFFFF0000)),
+            font_color: None,
+            bold: None,
+            italic: None,
+        }];
+
+        let evaluator = CellMapFormulaEvaluator {
+            formula: "RECORD_ENTITY".to_string(),
+            results: HashMap::from([
+                (
+                    CellRef::from_a1("A1").unwrap(),
+                    CellValue::Record(crate::RecordValue {
+                        display_field: Some("company".to_string()),
+                        fields: std::collections::BTreeMap::from([(
+                            "company".to_string(),
+                            CellValue::Entity(crate::EntityValue::new("Apple")),
+                        )]),
+                        ..Default::default()
+                    }),
+                ),
+                (
+                    CellRef::from_a1("A2").unwrap(),
+                    CellValue::Record(crate::RecordValue {
+                        display_field: Some("company".to_string()),
+                        fields: std::collections::BTreeMap::from([(
+                            "company".to_string(),
+                            CellValue::Entity(crate::EntityValue::new("")),
+                        )]),
+                        ..Default::default()
+                    }),
+                ),
+            ]),
+        };
+
+        let values = TestValues::default();
+        let mut engine = ConditionalFormattingEngine::new();
+        let eval =
+            engine.evaluate_visible_range(&[rule], visible, &values, Some(&evaluator), Some(&dxfs));
+
+        assert_eq!(
+            eval.get(CellRef::from_a1("A1").unwrap()).unwrap().style.fill,
+            Some(Color::new_argb(0xFFFF0000))
+        );
+        assert_eq!(
+            eval.get(CellRef::from_a1("A2").unwrap()).unwrap().style.fill,
+            None
+        );
+    }
+
+    #[test]
     fn value_key_maps_rich_values_to_display_string() {
         let entity = crate::EntityValue::new("Seattle");
         assert_eq!(
@@ -1975,6 +2031,41 @@ mod tests {
         assert_eq!(
             ValueKey::from_cell_value(CellValue::Record(record)),
             Some(ValueKey::String(record_display))
+        );
+
+        let record_entity = crate::RecordValue {
+            display_field: Some("company".to_string()),
+            fields: std::collections::BTreeMap::from([(
+                "company".to_string(),
+                CellValue::Entity(crate::EntityValue::new("Apple")),
+            )]),
+            ..Default::default()
+        };
+        let record_entity_display = record_entity.to_string();
+        assert_eq!(
+            ValueKey::from_cell_value(CellValue::Record(record_entity)),
+            Some(ValueKey::String(record_entity_display))
+        );
+
+        let record_nested = crate::RecordValue {
+            display_field: Some("person".to_string()),
+            fields: std::collections::BTreeMap::from([(
+                "person".to_string(),
+                CellValue::Record(crate::RecordValue {
+                    display_field: Some("name".to_string()),
+                    fields: std::collections::BTreeMap::from([(
+                        "name".to_string(),
+                        CellValue::String("Ada".to_string()),
+                    )]),
+                    ..Default::default()
+                }),
+            )]),
+            ..Default::default()
+        };
+        let record_nested_display = record_nested.to_string();
+        assert_eq!(
+            ValueKey::from_cell_value(CellValue::Record(record_nested)),
+            Some(ValueKey::String(record_nested_display))
         );
     }
 
