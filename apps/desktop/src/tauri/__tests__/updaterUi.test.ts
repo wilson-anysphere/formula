@@ -48,4 +48,33 @@ describe("updaterUi", () => {
     expect(show.mock.invocationCallOrder[0]).toBeLessThan(toastSpy.mock.invocationCallOrder[0]);
     expect(setFocus.mock.invocationCallOrder[0]).toBeLessThan(toastSpy.mock.invocationCallOrder[0]);
   });
+
+  it("renders an 'already checking' toast for repeated manual update checks", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '<div id="toast-root"></div>';
+
+    const show = vi.fn(async () => {});
+    const setFocus = vi.fn(async () => {});
+    const handle = { show, setFocus };
+
+    vi.stubGlobal("__TAURI__", {
+      window: {
+        getCurrentWindow: () => handle,
+      },
+    });
+
+    const toastSpy = vi.spyOn(ui, "showToast");
+
+    await handleUpdaterEvent("update-check-already-running", { source: "manual" });
+
+    expect(show).toHaveBeenCalledTimes(1);
+    expect(setFocus).toHaveBeenCalledTimes(1);
+    expect(toastSpy).toHaveBeenCalledTimes(1);
+
+    const toast = document.querySelector('[data-testid="toast"]');
+    expect(toast?.textContent).toContain("Already checking");
+
+    expect(show.mock.invocationCallOrder[0]).toBeLessThan(toastSpy.mock.invocationCallOrder[0]);
+    expect(setFocus.mock.invocationCallOrder[0]).toBeLessThan(toastSpy.mock.invocationCallOrder[0]);
+  });
 });

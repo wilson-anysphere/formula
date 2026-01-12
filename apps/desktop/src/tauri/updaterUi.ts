@@ -3,7 +3,12 @@ import { showToast } from "../extensions/ui.js";
 import { requestAppRestart } from "./appQuit";
 import { installUpdateAndRestart } from "./updater";
 
-type UpdaterEventName = "update-check-started" | "update-not-available" | "update-check-error" | "update-available";
+type UpdaterEventName =
+  | "update-check-already-running"
+  | "update-check-started"
+  | "update-not-available"
+  | "update-check-error"
+  | "update-available";
 
 type UpdaterEventPayload = {
   source?: string;
@@ -72,6 +77,10 @@ export async function handleUpdaterEvent(name: UpdaterEventName, payload: Update
   }
 
   switch (name) {
+    case "update-check-already-running": {
+      showToast("Already checking for updates...", "info");
+      break;
+    }
     case "update-check-started": {
       showToast("Checking for updates...", "info");
       break;
@@ -98,6 +107,7 @@ export function installUpdaterUi(listenArg?: TauriListen): void {
   if (!listen) return;
 
   const events: UpdaterEventName[] = [
+    "update-check-already-running",
     "update-check-started",
     "update-not-available",
     "update-check-error",
@@ -124,4 +134,3 @@ export async function restartToInstallUpdate(): Promise<boolean> {
     beforeQuitErrorToast: "Failed to restart to install the update.",
   });
 }
-

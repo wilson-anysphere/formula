@@ -15,6 +15,10 @@
         { "event": "tray-quit" },
         { "event": "shortcut-quick-open" },
         { "event": "shortcut-command-palette" },
+        { "event": "update-check-already-running" },
+        { "event": "update-check-started" },
+        { "event": "update-not-available" },
+        { "event": "update-check-error" },
         { "event": "update-available" }
       ]
     },
