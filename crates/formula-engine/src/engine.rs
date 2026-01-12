@@ -11039,6 +11039,17 @@ mod tests {
     }
 
     #[test]
+    fn bytecode_choose_does_not_eval_choices_when_index_is_out_of_range_even_when_volatile() {
+        // Use RAND() draw indexing to detect accidental eager evaluation of CHOOSE choices when
+        // the index is invalid (#VALUE!).
+        let v = assert_bytecode_eq_ast("=IFERROR(CHOOSE(3, RAND(), 1) + RAND(), RAND())");
+        match v {
+            Value::Number(n) => assert!((0.0..1.0).contains(&n), "got {n}"),
+            other => panic!("expected number, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn bytecode_ifs_short_circuits_later_conditions() {
         assert_bytecode_matches_ast("=IFS(TRUE, 1, 1/0, 2)", Value::Number(1.0));
     }
