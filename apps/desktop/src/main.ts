@@ -1883,6 +1883,10 @@ if (
   let lastLoadedExtensionIds = new Set<string>();
 
   const builtinKeybindings = [
+    // The command palette is opened by the shell (not via CommandRegistry),
+    // but we register this binding so UI surfaces (e.g. palette shortcuts) can
+    // display the canonical shortcut next to the command id.
+    { command: "workbench.showCommandPalette", key: "ctrl+shift+p", mac: "cmd+shift+p" },
     { command: "clipboard.cut", key: "ctrl+x", mac: "cmd+x" },
     { command: "clipboard.copy", key: "ctrl+c", mac: "cmd+c" },
     { command: "clipboard.paste", key: "ctrl+v", mac: "cmd+v" },
