@@ -318,8 +318,13 @@ SpreadsheetML’s `<c>` (cell) element can carry metadata indices:
 - `c/@vm` — **value metadata index** (used to associate a cell’s *value* with a record in `xl/metadata.xml`)
 - `c/@cm` — **cell metadata index** (used to associate the *cell* with a record in `xl/metadata.xml`)
 
-For round-trip safety, Formula must preserve these attributes even when the value/formula changes,
-because they can “point” to image/rich-value structures elsewhere in the package.
+For round-trip safety, Formula must preserve these attributes (and the `<extLst>` subtree) for **untouched**
+cells when round-tripping, because they can “point” to image/rich-value structures elsewhere in the
+package.
+
+However, if Formula **overwrites a cell’s value/formula**, it cannot currently update the corresponding
+rich-value tables, so it drops `vm="…"` (value metadata) to avoid leaving a dangling pointer. In contrast,
+`cm="…"` and `<extLst>` are preserved (see `crates/formula-xlsx/tests/cell_metadata_preservation.rs`).
 
 ### Minimal examples (from existing Formula fixtures/tests)
 
@@ -372,10 +377,10 @@ Observed shapes in **real Excel fixtures** in this repo:
 
 The exact cell shape for **`IMAGE()` formula results** still needs more real Excel samples; it may include
 a formula `<f>_xlfn.IMAGE(...)</f>` and/or an `<extLst>` payload. Treat all cell children and attributes as
-opaque and preserve them.
+opaque and preserve them for untouched cells.
 
-**Round-trip rule:** `vm`, `cm`, and the entire `<extLst>` subtree must be preserved verbatim unless we
-explicitly implement full rich-value editing.
+**Round-trip rule:** preserve `cm` and `<extLst>` verbatim. Preserve `vm` for untouched cells, but drop
+`vm` when overwriting a cell’s value/formula unless we explicitly implement full rich-value editing.
 
 ### How `vm` maps to `xl/metadata.xml` and the rich value store (`xl/richData/richValue*.xml` / `xl/richData/rdrichvalue.xml`)
 
@@ -918,9 +923,12 @@ does not “orphan” images or break Excel’s internal references.
 - **Best-effort extraction of richData-backed in-cell images (cell → bytes)**
   - API: `crates/formula-xlsx/src/rich_data/mod.rs` (`extract_rich_cell_images`)
   - Test: `crates/formula-xlsx/tests/rich_data_cell_images.rs`
-- **`vm` attribute preservation** on edit is covered by:
+- **`vm` attribute preservation** for untouched cells is covered by:
   - `crates/formula-xlsx/tests/sheetdata_row_col_attrs.rs` (`editing_a_cell_does_not_strip_unrelated_row_col_or_cell_attrs`)
   - `crates/formula-xlsx/tests/metadata_rich_values_vm_roundtrip.rs` (also asserts `xl/metadata.xml` is preserved and the workbook relationship to `metadata.xml` remains)
+- **`vm` attribute dropping** (when patching a cell value/formula away from rich-value placeholder semantics) is covered by:
+  - `crates/formula-xlsx/tests/cell_metadata_preservation.rs`
+  - `crates/formula-xlsx/tests/metadata_rich_value_roundtrip.rs`
 - **`cm` + `<extLst>` preservation** during cell patching is covered by:
   - `crates/formula-xlsx/tests/cell_metadata_preservation.rs`
 - **Best-effort `xl/metadata.xml` parsing for rich values (`vm` -> richValue index)**

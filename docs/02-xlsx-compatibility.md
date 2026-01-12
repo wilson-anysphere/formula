@@ -605,7 +605,9 @@ Packaging note:
 
 **Formula’s current strategy:**
 
-- Preserve `vm` / `cm` attributes on `<c>` elements when editing cell values.
+- Preserve `cm` and `<extLst>` on `<c>` elements when editing cell values.
+- Preserve `vm` for untouched cells, but drop `vm` when overwriting a cell’s value/formula away from
+  rich-value placeholder semantics (until Formula implements rich-value editing).
 - Preserve `xl/metadata.xml`, `xl/richData/**`, and their relationship parts byte-for-byte whenever possible.
 - Treat linked-data-type metadata as **opaque** until the calculation engine and data model grow first-class rich/linked value support.
 - (Implementation sanity) This preservation behavior is covered by XLSX round-trip / patch tests (e.g. `crates/formula-xlsx/tests/sheetdata_row_col_attrs.rs`).
