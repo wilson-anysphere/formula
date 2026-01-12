@@ -339,20 +339,6 @@ function getUpdaterApiOrNull(): { check: () => Promise<UpdaterUpdate | null> } |
   };
 }
 
-function getRelaunchOrNull(): (() => Promise<void>) | null {
-  const tauri = (globalThis as any).__TAURI__;
-  const relaunch =
-    (tauri?.process?.relaunch as (() => Promise<void> | void) | undefined) ??
-    (tauri?.process?.restart as (() => Promise<void> | void) | undefined) ??
-    (tauri?.app?.relaunch as (() => Promise<void> | void) | undefined) ??
-    (tauri?.app?.restart as (() => Promise<void> | void) | undefined) ??
-    null;
-  if (typeof relaunch !== "function") return null;
-  return async () => {
-    await relaunch.call(null);
-  };
-}
-
 function safeShowModal(dialog: HTMLDialogElement): void {
   // `showModal()` throws if called on an already-open dialog.
   if ((dialog as any).open === true || dialog.hasAttribute("open")) return;
@@ -618,8 +604,7 @@ function renderUpdateDialog(): void {
     els.viewVersionsBtn.style.color = "";
     els.viewVersionsBtn.style.fontWeight = "";
   }
-  els.restartBtn.textContent =
-    readyToInstall && !getRelaunchOrNull() ? t("updater.quitNow") : t("updater.restartNow");
+  els.restartBtn.textContent = t("updater.restartNow");
 }
 
 function renderProgress(): void {
@@ -904,15 +889,6 @@ export async function restartToInstallUpdate(): Promise<boolean> {
       } catch (err) {
         lastUpdateError = errorMessage(err);
         throw err;
-      }
-
-      const relaunch = getRelaunchOrNull();
-      if (relaunch) {
-        try {
-          await relaunch();
-        } catch {
-          // Fall back to the `quit_app` hard-exit in `requestAppRestart`.
-        }
       }
     },
     beforeQuitErrorToast: t("updater.restartFailed"),

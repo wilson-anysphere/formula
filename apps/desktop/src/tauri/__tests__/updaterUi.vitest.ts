@@ -30,10 +30,13 @@ describe("updater restart", () => {
 
   it("does not install if the unsaved-changes prompt is cancelled", async () => {
     document.body.innerHTML = `<div id="toast-root"></div>`;
+    const restartApp = vi.fn().mockResolvedValue(undefined);
+    const quitApp = vi.fn().mockResolvedValue(undefined);
     registerAppQuitHandlers({
       isDirty: () => true,
       drainBackendSync: vi.fn().mockResolvedValue(undefined),
-      quitApp: vi.fn().mockResolvedValue(undefined),
+      quitApp,
+      restartApp,
     });
 
     vi.spyOn(window, "confirm").mockReturnValue(false);
@@ -42,14 +45,19 @@ describe("updater restart", () => {
     await restartToInstallUpdate();
 
     expect(mocks.installUpdateAndRestart).not.toHaveBeenCalled();
+    expect(restartApp).not.toHaveBeenCalled();
+    expect(quitApp).not.toHaveBeenCalled();
   });
 
   it("installs exactly once when the unsaved-changes prompt is confirmed", async () => {
     document.body.innerHTML = `<div id="toast-root"></div>`;
+    const restartApp = vi.fn().mockResolvedValue(undefined);
+    const quitApp = vi.fn().mockResolvedValue(undefined);
     registerAppQuitHandlers({
       isDirty: () => true,
       drainBackendSync: vi.fn().mockResolvedValue(undefined),
-      quitApp: vi.fn().mockResolvedValue(undefined),
+      quitApp,
+      restartApp,
     });
 
     vi.spyOn(window, "confirm").mockReturnValue(true);
@@ -58,9 +66,11 @@ describe("updater restart", () => {
     await restartToInstallUpdate();
 
     expect(mocks.installUpdateAndRestart).toHaveBeenCalledTimes(1);
+    expect(restartApp).toHaveBeenCalledTimes(1);
+    expect(quitApp).not.toHaveBeenCalled();
   });
 
-  it("drains backend sync before installing and quitting", async () => {
+  it("drains backend sync before installing and restarting", async () => {
     document.body.innerHTML = `<div id="toast-root"></div>`;
 
     const calls: string[] = [];
@@ -70,11 +80,15 @@ describe("updater restart", () => {
     const quitApp = vi.fn(async () => {
       calls.push("quit");
     });
+    const restartApp = vi.fn(async () => {
+      calls.push("restart");
+    });
 
     registerAppQuitHandlers({
       isDirty: () => true,
       drainBackendSync,
       quitApp,
+      restartApp,
     });
 
     mocks.installUpdateAndRestart.mockImplementation(async () => {
@@ -86,18 +100,21 @@ describe("updater restart", () => {
     const { restartToInstallUpdate } = await import("../updaterUi");
     await restartToInstallUpdate();
 
-    expect(calls).toEqual(["drain", "install", "quit"]);
+    expect(calls).toEqual(["drain", "install", "restart"]);
+    expect(quitApp).not.toHaveBeenCalled();
   });
 
   it("aborts restart and shows an error toast if install fails", async () => {
     document.body.innerHTML = `<div id="toast-root"></div>`;
 
     const quitApp = vi.fn().mockResolvedValue(undefined);
+    const restartApp = vi.fn().mockResolvedValue(undefined);
 
     registerAppQuitHandlers({
       isDirty: () => true,
       drainBackendSync: vi.fn().mockResolvedValue(undefined),
       quitApp,
+      restartApp,
     });
 
     mocks.installUpdateAndRestart.mockRejectedValue(new Error("boom"));
@@ -108,6 +125,7 @@ describe("updater restart", () => {
 
     expect(ok).toBe(false);
     expect(quitApp).not.toHaveBeenCalled();
+    expect(restartApp).not.toHaveBeenCalled();
 
     const toast = document.querySelector<HTMLElement>('[data-testid="toast"]');
     expect(toast).not.toBeNull();

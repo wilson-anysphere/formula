@@ -5539,6 +5539,15 @@ try {
       // will never resolve in the success path.
       await invoke("quit_app");
     },
+    restartApp: async () => {
+      if (!invoke) {
+        window.close();
+        return;
+      }
+      // Restart/exit using Tauri-managed shutdown semantics so updater installs can complete
+      // without relying on capability-gated process relaunch APIs.
+      await invoke("restart_app");
+    },
   });
 
   // OAuth PKCE redirect capture:

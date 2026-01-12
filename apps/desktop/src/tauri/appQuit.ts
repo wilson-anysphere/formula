@@ -23,6 +23,13 @@ export type AppQuitHandlers = {
    * which hard-exits the process.)
    */
   quitApp: () => Promise<void> | void;
+  /**
+   * Perform the final restart operation.
+   *
+   * For updater-driven restarts, prefer this over `quitApp` so the desktop shell can use
+   * Tauri-managed restart/exit semantics (`restart_app`).
+   */
+  restartApp?: () => Promise<void> | void;
 };
 
 export type RequestAppQuitOptions = {
@@ -48,10 +55,13 @@ export function registerAppQuitHandlers(next: AppQuitHandlers | null): void {
   quitHandlers = next;
 }
 
-export async function requestAppQuit(options: RequestAppQuitOptions = {}): Promise<boolean> {
+async function requestAppExit(
+  exit: (handlers: AppQuitHandlers) => Promise<void> | void,
+  options: RequestAppQuitOptions = {},
+): Promise<boolean> {
   const handlers = quitHandlers;
   if (!handlers) {
-    console.warn("requestAppQuit called before quit handlers were registered");
+    console.warn("requestAppQuit/requestAppRestart called before quit handlers were registered");
     return false;
   }
 
@@ -93,7 +103,7 @@ export async function requestAppQuit(options: RequestAppQuitOptions = {}): Promi
       }
     }
 
-    await handlers.quitApp();
+    await exit(handlers);
     return true;
   } finally {
     // If `quitApp` hard-exits, this `finally` never runs, which is fine.
@@ -101,14 +111,21 @@ export async function requestAppQuit(options: RequestAppQuitOptions = {}): Promi
   }
 }
 
+export async function requestAppQuit(options: RequestAppQuitOptions = {}): Promise<boolean> {
+  return requestAppExit((handlers) => handlers.quitApp(), options);
+}
+
 export async function requestAppRestart(options: {
   beforeQuit: BeforeQuitHook;
   beforeQuitErrorToast?: string;
   dirtyConfirmMessage?: string;
 }): Promise<boolean> {
-  return requestAppQuit({
-    beforeQuit: options.beforeQuit,
-    beforeQuitErrorToast: options.beforeQuitErrorToast ?? t("updater.restartFailed"),
-    dirtyConfirmMessage: options.dirtyConfirmMessage,
-  });
+  return requestAppExit(
+    (handlers) => (handlers.restartApp ?? handlers.quitApp)(),
+    {
+      beforeQuit: options.beforeQuit,
+      beforeQuitErrorToast: options.beforeQuitErrorToast ?? t("updater.restartFailed"),
+      dirtyConfirmMessage: options.dirtyConfirmMessage,
+    },
+  );
 }
