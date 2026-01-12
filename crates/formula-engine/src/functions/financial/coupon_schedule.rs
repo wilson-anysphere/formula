@@ -1,0 +1,234 @@
+use crate::date::ExcelDateSystem;
+use crate::error::{ExcelError, ExcelResult};
+use crate::functions::date_time;
+
+const MAX_COUPON_STEPS: usize = 50_000;
+
+pub(crate) fn validate_frequency(frequency: i32) -> ExcelResult<i32> {
+    match frequency {
+        1 | 2 | 4 => Ok(frequency),
+        _ => Err(ExcelError::Num),
+    }
+}
+
+pub(crate) fn validate_basis(basis: i32) -> ExcelResult<i32> {
+    if (0..=4).contains(&basis) {
+        Ok(basis)
+    } else {
+        Err(ExcelError::Num)
+    }
+}
+
+pub(crate) fn validate_serial(serial: i32, system: ExcelDateSystem) -> ExcelResult<()> {
+    let _ = crate::date::serial_to_ymd(serial, system)?;
+    Ok(())
+}
+
+fn coupon_period_months(frequency: i32) -> ExcelResult<i32> {
+    match frequency {
+        1 => Ok(12),
+        2 => Ok(6),
+        4 => Ok(3),
+        _ => Err(ExcelError::Num),
+    }
+}
+
+/// Previous coupon date (PCD), next coupon date (NCD), and number of coupons remaining (COUPNUM).
+///
+/// Schedule is anchored at `maturity` and stepped backwards by `12/frequency` months using
+/// `EDATE` semantics.
+pub(crate) fn coupon_pcd_ncd_num(
+    settlement: i32,
+    maturity: i32,
+    frequency: i32,
+    system: ExcelDateSystem,
+) -> ExcelResult<(i32, i32, i32)> {
+    let months = coupon_period_months(frequency)?;
+    // IMPORTANT: Coupon schedules are anchored to `maturity` (not stepped iteratively).
+    //
+    // `EDATE` month-stepping is not invertible due to end-of-month clamping; if we step
+    // backwards one period at a time, the day-of-month can "drift" (e.g. 31st -> 30th)
+    // and coupon dates computed as `EDATE(maturity, -k*m)` will no longer be recognized
+    // as coupon dates. Excel's COUP* functions behave as if each coupon date is computed
+    // as an offset from maturity, so we do the same here.
+    for n in 1..=MAX_COUPON_STEPS {
+        let n_i32 = n as i32;
+        let months_back = n_i32.checked_mul(months).ok_or(ExcelError::Num)?;
+        let pcd = date_time::edate(maturity, -months_back, system)?;
+
+        let ncd = if n == 1 {
+            maturity
+        } else {
+            let prev_n = n_i32.checked_sub(1).ok_or(ExcelError::Num)?;
+            let prev_months_back = prev_n.checked_mul(months).ok_or(ExcelError::Num)?;
+            date_time::edate(maturity, -prev_months_back, system)?
+        };
+
+        if pcd <= settlement && settlement < ncd {
+            return Ok((pcd, ncd, n_i32));
+        }
+    }
+
+    Err(ExcelError::Num)
+}
+
+/// Day-count between two dates for coupon schedule computations.
+///
+/// - basis 0/4: 30/360 via DAYS360
+/// - basis 1/2/3: actual days via serial difference
+pub(crate) fn days_between(
+    start_date: i32,
+    end_date: i32,
+    basis: i32,
+    system: ExcelDateSystem,
+) -> ExcelResult<i64> {
+    match basis {
+        0 => date_time::days360(start_date, end_date, false, system),
+        4 => date_time::days360(start_date, end_date, true, system),
+        1 | 2 | 3 => Ok(i64::from(end_date) - i64::from(start_date)),
+        _ => Err(ExcelError::Num),
+    }
+}
+
+/// Coupon-period length `E` (days) following Excel-compatible conventions:
+/// - basis 0/2/4: 360/frequency (constant)
+/// - basis 3: 365/frequency (constant)
+/// - basis 1: actual days between PCD and NCD (variable)
+pub(crate) fn coupon_period_e(
+    pcd: i32,
+    ncd: i32,
+    frequency: i32,
+    basis: i32,
+    _system: ExcelDateSystem,
+) -> ExcelResult<f64> {
+    let freq = f64::from(frequency);
+    if !freq.is_finite() || freq <= 0.0 {
+        return Err(ExcelError::Num);
+    }
+
+    let e = match basis {
+        1 => (i64::from(ncd) - i64::from(pcd)) as f64,
+        0 | 2 | 4 => 360.0 / freq,
+        3 => 365.0 / freq,
+        _ => return Err(ExcelError::Num),
+    };
+
+    if !e.is_finite() || e <= 0.0 {
+        Err(ExcelError::Num)
+    } else {
+        Ok(e)
+    }
+}
+
+fn validate_coupon_args(
+    settlement: i32,
+    maturity: i32,
+    frequency: i32,
+    basis: i32,
+    system: ExcelDateSystem,
+) -> ExcelResult<()> {
+    if settlement >= maturity {
+        return Err(ExcelError::Num);
+    }
+    validate_frequency(frequency)?;
+    validate_basis(basis)?;
+    validate_serial(settlement, system)?;
+    validate_serial(maturity, system)?;
+    Ok(())
+}
+
+/// COUPPCD(settlement, maturity, frequency, [basis])
+pub fn couppcd(
+    settlement: i32,
+    maturity: i32,
+    frequency: i32,
+    basis: i32,
+    system: ExcelDateSystem,
+) -> ExcelResult<i32> {
+    validate_coupon_args(settlement, maturity, frequency, basis, system)?;
+    let (pcd, _ncd, _n) = coupon_pcd_ncd_num(settlement, maturity, frequency, system)?;
+    Ok(pcd)
+}
+
+/// COUPNCD(settlement, maturity, frequency, [basis])
+pub fn coupncd(
+    settlement: i32,
+    maturity: i32,
+    frequency: i32,
+    basis: i32,
+    system: ExcelDateSystem,
+) -> ExcelResult<i32> {
+    validate_coupon_args(settlement, maturity, frequency, basis, system)?;
+    let (_pcd, ncd, _n) = coupon_pcd_ncd_num(settlement, maturity, frequency, system)?;
+    Ok(ncd)
+}
+
+/// COUPNUM(settlement, maturity, frequency, [basis])
+pub fn coupnum(
+    settlement: i32,
+    maturity: i32,
+    frequency: i32,
+    basis: i32,
+    system: ExcelDateSystem,
+) -> ExcelResult<f64> {
+    validate_coupon_args(settlement, maturity, frequency, basis, system)?;
+    let (_pcd, _ncd, n) = coupon_pcd_ncd_num(settlement, maturity, frequency, system)?;
+    Ok(n as f64)
+}
+
+/// COUPDAYBS(settlement, maturity, frequency, [basis])
+pub fn coupdaybs(
+    settlement: i32,
+    maturity: i32,
+    frequency: i32,
+    basis: i32,
+    system: ExcelDateSystem,
+) -> ExcelResult<f64> {
+    validate_coupon_args(settlement, maturity, frequency, basis, system)?;
+    let (pcd, _ncd, _n) = coupon_pcd_ncd_num(settlement, maturity, frequency, system)?;
+    let a = days_between(pcd, settlement, basis, system)? as f64;
+    if !a.is_finite() || a < 0.0 {
+        return Err(ExcelError::Num);
+    }
+    Ok(a)
+}
+
+/// COUPDAYSNC(settlement, maturity, frequency, [basis])
+pub fn coupdaysnc(
+    settlement: i32,
+    maturity: i32,
+    frequency: i32,
+    basis: i32,
+    system: ExcelDateSystem,
+) -> ExcelResult<f64> {
+    validate_coupon_args(settlement, maturity, frequency, basis, system)?;
+    let (pcd, ncd, _n) = coupon_pcd_ncd_num(settlement, maturity, frequency, system)?;
+    // Excel's COUPDAYSNC is not always the same day-count convention as `days_between`.
+    // For 30/360 bases, Excel treats the coupon period length `E` as a fixed 360/fraction,
+    // and computes DSC as the remaining portion of that modeled coupon period.
+    let dsc = match basis {
+        0 | 4 => {
+            let e = coupon_period_e(pcd, ncd, frequency, basis, system)?;
+            let a = days_between(pcd, settlement, basis, system)? as f64;
+            e - a
+        }
+        _ => days_between(settlement, ncd, basis, system)? as f64,
+    };
+    if !dsc.is_finite() || dsc < 0.0 {
+        return Err(ExcelError::Num);
+    }
+    Ok(dsc)
+}
+
+/// COUPDAYS(settlement, maturity, frequency, [basis])
+pub fn coupdays(
+    settlement: i32,
+    maturity: i32,
+    frequency: i32,
+    basis: i32,
+    system: ExcelDateSystem,
+) -> ExcelResult<f64> {
+    validate_coupon_args(settlement, maturity, frequency, basis, system)?;
+    let (pcd, ncd, _n) = coupon_pcd_ncd_num(settlement, maturity, frequency, system)?;
+    coupon_period_e(pcd, ncd, frequency, basis, system)
+}

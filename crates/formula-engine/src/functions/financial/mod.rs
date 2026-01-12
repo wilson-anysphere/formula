@@ -6,14 +6,15 @@ mod builtins_amortization;
 mod builtins_bonds;
 mod builtins_depreciation_ext;
 mod builtins_french_depreciation;
-mod builtins_odd_coupon;
 mod builtins_misc;
+mod builtins_odd_coupon;
+mod builtins_pduration;
 mod builtins_schedules;
 mod builtins_securities;
 mod bonds;
 mod bonds_odd;
-mod builtins_pduration;
 mod cashflows;
+mod coupon_schedule;
 mod depreciation;
 mod duration;
 mod french_depreciation;
@@ -26,11 +27,9 @@ mod time_value;
 
 pub use accrued_interest::{accrint, accrintm};
 pub use amortization::{cumipmt, cumprinc};
-pub use bonds::{
-    coupdaybs, coupdays, coupdaysnc, coupncd, coupnum, couppcd, duration, mduration, price,
-    yield_rate,
-};
+pub use bonds::{duration, mduration, price, yield_rate};
 pub use cashflows::{irr, mirr, npv, xirr, xnpv};
+pub use coupon_schedule::{coupdaybs, coupdays, coupdaysnc, coupncd, coupnum, couppcd};
 pub use depreciation::{db, ddb, sln, syd, vdb};
 pub use duration::pduration;
 pub use french_depreciation::{amordegrec, amorlinc};
@@ -43,3 +42,4 @@ pub use securities::{
     yieldmat,
 };
 pub use time_value::{effect, fv, ipmt, nominal, nper, pmt, ppmt, pv, rate, rri};
+

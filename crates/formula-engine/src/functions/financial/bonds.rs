@@ -1,10 +1,12 @@
 use crate::date::ExcelDateSystem;
 use crate::error::{ExcelError, ExcelResult};
-use crate::functions::date_time;
 
+use super::coupon_schedule::{
+    coupon_pcd_ncd_num, coupon_period_e, days_between, validate_basis, validate_frequency,
+    validate_serial,
+};
 use super::iterative::solve_root_newton_bisection;
 
-const MAX_COUPON_STEPS: usize = 50_000;
 const MAX_ITER_YIELD: usize = 100;
 
 #[derive(Debug, Clone, Copy)]
@@ -17,96 +19,6 @@ struct CouponSchedule {
     n: i32,
 }
 
-fn validate_frequency(frequency: i32) -> ExcelResult<i32> {
-    match frequency {
-        1 | 2 | 4 => Ok(frequency),
-        _ => Err(ExcelError::Num),
-    }
-}
-
-fn validate_basis(basis: i32) -> ExcelResult<i32> {
-    if (0..=4).contains(&basis) {
-        Ok(basis)
-    } else {
-        Err(ExcelError::Num)
-    }
-}
-
-fn validate_serial(serial: i32, system: ExcelDateSystem) -> ExcelResult<()> {
-    let _ = crate::date::serial_to_ymd(serial, system)?;
-    Ok(())
-}
-
-fn coupon_period_months(frequency: i32) -> Option<i32> {
-    match frequency {
-        1 => Some(12),
-        2 => Some(6),
-        4 => Some(3),
-        _ => None,
-    }
-}
-
-/// Previous coupon date (PCD), next coupon date (NCD), and number of coupons remaining (COUPNUM).
-fn coupon_pcd_ncd_num(
-    settlement: i32,
-    maturity: i32,
-    frequency: i32,
-    system: ExcelDateSystem,
-) -> ExcelResult<(i32, i32, i32)> {
-    let months = coupon_period_months(frequency).ok_or(ExcelError::Num)?;
-    let mut n = 1i32;
-    for _ in 0..MAX_COUPON_STEPS {
-        let months_back = months.checked_mul(n).ok_or(ExcelError::Num)?;
-        let pcd = date_time::edate(maturity, -months_back, system)?;
-        if pcd <= settlement {
-            let ncd = if n == 1 {
-                maturity
-            } else {
-                let months_back_prev = months.checked_mul(n - 1).ok_or(ExcelError::Num)?;
-                date_time::edate(maturity, -months_back_prev, system)?
-            };
-            return Ok((pcd, ncd, n));
-        }
-        n = n.checked_add(1).ok_or(ExcelError::Num)?;
-    }
-
-    Err(ExcelError::Num)
-}
-
-fn days_between(
-    start_date: i32,
-    end_date: i32,
-    basis: i32,
-    system: ExcelDateSystem,
-) -> ExcelResult<i64> {
-    match basis {
-        0 => date_time::days360(start_date, end_date, false, system),
-        4 => date_time::days360(start_date, end_date, true, system),
-        1 | 2 | 3 => Ok(i64::from(end_date) - i64::from(start_date)),
-        _ => Err(ExcelError::Num),
-    }
-}
-
-fn coupon_period_days(
-    pcd: i32,
-    ncd: i32,
-    frequency: i32,
-    basis: i32,
-    _system: ExcelDateSystem,
-) -> ExcelResult<f64> {
-    let freq = frequency as f64;
-    match basis {
-        // For these bases, Excel treats the regular coupon period as a fixed fraction of a
-        // 360-day or 365-day year (depending on basis), regardless of the actual calendar days
-        // between coupon dates.
-        0 | 2 | 4 => Ok(360.0 / freq),
-        3 => Ok(365.0 / freq),
-        // Actual/Actual uses the actual number of days between coupon dates.
-        1 => Ok((i64::from(ncd) - i64::from(pcd)) as f64),
-        _ => Err(ExcelError::Num),
-    }
-}
-
 fn coupon_schedule(
     settlement: i32,
     maturity: i32,
@@ -116,7 +28,7 @@ fn coupon_schedule(
 ) -> ExcelResult<CouponSchedule> {
     let (pcd, ncd, n) = coupon_pcd_ncd_num(settlement, maturity, frequency, system)?;
 
-    let e = coupon_period_days(pcd, ncd, frequency, basis, system)?;
+    let e = coupon_period_e(pcd, ncd, frequency, basis, system)?;
     let a = days_between(pcd, settlement, basis, system)? as f64;
     let dsc = match basis {
         0 | 4 => e - a,
@@ -126,10 +38,7 @@ fn coupon_schedule(
     if !a.is_finite() || !e.is_finite() || !dsc.is_finite() {
         return Err(ExcelError::Num);
     }
-    if e <= 0.0 {
-        return Err(ExcelError::Num);
-    }
-    if dsc < 0.0 {
+    if a < 0.0 || dsc < 0.0 || e <= 0.0 {
         return Err(ExcelError::Num);
     }
 
@@ -138,147 +47,6 @@ fn coupon_schedule(
         d: dsc / e,
         n,
     })
-}
-
-// ---------------------------------------------------------------------
-// COUP* schedule functions
-// ---------------------------------------------------------------------
-
-/// COUPPCD(settlement, maturity, frequency, [basis])
-pub fn couppcd(
-    settlement: i32,
-    maturity: i32,
-    frequency: i32,
-    basis: i32,
-    system: ExcelDateSystem,
-) -> ExcelResult<i32> {
-    if settlement >= maturity {
-        return Err(ExcelError::Num);
-    }
-    validate_frequency(frequency)?;
-    validate_basis(basis)?;
-    validate_serial(settlement, system)?;
-    validate_serial(maturity, system)?;
-
-    let (pcd, _ncd, _n) = coupon_pcd_ncd_num(settlement, maturity, frequency, system)?;
-    Ok(pcd)
-}
-
-/// COUPNCD(settlement, maturity, frequency, [basis])
-pub fn coupncd(
-    settlement: i32,
-    maturity: i32,
-    frequency: i32,
-    basis: i32,
-    system: ExcelDateSystem,
-) -> ExcelResult<i32> {
-    if settlement >= maturity {
-        return Err(ExcelError::Num);
-    }
-    validate_frequency(frequency)?;
-    validate_basis(basis)?;
-    validate_serial(settlement, system)?;
-    validate_serial(maturity, system)?;
-
-    let (_pcd, ncd, _n) = coupon_pcd_ncd_num(settlement, maturity, frequency, system)?;
-    Ok(ncd)
-}
-
-/// COUPNUM(settlement, maturity, frequency, [basis])
-pub fn coupnum(
-    settlement: i32,
-    maturity: i32,
-    frequency: i32,
-    basis: i32,
-    system: ExcelDateSystem,
-) -> ExcelResult<f64> {
-    if settlement >= maturity {
-        return Err(ExcelError::Num);
-    }
-    validate_frequency(frequency)?;
-    validate_basis(basis)?;
-    validate_serial(settlement, system)?;
-    validate_serial(maturity, system)?;
-
-    let (_pcd, _ncd, n) = coupon_pcd_ncd_num(settlement, maturity, frequency, system)?;
-    Ok(n as f64)
-}
-
-/// COUPDAYBS(settlement, maturity, frequency, [basis])
-pub fn coupdaybs(
-    settlement: i32,
-    maturity: i32,
-    frequency: i32,
-    basis: i32,
-    system: ExcelDateSystem,
-) -> ExcelResult<f64> {
-    if settlement >= maturity {
-        return Err(ExcelError::Num);
-    }
-    validate_frequency(frequency)?;
-    validate_basis(basis)?;
-    validate_serial(settlement, system)?;
-    validate_serial(maturity, system)?;
-
-    let (pcd, _ncd, _n) = coupon_pcd_ncd_num(settlement, maturity, frequency, system)?;
-    Ok(days_between(pcd, settlement, basis, system)? as f64)
-}
-
-/// COUPDAYSNC(settlement, maturity, frequency, [basis])
-pub fn coupdaysnc(
-    settlement: i32,
-    maturity: i32,
-    frequency: i32,
-    basis: i32,
-    system: ExcelDateSystem,
-) -> ExcelResult<f64> {
-    if settlement >= maturity {
-        return Err(ExcelError::Num);
-    }
-    validate_frequency(frequency)?;
-    validate_basis(basis)?;
-    validate_serial(settlement, system)?;
-    validate_serial(maturity, system)?;
-
-    let (pcd, ncd, _n) = coupon_pcd_ncd_num(settlement, maturity, frequency, system)?;
-    let dsc = match basis {
-        0 | 4 => {
-            let e = coupon_period_days(pcd, ncd, frequency, basis, system)?;
-            let a = days_between(pcd, settlement, basis, system)? as f64;
-            e - a
-        }
-        _ => days_between(settlement, ncd, basis, system)? as f64,
-    };
-    if dsc.is_finite() && dsc >= 0.0 {
-        Ok(dsc)
-    } else {
-        Err(ExcelError::Num)
-    }
-}
-
-/// COUPDAYS(settlement, maturity, frequency, [basis])
-pub fn coupdays(
-    settlement: i32,
-    maturity: i32,
-    frequency: i32,
-    basis: i32,
-    system: ExcelDateSystem,
-) -> ExcelResult<f64> {
-    if settlement >= maturity {
-        return Err(ExcelError::Num);
-    }
-    validate_frequency(frequency)?;
-    validate_basis(basis)?;
-    validate_serial(settlement, system)?;
-    validate_serial(maturity, system)?;
-
-    let (pcd, ncd, _n) = coupon_pcd_ncd_num(settlement, maturity, frequency, system)?;
-    let e = coupon_period_days(pcd, ncd, frequency, basis, system)?;
-    if e.is_finite() && e > 0.0 {
-        Ok(e)
-    } else {
-        Err(ExcelError::Num)
-    }
 }
 
 /// Compute:
@@ -293,7 +61,11 @@ fn dirty_price_and_deriv_sum(
     d: f64,
     n: i32,
 ) -> Option<(f64, f64, f64)> {
-    if !coupon_payment.is_finite() || !redemption.is_finite() || !yld.is_finite() || !frequency.is_finite() {
+    if !coupon_payment.is_finite()
+        || !redemption.is_finite()
+        || !yld.is_finite()
+        || !frequency.is_finite()
+    {
         return None;
     }
     if frequency <= 0.0 || n <= 0 {
@@ -372,18 +144,18 @@ pub fn price(
     }
 
     let freq = frequency as f64;
-    // Yield must satisfy 1 + yld/frequency > 0, matching Excel's bond discount base.
-    // This allows negative yields down to `-frequency` (annualized), inclusive of large magnitudes
-    // when frequency > 1.
+    // Require 1 + yld/frequency > 0.
     if yld == -freq {
         return Err(ExcelError::Div0);
     }
     if yld < -freq {
         return Err(ExcelError::Num);
     }
-    // Excel models coupon payments as a fraction of the redemption/face value.
-    // This matches the conventions used by the odd-coupon bond functions (ODDF*/ODDL*).
+
     let coupon_payment = redemption * rate / freq;
+    if !coupon_payment.is_finite() {
+        return Err(ExcelError::Num);
+    }
 
     let schedule = coupon_schedule(settlement, maturity, frequency, basis, system)?;
     let (dirty, _deriv_sum, _g) =
@@ -499,6 +271,7 @@ pub fn duration(
     if yld < -freq {
         return Err(ExcelError::Num);
     }
+
     let coupon_payment = 100.0 * coupon / freq;
     let redemption = 100.0;
 
