@@ -462,15 +462,10 @@ fn parse_spc_indirect_data_content_v2(
         });
     }
 
-    // Fallbacks: permissive scanning for a SigDataV1Serialized blob and then (last resort) any
-    // 16-byte OCTET STRING.
+    // Fallback: permissively scan for an embedded SigDataV1Serialized blob elsewhere in the
+    // structure. We intentionally do **not** fall back to "any 16-byte OCTET STRING" because
+    // signature binding is security-sensitive and we prefer false negatives over false positives.
     if let Some(hash) = scan_asn1_for_sigdata_source_hash(content)? {
-        return Ok(VbaSignedDigest {
-            digest_algorithm_oid: OID_MD5_STR.to_owned(),
-            digest: hash,
-        });
-    }
-    if let Some(hash) = scan_asn1_for_octet_string_len(content, 16)? {
         return Ok(VbaSignedDigest {
             digest_algorithm_oid: OID_MD5_STR.to_owned(),
             digest: hash,
@@ -513,8 +508,15 @@ fn try_parse_sigdata_source_hash_from_spc_v2_contents(
         return extract_source_hash_from_sig_data_v1_serialized(&octets);
     }
 
-    // Otherwise, treat the element itself as a container and look for an inner 16-byte sourceHash.
-    scan_asn1_for_octet_string_len(sigdata_tlv, 16)
+    // Otherwise, SigDataV1Serialized may be embedded as ASN.1 (e.g. a SEQUENCE) or wrapped in
+    // another constructed element. Try parsing the element itself as SigData first when it's a
+    // SEQUENCE, then fall back to scanning within it for an OCTET STRING that contains SigData.
+    if tag.class == Asn1Class::Universal && tag.constructed && tag.number == 16 {
+        if let Some(hash) = extract_source_hash_from_sig_data_v1_serialized(sigdata_tlv)? {
+            return Ok(Some(hash));
+        }
+    }
+    scan_asn1_for_sigdata_source_hash(sigdata_tlv)
 }
 
 fn scan_asn1_for_sigdata_source_hash(
@@ -537,6 +539,14 @@ fn extract_sigdata_source_hash_from_asn1_element(
     element: &[u8],
 ) -> Result<Option<Vec<u8>>, VbaSignatureSignedDigestError> {
     let (tag, len, rest) = parse_tag_and_length(element)?;
+
+    // SEQUENCE: some producers may encode SigDataV1Serialized directly as ASN.1. Try treating this
+    // element as SigData before scanning its children.
+    if tag.class == Asn1Class::Universal && tag.constructed && tag.number == 16 {
+        if let Some(hash) = extract_source_hash_from_sig_data_v1_serialized(element)? {
+            return Ok(Some(hash));
+        }
+    }
 
     // OCTET STRING: treat the value bytes as a candidate SigDataV1Serialized blob.
     if tag.class == Asn1Class::Universal && tag.number == 4 {
@@ -586,11 +596,13 @@ fn extract_source_hash_from_sig_data_v1_serialized(
     bytes: &[u8],
 ) -> Result<Option<Vec<u8>>, VbaSignatureSignedDigestError> {
     // Some producers store `SigDataV1Serialized` as an embedded ASN.1 SEQUENCE (often inside an
-    // OCTET STRING). If it parses as ASN.1, look for a 16-byte OCTET STRING value inside it.
+    // OCTET STRING). Prefer a structure-aware parse to avoid accidentally interpreting unrelated
+    // 16-byte OCTET STRINGs as the VBA project hash.
     if bytes.first() == Some(&0x30) {
-        if let Ok(Some(hash)) = scan_asn1_for_octet_string_len(bytes, 16) {
+        if let Some(hash) = extract_source_hash_from_sig_data_v1_serialized_asn1(bytes)? {
             return Ok(Some(hash));
         }
+        return Ok(None);
     }
 
     // Otherwise treat it as an MS-OSHARED serialized binary structure and heuristically extract
@@ -598,15 +610,44 @@ fn extract_source_hash_from_sig_data_v1_serialized(
     Ok(extract_source_hash_from_sig_data_v1_serialized_binary(bytes))
 }
 
-fn extract_source_hash_from_sig_data_v1_serialized_binary(bytes: &[u8]) -> Option<Vec<u8>> {
-    // Fast path: raw MD5 bytes.
-    if bytes.len() == 16 {
-        return Some(bytes.to_vec());
+fn extract_source_hash_from_sig_data_v1_serialized_asn1(
+    bytes: &[u8],
+) -> Result<Option<Vec<u8>>, VbaSignatureSignedDigestError> {
+    // SigDataV1Serialized (ASN.1 form; best-effort) is expected to start with a version INTEGER
+    // followed by one or more fields that include the 16-byte sourceHash.
+    let Ok((tag, len, rest)) = parse_tag_and_length(bytes) else {
+        return Ok(None);
+    };
+    if tag.class != Asn1Class::Universal || !tag.constructed || tag.number != 16 {
+        return Ok(None);
     }
+    let Ok(content) = slice_constructed_contents(rest, len) else {
+        return Ok(None);
+    };
+    let mut cur = content;
 
+    let Some((version, after_ver)) = parse_integer_u32(cur)? else {
+        return Ok(None);
+    };
+    if !(1..=0x100).contains(&version) {
+        return Ok(None);
+    }
+    cur = after_ver;
+
+    scan_asn1_for_octet_string_len(cur, 16)
+}
+
+fn extract_source_hash_from_sig_data_v1_serialized_binary(bytes: &[u8]) -> Option<Vec<u8>> {
     fn read_u32_le(bytes: &[u8], offset: usize) -> Option<u32> {
         let b = bytes.get(offset..offset + 4)?;
         Some(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    }
+
+    // SigDataV1Serialized is expected to begin with a small version field. Keep this strict to
+    // avoid misidentifying unrelated octet strings as SigData.
+    let version = read_u32_le(bytes, 0)?;
+    if !(1..=0x100).contains(&version) {
+        return None;
     }
 
     // Common (test + observed) pattern:
@@ -622,45 +663,73 @@ fn extract_source_hash_from_sig_data_v1_serialized_binary(bytes: &[u8]) -> Optio
     // Generic length-prefixed blob scan:
     // try interpreting the payload as a sequence of `[u32 len][len bytes]` blobs, optionally
     // preceded by a 4-byte version field.
-    for start in [0usize, 4] {
-        let mut offset = start;
-        let mut candidate = None;
-        let mut steps = 0usize;
-        while offset + 4 <= bytes.len() && steps < 64 {
-            let Some(len) = read_u32_le(bytes, offset).map(|n| n as usize) else {
-                break;
-            };
-            offset += 4;
-            if offset + len > bytes.len() {
-                break;
-            }
-            if len == 16 {
-                candidate = Some(bytes[offset..offset + 16].to_vec());
-            }
-            offset += len;
-            steps += 1;
-        }
-        if candidate.is_some() {
-            return candidate;
-        }
-    }
-
-    // Fallback: scan DWORD-aligned offsets for a 16-byte BLOB length prefix.
-    for offset in (0..bytes.len().saturating_sub(4 + 16)).step_by(4) {
-        let Some(len) = read_u32_le(bytes, offset) else {
+    let mut offset = 4usize;
+    let mut candidate = None;
+    let mut steps = 0usize;
+    while offset + 4 <= bytes.len() && steps < 64 {
+        let Some(len) = read_u32_le(bytes, offset).map(|n| n as usize) else {
             break;
         };
-        if len as usize != 16 {
-            continue;
+        offset += 4;
+        if offset + len > bytes.len() {
+            break;
         }
-        let start = offset + 4;
-        let end = start + 16;
-        if end <= bytes.len() {
-            return Some(bytes[start..end].to_vec());
+        if len == 16 {
+            candidate = Some(bytes[offset..offset + 16].to_vec());
         }
+        offset += len;
+        steps += 1;
+    }
+    if candidate.is_some() {
+        return candidate;
     }
 
     None
+}
+
+fn parse_integer_u32(
+    input: &[u8],
+) -> Result<Option<(u32, &[u8])>, VbaSignatureSignedDigestError> {
+    let (tag, len, rest) = match parse_tag_and_length(input) {
+        Ok(v) => v,
+        Err(_) => return Ok(None),
+    };
+    if tag.class != Asn1Class::Universal || tag.constructed || tag.number != 2 {
+        return Ok(None);
+    }
+    let Length::Definite(l) = len else {
+        return Err(der_err("INTEGER uses indefinite length"));
+    };
+    let val = match rest.get(..l) {
+        Some(v) => v,
+        None => return Err(der_err("INTEGER length exceeds input")),
+    };
+    let after = rest.get(l..).ok_or_else(|| der_err("unexpected EOF"))?;
+
+    if val.is_empty() {
+        return Ok(None);
+    }
+    // Ignore a single leading 0x00 used to force a positive sign bit.
+    let val = if val.len() > 1 && val[0] == 0x00 {
+        &val[1..]
+    } else {
+        val
+    };
+    if val.len() > 4 {
+        return Ok(None);
+    }
+    if val.first().is_some_and(|b| b & 0x80 != 0) {
+        // Negative integer; not a plausible version field for our use.
+        return Ok(None);
+    }
+    let mut out: u32 = 0;
+    for &b in val {
+        out = out
+            .checked_shl(8)
+            .ok_or_else(|| der_err("INTEGER overflow"))?;
+        out |= b as u32;
+    }
+    Ok(Some((out, after)))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
