@@ -21,6 +21,64 @@ async function waitForIdle(page: import("@playwright/test").Page): Promise<void>
   }
 }
 
+type RichClipboardItem = {
+  types: string[];
+  html: string | null;
+  rtf: string | null;
+};
+
+async function readRichClipboardItem(
+  page: import("@playwright/test").Page,
+  {
+    timeoutMs = 5_000,
+    expectedHtmlSubstrings = [],
+  }: { timeoutMs?: number; expectedHtmlSubstrings?: string[] } = {}
+): Promise<RichClipboardItem> {
+  const start = Date.now();
+  let last: RichClipboardItem | null = null;
+  let lastError: unknown;
+
+  while (Date.now() - start < timeoutMs) {
+    try {
+      last = await page.evaluate(async () => {
+        const items = await navigator.clipboard.read();
+        const item = items[0];
+        if (!item) return null;
+
+        const types = item.types;
+        const readType = async (type: string): Promise<string | null> => {
+          if (!types.includes(type)) return null;
+          const blob = await item.getType(type);
+          return await blob.text();
+        };
+
+        return {
+          types,
+          html: await readType("text/html"),
+          rtf: await readType("text/rtf"),
+        };
+      });
+
+      if (
+        last?.types.includes("text/html") &&
+        last.html &&
+        expectedHtmlSubstrings.every((substring) => last!.html!.includes(substring))
+      ) {
+        return last;
+      }
+    } catch (err) {
+      lastError = err;
+    }
+
+    await page.waitForTimeout(100);
+  }
+
+  const errorMessage =
+    lastError instanceof Error ? lastError.message : lastError ? String(lastError) : "Unknown clipboard read error";
+  const types = last?.types?.length ? last.types.join(", ") : "none";
+  throw new Error(`Timed out waiting for rich clipboard data. Last error: ${errorMessage}. Last types: ${types}`);
+}
+
 test.describe("clipboard shortcuts (copy/cut/paste)", () => {
   test("Ctrl/Cmd+C copies selection and Ctrl/Cmd+V pastes starting at active cell", async ({ page }) => {
     await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
@@ -220,5 +278,63 @@ test.describe("clipboard shortcuts (copy/cut/paste)", () => {
     });
 
     expect(b1Bold).toBe(true);
+  });
+
+  test("desktop copy writes rich clipboard formats (HTML + optional RTF)", async ({ page }) => {
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await gotoDesktop(page);
+
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+
+    const seededValue = "RichClipboardA1";
+
+    // Seed a 2x2 range with mixed value types.
+    await page.evaluate(
+      ({ seededValue }) => {
+        const app = (window as any).__formulaApp;
+        const doc = app.getDocument();
+        const sheetId = app.getCurrentSheetId();
+        doc.beginBatch({ label: "Seed rich clipboard cells" });
+        doc.setCellValue(sheetId, "A1", seededValue);
+        doc.setCellValue(sheetId, "B1", 123);
+        doc.setCellValue(sheetId, "A2", "RichClipboardA2");
+        doc.setCellValue(sheetId, "B2", 456);
+        doc.endBatch();
+        app.refresh();
+      },
+      { seededValue }
+    );
+    await waitForIdle(page);
+
+    // Select A1:B2 via drag and copy.
+    await page.click("#grid", { position: { x: 53, y: 29 } });
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+    const gridBox = await page.locator("#grid").boundingBox();
+    if (!gridBox) throw new Error("Missing grid bounding box");
+    await page.mouse.move(gridBox.x + 60, gridBox.y + 40); // A1
+    await page.mouse.down();
+    await page.mouse.move(gridBox.x + 160, gridBox.y + 64); // B2
+    await page.mouse.up();
+    await expect(page.getByTestId("selection-range")).toHaveText("A1:B2");
+
+    await page.keyboard.press(`${modifier}+C`);
+    await waitForIdle(page);
+
+    const { types, html, rtf } = await readRichClipboardItem(page, {
+      expectedHtmlSubstrings: ["<table", seededValue],
+    });
+
+    expect(types).toContain("text/html");
+    expect(html).toBeTruthy();
+    expect(html!).toContain("<table");
+    expect(html!).toContain(seededValue);
+
+    if (types.includes("text/rtf")) {
+      expect(rtf).toBeTruthy();
+      expect(rtf!).toContain("\\rtf1");
+      expect(rtf!).toContain(seededValue);
+    } else {
+      console.log(`[clipboard] text/rtf missing from clipboard types: ${types.join(", ")}`);
+    }
   });
 });
