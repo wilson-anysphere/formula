@@ -38,7 +38,7 @@ describe("shellOpen", () => {
     expect(winOpen).toHaveBeenCalledWith("https://example.com", "_blank", "noopener,noreferrer");
   });
 
-  it("blocks javascript: URLs even when the shell API is available", async () => {
+  it("blocks javascript: URLs even when the Tauri API is available", async () => {
     const invoke = vi.fn().mockResolvedValue(undefined);
     (globalThis as any).__TAURI__ = { core: { invoke } };
 
@@ -46,7 +46,7 @@ describe("shellOpen", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
-  it("blocks data: URLs even when the shell API is available", async () => {
+  it("blocks data: URLs even when the Tauri API is available", async () => {
     const invoke = vi.fn().mockResolvedValue(undefined);
     (globalThis as any).__TAURI__ = { core: { invoke } };
 

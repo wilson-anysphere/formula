@@ -9,20 +9,20 @@ describe("tauri/updaterUi", () => {
   });
 
   it("opens the release URL from update metadata when provided", async () => {
-    const shellOpen = vi.fn(async () => undefined);
-    vi.stubGlobal("__TAURI__", { shell: { open: shellOpen } });
+    const invoke = vi.fn(async () => undefined);
+    vi.stubGlobal("__TAURI__", { core: { invoke } });
 
     await openUpdateReleasePage({ releaseUrl: "https://example.com/releases/v1.2.3" });
 
-    expect(shellOpen).toHaveBeenCalledWith("https://example.com/releases/v1.2.3");
+    expect(invoke).toHaveBeenCalledWith("open_external_url", { url: "https://example.com/releases/v1.2.3" });
   });
 
   it("falls back to the repo releases page when no release URL metadata is available", async () => {
-    const shellOpen = vi.fn(async () => undefined);
-    vi.stubGlobal("__TAURI__", { shell: { open: shellOpen } });
+    const invoke = vi.fn(async () => undefined);
+    vi.stubGlobal("__TAURI__", { core: { invoke } });
 
     await openUpdateReleasePage({ version: "1.2.3", body: "Notes" });
 
-    expect(shellOpen).toHaveBeenCalledWith(FORMULA_RELEASES_URL);
+    expect(invoke).toHaveBeenCalledWith("open_external_url", { url: FORMULA_RELEASES_URL });
   });
 });

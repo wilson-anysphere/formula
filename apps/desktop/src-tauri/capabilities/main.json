@@ -18,6 +18,7 @@
         "read_binary_file_range",
         "stat_file",
         "list_dir",
+        "open_external_url",
         "clipboard_read",
         "clipboard_write",
         "read_clipboard",

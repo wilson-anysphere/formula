@@ -802,6 +802,7 @@ fn main() {
                 )
                 .build(),
         )
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
@@ -836,6 +837,7 @@ fn main() {
             commands::read_binary_file_range,
             commands::stat_file,
             commands::list_dir,
+            commands::open_external_url,
             commands::read_clipboard,
             commands::write_clipboard,
             commands::power_query_cache_key_get_or_create,
