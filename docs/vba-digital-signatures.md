@@ -67,14 +67,15 @@ When inspecting/verifying signatures, `formula-xlsx`:
    - if that fails, as a raw PKCS#7/CMS signature blob.
 3. Falls back to scanning `xl/vbaProject.bin` for embedded `\x05DigitalSignature*` streams.
 
-### Binding limitations (until Task 128)
+### Binding considerations for external signature parts
 
-The dedicated signature part does not include the full set of VBA project streams needed for the
-MS-OVBA project digest transcript. Current `formula-xlsx` behavior is:
+The dedicated signature part contains the **signature payload**, but MS-OVBA binding is computed
+over the VBA project streams in `xl/vbaProject.bin`. As a result:
 
-- the signature can be cryptographically verified (`SignedVerified`), but
-- binding is reported as `Unknown` unless the project bytes from `xl/vbaProject.bin` are also used
-  for binding (tracked in Task 128).
+- When `xl/vbaProject.bin` is available (normal for XLSM), `formula-xlsx` uses those bytes when
+  verifying/binding a signature stored in the signature part.
+- If you only have the signature-part bytes (no project bytes), you can still verify the PKCS#7/CMS
+  signature, but binding cannot be evaluated and should be treated as `Unknown`.
 
 ## Signature stream payload variants (what the bytes look like)
 
