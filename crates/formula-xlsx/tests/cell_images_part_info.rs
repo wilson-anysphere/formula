@@ -21,9 +21,9 @@ fn build_package(entries: &[(&str, &[u8])]) -> Vec<u8> {
 
 #[test]
 fn discovers_cell_images_part_and_resolves_image_targets() {
-    let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
- xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"></workbook>"#;
+  let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+ <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"></workbook>"#;
 
     // Intentionally use an unknown relationship type. Discovery must rely on the Target heuristic.
     let workbook_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -34,8 +34,8 @@ fn discovers_cell_images_part_and_resolves_image_targets() {
     let cellimages_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <cellImages xmlns="http://schemas.microsoft.com/office/spreadsheetml/2019/cellimages"
  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <cellImage r:embed="rId1"/>
-</cellImages>"#;
+   <cellImage r:embed="rId1"/>
+ </cellImages>"#;
 
     let cellimages_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">

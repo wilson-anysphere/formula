@@ -6,6 +6,11 @@ test.describe("global keybindings", () => {
   test("routes command palette, find/replace, and extension bindings through a single handler with input focus scoping", async ({
     page,
   }) => {
+    await page.addInitScript(() => {
+      // Avoid permission prompt flakiness in this suite; other e2e tests cover the prompt UI.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (globalThis as any).__formulaPermissionPrompt = async () => true;
+    });
     await gotoDesktop(page);
 
     const primary = process.platform === "darwin" ? "Meta" : "Control";
