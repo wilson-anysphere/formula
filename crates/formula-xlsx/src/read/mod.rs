@@ -1111,7 +1111,6 @@ fn parse_worksheet_into_model(
     let mut current_formula: Option<FormulaMeta> = None;
     let mut current_value_text: Option<String> = None;
     let mut current_inline_text: Option<String> = None;
-    let mut current_vm: Option<u32> = None;
     let mut in_v = false;
     let mut in_f = false;
 
@@ -1294,7 +1293,6 @@ fn parse_worksheet_into_model(
                 current_formula = None;
                 current_value_text = None;
                 current_inline_text = None;
-                current_vm = None;
                 in_v = false;
                 in_f = false;
 
@@ -1500,7 +1498,6 @@ fn parse_worksheet_into_model(
                 current_formula = None;
                 current_value_text = None;
                 current_inline_text = None;
-                current_vm = None;
                 in_v = false;
                 in_f = false;
             }
