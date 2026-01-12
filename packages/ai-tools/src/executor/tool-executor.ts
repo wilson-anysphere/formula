@@ -261,8 +261,12 @@ type DlpRangeIndex = {
    */
   rangeRankMax: number;
   /**
-   * Records that cannot be indexed by (row,col)/(columnIndex) (e.g. tableId/columnId selectors).
-   * These are evaluated via the slower `effectiveCellClassification` path when present.
+   * Records that cannot be indexed by (row,col)/(columnIndex).
+   *
+   * ToolExecutor currently operates on sheet coordinates only (no table metadata), so
+   * table-based selectors (tableId/columnId) cannot be evaluated and are ignored when
+   * building the index. As a result this list is effectively always empty today, but
+   * is kept for future extensibility.
    */
   fallbackRecords: Array<{ selector: any; classification: any }>;
 };
