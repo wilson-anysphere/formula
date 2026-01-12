@@ -384,7 +384,7 @@ In Desktop/Tauri, the CSP lives in `apps/desktop/src-tauri/tauri.conf.json` (`ap
 
 The CSP must also allow the extension runtime mechanics:
 
-- `worker-src blob:` (extensions run in module workers)
+- `worker-src blob: data:` (extensions run in module workers)
 - `script-src blob: data:` (extensions are loaded from in-memory module URLs)
 - `child-src blob:` (extension panels are sandboxed `blob:` iframes)
 

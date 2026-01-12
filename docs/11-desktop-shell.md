@@ -108,7 +108,7 @@ Rationale:
 
 - The Rust engine runs as **WebAssembly inside a module Worker**, so CSP must allow:
   - `script-src 'wasm-unsafe-eval'` for WASM compilation/instantiation.
-  - `worker-src 'self' blob:` for module workers (Vite may use `blob:` URLs for worker bootstrapping).
+  - `worker-src 'self' blob: data:` for module workers (Vite may use `blob:`/`data:` URLs for worker bootstrapping).
 - The extension runtime (`BrowserExtensionHost`) also runs each extension in a **module Worker** loaded from an in-memory
   `blob:`/`data:` module URL, so CSP must allow `worker-src blob:` and `script-src blob: data:`.
 - Extension panels are rendered as sandboxed **`blob:` iframes**, so CSP must allow `child-src blob:` (or `frame-src blob:`)
