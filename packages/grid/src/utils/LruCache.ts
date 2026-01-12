@@ -13,6 +13,10 @@ export class LruCache<K, V> {
     return this.map.size;
   }
 
+  keys(): IterableIterator<K> {
+    return this.map.keys();
+  }
+
   get(key: K): V | undefined {
     const value = this.map.get(key);
     if (value === undefined) return undefined;
@@ -44,4 +48,3 @@ export class LruCache<K, V> {
     this.map.clear();
   }
 }
-

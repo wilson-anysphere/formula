@@ -443,18 +443,39 @@ export class DocumentCellProvider implements CellProvider {
     // region is "thin" (e.g. a single formatted row across all columns) to avoid
     // nuking the entire sheet cache.
     const maxDirectEvictions = 50_000;
-    const shouldEvictDirectly = cellCount <= 1000 || (cellCount <= maxDirectEvictions && height <= 4);
-    if (shouldEvictDirectly) {
-      const cache = this.sheetCaches.get(sheetId);
-      if (cache) {
+    const shouldEvictDirectly =
+      cellCount <= 1000 || (cellCount <= maxDirectEvictions && (height <= 4 || width <= 4));
+    const cache = this.sheetCaches.get(sheetId);
+    if (cache) {
+      if (shouldEvictDirectly) {
         for (let r = gridRange.startRow; r < gridRange.endRow; r++) {
           const base = r * CACHE_KEY_COL_STRIDE;
           for (let c = gridRange.startCol; c < gridRange.endCol; c++) {
             cache.delete(base + c);
           }
         }
+      } else if (width <= 4) {
+        // Full-height column invalidations (e.g. formatting an entire column) can span millions of
+        // rows. Iterating every coordinate is too expensive, but our cache is bounded, so we can
+        // evict matching entries by scanning keys.
+        for (const key of cache.keys()) {
+          const row = Math.floor(key / CACHE_KEY_COL_STRIDE);
+          const col = key - row * CACHE_KEY_COL_STRIDE;
+          if (row < gridRange.startRow || row >= gridRange.endRow) continue;
+          if (col < gridRange.startCol || col >= gridRange.endCol) continue;
+          cache.delete(key);
+        }
+      } else {
+        // If the range is large, clear the active sheet cache to avoid spending too much
+        // time iterating keys. Keep other sheet caches intact; large formatting edits are
+        // typically scoped to one sheet (and `subscribe` filters by sheetId).
+        this.sheetCaches.delete(sheetId);
+        if (this.lastSheetId === sheetId) {
+          this.lastSheetId = null;
+          this.lastSheetCache = null;
+        }
       }
-    } else {
+    } else if (!shouldEvictDirectly) {
       // If the range is large, clear the active sheet cache to avoid spending too much
       // time iterating keys. Keep other sheet caches intact; large formatting edits are
       // typically scoped to one sheet (and `subscribe` filters by sheetId).

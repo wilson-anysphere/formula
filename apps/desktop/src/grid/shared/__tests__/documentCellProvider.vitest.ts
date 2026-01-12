@@ -481,4 +481,45 @@ describe("DocumentCellProvider formatting integration", () => {
     expect(provider.getCell(headerRows + 1, headerCols + 0)?.value).toBe("row2");
     expect(getCellSpy).toHaveBeenCalledTimes(3);
   });
+
+  it("keeps other columns cached when invalidating a full-height column range", () => {
+    const doc = new DocumentController();
+    doc.setCellValue("Sheet1", "A1", "colA");
+    doc.setCellValue("Sheet1", "B1", "colB");
+
+    const headerRows = 1;
+    const headerCols = 1;
+    // > 50k so column-wide invalidation is considered "large" (would previously clear the whole sheet cache).
+    const docRows = 60_000;
+    const docCols = 2;
+
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => "Sheet1",
+      headerRows,
+      headerCols,
+      rowCount: docRows + headerRows,
+      colCount: docCols + headerCols,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const getCellSpy = vi.spyOn(doc, "getCell");
+
+    // Prime cache for two columns (same row).
+    expect(provider.getCell(headerRows + 0, headerCols + 0)?.value).toBe("colA");
+    expect(provider.getCell(headerRows + 0, headerCols + 1)?.value).toBe("colB");
+    expect(getCellSpy).toHaveBeenCalledTimes(2);
+
+    // Invalidate column 0 across all rows (doc range).
+    provider.invalidateDocCells({ startRow: 0, endRow: docRows, startCol: 0, endCol: 1 });
+
+    // Column 0 should be refetched...
+    expect(provider.getCell(headerRows + 0, headerCols + 0)?.value).toBe("colA");
+    expect(getCellSpy).toHaveBeenCalledTimes(3);
+
+    // ...but column 1 should stay cached.
+    expect(provider.getCell(headerRows + 0, headerCols + 1)?.value).toBe("colB");
+    expect(getCellSpy).toHaveBeenCalledTimes(3);
+  });
 });
