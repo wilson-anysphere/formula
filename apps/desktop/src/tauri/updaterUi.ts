@@ -809,9 +809,12 @@ export async function handleUpdaterEvent(name: UpdaterEventName, payload: Update
     case "update-available": {
       const manualFollowUp = manualUpdateCheckFollowUp;
       setManualUpdateCheckFollowUp(false);
+      const isManualRequest = source === "manual" || manualFollowUp;
       // Only show the in-app update dialog for manual checks. Startup checks should be silent
-      // (the shell shows a system notification instead).
-      if (source !== "manual") break;
+      // (the shell shows a system notification instead). One exception: if the user triggers a
+      // manual check while a startup check is already in-flight, the backend will report the
+      // result with `source: "startup"`; treat that as manual so the user still sees the dialog.
+      if (!isManualRequest) break;
 
       const version =
         typeof payload?.version === "string" && payload.version.trim() !== ""
