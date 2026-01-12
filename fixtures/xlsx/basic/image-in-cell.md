@@ -118,7 +118,13 @@ From `xl/metadata.xml`:
         </ext>
       </extLst>
     </bk>
-    <bk>...<xlrd:rvb i="1"/>...</bk>
+    <bk>
+      <extLst>
+        <ext uri="{3e2802c4-a4d2-4d8b-9148-e3be6c30e623}">
+          <xlrd:rvb i="1"/>
+        </ext>
+      </extLst>
+    </bk>
   </futureMetadata>
 
   <valueMetadata count="2">
@@ -155,14 +161,21 @@ Those IDs resolve via `xl/richData/_rels/richValueRel.xml.rels`:
 
 ```xml
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1"
-                Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
-                Target="../media/image1.png"/>
   <Relationship Id="rId2"
                 Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
                 Target="../media/image2.png"/>
+  <Relationship Id="rId1"
+                Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+                Target="../media/image1.png"/>
 </Relationships>
 ```
+
+Important indexing note:
+
+* `xl/richData/richValueRel.xml` is an **ordered** `<rel>` list (relationship-slot table). Rich values index into
+  this list by integer slot.
+* `xl/richData/_rels/richValueRel.xml.rels` is an **unordered** map from relationship ID (`rId*`) to `Target`.
+  Do not assume it has the same ordering as the `<rel>` list.
 
 ## Relationship chain (high level)
 
