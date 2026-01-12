@@ -1,0 +1,16 @@
+{
+  "name": "view-logger",
+  "displayName": "View Logger",
+  "version": "1.0.0",
+  "description": "Test-only extension that logs formula.events.onViewActivated.",
+  "publisher": "formula",
+  "license": "MIT",
+  "main": "./extension.js",
+  "engines": {
+    "formula": "^1.0.0"
+  },
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {},
+  "permissions": []
+}
+

@@ -100,6 +100,43 @@ test("integration: view activation creates and renders contributed panel", async
   assert.fail("Timed out waiting for panel HTML after view activation");
 });
 
+test("integration: viewActivated is broadcast even if view activation fails", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-view-activated-"));
+
+  // Deny all permission prompts so the Sample Hello extension fails to activate on view open. The
+  // goal of this test is to ensure `formula.events.onViewActivated` is still delivered to already
+  // running extensions (i.e. it behaves like other event broadcasts, not like an activation hook).
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => false
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const sampleHelloPath = path.resolve(__dirname, "../../../extensions/sample-hello");
+  const viewLoggerPath = path.resolve(__dirname, "./fixtures/view-logger");
+
+  await host.loadExtension(sampleHelloPath);
+  await host.loadExtension(viewLoggerPath);
+  await host.startup();
+
+  await assert.rejects(() => host.activateView("sampleHello.panel"), /Permission denied/);
+
+  const expected = "[view-logger] viewActivated:sampleHello.panel";
+  const deadline = Date.now() + 1_000;
+  while (Date.now() < deadline) {
+    const messages = host.getMessages().map((m) => String(m.message));
+    if (messages.some((m) => m.includes(expected))) return;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+
+  assert.fail("Timed out waiting for viewActivated message from view-logger extension");
+});
+
 test("integration: panel messaging (webview -> extension -> webview)", async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-panel-msg-"));
 
