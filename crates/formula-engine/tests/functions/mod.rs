@@ -48,6 +48,7 @@ mod statistical;
 mod statistical_moments;
 mod statistical_distributions_normal;
 mod statistical_more;
+mod statistical_ets;
 mod criteria_locale;
 mod text;
 mod text_dbcs;

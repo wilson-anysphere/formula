@@ -7,6 +7,7 @@ mod normal;
 pub use normal::{gauss, norm_dist, norm_inv, norm_s_dist, norm_s_inv, phi};
 mod frequency;
 pub use frequency::frequency;
+pub mod ets;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RankMethod {

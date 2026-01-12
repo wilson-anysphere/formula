@@ -1161,6 +1161,65 @@ export default {
       ]
     },
     {
+      "name": "FORECAST.ETS",
+      "min_args": 3,
+      "max_args": 6,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "any",
+        "any",
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "FORECAST.ETS.CONFINT",
+      "min_args": 3,
+      "max_args": 7,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "any",
+        "any",
+        "number",
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "FORECAST.ETS.SEASONALITY",
+      "min_args": 2,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "FORECAST.ETS.STAT",
+      "min_args": 2,
+      "max_args": 6,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "number",
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
       "name": "FORECAST.LINEAR",
       "min_args": 3,
       "max_args": 3,

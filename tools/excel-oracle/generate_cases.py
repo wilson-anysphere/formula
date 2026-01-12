@@ -932,6 +932,30 @@ def generate_cases() -> dict[str, Any]:
     _add_case(cases, prefix="intercept", tags=["stat", "INTERCEPT"], formula="=INTERCEPT({1,2,3},{1,2,3})")
     _add_case(cases, prefix="forecast", tags=["stat", "FORECAST"], formula="=FORECAST(4,{1,2,3},{1,2,3})")
     _add_case(cases, prefix="forecast_linear", tags=["stat", "FORECAST.LINEAR"], formula="=FORECAST.LINEAR(4,{1,2,3},{1,2,3})")
+    _add_case(
+        cases,
+        prefix="forecast_ets",
+        tags=["stat", "FORECAST.ETS"],
+        formula="=FORECAST.ETS(7,{1,2,3,4,5,6},{1,2,3,4,5,6},1)",
+    )
+    _add_case(
+        cases,
+        prefix="forecast_ets_confint",
+        tags=["stat", "FORECAST.ETS.CONFINT"],
+        formula="=FORECAST.ETS.CONFINT(7,{1,2,3,4,5,6},{1,2,3,4,5,6},0.95,1)",
+    )
+    _add_case(
+        cases,
+        prefix="forecast_ets_seasonality",
+        tags=["stat", "FORECAST.ETS.SEASONALITY"],
+        formula="=FORECAST.ETS.SEASONALITY({10,20,10,20,10,20,10,20},{1,2,3,4,5,6,7,8})",
+    )
+    _add_case(
+        cases,
+        prefix="forecast_ets_stat",
+        tags=["stat", "FORECAST.ETS.STAT"],
+        formula="=FORECAST.ETS.STAT({1,2,3,4,5,6},{1,2,3,4,5,6},1,1,1,8)",
+    )
 
     # STEYX should be 0 for a perfectly linear relationship (y = 2x + 1).
     _add_case(cases, prefix="steyx", tags=["stat", "STEYX"], formula="=STEYX({3,5,7,9,11},{1,2,3,4,5})")
