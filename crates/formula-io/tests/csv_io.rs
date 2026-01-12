@@ -108,6 +108,35 @@ fn opens_csv_with_wrong_extension() {
 }
 
 #[test]
+fn opens_csv_with_xls_extension() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("data.xls");
+
+    // Note: the extension is intentionally wrong; content sniffing should still treat it as CSV.
+    std::fs::write(&path, "col1,col2\n1,hello\n2,world\n").expect("write csv");
+
+    let wb = open_workbook(&path).expect("open csv workbook");
+    let model = match wb {
+        Workbook::Model(model) => model,
+        other => panic!("expected Workbook::Model, got {other:?}"),
+    };
+
+    let sheet_name = model.sheets[0].name.clone();
+    let sheet = model.sheet_by_name(&sheet_name).expect("sheet missing");
+
+    assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(1.0));
+    assert_eq!(
+        sheet.value_a1("B1").unwrap(),
+        CellValue::String("hello".to_string())
+    );
+    assert_eq!(sheet.value_a1("A2").unwrap(), CellValue::Number(2.0));
+    assert_eq!(
+        sheet.value_a1("B2").unwrap(),
+        CellValue::String("world".to_string())
+    );
+}
+
+#[test]
 fn opens_extensionless_csv() {
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("data");

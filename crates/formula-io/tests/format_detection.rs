@@ -75,6 +75,16 @@ fn detect_workbook_format_sniffs_csv_with_wrong_extension() {
 }
 
 #[test]
+fn detect_workbook_format_sniffs_csv_with_xls_extension() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("data.xls");
+    std::fs::write(&path, "col1,col2\n1,hello\n2,world\n").expect("write csv");
+
+    let fmt = detect_workbook_format(&path).expect("detect format");
+    assert_eq!(fmt, WorkbookFormat::Csv);
+}
+
+#[test]
 fn detect_workbook_format_sniffs_extensionless_csv() {
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("data");
