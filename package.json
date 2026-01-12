@@ -17,6 +17,7 @@
     "dev:sync": "pnpm -C services/sync-server dev",
     "build:desktop": "pnpm -C apps/desktop build",
     "generate:function-catalog": "node scripts/generate-function-catalog.js",
+    "report:function-parity": "node scripts/report-function-parity.mjs",
     "test": "pnpm test:vitest && pnpm test:node && pnpm test:sync && pnpm -C apps/desktop test",
     "test:sync": "pnpm -C services/sync-server test",
     "test:vitest": "vitest run",
