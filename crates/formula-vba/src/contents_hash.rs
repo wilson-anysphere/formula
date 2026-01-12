@@ -1803,14 +1803,21 @@ fn normalize_project_stream_properties_v3(project_stream_bytes: &[u8]) -> Vec<u8
 // helpers implement the legacy MS-OVBA `ProjectNormalizedData` transcript, whereas v3 signature
 // binding uses the raw, filtered `PROJECT` stream lines with CRLF-normalized endings.
 
-/// Compute the MS-OVBA §2.4.2.7 `ContentsHashV3` value (SHA-256) over v3 `ProjectNormalizedData`.
+/// Compute a legacy/test v3 digest (SHA-256) over v3 `ProjectNormalizedData`.
 ///
-/// `ContentsHashV3 = SHA-256(ProjectNormalizedData)` where:
+/// This helper computes:
+///
+/// `Sha256(ProjectNormalizedData)` where:
 /// `ProjectNormalizedData = (filtered PROJECT stream properties) || V3ContentNormalizedData || FormsNormalizedData`.
 ///
-/// Note: signature binding helpers use [`crate::compute_vba_project_digest_v3`] to support
-/// best-effort/non-standard digest algorithms seen in the wild; this function always computes the
-/// spec-defined SHA-256 digest.
+/// Spec note (important):
+///
+/// MS-OVBA §2.4.2.7 defines the **V3 Content Hash** used for VBA signature binding as an **MD5**
+/// value, and MS-OSHARED §4.3 specifies that the digest bytes embedded in VBA signatures are always
+/// a 16-byte MD5 for binding even when `DigestInfo.digestAlgorithm.algorithm` advertises SHA-256.
+///
+/// Do not treat this SHA-256 digest as the spec-correct binding value; see
+/// `docs/vba-digital-signatures.md`.
 pub fn contents_hash_v3(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseError> {
     let normalized = project_normalized_data_v3(vba_project_bin)?;
     Ok(Sha256::digest(&normalized).to_vec())

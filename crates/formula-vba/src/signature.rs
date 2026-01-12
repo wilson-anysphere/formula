@@ -712,11 +712,13 @@ pub fn verify_vba_digital_signature_with_trust(
 /// Verify whether a VBA signature blob is bound to the given `vbaProject.bin` payload via the
 /// MS-OVBA "Contents Hash" mechanism.
 ///
-/// Note:
-/// - For legacy signature streams (`\x05DigitalSignature` / `\x05DigitalSignatureEx`), Office stores
-///   a 16-byte MD5 binding digest even when the `DigestInfo.digestAlgorithm` OID indicates SHA-256
-///   (MS-OSHARED §4.3).
-/// - For `\x05DigitalSignatureExt`, binding uses MS-OVBA v3 `ContentsHashV3` (SHA-256).
+/// Note: per MS-OSHARED §4.3, the binding digest bytes embedded in VBA signatures are always a
+/// **16-byte MD5**, even when `DigestInfo.digestAlgorithm.algorithm` indicates SHA-256. This applies
+/// to all `\x05DigitalSignature*` variants, including `\x05DigitalSignatureExt`.
+///
+/// This helper is best-effort and has historically carried non-spec behavior; see
+/// `docs/vba-digital-signatures.md` for the spec-correct binding transcripts (including the v3
+/// `V3ContentHash` computation).
 ///
 /// This is a best-effort helper: it returns [`VbaSignatureBinding::Unknown`] when the signature does
 /// not contain a supported digest structure, uses an unsupported hash algorithm, or the binding
@@ -745,6 +747,9 @@ pub fn verify_vba_signature_binding_with_stream_path(
             signature_path_stream_kind(signature_stream_path),
             Some(VbaSignatureStreamKind::DigitalSignatureExt)
         ) {
+            // NOTE: `contents_hash_v3` is a legacy/test SHA-256 helper over v3 `ProjectNormalizedData`
+            // and must not be treated as the spec-correct binding value for Office-produced VBA
+            // signatures (MS-OSHARED §4.3 specifies the signed digest bytes are always 16-byte MD5).
             let computed = match crate::contents_hash_v3(vba_project_bin) {
                 Ok(v) => v,
                 Err(_) => return VbaSignatureBinding::Unknown,
@@ -814,9 +819,11 @@ pub fn verify_vba_signature_binding(
         // (e.g. `xl/vbaProjectSignature.bin` stored as raw PKCS#7/CMS bytes), we can't reliably know
         // whether to apply legacy (Content/Agile) or v3 (`DigitalSignatureExt`) binding rules.
         //
-        // Best-effort: try v3 binding first (ContentsHashV3), then fall back to the legacy binding
-        // check. Only return `NotBound` if we were able to compute the v3 digest and it did not
-        // match.
+        // Best-effort: try multiple comparisons.
+        //
+        // Note: per MS-OSHARED §4.3, the signed binding digest bytes are always 16-byte MD5 across
+        // all `DigitalSignature*` variants, so digest length is not a reliable way to disambiguate
+        // legacy vs v3 signatures when the stream kind is unknown.
         let signed = match extract_vba_signature_signed_digest(signature) {
             Ok(Some(v)) => v,
             _ => return VbaSignatureBinding::Unknown,
@@ -1405,7 +1412,11 @@ pub fn verify_vba_project_signature_binding(
     let mut content_hash_md5: Option<[u8; 16]> = None;
     // Outer Option = attempted; inner Option = computed successfully.
     let mut agile_hash_md5: Option<Option<[u8; 16]>> = None;
-    // Lazily computed MS-OVBA v3 digest (ContentsHashV3, SHA-256) for `\x05DigitalSignatureExt`.
+    // Lazily computed v3 binding digest for `\x05DigitalSignatureExt` (best-effort).
+    //
+    // Note: the `contents_hash_v3` helper currently computes a legacy/test SHA-256 digest over v3
+    // `ProjectNormalizedData`. Spec-correct Office binding uses a 16-byte MD5 digest per MS-OSHARED
+    // §4.3 (see `docs/vba-digital-signatures.md`).
     // Outer Option = attempted; inner Option = computed successfully.
     let mut v3_digest: Option<Option<Vec<u8>>> = None;
     for payload in payloads {
@@ -1432,7 +1443,7 @@ pub fn verify_vba_project_signature_binding(
         // we can usually detect the `DigitalSignature*` variant from the stream path and apply the
         // correct MS-OVBA digest:
         // - `DigitalSignature` / `DigitalSignatureEx`: legacy Content/Agile Content Hash (MD5)
-        // - `DigitalSignatureExt`: ContentsHashV3 (SHA-256)
+        // - `DigitalSignatureExt`: v3 binding digest (V3 Content Hash; MD5)
         //
         // When the signature bytes are provided as a raw PKCS#7/CMS blob, the original stream name
         // is unknown; in that case we try both legacy and v3 binding digests.
