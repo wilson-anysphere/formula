@@ -336,7 +336,7 @@ fn embedded_pkcs7_content_is_used_for_binding() {
 
 #[test]
 fn md5_binding_is_supported() {
-    let module1 = b"module1-bytes";
+    let module1 = b"Sub Hello()\r\nEnd Sub\r\n";
     let unsigned = build_minimal_vba_project_bin(module1, None);
     let normalized = content_normalized_data(&unsigned).expect("content normalized data");
     let digest: [u8; 16] = Md5::digest(&normalized).into();

@@ -230,6 +230,7 @@ fn parse_cell_images_part(
         }
 
         let Some(rel) = rels_by_id.get(&embed_rel_id) else {
+            // Best-effort: skip broken references instead of failing the whole workbook load.
             continue;
         };
         if rel
@@ -251,6 +252,7 @@ fn parse_cell_images_part(
 
         if workbook.images.get(&image_id).is_none() {
             let Some(bytes) = parts.get(&target_path) else {
+                // Best-effort: missing media should not prevent the workbook from loading.
                 continue;
             };
             let bytes = bytes.clone();
