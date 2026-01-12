@@ -4,25 +4,20 @@ import assert from "node:assert/strict";
 import { DocumentController } from "../../document/documentController.js";
 import { toggleBold } from "../toolbar.js";
 
-test("toolbar helpers propagate setRangeFormat cap skips via return value", () => {
+test("toolbar helpers block huge full-width row selections (band row cap)", () => {
   const doc = new DocumentController();
 
-  const warnings = [];
-  const originalWarn = console.warn;
-  console.warn = (...args) => {
-    warnings.push(args.join(" "));
+  // Full-width rows: 100,001 rows is too large to format (UI guard aligns with DocumentController
+  // maxEnumeratedRows=50k). The toolbar helper should return false *without* calling into the
+  // controller to avoid heavy work/delta allocations.
+  let setRangeFormatCalls = 0;
+  const originalSetRangeFormat = doc.setRangeFormat.bind(doc);
+  doc.setRangeFormat = (...args) => {
+    setRangeFormatCalls += 1;
+    return originalSetRangeFormat(...args);
   };
 
-  try {
-    // Full-width rows: 100,001 rows exceeds DocumentController's default maxEnumeratedRows (50,000),
-    // so formatting is skipped and the toolbar helper should return false.
-    const applied = toggleBold(doc, "Sheet1", "A1:XFD100001", { next: true });
-    assert.equal(applied, false);
-  } finally {
-    console.warn = originalWarn;
-  }
-
-  assert.equal(warnings.length, 1);
-  assert.match(warnings[0], /Skipping row formatting/);
+  const applied = toggleBold(doc, "Sheet1", "A1:XFD100001", { next: true });
+  assert.equal(applied, false);
+  assert.equal(setRangeFormatCalls, 0);
 });
-
