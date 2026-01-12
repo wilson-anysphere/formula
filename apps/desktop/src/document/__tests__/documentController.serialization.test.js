@@ -187,3 +187,73 @@ test("update event fires on edits and undo/redo", () => {
 
   assert.equal(updates, 3);
 });
+
+test("encodeState/applyState roundtrip preserves sheet metadata + order", () => {
+  const doc = new DocumentController();
+  // Materialize a few empty sheets.
+  doc.getCell("S1", "A1");
+  doc.getCell("S2", "A1");
+  doc.getCell("S3", "A1");
+
+  doc.renameSheet("S1", "Income");
+  doc.setSheetVisibility("S2", "hidden");
+  doc.setSheetTabColor("S3", { rgb: "FF00FF00", tint: 0.25 });
+  doc.reorderSheets(["S3", "S1", "S2"]);
+
+  const snapshot = doc.encodeState();
+  const parsed = JSON.parse(new TextDecoder().decode(snapshot));
+  assert.deepEqual(parsed.sheetOrder, ["S3", "S1", "S2"]);
+  assert.deepEqual(
+    parsed.sheets.map((s) => s.id),
+    ["S3", "S1", "S2"]
+  );
+
+  const restored = new DocumentController();
+  let lastChange = null;
+  let idsDuringChange = null;
+  let metaDuringChange = null;
+  restored.on("change", (payload) => {
+    lastChange = payload;
+    idsDuringChange = restored.getSheetIds();
+    metaDuringChange = restored.getSheetMeta("S1");
+  });
+  restored.applyState(snapshot);
+
+  assert.deepEqual(idsDuringChange, ["S3", "S1", "S2"]);
+  assert.deepEqual(metaDuringChange, { name: "Income", visibility: "visible" });
+
+  assert.deepEqual(restored.getSheetIds(), ["S3", "S1", "S2"]);
+  assert.deepEqual(restored.getSheetMeta("S1"), { name: "Income", visibility: "visible" });
+  assert.deepEqual(restored.getSheetMeta("S2"), { name: "S2", visibility: "hidden" });
+  assert.deepEqual(restored.getSheetMeta("S3"), {
+    name: "S3",
+    visibility: "visible",
+    tabColor: { rgb: "FF00FF00", tint: 0.25 },
+  });
+
+  assert.equal(lastChange?.source, "applyState");
+  assert.ok(Array.isArray(lastChange?.sheetMetaDeltas));
+});
+
+test("applyState accepts legacy snapshots without sheet metadata", () => {
+  const legacy = new TextEncoder().encode(
+    JSON.stringify({
+      schemaVersion: 1,
+      sheets: [
+        {
+          id: "Sheet1",
+          frozenRows: 0,
+          frozenCols: 0,
+          cells: [{ row: 0, col: 0, value: 123, formula: null, format: null }],
+        },
+      ],
+    })
+  );
+
+  const doc = new DocumentController();
+  doc.applyState(legacy);
+
+  assert.equal(doc.getCell("Sheet1", "A1").value, 123);
+  assert.deepEqual(doc.getSheetIds(), ["Sheet1"]);
+  assert.deepEqual(doc.getSheetMeta("Sheet1"), { name: "Sheet1", visibility: "visible" });
+});
