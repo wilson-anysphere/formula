@@ -8,8 +8,8 @@ import { indexWorkbook } from "../../ai-rag/src/pipeline/indexWorkbook.js";
 import { workbookFromSpreadsheetApi } from "../../ai-rag/src/workbook/fromSpreadsheetApi.js";
 import { DLP_ACTION } from "../../security/dlp/src/actions.js";
 import { evaluatePolicy, DLP_DECISION } from "../../security/dlp/src/policyEngine.js";
-import { CLASSIFICATION_LEVEL, maxClassification } from "../../security/dlp/src/classification.js";
-import { effectiveCellClassification, effectiveRangeClassification } from "../../security/dlp/src/selectors.js";
+import { CLASSIFICATION_LEVEL, DEFAULT_CLASSIFICATION, maxClassification } from "../../security/dlp/src/classification.js";
+import { effectiveCellClassification, effectiveRangeClassification, normalizeRange } from "../../security/dlp/src/selectors.js";
 import { DlpViolationError } from "../../security/dlp/src/errors.js";
 
 /**
@@ -91,7 +91,8 @@ export class ContextManager {
         },
       };
 
-      dlpSelectionClassification = effectiveRangeClassification(rangeRef, records);
+      const normalizedRange = normalizeRange(rangeRef.range);
+      dlpSelectionClassification = effectiveRangeClassification({ ...rangeRef, range: normalizedRange }, records);
       dlpDecision = evaluatePolicy({
         action: DLP_ACTION.AI_CLOUD_PROCESSING,
         classification: dlpSelectionClassification,
@@ -111,26 +112,37 @@ export class ContextManager {
         throw new DlpViolationError(dlpDecision);
       }
 
-      // Redact at cell level (deterministic placeholder).
-      const redactedValues = valuesForContext.map((row, r) =>
-        (row ?? []).map((value, c) => {
-          const classification = effectiveCellClassification(
-            { documentId: dlp.documentId, sheetId, row: r, col: c },
-            records,
-          );
-          const cellDecision = evaluatePolicy({
-            action: DLP_ACTION.AI_CLOUD_PROCESSING,
-            classification,
-            policy: dlp.policy,
-            options: { includeRestrictedContent },
-          });
-          if (cellDecision.decision === DLP_DECISION.ALLOW) return value;
-          dlpRedactedCells++;
-          return "[REDACTED]";
-        }),
-      );
+      // Only do per-cell enforcement under REDACT decisions; in ALLOW cases the range max
+      // classification is within the threshold so every in-range cell must be allowed.
+      let nextValues;
+      if (dlpDecision.decision === DLP_DECISION.REDACT) {
+        const index = buildDlpRangeIndex({ documentId: dlp.documentId, sheetId, range: normalizedRange }, records);
+        // Redact at cell level (deterministic placeholder).
+        nextValues = valuesForContext.map((row, r) =>
+          (row ?? []).map((value, c) => {
+            const classification = effectiveCellClassificationFromIndex(index, {
+              documentId: dlp.documentId,
+              sheetId,
+              row: r,
+              col: c,
+            });
+            const cellDecision = evaluatePolicy({
+              action: DLP_ACTION.AI_CLOUD_PROCESSING,
+              classification,
+              policy: dlp.policy,
+              options: { includeRestrictedContent },
+            });
+            if (cellDecision.decision === DLP_DECISION.ALLOW) return value;
+            dlpRedactedCells++;
+            return "[REDACTED]";
+          }),
+        );
+      } else {
+        // Preserve the previous behavior of returning fresh row arrays (but skip DLP scans).
+        nextValues = valuesForContext.map((row) => (row ?? []).slice());
+      }
 
-      sheetForContext = { ...rawSheet, name: sheetId, values: redactedValues };
+      sheetForContext = { ...rawSheet, name: sheetId, values: nextValues };
     }
 
     const schema = extractSheetSchema(sheetForContext);
@@ -687,4 +699,130 @@ export class ContextManager {
       includePromptContext: params.includePromptContext,
     });
   }
+}
+
+function cellInNormalizedRange(cell, range) {
+  return (
+    cell.row >= range.start.row &&
+    cell.row <= range.end.row &&
+    cell.col >= range.start.col &&
+    cell.col <= range.end.col
+  );
+}
+
+function rangesIntersectNormalized(a, b) {
+  return a.start.row <= b.end.row && b.start.row <= a.end.row && a.start.col <= b.end.col && b.start.col <= a.end.col;
+}
+
+function buildDlpRangeIndex(ref, records) {
+  const selectionRange = ref.range;
+  let docClassificationMax = { ...DEFAULT_CLASSIFICATION };
+  let sheetClassificationMax = { ...DEFAULT_CLASSIFICATION };
+  const columnClassificationByIndex = new Map();
+  const cellClassificationByCoord = new Map();
+  const rangeRecords = [];
+  const fallbackRecords = [];
+
+  for (const record of records || []) {
+    if (!record || !record.selector || typeof record.selector !== "object") continue;
+    const selector = record.selector;
+    if (selector.documentId !== ref.documentId) continue;
+
+    switch (selector.scope) {
+      case "document": {
+        docClassificationMax = maxClassification(docClassificationMax, record.classification);
+        break;
+      }
+      case "sheet": {
+        if (selector.sheetId === ref.sheetId) {
+          sheetClassificationMax = maxClassification(sheetClassificationMax, record.classification);
+        }
+        break;
+      }
+      case "column": {
+        if (selector.sheetId !== ref.sheetId) break;
+        if (typeof selector.columnIndex === "number") {
+          const existing = columnClassificationByIndex.get(selector.columnIndex);
+          columnClassificationByIndex.set(
+            selector.columnIndex,
+            existing ? maxClassification(existing, record.classification) : record.classification,
+          );
+        } else {
+          fallbackRecords.push(record);
+        }
+        break;
+      }
+      case "cell": {
+        if (selector.sheetId !== ref.sheetId) break;
+        if (typeof selector.row !== "number" || typeof selector.col !== "number") break;
+        if (
+          selector.row < selectionRange.start.row ||
+          selector.row > selectionRange.end.row ||
+          selector.col < selectionRange.start.col ||
+          selector.col > selectionRange.end.col
+        ) {
+          break;
+        }
+        const key = `${selector.row},${selector.col}`;
+        const existing = cellClassificationByCoord.get(key);
+        cellClassificationByCoord.set(key, existing ? maxClassification(existing, record.classification) : record.classification);
+        break;
+      }
+      case "range": {
+        if (selector.sheetId !== ref.sheetId) break;
+        if (!selector.range) break;
+        const normalized = normalizeRange(selector.range);
+        if (!rangesIntersectNormalized(normalized, selectionRange)) break;
+        rangeRecords.push({ range: normalized, classification: record.classification });
+        break;
+      }
+      default: {
+        fallbackRecords.push(record);
+        break;
+      }
+    }
+  }
+
+  return {
+    docClassificationMax,
+    sheetClassificationMax,
+    columnClassificationByIndex,
+    cellClassificationByCoord,
+    rangeRecords,
+    fallbackRecords,
+  };
+}
+
+function effectiveCellClassificationFromIndex(index, cellRef) {
+  let classification = { ...DEFAULT_CLASSIFICATION };
+
+  classification = maxClassification(classification, index.docClassificationMax);
+  if (classification.level !== CLASSIFICATION_LEVEL.RESTRICTED) {
+    classification = maxClassification(classification, index.sheetClassificationMax);
+  }
+
+  if (classification.level !== CLASSIFICATION_LEVEL.RESTRICTED) {
+    const colClassification = index.columnClassificationByIndex.get(cellRef.col);
+    if (colClassification) classification = maxClassification(classification, colClassification);
+  }
+
+  if (classification.level !== CLASSIFICATION_LEVEL.RESTRICTED) {
+    const cellClassification = index.cellClassificationByCoord.get(`${cellRef.row},${cellRef.col}`);
+    if (cellClassification) classification = maxClassification(classification, cellClassification);
+  }
+
+  if (classification.level !== CLASSIFICATION_LEVEL.RESTRICTED) {
+    for (const record of index.rangeRecords) {
+      if (!cellInNormalizedRange(cellRef, record.range)) continue;
+      classification = maxClassification(classification, record.classification);
+      if (classification.level === CLASSIFICATION_LEVEL.RESTRICTED) break;
+    }
+  }
+
+  if (classification.level !== CLASSIFICATION_LEVEL.RESTRICTED && index.fallbackRecords.length > 0) {
+    const fallback = effectiveCellClassification(cellRef, index.fallbackRecords);
+    classification = maxClassification(classification, fallback);
+  }
+
+  return classification;
 }
