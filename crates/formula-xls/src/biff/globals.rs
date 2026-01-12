@@ -2115,4 +2115,83 @@ mod tests {
             Some("0.00")
         );
     }
+
+    #[test]
+    fn parses_externsheet_across_continue_records_in_workbook_globals() {
+        // EXTERNSHEET payload: cXTI=2 with two internal sheet entries.
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&2u16.to_le_bytes()); // cXTI
+        // Entry 0: supbook=0, itabFirst=1, itabLast=1
+        payload.extend_from_slice(&0u16.to_le_bytes());
+        payload.extend_from_slice(&1u16.to_le_bytes());
+        payload.extend_from_slice(&1u16.to_le_bytes());
+        // Entry 1: supbook=0, itabFirst=2, itabLast=3
+        payload.extend_from_slice(&0u16.to_le_bytes());
+        payload.extend_from_slice(&2u16.to_le_bytes());
+        payload.extend_from_slice(&3u16.to_le_bytes());
+
+        // Split so a u16 spans the EXTERNSHEET/CONTINUE boundary.
+        let split = 2 + 6 + 1; // cXTI + first entry + 1 byte of second entry's iSupBook
+        let first = &payload[..split];
+        let second = &payload[split..];
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_EXTERNSHEET, first),
+            record(records::RECORD_CONTINUE, second),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let globals = parse_biff_workbook_globals(&stream, BiffVersion::Biff8, 1252).expect("parse");
+        assert_eq!(
+            globals.extern_sheets,
+            vec![
+                BiffExternSheetEntry {
+                    i_sup_book: 0,
+                    itab_first: 1,
+                    itab_last: 1,
+                },
+                BiffExternSheetEntry {
+                    i_sup_book: 0,
+                    itab_first: 2,
+                    itab_last: 3,
+                },
+            ]
+        );
+        assert!(
+            globals.warnings.is_empty(),
+            "expected no warnings, got {:?}",
+            globals.warnings
+        );
+    }
+
+    #[test]
+    fn workbook_globals_warns_on_externsheet_external_supbook() {
+        // EXTERNSHEET payload: one entry with iSupBook!=0 (external workbook/add-in).
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&1u16.to_le_bytes()); // cXTI
+        payload.extend_from_slice(&2u16.to_le_bytes()); // iSupBook != 0 => external
+        payload.extend_from_slice(&0u16.to_le_bytes()); // itabFirst
+        payload.extend_from_slice(&0u16.to_le_bytes()); // itabLast
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_EXTERNSHEET, &payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let globals = parse_biff_workbook_globals(&stream, BiffVersion::Biff8, 1252).expect("parse");
+        assert_eq!(globals.extern_sheets.len(), 1);
+        assert_eq!(globals.extern_sheets[0].i_sup_book, 2);
+        assert!(
+            globals
+                .warnings
+                .iter()
+                .any(|w| w.contains("external SupBook references")),
+            "expected external-supbook warning, got {:?}",
+            globals.warnings
+        );
+    }
 }
