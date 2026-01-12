@@ -8,6 +8,7 @@ use crate::value::{ErrorKind, Lambda, Value};
 use crate::LocaleConfig;
 
 pub mod date_time;
+pub mod database;
 pub mod financial;
 pub mod information;
 pub mod lookup;
@@ -34,6 +35,7 @@ pub enum SheetId {
 // registry live in dedicated modules to avoid merge conflicts.
 mod builtins_array;
 mod builtins_date_time;
+mod builtins_database;
 mod builtins_dynamic_arrays;
 mod builtins_dynamic_array_textsplit;
 mod builtins_information;

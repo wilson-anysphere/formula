@@ -583,6 +583,18 @@ export default {
       ]
     },
     {
+      "name": "DAVERAGE",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "any"
+      ]
+    },
+    {
       "name": "DAY",
       "min_args": 1,
       "max_args": 1,
@@ -636,6 +648,30 @@ export default {
       ]
     },
     {
+      "name": "DCOUNT",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "any"
+      ]
+    },
+    {
+      "name": "DCOUNTA",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "any"
+      ]
+    },
+    {
       "name": "DDB",
       "min_args": 4,
       "max_args": 5,
@@ -677,6 +713,18 @@ export default {
       ]
     },
     {
+      "name": "DGET",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "any",
+        "any",
+        "any"
+      ]
+    },
+    {
       "name": "DISC",
       "min_args": 4,
       "max_args": 5,
@@ -691,6 +739,30 @@ export default {
       ]
     },
     {
+      "name": "DMAX",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "any"
+      ]
+    },
+    {
+      "name": "DMIN",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "any"
+      ]
+    },
+    {
       "name": "DOLLAR",
       "min_args": 1,
       "max_args": 2,
@@ -699,6 +771,18 @@ export default {
       "arg_types": [
         "number",
         "number"
+      ]
+    },
+    {
+      "name": "DPRODUCT",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "any"
       ]
     },
     {
@@ -711,6 +795,66 @@ export default {
         "any",
         "number",
         "number"
+      ]
+    },
+    {
+      "name": "DSTDEV",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "any"
+      ]
+    },
+    {
+      "name": "DSTDEVP",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "any"
+      ]
+    },
+    {
+      "name": "DSUM",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "any"
+      ]
+    },
+    {
+      "name": "DVAR",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "any"
+      ]
+    },
+    {
+      "name": "DVARP",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "any"
       ]
     },
     {

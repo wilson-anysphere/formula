@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-01-12T06:58:27.184761595Z",
+  "generatedAt": "2026-01-12T07:04:59.076973578Z",
   "source": {
     "kind": "excel",
     "version": "unknown",
@@ -17,8 +17,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "9b02abcde59d1a38631ce17dc06eccaada8a21d74d3118a83fa6c16fda1e4bc9",
-    "count": 1495
+    "sha256": "aa88464a509e15f9b6b62185950b0344b2209f4cc8bcdd3120176c4ed04a9709",
+    "count": 1507
   },
   "results": [
     {
@@ -13818,6 +13818,126 @@
       },
       "address": "C1",
       "displayText": "2"
+    },
+    {
+      "caseId": "database_daverage_489759fd9a44",
+      "outputCell": "J1",
+      "result": {
+        "t": "n",
+        "v": 1350.0
+      },
+      "address": "J1",
+      "displayText": "1350"
+    },
+    {
+      "caseId": "database_dcount_8900e777aee9",
+      "outputCell": "J1",
+      "result": {
+        "t": "n",
+        "v": 2.0
+      },
+      "address": "J1",
+      "displayText": "2"
+    },
+    {
+      "caseId": "database_dcounta_4497be602ce8",
+      "outputCell": "J1",
+      "result": {
+        "t": "n",
+        "v": 2.0
+      },
+      "address": "J1",
+      "displayText": "2"
+    },
+    {
+      "caseId": "database_dmax_396d2f951e22",
+      "outputCell": "J1",
+      "result": {
+        "t": "n",
+        "v": 1500.0
+      },
+      "address": "J1",
+      "displayText": "1500"
+    },
+    {
+      "caseId": "database_dmin_c730a96581b4",
+      "outputCell": "J1",
+      "result": {
+        "t": "n",
+        "v": 1200.0
+      },
+      "address": "J1",
+      "displayText": "1200"
+    },
+    {
+      "caseId": "database_dproduct_e484f8256de5",
+      "outputCell": "J1",
+      "result": {
+        "t": "n",
+        "v": 1800000.0
+      },
+      "address": "J1",
+      "displayText": "1800000"
+    },
+    {
+      "caseId": "database_dsum_593f2dd9763b",
+      "outputCell": "J1",
+      "result": {
+        "t": "n",
+        "v": 2700.0
+      },
+      "address": "J1",
+      "displayText": "2700"
+    },
+    {
+      "caseId": "database_dstdev_38cc71e8fd62",
+      "outputCell": "J1",
+      "result": {
+        "t": "n",
+        "v": 212.13203435596427
+      },
+      "address": "J1",
+      "displayText": "212.13203435596427"
+    },
+    {
+      "caseId": "database_dstdevp_81db707d6e35",
+      "outputCell": "J1",
+      "result": {
+        "t": "n",
+        "v": 150.0
+      },
+      "address": "J1",
+      "displayText": "150"
+    },
+    {
+      "caseId": "database_dvar_730fe5644dab",
+      "outputCell": "J1",
+      "result": {
+        "t": "n",
+        "v": 45000.0
+      },
+      "address": "J1",
+      "displayText": "45000"
+    },
+    {
+      "caseId": "database_dvarp_dcd38e6c2bd3",
+      "outputCell": "J1",
+      "result": {
+        "t": "n",
+        "v": 22500.0
+      },
+      "address": "J1",
+      "displayText": "22500"
+    },
+    {
+      "caseId": "database_dget_d74e5349d03c",
+      "outputCell": "J1",
+      "result": {
+        "t": "n",
+        "v": 1000.0
+      },
+      "address": "J1",
+      "displayText": "1000"
     },
     {
       "caseId": "pv_23f3b6ce8410",
