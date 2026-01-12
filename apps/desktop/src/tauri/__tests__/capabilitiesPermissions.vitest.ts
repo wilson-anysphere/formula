@@ -13,7 +13,7 @@ describe("Tauri capabilities", () => {
     const permissions = capability.permissions as unknown[];
 
     expect(permissions).toContain("updater:allow-check");
-    expect(permissions).toContain("updater:allow-download-and-install");
+    expect(permissions).toContain("updater:allow-download");
+    expect(permissions).toContain("updater:allow-install");
   });
 });
-

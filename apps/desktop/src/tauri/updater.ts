@@ -25,60 +25,38 @@ export async function installUpdateAndRestart(): Promise<void> {
     throw new Error("Updater API not available");
   }
 
-  // Support a few likely API shapes:
-  // - direct install/downloadAndInstall functions
-  // - "check() -> update object -> downloadAndInstall()" style
-  const directInstall =
-    updater.install ??
-    updater.installUpdate ??
-    updater.downloadAndInstall ??
-    updater.downloadAndInstallUpdate ??
-    null;
-
-  if (typeof directInstall === "function") {
-    await directInstall.call(updater);
-    return;
-  }
-
+  // Tauri v2 updater plugin API shape (tauri-plugin-updater 2.x):
+  // - `updater.check()` -> `Update | null`
+  // - `Update.download()` -> downloads update package
+  // - `Update.install()` -> installs downloaded package
+  //
+  // We intentionally avoid `Update.downloadAndInstall()` so we don't need to grant the
+  // extra `updater:allow-download-and-install` capability permission.
   const check = updater.check ?? updater.checkUpdate ?? updater.checkForUpdate ?? null;
-  if (typeof check === "function") {
-    const result = await check.call(updater);
-    if (!result) {
-      throw new Error("No update available");
-    }
-
-    // Some APIs return `{ available: boolean, ... }`, others return an update object directly.
-    const update =
-      typeof result === "object" && result && "available" in result
-        ? (result as any).available
-          ? result
-          : null
-        : result;
-    if (!update) {
-      throw new Error("No update available");
-    }
-
-    const updateInstall =
-      (update as any).downloadAndInstall ??
-      (update as any).downloadAndInstallUpdate ??
-      (update as any).install ??
-      (update as any).installUpdate ??
-      null;
-    if (typeof updateInstall === "function") {
-      await updateInstall.call(update);
-      return;
-    }
-
-    const download = (update as any).download ?? null;
-    const install = (update as any).install ?? (update as any).installUpdate ?? null;
-    if (typeof download === "function" && typeof install === "function") {
-      await download.call(update);
-      await install.call(update);
-      return;
-    }
+  if (typeof check !== "function") {
+    throw new Error("Updater check API not available");
   }
 
-  throw new Error("Updater install API not available");
+  const result = await check.call(updater);
+  if (!result) {
+    throw new Error("No update available");
+  }
+
+  // Some APIs return `{ available: boolean, ... }`, others return an update object directly.
+  const update =
+    typeof result === "object" && result && "available" in result ? ((result as any).available ? result : null) : result;
+  if (!update) {
+    throw new Error("No update available");
+  }
+
+  const download = (update as any).download ?? null;
+  const install = (update as any).install ?? (update as any).installUpdate ?? null;
+  if (typeof download !== "function" || typeof install !== "function") {
+    throw new Error("Updater install API not available");
+  }
+
+  await download.call(update);
+  await install.call(update);
 }
 
 /**
