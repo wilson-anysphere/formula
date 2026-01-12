@@ -459,6 +459,19 @@ else
   done
 fi
 
+# Validate `FORMULA_LLD_THREADS` even when we won't apply it.
+#
+# The `--threads=<n>` linker flag is only injected for host builds below (since `-Wl,` isn't
+# understood by all cross-toolchains). Still, if callers explicitly configure `FORMULA_LLD_THREADS`,
+# fail fast when it's invalid rather than silently ignoring the typo.
+lld_threads_env="${FORMULA_LLD_THREADS:-}"
+if [[ -n "${lld_threads_env}" && "${lld_threads_env}" != "0" && "${lld_threads_env}" != "off" && "${lld_threads_env}" != "unlimited" ]]; then
+  if ! [[ "${lld_threads_env}" =~ ^[0-9]+$ ]]; then
+    echo "cargo_agent: invalid FORMULA_LLD_THREADS=${lld_threads_env} (expected integer, 0, off, or unlimited)" >&2
+    exit 2
+  fi
+fi
+
 if [[ -z "${cargo_target}" ]]; then
   lld_threads="${FORMULA_LLD_THREADS:-}"
   if [[ -z "${lld_threads}" ]]; then
