@@ -1427,6 +1427,13 @@ if (
     return menuItems;
   };
 
+  // While the context menu is open, keep its enabled/disabled state in sync with
+  // `ContextKeyService` so `when`-clauses can react to selection changes.
+  contextKeys.onDidChange(() => {
+    if (!contextMenu.isOpen()) return;
+    contextMenu.update(buildGridContextMenuItems());
+  });
+
   let contextMenuSession = 0;
 
   const openGridContextMenuAtPoint = (x: number, y: number) => {
