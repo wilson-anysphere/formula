@@ -184,6 +184,8 @@ export interface RewriteFormulaForCopyDeltaRequest {
  *
  * Offsets are expressed as **UTF-16 code unit** indices (the same indexing used
  * by JS `string.slice()` / `string.length`).
+ *
+ * Spans use `[start, end)` semantics (start inclusive, end exclusive).
  */
 export interface FormulaSpan {
   start: number;
