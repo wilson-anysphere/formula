@@ -267,6 +267,36 @@ def generate(
         description="COUPDAYS with maturity=2021-02-28 (month-end), basis=1",
     )
 
+    # Basis=4 (European 30E/360) day-count edge cases.
+    #
+    # For basis=4, Excel uses European DAYS360 for day counts like COUPDAYBS, but models the coupon
+    # period length `E` used by COUPDAYS as the fixed `360/frequency` value. Excel then computes
+    # COUPDAYSNC as the remaining portion of the modeled period: `DSC = E - A`.
+    #
+    # This can differ from European DAYS360 between coupon dates and/or between settlement and NCD,
+    # especially for end-of-month schedules involving February.
+    add_case(
+        cases,
+        prefix="coupdaybs_b4_eom_feb28",
+        tags=["financial", "COUPDAYBS", "coupon_schedule", "basis4"],
+        formula="=COUPDAYBS(DATE(2020,11,15),DATE(2021,2,28),2,4)",
+        description="COUPDAYBS basis=4 (European 30E/360) for an end-of-month schedule involving February",
+    )
+    add_case(
+        cases,
+        prefix="coupdays_b4_eom_feb28",
+        tags=["financial", "COUPDAYS", "coupon_schedule", "basis4"],
+        formula="=COUPDAYS(DATE(2020,11,15),DATE(2021,2,28),2,4)",
+        description="COUPDAYS basis=4 uses fixed 360/frequency even when European DAYS360 between coupon dates differs",
+    )
+    add_case(
+        cases,
+        prefix="coupdaysnc_b4_eom_feb28",
+        tags=["financial", "COUPDAYSNC", "coupon_schedule", "basis4"],
+        formula="=COUPDAYSNC(DATE(2020,11,15),DATE(2021,2,28),2,4)",
+        description="COUPDAYSNC basis=4 is computed as E - A (preserves additivity even when DAYS360 is not additive)",
+    )
+
     # Discount securities / T-bills.
     add_case(
         cases,

@@ -17,8 +17,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "a8cdd01288fb5e6ddf297379391bb9bc919f862e1e87f1481b32b76d8df3a614",
-    "count": 1826
+    "sha256": "846ce6e39710aaa1cc713b338d9ee9ce8b87a2f7fcfa3e03236cd37a1899c6c3",
+    "count": 1829
   },
   "results": [
     {
@@ -19000,6 +19000,36 @@
       },
       "address": "A1",
       "displayText": "31"
+    },
+    {
+      "caseId": "coupdaybs_b4_eom_feb28_baf6f7ea73cf",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 75.0
+      },
+      "address": "C1",
+      "displayText": "75"
+    },
+    {
+      "caseId": "coupdays_b4_eom_feb28_aa1d1a6a6133",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 178.0
+      },
+      "address": "C1",
+      "displayText": "178"
+    },
+    {
+      "caseId": "coupdaysnc_b4_eom_feb28_d49eb1080971",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 103.0
+      },
+      "address": "C1",
+      "displayText": "103"
     }
   ]
 }

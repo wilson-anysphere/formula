@@ -32634,6 +32634,45 @@
       "id": "coupdays_eom_feb28_69d7ccd41d35"
     },
     {
+      "formula": "=COUPDAYBS(DATE(2020,11,15),DATE(2021,2,28),2,4)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPDAYBS",
+        "coupon_schedule",
+        "basis4"
+      ],
+      "description": "COUPDAYBS basis=4 (European 30E/360) for an end-of-month schedule involving February",
+      "id": "coupdaybs_b4_eom_feb28_baf6f7ea73cf"
+    },
+    {
+      "formula": "=COUPDAYS(DATE(2020,11,15),DATE(2021,2,28),2,4)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPDAYS",
+        "coupon_schedule",
+        "basis4"
+      ],
+      "description": "COUPDAYS basis=4 uses fixed 360/frequency even when European DAYS360 between coupon dates differs",
+      "id": "coupdays_b4_eom_feb28_aa1d1a6a6133"
+    },
+    {
+      "formula": "=COUPDAYSNC(DATE(2020,11,15),DATE(2021,2,28),2,4)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPDAYSNC",
+        "coupon_schedule",
+        "basis4"
+      ],
+      "description": "COUPDAYSNC basis=4 is computed as E - A (preserves additivity even when DAYS360 is not additive)",
+      "id": "coupdaysnc_b4_eom_feb28_d49eb1080971"
+    },
+    {
       "formula": "=DISC(DATE(2020,1,1),DATE(2021,1,1),97,100)",
       "outputCell": "C1",
       "inputs": [],
