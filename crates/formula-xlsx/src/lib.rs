@@ -49,6 +49,7 @@ pub mod patch;
 mod path;
 pub mod pivots;
 pub mod print;
+pub mod rich_data;
 mod read;
 #[cfg(not(target_arch = "wasm32"))]
 mod reader;
