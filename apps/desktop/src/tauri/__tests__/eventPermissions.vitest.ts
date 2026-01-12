@@ -265,6 +265,36 @@ describe("tauri capability event permissions", () => {
 
     const runtimeText = runtimeFiles.map((p) => readFileSync(p, "utf8")).join("\n");
 
+    // Ensure the frontend's *direct* `listen("...")` / `emit("...")` calls are all allowlisted.
+    // (Some subsystems use indirection, e.g. iterating over an array of updater event names; those
+    // are covered by the explicit allowlist checks above.)
+    const listenedByFrontend = new Set<string>();
+    const emittedByFrontend = new Set<string>();
+
+    const listenCall = /(^|[^.#A-Za-z0-9_])listen\s*\(\s*(["'])([^"']+)\2/gm;
+    for (const match of runtimeText.matchAll(listenCall)) {
+      listenedByFrontend.add(match[3]);
+    }
+
+    const emitCall = /(^|[^.#A-Za-z0-9_])emit\s*\(\s*(["'])([^"']+)\2/gm;
+    for (const match of runtimeText.matchAll(emitCall)) {
+      emittedByFrontend.add(match[3]);
+    }
+
+    const allowListenEvents = new Set(
+      Array.isArray(allowListen?.allow) ? allowListen.allow.map((entry: any) => entry?.event).filter(Boolean) : [],
+    );
+    const allowEmitEvents = new Set(
+      Array.isArray(allowEmit?.allow) ? allowEmit.allow.map((entry: any) => entry?.event).filter(Boolean) : [],
+    );
+
+    for (const event of listenedByFrontend) {
+      expect(allowListenEvents.has(event)).toBe(true);
+    }
+    for (const event of emittedByFrontend) {
+      expect(allowEmitEvents.has(event)).toBe(true);
+    }
+
     for (const event of allowlistedEvents) {
       // Only treat an allowlisted event as "used" if it appears as a string literal in runtime
       // source. This intentionally avoids counting documentation comments as usage (see the
