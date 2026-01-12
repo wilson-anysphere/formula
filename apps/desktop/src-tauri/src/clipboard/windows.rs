@@ -199,20 +199,27 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
 
     let _guard = open_clipboard_with_retry()?;
 
-    let text = try_get_unicode_text()?;
+    // Best-effort reads: don't fail the entire operation if a single format can't be decoded.
+    let text = try_get_unicode_text().ok().flatten();
 
-    let mut html = try_get_clipboard_bytes(format_html, MAX_RICH_TEXT_BYTES)?
+    let mut html = try_get_clipboard_bytes(format_html, MAX_RICH_TEXT_BYTES)
+        .ok()
+        .flatten()
         .map(|bytes| extract_cf_html_fragment_best_effort(&bytes))
         .filter(|s| !s.is_empty());
     if html.is_none() {
         if let Some(format) = format_text_html {
-            html = try_get_clipboard_bytes(format, MAX_RICH_TEXT_BYTES)?
+            html = try_get_clipboard_bytes(format, MAX_RICH_TEXT_BYTES)
+                .ok()
+                .flatten()
                 .map(|bytes| extract_cf_html_fragment_best_effort(&bytes))
                 .filter(|s| !s.is_empty());
         }
     }
 
-    let mut rtf = try_get_clipboard_bytes(format_rtf, MAX_RICH_TEXT_BYTES)?
+    let mut rtf = try_get_clipboard_bytes(format_rtf, MAX_RICH_TEXT_BYTES)
+        .ok()
+        .flatten()
         .map(|bytes| {
             String::from_utf8_lossy(&bytes)
                 .trim_end_matches('\0')
@@ -221,7 +228,9 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
         .filter(|s| !s.is_empty());
     if rtf.is_none() {
         if let Some(format) = format_text_rtf {
-            rtf = try_get_clipboard_bytes(format, MAX_RICH_TEXT_BYTES)?
+            rtf = try_get_clipboard_bytes(format, MAX_RICH_TEXT_BYTES)
+                .ok()
+                .flatten()
                 .map(|bytes| {
                     String::from_utf8_lossy(&bytes)
                         .trim_end_matches('\0')
@@ -233,11 +242,16 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
 
     const MAX_DIB_BYTES: usize = 4 * MAX_IMAGE_BYTES; // allow larger uncompressed DIBs before converting to PNG
 
-    let mut png_base64 = if let Some(png_bytes) = try_get_clipboard_bytes(format_png, MAX_IMAGE_BYTES)? {
+    let mut png_base64 = if let Some(png_bytes) =
+        try_get_clipboard_bytes(format_png, MAX_IMAGE_BYTES).ok().flatten()
+    {
         Some(STANDARD.encode(png_bytes))
     } else if let Some(format) = format_image_png {
-        try_get_clipboard_bytes(format, MAX_IMAGE_BYTES)?.map(|bytes| STANDARD.encode(bytes))
-    } else if let Some(dib_bytes) = try_get_clipboard_bytes(CF_DIBV5, MAX_DIB_BYTES)? {
+        try_get_clipboard_bytes(format, MAX_IMAGE_BYTES)
+            .ok()
+            .flatten()
+            .map(|bytes| STANDARD.encode(bytes))
+    } else if let Some(dib_bytes) = try_get_clipboard_bytes(CF_DIBV5, MAX_DIB_BYTES).ok().flatten() {
         dibv5_to_png(&dib_bytes)
             .ok()
             .filter(|png| png.len() <= MAX_IMAGE_BYTES)
@@ -247,7 +261,7 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
     };
 
     if png_base64.is_none() {
-        if let Some(dib_bytes) = try_get_clipboard_bytes(CF_DIB, MAX_DIB_BYTES)? {
+        if let Some(dib_bytes) = try_get_clipboard_bytes(CF_DIB, MAX_DIB_BYTES).ok().flatten() {
             png_base64 = dibv5_to_png(&dib_bytes)
                 .ok()
                 .filter(|png| png.len() <= MAX_IMAGE_BYTES)

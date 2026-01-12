@@ -216,17 +216,12 @@ pub(crate) fn decode_cf_html_bytes(payload: &[u8]) -> Option<String> {
 
 /// Best-effort extraction of the HTML fragment from a CF_HTML payload.
 ///
-/// If parsing fails, returns the entire decoded payload (lossy UTF-8).
+/// If parsing fails, returns an empty string (to avoid surfacing the CF_HTML header blob as HTML).
 pub(crate) fn extract_cf_html_fragment_best_effort(payload: &[u8]) -> String {
     if let Some(decoded) = decode_cf_html_bytes(payload) {
         return decoded;
     }
-
-    let mut end = payload.len();
-    while end > 0 && payload[end - 1] == 0 {
-        end -= 1;
-    }
-    String::from_utf8_lossy(&payload[..end]).into_owned()
+    String::new()
 }
 
 #[cfg(test)]
@@ -356,6 +351,14 @@ mod tests {
         let payload = build_cf_html_payload(fragment).expect("payload");
         let extracted = extract_cf_html_fragment_best_effort(&payload);
         assert_eq!(extracted, fragment);
+    }
+
+    #[test]
+    fn extract_cf_html_fragment_best_effort_does_not_return_header_blob() {
+        // Malformed CF_HTML payload: contains only header fields and no HTML content.
+        let payload = b"Version:0.9\r\nStartHTML:0000000000\r\nEndHTML:0000000000\r\n";
+        let extracted = extract_cf_html_fragment_best_effort(payload);
+        assert!(extracted.is_empty());
     }
 
     #[test]
