@@ -837,11 +837,10 @@ Source of truth in this repo:
 
 Capabilities are scoped per window in **two** places (explicit scoping / defense-in-depth):
 
-- `apps/desktop/src-tauri/tauri.conf.json` opts windows into capability identifiers via `app.windows[].capabilities`.
-  - The main window includes `"capabilities": ["main"]`.
-- Each capability file under `apps/desktop/src-tauri/capabilities/` further scopes itself to window labels via
-  `"windows": [...]`.
+- Each capability file under `apps/desktop/src-tauri/capabilities/` scopes itself to window labels via `"windows": [...]`.
   - The `main` capability includes `"windows": ["main"]`.
+- Some toolchains also support window-level opt-in via `app.windows[].capabilities` in `apps/desktop/src-tauri/tauri.conf.json`.
+  - When present, the `main` window includes `"capabilities": ["main"]`.
 
 Keep these two layers in sync so adding a new window never implicitly grants it the main capability. This keeps new windows
 unprivileged by default, and makes granting a capability to additional windows an intentional two-file change (guardrailed by
@@ -854,12 +853,13 @@ It gates:
 - **`allow-invoke`** (application permission): allows the frontend to invoke Formula's app-defined Rust `#[tauri::command]` functions via
   `__TAURI__.core.invoke(...)`.
   - The command allowlist lives in `apps/desktop/src-tauri/permissions/allow-invoke.json`.
+  - This allowlist should match the backend’s exposed command surface (`generate_handler![...]`), guardrailed by
+    `apps/desktop/src-tauri/tests/tauri_ipc_allowlist.rs`.
+- **`core:allow-invoke`** (core permission): per-command allowlist for what the webview is allowed to invoke.
+  - We use the object form (`{ "identifier": "core:allow-invoke", "allow": [...] }`) to keep this list explicit (no allow-all)
+    and keep it in sync with actual frontend `invoke("...")` usage (guardrailed by `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts`).
   - Even with allowlisting, commands must validate scope/authorization in Rust (trusted-origin + window-label checks,
     argument validation, filesystem/network scope checks, etc).
-- **`core:allow-invoke`** (scoped core permission): an explicit allowlist of **which command names** the frontend can invoke.
-  - In this repo we use the object form with `allow: [{ "command": "..." }]` in `capabilities/main.json` (no allow-all).
-  - Keep this list in sync with the frontend’s `invoke("...")` usage (guardrailed by
-    `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts`).
 - **`core:event:allow-listen` / `core:event:allow-emit`**: which event names the frontend can `listen(...)` for or `emit(...)`.
 - **`core:event:allow-unlisten`**: allows the frontend to unregister event listeners it previously installed (so we don’t leak
   listeners for one-shot flows like close/open/OAuth readiness signals).
@@ -893,7 +893,7 @@ High-level contents (see the file for the exhaustive list):
 - We avoid `core:default` (broad, unscoped access to core plugins like event/window) to keep the permission surface minimal/explicit.
 - We keep custom Rust IPC calls explicit via:
   - `allow-invoke` (application permission defined in `apps/desktop/src-tauri/permissions/allow-invoke.json`, kept in sync with `generate_handler![...]`)
-  - `core:allow-invoke` (scoped allowlist in `apps/desktop/src-tauri/capabilities/main.json`, kept in sync with frontend invoke usage)
+  - `core:allow-invoke` (per-command allowlist in `apps/desktop/src-tauri/capabilities/main.json`, kept in sync with frontend invoke usage)
 - We scope `core:event:allow-listen` / `core:event:allow-emit` to explicit event-name allowlists (no wildcards).
 - `core:event:allow-listen` includes:
   - close flow: `close-prep`, `close-requested`
@@ -912,7 +912,7 @@ High-level contents (see the file for the exhaustive list):
 - Plugin permissions include dialog/window/clipboard APIs plus updater permissions (`updater:allow-check`, `updater:allow-download`, `updater:allow-install`, required for the updater UI).
   - Window API permissions are `core:window:allow-*`.
   - Plain-text clipboard permissions are `clipboard-manager:allow-*`.
-- Custom Rust commands are allowlisted by `allow-invoke` and `core:allow-invoke`, but must still keep input validation and scope checks in Rust.
+- Custom Rust commands are allowlisted by `allow-invoke` + `core:allow-invoke`, but must still keep input validation and scope checks in Rust.
 
 We intentionally keep capabilities narrow and rely on explicit Rust commands + higher-level app permission gates (macro
 trust, DLP, extension permissions) for privileged operations.
@@ -920,11 +920,14 @@ trust, DLP, extension permissions) for privileged operations.
 Guardrail tests (to prevent accidental “allow everything” capability drift):
 
 - `apps/desktop/src/tauri/__tests__/tauriSecurityConfig.vitest.ts` — asserts the hardened CSP/headers (COOP/COEP, no framing, restricted network) and capability scoping:
-  - `tauri.conf.json` main window includes `"capabilities": ["main"]` (and no other window has `main`)
   - `capabilities/main.json` includes `"windows": ["main"]`
+  - if `app.windows[].capabilities` is present, the `main` window includes `"capabilities": ["main"]` (and no other window has `main`)
+  - otherwise, no window should specify `capabilities` (toolchain compatibility)
 - `apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts` — asserts the `core:event:allow-listen` / `core:event:allow-emit`
   allowlists match the desktop shell’s real event usage (and contain no wildcards).
-- `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts` — asserts required plugin permissions stay explicit/minimal (dialogs, window ops, clipboard plain text, updater, etc), we don’t grant dangerous extras (e.g. `shell:allow-open`, notification permissions), and that both `allow-invoke.json` and `core:allow-invoke` stay scoped and in sync with frontend invoke usage (no allow-all / no unused commands).
+- `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts` — asserts required plugin permissions stay explicit/minimal (dialogs, window ops, clipboard plain text, updater, etc), we don’t grant dangerous extras (e.g. `shell:allow-open`, notification permissions), and that the invoke allowlists stay scoped and in sync with real usage (no wildcards / allow-all, no unused commands):
+  - `permissions/allow-invoke.json` (`allow-invoke` application permission; no wildcards, matches backend command surface)
+  - `capabilities/main.json` (`core:allow-invoke`; no wildcards, matches actual frontend `invoke("...")` usage)
 - `apps/desktop/src-tauri/tests/tauri_ipc_allowlist.rs` — asserts the `allow-invoke` permission allowlist stays in sync with the `generate_handler![...]` list in `apps/desktop/src-tauri/src/main.rs`.
 - `apps/desktop/src/tauri/__tests__/openFileIpcWiring.vitest.ts` — asserts the open-file IPC handshake (`open-file-ready`) is still wired in `main.ts` (prevents cold-start open drops).
 - `apps/desktop/src/tauri/__tests__/updaterMainListeners.vitest.ts` — asserts updater UX listeners remain consolidated in `tauri/updaterUi.ts` and the `updater-ui-ready` handshake stays intact.
@@ -956,13 +959,16 @@ Note: on Tauri v2.9, core permissions use the `core:` prefix (e.g. `core:event:a
 - For custom Rust `#[tauri::command]` functions invoked via `__TAURI__.core.invoke(...)`:
   - register them in `apps/desktop/src-tauri/src/main.rs` (`generate_handler![...]`)
   - add them to `apps/desktop/src-tauri/permissions/allow-invoke.json` (`allow-invoke` permission `commands.allow`)
-  - add them to `apps/desktop/src-tauri/capabilities/main.json` (`core:allow-invoke` allowlist) when the frontend starts invoking them
+  - add them to `apps/desktop/src-tauri/capabilities/main.json` (`core:allow-invoke` allowlist; no wildcards, keep minimal, matches actual frontend invoke usage)
   - keep input validation and scope checks in Rust (trusted-origin + window-label checks, etc)
 
 Guardrails (CI/tests):
 
 - `apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts` enforces that the event allowlists are explicit (no allow-all) and match the events used by the desktop code.
-- `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts` asserts the `allow-invoke.json` command allowlist stays explicit and in sync with frontend invoke usage, and that `core:allow-invoke` stays scoped (no allow-all) and in sync with frontend invoke usage. It also keeps the plugin permission surface minimal/explicit (including split updater `allow-check` / `allow-download` / `allow-install`).
+- `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts` asserts the invoke allowlists stay explicit and in sync (no wildcards / allow-all, no unused commands):
+  - `permissions/allow-invoke.json` (`allow-invoke` application permission; no wildcards, matches backend command surface)
+  - `capabilities/main.json` (`core:allow-invoke`; no wildcards, matches actual frontend `invoke("...")` usage)
+  and keeps the plugin permission surface minimal/explicit (including split updater `allow-check` / `allow-download` / `allow-install`).
 
 For background on capability syntax/semantics, see the upstream Tauri v2 docs:
 

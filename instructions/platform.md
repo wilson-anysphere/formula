@@ -102,14 +102,15 @@ See `docs/11-desktop-shell.md` for details.
 
 Tauri v2 permissions are granted via **capabilities**:
 
-- `apps/desktop/src-tauri/tauri.conf.json` opts each window into one or more capability identifiers via `app.windows[].capabilities`.
-  - The main window label is `main` and opts into the `main` capability via `"capabilities": ["main"]`.
-- `apps/desktop/src-tauri/capabilities/*.json` define explicit permission allowlists and further scope them to window labels via
+- `apps/desktop/src-tauri/capabilities/*.json` define explicit permission allowlists and scope them to window labels via
   the capability file’s `"windows": [...]` list (matches `app.windows[].label` in `tauri.conf.json`).
   - `apps/desktop/src-tauri/capabilities/main.json` scopes itself to `"windows": ["main"]`.
+- Some toolchains also support window-level opt-in via `app.windows[].capabilities` in `apps/desktop/src-tauri/tauri.conf.json`.
+  - When present, the main window label is `main` and opts into the `main` capability via `"capabilities": ["main"]`.
 
-Keep `app.windows[].capabilities` and the capability file’s `"windows": [...]` scoping in sync so adding a new window never
-implicitly grants it the main capability (guardrailed by `apps/desktop/src/tauri/__tests__/tauriSecurityConfig.vitest.ts`).
+Keep `app.windows[].capabilities` (when present) and the capability file’s `"windows": [...]` scoping in sync so adding a
+new window never implicitly grants it the main capability (guardrailed by
+`apps/desktop/src/tauri/__tests__/tauriSecurityConfig.vitest.ts`).
 
 Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the full allowlists):
 
@@ -146,13 +147,14 @@ Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the ful
 Note: `core:event:allow-unlisten` is granted so the frontend can unregister event listeners it previously installed (to avoid
 leaking listeners for one-shot flows).
 
-Note: custom Rust `#[tauri::command]` IPC calls are allowlisted in two places (defense-in-depth):
+Note: custom Rust `#[tauri::command]` IPC calls are allowlisted in two layers (defense-in-depth):
 
-- `apps/desktop/src-tauri/permissions/allow-invoke.json` (`allow-invoke` application permission; should match the backend
-  `generate_handler![...]` list)
-- `apps/desktop/src-tauri/capabilities/main.json` (`core:allow-invoke` scoped allowlist; should match frontend `invoke("...")` usage)
-
-`apps/desktop/src-tauri/capabilities/main.json` grants the application permission to the `main` window via `"allow-invoke"`.
+- `apps/desktop/src-tauri/permissions/allow-invoke.json` defines the `allow-invoke` application permission (global command
+  list; should match the backend `generate_handler![...]` list).
+- `apps/desktop/src-tauri/capabilities/main.json`:
+  - grants `"allow-invoke"` to the `main` window, and
+  - scopes what the webview can call via `core:allow-invoke` (per-command allowlist; should match frontend
+    `invoke("...")` usage).
 
 Note: external URL opening should go through the `open_external_url` Rust command (scheme allowlist enforced in Rust,
 and restricted to the main window + trusted app-local origins) rather than granting the webview direct access to the
@@ -194,8 +196,8 @@ We keep guardrail tests to ensure we don't accidentally broaden the desktop IPC 
 - **Event allowlists**: enforce the **exact** `core:event:allow-listen` / `core:event:allow-emit` sets (no wildcard / allow-all):
   - `apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts`
 - **Core/plugin + invoke permissions**: ensure required plugin permissions are explicitly granted (dialogs, window ops,
-  clipboard plain text, updater, etc), we don't accidentally grant dangerous extras, and `allow-invoke.json` / `core:allow-invoke`
-  stay scoped and in sync with frontend invoke usage:
+  clipboard plain text, updater, etc), we don't accidentally grant dangerous extras, and the invoke allowlists
+  (`allow-invoke.json` + `capabilities/main.json` `core:allow-invoke`) stay scoped and in sync with frontend invoke usage:
   - `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts`
 - **App command allowlist**: ensure invokable `#[tauri::command]` surface stays explicit + in sync:
   - `apps/desktop/src-tauri/tests/tauri_ipc_allowlist.rs`
