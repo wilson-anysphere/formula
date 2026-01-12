@@ -13,7 +13,9 @@ fn add_sheet_creates_persistence_mapping_for_cell_edits() {
         .load_workbook_persistent(workbook, WorkbookPersistenceLocation::InMemory)
         .expect("load workbook");
 
-    let sheet = state.add_sheet("Sheet".to_string()).expect("add sheet");
+    let sheet = state
+        .add_sheet("Sheet".to_string(), None)
+        .expect("add sheet");
 
     let updates = state
         .set_cell(&sheet.id, 0, 0, Some(json!(123)), None)
