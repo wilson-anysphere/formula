@@ -653,6 +653,15 @@ export class SpreadsheetApp {
   private vScrollbarThumb: HTMLDivElement;
   private hScrollbarTrack: HTMLDivElement;
   private hScrollbarThumb: HTMLDivElement;
+  private lastScrollbarLayout:
+    | { showV: boolean; showH: boolean; rowHeaderWidth: number; colHeaderHeight: number; thickness: number }
+    | null = null;
+  private lastScrollbarThumb: {
+    vSize: number | null;
+    vOffset: number | null;
+    hSize: number | null;
+    hOffset: number | null;
+  } = { vSize: null, vOffset: null, hSize: null, hOffset: null };
   private scrollbarDrag:
     | { axis: "x" | "y"; pointerId: number; grabOffset: number; thumbTravel: number; trackStart: number; maxScroll: number }
     | null = null;
@@ -5887,15 +5896,52 @@ export class SpreadsheetApp {
     const padding = 2;
     const thickness = this.scrollbarThickness;
 
-    this.vScrollbarTrack.style.display = showV ? "block" : "none";
-    this.hScrollbarTrack.style.display = showH ? "block" : "none";
+    const layout = {
+      showV,
+      showH,
+      rowHeaderWidth: this.rowHeaderWidth,
+      colHeaderHeight: this.colHeaderHeight,
+      thickness
+    };
+    const prevLayout = this.lastScrollbarLayout;
+    const layoutChanged =
+      prevLayout === null ||
+      prevLayout.showV !== layout.showV ||
+      prevLayout.showH !== layout.showH ||
+      prevLayout.rowHeaderWidth !== layout.rowHeaderWidth ||
+      prevLayout.colHeaderHeight !== layout.colHeaderHeight ||
+      prevLayout.thickness !== layout.thickness;
+
+    if (layoutChanged) {
+      // Track layout is a function of scrollbar visibility + header sizes; avoid rewriting these
+      // styles on every scroll event.
+      this.vScrollbarTrack.style.display = showV ? "block" : "none";
+      this.hScrollbarTrack.style.display = showH ? "block" : "none";
+
+      if (showV) {
+        this.vScrollbarTrack.style.right = `${padding}px`;
+        this.vScrollbarTrack.style.top = `${this.colHeaderHeight + padding}px`;
+        this.vScrollbarTrack.style.bottom = `${(showH ? thickness : 0) + padding}px`;
+        this.vScrollbarTrack.style.width = `${thickness}px`;
+      } else {
+        this.lastScrollbarThumb.vSize = null;
+        this.lastScrollbarThumb.vOffset = null;
+      }
+
+      if (showH) {
+        this.hScrollbarTrack.style.left = `${this.rowHeaderWidth + padding}px`;
+        this.hScrollbarTrack.style.right = `${(showV ? thickness : 0) + padding}px`;
+        this.hScrollbarTrack.style.bottom = `${padding}px`;
+        this.hScrollbarTrack.style.height = `${thickness}px`;
+      } else {
+        this.lastScrollbarThumb.hSize = null;
+        this.lastScrollbarThumb.hOffset = null;
+      }
+
+      this.lastScrollbarLayout = layout;
+    }
 
     if (showV) {
-      this.vScrollbarTrack.style.right = `${padding}px`;
-      this.vScrollbarTrack.style.top = `${this.colHeaderHeight + padding}px`;
-      this.vScrollbarTrack.style.bottom = `${(showH ? thickness : 0) + padding}px`;
-      this.vScrollbarTrack.style.width = `${thickness}px`;
-
       const trackSize = Math.max(0, this.height - (this.colHeaderHeight + padding) - ((showH ? thickness : 0) + padding));
       const { size, offset } = this.computeScrollbarThumb({
         scrollPos: this.scrollY,
@@ -5904,16 +5950,20 @@ export class SpreadsheetApp {
         trackSize
       });
 
-      this.vScrollbarThumb.style.height = `${size}px`;
-      this.vScrollbarThumb.style.transform = `translateY(${offset}px)`;
+      if (this.lastScrollbarThumb.vSize !== size) {
+        this.vScrollbarThumb.style.height = `${size}px`;
+        this.lastScrollbarThumb.vSize = size;
+      }
+      if (this.lastScrollbarThumb.vOffset !== offset) {
+        this.vScrollbarThumb.style.transform = `translateY(${offset}px)`;
+        this.lastScrollbarThumb.vOffset = offset;
+      }
+    } else {
+      this.lastScrollbarThumb.vSize = null;
+      this.lastScrollbarThumb.vOffset = null;
     }
 
     if (showH) {
-      this.hScrollbarTrack.style.left = `${this.rowHeaderWidth + padding}px`;
-      this.hScrollbarTrack.style.right = `${(showV ? thickness : 0) + padding}px`;
-      this.hScrollbarTrack.style.bottom = `${padding}px`;
-      this.hScrollbarTrack.style.height = `${thickness}px`;
-
       const trackSize = Math.max(0, this.width - (this.rowHeaderWidth + padding) - ((showV ? thickness : 0) + padding));
       const { size, offset } = this.computeScrollbarThumb({
         scrollPos: this.scrollX,
@@ -5922,8 +5972,17 @@ export class SpreadsheetApp {
         trackSize
       });
 
-      this.hScrollbarThumb.style.width = `${size}px`;
-      this.hScrollbarThumb.style.transform = `translateX(${offset}px)`;
+      if (this.lastScrollbarThumb.hSize !== size) {
+        this.hScrollbarThumb.style.width = `${size}px`;
+        this.lastScrollbarThumb.hSize = size;
+      }
+      if (this.lastScrollbarThumb.hOffset !== offset) {
+        this.hScrollbarThumb.style.transform = `translateX(${offset}px)`;
+        this.lastScrollbarThumb.hOffset = offset;
+      }
+    } else {
+      this.lastScrollbarThumb.hSize = null;
+      this.lastScrollbarThumb.hOffset = null;
     }
   }
 
