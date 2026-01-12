@@ -544,7 +544,7 @@ impl<'a> CompileCtx<'a> {
             // Match branch: evaluate the selected choice expression and jump to end.
             //
             // CHOOSE's value arguments may need to preserve references depending on surrounding
-            // context (e.g. `SUM(CHOOSE(1, A1, B1))`).
+            // context (e.g. `SUM(CHOOSE(1, A1, B1))`), so propagate `allow_range`.
             self.compile_expr_inner(choice_expr, allow_range);
 
             let jump_end_idx = self.program.instrs.len();
