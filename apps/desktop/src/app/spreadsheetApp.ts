@@ -4091,8 +4091,8 @@ export class SpreadsheetApp {
     // We cannot infer the original sheet for legacy comments once multiple sheets exist, so
     // we conservatively attach them to the default sheet id to keep them visible without
     // reintroducing cross-sheet collisions.
-      const legacyUnqualifiedSheetId = (() => {
-        if (!this.collabMode) return null;
+    const legacyUnqualifiedSheetId = (() => {
+      if (!this.collabMode) return null;
       // Some unit tests call `reindexCommentCells` on `Object.create(SpreadsheetApp.prototype)`
       // without running the constructor/field initializers, so `this.document` may be undefined.
       const ids = this.document?.getSheetIds?.() ?? [];
