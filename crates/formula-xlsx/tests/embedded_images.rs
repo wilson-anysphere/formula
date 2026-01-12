@@ -30,6 +30,29 @@ const METADATA_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="y
 </metadata>
 "#;
 
+const METADATA_XML_T_ZERO_BASED: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <metadataTypes count="1">
+    <metadataType name="XLRICHVALUE"/>
+  </metadataTypes>
+  <futureMetadata name="XLRICHVALUE" count="1">
+    <bk>
+      <extLst>
+        <ext uri="{00000000-0000-0000-0000-000000000000}">
+          <xlrd:rvb i="0"/>
+        </ext>
+      </extLst>
+    </bk>
+  </futureMetadata>
+  <valueMetadata count="1">
+    <bk>
+      <rc t="0" v="0"/>
+    </bk>
+  </valueMetadata>
+</metadata>
+"#;
+
 const RDRICHVALUE_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
   <rv s="0">
@@ -160,8 +183,7 @@ fn extracts_embedded_image_from_cell_vm_metadata_richdata_schema() {
 fn extracts_embedded_image_with_0_based_metadata_type_index() {
     // Some non-Excel producers have been observed to encode the `metadataTypes` index as 0-based
     // (`t="0"`) rather than Excel's typical 1-based (`t="1"`).
-    let metadata_xml = METADATA_XML.replace(r#"t="1""#, r#"t="0""#);
-    assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema(&metadata_xml);
+    assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema(METADATA_XML_T_ZERO_BASED);
 }
 
 #[test]

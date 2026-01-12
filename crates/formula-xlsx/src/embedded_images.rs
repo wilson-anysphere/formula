@@ -324,9 +324,8 @@ fn parse_vm_to_rich_value_index(xml: &[u8]) -> Result<HashMap<u32, u32>, XlsxErr
 
     let mut buf = Vec::new();
     let mut xlr_type_index: Option<u32> = None;
-    // Excel appears to emit `<rc t="...">` as a 1-based index into the `<metadataTypes>` list, but
-    // some producers use 0-based indices. Track metadataTypes with a 0-based counter and accept
-    // both forms when matching `rc/@t`.
+    // Excel has been observed to emit `<rc t="...">` as either 0-based or 1-based indices into
+    // the `<metadataTypes>` list. Track the 0-based index while parsing and accept both later.
     let mut next_metadata_type_index = 0u32;
 
     // `futureMetadata` bk entries in order: each entry contains `xlrd:rvb i="..."`
