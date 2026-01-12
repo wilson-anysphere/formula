@@ -1147,18 +1147,37 @@ window.addEventListener("keydown", (e) => {
   }
 });
 
-function ensureZoomOption(percent: number): void {
-  const existing = zoomControlEl.querySelector(`option[value="${percent}"]`);
-  if (existing) return;
-  const option = document.createElement("option");
+const ZOOM_PRESET_VALUES = new Set<number>(
+  Array.from(zoomControlEl.querySelectorAll("option"))
+    .map((opt) => Number(opt.value))
+    .filter((value) => Number.isFinite(value) && value > 0),
+);
+
+function getCustomZoomOption(): HTMLOptionElement | null {
+  return zoomControlEl.querySelector('option[data-zoom-custom="true"]');
+}
+
+function upsertCustomZoomOption(percent: number): void {
+  let option = getCustomZoomOption();
+  if (!option) {
+    option = document.createElement("option");
+    option.dataset.zoomCustom = "true";
+    zoomControlEl.appendChild(option);
+  }
   option.value = String(percent);
   option.textContent = `${percent}%`;
-  zoomControlEl.appendChild(option);
 }
 
 function syncZoomControl(): void {
   const percent = Math.round(app.getZoom() * 100);
-  ensureZoomOption(percent);
+  if (ZOOM_PRESET_VALUES.has(percent)) {
+    getCustomZoomOption()?.remove();
+  } else {
+    // Ctrl/Cmd+wheel zoom and "zoom to selection" can produce arbitrary percent values.
+    // Keep the dropdown stable by updating a single "custom" option instead of
+    // appending a new option for every zoom tick.
+    upsertCustomZoomOption(percent);
+  }
   zoomControlEl.value = String(percent);
   statusZoomEl.textContent = `${percent}%`;
   zoomControlEl.disabled = !app.supportsZoom();
@@ -5022,7 +5041,7 @@ mountRibbon(ribbonRoot, {
 
     const openCustomZoomQuickPick = async (): Promise<void> => {
       if (!app.supportsZoom()) return;
-      const baseOptions = [50, 75, 100, 125, 150, 200];
+      const baseOptions = [25, 50, 75, 100, 125, 150, 200];
       const current = Math.round(app.getZoom() * 100);
       const options = baseOptions.includes(current) ? baseOptions : [current, ...baseOptions];
       const picked = await showQuickPick(
