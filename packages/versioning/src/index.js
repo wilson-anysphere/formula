@@ -1,5 +1,6 @@
 export { normalizeFormula } from "./formula/normalize.js";
 export { parseFormula } from "./formula/parse.js";
+export { diffFormula } from "./formula/diff.js";
 export { semanticDiff, cellKey, parseCellKey } from "./diff/semanticDiff.js";
 export { FileVersionStore } from "./store/fileVersionStore.js";
 export { ApiVersionStore } from "./store/apiVersionStore.js";

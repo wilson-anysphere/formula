@@ -110,6 +110,25 @@ export function normalizeFormula(formula) {
 }
 
 /**
+ * Light formula normalization intended for diff/rendering purposes:
+ * - trim leading/trailing whitespace
+ * - treat empty/whitespace-only as `null`
+ * - ensure a leading `=` so callers can consistently tokenize/render formulas
+ *
+ * This is intentionally *not* semantic normalization; use {@link normalizeFormula}
+ * when you need to compare formulas for semantic equivalence.
+ *
+ * @param {string | null | undefined} formula
+ * @returns {string | null}
+ */
+export function normalizeFormulaText(formula) {
+  if (formula == null) return null;
+  const trimmed = String(formula).trim();
+  if (!trimmed) return null;
+  return trimmed.startsWith("=") ? trimmed : `=${trimmed}`;
+}
+
+/**
  * Best-effort textual normalization when the minimal AST parser can't handle a
  * formula (e.g. comparisons, structured references, etc).
  *
