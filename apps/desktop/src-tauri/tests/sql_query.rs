@@ -279,3 +279,92 @@ async fn odbc_sqlite_file_path_outside_scope_is_denied() {
         "unexpected error: {err}"
     );
 }
+
+#[tokio::test]
+async fn sqlite_get_schema_file_path_within_scope_is_allowed() {
+    let roots = desktop_allowed_roots();
+    assert!(!roots.is_empty(), "expected at least one allowed root");
+
+    let allowed_dir = tempfile::tempdir_in(&roots[0]).expect("tempdir in allowed root");
+    let db_path = allowed_dir.path().join("allowed.sqlite");
+    create_sqlite_db(&db_path).await;
+
+    let result = sql::sql_get_schema(
+        json!({ "kind": "sqlite", "path": db_path }),
+        "SELECT CAST(1 AS INTEGER) AS one".to_string(),
+        None,
+    )
+    .await
+    .expect("sql_get_schema should succeed for scoped db path");
+
+    assert_eq!(result.columns, vec!["one".to_string()]);
+    let types = result.types.expect("expected type map");
+    assert_eq!(types.get("one"), Some(&SqlDataType::Number));
+}
+
+#[tokio::test]
+async fn sqlite_get_schema_file_path_outside_scope_is_denied() {
+    let roots = desktop_allowed_roots();
+    assert!(!roots.is_empty(), "expected at least one allowed root");
+
+    let outside_dir = tempfile::tempdir().expect("tempdir");
+    let outside_dir_canon = std::fs::canonicalize(outside_dir.path()).expect("canonicalize");
+
+    if is_in_roots(&outside_dir_canon, &roots) {
+        eprintln!(
+            "skipping out-of-scope sqlite get_schema test: tempdir {} is within allowed roots {roots:?}",
+            outside_dir_canon.display()
+        );
+        return;
+    }
+
+    let db_path = outside_dir.path().join("outside.sqlite");
+    create_sqlite_db(&db_path).await;
+
+    let err = sql::sql_get_schema(
+        json!({ "kind": "sqlite", "path": db_path }),
+        "SELECT 1".to_string(),
+        None,
+    )
+    .await
+    .expect_err("expected sql_get_schema to deny out-of-scope sqlite path");
+
+    assert!(
+        err.to_string().contains("Access denied: SQLite database path is outside the allowed filesystem scope"),
+        "unexpected error: {err}"
+    );
+}
+
+#[tokio::test]
+async fn odbc_sqlite_get_schema_file_path_outside_scope_is_denied() {
+    let roots = desktop_allowed_roots();
+    assert!(!roots.is_empty(), "expected at least one allowed root");
+
+    let outside_dir = tempfile::tempdir().expect("tempdir");
+    let outside_dir_canon = std::fs::canonicalize(outside_dir.path()).expect("canonicalize");
+
+    if is_in_roots(&outside_dir_canon, &roots) {
+        eprintln!(
+            "skipping out-of-scope ODBC sqlite get_schema test: tempdir {} is within allowed roots {roots:?}",
+            outside_dir_canon.display()
+        );
+        return;
+    }
+
+    let db_path = outside_dir.path().join("outside.sqlite");
+    create_sqlite_db(&db_path).await;
+
+    let conn_str = format!("Driver=SQLite3;Database={};", db_path.display());
+    let err = sql::sql_get_schema(
+        json!({ "kind": "odbc", "connectionString": conn_str }),
+        "SELECT 1".to_string(),
+        None,
+    )
+    .await
+    .expect_err("expected sql_get_schema to deny out-of-scope odbc sqlite path");
+
+    assert!(
+        err.to_string().contains("Access denied: SQLite database path is outside the allowed filesystem scope"),
+        "unexpected error: {err}"
+    );
+}
