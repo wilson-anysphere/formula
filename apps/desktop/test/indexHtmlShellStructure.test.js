@@ -84,6 +84,11 @@ test("desktop index.html exposes required shell containers and testids", () => {
     /data-testid="collab-status"[^>]*\brole="status"/,
     'Expected collab-status element to include role="status" for accessibility',
   );
+  assert.match(
+    html,
+    /data-testid="collab-status"[^>]*\baria-label="Collaboration status"/,
+    'Expected collab-status element to include aria-label="Collaboration status" for accessibility',
+  );
 
   // Debug controls should live in the ribbon (React) rather than being duplicated in the
   // static `index.html` status bar. Duplicating them here causes Playwright strict-mode
