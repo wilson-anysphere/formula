@@ -79,7 +79,7 @@
       ]
     },
     {
-      "identifier": "core:event:allow-listen",
+      "identifier": "event:allow-listen",
       "allow": [
         { "event": "close-prep" },
         { "event": "close-requested" },
@@ -129,7 +129,7 @@
       ]
     },
     {
-      "identifier": "core:event:allow-emit",
+      "identifier": "event:allow-emit",
       "allow": [
         { "event": "open-file-ready" },
         { "event": "oauth-redirect-ready" },
