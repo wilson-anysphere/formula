@@ -911,13 +911,65 @@ pub fn dibv5_to_png(dib_bytes: &[u8]) -> Result<Vec<u8>, String> {
         None
     };
 
+    let pixel_data_bytes = stride
+        .checked_mul(height_usize)
+        .ok_or_else(|| "dib pixel data size overflow".to_string())?;
+
+    // Some producers include BI_BITFIELDS-style masks even when `biCompression` is BI_RGB.
+    // Detect common mask patterns and adjust the pixel offset accordingly.
+    if compression == BI_RGB
+        && header_size == BITMAPINFOHEADER_SIZE
+        && masks.is_none()
+        && (bit_count == 32 || bit_count == 16)
+    {
+        let r_mask = read_u32_le(dib_bytes, 40).unwrap_or(0);
+        let g_mask = read_u32_le(dib_bytes, 44).unwrap_or(0);
+        let b_mask = read_u32_le(dib_bytes, 48).unwrap_or(0);
+
+        let matches_common = match bit_count {
+            32 => matches!(
+                (r_mask, g_mask, b_mask),
+                (0x00FF_0000, 0x0000_FF00, 0x0000_00FF) | (0x0000_00FF, 0x0000_FF00, 0x00FF_0000)
+            ),
+            16 => matches!(
+                (r_mask, g_mask, b_mask),
+                (0x0000_F800, 0x0000_07E0, 0x0000_001F) | (0x0000_7C00, 0x0000_03E0, 0x0000_001F)
+            ),
+            _ => false,
+        };
+
+        if matches_common {
+            // 3 DWORD masks (RGB) are always present.
+            let mut mask_bytes = 12usize;
+            let mut a_mask = 0u32;
+
+            // Prefer 4 DWORD masks (RGBA) when present for 32bpp.
+            if bit_count == 32 {
+                let am = read_u32_le(dib_bytes, 52).unwrap_or(0);
+                if am == 0xFF00_0000 {
+                    mask_bytes = 16;
+                    a_mask = am;
+                }
+            }
+
+            let offset_with_masks = BITMAPINFOHEADER_SIZE
+                .checked_add(mask_bytes)
+                .ok_or_else(|| "dib mask offset overflow".to_string())?;
+            let needed_with_masks = offset_with_masks
+                .checked_add(pixel_data_bytes)
+                .ok_or_else(|| "dib total size overflow".to_string())?;
+
+            if needed_with_masks <= dib_bytes.len() {
+                masks = Some((r_mask, g_mask, b_mask, a_mask));
+                pixel_offset = offset_with_masks;
+            }
+        }
+    }
+
     // BI_RGB 16bpp defaults to 5-5-5 (no alpha).
     if bit_count == 16 && compression == BI_RGB && masks.is_none() {
         masks = Some((0x0000_7C00, 0x0000_03E0, 0x0000_001F, 0));
     }
-    let pixel_data_bytes = stride
-        .checked_mul(height_usize)
-        .ok_or_else(|| "dib pixel data size overflow".to_string())?;
     let needed = pixel_offset
         .checked_add(pixel_data_bytes)
         .ok_or_else(|| "dib total size overflow".to_string())?;
@@ -1560,6 +1612,72 @@ mod tests {
         push_u32_le(&mut dib, 0x0000_001F); // blue
 
         debug_assert_eq!(dib.len(), BITMAPINFOHEADER_SIZE + 12);
+
+        // One pixel: green max (63) => 0x07E0.
+        // Include 2 padding bytes for 4-byte row alignment.
+        dib.extend_from_slice(&[0xE0, 0x07, 0x00, 0x00]);
+
+        let png = dibv5_to_png(&dib).expect("dibv5_to_png failed");
+        let (_w, _h, px) = decode_png(&png);
+        assert_eq!(px, vec![0, 255, 0, 255]);
+    }
+
+    #[test]
+    fn dib32_bi_rgb_with_embedded_masks_decodes_correctly() {
+        // Some producers include BI_BITFIELDS-style masks after a BITMAPINFOHEADER even when
+        // `biCompression` is BI_RGB.
+        let mut dib = Vec::new();
+        push_u32_le(&mut dib, BITMAPINFOHEADER_SIZE as u32); // biSize
+        push_i32_le(&mut dib, 1); // biWidth
+        push_i32_le(&mut dib, 1); // biHeight (bottom-up)
+        push_u16_le(&mut dib, 1); // biPlanes
+        push_u16_le(&mut dib, 32); // biBitCount
+        push_u32_le(&mut dib, BI_RGB); // biCompression (even though masks are present)
+        push_u32_le(&mut dib, 0); // biSizeImage
+        push_i32_le(&mut dib, 0); // biXPelsPerMeter
+        push_i32_le(&mut dib, 0); // biYPelsPerMeter
+        push_u32_le(&mut dib, 0); // biClrUsed
+        push_u32_le(&mut dib, 0); // biClrImportant
+
+        debug_assert_eq!(dib.len(), BITMAPINFOHEADER_SIZE);
+
+        // BGRA masks (DWORDs).
+        push_u32_le(&mut dib, 0x00FF_0000); // red
+        push_u32_le(&mut dib, 0x0000_FF00); // green
+        push_u32_le(&mut dib, 0x0000_00FF); // blue
+        push_u32_le(&mut dib, 0xFF00_0000); // alpha
+
+        // One pixel: red at 50% alpha in BGRA byte order.
+        dib.extend_from_slice(&[0, 0, 255, 128]);
+
+        let png = dibv5_to_png(&dib).expect("dibv5_to_png failed");
+        let (_w, _h, px) = decode_png(&png);
+        assert_eq!(px, vec![255, 0, 0, 128]);
+    }
+
+    #[test]
+    fn dib16_bi_rgb_with_embedded_masks_decodes_correctly() {
+        // Some producers include 16bpp BI_BITFIELDS masks after a BITMAPINFOHEADER even when
+        // `biCompression` is BI_RGB.
+        let mut dib = Vec::new();
+        push_u32_le(&mut dib, BITMAPINFOHEADER_SIZE as u32); // biSize
+        push_i32_le(&mut dib, 1); // biWidth
+        push_i32_le(&mut dib, 1); // biHeight (bottom-up)
+        push_u16_le(&mut dib, 1); // biPlanes
+        push_u16_le(&mut dib, 16); // biBitCount
+        push_u32_le(&mut dib, BI_RGB); // biCompression (even though masks are present)
+        push_u32_le(&mut dib, 0); // biSizeImage
+        push_i32_le(&mut dib, 0); // biXPelsPerMeter
+        push_i32_le(&mut dib, 0); // biYPelsPerMeter
+        push_u32_le(&mut dib, 0); // biClrUsed
+        push_u32_le(&mut dib, 0); // biClrImportant
+
+        debug_assert_eq!(dib.len(), BITMAPINFOHEADER_SIZE);
+
+        // 5-6-5 masks (DWORDs).
+        push_u32_le(&mut dib, 0x0000_F800); // red
+        push_u32_le(&mut dib, 0x0000_07E0); // green
+        push_u32_le(&mut dib, 0x0000_001F); // blue
 
         // One pixel: green max (63) => 0x07E0.
         // Include 2 padding bytes for 4-byte row alignment.
