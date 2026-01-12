@@ -405,6 +405,20 @@ export function CellFormattingDemo(): React.ReactElement {
     return `R${selection.row + 1}C${selection.col + 1}`;
   })();
 
+  const selectionRangeA1 = (() => {
+    if (!selectionRange) return null;
+    const headerRows = 1;
+    const headerCols = 1;
+    const startRow0 = selectionRange.startRow - headerRows;
+    const startCol0 = selectionRange.startCol - headerCols;
+    const endRow0 = selectionRange.endRow - headerRows - 1;
+    const endCol0 = selectionRange.endCol - headerCols - 1;
+    if (startRow0 < 0 || startCol0 < 0 || endRow0 < 0 || endCol0 < 0) return null;
+    const start = `${toColumnName(startCol0)}${startRow0 + 1}`;
+    const end = `${toColumnName(endCol0)}${endRow0 + 1}`;
+    return start === end ? start : `${start}:${end}`;
+  })();
+
   useEffect(() => {
     apiRef.current?.setZoom(zoom);
   }, [zoom]);
@@ -555,9 +569,7 @@ export function CellFormattingDemo(): React.ReactElement {
                 {selectionRange ? (
                   <div style={{ marginTop: 6 }}>
                     <strong>Range:</strong>{" "}
-                    <code>
-                      {selectionRange.startRow},{selectionRange.startCol} → {selectionRange.endRow - 1},{selectionRange.endCol - 1}
-                    </code>
+                    <code>{selectionRangeA1 ?? "(includes headers)"}</code>
                   </div>
                 ) : null}
               </div>
