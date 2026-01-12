@@ -900,6 +900,77 @@ test("api errors: extension sees PermissionError name when workbook.manage is de
   });
 });
 
+test("permissions: workbook APIs require declaring workbook.manage in manifest", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-workbook-undeclared-"));
+  const extDir = path.join(dir, "ext");
+  await fs.mkdir(extDir);
+
+  const commandId = "workbookExt.undeclaredManage";
+  await writeExtensionFixture(
+    extDir,
+    {
+      name: "workbook-undeclared-manage-ext",
+      version: "1.0.0",
+      publisher: "formula-test",
+      main: "./dist/extension.js",
+      engines: { formula: "^1.0.0" },
+      activationEvents: [`onCommand:${commandId}`],
+      contributes: { commands: [{ command: commandId, title: "Workbook Undeclared Permission" }] },
+      // Intentionally omit `workbook.manage`.
+      permissions: ["ui.commands"]
+    },
+    `
+      const formula = require("@formula/extension-api");
+      exports.activate = async (context) => {
+        context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
+          commandId
+        )}, async () => {
+          let openErr = null;
+          let saveErr = null;
+          try {
+            await formula.workbook.openWorkbook("Book.xlsx");
+          } catch (err) {
+            openErr = { name: err?.name ?? null, message: err?.message ?? String(err) };
+          }
+          try {
+            await formula.workbook.saveAs("/tmp/book.xlsx");
+          } catch (err) {
+            saveErr = { name: err?.name ?? null, message: err?.message ?? String(err) };
+          }
+          return { openErr, saveErr };
+        }));
+      };
+    `
+  );
+
+  let workbookPromptCalls = 0;
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    activationTimeoutMs: ACTIVATION_TIMEOUT_MS,
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async ({ permissions }) => {
+      if (Array.isArray(permissions) && permissions.includes("workbook.manage")) {
+        workbookPromptCalls += 1;
+      }
+      return true;
+    },
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await host.loadExtension(extDir);
+
+  const result = await host.executeCommand(commandId);
+  assert.deepEqual(result, {
+    openErr: { name: "PermissionError", message: "Permission not declared in manifest: workbook.manage" },
+    saveErr: { name: "PermissionError", message: "Permission not declared in manifest: workbook.manage" }
+  });
+  assert.equal(workbookPromptCalls, 0);
+});
+
 test("api errors: host preserves extension error name/code for command/custom function/data connector failures", async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-error-name-propagation-"));
   const extDir = path.join(dir, "ext");
