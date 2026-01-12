@@ -5361,7 +5361,9 @@ mountRibbon(ribbonRoot, {
       commandId === "home.alignment.wrapText" ||
       commandId === "view.show.showFormulas" ||
       commandId === "view.show.performanceStats" ||
-      commandId === "view.window.split"
+      commandId === "view.window.split" ||
+      commandId === "review.comments.showComments" ||
+      commandId === "data.queriesConnections.queriesConnections"
     ) {
       return;
     }
