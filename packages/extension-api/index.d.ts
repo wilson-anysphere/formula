@@ -27,11 +27,31 @@ export interface ExtensionContext {
 
 export interface Workbook {
   readonly name: string;
+  /**
+   * Absolute path for file-backed workbooks; `null` for unsaved workbooks.
+   */
   readonly path?: string | null;
   readonly sheets: Sheet[];
   readonly activeSheet: Sheet;
+  /**
+   * Save the active workbook.
+   *
+   * In desktop builds this may show a native dialog (e.g. Save As for unsaved workbooks).
+   * If the user cancels, the Promise rejects with an Error whose `name` is `"AbortError"`.
+   */
   save(): Promise<void>;
+  /**
+   * Save the workbook to a specific path.
+   *
+   * If the user cancels, the Promise rejects with an Error whose `name` is `"AbortError"`.
+   * The host throws if `path` is empty/whitespace.
+   */
   saveAs(path: string): Promise<void>;
+  /**
+   * Close the current workbook.
+   *
+   * If the user cancels, the Promise rejects with an Error whose `name` is `"AbortError"`.
+   */
   close(): Promise<void>;
 }
 
@@ -73,12 +93,43 @@ export interface Panel extends Disposable {
   readonly webview: PanelWebview;
 }
 
+/**
+ * Workbook lifecycle APIs.
+ *
+ * Most operations require the `workbook.manage` permission.
+ */
 export namespace workbook {
   function getActiveWorkbook(): Promise<Workbook>;
+  /**
+   * Open a workbook from a file path.
+   *
+   * The host throws if `path` is empty/whitespace. In desktop builds this may prompt the user
+   * to discard unsaved changes; cancellations reject with `AbortError`.
+   */
   function openWorkbook(path: string): Promise<Workbook>;
+  /**
+   * Create a new blank workbook.
+   *
+   * In desktop builds this may prompt the user to discard unsaved changes; cancellations reject
+   * with `AbortError`.
+   */
   function createWorkbook(): Promise<Workbook>;
+  /**
+   * Save the active workbook. For unsaved workbooks this may behave like Save As.
+   */
   function save(): Promise<void>;
+  /**
+   * Save the active workbook to a specific path (Save As).
+   *
+   * The host throws if `path` is empty/whitespace.
+   */
   function saveAs(path: string): Promise<void>;
+  /**
+   * Close the current workbook.
+   *
+   * In desktop builds this may prompt the user to discard unsaved changes; cancellations reject
+   * with `AbortError`.
+   */
   function close(): Promise<void>;
 }
 
