@@ -194,6 +194,17 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
     if (blocked) badges.append(badge("blocked", { tone: "bad" }));
     if (malicious) badges.append(badge("malicious", { tone: "bad" }));
     if (publisherRevoked) badges.append(badge("revoked", { tone: "bad" }));
+    if (installed?.corrupted) {
+      const reason =
+        installed.corruptedReason && typeof installed.corruptedReason === "string" ? installed.corruptedReason : "Unknown reason";
+      const at = installed.corruptedAt && typeof installed.corruptedAt === "string" ? installed.corruptedAt : null;
+      badges.append(
+        badge("corrupted", {
+          tone: "bad",
+          title: at ? `Corrupted at ${at}: ${reason}` : `Corrupted: ${reason}`,
+        }),
+      );
+    }
     if (latestScanStatusRaw) {
       const normalized = String(latestScanStatusRaw).trim().toLowerCase();
       const tone =
@@ -276,6 +287,56 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
       if (installed.signingKeyId) metaParts.push(`key=${installed.signingKeyId}`);
       if (metaParts.length > 0) {
         actions.append(el("div", { className: "installed-meta" }, [document.createTextNode(metaParts.join(" · "))]));
+      }
+
+      if (installed.corrupted) {
+        actions.append(
+          el(
+            "button",
+            {
+              onClick: async () => {
+                actions.textContent = "Repairing…";
+                try {
+                  if (extensionHostManager) {
+                    await extensionHostManager.unloadExtension(item.id);
+                    await extensionHostManager.resetExtensionState?.(item.id);
+                  }
+                } catch {
+                  // ignore
+                }
+
+                try {
+                  const record =
+                    typeof extensionManager.repair === "function"
+                      ? await extensionManager.repair(item.id)
+                      : await extensionManager.install(item.id);
+
+                  if (Array.isArray(record?.warnings)) {
+                    for (const warning of record.warnings) {
+                      if (!warning || typeof warning.message !== "string") continue;
+                      tryShowToast(warning.message, "warning");
+                    }
+                  }
+
+                  if (extensionHostManager?.syncInstalledExtensions) {
+                    await extensionHostManager.syncInstalledExtensions();
+                  } else if (extensionHostManager) {
+                    await extensionHostManager.reloadExtension(item.id);
+                  }
+                  updateContributedPanelSeedsFromHost(extensionHostManager, item.id);
+                  actions.textContent = "Repaired";
+                  tryNotifyExtensionsChanged();
+                } catch (error) {
+                  // eslint-disable-next-line no-console
+                  console.error(error);
+                  tryShowToast(String(error?.message ?? error), "error");
+                  actions.textContent = `Error: ${String(error?.message ?? error)}`;
+                }
+              },
+            },
+            [document.createTextNode("Repair")],
+          ),
+        );
       }
 
       actions.append(
