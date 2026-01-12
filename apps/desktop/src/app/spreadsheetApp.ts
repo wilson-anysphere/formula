@@ -4016,6 +4016,24 @@ export class SpreadsheetApp {
     this.commentPreviewByCoord.clear();
     this.commentThreadsByCellRef.clear();
 
+    // Collab-mode safety: do not eagerly instantiate the `comments` root before the collab
+    // provider has hydrated the shared Y.Doc. Older documents may still use a legacy
+    // Array-backed schema, and calling `doc.getMap("comments")` too early can clobber it.
+    //
+    // `CommentManager.listAll()` calls `getCommentsRoot()` under the hood, so we guard here.
+    if (this.collabMode) {
+      const session = this.collabSession;
+      const provider = session?.provider;
+      const providerSynced =
+        provider && typeof (provider as any).on === "function" ? Boolean((provider as any).synced) : true;
+      const hasRoot = Boolean(session?.doc?.share?.get?.("comments"));
+      if (!providerSynced && !hasRoot) {
+        this.commentIndexVersion += 1;
+        this.sharedProvider?.invalidateAll();
+        return;
+      }
+    }
+
     // Back-compat: older collaboration docs stored comments under unqualified A1 refs
     // (e.g. "A1"). In collab mode we now require sheet-qualified refs ("sheetId!A1").
     //

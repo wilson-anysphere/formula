@@ -117,4 +117,31 @@ describe("SpreadsheetApp.reindexCommentCells", () => {
     expect((app as any).commentMetaByCoord.get(0)).toEqual({ resolved: false });
     expect((app as any).commentPreviewByCoord.get(0)).toBe("S1");
   });
+
+  it("does not call listAll (and avoids instantiating comments root) before collab provider sync when comments root is absent", () => {
+    const listAll = vi.fn(() => []);
+
+    const app = Object.create(SpreadsheetApp.prototype) as SpreadsheetApp;
+    (app as any).collabMode = true;
+    // Emulate a collab session that has not synced yet and has no `comments` root in the doc.
+    (app as any).collabSession = { provider: { synced: false, on: () => {} }, doc: { share: new Map() } };
+    (app as any).commentMetaByCoord = new Map<number, { resolved: boolean }>();
+    (app as any).commentPreviewByCoord = new Map<number, string>();
+    (app as any).commentThreadsByCellRef = new Map<string, any[]>();
+    (app as any).commentIndexVersion = 0;
+    (app as any).lastHoveredCommentIndexVersion = -1;
+    (app as any).commentManager = { listAll };
+
+    const invalidateAll = vi.fn();
+    (app as any).sharedProvider = { invalidateAll };
+
+    (app as any).reindexCommentCells();
+
+    expect(listAll).toHaveBeenCalledTimes(0);
+    expect((app as any).commentThreadsByCellRef.size).toBe(0);
+    expect((app as any).commentMetaByCoord.size).toBe(0);
+    expect((app as any).commentPreviewByCoord.size).toBe(0);
+    expect((app as any).commentIndexVersion).toBe(1);
+    expect(invalidateAll).toHaveBeenCalledTimes(1);
+  });
 });
