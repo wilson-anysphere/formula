@@ -2567,25 +2567,32 @@ fn sanitize_biff8_continued_name_records_for_calamine(stream: &[u8]) -> Option<V
                     }
                 }
 
-                // Best-effort: for non-built-in names, detect obviously out-of-bounds `cch`/`cce`
-                // values that would cause calamine slice panics even without CONTINUE records.
-                //
-                // Built-in NAME records have a different payload layout and are not required for
-                // `PtgName` decoding, so avoid guessing for them here.
-                if !is_builtin {
-                    // Calamine slices `&payload[14..]` and expects at least:
-                    // - 1 flags byte (buf[0])
-                    // - `cch` bytes of name data (buf[1..=cch])
-                    // - `cce` bytes of formula tokens after the name bytes.
-                    if len < 14 {
-                        needs_patch = true;
+                // Best-effort: detect obviously out-of-bounds `cch`/`cce` values that would cause
+                // calamine slice panics even without CONTINUE records.
+                if len < 14 {
+                    needs_patch = true;
+                } else {
+                    let available = len.saturating_sub(14);
+                    if is_builtin {
+                        // Built-in NAME layout: `rgchName` is `cch` bytes (usually 1-byte id).
+                        // Remaining bytes are the rgce formula token stream.
+                        if available < cch {
+                            needs_patch = true;
+                        } else {
+                            let remaining = available.saturating_sub(cch);
+                            if cce > remaining {
+                                needs_patch = true;
+                            }
+                        }
                     } else {
-                        let available = len.saturating_sub(14);
-                        // `available > cch` is required for `buf[1..=cch]`.
+                        // User-defined NAME layout: `rgchName` is an XLUnicodeStringNoCch, which
+                        // includes a 1-byte flags prefix + `cch` bytes of character data.
+                        //
+                        // Calamine slices `&payload[14..]` and then indexes `buf[1..=cch]`, which
+                        // requires `available > cch`.
                         if available <= cch {
                             needs_patch = true;
                         } else {
-                            // Remaining bytes after flags+name.
                             let remaining = available.saturating_sub(cch + 1);
                             if cce > remaining {
                                 needs_patch = true;
@@ -2617,10 +2624,7 @@ fn sanitize_biff8_continued_name_records_for_calamine(stream: &[u8]) -> Option<V
             out[data_start + 4..data_start + 6].copy_from_slice(&0u16.to_le_bytes());
         }
 
-        // Best-effort: clamp `cch` if the name string cannot fit in the first fragment.
-        //
-        // Calamine slices `&payload[14..]` then indexes `buf[1..=cch]`, which requires
-        // `payload.len() > 14 + cch` (non-built-in names only).
+        // Best-effort: clamp `cch` if the name bytes cannot fit in the first fragment.
         if len >= 4 && data_start + 4 <= out.len() {
             let grbit = if len >= 2 && data_start + 2 <= out.len() {
                 u16::from_le_bytes([out[data_start], out[data_start + 1]])
@@ -2628,14 +2632,55 @@ fn sanitize_biff8_continued_name_records_for_calamine(stream: &[u8]) -> Option<V
                 0
             };
             let is_builtin = (grbit & NAME_FLAG_BUILTIN) != 0;
-            if !is_builtin {
-                let cch = out[data_start + 3] as usize;
-                let available = len.saturating_sub(14);
-                if available <= cch {
-                    // Ensure `available > cch` (or set to 0 if we can't even fit the flags byte).
-                    let new_cch = available.saturating_sub(1).min(u8::MAX as usize) as u8;
-                    out[data_start + 3] = new_cch;
+            let cch = out[data_start + 3] as usize;
+            let available = len.saturating_sub(14);
+            if is_builtin {
+                // Built-in NAME: `rgchName` is stored as raw bytes (usually a single-byte id), so
+                // we only require `available >= cch`.
+                if available < cch {
+                    out[data_start + 3] = available.min(u8::MAX as usize) as u8;
                 }
+            } else {
+                // User-defined NAME: `rgchName` is stored as XLUnicodeStringNoCch, which includes a
+                // 1-byte flags prefix. Calamine indexes `buf[1..=cch]`, which requires
+                // `available > cch`.
+                if available <= cch {
+                    out[data_start + 3] = available.saturating_sub(1).min(u8::MAX as usize) as u8;
+                }
+            }
+        }
+
+        // Special-case: if a continued NAME record ends exactly at the fixed 14-byte header (i.e.
+        // there are no bytes at `payload[14..]`), calamine can still panic even after clamping cch
+        // to 0 because it indexes `buf[1..=cch]` on an empty slice.
+        //
+        // Best-effort: coalesce the following CONTINUE record(s) into this NAME record by
+        // increasing the physical record length to span them. This ensures `payload[14..]` is
+        // non-empty, preventing out-of-range indexing, while keeping the overall byte stream
+        // length unchanged (BoundSheet offsets stay valid).
+        let next_offset = data_start.saturating_add(len);
+        if len <= 14 && next_offset + 4 <= out.len() {
+            let next_id = u16::from_le_bytes([out[next_offset], out[next_offset + 1]]);
+            if next_id == RECORD_CONTINUE {
+                let mut extra = 0usize;
+                let mut cursor = next_offset;
+                while cursor + 4 <= out.len() {
+                    let id = u16::from_le_bytes([out[cursor], out[cursor + 1]]);
+                    if id != RECORD_CONTINUE {
+                        break;
+                    }
+                    let cont_len =
+                        u16::from_le_bytes([out[cursor + 2], out[cursor + 3]]) as usize;
+                    let total = 4usize.saturating_add(cont_len);
+                    if cursor.saturating_add(total) > out.len() {
+                        break;
+                    }
+                    extra = extra.saturating_add(total);
+                    cursor = cursor.saturating_add(total);
+                }
+
+                let new_len = len.saturating_add(extra).min(u16::MAX as usize) as u16;
+                out[header_offset + 2..header_offset + 4].copy_from_slice(&new_len.to_le_bytes());
             }
         }
     }
@@ -2745,6 +2790,8 @@ mod tests {
     const RECORD_XF: u16 = 0x00E0;
     const RECORD_BOUNDSHEET: u16 = 0x0085;
     const RECORD_NAME: u16 = 0x0018;
+    const RECORD_CONTINUE: u16 = 0x003C;
+    const NAME_FLAG_BUILTIN: u16 = 0x0020;
 
     const RECORD_DIMENSIONS: u16 = 0x0200;
     const RECORD_WINDOW2: u16 = 0x023E;
@@ -2897,6 +2944,74 @@ mod tests {
         globals
     }
 
+    fn build_minimal_workbook_stream_with_continued_builtin_name_header_only() -> Vec<u8> {
+        // Build a minimal BIFF8 workbook stream containing a built-in NAME record whose `rgchName`
+        // payload (the built-in id byte) is stored entirely in a `CONTINUE` record.
+        //
+        // Calamine does not always handle continued NAME records safely; the sanitizer should clamp
+        // `cch` so calamine doesn't attempt to read bytes that don't exist in the first fragment.
+        let mut globals = Vec::<u8>::new();
+
+        push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+        push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+        push_record(&mut globals, RECORD_WINDOW1, &window1());
+        push_record(&mut globals, RECORD_FONT, &font_arial());
+
+        for _ in 0..16 {
+            push_record(&mut globals, RECORD_XF, &xf_record(true));
+        }
+        let xf_general = 16u16;
+        push_record(&mut globals, RECORD_XF, &xf_record(false));
+
+        // Single worksheet.
+        let boundsheet_start = globals.len();
+        let mut boundsheet = Vec::<u8>::new();
+        boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+        boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+        write_short_unicode_string(&mut boundsheet, "Sheet1");
+        push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+        let boundsheet_offset_pos = boundsheet_start + 4;
+
+        // Built-in NAME record header only (14 bytes); `cch=1` but `rgchName` byte lives in the
+        // `CONTINUE` record that follows.
+        let mut name_header = Vec::<u8>::new();
+        name_header.extend_from_slice(&NAME_FLAG_BUILTIN.to_le_bytes()); // grbit (builtin)
+        name_header.push(0); // chKey
+        name_header.push(1); // cch (built-in id length)
+        name_header.extend_from_slice(&0u16.to_le_bytes()); // cce (no formula)
+        name_header.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        name_header.extend_from_slice(&0u16.to_le_bytes()); // itab (workbook scope)
+        name_header.extend_from_slice(&[0, 0, 0, 0]); // cchCustMenu, cchDescription, cchHelpTopic, cchStatusText
+        push_record(&mut globals, RECORD_NAME, &name_header);
+        // CONTINUE payload contains the built-in id byte (e.g. Print_Area = 0x06).
+        push_record(&mut globals, RECORD_CONTINUE, &[0x06u8]);
+
+        push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+        // -- Sheet substream ----------------------------------------------------
+        let sheet_offset = globals.len();
+        let mut sheet = Vec::<u8>::new();
+        push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+        // DIMENSIONS: rows [0, 1) cols [0, 1)
+        let mut dims = Vec::<u8>::new();
+        dims.extend_from_slice(&0u32.to_le_bytes());
+        dims.extend_from_slice(&1u32.to_le_bytes());
+        dims.extend_from_slice(&0u16.to_le_bytes());
+        dims.extend_from_slice(&1u16.to_le_bytes());
+        dims.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+        push_record(&mut sheet, RECORD_WINDOW2, &window2());
+        push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_general, 0.0));
+        push_record(&mut sheet, RECORD_EOF, &[]);
+
+        // Patch BoundSheet offset.
+        globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+            .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+        globals.extend_from_slice(&sheet);
+        globals
+    }
+
     fn calamine_can_open_workbook_stream(workbook_stream: &[u8]) -> bool {
         std::panic::catch_unwind(|| {
             let xls_bytes = build_in_memory_xls(workbook_stream).expect("cfb");
@@ -2956,6 +3071,39 @@ mod tests {
         assert!(
             calamine_can_open_workbook_stream(&sanitized),
             "expected calamine to open after sanitizing malformed NAME record"
+        );
+    }
+
+    #[test]
+    fn sanitizes_continued_builtin_name_when_id_bytes_are_missing_in_first_fragment() {
+        let stream = build_minimal_workbook_stream_with_continued_builtin_name_header_only();
+
+        // Even if calamine becomes resilient to this input in the future, the sanitizer should
+        // still clamp cch/cce defensively so workbook import never panics.
+        let _ = calamine_can_open_workbook_stream(&stream);
+
+        let payload =
+            first_record_payload(&stream, RECORD_NAME).expect("expected NAME record in fixture");
+        assert_eq!(payload[0..2], NAME_FLAG_BUILTIN.to_le_bytes());
+        assert_eq!(payload[3], 1, "expected built-in cch=1");
+
+        let sanitized =
+            sanitize_biff8_continued_name_records_for_calamine(&stream).expect("expected sanitize");
+
+        let sanitized_payload = first_record_payload(&sanitized, RECORD_NAME)
+            .expect("expected NAME record in sanitized workbook stream");
+        // NAME record contains only the 14-byte header in its first fragment; clamp cch to 0 so
+        // calamine doesn't attempt to read `rgchName` bytes from the first fragment.
+        assert_eq!(sanitized_payload[3], 0, "expected clamped cch=0");
+        assert_eq!(
+            u16::from_le_bytes([sanitized_payload[4], sanitized_payload[5]]),
+            0,
+            "expected patched cce=0"
+        );
+
+        assert!(
+            calamine_can_open_workbook_stream(&sanitized),
+            "expected calamine to open after sanitizing continued built-in NAME record"
         );
     }
 }
