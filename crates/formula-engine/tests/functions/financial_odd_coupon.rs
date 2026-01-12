@@ -65,7 +65,7 @@ fn coupon_period_e(
     match basis {
         1 => (ncd - pcd) as f64,
         0 | 2 => 360.0 / freq,
-        // basis 4: European 30/360 day-count between coupon dates (DAYS360(..., TRUE)).
+        // basis=4: European 30/360 day-count between coupon dates (DAYS360(..., TRUE)).
         //
         // This can differ from `360/frequency` for some end-of-month schedules involving
         // February (e.g. Feb 28 -> Aug 31 yields 182, not 180).
@@ -4011,6 +4011,18 @@ fn oddfprice_matches_excel_model_for_30_360_bases() {
         let settlement = ymd_to_serial(settlement, system).unwrap();
         let first_coupon = ymd_to_serial(first_coupon, system).unwrap();
         let maturity = ymd_to_serial(maturity, system).unwrap();
+
+        // Guard: ensure we cover a basis=4 schedule where `E != 360/frequency`.
+        if maturity == ymd_to_serial(ExcelDate::new(2019, 2, 28), system).unwrap() {
+            let months_per_period = 12 / frequency;
+            let eom = is_end_of_month(maturity, system);
+            assert!(eom, "expected maturity to be EOM for this scenario");
+            let coupon_dates = oddf_coupon_schedule(first_coupon, maturity, frequency, system);
+            let n = coupon_dates.len() as i32;
+            let prev_coupon = coupon_date_with_eom(maturity, -(n * months_per_period), eom, system);
+            let e4 = coupon_period_e(prev_coupon, first_coupon, 4, frequency, system);
+            assert_close(e4, 182.0, 0.0);
+        }
 
         // Guard: ensure US vs EU DAYS360 behavior actually diverges in this scenario.
         let a0 = days_between(issue, settlement, 0, system);
