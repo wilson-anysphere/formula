@@ -27,12 +27,12 @@ pub(super) fn eval_number_or_skip(sheet: &mut TestSheet, formula: &str) -> Optio
 
 fn coupon_date_from_maturity(maturity: &str, months_per_period: i32, periods_back: i32) -> String {
     // Coupon schedules are maturity-anchored: each coupon date is computed as an offset from
-    // `maturity` (not by stepping iteratively period-by-period).
+    // `maturity` in whole coupon periods (12/frequency), using `EDATE`.
     //
-    // This matters because `EDATE` month-stepping is not invertible due to end-of-month clamping;
-    // iterative stepping can drift the day-of-month (e.g. Dec 31 -> Jun 30 -> Dec 30). The engine’s
-    // COUP* functions (and bond schedule math) compute coupon dates as `EDATE(maturity, -k*m)`, so
-    // tests should too.
+    // Important: repeated iterative stepping (e.g. `EDATE(EDATE(maturity,-m),-m)`) can drift for
+    // month-end dates due to end-of-month clamping (e.g. Dec 31 -> Jun 30 -> Dec 30). The COUP*
+    // functions (and bond schedule math) compute coupon dates as `EDATE(maturity, -k*m)`, so tests
+    // should too.
     debug_assert!(months_per_period > 0);
     debug_assert!(periods_back >= 0);
     let months_back = months_per_period
