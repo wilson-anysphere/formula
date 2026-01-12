@@ -20,6 +20,11 @@ test("Collab Version History / Branch Manager panels are class-driven + styled v
     "panelBodyRenderer.tsx should not use React inline styles; collab panels should use workspace.css classes instead",
   );
 
+  // Sanity-check that the React markup actually uses the shared classes.
+  for (const className of ["collab-panel__message", "collab-panel__message--error", "collab-version-history"]) {
+    assert.ok(renderer.includes(className), `Expected panelBodyRenderer.tsx to render className=\"${className}\"`);
+  }
+
   const requiredSelectors = [
     // Shared message styling (loading/errors).
     ".collab-panel__message",
@@ -36,4 +41,3 @@ test("Collab Version History / Branch Manager panels are class-driven + styled v
     assert.ok(css.includes(selector), `Expected workspace.css to define ${selector}`);
   }
 });
-
