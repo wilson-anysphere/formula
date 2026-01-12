@@ -180,6 +180,10 @@ fn database_functions_computed_criteria_error_propagation() {
         sheet.eval("=DSUM(A1:D5,\"Salary\",F1:F2)"),
         Value::Error(ErrorKind::Div0)
     );
+    assert_eq!(
+        sheet.eval("=DGET(A1:D5,\"Salary\",F1:F2)"),
+        Value::Error(ErrorKind::Div0)
+    );
 }
 
 #[test]
@@ -348,4 +352,17 @@ fn database_functions_computed_criteria_falsey_empty_string_results_in_no_matche
         sheet.eval("=DGET(A1:D5,\"Salary\",F1:F2)"),
         Value::Error(ErrorKind::Value)
     );
+}
+
+#[test]
+fn database_functions_computed_criteria_can_reference_other_sheets() {
+    let mut sheet = TestSheet::new();
+    seed_database(&mut sheet);
+
+    // Use a threshold from another sheet.
+    sheet.set_on("Sheet2", "A1", 30);
+    sheet.set_formula("F2", "=C2>Sheet2!A1");
+
+    // Matches Bob (35) and Dan (40) => Salary sum = 1500 + 2000.
+    assert_number(&sheet.eval("=DSUM(A1:D5,\"Salary\",F1:F2)"), 3500.0);
 }

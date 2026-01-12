@@ -33,9 +33,21 @@ impl TestSheet {
             .expect("set cell value");
     }
 
+    pub fn set_on(&mut self, sheet: &str, addr: &str, value: impl Into<Value>) {
+        self.engine
+            .set_cell_value(sheet, addr, value)
+            .expect("set cell value");
+    }
+
     pub fn set_formula(&mut self, addr: &str, formula: &str) {
         self.engine
             .set_cell_formula(self.sheet, addr, formula)
+            .expect("set cell formula");
+    }
+
+    pub fn set_formula_on(&mut self, sheet: &str, addr: &str, formula: &str) {
+        self.engine
+            .set_cell_formula(sheet, addr, formula)
             .expect("set cell formula");
     }
 
@@ -51,6 +63,10 @@ impl TestSheet {
 
     pub fn get(&self, addr: &str) -> Value {
         self.engine.get_cell_value(self.sheet, addr)
+    }
+
+    pub fn get_on(&self, sheet: &str, addr: &str) -> Value {
+        self.engine.get_cell_value(sheet, addr)
     }
 
     pub fn bytecode_program_count(&self) -> usize {
