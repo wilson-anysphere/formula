@@ -1,0 +1,205 @@
+{
+  "schemaVersion": 1,
+  "caseSet": "financial-odd-coupon-validation",
+  "defaultSheet": "Sheet1",
+  "cases": [
+    {
+      "formula": "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,-0.01,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDFPRICE",
+        "odd_coupon_validation",
+        "neg_yld"
+      ],
+      "description": "ODDFPRICE with negative yld (confirm whether Excel returns #NUM! or a price)",
+      "id": "oddfprice_neg_yld_2928961fbdcb"
+    },
+    {
+      "formula": "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,-0.01,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLPRICE",
+        "odd_coupon_validation",
+        "neg_yld"
+      ],
+      "description": "ODDLPRICE with negative yld (confirm whether Excel returns #NUM! or a price)",
+      "id": "oddlprice_neg_yld_174200b7a8bb"
+    },
+    {
+      "formula": "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,-1.5,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDFPRICE",
+        "odd_coupon_validation",
+        "neg_yld",
+        "yld_below_minus1"
+      ],
+      "description": "ODDFPRICE with yld=-1.5 (below -1 but still within the per-period domain yld > -frequency when frequency=2)",
+      "id": "oddfprice_neg_yld_below_minus1_f535537fc96a"
+    },
+    {
+      "formula": "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,-1.5,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLPRICE",
+        "odd_coupon_validation",
+        "neg_yld",
+        "yld_below_minus1"
+      ],
+      "description": "ODDLPRICE with yld=-1.5 (below -1 but still within the per-period domain yld > -frequency when frequency=2)",
+      "id": "oddlprice_neg_yld_below_minus1_0c820181317f"
+    },
+    {
+      "formula": "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,-2,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDFPRICE",
+        "odd_coupon_validation",
+        "yld_eq_neg_frequency"
+      ],
+      "description": "ODDFPRICE with yld == -frequency (discount base hits 0; confirm Excel returns #DIV/0!)",
+      "id": "oddfprice_yld_eq_neg_frequency_5fb6b5e57e7d"
+    },
+    {
+      "formula": "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,-2,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLPRICE",
+        "odd_coupon_validation",
+        "yld_eq_neg_frequency"
+      ],
+      "description": "ODDLPRICE with yld == -frequency (discount base hits 0; confirm Excel returns #DIV/0!)",
+      "id": "oddlprice_yld_eq_neg_frequency_8f648dce7605"
+    },
+    {
+      "formula": "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,-2.5,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDFPRICE",
+        "odd_coupon_validation",
+        "yld_lt_neg_frequency"
+      ],
+      "description": "ODDFPRICE with yld < -frequency (confirm Excel returns #NUM!)",
+      "id": "oddfprice_yld_below_neg_frequency_11e8741164c3"
+    },
+    {
+      "formula": "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,-2.5,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLPRICE",
+        "odd_coupon_validation",
+        "yld_lt_neg_frequency"
+      ],
+      "description": "ODDLPRICE with yld < -frequency (confirm Excel returns #NUM!)",
+      "id": "oddlprice_yld_below_neg_frequency_c526442cb3ec"
+    },
+    {
+      "formula": "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),-0.01,0.0625,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDFPRICE",
+        "odd_coupon_validation",
+        "neg_rate"
+      ],
+      "description": "ODDFPRICE with negative coupon rate (confirm whether Excel returns #NUM!)",
+      "id": "oddfprice_neg_rate_dbd0d8db50e3"
+    },
+    {
+      "formula": "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),-0.01,0.0625,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLPRICE",
+        "odd_coupon_validation",
+        "neg_rate"
+      ],
+      "description": "ODDLPRICE with negative coupon rate (confirm whether Excel returns #NUM!)",
+      "id": "oddlprice_neg_rate_164249beee1e"
+    },
+    {
+      "formula": "=ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),-0.01,98,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDFYIELD",
+        "odd_coupon_validation",
+        "neg_rate"
+      ],
+      "description": "ODDFYIELD with negative coupon rate (confirm whether Excel returns #NUM!)",
+      "id": "oddfyield_neg_rate_5c95d4d6f457"
+    },
+    {
+      "formula": "=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),-0.01,98,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLYIELD",
+        "odd_coupon_validation",
+        "neg_rate"
+      ],
+      "description": "ODDLYIELD with negative coupon rate (confirm whether Excel returns #NUM!)",
+      "id": "oddlyield_neg_rate_3476c91a558e"
+    },
+    {
+      "formula": "=ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,300,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDFYIELD",
+        "odd_coupon_validation",
+        "implied_neg_yld"
+      ],
+      "description": "ODDFYIELD with a price that implies a negative yield if allowed (confirm whether Excel returns a negative yield or #NUM!)",
+      "id": "oddfyield_high_price_3b17d5c7fad9"
+    },
+    {
+      "formula": "=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,300,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLYIELD",
+        "odd_coupon_validation",
+        "implied_neg_yld"
+      ],
+      "description": "ODDLYIELD with a price that implies a negative yield if allowed (confirm whether Excel returns a negative yield or #NUM!)",
+      "id": "oddlyield_high_price_c8cf5120a715"
+    }
+  ]
+}

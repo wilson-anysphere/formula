@@ -32,6 +32,9 @@ and exits non-zero if mismatches exceed the configured threshold.
     scenarios (DFC/E > 1 or DSM/E > 1). This subset reuses the canonical `caseId`s from `cases.json`.
   - `tools/excel-oracle/odd_coupon_boundary_cases.json` — boundary date-equality scenarios
     (e.g. `issue == settlement`, `settlement == first_coupon`).
+  - `tools/excel-oracle/odd_coupon_validation_cases.json` — validation scenarios for **negative yields / negative coupon rates**
+    and yield-domain boundaries (tagged `odd_coupon_validation` in the canonical corpus). This subset reuses the canonical
+    `caseId`s from `cases.json` so results can be merged back into the pinned dataset.
 - `datasets/` — results datasets:
   - `excel-oracle.pinned.json` — pinned Excel dataset for CI (no Excel needed).
   - `versioned/` — version-tagged pinned datasets (useful when Excel behavior differs across versions/builds).

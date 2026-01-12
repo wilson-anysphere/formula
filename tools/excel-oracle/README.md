@@ -130,6 +130,16 @@ powershell -ExecutionPolicy Bypass -File tools/excel-oracle/run-excel-oracle.ps1
   -OutPath  tests/compatibility/excel-oracle/datasets/excel-oracle.json
 ```
 
+To generate only the **odd-coupon negative yield / negative coupon** validation scenarios, use:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/excel-oracle/run-excel-oracle.ps1 `
+  -CasesPath tools/excel-oracle/odd_coupon_validation_cases.json `
+  -OutPath  tests/compatibility/excel-oracle/datasets/excel-oracle.json
+```
+
+This subset corresponds to the cases tagged `odd_coupon_validation` in the canonical corpus.
+
 Note: this subset corpus reuses the **canonical case IDs** from `tests/compatibility/excel-oracle/cases.json`,
 so you can map results back to the full corpus by `caseId` (useful when updating/pinning datasets).
 
