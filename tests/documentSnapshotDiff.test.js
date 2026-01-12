@@ -88,6 +88,27 @@ test("diffDocumentSnapshots detects formatOnly edits from row-default formatting
   assert.equal(diff.removed.length, 0);
 });
 
+test("sheetStateFromDocumentSnapshot merges range-run formats when present (Task 118)", () => {
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", 1);
+  const beforeSnapshot = doc.encodeState();
+
+  const parsed = JSON.parse(decoder.decode(beforeSnapshot));
+  const sheet = parsed.sheets.find((s) => s?.id === "Sheet1");
+  assert.ok(sheet, "expected Sheet1 in snapshot");
+
+  // Simulate Task 118 range-run formatting schema without expanding cells:
+  // apply { font: { bold:true } } to A1 via a run.
+  sheet.formatRuns = [{ startRow: 0, startCol: 0, endRow: 0, endCol: 0, format: { font: { bold: true } } }];
+
+  const afterSnapshot = encoder.encode(JSON.stringify(parsed));
+  const state = sheetStateFromDocumentSnapshot(afterSnapshot, { sheetId: "Sheet1" });
+  assert.deepEqual(state.cells.get(cellKey(0, 0))?.format, { font: { bold: true } });
+});
+
 test("exportSheetForSemanticDiff exports effective formats from column defaults", () => {
   const doc = new DocumentController();
   doc.setCellValue("Sheet1", "A1", 1);
