@@ -1158,7 +1158,8 @@ def generate_cases() -> dict[str, Any]:
     # TEXT / VALUE / NUMBERVALUE / DOLLAR
     _add_case(cases, prefix="text_fmt", tags=["text", "TEXT"], formula='=TEXT(1234.567,"#,##0.00")')
     _add_case(cases, prefix="text_pct", tags=["text", "TEXT"], formula='=TEXT(1.23,"0%")')
-    _add_case(cases, prefix="text_cur", tags=["text", "TEXT"], formula='=TEXT(-1,"$0.00")')
+    # Avoid currency symbols (can be locale-dependent).
+    _add_case(cases, prefix="text_cur", tags=["text", "TEXT"], formula='=TEXT(-1,"0.00")')
     _add_case(cases, prefix="value", tags=["text", "VALUE", "coercion"], formula='=VALUE("1234")')
     _add_case(cases, prefix="value", tags=["text", "VALUE"], formula='=VALUE("(1000)")')
     _add_case(cases, prefix="value", tags=["text", "VALUE"], formula='=VALUE("10%")')

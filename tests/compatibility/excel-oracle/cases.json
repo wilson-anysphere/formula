@@ -24771,14 +24771,14 @@
       "id": "text_pct_a4552c585ed2"
     },
     {
-      "formula": "=TEXT(-1,\"$0.00\")",
+      "formula": "=TEXT(-1,\"0.00\")",
       "outputCell": "C1",
       "inputs": [],
       "tags": [
         "text",
         "TEXT"
       ],
-      "id": "text_cur_99ef77d58413"
+      "id": "text_cur_a21571662fb7"
     },
     {
       "formula": "=VALUE(\"1234\")",

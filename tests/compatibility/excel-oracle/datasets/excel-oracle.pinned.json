@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-01-12T03:32:30.83934706Z",
+  "generatedAt": "2026-01-12T03:37:04.144727599Z",
   "source": {
     "kind": "excel",
     "version": "unknown",
@@ -10,7 +10,7 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "46604d4ff04d520099220c9e4f132e26eb3bee90e2887c814aee0c4b48ad0a67",
+    "sha256": "f86cb8d3e9962d186261953c7b028bdbd27eac8025225c97d606966351741b83",
     "count": 1390
   },
   "results": [
@@ -11863,14 +11863,14 @@
       "displayText": "123%"
     },
     {
-      "caseId": "text_cur_99ef77d58413",
+      "caseId": "text_cur_a21571662fb7",
       "outputCell": "C1",
       "result": {
         "t": "s",
-        "v": "-$1.00"
+        "v": "-1.00"
       },
       "address": "C1",
-      "displayText": "-$1.00"
+      "displayText": "-1.00"
     },
     {
       "caseId": "value_7b9b63be93a9",
