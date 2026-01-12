@@ -40,6 +40,8 @@ const OBJ_SUBRECORD_FT_CMO: u16 = 0x0015;
 const TXO_TEXT_LEN_OFFSET: usize = 6;
 const TXO_RUNS_LEN_OFFSET: usize = 12;
 
+const MAX_WARNINGS_PER_SHEET: usize = 20;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BiffNote {
     pub(crate) cell: CellRef,
@@ -54,6 +56,12 @@ pub(crate) struct BiffNote {
     pub(crate) text: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct ParsedSheetNotes {
+    pub(crate) notes: Vec<BiffNote>,
+    pub(crate) warnings: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ParsedNote {
     cell: CellRef,
@@ -64,14 +72,14 @@ struct ParsedNote {
 
 /// Best-effort parse of legacy note comments from a worksheet BIFF substream.
 ///
-/// Returns `(notes, warnings)`. Warnings are non-fatal and should be surfaced to
-/// callers so partially-imported `.xls` files can be debugged.
+/// Returns parsed notes + non-fatal warnings (bounded per sheet) so callers can surface partial
+/// `.xls` imports to users and aid debugging.
 pub(crate) fn parse_biff_sheet_notes(
     workbook_stream: &[u8],
     start: usize,
     biff: BiffVersion,
     codepage: u16,
-) -> Result<(Vec<BiffNote>, Vec<String>), String> {
+) -> Result<ParsedSheetNotes, String> {
     let allows_continuation = |record_id: u16| record_id == RECORD_TXO;
     let iter =
         records::LogicalBiffRecordIter::from_offset(workbook_stream, start, allows_continuation)?;
@@ -87,7 +95,7 @@ pub(crate) fn parse_biff_sheet_notes(
             Err(err) => {
                 // Best-effort: stop on a malformed record, but surface a warning so callers can
                 // report partial import to the user.
-                warnings.push(format!("malformed BIFF record: {err}"));
+                push_warning(&mut warnings, format!("malformed BIFF record: {err}"));
                 break;
             }
         };
@@ -111,10 +119,13 @@ pub(crate) fn parse_biff_sheet_notes(
             RECORD_TXO => {
                 // The current object id applies only to the next TXO record.
                 let Some(obj_id) = current_obj_id.take() else {
-                    warnings.push(format!(
-                        "TXO record at offset {} missing preceding OBJ object id",
-                        record.offset
-                    ));
+                    push_warning(
+                        &mut warnings,
+                        format!(
+                            "TXO record at offset {} missing preceding OBJ object id",
+                            record.offset
+                        ),
+                    );
                     continue;
                 };
 
@@ -136,12 +147,15 @@ pub(crate) fn parse_biff_sheet_notes(
         else {
             // No TXO payload for this NOTE record: keep best-effort import going, but skip creating
             // a model comment with missing text.
-            warnings.push(format!(
-                "NOTE record for cell {} references missing TXO payload (obj_id={}, fallback_obj_id={})",
-                note.cell.to_a1(),
-                note.primary_obj_id,
-                note.secondary_obj_id
-            ));
+            push_warning(
+                &mut warnings,
+                format!(
+                    "NOTE record for cell {} references missing TXO payload (obj_id={}, fallback_obj_id={})",
+                    note.cell.to_a1(),
+                    note.primary_obj_id,
+                    note.secondary_obj_id
+                ),
+            );
             continue;
         };
 
@@ -153,7 +167,17 @@ pub(crate) fn parse_biff_sheet_notes(
         });
     }
 
-    Ok((out, warnings))
+    Ok(ParsedSheetNotes {
+        notes: out,
+        warnings,
+    })
+}
+
+fn push_warning(warnings: &mut Vec<String>, warning: impl Into<String>) {
+    if warnings.len() >= MAX_WARNINGS_PER_SHEET {
+        return;
+    }
+    warnings.push(warning.into());
 }
 
 fn parse_note_record(
@@ -164,10 +188,13 @@ fn parse_note_record(
     warnings: &mut Vec<String>,
 ) -> Option<ParsedNote> {
     if data.len() < 8 {
-        warnings.push(format!(
-            "NOTE record at offset {offset} is too short (len={})",
-            data.len()
-        ));
+        push_warning(
+            warnings,
+            format!(
+                "NOTE record at offset {offset} is too short (len={})",
+                data.len()
+            ),
+        );
         return None;
     }
 
@@ -178,9 +205,12 @@ fn parse_note_record(
     let primary_obj_id = u16::from_le_bytes([data[6], data[7]]);
     let secondary_obj_id = u16::from_le_bytes([data[4], data[5]]);
     if row >= EXCEL_MAX_ROWS || col >= EXCEL_MAX_COLS {
-        warnings.push(format!(
-            "NOTE record at offset {offset} references out-of-bounds cell ({row},{col}) (obj_id={primary_obj_id}, fallback_obj_id={secondary_obj_id})"
-        ));
+        push_warning(
+            warnings,
+            format!(
+                "NOTE record at offset {offset} references out-of-bounds cell ({row},{col}) (obj_id={primary_obj_id}, fallback_obj_id={secondary_obj_id})"
+            ),
+        );
         return None;
     }
 
@@ -207,16 +237,20 @@ fn parse_note_record(
                 match strings::parse_biff8_unicode_string(author_bytes, codepage) {
                     Ok((alt, _)) => alt,
                     Err(unicode_err) => {
-                        warnings.push(format!(
-                            "failed to parse NOTE author string at offset {offset}: {err}; XLUnicodeString fallback also failed: {unicode_err}"
-                        ));
+                        push_warning(
+                            warnings,
+                            format!(
+                                "failed to parse NOTE author string at offset {offset}: {err}; XLUnicodeString fallback also failed: {unicode_err}"
+                            ),
+                        );
                         String::new()
                     }
                 }
             } else {
-                warnings.push(format!(
-                    "failed to parse NOTE author string at offset {offset}: {err}"
-                ));
+                push_warning(
+                    warnings,
+                    format!("failed to parse NOTE author string at offset {offset}: {err}"),
+                );
                 String::new()
             }
         }
@@ -247,16 +281,18 @@ fn parse_obj_record_id(
         let end = match idx.checked_add(cb) {
             Some(end) => end,
             None => {
-                warnings.push(format!(
-                    "OBJ record at offset {record_offset} has subrecord length overflow"
-                ));
+                push_warning(
+                    warnings,
+                    format!("OBJ record at offset {record_offset} has subrecord length overflow"),
+                );
                 break;
             }
         };
         let Some(sub) = data.get(idx..end) else {
-            warnings.push(format!(
+            push_warning(
+                warnings,
                 "OBJ record at offset {record_offset} has truncated subrecord 0x{ft:04X} (cb={cb})"
-            ));
+            );
             break;
         };
 
@@ -265,10 +301,13 @@ fn parse_obj_record_id(
             if sub.len() >= 4 {
                 obj_id = Some(u16::from_le_bytes([sub[2], sub[3]]));
             } else {
-                warnings.push(format!(
-                    "OBJ record has truncated ftCmo subrecord (len={})",
-                    sub.len()
-                ));
+                push_warning(
+                    warnings,
+                    format!(
+                        "OBJ record has truncated ftCmo subrecord (len={})",
+                        sub.len()
+                    ),
+                );
             }
         }
 
@@ -276,9 +315,10 @@ fn parse_obj_record_id(
     }
 
     if obj_id.is_none() {
-        warnings.push(format!(
-            "OBJ record at offset {record_offset} missing ftCmo object id"
-        ));
+        push_warning(
+            warnings,
+            format!("OBJ record at offset {record_offset} missing ftCmo object id"),
+        );
     }
     obj_id
 }
@@ -322,6 +362,16 @@ fn parse_txo_text_biff5(
 
     let fragments: Vec<&[u8]> = record.fragments().collect();
     let continues = fragments.get(1..).unwrap_or_default();
+    if continues.is_empty() {
+        push_warning(
+            warnings,
+            format!(
+                "TXO record at offset {} missing CONTINUE fragments (expected {cch_text} chars)",
+                record.offset
+            ),
+        );
+        return Some(String::new());
+    }
 
     let mut skip_leading_flag_bytes = false;
     if let Some(first_continue) = continues.first().copied() {
@@ -384,11 +434,14 @@ fn parse_txo_text_biff5(
     }
 
     if remaining > 0 {
-        warnings.push(format!(
-            "TXO record at offset {} truncated text (wanted {cch_text} chars, got {})",
-            record.offset,
-            cch_text.saturating_sub(remaining)
-        ));
+        push_warning(
+            warnings,
+            format!(
+                "TXO record at offset {} truncated text (wanted {cch_text} chars, got {})",
+                record.offset,
+                cch_text.saturating_sub(remaining)
+            ),
+        );
     }
     trim_trailing_nuls(&mut out);
     strip_embedded_nuls(&mut out);
@@ -404,6 +457,27 @@ fn parse_txo_text_biff8(
     let fragments: Vec<&[u8]> = record.fragments().collect();
     let continues = fragments.get(1..).unwrap_or_default();
     if continues.is_empty() {
+        match parse_txo_cch_text(first, 0) {
+            Some(0) => {}
+            Some(cch_text) => {
+                push_warning(
+                    warnings,
+                    format!(
+                        "TXO record at offset {} missing CONTINUE fragments (expected {cch_text} chars)",
+                        record.offset
+                    ),
+                );
+            }
+            None => {
+                push_warning(
+                    warnings,
+                    format!(
+                        "TXO record at offset {} missing CONTINUE fragments (unable to read cchText from header)",
+                        record.offset
+                    ),
+                );
+            }
+        }
         return Some(String::new());
     }
 
@@ -417,10 +491,13 @@ fn parse_txo_text_biff8(
     let total_continue_bytes: usize = continues.iter().map(|frag| frag.len()).sum();
     let text_continue_bytes = total_continue_bytes.saturating_sub(cb_runs);
     if cb_runs > total_continue_bytes {
-        warnings.push(format!(
-            "TXO record at offset {} has cbRuns ({cb_runs}) larger than continuation payload ({total_continue_bytes})",
-            record.offset
-        ));
+        push_warning(
+            warnings,
+            format!(
+                "TXO record at offset {} has cbRuns ({cb_runs}) larger than continuation payload ({total_continue_bytes})",
+                record.offset
+            ),
+        );
     }
 
     let max_chars = estimate_max_chars_with_byte_limit(continues, text_continue_bytes);
@@ -464,11 +541,14 @@ fn parse_txo_text_biff8(
     }
 
     if remaining > 0 {
-        warnings.push(format!(
-            "TXO record at offset {} truncated text (wanted {cch_text} chars, got {})",
-            record.offset,
-            cch_text.saturating_sub(remaining)
-        ));
+        push_warning(
+            warnings,
+            format!(
+                "TXO record at offset {} truncated text (wanted {cch_text} chars, got {})",
+                record.offset,
+                cch_text.saturating_sub(remaining)
+            ),
+        );
     }
     trim_trailing_nuls(&mut out);
     strip_embedded_nuls(&mut out);
@@ -552,13 +632,20 @@ fn fallback_decode_first_continue(
     let mut fragments = record.fragments();
     let _ = fragments.next(); // skip header
     let Some(first) = fragments.next() else {
+        push_warning(
+            warnings,
+            format!("TXO record at offset {} missing CONTINUE fragments", record.offset),
+        );
         return Some(String::new());
     };
 
-    warnings.push(format!(
-        "TXO record at offset {} has malformed header; falling back to decoding first CONTINUE fragment",
-        record.offset
-    ));
+    push_warning(
+        warnings,
+        format!(
+            "TXO record at offset {} has malformed header; falling back to decoding first CONTINUE fragment",
+            record.offset
+        ),
+    );
     let Some((&flags, bytes)) = first.split_first() else {
         return Some(String::new());
     };
@@ -580,13 +667,20 @@ fn fallback_decode_first_continue_biff5(
     let mut fragments = record.fragments();
     let _ = fragments.next(); // skip header
     let Some(first) = fragments.next() else {
+        push_warning(
+            warnings,
+            format!("TXO record at offset {} missing CONTINUE fragments", record.offset),
+        );
         return Some(String::new());
     };
 
-    warnings.push(format!(
-        "TXO record at offset {} has malformed header; falling back to decoding first CONTINUE fragment",
-        record.offset
-    ));
+    push_warning(
+        warnings,
+        format!(
+            "TXO record at offset {} has malformed header; falling back to decoding first CONTINUE fragment",
+            record.offset
+        ),
+    );
 
     if first.is_empty() {
         return Some(String::new());
@@ -844,7 +938,7 @@ mod tests {
         ]
         .concat();
 
-        let (notes, warnings) =
+        let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
         assert!(
             warnings.is_empty(),
@@ -880,7 +974,7 @@ mod tests {
         ]
         .concat();
 
-        let (notes, warnings) =
+        let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff5, 1251).expect("parse");
         assert!(
             warnings.is_empty(),
@@ -909,7 +1003,7 @@ mod tests {
         ]
         .concat();
 
-        let (notes, warnings) =
+        let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff5, 1251).expect("parse");
         assert!(
             warnings.is_empty(),
@@ -932,7 +1026,7 @@ mod tests {
         ]
         .concat();
 
-        let (notes, warnings) =
+        let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
         assert!(
             warnings.is_empty(),
@@ -954,7 +1048,7 @@ mod tests {
         ]
         .concat();
 
-        let (notes, warnings) =
+        let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
         assert!(
             warnings.is_empty(),
@@ -976,7 +1070,7 @@ mod tests {
         ]
         .concat();
 
-        let (notes, warnings) =
+        let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
         assert!(
             warnings.is_empty(),
@@ -1003,7 +1097,7 @@ mod tests {
         ]
         .concat();
 
-        let (notes, warnings) =
+        let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
         assert!(
             warnings.is_empty(),
@@ -1047,7 +1141,7 @@ mod tests {
         ]
         .concat();
 
-        let (notes, warnings) =
+        let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
         assert!(
             warnings.is_empty(),
@@ -1074,7 +1168,7 @@ mod tests {
         ]
         .concat();
 
-        let (notes, warnings) =
+        let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].text, "Hello");
@@ -1094,7 +1188,7 @@ mod tests {
         ]
         .concat();
 
-        let (notes, warnings) =
+        let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
         assert!(notes.is_empty(), "expected note to be skipped");
         assert!(
@@ -1118,7 +1212,7 @@ mod tests {
         ]
         .concat();
 
-        let (notes, warnings) =
+        let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].text, "Hello");
@@ -1141,7 +1235,7 @@ mod tests {
         ]
         .concat();
 
-        let (notes, warnings) =
+        let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff5, 1252).expect("parse");
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].text, "Hi");
@@ -1163,7 +1257,7 @@ mod tests {
         ]
         .concat();
 
-        let (notes, warnings) =
+        let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
         assert!(
             warnings.is_empty(),
@@ -1186,7 +1280,7 @@ mod tests {
         ]
         .concat();
 
-        let (notes, warnings) =
+        let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1251).expect("parse");
         assert!(
             warnings.is_empty(),
@@ -1211,7 +1305,7 @@ mod tests {
         ]
         .concat();
 
-        let (notes, warnings) =
+        let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
         assert!(
             warnings.is_empty(),
@@ -1238,7 +1332,7 @@ mod tests {
         ]
         .concat();
 
-        let (notes, warnings) =
+        let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].text, "Hello");
@@ -1290,7 +1384,7 @@ mod tests {
         ]
         .concat();
 
-        let (notes, warnings) =
+        let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff5, 1251).expect("parse");
         assert!(
             warnings.is_empty(),
@@ -1324,7 +1418,7 @@ mod tests {
         ]
         .concat();
 
-        let (notes, warnings) =
+        let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff5, 1251).expect("parse");
         assert!(
             warnings.is_empty(),
@@ -1349,7 +1443,7 @@ mod tests {
         ]
         .concat();
 
-        let (notes, warnings) =
+        let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
         assert!(
             warnings.is_empty(),

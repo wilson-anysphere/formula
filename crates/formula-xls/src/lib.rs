@@ -743,13 +743,13 @@ fn import_xls_path_with_biff_reader(
                         biff_version,
                         codepage,
                     ) {
-                        Ok((notes, note_warnings)) => {
-                            let notes: Vec<biff::BiffNote> = notes;
-                            warnings.extend(note_warnings.into_iter().map(|w| {
+                        Ok(parsed) => {
+                            warnings.extend(parsed.warnings.into_iter().map(|w| {
                                 ImportWarning::new(format!(
-                                    "failed to fully import `.xls` note comments for sheet `{sheet_name}` (index {sheet_idx}): {w}"
+                                    "failed to import `.xls` note comment in sheet `{sheet_name}`: {w}"
                                 ))
                             }));
+                            let notes: Vec<biff::BiffNote> = parsed.notes;
                             let mut used_note_ids: HashSet<String> = HashSet::new();
                             for note in notes {
                                 let anchor = sheet.merged_regions.resolve_cell(note.cell);
