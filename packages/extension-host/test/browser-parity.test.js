@@ -47,3 +47,31 @@ test("permission schema: API_PERMISSIONS only uses known manifest permissions", 
   }
   assert.deepEqual([...unknown].sort(), []);
 });
+
+test("browser host parity: permission management methods are available on both hosts", async () => {
+  const browserModuleUrl = pathToFileURL(
+    path.join(__dirname, "..", "src", "browser", "index.mjs")
+  ).href;
+  const browserPkg = await import(browserModuleUrl);
+
+  const browserProto = browserPkg.BrowserExtensionHost?.prototype;
+  const nodeProto = nodeHostPkg.ExtensionHost?.prototype;
+  assert.ok(browserProto, "Expected BrowserExtensionHost prototype");
+  assert.ok(nodeProto, "Expected ExtensionHost prototype");
+
+  const methods = [
+    "getGrantedPermissions",
+    "revokePermissions",
+    "resetPermissions",
+    "resetAllPermissions"
+  ];
+
+  for (const method of methods) {
+    assert.equal(
+      typeof browserProto[method],
+      "function",
+      `BrowserExtensionHost missing method: ${method}`
+    );
+    assert.equal(typeof nodeProto[method], "function", `ExtensionHost missing method: ${method}`);
+  }
+});
