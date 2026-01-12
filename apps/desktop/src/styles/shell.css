@@ -374,6 +374,16 @@ dialog.goto-dialog::backdrop {
   min-width: 0;
 }
 
+.statusbar-mode {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .statusbar code {
   font-family:
     ui-monospace,

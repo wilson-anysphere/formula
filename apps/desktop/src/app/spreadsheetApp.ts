@@ -433,6 +433,9 @@ export class SpreadsheetApp {
   });
   private readonly selectionListeners = new Set<(selection: SelectionState) => void>();
 
+  private editState = false;
+  private readonly editStateListeners = new Set<(isEditing: boolean) => void>();
+
   private editor: CellEditorOverlay;
   private formulaBar: FormulaBarView | null = null;
   private formulaBarCompletion: FormulaBarTabCompletionController | null = null;
@@ -656,6 +659,7 @@ export class SpreadsheetApp {
 
     this.editor = new CellEditorOverlay(this.root, {
       onCommit: (commit) => {
+        this.updateEditState();
         this.applyEdit(this.sheetId, commit.cell, commit.value);
 
         const next = navigateSelectionByKey(
@@ -674,6 +678,7 @@ export class SpreadsheetApp {
         this.focus();
       },
       onCancel: () => {
+        this.updateEditState();
         this.renderSelection();
         this.updateStatus();
         this.focus();
@@ -917,6 +922,7 @@ export class SpreadsheetApp {
         onBeginEdit: () => {
           this.formulaEditCell = { sheetId: this.sheetId, cell: { ...this.selection.active } };
           this.syncSharedGridInteractionMode();
+          this.updateEditState();
         },
         onGoTo: (reference) => this.goTo(reference),
         onCommit: (text) => this.commitFormulaBar(text),
@@ -1021,6 +1027,7 @@ export class SpreadsheetApp {
       this.syncSharedGridSelectionFromState();
     }
     this.uiReady = true;
+    this.editState = this.isEditing();
   }
 
   destroy(): void {
@@ -1095,6 +1102,27 @@ export class SpreadsheetApp {
 
   focus(): void {
     this.root.focus();
+  }
+
+  isEditing(): boolean {
+    return this.editor.isOpen() || Boolean(this.formulaBar?.isEditing());
+  }
+
+  onEditStateChange(listener: (isEditing: boolean) => void): () => void {
+    this.editStateListeners.add(listener);
+    listener(this.isEditing());
+    return () => {
+      this.editStateListeners.delete(listener);
+    };
+  }
+
+  private updateEditState(): void {
+    const next = this.isEditing();
+    if (next === this.editState) return;
+    this.editState = next;
+    for (const listener of this.editStateListeners) {
+      listener(next);
+    }
   }
 
   async whenIdle(): Promise<void> {
@@ -1765,6 +1793,7 @@ export class SpreadsheetApp {
     if (!rect) return;
     const initialValue = request.initialKey ?? this.getCellInputText(docCell);
     this.editor.open(docCell, rect, initialValue, { cursor: "end" });
+    this.updateEditState();
   }
 
   private onSharedGridAxisSizeChange(change: GridAxisSizeChange): void {
@@ -4786,6 +4815,7 @@ export class SpreadsheetApp {
       if (!bounds) return;
       const initialValue = this.getCellInputText(cell);
       this.editor.open(cell, bounds, initialValue, { cursor: "end" });
+      this.updateEditState();
       return;
     }
 
@@ -4965,6 +4995,7 @@ export class SpreadsheetApp {
       const bounds = this.getCellRect(cell);
       if (!bounds) return;
       this.editor.open(cell, bounds, e.key, { cursor: "end" });
+      this.updateEditState();
       return;
     }
 
@@ -5418,6 +5449,7 @@ export class SpreadsheetApp {
   }
 
   private commitFormulaBar(text: string): void {
+    this.updateEditState();
     const target = this.formulaEditCell ?? { sheetId: this.sheetId, cell: { ...this.selection.active } };
     this.applyEdit(target.sheetId, target.cell, text);
 
@@ -5439,6 +5471,7 @@ export class SpreadsheetApp {
   }
 
   private cancelFormulaBar(): void {
+    this.updateEditState();
     const target = this.formulaEditCell;
     this.formulaEditCell = null;
     this.referencePreview = null;

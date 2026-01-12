@@ -165,6 +165,7 @@ formulaBarRoot.replaceChildren(ribbonRoot, formulaBarContainer);
 const activeCell = document.querySelector<HTMLElement>('[data-testid="active-cell"]');
 const selectionRange = document.querySelector<HTMLElement>('[data-testid="selection-range"]');
 const activeValue = document.querySelector<HTMLElement>('[data-testid="active-value"]');
+const statusMode = document.querySelector<HTMLElement>('[data-testid="status-mode"]');
 const sheetSwitcher = document.querySelector<HTMLSelectElement>('[data-testid="sheet-switcher"]');
 const undoButton = document.querySelector<HTMLButtonElement>('[data-testid="undo"]');
 const redoButton = document.querySelector<HTMLButtonElement>('[data-testid="redo"]');
@@ -173,7 +174,7 @@ const auditPrecedents = document.querySelector<HTMLButtonElement>('[data-testid=
 const auditDependents = document.querySelector<HTMLButtonElement>('[data-testid="audit-dependents"]');
 const auditTransitive = document.querySelector<HTMLButtonElement>('[data-testid="audit-transitive"]');
 const openVbaMigratePanel = document.querySelector<HTMLButtonElement>('[data-testid="open-vba-migrate-panel"]');
-if (!activeCell || !selectionRange || !activeValue || !sheetSwitcher) {
+if (!activeCell || !selectionRange || !activeValue || !statusMode || !sheetSwitcher) {
   throw new Error("Missing status bar elements");
 }
 const sheetSwitcherEl = sheetSwitcher;
@@ -200,6 +201,11 @@ let activePanelWorkbookId = workbookId;
 // Treat the seeded demo workbook as an initial "saved" baseline so web reloads
 // and Playwright tests aren't blocked by unsaved-changes prompts.
 app.getDocument().markSaved();
+
+app.onEditStateChange((isEditing) => {
+  statusMode.textContent = isEditing ? "Edit" : "Ready";
+});
+
 app.focus();
 const syncUndoRedoButtons = () => {
   const state = app.getUndoRedoState();
