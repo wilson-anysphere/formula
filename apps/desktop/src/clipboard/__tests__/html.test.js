@@ -194,3 +194,30 @@ test("clipboard HTML strips NUL padding from non-CF_HTML HTML payloads", () => {
   assert.ok(grid);
   assert.equal(grid[0][0].value, "Hello");
 });
+
+test("clipboard HTML honors CF_HTML offsets when payload has leading NUL padding", () => {
+  // Omit fragment markers so parsing must rely on StartFragment/EndFragment offsets, and include a
+  // preceding table so we can detect when offset parsing fails and we fall back to the wrong table.
+  const base = buildCfHtmlPayload("<table><tr><td>RIGHT</td></tr></table>", {
+    beforeFragmentHtml: "<table><tr><td>WRONG</td></tr></table>",
+    includeFragmentMarkers: false,
+    offsets: "bytes",
+  });
+
+  const pad8 = (n) => String(n).padStart(8, "0");
+  const bump = (name, input) =>
+    input.replace(new RegExp(`(${name}:)(\\d{8})`), (_, prefix, num) => {
+      const next = Number.parseInt(num, 10) + 1;
+      return `${prefix}${pad8(next)}`;
+    });
+
+  // Prefix with a NUL and update offsets to include it.
+  let cfHtml = `\u0000${base}`;
+  for (const name of ["StartHTML", "EndHTML", "StartFragment", "EndFragment"]) {
+    cfHtml = bump(name, cfHtml);
+  }
+
+  const grid = parseHtmlToCellGrid(cfHtml);
+  assert.ok(grid);
+  assert.equal(grid[0][0].value, "RIGHT");
+});

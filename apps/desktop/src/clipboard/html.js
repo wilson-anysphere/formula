@@ -43,7 +43,13 @@ function normalizeClipboardHtml(html) {
   if (typeof html !== "string") return "";
 
   // Some producers include null padding/terminators.
-  const input = html.replace(/^\u0000+/, "").replace(/\u0000+$/, "");
+  //
+  // Important: strip trailing NULs eagerly (so we don't end up with odd characters at the end of
+  // otherwise-valid markup), but avoid stripping *leading* NULs here. Some native clipboard bridges
+  // include those leading bytes in CF_HTML offset calculations; removing them up-front would shift
+  // StartHTML/StartFragment offsets and break extraction. Leading NULs are still removed later via
+  // `stripToMarkup(...)`, which slices from the first HTML tag.
+  const input = html.replace(/\u0000+$/, "");
 
   const findStartOfMarkup = (s) => {
     const doctype = s.search(/<!doctype/i);
