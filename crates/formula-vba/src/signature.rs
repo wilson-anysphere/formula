@@ -2,7 +2,6 @@ use thiserror::Error;
 
 use crate::{
     authenticode::extract_vba_signature_signed_digest,
-    compute_vba_project_digest_v3,
     contents_hash::content_normalized_data,
     normalized_data::forms_normalized_data,
     OleError,
@@ -73,12 +72,11 @@ pub struct VbaDigitalSignature {
     /// Whether the signature is bound to the VBA project via the MS-OVBA digest ("Contents Hash")
     /// mechanism (V3 Content Hash for `DigitalSignatureExt`).
     ///
-    /// Note: per MS-OSHARED §4.3, Office uses **16-byte MD5** binding digest bytes for legacy VBA
-    /// signature streams (`\x05DigitalSignature` / `\x05DigitalSignatureEx`) even when
-    /// `DigestInfo.digestAlgorithm.algorithm` indicates SHA-256.
-    ///
-    /// For the v3 `\x05DigitalSignatureExt` variant, Office uses the MS-OVBA v3 transcript and the
-    /// digest bytes are typically **SHA-256** over v3 `ProjectNormalizedData`.
+    /// Note: for VBA signatures the binding digest bytes embedded in Authenticode
+    /// `SpcIndirectDataContent.messageDigest.digest` are always a **16-byte MD5** for legacy
+    /// signature streams (`\x05DigitalSignature` / `\x05DigitalSignatureEx`), even when
+    /// `DigestInfo.digestAlgorithm` is SHA-256 (MS-OSHARED §4.3). For `\x05DigitalSignatureExt`,
+    /// MS-OVBA v3 binding uses a **32-byte SHA-256** digest (`ContentsHashV3`).
     pub binding: VbaSignatureBinding,
 }
 
@@ -110,10 +108,9 @@ pub struct VbaDigitalSignatureBound {
 pub struct VbaProjectDigestDebugInfo {
     /// OID from `DigestInfo.digestAlgorithm.algorithm` (if found).
     ///
-    /// Note: for legacy VBA signature streams (`DigitalSignature` / `DigitalSignatureEx`), this OID
-    /// is not authoritative for binding; Office uses 16-byte MD5 digest bytes per MS-OSHARED §4.3
-    /// even when the OID indicates SHA-256. For v3 (`DigitalSignatureExt`), the OID is expected to
-    /// indicate the digest algorithm for the v3 transcript (typically SHA-256).
+    /// Note: for VBA signatures this OID is not authoritative for binding; the digest bytes are
+    /// always MD5 per MS-OSHARED §4.3 for legacy signature streams (`DigitalSignature` /
+    /// `DigitalSignatureEx`). For `DigitalSignatureExt`, MS-OVBA v3 binding uses SHA-256.
     pub hash_algorithm_oid: Option<String>,
     /// Human-readable name for the hash algorithm (best-effort).
     pub hash_algorithm_name: Option<String>,
@@ -454,22 +451,7 @@ pub fn verify_vba_digital_signature_bound(
 
         match signature.stream_kind {
             VbaSignatureStreamKind::DigitalSignatureExt => {
-                // V3 (`DigitalSignatureExt`) binds against the MS-OVBA v3 transcript. MS-OVBA
-                // specifies SHA-256 for `ContentsHashV3`, but in the wild the DigestInfo algorithm
-                // OID can vary and may even be inconsistent with the digest length.
-                //
-                // Infer the digest algorithm primarily from the digest length (16/20/32 →
-                // MD5/SHA-1/SHA-256), falling back to the OID.
-                let Some(alg) = digest_alg_from_digest_len(signed.digest.len())
-                    .or_else(|| digest_alg_from_oid_str(&signed.digest_algorithm_oid))
-                else {
-                    return Ok(Some(VbaDigitalSignatureBound {
-                        signature,
-                        binding: VbaProjectBindingVerification::BoundUnknown(debug),
-                    }));
-                };
-
-                if let Ok(computed) = compute_vba_project_digest_v3(vba_project_bin, alg) {
+                if let Ok(computed) = crate::contents_hash_v3(vba_project_bin) {
                     debug.computed_digest = Some(computed.clone());
                     if signature.verification == VbaSignatureVerification::SignedVerified {
                         let binding = if signed.digest.as_slice() == computed.as_slice() {
@@ -547,11 +529,11 @@ pub fn verify_vba_digital_signature_bound(
 /// MS-OVBA Contents Hash transcript (Content Hash / Agile Content Hash, or the V3 Content Hash for
 /// `DigitalSignatureExt`).
 ///
-/// Note: for legacy VBA signature streams (`\x05DigitalSignature` / `\x05DigitalSignatureEx`),
-/// Office uses 16-byte MD5 digest bytes for binding even when `DigestInfo.digestAlgorithm.algorithm`
-/// indicates SHA-256 (MS-OSHARED §4.3). For the v3 `\x05DigitalSignatureExt` stream, the digest
-/// algorithm OID is meaningful (typically SHA-256) and the digest bytes are computed over the
-/// MS-OVBA v3 transcript.
+/// Note:
+/// - For legacy signature streams (`\x05DigitalSignature` / `\x05DigitalSignatureEx`), the embedded
+///   binding digest bytes are always a 16-byte MD5 even when `DigestInfo.digestAlgorithm` indicates
+///   SHA-256 (MS-OSHARED §4.3).
+/// - For `\x05DigitalSignatureExt`, binding uses MS-OVBA v3 `ContentsHashV3` (SHA-256).
 ///
 /// If multiple signature streams are present, we prefer:
 /// 1) The first signature stream (by Excel-like stream-name ordering; see `signature_path_rank`)
@@ -730,10 +712,11 @@ pub fn verify_vba_digital_signature_with_trust(
 /// Verify whether a VBA signature blob is bound to the given `vbaProject.bin` payload via the
 /// MS-OVBA "Contents Hash" mechanism.
 ///
-/// Note: for legacy VBA signature streams (`\x05DigitalSignature` / `\x05DigitalSignatureEx`),
-/// Office uses 16-byte MD5 digest bytes for binding even when `DigestInfo.digestAlgorithm.algorithm`
-/// indicates SHA-256 (MS-OSHARED §4.3). For v3 `\x05DigitalSignatureExt`, the digest algorithm OID is
-/// meaningful (typically SHA-256) and the digest bytes are computed over the MS-OVBA v3 transcript.
+/// Note:
+/// - For legacy signature streams (`\x05DigitalSignature` / `\x05DigitalSignatureEx`), Office stores
+///   a 16-byte MD5 binding digest even when the `DigestInfo.digestAlgorithm` OID indicates SHA-256
+///   (MS-OSHARED §4.3).
+/// - For `\x05DigitalSignatureExt`, binding uses MS-OVBA v3 `ContentsHashV3` (SHA-256).
 ///
 /// This is a best-effort helper: it returns [`VbaSignatureBinding::Unknown`] when the signature does
 /// not contain a supported digest structure, uses an unsupported hash algorithm, or the binding
@@ -758,39 +741,11 @@ pub fn verify_vba_signature_binding_with_stream_path(
 
         let signed_digest = signed.digest.as_slice();
 
-        let stream_kind = signature_path_stream_kind(signature_stream_path);
-        // Prefer v3 when the stream kind indicates `DigitalSignatureExt`.
-        //
-        // For legacy v1/v2 (`DigitalSignature` / `DigitalSignatureEx`) streams, Office uses a
-        // 16-byte MD5 digest for binding per MS-OSHARED §4.3, even when the DigestInfo algorithm OID
-        // indicates SHA-256.
-        //
-        // For v3 (`DigitalSignatureExt`), the digest bytes are computed over the MS-OVBA v3
-        // transcript and the digest algorithm is meaningful (typically SHA-256; MS-OVBA §2.4.2.7).
-        //
-        // When the stream kind is unknown (or not provided), digest length is only a heuristic:
-        // 20/32-byte digests strongly suggest v3, but 16-byte digests are ambiguous (legacy v1/v2 vs
-        // v3 using MD5). We therefore default to legacy binding for 16-byte digests and use a
-        // best-effort v3 fallback below if the legacy comparison fails.
-        let treat_as_v3 = match stream_kind {
-            Some(VbaSignatureStreamKind::DigitalSignatureExt) => true,
-            Some(VbaSignatureStreamKind::DigitalSignature)
-            | Some(VbaSignatureStreamKind::DigitalSignatureEx) => false,
-            Some(VbaSignatureStreamKind::Unknown) | None => signed_digest.len() != 16,
-        };
-
-        if treat_as_v3 {
-            // V3 (`DigitalSignatureExt`) binds against the MS-OVBA v3 transcript.
-            //
-            // Infer the digest algorithm primarily from the digest length (16/20/32 →
-            // MD5/SHA-1/SHA-256), falling back to the DigestInfo algorithm OID (which can be
-            // inconsistent in the wild).
-            let Some(alg) = digest_alg_from_digest_len(signed_digest.len())
-                .or_else(|| digest_alg_from_oid_str(&signed.digest_algorithm_oid))
-            else {
-                return VbaSignatureBinding::Unknown;
-            };
-            let computed = match compute_vba_project_digest_v3(vba_project_bin, alg) {
+        if matches!(
+            signature_path_stream_kind(signature_stream_path),
+            Some(VbaSignatureStreamKind::DigitalSignatureExt)
+        ) {
+            let computed = match crate::contents_hash_v3(vba_project_bin) {
                 Ok(v) => v,
                 Err(_) => return VbaSignatureBinding::Unknown,
             };
@@ -803,66 +758,33 @@ pub fn verify_vba_signature_binding_with_stream_path(
 
         // Legacy/v2 binding: ContentHash (v1) or AgileContentHash (v2).
         //
-        // For unknown stream kinds with a 16-byte digest, some non-Office producers may still be
-        // using the v3 transcript hashed with MD5. We'll treat this as best-effort: check legacy
-        // binding first, then (if not bound) try the v3 transcript with MD5.
-        let content_normalized = content_normalized_data(vba_project_bin).ok();
+        // MS-OSHARED §4.3: for legacy VBA signatures, Office stores an MD5 digest in
+        // `DigestInfo.digest` even when `DigestInfo.digestAlgorithm.algorithm` indicates SHA-256.
+        let content_normalized = match content_normalized_data(vba_project_bin) {
+            Ok(v) => v,
+            Err(_) => return VbaSignatureBinding::Unknown,
+        };
 
-        let mut agile_hash_md5: Option<[u8; 16]> = None;
-        if let Some(content_normalized) = content_normalized.as_deref() {
-            let content_hash_md5: [u8; 16] = Md5::digest(content_normalized).into();
-            if signed_digest == content_hash_md5 {
-                return VbaSignatureBinding::Bound;
-            }
-
-            // Agile Content Hash (MS-OVBA §2.4.2.4) incorporates designer storages.
-            agile_hash_md5 = forms_normalized_data(vba_project_bin)
-                .ok()
-                .map(|forms_normalized| {
-                    let mut h = Md5::new();
-                    h.update(content_normalized);
-                    h.update(&forms_normalized);
-                    h.finalize().into()
-                });
-            if let Some(h) = agile_hash_md5 {
-                if signed_digest == h {
-                    return VbaSignatureBinding::Bound;
-                }
-            }
+        let content_hash_md5: [u8; 16] = Md5::digest(&content_normalized).into();
+        if signed_digest == content_hash_md5 {
+            return VbaSignatureBinding::Bound;
         }
 
-        let mut v3_md5_compared = false;
-        let mut v3_md5_computed = false;
-        if matches!(stream_kind, Some(VbaSignatureStreamKind::Unknown) | None)
-            && signed_digest.len() == 16
-        {
-            v3_md5_compared = true;
-            if let Ok(computed) =
-                compute_vba_project_digest_v3(vba_project_bin, crate::DigestAlg::Md5)
-            {
-                v3_md5_computed = true;
-                if signed_digest == computed.as_slice() {
-                    return VbaSignatureBinding::Bound;
-                }
-            }
-        }
+        // Agile Content Hash (MS-OVBA §2.4.2.4) incorporates designer storages.
+        let agile_hash_md5: Option<[u8; 16]> = forms_normalized_data(vba_project_bin)
+            .ok()
+            .map(|forms_normalized| {
+                let mut h = Md5::new();
+                h.update(&content_normalized);
+                h.update(&forms_normalized);
+                h.finalize().into()
+            });
 
-        // If we couldn't compute the legacy transcript, we can't verify binding (even if the digest
-        // "looks" like legacy MD5).
-        if content_normalized.is_none() {
-            return VbaSignatureBinding::Unknown;
+        match agile_hash_md5 {
+            Some(h) if signed_digest == h => VbaSignatureBinding::Bound,
+            Some(_) => VbaSignatureBinding::NotBound,
+            None => VbaSignatureBinding::Unknown,
         }
-
-        // If we couldn't compute the Agile hash, we can't distinguish "truly unbound" from "bound
-        // but forms data missing/unparseable", so treat binding as unknown.
-        //
-        // Similarly, if we attempted a best-effort v3 MD5 comparison but couldn't compute the v3
-        // digest, we can't distinguish "unbound" from "v3 bound but transcript unavailable".
-        if agile_hash_md5.is_none() || (v3_md5_compared && !v3_md5_computed) {
-            return VbaSignatureBinding::Unknown;
-        }
-
-        VbaSignatureBinding::NotBound
     }
 }
 
@@ -880,7 +802,46 @@ pub fn verify_vba_signature_binding(
     vba_project_bin: &[u8],
     signature: &[u8],
 ) -> VbaSignatureBinding {
-    verify_vba_signature_binding_with_stream_path(vba_project_bin, "", signature)
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (vba_project_bin, signature);
+        return VbaSignatureBinding::Unknown;
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // When callers don't know which `\x05DigitalSignature*` stream a signature blob came from
+        // (e.g. `xl/vbaProjectSignature.bin` stored as raw PKCS#7/CMS bytes), we can't reliably know
+        // whether to apply legacy (Content/Agile) or v3 (`DigitalSignatureExt`) binding rules.
+        //
+        // Best-effort: try v3 binding first (ContentsHashV3), then fall back to the legacy binding
+        // check. Only return `NotBound` if we were able to compute the v3 digest and it did not
+        // match.
+        let signed = match extract_vba_signature_signed_digest(signature) {
+            Ok(Some(v)) => v,
+            _ => return VbaSignatureBinding::Unknown,
+        };
+
+        let signed_digest = signed.digest.as_slice();
+
+        let v3 = crate::contents_hash_v3(vba_project_bin).ok();
+        if let Some(ref computed) = v3 {
+            if signed_digest == computed.as_slice() {
+                return VbaSignatureBinding::Bound;
+            }
+        }
+
+        let legacy = verify_vba_signature_binding_with_stream_path(vba_project_bin, "", signature);
+        if legacy == VbaSignatureBinding::Bound {
+            return legacy;
+        }
+
+        if v3.is_none() {
+            return VbaSignatureBinding::Unknown;
+        }
+
+        legacy
+    }
 }
 
 /// Evaluate whether the signing certificate embedded in a PKCS#7/CMS VBA signature blob chains to
@@ -920,23 +881,6 @@ fn digest_alg_from_oid_str(oid: &str) -> Option<crate::DigestAlg> {
         _ => None,
     }
 }
-
-fn digest_alg_from_digest_len(len: usize) -> Option<crate::DigestAlg> {
-    // VBA signature binding digests in the wild typically use one of:
-    // - MD5    (16 bytes)
-    // - SHA-1  (20 bytes)
-    // - SHA-256 (32 bytes)
-    //
-    // For VBA signature binding, the `DigestInfo.digestAlgorithm.algorithm` OID is sometimes
-    // inconsistent with the digest bytes (MS-OSHARED §4.3); length-based inference is therefore a
-    // more reliable first-pass.
-    match len {
-        16 => Some(crate::DigestAlg::Md5),
-        20 => Some(crate::DigestAlg::Sha1),
-        32 => Some(crate::DigestAlg::Sha256),
-        _ => None,
-    }
-}
 fn digest_name_from_oid_str(oid: &str) -> Option<&'static str> {
     digest_alg_from_oid_str(oid).map(|alg| match alg {
         crate::DigestAlg::Md5 => "MD5",
@@ -944,7 +888,6 @@ fn digest_name_from_oid_str(oid: &str) -> Option<&'static str> {
         crate::DigestAlg::Sha256 => "SHA-256",
     })
 }
-
 fn signature_kind_rank(kind: VbaSignatureStreamKind) -> u8 {
     match kind {
         VbaSignatureStreamKind::DigitalSignatureExt => 0,
@@ -1447,14 +1390,15 @@ pub fn verify_vba_project_signature_binding(
     let payloads = signature_payload_candidates(signature_bytes);
 
     let mut any_signed_digest = None::<VbaProjectDigestDebugInfo>;
-    let mut first_comparison = None::<VbaProjectDigestDebugInfo>;
-    let mut first_comparison_is_v3 = false;
+    let mut first_mismatch = None::<VbaProjectDigestDebugInfo>;
+    let mut first_unknown = None::<VbaProjectDigestDebugInfo>;
     // Lazily computed MS-OVBA Content/Agile hashes for the project bytes.
     let mut content_hash_md5: Option<[u8; 16]> = None;
     // Outer Option = attempted; inner Option = computed successfully.
     let mut agile_hash_md5: Option<Option<[u8; 16]>> = None;
-    // Lazily computed MS-OVBA v3 digest (for `\x05DigitalSignatureExt`-style signatures).
-    let mut v3_digest: Option<(crate::DigestAlg, Vec<u8>)> = None;
+    // Lazily computed MS-OVBA v3 digest (ContentsHashV3, SHA-256) for `\x05DigitalSignatureExt`.
+    // Outer Option = attempted; inner Option = computed successfully.
+    let mut v3_digest: Option<Option<Vec<u8>>> = None;
     for payload in payloads {
         let signed = match extract_vba_signature_signed_digest(&payload.bytes) {
             Ok(Some(signed)) => signed,
@@ -1473,165 +1417,129 @@ pub fn verify_vba_project_signature_binding(
 
         let signed_digest = signed.digest.as_slice();
 
-        // Prefer v3 transcript computation when we know this signature was loaded from a
-        // `\x05DigitalSignatureExt` stream. When verifying signature payloads outside the main
-        // `vbaProject.bin` (e.g. `xl/vbaProjectSignature.bin`) we may not know the original stream
-        // name; in that case we fall back to heuristics.
+        // Determine which binding rules apply based on the signature stream kind (when known).
         //
-        // Note: for legacy v1/v2 (`DigitalSignature` / `DigitalSignatureEx`) signature streams,
-        // Office uses a 16-byte MD5 digest for binding per MS-OSHARED §4.3 even when the DigestInfo
-        // algorithm OID indicates SHA-256.
+        // When the signature bytes come from an OLE container (e.g. `xl/vbaProjectSignature.bin`),
+        // we can usually detect the `DigitalSignature*` variant from the stream path and apply the
+        // correct MS-OVBA digest:
+        // - `DigitalSignature` / `DigitalSignatureEx`: legacy Content/Agile Content Hash (MD5)
+        // - `DigitalSignatureExt`: ContentsHashV3 (SHA-256)
         //
-        // When the stream kind is unknown (or not provided), digest length is only a heuristic:
-        // 20/32-byte digests strongly suggest v3, but 16-byte digests are ambiguous (legacy v1/v2 vs
-        // v3 using MD5). This helper therefore defaults to legacy binding for 16-byte digests and
-        // falls back to a best-effort v3 comparison below if the legacy comparison fails.
-        //
-        // If we *do* know the stream kind and it is a legacy `DigitalSignature`/`DigitalSignatureEx`
-        // stream, keep legacy semantics even if the digest length is unexpected.
-        let treat_as_v3 = match payload.stream_kind {
-            Some(VbaSignatureStreamKind::DigitalSignatureExt) => true,
-            Some(VbaSignatureStreamKind::DigitalSignature)
-            | Some(VbaSignatureStreamKind::DigitalSignatureEx) => false,
-            Some(VbaSignatureStreamKind::Unknown) | None => signed_digest.len() != 16,
-        };
+        // When the signature bytes are provided as a raw PKCS#7/CMS blob, the original stream name
+        // is unknown; in that case we try both legacy and v3 binding digests.
+        let try_v3 = matches!(
+            payload.stream_kind,
+            Some(VbaSignatureStreamKind::DigitalSignatureExt)
+                | Some(VbaSignatureStreamKind::Unknown)
+                | None
+        );
+        let try_legacy =
+            !matches!(payload.stream_kind, Some(VbaSignatureStreamKind::DigitalSignatureExt));
 
-        if treat_as_v3 {
-            // V3 (`DigitalSignatureExt`) binds against the MS-OVBA v3 transcript. MS-OVBA specifies
-            // SHA-256 for `ContentsHashV3`, but in the wild the DigestInfo algorithm OID can vary and
-            // may even be inconsistent with the digest length.
-            //
-            // Infer the digest algorithm primarily from the digest length (16/20/32 →
-            // MD5/SHA-1/SHA-256), falling back to the OID.
-            let Some(alg) = digest_alg_from_digest_len(signed_digest.len())
-                .or_else(|| digest_alg_from_oid_str(&signed.digest_algorithm_oid))
-            else {
-                continue;
-            };
+        // Track whether we were able to compute all digests relevant to this payload; if not, a
+        // mismatch is treated as `BoundUnknown` rather than `BoundMismatch`.
+        let mut can_decide_mismatch = true;
 
-            let computed = match v3_digest.as_ref() {
-                Some((cached_alg, bytes)) if *cached_alg == alg => bytes.clone(),
-                _ => match compute_vba_project_digest_v3(project_ole, alg) {
-                    Ok(v) => {
-                        v3_digest = Some((alg, v.clone()));
-                        v
+        // ---- V3 binding (`DigitalSignatureExt`) ----
+        if try_v3 {
+            if v3_digest.is_none() {
+                v3_digest = Some(crate::contents_hash_v3(project_ole).ok());
+            }
+
+            match v3_digest.as_ref().and_then(|v| v.as_ref()) {
+                Some(computed) => {
+                    if signed_digest == computed.as_slice() {
+                        debug.computed_digest = Some(computed.clone());
+                        return Ok(VbaProjectBindingVerification::BoundVerified(debug));
                     }
-                    Err(_) => continue,
-                },
-            };
-
-            debug.computed_digest = Some(computed.clone());
-
-            if signed_digest == computed.as_slice() {
-                return Ok(VbaProjectBindingVerification::BoundVerified(debug));
-            }
-
-            if first_comparison.is_none() {
-                first_comparison = Some(debug.clone());
-                first_comparison_is_v3 = true;
-            }
-
-            continue;
-        }
-
-        // MS-OSHARED §4.3: for legacy VBA signatures, the binding digest bytes in `DigestInfo.digest`
-        // are always a 16-byte MD5 even when `DigestInfo.digestAlgorithm.algorithm` indicates
-        // SHA-256.
-        // https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/40c8dab3-e8db-4c66-a6be-8cec06351b1e
-        if content_hash_md5.is_none() {
-            match content_normalized_data(project_ole) {
-                Ok(content_normalized) => {
-                    content_hash_md5 = Some(Md5::digest(&content_normalized).into());
-
-                    // Agile Content Hash (MS-OVBA §2.4.2.4) incorporates designer storages. Only
-                    // compute it when `FormsNormalizedData` is available.
-                    agile_hash_md5 = Some(forms_normalized_data(project_ole).ok().map(|forms| {
-                        let mut h = Md5::new();
-                        h.update(&content_normalized);
-                        h.update(&forms);
-                        h.finalize().into()
-                    }));
+                    // For explicit `DigitalSignatureExt` payloads, surface the v3 digest even on
+                    // mismatch.
+                    if matches!(
+                        payload.stream_kind,
+                        Some(VbaSignatureStreamKind::DigitalSignatureExt)
+                    ) {
+                        debug.computed_digest = Some(computed.clone());
+                    }
                 }
-                Err(_) => continue,
+                None => {
+                    can_decide_mismatch = false;
+                }
             }
         }
-        let Some(content_hash_md5) = content_hash_md5 else {
-            continue;
-        };
-        let agile_hash_md5 = agile_hash_md5.unwrap_or(None);
 
-        // For debug output, pick the digest we actually matched (if any); otherwise surface the
-        // legacy Content Hash (Agile is a strict extension).
-        let computed_for_debug = if signed_digest == content_hash_md5 {
-            content_hash_md5.to_vec()
-        } else if let Some(h) = agile_hash_md5 {
-            if signed_digest == h {
-                h.to_vec()
-            } else {
-                content_hash_md5.to_vec()
+        // ---- Legacy binding (`DigitalSignature` / `DigitalSignatureEx`) ----
+        if try_legacy {
+            // MS-OSHARED §4.3: for legacy VBA signatures, Office stores an MD5 digest in
+            // `DigestInfo.digest` even when `DigestInfo.algorithm` indicates SHA-256.
+            if content_hash_md5.is_none() {
+                match content_normalized_data(project_ole) {
+                    Ok(content_normalized) => {
+                        content_hash_md5 = Some(Md5::digest(&content_normalized).into());
+                        // Agile Content Hash (MS-OVBA §2.4.2.4) incorporates designer storages. Only
+                        // compute it when `FormsNormalizedData` is available.
+                        agile_hash_md5 = Some(forms_normalized_data(project_ole).ok().map(|forms| {
+                            let mut h = Md5::new();
+                            h.update(&content_normalized);
+                            h.update(&forms);
+                            h.finalize().into()
+                        }));
+                    }
+                    Err(_) => {
+                        can_decide_mismatch = false;
+                    }
+                }
             }
-        } else {
-            content_hash_md5.to_vec()
-        };
-        debug.computed_digest = Some(computed_for_debug);
 
-        if first_comparison.is_none() {
-            first_comparison = Some(debug.clone());
-        }
-
-        if signed_digest == content_hash_md5
-            || matches!(agile_hash_md5, Some(h) if signed_digest == h)
-        {
-            return Ok(VbaProjectBindingVerification::BoundVerified(debug));
-        }
-
-        // Best-effort fallback: if we couldn't match the legacy Content/Agile hash and we don't
-        // know which signature stream kind we're verifying, attempt v3 digest binding even when
-        // the digest length looks legacy (16-byte MD5).
-        //
-        // This handles cases where callers pass raw `\x05DigitalSignatureExt` stream bytes (or a
-        // detached `content || pkcs7` blob) without an accompanying stream path/CFB container.
-        if matches!(payload.stream_kind, Some(VbaSignatureStreamKind::Unknown) | None) {
-            let alg = digest_alg_from_digest_len(signed_digest.len())
-                .or_else(|| digest_alg_from_oid_str(&signed.digest_algorithm_oid));
-            if let Some(alg) = alg {
-                let computed = match v3_digest.as_ref() {
-                    Some((cached_alg, bytes)) if *cached_alg == alg => bytes.clone(),
-                    _ => match compute_vba_project_digest_v3(project_ole, alg) {
-                        Ok(v) => {
-                            v3_digest = Some((alg, v.clone()));
-                            v
-                        }
-                        Err(_) => continue,
-                    },
-                };
-
-                if signed_digest == computed.as_slice() {
-                    debug.computed_digest = Some(computed);
+            if let Some(content_hash_md5) = content_hash_md5 {
+                if signed_digest == content_hash_md5 {
+                    debug.computed_digest = Some(content_hash_md5.to_vec());
                     return Ok(VbaProjectBindingVerification::BoundVerified(debug));
                 }
+
+                let agile_hash_md5 = agile_hash_md5.unwrap_or(None);
+                match agile_hash_md5 {
+                    Some(h) => {
+                        if signed_digest == h {
+                            debug.computed_digest = Some(h.to_vec());
+                            return Ok(VbaProjectBindingVerification::BoundVerified(debug));
+                        }
+                    }
+                    None => {
+                        can_decide_mismatch = false;
+                    }
+                }
+
+                // If we haven't already populated a v3 digest for debug output, surface the legacy
+                // content hash.
+                if debug.computed_digest.is_none() {
+                    debug.computed_digest = Some(content_hash_md5.to_vec());
+                }
+            } else {
+                can_decide_mismatch = false;
             }
+        }
+
+        if can_decide_mismatch {
+            if first_mismatch.is_none() {
+                first_mismatch = Some(debug.clone());
+            }
+        } else if first_unknown.is_none() {
+            first_unknown = Some(debug.clone());
         }
     }
 
-    if let Some(debug) = first_comparison {
-        if first_comparison_is_v3 {
-            return Ok(VbaProjectBindingVerification::BoundMismatch(debug));
-        }
-        // If we couldn't compute the Agile hash, we can't distinguish "truly unbound" from "bound
-        // but forms data missing/unparseable", so treat binding as unknown.
-        let agile_hash_md5 = agile_hash_md5.unwrap_or(None);
-        return Ok(if agile_hash_md5.is_some() {
-            VbaProjectBindingVerification::BoundMismatch(debug)
-        } else {
-            VbaProjectBindingVerification::BoundUnknown(debug)
-        });
+    if let Some(debug) = first_mismatch {
+        return Ok(VbaProjectBindingVerification::BoundMismatch(debug));
+    }
+    if let Some(debug) = first_unknown {
+        return Ok(VbaProjectBindingVerification::BoundUnknown(debug));
     }
 
     Ok(VbaProjectBindingVerification::BoundUnknown(
         any_signed_digest.unwrap_or_default(),
     ))
 }
+
 
 #[derive(Debug, Clone)]
 struct SignaturePayloadCandidate {
@@ -1677,8 +1585,9 @@ fn signature_payload_candidates(signature_bytes: &[u8]) -> Vec<SignaturePayloadC
 
 #[cfg(test)]
 mod tests {
-    use super::{digest_alg_from_oid_str, digest_name_from_oid_str};
     use crate::DigestAlg;
+
+    use super::{digest_alg_from_oid_str, digest_name_from_oid_str};
 
     #[test]
     fn digest_alg_from_oid_str_maps_known_digest_oids() {

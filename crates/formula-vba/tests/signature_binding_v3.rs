@@ -4,10 +4,10 @@ use std::io::{Cursor, Write};
 
 use formula_vba::{
     agile_content_hash_md5, compress_container, compute_vba_project_digest_v3, content_hash_md5,
-    verify_vba_digital_signature, verify_vba_digital_signature_bound, verify_vba_project_signature_binding,
-    verify_vba_signature_binding, verify_vba_signature_binding_with_stream_path, DigestAlg,
-    VbaProjectBindingVerification, VbaSignatureBinding, VbaSignatureStreamKind,
-    VbaSignatureVerification,
+    contents_hash_v3, verify_vba_digital_signature, verify_vba_digital_signature_bound,
+    verify_vba_project_signature_binding, verify_vba_signature_binding,
+    verify_vba_signature_binding_with_stream_path, DigestAlg, VbaProjectBindingVerification,
+    VbaSignatureBinding, VbaSignatureStreamKind, VbaSignatureVerification,
 };
 
 mod signature_test_utils;
@@ -276,10 +276,18 @@ fn build_spc_indirect_data_content_md5(project_digest: &[u8]) -> Vec<u8> {
 }
 
 #[test]
-fn verify_v3_md5_binding_when_stream_kind_is_unknown() {
+fn verify_v3_md5_digest_does_not_bind_when_stream_kind_is_unknown() {
     let project_ole = build_minimal_vba_project_bin_v3(None, b"ABC");
     let digest = compute_vba_project_digest_v3(&project_ole, DigestAlg::Md5).expect("digest v3");
     assert_eq!(digest.len(), 16, "MD5 digest must be 16 bytes");
+
+    // Ensure this test is actually exercising a non-legacy digest value.
+    let legacy_content = content_hash_md5(&project_ole).expect("Content hash MD5");
+    let legacy_agile = agile_content_hash_md5(&project_ole)
+        .expect("Agile content hash MD5")
+        .expect("designer present");
+    assert_ne!(digest.as_slice(), legacy_content.as_ref());
+    assert_ne!(digest.as_slice(), legacy_agile.as_ref());
 
     let signed_content = build_spc_indirect_data_content_md5(&digest);
     let pkcs7 = signature_test_utils::make_pkcs7_detached_signature(&signed_content);
@@ -288,29 +296,31 @@ fn verify_v3_md5_binding_when_stream_kind_is_unknown() {
 
     // When the signature bytes are provided without an OLE stream name (for example, raw PKCS#7
     // bytes from an external signature part), we still want best-effort binding verification.
-    // If the digest matches the v3 transcript hashed with MD5, treat it as bound.
+    // However, binding is against ContentsHashV3 (SHA-256) for `DigitalSignatureExt`, and legacy
+    // content/agile hashes for other signature streams. An out-of-spec MD5 digest over the v3
+    // transcript should therefore not bind.
     let binding = verify_vba_signature_binding(&project_ole, &signature_stream_payload);
-    assert_eq!(binding, VbaSignatureBinding::Bound);
+    assert_eq!(binding, VbaSignatureBinding::NotBound);
 
     let binding2 =
         verify_vba_signature_binding_with_stream_path(&project_ole, "", &signature_stream_payload);
-    assert_eq!(binding2, VbaSignatureBinding::Bound);
+    assert_eq!(binding2, VbaSignatureBinding::NotBound);
 
     let binding3 = verify_vba_project_signature_binding(&project_ole, &signature_stream_payload)
         .expect("binding");
     match binding3 {
-        VbaProjectBindingVerification::BoundVerified(debug) => {
+        VbaProjectBindingVerification::BoundMismatch(debug) => {
             assert_eq!(debug.signed_digest.as_deref(), Some(digest.as_slice()));
-            assert_eq!(debug.computed_digest.as_deref(), Some(digest.as_slice()));
+            assert_eq!(debug.computed_digest.as_deref(), Some(legacy_content.as_ref()));
         }
-        other => panic!("expected BoundVerified, got {other:?}"),
+        other => panic!("expected BoundMismatch, got {other:?}"),
     }
 }
 
 #[test]
 fn digital_signature_ext_uses_v3_project_digest_for_binding() {
     let unsigned = build_minimal_vba_project_bin_v3(None, b"ABC");
-    let digest = compute_vba_project_digest_v3(&unsigned, DigestAlg::Sha256).expect("digest v3");
+    let digest = contents_hash_v3(&unsigned).expect("ContentsHashV3");
     assert_eq!(digest.len(), 32, "SHA-256 digest must be 32 bytes");
 
     let signed_content = build_spc_indirect_data_content_sha256(&digest);
@@ -345,8 +355,8 @@ fn digital_signature_ext_uses_v3_project_digest_for_binding() {
         "expected binding to remain Bound for prefixed stream path {prefixed_path}"
     );
 
-    // If callers don't know the original OLE stream name, we fall back to trying all digest
-    // variants; for a non-16-byte digest this should still bind via v3.
+    // If callers don't know the original OLE stream name, we still attempt v3 binding
+    // best-effort by comparing against ContentsHashV3.
     let binding2 = verify_vba_signature_binding(&signed, &signature_stream);
     assert_eq!(binding2, VbaSignatureBinding::Bound);
 
@@ -360,18 +370,18 @@ fn digital_signature_ext_uses_v3_project_digest_for_binding() {
 }
 
 #[test]
-fn digital_signature_ext_binds_md5_digest_bytes_even_when_oid_is_sha256() {
+fn digital_signature_ext_does_not_bind_md5_digest_bytes_even_when_oid_is_sha256() {
     // ---- 1) Build a minimal V3 project with non-empty FormsNormalizedData ----
     let unsigned = build_single_userform_vba_project_bin_v3(None, b"ABC");
 
-    // ---- 2) Compute the V3 binding digest bytes (MD5, 16 bytes) ----
+    // ---- 2) Compute an out-of-spec MD5 digest over the v3 transcript (16 bytes) ----
     let digest_md5 = compute_vba_project_digest_v3(&unsigned, DigestAlg::Md5).expect("digest v3");
     assert_eq!(digest_md5.len(), 16, "MD5 digest must be 16 bytes");
 
     // ---- 3) Construct SpcIndirectDataContent with SHA-256 OID but MD5 digest bytes ----
     //
-    // This mirrors Office behavior described in MS-OSHARED §4.3: the digest bytes for VBA signature
-    // binding are MD5 even when the DigestInfo algorithm OID indicates SHA-256.
+    // For `\x05DigitalSignatureExt`, binding is against MS-OVBA v3 `ContentsHashV3` (SHA-256). This
+    // signature therefore must *not* be considered bound.
     let signed_content = build_spc_indirect_data_content_sha256(&digest_md5);
 
     // ---- 4) Sign and store in \x05DigitalSignatureExt ----
@@ -389,15 +399,15 @@ fn digital_signature_ext_binds_md5_digest_bytes_even_when_oid_is_sha256() {
     assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
     assert_eq!(
         sig.binding,
-        VbaSignatureBinding::Bound,
-        "expected DigitalSignatureExt binding to be Bound even when DigestInfo.digestAlgorithm is SHA-256 but digest bytes are MD5"
+        VbaSignatureBinding::NotBound,
+        "expected DigitalSignatureExt binding to be NotBound when digest bytes are MD5"
     );
 }
 
 #[test]
 fn verify_vba_project_signature_binding_supports_v3_signature_part() {
     let project_ole = build_minimal_vba_project_bin_v3(None, b"ABC");
-    let digest = compute_vba_project_digest_v3(&project_ole, DigestAlg::Sha256).expect("digest v3");
+    let digest = contents_hash_v3(&project_ole).expect("ContentsHashV3");
 
     let signed_content = build_spc_indirect_data_content_sha256(&digest);
     let pkcs7 = signature_test_utils::make_pkcs7_detached_signature(&signed_content);
@@ -423,8 +433,7 @@ fn verify_vba_project_signature_binding_supports_v3_signature_part() {
 
     // Tamper with the project bytes (designer payload) and ensure binding mismatch is detected.
     let tampered_project = build_minimal_vba_project_bin_v3(None, b"ABD");
-    let tampered_digest =
-        compute_vba_project_digest_v3(&tampered_project, DigestAlg::Sha256).expect("digest v3");
+    let tampered_digest = contents_hash_v3(&tampered_project).expect("ContentsHashV3(tampered)");
 
     let binding2 =
         verify_vba_project_signature_binding(&tampered_project, &signature_part).expect("binding");
@@ -441,7 +450,7 @@ fn verify_vba_project_signature_binding_supports_v3_signature_part() {
 }
 
 #[test]
-fn verify_vba_project_signature_binding_supports_v3_signature_part_md5_digest() {
+fn verify_vba_project_signature_binding_supports_v3_signature_part_even_when_oid_is_md5() {
     let project_ole = build_minimal_vba_project_bin_v3(None, b"ABC");
 
     // Ensure this test actually distinguishes v3 (DigitalSignatureExt) from legacy binding.
@@ -450,8 +459,8 @@ fn verify_vba_project_signature_binding_supports_v3_signature_part_md5_digest() 
         .expect("Agile content hash MD5")
         .expect("designer present");
 
-    let digest = compute_vba_project_digest_v3(&project_ole, DigestAlg::Md5).expect("digest v3");
-    assert_eq!(digest.len(), 16, "MD5 digest must be 16 bytes");
+    let digest = contents_hash_v3(&project_ole).expect("ContentsHashV3");
+    assert_eq!(digest.len(), 32, "SHA-256 digest must be 32 bytes");
     assert_ne!(digest.as_slice(), legacy_content.as_ref());
     assert_ne!(digest.as_slice(), legacy_agile.as_ref());
 
@@ -484,56 +493,16 @@ fn verify_vba_project_signature_binding_supports_v3_signature_part_md5_digest() 
 }
 
 #[test]
-fn verify_vba_signature_binding_accepts_v3_md5_digest_even_without_stream_path() {
-    let project_ole = build_minimal_vba_project_bin_v3(None, b"ABC");
-    let digest = compute_vba_project_digest_v3(&project_ole, DigestAlg::Md5).expect("digest v3");
-    assert_eq!(digest.len(), 16, "MD5 digest must be 16 bytes");
-
-    let signed_content = build_spc_indirect_data_content_md5(&digest);
-    let pkcs7 = signature_test_utils::make_pkcs7_detached_signature(&signed_content);
-    let mut signature_stream_payload = signed_content.clone();
-    signature_stream_payload.extend_from_slice(&pkcs7);
-
-    // Verify binding without providing a stream path/stream kind: this exercises the best-effort
-    // v3 fallback for spec-correct 16-byte MD5 digests.
-    let binding = verify_vba_signature_binding(&project_ole, &signature_stream_payload);
-    assert_eq!(binding, VbaSignatureBinding::Bound);
-}
-
-#[test]
-fn verify_vba_project_signature_binding_accepts_v3_md5_raw_stream_payload() {
-    let project_ole = build_minimal_vba_project_bin_v3(None, b"ABC");
-    let digest = compute_vba_project_digest_v3(&project_ole, DigestAlg::Md5).expect("digest v3");
-    assert_eq!(digest.len(), 16, "MD5 digest must be 16 bytes");
-
-    let signed_content = build_spc_indirect_data_content_md5(&digest);
-    let pkcs7 = signature_test_utils::make_pkcs7_detached_signature(&signed_content);
-    let mut signature_stream_payload = signed_content.clone();
-    signature_stream_payload.extend_from_slice(&pkcs7);
-
-    // Pass raw stream bytes (not an OLE signature part) and ensure we still attempt v3 binding.
-    let binding =
-        verify_vba_project_signature_binding(&project_ole, &signature_stream_payload).expect("binding");
-    match binding {
-        VbaProjectBindingVerification::BoundVerified(debug) => {
-            assert_eq!(debug.hash_algorithm_oid.as_deref(), Some("1.2.840.113549.2.5"));
-            assert_eq!(debug.hash_algorithm_name.as_deref(), Some("MD5"));
-            assert_eq!(debug.signed_digest.as_deref(), Some(digest.as_slice()));
-            assert_eq!(debug.computed_digest.as_deref(), Some(digest.as_slice()));
-        }
-        other => panic!("expected BoundVerified, got {other:?}"),
-    }
-}
-
-#[test]
-fn verify_vba_project_signature_binding_v3_uses_digest_len_when_oid_is_inconsistent() {
+fn verify_vba_project_signature_binding_v3_reports_mismatch_when_digest_len_is_md5() {
     let project_ole = build_minimal_vba_project_bin_v3(None, b"ABC");
 
-    // Compute an MD5 v3 digest, but wrap it in a DigestInfo that *claims* to be SHA-256. This
-    // happens in the wild for legacy VBA binding digests (MS-OSHARED §4.3), and we want the v3
-    // binder to be robust to the same kind of inconsistency.
+    // Construct an out-of-spec `DigitalSignatureExt` binding digest (MD5-sized) and ensure the
+    // v3 binder does not treat it as a valid v3 binding: `DigitalSignatureExt` binds against
+    // MS-OVBA `ContentsHashV3` (SHA-256).
     let digest = compute_vba_project_digest_v3(&project_ole, DigestAlg::Md5).expect("digest v3");
     assert_eq!(digest.len(), 16, "MD5 digest must be 16 bytes");
+    let expected = contents_hash_v3(&project_ole).expect("ContentsHashV3");
+    assert_eq!(expected.len(), 32, "SHA-256 digest must be 32 bytes");
 
     let signed_content = build_spc_indirect_data_content_sha256(&digest);
     let pkcs7 = signature_test_utils::make_pkcs7_detached_signature(&signed_content);
@@ -545,31 +514,30 @@ fn verify_vba_project_signature_binding_v3_uses_digest_len_when_oid_is_inconsist
     let binding =
         verify_vba_project_signature_binding(&project_ole, &signature_part).expect("binding");
     match binding {
-        VbaProjectBindingVerification::BoundVerified(debug) => {
+        VbaProjectBindingVerification::BoundMismatch(debug) => {
             assert_eq!(
                 debug.hash_algorithm_oid.as_deref(),
                 Some("2.16.840.1.101.3.4.2.1")
             );
-            // `hash_algorithm_name` reflects the OID found in the signature, even though the digest
-            // bytes (and therefore the binding digest algorithm) are MD5.
             assert_eq!(debug.hash_algorithm_name.as_deref(), Some("SHA-256"));
             assert_eq!(debug.signed_digest.as_deref(), Some(digest.as_slice()));
-            assert_eq!(debug.computed_digest.as_deref(), Some(digest.as_slice()));
+            assert_eq!(debug.computed_digest.as_deref(), Some(expected.as_slice()));
         }
-        other => panic!("expected BoundVerified, got {other:?}"),
+        other => panic!("expected BoundMismatch, got {other:?}"),
     }
 }
 
 #[test]
-fn verify_vba_digital_signature_bound_v3_uses_digest_len_when_oid_is_inconsistent() {
+fn verify_vba_digital_signature_bound_v3_reports_mismatch_when_digest_len_is_md5() {
     let unsigned = build_minimal_vba_project_bin_v3(None, b"ABC");
 
-    // Compute an MD5 v3 digest, but wrap it in a DigestInfo that *claims* to be SHA-256.
-    //
-    // `verify_vba_digital_signature` already uses digest-length inference for v3 binding; this test
-    // ensures the richer `verify_vba_digital_signature_bound` helper stays consistent.
+    // Compute an out-of-spec MD5 v3 digest and wrap it in a DigestInfo that *claims* to be SHA-256.
+    // For `\x05DigitalSignatureExt`, binding is against MS-OVBA `ContentsHashV3` (SHA-256), so this
+    // must produce a binding mismatch.
     let digest = compute_vba_project_digest_v3(&unsigned, DigestAlg::Md5).expect("digest v3");
     assert_eq!(digest.len(), 16, "MD5 digest must be 16 bytes");
+    let expected = contents_hash_v3(&unsigned).expect("ContentsHashV3");
+    assert_eq!(expected.len(), 32, "SHA-256 digest must be 32 bytes");
 
     let signed_content = build_spc_indirect_data_content_sha256(&digest);
     let pkcs7 = signature_test_utils::make_pkcs7_detached_signature(&signed_content);
@@ -582,29 +550,28 @@ fn verify_vba_digital_signature_bound_v3_uses_digest_len_when_oid_is_inconsisten
         .expect("signature present");
 
     assert_eq!(bound.signature.verification, VbaSignatureVerification::SignedVerified);
-    assert_eq!(bound.signature.binding, VbaSignatureBinding::Bound);
+    assert_eq!(bound.signature.binding, VbaSignatureBinding::NotBound);
 
     match bound.binding {
-        VbaProjectBindingVerification::BoundVerified(debug) => {
+        VbaProjectBindingVerification::BoundMismatch(debug) => {
             assert_eq!(
                 debug.hash_algorithm_oid.as_deref(),
                 Some("2.16.840.1.101.3.4.2.1")
             );
-            // `hash_algorithm_name` reflects the OID found in the signature, even though the digest
-            // bytes (and therefore the binding digest algorithm) are MD5.
             assert_eq!(debug.hash_algorithm_name.as_deref(), Some("SHA-256"));
             assert_eq!(debug.signed_digest.as_deref(), Some(digest.as_slice()));
-            assert_eq!(debug.computed_digest.as_deref(), Some(digest.as_slice()));
+            assert_eq!(debug.computed_digest.as_deref(), Some(expected.as_slice()));
         }
-        other => panic!("expected BoundVerified, got {other:?}"),
+        other => panic!("expected BoundMismatch, got {other:?}"),
     }
 }
 
 #[test]
-fn verify_vba_project_signature_binding_infers_v3_for_md5_digests_when_stream_kind_is_unknown() {
+fn verify_vba_project_signature_binding_reports_mismatch_for_md5_digests_when_stream_kind_is_unknown(
+) {
     let project_ole = build_minimal_vba_project_bin_v3(None, b"ABC");
 
-    // This is a v3 project digest, but it is still 16 bytes (MD5).
+    // This is an out-of-spec v3 project digest (MD5, 16 bytes).
     // Ensure we don't accidentally match legacy binding digests.
     let legacy_content = content_hash_md5(&project_ole).expect("Content hash MD5");
     let legacy_agile = agile_content_hash_md5(&project_ole)
@@ -628,21 +595,21 @@ fn verify_vba_project_signature_binding_infers_v3_for_md5_digests_when_stream_ki
     let binding = verify_vba_project_signature_binding(&project_ole, &signature_stream_payload)
         .expect("binding");
     match binding {
-        VbaProjectBindingVerification::BoundVerified(debug) => {
+        VbaProjectBindingVerification::BoundMismatch(debug) => {
             assert_eq!(
                 debug.hash_algorithm_oid.as_deref(),
                 Some("1.2.840.113549.2.5")
             );
             assert_eq!(debug.hash_algorithm_name.as_deref(), Some("MD5"));
             assert_eq!(debug.signed_digest.as_deref(), Some(digest.as_slice()));
-            assert_eq!(debug.computed_digest.as_deref(), Some(digest.as_slice()));
+            assert_eq!(debug.computed_digest.as_deref(), Some(legacy_content.as_ref()));
         }
-        other => panic!("expected BoundVerified, got {other:?}"),
+        other => panic!("expected BoundMismatch, got {other:?}"),
     }
 
     // Also cover the simpler binding helper (no debug info).
     assert_eq!(
         verify_vba_signature_binding(&project_ole, &signature_stream_payload),
-        VbaSignatureBinding::Bound
+        VbaSignatureBinding::NotBound
     );
 }

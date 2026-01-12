@@ -3,8 +3,8 @@
 use std::io::{Cursor, Write};
 
 use formula_vba::{
-    compress_container, compute_vba_project_digest_v3, verify_vba_digital_signature, DigestAlg,
-    VbaSignatureBinding, VbaSignatureStreamKind, VbaSignatureVerification,
+    compress_container, contents_hash_v3, verify_vba_digital_signature, VbaSignatureBinding,
+    VbaSignatureStreamKind, VbaSignatureVerification,
 };
 
 mod signature_test_utils;
@@ -60,11 +60,11 @@ fn der_octet_string(bytes: &[u8]) -> Vec<u8> {
     der_tlv(0x04, bytes)
 }
 
-fn build_spc_indirect_data_content_sha1_oid_with_md5_digest(md5_digest: &[u8]) -> Vec<u8> {
+fn build_spc_indirect_data_content_sha1_oid_with_digest(digest: &[u8]) -> Vec<u8> {
     // SHA-1 OID: 1.3.14.3.2.26
     let sha1_oid = [0x2B, 0x0E, 0x03, 0x02, 0x1A];
     let alg_id = der_sequence(&[der_oid_raw(&sha1_oid), der_null()]);
-    let digest_info = der_sequence(&[alg_id, der_octet_string(md5_digest)]);
+    let digest_info = der_sequence(&[alg_id, der_octet_string(digest)]);
 
     // SpcIndirectDataContent ::= SEQUENCE { data, messageDigest }
     der_sequence(&[der_null(), digest_info])
@@ -149,14 +149,15 @@ fn build_vba_project_bin(signature_stream_payload: Option<&[u8]>) -> Vec<u8> {
 }
 
 #[test]
-fn digital_signature_ext_accepts_md5_digest_bytes_even_when_digestinfo_oid_is_sha1() {
-    // Build an unsigned project, compute the v3 binding digest as MD5, then embed that 16-byte MD5
-    // digest in a DigestInfo whose algorithm OID is SHA-1.
+fn digital_signature_ext_binds_even_when_digestinfo_oid_is_sha1() {
+    // Build an unsigned project, compute the v3 binding digest bytes, then embed them in a
+    // DigestInfo whose algorithm OID is SHA-1. The binding logic should compare digest bytes to
+    // `ContentsHashV3` and ignore the (sometimes inconsistent) OID.
     let unsigned = build_vba_project_bin(None);
-    let digest = compute_vba_project_digest_v3(&unsigned, DigestAlg::Md5).expect("digest v3 (md5)");
-    assert_eq!(digest.len(), 16);
+    let digest = contents_hash_v3(&unsigned).expect("ContentsHashV3");
+    assert_eq!(digest.len(), 32);
 
-    let signed_content = build_spc_indirect_data_content_sha1_oid_with_md5_digest(&digest);
+    let signed_content = build_spc_indirect_data_content_sha1_oid_with_digest(&digest);
     let pkcs7 = signature_test_utils::make_pkcs7_detached_signature(&signed_content);
     let mut signature_stream_payload = signed_content.clone();
     signature_stream_payload.extend_from_slice(&pkcs7);
