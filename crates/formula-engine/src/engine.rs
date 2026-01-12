@@ -5687,11 +5687,19 @@ fn engine_value_to_bytecode(value: &Value) -> bytecode::Value {
         Value::Text(s) => bytecode::Value::Text(Arc::from(s.as_str())),
         Value::Blank => bytecode::Value::Empty,
         Value::Error(e) => bytecode::Value::Error(engine_error_to_bytecode(*e)),
-        Value::Lambda(_) => bytecode::Value::Error(bytecode::ErrorKind::Calc),
-        Value::Reference(_) | Value::ReferenceUnion(_) => {
-            bytecode::Value::Error(bytecode::ErrorKind::Value)
-        }
-        Value::Array(_) | Value::Spill { .. } => bytecode::Value::Error(bytecode::ErrorKind::Spill),
+        other => match other {
+            Value::Lambda(_) => bytecode::Value::Error(bytecode::ErrorKind::Calc),
+            Value::Reference(_) | Value::ReferenceUnion(_) => {
+                bytecode::Value::Error(bytecode::ErrorKind::Value)
+            }
+            Value::Array(_) | Value::Spill { .. } => {
+                bytecode::Value::Error(bytecode::ErrorKind::Spill)
+            }
+            // Rich values (e.g. Entity/Record) can exist in the engine grid but aren't represented
+            // natively in the bytecode runtime yet. Degrade them to their display string so they
+            // behave like text in references (e.g. SUM ignores them).
+            _ => bytecode::Value::Text(Arc::from(other.to_string())),
+        },
     }
 }
 
@@ -5702,9 +5710,9 @@ fn bytecode_value_to_engine(value: bytecode::Value) -> Value {
         bytecode::Value::Text(s) => Value::Text(s.to_string()),
         bytecode::Value::Empty => Value::Blank,
         bytecode::Value::Error(e) => Value::Error(bytecode_error_to_engine(e)),
-        bytecode::Value::Array(_) | bytecode::Value::Range(_) | bytecode::Value::MultiRange(_) => {
-            Value::Error(ErrorKind::Spill)
-        }
+        // Bytecode arrays/refs are "spill" markers in the engine layer; other (future) rich values
+        // should also degrade safely rather than panicking.
+        _ => Value::Error(ErrorKind::Spill),
     }
 }
 
@@ -5960,7 +5968,9 @@ impl BytecodeColumnCache {
                     seg.blocked_rows_strict.push(row);
                     seg.blocked_rows_ignore_nonnumeric.push(row);
                 }
-                Value::Bool(_) | Value::Text(_) => seg.blocked_rows_strict.push(row),
+                // Excel ignores logical/text values in references for most aggregates, so allow
+                // IgnoreNonNumeric SIMD slices. Rich values (Entity/Record) should behave like text.
+                _ => seg.blocked_rows_strict.push(row),
             }
         }
 
@@ -7917,13 +7927,9 @@ fn numeric_value(value: &Value) -> Option<f64> {
         Value::Number(n) => Some(*n),
         Value::Blank => Some(0.0),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        Value::Text(_)
-        | Value::Error(_)
-        | Value::Reference(_)
-        | Value::ReferenceUnion(_)
-        | Value::Array(_)
-        | Value::Lambda(_)
-        | Value::Spill { .. } => None,
+        // Treat any non-scalar / rich values (e.g. Entity/Record) as non-numeric so iterative
+        // convergence uses `INFINITY` deltas unless the values are identical.
+        _ => None,
     }
 }
 
