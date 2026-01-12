@@ -726,7 +726,12 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     if (shortcutMode) {
       abortChunkedSearch();
       const shortcutQuery = trimmed.slice(1).trim();
-      const matches = searchShortcutCommands({ commands: cachedCommands, keybindingIndex, query: shortcutQuery });
+      const matches = searchShortcutCommands({
+        commands: cachedCommands,
+        keybindingIndex,
+        query: shortcutQuery,
+        limits: { maxResults: limits.maxResults, maxResultsPerCategory: limits.maxResultsPerGroup },
+      });
       renderGroups(
         buildGroupsForShortcutMode(matches, limits),
         shortcutQuery ? t("commandPalette.empty.noMatchingShortcuts") : t("commandPalette.empty.noShortcuts"),

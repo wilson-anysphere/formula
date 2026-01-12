@@ -33,6 +33,18 @@ const SHORTCUT_SYMBOL_TOKENS: Record<string, string> = {
   "→": "right",
 };
 
+type ShortcutSearchLimits = {
+  /**
+   * Max number of matches to return.
+   * When provided (and query is empty), we avoid sorting potentially huge match arrays.
+   */
+  maxResults: number;
+  /**
+   * Max number of matches per category to return.
+   */
+  maxResultsPerCategory: number;
+};
+
 function normalizeQuery(query: string): string {
   return String(query ?? "")
     .trim()
@@ -93,6 +105,16 @@ function getPrimaryShortcut(value: string | readonly string[] | undefined): stri
   return null;
 }
 
+function compareShortcutMatches(a: { shortcut: string; title: string; commandId: string }, b: { shortcut: string; title: string; commandId: string }): number {
+  const shortcutCompare = a.shortcut.localeCompare(b.shortcut, undefined, { sensitivity: "base" });
+  if (shortcutCompare !== 0) return shortcutCompare;
+
+  const titleCompare = a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
+  if (titleCompare !== 0) return titleCompare;
+
+  return a.commandId.localeCompare(b.commandId, undefined, { sensitivity: "base" });
+}
+
 /**
  * Returns the commands eligible for shortcut search:
  * - must have a display shortcut in `keybindingIndex`
@@ -103,8 +125,60 @@ export function searchShortcutCommands<T extends ShortcutSearchCommandLike>(para
   commands: T[];
   keybindingIndex: Map<string, string | readonly string[]>;
   query: string;
+  limits?: ShortcutSearchLimits;
 }): Array<ShortcutSearchMatch<T>> {
   const q = normalizeQuery(params.query);
+
+  const limits = params.limits ?? null;
+  const maxResults = limits ? Math.max(0, Math.floor(limits.maxResults)) : null;
+  const maxPerCategoryRaw = limits ? Math.max(1, Math.floor(limits.maxResultsPerCategory)) : null;
+  const maxPerCategory = maxResults != null && maxPerCategoryRaw != null ? Math.min(maxResults, maxPerCategoryRaw) : null;
+
+  // Optimized path for listing all shortcuts (`/` with an empty query): avoid sorting huge arrays.
+  if (!q && maxResults != null && maxPerCategory != null) {
+    if (maxResults === 0) return [];
+
+    const byCategory = new Map<string, Array<ShortcutSearchMatch<T>>>();
+    for (const cmd of params.commands) {
+      const shortcut = getPrimaryShortcut(params.keybindingIndex.get(cmd.commandId));
+      if (!shortcut) continue;
+
+      const category = normalizeCategory(cmd.category);
+      const list = byCategory.get(category) ?? [];
+
+      const candidate: ShortcutSearchMatch<T> = { ...cmd, shortcut };
+      if (list.length < maxPerCategory) {
+        list.push(candidate);
+        byCategory.set(category, list);
+        continue;
+      }
+
+      // Replace the worst entry in this category if the new one sorts earlier.
+      let worstIdx = 0;
+      for (let i = 1; i < list.length; i += 1) {
+        if (compareShortcutMatches(list[i]!, list[worstIdx]!) > 0) worstIdx = i;
+      }
+
+      if (compareShortcutMatches(candidate, list[worstIdx]!) < 0) {
+        list[worstIdx] = candidate;
+        byCategory.set(category, list);
+      }
+    }
+
+    const categories = [...byCategory.keys()].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+    const out: Array<ShortcutSearchMatch<T>> = [];
+    for (const category of categories) {
+      if (out.length >= maxResults) break;
+      const list = byCategory.get(category);
+      if (!list || list.length === 0) continue;
+      list.sort(compareShortcutMatches);
+      for (const cmd of list) {
+        out.push(cmd);
+        if (out.length >= maxResults) break;
+      }
+    }
+    return out;
+  }
 
   const matches: Array<ShortcutSearchMatch<T>> = [];
   for (const cmd of params.commands) {
@@ -124,15 +198,13 @@ export function searchShortcutCommands<T extends ShortcutSearchCommandLike>(para
     const catB = normalizeCategory(b.category);
     const catCompare = catA.localeCompare(catB, undefined, { sensitivity: "base" });
     if (catCompare !== 0) return catCompare;
-
-    const shortcutCompare = a.shortcut.localeCompare(b.shortcut, undefined, { sensitivity: "base" });
-    if (shortcutCompare !== 0) return shortcutCompare;
-
-    const titleCompare = a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
-    if (titleCompare !== 0) return titleCompare;
-
-    return a.commandId.localeCompare(b.commandId, undefined, { sensitivity: "base" });
+    return compareShortcutMatches(a, b);
   });
+
+  // Optional cap even in the sorted path (useful when query is selective).
+  if (maxResults != null && matches.length > maxResults) {
+    return matches.slice(0, maxResults);
+  }
 
   return matches;
 }
