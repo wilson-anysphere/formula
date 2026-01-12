@@ -29,7 +29,7 @@ describe("createWorkbookLoadTruncationWarning", () => {
     expect(message).toContain("rows 1-15,001");
     expect(message).toContain("cols 1-251");
     expect(message).toContain("loadMaxRows");
-    expect(message).toContain("DESKTOP_LOAD_MAX_ROWS");
+    expect(message).toContain("VITE_DESKTOP_LOAD_MAX_ROWS");
   });
 });
 
