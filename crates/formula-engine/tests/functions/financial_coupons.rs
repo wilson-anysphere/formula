@@ -196,6 +196,10 @@ fn coup_schedule_eom_maturity_clamps_previous_coupon_date() {
             coupncd(settlement, maturity, 2, basis, system).unwrap(),
             expected_ncd
         );
+        assert_eq!(
+            coupnum(settlement, maturity, 2, basis, system).unwrap(),
+            1.0
+        );
     }
 
     // Day-count sanity across bases.
@@ -238,6 +242,10 @@ fn coup_schedule_leap_day_clamps_previous_coupon_date() {
         assert_eq!(
             coupncd(settlement, maturity, 4, basis, system).unwrap(),
             expected_ncd
+        );
+        assert_eq!(
+            coupnum(settlement, maturity, 4, basis, system).unwrap(),
+            1.0
         );
     }
 
@@ -315,6 +323,14 @@ fn builtins_coup_day_counts_handle_eom_and_leap_day_schedules() {
     assert_number(&sheet.eval("=COUPDAYS(A1,A2,2,1)"), 183.0);
     assert_number(&sheet.eval("=COUPNUM(A1,A2,2,1)"), 1.0);
 
+    // COUPDAYS is basis-dependent for 2/3/4, but the coupon *dates* are not.
+    assert_number(&sheet.eval("=COUPDAYS(A1,A2,2,2)"), 180.0);
+    assert_number(&sheet.eval("=COUPDAYS(A1,A2,2,3)"), 182.5);
+    assert_number(&sheet.eval("=COUPDAYS(A1,A2,2,4)"), 180.0);
+    assert_number(&sheet.eval("=COUPNUM(A1,A2,2,2)"), 1.0);
+    assert_number(&sheet.eval("=COUPNUM(A1,A2,2,3)"), 1.0);
+    assert_number(&sheet.eval("=COUPNUM(A1,A2,2,4)"), 1.0);
+
     // Leap-day clamping (May 31 -> Feb 29).
     assert_number(&sheet.eval("=COUPDAYBS(B1,B2,4,0)"), 1.0);
     assert_number(&sheet.eval("=COUPDAYSNC(B1,B2,4,0)"), 89.0);
@@ -325,4 +341,11 @@ fn builtins_coup_day_counts_handle_eom_and_leap_day_schedules() {
     assert_number(&sheet.eval("=COUPDAYSNC(B1,B2,4,1)"), 91.0);
     assert_number(&sheet.eval("=COUPDAYS(B1,B2,4,1)"), 92.0);
     assert_number(&sheet.eval("=COUPNUM(B1,B2,4,1)"), 1.0);
+
+    assert_number(&sheet.eval("=COUPDAYS(B1,B2,4,2)"), 90.0);
+    assert_number(&sheet.eval("=COUPDAYS(B1,B2,4,3)"), 91.25);
+    assert_number(&sheet.eval("=COUPDAYS(B1,B2,4,4)"), 91.0);
+    assert_number(&sheet.eval("=COUPNUM(B1,B2,4,2)"), 1.0);
+    assert_number(&sheet.eval("=COUPNUM(B1,B2,4,3)"), 1.0);
+    assert_number(&sheet.eval("=COUPNUM(B1,B2,4,4)"), 1.0);
 }
