@@ -4074,9 +4074,12 @@ if (
   //
   // BrowserExtensionHost tracks read taint (API reads + event payloads) and passes those ranges to this
   // optional `clipboardWriteGuard`, which runs *before* any clipboard write. Enforce clipboard-copy DLP
-  // against any workbook data the extension has observed (taintedRanges). Clipboard writes that are
-  // not derived from spreadsheet data (no taint) should still be blocked if the current selection is
-  // Restricted (selection-based DLP).
+  // against:
+  //   - the current UI selection (active-cell fallback), and
+  //   - any workbook ranges the extension has observed (taintedRanges).
+  //
+  // This mirrors the built-in copy/cut DLP enforcement and prevents extensions from bypassing policy
+  // checks by writing arbitrary text to the clipboard.
   const extensionClipboardDlp = createDesktopDlpContext({ documentId: workbookId });
 
   const normalizeSelectionRange = (range: { startRow: number; startCol: number; endRow: number; endCol: number }) => {
@@ -4111,22 +4114,39 @@ if (
       try {
         const sheetId = app.getCurrentSheetId();
         const selectionRanges = app.getSelectionRanges?.() ?? [];
-        for (const range of selectionRanges) {
-          if (!range || typeof range !== "object") continue;
-          const startRow = Number((range as any).startRow);
-          const startCol = Number((range as any).startCol);
-          const endRow = Number((range as any).endRow);
-          const endCol = Number((range as any).endCol);
-          if (![startRow, startCol, endRow, endCol].every((v) => Number.isFinite(v))) continue;
-          enforceExtensionClipboardDlpForRange({
-            sheetId,
-            range: normalizeSelectionRange({
-              startRow: Math.trunc(startRow),
-              startCol: Math.trunc(startCol),
-              endRow: Math.trunc(endRow),
-              endCol: Math.trunc(endCol),
-            }),
-          });
+        if (selectionRanges.length === 0) {
+          const active = app.getActiveCell?.();
+          const activeRow = Number((active as any)?.row);
+          const activeCol = Number((active as any)?.col);
+          if (Number.isFinite(activeRow) && Number.isFinite(activeCol)) {
+            enforceExtensionClipboardDlpForRange({
+              sheetId,
+              range: normalizeSelectionRange({
+                startRow: Math.trunc(activeRow),
+                startCol: Math.trunc(activeCol),
+                endRow: Math.trunc(activeRow),
+                endCol: Math.trunc(activeCol),
+              }),
+            });
+          }
+        } else {
+          for (const range of selectionRanges) {
+            if (!range || typeof range !== "object") continue;
+            const startRow = Number((range as any).startRow);
+            const startCol = Number((range as any).startCol);
+            const endRow = Number((range as any).endRow);
+            const endCol = Number((range as any).endCol);
+            if (![startRow, startCol, endRow, endCol].every((v) => Number.isFinite(v))) continue;
+            enforceExtensionClipboardDlpForRange({
+              sheetId,
+              range: normalizeSelectionRange({
+                startRow: Math.trunc(startRow),
+                startCol: Math.trunc(startCol),
+                endRow: Math.trunc(endRow),
+                endCol: Math.trunc(endCol),
+              }),
+            });
+          }
         }
       } catch (err) {
         const isDlpViolation = err instanceof DlpViolationError || (err as any)?.name === "DlpViolationError";

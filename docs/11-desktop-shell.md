@@ -748,8 +748,8 @@ Security boundaries:
   - `SpreadsheetApp.copySelectionToClipboard()` / `cutSelectionToClipboard()`
   - → `enforceClipboardCopy` (`apps/desktop/src/dlp/enforceClipboardCopy.js`)
 - **Extensions are DLP-enforced too**: `formula.clipboard.writeText(...)` is mediated by the desktop extension host adapter and
-  enforces clipboard-copy DLP before writing to the system clipboard (taint tracking based on the spreadsheet ranges the
-  extension has read).
+  enforces clipboard-copy DLP before writing to the system clipboard. Enforcement considers both the current UI selection
+  (active-cell fallback) and any spreadsheet ranges the extension has read/received (taint tracking).
 - **Extension sandboxing**: extension panels run in sandboxed iframes; do not expose Tauri IPC (`invoke`) or native clipboard APIs directly to untrusted iframe content. Clipboard operations must be mediated by the trusted host UI layer.
 
 ### Manual QA matrix (recommended)
