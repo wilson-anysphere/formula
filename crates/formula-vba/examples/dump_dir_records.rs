@@ -6,6 +6,9 @@ use std::process::ExitCode;
 use encoding_rs::UTF_16LE;
 use formula_vba::{decompress_container, OleFile};
 
+#[path = "shared/dir_record_names.rs"]
+mod dir_record_names;
+
 fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
@@ -150,7 +153,7 @@ fn dump_dir_records(decompressed: &[u8]) {
         offset += len;
 
         idx += 1;
-        let name = record_name(id).unwrap_or("<unknown>");
+        let name = dir_record_names::record_name(id).unwrap_or("<unknown>");
         println!(
             "[{idx:03}] offset=0x{record_offset:08x} id={id:#06x} len={len:>6} {name}"
         );
@@ -210,74 +213,6 @@ fn dump_dir_records(decompressed: &[u8]) {
         println!();
         println!("records: {idx} (stopped early at offset=0x{offset:08x})");
     }
-}
-
-fn record_name(id: u16) -> Option<&'static str> {
-    // Names from MS-OVBA 2.3.4 "dir Stream".
-    Some(match id {
-        // ---- Project information records ----
-        0x0001 => "PROJECTSYSKIND",
-        0x0002 => "PROJECTLCID",
-        0x0003 => "PROJECTCODEPAGE",
-        0x0004 => "PROJECTNAME",
-        0x0005 => "PROJECTDOCSTRING",
-        0x0006 => "PROJECTHELPFILEPATH",
-        0x0007 => "PROJECTHELPCONTEXT",
-        0x0008 => "PROJECTLIBFLAGS",
-        0x0009 => "PROJECTVERSION",
-        0x000C => "PROJECTCONSTANTS",
-        0x0014 => "PROJECTLCIDINVOKE",
-        // Unicode variants of selected strings.
-        //
-        // MS-OVBA v3 `ProjectNormalizedData` uses the 0x0040..0x0043 Unicode record IDs with an
-        // *internal* u32 length prefix (see docs/vba-digital-signatures.md).
-        0x0040 => "PROJECTNAMEUNICODE",
-        0x0041 => "PROJECTDOCSTRINGUNICODE",
-        0x0042 => "PROJECTHELPFILEPATHUNICODE",
-        0x0043 => "PROJECTCONSTANTSUNICODE",
-        // Legacy/alternate record id seen in some older fixtures/implementations.
-        0x003C => "PROJECTCONSTANTSUNICODE (legacy id 0x003C)",
-        // Present in many real-world files, but skipped by the MS-OVBA V3ContentNormalizedData
-        // pseudocode.
-        0x004A => "PROJECTCOMPATVERSION / MODULEHELPFILEPATHUNICODE (id collision)",
-
-        // ---- Reference records (used by ContentNormalizedData / ProjectNormalizedData) ----
-        0x000D => "REFERENCEREGISTERED",
-        0x000E => "REFERENCEPROJECT",
-        0x0016 => "REFERENCENAME",
-        0x002F => "REFERENCECONTROL",
-        0x0030 => "REFERENCEEXTENDED",
-        0x0033 => "REFERENCEORIGINAL",
-
-        // ---- Module records ----
-        // ProjectModules / terminators (spec-accurate `VBA/dir` layouts use these).
-        0x000F => "PROJECTMODULES (ModuleCount)",
-        0x0013 => "PROJECTCOOKIE",
-        0x0010 => "PROJECTTERMINATOR (dir stream end)",
-
-        0x0019 => "MODULENAME",
-        0x0047 => "MODULENAMEUNICODE",
-        0x001B => "MODULEDOCSTRING",
-        0x001A => "MODULESTREAMNAME",
-        // MS-OVBA v3 Unicode variant id for MODULESTREAMNAME (with internal u32 length prefix).
-        0x0048 => "MODULESTREAMNAMEUNICODE",
-        // MS-OVBA v3 Unicode variant id for MODULEDOCSTRING (with internal u32 length prefix).
-        0x0049 => "MODULEDOCSTRINGUNICODE",
-        // Legacy/alternate ids seen in some fixtures/implementations.
-        0x0032 => "MODULESTREAMNAMEUNICODE (legacy id 0x0032)",
-        0x001C => "MODULEDOCSTRING (legacy id 0x001C)",
-        0x001D => "MODULEHELPFILEPATH",
-        0x001E => "MODULEHELPCONTEXT",
-        0x0021 => "MODULETYPE (procedural TypeRecord.Id=0x0021)",
-        0x0022 => "MODULETYPE (non-procedural TypeRecord.Id=0x0022)",
-        0x0025 => "MODULEREADONLY",
-        0x0028 => "MODULEPRIVATE",
-        0x002B => "MODULETERMINATOR",
-        0x002C => "MODULECOOKIE",
-        0x0031 => "MODULETEXTOFFSET",
-
-        _ => return None,
-    })
 }
 
 fn bytes_to_hex_spaced(bytes: &[u8]) -> String {
