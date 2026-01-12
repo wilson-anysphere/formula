@@ -603,46 +603,26 @@ test.describe("sheet tabs", () => {
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(false);
 
     // Move Sheet2 before Sheet1 (new order: Sheet2, Sheet1).
-    try {
-      await page
-        .getByTestId("sheet-tab-Sheet2")
-        .dragTo(page.getByTestId("sheet-tab-Sheet1"), { targetPosition: { x: 1, y: 1 } });
-    } catch {
-      // Ignore; we'll fall back to a synthetic drop below.
-    }
-
-    // As with other tab drag tests, use a synthetic drop if Playwright's dragTo doesn't take.
     const desiredOrder = ["Sheet2", "Sheet1"];
-    const orderKey = (order: Array<string | null>) => order.filter(Boolean).slice(0, 2).join(",");
-    const didReorder = orderKey(
-      await page.evaluate(() =>
-        Array.from(document.querySelectorAll("#sheet-tabs .sheet-tabs [data-sheet-id]")).map((el) =>
-          (el as HTMLElement).getAttribute("data-sheet-id"),
-        ),
-      ),
-    );
+    await page.evaluate(() => {
+      const fromId = "Sheet2";
+      const target = document.querySelector('[data-testid="sheet-tab-Sheet1"]') as HTMLElement | null;
+      if (!target) throw new Error("Missing Sheet1 tab");
+      const rect = target.getBoundingClientRect();
 
-    if (didReorder !== desiredOrder.join(",")) {
-      await page.evaluate(() => {
-        const fromId = "Sheet2";
-        const target = document.querySelector('[data-testid="sheet-tab-Sheet1"]') as HTMLElement | null;
-        if (!target) throw new Error("Missing Sheet1 tab");
-        const rect = target.getBoundingClientRect();
+      const dt = new DataTransfer();
+      dt.setData("text/sheet-id", fromId);
+      dt.setData("text/plain", fromId);
 
-        const dt = new DataTransfer();
-        dt.setData("text/sheet-id", fromId);
-        dt.setData("text/plain", fromId);
-
-        const drop = new DragEvent("drop", {
-          bubbles: true,
-          cancelable: true,
-          clientX: rect.left + 1,
-          clientY: rect.top + rect.height / 2,
-        });
-        Object.defineProperty(drop, "dataTransfer", { value: dt });
-        target.dispatchEvent(drop);
+      const drop = new DragEvent("drop", {
+        bubbles: true,
+        cancelable: true,
+        clientX: rect.left + 1,
+        clientY: rect.top + rect.height / 2,
       });
-    }
+      Object.defineProperty(drop, "dataTransfer", { value: dt });
+      target.dispatchEvent(drop);
+    });
 
     await expect.poll(() =>
       page.evaluate(() =>

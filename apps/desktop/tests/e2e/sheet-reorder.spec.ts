@@ -110,20 +110,37 @@ test.describe("sheet reorder", () => {
 
     const tabOrder = async () =>
       page.evaluate(() => {
-        const tabs = Array.from(document.querySelectorAll('[data-testid^="sheet-tab-"]')) as HTMLElement[];
-        return tabs.map((el) => el.dataset.sheetId ?? "");
+        // Scope to actual sheet tab elements; other UI (e.g. context menus) may also use `sheet-tab-*` test ids.
+        const tabs = Array.from(document.querySelectorAll("#sheet-tabs .sheet-tabs [data-sheet-id]")) as HTMLElement[];
+        return tabs.map((el) => el.getAttribute("data-sheet-id") ?? "");
       });
 
     expect(await tabOrder()).toEqual(["Sheet1", "Sheet2", "Sheet3"]);
 
     // Drop on the left half of the target tab so the reorder logic chooses "insert before".
-    await page.getByTestId("sheet-tab-Sheet3").dragTo(page.getByTestId("sheet-tab-Sheet1"), {
-      targetPosition: { x: 1, y: 1 },
+    await page.evaluate(() => {
+      const fromId = "Sheet3";
+      const target = document.querySelector('[data-testid="sheet-tab-Sheet1"]') as HTMLElement | null;
+      if (!target) throw new Error("Missing Sheet1 tab");
+      const rect = target.getBoundingClientRect();
+
+      const dt = new DataTransfer();
+      dt.setData("text/sheet-id", fromId);
+      dt.setData("text/plain", fromId);
+
+      const drop = new DragEvent("drop", {
+        bubbles: true,
+        cancelable: true,
+        clientX: rect.left + 1,
+        clientY: rect.top + rect.height / 2,
+      });
+      Object.defineProperty(drop, "dataTransfer", { value: dt });
+      target.dispatchEvent(drop);
     });
 
     await page.waitForFunction(() => {
-      const tabs = Array.from(document.querySelectorAll('[data-testid^="sheet-tab-"]')) as HTMLElement[];
-      return tabs[0]?.dataset?.sheetId === "Sheet3";
+      const tabs = Array.from(document.querySelectorAll("#sheet-tabs .sheet-tabs [data-sheet-id]")) as HTMLElement[];
+      return tabs[0]?.getAttribute("data-sheet-id") === "Sheet3";
     });
     expect(await tabOrder()).toEqual(["Sheet3", "Sheet1", "Sheet2"]);
 
@@ -138,8 +155,8 @@ test.describe("sheet reorder", () => {
 
     await expect(page.getByTestId("sheet-tab-Sheet3")).toBeVisible();
     await page.waitForFunction(() => {
-      const tabs = Array.from(document.querySelectorAll('[data-testid^="sheet-tab-"]')) as HTMLElement[];
-      return tabs[0]?.dataset?.sheetId === "Sheet3";
+      const tabs = Array.from(document.querySelectorAll("#sheet-tabs .sheet-tabs [data-sheet-id]")) as HTMLElement[];
+      return tabs[0]?.getAttribute("data-sheet-id") === "Sheet3";
     });
     expect(await tabOrder()).toEqual(["Sheet3", "Sheet1", "Sheet2"]);
   });
