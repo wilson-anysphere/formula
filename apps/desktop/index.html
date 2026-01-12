@@ -43,11 +43,12 @@
             <option value="125">125%</option>
             <option value="150">150%</option>
             <option value="200">200%</option>
-          </select>
-          <div class="statusbar__item" data-testid="status-zoom">100%</div>
-          <div class="statusbar__item" data-testid="sheet-position">Sheet 1 of 1</div>
-        </div>
-        <div class="statusbar__debug">
+           </select>
+           <div class="statusbar__item" data-testid="status-zoom">100%</div>
+           <div class="statusbar__item" data-testid="sheet-position">Sheet 1 of 1</div>
+           <div class="statusbar__item">Collab: <span data-testid="collab-status">Local</span></div>
+         </div>
+         <div class="statusbar__debug">
           <div>
             Active:
             <code data-testid="active-cell">A1</code>
@@ -60,17 +61,13 @@
             Selection:
             <code data-testid="selection-range">A1</code>
           </div>
-          <div>
-            Value:
-            <code data-testid="active-value"></code>
-          </div>
-          <div>
-            Collab:
-            <code data-testid="collab-status"></code>
-          </div>
-        </div>
-      </div>
-    </div>
+           <div>
+             Value:
+             <code data-testid="active-value"></code>
+           </div>
+         </div>
+       </div>
+     </div>
     <div id="toast-root" data-testid="toast-root" aria-live="polite" aria-atomic="true"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
