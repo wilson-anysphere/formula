@@ -5,6 +5,7 @@
 //! DrawingML `<pic>` payloads that reference media via relationships.
 mod part_info;
 pub use part_info::{CellImageEmbed, CellImagesPartInfo};
+
 use std::collections::{BTreeMap, HashMap};
 
 use formula_model::drawings::{ImageData, ImageId};
@@ -15,6 +16,7 @@ use crate::path::resolve_target;
 use crate::XlsxError;
 
 type Result<T> = std::result::Result<T, XlsxError>;
+
 const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
 /// Best-effort loader for workbook-level "in-cell" images.
