@@ -183,6 +183,33 @@ test.describe("Extensions UI integration", () => {
     expect(tauriTypes.tauriIpc, "webview should not expose __TAURI_IPC__").toBe("undefined");
     expect(tauriTypes.tauriInternals, "webview should not expose __TAURI_INTERNALS__").toBe("undefined");
     expect(tauriTypes.tauriMetadata, "webview should not expose __TAURI_METADATA__").toBe("undefined");
+
+    const tauriDescriptors = await webviewFrame!.evaluate(() => {
+      const read = (key: string) => {
+        const desc = Object.getOwnPropertyDescriptor(window, key) as any;
+        if (!desc) return null;
+        return {
+          writable: desc.writable,
+          configurable: desc.configurable,
+          valueType: typeof desc.value,
+        };
+      };
+
+      return {
+        tauri: read("__TAURI__"),
+        tauriIpc: read("__TAURI_IPC__"),
+        tauriInternals: read("__TAURI_INTERNALS__"),
+        tauriMetadata: read("__TAURI_METADATA__"),
+      };
+    });
+
+    // If the runtime injects globals as non-configurable properties, the hardening script should
+    // lock them down to `undefined` so they can't be repopulated later.
+    for (const [key, desc] of Object.entries(tauriDescriptors)) {
+      if (!desc) continue;
+      expect(desc.valueType, `${key} should be scrubbed to undefined`).toBe("undefined");
+      expect(desc.writable, `${key} should not be writable after scrubbing`).toBe(false);
+    }
   });
 
   test("runs sampleHello.sumSelection via the Extensions panel and shows a toast", async ({ page }) => {
