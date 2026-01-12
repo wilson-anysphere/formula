@@ -7,7 +7,7 @@ import {
   verifyExtensionPackageV2Browser
 } from "../../../shared/extension-package/v2-browser.mjs";
 
-import { validateExtensionManifest } from "../../../../shared/extension-manifest/index.mjs";
+import { validateExtensionManifest } from "../../../shared/extension-manifest/index.mjs";
 
 import { MarketplaceClient } from "./MarketplaceClient";
 
