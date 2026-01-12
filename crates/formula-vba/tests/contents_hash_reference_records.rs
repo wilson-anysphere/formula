@@ -8,6 +8,12 @@ fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
     out.extend_from_slice(data);
 }
 
+fn push_record_with_size(out: &mut Vec<u8>, id: u16, size: u32, data: &[u8]) {
+    out.extend_from_slice(&id.to_le_bytes());
+    out.extend_from_slice(&size.to_le_bytes());
+    out.extend_from_slice(data);
+}
+
 fn build_vba_project_with_dir(dir_decompressed: &[u8]) -> Vec<u8> {
     let dir_container = compress_container(dir_decompressed);
 
@@ -20,6 +26,31 @@ fn build_vba_project_with_dir(dir_decompressed: &[u8]) -> Vec<u8> {
     }
 
     ole.into_inner().into_inner()
+}
+
+fn reference_registered_payload(libid: &[u8]) -> Vec<u8> {
+    // REFERENCEREGISTERED (0x000D) payload:
+    // SizeOfLibid (u32) + Libid (bytes) + Reserved1 (u32) + Reserved2 (u16).
+    let mut out = Vec::new();
+    out.extend_from_slice(&(libid.len() as u32).to_le_bytes());
+    out.extend_from_slice(libid);
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out
+}
+
+fn reference_extended_payload(libid: &[u8]) -> Vec<u8> {
+    // REFERENCEEXTENDED (0x0030) payload:
+    // SizeOfLibidExtended (u32) + LibidExtended (bytes) + Reserved4 (u32) + Reserved5 (u16)
+    // + OriginalTypeLib (GUID, 16 bytes) + Cookie (u32).
+    let mut out = Vec::new();
+    out.extend_from_slice(&(libid.len() as u32).to_le_bytes());
+    out.extend_from_slice(libid);
+    out.extend_from_slice(&0u32.to_le_bytes()); // Reserved4
+    out.extend_from_slice(&0u16.to_le_bytes()); // Reserved5
+    out.extend_from_slice(&[0u8; 16]); // OriginalTypeLib
+    out.extend_from_slice(&0u32.to_le_bytes()); // Cookie
+    out
 }
 
 #[test]
@@ -61,6 +92,9 @@ fn v3_content_normalized_data_includes_all_reference_record_types_in_order() {
     reference_project.extend_from_slice(&major.to_le_bytes());
     reference_project.extend_from_slice(&minor.to_le_bytes());
 
+    let reference_extended = reference_extended_payload(b"EXTENDED");
+    let reference_registered = reference_registered_payload(b"{REG}");
+
     let dir_decompressed = {
         let mut out = Vec::new();
 
@@ -74,7 +108,7 @@ fn v3_content_normalized_data_includes_all_reference_record_types_in_order() {
         push_record(&mut out, 0x002F, &reference_control);
 
         // REFERENCEEXTENDED (0x0030): incorporated as raw payload bytes.
-        push_record(&mut out, 0x0030, b"EXTENDED");
+        push_record(&mut out, 0x0030, &reference_extended);
 
         // REFERENCEORIGINAL (0x0033): u32-len-prefixed libid.
         //
@@ -82,8 +116,9 @@ fn v3_content_normalized_data_includes_all_reference_record_types_in_order() {
         // payload is the libid bytes (no u32 length prefix inside the payload).
         push_record(&mut out, 0x0033, b"OrigLib");
 
-        // REFERENCEREGISTERED (0x000D): record bytes are incorporated directly.
-        push_record(&mut out, 0x000D, b"{REG}");
+        // REFERENCEREGISTERED (0x000D): payload bytes are incorporated directly (excluding the record
+        // size field).
+        push_record(&mut out, 0x000D, &reference_registered);
 
         // REFERENCEPROJECT (0x000E)
         push_record(&mut out, 0x000E, &reference_project);
@@ -109,14 +144,14 @@ fn v3_content_normalized_data_includes_all_reference_record_types_in_order() {
     expected.extend_from_slice(&reference_control);
     // REFERENCEEXTENDED: Id + payload (no record SizeExtended field)
     expected.extend_from_slice(&0x0030u16.to_le_bytes());
-    expected.extend_from_slice(b"EXTENDED");
+    expected.extend_from_slice(&reference_extended);
     // REFERENCEORIGINAL: Id + SizeOfLibidOriginal + LibidOriginal
     expected.extend_from_slice(&0x0033u16.to_le_bytes());
     expected.extend_from_slice(&(b"OrigLib".len() as u32).to_le_bytes());
     expected.extend_from_slice(b"OrigLib");
     // REFERENCEREGISTERED: Id + payload (no record Size field)
     expected.extend_from_slice(&0x000Du16.to_le_bytes());
-    expected.extend_from_slice(b"{REG}");
+    expected.extend_from_slice(&reference_registered);
     // REFERENCEPROJECT: Id + payload (no record Size field)
     expected.extend_from_slice(&0x000Eu16.to_le_bytes());
     expected.extend_from_slice(&reference_project);
@@ -154,10 +189,12 @@ fn v3_content_normalized_data_skips_referenceoriginal_embedded_referencecontrol(
         push_record(&mut out, 0x003E, &[b'E', 0x00]);
 
         // Embedded control tail / extended bytes (should be skipped).
-        push_record(&mut out, 0x0030, b"EMB_EXT");
+        let embedded_extended = reference_extended_payload(b"EMB_EXT");
+        push_record(&mut out, 0x0030, &embedded_extended);
 
         // Next reference (registered) should still be incorporated.
-        push_record(&mut out, 0x000D, b"{REG}");
+        let reference_registered = reference_registered_payload(b"{REG}");
+        push_record(&mut out, 0x000D, &reference_registered);
 
         out
     };
@@ -181,7 +218,7 @@ fn v3_content_normalized_data_skips_referenceoriginal_embedded_referencecontrol(
     // Embedded REFERENCECONTROL (+ name/extended tail) is skipped.
     // Next reference (registered): Id + payload
     expected.extend_from_slice(&0x000Du16.to_le_bytes());
-    expected.extend_from_slice(b"{REG}");
+    expected.extend_from_slice(&reference_registered_payload(b"{REG}"));
 
     assert_eq!(normalized, expected);
 }
@@ -214,10 +251,12 @@ fn v3_content_normalized_data_skips_referenceoriginal_embedded_referencecontrol_
         push_record(&mut out, 0x002F, &embedded_control);
 
         // Embedded control tail / extended bytes (should be skipped).
-        push_record(&mut out, 0x0030, b"EMB_EXT");
+        let embedded_extended = reference_extended_payload(b"EMB_EXT");
+        push_record(&mut out, 0x0030, &embedded_extended);
 
         // Next reference (registered) should still be incorporated.
-        push_record(&mut out, 0x000D, b"{REG}");
+        let reference_registered = reference_registered_payload(b"{REG}");
+        push_record(&mut out, 0x000D, &reference_registered);
 
         out
     };
@@ -241,7 +280,66 @@ fn v3_content_normalized_data_skips_referenceoriginal_embedded_referencecontrol_
     // Embedded control is skipped.
     // Next reference (registered)
     expected.extend_from_slice(&0x000Du16.to_le_bytes());
-    expected.extend_from_slice(b"{REG}");
+    expected.extend_from_slice(&reference_registered_payload(b"{REG}"));
+
+    assert_eq!(normalized, expected);
+}
+
+#[test]
+fn v3_content_normalized_data_skips_referenceoriginal_embedded_referencecontrol_with_malformed_record_size_fields(
+) {
+    // Like `..._without_name_record_extended`, but uses incorrect record-size values (0) for the
+    // embedded REFERENCECONTROL (0x002F) and REFERENCEEXTENDED (0x0030) records. These size fields
+    // MUST be ignored by MS-OVBA v3 transcript construction, and should not be used for record
+    // framing.
+    let dir_decompressed = {
+        let mut out = Vec::new();
+
+        // NameRecord for the reference.
+        push_record(&mut out, 0x0016, b"OrigName");
+        push_record(&mut out, 0x003E, &[b'O', 0x00, b'K', 0x00]);
+
+        // REFERENCEORIGINAL payload is just the libid bytes (spec form).
+        push_record(&mut out, 0x0033, b"OrigLib");
+
+        // Embedded REFERENCECONTROL (should be skipped); malformed SizeTwiddled.
+        let libid_twiddled = b"EmbeddedCtrl";
+        let reserved1: u32 = 1;
+        let reserved2: u16 = 0;
+        let mut embedded_control = Vec::new();
+        embedded_control.extend_from_slice(&(libid_twiddled.len() as u32).to_le_bytes());
+        embedded_control.extend_from_slice(libid_twiddled);
+        embedded_control.extend_from_slice(&reserved1.to_le_bytes());
+        embedded_control.extend_from_slice(&reserved2.to_le_bytes());
+        push_record_with_size(&mut out, 0x002F, 0, &embedded_control);
+
+        // Embedded control tail / extended bytes (should be skipped); malformed SizeExtended.
+        let embedded_extended = reference_extended_payload(b"EMB_EXT");
+        push_record_with_size(&mut out, 0x0030, 0, &embedded_extended);
+
+        // Next reference (registered) should still be incorporated.
+        let reference_registered = reference_registered_payload(b"{REG}");
+        push_record(&mut out, 0x000D, &reference_registered);
+
+        out
+    };
+
+    let vba_bin = build_vba_project_with_dir(&dir_decompressed);
+    let normalized = v3_content_normalized_data(&vba_bin).expect("V3ContentNormalizedData");
+
+    let mut expected = Vec::new();
+    expected.extend_from_slice(&0x0016u16.to_le_bytes());
+    expected.extend_from_slice(&(b"OrigName".len() as u32).to_le_bytes());
+    expected.extend_from_slice(b"OrigName");
+    expected.extend_from_slice(&0x003Eu16.to_le_bytes());
+    expected.extend_from_slice(&(4u32).to_le_bytes());
+    expected.extend_from_slice(&[b'O', 0x00, b'K', 0x00]);
+    expected.extend_from_slice(&0x0033u16.to_le_bytes());
+    expected.extend_from_slice(&(b"OrigLib".len() as u32).to_le_bytes());
+    expected.extend_from_slice(b"OrigLib");
+    // Embedded control records are skipped.
+    expected.extend_from_slice(&0x000Du16.to_le_bytes());
+    expected.extend_from_slice(&reference_registered_payload(b"{REG}"));
 
     assert_eq!(normalized, expected);
 }

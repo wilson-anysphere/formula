@@ -1297,6 +1297,35 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
             continue;
         }
 
+        // Some `REFERENCE*` records include redundant size fields that MS-OVBA specifies MUST be
+        // ignored. Do not trust these fields for record framing; instead, derive boundaries from
+        // the subsequent size-of-libid fields.
+        //
+        // This also keeps us robust to malformed size fields (common in hand-crafted fixtures).
+        match id {
+            0x000D => {
+                expect_reference_name_unicode = false;
+                append_v3_reference_registered(&mut out, &dir_decompressed, &mut offset)?;
+                continue;
+            }
+            0x000E => {
+                expect_reference_name_unicode = false;
+                append_v3_reference_project(&mut out, &dir_decompressed, &mut offset)?;
+                continue;
+            }
+            0x002F => {
+                expect_reference_name_unicode = false;
+                append_v3_reference_control(&mut out, &dir_decompressed, &mut offset)?;
+                continue;
+            }
+            0x0030 => {
+                expect_reference_name_unicode = false;
+                append_v3_reference_extended(&mut out, &dir_decompressed, &mut offset)?;
+                continue;
+            }
+            _ => {}
+        }
+
         if offset + 6 > dir_decompressed.len() {
             return Err(DirParseError::Truncated.into());
         }
@@ -1394,38 +1423,6 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
                 out.extend_from_slice(&(len as u32).to_le_bytes());
                 out.extend_from_slice(data);
                 expect_reference_name_unicode = false;
-            }
-
-            // REFERENCEREGISTERED
-            0x000D => {
-                out.extend_from_slice(&id.to_le_bytes());
-                // Do not include the record `Size` field (MS-OVBA pseudocode appends SizeOfLibid,
-                // Libid, and reserved fields only).
-                out.extend_from_slice(data);
-            }
-
-            // REFERENCEPROJECT
-            0x000E => {
-                out.extend_from_slice(&id.to_le_bytes());
-                // Do not include the record `Size` field (MS-OVBA pseudocode appends the libid
-                // size fields + libid bytes + version fields).
-                out.extend_from_slice(data);
-            }
-
-            // REFERENCECONTROL
-            0x002F => {
-                out.extend_from_slice(&id.to_le_bytes());
-                // Do not include `SizeTwiddled` (the record `Size` field); include only the fields
-                // in the record payload (SizeOfLibidTwiddled/LibidTwiddled/Reserved1/Reserved2).
-                out.extend_from_slice(data);
-            }
-
-            // REFERENCEEXTENDED
-            0x0030 => {
-                out.extend_from_slice(&id.to_le_bytes());
-                // Do not include `SizeExtended` (the record `Size` field); include only the fields
-                // in the record payload (SizeOfLibidExtended/LibidExtended/Reserved4/Reserved5/GUID/Cookie).
-                out.extend_from_slice(data);
             }
 
             // REFERENCEORIGINAL
@@ -1627,7 +1624,7 @@ fn skip_referenceoriginal_embedded_control(
     }
 
     // Skip the embedded REFERENCECONTROL (0x002F) twiddled part.
-    skip_dir_record(dir_decompressed, offset)?;
+    skip_v3_reference_control(dir_decompressed, offset)?;
 
     // Optional NameRecordExtended (0x0016) + NameUnicode (0x003E).
     if peek_next_record_id(dir_decompressed, *offset) == Some(0x0016) {
@@ -1639,9 +1636,167 @@ fn skip_referenceoriginal_embedded_control(
 
     // Extended control tail (Reserved3=0x0030 marker + size + payload).
     if peek_next_record_id(dir_decompressed, *offset) == Some(0x0030) {
-        skip_dir_record(dir_decompressed, offset)?;
+        skip_v3_reference_extended(dir_decompressed, offset)?;
     }
 
+    Ok(())
+}
+
+fn append_v3_reference_registered(
+    out: &mut Vec<u8>,
+    dir_decompressed: &[u8],
+    offset: &mut usize,
+) -> Result<(), ParseError> {
+    let mut cur = DirCursor {
+        bytes: dir_decompressed,
+        offset: *offset,
+    };
+    let id = cur.read_u16().ok_or(DirParseError::Truncated)?;
+    if id != 0x000D {
+        return Err(DirParseError::UnexpectedRecordId { expected: 0x000D, found: id }.into());
+    }
+    cur.read_u32().ok_or(DirParseError::Truncated)?; // Size (ignored)
+    let payload_start = cur.offset;
+    let size_of_libid = cur.read_u32().ok_or(DirParseError::Truncated)? as usize;
+    cur.skip(size_of_libid).ok_or(DirParseError::Truncated)?;
+    cur.read_u32().ok_or(DirParseError::Truncated)?; // Reserved1
+    cur.read_u16().ok_or(DirParseError::Truncated)?; // Reserved2
+    let payload_end = cur.offset;
+
+    out.extend_from_slice(&id.to_le_bytes());
+    out.extend_from_slice(&dir_decompressed[payload_start..payload_end]);
+    *offset = payload_end;
+    Ok(())
+}
+
+fn append_v3_reference_project(
+    out: &mut Vec<u8>,
+    dir_decompressed: &[u8],
+    offset: &mut usize,
+) -> Result<(), ParseError> {
+    let mut cur = DirCursor {
+        bytes: dir_decompressed,
+        offset: *offset,
+    };
+    let id = cur.read_u16().ok_or(DirParseError::Truncated)?;
+    if id != 0x000E {
+        return Err(DirParseError::UnexpectedRecordId { expected: 0x000E, found: id }.into());
+    }
+    cur.read_u32().ok_or(DirParseError::Truncated)?; // Size (ignored)
+    let payload_start = cur.offset;
+
+    let size_abs = cur.read_u32().ok_or(DirParseError::Truncated)? as usize;
+    cur.skip(size_abs).ok_or(DirParseError::Truncated)?;
+    let size_rel = cur.read_u32().ok_or(DirParseError::Truncated)? as usize;
+    cur.skip(size_rel).ok_or(DirParseError::Truncated)?;
+    cur.read_u32().ok_or(DirParseError::Truncated)?; // MajorVersion
+    cur.read_u16().ok_or(DirParseError::Truncated)?; // MinorVersion
+    let payload_end = cur.offset;
+
+    out.extend_from_slice(&id.to_le_bytes());
+    out.extend_from_slice(&dir_decompressed[payload_start..payload_end]);
+    *offset = payload_end;
+    Ok(())
+}
+
+fn append_v3_reference_control(
+    out: &mut Vec<u8>,
+    dir_decompressed: &[u8],
+    offset: &mut usize,
+) -> Result<(), ParseError> {
+    let mut cur = DirCursor {
+        bytes: dir_decompressed,
+        offset: *offset,
+    };
+    let id = cur.read_u16().ok_or(DirParseError::Truncated)?;
+    if id != 0x002F {
+        return Err(DirParseError::UnexpectedRecordId { expected: 0x002F, found: id }.into());
+    }
+    cur.read_u32().ok_or(DirParseError::Truncated)?; // SizeTwiddled (ignored)
+    let payload_start = cur.offset;
+
+    let size_of_libid_twiddled = cur.read_u32().ok_or(DirParseError::Truncated)? as usize;
+    cur.skip(size_of_libid_twiddled)
+        .ok_or(DirParseError::Truncated)?;
+    cur.read_u32().ok_or(DirParseError::Truncated)?; // Reserved1
+    cur.read_u16().ok_or(DirParseError::Truncated)?; // Reserved2
+    let payload_end = cur.offset;
+
+    out.extend_from_slice(&id.to_le_bytes());
+    out.extend_from_slice(&dir_decompressed[payload_start..payload_end]);
+    *offset = payload_end;
+    Ok(())
+}
+
+fn append_v3_reference_extended(
+    out: &mut Vec<u8>,
+    dir_decompressed: &[u8],
+    offset: &mut usize,
+) -> Result<(), ParseError> {
+    let mut cur = DirCursor {
+        bytes: dir_decompressed,
+        offset: *offset,
+    };
+    let id = cur.read_u16().ok_or(DirParseError::Truncated)?;
+    if id != 0x0030 {
+        return Err(DirParseError::UnexpectedRecordId { expected: 0x0030, found: id }.into());
+    }
+    cur.read_u32().ok_or(DirParseError::Truncated)?; // SizeExtended (ignored)
+    let payload_start = cur.offset;
+
+    let size_of_libid_extended = cur.read_u32().ok_or(DirParseError::Truncated)? as usize;
+    cur.skip(size_of_libid_extended)
+        .ok_or(DirParseError::Truncated)?;
+    cur.read_u32().ok_or(DirParseError::Truncated)?; // Reserved4
+    cur.read_u16().ok_or(DirParseError::Truncated)?; // Reserved5
+    cur.skip(16).ok_or(DirParseError::Truncated)?; // OriginalTypeLib GUID
+    cur.read_u32().ok_or(DirParseError::Truncated)?; // Cookie
+    let payload_end = cur.offset;
+
+    out.extend_from_slice(&id.to_le_bytes());
+    out.extend_from_slice(&dir_decompressed[payload_start..payload_end]);
+    *offset = payload_end;
+    Ok(())
+}
+
+fn skip_v3_reference_control(dir_decompressed: &[u8], offset: &mut usize) -> Result<(), ParseError> {
+    // Reuse the same parsing logic as the append path, but discard output.
+    let mut cur = DirCursor {
+        bytes: dir_decompressed,
+        offset: *offset,
+    };
+    let id = cur.read_u16().ok_or(DirParseError::Truncated)?;
+    if id != 0x002F {
+        return Err(DirParseError::UnexpectedRecordId { expected: 0x002F, found: id }.into());
+    }
+    cur.read_u32().ok_or(DirParseError::Truncated)?; // SizeTwiddled (ignored)
+    let size_of_libid_twiddled = cur.read_u32().ok_or(DirParseError::Truncated)? as usize;
+    cur.skip(size_of_libid_twiddled)
+        .ok_or(DirParseError::Truncated)?;
+    cur.read_u32().ok_or(DirParseError::Truncated)?; // Reserved1
+    cur.read_u16().ok_or(DirParseError::Truncated)?; // Reserved2
+    *offset = cur.offset;
+    Ok(())
+}
+
+fn skip_v3_reference_extended(dir_decompressed: &[u8], offset: &mut usize) -> Result<(), ParseError> {
+    let mut cur = DirCursor {
+        bytes: dir_decompressed,
+        offset: *offset,
+    };
+    let id = cur.read_u16().ok_or(DirParseError::Truncated)?;
+    if id != 0x0030 {
+        return Err(DirParseError::UnexpectedRecordId { expected: 0x0030, found: id }.into());
+    }
+    cur.read_u32().ok_or(DirParseError::Truncated)?; // SizeExtended (ignored)
+    let size_of_libid_extended = cur.read_u32().ok_or(DirParseError::Truncated)? as usize;
+    cur.skip(size_of_libid_extended)
+        .ok_or(DirParseError::Truncated)?;
+    cur.read_u32().ok_or(DirParseError::Truncated)?; // Reserved4
+    cur.read_u16().ok_or(DirParseError::Truncated)?; // Reserved5
+    cur.skip(16).ok_or(DirParseError::Truncated)?; // OriginalTypeLib GUID
+    cur.read_u32().ok_or(DirParseError::Truncated)?; // Cookie
+    *offset = cur.offset;
     Ok(())
 }
 

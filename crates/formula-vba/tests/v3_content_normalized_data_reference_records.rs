@@ -15,6 +15,12 @@ fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
     out.extend_from_slice(data);
 }
 
+fn push_record_with_size(out: &mut Vec<u8>, id: u16, size: u32, data: &[u8]) {
+    out.extend_from_slice(&id.to_le_bytes());
+    out.extend_from_slice(&size.to_le_bytes());
+    out.extend_from_slice(data);
+}
+
 fn push_reference_name(dir: &mut Vec<u8>, expected: &mut Vec<u8>, name: &str) {
     let name_bytes = name.as_bytes();
     let name_unicode: Vec<u8> = name
@@ -147,3 +153,93 @@ fn v3_content_normalized_data_reference_handling_includes_names_and_excludes_rec
     assert_eq!(actual, expected);
 }
 
+#[test]
+fn v3_content_normalized_data_reference_handling_ignores_malformed_record_size_fields() {
+    // MS-OVBA specifies that several reference-record "Size*" fields MUST be ignored.
+    //
+    // This test ensures we do not rely on the on-disk record-size value for record framing. We
+    // intentionally write incorrect sizes (0) for reference records and ensure the transcript
+    // remains correct and parsing continues to subsequent records.
+    let mut dir_decompressed = Vec::new();
+    let mut expected = Vec::new();
+
+    // ---- Reference 1: REFERENCECONTROL (0x002F) with malformed SizeTwiddled ----
+    push_reference_name(&mut dir_decompressed, &mut expected, "ControlRef");
+
+    let libid_twiddled = b"LIBID-TWIDDLED";
+    let reserved1: u32 = 0x00000000;
+    let reserved2: u16 = 0x0000;
+    let mut reference_control = Vec::new();
+    reference_control.extend_from_slice(&(libid_twiddled.len() as u32).to_le_bytes());
+    reference_control.extend_from_slice(libid_twiddled);
+    reference_control.extend_from_slice(&reserved1.to_le_bytes());
+    reference_control.extend_from_slice(&reserved2.to_le_bytes());
+    // Malformed size (0): actual payload bytes still follow.
+    push_record_with_size(&mut dir_decompressed, 0x002F, 0, &reference_control);
+    expected.extend_from_slice(&0x002Fu16.to_le_bytes());
+    expected.extend_from_slice(&reference_control);
+
+    // ---- Reference 1b: REFERENCEEXTENDED (0x0030) with malformed SizeExtended ----
+    push_reference_name(&mut dir_decompressed, &mut expected, "ExtTypeLib");
+
+    let libid_extended = b"LIBID-EXTENDED";
+    let reserved4: u32 = 0x00000000;
+    let reserved5: u16 = 0x0000;
+    let original_type_lib: [u8; 16] = [0u8; 16];
+    let cookie: u32 = 0xA1B2C3D4;
+    let mut reference_extended = Vec::new();
+    reference_extended.extend_from_slice(&(libid_extended.len() as u32).to_le_bytes());
+    reference_extended.extend_from_slice(libid_extended);
+    reference_extended.extend_from_slice(&reserved4.to_le_bytes());
+    reference_extended.extend_from_slice(&reserved5.to_le_bytes());
+    reference_extended.extend_from_slice(&original_type_lib);
+    reference_extended.extend_from_slice(&cookie.to_le_bytes());
+    push_record_with_size(&mut dir_decompressed, 0x0030, 0, &reference_extended);
+    expected.extend_from_slice(&0x0030u16.to_le_bytes());
+    expected.extend_from_slice(&reference_extended);
+
+    // ---- Reference 2: REFERENCEREGISTERED (0x000D) with malformed Size ----
+    push_reference_name(&mut dir_decompressed, &mut expected, "RegisteredRef");
+
+    let libid_registered = b"LIBID-REGISTERED";
+    let mut reference_registered = Vec::new();
+    reference_registered.extend_from_slice(&(libid_registered.len() as u32).to_le_bytes());
+    reference_registered.extend_from_slice(libid_registered);
+    reference_registered.extend_from_slice(&0u32.to_le_bytes()); // Reserved1
+    reference_registered.extend_from_slice(&0u16.to_le_bytes()); // Reserved2
+    push_record_with_size(&mut dir_decompressed, 0x000D, 0, &reference_registered);
+    expected.extend_from_slice(&0x000Du16.to_le_bytes());
+    expected.extend_from_slice(&reference_registered);
+
+    // ---- Reference 3: REFERENCEPROJECT (0x000E) with malformed Size ----
+    push_reference_name(&mut dir_decompressed, &mut expected, "ProjectRef");
+
+    let libid_absolute = b"ABS-PATH";
+    let libid_relative = b"REL-PATH";
+    let major: u32 = 0x01020304;
+    let minor: u16 = 0x0506;
+    let mut reference_project = Vec::new();
+    reference_project.extend_from_slice(&(libid_absolute.len() as u32).to_le_bytes());
+    reference_project.extend_from_slice(libid_absolute);
+    reference_project.extend_from_slice(&(libid_relative.len() as u32).to_le_bytes());
+    reference_project.extend_from_slice(libid_relative);
+    reference_project.extend_from_slice(&major.to_le_bytes());
+    reference_project.extend_from_slice(&minor.to_le_bytes());
+    push_record_with_size(&mut dir_decompressed, 0x000E, 0, &reference_project);
+    expected.extend_from_slice(&0x000Eu16.to_le_bytes());
+    expected.extend_from_slice(&reference_project);
+
+    // ---- Build OLE with the `VBA/dir` stream ----
+    let dir_container = compress_container(&dir_decompressed);
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    let vba_bin = ole.into_inner().into_inner();
+
+    let actual = v3_content_normalized_data(&vba_bin).expect("V3ContentNormalizedData");
+    assert_eq!(actual, expected);
+}
