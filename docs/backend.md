@@ -185,6 +185,11 @@ pnpm -C services/api secrets:rotate
 
 This scans the `secrets` table and re-encrypts any secrets not using the current key id into the latest format. It is safe to run while the API is online.
 
+Optional env vars:
+
+- `PREFIX="oidc:<orgId>:"` to scope rotation to a literal secret-name prefix.
+- `BATCH_SIZE=250` to control pagination.
+
 ## Persistence (local docker compose)
 
 The docker compose stack configures the sync server with:

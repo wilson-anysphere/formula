@@ -5,7 +5,12 @@ import { runSecretsRotation } from "../secrets/rotation";
 const config = loadConfig();
 const pool = createPool(config.databaseUrl);
 
-const batchSize = process.env.BATCH_SIZE ? Number.parseInt(process.env.BATCH_SIZE, 10) : undefined;
+const batchSizeRaw = process.env.BATCH_SIZE?.trim();
+const batchSizeParsed = batchSizeRaw ? Number.parseInt(batchSizeRaw, 10) : undefined;
+const batchSize =
+  batchSizeParsed != null && Number.isFinite(batchSizeParsed) && batchSizeParsed > 0
+    ? batchSizeParsed
+    : undefined;
 const prefix = process.env.PREFIX?.trim() || undefined;
 
 runSecretsRotation(pool, config.secretStoreKeys, { batchSize, prefix })
