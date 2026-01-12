@@ -15,14 +15,20 @@ describe("ui/icons", () => {
   it("does not introduce hardcoded colors and uses Icon base component", () => {
     const iconsDir = dirname(fileURLToPath(import.meta.url));
     const files = listIconSourceFiles(iconsDir);
+    const indexSrc = readFileSync(join(iconsDir, "index.ts"), "utf8");
 
     for (const file of files) {
       const fullPath = join(iconsDir, file);
       const src = readFileSync(fullPath, "utf8");
+      const exportName = file.replace(/\.tsx$/, "");
 
       // All icon components should go through the shared base component (so sizing,
       // stroke styles, and currentColor defaults are consistent).
       expect(src, `${file} should use <Icon>`).toContain("<Icon");
+
+      // Ensure the icon is re-exported from the barrel so consumers can import
+      // consistently from `ui/icons`.
+      expect(indexSrc, `index.ts should export ${exportName}`).toContain(`"./${exportName}"`);
 
       // Prevent hard-coded color values. Icons must inherit `currentColor`.
       expect(src, `${file} should not contain hex colors`).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
