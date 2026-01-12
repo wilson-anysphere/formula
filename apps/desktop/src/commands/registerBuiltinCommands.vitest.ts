@@ -243,6 +243,9 @@ describe("registerBuiltinCommands: core editing/view/audit commands", () => {
       registerBuiltinCommands({ commandRegistry, app, layoutController });
       await commandRegistry.executeCommand("edit.undo");
       await commandRegistry.executeCommand("edit.redo");
+      await commandRegistry.executeCommand("view.toggleShowFormulas");
+      await commandRegistry.executeCommand("audit.togglePrecedents");
+      await commandRegistry.executeCommand("audit.toggleDependents");
     } finally {
       if (prevDocument === undefined) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -257,5 +260,8 @@ describe("registerBuiltinCommands: core editing/view/audit commands", () => {
     expect(execCommand).toHaveBeenCalledWith("redo", false);
     expect(app.undo).not.toHaveBeenCalled();
     expect(app.redo).not.toHaveBeenCalled();
+    expect(app.toggleShowFormulas).not.toHaveBeenCalled();
+    expect(app.toggleAuditingPrecedents).not.toHaveBeenCalled();
+    expect(app.toggleAuditingDependents).not.toHaveBeenCalled();
   });
 });

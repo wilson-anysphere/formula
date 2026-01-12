@@ -143,6 +143,7 @@ export function registerBuiltinCommands(params: {
     t("command.view.toggleShowFormulas"),
     () => {
       if (app.isEditing()) return;
+      if (getTextEditingTarget()) return;
       app.toggleShowFormulas();
     },
     {
@@ -158,6 +159,7 @@ export function registerBuiltinCommands(params: {
     t("command.audit.togglePrecedents"),
     () => {
       if (app.isEditing()) return;
+      if (getTextEditingTarget()) return;
       app.toggleAuditingPrecedents();
     },
     {
@@ -173,6 +175,7 @@ export function registerBuiltinCommands(params: {
     t("command.audit.toggleDependents"),
     () => {
       if (app.isEditing()) return;
+      if (getTextEditingTarget()) return;
       app.toggleAuditingDependents();
     },
     {
