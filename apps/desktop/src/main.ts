@@ -7891,7 +7891,8 @@ type TauriDialogOpen = (options?: Record<string, unknown>) => Promise<string | s
 type TauriDialogSave = (options?: Record<string, unknown>) => Promise<string | null>;
 
 function getTauriDialog(): { open: TauriDialogOpen; save: TauriDialogSave } {
-  const dialog = (globalThis as any).__TAURI__?.dialog;
+  const tauri = (globalThis as any).__TAURI__;
+  const dialog = tauri?.dialog ?? tauri?.plugin?.dialog;
   const open = dialog?.open as TauriDialogOpen | undefined;
   const save = dialog?.save as TauriDialogSave | undefined;
   if (!open || !save) {

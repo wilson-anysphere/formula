@@ -407,8 +407,6 @@ use crate::{
 #[cfg(any(feature = "desktop", test))]
 use std::path::PathBuf;
 #[cfg(feature = "desktop")]
-use std::sync::Arc;
-#[cfg(feature = "desktop")]
 use tauri::State;
 #[cfg(feature = "desktop")]
 use tauri_plugin_shell::ShellExt;
@@ -2056,7 +2054,7 @@ fn build_macro_security_status(
             // producers store the `\x05DigitalSignature*` streams outside of `vbaProject.bin`.
             if let Some(origin) = workbook.origin_xlsx_bytes.as_deref() {
                 let sig_part = formula_xlsx::read_part_from_reader(
-                    std::io::Cursor::new(origin.as_ref()),
+                    std::io::Cursor::new(origin),
                     "xl/vbaProjectSignature.bin",
                 )
                 .ok()
@@ -2151,7 +2149,7 @@ fn enforce_macro_trust(
         .map(|s| s.status)
         .unwrap_or(MacroSignatureStatus::Unsigned);
 
-    match evaluate_macro_trust(status.trust, signature_status) {
+    match evaluate_macro_trust(status.trust.clone(), signature_status) {
         Ok(()) => Ok(None),
         Err(reason) => Ok(Some(MacroBlockedError { reason, status })),
     }
@@ -2204,12 +2202,12 @@ pub async fn get_macro_security_status(
     state: State<'_, SharedAppState>,
     trust: State<'_, SharedMacroTrustStore>,
 ) -> Result<MacroSecurityStatus, String> {
-    let workbook_id = workbook_id.as_deref();
     let shared = state.inner().clone();
     let trust_shared = trust.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let workbook_id = workbook_id.as_deref();
         let mut state = shared.lock().unwrap();
-        let mut trust_store = trust_shared.lock().unwrap();
+        let trust_store = trust_shared.lock().unwrap();
         let workbook = state.get_workbook_mut().map_err(app_error)?;
         build_macro_security_status(workbook, workbook_id, &trust_store)
     })
@@ -2225,10 +2223,10 @@ pub async fn set_macro_trust(
     state: State<'_, SharedAppState>,
     trust: State<'_, SharedMacroTrustStore>,
 ) -> Result<MacroSecurityStatus, String> {
-    let workbook_id = workbook_id.as_deref();
     let shared = state.inner().clone();
     let trust_shared = trust.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let workbook_id = workbook_id.as_deref();
         let mut state = shared.lock().unwrap();
         let mut trust_store = trust_shared.lock().unwrap();
 

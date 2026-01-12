@@ -21,12 +21,13 @@ default = []
 desktop = [
     "dep:tauri",
     "dep:tauri-build",
+    "dep:tauri-plugin-deep-link",
+    "dep:tauri-plugin-dialog",
+    "dep:tauri-plugin-clipboard-manager",
     "dep:tauri-plugin-global-shortcut",
     "dep:tauri-plugin-single-instance",
     "dep:tauri-plugin-notification",
-    "dep:tauri-plugin-dialog",
     "dep:tauri-plugin-shell",
-    "dep:tauri-plugin-clipboard-manager",
     "dep:tauri-plugin-updater",
     "dep:http-range",
     "dep:percent-encoding",
@@ -81,6 +82,7 @@ sha2 = "0.10"
 hex = "0.4"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "sqlite", "postgres", "chrono"] }
 tauri = { version = "2.9", optional = true, features = ["tray-icon"] }
+tauri-plugin-deep-link = { version = "2.4", optional = true }
 tauri-plugin-dialog = { version = "2", optional = true }
 tauri-plugin-clipboard-manager = { version = "2", optional = true }
 tauri-plugin-global-shortcut = { version = "2.3", optional = true }

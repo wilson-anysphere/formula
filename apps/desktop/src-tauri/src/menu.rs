@@ -139,10 +139,14 @@ pub fn on_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
     }
 }
 
-fn build_menu(handle: &AppHandle) -> tauri::Result<Menu> {
+fn build_menu(handle: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     // Prefer the configured product name (tauri.conf.json `productName`) for menu labels.
     // `package_info().name` is the Cargo crate name (e.g. `desktop`), which isn't user-facing.
-    let app_name = handle.config().product_name.clone();
+    let app_name = handle
+        .config()
+        .product_name
+        .clone()
+        .unwrap_or_else(|| handle.package_info().name.clone());
 
     let new = MenuItem::with_id(handle, ITEM_NEW, "New", true, Some("CmdOrCtrl+N"))?;
     let open = MenuItem::with_id(handle, ITEM_OPEN, "Open…", true, Some("CmdOrCtrl+O"))?;

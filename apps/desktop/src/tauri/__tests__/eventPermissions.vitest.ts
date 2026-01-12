@@ -23,8 +23,6 @@ describe("tauri capability event permissions", () => {
     const windows = Array.isArray(tauriConf?.app?.windows) ? tauriConf.app.windows : [];
     const mainWindow = windows.find((w: any) => w?.label === "main");
     expect(mainWindow).toBeTruthy();
-    expect(Array.isArray(mainWindow?.capabilities)).toBe(true);
-    expect(mainWindow.capabilities).toContain("main");
 
     const mainWindowLabel = String(mainWindow?.label ?? "");
     expect(mainWindowLabel).toBe("main");
@@ -81,7 +79,7 @@ describe("tauri capability event permissions", () => {
     }
   });
 
-  it("does not include duplicate allow-invoke command names", () => {
+  it("does not grant broad default core permissions (least privilege)", () => {
     const capabilityUrl = new URL("../../../src-tauri/capabilities/main.json", import.meta.url);
     const capability = JSON.parse(readFileSync(capabilityUrl, "utf8")) as {
       permissions?: CapabilityPermission[];
@@ -89,16 +87,11 @@ describe("tauri capability event permissions", () => {
 
     const permissions = Array.isArray(capability.permissions) ? capability.permissions : [];
 
-    const allowInvoke = permissions.find(
-      (p): p is Exclude<CapabilityPermission, string> =>
-        typeof p === "object" && p != null && (p as any).identifier === "core:allow-invoke",
-    ) as any;
-
-    expect(allowInvoke).toBeTruthy();
-    expect(Array.isArray(allowInvoke.allow)).toBe(true);
-
-    const rawCommands = (allowInvoke.allow as any[]).filter((cmd) => typeof cmd === "string");
-    expect(new Set(rawCommands).size).toBe(rawCommands.length);
+    // `core:default` would implicitly grant broad access to many core plugins (event/window/etc),
+    // defeating the point of the explicit allowlists in this hardened build.
+    expect(permissions).not.toContain("core:default");
+    expect(permissions).not.toContain("core:event:default");
+    expect(permissions).not.toContain("core:window:default");
   });
 
   it("includes the desktop shell event names used by the frontend", () => {

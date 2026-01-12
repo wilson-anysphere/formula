@@ -4,147 +4,57 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 describe("Tauri capabilities", () => {
-  it("allowlists add_sheet so the sheet tabs '+' button can persist sheets in Tauri builds", () => {
+  function readPermissions(): unknown[] {
     const capabilityPath = fileURLToPath(new URL("../../../src-tauri/capabilities/main.json", import.meta.url));
     const capability = JSON.parse(readFileSync(capabilityPath, "utf8")) as { permissions?: unknown };
-
     expect(Array.isArray(capability.permissions)).toBe(true);
+    return capability.permissions as unknown[];
+  }
 
-    const permissions = capability.permissions as unknown[];
+  it("does not rely on unsupported core:allow-invoke permissions (commands must validate in Rust)", () => {
+    const permissions = readPermissions();
     const allowInvoke = permissions.find(
       (permission) =>
         Boolean(permission) && typeof permission === "object" && (permission as Record<string, unknown>).identifier === "core:allow-invoke",
     );
-
-    expect(allowInvoke).toBeTruthy();
-    const allowedCommands = (allowInvoke as Record<string, unknown>).allow;
-    expect(Array.isArray(allowedCommands)).toBe(true);
-
-    const commands = allowedCommands as unknown[];
-    expect(commands).toContain("add_sheet");
+    expect(allowInvoke).toBeFalsy();
   });
 
-  it("allowlists rename_sheet so sheet tab renames persist in Tauri builds", () => {
-    const capabilityPath = fileURLToPath(new URL("../../../src-tauri/capabilities/main.json", import.meta.url));
-    const capability = JSON.parse(readFileSync(capabilityPath, "utf8")) as { permissions?: unknown };
+  it("grants the dialog + clipboard permissions required by the frontend", () => {
+    const permissions = readPermissions();
 
-    expect(Array.isArray(capability.permissions)).toBe(true);
+    expect(permissions).toContain("dialog:allow-open");
+    expect(permissions).toContain("dialog:allow-save");
+    expect(permissions).toContain("dialog:allow-confirm");
+    expect(permissions).toContain("dialog:allow-message");
+    // Keep dialog permission surface minimal.
+    expect(permissions).not.toContain("dialog:default");
 
-    const permissions = capability.permissions as unknown[];
-    const allowInvoke = permissions.find(
-      (permission) =>
-        Boolean(permission) && typeof permission === "object" && (permission as Record<string, unknown>).identifier === "core:allow-invoke",
-    );
-
-    expect(allowInvoke).toBeTruthy();
-    const allowedCommands = (allowInvoke as Record<string, unknown>).allow;
-    expect(Array.isArray(allowedCommands)).toBe(true);
-
-    const commands = allowedCommands as unknown[];
-    expect(commands).toContain("rename_sheet");
+    expect(permissions).toContain("clipboard-manager:allow-read-text");
+    expect(permissions).toContain("clipboard-manager:allow-write-text");
+    // Keep clipboard permission surface minimal.
+    expect(permissions).not.toContain("clipboard-manager:default");
   });
 
-  it("explicitly allowlists rich clipboard commands required by the desktop clipboard provider", () => {
-    const capabilityPath = fileURLToPath(new URL("../../../src-tauri/capabilities/main.json", import.meta.url));
-    const capability = JSON.parse(readFileSync(capabilityPath, "utf8")) as { permissions?: unknown };
-
-    expect(Array.isArray(capability.permissions)).toBe(true);
-
-    const permissions = capability.permissions as unknown[];
-    const allowInvoke = permissions.find(
-      (permission) => Boolean(permission) && typeof permission === "object" && (permission as Record<string, unknown>).identifier === "core:allow-invoke",
-    );
-
-    expect(allowInvoke).toBeTruthy();
-    const allowedCommands = (allowInvoke as Record<string, unknown>).allow;
-    expect(Array.isArray(allowedCommands)).toBe(true);
-
-    const commands = allowedCommands as unknown[];
-    expect(commands).toContain("clipboard_read");
-    expect(commands).toContain("clipboard_write");
-    // Back-compat for older desktop builds.
-    expect(commands).toContain("read_clipboard");
-    expect(commands).toContain("write_clipboard");
+  it("grants the window permissions required by the UI window helpers", () => {
+    const permissions = readPermissions();
+    expect(permissions).toContain("core:window:allow-hide");
+    expect(permissions).toContain("core:window:allow-show");
+    expect(permissions).toContain("core:window:allow-set-focus");
+    expect(permissions).toContain("core:window:allow-close");
+    expect(permissions).toContain("core:window:allow-minimize");
+    expect(permissions).toContain("core:window:allow-toggle-maximize");
+    expect(permissions).toContain("core:window:allow-is-maximized");
   });
 
-  it("allows invoking show_system_notification from the main window", () => {
-    const capabilityPath = fileURLToPath(new URL("../../../src-tauri/capabilities/main.json", import.meta.url));
-    const capability = JSON.parse(readFileSync(capabilityPath, "utf8")) as { permissions?: unknown };
-
-    expect(Array.isArray(capability.permissions)).toBe(true);
-
-    const permissions = capability.permissions as unknown[];
-    const allowInvoke = permissions.find(
-      (permission) => Boolean(permission) && typeof permission === "object" && (permission as Record<string, unknown>).identifier === "core:allow-invoke",
-    );
-
-    expect(allowInvoke).toBeTruthy();
-    const allowedCommands = (allowInvoke as Record<string, unknown>).allow;
-    expect(Array.isArray(allowedCommands)).toBe(true);
-
-    const commands = allowedCommands as unknown[];
-    expect(commands).toContain("show_system_notification");
-  });
-
-  it("allows invoking oauth_loopback_listen for RFC 8252 loopback redirect capture", () => {
-    const capabilityPath = fileURLToPath(new URL("../../../src-tauri/capabilities/main.json", import.meta.url));
-    const capability = JSON.parse(readFileSync(capabilityPath, "utf8")) as { permissions?: unknown };
-
-    expect(Array.isArray(capability.permissions)).toBe(true);
-
-    const permissions = capability.permissions as unknown[];
-    const allowInvoke = permissions.find(
-      (permission) => Boolean(permission) && typeof permission === "object" && (permission as Record<string, unknown>).identifier === "core:allow-invoke",
-    );
-
-    expect(allowInvoke).toBeTruthy();
-    const allowedCommands = (allowInvoke as Record<string, unknown>).allow;
-    expect(Array.isArray(allowedCommands)).toBe(true);
-
-    const commands = allowedCommands as unknown[];
-    expect(commands).toContain("oauth_loopback_listen");
-  });
-
-  it("routes external URL opening through open_external_url (no shell:allow-open permission)", () => {
-    const capabilityPath = fileURLToPath(new URL("../../../src-tauri/capabilities/main.json", import.meta.url));
-    const capability = JSON.parse(readFileSync(capabilityPath, "utf8")) as { permissions?: unknown };
-
-    expect(Array.isArray(capability.permissions)).toBe(true);
-
-    const permissions = capability.permissions as unknown[];
-    const allowInvoke = permissions.find(
-      (permission) => Boolean(permission) && typeof permission === "object" && (permission as Record<string, unknown>).identifier === "core:allow-invoke",
-    );
-
-    expect(allowInvoke).toBeTruthy();
-    const allowedCommands = (allowInvoke as Record<string, unknown>).allow;
-    expect(Array.isArray(allowedCommands)).toBe(true);
-
-    const commands = allowedCommands as unknown[];
-    expect(commands).toContain("open_external_url");
+  it("does not grant shell open permissions to the frontend (external navigation goes through Rust)", () => {
+    const permissions = readPermissions();
     expect(permissions).not.toContain("shell:allow-open");
+    expect(permissions).not.toContain("shell:default");
   });
 
   it("grants the updater permissions required by the frontend restart/install flow", () => {
-    const capabilityPath = fileURLToPath(new URL("../../../src-tauri/capabilities/main.json", import.meta.url));
-    const capability = JSON.parse(readFileSync(capabilityPath, "utf8")) as { permissions?: unknown };
-
-    expect(Array.isArray(capability.permissions)).toBe(true);
-
-    const permissions = capability.permissions as unknown[];
-
-    const allowInvoke = permissions.find(
-      (permission) =>
-        Boolean(permission) && typeof permission === "object" && (permission as Record<string, unknown>).identifier === "core:allow-invoke",
-    );
-    expect(allowInvoke).toBeTruthy();
-    const allowedCommands = (allowInvoke as Record<string, unknown>).allow;
-    expect(Array.isArray(allowedCommands)).toBe(true);
-
-    const commands = allowedCommands as unknown[];
-    // The updater restart flow calls `restart_app` when available, falling back to `quit_app`.
-    expect(commands).toContain("restart_app");
-    expect(commands).toContain("quit_app");
+    const permissions = readPermissions();
 
     expect(permissions).toContain("updater:allow-check");
     expect(permissions).toContain("updater:allow-download");

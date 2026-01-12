@@ -18,7 +18,8 @@ function getTauriDialogApi():
       alert?: TauriDialogMessage;
     }
   | null {
-  const dialog = (globalThis as any).__TAURI__?.dialog as unknown;
+  const tauri = (globalThis as any).__TAURI__;
+  const dialog = (tauri?.dialog ?? tauri?.plugin?.dialog) as unknown;
   if (!dialog || typeof dialog !== "object") return null;
   return dialog as any;
 }

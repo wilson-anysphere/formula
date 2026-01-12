@@ -25,6 +25,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tauri::{Emitter, Listener, Manager, State};
+use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_notification::NotificationExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -467,7 +468,7 @@ fn macros_trusted_for_before_close(
 
     let sig_part = workbook.origin_xlsx_bytes.as_deref().and_then(|origin| {
         formula_xlsx::read_part_from_reader(
-            std::io::Cursor::new(origin.as_ref()),
+            std::io::Cursor::new(origin),
             "xl/vbaProjectSignature.bin",
         )
         .ok()
@@ -780,6 +781,7 @@ fn main() {
                 )
                 .build(),
         )
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .manage(state)
@@ -789,18 +791,19 @@ fn main() {
         .manage(oauth_loopback_state)
         .manage(TrayStatusState::default())
         .manage(startup_metrics)
-        // NOTE: IPC hardening / command allowlist (Tauri v2 capabilities)
+        // NOTE: IPC hardening / capabilities (Tauri v2)
         //
-        // Any new `#[tauri::command]` must be:
-        //  1) Implemented in Rust (typically `src/commands.rs`, but may live elsewhere)
-        //  2) Registered here in `generate_handler![...]`
-        //  3) Added to the explicit JS invoke allowlist in
-        //     `src-tauri/capabilities/main.json` (`core:allow-invoke`)
+        // We avoid `core:default` and instead grant only the plugin APIs the frontend uses
+        // (events, dialogs, window ops, clipboard (plain text), updater, ...) in
+        // `src-tauri/capabilities/main.json`, scoped to the `main` window.
         //
-        // Otherwise `globalThis.__TAURI__.core.invoke("...")` will fail with a permission error.
+        // Note: we intentionally do not grant the JS shell plugin API (`shell:allow-open`);
+        // external URL opening goes through the `open_external_url` Rust command which enforces a
+        // scheme allowlist.
         //
-        // SECURITY: Commands touching filesystem/network/etc must validate inputs and enforce
-        // scoping/authorization in Rust (never trust the webview).
+        // SECURITY: Custom `#[tauri::command]` handlers are not currently permission-gated by the
+        // capability system in this build setup, so commands touching filesystem/network/etc must
+        // validate inputs and enforce scoping/authorization in Rust (never trust the webview).
         .invoke_handler(tauri::generate_handler![
             clipboard::clipboard_read,
             clipboard::clipboard_write,
@@ -922,10 +925,7 @@ fn main() {
                     let tx_for_listener = tx.clone();
 
                     let handler = window.listen("close-prep-done", move |event| {
-                        let Some(payload) = event.payload() else {
-                            return;
-                        };
-                        let received = payload.trim().trim_matches('"');
+                        let received = event.payload().trim().trim_matches('"');
                         if received != token_for_listener {
                             return;
                         }
@@ -1012,10 +1012,7 @@ fn main() {
                     let token_for_handled = token.clone();
                     let handled_tx_for_listener = handled_tx.clone();
                     let handled_handler = window.listen("close-handled", move |event| {
-                        let Some(payload) = event.payload() else {
-                            return;
-                        };
-                        let received = payload.trim().trim_matches('"');
+                        let received = event.payload().trim().trim_matches('"');
                         if received != token_for_handled {
                             return;
                         }
@@ -1070,10 +1067,11 @@ fn main() {
                 }
 
                 window.listen("coi-check-result", |event| {
-                    let Some(payload) = event.payload() else {
+                    let payload = event.payload();
+                    if payload.trim().is_empty() {
                         eprintln!("[formula][coi-check] missing payload");
                         std::process::exit(2);
-                    };
+                    }
 
                     let parsed: CrossOriginIsolationCheckResult =
                         match serde_json::from_str(payload) {
@@ -1218,6 +1216,15 @@ fn main() {
             tray::init(app)?;
             menu::init(app)?;
 
+            // Register the `formula://` deep-link URL scheme with the OS so OAuth PKCE redirects
+            // can round-trip back into the running desktop app instance.
+            //
+            // This is best-effort because some platforms may deny registration (e.g. sandboxed
+            // environments) and we still want the app to launch normally.
+            if let Err(err) = app.handle().deep_link().register("formula") {
+                eprintln!("[deep-link] failed to register formula:// handler: {err}");
+            }
+
             // Register global shortcuts (handled by the frontend via the Tauri plugin).
             shortcuts::register(app.handle())?;
 
@@ -1306,16 +1313,17 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(|app_handle, event| match event {
+    app.run(|_app_handle, event| match event {
         // macOS: when the app is already running and the user opens a file via Finder,
         // the running instance receives an "open documents" event. Route it through the
         // same open-file pipeline.
+        #[cfg(target_os = "macos")]
         tauri::RunEvent::Opened { urls, .. } => {
             let argv: Vec<String> = urls.iter().map(|url| url.to_string()).collect();
             let oauth_urls = extract_oauth_redirect_urls(&argv);
             handle_oauth_redirect_request(app_handle, oauth_urls);
             let paths = extract_open_file_paths(&argv, None);
-            handle_open_file_request(app_handle, paths);
+            handle_open_file_request(_app_handle, paths);
         }
         _ => {}
     });

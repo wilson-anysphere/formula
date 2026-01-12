@@ -97,6 +97,16 @@ pub struct MacroHost {
     program_compile_count: u64,
 }
 
+// SAFETY: `MacroHost` embeds `formula_vba_runtime` types that use `Rc<RefCell<...>>` internally
+// (not `Send`). In the desktop shell we only access the macro runtime via the shared `AppState`,
+// which is always protected by a `std::sync::Mutex` (see `SharedAppState` in `state.rs`).
+//
+// This ensures all `Rc` refcount mutations and `RefCell` borrows happen with mutual exclusion,
+// even if Tauri invokes commands on different threads. We therefore treat `MacroHost` as
+// effectively single-threaded state guarded by a mutex and mark it as `Send` so it can be stored
+// in Tauri-managed state.
+unsafe impl Send for MacroHost {}
+
 impl MacroHost {
     pub fn invalidate(&mut self) {
         self.vba_project_hash = None;

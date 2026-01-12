@@ -89,6 +89,7 @@ Key config fields you'll touch most often:
 - `build.frontendDist`: path to built frontend assets for production builds
 - `app.security.headers`: COOP/COEP headers (required for `crossOriginIsolated` / `SharedArrayBuffer`)
 - `app.security.csp`: Content Security Policy for the desktop WebView
+- `apps/desktop/src-tauri/capabilities/*.json`: explicit IPC permission allowlists (scoped to specific windows/webviews)
 - `plugins.*`: plugin configuration (e.g. updater)
 
 `app.security.headers` is especially important for the desktop app because the Pyodide-based Python runtime
@@ -99,7 +100,6 @@ Tauri v2 permissions are granted via **capabilities**:
 
 - `apps/desktop/src-tauri/capabilities/*.json`
 - capability files scope themselves to window labels via the capability file’s `"windows": [...]` list (matches `app.windows[].label` in `apps/desktop/src-tauri/tauri.conf.json`)
-- windows opt into capabilities via `app.windows[].capabilities` (list of capability identifiers; the main window uses `["main"]`)
 
 Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the full allowlists):
 
@@ -111,32 +111,13 @@ Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the ful
   "local": true,
   "windows": ["main"],
   "permissions": [
-    "core:default",
-    { "identifier": "core:allow-invoke", "allow": ["open_workbook", "save_workbook", "open_external_url"] },
-    // ...
-    {
-      "identifier": "event:allow-listen",
-      "allow": [
-        { "event": "open-file" },
-        { "event": "oauth-redirect" },
-        { "event": "startup:window-visible" },
-        { "event": "startup:webview-loaded" },
-        { "event": "startup:tti" },
-        { "event": "startup:metrics" }
-      ]
-    },
-    {
-      "identifier": "event:allow-emit",
-      "allow": [
-        { "event": "open-file-ready" },
-        { "event": "oauth-redirect-ready" },
-        { "event": "close-prep-done" },
-        { "event": "close-handled" }
-      ]
-    },
-    // ...
+    { "identifier": "core:event:allow-listen", "allow": [{ "event": "open-file" }] },
+    { "identifier": "core:event:allow-emit", "allow": [{ "event": "open-file-ready" }] },
+    "core:event:allow-unlisten",
     "dialog:allow-open",
     "dialog:allow-save",
+    "dialog:allow-confirm",
+    "dialog:allow-message",
     "core:window:allow-hide",
     "core:window:allow-show",
     "core:window:allow-set-focus",
@@ -153,26 +134,20 @@ Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the ful
 Note: external URL opening should go through the `open_external_url` Rust command (scheme allowlist enforced in Rust)
 rather than granting the webview direct access to the shell plugin (`shell:allow-open`).
 
-Note: `clipboard-manager:allow-read-text` / `clipboard-manager:allow-write-text` only grant access to the legacy plain-text
-clipboard helpers (`globalThis.__TAURI__.clipboard.readText` / `writeText`). Rich clipboard formats
-(HTML/RTF/PNG) are handled via custom Rust commands and must be added to the `core:allow-invoke` allowlist
-when used.
+Note: `clipboard-manager:allow-read-text` / `clipboard-manager:allow-write-text` grant access to the plain-text
+clipboard helpers (`globalThis.__TAURI__.clipboard.readText` / `writeText`). Rich clipboard formats (HTML/RTF/PNG)
+are handled via custom Rust commands (`__TAURI__.core.invoke(...)`) and must be kept input-validated/scoped in Rust.
 
 If you add new desktop IPC surface area, you must update the capability allowlists:
 
-- new `#[tauri::command]` names → `core:allow-invoke`
-- new frontend↔backend events → `event:allow-listen` / `event:allow-emit`
-
-Note: do **not** add `plugin:*` command names to `core:allow-invoke`. Plugin APIs are gated by their own permission strings
-(e.g. `dialog:allow-open`, `updater:allow-check`).
+- new frontend↔backend events → `core:event:allow-listen` / `core:event:allow-emit`
+- new plugin API usage → add the corresponding `*:allow-*` permission string(s)
 
 We keep guardrail tests to ensure we don't accidentally broaden the desktop IPC surface:
 
-- **Event allowlists**: enforce the **exact** `event:allow-listen` / `event:allow-emit` sets (no wildcard / allow-all):
+- **Event allowlists**: enforce the **exact** `core:event:allow-listen` / `core:event:allow-emit` sets (no wildcard / allow-all):
   - `apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts`
-- **Invoke allowlist**: ensure `core:allow-invoke` matches the Rust `generate_handler![...]` registration list:
-  - `apps/desktop/src-tauri/tests/tauri_ipc_allowlist.rs`
-- **Updater permissions**: ensure the frontend restart/install flow has the minimum updater permissions:
+- **Core/plugin permissions**: ensure required plugin APIs are explicitly granted (dialogs, clipboard, updater, etc):
   - `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts`
 
 Filesystem access for Power Query is handled via **custom Rust commands** (e.g. `read_text_file`, `list_dir`)
@@ -287,7 +262,11 @@ TypeScript ↔ Rust communication:
 //
 // In this repo, commands must also be:
 //  1) registered in `apps/desktop/src-tauri/src/main.rs` (`generate_handler![...]`)
-//  2) allowlisted in `apps/desktop/src-tauri/capabilities/main.json` (`core:allow-invoke`)
+//
+// Note: the current Tauri permission schema used by this repo does **not** provide a per-command
+// capability allowlist for app-defined `#[tauri::command]` functions. Capabilities are still used
+// to scope access to core/plugin APIs and to disable IPC entirely for non-matching windows, but
+// you must keep commands input-validated/scoped in Rust.
 //
 #[tauri::command]
 fn check_for_updates(app: tauri::AppHandle, source: crate::updater::UpdateCheckSource) -> Result<(), String> {

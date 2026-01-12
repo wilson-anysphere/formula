@@ -24,8 +24,7 @@
         "title": "Formula",
         "width": 1280,
         "height": 800,
-        "dragDropEnabled": true,
-        "capabilities": ["main"]
+        "dragDropEnabled": true
       }
     ]
   },
@@ -106,10 +105,6 @@
     "windows": {
       "certificateThumbprint": null,
       "timestampUrl": "http://timestamp.digicert.com"
-    },
-    "protocols": {
-      "name": "formula",
-      "schemes": ["formula"]
     }
   },
   "plugins": {
