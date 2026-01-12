@@ -115,11 +115,19 @@ test("binder normalizes foreign nested cell maps before mutating so collab undo 
   const remote = new Ycjs.Doc();
   const remoteCells = remote.getMap("cells");
   remote.transact(() => {
-    const cell = new Ycjs.Map();
-    cell.set("value", "from-cjs");
-    cell.set("formula", null);
-    cell.set("modified", 1);
-    remoteCells.set("Sheet1:0:0", cell);
+    const canonical = new Ycjs.Map();
+    canonical.set("value", "from-cjs");
+    canonical.set("formula", null);
+    canonical.set("modified", 1);
+    remoteCells.set("Sheet1:0:0", canonical);
+
+    // Also store the same cell under a legacy encoding so the binder writes to
+    // multiple raw keys for a single canonical coordinate.
+    const legacy = new Ycjs.Map();
+    legacy.set("value", "from-cjs");
+    legacy.set("formula", null);
+    legacy.set("modified", 1);
+    remoteCells.set("Sheet1:0,0", legacy);
   });
   const update = Ycjs.encodeStateAsUpdate(remote);
 
@@ -158,12 +166,20 @@ test("binder normalizes foreign nested cell maps before mutating so collab undo 
   assert.ok(afterWrite instanceof Y.Map, "cell map should be normalized to local Y.Map");
   assert.equal(afterWrite.get("value"), null);
 
+  const afterWriteLegacy = cellsRoot.get("Sheet1:0,0");
+  assert.ok(afterWriteLegacy);
+  assert.ok(afterWriteLegacy instanceof Y.Map, "legacy key cell map should also be normalized to local Y.Map");
+  assert.equal(afterWriteLegacy.get("value"), null);
+
+  assert.equal(undoService.canUndo(), true);
   undoService.undo();
   await flushAsync();
 
   const afterUndo = cellsRoot.get("Sheet1:0:0");
   assert.ok(afterUndo);
+  assert.ok(afterUndo instanceof Y.Map, "undo should not revert normalization to a foreign Y.Map");
   assert.equal(afterUndo.get("value"), "from-cjs");
+  assert.equal(undoService.canUndo(), false, "normalization should not create an extra undo step");
   assert.equal(documentController.getCell("Sheet1", { row: 0, col: 0 }).value, "from-cjs");
 
   binder.destroy();
