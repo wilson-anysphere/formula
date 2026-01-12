@@ -508,63 +508,100 @@ pub struct ListDirEntry {
     pub mtime_ms: u64,
 }
 
+/// Core implementation of `list_dir` (shared by the Tauri command and unit tests).
+///
+/// This intentionally enforces backend-side resource limits to prevent unbounded memory usage
+/// when listing very large directories.
+#[cfg(any(feature = "desktop", test))]
+fn list_dir_blocking(path: &str, recursive: bool) -> Result<Vec<ListDirEntry>, String> {
+    use std::path::{Path, PathBuf};
+
+    fn visit(
+        dir: &Path,
+        recursive: bool,
+        depth: usize,
+        out: &mut Vec<ListDirEntry>,
+    ) -> Result<(), String> {
+        if depth > crate::resource_limits::MAX_LIST_DIR_DEPTH {
+            return Err(format!(
+                "Directory listing exceeded depth limit (max {} levels)",
+                crate::resource_limits::MAX_LIST_DIR_DEPTH
+            ));
+        }
+
+        let entries = std::fs::read_dir(dir).map_err(|e| e.to_string())?;
+        for entry in entries {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let entry_path = entry.path();
+            let file_type = entry.file_type().map_err(|e| e.to_string())?;
+            let metadata = entry.metadata().map_err(|e| e.to_string())?;
+
+            if metadata.is_dir() {
+                // Never follow symlinked directories, to avoid cycles and unexpected traversal
+                // outside the requested subtree.
+                if recursive && !file_type.is_symlink() {
+                    visit(&entry_path, recursive, depth + 1, out)?;
+                }
+                continue;
+            }
+
+            if !metadata.is_file() {
+                continue;
+            }
+
+            let modified = metadata.modified().map_err(|e| e.to_string())?;
+            let duration = modified
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|e| e.to_string())?;
+
+            let name = entry
+                .file_name()
+                .to_str()
+                .unwrap_or_default()
+                .to_string();
+
+            out.push(ListDirEntry {
+                path: entry_path.to_string_lossy().to_string(),
+                name,
+                size: metadata.len(),
+                mtime_ms: duration.as_millis() as u64,
+            });
+
+            if out.len() >= crate::resource_limits::MAX_LIST_DIR_ENTRIES {
+                return Err(format!(
+                    "Directory listing exceeded limit (max {} entries)",
+                    crate::resource_limits::MAX_LIST_DIR_ENTRIES
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    let root = PathBuf::from(path);
+    let mut out = Vec::new();
+    visit(&root, recursive, 0, &mut out)?;
+    Ok(out)
+}
+
 /// List files in a directory (optionally recursively) and return basic metadata.
 ///
 /// This supports Power Query-style `Folder.Files` / `Folder.Contents` sources in the webview
 /// without depending on the optional Tauri FS plugin.
+///
+/// Resource limits:
+/// - The result set is capped at `MAX_LIST_DIR_ENTRIES` (see `resource_limits.rs`).
+/// - Recursive traversal is capped at `MAX_LIST_DIR_DEPTH`.
+/// - Symlinked directories are not followed.
+///
+/// If a limit is reached, the command returns an error instead of a truncated result.
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn list_dir(path: String, recursive: Option<bool>) -> Result<Vec<ListDirEntry>, String> {
-    use std::path::{Path, PathBuf};
-    use std::time::UNIX_EPOCH;
-
     let recursive = recursive.unwrap_or(false);
 
-    tauri::async_runtime::spawn_blocking(move || {
-        fn visit(dir: &Path, recursive: bool, out: &mut Vec<ListDirEntry>) -> Result<(), String> {
-            let entries = std::fs::read_dir(dir).map_err(|e| e.to_string())?;
-            for entry in entries {
-                let entry = entry.map_err(|e| e.to_string())?;
-                let entry_path = entry.path();
-                let metadata = entry.metadata().map_err(|e| e.to_string())?;
-                if metadata.is_dir() {
-                    if recursive {
-                        visit(&entry_path, recursive, out)?;
-                    }
-                    continue;
-                }
-                if !metadata.is_file() {
-                    continue;
-                }
-
-                let modified = metadata.modified().map_err(|e| e.to_string())?;
-                let duration = modified
-                    .duration_since(UNIX_EPOCH)
-                    .map_err(|e| e.to_string())?;
-
-                let name = entry
-                    .file_name()
-                    .to_str()
-                    .unwrap_or_default()
-                    .to_string();
-
-                out.push(ListDirEntry {
-                    path: entry_path.to_string_lossy().to_string(),
-                    name,
-                    size: metadata.len(),
-                    mtime_ms: duration.as_millis() as u64,
-                });
-            }
-            Ok(())
-        }
-
-        let root = PathBuf::from(path);
-        let mut out = Vec::new();
-        visit(&root, recursive, &mut out)?;
-        Ok::<_, String>(out)
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || list_dir_blocking(&path, recursive))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// Power Query: retrieve (or create) the AES-256-GCM key used to encrypt cached
@@ -3326,6 +3363,7 @@ mod tests {
     use super::*;
     use crate::file_io::read_xlsx_blocking;
     use std::path::Path;
+    use tempfile::TempDir;
 
     #[test]
     fn workbook_theme_palette_is_exposed_for_rt_simple_fixture() {
@@ -3361,6 +3399,52 @@ mod tests {
                 "expected hex color like '#RRGGBB', got {value}"
             );
         }
+    }
+
+    #[test]
+    fn list_dir_errors_when_entry_limit_reached() {
+        use std::fs::File;
+
+        let dir = TempDir::new().expect("create temp dir");
+        for idx in 0..=crate::resource_limits::MAX_LIST_DIR_ENTRIES {
+            let path = dir.path().join(format!("file_{idx}.txt"));
+            File::create(path).expect("create temp file");
+        }
+
+        let err = list_dir_blocking(dir.path().to_str().unwrap(), false)
+            .expect_err("expected list_dir to error once entry limit is reached");
+        assert!(
+            err.contains(&format!(
+                "Directory listing exceeded limit (max {} entries)",
+                crate::resource_limits::MAX_LIST_DIR_ENTRIES
+            )),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn list_dir_errors_when_depth_limit_reached() {
+        use std::fs::{create_dir, File};
+
+        let dir = TempDir::new().expect("create temp dir");
+        let mut current = dir.path().to_path_buf();
+        for depth in 0..=crate::resource_limits::MAX_LIST_DIR_DEPTH {
+            current = current.join(format!("d{depth}"));
+            create_dir(&current).expect("create nested dir");
+        }
+
+        // Add a file at the deepest level to ensure traversal would want to descend that far.
+        File::create(current.join("deep.txt")).expect("create deep file");
+
+        let err = list_dir_blocking(dir.path().to_str().unwrap(), true)
+            .expect_err("expected list_dir to error once depth limit is reached");
+        assert!(
+            err.contains(&format!(
+                "Directory listing exceeded depth limit (max {} levels)",
+                crate::resource_limits::MAX_LIST_DIR_DEPTH
+            )),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

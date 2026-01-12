@@ -333,6 +333,23 @@ function normalizeMtimeMs(payload: unknown): number {
   throw new Error("Unexpected stat payload returned from filesystem API");
 }
 
+function normalizeInvokeErrorMessage(err: unknown): string {
+  if (typeof err === "string") return err;
+  if (err && typeof err === "object") {
+    const maybeMessage = (err as any).message;
+    if (typeof maybeMessage === "string") return maybeMessage;
+  }
+  if (err instanceof Error) return err.message;
+  return String(err);
+}
+
+function isListDirLimitError(message: string): boolean {
+  return (
+    message.includes("Directory listing exceeded limit") ||
+    message.includes("Directory listing exceeded depth limit")
+  );
+}
+
 function createDefaultFileAdapter(): FileAdapter {
   const fs = getTauriFs();
   const readTextFile = fs?.readTextFile;
@@ -371,16 +388,27 @@ function createDefaultFileAdapter(): FileAdapter {
               };
             }
           : undefined,
-      listDir: async (path, options = {}) => {
-        const recursive = options.recursive ?? false;
-        if (typeof readDir !== "function") {
-          const invoke = getTauriInvoke();
-          const payload = await invoke("list_dir", { path, recursive });
-          if (!Array.isArray(payload)) throw new Error("Unexpected list_dir payload returned from filesystem API");
-          return payload.map((entry) => ({
-            path: String((entry as any)?.path ?? ""),
-            name: typeof (entry as any)?.name === "string" ? (entry as any).name : undefined,
-            size: (() => {
+       listDir: async (path, options = {}) => {
+         const recursive = options.recursive ?? false;
+         if (typeof readDir !== "function") {
+           const invoke = getTauriInvoke();
+           let payload: unknown;
+           try {
+             payload = await invoke("list_dir", { path, recursive });
+           } catch (err) {
+             const message = normalizeInvokeErrorMessage(err);
+             if (isListDirLimitError(message)) {
+               throw new Error(
+                 `This folder contains too many files (or is too deeply nested) to list safely.\n\n${message}\n\nTry selecting a smaller folder or disabling recursive listing.`,
+               );
+             }
+             throw err instanceof Error ? err : new Error(message);
+           }
+           if (!Array.isArray(payload)) throw new Error("Unexpected list_dir payload returned from filesystem API");
+           return payload.map((entry) => ({
+             path: String((entry as any)?.path ?? ""),
+             name: typeof (entry as any)?.name === "string" ? (entry as any).name : undefined,
+             size: (() => {
               try {
                 return normalizeFileSize((entry as any)?.size);
               } catch {
@@ -516,7 +544,18 @@ function createDefaultFileAdapter(): FileAdapter {
     stat: async (path) => ({ mtimeMs: normalizeMtimeMs(await invoke("stat_file", { path })) }),
     listDir: async (path, options = {}) => {
       const recursive = options.recursive ?? false;
-      const payload = await invoke("list_dir", { path, recursive });
+      let payload: unknown;
+      try {
+        payload = await invoke("list_dir", { path, recursive });
+      } catch (err) {
+        const message = normalizeInvokeErrorMessage(err);
+        if (isListDirLimitError(message)) {
+          throw new Error(
+            `This folder contains too many files (or is too deeply nested) to list safely.\n\n${message}\n\nTry selecting a smaller folder or disabling recursive listing.`,
+          );
+        }
+        throw err instanceof Error ? err : new Error(message);
+      }
       if (!Array.isArray(payload)) throw new Error("Unexpected list_dir payload returned from filesystem API");
       return payload.map((entry) => ({
         path: String((entry as any)?.path ?? ""),

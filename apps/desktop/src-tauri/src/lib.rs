@@ -5,6 +5,7 @@ pub mod macros;
 pub mod open_file;
 pub mod persistence;
 pub mod python;
+pub mod resource_limits;
 pub mod sql;
 pub mod state;
 pub mod storage;
