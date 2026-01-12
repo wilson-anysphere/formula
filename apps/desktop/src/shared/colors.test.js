@@ -21,12 +21,14 @@ test("normalizeExcelColorToCss converts Excel ARGB to canvas-safe CSS colors", (
 test("normalizeExcelColorToCss resolves formula-model/XLSX color reference objects", () => {
   assert.equal(normalizeExcelColorToCss({ indexed: 2 }), "#ff0000");
   assert.equal(normalizeExcelColorToCss({ indexed: 64 }), undefined);
+  assert.equal(normalizeExcelColorToCss({ indexed: 2, tint: 0.5 }), "#ff8080");
+  assert.equal(normalizeExcelColorToCss({ indexed: 2, tint: 500 }), "#ff8080");
 
   // Office 2013 default theme palette.
   assert.equal(normalizeExcelColorToCss({ theme: 4 }), "#5b9bd5"); // accent1
   assert.equal(normalizeExcelColorToCss({ theme: 0 }), "#ffffff"); // lt1
 
-  // Tint values are thousandths, with negatives shading toward black.
+  // Tint supports both formula-model's thousandths representation and OOXML's [-1, 1] float.
   assert.equal(normalizeExcelColorToCss({ theme: 4, tint: -500 }), "#2e4e6b");
   // Also accept OOXML-style tint fractions.
   assert.equal(normalizeExcelColorToCss({ theme: 4, tint: -0.5 }), "#2e4e6b");

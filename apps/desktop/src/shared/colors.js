@@ -13,6 +13,8 @@
  * - Any other non-hex string (e.g. `"red"`, `"rgb(…)"`) is returned as-is.
  *
  * Alpha is rounded to 3 decimal places for deterministic outputs (e.g. `0x80 / 255` -> `0.502`).
+ * Tint supports both formula-model's thousandths encoding (e.g. `-500`) and the OOXML float
+ * encoding (e.g. `-0.5`).
  *
  * @param {unknown} input
  * @returns {string | undefined}
@@ -64,7 +66,10 @@ export function normalizeExcelColorToCss(input) {
     if (idx === 64) return undefined;
 
     if (!Number.isInteger(idx) || idx < 0 || idx >= EXCEL_INDEXED_COLORS.length) return undefined;
-    const argb = EXCEL_INDEXED_COLORS[idx];
+    let argb = EXCEL_INDEXED_COLORS[idx];
+    if (typeof input.tint === "number" && Number.isFinite(input.tint) && input.tint !== 0) {
+      argb = applyTint(argb, input.tint);
+    }
     return normalizeExcelColorStringToCss(toHexArgb(argb));
   }
 
