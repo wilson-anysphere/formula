@@ -39,6 +39,7 @@ const INCLUDED_DIRS = [
   "extensions",
   "fixtures",
   "patches",
+  "security",
   ".github",
   ".cargo",
   "scripts",
