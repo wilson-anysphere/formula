@@ -114,4 +114,36 @@ test.describe("external hyperlink opening", () => {
     expect(windowCalls).toEqual([]);
     expect(urlAfter).toBe(urlBefore);
   });
+
+  test("middle-clicking an <a href> uses the Tauri shell plugin (auxclick)", async ({ page }) => {
+    await gotoDesktop(page);
+    await waitForIdle(page);
+
+    await page.evaluate(() => {
+      (window as any).__shellOpenCalls = [];
+      (window as any).__TAURI__ = {
+        plugin: {
+          shell: {
+            open: (url: string) => {
+              (window as any).__shellOpenCalls.push(url);
+              return Promise.resolve();
+            },
+          },
+        },
+      };
+
+      const a = document.createElement("a");
+      a.id = "e2e-external-anchor-middle";
+      a.href = "https://example.com";
+      a.textContent = "external link";
+      document.body.appendChild(a);
+    });
+
+    await page.click("#e2e-external-anchor-middle", { button: "middle" });
+    await page.waitForFunction(() => (window as any).__shellOpenCalls?.length === 1);
+
+    const shellCalls = await page.evaluate(() => (window as any).__shellOpenCalls);
+    expect(shellCalls).toHaveLength(1);
+    expect(shellCalls[0]).toMatch(/^https:\/\/example\.com\/?$/);
+  });
 });

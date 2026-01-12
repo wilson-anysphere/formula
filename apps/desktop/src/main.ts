@@ -194,9 +194,7 @@ let workbookSheetStore = new WorkbookSheetStore([{ id: "Sheet1", name: "Sheet1",
 function installExternalLinkInterceptor(): void {
   if (typeof document === "undefined") return;
 
-  document.addEventListener(
-    "click",
-    (event) => {
+  const handler = (event: MouseEvent) => {
       if (event.defaultPrevented) return;
 
       const target = event.target as Element | null;
@@ -242,6 +240,16 @@ function installExternalLinkInterceptor(): void {
       }).catch((err) => {
         console.error("Failed to open external link:", err);
       });
+  };
+
+  document.addEventListener("click", handler, { capture: true });
+  // Middle-click on links in browsers opens a new tab via `auxclick` rather than `click`.
+  // Intercept it too so desktop/Tauri always delegates to the OS browser.
+  document.addEventListener(
+    "auxclick",
+    (event) => {
+      if (event.button !== 1) return;
+      handler(event);
     },
     { capture: true },
   );
