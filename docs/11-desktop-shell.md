@@ -552,9 +552,9 @@ Provider selection:
 End-to-end flow (grid copy/paste):
 
 1. UI handlers in `apps/desktop/src/app/spreadsheetApp.ts` intercept `Cmd/Ctrl+C`, `X`, `V`.
-2. Copy/cut serializes the selection via `copyRangeToClipboardPayload()` (`apps/desktop/src/clipboard/clipboard.js`), producing `{ text, html }`.
+2. Copy/cut serializes the selection via `copyRangeToClipboardPayload()` (`apps/desktop/src/clipboard/clipboard.js`), producing `{ text, html, rtf }`.
 3. The platform provider (`apps/desktop/src/clipboard/platform/provider.js`) writes/reads the system clipboard.
-4. Paste prefers `text/html` (HTML tables) when available and falls back to `text/plain`.
+4. Paste parses clipboard payloads in priority order: `text/html` → `text/plain` → `text/rtf` (plain-text extracted from RTF).
 
 Desktop vs web behavior:
 
