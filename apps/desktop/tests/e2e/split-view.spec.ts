@@ -336,6 +336,34 @@ test.describe("split view", () => {
     expect(await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C1"))).toBe("");
   });
 
+  test("primary in-cell edits commit on blur when clicking another cell (shared grid)", async ({ page }) => {
+    await gotoDesktop(page, "/?grid=shared");
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await waitForDesktopReady(page);
+    await waitForIdle(page);
+    await waitForGridCanvasesToBeSized(page, "#grid");
+
+    const primary = page.locator("#grid");
+
+    // Begin editing A1 in the primary pane, but do not press Enter.
+    await primary.click({ position: { x: 48 + 12, y: 24 + 12 } }); // A1
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+    await page.keyboard.press("h");
+    const editor = primary.locator("textarea.cell-editor");
+    await expect(editor).toBeVisible();
+    await page.keyboard.type("ello");
+    await expect(editor).toHaveValue("hello");
+
+    // Clicking another cell within the primary pane should commit and move selection.
+    await primary.click({ position: { x: 48 + 100 + 12, y: 24 + 12 } }); // B1
+    await waitForIdle(page);
+
+    await expect(page.getByTestId("active-cell")).toHaveText("B1");
+    expect(await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"))).toBe("hello");
+    await expect(editor).toBeHidden();
+  });
+
   test("secondary in-cell edits commit on blur when clicking the primary pane", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
     await page.evaluate(() => localStorage.clear());

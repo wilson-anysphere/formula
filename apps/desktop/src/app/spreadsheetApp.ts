@@ -691,6 +691,7 @@ export class SpreadsheetApp {
   private readonly editStateListeners = new Set<(isEditing: boolean) => void>();
 
   private editor: CellEditorOverlay;
+  private suppressFocusRestoreOnNextCommandCommit = false;
   private formulaBar: FormulaBarView | null = null;
   private formulaBarCompletion: FormulaBarTabCompletionController | null = null;
   private formulaEditCell: { sheetId: string; cell: CellCoord } | null = null;
@@ -1128,6 +1129,9 @@ export class SpreadsheetApp {
 
     this.editor = new CellEditorOverlay(this.root, {
       onCommit: (commit) => {
+        const suppressFocusRestore =
+          commit.reason === "command" && this.suppressFocusRestoreOnNextCommandCommit;
+        this.suppressFocusRestoreOnNextCommandCommit = false;
         this.updateEditState();
         this.applyEdit(this.sheetId, commit.cell, commit.value);
 
@@ -1146,15 +1150,30 @@ export class SpreadsheetApp {
         this.scrollCellIntoView(this.selection.active);
         if (this.sharedGrid) this.syncSharedGridSelectionFromState();
         this.refresh();
-        this.focus();
+        if (!suppressFocusRestore) this.focus();
       },
       onCancel: () => {
+        this.suppressFocusRestoreOnNextCommandCommit = false;
         this.updateEditState();
         this.renderSelection();
         this.updateStatus();
         this.focus();
       }
     });
+
+    // Excel behavior: leaving in-cell editing (e.g. clicking another cell, ribbon, etc)
+    // should commit the draft text.
+    //
+    // IMPORTANT: Avoid stealing focus back from whatever surface the user clicked. When the
+    // editor blurs to an element outside the grid root, suppress the focus-restore logic that
+    // normally runs after a command commit.
+    const onEditorBlur = (event: FocusEvent) => {
+      if (!this.editor.isOpen()) return;
+      const next = event.relatedTarget as Node | null;
+      this.suppressFocusRestoreOnNextCommandCommit = !next || !this.root.contains(next);
+      this.editor.commit("command");
+    };
+    this.editor.element.addEventListener("blur", onEditorBlur, { signal: this.domAbort.signal });
 
     this.inlineEditController = new InlineEditController({
       container: this.root,
