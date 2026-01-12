@@ -88,6 +88,31 @@ describe("computeCurrentRegionRange", () => {
     expect(rangeToA1(range)).toBe("A1:B2");
   });
 
+  it("includes the active cell even when it is adjacent outside the non-empty bounding box", () => {
+    const cells = new Map<string, { value: unknown; formula: string | null }>();
+    const setValue = (row: number, col: number, value: unknown, formula: string | null = null) => {
+      cells.set(`${row},${col}`, { value, formula });
+    };
+
+    // Only A1 is non-empty. Active cell B1 is empty but adjacent (to the right),
+    // so the selection should include both cells to keep the active cell inside
+    // the resulting selection range.
+    setValue(0, 0, "A1");
+
+    const data = {
+      getUsedRange(): Range | null {
+        return { startRow: 0, endRow: 0, startCol: 0, endCol: 0 };
+      },
+      isCellEmpty(cell: CellCoord): boolean {
+        const entry = cells.get(`${cell.row},${cell.col}`);
+        return entry == null || (entry.value == null && entry.formula == null);
+      },
+    };
+
+    const range = computeCurrentRegionRange({ row: 0, col: 1 }, data, { maxRows: 100, maxCols: 100 });
+    expect(rangeToA1(range)).toBe("A1:B1");
+  });
+
   it("does not connect cells diagonally (4-neighborhood only)", () => {
     const cells = new Map<string, { value: unknown; formula: string | null }>();
     const setValue = (row: number, col: number, value: unknown, formula: string | null = null) => {

@@ -55,8 +55,16 @@ export function computeCurrentRegionRange(
   const inUsedBounds = (row: number, col: number): boolean =>
     row >= used.startRow && row <= used.endRow && col >= used.startCol && col <= used.endCol;
 
+  // If the active cell is empty but adjacent to a region, we still want to select that region.
+  // However, selection state invariants expect the active cell to be inside the selected range,
+  // so we explicitly include the active cell in the final bounding box in this case.
+  let includeActiveInBounds = false;
+
   const pickSeed = (): CellCoord | null => {
-    if (inUsedBounds(active.row, active.col) && isNonEmpty(active.row, active.col)) return active;
+    if (inUsedBounds(active.row, active.col) && isNonEmpty(active.row, active.col)) {
+      includeActiveInBounds = true;
+      return active;
+    }
 
     // If the active cell is empty, Excel selects the region if the active cell is adjacent
     // to non-empty data. Use the first non-empty orthogonal neighbor as the seed.
@@ -70,6 +78,7 @@ export function computeCurrentRegionRange(
     for (const [row, col] of neighbors) {
       if (!inUsedBounds(row, col)) continue;
       if (!isNonEmpty(row, col)) continue;
+      includeActiveInBounds = true;
       return { row, col };
     }
 
@@ -149,6 +158,12 @@ export function computeCurrentRegionRange(
     maybeEnqueue(row, col + 1);
   }
 
+  if (includeActiveInBounds) {
+    if (active.row < minRow) minRow = active.row;
+    if (active.row > maxRow) maxRow = active.row;
+    if (active.col < minCol) minCol = active.col;
+    if (active.col > maxCol) maxCol = active.col;
+  }
+
   return { startRow: minRow, endRow: maxRow, startCol: minCol, endCol: maxCol };
 }
-
