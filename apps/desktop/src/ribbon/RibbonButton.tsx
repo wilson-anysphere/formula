@@ -158,7 +158,7 @@ export const RibbonButton = React.memo(function RibbonButton({ button, pressed, 
   }
 
   return (
-    <div className="ribbon-dropdown" ref={dropdownRef}>
+    <div className={["ribbon-dropdown", `ribbon-dropdown--${size}`].join(" ")} ref={dropdownRef}>
       {buttonEl}
       {menuOpen ? (
         <div

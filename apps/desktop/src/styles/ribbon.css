@@ -241,6 +241,15 @@
   flex: 0 0 auto;
 }
 
+.ribbon-dropdown--large {
+  grid-row: span 3;
+  align-self: stretch;
+}
+
+.ribbon-dropdown--large > .ribbon-button {
+  height: 100%;
+}
+
 .ribbon-dropdown__menu {
   position: absolute;
   top: calc(100% + 4px);
