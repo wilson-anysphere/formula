@@ -5244,6 +5244,34 @@ mod tests {
     }
 
     #[test]
+    fn saving_xlsx_as_xltx_enforces_template_content_type() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/basic/basic.xlsx"
+        ));
+        let workbook = read_xlsx_blocking(fixture_path).expect("read fixture workbook");
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("converted.xltx");
+        write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
+
+        let written_bytes = std::fs::read(&out_path).expect("read written xltx");
+        let written_pkg = XlsxPackage::from_bytes(&written_bytes).expect("parse written package");
+
+        assert!(
+            written_pkg.vba_project_bin().is_none(),
+            "expected vbaProject.bin to remain absent when saving .xlsx as .xltx"
+        );
+
+        let ct = std::str::from_utf8(written_pkg.part("[Content_Types].xml").unwrap())
+            .expect("[Content_Types].xml should be utf8");
+        assert!(
+            workbook_override_matches_content_type(ct, XLTX_WORKBOOK_CONTENT_TYPE),
+            "expected workbook override content type {XLTX_WORKBOOK_CONTENT_TYPE} for .xltx, got: {ct}"
+        );
+    }
+
+    #[test]
     fn storage_export_supports_xltx_xltm_xlam_macros_content_type_and_print_settings() {
         use formula_storage::ImportModelWorkbookOptions;
 

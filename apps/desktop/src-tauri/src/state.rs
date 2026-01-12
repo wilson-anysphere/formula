@@ -848,7 +848,12 @@ impl AppState {
         // The macro runtime context stores sheet indices; keep them stable so it continues to
         // point at the same sheet(s) after reordering.
         {
-            let workbook = self.get_workbook()?;
+            // Avoid `self.get_workbook()` here so we can mutably borrow `self.macro_host` while
+            // holding an immutable reference to the workbook (borrow-splitting across fields).
+            let workbook = self
+                .workbook
+                .as_ref()
+                .ok_or(AppStateError::NoWorkbookLoaded)?;
             let mut new_ctx = ctx;
 
             if let Some(active_sheet_id) = active_sheet_id {
