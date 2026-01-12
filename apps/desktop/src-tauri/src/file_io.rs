@@ -4975,4 +4975,47 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
 
         assert_eq!(file_bytes.as_slice(), written.as_ref());
     }
+
+    #[test]
+    fn xltx_save_writes_print_settings() {
+        use formula_xlsx::print::{ManualPageBreaks, Orientation, PageSetup, SheetPrintSettings};
+
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.print_settings = WorkbookPrintSettings {
+            sheets: vec![SheetPrintSettings {
+                sheet_name: "Sheet1".to_string(),
+                print_area: None,
+                print_titles: None,
+                page_setup: PageSetup {
+                    orientation: Orientation::Landscape,
+                    ..PageSetup::default()
+                },
+                manual_page_breaks: ManualPageBreaks::default(),
+            }],
+        };
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("print-settings.xltx");
+        let written_bytes = write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
+
+        let settings =
+            read_workbook_print_settings(written_bytes.as_ref()).expect("read print settings");
+        assert_eq!(settings, workbook.print_settings);
+    }
+
+    #[test]
+    fn xltm_save_updates_workbook_date_system() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.date_system = WorkbookDateSystem::Excel1904;
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("date-system-1904.xltm");
+        let written_bytes = write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
+
+        let doc = formula_xlsx::load_from_bytes(written_bytes.as_ref())
+            .expect("load workbook from bytes");
+        assert_eq!(doc.workbook.date_system, WorkbookDateSystem::Excel1904);
+    }
 }
