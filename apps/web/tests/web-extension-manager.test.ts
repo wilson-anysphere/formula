@@ -329,6 +329,71 @@ test("install → verify → load → execute a command (sample-hello)", async (
   await host.dispose();
 });
 
+test("install persists contributed panel metadata (icon + defaultDock) into the seed store", async () => {
+  const keys = generateEd25519KeyPair();
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-web-ext-panel-seed-metadata-"));
+  const extDir = path.join(tmpRoot, "ext");
+  await fs.mkdir(path.join(extDir, "dist"), { recursive: true });
+
+  const manifest = {
+    name: "panel-seed-ext",
+    publisher: "test",
+    version: "1.0.0",
+    main: "./dist/extension.js",
+    browser: "./dist/extension.mjs",
+    engines: { formula: "^1.0.0" },
+    contributes: {
+      panels: [
+        {
+          id: "test.panelSeed",
+          title: "Seed Panel",
+          icon: "seed-icon",
+          // Not (yet) validated by the shared manifest schema, but allowed as an extra field.
+          // Desktop uses this as the default dock side when seeding the panel registry.
+          position: "left"
+        }
+      ]
+    }
+  };
+
+  await fs.writeFile(path.join(extDir, "package.json"), JSON.stringify(manifest, null, 2));
+  const source = `export async function activate() {}\n`;
+  await fs.writeFile(path.join(extDir, "dist", "extension.mjs"), source);
+  await fs.writeFile(path.join(extDir, "dist", "extension.js"), source);
+
+  const pkgBytes = await createExtensionPackageV2(extDir, { privateKeyPem: keys.privateKeyPem });
+
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "test.panel-seed-ext",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes }
+  });
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: new TestSpreadsheetApi(),
+    permissionPrompt: async () => true
+  });
+  const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
+
+  await manager.install("test.panel-seed-ext");
+
+  const seedRaw = globalThis.localStorage.getItem("formula.extensions.contributedPanels.v1");
+  expect(seedRaw).not.toBeNull();
+  const seed = JSON.parse(String(seedRaw));
+  expect(seed["test.panelSeed"]).toMatchObject({
+    extensionId: "test.panel-seed-ext",
+    title: "Seed Panel",
+    icon: "seed-icon",
+    defaultDock: "left"
+  });
+
+  await manager.dispose();
+  await host.dispose();
+  await fs.rm(tmpRoot, { recursive: true, force: true });
+});
+
 test("tampered package fails verification and is not installed", async () => {
   const keys = generateEd25519KeyPair();
   const extensionDir = path.resolve("extensions/sample-hello");

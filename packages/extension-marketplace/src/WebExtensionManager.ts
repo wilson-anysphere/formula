@@ -190,7 +190,7 @@ function removePermissionGrantsForExtension(storage: Storage, extensionId: strin
 function prepareContributedPanelSeedsUpdate(
   storage: Storage,
   extensionId: string,
-  panels: Array<{ id?: unknown; title?: unknown; icon?: unknown }>
+  panels: Array<{ id?: unknown; title?: unknown; icon?: unknown; defaultDock?: unknown; position?: unknown }>
 ): Record<string, ContributedPanelSeed> {
   const owner = String(extensionId ?? "").trim();
   if (!owner) return readContributedPanelSeedStore(storage);
@@ -220,10 +220,14 @@ function prepareContributedPanelSeedsUpdate(
     const titleRaw = typeof panel?.title === "string" ? panel.title.trim() : "";
     const title = titleRaw || panelId;
     const icon = panel?.icon === undefined ? undefined : panel.icon === null ? null : String(panel.icon);
+    const dockCandidate = (panel as any)?.defaultDock ?? (panel as any)?.position;
+    const defaultDock =
+      dockCandidate === "left" || dockCandidate === "right" || dockCandidate === "bottom" ? dockCandidate : undefined;
     next[panelId] = {
       extensionId: owner,
       title,
-      ...(icon !== undefined ? { icon } : {})
+      ...(icon !== undefined ? { icon } : {}),
+      ...(defaultDock ? { defaultDock } : {})
     };
   }
 
