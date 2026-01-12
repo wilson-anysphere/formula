@@ -29,6 +29,9 @@ fn vlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     if let Value::Error(e) = lookup_value {
         return Value::Error(e);
     }
+    if matches!(lookup_value, Value::Lambda(_)) {
+        return Value::Error(ErrorKind::Value);
+    }
 
     let col_index = match eval_scalar_arg(ctx, &args[2]).coerce_to_i64_with_ctx(ctx) {
         Ok(n) => n,
@@ -120,6 +123,9 @@ fn hlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let lookup_value = eval_scalar_arg(ctx, &args[0]);
     if let Value::Error(e) = lookup_value {
         return Value::Error(e);
+    }
+    if matches!(lookup_value, Value::Lambda(_)) {
+        return Value::Error(ErrorKind::Value);
     }
 
     let row_index = match eval_scalar_arg(ctx, &args[2]).coerce_to_i64_with_ctx(ctx) {
@@ -399,6 +405,9 @@ fn match_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let lookup = eval_scalar_arg(ctx, &args[0]);
     if let Value::Error(e) = lookup {
         return Value::Error(e);
+    }
+    if matches!(lookup, Value::Lambda(_)) {
+        return Value::Error(ErrorKind::Value);
     }
 
     let match_type = if args.len() == 3 {

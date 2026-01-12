@@ -112,3 +112,12 @@ fn sign_accepts_xlfn_prefix() {
     let mut sheet = TestSheet::new();
     assert_number(&sheet.eval("=_xlfn.SIGN(-2)"), -1.0);
 }
+
+#[test]
+fn sumproduct_rejects_lambda_values() {
+    let mut sheet = TestSheet::new();
+    assert_eq!(
+        sheet.eval("=SUMPRODUCT(LAMBDA(x,x),1)"),
+        Value::Error(ErrorKind::Value)
+    );
+}

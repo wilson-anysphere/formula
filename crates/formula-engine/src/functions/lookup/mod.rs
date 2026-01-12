@@ -211,6 +211,9 @@ pub fn xmatch_with_modes(
     match_mode: MatchMode,
     search_mode: SearchMode,
 ) -> Result<i32, ErrorKind> {
+    if matches!(lookup_value, Value::Lambda(_)) {
+        return Err(ErrorKind::Value);
+    }
     let pos = match search_mode {
         SearchMode::FirstToLast => xmatch_linear(lookup_value, lookup_array, match_mode, false)?,
         SearchMode::LastToFirst => xmatch_linear(lookup_value, lookup_array, match_mode, true)?,
@@ -233,6 +236,9 @@ pub fn xmatch_with_modes_accessor(
     match_mode: MatchMode,
     search_mode: SearchMode,
 ) -> Result<i32, ErrorKind> {
+    if matches!(lookup_value, Value::Lambda(_)) {
+        return Err(ErrorKind::Value);
+    }
     let pos = match search_mode {
         SearchMode::FirstToLast => xmatch_linear_accessor(lookup_value, len, &mut value_at, match_mode, false)?,
         SearchMode::LastToFirst => xmatch_linear_accessor(lookup_value, len, &mut value_at, match_mode, true)?,

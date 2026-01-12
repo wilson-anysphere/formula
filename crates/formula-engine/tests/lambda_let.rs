@@ -53,3 +53,16 @@ fn lambda_used_as_number_returns_value_error() {
         Value::Error(ErrorKind::Value)
     );
 }
+
+#[test]
+fn lambda_used_in_lookup_functions_returns_value_error() {
+    let mut engine = Engine::new();
+    assert_eq!(
+        eval(&mut engine, "=MATCH(LAMBDA(x,x),{1,2},0)"),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
+        eval(&mut engine, "=XMATCH(LAMBDA(x,x),{1,2})"),
+        Value::Error(ErrorKind::Value)
+    );
+}
