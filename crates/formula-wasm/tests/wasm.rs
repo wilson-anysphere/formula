@@ -561,6 +561,37 @@ fn getting_data_error_literal_is_parsed_as_error() {
 }
 
 #[wasm_bindgen_test]
+fn from_xlsx_bytes_preserves_modern_error_values_as_errors() {
+    let bytes = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/xlsx/basic/bool-error.xlsx"
+    ));
+    let mut wb = WasmWorkbook::from_xlsx_bytes(bytes).unwrap();
+
+    // Use ISERROR to distinguish between real errors and error-looking text.
+    wb.set_cell("C2".to_string(), JsValue::from_str("=ISERROR(C1)"), None)
+        .unwrap();
+    wb.set_cell("D2".to_string(), JsValue::from_str("=ISERROR(D1)"), None)
+        .unwrap();
+    wb.set_cell("E2".to_string(), JsValue::from_str("=ISERROR(E1)"), None)
+        .unwrap();
+    wb.set_cell("F2".to_string(), JsValue::from_str("=ISERROR(F1)"), None)
+        .unwrap();
+
+    wb.recalculate(None).unwrap();
+
+    for addr in ["C2", "D2", "E2", "F2"] {
+        let cell_js = wb.get_cell(addr.to_string(), None).unwrap();
+        let cell: CellData = serde_wasm_bindgen::from_value(cell_js).unwrap();
+        assert_eq!(
+            cell.value,
+            json!(true),
+            "expected {addr} to evaluate to TRUE"
+        );
+    }
+}
+
+#[wasm_bindgen_test]
 fn leading_apostrophe_forces_text_for_error_literals() {
     let mut wb = WasmWorkbook::new();
     wb.set_cell("A1".to_string(), JsValue::from_str("#DIV/0!"), None)

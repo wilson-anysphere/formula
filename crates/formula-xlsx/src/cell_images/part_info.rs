@@ -48,7 +48,7 @@ impl XlsxPackage {
     /// workbook -> cellimages relationship. Instead it prefers scanning
     /// `xl/_rels/workbook.xml.rels` for any relationship whose `Target` ends with `cellimages.xml`
     /// (case-insensitive).
-    pub fn cell_images_part_info(&self) -> Result<Option<CellImagesPartInfo>> {
+    pub fn cell_images_part_info(&self) -> Result<Option<super::CellImagesPartInfo>> {
         let Some(part_path) = discover_cell_images_part(self)? else {
             return Ok(None);
         };
@@ -80,14 +80,14 @@ impl XlsxPackage {
                 .ok_or_else(|| XlsxError::MissingPart(target_part.clone()))?
                 .to_vec();
 
-            embeds.push(CellImageEmbed {
+            embeds.push(super::CellImageEmbed {
                 embed_rid: rid,
                 target_part,
                 target_bytes,
             });
         }
 
-        Ok(Some(CellImagesPartInfo {
+        Ok(Some(super::CellImagesPartInfo {
             part_path,
             rels_path,
             embeds,

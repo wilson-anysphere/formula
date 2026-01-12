@@ -580,6 +580,10 @@ def sheet_bool_error_xml() -> str:
     <row r="1">
       <c r="A1" t="b"><v>1</v></c>
       <c r="B1" t="e"><v>#DIV/0!</v></c>
+      <c r="C1" t="e"><v>#FIELD!</v></c>
+      <c r="D1" t="e"><v>#CONNECT!</v></c>
+      <c r="E1" t="e"><v>#BLOCKED!</v></c>
+      <c r="F1" t="e"><v>#UNKNOWN!</v></c>
     </row>
     <row r="2">
       <c r="A2" t="b"><v>0</v></c>
