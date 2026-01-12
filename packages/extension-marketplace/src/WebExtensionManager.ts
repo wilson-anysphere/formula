@@ -187,6 +187,12 @@ function readContributedPanelSeedStore(storage: Storage): Record<string, Contrib
 }
 
 function writeContributedPanelSeedStore(storage: Storage, data: Record<string, ContributedPanelSeed>): void {
+  // When empty, remove the key entirely so installs/updates that remove the last contributed panel
+  // leave a clean slate in localStorage (consistent with uninstall cleanup behavior).
+  if (!data || Object.keys(data).length === 0) {
+    storage.removeItem(CONTRIBUTED_PANELS_SEED_STORE_KEY);
+    return;
+  }
   storage.setItem(CONTRIBUTED_PANELS_SEED_STORE_KEY, JSON.stringify(data));
 }
 
@@ -926,10 +932,13 @@ export class WebExtensionManager {
     // panel id), and avoids ending up with an installed extension whose panels cannot be seeded
     // synchronously at startup.
     const seedStorage = getLocalStorage();
-    const seedUpdate =
-      seedStorage && Array.isArray(manifest.contributes?.panels)
-        ? prepareContributedPanelSeedsUpdate(seedStorage, id, manifest.contributes.panels)
-        : null;
+    const seedUpdate = seedStorage
+      ? prepareContributedPanelSeedsUpdate(
+          seedStorage,
+          id,
+          Array.isArray(manifest.contributes?.panels) ? manifest.contributes.panels : []
+        )
+      : null;
 
     if (download.signatureBase64 && download.signatureBase64 !== verified.signatureBase64) {
       throw new Error("Marketplace signature header does not match package signature");

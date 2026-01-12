@@ -409,6 +409,76 @@ test("install persists contributed panel metadata (icon + defaultDock) into the 
   await fs.rm(tmpRoot, { recursive: true, force: true });
 });
 
+test("install clears contributed panel seed store entries when updating to a version without panels", async () => {
+  const keys = generateEd25519KeyPair();
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-web-ext-panel-seed-update-"));
+  const extDir = path.join(tmpRoot, "ext");
+  await fs.mkdir(path.join(extDir, "dist"), { recursive: true });
+
+  const extensionId = "test.panel-seed-update-ext";
+
+  const source = `export async function activate() {}\n`;
+  await fs.writeFile(path.join(extDir, "dist", "extension.mjs"), source);
+  await fs.writeFile(path.join(extDir, "dist", "extension.js"), source);
+
+  const manifestV1 = {
+    name: "panel-seed-update-ext",
+    publisher: "test",
+    version: "1.0.0",
+    main: "./dist/extension.js",
+    browser: "./dist/extension.mjs",
+    engines: { formula: "^1.0.0" },
+    contributes: {
+      panels: [{ id: "test.panelSeedUpdate", title: "Seed Update Panel" }],
+    },
+  };
+
+  await fs.writeFile(path.join(extDir, "package.json"), JSON.stringify(manifestV1, null, 2));
+  const pkgV1 = await createExtensionPackageV2(extDir, { privateKeyPem: keys.privateKeyPem });
+
+  // Update removes the panels contribution entirely (no `contributes.panels` array).
+  // WebExtensionManager should treat this as "no panels" and remove any previously persisted
+  // contributed panel seed entries for the extension.
+  const manifestV2 = {
+    ...manifestV1,
+    version: "1.0.1",
+    contributes: {},
+  };
+  await fs.writeFile(path.join(extDir, "package.json"), JSON.stringify(manifestV2, null, 2));
+  const pkgV2 = await createExtensionPackageV2(extDir, { privateKeyPem: keys.privateKeyPem });
+
+  const marketplaceClient = createMockMarketplace({
+    extensionId,
+    latestVersion: "1.0.1",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgV1, "1.0.1": pkgV2 },
+  });
+
+  const manager = new WebExtensionManager({ marketplaceClient, host: null, engineVersion: "1.0.0" });
+
+  try {
+    await manager.install(extensionId, "1.0.0");
+
+    const seedKey = "formula.extensions.contributedPanels.v1";
+    const seedRaw = globalThis.localStorage.getItem(seedKey);
+    expect(seedRaw).not.toBeNull();
+    const seed = JSON.parse(String(seedRaw));
+    expect(seed["test.panelSeedUpdate"]).toMatchObject({
+      extensionId,
+      title: "Seed Update Panel",
+    });
+
+    await manager.install(extensionId, "1.0.1");
+
+    // When the last contributed panel seed is removed, the key should be deleted entirely
+    // (avoids leaving behind an empty "{}" record).
+    expect(globalThis.localStorage.getItem(seedKey)).toBeNull();
+  } finally {
+    await manager.dispose();
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test("loadInstalled triggers onStartupFinished activation + initial workbookOpened (storage key)", async () => {
   const keys = generateEd25519KeyPair();
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-web-ext-startup-"));
