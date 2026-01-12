@@ -54,6 +54,74 @@ describe("extractVerifiableClaims", () => {
     ]);
   });
 
+  it("supports \"of the range\" phrasing", () => {
+    const claims = extractVerifiableClaims({
+      assistantText: "The median of the range Sheet1!A1:A2 is 0.5.",
+      userText: ""
+    });
+
+    expect(claims).toEqual([
+      {
+        kind: "range_stat",
+        measure: "median",
+        reference: "Sheet1!A1:A2",
+        expected: 0.5,
+        source: "median of the range Sheet1!A1:A2 is 0.5"
+      }
+    ]);
+  });
+
+  it("supports \"in range\" phrasing", () => {
+    const claims = extractVerifiableClaims({
+      assistantText: "Std dev in range Sheet1!B2:B100 = 12.3.",
+      userText: ""
+    });
+
+    expect(claims).toEqual([
+      {
+        kind: "range_stat",
+        measure: "stdev",
+        reference: "Sheet1!B2:B100",
+        expected: 12.3,
+        source: "Std dev in range Sheet1!B2:B100 = 12.3"
+      }
+    ]);
+  });
+
+  it("extracts implicit count claims (there are ... in range)", () => {
+    const claims = extractVerifiableClaims({
+      assistantText: "There are 99 values in the range Sheet1!A1:A10.",
+      userText: ""
+    });
+
+    expect(claims).toEqual([
+      {
+        kind: "range_stat",
+        measure: "count",
+        reference: "Sheet1!A1:A10",
+        expected: 99,
+        source: "There are 99 values in the range Sheet1!A1:A10"
+      }
+    ]);
+  });
+
+  it("extracts implicit count claims (range has ... values)", () => {
+    const claims = extractVerifiableClaims({
+      assistantText: "Sheet1!A1:A10 has 99 values.",
+      userText: ""
+    });
+
+    expect(claims).toEqual([
+      {
+        kind: "range_stat",
+        measure: "count",
+        reference: "Sheet1!A1:A10",
+        expected: 99,
+        source: "Sheet1!A1:A10 has 99 values"
+      }
+    ]);
+  });
+
   it("parses parenthesized negative numbers", () => {
     const claims = extractVerifiableClaims({
       assistantText: "Total for range Sheet1!B1:B2 = (1,200).",

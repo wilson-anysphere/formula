@@ -91,7 +91,7 @@ const KEYWORD_PATTERN = Object.keys(KEYWORD_TO_MEASURE)
   .join("|");
 
 const RANGE_STAT_WITH_REF_RE_1 = new RegExp(
-  `\\b(?<keyword>${KEYWORD_PATTERN})\\b(?:\\s+(?:of|for))?\\s+(?:range\\s+)?\\(?\\s*(?<ref>${A1_REFERENCE_PATTERN})\\s*\\)?\\s*(?:is|was|=|:|equals)?\\s*(?<num>${NUMBER_PATTERN})`,
+  `\\b(?<keyword>${KEYWORD_PATTERN})\\b(?:\\s+(?:of|for|in|within))?\\s+(?:(?:the\\s+)?range\\s+)?\\(?\\s*(?<ref>${A1_REFERENCE_PATTERN})\\s*\\)?\\s*(?:is|was|=|:|equals)?\\s*(?<num>${NUMBER_PATTERN})`,
   "gi"
 );
 
@@ -103,6 +103,17 @@ const RANGE_STAT_WITH_REF_FUNCTION_CALL_RE = new RegExp(
 
 const RANGE_STAT_WITH_REF_RE_2 = new RegExp(
   `(?<ref>${A1_REFERENCE_PATTERN})\\s*[,:-]?\\s*(?<keyword>${KEYWORD_PATTERN})\\b\\s*(?:is|was|=|:|equals)?\\s*(?<num>${NUMBER_PATTERN})`,
+  "gi"
+);
+
+// Support implicit count claims like "There are 99 values in A1:A10" or "A1:A10 has 99 values".
+const COUNT_WITH_REF_RE_1 = new RegExp(
+  `\\bthere\\s+(?:are|were)\\s+(?<num>${NUMBER_PATTERN})\\s+(?:values|entries|cells|numbers|observations|rows|records)\\b\\s+(?:in|within|for)\\s+(?:the\\s+)?(?:range\\s+)?\\(?\\s*(?<ref>${A1_REFERENCE_PATTERN})\\s*\\)?`,
+  "gi"
+);
+
+const COUNT_WITH_REF_RE_2 = new RegExp(
+  `\\(?\\s*(?<ref>${A1_REFERENCE_PATTERN})\\s*\\)?\\s+(?:has|contains)\\s+(?<num>${NUMBER_PATTERN})\\s+(?:values|entries|cells|numbers|observations|rows|records)\\b`,
   "gi"
 );
 
@@ -138,6 +149,8 @@ export function extractVerifiableClaims(params: ExtractVerifiableClaimsParams): 
   spans.push(...collectRangeStatWithRef(RANGE_STAT_WITH_REF_RE_1, assistantText));
   spans.push(...collectRangeStatWithRef(RANGE_STAT_WITH_REF_FUNCTION_CALL_RE, assistantText));
   spans.push(...collectRangeStatWithRef(RANGE_STAT_WITH_REF_RE_2, assistantText));
+  spans.push(...collectCountWithRef(COUNT_WITH_REF_RE_1, assistantText));
+  spans.push(...collectCountWithRef(COUNT_WITH_REF_RE_2, assistantText));
   spans.push(...collectCellValueClaims(assistantText));
 
   const occupied = spans.map(({ start, end }) => ({ start, end }));
@@ -156,6 +169,32 @@ export function extractVerifiableClaims(params: ExtractVerifiableClaimsParams): 
   });
 
   return dedupeClaims(resolved);
+}
+
+function collectCountWithRef(regex: RegExp, text: string): Array<MatchSpan<ExtractedSpreadsheetClaim>> {
+  const out: Array<MatchSpan<ExtractedSpreadsheetClaim>> = [];
+  for (const match of text.matchAll(regex)) {
+    const groups = match.groups ?? {};
+    const refRaw = String(groups.ref ?? "").trim();
+    const ref = refRaw ? normalizeA1Reference(refRaw) : undefined;
+    if (!ref) continue;
+
+    const expected = parseNumberToken(String(groups.num ?? ""));
+    if (expected == null) continue;
+
+    out.push({
+      start: match.index ?? 0,
+      end: (match.index ?? 0) + match[0]!.length,
+      value: {
+        kind: "range_stat",
+        measure: "count",
+        reference: ref,
+        expected,
+        source: match[0]!.trim()
+      }
+    });
+  }
+  return out;
 }
 
 function collectRangeStatWithRef(
