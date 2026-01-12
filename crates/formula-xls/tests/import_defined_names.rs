@@ -231,6 +231,15 @@ fn imports_defined_names_with_external_workbook_3d_refs() {
     assert_eq!(udf.refers_to, "MyUdf(1)");
     assert_parseable_refers_to(&udf.refers_to);
 
+    let ext_wb = result
+        .workbook
+        .defined_names
+        .iter()
+        .find(|n| n.name == "ExtNameXWb")
+        .expect("ExtNameXWb missing");
+    assert_eq!(ext_wb.refers_to, "'[Book2.xlsx]WBName'");
+    assert_parseable_refers_to(&ext_wb.refers_to);
+
     for name in &result.workbook.defined_names {
         assert_parseable_refers_to(&name.refers_to);
     }

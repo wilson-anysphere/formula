@@ -2561,6 +2561,14 @@ fn build_defined_names_external_workbook_refs_workbook_stream() -> Vec<u8> {
     push_record(&mut globals, RECORD_EXTERNNAME, &externname_record("ExtDefined"));
     push_record(&mut globals, RECORD_EXTERNNAME, &externname_record("MyUdf"));
 
+    // Additional external SUPBOOK without a corresponding EXTERNSHEET entry. Some writers appear to
+    // store `PtgNameX.ixti` as a SUPBOOK index directly (when EXTERNSHEET is missing). Our decoder
+    // treats missing EXTERNSHEET as a signal to interpret `ixti` as a SUPBOOK index.
+    //
+    // This SUPBOOK is only used for the PtgNameX workbook-scoped external-name test.
+    push_record(&mut globals, RECORD_SUPBOOK, &supbook_external("Book2.xlsx", &[]));
+    push_record(&mut globals, RECORD_EXTERNNAME, &externname_record("WBName"));
+
     push_record(
         &mut globals,
         RECORD_EXTERNSHEET,
@@ -2597,6 +2605,13 @@ fn build_defined_names_external_workbook_refs_workbook_stream() -> Vec<u8> {
         &mut globals,
         RECORD_NAME,
         &name_record("ExtUdfCall", 0, false, None, &udf_rgce),
+    );
+
+    // External workbook-scoped name reference with missing EXTERNSHEET (ixti=2 => SUPBOOK index 2).
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &name_record("ExtNameXWb", 0, false, None, &ptg_namex(2, 1)),
     );
 
     push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
