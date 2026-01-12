@@ -33,12 +33,33 @@ function hasTauri() {
  * @returns {number}
  */
 function estimateBase64Bytes(base64) {
-  const trimmed = base64.startsWith("data:") ? base64.slice(base64.indexOf(",") + 1) : base64;
-  const normalized = trimmed.trim();
-  if (!normalized) return 0;
+  const isTrimChar = (code) => code === 0x20 || code === 0x09 || code === 0x0a || code === 0x0d; // space, tab, lf, cr
 
-  const padding = normalized.endsWith("==") ? 2 : normalized.endsWith("=") ? 1 : 0;
-  return Math.floor((normalized.length * 3) / 4) - padding;
+  let start = 0;
+  if (base64.startsWith("data:")) {
+    const comma = base64.indexOf(",");
+    if (comma === -1) return 0;
+    start = comma + 1;
+  }
+
+  // Trim leading/trailing whitespace without allocating a new string (important when inputs are huge).
+  while (start < base64.length && isTrimChar(base64.charCodeAt(start))) start += 1;
+
+  let end = base64.length - 1;
+  while (end >= start && isTrimChar(base64.charCodeAt(end))) end -= 1;
+
+  const len = end - start + 1;
+  if (len <= 0) return 0;
+
+  let padding = 0;
+  if (base64.charCodeAt(end) === 0x3d) {
+    // '=' padding
+    padding = 1;
+    if (end - 1 >= start && base64.charCodeAt(end - 1) === 0x3d) padding = 2;
+  }
+
+  const bytes = Math.floor((len * 3) / 4) - padding;
+  return bytes > 0 ? bytes : 0;
 }
 
 /**
@@ -69,8 +90,15 @@ function coerceUint8Array(val) {
 
   // Some native bridges may return base64.
   if (typeof val === "string") {
-    const base64 = val.startsWith("data:") ? val.slice(val.indexOf(",") + 1) : val;
-    if (estimateBase64Bytes(base64) > MAX_IMAGE_BYTES) return undefined;
+    // Estimate size before decoding and (importantly) before slicing data URLs into a second large string.
+    if (estimateBase64Bytes(val) > MAX_IMAGE_BYTES) return undefined;
+
+    let base64 = val;
+    if (val.startsWith("data:")) {
+      const comma = val.indexOf(",");
+      if (comma === -1) return undefined;
+      base64 = val.slice(comma + 1);
+    }
 
     try {
       const bin = atob(base64);

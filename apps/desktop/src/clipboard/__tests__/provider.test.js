@@ -589,6 +589,29 @@ test("clipboard provider", async (t) => {
     );
   });
 
+  await t.test("tauri: read drops oversized pngBase64 payloads", async () => {
+    const largeBase64 = "A".repeat(14 * 1024 * 1024);
+
+    await withGlobals(
+      {
+        __TAURI__: {
+          core: {
+            async invoke(cmd) {
+              assert.equal(cmd, "clipboard_read");
+              return { text: "tauri text", pngBase64: largeBase64 };
+            },
+          },
+        },
+        navigator: undefined,
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        const content = await provider.read();
+        assert.deepEqual(content, { text: "tauri text" });
+      }
+    );
+  });
+
   await t.test("tauri: read falls back to web clipboard before tauri clipboard.readText", async () => {
     /** @type {number} */
     let tauriReadTextCalls = 0;
