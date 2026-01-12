@@ -459,6 +459,118 @@ impl<'a> CompileCtx<'a> {
         }
     }
 
+    fn compile_choose(&mut self, args: &[Expr]) {
+        // CHOOSE(index, value1, [value2], ...)
+        if args.len() < 2 {
+            self.push_error_const(ErrorKind::Value);
+            return;
+        }
+
+        // Evaluate the index expression once.
+        //
+        // To exactly match the engine's CHOOSE index coercion (`coerce_to_i64` truncation),
+        // evaluate the index through a runtime CHOOSE call over constant choices 1..N, which
+        // returns the normalized integer index (or an error) without evaluating any caller
+        // branch expressions.
+        self.compile_expr(&args[0]);
+        for i in 1..args.len() {
+            let idx = self.program.consts.len() as u32;
+            self.program
+                .consts
+                .push(ConstValue::Value(Value::Number(i as f64)));
+            self.program
+                .instrs
+                .push(Instruction::new(OpCode::PushConst, idx, 0));
+        }
+        let func_idx = intern_func(self.program, Function::Choose);
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::CallFunc, func_idx, args.len() as u32));
+
+        let idx_local = self.alloc_temp_local("\u{0}CHOOSE_IDX");
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::StoreLocal, idx_local, 0));
+
+        // If the index normalization returned an error (e.g. invalid index), return it without
+        // evaluating any branch expressions.
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::LoadLocal, idx_local, 0));
+        let jump_not_error_idx = self.program.instrs.len();
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::JumpIfNotError, 0, 0));
+
+        // Error path: reload the error and jump to end.
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::LoadLocal, idx_local, 0));
+        let jump_error_end_idx = self.program.instrs.len();
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::Jump, 0, 0));
+
+        let cases_start = self.program.instrs.len() as u32;
+        self.program.instrs[jump_not_error_idx] =
+            Instruction::new(OpCode::JumpIfNotError, cases_start, 0);
+
+        let mut jump_if_idxs: Vec<usize> = Vec::new();
+        let mut jump_end_idxs: Vec<usize> = vec![jump_error_end_idx];
+
+        for (case_idx, expr) in args[1..].iter().enumerate() {
+            let expected_idx = (case_idx + 1) as f64;
+
+            if case_idx != 0 {
+                self.program
+                    .instrs
+                    .push(Instruction::new(OpCode::LoadLocal, idx_local, 0));
+            }
+            let idx = self.program.consts.len() as u32;
+            self.program
+                .consts
+                .push(ConstValue::Value(Value::Number(expected_idx)));
+            self.program
+                .instrs
+                .push(Instruction::new(OpCode::PushConst, idx, 0));
+            self.program
+                .instrs
+                .push(Instruction::new(OpCode::Eq, 0, 0));
+
+            let jump_idx = self.program.instrs.len();
+            // Patched below: a=next_case_target, b=end_target (for error propagation).
+            self.program
+                .instrs
+                .push(Instruction::new(OpCode::JumpIfFalseOrError, 0, 0));
+
+            // Match branch: evaluate the selected value expression and jump to end.
+            self.compile_expr(expr);
+            let jump_end_idx = self.program.instrs.len();
+            self.program
+                .instrs
+                .push(Instruction::new(OpCode::Jump, 0, 0));
+
+            let next_case_target = self.program.instrs.len() as u32;
+            self.program.instrs[jump_idx] =
+                Instruction::new(OpCode::JumpIfFalseOrError, next_case_target, 0);
+            jump_if_idxs.push(jump_idx);
+            jump_end_idxs.push(jump_end_idx);
+        }
+
+        // If we somehow failed to match a case (should be unreachable given the normalization step),
+        // fall back to #VALUE! for safety.
+        self.push_error_const(ErrorKind::Value);
+        let end_target = self.program.instrs.len() as u32;
+
+        for idx in jump_if_idxs {
+            let a = self.program.instrs[idx].a();
+            self.program.instrs[idx] = Instruction::new(OpCode::JumpIfFalseOrError, a, end_target);
+        }
+        for idx in jump_end_idxs {
+            self.program.instrs[idx] = Instruction::new(OpCode::Jump, end_target, 0);
+        }
+    }
+
     fn compile_switch(&mut self, args: &[Expr]) {
         // SWITCH(expr, value1, result1, [value2, result2], ..., [default])
         if args.len() < 3 {
