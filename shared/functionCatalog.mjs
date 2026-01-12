@@ -78,6 +78,38 @@ export default {
       ]
     },
     {
+      "name": "AMORDEGRC",
+      "min_args": 6,
+      "max_args": 7,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "any",
+        "any",
+        "number",
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "AMORLINC",
+      "min_args": 6,
+      "max_args": 7,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "any",
+        "any",
+        "number",
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
       "name": "AND",
       "min_args": 1,
       "max_args": 255,

@@ -29358,6 +29358,44 @@
       "id": "tbilleq_fd491a02769a"
     },
     {
+      "formula": "=AMORLINC(2400,A1,A2,300,1,0.15,1)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 39679
+        },
+        {
+          "cell": "A2",
+          "value": 39813
+        }
+      ],
+      "tags": [
+        "financial",
+        "AMORLINC"
+      ],
+      "id": "amorlinc_dee2af9ce2b3"
+    },
+    {
+      "formula": "=AMORDEGRC(2400,A1,A2,300,1,0.15,1)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 39679
+        },
+        {
+          "cell": "A2",
+          "value": 39813
+        }
+      ],
+      "tags": [
+        "financial",
+        "AMORDEGRC"
+      ],
+      "id": "amordegrec_e5b0c12687f4"
+    },
+    {
       "formula": "=NPV(0.1,A1:A4)",
       "outputCell": "C1",
       "inputs": [

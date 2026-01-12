@@ -1645,6 +1645,27 @@ def generate_cases() -> dict[str, Any]:
         formula="=TBILLEQ(DATE(2020,1,1),DATE(2020,12,31),0.05)",
     )
 
+    # French accounting depreciation functions (AMOR*)
+    amor_date_purchased = _excel_serial_1900(2008, 8, 19)
+    amor_first_period = _excel_serial_1900(2008, 12, 31)
+    amor_inputs = [CellInput("A1", amor_date_purchased), CellInput("A2", amor_first_period)]
+    _add_case(
+        cases,
+        prefix="amorlinc",
+        tags=["financial", "AMORLINC"],
+        formula="=AMORLINC(2400,A1,A2,300,1,0.15,1)",
+        inputs=amor_inputs,
+        output_cell="C1",
+    )
+    _add_case(
+        cases,
+        prefix="amordegrec",
+        tags=["financial", "AMORDEGRC"],
+        formula="=AMORDEGRC(2400,A1,A2,300,1,0.15,1)",
+        inputs=amor_inputs,
+        output_cell="C1",
+    )
+
     # Range-based cashflow functions.
     cashflows = [-100.0, 30.0, 40.0, 50.0]
     cf_inputs = [CellInput(f"A{i+1}", v) for i, v in enumerate(cashflows)]
