@@ -179,7 +179,7 @@ test.describe("tauri workbook integration", () => {
     await expect(switcher.locator("option")).toHaveText(["Sheet1", "Sheet3"]);
 
     // Unhide Sheet2 and ensure it appears again in the correct order.
-    await page.getByTestId("sheet-tab-Sheet1").click({ button: "right" });
+    await page.getByTestId("sheet-tab-Sheet1").click({ button: "right", position: { x: 10, y: 10 } });
     const menu = page.getByTestId("sheet-tab-context-menu");
     await expect(menu).toBeVisible();
     await menu.getByRole("button", { name: "Unhide…" }).click();
@@ -283,7 +283,7 @@ test.describe("tauri workbook integration", () => {
     const switcher = page.getByTestId("sheet-switcher");
     await expect(switcher.locator("option")).toHaveText(["Sheet1", "Sheet4"]);
 
-    await page.getByTestId("sheet-tab-Sheet1").click({ button: "right" });
+    await page.getByTestId("sheet-tab-Sheet1").click({ button: "right", position: { x: 10, y: 10 } });
     const menu = page.getByTestId("sheet-tab-context-menu");
     await expect(menu).toBeVisible();
 
@@ -319,7 +319,7 @@ test.describe("tauri workbook integration", () => {
     });
 
     await expect(page.getByTestId("toast-root")).toContainText(
-      "Workbook partially loaded (limited to 10,000 rows × 200 cols).",
+      "Workbook partially loaded (limited to rows 1-10,000, cols 1-200).",
       { timeout: 30_000 },
     );
   });
@@ -340,10 +340,9 @@ test.describe("tauri workbook integration", () => {
       (window as any).__tauriListeners["file-dropped"]({ payload: ["/tmp/fake.xlsx"] });
     });
 
-    await expect(page.getByTestId("toast-root")).toContainText(
-      "Workbook partially loaded (limited to 5 rows × 6 cols).",
-      { timeout: 30_000 },
-    );
+    await expect(page.getByTestId("toast-root")).toContainText("Workbook partially loaded (limited to rows 1-5, cols 1-6).", {
+      timeout: 30_000,
+    });
   });
 
   test("sheet add button calls backend add_sheet and uses returned id for subsequent sync", async ({ page }) => {

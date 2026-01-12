@@ -23,10 +23,10 @@ test.describe("sheet tab context menu", () => {
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(false);
 
     // Hide Sheet2.
-    await sheet2Tab.click({ button: "right" });
+    await sheet2Tab.click({ button: "right", position: { x: 10, y: 10 } });
     const menu = page.getByTestId("sheet-tab-context-menu");
     await expect(menu).toBeVisible();
-    await menu.getByRole("button", { name: "Hide" }).click();
+    await menu.getByRole("button", { name: "Hide", exact: true }).click();
 
     await expect(sheet2Tab).toHaveCount(0);
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet1");
@@ -39,9 +39,9 @@ test.describe("sheet tab context menu", () => {
     });
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(false);
 
-    await page.getByTestId("sheet-tab-Sheet1").click({ button: "right" });
+    await page.getByTestId("sheet-tab-Sheet1").click({ button: "right", position: { x: 10, y: 10 } });
     await expect(menu).toBeVisible();
-    await menu.getByRole("button", { name: "Unhide…" }).click();
+    await menu.getByRole("button", { name: "Unhide…", exact: true }).click();
     await menu.getByRole("button", { name: "Sheet2" }).click();
 
     await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
@@ -55,13 +55,12 @@ test.describe("sheet tab context menu", () => {
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(false);
 
     const sheet2TabVisible = page.getByTestId("sheet-tab-Sheet2");
-    await sheet2TabVisible.click({ button: "right" });
+    await sheet2TabVisible.click({ button: "right", position: { x: 10, y: 10 } });
     await expect(menu).toBeVisible();
-    await menu.getByRole("button", { name: "Tab Color" }).click();
+    await menu.getByRole("button", { name: "Tab Color", exact: true }).click();
     await menu.getByRole("button", { name: "Red" }).click();
 
     await expect(sheet2TabVisible).toHaveAttribute("data-tab-color", "#ff0000");
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(true);
   });
 });
-

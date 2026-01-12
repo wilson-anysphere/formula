@@ -144,7 +144,7 @@ test.describe("collaboration: sheet metadata", () => {
       await expect(sheet2TabA).toBeFocused();
       await pageA.keyboard.press("Shift+F10");
       await expect(menuA).toBeVisible();
-      await menuA.getByRole("button", { name: "Tab Color" }).click();
+      await menuA.getByRole("button", { name: "Tab Color", exact: true }).click();
       await menuA.getByRole("button", { name: "Blue" }).click();
       await expect(pageB.getByTestId("sheet-tab-Sheet2")).toHaveAttribute("data-tab-color", "#0070c0", {
         timeout: 30_000,

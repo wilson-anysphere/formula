@@ -30,11 +30,11 @@ test.describe("sheet switcher", () => {
     await page.getByTestId("sheet-tab-Sheet2").click();
 
     // Hide Sheet2 via context menu.
-    await page.getByTestId("sheet-tab-Sheet2").click({ button: "right" });
+    await page.getByTestId("sheet-tab-Sheet2").click({ button: "right", position: { x: 10, y: 10 } });
     const menu = page.getByTestId("sheet-tab-context-menu");
     await expect(page.getByTestId("context-menu")).toBeHidden();
     await expect(menu).toBeVisible();
-    await menu.getByRole("button", { name: "Hide" }).click();
+    await menu.getByRole("button", { name: "Hide", exact: true }).click();
 
     await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveCount(0);
     await expect(switcher.locator("option")).toHaveCount(2);
@@ -52,7 +52,7 @@ test.describe("sheet switcher", () => {
     }
 
     // Unhide Sheet2 via context menu on any visible tab.
-    await page.getByTestId("sheet-tab-Sheet1").click({ button: "right" });
+    await page.getByTestId("sheet-tab-Sheet1").click({ button: "right", position: { x: 10, y: 10 } });
     await expect(page.getByTestId("context-menu")).toBeHidden();
     await expect(menu).toBeVisible();
     await menu.getByRole("button", { name: "Unhide…" }).click();
