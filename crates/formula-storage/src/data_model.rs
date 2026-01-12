@@ -795,7 +795,7 @@ pub(crate) fn load_data_model_schema(
         Ok((
             row.get::<_, i64>(0)?,
             row.get::<_, String>(1)?,
-            row.get::<_, i64>(2)?,
+            row.get::<_, Option<i64>>(2).ok().flatten(),
         ))
     })?;
 
@@ -804,6 +804,9 @@ pub(crate) fn load_data_model_schema(
         let Ok((table_id, name, row_count)) = row else {
             continue;
         };
+        let row_count = row_count
+            .and_then(|count| usize::try_from(count).ok())
+            .unwrap_or(0);
         let mut col_stmt = conn.prepare(
             r#"
             SELECT name, column_type
@@ -831,7 +834,7 @@ pub(crate) fn load_data_model_schema(
         }
         tables.push(DataModelTableSchema {
             name,
-            row_count: usize::try_from(row_count).unwrap_or(0),
+            row_count,
             columns,
         });
     }
