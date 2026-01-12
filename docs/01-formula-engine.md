@@ -127,6 +127,7 @@ arg_list    = expression ("," expression)* ;
  //   Sheet1!A1
  //   Sheet1:Sheet3!A1   // 3D sheet span (workbook sheet order)
  //   [Book.xlsx]Sheet1!A1
+ sheet_prefix = (sheet_name | sheet_name ":" sheet_name | "[" workbook_name "]" sheet_name) "!" ;
  reference   = [sheet_prefix] (cell_ref | range_ref | named_ref | structured_ref) ;
 array_literal = "{" array_row (";" array_row)* "}" ;
 array_row   = array_element ("," array_element)* ;
