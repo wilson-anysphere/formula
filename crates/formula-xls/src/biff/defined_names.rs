@@ -295,9 +295,9 @@ impl<'a> FragmentCursor<'a> {
     }
 
     fn read_biff8_rgce(&mut self, cce: usize) -> Result<Vec<u8>, String> {
-        // Best-effort: parse a subset of BIFF8 ptg tokens so we can skip the continuation flags
-        // byte injected at fragment boundaries when a `PtgStr` (ShortXLUnicodeString) payload is
-        // split across `CONTINUE` records.
+        // Best-effort: parse BIFF8 ptg tokens so we can skip the continuation flags byte injected
+        // at fragment boundaries when a `PtgStr` (ShortXLUnicodeString) payload is split across
+        // `CONTINUE` records.
         //
         // If we encounter an unsupported token, fall back to raw byte copying for the remainder of
         // the `rgce` stream (without special continuation handling).
@@ -373,6 +373,26 @@ impl<'a> FragmentCursor<'a> {
                         out.extend_from_slice(&extra);
                     }
                 }
+                // PtgAttr (evaluation hints / jump tables).
+                //
+                // Payload: [grbit: u8][wAttr: u16] + optional jump table for tAttrChoose.
+                0x19 => {
+                    let grbit = self.read_u8()?;
+                    let w_attr = self.read_u16_le()?;
+                    out.push(grbit);
+                    out.extend_from_slice(&w_attr.to_le_bytes());
+
+                    // tAttrChoose includes a jump table of `u16` offsets (wAttr entries).
+                    const T_ATTR_CHOOSE: u8 = 0x04;
+                    if (grbit & T_ATTR_CHOOSE) != 0 {
+                        let entries = w_attr as usize;
+                        let bytes = entries
+                            .checked_mul(2)
+                            .ok_or_else(|| "tAttrChoose jump table length overflow".to_string())?;
+                        let table = self.read_bytes(bytes)?;
+                        out.extend_from_slice(&table);
+                    }
+                }
                 // PtgErr (1 byte)
                 0x1C | 0x1D => {
                     out.push(self.read_u8()?);
@@ -415,6 +435,18 @@ impl<'a> FragmentCursor<'a> {
                 0x3B | 0x5B | 0x7B => {
                     let bytes = self.read_bytes(10)?;
                     out.extend_from_slice(&bytes);
+                }
+                // PtgMem* tokens: consume the nested rgce payload. These tokens have the form:
+                //   [ptg][cce: u16][rgce: cce bytes]
+                //
+                // The nested rgce stream itself can contain continued strings, so we parse it via
+                // `read_biff8_rgce` recursively.
+                0x26 | 0x46 | 0x66 | 0x27 | 0x47 | 0x67 | 0x28 | 0x48 | 0x68 | 0x29 | 0x49
+                | 0x69 | 0x2E | 0x4E | 0x6E => {
+                    let inner_cce = self.read_u16_le()? as usize;
+                    out.extend_from_slice(&(inner_cce as u16).to_le_bytes());
+                    let inner = self.read_biff8_rgce(inner_cce)?;
+                    out.extend_from_slice(&inner);
                 }
                 _ => {
                     // Unsupported token: copy the remaining bytes as-is to satisfy the `cce`
