@@ -357,14 +357,62 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
   }
 
   readRange(range: RangeAddress): CellData[][] {
-    const rows: CellData[][] = [];
-    for (let r = range.startRow; r <= range.endRow; r++) {
-      const row: CellData[] = [];
-      for (let c = range.startCol; c <= range.endCol; c++) {
-        row.push(this.getCell({ sheet: range.sheet, row: r, col: c }));
+    const rowCount = Math.max(0, range.endRow - range.startRow + 1);
+    const colCount = Math.max(0, range.endCol - range.startCol + 1);
+
+    const rows: CellData[][] = new Array(rowCount);
+
+    // Hot path: many callers (WorkbookContextBuilder) read 5k-10k cells at once.
+    // Avoid per-cell `DocumentController.getCell()` calls which clone cell state,
+    // normalize formulas, and perform style lookups.
+    const sheetModel = this.controller.model.sheets.get(range.sheet);
+    const cellMap: Map<string, any> | undefined = sheetModel?.cells;
+    const formatCache = new Map<number, CellFormat | undefined>();
+    const getFormatForStyleId = (styleId: number): CellFormat | undefined => {
+      if (styleId === 0) return undefined;
+      if (formatCache.has(styleId)) return formatCache.get(styleId);
+      const style = this.controller.styleTable.get(styleId);
+      const format = styleToCellFormat(style);
+      formatCache.set(styleId, format);
+      return format;
+    };
+
+    const startRow0 = range.startRow - 1;
+    const startCol0 = range.startCol - 1;
+
+    for (let r = 0; r < rowCount; r++) {
+      const row = new Array<CellData>(colCount);
+      const row0 = startRow0 + r;
+      for (let c = 0; c < colCount; c++) {
+        const col0 = startCol0 + c;
+        const cellState = cellMap?.get(`${row0},${col0}`);
+        if (!cellState) {
+          row[c] = { value: null };
+          continue;
+        }
+
+        const rawFormula = cellState.formula;
+        if (rawFormula != null) {
+          const normalizedFormula = normalizeFormula(rawFormula);
+          if (normalizedFormula) {
+            const styleId = typeof cellState.styleId === "number" ? cellState.styleId : 0;
+            const format = getFormatForStyleId(styleId);
+            row[c] = { value: null, formula: normalizedFormula, ...(format ? { format } : {}) };
+            continue;
+          }
+        }
+
+        const rawValue = cellState.value ?? null;
+        const styleId = typeof cellState.styleId === "number" ? cellState.styleId : 0;
+        const format = getFormatForStyleId(styleId);
+        row[c] = {
+          value: rawValue != null && typeof rawValue === "object" ? cloneCellValue(rawValue) : rawValue,
+          ...(format ? { format } : {})
+        };
       }
-      rows.push(row);
+      rows[r] = row;
     }
+
     return rows;
   }
 

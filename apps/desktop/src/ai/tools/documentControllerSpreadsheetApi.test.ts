@@ -1,8 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { DocumentController } from "../../document/documentController.js";
 
 import { ToolExecutor, PreviewEngine } from "../../../../../packages/ai-tools/src/index.js";
+import { DLP_ACTION } from "../../../../../packages/security/dlp/src/actions.js";
+import { CLASSIFICATION_SCOPE } from "../../../../../packages/security/dlp/src/selectors.js";
 
 import { DocumentControllerSpreadsheetApi } from "./documentControllerSpreadsheetApi.js";
 
@@ -362,5 +364,110 @@ describe("DocumentControllerSpreadsheetApi", () => {
 
     const cell = api.getCell({ sheet: "Sheet1", row: 1, col: 1 });
     expect(cell.formula).toBe("=SUM(B1:B3)");
+  });
+
+  it("read_range returns primitive values + formulas without per-cell controller.getCell calls", async () => {
+    const controller = new DocumentController();
+    controller.setCellValue("Sheet1", "A1", 123);
+    controller.setCellValue("Sheet1", "B1", "hello");
+    controller.setCellValue("Sheet1", "C1", true);
+    // Store without leading '=' to ensure adapter normalization still matches tool semantics.
+    controller.setCellFormula("Sheet1", "D1", "SUM(A1:C1)");
+
+    const api = new DocumentControllerSpreadsheetApi(controller);
+    const executor = new ToolExecutor(api, { default_sheet: "Sheet1" });
+
+    const getCellSpy = vi.spyOn(controller, "getCell");
+    getCellSpy.mockClear();
+
+    const result = await executor.execute({
+      name: "read_range",
+      parameters: { range: "A1:D1", include_formulas: true }
+    });
+
+    expect(getCellSpy).not.toHaveBeenCalled();
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("read_range");
+    if (!result.ok || result.tool !== "read_range") throw new Error("Unexpected tool result");
+    expect(result.data?.values).toEqual([[123, "hello", true, null]]);
+    expect(result.data?.formulas).toEqual([[null, null, null, "=SUM(A1:C1)"]]);
+  });
+
+  it("read_range does not leak mutable references for object cell values", async () => {
+    const controller = new DocumentController();
+    controller.setCellValue("Sheet1", "A1", {
+      text: "Rich Bold",
+      runs: [{ start: 0, end: 4, style: { bold: true } }]
+    });
+
+    const api = new DocumentControllerSpreadsheetApi(controller);
+    const executor = new ToolExecutor(api, { default_sheet: "Sheet1" });
+
+    const result = await executor.execute({
+      name: "read_range",
+      parameters: { range: "A1:A1" }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("read_range");
+    if (!result.ok || result.tool !== "read_range") throw new Error("Unexpected tool result");
+
+    const value = result.data?.values?.[0]?.[0] as any;
+    expect(value?.text).toBe("Rich Bold");
+    value.text = "Mutated";
+
+    const after = controller.getCell("Sheet1", "A1").value as any;
+    expect(after?.text).toBe("Rich Bold");
+  });
+
+  it("read_range DLP redaction works against DocumentController adapter output shapes", async () => {
+    const controller = new DocumentController();
+    controller.setCellValue("Sheet1", "A1", "ok");
+    controller.setCellValue("Sheet1", "B1", "secret");
+    controller.setCellValue("Sheet1", "C1", 123);
+
+    const api = new DocumentControllerSpreadsheetApi(controller);
+    const executor = new ToolExecutor(api, {
+      default_sheet: "Sheet1",
+      dlp: {
+        document_id: "doc-1",
+        policy: {
+          version: 1,
+          allowDocumentOverrides: true,
+          rules: {
+            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+              maxAllowed: "Internal",
+              allowRestrictedContent: false,
+              redactDisallowed: true
+            }
+          }
+        },
+        classification_records: [
+          {
+            selector: {
+              scope: CLASSIFICATION_SCOPE.CELL,
+              documentId: "doc-1",
+              sheetId: "Sheet1",
+              row: 0,
+              col: 1
+            },
+            classification: { level: "Restricted", labels: [] }
+          }
+        ]
+      }
+    });
+
+    const result = await executor.execute({
+      name: "read_range",
+      parameters: { range: "Sheet1!A1:C1", include_formulas: true }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("read_range");
+    if (!result.ok || result.tool !== "read_range") throw new Error("Unexpected tool result");
+
+    expect(result.data?.values).toEqual([["ok", "[REDACTED]", 123]]);
+    expect(result.data?.formulas).toEqual([[null, "[REDACTED]", null]]);
   });
 });
