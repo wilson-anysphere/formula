@@ -3,12 +3,20 @@ import { CellStructuralConflictMonitor, FormulaConflictMonitor } from "../../../
 /**
  * Yjs transaction origin used by `CollabVersioning.restoreVersion`.
  *
- * This origin should be treated as "local" by *formula/value* conflict monitoring
- * (to avoid spurious conflict UI during bulk restores), but it must *not* be
- * treated as local by the structural conflict monitor (otherwise it would log
- * thousands of structural ops into `cellStructuralOps`).
+ * This origin should be *ignored* by formula/value conflict monitoring (to avoid
+ * spurious conflict UI *and* avoid polluting local edit tracking with bulk
+ * snapshot rewrites).
+ *
+ * It must also not be treated as local by the structural conflict monitor
+ * (otherwise it would log thousands of structural ops into `cellStructuralOps`).
  */
 export const VERSIONING_RESTORE_ORIGIN = "versioning-restore";
+
+/**
+ * Yjs transaction origin used when applying branch checkout/merge state back into
+ * the live workbook.
+ */
+export const BRANCHING_APPLY_ORIGIN = "branching-apply";
 
 /**
  * Create a FormulaConflictMonitor configured for desktop collaboration wiring.
@@ -16,8 +24,8 @@ export const VERSIONING_RESTORE_ORIGIN = "versioning-restore";
  * Key behaviors:
  * - Treat `binderOrigin` (DocumentController-driven edits) as local.
  * - Treat `sessionOrigin` (branch checkout/merge, conflict resolution writes) as local.
- * - Treat `VERSIONING_RESTORE_ORIGIN` as local so version restores do not surface
- *   conflict UI.
+ * - Ignore bulk "time travel" operations (`VERSIONING_RESTORE_ORIGIN`, `BRANCHING_APPLY_ORIGIN`)
+ *   so they do not surface conflict UI or pollute local-edit tracking.
  *
  * @param {object} opts
  * @param {import("yjs").Doc} opts.doc
@@ -34,13 +42,14 @@ export function createDesktopFormulaConflictMonitor(opts) {
   const localOrigins = new Set();
   localOrigins.add(opts.sessionOrigin);
   localOrigins.add(opts.binderOrigin);
-  localOrigins.add(VERSIONING_RESTORE_ORIGIN);
 
   if (opts.undoLocalOrigins) {
     for (const origin of opts.undoLocalOrigins) {
       localOrigins.add(origin);
     }
   }
+
+  const ignoredOrigins = new Set([VERSIONING_RESTORE_ORIGIN, BRANCHING_APPLY_ORIGIN]);
 
   return new FormulaConflictMonitor({
     doc: opts.doc,
@@ -50,6 +59,7 @@ export function createDesktopFormulaConflictMonitor(opts) {
     // through the Yjs->DocumentController binder.
     origin: opts.sessionOrigin,
     localOrigins,
+    ignoredOrigins,
     onConflict: opts.onConflict,
     getCellValue: opts.getCellValue,
     mode: opts.mode,
@@ -101,4 +111,3 @@ export function createDesktopCellStructuralConflictMonitor(opts) {
     maxOpRecordsPerUser: opts.maxOpRecordsPerUser,
   });
 }
-
