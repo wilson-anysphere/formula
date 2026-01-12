@@ -1721,6 +1721,26 @@ mod tests {
     }
 
     #[test]
+    fn sheet_protection_scan_stops_at_next_bof() {
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_PROTECT, &1u16.to_le_bytes()),
+            // BOF for the next substream; no EOF record for the worksheet protection scan.
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            // This record should be ignored because it's in the next substream.
+            record(RECORD_PROTECT, &0u16.to_le_bytes()),
+        ]
+        .concat();
+        let parsed = parse_biff_sheet_protection(&stream, 0).expect("parse");
+        assert_eq!(parsed.protection.enabled, true);
+        assert!(
+            parsed.warnings.is_empty(),
+            "expected no warnings, got {:?}",
+            parsed.warnings
+        );
+    }
+
+    #[test]
     fn sheet_protection_warns_on_truncated_records_and_continues() {
         // Emit truncated protection records followed by valid ones; parser should warn but still
         // return the final values.
