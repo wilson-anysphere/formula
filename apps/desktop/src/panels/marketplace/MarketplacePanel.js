@@ -12,6 +12,14 @@ import {
 } from "../../extensions/contributedPanelsSeedStore.js";
 import { showToast } from "../../extensions/ui.js";
 
+function tryShowToast(message, type = "info") {
+  try {
+    showToast(String(message ?? ""), type);
+  } catch {
+    // ignore missing toast root
+  }
+}
+
 function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);
   for (const [key, value] of Object.entries(attrs)) {
@@ -112,11 +120,17 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
         : null;
 
     const badges = el("div", { className: "badges", style: "display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;" });
-    if (item.verified) badges.append(badge("verified", { tone: "good" }));
-    if (item.featured) badges.append(badge("featured", { tone: "good" }));
-    if (item.deprecated) badges.append(badge("deprecated", { tone: "warn" }));
-    if (item.blocked) badges.append(badge("blocked", { tone: "bad" }));
-    if (item.malicious) badges.append(badge("malicious", { tone: "bad" }));
+    const verified = Boolean(item.verified ?? details?.verified);
+    const featured = Boolean(item.featured ?? details?.featured);
+    const deprecated = Boolean(details?.deprecated ?? item.deprecated);
+    const blocked = Boolean(details?.blocked ?? item.blocked);
+    const malicious = Boolean(details?.malicious ?? item.malicious);
+
+    if (verified) badges.append(badge("verified", { tone: "good" }));
+    if (featured) badges.append(badge("featured", { tone: "good" }));
+    if (deprecated) badges.append(badge("deprecated", { tone: "warn" }));
+    if (blocked) badges.append(badge("blocked", { tone: "bad" }));
+    if (malicious) badges.append(badge("malicious", { tone: "bad" }));
     if (latestScanStatus) {
       const normalized = String(latestScanStatus).trim().toLowerCase();
       const tone = normalized === "passed" ? "good" : normalized === "pending" || normalized === "unknown" ? "warn" : "bad";
@@ -136,7 +150,25 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
           onClick: async () => {
             actions.textContent = "Installing…";
             try {
-              await extensionManager.install(item.id);
+              const record = await extensionManager.install(item.id, null, {
+                confirm: async (warning) => {
+                  // Best-effort: use a browser confirm prompt (some environments may not allow it).
+                  try {
+                    if (typeof window?.confirm === "function") {
+                      return window.confirm(`${warning.message}\n\nProceed with install?`);
+                    }
+                  } catch {
+                    // ignore
+                  }
+                  return true;
+                },
+              });
+              if (Array.isArray(record?.warnings)) {
+                for (const warning of record.warnings) {
+                  if (!warning || typeof warning.message !== "string") continue;
+                  tryShowToast(warning.message, "warning");
+                }
+              }
               if (extensionHostManager?.syncInstalledExtensions) {
                 await extensionHostManager.syncInstalledExtensions();
               } else if (extensionHostManager) {
@@ -147,6 +179,7 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
             } catch (error) {
               // eslint-disable-next-line no-console
               console.error(error);
+              tryShowToast(String(error?.message ?? error), "error");
               actions.textContent = `Error: ${String(error?.message ?? error)}`;
             }
           },
@@ -172,6 +205,7 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
             } catch (error) {
               // eslint-disable-next-line no-console
               console.error(error);
+              tryShowToast(String(error?.message ?? error), "error");
               actions.textContent = `Error: ${String(error?.message ?? error)}`;
             }
           },
@@ -192,20 +226,27 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
               actions.textContent = `Updating to ${update.latestVersion}…`;
               // Terminate the running extension before mutating its install directory.
               // This avoids worker threads reading partially-updated files.
-              if (extensionHostManager) {
-                await extensionHostManager.unloadExtension(item.id);
-              }
-              await extensionManager.update(item.id);
-              if (extensionHostManager?.syncInstalledExtensions) {
-                await extensionHostManager.syncInstalledExtensions();
-              } else if (extensionHostManager) {
-                await extensionHostManager.reloadExtension(item.id);
+                if (extensionHostManager) {
+                  await extensionHostManager.unloadExtension(item.id);
+                }
+                const record = await extensionManager.update(item.id);
+                if (Array.isArray(record?.warnings)) {
+                  for (const warning of record.warnings) {
+                    if (!warning || typeof warning.message !== "string") continue;
+                    tryShowToast(warning.message, "warning");
+                  }
+                }
+                if (extensionHostManager?.syncInstalledExtensions) {
+                  await extensionHostManager.syncInstalledExtensions();
+                } else if (extensionHostManager) {
+                  await extensionHostManager.reloadExtension(item.id);
               }
               updateContributedPanelSeedsFromHost(extensionHostManager, item.id);
               actions.textContent = "Updated";
             } catch (error) {
               // eslint-disable-next-line no-console
               console.error(error);
+              tryShowToast(String(error?.message ?? error), "error");
               actions.textContent = `Error: ${String(error?.message ?? error)}`;
             }
           },
