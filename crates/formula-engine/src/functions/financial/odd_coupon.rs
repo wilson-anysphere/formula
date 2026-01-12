@@ -346,7 +346,9 @@ fn oddf_equation(
     // - `issue < first_coupon` (reject `issue == first_coupon`)
     // - `settlement < maturity` (reject `settlement == maturity`)
     //
-    // See `crates/formula-engine/tests/odd_coupon_date_boundaries.rs` for pinned boundary behavior.
+    // See:
+    // - `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`
+    // - `crates/formula-engine/tests/functions/financial_oddcoupons.rs`
     if !(issue <= settlement
         && settlement <= first_coupon
         && first_coupon <= maturity
@@ -376,6 +378,10 @@ fn oddf_equation(
     let dsc = days_between(settlement, first_coupon, basis, system)?;
 
     // When settlement is on the first coupon date, `dsc` is 0.
+    //
+    // For 30/360 bases, these day-counts are not strictly tied to calendar day differences. In
+    // particular, `A`/`DSC` can be 0 even when the underlying serial dates differ (due to the
+    // day-of-month adjustments in DAYS360).
     if a < 0.0 || dfc <= 0.0 || dsc < 0.0 {
         return Err(ExcelError::Num);
     }

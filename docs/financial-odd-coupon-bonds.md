@@ -103,9 +103,10 @@ Current engine behavior:
   - `issue == settlement` (zero accrued interest)
   - `settlement == first_coupon` (settlement on the first coupon date)
   - `first_coupon == maturity` (single odd stub period paid at maturity)
-  The enforced chronology is `issue <= settlement <= first_coupon <= maturity` with the additional
-  constraints `issue < first_coupon` and `settlement < maturity` (see the oracle boundary cases +
-  unit tests).
+  while still enforcing the core chronology constraints:
+  - `issue <= settlement <= first_coupon <= maturity`
+  - `issue < first_coupon` (rejects `issue == first_coupon` with `#NUM!`)
+  - `settlement < maturity`
 - **ODDL\*** requires `settlement < maturity` and `last_interest < maturity`, but allows settlement
   dates **on or before** `last_interest` (as well as inside the odd-last stub).
   - `settlement == last_interest` is allowed (it implies zero accrued interest).
