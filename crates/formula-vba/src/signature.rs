@@ -780,12 +780,11 @@ pub fn verify_vba_signature_binding_with_stream_path(
         };
 
         if treat_as_v3 {
-            // V3 (`DigitalSignatureExt`) binds against the MS-OVBA v3 transcript. MS-OVBA specifies
-            // SHA-256 for `ContentsHashV3`, but in the wild the DigestInfo algorithm OID can vary and
-            // may even be inconsistent with the digest length.
+            // V3 (`DigitalSignatureExt`) binds against the MS-OVBA v3 transcript.
             //
             // Infer the digest algorithm primarily from the digest length (16/20/32 →
-            // MD5/SHA-1/SHA-256), falling back to the OID.
+            // MD5/SHA-1/SHA-256), falling back to the DigestInfo algorithm OID (which can be
+            // inconsistent in the wild).
             let Some(alg) = digest_alg_from_digest_len(signed_digest.len())
                 .or_else(|| digest_alg_from_oid_str(&signed.digest_algorithm_oid))
             else {
@@ -802,57 +801,64 @@ pub fn verify_vba_signature_binding_with_stream_path(
             };
         }
 
-        let content_normalized = match content_normalized_data(vba_project_bin) {
-            Ok(v) => v,
-            Err(_) => {
-                // If we can't compute the MS-OVBA ContentNormalizedData transcript, we can't verify
-                // binding.
-                return VbaSignatureBinding::Unknown;
-            }
-        };
+        // Legacy/v2 binding: ContentHash (v1) or AgileContentHash (v2).
+        //
+        // For unknown stream kinds with a 16-byte digest, some non-Office producers may still be
+        // using the v3 transcript hashed with MD5. We'll treat this as best-effort: check legacy
+        // binding first, then (if not bound) try the v3 transcript with MD5.
+        let content_normalized = content_normalized_data(vba_project_bin).ok();
 
-        let content_hash_md5: [u8; 16] = Md5::digest(&content_normalized).into();
-
-        if signed_digest == content_hash_md5 {
-            return VbaSignatureBinding::Bound;
-        }
-
-        // Agile Content Hash (MS-OVBA §2.4.2.4) incorporates designer storages.
-        let agile_hash_md5: Option<[u8; 16]> = match forms_normalized_data(vba_project_bin) {
-            Ok(forms_normalized) => {
-                let mut h = Md5::new();
-                h.update(&content_normalized);
-                h.update(&forms_normalized);
-                Some(h.finalize().into())
-            }
-            Err(_) => None,
-        };
-
-        if let Some(h) = agile_hash_md5 {
-            if signed_digest == h {
+        let mut agile_hash_md5: Option<[u8; 16]> = None;
+        if let Some(content_normalized) = content_normalized.as_deref() {
+            let content_hash_md5: [u8; 16] = Md5::digest(content_normalized).into();
+            if signed_digest == content_hash_md5 {
                 return VbaSignatureBinding::Bound;
             }
-        }
 
-        // If the stream kind is unknown (or not provided), the digest length heuristic above will
-        // classify v3 signatures that use a 16-byte digest (e.g. MD5) as legacy. As a best-effort
-        // fallback, attempt v3 binding even for 16-byte digests when we couldn't match the legacy
-        // Content/Agile hash.
-        if matches!(stream_kind, Some(VbaSignatureStreamKind::Unknown) | None) {
-            let alg = digest_alg_from_digest_len(signed_digest.len())
-                .or_else(|| digest_alg_from_oid_str(&signed.digest_algorithm_oid));
-            if let Some(alg) = alg {
-                if let Ok(computed) = compute_vba_project_digest_v3(vba_project_bin, alg) {
-                    if signed_digest == computed.as_slice() {
-                        return VbaSignatureBinding::Bound;
-                    }
+            // Agile Content Hash (MS-OVBA §2.4.2.4) incorporates designer storages.
+            agile_hash_md5 = forms_normalized_data(vba_project_bin)
+                .ok()
+                .map(|forms_normalized| {
+                    let mut h = Md5::new();
+                    h.update(content_normalized);
+                    h.update(&forms_normalized);
+                    h.finalize().into()
+                });
+            if let Some(h) = agile_hash_md5 {
+                if signed_digest == h {
+                    return VbaSignatureBinding::Bound;
                 }
             }
         }
 
+        let mut v3_md5_compared = false;
+        let mut v3_md5_computed = false;
+        if matches!(stream_kind, Some(VbaSignatureStreamKind::Unknown) | None)
+            && signed_digest.len() == 16
+        {
+            v3_md5_compared = true;
+            if let Ok(computed) =
+                compute_vba_project_digest_v3(vba_project_bin, crate::DigestAlg::Md5)
+            {
+                v3_md5_computed = true;
+                if signed_digest == computed.as_slice() {
+                    return VbaSignatureBinding::Bound;
+                }
+            }
+        }
+
+        // If we couldn't compute the legacy transcript, we can't verify binding (even if the digest
+        // "looks" like legacy MD5).
+        if content_normalized.is_none() {
+            return VbaSignatureBinding::Unknown;
+        }
+
         // If we couldn't compute the Agile hash, we can't distinguish "truly unbound" from "bound
         // but forms data missing/unparseable", so treat binding as unknown.
-        if agile_hash_md5.is_none() {
+        //
+        // Similarly, if we attempted a best-effort v3 MD5 comparison but couldn't compute the v3
+        // digest, we can't distinguish "unbound" from "v3 bound but transcript unavailable".
+        if agile_hash_md5.is_none() || (v3_md5_compared && !v3_md5_computed) {
             return VbaSignatureBinding::Unknown;
         }
 

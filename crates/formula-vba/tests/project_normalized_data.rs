@@ -58,7 +58,7 @@ fn project_normalized_data_includes_expected_dir_records_and_prefers_unicode_var
 
         // Included: PROJECTSYSKIND
         push_record(&mut out, 0x0001, &1u32.to_le_bytes());
-        // Excluded (optional): PROJECTCOMPATVERSION
+        // Excluded: PROJECTCOMPATVERSION (must not affect ProjectNormalizedData)
         push_record(&mut out, 0x004A, &0xDEADBEEFu32.to_le_bytes());
         // Included: PROJECTLCID
         push_record(&mut out, 0x0002, &0x0409u32.to_le_bytes());

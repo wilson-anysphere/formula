@@ -273,6 +273,38 @@ fn build_spc_indirect_data_content_md5(project_digest: &[u8]) -> Vec<u8> {
 }
 
 #[test]
+fn verify_v3_md5_binding_when_stream_kind_is_unknown() {
+    let project_ole = build_minimal_vba_project_bin_v3(None, b"ABC");
+    let digest = compute_vba_project_digest_v3(&project_ole, DigestAlg::Md5).expect("digest v3");
+    assert_eq!(digest.len(), 16, "MD5 digest must be 16 bytes");
+
+    let signed_content = build_spc_indirect_data_content_md5(&digest);
+    let pkcs7 = signature_test_utils::make_pkcs7_detached_signature(&signed_content);
+    let mut signature_stream_payload = signed_content.clone();
+    signature_stream_payload.extend_from_slice(&pkcs7);
+
+    // When the signature bytes are provided without an OLE stream name (for example, raw PKCS#7
+    // bytes from an external signature part), we still want best-effort binding verification.
+    // If the digest matches the v3 transcript hashed with MD5, treat it as bound.
+    let binding = verify_vba_signature_binding(&project_ole, &signature_stream_payload);
+    assert_eq!(binding, VbaSignatureBinding::Bound);
+
+    let binding2 =
+        verify_vba_signature_binding_with_stream_path(&project_ole, "", &signature_stream_payload);
+    assert_eq!(binding2, VbaSignatureBinding::Bound);
+
+    let binding3 = verify_vba_project_signature_binding(&project_ole, &signature_stream_payload)
+        .expect("binding");
+    match binding3 {
+        VbaProjectBindingVerification::BoundVerified(debug) => {
+            assert_eq!(debug.signed_digest.as_deref(), Some(digest.as_slice()));
+            assert_eq!(debug.computed_digest.as_deref(), Some(digest.as_slice()));
+        }
+        other => panic!("expected BoundVerified, got {other:?}"),
+    }
+}
+
+#[test]
 fn digital_signature_ext_uses_v3_project_digest_for_binding() {
     let unsigned = build_minimal_vba_project_bin_v3(None, b"ABC");
     let digest = compute_vba_project_digest_v3(&unsigned, DigestAlg::Sha256).expect("digest v3");
