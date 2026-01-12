@@ -29,7 +29,7 @@ and exits non-zero if mismatches exceed the configured threshold.
 - `cases.json` — curated (~2k) formula + input-grid cases (deterministic).
 - Supplemental small corpora for targeted Windows + Excel runs:
   - `tools/excel-oracle/odd_coupon_long_stub_cases.json` — long odd-coupon (`ODDF*` / `ODDL*`) **long-stub**
-    scenarios (DFC/E > 1 or DSM/E > 1).
+    scenarios (DFC/E > 1 or DSM/E > 1). This subset reuses the canonical `caseId`s from `cases.json`.
   - `tools/excel-oracle/odd_coupon_boundary_cases.json` — boundary date-equality scenarios
     (e.g. `issue == settlement`, `settlement == first_coupon`).
 - `datasets/` — results datasets:

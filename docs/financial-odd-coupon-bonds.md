@@ -162,7 +162,7 @@ Our implementation follows the standard Excel-style model:
 - Engine unit tests:
   - `crates/formula-engine/tests/functions/financial_odd_coupon.rs` (search for `round_trip_long_stub`)
 - Excel oracle subsets (for quick Windows + Excel runs):
-  - `tools/excel-oracle/odd_coupon_long_stub_cases.json`
+  - `tools/excel-oracle/odd_coupon_long_stub_cases.json` (uses canonical `caseId`s from `cases.json`)
 - Canonical oracle corpus:
   - `tests/compatibility/excel-oracle/cases.json` (tagged `odd_coupon` + `long_stub`)
 

@@ -34,7 +34,7 @@ class OddCouponLongStubCorpusTests(unittest.TestCase):
                     f"Missing long odd-coupon stub oracle coverage: tags odd_coupon+long_stub+{func}+{basis}",
                 )
 
-    def test_subset_corpus_formulas_are_in_canonical_corpus(self) -> None:
+    def test_subset_corpus_ids_are_in_canonical_corpus(self) -> None:
         repo_root = Path(__file__).resolve().parents[3]
         cases_path = repo_root / "tests/compatibility/excel-oracle/cases.json"
         subset_path = repo_root / "tools/excel-oracle/odd_coupon_long_stub_cases.json"
@@ -45,8 +45,8 @@ class OddCouponLongStubCorpusTests(unittest.TestCase):
         cases = cases_payload.get("cases", [])
         self.assertIsInstance(cases, list, "cases.json top-level 'cases' must be an array")
 
-        canonical_formulas: set[str] = {
-            c["formula"] for c in cases if isinstance(c, dict) and isinstance(c.get("formula"), str)
+        canonical_ids: set[str] = {
+            c["id"] for c in cases if isinstance(c, dict) and isinstance(c.get("id"), str)
         }
 
         subset_payload = json.loads(subset_path.read_text(encoding="utf-8"))
@@ -61,15 +61,14 @@ class OddCouponLongStubCorpusTests(unittest.TestCase):
         for c in subset_cases:
             if not isinstance(c, dict):
                 continue
-            formula = c.get("formula")
-            self.assertIsInstance(formula, str)
+            cid = c.get("id")
+            self.assertIsInstance(cid, str)
             self.assertIn(
-                formula,
-                canonical_formulas,
-                f"Subset corpus formula is missing from canonical cases.json: {formula}",
+                cid,
+                canonical_ids,
+                f"Subset corpus case ID is missing from canonical cases.json: {cid}",
             )
 
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -130,6 +130,9 @@ powershell -ExecutionPolicy Bypass -File tools/excel-oracle/run-excel-oracle.ps1
   -OutPath  tests/compatibility/excel-oracle/datasets/excel-oracle.json
 ```
 
+Note: this subset corpus reuses the **canonical case IDs** from `tests/compatibility/excel-oracle/cases.json`,
+so you can map results back to the full corpus by `caseId` (useful when updating/pinning datasets).
+
 The output JSON includes:
 
 - Excel version/build metadata (because behavior can differ between Excel versions)
