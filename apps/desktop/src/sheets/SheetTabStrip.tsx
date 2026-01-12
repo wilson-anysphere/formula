@@ -9,14 +9,14 @@ import type { SheetMeta, SheetVisibility, TabColor, WorkbookSheetStore } from ".
 import { computeWorkbookSheetMoveIndex } from "./sheetReorder";
 
 const SHEET_TAB_COLOR_PALETTE: Array<{ label: string; token: string; fallbackCss: string }> = [
-  { label: "Red", token: "--sheet-tab-red", fallbackCss: "red" },
-  { label: "Orange", token: "--sheet-tab-orange", fallbackCss: "orange" },
-  { label: "Yellow", token: "--sheet-tab-yellow", fallbackCss: "yellow" },
-  { label: "Green", token: "--sheet-tab-green", fallbackCss: "green" },
-  { label: "Teal", token: "--sheet-tab-teal", fallbackCss: "teal" },
-  { label: "Blue", token: "--sheet-tab-blue", fallbackCss: "blue" },
-  { label: "Purple", token: "--sheet-tab-purple", fallbackCss: "purple" },
-  { label: "Gray", token: "--sheet-tab-gray", fallbackCss: "gray" },
+  { label: "Red", token: "--sheet-tab-red", fallbackCss: "#ff0000" },
+  { label: "Orange", token: "--sheet-tab-orange", fallbackCss: "#ff9900" },
+  { label: "Yellow", token: "--sheet-tab-yellow", fallbackCss: "#ffff00" },
+  { label: "Green", token: "--sheet-tab-green", fallbackCss: "#00b050" },
+  { label: "Teal", token: "--sheet-tab-teal", fallbackCss: "#00b0f0" },
+  { label: "Blue", token: "--sheet-tab-blue", fallbackCss: "#0070c0" },
+  { label: "Purple", token: "--sheet-tab-purple", fallbackCss: "#7030a0" },
+  { label: "Gray", token: "--sheet-tab-gray", fallbackCss: "#7f7f7f" },
 ];
 
 function normalizeCssHexToExcelArgb(cssColor: string): string | null {
