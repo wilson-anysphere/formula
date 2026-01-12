@@ -151,12 +151,17 @@ export class KeybindingService {
   }
 
   setExtensionKeybindings(bindings: ContributedKeybinding[]): void {
-    this.extensionKeybindings = [...bindings];
+    const filtered: ContributedKeybinding[] = [];
     const next: StoredKeybinding[] = [];
     for (const kb of bindings) {
       const raw = pickPlatformKeybinding(kb, this.platform);
       const parsed = parseKeybinding(kb.command, raw, kb.when ?? null);
       if (!parsed) continue;
+      // Extensions should not be allowed to claim shortcuts that we reserve for core UX
+      // (clipboard chords, command palette, etc). Filter these out early so UI surfaces
+      // don't advertise keybindings that will never fire.
+      if (this.isReservedExtensionKeybinding(parsed)) continue;
+      filtered.push(kb);
       next.push({
         source: { kind: "extension", extensionId: kb.extensionId },
         binding: parsed,
@@ -164,6 +169,7 @@ export class KeybindingService {
         order: ++this.orderCounter,
       });
     }
+    this.extensionKeybindings = filtered;
     this.extensions = next;
     this.rebuildCommandKeybindingDisplayIndex();
   }
@@ -254,6 +260,17 @@ export class KeybindingService {
     if (!event.ctrlKey && !event.metaKey) return false;
     if (event.altKey) return false;
     return this.reservedExtensionShortcuts.some((binding) => matchesKeybinding(binding, event));
+  }
+
+  private isReservedExtensionKeybinding(binding: ParsedKeybinding): boolean {
+    return this.reservedExtensionShortcuts.some(
+      (reserved) =>
+        reserved.ctrl === binding.ctrl &&
+        reserved.shift === binding.shift &&
+        reserved.alt === binding.alt &&
+        reserved.meta === binding.meta &&
+        reserved.key === binding.key,
+    );
   }
 
   private rebuildCommandKeybindingDisplayIndex(): void {

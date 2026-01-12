@@ -144,6 +144,25 @@ describe("KeybindingService", () => {
     expect(extRun).not.toHaveBeenCalled();
   });
 
+  it("does not advertise reserved shortcuts in the command keybinding display index", () => {
+    const contextKeys = new ContextKeyService();
+    const commandRegistry = new CommandRegistry();
+    const service = new KeybindingService({ commandRegistry, contextKeys, platform: "other" });
+
+    service.setExtensionKeybindings([
+      { extensionId: "ext", command: "ext.stealCopy", key: "ctrl+c", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealPasteSpecial", key: "ctrl+cmd+shift+v", mac: null, when: null },
+      { extensionId: "ext", command: "ext.allowed", key: "ctrl+k", mac: null, when: null },
+    ]);
+
+    const index = service.getCommandKeybindingDisplayIndex();
+    expect(index.get("ext.allowed")).toEqual(["Ctrl+K"]);
+
+    // Reserved bindings should not be surfaced as hints since they will never fire.
+    expect(index.get("ext.stealCopy")).toBeUndefined();
+    expect(index.get("ext.stealPasteSpecial")).toBeUndefined();
+  });
+
   it("matches shifted punctuation keybindings via KeyboardEvent.code fallback", async () => {
     const contextKeys = new ContextKeyService();
     const commandRegistry = new CommandRegistry();
