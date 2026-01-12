@@ -88,22 +88,55 @@ export interface FormulaSpan {
 /**
  * Token returned by `lexFormula`.
  *
- * Note: This type intentionally mirrors the Rust wasm DTO shape. Treat unknown
- * fields as implementation details; consumers should rely on `kind` + `span`
- * for stable behavior.
+ * This type intentionally mirrors the Rust wasm DTO shape produced by
+ * `crates/formula-wasm` (`LexTokenDto`).
  */
-export interface FormulaToken {
-  kind: string;
-  span: FormulaSpan;
-  /**
-   * Optional token payload (depends on `kind`).
-   *
-   * For example:
-   * - literals may include a raw string/number representation
-   * - reference tokens may include structured metadata (row/col, absolutes)
-   */
-  value?: unknown;
-}
+export type FormulaCoord =
+  | { kind: "A1"; index: number; abs: boolean }
+  | { kind: "Offset"; delta: number };
+
+export type FormulaToken =
+  | { kind: "Number"; span: FormulaSpan; value: string }
+  | { kind: "String"; span: FormulaSpan; value: string }
+  | { kind: "Boolean"; span: FormulaSpan; value: boolean }
+  | { kind: "Error"; span: FormulaSpan; value: string }
+  | { kind: "Cell"; span: FormulaSpan; row: number; col: number; row_abs: boolean; col_abs: boolean }
+  | { kind: "R1C1Cell"; span: FormulaSpan; row: FormulaCoord; col: FormulaCoord }
+  | { kind: "R1C1Row"; span: FormulaSpan; row: FormulaCoord }
+  | { kind: "R1C1Col"; span: FormulaSpan; col: FormulaCoord }
+  | { kind: "Ident"; span: FormulaSpan; value: string }
+  | { kind: "QuotedIdent"; span: FormulaSpan; value: string }
+  | { kind: "Whitespace"; span: FormulaSpan; value: string }
+  | { kind: "Intersect"; span: FormulaSpan; value: string }
+  | { kind: "LParen"; span: FormulaSpan }
+  | { kind: "RParen"; span: FormulaSpan }
+  | { kind: "LBrace"; span: FormulaSpan }
+  | { kind: "RBrace"; span: FormulaSpan }
+  | { kind: "LBracket"; span: FormulaSpan }
+  | { kind: "RBracket"; span: FormulaSpan }
+  | { kind: "Bang"; span: FormulaSpan }
+  | { kind: "Colon"; span: FormulaSpan }
+  | { kind: "Dot"; span: FormulaSpan }
+  | { kind: "ArgSep"; span: FormulaSpan }
+  | { kind: "Union"; span: FormulaSpan }
+  | { kind: "ArrayRowSep"; span: FormulaSpan }
+  | { kind: "ArrayColSep"; span: FormulaSpan }
+  | { kind: "Plus"; span: FormulaSpan }
+  | { kind: "Minus"; span: FormulaSpan }
+  | { kind: "Star"; span: FormulaSpan }
+  | { kind: "Slash"; span: FormulaSpan }
+  | { kind: "Caret"; span: FormulaSpan }
+  | { kind: "Amp"; span: FormulaSpan }
+  | { kind: "Percent"; span: FormulaSpan }
+  | { kind: "Hash"; span: FormulaSpan }
+  | { kind: "Eq"; span: FormulaSpan }
+  | { kind: "Ne"; span: FormulaSpan }
+  | { kind: "Lt"; span: FormulaSpan }
+  | { kind: "Gt"; span: FormulaSpan }
+  | { kind: "Le"; span: FormulaSpan }
+  | { kind: "Ge"; span: FormulaSpan }
+  | { kind: "At"; span: FormulaSpan }
+  | { kind: "Eof"; span: FormulaSpan };
 
 export interface FormulaParseError {
   message: string;

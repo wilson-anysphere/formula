@@ -13,6 +13,7 @@ export type {
   FormulaParseError,
   FormulaParseOptions,
   FormulaPartialParseResult,
+  FormulaCoord,
   FormulaSpan,
   FormulaToken,
   FunctionContext,
