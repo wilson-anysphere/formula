@@ -13,6 +13,7 @@ use desktop::commands;
 use desktop::macro_trust::{compute_macro_fingerprint, MacroTrustStore, SharedMacroTrustStore};
 use desktop::macros::MacroExecutionOptions;
 use desktop::open_file;
+use desktop::open_file_ipc::OpenFileState;
 use desktop::state::{AppState, CellUpdateData, SharedAppState};
 use desktop::tray_status::{self, TrayStatusState};
 use desktop::updater;
@@ -57,16 +58,8 @@ static CLOSE_REQUEST_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 // - updater-ui-ready, coi-check-result
 const OPEN_FILE_EVENT: &str = "open-file";
 const OPEN_FILE_READY_EVENT: &str = "open-file-ready";
-
 const OAUTH_REDIRECT_EVENT: &str = "oauth-redirect";
 const OAUTH_REDIRECT_READY_EVENT: &str = "oauth-redirect-ready";
-
-#[derive(Debug, Default)]
-struct OpenFileState {
-    ready: bool,
-    pending_paths: Vec<String>,
-}
-
 type SharedOpenFileState = Arc<Mutex<OpenFileState>>;
 
 #[derive(Debug, Default)]
@@ -334,13 +327,13 @@ fn handle_open_file_request(app: &tauri::AppHandle, paths: Vec<String>) {
     show_main_window(app);
 
     let open_file_state = app.state::<SharedOpenFileState>().inner().clone();
-    let mut state = open_file_state.lock().unwrap();
+    let maybe_emit = {
+        let mut state = open_file_state.lock().unwrap();
+        state.queue_or_emit(paths)
+    };
 
-    if state.ready {
-        drop(state);
+    if let Some(paths) = maybe_emit {
         emit_open_file_event(app, paths);
-    } else {
-        state.pending_paths.extend(paths);
     }
 }
 
@@ -735,7 +728,7 @@ fn main() {
     ));
     if !initial_paths.is_empty() {
         let mut guard = open_file_state.lock().unwrap();
-        guard.pending_paths.extend(initial_paths);
+        guard.queue_or_emit(initial_paths);
     }
 
     let initial_oauth_urls =
@@ -1266,11 +1259,7 @@ fn main() {
                     let state = handle.state::<SharedOpenFileState>().inner().clone();
                     let pending = {
                         let mut guard = state.lock().unwrap();
-                        if guard.ready {
-                            return;
-                        }
-                        guard.ready = true;
-                        std::mem::take(&mut guard.pending_paths)
+                        guard.mark_ready_and_drain()
                     };
                     let pending = normalize_open_file_request_paths(pending);
 

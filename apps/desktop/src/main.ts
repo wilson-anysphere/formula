@@ -72,6 +72,7 @@ import * as nativeDialogs from "./tauri/nativeDialogs";
 import { shellOpen } from "./tauri/shellOpen";
 import { setTrayStatus } from "./tauri/trayStatus";
 import { installUpdaterUi } from "./tauri/updaterUi";
+import { installOpenFileIpc } from "./tauri/openFileIpc";
 import { notify } from "./tauri/notifications";
 import { registerAppQuitHandlers, requestAppQuit } from "./tauri/appQuit";
 import { checkForUpdatesFromCommandPalette } from "./tauri/updater.js";
@@ -8365,27 +8366,9 @@ try {
     }
   });
 
-  const openFileListener = listen("open-file", (event) => {
-    const payload = (event as any)?.payload;
-    if (!Array.isArray(payload)) return;
-    const paths = payload.filter((p) => typeof p === "string" && p.trim() !== "");
-    if (paths.length === 0) return;
-
-    // Serialize opens to avoid overlapping prompts / backend state swaps.
-    for (const path of paths) {
-      queueOpenWorkbook(path);
-    }
-  });
-
-  // Signal that we're ready to receive (and flush any queued) open-file requests.
-  void openFileListener
-    .then(() => {
-      if (!emit) return;
-      return Promise.resolve(emit("open-file-ready"));
-    })
-    .catch((err) => {
-      console.error("Failed to signal open-file readiness:", err);
-    });
+  // Queue open-file requests until after the listener is registered, then signal readiness to
+  // flush any pending paths from the Rust host.
+  installOpenFileIpc({ listen, emit, onOpenPath: queueOpenWorkbook });
 
   void listen("file-dropped", async (event) => {
     const paths = (event as any)?.payload;
