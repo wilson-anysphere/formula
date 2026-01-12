@@ -24,7 +24,12 @@ export async function gotoDesktop(page: Page, path: string = "/"): Promise<void>
       return;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (attempt === 0 && message.includes("Execution context was destroyed")) {
+      if (
+        attempt === 0 &&
+        (message.includes("Execution context was destroyed") ||
+          message.includes("net::ERR_ABORTED") ||
+          message.includes("frame was detached"))
+      ) {
         await page.waitForLoadState("load");
         continue;
       }
@@ -46,7 +51,12 @@ export async function waitForDesktopReady(page: Page): Promise<void> {
       return;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (attempt === 0 && message.includes("Execution context was destroyed")) {
+      if (
+        attempt === 0 &&
+        (message.includes("Execution context was destroyed") ||
+          message.includes("net::ERR_ABORTED") ||
+          message.includes("frame was detached"))
+      ) {
         await page.waitForLoadState("load");
         continue;
       }

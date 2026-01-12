@@ -9,7 +9,7 @@ test.describe("ribbon zoom", () => {
     const ribbon = page.getByTestId("ribbon-root");
     await expect(ribbon).toBeVisible();
 
-    const viewTab = ribbon.getByRole("tab", { name: "View" });
+    const viewTab = ribbon.getByRole("tab", { name: "View", exact: true });
     await viewTab.click();
     await expect(viewTab).toHaveAttribute("aria-selected", "true");
 
@@ -42,4 +42,3 @@ test.describe("ribbon zoom", () => {
     await expect(zoomControl).toHaveValue("125");
   });
 });
-
