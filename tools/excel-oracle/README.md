@@ -214,6 +214,13 @@ For a one-command flow that runs Excel on a subset corpus and patches the pinned
 
 * `tools/excel-oracle/patch-pinned-dataset-with-excel.ps1`
 
+Example (patch only the odd-coupon negative yield / negative coupon validation scenarios):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/excel-oracle/patch-pinned-dataset-with-excel.ps1 `
+  -SubsetCasesPath tools/excel-oracle/odd_coupon_validation_cases.json
+```
+
 This script preserves existing results, updates the `caseSet.sha256`/`caseSet.count` metadata, and
 only evaluates missing cases via `crates/formula-excel-oracle`.
 

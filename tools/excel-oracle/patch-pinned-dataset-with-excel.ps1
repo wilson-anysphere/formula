@@ -18,6 +18,8 @@
 
 .PARAMETER SubsetCasesPath
   Path to a subset corpus (default: tools/excel-oracle/odd_coupon_long_stub_cases.json).
+  Other useful subsets include:
+    - tools/excel-oracle/odd_coupon_validation_cases.json (negative yields / yield-domain edges / negative rate)
 
 .PARAMETER CasesPath
   Path to the canonical cases.json corpus (default: tests/compatibility/excel-oracle/cases.json).
@@ -96,4 +98,3 @@ try {
     Remove-Item -LiteralPath $excelResultsFull -Force -ErrorAction SilentlyContinue
   }
 }
-
