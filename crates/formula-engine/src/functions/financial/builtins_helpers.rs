@@ -100,7 +100,6 @@ pub(super) fn eval_i32_trunc_arg(
         other => coerce_to_i32_trunc(ctx, &other),
     }
 }
-
 pub(super) fn basis_from_optional_arg(
     ctx: &dyn FunctionContext,
     arg: Option<&CompiledExpr>,
@@ -112,12 +111,7 @@ pub(super) fn basis_from_optional_arg(
     if matches!(v, Value::Blank) {
         return Ok(0);
     }
-    let n = coerce_to_finite_number(ctx, &v)?;
-    let t = n.trunc();
-    if t < (i32::MIN as f64) || t > (i32::MAX as f64) {
-        return Err(ErrorKind::Num);
-    }
-    let basis = t as i32;
+    let basis = coerce_to_i32_trunc(ctx, &v)?;
     super::coupon_schedule::validate_basis(basis).map_err(excel_error_kind)
 }
 

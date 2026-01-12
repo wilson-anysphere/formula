@@ -7,7 +7,6 @@ use super::builtins_helpers::{
     basis_from_optional_arg, eval_date_arg, eval_finite_number_arg, eval_i32_trunc_arg,
     excel_result_number, excel_result_serial,
 };
-
 // ---------------------------------------------------------------------
 // COUP* schedule functions
 // ---------------------------------------------------------------------

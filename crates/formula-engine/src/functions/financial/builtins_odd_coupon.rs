@@ -7,8 +7,8 @@ use crate::functions::{ThreadSafety, ValueType, Volatility};
 use crate::value::{ErrorKind, Value};
 
 use super::builtins_helpers::{
-    basis_from_optional_arg, coerce_to_finite_number, datevalue_from_value, excel_error_kind,
-    excel_result_number,
+    basis_from_optional_arg, coerce_to_finite_number, coerce_to_i32_trunc, datevalue_from_value,
+    excel_error_kind, excel_result_number,
 };
 
 fn datevalue_checked_from_value(
@@ -26,12 +26,7 @@ fn datevalue_checked_from_value(
 }
 
 fn frequency_from_value(ctx: &dyn FunctionContext, v: &Value) -> Result<i32, ErrorKind> {
-    let n = coerce_to_finite_number(ctx, v)?;
-    let t = n.trunc();
-    if t < (i32::MIN as f64) || t > (i32::MAX as f64) {
-        return Err(ErrorKind::Num);
-    }
-    let frequency = t as i32;
+    let frequency = coerce_to_i32_trunc(ctx, v)?;
     super::coupon_schedule::validate_frequency(frequency).map_err(excel_error_kind)
 }
 

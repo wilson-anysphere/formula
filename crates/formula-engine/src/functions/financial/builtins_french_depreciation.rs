@@ -1,9 +1,11 @@
 use crate::eval::CompiledExpr;
 use crate::functions::{eval_scalar_arg, FunctionContext, FunctionSpec};
 use crate::functions::{ArraySupport, ThreadSafety, ValueType, Volatility};
-use crate::value::{ErrorKind, Value};
+use crate::value::Value;
 
-use super::builtins_helpers::{coerce_to_finite_number, datevalue_from_value, excel_error_kind};
+use super::builtins_helpers::{
+    coerce_to_finite_number, coerce_to_i32_trunc, datevalue_from_value, excel_error_kind,
+};
 
 inventory::submit! {
     FunctionSpec {
@@ -187,13 +189,4 @@ fn amordegrec_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(v) => Value::Number(v),
         Err(e) => Value::Error(excel_error_kind(e)),
     }
-}
-
-fn coerce_to_i32_trunc(ctx: &dyn FunctionContext, v: &Value) -> Result<i32, ErrorKind> {
-    let n = coerce_to_finite_number(ctx, v)?;
-    let t = n.trunc();
-    if t < (i32::MIN as f64) || t > (i32::MAX as f64) {
-        return Err(ErrorKind::Num);
-    }
-    Ok(t as i32)
 }
