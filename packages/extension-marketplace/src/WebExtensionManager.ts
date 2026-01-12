@@ -1404,6 +1404,7 @@ export class WebExtensionManager {
           "Call WebExtensionManager.repair(id) to re-download the package."
       );
     }
+    const wasIncompatible = Boolean(installed.incompatible || installed.incompatibleAt || installed.incompatibleReason);
 
     const pkg = await this._getPackage(installed.id, installed.version);
     if (!pkg) {
@@ -1426,7 +1427,7 @@ export class WebExtensionManager {
       throw error instanceof Error ? error : new Error(msg);
     }
 
-    if (installed.incompatible) {
+    if (wasIncompatible) {
       await this._clearIncompatibleInstall(installed).catch(() => {});
     }
 

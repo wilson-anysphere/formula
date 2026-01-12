@@ -1489,6 +1489,85 @@ test("verifyInstalled clears incompatible flag when the manifest becomes compati
   await fs.rm(tmpRoot, { recursive: true, force: true });
 });
 
+test("loadInstalled clears incompatible markers even when the incompatible flag is missing", async () => {
+  const keys = generateEd25519KeyPair();
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-web-ext-load-unquarantine-"));
+  const extDir = path.join(tmpRoot, "ext");
+  await fs.mkdir(path.join(extDir, "dist"), { recursive: true });
+
+  const manifest = {
+    name: "load-unquarantine-ext",
+    publisher: "test",
+    version: "1.0.0",
+    main: "./dist/extension.js",
+    browser: "./dist/extension.mjs",
+    engines: { formula: "^1.0.0" }
+  };
+
+  await fs.writeFile(path.join(extDir, "package.json"), JSON.stringify(manifest, null, 2));
+  const source = `export async function activate() {}\n`;
+  await fs.writeFile(path.join(extDir, "dist", "extension.mjs"), source);
+  await fs.writeFile(path.join(extDir, "dist", "extension.js"), source);
+
+  const pkgBytes = await createExtensionPackageV2(extDir, { privateKeyPem: keys.privateKeyPem });
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "test.load-unquarantine-ext",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes }
+  });
+
+  const installer = new WebExtensionManager({ marketplaceClient, engineVersion: "1.0.0" });
+  await installer.install("test.load-unquarantine-ext");
+  await installer.dispose();
+
+  // Mark incompatible under a different engine version.
+  const managerV2 = new WebExtensionManager({ marketplaceClient, engineVersion: "2.0.0" });
+  const verificationV2 = await managerV2.verifyInstalled("test.load-unquarantine-ext");
+  expect(verificationV2.ok).toBe(false);
+  expect(String(verificationV2.reason ?? "")).toMatch(/engine mismatch/i);
+  const storedAfterV2 = await managerV2.getInstalled("test.load-unquarantine-ext");
+  expect(storedAfterV2?.incompatible).toBe(true);
+  expect(String(storedAfterV2?.incompatibleReason ?? "")).toMatch(/engine mismatch/i);
+  await managerV2.dispose();
+
+  // Simulate a legacy/partial record where `incompatibleAt`/`incompatibleReason` were persisted
+  // without the boolean `incompatible` flag.
+  const db = await requestToPromise(indexedDB.open("formula.webExtensions"));
+  try {
+    const tx = db.transaction(["installed"], "readwrite");
+    const store = tx.objectStore("installed");
+    const record: any = await requestToPromise(store.get("test.load-unquarantine-ext"));
+    expect(record).toBeTruthy();
+    expect(record.incompatibleAt).toBeTruthy();
+    expect(record.incompatibleReason).toBeTruthy();
+    delete record.incompatible;
+    store.put(record);
+    await txDone(tx);
+  } finally {
+    db.close();
+  }
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: new TestSpreadsheetApi(),
+    permissionPrompt: async () => true
+  });
+  const managerV1 = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
+
+  await managerV1.loadInstalled("test.load-unquarantine-ext");
+  const storedAfterLoad = await managerV1.getInstalled("test.load-unquarantine-ext");
+  expect(storedAfterLoad?.incompatible).not.toBe(true);
+  expect(storedAfterLoad?.incompatibleAt).toBeUndefined();
+  expect(storedAfterLoad?.incompatibleReason).toBeUndefined();
+  expect(managerV1.isLoaded("test.load-unquarantine-ext")).toBe(true);
+  expect(host.listExtensions().some((e: any) => e.id === "test.load-unquarantine-ext")).toBe(true);
+
+  await managerV1.dispose();
+  await host.dispose();
+  await fs.rm(tmpRoot, { recursive: true, force: true });
+});
+
 test("verifyInstalled quarantines and unloads an extension when its stored manifest becomes incompatible", async () => {
   const keys = generateEd25519KeyPair();
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-web-ext-incompatible-unload-"));
