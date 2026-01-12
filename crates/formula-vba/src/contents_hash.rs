@@ -12,6 +12,106 @@ struct ModuleInfo {
     text_offset: Option<usize>,
 }
 
+/// Build the MS-OVBA `ProjectNormalizedData` byte sequence (used by "Contents Hash V3").
+///
+/// This is derived from the decompressed `VBA/dir` stream by iterating records in stored order and
+/// concatenating the **record data bytes** (excluding the 6-byte record header: `id` + `len`) for
+/// the subset of `dir` record types specified by MS-OVBA.
+///
+/// Spec reference: MS-OVBA §2.4.2 "ProjectNormalizedData" (Contents Hash V3).
+pub fn project_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseError> {
+    // Project information record IDs (MS-OVBA 2.3.4.2.1).
+    //
+    // Note: `VBA/dir` stores records as: u16 id, u32 len, `len` bytes of record data.
+    const PROJECTSYSKIND: u16 = 0x0001;
+    const PROJECTLCID: u16 = 0x0002;
+    const PROJECTCODEPAGE: u16 = 0x0003;
+    const PROJECTNAME: u16 = 0x0004;
+    const PROJECTDOCSTRING: u16 = 0x0005;
+    const PROJECTHELPFILEPATH: u16 = 0x0006;
+    const PROJECTHELPCONTEXT: u16 = 0x0007;
+    const PROJECTLIBFLAGS: u16 = 0x0008;
+    const PROJECTVERSION: u16 = 0x0009;
+    const PROJECTCONSTANTS: u16 = 0x000C;
+    const PROJECTLCIDINVOKE: u16 = 0x0014;
+
+    // Some producers emit a second, Unicode form record immediately following the ANSI form.
+    // The MS-OVBA pseudocode prefers the Unicode form when present.
+    //
+    // These record IDs are not part of the minimal VBA project fixture used by this repo, but they
+    // occur in real-world files.
+    const PROJECTDOCSTRINGUNICODE: u16 = 0x0040;
+    const PROJECTCONSTANTSUNICODE: u16 = 0x003C;
+
+    let mut ole = OleFile::open(vba_project_bin)?;
+
+    let dir_bytes = ole
+        .read_stream_opt("VBA/dir")?
+        .ok_or(ParseError::MissingStream("VBA/dir"))?;
+    let dir_decompressed = decompress_container(&dir_bytes)?;
+
+    let mut out = Vec::new();
+
+    let mut offset = 0usize;
+    while offset < dir_decompressed.len() {
+        if offset + 6 > dir_decompressed.len() {
+            return Err(DirParseError::Truncated.into());
+        }
+
+        let id = u16::from_le_bytes([dir_decompressed[offset], dir_decompressed[offset + 1]]);
+        let len = u32::from_le_bytes([
+            dir_decompressed[offset + 2],
+            dir_decompressed[offset + 3],
+            dir_decompressed[offset + 4],
+            dir_decompressed[offset + 5],
+        ]) as usize;
+        offset += 6;
+        if offset + len > dir_decompressed.len() {
+            return Err(DirParseError::BadRecordLength { id, len }.into());
+        }
+        let data = &dir_decompressed[offset..offset + len];
+        offset += len;
+
+        let next_id = peek_next_record_id(&dir_decompressed, offset);
+
+        match id {
+            PROJECTSYSKIND
+            | PROJECTLCID
+            | PROJECTLCIDINVOKE
+            | PROJECTCODEPAGE
+            | PROJECTNAME
+            | PROJECTHELPFILEPATH
+            | PROJECTHELPCONTEXT
+            | PROJECTLIBFLAGS
+            | PROJECTVERSION => {
+                out.extend_from_slice(data);
+            }
+
+            PROJECTDOCSTRING => {
+                if next_id != Some(PROJECTDOCSTRINGUNICODE) {
+                    out.extend_from_slice(data);
+                }
+            }
+            PROJECTDOCSTRINGUNICODE => {
+                out.extend_from_slice(data);
+            }
+
+            PROJECTCONSTANTS => {
+                if next_id != Some(PROJECTCONSTANTSUNICODE) {
+                    out.extend_from_slice(data);
+                }
+            }
+            PROJECTCONSTANTSUNICODE => {
+                out.extend_from_slice(data);
+            }
+
+            _ => {}
+        }
+    }
+
+    Ok(out)
+}
+
 /// Build the MS-OVBA "ContentNormalizedData" byte sequence for a VBA project.
 ///
 /// This is a building block used by MS-OVBA when computing the VBA project digest that a
@@ -473,6 +573,13 @@ fn trim_reserved_u16(bytes: &[u8]) -> &[u8] {
     } else {
         bytes
     }
+}
+
+fn peek_next_record_id(bytes: &[u8], offset: usize) -> Option<u16> {
+    if offset + 2 > bytes.len() {
+        return None;
+    }
+    Some(u16::from_le_bytes([bytes[offset], bytes[offset + 1]]))
 }
 
 fn guess_text_offset(module_stream: &[u8]) -> usize {

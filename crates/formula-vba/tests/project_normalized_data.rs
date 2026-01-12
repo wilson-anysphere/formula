@@ -1,6 +1,9 @@
 use std::io::{Cursor, Write};
 
-use formula_vba::{compress_container, project_normalized_data_v3, DirParseError, ParseError};
+use formula_vba::{
+    compress_container, project_normalized_data, project_normalized_data_v3, DirParseError,
+    ParseError,
+};
 
 fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
     out.extend_from_slice(&id.to_le_bytes());
@@ -19,6 +22,64 @@ fn build_vba_bin_with_dir_decompressed(dir_decompressed: &[u8]) -> Vec<u8> {
         s.write_all(&dir_container).expect("write dir");
     }
     ole.into_inner().into_inner()
+}
+
+fn utf16le_bytes(s: &str) -> Vec<u8> {
+    let mut out = Vec::new();
+    for unit in s.encode_utf16() {
+        out.extend_from_slice(&unit.to_le_bytes());
+    }
+    out
+}
+
+#[test]
+fn project_normalized_data_includes_expected_dir_records_and_prefers_unicode_variants() {
+    // Build a synthetic decompressed `VBA/dir` stream with:
+    // - multiple included project-info records
+    // - one excluded record
+    // - ANSI + UNICODE pairs where the algorithm must prefer the UNICODE record.
+    let dir_decompressed = {
+        let mut out = Vec::new();
+
+        // Included: PROJECTSYSKIND
+        push_record(&mut out, 0x0001, &1u32.to_le_bytes());
+        // Included: PROJECTLCID
+        push_record(&mut out, 0x0002, &0x0409u32.to_le_bytes());
+        // Included: PROJECTCODEPAGE
+        push_record(&mut out, 0x0003, &1252u16.to_le_bytes());
+        // Included: PROJECTNAME
+        push_record(&mut out, 0x0004, b"MyProject");
+
+        // Included (ANSI), but followed by UNICODE -> should be skipped in favor of UNICODE.
+        push_record(&mut out, 0x0005, b"Doc");
+        // Included: PROJECTDOCSTRINGUNICODE (paired with 0x0005 above).
+        push_record(&mut out, 0x0040, &utf16le_bytes("Doc"));
+
+        // Excluded: REFERENCEREGISTERED (0x000D)
+        push_record(&mut out, 0x000D, b"{EXCLUDED}");
+
+        // Included (ANSI), but followed by UNICODE -> should be skipped in favor of UNICODE.
+        push_record(&mut out, 0x000C, b"Const=1");
+        // Included: PROJECTCONSTANTSUNICODE (paired with 0x000C above).
+        push_record(&mut out, 0x003C, &utf16le_bytes("Const=1"));
+
+        out
+    };
+
+    let vba_bin = build_vba_bin_with_dir_decompressed(&dir_decompressed);
+    let normalized = project_normalized_data(&vba_bin).expect("ProjectNormalizedData");
+
+    let expected = [
+        1u32.to_le_bytes().as_slice(),
+        0x0409u32.to_le_bytes().as_slice(),
+        1252u16.to_le_bytes().as_slice(),
+        b"MyProject".as_slice(),
+        utf16le_bytes("Doc").as_slice(),
+        utf16le_bytes("Const=1").as_slice(),
+    ]
+    .concat();
+
+    assert_eq!(normalized, expected);
 }
 
 #[test]
