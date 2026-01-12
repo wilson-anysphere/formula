@@ -28,8 +28,11 @@ In OOXML this is implemented using **Rich Values** (“richData”) plus **cell 
 This document captures the part relationships and (most importantly) the **index mappings** needed to implement full support (reader → model → writer) and to avoid compatibility regressions when round-tripping unknown rich-data content.
 
 > Note: The exact element/type names inside `<rv>` for image payloads vary by Excel version and are not
-> fully specified in the public ECMA-376 base schema. This repo contains **two real fixtures** showing
-> concrete shapes/namespaces for both the `richValue.xml` and `rdRichValue*` variants — see
+> fully specified in the public ECMA-376 base schema. This repo contains **real Excel fixtures** showing
+> concrete shapes/namespaces for:
+> - the unprefixed **`richValue*`** variant (see `fixtures/xlsx/rich-data/images-in-cell.xlsx`), and
+> - the **`rdRichValue*`** variant (see `fixtures/xlsx/basic/image-in-cell.xlsx`),
+> plus minimal synthetic fixtures for regression tests. See
 > [Observed in fixtures](#observed-in-fixtures-in-repo) and [`docs/xlsx-embedded-images-in-cells.md`](./xlsx-embedded-images-in-cells.md).
 
 ---
@@ -120,7 +123,29 @@ sheetN.xml: <c vm="VM_INDEX">…</c>
 
 ## Observed in fixtures (in-repo)
 
-These are fixture XLSX files in this repository used for parser/round-trip testing.
+These are fixture XLSX files in this repository used for parser/round-trip testing (some Excel-generated,
+some synthetic). Prefer the Excel-generated fixtures as the primary ground truth for namespaces/root
+element names.
+
+### Fixture: `fixtures/xlsx/rich-data/images-in-cell.xlsx` (Excel `richValue*` + `cellimages.xml`)
+
+See also: [`fixtures/xlsx/rich-data/images-in-cell.md`](../fixtures/xlsx/rich-data/images-in-cell.md) (walkthrough).
+
+This fixture contains:
+
+* `xl/cellimages.xml` + `xl/_rels/cellimages.xml.rels` (cell image store)
+* `xl/metadata.xml` + `xl/_rels/metadata.xml.rels` (value/cell metadata; `futureMetadata`/`xlrd:rvb` mapping)
+* full `xl/richData/richValue*.xml` table set:
+  * `richValue.xml`
+  * `richValueRel.xml`
+  * `richValueTypes.xml`
+  * `richValueStructure.xml`
+
+Notable shape differences vs the minimal/synthetic `image-in-cell-richdata.xlsx` fixture:
+
+* `xl/richData/richValue.xml` uses a `<values>` wrapper and a `type="…"` attribute:
+  * `<rv type="0"><v kind="rel">0</v></rv>`
+* `xl/richData/richValueRel.xml` uses root `<rvRel>` (namespace `…/2017/richdata`) and wraps entries in `<rels>`.
 
 - `fixtures/xlsx/basic/image-in-cell.xlsx` is **real Excel-generated** (see `docProps/app.xml`).
 - `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` is **synthetic** (tagged `Application=Formula Fixtures`).
@@ -131,6 +156,9 @@ fixtures are still useful for exercising edge cases and ensuring we preserve unk
 ### Fixture: `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` (synthetic; `richValue.xml` + `richValueRel.xml` 2017 variant)
 
 See also: [`fixtures/xlsx/basic/image-in-cell-richdata.md`](../fixtures/xlsx/basic/image-in-cell-richdata.md) (walkthrough of this fixture).
+
+Note: this fixture is intentionally minimal and is tagged in `docProps/app.xml` as `Application=Formula Fixtures`
+(not Excel). It is still useful for testing round-trip preservation and basic parsing.
 
 **Parts present** (complete inventory from `unzip -l`):
 

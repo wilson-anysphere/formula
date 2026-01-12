@@ -44,6 +44,8 @@ Notes:
   and omits `richValueTypes.xml` / `richValueStructure.xml`.
 * For linked data types and richer payloads, Excel is expected to add the supporting “types” and
   “structure” tables; treat their presence as feature-dependent.
+  * For example, the real Excel fixture `fixtures/xlsx/rich-data/images-in-cell.xlsx` includes
+    `richValueTypes.xml` and `richValueStructure.xml`.
 * File naming varies across producers (and even across Excel builds):
   * “Excel-like” naming: `richValue.xml`, `richValueTypes.xml`, `richValueStructure.xml`
   * “rdRichValue” naming (observed in the real Excel fixture `fixtures/xlsx/basic/image-in-cell.xlsx`
@@ -56,12 +58,15 @@ Notes:
 
 ## Observed in fixtures (in-repo)
 
-This repo includes fixture workbooks that exercise two distinct "image in cell" / rich-data encodings
-(one is real Excel, one is synthetic):
+This repo includes **real Excel fixtures** for multiple "image in cell" / rich-data encodings (plus a
+minimal synthetic fixture used for regression tests):
 
-* A minimal (synthetic) **`richValue.xml`** variant (`fixtures/xlsx/basic/image-in-cell-richdata.xlsx`)
-* A real Excel **`rdRichValue`** variant (`fixtures/xlsx/basic/image-in-cell.xlsx`) that uses a **structure table**
-  (`rdrichvaluestructure.xml`) to assign meanings to positional `<v>` fields.
+* **Real Excel**: `fixtures/xlsx/rich-data/images-in-cell.xlsx` — full `richValue*` part set **plus**
+  `xl/cellimages.xml`.
+* **Real Excel**: `fixtures/xlsx/basic/image-in-cell.xlsx` — `rdRichValue*` variant that uses a
+  **structure table** (`rdrichvaluestructure.xml`) to assign meanings to positional `<v>` fields.
+* **Synthetic (Formula fixture)**: `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` — minimal
+  `richValue.xml` + `richValueRel.xml` variant (no `richValueTypes.xml` / `richValueStructure.xml`).
 
 ### Fixture: `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` (`richValue.xml` + `richValueRel.xml` 2017 variant)
 
@@ -166,6 +171,162 @@ From `xl/_rels/workbook.xml.rels` (excerpt):
 
 `[Content_Types].xml` in this fixture includes **no overrides** for `xl/metadata.xml` or `xl/richData/*`
 (it relies on the default `application/xml`).
+
+### Fixture: `fixtures/xlsx/rich-data/images-in-cell.xlsx` (Excel `richValue*` + `cellimages.xml`)
+
+This is a modern Excel workbook demonstrating an image stored as a cell value using the unprefixed
+`richValue*` table naming scheme **and** a `xl/cellimages.xml` store part.
+
+See also: [`fixtures/xlsx/rich-data/images-in-cell.md`](../fixtures/xlsx/rich-data/images-in-cell.md) (walkthrough of this fixture).
+
+**Parts present** (complete inventory from `unzip -l`):
+
+```
+[Content_Types].xml
+_rels/.rels
+docProps/core.xml
+docProps/app.xml
+xl/workbook.xml
+xl/_rels/workbook.xml.rels
+xl/worksheets/sheet1.xml
+xl/styles.xml
+xl/cellimages.xml
+xl/_rels/cellimages.xml.rels
+xl/metadata.xml
+xl/_rels/metadata.xml.rels
+xl/richData/richValue.xml
+xl/richData/richValueRel.xml
+xl/richData/richValueTypes.xml
+xl/richData/richValueStructure.xml
+xl/richData/_rels/richValueRel.xml.rels
+xl/media/image1.png
+```
+
+**Sheet cell metadata (`vm`, `cm`)**
+
+From `xl/worksheets/sheet1.xml`:
+
+```xml
+<c r="A1" vm="1" cm="1"><v>0</v></c>
+```
+
+Notes:
+
+* In this fixture, `vm` and `cm` **appear to be 1-based** (`vm="1"` selects the first `<valueMetadata><bk>`).
+* The cached cell value is a placeholder numeric `<v>0</v>` (no `t="e"`/`#VALUE!`); the image binding still
+  comes from `vm`/`cm` + `xl/metadata.xml`.
+
+**`xl/metadata.xml` (`futureMetadata name="XLRICHVALUE"` + `xlrd:rvb i="..."`, plus `cellMetadata`)**
+
+```xml
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <metadataTypes count="1">
+    <metadataType name="XLRICHVALUE"/>
+  </metadataTypes>
+
+  <futureMetadata name="XLRICHVALUE" count="1">
+    <bk>
+      <extLst>
+        <ext uri="{00000000-0000-0000-0000-000000000000}">
+          <xlrd:rvb i="0"/>
+        </ext>
+      </extLst>
+    </bk>
+  </futureMetadata>
+
+  <valueMetadata count="1">
+    <bk><rc t="1" v="0"/></bk>
+  </valueMetadata>
+
+  <cellMetadata count="1">
+    <bk><rc t="1" v="0"/></bk>
+  </cellMetadata>
+</metadata>
+```
+
+Notes:
+
+* `rc/@t="1"` is the 1-based index into `<metadataTypes>`.
+* `rc/@v="0"` is a 0-based index into the `<futureMetadata name="XLRICHVALUE">` `<bk>` list.
+* `xlrd:rvb/@i="0"` is the **0-based rich value index** into `xl/richData/richValue.xml`.
+
+**`xl/richData/richValueTypes.xml` and `xl/richData/richValueStructure.xml`**
+
+```xml
+<rvTypes xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <types>
+    <type id="0" name="com.microsoft.excel.image" structure="s_image"/>
+  </types>
+</rvTypes>
+```
+
+```xml
+<rvStruct xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <structures>
+    <structure id="s_image">
+      <member name="imageRel" kind="rel"/>
+    </structure>
+  </structures>
+</rvStruct>
+```
+
+**`xl/richData/richValue.xml` (image rich value)**
+
+```xml
+<rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <values>
+    <rv type="0">
+      <v kind="rel">0</v>
+    </rv>
+  </values>
+</rvData>
+```
+
+Notes:
+
+* `<rv>` is keyed by a numeric `type="0"` which maps into `richValueTypes.xml`.
+* `<v kind="rel">0</v>` stores the **0-based relationship slot index** into `xl/richData/richValueRel.xml`.
+
+**`xl/richData/richValueRel.xml` (relationship-slot table; `rvRel` variant)**
+
+```xml
+<rvRel xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata"
+       xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <rels>
+    <rel r:id="rId1"/>
+  </rels>
+</rvRel>
+```
+
+Notes:
+
+* Root local-name is `rvRel`.
+* Namespace is **`…/2017/richdata`** (not `…/2017/richdata2`).
+* Relationship slots are positional: slot `0` selects the first `<rel/>` (here: `rId1`).
+
+**Workbook + metadata relationships**
+
+From `xl/_rels/workbook.xml.rels` (excerpt):
+
+* `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata"`
+  → `Target="metadata.xml"`
+* `Type="http://schemas.microsoft.com/office/2019/relationships/cellimages"`
+  → `Target="cellimages.xml"`
+
+From `xl/_rels/metadata.xml.rels` (metadata → richData; excerpt):
+
+* `http://schemas.microsoft.com/office/2017/relationships/richValue`
+* `http://schemas.microsoft.com/office/2017/relationships/richValueRel`
+* `http://schemas.microsoft.com/office/2017/relationships/richValueTypes`
+* `http://schemas.microsoft.com/office/2017/relationships/richValueStructure`
+
+`[Content_Types].xml` in this fixture includes explicit overrides for these parts, e.g.:
+
+* `/xl/cellimages.xml` → `application/vnd.openxmlformats-officedocument.spreadsheetml.cellimages+xml`
+* `/xl/metadata.xml` → `application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml`
+* `/xl/richData/richValueTypes.xml` → `application/vnd.ms-excel.richvaluetypes+xml`
+* `/xl/richData/richValueStructure.xml` → `application/vnd.ms-excel.richvaluestructure+xml`
 
 ### Fixture: `fixtures/xlsx/basic/image-in-cell.xlsx` (`rdrichvalue.xml` + `richValueRel.xml` 2022 variant)
 
@@ -647,7 +808,7 @@ Notes:
 
 Stores a **vector/table** of `r:id` strings. The *index* into this vector is what rich values store.
 
-Two root/namespace variants are observed in-repo:
+Three root/namespace variants are observed in-repo:
 
 1) `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` (`richValueRel` root, `…/2017/richdata2`):
 
@@ -661,7 +822,20 @@ Two root/namespace variants are observed in-repo:
 </richValueRel>
 ```
 
-2) `fixtures/xlsx/basic/image-in-cell.xlsx` (`richValueRels` root, `…/2022/richvaluerel`):
+2) `fixtures/xlsx/rich-data/images-in-cell.xlsx` (`rvRel` root, `…/2017/richdata`, with a `<rels>` wrapper):
+
+```xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvRel xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata"
+       xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <!-- Table position = relationship index (0-based). -->
+  <rels>
+    <rel r:id="rId1"/>
+  </rels>
+</rvRel>
+```
+
+3) `fixtures/xlsx/basic/image-in-cell.xlsx` (`richValueRels` root, `…/2022/richvaluerel`):
 
 ```xml
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -673,7 +847,7 @@ Two root/namespace variants are observed in-repo:
 </richValueRels>
 ```
 
-In both cases, treat the `<rel>` list as an **ordered table** (0-based indices). Some variants may wrap the
+In all cases, treat the `<rel>` list as an **ordered table** (0-based indices). Some variants wrap the
 entries (e.g. `<rels><rel .../></rels>`); match on element local-names and preserve unknown structure when
 round-tripping.
 
@@ -697,7 +871,9 @@ And the corresponding OPC relationships part:
 
 Stores the actual rich value instances. Each instance references a type (and/or structure) and encodes member values (often positionally, guided by `richValueStructure.xml`).
 
-Observed in `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` (image rich value referencing relationship index `0`):
+Two variants are observed in-repo:
+
+1) `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` (minimal `t="image"` payload referencing relationship slot `0`):
 
 ```xml
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -707,6 +883,21 @@ Observed in `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` (image rich value 
     <!-- Relationship index (0-based) into richValueRel.xml -->
     <v>0</v>
   </rv>
+</rvData>
+```
+
+2) `fixtures/xlsx/rich-data/images-in-cell.xlsx` (typed payload referencing relationship slot `0`):
+
+```xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <values>
+    <!-- Rich value index 0 -->
+    <rv type="0">
+      <!-- Relationship index (0-based) into richValueRel.xml -->
+      <v kind="rel">0</v>
+    </rv>
+  </values>
 </rvData>
 ```
 
@@ -772,9 +963,9 @@ The workbook → metadata relationship uses a standard SpreadsheetML relationshi
 observed in this repo:
 
 * `http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata`
-  * Observed in `fixtures/xlsx/metadata/rich-values-vm.xlsx`
+  * Observed in `fixtures/xlsx/metadata/rich-values-vm.xlsx` and `fixtures/xlsx/rich-data/images-in-cell.xlsx`
 * `http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata`
-  * Observed in `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`
+  * Observed in `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` and `fixtures/xlsx/basic/image-in-cell.xlsx`
 
 Additionally, `xl/workbook.xml` may include a `<metadata r:id="..."/>` element pointing at the relationship
 ID for the metadata part (observed in `fixtures/xlsx/metadata/rich-values-vm.xlsx`). Some workbooks omit
@@ -786,11 +977,18 @@ The richValue relationships are Microsoft-specific. Observed in this repo:
 
 * `http://schemas.microsoft.com/office/2017/06/relationships/richValue` → `xl/richData/richValue.xml`
 * `http://schemas.microsoft.com/office/2017/06/relationships/richValueRel` → `xl/richData/richValueRel.xml`
-  * Observed in `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`
+   * Observed in `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`
+* When the richData parts are related from `xl/metadata.xml` (via `xl/_rels/metadata.xml.rels`), Excel uses
+  unversioned 2017 relationship Type URIs:
+  * `http://schemas.microsoft.com/office/2017/relationships/richValue` → `xl/richData/richValue.xml`
+  * `http://schemas.microsoft.com/office/2017/relationships/richValueRel` → `xl/richData/richValueRel.xml`
+  * `http://schemas.microsoft.com/office/2017/relationships/richValueTypes` → `xl/richData/richValueTypes.xml`
+  * `http://schemas.microsoft.com/office/2017/relationships/richValueStructure` → `xl/richData/richValueStructure.xml`
+    * Observed in `fixtures/xlsx/rich-data/images-in-cell.xlsx` and `fixtures/xlsx/rich-data/richdata-minimal.xlsx`
 * `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValue` → `xl/richData/rdrichvalue.xml`
-  * Observed in `fixtures/xlsx/basic/image-in-cell.xlsx`
+   * Observed in `fixtures/xlsx/basic/image-in-cell.xlsx`
 * `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueStructure` → `xl/richData/rdrichvaluestructure.xml`
-  * Observed in `fixtures/xlsx/basic/image-in-cell.xlsx`
+   * Observed in `fixtures/xlsx/basic/image-in-cell.xlsx`
 * `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueTypes` → `xl/richData/rdRichValueTypes.xml`
   * Observed in `fixtures/xlsx/basic/image-in-cell.xlsx`
 * `http://schemas.microsoft.com/office/2022/10/relationships/richValueRel` → `xl/richData/richValueRel.xml`
@@ -811,20 +1009,31 @@ These values are copied from fixtures/tests in this repo and are safe to treat a
 
 | Kind | Value | Source |
 |------|-------|--------|
-| Workbook → metadata relationship Type | `http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata` | `fixtures/xlsx/metadata/rich-values-vm.xlsx` |
-| Workbook → metadata relationship Type | `http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata` | `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` |
+| Workbook → metadata relationship Type | `http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata` | `fixtures/xlsx/metadata/rich-values-vm.xlsx`, `fixtures/xlsx/rich-data/images-in-cell.xlsx` |
+| Workbook → metadata relationship Type | `http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata` | `fixtures/xlsx/basic/image-in-cell.xlsx`, `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` |
+| Workbook → cellimages relationship Type | `http://schemas.microsoft.com/office/2019/relationships/cellimages` | `fixtures/xlsx/rich-data/images-in-cell.xlsx` |
 | Workbook → richValue relationship Type | `http://schemas.microsoft.com/office/2017/06/relationships/richValue` | `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` |
 | Workbook → richValueRel relationship Type | `http://schemas.microsoft.com/office/2017/06/relationships/richValueRel` | `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` |
+| Metadata → richValue relationship Type (`xl/_rels/metadata.xml.rels`) | `http://schemas.microsoft.com/office/2017/relationships/richValue` | `fixtures/xlsx/rich-data/images-in-cell.xlsx`, `fixtures/xlsx/rich-data/richdata-minimal.xlsx` |
+| Metadata → richValueRel relationship Type (`xl/_rels/metadata.xml.rels`) | `http://schemas.microsoft.com/office/2017/relationships/richValueRel` | `fixtures/xlsx/rich-data/images-in-cell.xlsx`, `fixtures/xlsx/rich-data/richdata-minimal.xlsx` |
+| Metadata → richValueTypes relationship Type (`xl/_rels/metadata.xml.rels`) | `http://schemas.microsoft.com/office/2017/relationships/richValueTypes` | `fixtures/xlsx/rich-data/images-in-cell.xlsx`, `fixtures/xlsx/rich-data/richdata-minimal.xlsx` |
+| Metadata → richValueStructure relationship Type (`xl/_rels/metadata.xml.rels`) | `http://schemas.microsoft.com/office/2017/relationships/richValueStructure` | `fixtures/xlsx/rich-data/images-in-cell.xlsx`, `fixtures/xlsx/rich-data/richdata-minimal.xlsx` |
 | Workbook → rdRichValue relationship Type | `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValue` | `fixtures/xlsx/basic/image-in-cell.xlsx` |
 | Workbook → rdRichValueStructure relationship Type | `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueStructure` | `fixtures/xlsx/basic/image-in-cell.xlsx` |
 | Workbook → rdRichValueTypes relationship Type | `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueTypes` | `fixtures/xlsx/basic/image-in-cell.xlsx` |
 | Workbook → richValueRel relationship Type | `http://schemas.microsoft.com/office/2022/10/relationships/richValueRel` | `fixtures/xlsx/basic/image-in-cell.xlsx` |
 | `richValueRel.xml` root + namespace | `<richValueRel>` / `http://schemas.microsoft.com/office/spreadsheetml/2017/richdata2` | `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` |
+| `richValueRel.xml` root + namespace | `<rvRel>` / `http://schemas.microsoft.com/office/spreadsheetml/2017/richdata` | `fixtures/xlsx/rich-data/images-in-cell.xlsx` |
 | `richValueRel.xml` root + namespace | `<richValueRels>` / `http://schemas.microsoft.com/office/spreadsheetml/2022/richvaluerel` | `fixtures/xlsx/basic/image-in-cell.xlsx` |
-| `richValue.xml` namespace | `http://schemas.microsoft.com/office/spreadsheetml/2017/richdata` | `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` |
+| `richValue.xml` namespace | `http://schemas.microsoft.com/office/spreadsheetml/2017/richdata` | `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`, `fixtures/xlsx/rich-data/images-in-cell.xlsx` |
 | `rdrichvalue.xml` namespace | `http://schemas.microsoft.com/office/spreadsheetml/2017/richdata` | `fixtures/xlsx/basic/image-in-cell.xlsx` |
 | `rdrichvaluestructure.xml` root + namespace | `<rvStructures>` / `http://schemas.microsoft.com/office/spreadsheetml/2017/richdata` | `fixtures/xlsx/basic/image-in-cell.xlsx` |
 | `rdRichValueTypes.xml` root + namespace | `<rvTypesInfo>` / `http://schemas.microsoft.com/office/spreadsheetml/2017/richdata2` | `fixtures/xlsx/basic/image-in-cell.xlsx` |
+| `richValue.xml` content type override | `application/vnd.ms-excel.richvalue+xml` | `fixtures/xlsx/rich-data/images-in-cell.xlsx`, `fixtures/xlsx/rich-data/richdata-minimal.xlsx` |
+| `richValueRel.xml` content type override | `application/vnd.ms-excel.richvaluerel+xml` | `fixtures/xlsx/rich-data/images-in-cell.xlsx`, `fixtures/xlsx/rich-data/richdata-minimal.xlsx`, `fixtures/xlsx/basic/image-in-cell.xlsx` |
+| `richValueTypes.xml` content type override | `application/vnd.ms-excel.richvaluetypes+xml` | `fixtures/xlsx/rich-data/images-in-cell.xlsx`, `fixtures/xlsx/rich-data/richdata-minimal.xlsx` |
+| `richValueStructure.xml` content type override | `application/vnd.ms-excel.richvaluestructure+xml` | `fixtures/xlsx/rich-data/images-in-cell.xlsx`, `fixtures/xlsx/rich-data/richdata-minimal.xlsx` |
+| `cellimages.xml` content type override | `application/vnd.openxmlformats-officedocument.spreadsheetml.cellimages+xml` | `fixtures/xlsx/rich-data/images-in-cell.xlsx` |
 | `metadata.xml` content type override | `application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml` | `fixtures/xlsx/metadata/rich-values-vm.xlsx` |
 | `metadata.xml` content type override | `application/vnd.openxmlformats-officedocument.spreadsheetml.metadata+xml` | `crates/formula-xlsx/tests/metadata_rich_value_roundtrip.rs` |
 | No override for metadata/richData XML parts (default `application/xml`) | (none) | `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` |
@@ -853,7 +1062,7 @@ These values are copied from fixtures/tests in this repo and are safe to treat a
 ```
 
 `xl/_rels/metadata.xml.rels` (optional; metadata → richData tables; observed in
-`fixtures/xlsx/rich-data/richdata-minimal.xlsx`):
+`fixtures/xlsx/rich-data/richdata-minimal.xlsx` and `fixtures/xlsx/rich-data/images-in-cell.xlsx`):
 
 ```xml
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -884,12 +1093,18 @@ Observed patterns in this repo:
 * `fixtures/xlsx/basic/image-in-cell.xlsx` includes explicit `<Override>` entries for `xl/metadata.xml` and
   `xl/richData/*` (including `rdrichvalue.xml`, `rdrichvaluestructure.xml`, `rdRichValueTypes.xml`,
   `richValueRel.xml`).
+* `fixtures/xlsx/rich-data/images-in-cell.xlsx` includes explicit `<Override>` entries for:
+  * `xl/cellimages.xml`
+  * `xl/metadata.xml`
+  * `xl/richData/richValue*.xml` (including `richValueTypes.xml` / `richValueStructure.xml`)
 * `fixtures/xlsx/metadata/rich-values-vm.xlsx` includes an override:
   * `<Override PartName="/xl/metadata.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"/>`
 * Some tests construct workbooks that use:
   * `application/vnd.openxmlformats-officedocument.spreadsheetml.metadata+xml` for `/xl/metadata.xml`
 
-For the richData tables themselves, Excel may emit Microsoft-specific content types. Observed/likely patterns:
+For the richData tables themselves, Excel may emit Microsoft-specific content types. Observed in
+`fixtures/xlsx/rich-data/images-in-cell.xlsx` and `fixtures/xlsx/rich-data/richdata-minimal.xlsx` (overrides
+may be absent in other workbooks):
 
 ```xml
 <Override PartName="/xl/richData/richValue.xml"          ContentType="application/vnd.ms-excel.richvalue+xml"/>

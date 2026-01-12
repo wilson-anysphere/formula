@@ -29,7 +29,7 @@ workbook.xlsx (ZIP archive)
 │   ├── workbook.xml             # Workbook structure, sheet refs
 │   ├── styles.xml               # All cell formatting
 │   ├── sharedStrings.xml        # Deduplicated text strings
-│   ├── cellImages.xml           # (optional) workbook-level cell image store (alternate mechanism; name/casing varies; may also appear as xl/cellimages.xml)
+│   ├── cellImages.xml           # (optional) workbook-level cell image store (name/casing varies; may also appear as xl/cellimages.xml; observed in the real Excel fixture fixtures/xlsx/rich-data/images-in-cell.xlsx)
 │   ├── calcChain.xml            # Calculation order hints
 │   ├── metadata.xml             # Cell/value metadata (Excel "Rich Data")
 │   ├── richData/                # Excel 365+ rich values (data types, in-cell images; naming/casing varies)
@@ -706,10 +706,15 @@ Some producer tooling (and possibly some Excel builds) can store “images in ce
 - Part: `xl/cellImages.xml` (casing varies; `xl/cellimages.xml` is also seen in the wild)
 - Relationships: `xl/_rels/cellImages.xml.rels` (casing varies in lockstep with the XML part name)
 
-However, in the Excel 365 “Place in Cell” fixtures we inspected, in-cell images were represented via
-`xl/metadata.xml` + `xl/richData/*` + `xl/media/*` and no `xl/cellImages.xml` / `xl/cellimages.xml` part
-was present. This repo also includes `fixtures/xlsx/basic/cellimages.xlsx`, which *does* contain a
-`xl/cellimages.xml` part; treat it as an alternate/legacy store and preserve it when present.
+Excel has been observed (in this repo) to use **both** encodings:
+
+- RichData-only (no `xl/cellImages.xml` / `xl/cellimages.xml`): `fixtures/xlsx/basic/image-in-cell.xlsx`
+- RichData **plus** `xl/cellimages.xml`: `fixtures/xlsx/rich-data/images-in-cell.xlsx`
+
+This repo also includes `fixtures/xlsx/basic/cellimages.xlsx`, which *does* contain a standalone
+`xl/cellimages.xml` part; treat it as an alternate store and preserve it when present.
+
+If a `cellImages` part is present, we should preserve it for round-trip safety.
 
 From a **packaging / round-trip** perspective, the important thing is the relationship chain that connects this part to the actual image blobs under `xl/media/*`.
 
