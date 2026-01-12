@@ -1,0 +1,295 @@
+use std::ffi::OsString;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+
+use encoding_rs::UTF_16LE;
+use formula_vba::{decompress_container, OleFile};
+
+fn main() -> ExitCode {
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("{err}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run() -> Result<(), String> {
+    let mut args = std::env::args_os();
+    let program = args
+        .next()
+        .unwrap_or_else(|| OsString::from("dump_dir_records"));
+
+    let Some(input) = args.next() else {
+        return Err(usage(&program));
+    };
+    if args.next().is_some() {
+        return Err(usage(&program));
+    }
+
+    let input_path = PathBuf::from(input);
+
+    let (vba_project_bin, source) = load_vba_project_bin(&input_path)?;
+
+    println!("vbaProject.bin source: {source}");
+    println!("vbaProject.bin size: {} bytes", vba_project_bin.len());
+
+    let mut ole =
+        OleFile::open(&vba_project_bin).map_err(|e| format!("failed to parse OLE: {e}"))?;
+
+    let dir_compressed = ole
+        .read_stream_opt("VBA/dir")
+        .map_err(|e| format!("failed to read VBA/dir: {e}"))?
+        .ok_or("missing required stream VBA/dir".to_owned())?;
+
+    println!("VBA/dir compressed: {} bytes", dir_compressed.len());
+
+    let dir_decompressed = decompress_container(&dir_compressed)
+        .map_err(|e| format!("failed to decompress VBA/dir container: {e}"))?;
+
+    println!("VBA/dir decompressed: {} bytes", dir_decompressed.len());
+    println!();
+    println!("-- VBA/dir records (decompressed) --");
+    dump_dir_records(&dir_decompressed);
+
+    dump_project_normalized_data_v3(&vba_project_bin);
+
+    Ok(())
+}
+
+fn usage(program: &OsString) -> String {
+    format!(
+        "usage: {} <vbaProject.bin|workbook.xlsm|workbook.xlsx|workbook.xlsb>",
+        program.to_string_lossy()
+    )
+}
+
+fn load_vba_project_bin(path: &Path) -> Result<(Vec<u8>, String), String> {
+    match try_extract_vba_project_bin_from_zip(path) {
+        Ok(Some(bytes)) => Ok((
+            bytes,
+            format!("{} (zip entry xl/vbaProject.bin)", path.display()),
+        )),
+        Ok(None) => {
+            // Not a zip workbook; treat as a raw vbaProject.bin OLE file.
+            let bytes = std::fs::read(path)
+                .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+            Ok((bytes, path.display().to_string()))
+        }
+        Err(err) => Err(err),
+    }
+}
+
+fn try_extract_vba_project_bin_from_zip(path: &Path) -> Result<Option<Vec<u8>>, String> {
+    let file = match std::fs::File::open(path) {
+        Ok(f) => f,
+        Err(e) => return Err(format!("failed to open {}: {e}", path.display())),
+    };
+
+    let mut archive = match zip::ZipArchive::new(file) {
+        Ok(a) => a,
+        Err(_) => return Ok(None),
+    };
+
+    let mut entry = match archive.by_name("xl/vbaProject.bin") {
+        Ok(f) => f,
+        Err(zip::result::ZipError::FileNotFound) => {
+            return Err(format!(
+                "{} is a zip, but does not contain xl/vbaProject.bin",
+                path.display()
+            ));
+        }
+        Err(e) => return Err(format!("failed to read zip {}: {e}", path.display())),
+    };
+
+    let mut buf = Vec::new();
+    entry
+        .read_to_end(&mut buf)
+        .map_err(|e| format!("failed to read xl/vbaProject.bin from {}: {e}", path.display()))?;
+    Ok(Some(buf))
+}
+
+fn dump_dir_records(decompressed: &[u8]) {
+    let mut offset = 0usize;
+    let mut idx = 0usize;
+
+    while offset < decompressed.len() {
+        let record_offset = offset;
+
+        if offset + 6 > decompressed.len() {
+            println!(
+                "[{:03}] offset=0x{record_offset:08x} <truncated record header: need 6 bytes, have {}>",
+                idx + 1,
+                decompressed.len() - offset
+            );
+            break;
+        }
+
+        let id = u16::from_le_bytes([decompressed[offset], decompressed[offset + 1]]);
+        let len = u32::from_le_bytes([
+            decompressed[offset + 2],
+            decompressed[offset + 3],
+            decompressed[offset + 4],
+            decompressed[offset + 5],
+        ]) as usize;
+        offset += 6;
+
+        if offset + len > decompressed.len() {
+            println!(
+                "[{:03}] offset=0x{record_offset:08x} id={id:#06x} len={len} <bad record length: need {} bytes, have {}>",
+                idx + 1,
+                len,
+                decompressed.len().saturating_sub(offset)
+            );
+            break;
+        }
+        let data = &decompressed[offset..offset + len];
+        offset += len;
+
+        idx += 1;
+        let name = record_name(id).unwrap_or("<unknown>");
+        println!(
+            "[{idx:03}] offset=0x{record_offset:08x} id={id:#06x} len={len:>6} {name}"
+        );
+
+        if len <= 64 {
+            println!("      hex: {}", bytes_to_hex_spaced(data));
+            if !data.is_empty() {
+                println!("      ascii: {}", bytes_to_ascii_preview(data));
+            }
+            if looks_like_utf16le(data) {
+                let (cow, had_errors) = UTF_16LE.decode_without_bom_handling(data);
+                let mut s = cow.into_owned();
+                // This is a debugging aid: strip NULs to keep output readable.
+                s.retain(|c| c != '\u{0000}');
+                let escaped = escape_str(&s);
+                if had_errors {
+                    println!("      utf16le: {escaped} <decode errors>");
+                } else {
+                    println!("      utf16le: {escaped}");
+                }
+            }
+        }
+    }
+
+    if offset == decompressed.len() {
+        println!();
+        println!("records: {idx}");
+    } else {
+        println!();
+        println!("records: {idx} (stopped early at offset=0x{offset:08x})");
+    }
+}
+
+fn record_name(id: u16) -> Option<&'static str> {
+    // Names from MS-OVBA 2.3.4 "dir Stream".
+    Some(match id {
+        // ---- Project information records ----
+        0x0001 => "PROJECTSYSKIND",
+        0x0002 => "PROJECTLCID",
+        0x0003 => "PROJECTCODEPAGE",
+        0x0004 => "PROJECTNAME",
+        0x0005 => "PROJECTDOCSTRING",
+        0x0006 => "PROJECTHELPFILEPATH",
+        0x0007 => "PROJECTHELPCONTEXT",
+        0x0008 => "PROJECTLIBFLAGS",
+        0x0009 => "PROJECTVERSION",
+        0x000C => "PROJECTCONSTANTS",
+
+        // ---- Reference records (used by ContentNormalizedData / ProjectNormalizedData) ----
+        0x000D => "REFERENCEREGISTERED",
+        0x000E => "REFERENCEPROJECT",
+        0x000F => "REFERENCECONTROL",
+        0x0010 => "REFERENCETYPELIB",
+
+        // ---- Module records ----
+        0x0014 => "PROJECTCOOKIE",
+        0x0015 => "MODULECOUNT",
+        0x0016 => "PROJECTMODULES",
+        0x0019 => "MODULENAME",
+        0x001A => "MODULESTREAMNAME",
+        0x001C => "MODULEDOCSTRING",
+        0x001D => "MODULEHELPFILEPATH",
+        0x001E => "MODULEHELPCONTEXT",
+        0x0021 => "MODULETYPE",
+        0x0025 => "MODULEREADONLY",
+        0x0028 => "MODULEPRIVATE",
+        0x002B => "MODULETERMINATOR",
+        0x002C => "MODULECOOKIE",
+        0x0031 => "MODULETEXTOFFSET",
+
+        _ => return None,
+    })
+}
+
+fn bytes_to_hex_spaced(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 3);
+    for (i, b) in bytes.iter().enumerate() {
+        use std::fmt::Write;
+        if i != 0 {
+            out.push(' ');
+        }
+        write!(&mut out, "{:02x}", b).expect("writing to String cannot fail");
+    }
+    out
+}
+
+fn bytes_to_ascii_preview(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len());
+    for &b in bytes {
+        match b {
+            b'\r' => out.push_str("\\r"),
+            b'\n' => out.push_str("\\n"),
+            b'\t' => out.push_str("\\t"),
+            0x20..=0x7E => out.push(b as char),
+            0x00 => out.push_str("\\0"),
+            _ => out.push('.'),
+        }
+    }
+    out
+}
+
+fn looks_like_utf16le(bytes: &[u8]) -> bool {
+    if bytes.len() < 2 || bytes.len() % 2 != 0 {
+        return false;
+    }
+    // If a substantial portion of the high bytes are NUL, it's probably
+    // UTF-16LE for ASCII-range characters.
+    let total = bytes.len() / 2;
+    let nul_high = bytes.iter().skip(1).step_by(2).filter(|&&b| b == 0).count();
+    nul_high >= total / 2
+}
+
+fn escape_str(s: &str) -> String {
+    s.chars().flat_map(|c| c.escape_default()).collect()
+}
+
+#[cfg(formula_vba_has_project_normalized_data_v3)]
+fn dump_project_normalized_data_v3(vba_project_bin: &[u8]) {
+    const PREFIX_LEN: usize = 64;
+    println!();
+    println!("-- ProjectNormalizedDataV3 --");
+
+    match formula_vba::project_normalized_data_v3(vba_project_bin) {
+        Ok(data) => {
+            let n = PREFIX_LEN.min(data.len());
+            println!("len: {} bytes", data.len());
+            println!("first {n} bytes: {}", bytes_to_hex_spaced(&data[..n]));
+        }
+        Err(err) => {
+            // Keep going: this is a developer tool and should be resilient to partially malformed
+            // inputs / in-progress implementations.
+            println!("error: {err}");
+        }
+    }
+}
+
+#[cfg(not(formula_vba_has_project_normalized_data_v3))]
+fn dump_project_normalized_data_v3(_vba_project_bin: &[u8]) {
+    println!();
+    println!("-- ProjectNormalizedDataV3 --");
+    println!("unavailable: formula_vba::project_normalized_data_v3 not found in this build");
+}
+
