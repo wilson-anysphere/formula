@@ -1631,7 +1631,7 @@ if (
         rowCount,
         colCount,
         showFormulas: () => app.getShowFormulas(),
-        getComputedValue: (cell) => (app as any).getCellComputedValue(cell),
+        getComputedValue: (cell) => app.getCellComputedValueForSheet(app.getCurrentSheetId(), cell),
         onSelectionChange: () => syncPrimarySelectionFromSecondary(),
         onSelectionRangeChange: () => syncPrimarySelectionFromSecondary(),
         initialScroll,
