@@ -490,74 +490,6 @@ pub fn decode_rgce(rgce: &[u8]) -> Result<String, DecodeRgceError> {
                 }
                 stack.push(frag);
             }
-            // Legacy placeholder "PtgList" (structured reference).
-            //
-            // NOTE: This is **not** Excel's on-disk BIFF12 encoding for structured references.
-            // Older versions of `formula-biff` used this self-contained, string-based token
-            // format for internal round-tripping. We keep decode support for backwards
-            // compatibility only.
-            //
-            // Token layout:
-            //   [ptg: u8]
-            //   [flags: u16]  (item + column selector)
-            //   [table: XLUnicodeString(u16-len)]
-            //   [col1: XLUnicodeString(u16-len)]
-            //   [col2: XLUnicodeString(u16-len)]
-            0x30 | 0x50 | 0x70 => {
-                if input.len() < 2 {
-                    return Err(DecodeRgceError::UnexpectedEof);
-                }
-                let flags = u16::from_le_bytes([input[0], input[1]]);
-                input = &input[2..];
-
-                let item = (flags & 0x0007) as u8;
-                let cols = ((flags >> 3) & 0x0003) as u8;
-
-                let table = take_utf16_len_prefixed(&mut input)?;
-                let col1 = take_utf16_len_prefixed(&mut input)?;
-                let col2 = take_utf16_len_prefixed(&mut input)?;
-
-                let item = match item {
-                    0 => None,
-                    1 => Some(StructuredRefItem::All),
-                    2 => Some(StructuredRefItem::Data),
-                    3 => Some(StructuredRefItem::Headers),
-                    4 => Some(StructuredRefItem::Totals),
-                    5 => Some(StructuredRefItem::ThisRow),
-                    _ => return Err(DecodeRgceError::UnsupportedToken { ptg }),
-                };
-                let cols = match cols {
-                    0 => StructuredColumns::All,
-                    1 => StructuredColumns::Single(col1),
-                    2 => StructuredColumns::Range { start: col1, end: col2 },
-                    _ => return Err(DecodeRgceError::UnsupportedToken { ptg }),
-                };
-
-                let is_value_class = (ptg & 0x60) == 0x40;
-                let is_single_cell = structured_ref_is_single_cell(item, &cols);
-
-                let table_name = if table.is_empty() {
-                    None
-                } else {
-                    Some(table.as_str())
-                };
-
-                let mut text = format_structured_ref(table_name, item, &cols);
-
-                let mut precedence = 100;
-                if is_value_class && !is_single_cell {
-                    // Preserve legacy implicit intersection semantics (same approach as PtgAreaV).
-                    text = format!("@{text}");
-                    precedence = 70;
-                }
-
-                stack.push(ExprFragment {
-                    text,
-                    precedence,
-                    contains_union: false,
-                    is_missing: false,
-                });
-            }
             _ => return Err(DecodeRgceError::UnsupportedToken { ptg }),
         }
     }
@@ -599,27 +531,6 @@ enum StructuredColumns {
     All,
     Single(String),
     Range { start: String, end: String },
-}
-
-fn take_utf16_len_prefixed(input: &mut &[u8]) -> Result<String, DecodeRgceError> {
-    if input.len() < 2 {
-        return Err(DecodeRgceError::UnexpectedEof);
-    }
-    let cch = u16::from_le_bytes([input[0], input[1]]) as usize;
-    *input = &input[2..];
-
-    let byte_len = cch.checked_mul(2).ok_or(DecodeRgceError::UnexpectedEof)?;
-    if input.len() < byte_len {
-        return Err(DecodeRgceError::UnexpectedEof);
-    }
-    let raw = &input[..byte_len];
-    *input = &input[byte_len..];
-
-    let mut units = Vec::with_capacity(cch);
-    for chunk in raw.chunks_exact(2) {
-        units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
-    }
-    String::from_utf16(&units).map_err(|_| DecodeRgceError::InvalidUtf16)
 }
 
 fn structured_ref_item_from_flags(flags: u16) -> Option<StructuredRefItem> {

@@ -1,4 +1,4 @@
-use formula_biff::decode_rgce;
+use formula_biff::{decode_rgce, DecodeRgceError};
 use pretty_assertions::assert_eq;
 
 /// Build a BIFF12 structured reference token (`PtgList`) encoded as `PtgExtend` + `etpg=0x19`.
@@ -67,3 +67,17 @@ fn decodes_structured_ref_value_class_emits_explicit_implicit_intersection() {
     assert_eq!(text, "@Table1[Column2]");
 }
 
+#[test]
+fn rejects_legacy_placeholder_ptglist_token() {
+    // Older versions of `formula-biff` used a non-standard, string-based "PtgList" token with id
+    // 0x30. Ensure we reject it so callers don't accidentally rely on it.
+    let rgce = vec![
+        0x30, // legacy placeholder token id
+        0x00, 0x00, // flags
+        0x00, 0x00, // table name (utf16 len=0)
+        0x00, 0x00, // col1 (utf16 len=0)
+        0x00, 0x00, // col2 (utf16 len=0)
+    ];
+    let err = decode_rgce(&rgce).unwrap_err();
+    assert!(matches!(err, DecodeRgceError::UnsupportedToken { ptg: 0x30 }));
+}
