@@ -16,8 +16,8 @@ const DEFAULT_SHARED_STRINGS_PART: &str = "xl/sharedStrings.bin";
 
 fn build_shared_strings_fixture_variant(
     shared_strings_part: &str,
-    workbook_rels_target: &str,
-    content_types_part_name: &str,
+    workbook_rels_target: Option<&str>,
+    content_types_part_name: Option<&str>,
     move_shared_strings_part: bool,
 ) -> Vec<u8> {
     let mut builder = XlsbFixtureBuilder::new();
@@ -44,23 +44,36 @@ fn build_shared_strings_fixture_variant(
         parts.insert(shared_strings_part.to_string(), shared_strings);
     }
 
-    let workbook_rels_xml =
-        String::from_utf8(parts["xl/_rels/workbook.bin.rels"].clone()).expect("utf8 workbook rels");
-    let workbook_rels_xml = workbook_rels_xml.replace(
-        "Target=\"sharedStrings.bin\"",
-        &format!("Target=\"{workbook_rels_target}\""),
-    );
+    let workbook_rels_xml = String::from_utf8(parts["xl/_rels/workbook.bin.rels"].clone())
+        .expect("utf8 workbook rels");
+    let workbook_rels_xml = match workbook_rels_target {
+        Some(target) => workbook_rels_xml.replace(
+            "Target=\"sharedStrings.bin\"",
+            &format!("Target=\"{target}\""),
+        ),
+        None => workbook_rels_xml
+            .lines()
+            .filter(|line| !line.to_ascii_lowercase().contains("relationships/sharedstrings"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    };
     parts.insert(
         "xl/_rels/workbook.bin.rels".to_string(),
         workbook_rels_xml.into_bytes(),
     );
 
-    let content_types_xml =
-        String::from_utf8(parts["[Content_Types].xml"].clone()).expect("utf8 content types");
-    let content_types_xml = content_types_xml.replace(
-        "PartName=\"/xl/sharedStrings.bin\"",
-        &format!("PartName=\"{content_types_part_name}\""),
-    );
+    let content_types_xml = String::from_utf8(parts["[Content_Types].xml"].clone())
+        .expect("utf8 content types");
+    let content_types_xml = match content_types_part_name {
+        Some(part_name) => content_types_xml.replace(
+            "PartName=\"/xl/sharedStrings.bin\"",
+            &format!("PartName=\"{part_name}\""),
+        ),
+        None => content_types_xml.replace(
+            "  <Override PartName=\"/xl/sharedStrings.bin\" ContentType=\"application/vnd.ms-excel.sharedStrings\"/>\n",
+            "",
+        ),
+    };
     parts.insert(
         "[Content_Types].xml".to_string(),
         content_types_xml.into_bytes(),
@@ -79,8 +92,8 @@ fn build_shared_strings_fixture_variant(
 fn build_nonstandard_shared_strings_fixture() -> Vec<u8> {
     build_shared_strings_fixture_variant(
         "xl/strings/sharedStrings.bin",
-        "strings/sharedStrings.bin",
-        "/xl/strings/sharedStrings.bin",
+        Some("strings/sharedStrings.bin"),
+        Some("/xl/strings/sharedStrings.bin"),
         true,
     )
 }
@@ -101,9 +114,9 @@ struct SharedStringsInfo {
 }
 
 fn read_shared_strings_info(shared_strings_bin: &[u8]) -> SharedStringsInfo {
-    const SST: u32 = 0x019F;
+    const SST: u32 = 0x009F;
     const SI: u32 = 0x0013;
-    const SST_END: u32 = 0x01A0;
+    const SST_END: u32 = 0x00A0;
 
     let mut cursor = Cursor::new(shared_strings_bin);
     let mut total_count = None;
@@ -177,8 +190,8 @@ fn open_resolves_shared_strings_part_from_workbook_rels() {
 fn open_resolves_shared_strings_part_with_backslashes_and_case_insensitive_entry_names() {
     let bytes = build_shared_strings_fixture_variant(
         "xl/Strings/SharedStrings.bin",
-        r#"Strings\SharedStrings.bin"#,
-        "/xl/Strings/SharedStrings.bin",
+        Some(r#"Strings\SharedStrings.bin"#),
+        Some("/xl/Strings/SharedStrings.bin"),
         true,
     );
 
@@ -200,9 +213,55 @@ fn open_resolves_shared_strings_part_with_backslashes_and_case_insensitive_entry
 fn open_falls_back_to_default_shared_strings_part_when_relationship_points_to_missing_entry() {
     let bytes = build_shared_strings_fixture_variant(
         DEFAULT_SHARED_STRINGS_PART,
-        "strings/sharedStrings.bin",
-        "/xl/strings/sharedStrings.bin",
+        Some("strings/sharedStrings.bin"),
+        Some("/xl/strings/sharedStrings.bin"),
         false,
+    );
+
+    let tmpdir = tempdir().expect("create temp dir");
+    let input_path = tmpdir.path().join("input.xlsb");
+    std::fs::write(&input_path, bytes).expect("write input workbook");
+
+    let wb = XlsbWorkbook::open(&input_path).expect("open xlsb");
+    let sheet = wb.read_sheet(0).expect("read sheet");
+    let a1 = sheet
+        .cells
+        .iter()
+        .find(|c| c.row == 0 && c.col == 0)
+        .expect("A1 exists");
+    assert_eq!(a1.value, CellValue::Text("Hello".to_string()));
+}
+
+#[test]
+fn open_resolves_shared_strings_part_from_content_types_when_relationship_missing() {
+    let bytes = build_shared_strings_fixture_variant(
+        "xl/strings/sharedStrings.bin",
+        None,
+        Some("/xl/strings/sharedStrings.bin"),
+        true,
+    );
+
+    let tmpdir = tempdir().expect("create temp dir");
+    let input_path = tmpdir.path().join("input.xlsb");
+    std::fs::write(&input_path, bytes).expect("write input workbook");
+
+    let wb = XlsbWorkbook::open(&input_path).expect("open xlsb");
+    let sheet = wb.read_sheet(0).expect("read sheet");
+    let a1 = sheet
+        .cells
+        .iter()
+        .find(|c| c.row == 0 && c.col == 0)
+        .expect("A1 exists");
+    assert_eq!(a1.value, CellValue::Text("Hello".to_string()));
+}
+
+#[test]
+fn open_resolves_shared_strings_part_from_absolute_relationship_target() {
+    let bytes = build_shared_strings_fixture_variant(
+        "xl/strings/sharedStrings.bin",
+        Some("/xl/strings/sharedStrings.bin"),
+        Some("/xl/strings/sharedStrings.bin"),
+        true,
     );
 
     let tmpdir = tempdir().expect("create temp dir");
@@ -271,6 +330,43 @@ fn save_with_cell_edits_shared_strings_updates_nonstandard_shared_strings_part()
         .find(|c| c.row == 0 && c.col == 0)
         .expect("A1 exists");
     assert_eq!(a1.value, CellValue::Text("New".to_string()));
+
+    let shared_strings_bin = read_zip_part(&output_path, "xl/strings/sharedStrings.bin");
+    let info = read_shared_strings_info(&shared_strings_bin);
+    assert_eq!(info.total_count, Some(1));
+    assert_eq!(info.unique_count, Some(2));
+    assert_eq!(info.strings.len(), 2);
+    assert_eq!(info.strings[1], "New");
+}
+
+#[test]
+fn save_with_cell_edits_shared_strings_updates_content_types_resolved_shared_strings_part() {
+    let bytes = build_shared_strings_fixture_variant(
+        "xl/strings/sharedStrings.bin",
+        None,
+        Some("/xl/strings/sharedStrings.bin"),
+        true,
+    );
+
+    let tmpdir = tempdir().expect("create temp dir");
+    let input_path = tmpdir.path().join("input.xlsb");
+    let output_path = tmpdir.path().join("output.xlsb");
+    std::fs::write(&input_path, bytes).expect("write input workbook");
+
+    let wb = XlsbWorkbook::open(&input_path).expect("open xlsb");
+    wb.save_with_cell_edits_shared_strings(
+        &output_path,
+        0,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Text("New".to_string()),
+            new_formula: None,
+            new_rgcb: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect("save_with_cell_edits_shared_strings");
 
     let shared_strings_bin = read_zip_part(&output_path, "xl/strings/sharedStrings.bin");
     let info = read_shared_strings_info(&shared_strings_bin);
