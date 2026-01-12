@@ -387,3 +387,32 @@ fn bytecode_compiles_and_or_over_sheet_range_cell_ref_and_matches_ast() {
     assert_eq!(bytecode_and, Value::Bool(false));
     assert_eq!(bytecode_or, Value::Bool(true));
 }
+
+#[test]
+fn bytecode_compiles_counta_and_countblank_over_large_sheet_range_span() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet2", "B2", "hello").unwrap();
+    engine.set_cell_value("Sheet3", "F262145", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "C3", "").unwrap(); // empty string
+
+    engine
+        .set_cell_formula("Summary", "A1", "=COUNTA(Sheet1:Sheet3!A1:F262145)")
+        .unwrap();
+    engine
+        .set_cell_formula("Summary", "A2", "=COUNTBLANK(Sheet1:Sheet3!A1:F262145)")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 2);
+
+    engine.recalculate_single_threaded();
+
+    // Non-empty cells include empty strings for COUNTA.
+    assert_eq!(engine.get_cell_value("Summary", "A1"), Value::Number(4.0));
+    // 3 sheets x 262,145 rows x 6 cols = 4,718,610 cells total.
+    // Only 3 of them are non-blank (empty strings count as blank for COUNTBLANK).
+    assert_eq!(
+        engine.get_cell_value("Summary", "A2"),
+        Value::Number(4_718_607.0)
+    );
+}
