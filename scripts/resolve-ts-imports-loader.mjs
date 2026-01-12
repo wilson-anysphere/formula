@@ -7,12 +7,14 @@
  *   import { foo } from "./foo.js";
  * while the source file on disk is `foo.ts`.
  *
+ * Some sources also import `.jsx` specifiers (even when the file on disk is still `.ts`).
+ *
  * Bundlers (and TypeScript's `moduleResolution: "Bundler"`) understand this, but
  * Node's default ESM resolver does not. When we run `.test.js` files directly via
  * `node --test` (executing TypeScript sources directly), those imports would fail
  * with `ERR_MODULE_NOT_FOUND`.
  *
- * This loader keeps runtime semantics identical when a real `.js` file exists, but
+ * This loader keeps runtime semantics identical when a real `.js`/`.jsx` file exists, but
  * falls back to the matching `.ts` source when it doesn't.
  *
  * Additionally, some TS sources in this repo still use extensionless relative

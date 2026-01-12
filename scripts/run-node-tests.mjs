@@ -581,9 +581,11 @@ async function filterExternalDependencyTests(files, opts) {
           /** @type {string[]} */
           const fallbacks = [];
           if (ext === ".jsx") {
-            // `.jsx` specifiers are treated as a TSX convention when running with a
-            // TypeScript transpile loader.
+            // `.jsx` specifiers may point at `.ts` sources (and are supported by the
+            // TypeScript transpile loader via `.tsx` -> `.ts` fallbacks). When using Node's
+            // built-in TS execution, `.tsx` is unsupported, but `.ts` still works.
             if (opts.canExecuteTsx) fallbacks.push(".tsx");
+            fallbacks.push(".ts");
           } else {
             fallbacks.push(".ts");
             if (opts.canExecuteTsx) fallbacks.push(".tsx");
@@ -828,6 +830,7 @@ async function filterMissingWorkspaceDependencyTests(files, opts) {
           const fallbacks = [];
           if (ext === ".jsx") {
             if (opts.canExecuteTsx) fallbacks.push(".tsx");
+            fallbacks.push(".ts");
           } else {
             fallbacks.push(".ts");
             if (opts.canExecuteTsx) fallbacks.push(".tsx");
