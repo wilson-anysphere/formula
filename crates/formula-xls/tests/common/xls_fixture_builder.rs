@@ -19,6 +19,9 @@ const RECORD_DELTA: u16 = 0x0010;
 const RECORD_ITERATION: u16 = 0x0011;
 const RECORD_FORMAT: u16 = 0x041E;
 const RECORD_CONTINUE: u16 = 0x003C;
+const RECORD_NOTE: u16 = 0x001C;
+const RECORD_OBJ: u16 = 0x005D;
+const RECORD_TXO: u16 = 0x01B6;
 const RECORD_XF: u16 = 0x00E0;
 const RECORD_BOUNDSHEET: u16 = 0x0085;
 const RECORD_SAVERECALC: u16 = 0x005F;
@@ -217,6 +220,41 @@ pub fn build_unknown_builtin_numfmtid_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a minimal BIFF8 `.xls` fixture containing a single sheet named `Notes`
+/// with a NOTE/OBJ/TXO comment anchored to `A1`.
+pub fn build_note_comment_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_note_comment_workbook_stream(NoteCommentSheetKind::SingleCell);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture containing a single sheet with a merged region (`A1:B1`).
+///
+/// The NOTE record is targeted at the non-anchor cell (`B1`), but the importer should
+/// anchor the resulting model comment to `A1` per Excel merged-cell semantics.
+pub fn build_note_comment_in_merged_region_fixture_xls() -> Vec<u8> {
+    let workbook_stream =
+        build_note_comment_workbook_stream(NoteCommentSheetKind::MergedRegionNonAnchorNote);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing a single external hyperlink on `A1`.
 ///
 /// This is used to ensure we preserve BIFF `HLINK` records when importing `.xls` workbooks.
@@ -358,6 +396,177 @@ fn build_workbook_stream(date_1904: bool) -> Vec<u8> {
     // Append sheet substream.
     globals.extend_from_slice(&sheet);
     globals
+}
+
+#[derive(Clone, Copy, Debug)]
+enum NoteCommentSheetKind {
+    SingleCell,
+    MergedRegionNonAnchorNote,
+}
+
+fn build_note_comment_workbook_stream(kind: NoteCommentSheetKind) -> Vec<u8> {
+    let (sheet_name, sheet_stream) = match kind {
+        NoteCommentSheetKind::SingleCell => ("Notes", build_note_comment_sheet_stream(false)),
+        NoteCommentSheetKind::MergedRegionNonAnchorNote => {
+            ("MergedNotes", build_note_comment_sheet_stream(true))
+        }
+    };
+
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // Many readers expect at least 16 style XFs before cell XFs.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+
+    // One default cell XF (General).
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, sheet_name);
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    push_record(&mut globals, RECORD_EOF, &[]);
+
+    let sheet_offset = globals.len();
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+
+    globals.extend_from_slice(&sheet_stream);
+    globals
+}
+
+fn build_note_comment_sheet_stream(include_merged_region: bool) -> Vec<u8> {
+    const OBJECT_ID: u16 = 1;
+    const AUTHOR: &str = "Alice";
+    const TEXT: &str = "Hello from note";
+
+    let (note_row, note_col) = if include_merged_region {
+        // NOTE targets B1 (non-anchor) while A1:B1 is merged.
+        (0u16, 1u16)
+    } else {
+        // NOTE targets A1.
+        (0u16, 0u16)
+    };
+
+    // The workbook globals above create 16 style XFs + 1 cell XF, so the first usable
+    // cell XF index is 16.
+    const XF_GENERAL_CELL: u16 = 16;
+
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1) or [0, 2) if we include B1.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes());
+    dims.extend_from_slice(&1u32.to_le_bytes());
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    dims.extend_from_slice(&(if include_merged_region { 2u16 } else { 1u16 }).to_le_bytes());
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    if include_merged_region {
+        // MERGEDCELLS: 1 range, A1:B1.
+        let mut merged = Vec::<u8>::new();
+        merged.extend_from_slice(&1u16.to_le_bytes()); // cAreas
+        merged.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
+        merged.extend_from_slice(&0u16.to_le_bytes()); // rwLast
+        merged.extend_from_slice(&0u16.to_le_bytes()); // colFirst (A)
+        merged.extend_from_slice(&1u16.to_le_bytes()); // colLast (B)
+        push_record(&mut sheet, RECORD_MERGEDCELLS, &merged);
+    }
+
+    // Ensure the anchor cell exists in the calamine value grid (even though the comment could
+    // conceptually be attached to an empty cell).
+    push_record(&mut sheet, RECORD_BLANK, &blank_cell(0, 0, XF_GENERAL_CELL));
+
+    // NOTE/OBJ/TXO trio that encodes the comment payload.
+    push_record(
+        &mut sheet,
+        RECORD_NOTE,
+        &note_record(note_row, note_col, OBJECT_ID, AUTHOR),
+    );
+    push_record(&mut sheet, RECORD_OBJ, &obj_record_with_ftcmo(OBJECT_ID));
+    push_txo_logical_record(&mut sheet, TEXT);
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn note_record(row: u16, col: u16, object_id: u16, author: &str) -> Vec<u8> {
+    // NOTE record (BIFF8): [rw: u16][col: u16][grbit: u16][idObj: u16][stAuthor]
+    //
+    // Some parsers differ on whether `idObj` precedes `grbit`; we keep this fixture robust
+    // by writing the same stable value into both fields (object_id=1).
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&row.to_le_bytes());
+    out.extend_from_slice(&col.to_le_bytes());
+    out.extend_from_slice(&object_id.to_le_bytes()); // grbit (or idObj)
+    out.extend_from_slice(&object_id.to_le_bytes()); // idObj (or grbit)
+    write_short_unicode_string(&mut out, author);
+    out
+}
+
+fn obj_record_with_ftcmo(object_id: u16) -> Vec<u8> {
+    // OBJ record [MS-XLS 2.4.178] contains a series of subrecords.
+    // For legacy NOTE comments we only need `ftCmo` (common object data) + `ftEnd`.
+    const FT_CMO: u16 = 0x0015;
+    const FT_END: u16 = 0x0000;
+
+    // In BIFF8, `cb` is the size of the subrecord payload *excluding* the `ft/cb` header.
+    const CMO_CB: u16 = 0x0012;
+    const OBJECT_TYPE_NOTE: u16 = 0x0019;
+
+    let mut out = Vec::<u8>::new();
+
+    // ftCmo header
+    out.extend_from_slice(&FT_CMO.to_le_bytes());
+    out.extend_from_slice(&CMO_CB.to_le_bytes());
+    // ftCmo payload (18 bytes)
+    out.extend_from_slice(&OBJECT_TYPE_NOTE.to_le_bytes()); // ot
+    out.extend_from_slice(&object_id.to_le_bytes()); // id
+    out.extend_from_slice(&0u16.to_le_bytes()); // grbit
+    out.extend_from_slice(&[0u8; 12]); // reserved
+
+    // ftEnd subrecord
+    out.extend_from_slice(&FT_END.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+
+    out
+}
+
+fn push_txo_logical_record(out: &mut Vec<u8>, text: &str) {
+    let cch_text: u16 = text
+        .len()
+        .try_into()
+        .expect("comment text too long for u16 length");
+
+    // TXO record payload (18 bytes).
+    // Store `cchText` as u16 at offset 6, and `cbRuns` as u16 at offset 12.
+    let mut txo = [0u8; 18];
+    txo[6..8].copy_from_slice(&cch_text.to_le_bytes());
+    txo[12..14].copy_from_slice(&4u16.to_le_bytes()); // cbRuns
+    push_record(out, RECORD_TXO, &txo);
+
+    // First CONTINUE record: BIFF8 continued-string form: [flags: u8][chars...]
+    let mut cont_text = Vec::<u8>::new();
+    cont_text.push(0); // flags: compressed 8-bit chars
+    cont_text.extend_from_slice(text.as_bytes());
+    push_record(out, RECORD_CONTINUE, &cont_text);
+
+    // Second CONTINUE record: formatting runs. We use 4 bytes of dummy data.
+    push_record(out, RECORD_CONTINUE, &[0u8; 4]);
 }
 
 fn build_merged_formatted_blank_workbook_stream() -> Vec<u8> {
