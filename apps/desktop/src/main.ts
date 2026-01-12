@@ -4396,6 +4396,7 @@ if (
       const doc = app.getDocument();
       const wasActive = app.getCurrentSheetId() === sheetId;
       const deletedName = workbookSheetStore.getName(sheetId) ?? sheetId;
+      const sheetOrder = workbookSheetStore.listAll().map((s) => s.name);
 
       // In collab mode, sheet operations are persisted through the shared Yjs document.
       // Avoid mutating the local Tauri workbook backend (if present).
@@ -4427,7 +4428,7 @@ if (
       }
 
       try {
-        rewriteDocumentFormulasForSheetDelete(doc as any, deletedName);
+        rewriteDocumentFormulasForSheetDelete(doc as any, deletedName, sheetOrder);
       } catch {
         // ignore
       }
