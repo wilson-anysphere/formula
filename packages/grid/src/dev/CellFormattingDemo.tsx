@@ -1,10 +1,24 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
-import type { CellData, CellProvider, CellStyle } from "../model/CellProvider";
+import type {
+  CellBorderLineStyle,
+  CellBorderSpec,
+  CellBorders,
+  CellData,
+  CellProvider,
+  CellStyle
+} from "../model/CellProvider";
 import { CanvasGrid, type GridApi } from "../react/CanvasGrid";
 
-type DemoCellStyle = CellStyle & Record<string, unknown>;
-type DemoCellData = CellData & Record<string, unknown>;
+type DemoCellData = CellData & {
+  /**
+   * Optional formatted display string for number formats (Task 68).
+   * Not currently used by the renderer; included for manual verification once supported.
+   */
+  displayValue?: string;
+  formattedValue?: string;
+  numberFormat?: string;
+};
 
 function toColumnName(col0: number): string {
   let value = col0 + 1;
@@ -26,8 +40,8 @@ class CellFormattingDemoProvider implements CellProvider {
   private readonly colCount: number;
   private readonly cells = new Map<string, DemoCellData>();
 
-  private readonly headerStyle: DemoCellStyle = { fontWeight: "600", textAlign: "center" };
-  private readonly rowHeaderStyle: DemoCellStyle = { fontWeight: "600", textAlign: "end" };
+  private readonly headerStyle: CellStyle = { fontWeight: "600", textAlign: "center" };
+  private readonly rowHeaderStyle: CellStyle = { fontWeight: "600", textAlign: "end" };
 
   constructor(options: { rowCount: number; colCount: number }) {
     this.rowCount = options.rowCount;
@@ -37,8 +51,8 @@ class CellFormattingDemoProvider implements CellProvider {
       row: number,
       col: number,
       value: CellData["value"],
-      style?: DemoCellStyle,
-      extras?: Record<string, unknown>
+      style?: CellStyle,
+      extras?: Partial<DemoCellData>
     ) => {
       const cell: DemoCellData = { row, col, value, style, ...(extras ?? {}) };
       this.cells.set(cellKey(row, col), cell);
@@ -52,54 +66,45 @@ class CellFormattingDemoProvider implements CellProvider {
     // ---------------------------------------------------------------------------------------------
     put(1, 1, "Text styles", { fill: sectionHeaderFill, fontWeight: "700" });
 
-    const baseTextStyle: DemoCellStyle = {
+    const baseTextStyle: CellStyle = {
       fill: "rgba(148, 163, 184, 0.08)",
       textAlign: "center"
     };
 
     put(2, 1, "Bold", {
       ...baseTextStyle,
-      fontWeight: "700",
-      // Future-facing (Excel-style) format payloads:
-      font: { bold: true }
+      fontWeight: "700"
     });
 
     put(2, 2, "Italic", {
       ...baseTextStyle,
-      font: { italic: true },
       fontStyle: "italic"
     });
 
     put(2, 3, "Underline", {
       ...baseTextStyle,
-      font: { underline: "single" },
       underline: true
     });
 
     put(2, 4, "Strike", {
       ...baseTextStyle,
-      font: { strike: true },
-      strike: true,
-      strikethrough: true
+      strike: true
     });
 
     put(3, 1, "Bold+Italic", {
       ...baseTextStyle,
       fontWeight: "700",
-      font: { bold: true, italic: true },
       fontStyle: "italic"
     });
 
     put(3, 2, "Bold+Underline", {
       ...baseTextStyle,
       fontWeight: "700",
-      font: { bold: true, underline: "single" },
       underline: true
     });
 
     put(3, 3, "Italic+Underline", {
       ...baseTextStyle,
-      font: { italic: true, underline: "single" },
       fontStyle: "italic",
       underline: true
     });
@@ -107,7 +112,6 @@ class CellFormattingDemoProvider implements CellProvider {
     put(3, 4, "All", {
       ...baseTextStyle,
       fontWeight: "700",
-      font: { bold: true, italic: true, underline: "single", strike: true },
       fontStyle: "italic",
       underline: true,
       strike: true
@@ -115,25 +119,26 @@ class CellFormattingDemoProvider implements CellProvider {
 
     put(4, 1, "Underline+Strike", {
       ...baseTextStyle,
-      font: { underline: "single", strike: true },
       underline: true,
       strike: true
     });
 
-    put(4, 2, "Double underline", {
+    put(4, 2, "Italic+Strike", {
       ...baseTextStyle,
-      font: { underline: "double" },
-      underline: "double"
+      fontStyle: "italic",
+      strike: true
     });
 
-    put(4, 3, "Superscript?", {
+    put(4, 3, "Bold+Strike", {
       ...baseTextStyle,
-      font: { vertAlign: "superscript" }
+      fontWeight: "700",
+      strike: true
     });
 
-    put(4, 4, "Subscript?", {
+    put(4, 4, "Underline+Italic", {
       ...baseTextStyle,
-      font: { vertAlign: "subscript" }
+      fontStyle: "italic",
+      underline: true
     });
 
     // ---------------------------------------------------------------------------------------------
@@ -156,95 +161,58 @@ class CellFormattingDemoProvider implements CellProvider {
     // ---------------------------------------------------------------------------------------------
     put(8, 1, "Borders", { fill: sectionHeaderFill, fontWeight: "700" });
 
-    const borderCellBase: DemoCellStyle = { textAlign: "center", fill: "rgba(148, 163, 184, 0.06)" };
-    const mkEdge = (style: string, color: string) => ({ style, color });
+    const borderCellBase: CellStyle = { textAlign: "center", fill: "rgba(148, 163, 184, 0.06)" };
+    const mkBorder = (width: number, style: CellBorderLineStyle, color: string): CellBorderSpec => ({ width, style, color });
+    const allBorders = (spec: CellBorderSpec): CellBorders => ({ top: spec, right: spec, bottom: spec, left: spec });
 
     put(9, 1, "Thin", {
       ...borderCellBase,
-      border: {
-        top: mkEdge("thin", "#0f172a"),
-        right: mkEdge("thin", "#0f172a"),
-        bottom: mkEdge("thin", "#0f172a"),
-        left: mkEdge("thin", "#0f172a")
-      }
+      borders: allBorders(mkBorder(1, "solid", "#0f172a"))
     });
 
     put(9, 2, "Medium", {
       ...borderCellBase,
-      border: {
-        top: mkEdge("medium", "#0f172a"),
-        right: mkEdge("medium", "#0f172a"),
-        bottom: mkEdge("medium", "#0f172a"),
-        left: mkEdge("medium", "#0f172a")
-      }
+      borders: allBorders(mkBorder(2, "solid", "#0f172a"))
     });
 
     put(9, 3, "Thick", {
       ...borderCellBase,
-      border: {
-        top: mkEdge("thick", "#0f172a"),
-        right: mkEdge("thick", "#0f172a"),
-        bottom: mkEdge("thick", "#0f172a"),
-        left: mkEdge("thick", "#0f172a")
-      }
+      borders: allBorders(mkBorder(3, "solid", "#0f172a"))
     });
 
     put(10, 1, "Dashed", {
       ...borderCellBase,
-      border: {
-        top: mkEdge("dashed", "#ef4444"),
-        right: mkEdge("dashed", "#ef4444"),
-        bottom: mkEdge("dashed", "#ef4444"),
-        left: mkEdge("dashed", "#ef4444")
-      }
+      borders: allBorders(mkBorder(1, "dashed", "#ef4444"))
     });
 
     put(10, 2, "Dotted", {
       ...borderCellBase,
-      border: {
-        top: mkEdge("dotted", "#3b82f6"),
-        right: mkEdge("dotted", "#3b82f6"),
-        bottom: mkEdge("dotted", "#3b82f6"),
-        left: mkEdge("dotted", "#3b82f6")
-      }
+      borders: allBorders(mkBorder(1, "dotted", "#3b82f6"))
     });
 
     put(10, 3, "Double", {
       ...borderCellBase,
-      border: {
-        top: mkEdge("double", "#a855f7"),
-        right: mkEdge("double", "#a855f7"),
-        bottom: mkEdge("double", "#a855f7"),
-        left: mkEdge("double", "#a855f7")
-      }
+      borders: allBorders(mkBorder(2, "double", "#a855f7"))
     });
 
     // Conflicting adjacent borders (shared edge). The renderer should pick the correct winner.
     put(11, 1, "Conflict A", {
       ...borderCellBase,
-      border: {
-        right: mkEdge("thick", "#ef4444")
-      }
+      borders: { right: mkBorder(3, "solid", "#ef4444") }
     });
     put(11, 2, "Conflict B", {
       ...borderCellBase,
-      border: {
-        left: mkEdge("thin", "#3b82f6")
-      }
+      borders: { left: mkBorder(1, "dotted", "#3b82f6") }
     });
 
     // Conflicting top/bottom border (stacked).
     put(12, 3, "Bottom thick", {
       ...borderCellBase,
-      border: {
-        bottom: mkEdge("thick", "#22c55e")
-      }
+      borders: { bottom: mkBorder(3, "solid", "#22c55e") }
     });
     put(13, 3, "Top thin", {
       ...borderCellBase,
-      border: {
-        top: mkEdge("thin", "#f97316")
-      }
+      borders: { top: mkBorder(1, "solid", "#f97316") }
     });
 
     // ---------------------------------------------------------------------------------------------
@@ -264,17 +232,17 @@ class CellFormattingDemoProvider implements CellProvider {
       textAlign: "center",
       verticalAlign: "middle",
       fill: "rgba(14, 101, 235, 0.12)",
-      fontWeight: "600",
-      alignment: { textRotation: 45 }
+      fontWeight: "600"
     });
 
     // ---------------------------------------------------------------------------------------------
     // Rich text runs (if Task 84 lands)
     // ---------------------------------------------------------------------------------------------
+    const richTextValue = "Rich: bold + italic + underline + color";
     put(
       20,
       1,
-      "Rich text (if supported)",
+      richTextValue,
       {
         wrapMode: "word",
         textAlign: "start",
@@ -282,12 +250,16 @@ class CellFormattingDemoProvider implements CellProvider {
       },
       {
         richText: {
-          text: "Rich: bold + italic + underline + color",
+          text: richTextValue,
           runs: [
-            { start: 0, end: 6, style: { bold: true } },
-            { start: 7, end: 11, style: { italic: true } },
-            { start: 14, end: 23, style: { underline: "single" } },
-            { start: 26, end: 31, style: { color: "#ef4444" } }
+            { start: 0, end: 6, style: {} },
+            { start: 6, end: 10, style: { bold: true } },
+            { start: 10, end: 13, style: {} },
+            { start: 13, end: 19, style: { italic: true } },
+            { start: 19, end: 22, style: {} },
+            { start: 22, end: 31, style: { underline: "double", color: "#FF2563EB" } },
+            { start: 31, end: 34, style: {} },
+            { start: 34, end: 39, style: { color: "#FFEF4444", bold: true } }
           ]
         }
       }
@@ -303,13 +275,13 @@ class CellFormattingDemoProvider implements CellProvider {
       {
         textAlign: "end",
         fontWeight: "600",
-        fill: "rgba(148, 163, 184, 0.08)",
-        numberFormat: "$#,##0.00"
+        fill: "rgba(148, 163, 184, 0.08)"
       },
       {
         // Candidate names for display strings (implementation may choose one).
         displayValue: "$1,234.56",
-        formattedValue: "$1,234.56"
+        formattedValue: "$1,234.56",
+        numberFormat: "$#,##0.00"
       }
     );
   }
