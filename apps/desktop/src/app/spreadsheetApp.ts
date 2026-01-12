@@ -389,6 +389,14 @@ export class SpreadsheetApp {
   private uiReady = false;
   private readonly sheetNameResolver: SheetNameResolver | null;
   private readonly gridMode: DesktopGridMode;
+  /**
+   * When enabled, comments are keyed by a sheet-qualified cell ref (`${sheetId}!A1`).
+   *
+   * This is required for collaboration (multi-sheet) to avoid cross-sheet collisions, but we
+   * intentionally keep legacy A1-only comment refs in non-collab mode for back-compat with
+   * existing persisted comment docs + tests.
+   */
+  private readonly collabMode: boolean;
   private readonly engine = new IdleTrackingEngine(
     new MockEngine(),
     this.idle,
@@ -644,6 +652,11 @@ export class SpreadsheetApp {
     private status: SpreadsheetAppStatusElements,
     opts: {
       workbookId?: string;
+      /**
+       * Enables sheet-qualified comment cell refs (`${sheetId}!A1`) without requiring a full
+       * CollabSession. Intended for desktop collab mode and unit/e2e harnesses.
+       */
+      collabMode?: boolean;
       limits?: GridLimits;
       formulaBar?: HTMLElement;
       collab?: SpreadsheetAppCollabOptions;
@@ -672,6 +685,7 @@ export class SpreadsheetApp {
     this.selection = createSelection({ row: 0, col: 0 }, this.limits);
     const collab = opts.collab ?? resolveCollabOptionsFromUrl();
     const collabEnabled = Boolean(collab);
+    this.collabMode = collabEnabled || Boolean(opts.collabMode);
     this.currentUser = collab ? { id: collab.user.id, name: collab.user.name } : { id: "local", name: t("chat.role.user") };
 
     if (collab) {
@@ -2601,6 +2615,7 @@ export class SpreadsheetApp {
     if (!sheetId) return;
     if (sheetId === this.sheetId) return;
     this.sheetId = sheetId;
+    if (this.collabMode) this.reindexCommentCells();
     const presence = this.collabSession?.presence;
     if (presence) {
       presence.setActiveSheet(this.sheetId);
@@ -2648,6 +2663,7 @@ export class SpreadsheetApp {
     let sheetChanged = false;
     if (target.sheetId && target.sheetId !== this.sheetId) {
       this.sheetId = target.sheetId;
+      if (this.collabMode) this.reindexCommentCells();
       this.collabSession?.presence?.setActiveSheet(this.sheetId);
       this.chartStore.setDefaultSheet(target.sheetId);
       this.referencePreview = null;
@@ -2706,6 +2722,7 @@ export class SpreadsheetApp {
     let sheetChanged = false;
     if (target.sheetId && target.sheetId !== this.sheetId) {
       this.sheetId = target.sheetId;
+      if (this.collabMode) this.reindexCommentCells();
       this.collabSession?.presence?.setActiveSheet(this.sheetId);
       this.chartStore.setDefaultSheet(target.sheetId);
       this.referencePreview = null;
@@ -3673,6 +3690,14 @@ export class SpreadsheetApp {
     this.sharedHoverCellHasComment = false;
   }
 
+  private commentCellRefFromA1(sheetId: string, a1: string): string {
+    return this.collabMode ? `${sheetId}!${a1}` : a1;
+  }
+
+  private commentCellRef(cell: CellCoord, sheetId: string = this.sheetId): string {
+    return this.commentCellRefFromA1(sheetId, cellToA1(cell));
+  }
+
   private reindexCommentCells(): void {
     this.commentCells.clear();
     this.commentMeta.clear();
@@ -3681,9 +3706,15 @@ export class SpreadsheetApp {
     this.commentThreadsByCellRef.clear();
     for (const comment of this.commentManager.listAll()) {
       const rawCellRef = comment.cellRef;
-      const isPlainA1 = A1_CELL_REF_RE.test(rawCellRef);
+      const bang = rawCellRef.indexOf("!");
+      const sheetId = bang >= 0 ? rawCellRef.slice(0, bang) : null;
+      const a1Raw = bang >= 0 ? rawCellRef.slice(bang + 1) : rawCellRef;
+      const a1IsPlain = A1_CELL_REF_RE.test(a1Raw);
+      const normalizedA1 = a1IsPlain ? a1Raw.replaceAll("$", "").toUpperCase() : a1Raw;
+
       // Normalize A1 refs so `$A$1`, `a1`, etc map to the same cell key.
-      const cellRef = isPlainA1 ? rawCellRef.replaceAll("$", "").toUpperCase() : rawCellRef;
+      // For collab-mode sheet-qualified refs, normalize only the A1 portion.
+      const cellRef = sheetId ? `${sheetId}!${normalizedA1}` : a1IsPlain ? normalizedA1 : rawCellRef;
       this.commentCells.add(cellRef);
 
       const resolved = Boolean(comment.resolved);
@@ -3699,11 +3730,23 @@ export class SpreadsheetApp {
       if (threads) threads.push(comment);
       else this.commentThreadsByCellRef.set(cellRef, [comment]);
 
-      // Only populate coord-keyed maps when the stored cellRef looks like a plain A1 address.
-      // This prevents corrupt/non-canonical refs from being mis-indexed into A1 (0,0).
-      if (!isPlainA1) continue;
+      // In collab mode we key comments by `sheetId!A1`. `commentMetaByCoord` and
+      // `commentPreviewByCoord` are used for fast per-cell lookups (indicators/tooltips) and
+      // must not collide across sheets, so we only index comments for the active sheet.
+      if (this.collabMode) {
+        if (!sheetId) continue;
+        if (sheetId !== this.sheetId) continue;
+      } else {
+        // In non-collab mode comments are unqualified ("A1") for back-compat; ignore any
+        // qualified refs to keep the UI consistent.
+        if (sheetId) continue;
+      }
 
-      const coord = parseA1(rawCellRef);
+      // Only populate coord-keyed maps when the stored ref looks like a plain A1 address.
+      // This prevents corrupt/non-canonical refs from being mis-indexed into A1 (0,0).
+      if (!a1IsPlain) continue;
+
+      const coord = parseA1(a1Raw);
       const coordKey = coord.row * COMMENT_COORD_COL_STRIDE + coord.col;
       const existingCoord = this.commentMetaByCoord.get(coordKey);
       if (!existingCoord) this.commentMetaByCoord.set(coordKey, { resolved });
@@ -3725,7 +3768,7 @@ export class SpreadsheetApp {
   private renderCommentsPanel(): void {
     if (!this.commentsPanelVisible) return;
 
-    const cellRef = cellToA1(this.selection.active);
+    const cellRef = this.commentCellRef(this.selection.active);
     this.commentsPanelCell.textContent = tWithVars("comments.cellLabel", { cellRef });
 
     const threads = this.commentThreadsByCellRef.get(cellRef) ?? [];
@@ -3831,7 +3874,7 @@ export class SpreadsheetApp {
   private submitNewComment(): void {
     const content = this.newCommentInput.value.trim();
     if (!content) return;
-    const cellRef = cellToA1(this.selection.active);
+    const cellRef = this.commentCellRef(this.selection.active);
 
     this.commentManager.addComment({
       cellRef,
