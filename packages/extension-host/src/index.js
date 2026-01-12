@@ -6,6 +6,7 @@ const { pathToFileURL } = require("node:url");
 
 const { validateExtensionManifest } = require("./manifest");
 const { PermissionManager } = require("./permission-manager");
+const { writeFileAtomic } = require("./write-file-atomic");
 const { InMemorySpreadsheet } = require("./spreadsheet-mock");
 const { installExtensionFromDirectory, uninstallExtension, listInstalledExtensions } = require("./installer");
 
@@ -1515,7 +1516,7 @@ class ExtensionHost {
 
   async _saveExtensionStorage(store) {
     await fs.mkdir(path.dirname(this._extensionStoragePath), { recursive: true });
-    await fs.writeFile(this._extensionStoragePath, JSON.stringify(store, null, 2), "utf8");
+    await writeFileAtomic(this._extensionStoragePath, JSON.stringify(store, null, 2), "utf8");
   }
 
   _handleWorkerMessage(extension, worker, message) {

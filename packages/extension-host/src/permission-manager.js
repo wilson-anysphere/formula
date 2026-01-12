@@ -1,6 +1,8 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
 
+const { writeFileAtomic } = require("./write-file-atomic");
+
 class PermissionError extends Error {
   constructor(message) {
     super(message);
@@ -213,7 +215,7 @@ class PermissionManager {
 
   async _save() {
     await fs.mkdir(path.dirname(this._storagePath), { recursive: true });
-    await fs.writeFile(this._storagePath, JSON.stringify(this._data, null, 2), "utf8");
+    await writeFileAtomic(this._storagePath, JSON.stringify(this._data, null, 2), "utf8");
   }
 
   async getGrantedPermissions(extensionId) {
