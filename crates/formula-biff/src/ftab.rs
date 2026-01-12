@@ -668,6 +668,7 @@ const FUTURE_UDF_FUNCTIONS: &[&str] = &[
     "NORM.S.DIST",
     "NORM.S.INV",
     "NUMBERVALUE",
+    "PDURATION",
     "PERCENTILE.EXC",
     "PERCENTILE.INC",
     "PERCENTRANK.EXC",
