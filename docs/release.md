@@ -60,8 +60,7 @@ the repo cargo wrapper (`scripts/cargo_agent.sh`) instead of bare `cargo`:
 source scripts/agent-init.sh
 
 bash scripts/cargo_agent.sh install cargo-tauri --locked
-cd apps/desktop/src-tauri
-bash ../../../scripts/cargo_agent.sh tauri signer generate
+(cd apps/desktop/src-tauri && bash ../../../scripts/cargo_agent.sh tauri signer generate)
 ```
 
 This prints:
@@ -236,8 +235,7 @@ There is also an optional size gate (off by default):
    source scripts/agent-init.sh
 
    bash scripts/cargo_agent.sh install cargo-tauri --locked
-   cd apps/desktop
-   bash ../../scripts/cargo_agent.sh tauri build
+   (cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)
    ```
 
 2. From the repo root, print a bundle size table:
