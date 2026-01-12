@@ -693,7 +693,8 @@ Some producer tooling (and possibly some Excel builds) can store “images in ce
 
 However, in the Excel 365 “Place in Cell” fixtures we inspected, in-cell images were represented via
 `xl/metadata.xml` + `xl/richData/*` + `xl/media/*` and no `xl/cellImages.xml` / `xl/cellimages.xml` part
-was present. If we encounter a `cellImages` part in the wild, we should preserve it for round-trip safety.
+was present. This repo also includes `fixtures/xlsx/basic/cellimages.xlsx`, which *does* contain a
+`xl/cellimages.xml` part; treat it as an alternate/legacy store and preserve it when present.
 
 From a **packaging / round-trip** perspective, the important thing is the relationship chain that connects this part to the actual image blobs under `xl/media/*`.
 
@@ -731,8 +732,13 @@ Observed in this repo (see `crates/formula-xlsx/tests/cell_images.rs` and
 
 - `xl/_rels/cellImages.xml.rels` (casing varies) → `xl/media/*`:
   - **High confidence**: `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"`
-- `xl/workbook.xml.rels` → `xl/cellImages.xml`:
-  - **Microsoft extension** (variable). Prefer detection by `Target`/part name.
+- `xl/workbook.xml.rels` → `xl/cellImages.xml` / `xl/cellimages.xml`:
+  - **Confirmed in fixtures** (`fixtures/xlsx/basic/cellimages.xlsx`):
+    - `http://schemas.microsoft.com/office/2022/relationships/cellImages`
+  - Observed variants in tests/synthetic inputs:
+    - `http://schemas.microsoft.com/office/2020/relationships/cellImages`
+    - `http://schemas.microsoft.com/office/2020/07/relationships/cellImages`
+  - Prefer detection by `Target`/part name when possible.
 
 #### Minimal (non-normative) XML snippets
 
@@ -741,9 +747,10 @@ Workbook relationship entry (in `xl/_rels/workbook.xml.rels`):
 ```xml
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId42"
-                Type="http://schemas.microsoft.com/office/.../relationships/cellimages"
-                Target="cellImages.xml"/>
+  <!-- fixtures/xlsx/basic/cellimages.xlsx -->
+  <Relationship Id="rId3"
+                Type="http://schemas.microsoft.com/office/2022/relationships/cellImages"
+                Target="cellimages.xml"/>
 </Relationships>
 ```
 
@@ -762,16 +769,13 @@ Cellimages part referencing an image by relationship id (in `xl/cellImages.xml`)
 
 ```xml
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<cx:cellImages xmlns:cx="http://schemas.microsoft.com/office/spreadsheetml/2019/cellimages"
-               xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
-               xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
-               xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <xdr:pic>
-    <xdr:blipFill>
-      <a:blip r:embed="rId1"/>
-    </xdr:blipFill>
-  </xdr:pic>
-</cx:cellImages>
+<cellImages xmlns="http://schemas.microsoft.com/office/spreadsheetml/2022/cellimages"
+            xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <cellImage>
+    <a:blip r:embed="rId1"/>
+  </cellImage>
+</cellImages>
 ```
 
 ---

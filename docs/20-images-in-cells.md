@@ -20,8 +20,10 @@ Excel has (at least) two distinct storage mechanisms:
    - Stored under `xl/drawings/*` with image binaries under `xl/media/*`.
    - Already covered by the general DrawingML preservation strategy.
 2. **Images in cells** (newer Excel / Microsoft 365)
-   - Stored via the workbook-level **rich value / metadata** system, and may additionally use a
-     dedicated **cell image store** part (`xl/cellImages.xml`) depending on producer/version.
+   - Primarily stored via the workbook-level **Rich Data** system (`xl/metadata.xml` + `xl/richData/*`).
+   - Some producers (and possibly some Excel builds) additionally emit a dedicated **cell image store**
+     part (`xl/cellImages.xml` / `xl/cellimages.xml`). Treat this as an alternate/legacy store and
+     preserve **both** graphs when present.
    - The rest of this document focuses on this second mechanism.
 
 ## Expected OOXML parts
@@ -78,11 +80,15 @@ For a concrete, fixture-backed “Place in Cell” schema walkthrough (including
   - The Excel-produced fixture [`fixtures/xlsx/basic/image-in-cell.xlsx`](../fixtures/xlsx/basic/image-in-cell.xlsx) uses the same richData-only wiring
     (and does **not** use `xl/cellImages.xml`), with notes in [`fixtures/xlsx/basic/image-in-cell.md`](../fixtures/xlsx/basic/image-in-cell.md).
 
-## In-repo fixture (cell image store part)
+## In-repo fixtures (cell image store part)
 
-Fixture workbook: [`fixtures/xlsx/basic/cell-images.xlsx`](../fixtures/xlsx/basic/cell-images.xlsx)
+This repo includes a few small fixtures that exercise the workbook-level `cellImages` part. These are
+useful for confirming namespace + relationship `Type` URI variants, independent of the Rich Data wiring
+used by modern Excel “Place in Cell”.
 
-Confirmed values from this fixture:
+### Fixture: `fixtures/xlsx/basic/cell-images.xlsx` (camel-case part name)
+
+Confirmed values:
 
 - Part paths:
   - `xl/cellImages.xml`
@@ -90,10 +96,21 @@ Confirmed values from this fixture:
   - `xl/media/image1.png`
 - `xl/cellImages.xml` root namespace:
   - `http://schemas.microsoft.com/office/spreadsheetml/2023/02/main`
-- `[Content_Types].xml` override for the part:
-  - `application/vnd.ms-excel.cellimages+xml`
 - Workbook → `cellImages.xml` relationship `Type` URI (in `xl/_rels/workbook.xml.rels`):
   - `http://schemas.microsoft.com/office/2023/02/relationships/cellImage`
+
+### Fixture: `fixtures/xlsx/basic/cellimages.xlsx` (lowercase part name)
+
+Confirmed values:
+
+- Part paths:
+  - `xl/cellimages.xml`
+  - `xl/_rels/cellimages.xml.rels`
+  - `xl/media/image1.png`
+- `xl/cellimages.xml` root namespace:
+  - `http://schemas.microsoft.com/office/spreadsheetml/2022/cellimages`
+- Workbook → `cellimages.xml` relationship `Type` URI (in `xl/_rels/workbook.xml.rels`):
+  - `http://schemas.microsoft.com/office/2022/relationships/cellImages`
 
 ### Quick reference: `cellImages` part graph (OPC + XML)
 
@@ -106,8 +123,12 @@ variant shapes are documented further below.
 
 - A workbook can contain a dedicated `cellImages` part (seen in tests as `xl/cellimages.xml` and
   `xl/cellImages.xml`) plus a matching relationship part at `xl/_rels/<part>.rels`.
-- [`fixtures/xlsx/basic/cell-images.xlsx`](../fixtures/xlsx/basic/cell-images.xlsx) contains `xl/cellImages.xml` with namespace:
+- `fixtures/xlsx/basic/cell-images.xlsx` contains `xl/cellImages.xml` with root namespace:
   - `http://schemas.microsoft.com/office/spreadsheetml/2023/02/main`
+- `fixtures/xlsx/basic/cellimages.xlsx` contains `xl/cellimages.xml` with root namespace:
+  - `http://schemas.microsoft.com/office/spreadsheetml/2022/cellimages`
+- Both fixtures contain `<cellImage>` entries that reference images via:
+  - `<a:blip r:embed="rIdX"/>`
 - The `cellImages` XML can reference binary images via DrawingML-style `r:embed="rIdX"` references.
 - `rIdX` is resolved through the `*.rels` part to an image under `xl/media/*`.
 - Image relationship type is the standard OOXML one:
@@ -117,12 +138,18 @@ variant shapes are documented further below.
 
 - Exact part naming + casing used by current Excel builds (and whether multiple numbered parts like
   `cellImages1.xml` are used).
-- Exact root namespace used by Excel for `cellImages` today (we *expect* `.../2019/cellimages`, but
-  have seen other variants in synthetic fixtures).
-- Exact schema shape (e.g. whether `<cellImage>` always contains a full `<xdr:pic>` subtree or can be
-  a lightweight reference-only element).
+- The full set of namespaces used by real Excel builds for `cellImages` across versions.
+  - Confirmed in fixtures:
+    - `http://schemas.microsoft.com/office/spreadsheetml/2023/02/main`
+    - `http://schemas.microsoft.com/office/spreadsheetml/2022/cellimages`
+  - Also observed in tests/synthetic inputs (treat as opaque and preserve):
+    - `http://schemas.microsoft.com/office/spreadsheetml/2019/cellimages`
+    - `http://schemas.microsoft.com/office/spreadsheetml/2020/07/main`
+    - `http://schemas.microsoft.com/office/spreadsheetml/2019/11/main`
+- Exact schema shape(s) emitted by real Excel (e.g. whether `<cellImage>` always contains a full
+  `<xdr:pic>` subtree or can be a lightweight `<cellImage><a:blip .../></cellImage>` entry).
 - Whether Excel consistently uses a single relationship `Type` URI (and whether the relationship is
-  always on `xl/workbook.xml.rels` vs sometimes worksheet-level).
+  always on `xl/_rels/workbook.xml.rels` vs sometimes worksheet-level).
 - The exact “cell → image” mapping mechanism across **all** Excel scenarios.
   - Confirmed for a rust_xlsxwriter-generated **“Place in Cell”** workbook (used for schema verification in this repo):
     - worksheet cell is `t="e"` with cached `#VALUE!` and `vm="1"`
@@ -141,19 +168,21 @@ variant shapes are documented further below.
 - `xl/_rels/cellImages.xml.rels`
 - image binaries: `xl/media/imageN.<ext>`
 
-#### XML namespace + structure (likely)
+#### XML namespace + structure (observed)
 
-- Root element local name: `<cellImages>` in namespace:
+- Root element local name: `<cellImages>`
+- Confirmed in fixtures:
+  - `fixtures/xlsx/basic/cell-images.xlsx`:
+    - namespace: `http://schemas.microsoft.com/office/spreadsheetml/2023/02/main`
+  - `fixtures/xlsx/basic/cellimages.xlsx`:
+    - namespace: `http://schemas.microsoft.com/office/spreadsheetml/2022/cellimages`
+- Other observed namespace variants (tests/synthetic inputs; treat as opaque and preserve):
   - `http://schemas.microsoft.com/office/spreadsheetml/2019/cellimages`
-- Some files may use newer versions like:
-  - `http://schemas.microsoft.com/office/spreadsheetml/2022/cellimages`
-- Some in-repo synthetic fixtures also use a more generic Microsoft SpreadsheetML namespace:
-  - `http://schemas.microsoft.com/office/spreadsheetml/2020/07/main` (unverified vs real Excel)
-- [`fixtures/xlsx/basic/cell-images.xlsx`](../fixtures/xlsx/basic/cell-images.xlsx) uses:
-  - `http://schemas.microsoft.com/office/spreadsheetml/2023/02/main`
-- The root contains one or more `<cellImage>` entries, each containing a DrawingML picture subtree
-  (typically `<xdr:pic>`) and a blip like:
-  - `<a:blip r:embed="rIdX"/>`
+  - `http://schemas.microsoft.com/office/spreadsheetml/2020/07/main`
+  - `http://schemas.microsoft.com/office/spreadsheetml/2019/11/main`
+- The root contains one or more `<cellImage>` entries. Some schemas embed a full DrawingML picture
+  subtree (e.g. `<xdr:pic>`), but the fixtures above also use a lightweight:
+  - `<cellImage><a:blip r:embed="rIdX"/></cellImage>`
 - `r:embed="rIdX"` is resolved via `xl/_rels/cellImages.xml.rels` to a `Target` under `xl/media/*`.
 
 #### Content types (expected)
@@ -169,16 +198,15 @@ variant shapes are documented further below.
 
 - Image relationship type (standard OOXML):
   - `http://schemas.openxmlformats.org/officeDocument/2006/relationships/image`
-- Relationship type for “workbook/worksheet → `cellImages.xml`” discovery:
-  - Confirmed in [`fixtures/xlsx/basic/cell-images.xlsx`](../fixtures/xlsx/basic/cell-images.xlsx):
+- Relationship type for “workbook → `cellImages*.xml` / `cellimages*.xml`” discovery (Microsoft extension; **variable**):
+  - **Confirmed in fixtures:**
     - `http://schemas.microsoft.com/office/2023/02/relationships/cellImage`
-  - Other candidates observed in synthetic fixtures / tooling:
-    - `http://schemas.microsoft.com/office/2020/07/relationships/cellImages`
     - `http://schemas.microsoft.com/office/2022/relationships/cellImages`
-  - Candidate observed in a synthetic round-trip test:
+  - Observed variants in tests/synthetic inputs:
+    - `http://schemas.microsoft.com/office/2020/relationships/cellImages`
     - `http://schemas.microsoft.com/office/2020/07/relationships/cellImages`
-  - Candidate observed in synthetic fixtures / corpus tooling:
-    - `http://schemas.microsoft.com/office/2022/relationships/cellImages`
+  - **Detection rule:** prefer identifying the relationship by resolved `Target` part name
+    (`cellImages*.xml` / `cellimages*.xml`) rather than hardcoding a single `Type` URI.
 
 #### Minimal example (`xl/cellImages.xml`) (synthetic)
 
@@ -209,15 +237,22 @@ variant shapes are documented further below.
 </Relationships>
 ```
 
-#### Minimal example (`xl/_rels/workbook.xml.rels` entry) (fixture)
+#### Minimal example (`xl/_rels/workbook.xml.rels` entry) (fixtures; **Type URI observed to vary**)
 
-Some files link `xl/workbook.xml` → `xl/cellImages.xml` via an OPC relationship in
-`xl/_rels/workbook.xml.rels` using a Microsoft-specific relationship `Type`.
+Some files link `xl/workbook.xml` → `xl/cellImages*.xml` via an OPC relationship in
+`xl/_rels/workbook.xml.rels`. The relationship `Type` is Microsoft-specific and has been observed to
+vary; prefer detecting by `Target` when possible.
 
 ```xml
+<!-- fixtures/xlsx/basic/cell-images.xlsx -->
 <Relationship Id="rId3"
               Type="http://schemas.microsoft.com/office/2023/02/relationships/cellImage"
               Target="cellImages.xml"/>
+
+<!-- fixtures/xlsx/basic/cellimages.xlsx -->
+<Relationship Id="rId3"
+              Type="http://schemas.microsoft.com/office/2022/relationships/cellImages"
+              Target="cellimages.xml"/>
 ```
 
 ## Worksheet cell references (`c/@vm`, `c/@cm`, `<extLst>`)
@@ -347,11 +382,27 @@ The part embeds **SpreadsheetDrawing / DrawingML** `<xdr:pic>` payloads and uses
 
 Observed root namespaces (from in-repo tests; Excel versions may vary):
 
+- `http://schemas.microsoft.com/office/spreadsheetml/2023/02/main`
 - `http://schemas.microsoft.com/office/spreadsheetml/2019/cellimages`
 - `http://schemas.microsoft.com/office/spreadsheetml/2022/cellimages`
 
 Namespace prefixes vary (`cx`, `etc`, or none). Parsers should match by **local-name** (e.g.
 `cellImages`, `cellImage`, `pic`, `blip`) and by relationship-namespace attributes, not by prefix.
+
+### Confirmed fixture example (`fixtures/xlsx/basic/cellimages.xlsx`)
+
+`xl/cellimages.xml`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cellImages xmlns="http://schemas.microsoft.com/office/spreadsheetml/2022/cellimages"
+            xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <cellImage>
+    <a:blip r:embed="rId1"/>
+  </cellImage>
+</cellImages>
+```
 
 Representative example (from `crates/formula-xlsx/tests/cell_images.rs`; non-normative):
 
@@ -407,7 +458,8 @@ has explicit support for `r:id` on `<cellImage>` (and some variants use `r:embed
 `xl/_rels/cellImages.xml.rels` contains OPC relationships from `cellImages.xml` to the binary image parts
 under `xl/media/*`.
 
-This relationships file is standard OPC, and the **image relationship type URI is known**:
+This relationships file is standard OPC, and the **image relationship type URI is known** (and is
+confirmed in `fixtures/xlsx/basic/cellimages.xlsx`):
 
 ```xml
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -418,7 +470,7 @@ This relationships file is standard OPC, and the **image relationship type URI i
 </Relationships>
 ```
 
-Targets are usually relative paths and may appear as `media/image1.png` or `../media/image1.png`
+Targets are usually relative paths and may appear as `media/imageN.png` or `../media/imageN.png`
 (preserve the original `Target` exactly).
 
 **Parser resilience (Formula):** the `cell_images` parser uses a best-effort resolver that tries:
@@ -653,10 +705,12 @@ Partially known (fixture-driven details still recommended):
 - Workbook → `xl/cellImages.xml` relationship:
   - Lives in `xl/_rels/workbook.xml.rels`.
   - Excel uses a Microsoft-extension relationship `Type` URI that has been observed to vary.
-  - Candidate observed in `crates/formula-xlsx/tests/cellimages_roundtrip_preserves_parts.rs`:
+  - **Confirmed in fixtures:**
+    - `Type="http://schemas.microsoft.com/office/2023/02/relationships/cellImage"` (fixture: `fixtures/xlsx/basic/cell-images.xlsx`)
+    - `Type="http://schemas.microsoft.com/office/2022/relationships/cellImages"` (fixture: `fixtures/xlsx/basic/cellimages.xlsx`)
+  - Observed variants in tests/synthetic inputs:
+    - `Type="http://schemas.microsoft.com/office/2020/relationships/cellImages"`
     - `Type="http://schemas.microsoft.com/office/2020/07/relationships/cellImages"`
-  - Candidate observed in synthetic fixtures / corpus tooling:
-    - `Type="http://schemas.microsoft.com/office/2022/relationships/cellImages"`
   - **Round-trip / detection rule:** identify the relationship by resolved `Target`
     (`/xl/cellImages.xml` or `/xl/cellimages.xml`) rather than hardcoding a single `Type`.
 - RichData relationship indirection (images referenced via `richValueRel.xml`):
@@ -679,8 +733,9 @@ Partially known (fixture-driven details still recommended):
 
 TODO (confirm via real Excel fixture, then harden parsers/writers):
 
-- Relationship type(s) connecting `xl/workbook.xml` (or other workbook-level parts) to:
-  - `xl/cellImages.xml`
+- Relationship type(s) connecting `xl/workbook.xml` (or other workbook-level parts) to `xl/cellImages*.xml`:
+  - we have fixture-confirmed `Type` values (`.../2022/relationships/cellImages`, `.../2023/02/relationships/cellImage`),
+    but real Excel/version coverage is incomplete.
 
 Until confirmed, Formula must preserve any such relationships byte-for-byte rather than regenerating.
 
