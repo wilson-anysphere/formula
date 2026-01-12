@@ -219,6 +219,11 @@ pnpm test:vitest apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts
 (`pnpm test:vitest -- <file>` is also OK: the wrapper at `scripts/run-vitest.mjs` strips the
 `--` delimiter pnpm forwards so Vitest doesn't accidentally treat it as a test pattern.)
 
+The wrapper runs Vitest via `vitest --run ...` (run-once mode) and tolerates common muscle memory
+like `pnpm test:vitest -- run <file>` (the leading `run` is ignored). It also prefers the
+calling package’s local `node_modules/.bin/vitest` so workspace packages can pin different
+Vitest versions.
+
 Or run Vitest directly:
 
 ```bash
