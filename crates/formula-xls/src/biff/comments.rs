@@ -308,7 +308,7 @@ fn parse_txo_text_biff5(
     let first = record.first_fragment();
     if first.len() < TXO_TEXT_LEN_OFFSET + 2 {
         // Best-effort: if the TXO header is malformed, decode the first continuation as text.
-        return fallback_decode_first_continue(record, codepage, warnings);
+        return fallback_decode_first_continue_biff5(record, codepage, warnings);
     }
     let cch_text = u16::from_le_bytes([
         first[TXO_TEXT_LEN_OFFSET],
@@ -549,6 +549,45 @@ fn fallback_decode_first_continue(
     } else {
         strings::decode_ansi(codepage, bytes)
     };
+    trim_trailing_nuls(&mut out);
+    strip_embedded_nuls(&mut out);
+    Some(out)
+}
+
+fn fallback_decode_first_continue_biff5(
+    record: &records::LogicalBiffRecord<'_>,
+    codepage: u16,
+    warnings: &mut Vec<String>,
+) -> Option<String> {
+    let mut fragments = record.fragments();
+    let _ = fragments.next(); // skip header
+    let Some(first) = fragments.next() else {
+        return Some(String::new());
+    };
+
+    warnings.push(format!(
+        "TXO record at offset {} has malformed header; falling back to decoding first CONTINUE fragment",
+        record.offset
+    ));
+
+    if first.is_empty() {
+        return Some(String::new());
+    }
+
+    // BIFF5 usually stores the raw ANSI bytes directly, but some producers mimic the BIFF8
+    // continued-string layout and prefix the fragment with a 0/1 "high-byte" flag.
+    let mut out = if matches!(first.first().copied(), Some(0) | Some(1)) {
+        let flags = first[0];
+        let bytes = &first[1..];
+        if (flags & 0x01) != 0 {
+            decode_utf16le(bytes)
+        } else {
+            strings::decode_ansi(codepage, bytes)
+        }
+    } else {
+        strings::decode_ansi(codepage, first)
+    };
+
     trim_trailing_nuls(&mut out);
     strip_embedded_nuls(&mut out);
     Some(out)
@@ -1057,6 +1096,29 @@ mod tests {
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].text, "Hello");
+        assert!(
+            warnings.iter().any(|w| w.contains("falling back")),
+            "expected fallback warning; warnings={warnings:?}"
+        );
+    }
+
+    #[test]
+    fn falls_back_to_decoding_first_continue_when_txo_header_is_missing_biff5() {
+        let stream = [
+            bof_biff5(),
+            note_biff5(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            // Empty TXO header.
+            record(RECORD_TXO, &[]),
+            continue_text_biff5(b"Hi"),
+            eof(),
+        ]
+        .concat();
+
+        let (notes, warnings) =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff5, 1252).expect("parse");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].text, "Hi");
         assert!(
             warnings.iter().any(|w| w.contains("falling back")),
             "expected fallback warning; warnings={warnings:?}"
