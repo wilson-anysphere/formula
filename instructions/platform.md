@@ -123,6 +123,11 @@ If you add new desktop IPC surface area, you must update the capability allowlis
 - new `#[tauri::command]` names → `core:allow-invoke`
 - new frontend↔backend events → `event:allow-listen` / `event:allow-emit`
 
+For events specifically, we also keep a guardrail test that enforces the **exact** allowlist so we
+don't regress to “allow all events”:
+
+- `apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts`
+
 Filesystem access for Power Query is handled via **custom Rust commands** (e.g. `read_text_file`, `list_dir`)
 instead of the optional Tauri FS plugin. Those commands enforce an explicit scope:
 
