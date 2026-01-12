@@ -4522,17 +4522,30 @@ if (
     header.appendChild(titleOrTabs);
     header.appendChild(controls);
 
-    const body = document.createElement("div");
-    body.className = "dock-panel__body";
-    if (zone.panels.length > 1) {
-      body.id = dockTabPanelDomId(active);
-      body.setAttribute("role", "tabpanel");
-      body.setAttribute("aria-labelledby", dockTabDomId(active));
-    }
-    renderPanelBody(active, body);
-
     panel.appendChild(header);
-    panel.appendChild(body);
+
+    if (zone.panels.length > 1) {
+      // Keep a tabpanel element for each open panel so `aria-controls` references always
+      // point at an element in the DOM (inactive tabpanels remain empty + hidden).
+      for (const panelId of zone.panels) {
+        const body = document.createElement("div");
+        body.className = "dock-panel__body";
+        body.id = dockTabPanelDomId(panelId);
+        body.setAttribute("role", "tabpanel");
+        body.setAttribute("aria-labelledby", dockTabDomId(panelId));
+        if (panelId !== active) {
+          body.hidden = true;
+        } else {
+          renderPanelBody(active, body);
+        }
+        panel.appendChild(body);
+      }
+    } else {
+      const body = document.createElement("div");
+      body.className = "dock-panel__body";
+      renderPanelBody(active, body);
+      panel.appendChild(body);
+    }
 
     el.appendChild(panel);
   }
