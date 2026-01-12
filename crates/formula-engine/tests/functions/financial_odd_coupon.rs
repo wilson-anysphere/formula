@@ -660,6 +660,113 @@ fn oddfprice_eom_schedule_does_not_drift_off_maturity_basis1() {
 }
 
 #[test]
+fn oddfprice_eom_schedule_month_end_maturity_not_31st_basis1() {
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    // Maturity is month-end but not the 31st (Apr 30). Excel treats this as an end-of-month coupon
+    // schedule and pins coupon dates to month-end when stepping from maturity.
+    //
+    // Quarterly schedule anchored at maturity=2020-04-30 yields coupon dates:
+    // 2019-10-31, 2020-01-31, 2020-04-30.
+    let issue = serial(2019, 12, 15, system);
+    let settlement = serial(2020, 1, 15, system);
+    let first_coupon = serial(2020, 1, 31, system);
+    let maturity = serial(2020, 4, 30, system);
+
+    let rate = 0.0;
+    let yld = 0.1;
+    let redemption = 100.0;
+    let frequency = 4;
+    let basis = 1;
+
+    let price = oddfprice(
+        settlement,
+        maturity,
+        issue,
+        first_coupon,
+        rate,
+        yld,
+        redemption,
+        frequency,
+        basis,
+        system,
+    )
+    .expect("ODDFPRICE should accept month-end schedules where maturity is not the 31st");
+    assert!(price.is_finite());
+
+    // With rate=0, coupons and accrued interest are 0:
+    // P = redemption / (1 + yld/frequency)^((N-1) + DSC/E)
+    //
+    // Under EOM schedule:
+    // - prev_coupon(F) = 2019-10-31
+    // - E = 92 (basis=1)
+    // - DSC = 16 (2020-01-15 -> 2020-01-31)
+    // - N = 2 (2020-01-31, 2020-04-30)
+    let prev_coupon = serial(2019, 10, 31, system);
+    let e = (first_coupon - prev_coupon) as f64;
+    assert_eq!(e, 92.0);
+    let dsc = (first_coupon - settlement) as f64;
+    assert_eq!(dsc, 16.0);
+    let exponent = 1.0 + dsc / e;
+
+    let y = yld / (frequency as f64);
+    let expected = redemption / (1.0 + y).powf(exponent);
+    assert_close(price, expected, 1e-12);
+}
+
+#[test]
+fn oddfprice_eom_schedule_month_end_maturity_feb28_basis1() {
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    // Maturity is Feb 28 (month-end). Excel's EOM schedule rule implies the prior semiannual coupon
+    // date is Aug 31 (not Aug 28), and the regular period before that is Feb 29 (leap day).
+    let issue = serial(2020, 6, 15, system);
+    let settlement = serial(2020, 7, 15, system);
+    let first_coupon = serial(2020, 8, 31, system);
+    let maturity = serial(2021, 2, 28, system);
+
+    let rate = 0.0;
+    let yld = 0.1;
+    let redemption = 100.0;
+    let frequency = 2;
+    let basis = 1;
+
+    let price = oddfprice(
+        settlement,
+        maturity,
+        issue,
+        first_coupon,
+        rate,
+        yld,
+        redemption,
+        frequency,
+        basis,
+        system,
+    )
+    .expect("ODDFPRICE should accept month-end maturity schedules (Feb 28)");
+    assert!(price.is_finite());
+
+    // With rate=0, coupons and accrued interest are 0:
+    // P = redemption / (1 + yld/frequency)^((N-1) + DSC/E)
+    //
+    // Under EOM schedule:
+    // - prev_coupon(F) = 2020-02-29
+    // - E = 184 (basis=1)
+    // - DSC = 47 (2020-07-15 -> 2020-08-31)
+    // - N = 2 (2020-08-31, 2021-02-28)
+    let prev_coupon = serial(2020, 2, 29, system);
+    let e = (first_coupon - prev_coupon) as f64;
+    assert_eq!(e, 184.0);
+    let dsc = (first_coupon - settlement) as f64;
+    assert_eq!(dsc, 47.0);
+    let exponent = 1.0 + dsc / e;
+
+    let y = yld / (frequency as f64);
+    let expected = redemption / (1.0 + y).powf(exponent);
+    assert_close(price, expected, 1e-12);
+}
+
+#[test]
 fn oddlprice_zero_coupon_rate_reduces_to_discounted_redemption() {
     let system = ExcelDateSystem::EXCEL_1900;
 
