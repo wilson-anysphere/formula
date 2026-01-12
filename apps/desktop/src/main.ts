@@ -1293,7 +1293,7 @@ if (
       },
     ];
 
-    if (extensionHostManager.ready) {
+    if (extensionHostManager.ready && !extensionHostManager.error) {
       // Ensure command labels are available.
       syncContributedCommands();
 
@@ -1320,11 +1320,37 @@ if (
     return menuItems;
   };
 
+  let contextMenuSession = 0;
+
+  const openGridContextMenuAtPoint = (x: number, y: number) => {
+    const session = (contextMenuSession += 1);
+    contextMenu.open({ x, y, items: buildGridContextMenuItems() });
+
+    // Extensions are lazy-loaded to keep startup light. Right-clicking should still
+    // surface extension-contributed context menu items, so load them on-demand and
+    // update the menu if it is still open.
+    if (!extensionHostManager.ready) {
+      void ensureExtensionsLoaded()
+        .then(() => {
+          if (session !== contextMenuSession) return;
+          if (!contextMenu.isOpen()) return;
+          if (!extensionHostManager.ready || extensionHostManager.error) return;
+          contextMenu.update(buildGridContextMenuItems());
+        })
+        .catch(() => {
+          // ignore
+        });
+    }
+  };
+
   gridRoot.addEventListener("contextmenu", (e) => {
     // Always prevent the native context menu; we render our own.
     e.preventDefault();
 
-    const picked = app.pickCellAtClientPoint(e.clientX, e.clientY);
+    const anchorX = e.clientX;
+    const anchorY = e.clientY;
+
+    const picked = app.pickCellAtClientPoint(anchorX, anchorY);
     if (picked) {
       // Excel-like behavior: if the user right-clicks outside the current selection,
       // move the active cell to the clicked coordinate. If they right-click within
@@ -1343,7 +1369,7 @@ if (
       }
     }
 
-    contextMenu.open({ x: e.clientX, y: e.clientY, items: buildGridContextMenuItems() });
+    openGridContextMenuAtPoint(anchorX, anchorY);
   });
 
   const isEditableTarget = (target: EventTarget | null): boolean => {
@@ -1355,16 +1381,12 @@ if (
   const openGridContextMenuAtActiveCell = () => {
     const rect = app.getActiveCellRect();
     if (rect) {
-      contextMenu.open({ x: rect.x, y: rect.y + rect.height, items: buildGridContextMenuItems() });
+      openGridContextMenuAtPoint(rect.x, rect.y + rect.height);
       return;
     }
 
     const gridRect = gridRoot.getBoundingClientRect();
-    contextMenu.open({
-      x: gridRect.left + gridRect.width / 2,
-      y: gridRect.top + gridRect.height / 2,
-      items: buildGridContextMenuItems(),
-    });
+    openGridContextMenuAtPoint(gridRect.left + gridRect.width / 2, gridRect.top + gridRect.height / 2);
   };
 
   window.addEventListener(

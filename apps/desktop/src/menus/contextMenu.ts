@@ -37,6 +37,7 @@ export class ContextMenu {
   private isShown = false;
   private readonly onClose: (() => void) | null;
   private keydownListener: ((e: KeyboardEvent) => void) | null = null;
+  private lastAnchor: { x: number; y: number } | null = null;
 
   constructor(options: { onClose?: () => void } = {}) {
     this.onClose = options.onClose ?? null;
@@ -85,6 +86,7 @@ export class ContextMenu {
   open({ x, y, items }: ContextMenuOpenOptions): void {
     this.close();
     this.isShown = true;
+    this.lastAnchor = { x, y };
 
     this.menu.replaceChildren();
     this.closeSubmenu();
@@ -203,9 +205,123 @@ export class ContextMenu {
     window.addEventListener("keydown", this.keydownListener, true);
   }
 
+  isOpen(): boolean {
+    return this.isShown;
+  }
+
+  update(items: ContextMenuItem[]): void {
+    if (!this.isShown) return;
+    if (!this.lastAnchor) return;
+
+    this.menu.replaceChildren();
+    this.closeSubmenu();
+
+    // Re-render in place without touching the global event listeners.
+    for (const item of items) {
+      if (item.type === "separator") {
+        const sep = document.createElement("div");
+        sep.setAttribute("role", "separator");
+        sep.style.height = "1px";
+        sep.style.margin = "6px 6px";
+        sep.style.background = "var(--border)";
+        this.menu.appendChild(sep);
+        continue;
+      }
+
+      const enabled = item.enabled ?? true;
+
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.disabled = !enabled;
+
+      btn.style.display = "flex";
+      btn.style.alignItems = "center";
+      btn.style.justifyContent = "space-between";
+      btn.style.gap = "16px";
+      btn.style.width = "100%";
+      btn.style.textAlign = "left";
+      btn.style.padding = "8px 10px";
+      btn.style.borderRadius = "8px";
+      btn.style.border = "1px solid transparent";
+      btn.style.background = "transparent";
+      btn.style.color = enabled ? "var(--text-primary)" : "var(--text-secondary)";
+      btn.style.cursor = enabled ? "pointer" : "default";
+
+      const label = document.createElement("span");
+      label.textContent = item.label;
+      label.style.flex = "1";
+      label.style.minWidth = "0";
+      label.style.overflow = "hidden";
+      label.style.textOverflow = "ellipsis";
+      label.style.whiteSpace = "nowrap";
+      btn.appendChild(label);
+
+      if (item.shortcut) {
+        const shortcut = document.createElement("span");
+        shortcut.textContent = item.shortcut;
+        shortcut.style.color = "var(--text-secondary)";
+        shortcut.style.fontSize = "12px";
+        shortcut.style.flex = "none";
+        btn.appendChild(shortcut);
+      }
+
+      if (item.type === "submenu") {
+        const arrow = document.createElement("span");
+        arrow.textContent = "›";
+        arrow.style.color = "var(--text-secondary)";
+        arrow.style.fontSize = "14px";
+        arrow.style.flex = "none";
+        btn.appendChild(arrow);
+      }
+
+      btn.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+      });
+
+      if (item.type === "submenu") {
+        const openSub = () => {
+          if (!enabled) return;
+          this.openSubmenu(btn, item.items);
+        };
+        btn.addEventListener("mouseenter", openSub);
+        btn.addEventListener("click", (e) => {
+          e.preventDefault();
+          openSub();
+        });
+      } else {
+        btn.addEventListener("click", () => {
+          if (!enabled) return;
+          this.close();
+          void Promise.resolve(item.onSelect()).catch((err) => {
+            console.error("Context menu action failed:", err);
+          });
+        });
+      }
+
+      btn.addEventListener("mouseenter", () => {
+        if (!enabled) return;
+        if (item.type !== "submenu") {
+          this.closeSubmenu();
+        }
+        btn.style.background = "var(--bg-hover)";
+        btn.style.borderColor = "var(--border)";
+      });
+      btn.addEventListener("mouseleave", () => {
+        if (this.submenu && this.submenuParent === btn) return;
+        btn.style.background = "transparent";
+        btn.style.borderColor = "transparent";
+      });
+
+      this.menu.appendChild(btn);
+    }
+
+    this.positionMenu(this.lastAnchor.x, this.lastAnchor.y);
+  }
+
   close(): void {
     if (!this.isShown) return;
     this.isShown = false;
+    this.lastAnchor = null;
     this.overlay.style.display = "none";
     this.menu.replaceChildren();
     this.closeSubmenu();
