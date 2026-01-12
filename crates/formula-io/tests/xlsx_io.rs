@@ -1,3 +1,4 @@
+use std::io::{Cursor, Write};
 use std::path::PathBuf;
 
 use formula_io::{open_workbook, save_workbook, Workbook};
@@ -208,5 +209,91 @@ fn saving_xltm_preserves_vba_and_saving_xltx_strips_vba() {
     assert!(
         saved_pkg.vba_project_bin().is_none(),
         "expected vbaProject.bin to be removed when saving as .xltx"
+    );
+}
+
+fn build_zip(files: &[(&str, &[u8])]) -> Vec<u8> {
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = zip::ZipWriter::new(cursor);
+    let options = zip::write::FileOptions::<()>::default()
+        .compression_method(zip::CompressionMethod::Stored);
+
+    for (name, bytes) in files {
+        zip.start_file(*name, options).unwrap();
+        zip.write_all(bytes).unwrap();
+    }
+
+    zip.finish().unwrap().into_inner()
+}
+
+#[test]
+fn saving_xlsx_strips_xlm_macrosheets_and_dialogsheets_without_vba_project() {
+    // Build a tiny "XLSX-in-disguise" package:
+    // - Has XLM macrosheets + dialog sheets
+    // - Does *not* have `xl/vbaProject.bin`
+    // - Advertises a macro-enabled workbook content type
+    //
+    // When saving to `.xlsx`, formula-io must strip *all* macro-capable content, not just VBA.
+    let input_bytes = build_zip(&[
+        (
+            "[Content_Types].xml",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.ms-excel.sheet.macroEnabled.main+xml"/>
+  <Override PartName="/xl/macrosheets/sheet1.xml" ContentType="application/vnd.ms-excel.macrosheet+xml"/>
+  <Override PartName="/xl/dialogsheets/sheet1.xml" ContentType="application/vnd.ms-excel.dialogsheet+xml"/>
+</Types>"#,
+        ),
+        (
+            "xl/workbook.xml",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+</workbook>"#,
+        ),
+        ("xl/macrosheets/sheet1.xml", br#"<macrosheet/>"#),
+        ("xl/dialogsheets/sheet1.xml", br#"<dialogsheet/>"#),
+    ]);
+
+    let pkg = XlsxPackage::from_bytes(&input_bytes).expect("parse test package");
+    assert!(
+        pkg.vba_project_bin().is_none(),
+        "test package should not contain xl/vbaProject.bin"
+    );
+    assert!(
+        pkg.macro_presence().any(),
+        "test package should be detected as macro-capable"
+    );
+
+    let wb = Workbook::Xlsx(pkg);
+    let dir = tempfile::tempdir().expect("temp dir");
+    let out_path = dir.path().join("out.xlsx");
+    save_workbook(&wb, &out_path).expect("save workbook");
+
+    let bytes = std::fs::read(&out_path).expect("read saved workbook");
+    let out_pkg = XlsxPackage::from_bytes(&bytes).expect("re-open saved package");
+
+    assert!(
+        !out_pkg
+            .part_names()
+            .any(|name| name.starts_with("xl/macrosheets/")),
+        "expected XLM macrosheet parts to be stripped when saving `.xlsx`"
+    );
+    assert!(
+        !out_pkg
+            .part_names()
+            .any(|name| name.starts_with("xl/dialogsheets/")),
+        "expected legacy dialog sheet parts to be stripped when saving `.xlsx`"
+    );
+
+    let content_types = std::str::from_utf8(
+        out_pkg
+            .part("[Content_Types].xml")
+            .expect("content types should be preserved/updated"),
+    )
+    .unwrap();
+    assert!(
+        !content_types.contains("macroEnabled"),
+        "expected `[Content_Types].xml` to no longer advertise a macro-enabled workbook"
     );
 }

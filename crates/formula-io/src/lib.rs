@@ -797,11 +797,16 @@ pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), 
     match workbook {
         Workbook::Xlsx(package) => match ext.as_str() {
             "xlsx" => {
-                // If we're saving a macro-enabled workbook to a `.xlsx` filename, strip the VBA
-                // project and its related parts/relationships so we don't produce an
-                // XLSM-in-disguise (which Excel refuses to open).
                 let mut out = package.clone();
-                if out.vba_project_bin().is_some() {
+                // If we're saving a workbook with any macro-capable content to a `.xlsx` filename,
+                // strip macro parts/relationships so we don't produce an XLSM-in-disguise (which
+                // Excel refuses to open).
+                //
+                // Macro-capable surfaces include:
+                // - classic VBA (`xl/vbaProject.bin`)
+                // - Excel 4.0 macro sheets (`xl/macrosheets/**`)
+                // - legacy dialog sheets (`xl/dialogsheets/**`)
+                if out.macro_presence().any() {
                     out.remove_vba_project()
                         .map_err(|source| Error::SaveXlsxPackage {
                             path: path.to_path_buf(),
