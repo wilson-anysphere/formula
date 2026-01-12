@@ -164,6 +164,18 @@ fn get_response(
             .map_err(Into::into);
     }
 
+    // The asset protocol is a read-only file responder. Reject unexpected methods early so callers
+    // cannot trigger surprising behavior via non-GET verbs.
+    if request.method() != tauri::http::Method::GET && request.method() != tauri::http::Method::HEAD {
+        return Response::builder()
+            .status(StatusCode::METHOD_NOT_ALLOWED)
+            .header("Allow", "GET, HEAD, OPTIONS")
+            .header("Access-Control-Allow-Origin", window_origin)
+            .header("Cross-Origin-Resource-Policy", "cross-origin")
+            .body(Vec::new())
+            .map_err(Into::into);
+    }
+
     // skip leading `/`
     let path = percent_encoding::percent_decode(&request.uri().path().as_bytes()[1..])
         .decode_utf8_lossy()
@@ -285,7 +297,7 @@ fn get_response(
             ranges
                 .iter()
                 // Map to <start-end>, example: 0-499
-                .map(|r| (r.start, r.start + r.length - 1))
+                .map(|r| (r.start, r.start.saturating_add(r.length.saturating_sub(1))))
                 .collect::<Vec<_>>()
         } else {
             return not_satisfiable();
