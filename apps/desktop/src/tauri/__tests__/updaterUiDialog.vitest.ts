@@ -13,6 +13,12 @@ async function flushMicrotasks(times = 6): Promise<void> {
 describe("updaterUi (dialog + download)", () => {
   beforeEach(() => {
     document.body.innerHTML = '<div id="toast-root"></div>';
+    try {
+      window.localStorage.removeItem("formula.updater.dismissedVersion");
+      window.localStorage.removeItem("formula.updater.dismissedAt");
+    } catch {
+      // ignore
+    }
     vi.resetModules();
   });
 
@@ -43,6 +49,26 @@ describe("updaterUi (dialog + download)", () => {
 
     expect(dialog?.querySelector('[data-testid="updater-version"]')?.textContent).toContain("9.9.9");
     expect(dialog?.querySelector('[data-testid="updater-body"]')?.textContent).toContain("Release notes");
+  });
+
+  it("does not suppress an update dialog when the user clicks manual check during an in-flight startup check", async () => {
+    // Simulate "Later" suppression for a specific version.
+    window.localStorage.setItem("formula.updater.dismissedVersion", "9.9.9");
+    window.localStorage.setItem("formula.updater.dismissedAt", String(Date.now()));
+
+    const { handleUpdaterEvent } = await import("../updaterUi");
+
+    // User clicks "Check for Updates" while a startup check is already running.
+    await handleUpdaterEvent("update-check-already-running", { source: "manual" });
+
+    // Startup-sourced update result arrives, but should still open a dialog because the user
+    // explicitly requested a manual check.
+    await handleUpdaterEvent("update-available", { source: "startup", version: "9.9.9", body: "Release notes\nLine 2" });
+    await flushMicrotasks();
+
+    const dialog = document.querySelector<HTMLDialogElement>('[data-testid="updater-dialog"]');
+    expect(dialog).not.toBeNull();
+    expect(dialog?.getAttribute("open") === "" || dialog?.open === true).toBe(true);
   });
 
   it("shows download progress and reveals the restart button once downloaded", async () => {
@@ -97,4 +123,3 @@ describe("updaterUi (dialog + download)", () => {
     expect(restartBtn?.style.display).not.toBe("none");
   });
 });
-

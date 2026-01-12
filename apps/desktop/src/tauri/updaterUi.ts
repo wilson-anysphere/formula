@@ -739,9 +739,13 @@ function openUpdateAvailableDialog(payload: UpdaterEventPayload): void {
 }
 
 export async function handleUpdaterEvent(name: UpdaterEventName, payload: UpdaterEventPayload): Promise<void> {
-  const source = payload?.source;
+  const rawSource = payload?.source;
+  const followUpEligible =
+    name === "update-not-available" || name === "update-check-error" || name === "update-available";
+  const followUpManual = manualUpdateCheckFollowUp && rawSource === "startup" && followUpEligible;
+  const source = followUpManual ? "manual" : rawSource;
 
-  if (name === "update-available" && source === "startup" && !manualUpdateCheckFollowUp) {
+  if (name === "update-available" && rawSource === "startup" && !manualUpdateCheckFollowUp) {
     const version = typeof payload?.version === "string" ? payload.version.trim() : "";
     const body = typeof payload?.body === "string" ? payload.body.trim() : "";
     const appName = t("app.title");
