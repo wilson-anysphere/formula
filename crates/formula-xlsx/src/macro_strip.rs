@@ -53,6 +53,15 @@ fn compute_macro_delete_set(
         }
     }
 
+    // Legacy macro surfaces beyond VBA:
+    // - Excel 4.0 macro sheets (XLM) stored under `xl/macrosheets/**`
+    // - Dialog sheets stored under `xl/dialogsheets/**`
+    for name in parts.keys() {
+        if name.starts_with("xl/macrosheets/") || name.starts_with("xl/dialogsheets/") {
+            delete.insert(name.clone());
+        }
+    }
+
     // Parts referenced by `xl/_rels/vbaProject.bin.rels` (e.g. signature payloads).
     if let Some(rels_bytes) = parts.get("xl/_rels/vbaProject.bin.rels") {
         let targets = parse_internal_relationship_targets(rels_bytes, "xl/vbaProject.bin")?;
