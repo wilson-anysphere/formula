@@ -39,7 +39,15 @@ export type ClipboardProvider = {
 
 export function createClipboardProvider(): Promise<ClipboardProvider>;
 
-export function parseClipboardContentToCellGrid(content: ClipboardContent): any[] | null;
+export const DEFAULT_MAX_CLIPBOARD_PARSE_CELLS: number;
+export const DEFAULT_MAX_CLIPBOARD_HTML_CHARS: number;
+
+export class ClipboardParseLimitError extends Error {}
+
+export function parseClipboardContentToCellGrid(
+  content: ClipboardContent,
+  options?: { maxCells?: number; maxChars?: number }
+): any[] | null;
 
 export function clipboardFormatToDocStyle(format: any): any | null;
 

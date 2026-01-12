@@ -3,6 +3,7 @@ import { t } from "../i18n/index.js";
 import { parseHtmlToCellGrid, serializeCellGridToHtml } from "./html.js";
 import { extractPlainTextFromRtf, serializeCellGridToRtf } from "./rtf.js";
 import { parseTsvToCellGrid, serializeCellGridToTsv } from "./tsv.js";
+import { ClipboardParseLimitError, DEFAULT_MAX_CLIPBOARD_HTML_CHARS, DEFAULT_MAX_CLIPBOARD_PARSE_CELLS } from "./limits.js";
 import { enforceClipboardCopy } from "../dlp/enforceClipboardCopy.js";
 import { normalizeExcelColorToCss } from "../shared/colors.js";
 
@@ -378,15 +379,45 @@ export function serializeCellGridToClipboardPayload(grid) {
 /**
  * Parse clipboard payloads in priority order: HTML > TSV/plain.
  * @param {ClipboardContent} content
+ * @param {{ maxCells?: number, maxChars?: number }} [options]
  * @returns {CellGrid | null}
  */
-export function parseClipboardContentToCellGrid(content) {
+export function parseClipboardContentToCellGrid(content, options = {}) {
+  const rawMaxCells = options.maxCells;
+  const maxCells = (() => {
+    if (rawMaxCells === Infinity) return Infinity;
+    const n = Number(rawMaxCells);
+    if (Number.isFinite(n) && Number.isInteger(n) && n > 0) return n;
+    return DEFAULT_MAX_CLIPBOARD_PARSE_CELLS;
+  })();
+
+  const rawMaxChars = options.maxChars;
+  const maxChars = (() => {
+    if (rawMaxChars === Infinity) return Infinity;
+    const n = Number(rawMaxChars);
+    if (Number.isFinite(n) && Number.isInteger(n) && n > 0) return n;
+    return DEFAULT_MAX_CLIPBOARD_HTML_CHARS;
+  })();
+
+  const parseOptions = { maxCells, maxChars };
+
+  /** @type {unknown | null} */
+  let deferredLimitError = null;
+
   const html = typeof content.html === "string" ? content.html : null;
   // Avoid trimming the raw HTML string before parsing: CF_HTML offset fields are byte offsets into
   // the *original* payload, so stripping whitespace can invalidate otherwise-correct offsets.
   if (html && /\S/.test(html)) {
-    const parsed = parseHtmlToCellGrid(html);
-    if (parsed) return parsed;
+    try {
+      const parsed = parseHtmlToCellGrid(html, parseOptions);
+      if (parsed) return parsed;
+    } catch (err) {
+      if (err instanceof ClipboardParseLimitError || err?.name === "ClipboardParseLimitError") {
+        deferredLimitError = err;
+      } else {
+        // Ignore parse failures and fall back to TSV/RTF.
+      }
+    }
   }
 
   const text = content.text;
@@ -396,17 +427,35 @@ export function parseClipboardContentToCellGrid(content) {
   // Some clipboard backends may provide an empty `text/plain` payload alongside richer formats.
   // Only treat empty strings as "missing" when we have an RTF payload to fall back to. Otherwise
   // keep the legacy behavior (pasting a blank 1×1 cell should still clear the target).
-  if (typeof text === "string" && (text !== "" || !hasMeaningfulRtf)) {
-    const parsed = parseTsvToCellGrid(text);
-    if (parsed) return parsed;
+  if (typeof text === "string" && (text !== "" || (!hasMeaningfulRtf && deferredLimitError === null))) {
+    try {
+      const parsed = parseTsvToCellGrid(text, parseOptions);
+      if (parsed) return parsed;
+    } catch (err) {
+      if (err instanceof ClipboardParseLimitError || err?.name === "ClipboardParseLimitError") {
+        throw err;
+      }
+      // Ignore parse failures and fall back to RTF.
+    }
   }
 
   if (hasMeaningfulRtf) {
     const extracted = extractPlainTextFromRtf(rtf);
     if (extracted) {
-      const parsed = parseTsvToCellGrid(extracted);
-      if (parsed) return parsed;
+      try {
+        const parsed = parseTsvToCellGrid(extracted, parseOptions);
+        if (parsed) return parsed;
+      } catch (err) {
+        if (err instanceof ClipboardParseLimitError || err?.name === "ClipboardParseLimitError") {
+          throw err;
+        }
+        // Ignore parse failures.
+      }
     }
+  }
+
+  if (deferredLimitError) {
+    throw deferredLimitError;
   }
 
   return null;
@@ -749,7 +798,16 @@ export function copyRangeToClipboardPayload(doc, sheetId, range, options = {}) {
  * @returns {boolean} whether a paste occurred
  */
 export function pasteClipboardContent(doc, sheetId, start, content, options = {}) {
-  const grid = parseClipboardContentToCellGrid(content);
+  let grid = null;
+  try {
+    grid = parseClipboardContentToCellGrid(content);
+  } catch (err) {
+    // Oversized clipboard payloads should not crash the paste handler.
+    if (err instanceof ClipboardParseLimitError || err?.name === "ClipboardParseLimitError") {
+      return false;
+    }
+    throw err;
+  }
   if (!grid) return false;
 
   const mode = options.mode ?? "all";

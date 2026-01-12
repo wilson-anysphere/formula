@@ -1,4 +1,5 @@
 import { excelSerialToDate, parseScalar } from "../shared/valueParsing.js";
+import { ClipboardParseLimitError, DEFAULT_MAX_CLIPBOARD_PARSE_CELLS } from "./limits.js";
 
 /**
  * @typedef {import("./types.js").CellGrid} CellGrid
@@ -85,31 +86,90 @@ export function serializeCellGridToTsv(grid) {
 
 /**
  * @param {string} tsv
+ * @param {{ maxCells?: number }} [options]
  * @returns {CellGrid}
  */
-export function parseTsvToCellGrid(tsv) {
-  const normalized = tsv.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  const lines = normalized.split("\n");
+export function parseTsvToCellGrid(tsv, options = {}) {
+  const rawMaxCells = options.maxCells;
+  const maxCells = (() => {
+    if (rawMaxCells === Infinity) return Infinity;
+    const n = Number(rawMaxCells);
+    if (Number.isFinite(n) && Number.isInteger(n) && n > 0) return n;
+    return DEFAULT_MAX_CLIPBOARD_PARSE_CELLS;
+  })();
 
-  // Drop the final empty record when the clipboard payload ends with a newline.
-  if (lines.length > 1 && lines.at(-1) === "") lines.pop();
+  const text = String(tsv ?? "");
 
-  return lines.map((line) => {
-    const parts = line.split("\t");
-    return parts.map((raw) => {
-      if (raw.startsWith("'")) {
-        // Excel convention: a leading apostrophe forces text.
-        return { value: raw.slice(1), formula: null, format: null };
-      }
+  /** @type {CellGrid} */
+  const grid = [];
+  /** @type {CellState[]} */
+  let row = [];
+  let cellStart = 0;
+  let cellCount = 0;
 
-      const trimmed = raw.trimStart();
-      if (trimmed.startsWith("=")) {
-        return { value: null, formula: trimmed, format: null };
-      }
+  const parseCell = (raw) => {
+    if (raw.startsWith("'")) {
+      // Excel convention: a leading apostrophe forces text.
+      return { value: raw.slice(1), formula: null, format: null };
+    }
 
-      const parsed = parseScalar(raw);
-      const format = parsed.type === "datetime" ? { numberFormat: parsed.numberFormat } : null;
-      return { value: parsed.value, formula: null, format };
-    });
-  });
+    const trimmed = raw.trimStart();
+    if (trimmed.startsWith("=")) {
+      return { value: null, formula: trimmed, format: null };
+    }
+
+    const parsed = parseScalar(raw);
+    const format = parsed.type === "datetime" ? { numberFormat: parsed.numberFormat } : null;
+    return { value: parsed.value, formula: null, format };
+  };
+
+  const pushCell = (end) => {
+    row.push(parseCell(text.slice(cellStart, end)));
+    cellCount += 1;
+    if (Number.isFinite(maxCells) && cellCount > maxCells) {
+      throw new ClipboardParseLimitError(
+        `Clipboard TSV too large to parse (${cellCount.toLocaleString()} cells; max=${maxCells.toLocaleString()}).`
+      );
+    }
+  };
+
+  const pushRow = () => {
+    grid.push(row);
+    row = [];
+  };
+
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    // tab, newline, carriage return
+    if (code !== 9 && code !== 10 && code !== 13) continue;
+
+    pushCell(i);
+
+    if (code === 9) {
+      // tab
+      cellStart = i + 1;
+      continue;
+    }
+
+    // newline / CRLF
+    pushRow();
+
+    if (code === 13 && text.charCodeAt(i + 1) === 10) {
+      // CRLF -> skip the LF
+      i += 1;
+    }
+    cellStart = i + 1;
+  }
+
+  // Add the final cell/row (if any). When the payload ends with a newline, `row` will be
+  // empty here, mirroring the prior behavior that dropped the final empty record.
+  if (cellStart <= text.length) {
+    // Note: for an empty string, this produces a 1x1 empty cell, matching `"".split("\n")`.
+    if (row.length > 0 || cellStart < text.length || grid.length === 0) {
+      pushCell(text.length);
+      pushRow();
+    }
+  }
+
+  return grid;
 }

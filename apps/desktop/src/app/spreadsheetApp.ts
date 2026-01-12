@@ -9243,6 +9243,18 @@ export class SpreadsheetApp {
         }
         return;
       }
+      const isClipboardLimit = (err as any)?.name === "ClipboardParseLimitError";
+      if (isClipboardLimit) {
+        try {
+          showToast(
+            `Paste too large (>${MAX_CLIPBOARD_CELLS.toLocaleString()} cells). Paste fewer cells and try again.`,
+            "warning"
+          );
+        } catch {
+          // `showToast` requires a #toast-root; unit tests don't always include it.
+        }
+        return;
+      }
       // Ignore clipboard failures (permissions, platform restrictions).
     }
   }

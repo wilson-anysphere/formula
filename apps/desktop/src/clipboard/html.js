@@ -1,4 +1,5 @@
 import { excelSerialToDate, parseScalar } from "../shared/valueParsing.js";
+import { ClipboardParseLimitError, DEFAULT_MAX_CLIPBOARD_HTML_CHARS, DEFAULT_MAX_CLIPBOARD_PARSE_CELLS } from "./limits.js";
 
 /**
  * @typedef {import("./types.js").CellGrid} CellGrid
@@ -435,20 +436,57 @@ export function serializeCellGridToHtml(grid) {
 
 /**
  * @param {string} html
+ * @param {{ maxCells?: number, maxChars?: number }} [options]
  * @returns {CellGrid | null}
  */
-export function parseHtmlToCellGrid(html) {
-  if (typeof DOMParser !== "undefined") return parseHtmlToCellGridDom(html);
-  return parseHtmlToCellGridFallback(html);
+export function parseHtmlToCellGrid(html, options = {}) {
+  const rawMaxCells = options.maxCells;
+  const maxCells = (() => {
+    if (rawMaxCells === Infinity) return Infinity;
+    const n = Number(rawMaxCells);
+    if (Number.isFinite(n) && Number.isInteger(n) && n > 0) return n;
+    return DEFAULT_MAX_CLIPBOARD_PARSE_CELLS;
+  })();
+
+  const rawMaxChars = options.maxChars;
+  const maxChars = (() => {
+    if (rawMaxChars === Infinity) return Infinity;
+    const n = Number(rawMaxChars);
+    if (Number.isFinite(n) && Number.isInteger(n) && n > 0) return n;
+    return DEFAULT_MAX_CLIPBOARD_HTML_CHARS;
+  })();
+
+  const input = String(html ?? "");
+  if (Number.isFinite(maxChars) && input.length > maxChars) {
+    throw new ClipboardParseLimitError(
+      `Clipboard HTML too large to parse (${input.length.toLocaleString()} chars; max=${maxChars.toLocaleString()}).`
+    );
+  }
+
+  const opts = { maxCells, maxChars };
+  if (typeof DOMParser !== "undefined") return parseHtmlToCellGridDom(input, opts);
+  return parseHtmlToCellGridFallback(input, opts);
 }
 
 /**
  * DOM-based parser (browser / WebView).
  * @param {string} html
+ * @param {{ maxCells: number, maxChars: number }} options
  * @returns {CellGrid | null}
  */
-function parseHtmlToCellGridDom(html) {
+function parseHtmlToCellGridDom(html, options) {
+  if (Number.isFinite(options.maxChars) && html.length > options.maxChars) {
+    throw new ClipboardParseLimitError(
+      `Clipboard HTML too large to parse (${html.length.toLocaleString()} chars; max=${options.maxChars.toLocaleString()}).`
+    );
+  }
+
   html = normalizeClipboardHtml(html);
+  if (Number.isFinite(options.maxChars) && html.length > options.maxChars) {
+    throw new ClipboardParseLimitError(
+      `Clipboard HTML too large to parse (${html.length.toLocaleString()} chars; max=${options.maxChars.toLocaleString()}).`
+    );
+  }
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, "text/html");
   const table = doc.querySelector("table");
@@ -456,13 +494,20 @@ function parseHtmlToCellGridDom(html) {
 
   /** @type {CellGrid} */
   const grid = [];
+  let cellCount = 0;
 
-  for (const row of Array.from(table.querySelectorAll("tr"))) {
-    const cells = Array.from(row.querySelectorAll("th,td"));
+  for (const row of table.querySelectorAll("tr")) {
+    const cells = row.querySelectorAll("th,td");
     /** @type {CellState[]} */
     const outRow = [];
 
     for (const cellEl of cells) {
+      cellCount += 1;
+      if (Number.isFinite(options.maxCells) && cellCount > options.maxCells) {
+        throw new ClipboardParseLimitError(
+          `Clipboard HTML table too large to parse (${cellCount.toLocaleString()} cells; max=${options.maxCells.toLocaleString()}).`
+        );
+      }
       const formula =
         cellEl.getAttribute("data-formula") ??
         cellEl.getAttribute("data-sheets-formula") ??
@@ -511,10 +556,22 @@ function parseHtmlToCellGridDom(html) {
 /**
  * Regex-based fallback parser for non-DOM environments (Node tests).
  * @param {string} html
+ * @param {{ maxCells: number, maxChars: number }} options
  * @returns {CellGrid | null}
  */
-function parseHtmlToCellGridFallback(html) {
+function parseHtmlToCellGridFallback(html, options) {
+  if (Number.isFinite(options.maxChars) && html.length > options.maxChars) {
+    throw new ClipboardParseLimitError(
+      `Clipboard HTML too large to parse (${html.length.toLocaleString()} chars; max=${options.maxChars.toLocaleString()}).`
+    );
+  }
+
   html = normalizeClipboardHtml(html);
+  if (Number.isFinite(options.maxChars) && html.length > options.maxChars) {
+    throw new ClipboardParseLimitError(
+      `Clipboard HTML too large to parse (${html.length.toLocaleString()} chars; max=${options.maxChars.toLocaleString()}).`
+    );
+  }
   const tableMatch = /<table\b[\s\S]*?<\/table>/i.exec(html);
   if (!tableMatch) return null;
 
@@ -524,13 +581,26 @@ function parseHtmlToCellGridFallback(html) {
 
   /** @type {CellGrid} */
   const grid = [];
+  let cellCount = 0;
 
-  for (const rowHtml of tableHtml.match(rowRegex) ?? []) {
+  rowRegex.lastIndex = 0;
+  let rowMatch;
+  while ((rowMatch = rowRegex.exec(tableHtml))) {
+    const rowHtml = rowMatch[0] ?? "";
     /** @type {CellState[]} */
     const row = [];
-    for (const cellMatch of rowHtml.matchAll(cellRegex)) {
+    cellRegex.lastIndex = 0;
+    let cellMatch;
+    while ((cellMatch = cellRegex.exec(rowHtml))) {
       const attrs = cellMatch[2] ?? "";
       const inner = cellMatch[3] ?? "";
+
+      cellCount += 1;
+      if (Number.isFinite(options.maxCells) && cellCount > options.maxCells) {
+        throw new ClipboardParseLimitError(
+          `Clipboard HTML table too large to parse (${cellCount.toLocaleString()} cells; max=${options.maxCells.toLocaleString()}).`
+        );
+      }
 
       const getAttr = (name) => {
         const re = new RegExp(`${name}\\s*=\\s*(\"([^\"]*)\"|'([^']*)'|([^\\s>]+))`, "i");
