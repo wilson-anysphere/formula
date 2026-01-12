@@ -14,7 +14,14 @@ fn png_1x1() -> Vec<u8> {
         .expect("valid base64 png")
 }
 
-fn build_rich_data_package(metadata_xml: &str) -> Vec<u8> {
+const RICH_VALUE_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rv:richValue xmlns:rv="http://schemas.microsoft.com/office/spreadsheetml/2017/richvalue">
+  <rv:rv>
+    <rv:v t="rel">0</rv:v>
+  </rv:rv>
+</rv:richValue>"#;
+
+fn build_rich_data_package(metadata_xml: &str, include_rich_value_part: bool) -> Vec<u8> {
     let png = png_1x1();
     let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
@@ -46,15 +53,6 @@ fn build_rich_data_package(metadata_xml: &str) -> Vec<u8> {
    <rv:rel r:id="rId1"/>
 </rv:richValueRel>"#;
 
-    // Minimal richValue payload with a single `<rv>` record that references relationship index 0.
-    // Excel's real schema is richer; this is the smallest thing our extractor understands.
-    let rich_value_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<rv:richValue xmlns:rv="http://schemas.microsoft.com/office/spreadsheetml/2017/richvalue">
-  <rv:rv>
-    <rv:v t="rel">0</rv:v>
-  </rv:rv>
-</rv:richValue>"#;
-
     let rich_value_rel_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
@@ -64,12 +62,11 @@ fn build_rich_data_package(metadata_xml: &str) -> Vec<u8> {
     let mut zip = ZipWriter::new(cursor);
     let options = FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
 
-    for (name, bytes) in [
+    let mut files: Vec<(&str, &[u8])> = vec![
         ("xl/workbook.xml", workbook_xml.as_bytes()),
         ("xl/_rels/workbook.xml.rels", workbook_rels.as_bytes()),
         ("xl/worksheets/sheet1.xml", sheet_xml.as_bytes()),
         ("xl/metadata.xml", metadata_xml.as_bytes()),
-        ("xl/richData/richValue.xml", rich_value_xml.as_bytes()),
         (
             "xl/richData/richValueRel.xml",
             rich_value_rel_xml.as_bytes(),
@@ -79,7 +76,13 @@ fn build_rich_data_package(metadata_xml: &str) -> Vec<u8> {
             rich_value_rel_rels.as_bytes(),
         ),
         ("xl/media/image1.png", png.as_slice()),
-    ] {
+    ];
+
+    if include_rich_value_part {
+        files.push(("xl/richData/richValue.xml", RICH_VALUE_XML.as_bytes()));
+    }
+
+    for (name, bytes) in files {
         zip.start_file(name, options).unwrap();
         zip.write_all(bytes).unwrap();
     }
@@ -104,7 +107,7 @@ fn extracts_in_cell_images_with_direct_extlst_rvb_list() {
   </extLst>
 </metadata>"#;
 
-    let bytes = build_rich_data_package(metadata_xml);
+    let bytes = build_rich_data_package(metadata_xml, true);
     let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
     let images = extract_rich_cell_images(&pkg).expect("extract richData images");
 
@@ -112,42 +115,67 @@ fn extracts_in_cell_images_with_direct_extlst_rvb_list() {
     assert_eq!(images.get(&key).cloned(), Some(png_1x1()));
 }
 
- #[test]
- fn extracts_in_cell_images_with_future_metadata_indirection() {
-     // Excel commonly emits `metadataTypes` + `futureMetadata`, and `valueMetadata/rc` references
-     // the XLRICHVALUE type via `t=` and chooses a `futureMetadata/bk` entry via `v=`.
-     let metadata_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
- <metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
-  xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
-   <metadataTypes>
-     <metadataType name="XLRICHVALUE"/>
-   </metadataTypes>
-   <!-- Unrelated rvb to ensure resolution uses metadataTypes/futureMetadata instead of scanning
-        all rvb entries in document order. -->
-   <extLst>
-     <ext uri="{DUMMY}">
-       <xlrd:rvb i="999"/>
-     </ext>
-   </extLst>
-   <futureMetadata name="XLRICHVALUE">
-     <bk>
-       <extLst>
-         <ext uri="{DUMMY}">
-           <xlrd:rvb i="0"/>
-         </ext>
-       </extLst>
-     </bk>
-   </futureMetadata>
-   <valueMetadata>
-     <bk>
-       <rc t="0" v="0"/>
-     </bk>
-   </valueMetadata>
- </metadata>"#;
+#[test]
+fn extracts_in_cell_images_with_future_metadata_indirection() {
+    // Excel commonly emits `metadataTypes` + `futureMetadata`, and `valueMetadata/rc` references
+    // the XLRICHVALUE type via `t=` and chooses a `futureMetadata/bk` entry via `v=`.
+    let metadata_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <metadataTypes>
+    <metadataType name="XLRICHVALUE"/>
+  </metadataTypes>
+  <!-- Unrelated rvb to ensure resolution uses metadataTypes/futureMetadata instead of scanning
+       all rvb entries in document order. -->
+  <extLst>
+    <ext uri="{DUMMY}">
+      <xlrd:rvb i="999"/>
+    </ext>
+  </extLst>
+  <futureMetadata name="XLRICHVALUE">
+    <bk>
+      <extLst>
+        <ext uri="{DUMMY}">
+          <xlrd:rvb i="0"/>
+        </ext>
+      </extLst>
+    </bk>
+  </futureMetadata>
+  <valueMetadata>
+    <bk>
+      <rc t="0" v="0"/>
+    </bk>
+  </valueMetadata>
+</metadata>"#;
 
-    let bytes = build_rich_data_package(metadata_xml);
+    let bytes = build_rich_data_package(metadata_xml, true);
     let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
     let images = extract_rich_cell_images(&pkg).expect("extract richData images");
+
+    let key = ("Sheet1".to_string(), CellRef::from_a1("A1").unwrap());
+    assert_eq!(images.get(&key).cloned(), Some(png_1x1()));
+}
+
+#[test]
+fn extracts_in_cell_images_without_rich_value_part_via_fallback() {
+    let metadata_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <valueMetadata>
+    <bk><rc v="0"/></bk>
+  </valueMetadata>
+  <extLst>
+    <ext uri="{DUMMY}">
+      <xlrd:rvb i="0"/>
+    </ext>
+  </extLst>
+</metadata>"#;
+
+    let bytes = build_rich_data_package(metadata_xml, false);
+    let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+    let images = pkg
+        .extract_rich_cell_images_by_cell()
+        .expect("extract richData images");
 
     let key = ("Sheet1".to_string(), CellRef::from_a1("A1").unwrap());
     assert_eq!(images.get(&key).cloned(), Some(png_1x1()));
