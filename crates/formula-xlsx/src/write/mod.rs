@@ -3317,7 +3317,6 @@ fn append_cell_xml(
             out.push_str(&format!(r#" cm="{}""#, escape_attr(cm)));
         }
     }
-
     out.push('>');
 
     let model_formula = cell.formula.as_deref();

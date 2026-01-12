@@ -153,7 +153,7 @@ impl RichDataVmIndex {
 // that returns raw `xl/media/*` parts referenced by the RichData graph.
 //
 // For per-cell in-cell image extraction, use `XlsxPackage::extract_rich_cell_images_by_cell`.
-
+const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 /// Errors returned by rich-data parsing helpers.
 ///
 /// These parsers are intentionally "best effort": missing parts yield empty results, while
@@ -1062,21 +1062,26 @@ fn parse_rich_value_rel_rids(bytes: &[u8]) -> Result<Vec<String>, RichDataError>
         .descendants()
         .filter(|n| n.is_element() && n.tag_name().name() == "rel")
     {
-        // Typically emitted as `r:id="rId..."`, but accept a few variants.
-        let Some(rid) = rel
-            .attribute((
-                "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
-                "id",
-            ))
-            .or_else(|| rel.attribute("r:id"))
-            .or_else(|| rel.attribute("id"))
-        else {
+        // Typically emitted as `r:id="rId..."` (prefix varies), but be robust to prefix
+        // differences and missing namespace declarations.
+        let Some(rid) = rel.attribute((REL_NS, "id")).or_else(|| {
+            rel.attributes()
+                .find(|attr| attr.name() == "id" && is_rid(attr.value()))
+                .map(|attr| attr.value())
+        }) else {
             continue;
         };
         out.push(rid.to_string());
     }
 
     Ok(out)
+}
+
+fn is_rid(value: &str) -> bool {
+    let Some(suffix) = value.strip_prefix("rId") else {
+        return false;
+    };
+    !suffix.is_empty() && suffix.as_bytes().iter().all(|b| b.is_ascii_digit())
 }
 
 fn parse_rich_value_rel_rels(bytes: &[u8]) -> Result<HashMap<String, String>, RichDataError> {
@@ -1122,4 +1127,112 @@ fn strip_fragment(target: &str) -> &str {
         .split_once('#')
         .map(|(base, _)| base)
         .unwrap_or(target)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::io::{Cursor, Write};
+
+    use zip::write::FileOptions;
+    use zip::ZipWriter;
+
+    fn build_package(entries: &[(&str, &[u8])]) -> XlsxPackage {
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = ZipWriter::new(cursor);
+        let options =
+            FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+        for (name, bytes) in entries {
+            zip.start_file(*name, options).unwrap();
+            zip.write_all(bytes).unwrap();
+        }
+
+        let bytes = zip.finish().unwrap().into_inner();
+        XlsxPackage::from_bytes(&bytes).expect("read test pkg")
+    }
+
+    #[test]
+    fn extracts_rich_cell_image_with_non_r_prefix_in_rich_value_rel() {
+        let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+        let workbook_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+
+        let sheet_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" vm="1"/>
+    </row>
+  </sheetData>
+</worksheet>"#;
+
+        let metadata_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <metadataTypes count="1">
+    <metadataType name="XLRICHVALUE"/>
+  </metadataTypes>
+  <futureMetadata name="XLRICHVALUE" count="1">
+    <bk>
+      <extLst>
+        <ext uri="{00000000-0000-0000-0000-000000000000}">
+          <xlrd:rvb i="0"/>
+        </ext>
+      </extLst>
+    </bk>
+  </futureMetadata>
+  <valueMetadata count="1">
+    <bk>
+      <rc t="1" v="0"/>
+    </bk>
+  </valueMetadata>
+</metadata>"#;
+
+        let rich_value_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<richValue xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <rv>
+    <v t="rel">0</v>
+  </rv>
+</richValue>"#;
+
+        let rich_value_rel_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<richValueRels xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <rel rel:id="rId1"/>
+</richValueRels>"#;
+
+        let rich_value_rel_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
+</Relationships>"#;
+
+        let pkg = build_package(&[
+            ("xl/workbook.xml", workbook_xml),
+            ("xl/_rels/workbook.xml.rels", workbook_rels),
+            ("xl/worksheets/sheet1.xml", sheet_xml),
+            ("xl/metadata.xml", metadata_xml),
+            ("xl/richData/richValue1.xml", rich_value_xml),
+            ("xl/richData/richValueRel.xml", rich_value_rel_xml),
+            ("xl/richData/_rels/richValueRel.xml.rels", rich_value_rel_rels),
+            ("xl/media/image1.png", b"png-bytes"),
+        ]);
+
+        let images = extract_rich_cell_images(&pkg).expect("extract cell images");
+
+        let key = ("Sheet1".to_string(), CellRef::from_a1("A1").unwrap());
+        assert_eq!(
+            images.get(&key).map(|bytes| bytes.as_slice()),
+            Some(b"png-bytes".as_slice())
+        );
+    }
 }

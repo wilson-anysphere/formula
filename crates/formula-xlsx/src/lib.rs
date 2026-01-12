@@ -140,7 +140,7 @@ pub use writer::{
 pub use xml::XmlDomError;
 
 use formula_model::rich_text::RichText;
-use formula_model::{CellRef, CellValue, Workbook, WorksheetId};
+use formula_model::{CellRef, CellValue, ErrorValue, Workbook, WorksheetId};
 
 /// Excel date system used to interpret serialized dates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -335,6 +335,17 @@ impl XlsxDocument {
         let Some(sheet) = self.workbook.sheet_mut(sheet_id) else {
             return false;
         };
+
+        let old_is_in_cell_image_placeholder = sheet
+            .cell(cell)
+            .is_some_and(|record| matches!(&record.value, CellValue::Error(ErrorValue::Value)));
+        let new_is_in_cell_image_placeholder =
+            matches!(&value, CellValue::Error(ErrorValue::Value));
+        if old_is_in_cell_image_placeholder && !new_is_in_cell_image_placeholder {
+            if let Some(meta) = self.meta.cell_meta.get_mut(&(sheet_id, cell)) {
+                meta.vm = None;
+            }
+        }
         sheet.set_value(cell, value.clone());
 
         let Some(cell_record) = sheet.cell(cell) else {

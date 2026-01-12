@@ -200,9 +200,9 @@ impl XlsxPackage {
                 .part(&sheet_rels_part)
                 .and_then(|bytes| std::str::from_utf8(bytes).ok());
 
-            // Best-effort: if hyperlink parsing fails (malformed file), still extract images.
-            let hyperlinks =
-                parse_worksheet_hyperlinks(sheet_xml, sheet_rels_xml).unwrap_or_default();
+              // Best-effort: if hyperlink parsing fails (malformed file), still extract images.
+              let hyperlinks =
+                  parse_worksheet_hyperlinks(sheet_xml, sheet_rels_xml).unwrap_or_default();
 
             for (cell_ref, vm) in parse_sheet_vm_image_cells(sheet_xml_bytes)? {
                 // First resolve the cell's `vm` into a rich value index when possible.
@@ -313,12 +313,21 @@ fn parse_rich_value_rel_ids(xml: &str) -> Result<Vec<String>, XlsxError> {
             Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"rel" => {
                 for attr in e.attributes() {
                     let attr = attr?;
-                    match attr.key.as_ref() {
-                        b"r:id" | b"id" => {
-                            out.push(attr.unescape_value()?.into_owned());
-                            break;
-                        }
-                        _ => {}
+                    let key = attr.key.as_ref();
+                    let local = key.rsplit(|b| *b == b':').next().unwrap_or(key);
+                    if !local.eq_ignore_ascii_case(b"id") {
+                        continue;
+                    }
+                    let value = attr.unescape_value()?.into_owned();
+                    // Relationship IDs are typically `rIdN` (digits). Be defensive and ignore
+                    // other `id=` attributes.
+                    let trimmed = value.trim();
+                    if trimmed.starts_with("rId")
+                        && trimmed.len() > 3
+                        && trimmed[3..].chars().all(|c| c.is_ascii_digit())
+                    {
+                        out.push(value);
+                        break;
                     }
                 }
             }
