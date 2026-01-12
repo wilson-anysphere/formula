@@ -34540,6 +34540,86 @@
       "id": "mduration_709c85e602af"
     },
     {
+      "formula": "=ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,105,1,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDFPRICE"
+      ],
+      "id": "oddfprice_e5c6c75ebd1f"
+    },
+    {
+      "formula": "=ODDFPRICE(DATE(2020,1,20),DATE(2021,8,15),DATE(2020,1,1),DATE(2020,2,15),0.08,0.07,100,4,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDFPRICE"
+      ],
+      "id": "oddfprice_0694859c0ce1"
+    },
+    {
+      "formula": "=ODDFYIELD(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,105,1,0),105,1,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDFYIELD"
+      ],
+      "id": "oddfyield_8412add68e8b"
+    },
+    {
+      "formula": "=ODDFYIELD(DATE(2020,1,20),DATE(2021,8,15),DATE(2020,1,1),DATE(2020,2,15),0.08,ODDFPRICE(DATE(2020,1,20),DATE(2021,8,15),DATE(2020,1,1),DATE(2020,2,15),0.08,0.07,100,4,0),100,4,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDFYIELD"
+      ],
+      "id": "oddfyield_8ed393f09676"
+    },
+    {
+      "formula": "=ODDLPRICE(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,0.05,105,1,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDLPRICE"
+      ],
+      "id": "oddlprice_f05f7b6f37f3"
+    },
+    {
+      "formula": "=ODDLPRICE(DATE(2021,7,1),DATE(2021,8,15),DATE(2021,6,15),0.08,0.07,100,4,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDLPRICE"
+      ],
+      "id": "oddlprice_9e24539e95ee"
+    },
+    {
+      "formula": "=ODDLYIELD(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,ODDLPRICE(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,0.05,105,1,0),105,1,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDLYIELD"
+      ],
+      "id": "oddlyield_21d13ae5c040"
+    },
+    {
+      "formula": "=ODDLYIELD(DATE(2021,7,1),DATE(2021,8,15),DATE(2021,6,15),0.08,ODDLPRICE(DATE(2021,7,1),DATE(2021,8,15),DATE(2021,6,15),0.08,0.07,100,4,0),100,4,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDLYIELD"
+      ],
+      "id": "oddlyield_26ae2025360d"
+    },
+    {
       "formula": "=ACCRINTM(A1,A2,0.1,1000,0)",
       "outputCell": "C1",
       "inputs": [

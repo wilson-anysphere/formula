@@ -242,11 +242,13 @@ In practice, the current engine behavior (pinned by unit tests and by the **synt
 excel-oracle dataset used in CI) accepts the ODDF\* boundary equalities `issue == settlement` and
 `settlement == first_coupon` (as well as `first_coupon == maturity`). This diverges from the strict
 ordering documented in Microsoft’s `WorksheetFunction` docs; re-validate against real Excel by
-generating a dataset via `tools/excel-oracle/run-excel-oracle.ps1` (Task 393).
+running the oracle harness on Windows + Excel (see "Excel oracle run" below).
+
 The current engine implementation enforces:
 
-- ODDF\*: `issue <= settlement <= first_coupon <= maturity` with `issue < first_coupon` and `settlement < maturity`
-  (allows the equality boundaries `issue == settlement`, `settlement == first_coupon`, and `first_coupon == maturity`)
+- ODDF\*: `issue <= settlement <= first_coupon <= maturity` with `issue < first_coupon` and
+  `settlement < maturity` (allows `issue == settlement`, `settlement == first_coupon`, and
+  `first_coupon == maturity`)
 - ODDL\*: `settlement < maturity` and `last_interest < maturity` (settlement may be before, on, or
   after `last_interest`; see `odd_coupon.rs::oddl_equation`).
 
@@ -284,15 +286,16 @@ dates** (consistent with `COUP*`/`PRICE` behavior).
 
 `basis=4` is **European 30/360** (`DAYS360(..., method=TRUE)`).
 
-For `basis=4`, day counts use `DAYS360(..., TRUE)`, but the modeled coupon-period length `E` is:
+For `basis=4`, day counts are computed via `DAYS360(..., TRUE)`, but the regular coupon-period
+length `E` is modeled as:
 
 ```
 E = 360 / frequency
 ```
 
-Day counts like `A`/`DFC`/`DSC` still use `DAYS360(..., TRUE)`, so for some end-of-month schedules
-involving February `DAYS360(PCD, NCD, TRUE)` can differ from the modeled `E` (e.g. Feb 28 → Aug 31
-yields 182 under European `DAYS360`, not 180).
+This can intentionally differ from `DAYS360(PCD, NCD, TRUE)` between coupon dates for some
+end-of-month schedules involving February (e.g. Feb 28 → Aug 31 yields 182 under European
+`DAYS360`, not 180).
 
 For `basis=4`, the remaining days in the coupon period (`DSC`) are computed as `DSC = E - A`, so
 `DSC` is not always equal to `DAYS360(settlement, NCD, TRUE)` (see

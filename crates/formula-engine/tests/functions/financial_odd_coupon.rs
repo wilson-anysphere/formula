@@ -243,6 +243,20 @@ fn odd_coupon_boundary_date_validations_match_engine_behavior() {
     };
     assert!(yld.is_finite(), "expected finite ODDFYIELD, got {yld}");
 
+    // issue == first_coupon is invalid.
+    if !assert_num_error_or_skip(
+        &mut sheet,
+        "=ODDFPRICE(DATE(2020,7,1),DATE(2025,1,1),DATE(2020,7,1),DATE(2020,7,1),0.05,0.06,100,2,0)",
+    ) {
+        return;
+    }
+    if !assert_num_error_or_skip(
+        &mut sheet,
+        "=ODDFYIELD(DATE(2020,7,1),DATE(2025,1,1),DATE(2020,7,1),DATE(2020,7,1),0.05,99,100,2,0)",
+    ) {
+        return;
+    }
+
     // first_coupon > maturity
     if !assert_num_error_or_skip(&mut sheet, "=ODDFPRICE(DATE(2020,1,1),DATE(2021,7,1),DATE(2019,10,1),DATE(2021,8,1),0.05,0.06,100,2,0)") {
         return;

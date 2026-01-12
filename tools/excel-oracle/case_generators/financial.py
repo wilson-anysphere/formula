@@ -616,6 +616,59 @@ def generate(
         description="basis=0.9",
     )
 
+    # Odd-coupon bond functions (ODDF*/ODDL*) frequency variants + non-par redemption scaling.
+    #
+    # These are intentionally "roundtrip" cases: pick a yield, compute price via ODDF/ODDLPRICE,
+    # then recover the yield via ODDF/ODDLYIELD.
+    add_case(
+        cases,
+        prefix="oddfprice",
+        tags=["financial", "ODDFPRICE"],
+        formula="=ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,105,1,0)",
+    )
+    add_case(
+        cases,
+        prefix="oddfprice",
+        tags=["financial", "ODDFPRICE"],
+        formula="=ODDFPRICE(DATE(2020,1,20),DATE(2021,8,15),DATE(2020,1,1),DATE(2020,2,15),0.08,0.07,100,4,0)",
+    )
+    add_case(
+        cases,
+        prefix="oddfyield",
+        tags=["financial", "ODDFYIELD"],
+        formula="=ODDFYIELD(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,105,1,0),105,1,0)",
+    )
+    add_case(
+        cases,
+        prefix="oddfyield",
+        tags=["financial", "ODDFYIELD"],
+        formula="=ODDFYIELD(DATE(2020,1,20),DATE(2021,8,15),DATE(2020,1,1),DATE(2020,2,15),0.08,ODDFPRICE(DATE(2020,1,20),DATE(2021,8,15),DATE(2020,1,1),DATE(2020,2,15),0.08,0.07,100,4,0),100,4,0)",
+    )
+    add_case(
+        cases,
+        prefix="oddlprice",
+        tags=["financial", "ODDLPRICE"],
+        formula="=ODDLPRICE(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,0.05,105,1,0)",
+    )
+    add_case(
+        cases,
+        prefix="oddlprice",
+        tags=["financial", "ODDLPRICE"],
+        formula="=ODDLPRICE(DATE(2021,7,1),DATE(2021,8,15),DATE(2021,6,15),0.08,0.07,100,4,0)",
+    )
+    add_case(
+        cases,
+        prefix="oddlyield",
+        tags=["financial", "ODDLYIELD"],
+        formula="=ODDLYIELD(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,ODDLPRICE(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,0.05,105,1,0),105,1,0)",
+    )
+    add_case(
+        cases,
+        prefix="oddlyield",
+        tags=["financial", "ODDLYIELD"],
+        formula="=ODDLYIELD(DATE(2021,7,1),DATE(2021,8,15),DATE(2021,6,15),0.08,ODDLPRICE(DATE(2021,7,1),DATE(2021,8,15),DATE(2021,6,15),0.08,0.07,100,4,0),100,4,0)",
+    )
+
     # Accrued interest.
     add_case(
         cases,

@@ -206,13 +206,13 @@ fn coupdays_basis_4_uses_fixed_360_over_frequency_and_preserves_additivity() {
         expected_ncd
     );
     assert_eq!(coupnum(settlement, maturity, 2, 4, system).unwrap(), 1.0);
-
     let expected_daybs =
         date_time::days360(expected_pcd, settlement, true, system).unwrap() as f64;
     assert_eq!(expected_daybs, 75.0);
 
     let expected_days = 360.0 / 2.0;
     assert_eq!(expected_days, 180.0);
+    assert_ne!(expected_days, days360_coupon);
     let expected_daysnc = expected_days - expected_daybs;
     assert_eq!(expected_daysnc, 105.0);
 
