@@ -3,6 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 
 import { PanelIds } from "./panelRegistry.js";
 import { AIChatPanelContainer } from "./ai-chat/AIChatPanelContainer.js";
+import { DataQueriesPanelContainer } from "./data-queries/DataQueriesPanelContainer.js";
 import { QueryEditorPanelContainer } from "./query-editor/QueryEditorPanelContainer.js";
 import { createAIAuditPanel } from "./ai-audit/index.js";
 import { mountPythonPanel } from "./python/index.js";
@@ -182,6 +183,16 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
           invoke={options.invoke as any}
           drainBackendSync={options.drainBackendSync}
         />,
+      );
+      return;
+    }
+
+    if (panelId === PanelIds.DATA_QUERIES) {
+      makeBodyFillAvailableHeight(body);
+      renderReactPanel(
+        panelId,
+        body,
+        <DataQueriesPanelContainer getDocumentController={options.getDocumentController} workbookId={options.workbookId} />,
       );
       return;
     }

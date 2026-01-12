@@ -308,6 +308,7 @@ const gridSecondary = document.getElementById("grid-secondary");
 const gridSplitter = document.getElementById("grid-splitter");
 const openAiPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-ai-panel"]');
 const openAiAuditPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-ai-audit-panel"]');
+const openDataQueriesPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-data-queries-panel"]');
 const openMacrosPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-macros-panel"]');
 const openScriptEditorPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-script-editor-panel"]');
 const openPythonPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-python-panel"]');
@@ -331,6 +332,7 @@ if (
   gridSplitter &&
   openAiPanel &&
   openAiAuditPanel &&
+  openDataQueriesPanel &&
   openMacrosPanel &&
   openScriptEditorPanel &&
   splitVertical &&
@@ -1417,6 +1419,12 @@ if (
     else layoutController.closePanel(PanelIds.AI_AUDIT);
   });
 
+  openDataQueriesPanel.addEventListener("click", () => {
+    const placement = getPanelPlacement(layoutController.layout, PanelIds.DATA_QUERIES);
+    if (placement.kind === "closed") layoutController.openPanel(PanelIds.DATA_QUERIES);
+    else layoutController.closePanel(PanelIds.DATA_QUERIES);
+  });
+
   openMacrosPanel.addEventListener("click", () => {
     const placement = getPanelPlacement(layoutController.layout, PanelIds.MACROS);
     if (placement.kind === "closed") layoutController.openPanel(PanelIds.MACROS);
@@ -1462,7 +1470,7 @@ if (
   paletteOverlay.style.alignItems = "flex-start";
   paletteOverlay.style.justifyContent = "center";
   paletteOverlay.style.paddingTop = "80px";
-  paletteOverlay.style.background = "rgba(0,0,0,0.25)";
+  paletteOverlay.style.background = "var(--dialog-backdrop)";
   paletteOverlay.style.zIndex = "1000";
 
   const palette = document.createElement("div");
@@ -1650,6 +1658,15 @@ if (
   layoutController.on("change", () => renderLayout());
   rerenderLayout = renderLayout;
   renderLayout();
+
+  // Allow panel content to request opening another panel.
+  window.addEventListener("formula:open-panel", (evt) => {
+    const panelId = (evt as any)?.detail?.panelId;
+    if (typeof panelId !== "string") return;
+    const placement = getPanelPlacement(layoutController.layout, panelId);
+    if (placement.kind === "closed") layoutController.openPanel(panelId);
+    else if (placement.kind === "docked") layoutController.activateDockedPanel(panelId, placement.side);
+  });
 }
 
 freezePanes?.addEventListener("click", () => {

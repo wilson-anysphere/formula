@@ -13,6 +13,8 @@ import {
   onDesktopPowerQueryServiceChanged,
 } from "../../power-query/service.js";
 
+import { PanelIds } from "../panelRegistry.js";
+
 import { QueryEditorPanel } from "./QueryEditorPanel.js";
 
 type Props = {
@@ -95,12 +97,55 @@ function hasTauri(): boolean {
   return Boolean((globalThis as any).__TAURI__);
 }
 
+type StorageLike = { getItem(key: string): string | null; setItem(key: string, value: string): void };
+
+function getLocalStorageOrNull(): StorageLike | null {
+  try {
+    const storage = (globalThis as any)?.localStorage as StorageLike | undefined;
+    if (storage && typeof storage.getItem === "function" && typeof storage.setItem === "function") return storage;
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function selectedQueryKey(workbookId: string): string {
+  return `formula.desktop.powerQuery.selectedQuery:${workbookId}`;
+}
+
+function loadSelectedQueryId(workbookId: string): string | null {
+  const storage = getLocalStorageOrNull();
+  if (!storage) return null;
+  try {
+    const raw = storage.getItem(selectedQueryKey(workbookId));
+    return typeof raw === "string" && raw.trim() ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveSelectedQueryId(workbookId: string, queryId: string): void {
+  const storage = getLocalStorageOrNull();
+  if (!storage) return;
+  try {
+    storage.setItem(selectedQueryKey(workbookId), queryId);
+  } catch {
+    // ignore
+  }
+}
+
 export function QueryEditorPanelContainer(props: Props) {
   const workbookId = props.workbookId ?? "default";
   const doc = props.getDocumentController();
   const queryContext = useMemo(() => getContextForDocument(doc), [doc]);
 
   const [service, setService] = useState<DesktopPowerQueryService | null>(() => getDesktopPowerQueryService(workbookId));
+  const serviceRef = useRef<DesktopPowerQueryService | null>(service);
+  serviceRef.current = service;
+  const [queries, setQueries] = useState<Query[]>(() => service?.getQueries?.() ?? []);
+  const [activeQueryId, setActiveQueryId] = useState<string | null>(() => loadSelectedQueryId(workbookId));
+  const activeQueryIdRef = useRef<string | null>(activeQueryId);
+  activeQueryIdRef.current = activeQueryId;
 
   useEffect(() => {
     return onDesktopPowerQueryServiceChanged(workbookId, setService);
@@ -133,6 +178,8 @@ export function QueryEditorPanelContainer(props: Props) {
 
   useEffect(() => {
     hasSeededDefaultQuery.current = false;
+    setQueries(serviceRef.current?.getQueries?.() ?? []);
+    setActiveQueryId(loadSelectedQueryId(workbookId));
     setActiveLoad(null);
     setActiveRefresh(null);
     setActiveRefreshAll(null);
@@ -144,7 +191,15 @@ export function QueryEditorPanelContainer(props: Props) {
 
     const existing = service.getQueries();
     if (existing.length > 0) {
-      setQuery(existing[0]);
+      setQueries(existing);
+      const preferredId = loadSelectedQueryId(workbookId);
+      const selected =
+        (preferredId && existing.find((q) => q.id === preferredId)) ?? existing.find((q) => q.id === activeQueryIdRef.current) ?? existing[0];
+      if (selected) {
+        setActiveQueryId(selected.id);
+        saveSelectedQueryId(workbookId, selected.id);
+        setQuery(selected);
+      }
       return;
     }
 
@@ -153,6 +208,9 @@ export function QueryEditorPanelContainer(props: Props) {
     const seeded = defaultQuery();
     service.setQueries([seeded]);
     hasSeededDefaultQuery.current = true;
+    setQueries([seeded]);
+    setActiveQueryId(seeded.id);
+    saveSelectedQueryId(workbookId, seeded.id);
     setQuery(seeded);
   }, [service, workbookId]);
 
@@ -162,7 +220,15 @@ export function QueryEditorPanelContainer(props: Props) {
     return service.onEvent((evt) => {
       if (evt?.type === "queries:changed") {
         const queries = Array.isArray((evt as any).queries) ? (evt as any).queries : [];
-        setQuery((prev) => queries.find((q: any) => q?.id === prev.id) ?? queries[0] ?? prev);
+        setQueries(queries);
+
+        const preferredId = activeQueryIdRef.current ?? loadSelectedQueryId(workbookId);
+        const selected = (preferredId && queries.find((q: any) => q?.id === preferredId)) ?? queries[0] ?? null;
+        if (selected) {
+          setActiveQueryId(selected.id);
+          saveSelectedQueryId(workbookId, selected.id);
+          setQuery(selected);
+        }
         return;
       }
 
@@ -208,11 +274,35 @@ export function QueryEditorPanelContainer(props: Props) {
         setActiveRefresh((prev) => (prev?.jobId === applyJobId ? null : prev));
       }
     });
-  }, [service]);
+  }, [service, workbookId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handler = (evt: Event) => {
+      const detail = (evt as any)?.detail;
+      if (detail?.panelId !== PanelIds.QUERY_EDITOR) return;
+      const requested = detail?.queryId;
+      if (typeof requested !== "string" || !requested.trim()) return;
+      setActiveQueryId(requested);
+      saveSelectedQueryId(workbookId, requested);
+      const next = serviceRef.current?.getQuery?.(requested) ?? queries.find((q) => q.id === requested);
+      if (next) setQuery(next);
+    };
+    window.addEventListener("formula:open-panel", handler as any);
+    return () => window.removeEventListener("formula:open-panel", handler as any);
+  }, [queries, workbookId]);
 
   function persistQuery(next: Query): void {
     setQuery(next);
     service?.registerQuery(next);
+  }
+
+  function switchActiveQuery(nextQueryId: string): void {
+    const next = service?.getQuery(nextQueryId) ?? queries.find((q) => q.id === nextQueryId);
+    if (!next) return;
+    setActiveQueryId(nextQueryId);
+    saveSelectedQueryId(workbookId, nextQueryId);
+    setQuery(next);
   }
 
   function activeSheetId(): string {
@@ -406,6 +496,13 @@ export function QueryEditorPanelContainer(props: Props) {
       ) : null}
 
       <div style={{ padding: 12, borderBottom: "1px solid var(--border)", display: "flex", flexWrap: "wrap", gap: 8 }}>
+        <select value={activeQueryId ?? query.id} onChange={(e) => switchActiveQuery(e.target.value)} style={{ padding: 6 }}>
+          {queries.map((q) => (
+            <option key={q.id} value={q.id}>
+              {q.name}
+            </option>
+          ))}
+        </select>
         <div style={{ color: "var(--text-muted)", fontSize: 12, marginRight: 8 }}>Source: {describeSource(query.source)}</div>
         <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
           Refresh:

@@ -9,6 +9,7 @@ export const PanelIds = Object.freeze({
   VBA_MIGRATE: "vbaMigrate",
   SCRIPT_EDITOR: "scriptEditor",
   PIVOT_BUILDER: "pivotBuilder",
+  DATA_QUERIES: "dataQueries",
   QUERY_EDITOR: "queryEditor",
   PYTHON: "python",
   SOLVER: "solver",
@@ -233,6 +234,18 @@ panelRegistry.registerPanel(
   },
   { owner: "builtin" },
 );
+
+panelRegistry.registerPanel(
+  PanelIds.DATA_QUERIES,
+  {
+    title: "Data / Queries",
+    defaultDock: "right",
+    defaultFloatingRect: { x: 140, y: 140, width: 720, height: 560 },
+    source: { kind: "builtin" },
+  },
+  { owner: "builtin" },
+);
+
 panelRegistry.registerPanel(
   PanelIds.QUERY_EDITOR,
   {

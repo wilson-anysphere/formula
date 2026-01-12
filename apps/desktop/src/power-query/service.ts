@@ -1,5 +1,7 @@
 import type { Query, RefreshPolicy } from "../../../../packages/power-query/src/model.js";
 import { QueryEngine } from "../../../../packages/power-query/src/engine.js";
+import { OAuth2Manager } from "../../../../packages/power-query/src/oauth2/manager.js";
+import { CredentialStoreOAuthTokenStore } from "../../../../packages/power-query/src/oauth2/credentialStoreTokenStore.js";
 
 import type { QueryExecutionContext } from "../../../../packages/power-query/src/engine.js";
 
@@ -16,6 +18,7 @@ import {
 } from "./refresh.ts";
 import { applyQueryToDocument, type ApplyToDocumentResult, type QuerySheetDestination } from "./applyToDocument.ts";
 import { createPowerQueryRefreshStateStore, type RefreshStateStore } from "./refreshStateStore.ts";
+import { loadOAuth2ProviderConfigs } from "./oauthProviders.ts";
 
 type StorageLike = { getItem(key: string): string | null; setItem(key: string, value: string): void; removeItem(key: string): void };
 
@@ -120,6 +123,12 @@ export class DesktopPowerQueryService {
   readonly document: DocumentController;
   readonly engine: QueryEngine;
   readonly engineError: string | null;
+  readonly credentialStore: {
+    get: (scope: any) => Promise<{ id: string; secret: unknown } | null>;
+    set: (scope: any, secret: unknown) => Promise<{ id: string; secret: unknown }>;
+    delete: (scope: any) => Promise<void>;
+  };
+  readonly oauth2Manager: OAuth2Manager;
 
   private readonly emitter = new Emitter<DesktopPowerQueryServiceEvent>();
   private readonly refreshManager: DesktopPowerQueryRefreshManager;
@@ -134,6 +143,15 @@ export class DesktopPowerQueryService {
     this.getContext = options.getContext ?? (() => getContextForDocument(this.document));
 
     const creds = createPowerQueryCredentialManager({ prompt: options.credentialPrompt });
+    this.credentialStore = creds.store;
+    this.oauth2Manager = new OAuth2Manager({ tokenStore: new CredentialStoreOAuthTokenStore(creds.store as any) });
+    try {
+      for (const provider of loadOAuth2ProviderConfigs(this.workbookId)) {
+        this.oauth2Manager.registerProvider(provider as any);
+      }
+    } catch {
+      // ignore provider config errors; callers can still register providers later
+    }
 
     let engine: QueryEngine;
     let engineError: string | null = null;
@@ -142,7 +160,11 @@ export class DesktopPowerQueryService {
     } else {
       try {
         const dlp = maybeGetPowerQueryDlpContext({ documentId: this.workbookId });
-        engine = createDesktopQueryEngine({ dlp: dlp ?? undefined, onCredentialRequest: creds.onCredentialRequest });
+        engine = createDesktopQueryEngine({
+          dlp: dlp ?? undefined,
+          onCredentialRequest: creds.onCredentialRequest,
+          oauth2Manager: this.oauth2Manager,
+        });
       } catch (err: any) {
         engine = new QueryEngine();
         engineError = err?.message ?? String(err);
@@ -168,6 +190,28 @@ export class DesktopPowerQueryService {
 
     this.unsubscribeRefreshEvents = this.refreshManager.onEvent((evt) => {
       this.emitter.emit(evt);
+
+      if (
+        evt?.type === "apply:completed" &&
+        typeof (evt as any)?.queryId === "string" &&
+        typeof (evt as any)?.result?.rows === "number" &&
+        typeof (evt as any)?.result?.cols === "number"
+      ) {
+        const queryId = String((evt as any).queryId);
+        const result = (evt as any).result;
+        const query = this.queries.get(queryId);
+        const dest = query?.destination as any;
+        if (query && dest && typeof dest === "object" && typeof dest.sheetId === "string") {
+          const nextDestination = { ...dest, lastOutputSize: { rows: result.rows, cols: result.cols } };
+          const updated: Query = { ...query, destination: nextDestination };
+          // Update the in-memory query definition so subsequent refreshes can clear
+          // the previous output rectangle when `clearExisting` is enabled.
+          this.queries.set(queryId, updated);
+          // Keep the refresh manager's copy in sync with the updated destination.
+          (this.refreshManager as any).queries?.set?.(queryId, updated);
+        }
+      }
+
       if (evt?.type === "apply:completed" || evt?.type === "apply:cancelled" || evt?.type === "apply:error") {
         this.persistQueries();
       }
@@ -279,12 +323,12 @@ export class DesktopPowerQueryService {
           throw err;
         }
 
-        const result = await applyQueryToDocument(this.document, query, destination, {
-          engine: this.engine,
-          context: this.getContext(),
-          batchSize: options?.batchSize ?? 1024,
-          signal: controller.signal,
-          label: `Load query: ${query.name}`,
+         const result = await applyQueryToDocument(this.document, query, destination, {
+           engine: this.engine,
+           context: this.getContext(),
+           batchSize: options?.batchSize ?? 1024,
+           signal: controller.signal,
+           label: `Load query: ${query.name}`,
           onProgress: async (evt) => {
             if (evt.type === "batch") {
               this.emitter.emit({ type: "apply:progress", jobId, queryId, rowsWritten: evt.totalRowsWritten });
@@ -292,11 +336,15 @@ export class DesktopPowerQueryService {
           },
         });
 
-        const updated = { ...query, destination };
-        this.registerQuery(updated);
+         const updatedDestination: QuerySheetDestination = {
+           ...destination,
+           lastOutputSize: { rows: result.rows, cols: result.cols },
+         };
+         const updated = { ...query, destination: updatedDestination };
+         this.registerQuery(updated);
 
-        this.emitter.emit({ type: "apply:completed", jobId, queryId, result });
-        return result;
+         this.emitter.emit({ type: "apply:completed", jobId, queryId, result });
+         return result;
       } catch (error) {
         if (controller.signal.aborted || isAbortError(error)) {
           this.emitter.emit({ type: "apply:cancelled", jobId, queryId });
