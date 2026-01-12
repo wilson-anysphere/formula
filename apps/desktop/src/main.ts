@@ -111,6 +111,11 @@ import {
 
 import sampleHelloManifest from "../../../extensions/sample-hello/package.json";
 import { purgeLegacyDesktopLLMSettings } from "./ai/llm/desktopLLMClient.js";
+import {
+  installStartupTimingsListeners,
+  markStartupTimeToInteractive,
+  reportStartupWebviewLoaded,
+} from "./tauri/startupMetrics.js";
 
 // Apply theme + reduced motion settings as early as possible to avoid rendering with
 // default tokens before the user's preference is known.
@@ -123,6 +128,13 @@ window.addEventListener("unload", () => {
     // Best-effort cleanup; ignore failures during teardown.
   }
 });
+
+// Startup performance instrumentation (no-op for web builds).
+void (async () => {
+  await installStartupTimingsListeners();
+  reportStartupWebviewLoaded();
+})();
+
 /**
  * SharedArrayBuffer requires cross-origin isolation (COOP/COEP). When we ship a
  * packaged Tauri build without it, Pyodide cannot use its Worker backend.
@@ -3980,3 +3992,6 @@ try {
 // Expose a small API for Playwright assertions.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (window as any).__formulaApp = app;
+
+// Time-to-interactive instrumentation (best-effort, no-op for web builds).
+void markStartupTimeToInteractive({ whenIdle: () => app.whenIdle() });

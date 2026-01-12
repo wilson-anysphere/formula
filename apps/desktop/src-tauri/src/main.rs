@@ -19,7 +19,8 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tauri::{Emitter, Listener, Manager};
+use std::time::Instant;
+use tauri::{Emitter, Listener, Manager, State};
 use tauri_plugin_notification::NotificationExt;
 use tokio::sync::oneshot;
 use tokio::time::{timeout, Duration};
@@ -39,6 +40,145 @@ struct OpenFileState {
 }
 
 type SharedOpenFileState = Arc<Mutex<OpenFileState>>;
+
+type SharedStartupMetrics = Arc<Mutex<StartupMetrics>>;
+
+#[derive(Clone, Debug, Serialize)]
+struct StartupTimingsSnapshot {
+    #[serde(rename = "window_visible_ms")]
+    window_visible_ms: Option<u64>,
+    #[serde(rename = "webview_loaded_ms")]
+    webview_loaded_ms: Option<u64>,
+    #[serde(rename = "tti_ms")]
+    tti_ms: Option<u64>,
+}
+
+#[derive(Debug)]
+struct StartupMetrics {
+    start: Instant,
+    window_visible_ms: Option<u64>,
+    webview_loaded_ms: Option<u64>,
+    tti_ms: Option<u64>,
+    logged: bool,
+}
+
+impl StartupMetrics {
+    fn new(start: Instant) -> Self {
+        Self {
+            start,
+            window_visible_ms: None,
+            webview_loaded_ms: None,
+            tti_ms: None,
+            logged: false,
+        }
+    }
+
+    fn elapsed_ms(&self) -> u64 {
+        self.start.elapsed().as_millis() as u64
+    }
+
+    fn record_window_visible(&mut self) -> u64 {
+        if let Some(ms) = self.window_visible_ms {
+            return ms;
+        }
+        let ms = self.elapsed_ms();
+        self.window_visible_ms = Some(ms);
+        ms
+    }
+
+    fn record_webview_loaded(&mut self) -> u64 {
+        if let Some(ms) = self.webview_loaded_ms {
+            return ms;
+        }
+        let ms = self.elapsed_ms();
+        self.webview_loaded_ms = Some(ms);
+        ms
+    }
+
+    fn record_tti(&mut self) -> u64 {
+        if let Some(ms) = self.tti_ms {
+            return ms;
+        }
+        let ms = self.elapsed_ms();
+        self.tti_ms = Some(ms);
+        ms
+    }
+
+    fn snapshot(&self) -> StartupTimingsSnapshot {
+        StartupTimingsSnapshot {
+            window_visible_ms: self.window_visible_ms,
+            webview_loaded_ms: self.webview_loaded_ms,
+            tti_ms: self.tti_ms,
+        }
+    }
+
+    fn maybe_log(&mut self) {
+        if self.logged {
+            return;
+        }
+        if !should_log_startup_metrics() {
+            return;
+        }
+        if let (Some(window_visible), Some(tti)) = (self.window_visible_ms, self.tti_ms) {
+            let webview_loaded = self.webview_loaded_ms;
+            println!(
+                "[startup] window_visible_ms={window_visible} webview_loaded_ms={} tti_ms={tti}",
+                webview_loaded
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "n/a".to_string())
+            );
+            self.logged = true;
+        }
+    }
+}
+
+fn should_log_startup_metrics() -> bool {
+    if cfg!(debug_assertions) {
+        return true;
+    }
+    match std::env::var("FORMULA_STARTUP_METRICS") {
+        Ok(raw) => {
+            let v = raw.trim().to_ascii_lowercase();
+            !(v.is_empty() || v == "0" || v == "false")
+        }
+        Err(_) => false,
+    }
+}
+
+#[tauri::command]
+fn report_startup_webview_loaded(app: tauri::AppHandle, state: State<'_, SharedStartupMetrics>) {
+    let shared = state.inner().clone();
+    let (window_visible_ms, webview_loaded_ms, snapshot) = {
+        let mut metrics = shared.lock().unwrap();
+        let window_visible_ms = metrics.record_window_visible();
+        let webview_loaded_ms = metrics.record_webview_loaded();
+        let snapshot = metrics.snapshot();
+        (window_visible_ms, webview_loaded_ms, snapshot)
+    };
+
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.emit("startup:window-visible", window_visible_ms);
+        let _ = window.emit("startup:webview-loaded", webview_loaded_ms);
+        let _ = window.emit("startup:metrics", snapshot);
+    }
+}
+
+#[tauri::command]
+fn report_startup_tti(app: tauri::AppHandle, state: State<'_, SharedStartupMetrics>) {
+    let shared = state.inner().clone();
+    let (tti_ms, snapshot) = {
+        let mut metrics = shared.lock().unwrap();
+        let tti_ms = metrics.record_tti();
+        let snapshot = metrics.snapshot();
+        metrics.maybe_log();
+        (tti_ms, snapshot)
+    };
+
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.emit("startup:tti", tti_ms);
+        let _ = window.emit("startup:metrics", snapshot);
+    }
+}
 
 #[derive(Clone, Debug, Serialize)]
 struct CloseRequestedPayload {
@@ -215,6 +355,10 @@ async fn show_system_notification(
 }
 
 fn main() {
+    // Record a monotonic startup timestamp as early as possible so we can measure
+    // cold start time-to-window-visible / time-to-interactive.
+    let startup_metrics: SharedStartupMetrics = Arc::new(Mutex::new(StartupMetrics::new(Instant::now())));
+
     let state: SharedAppState = Arc::new(Mutex::new(AppState::new()));
     let macro_trust: SharedMacroTrustStore = Arc::new(Mutex::new(
         MacroTrustStore::load_default().unwrap_or_else(|_| {
@@ -280,6 +424,7 @@ fn main() {
         .manage(macro_trust)
         .manage(open_file_state)
         .manage(TrayStatusState::default())
+        .manage(startup_metrics)
         .invoke_handler(tauri::generate_handler![
             commands::open_workbook,
             commands::new_workbook,
@@ -339,8 +484,19 @@ fn main() {
             commands::fire_selection_change,
             tray_status::set_tray_status,
             show_system_notification,
+            report_startup_webview_loaded,
+            report_startup_tti,
         ])
         .on_window_event(|window, event| match event {
+            tauri::WindowEvent::Resized(_)
+            | tauri::WindowEvent::Moved(_)
+            | tauri::WindowEvent::Focused(true) => {
+                if window.label() == "main" {
+                    let startup = window.state::<SharedStartupMetrics>().inner().clone();
+                    let mut metrics = startup.lock().unwrap();
+                    metrics.record_window_visible();
+                }
+            }
             tauri::WindowEvent::CloseRequested { api, .. } => {
                 // Keep the process alive so the tray icon stays available.
                 api.prevent_close();

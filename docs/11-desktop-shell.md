@@ -22,6 +22,23 @@ This document is a “what’s real in the repo” reference for contributors.
   - Global shortcuts: `apps/desktop/src-tauri/src/shortcuts.rs`
   - Updater integration: `apps/desktop/src-tauri/src/updater.rs`
 
+## Startup performance instrumentation
+
+The desktop shell reports real startup timings from the Rust host + webview so we can track cold-start regressions:
+
+- `startup:window-visible` — milliseconds since native process start
+- `startup:webview-loaded` — milliseconds since native process start
+- `startup:tti` — milliseconds since native process start (time-to-interactive)
+
+### Viewing startup timings
+
+- **Dev builds**: the Rust backend prints a single line to stdout once TTI is reported, e.g.
+  ```
+  [startup] window_visible_ms=123 webview_loaded_ms=234 tti_ms=456
+  ```
+- **Release builds**: set `FORMULA_STARTUP_METRICS=1` to enable the same log line.
+- **Frontend access**: the latest metrics are mirrored into `globalThis.__FORMULA_STARTUP_TIMINGS__` (inspect via DevTools).
+
 ---
 
 ## Tauri configuration (v2)
