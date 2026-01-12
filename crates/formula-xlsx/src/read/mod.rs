@@ -1625,6 +1625,7 @@ fn parse_worksheet_into_model(
     let mut current_inline_text: Option<String> = None;
     let mut in_v = false;
     let mut in_f = false;
+    let mut pending_vm_cells: Vec<(CellRef, u32)> = Vec::new();
 
     loop {
         match reader.read_event_into(&mut buf)? {
@@ -1899,13 +1900,11 @@ fn parse_worksheet_into_model(
                     // Skip non-anchor cells inside merged regions. Excel stores the value
                     // (and typically formatting) on the top-left cell only.
                     if worksheet.merged_regions.resolve_cell(cell_ref) == cell_ref {
-                        if let (Some(vm), Some(metadata_part), Some(rich_value_cells)) =
+                        if let (Some(vm), Some(_metadata_part), Some(_rich_value_cells)) =
                             (vm.as_deref(), metadata_part, rich_value_cells.as_mut())
                         {
                             if let Ok(vm_idx) = vm.parse::<u32>() {
-                                if let Some(idx) = metadata_part.vm_to_rich_value_index(vm_idx) {
-                                    rich_value_cells.insert((worksheet_id, cell_ref), idx);
-                                }
+                                pending_vm_cells.push((cell_ref, vm_idx));
                             }
                         }
 
@@ -1995,13 +1994,11 @@ fn parse_worksheet_into_model(
                         cell.formula = formula_in_model;
                         cell.style_id = current_style;
 
-                        if let (Some(vm), Some(metadata_part), Some(rich_value_cells)) =
+                        if let (Some(vm), Some(_metadata_part), Some(_rich_value_cells)) =
                             (current_vm.as_deref(), metadata_part, rich_value_cells.as_mut())
                         {
                             if let Ok(vm_idx) = vm.parse::<u32>() {
-                                if let Some(idx) = metadata_part.vm_to_rich_value_index(vm_idx) {
-                                    rich_value_cells.insert((worksheet_id, cell_ref), idx);
-                                }
+                                pending_vm_cells.push((cell_ref, vm_idx));
                             }
                         }
 
@@ -2125,6 +2122,30 @@ fn parse_worksheet_into_model(
             _ => {}
         }
         buf.clear();
+    }
+
+    // Resolve `c/@vm` values to rich value record indices after parsing the sheet.
+    //
+    // Some producers encode worksheet `vm` values as 0-based, while `xl/metadata.xml` is commonly
+    // 1-based for `<valueMetadata>` `<bk>` indices. When multiple rich values are present, we
+    // cannot represent both index bases simultaneously in a single `HashMap` without collisions.
+    //
+    // To be robust, infer a sheet-local offset: if any cell uses `vm="0"`, treat all worksheet `vm`
+    // values as 0-based and add 1 before resolving.
+    if !pending_vm_cells.is_empty() {
+        if let (Some(metadata_part), Some(rich_value_cells)) = (metadata_part, rich_value_cells) {
+            let vm_offset = pending_vm_cells
+                .iter()
+                .any(|(_cell_ref, vm)| *vm == 0)
+                .then_some(1u32)
+                .unwrap_or(0);
+            for (cell_ref, vm) in pending_vm_cells {
+                let vm = vm.saturating_add(vm_offset);
+                if let Some(idx) = metadata_part.vm_to_rich_value_index(vm) {
+                    rich_value_cells.insert((worksheet_id, cell_ref), idx);
+                }
+            }
+        }
     }
 
     if let Some(groups) = shared_formula_groups {
