@@ -872,11 +872,11 @@ fn digest_alg_from_oid_str(oid: &str) -> Option<crate::DigestAlg> {
     }
 }
 
-fn digest_alg_from_digest_len(len: usize) -> Option<DigestAlg> {
+fn digest_alg_from_digest_len(len: usize) -> Option<crate::DigestAlg> {
     match len {
-        16 => Some(DigestAlg::Md5),
-        20 => Some(DigestAlg::Sha1),
-        32 => Some(DigestAlg::Sha256),
+        16 => Some(crate::DigestAlg::Md5),
+        20 => Some(crate::DigestAlg::Sha1),
+        32 => Some(crate::DigestAlg::Sha256),
         _ => None,
     }
 }
