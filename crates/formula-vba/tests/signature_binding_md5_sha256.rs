@@ -3,7 +3,8 @@
 use std::io::{Cursor, Write};
 
 use formula_vba::{
-    compress_container, content_normalized_data, verify_vba_digital_signature, VbaSignatureBinding,
+    compress_container, content_normalized_data, verify_vba_digital_signature,
+    verify_vba_project_signature_binding, VbaProjectBindingVerification, VbaSignatureBinding,
     VbaSignatureVerification,
 };
 use md5::{Digest as _, Md5};
@@ -146,6 +147,93 @@ fn ms_oshared_md5_digest_bytes_even_when_signeddata_uses_sha256() {
         VbaSignatureBinding::Bound,
         "expected signature binding to be Bound even when DigestInfo.digestAlgorithm is sha256 but digest bytes are MD5"
     );
+}
+
+#[test]
+fn verify_vba_project_signature_binding_md5_digest_bytes_even_when_oid_is_sha256() {
+    use openssl::pkcs7::{Pkcs7, Pkcs7Flags};
+    use openssl::pkey::PKey;
+    use openssl::stack::Stack;
+    use openssl::x509::X509;
+
+    // ---- 1) Build a minimal spec-ish VBA project and compute its MS-OVBA content hash (MD5). ----
+    let module_source = b"Sub Hello()\r\nEnd Sub\r\n";
+    let module_container = compress_container(module_source);
+
+    // Minimal `dir` stream (decompressed form) with a single module.
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        // PROJECTNAME
+        push_record(&mut out, 0x0004, b"VBAProject");
+        // MODULENAME
+        push_record(&mut out, 0x0019, b"Module1");
+        // MODULESTREAMNAME + reserved u16
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"Module1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+        // MODULETYPE (standard)
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes());
+        // MODULETEXTOFFSET
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let project_stream_bytes: &[u8] = b"Name=\"VBAProject\"\r\nModule=Module1\r\n";
+    let vba_project_stream_bytes: &[u8] = b"dummy";
+
+    let unsigned_vba_project_bin = build_vba_project_bin_with_streams(&[
+        ("PROJECT", project_stream_bytes),
+        ("VBA/_VBA_PROJECT", vba_project_stream_bytes),
+        ("VBA/dir", &dir_container),
+        ("VBA/Module1", &module_container),
+    ]);
+
+    let normalized =
+        content_normalized_data(&unsigned_vba_project_bin).expect("ContentNormalizedData");
+    let project_md5: [u8; 16] = Md5::digest(&normalized).into();
+    assert_eq!(project_md5.len(), 16, "VBA project digest must be 16-byte MD5");
+
+    // ---- 2) Construct SpcIndirectDataContent with sha256 OID but MD5 digest bytes. ----
+    let spc_indirect_data_content =
+        build_spc_indirect_data_content_sha256_oid_with_md5_digest(&project_md5);
+
+    // ---- 3) Produce PKCS#7 SignedData using OpenSSL (signing with SHA-256 by default). ----
+    let pkey = PKey::private_key_from_pem(TEST_KEY_PEM.as_bytes()).expect("parse private key");
+    let cert = X509::from_pem(TEST_CERT_PEM.as_bytes()).expect("parse certificate");
+    let extra_certs = Stack::new().expect("create cert stack");
+
+    let pkcs7 = Pkcs7::sign(
+        &cert,
+        &pkey,
+        &extra_certs,
+        &spc_indirect_data_content,
+        Pkcs7Flags::BINARY | Pkcs7Flags::NOATTR,
+    )
+    .expect("pkcs7 sign");
+    let pkcs7_der = pkcs7.to_der().expect("pkcs7 DER");
+
+    // ---- 4) Store signature in a separate signature OLE container (like `vbaProjectSignature.bin`). ----
+    let signature_container_bin =
+        build_vba_project_bin_with_streams(&[("\u{0005}DigitalSignature", pkcs7_der.as_slice())]);
+
+    // ---- 5) Verify binding ----
+    let binding = verify_vba_project_signature_binding(&unsigned_vba_project_bin, &signature_container_bin)
+        .expect("binding verification should succeed");
+
+    let debug = match binding {
+        VbaProjectBindingVerification::BoundVerified(debug) => debug,
+        other => panic!("expected BoundVerified, got {:?}", other),
+    };
+
+    assert_eq!(
+        debug.hash_algorithm_oid.as_deref(),
+        Some("2.16.840.1.101.3.4.2.1")
+    );
+    assert_eq!(debug.hash_algorithm_name.as_deref(), Some("SHA-256"));
+    assert_eq!(debug.signed_digest.as_deref(), Some(project_md5.as_ref()));
+    assert_eq!(debug.computed_digest.as_deref(), Some(project_md5.as_ref()));
 }
 
 fn build_vba_project_bin_with_streams(streams: &[(&str, &[u8])]) -> Vec<u8> {

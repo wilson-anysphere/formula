@@ -1431,7 +1431,7 @@ fn error_type_code(kind: ErrorKind) -> i32 {
     // Keep bytecode ERROR.TYPE semantics aligned with the AST evaluator's mapping.
     // `bytecode::value::ErrorKind` mirrors `crate::value::ErrorKind`, so use the canonical
     // `code()` mapping from the main error kind.
-    i32::from(crate::value::ErrorKind::from(kind).code())
+    i32::from(EngineErrorKind::from(kind).code())
 }
 
 fn fn_error_type(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {

@@ -41,4 +41,3 @@ impl XlsxPackage {
             .collect()
     }
 }
-

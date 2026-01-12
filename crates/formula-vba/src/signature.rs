@@ -2,7 +2,6 @@ use thiserror::Error;
 
 use crate::{
     authenticode::extract_vba_signature_signed_digest,
-    compute_vba_project_digest,
     contents_hash::content_normalized_data,
     DigestAlg,
     normalized_data::forms_normalized_data,
@@ -695,12 +694,11 @@ pub fn verify_vba_signature_certificate_trust(
     verify_pkcs7_trust(signature, &options.trusted_root_certs_der)
 }
 fn digest_name_from_oid_str(oid: &str) -> Option<&'static str> {
-    match oid {
-        "1.2.840.113549.2.5" => Some("MD5"),
-        "1.3.14.3.2.26" => Some("SHA-1"),
-        "2.16.840.1.101.3.4.2.1" => Some("SHA-256"),
-        _ => None,
-    }
+    digest_alg_from_oid_str(oid).map(|alg| match alg {
+        DigestAlg::Md5 => "MD5",
+        DigestAlg::Sha1 => "SHA-1",
+        DigestAlg::Sha256 => "SHA-256",
+    })
 }
 
 fn is_signature_component(component: &str) -> bool {
@@ -1157,6 +1155,9 @@ pub fn verify_vba_project_signature_binding(
 
     let mut any_signed_digest = None::<VbaProjectDigestDebugInfo>;
     let mut first_comparison = None::<VbaProjectDigestDebugInfo>;
+    // Lazily computed MS-OVBA Content/Agile hashes for the project bytes.
+    let mut content_hash_md5: Option<[u8; 16]> = None;
+    let mut agile_hash_md5: Option<Option<[u8; 16]>> = None;
     for payload in payloads {
         let signed = match extract_vba_signature_signed_digest(&payload) {
             Ok(Some(signed)) => signed,
@@ -1165,31 +1166,72 @@ pub fn verify_vba_project_signature_binding(
 
         let mut debug = VbaProjectDigestDebugInfo::default();
         debug.hash_algorithm_oid = Some(signed.digest_algorithm_oid.clone());
+        debug.hash_algorithm_name =
+            digest_name_from_oid_str(&signed.digest_algorithm_oid).map(str::to_owned);
         debug.signed_digest = Some(signed.digest.clone());
 
         if any_signed_digest.is_none() {
             any_signed_digest = Some(debug.clone());
         }
 
-        debug.hash_algorithm_name =
-            digest_name_from_oid_str(&signed.digest_algorithm_oid).map(str::to_owned);
+        // MS-OSHARED §4.3: for VBA signatures, Office stores an MD5 digest in `DigestInfo.digest`
+        // even when `DigestInfo.algorithm` indicates SHA-256.
+        if content_hash_md5.is_none() {
+            let Ok(content_normalized) = content_normalized_data(project_ole) else {
+                continue;
+            };
+            content_hash_md5 = Some(Md5::digest(&content_normalized).into());
 
-        // MS-OSHARED §4.3: the VBA project digest is always MD5 (16 bytes), even if the PKCS#7
-        // signature uses SHA-1/SHA-256 and even if the DigestInfo algorithm OID indicates SHA-256.
-        let computed = compute_vba_project_digest(project_ole, DigestAlg::Md5)?;
-        debug.computed_digest = Some(computed.clone());
+            // Agile Content Hash (MS-OVBA §2.4.2.4) incorporates designer storages. Only compute it
+            // when `FormsNormalizedData` is available.
+            agile_hash_md5 = Some(forms_normalized_data(project_ole).ok().map(|forms| {
+                let mut h = Md5::new();
+                h.update(&content_normalized);
+                h.update(&forms);
+                h.finalize().into()
+            }));
+        }
+
+        let Some(content_hash_md5) = content_hash_md5 else {
+            continue;
+        };
+        let agile_hash_md5 = agile_hash_md5.unwrap_or(None);
+
+        let signed_digest = signed.digest.as_slice();
+
+        // For debug output, pick the digest we actually matched (if any); otherwise surface the
+        // legacy Content Hash (Agile is a strict extension).
+        let computed_for_debug = if signed_digest == content_hash_md5 {
+            content_hash_md5.to_vec()
+        } else if let Some(h) = agile_hash_md5 {
+            if signed_digest == h {
+                h.to_vec()
+            } else {
+                content_hash_md5.to_vec()
+            }
+        } else {
+            content_hash_md5.to_vec()
+        };
+        debug.computed_digest = Some(computed_for_debug);
 
         if first_comparison.is_none() {
             first_comparison = Some(debug.clone());
         }
 
-        if computed == signed.digest {
+        if signed_digest == content_hash_md5 || matches!(agile_hash_md5, Some(h) if signed_digest == h) {
             return Ok(VbaProjectBindingVerification::BoundVerified(debug));
         }
     }
 
     if let Some(debug) = first_comparison {
-        return Ok(VbaProjectBindingVerification::BoundMismatch(debug));
+        // If we couldn't compute the Agile hash, we can't distinguish "truly unbound" from "bound
+        // but forms data missing/unparseable", so treat binding as unknown.
+        let agile_hash_md5 = agile_hash_md5.unwrap_or(None);
+        return Ok(if agile_hash_md5.is_some() {
+            VbaProjectBindingVerification::BoundMismatch(debug)
+        } else {
+            VbaProjectBindingVerification::BoundUnknown(debug)
+        });
     }
 
     Ok(VbaProjectBindingVerification::BoundUnknown(
