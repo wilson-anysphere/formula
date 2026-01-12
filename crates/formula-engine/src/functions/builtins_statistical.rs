@@ -5,9 +5,11 @@ use crate::functions::array_lift;
 use crate::functions::statistical::{RankMethod, RankOrder};
 use crate::functions::{eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
+use crate::simd;
 use crate::value::{Array, ErrorKind, Value};
 
 const VAR_ARGS: usize = 255;
+const SIMD_AGGREGATE_BLOCK: usize = 1024;
 
 fn push_numbers_from_scalar(out: &mut Vec<f64>, value: Value) -> Result<(), ErrorKind> {
     match value {
@@ -327,13 +329,179 @@ inventory::submit! {
 }
 
 fn sumsq_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let values = match collect_numbers(ctx, args) {
-        Ok(v) => v,
-        Err(e) => return Value::Error(e),
+    fn flush(buf: &[f64], sum: &mut f64, c: &mut f64) -> bool {
+        if buf.is_empty() {
+            return false;
+        }
+        let block_sum = simd::sumproduct_ignore_nan_f64(buf, buf);
+        if !block_sum.is_finite() {
+            return true;
+        }
+
+        // Kahan-compensated summation for better numeric stability while still allowing SIMD
+        // acceleration for the hot (squaring + summing) inner loop.
+        let y = block_sum - *c;
+        let t = *sum + y;
+        *c = (t - *sum) - y;
+        *sum = t;
+        !sum.is_finite()
+    }
+
+    let mut sum = 0.0;
+    let mut c = 0.0;
+    let mut saw_nonfinite = false;
+    let mut buf = [0.0_f64; SIMD_AGGREGATE_BLOCK];
+    let mut len = 0usize;
+
+    let push_number = |n: f64,
+                       sum: &mut f64,
+                       c: &mut f64,
+                       saw_nonfinite: &mut bool,
+                       buf: &mut [f64; SIMD_AGGREGATE_BLOCK],
+                       len: &mut usize| {
+        if *saw_nonfinite {
+            return;
+        }
+        if !n.is_finite() {
+            *saw_nonfinite = true;
+            *len = 0;
+            return;
+        }
+
+        buf[*len] = n;
+        *len += 1;
+        if *len == SIMD_AGGREGATE_BLOCK {
+            if flush(&buf[..], sum, c) {
+                *saw_nonfinite = true;
+                *len = 0;
+            } else {
+                *len = 0;
+            }
+        }
     };
-    match crate::functions::statistical::sumsq(&values) {
-        Ok(v) => Value::Number(v),
-        Err(e) => Value::Error(e),
+
+    for expr in args {
+        match ctx.eval_arg(expr) {
+            ArgValue::Scalar(v) => match v {
+                Value::Error(e) => return Value::Error(e),
+                Value::Number(n) => {
+                    push_number(n, &mut sum, &mut c, &mut saw_nonfinite, &mut buf, &mut len);
+                }
+                Value::Bool(b) => {
+                    push_number(
+                        if b { 1.0 } else { 0.0 },
+                        &mut sum,
+                        &mut c,
+                        &mut saw_nonfinite,
+                        &mut buf,
+                        &mut len,
+                    );
+                }
+                Value::Blank => {}
+                Value::Text(s) => {
+                    let n = match Value::Text(s).coerce_to_number() {
+                        Ok(n) => n,
+                        Err(e) => return Value::Error(e),
+                    };
+                    push_number(n, &mut sum, &mut c, &mut saw_nonfinite, &mut buf, &mut len);
+                }
+                Value::Array(arr) => {
+                    for v in arr.iter() {
+                        match v {
+                            Value::Error(e) => return Value::Error(*e),
+                            Value::Number(n) => {
+                                push_number(
+                                    *n,
+                                    &mut sum,
+                                    &mut c,
+                                    &mut saw_nonfinite,
+                                    &mut buf,
+                                    &mut len,
+                                );
+                            }
+                            Value::Lambda(_) => return Value::Error(ErrorKind::Value),
+                            Value::Bool(_)
+                            | Value::Text(_)
+                            | Value::Blank
+                            | Value::Array(_)
+                            | Value::Spill { .. }
+                            | Value::Reference(_)
+                            | Value::ReferenceUnion(_) => {}
+                        }
+                    }
+                }
+                Value::Reference(_)
+                | Value::ReferenceUnion(_)
+                | Value::Lambda(_)
+                | Value::Spill { .. } => return Value::Error(ErrorKind::Value),
+            },
+            ArgValue::Reference(r) => {
+                for addr in ctx.iter_reference_cells(&r) {
+                    match ctx.get_cell_value(&r.sheet_id, addr) {
+                        Value::Error(e) => return Value::Error(e),
+                        Value::Number(n) => {
+                            push_number(
+                                n,
+                                &mut sum,
+                                &mut c,
+                                &mut saw_nonfinite,
+                                &mut buf,
+                                &mut len,
+                            );
+                        }
+                        Value::Lambda(_) => return Value::Error(ErrorKind::Value),
+                        Value::Bool(_)
+                        | Value::Text(_)
+                        | Value::Blank
+                        | Value::Array(_)
+                        | Value::Spill { .. }
+                        | Value::Reference(_)
+                        | Value::ReferenceUnion(_) => {}
+                    }
+                }
+            }
+            ArgValue::ReferenceUnion(ranges) => {
+                let mut seen = HashSet::new();
+                for r in ranges {
+                    for addr in ctx.iter_reference_cells(&r) {
+                        if !seen.insert((r.sheet_id.clone(), addr)) {
+                            continue;
+                        }
+                        match ctx.get_cell_value(&r.sheet_id, addr) {
+                            Value::Error(e) => return Value::Error(e),
+                            Value::Number(n) => {
+                                push_number(
+                                    n,
+                                    &mut sum,
+                                    &mut c,
+                                    &mut saw_nonfinite,
+                                    &mut buf,
+                                    &mut len,
+                                );
+                            }
+                            Value::Lambda(_) => return Value::Error(ErrorKind::Value),
+                            Value::Bool(_)
+                            | Value::Text(_)
+                            | Value::Blank
+                            | Value::Array(_)
+                            | Value::Spill { .. }
+                            | Value::Reference(_)
+                            | Value::ReferenceUnion(_) => {}
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if !saw_nonfinite && len > 0 && flush(&buf[..len], &mut sum, &mut c) {
+        saw_nonfinite = true;
+    }
+
+    if saw_nonfinite || !sum.is_finite() {
+        Value::Error(ErrorKind::Num)
+    } else {
+        Value::Number(sum)
     }
 }
 
