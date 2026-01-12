@@ -80,9 +80,9 @@ because they can “point” to image/rich-value structures elsewhere in the pac
 The repository already has fixtures/tests exercising preservation of these attributes:
 
 ```xml
-<!-- `vm` attribute example (fixtures/xlsx/basic/row-col-attrs.xlsx) -->
-<row r="2" spans="1:1" ht="20" customHeight="1">
-  <c r="A2" vm="1"><v>2</v></c>
+<!-- `vm` attribute example (fixtures/xlsx/metadata/rich-values-vm.xlsx) -->
+<row r="1">
+  <c r="A1" vm="1"><v>1</v></c>
 </row>
 ```
 
@@ -383,6 +383,7 @@ Partially known (fixture-driven details still recommended):
   - Lives in `xl/_rels/workbook.xml.rels`.
   - Observed in `fixtures/xlsx/metadata/rich-values-vm.xlsx`:
     - `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata"`
+  - Preservation is covered by `crates/formula-xlsx/tests/metadata_rich_values_vm_roundtrip.rs`.
 - Workbook → `xl/cellImages.xml` relationship:
   - Lives in `xl/_rels/workbook.xml.rels`.
   - Excel uses a Microsoft-extension relationship `Type` URI that has been observed to vary.
@@ -437,6 +438,7 @@ does not “orphan” images or break Excel’s internal references.
   - Test: `crates/formula-xlsx/tests/cellimages_preservation.rs`
 - **`vm` attribute preservation** on edit is covered by:
   - `crates/formula-xlsx/tests/sheetdata_row_col_attrs.rs` (`editing_a_cell_does_not_strip_unrelated_row_col_or_cell_attrs`)
+  - `crates/formula-xlsx/tests/metadata_rich_values_vm_roundtrip.rs` (also asserts `xl/metadata.xml` is preserved and the workbook relationship to `metadata.xml` remains)
 - **`cm` + `<extLst>` preservation** during cell patching is covered by:
   - `crates/formula-xlsx/tests/cell_metadata_preservation.rs`
 - **Best-effort `xl/metadata.xml` parsing for rich values (`vm` -> richValue index)**
