@@ -190,6 +190,41 @@ Notes:
 - If `persistence` is provided, `connection.docId` (or `options.docId`) must be set; otherwise the session throws.
 - When `presence` is enabled, `session.presence` is a `PresenceManager` instance.
 
+### Schema initialization (default sheet + root normalization)
+
+By default, `createCollabSession` will keep the shared workbook schema well-formed by calling `ensureWorkbookSchema(session.doc, ...)` (from `@formula/collab-workbook`):
+
+- ensures required roots exist (`cells`, `sheets`, `metadata`, `namedRanges`)
+- ensures there is at least one sheet, creating a default sheet when appropriate
+- prunes duplicate sheet ids created by concurrent initialization
+
+To avoid creating “placeholder” sheets that later race with real hydrated state, schema initialization is *gated*:
+
+- when a sync provider is present (e.g. y-websocket), schema init waits until the first `sync=true` event
+- when offline persistence (`options.offline`) or pluggable persistence (`options.persistence`) is enabled, schema init waits until local state has loaded
+
+Advanced control:
+
+- disable entirely with `schema: { autoInit: false }`
+- set default sheet id/name via `schema: { defaultSheetId, defaultSheetName }`
+
+Implementation: see `ensureSchema` inside [`packages/collab/session/src/index.ts`](../packages/collab/session/src/index.ts).
+
+### Collaborative undo scope (what gets undone)
+
+When `createCollabSession({ undo: ... })` is enabled, the session creates a Yjs UndoManager-backed undo service (`session.undo`) that only tracks **local-origin** edits.
+
+The default undo scope includes these shared roots:
+
+- `cells`, `sheets`, `metadata`, `namedRanges`, and the `comments` root
+
+You can include additional roots via:
+
+- `undo.scopeNames` (creates maps by name)
+- `undo.includeRoots(doc)` (include arbitrary Yjs root types)
+
+Some internal roots are intentionally excluded from undo tracking (e.g. `cellStructuralOps`, the structural conflict monitor log), so conflict detection metadata is never undone.
+
 ---
 
 ## Binding Yjs to the desktop workbook model
