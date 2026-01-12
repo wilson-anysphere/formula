@@ -1029,7 +1029,8 @@ Important notes:
   - For the `DigitalSignatureExt` stream variant, Office uses the MS-OVBA §2.4.2 v3 transcript and
     computes `ContentsHashV3` (MS-OVBA §2.4.2.7):
     `ContentsHashV3 = SHA-256(ProjectNormalizedData)`.
-    (See `docs/vba-digital-signatures.md` for transcript details.)
+    (See the `### ProjectNormalizedData (MS-OVBA §2.4.2, ContentsHashV3)` section in
+    `docs/vba-digital-signatures.md` for transcript details.)
     
   Per MS-OSHARED §4.3, for **legacy** signature streams (`DigitalSignature` / `DigitalSignatureEx`),
   the binding digest bytes embedded in VBA signatures are always **MD5 (16 bytes)** even when the
@@ -1106,7 +1107,7 @@ Binding (best-effort; see MS-OVBA):
 2. For v1/v2 streams, compute the MS-OVBA `Content Hash` = `MD5(ContentNormalizedData)` (MS-OVBA §2.4.2.3)
    and the MS-OVBA `Agile Content Hash` = `MD5(ContentNormalizedData || FormsNormalizedData)` (MS-OVBA §2.4.2.4),
    then compare the signed digest bytes to either digest.
-3. For the v3 `DigitalSignatureExt` stream, compute the MS-OVBA `ContentsHashV3`
+3. For the v3 `DigitalSignatureExt` stream, compute the MS-OVBA `ContentsHashV3`:
    `ContentsHashV3 = SHA-256(ProjectNormalizedData)` (MS-OVBA §2.4.2.7) and compare it to the signed
    digest bytes.
 4. `trusted_signed_only` is treated as satisfied only when:
