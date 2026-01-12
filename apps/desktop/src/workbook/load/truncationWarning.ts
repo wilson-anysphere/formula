@@ -56,7 +56,7 @@ export function createWorkbookLoadTruncationWarning(
   const sheetsText = remaining > 0 ? `${sheetSummaries.join("; ")}; +${remaining} more` : sheetSummaries.join("; ");
 
   const hint =
-    "To load more, increase limits (?loadMaxRows=…&loadMaxCols=… in dev, or env VITE_DESKTOP_LOAD_MAX_ROWS/VITE_DESKTOP_LOAD_MAX_COLS).";
+    "To load more, increase limits (?loadMaxRows=…&loadMaxCols=… or env VITE_DESKTOP_LOAD_MAX_ROWS/VITE_DESKTOP_LOAD_MAX_COLS).";
 
   return `Workbook partially loaded (limited to ${capText}). Sheets: ${sheetsText}. ${hint}`;
 }
