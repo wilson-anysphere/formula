@@ -119,11 +119,12 @@ pub struct VbaDigitalSignatureStream {
     /// Verification state (best-effort).
     pub verification: VbaSignatureVerification,
     /// If the signature stream is wrapped in an [MS-OFFCRYPTO] `DigSigInfoSerialized` prefix,
-    /// this is the byte offset (from the start of the stream) where the DER-encoded PKCS#7
-    /// `ContentInfo` begins.
+    /// this is the byte offset (from the start of the stream) where the PKCS#7/CMS `ContentInfo`
+    /// begins.
     pub pkcs7_offset: Option<usize>,
     /// If the signature stream is wrapped in an [MS-OFFCRYPTO] `DigSigInfoSerialized` prefix,
-    /// this is the length (in bytes) of the DER-encoded PKCS#7 `ContentInfo`.
+    /// this is the length (in bytes) of the PKCS#7/CMS `ContentInfo` TLV (supports both strict DER
+    /// and BER/indefinite-length encodings).
     pub pkcs7_len: Option<usize>,
     /// Best-effort DigestInfo algorithm OID extracted from Authenticode's
     /// `SpcIndirectDataContent` (if present).
@@ -915,8 +916,8 @@ fn parse_pkcs7_with_offset(signature: &[u8]) -> Option<(openssl::pkcs7::Pkcs7, u
         }
     }
 
-    // Some producers include a small header before the DER-encoded PKCS#7 payload. Try parsing
-    // from the start first, then scan for an embedded DER SEQUENCE that parses as PKCS#7.
+    // Some producers include a small header before the PKCS#7 payload. Try parsing from the start
+    // first, then scan for an embedded SEQUENCE that parses as PKCS#7.
     if let Some(pkcs7) = parse_pkcs7_exact(signature) {
         return Some((pkcs7, 0));
     }
