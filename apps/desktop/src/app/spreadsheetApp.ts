@@ -92,6 +92,9 @@ type AuditingCacheEntry = {
 };
 
 const MAX_KEYBOARD_FORMATTING_CELLS = 50_000;
+// Encode (row, col) into a single numeric key for allocation-free lookups.
+// `16_384` matches Excel's maximum column count, so the mapping is collision-free for Excel-sized sheets.
+const COMMENT_COORD_COL_STRIDE = 16_384;
 
 function isThenable(value: unknown): value is PromiseLike<unknown> {
   return typeof (value as { then?: unknown } | null)?.then === "function";
@@ -924,7 +927,7 @@ export class SpreadsheetApp {
         colCount: this.limits.maxCols + headerCols,
         showFormulas: () => this.showFormulas,
         getComputedValue: (cell) => this.getCellComputedValue(cell),
-        getCommentMeta: (row, col) => this.commentMetaByCoord.get(row * 16_384 + col) ?? null
+        getCommentMeta: (row, col) => this.commentMetaByCoord.get(row * COMMENT_COORD_COL_STRIDE + col) ?? null
       });
 
       this.sharedGrid = new DesktopSharedGrid({
@@ -2803,7 +2806,7 @@ export class SpreadsheetApp {
     }
 
     const docCell = this.docCellFromGridCell(picked);
-    const metaKey = docCell.row * 16_384 + docCell.col;
+    const metaKey = docCell.row * COMMENT_COORD_COL_STRIDE + docCell.col;
     if (!this.commentMetaByCoord.has(metaKey)) {
       this.hideCommentTooltip();
       return;
@@ -3000,7 +3003,7 @@ export class SpreadsheetApp {
    */
   activeCellHasComment(): boolean {
     const cell = this.selection.active;
-    return this.commentMetaByCoord.has(cell.row * 16_384 + cell.col);
+    return this.commentMetaByCoord.has(cell.row * COMMENT_COORD_COL_STRIDE + cell.col);
   }
 
   toggleCommentsPanel(): void {
@@ -3178,7 +3181,7 @@ export class SpreadsheetApp {
       }
 
       const coord = parseA1(cellRef);
-      const coordKey = coord.row * 16_384 + coord.col;
+      const coordKey = coord.row * COMMENT_COORD_COL_STRIDE + coord.col;
       const existingCoord = this.commentMetaByCoord.get(coordKey);
       if (!existingCoord) this.commentMetaByCoord.set(coordKey, { resolved });
       else existingCoord.resolved = existingCoord.resolved && resolved;
@@ -3559,7 +3562,7 @@ export class SpreadsheetApp {
         const row = rows[visualRow]!;
         for (let visualCol = 0; visualCol < cols.length; visualCol++) {
           const col = cols[visualCol]!;
-          const meta = this.commentMetaByCoord.get(row * 16_384 + col);
+          const meta = this.commentMetaByCoord.get(row * COMMENT_COORD_COL_STRIDE + col);
           if (!meta) continue;
           const resolved = meta.resolved ?? false;
           drawCommentIndicator(ctx, {
@@ -5857,7 +5860,7 @@ export class SpreadsheetApp {
     }
 
     const cell = this.cellFromPoint(x, y);
-    const metaKey = cell.row * 16_384 + cell.col;
+    const metaKey = cell.row * COMMENT_COORD_COL_STRIDE + cell.col;
     if (!this.commentMetaByCoord.has(metaKey)) {
       this.hideCommentTooltip();
       return;
