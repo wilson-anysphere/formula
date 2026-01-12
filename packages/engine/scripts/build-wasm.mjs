@@ -271,7 +271,10 @@ function defaultWasmConcurrency() {
   return {
     jobs,
     makeflags: process.env.MAKEFLAGS ?? `-j${jobs}`,
-    rustflags: process.env.RUSTFLAGS ?? `-C codegen-units=${jobs}`,
+    // Prefer setting codegen units via Cargo profile env vars rather than forcing `RUSTFLAGS`.
+    // This avoids overriding other profile configuration and matches the approach used by
+    // `scripts/cargo_agent.sh` on multi-agent hosts.
+    releaseCodegenUnits: process.env.CARGO_PROFILE_RELEASE_CODEGEN_UNITS?.trim() || jobs,
     rayonThreads:
       process.env.RAYON_NUM_THREADS ??
       process.env.FORMULA_RAYON_NUM_THREADS ??
@@ -290,7 +293,7 @@ function defaultWasmConcurrency() {
   };
 }
 
-function runWasmPack({ jobs, makeflags, rustflags, rayonThreads, binaryenCores }) {
+function runWasmPack({ jobs, makeflags, releaseCodegenUnits, rayonThreads, binaryenCores }) {
   return spawnSync(
     wasmPackBin,
     [
@@ -316,7 +319,7 @@ function runWasmPack({ jobs, makeflags, rustflags, rayonThreads, binaryenCores }
         // if the caller didn't source `scripts/agent-init.sh`.
         CARGO_BUILD_JOBS: jobs,
         MAKEFLAGS: makeflags,
-        RUSTFLAGS: rustflags,
+        CARGO_PROFILE_RELEASE_CODEGEN_UNITS: releaseCodegenUnits,
         // Rayon defaults to spawning one thread per core. On multi-agent hosts this can be very
         // large and can even fail to initialize ("Resource temporarily unavailable"). Default it
         // to our safe cargo job count unless explicitly overridden by the caller.
@@ -347,6 +350,7 @@ if ((result.status ?? 0) !== 0) {
     process.env.CARGO_BUILD_JOBS ||
     process.env.MAKEFLAGS ||
     process.env.RUSTFLAGS ||
+    process.env.CARGO_PROFILE_RELEASE_CODEGEN_UNITS ||
     process.env.RAYON_NUM_THREADS ||
     process.env.FORMULA_RAYON_NUM_THREADS ||
     process.env.BINARYEN_CORES ||
@@ -357,7 +361,7 @@ if ((result.status ?? 0) !== 0) {
     result = runWasmPack({
       jobs: "1",
       makeflags: "-j1",
-      rustflags: "-C codegen-units=1",
+      releaseCodegenUnits: "1",
       rayonThreads: "1",
       binaryenCores: "1",
     });
