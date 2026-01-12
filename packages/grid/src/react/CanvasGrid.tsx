@@ -316,6 +316,12 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   const hThumbRef = useRef<HTMLDivElement | null>(null);
 
   const scrollbarLayoutRef = useRef<{ inset: number; corner: number }>({ inset: 0, corner: 0 });
+  const scrollbarThumbRef = useRef<{ vSize: number | null; vOffset: number | null; hSize: number | null; hOffset: number | null }>({
+    vSize: null,
+    vOffset: null,
+    hSize: null,
+    hOffset: null
+  });
 
   const rendererRef = useRef<CanvasGridRenderer | null>(null);
   const onSelectionChangeRef = useRef(props.onSelectionChange);
@@ -493,8 +499,15 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       minThumbSize
     });
 
-    vThumb.style.height = `${vThumbMetrics.size}px`;
-    vThumb.style.transform = `translateY(${vThumbMetrics.offset}px)`;
+    const prevThumb = scrollbarThumbRef.current;
+    if (prevThumb.vSize !== vThumbMetrics.size) {
+      vThumb.style.height = `${vThumbMetrics.size}px`;
+      prevThumb.vSize = vThumbMetrics.size;
+    }
+    if (prevThumb.vOffset !== vThumbMetrics.offset) {
+      vThumb.style.transform = `translateY(${vThumbMetrics.offset}px)`;
+      prevThumb.vOffset = vThumbMetrics.offset;
+    }
 
     const hThumbMetrics = computeScrollbarThumb({
       scrollPos: scroll.x,
@@ -504,8 +517,14 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       minThumbSize
     });
 
-    hThumb.style.width = `${hThumbMetrics.size}px`;
-    hThumb.style.transform = `translateX(${hThumbMetrics.offset}px)`;
+    if (prevThumb.hSize !== hThumbMetrics.size) {
+      hThumb.style.width = `${hThumbMetrics.size}px`;
+      prevThumb.hSize = hThumbMetrics.size;
+    }
+    if (prevThumb.hOffset !== hThumbMetrics.offset) {
+      hThumb.style.transform = `translateX(${hThumbMetrics.offset}px)`;
+      prevThumb.hOffset = hThumbMetrics.offset;
+    }
   };
 
   const setZoomInternal = (nextZoom: number, options?: { anchorX?: number; anchorY?: number; force?: boolean }) => {

@@ -156,6 +156,8 @@ export class DesktopSharedGrid {
     | { showV: boolean; showH: boolean; frozenWidth: number; frozenHeight: number }
     | null = null;
 
+  private lastScrollbarThumb: { vSize: number | null; hSize: number | null } = { vSize: null, hSize: null };
+
   private readonly frozenRows: number;
   private readonly frozenCols: number;
   private readonly headerRows: number;
@@ -1960,8 +1962,13 @@ export class DesktopSharedGrid {
         trackSize
       });
 
-      this.vThumb.style.height = `${thumb.size}px`;
+      if (this.lastScrollbarThumb.vSize !== thumb.size) {
+        this.vThumb.style.height = `${thumb.size}px`;
+        this.lastScrollbarThumb.vSize = thumb.size;
+      }
       this.vThumb.style.transform = `translateY(${thumb.offset}px)`;
+    } else {
+      this.lastScrollbarThumb.vSize = null;
     }
 
     if (showH) {
@@ -1975,8 +1982,13 @@ export class DesktopSharedGrid {
         trackSize
       });
 
-      this.hThumb.style.width = `${thumb.size}px`;
+      if (this.lastScrollbarThumb.hSize !== thumb.size) {
+        this.hThumb.style.width = `${thumb.size}px`;
+        this.lastScrollbarThumb.hSize = thumb.size;
+      }
       this.hThumb.style.transform = `translateX(${thumb.offset}px)`;
+    } else {
+      this.lastScrollbarThumb.hSize = null;
     }
   }
 
