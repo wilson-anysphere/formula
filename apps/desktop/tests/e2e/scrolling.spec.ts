@@ -166,6 +166,48 @@ test.describe("grid scrolling + virtualization", () => {
     expect(scrollAfter.y).toBeCloseTo(scrollBefore.y, 5);
   });
 
+  test("programmatic selection sync can opt out of focusing the grid in shared-grid mode (split-pane)", async ({ page }) => {
+    await gotoDesktop(page, "/?grid=shared");
+    await waitForIdle(page);
+
+    const grid = page.locator("#grid");
+
+    // Scroll down so A1 is offscreen (to also ensure focus suppression doesn't accidentally scroll).
+    await grid.hover({ position: { x: 60, y: 40 } });
+    await page.mouse.wheel(0, 300 * 24);
+    await expect.poll(async () => {
+      return await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
+    }).toBeGreaterThan(0);
+
+    // Focus an element outside the grid (name box / formula address).
+    const address = page.getByTestId("formula-address");
+    await address.click();
+    await expect(address).toBeFocused();
+
+    const scrollBefore = await page.evaluate(() => (window as any).__formulaApp.getScroll());
+
+    await page.evaluate(() => {
+      (window as any).__formulaApp.activateCell({ row: 0, col: 0 }, { scrollIntoView: false, focus: false });
+    });
+
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+    await expect(address).toBeFocused();
+
+    await page.evaluate(() => {
+      (window as any).__formulaApp.selectRange(
+        { range: { startRow: 0, startCol: 0, endRow: 1, endCol: 1 } },
+        { scrollIntoView: false, focus: false }
+      );
+    });
+
+    await expect(page.getByTestId("selection-range")).toHaveText("A1:B2");
+    await expect(address).toBeFocused();
+
+    const scrollAfter = await page.evaluate(() => (window as any).__formulaApp.getScroll());
+    expect(scrollAfter.x).toBeCloseTo(scrollBefore.x, 5);
+    expect(scrollAfter.y).toBeCloseTo(scrollBefore.y, 5);
+  });
+
   test("programmatic range selection sync can opt out of scrolling (split-pane)", async ({ page }) => {
     await gotoDesktop(page);
     await waitForIdle(page);
