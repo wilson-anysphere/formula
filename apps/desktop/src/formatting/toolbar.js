@@ -54,10 +54,6 @@ function ensureSafeFormattingRange(rangeOrRanges) {
       continue;
     }
     const cellCount = rangeCellCount(r);
-    // DocumentController.setRangeFormat stores very large rectangles as compressed "range runs"
-    // (sheet.formatRunsByCol) rather than enumerating per-cell overrides, so those ranges are
-    // safe to apply even if they are larger than our per-cell cap.
-    if (cellCount > MAX_RANGE_FORMATTING_CELLS) continue;
     totalCells += cellCount;
     if (totalCells > MAX_RANGE_FORMATTING_CELLS) {
       try {

@@ -99,7 +99,7 @@ export function showToast(message, type = "info", options = {}) {
 }
 
 /**
- * @typedef {{ prompt?: string; value?: string; placeHolder?: string }} InputBoxOptions
+ * @typedef {{ prompt?: string; value?: string; placeHolder?: string; type?: "text" | "password" | "textarea" }} InputBoxOptions
  */
 
 /**
@@ -117,14 +117,30 @@ export async function showInputBox(options = {}) {
   title.id = nextExtensionsUiDialogTitleId("input-box");
   dialog.setAttribute("aria-labelledby", title.id);
 
-  const input = document.createElement("input");
-  input.type = "text";
-  input.className = "dialog__field";
-  input.value = options.value ?? "";
-  if (options.placeHolder) input.placeholder = options.placeHolder;
-  // The dialog title doubles as the input label.
-  input.setAttribute("aria-labelledby", title.id);
-  input.dataset.testid = "input-box-field";
+  const kind = options.type ?? "text";
+  /** @type {HTMLInputElement | HTMLTextAreaElement} */
+  const field = (() => {
+    if (kind === "textarea") {
+      const textarea = document.createElement("textarea");
+      textarea.className = "dialog__field";
+      textarea.value = options.value ?? "";
+      if (options.placeHolder) textarea.placeholder = options.placeHolder;
+      // The dialog title doubles as the input label.
+      textarea.setAttribute("aria-labelledby", title.id);
+      textarea.dataset.testid = "input-box-field";
+      return textarea;
+    }
+
+    const input = document.createElement("input");
+    input.type = kind === "password" ? "password" : "text";
+    input.className = "dialog__field";
+    input.value = options.value ?? "";
+    if (options.placeHolder) input.placeholder = options.placeHolder;
+    // The dialog title doubles as the input label.
+    input.setAttribute("aria-labelledby", title.id);
+    input.dataset.testid = "input-box-field";
+    return input;
+  })();
 
   const controls = document.createElement("div");
   controls.className = "dialog__controls";
@@ -143,7 +159,7 @@ export async function showInputBox(options = {}) {
   controls.appendChild(okBtn);
 
   dialog.appendChild(title);
-  dialog.appendChild(input);
+  dialog.appendChild(field);
   dialog.appendChild(controls);
 
   document.body.appendChild(dialog);
@@ -159,7 +175,7 @@ export async function showInputBox(options = {}) {
         // @ts-expect-error - returnValue not modeled on jsdom's dialog typings.
         const returnValue = String(dialog.returnValue ?? "");
         cleanup();
-        resolve(returnValue === "ok" ? input.value : null);
+        resolve(returnValue === "ok" ? field.value : null);
       },
       { once: true },
     );
@@ -173,12 +189,20 @@ export async function showInputBox(options = {}) {
     okBtn.addEventListener("click", () => closeDialog(dialog, "ok"));
 
     showModal(dialog);
-    input.focus();
+    field.focus();
 
-    input.addEventListener("keydown", (e) => {
+    field.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
-        e.preventDefault();
-        closeDialog(dialog, "ok");
+        if (field.tagName === "TEXTAREA") {
+          // Excel/VSC-style behavior: allow multi-line values, submit on Ctrl/Cmd+Enter.
+          if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            closeDialog(dialog, "ok");
+          }
+        } else {
+          e.preventDefault();
+          closeDialog(dialog, "ok");
+        }
       } else if (e.key === "Escape") {
         e.preventDefault();
         closeDialog(dialog, "cancel");
@@ -324,4 +348,3 @@ export async function showQuickPick(items, options = {}) {
     }
   });
 }
-
