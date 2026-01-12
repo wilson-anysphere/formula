@@ -50,6 +50,7 @@ mod read;
 #[cfg(not(target_arch = "wasm32"))]
 mod reader;
 mod relationships;
+pub mod rich_data;
 pub mod shared_strings;
 mod sheet_metadata;
 pub mod streaming;
@@ -98,6 +99,7 @@ pub use read::{load_from_bytes, read_workbook_model_from_bytes, read_workbook_mo
 pub use read::load_from_path;
 #[cfg(not(target_arch = "wasm32"))]
 pub use reader::{read_workbook, read_workbook_from_reader};
+pub use rich_data::metadata::parse_value_metadata_vm_to_rich_value_index_map;
 pub use sheet_metadata::{
     parse_sheet_tab_color, parse_workbook_sheets, write_sheet_tab_color, write_workbook_sheets,
     WorkbookSheetInfo,
