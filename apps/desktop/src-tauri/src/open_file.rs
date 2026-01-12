@@ -106,6 +106,9 @@ fn normalize_open_file_candidate(arg: &str, cwd: Option<&Path>) -> Option<PathBu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
+
+    use serde_json::Value;
     use tempfile::tempdir;
 
     #[test]
@@ -133,6 +136,44 @@ mod tests {
         ];
         let paths = extract_open_file_paths_from_argv(&argv, None);
         assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn supported_extensions_cover_tauri_file_associations() {
+        let conf = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tauri.conf.json"));
+        let conf: Value = serde_json::from_str(conf).expect("parse tauri.conf.json");
+
+        let mut advertised: BTreeSet<String> = BTreeSet::new();
+        let associations = conf
+            .get("bundle")
+            .and_then(|b| b.get("fileAssociations"))
+            .and_then(|fa| fa.as_array())
+            .expect("tauri.conf.json must contain bundle.fileAssociations");
+
+        for assoc in associations {
+            let exts = assoc.get("ext").and_then(|ext| ext.as_array());
+            let Some(exts) = exts else { continue };
+            for ext in exts {
+                let Some(ext) = ext.as_str() else { continue };
+                let ext = ext.trim();
+                if ext.is_empty() {
+                    continue;
+                }
+                advertised.insert(ext.to_ascii_lowercase());
+            }
+        }
+
+        // Desktop builds enable Parquet support, but unit tests may compile without the `parquet`
+        // feature. Only assert on parquet when it is enabled.
+        #[cfg(not(feature = "parquet"))]
+        advertised.remove("parquet");
+
+        for ext in advertised {
+            assert!(
+                SUPPORTED_EXTENSIONS.contains(&ext.as_str()),
+                "tauri.conf.json advertises extension `{ext}` but it is missing from SUPPORTED_EXTENSIONS"
+            );
+        }
     }
 
     #[test]
