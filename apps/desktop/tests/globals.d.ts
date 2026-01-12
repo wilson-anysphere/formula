@@ -12,7 +12,7 @@ declare global {
     __formulaCommandRegistry?: unknown;
     __formulaExtensionHostManager?: unknown;
     __formulaExtensionHost?: unknown;
+    __formulaSecondaryGrid?: unknown;
     __workbookSheetStore?: unknown;
   }
 }
-

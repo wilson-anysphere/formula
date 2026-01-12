@@ -920,12 +920,9 @@ const app = new SpreadsheetApp(
 
 // Expose a small API for Playwright assertions early so e2e can still attach even if
 // optional desktop integrations (e.g. Tauri host wiring) fail during startup.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-(window as any).__formulaApp = app;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-(app as any).getWorkbookSheetStore = () => workbookSheetStore;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-(window as any).__workbookSheetStore = workbookSheetStore;
+window.__formulaApp = app;
+(app as unknown as { getWorkbookSheetStore: () => unknown }).getWorkbookSheetStore = () => workbookSheetStore;
+window.__workbookSheetStore = workbookSheetStore;
 
 // Panels persist state keyed by a workbook/document identifier. For file-backed workbooks we use
 // their on-disk path; for unsaved sessions we generate a random session id so distinct new
@@ -2019,8 +2016,7 @@ let updateContextKeys: (selection?: SelectionState | null) => void = () => {};
 
 // Expose for Playwright e2e so tests can execute commands by id without going
 // through UI affordances.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-(window as any).__formulaCommandRegistry = commandRegistry;
+window.__formulaCommandRegistry = commandRegistry;
 
 // --- Sheet tabs (Excel-like multi-sheet UI) -----------------------------------
 
@@ -3532,8 +3528,7 @@ if (
       }
       stopPrimarySplitPanePersistence();
       primaryPaneViewportRestored = false;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).__formulaSecondaryGrid = null;
+      window.__formulaSecondaryGrid = null;
       flushSplitPanePersist();
       gridRoot.dataset.splitActive = "false";
       gridSecondaryEl.dataset.splitActive = "false";
@@ -3624,8 +3619,7 @@ if (
     }
  
     // Expose for Playwright (secondary pane autofill).
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (window as any).__formulaSecondaryGrid = secondaryGridView.grid;
+    window.__formulaSecondaryGrid = secondaryGridView.grid;
     const active = split.activePane ?? "primary";
     gridRoot.dataset.splitActive = active === "primary" ? "true" : "false";
     gridSecondaryEl.dataset.splitActive = active === "secondary" ? "true" : "false";
@@ -8993,8 +8987,7 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
   );
   installSheetStoreSubscription();
   // Keep the e2e harness up-to-date when we swap the store after opening a workbook.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (window as any).__workbookSheetStore = workbookSheetStore;
+  window.__workbookSheetStore = workbookSheetStore;
 
   const { maxRows: MAX_ROWS, maxCols: MAX_COLS, chunkRows: CHUNK_ROWS } = getWorkbookLoadLimits();
   // Backend-enforced Tauri limits for `get_range` requests. Keep in sync with:
@@ -10328,14 +10321,10 @@ try {
 }
 
 // Expose a small API for Playwright assertions.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-(window as any).__formulaApp = app;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-(window as any).__formulaExtensionHostManager = extensionHostManagerForE2e;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-(window as any).__formulaExtensionHost = extensionHostManagerForE2e?.host ?? null;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-(window as any).__workbookSheetStore = workbookSheetStore;
+window.__formulaApp = app;
+window.__formulaExtensionHostManager = extensionHostManagerForE2e;
+window.__formulaExtensionHost = extensionHostManagerForE2e?.host ?? null;
+window.__workbookSheetStore = workbookSheetStore;
 
 // Time-to-interactive instrumentation (best-effort, no-op for web builds).
 void markStartupTimeToInteractive({ whenIdle: () => app.whenIdle() }).catch(() => {});
