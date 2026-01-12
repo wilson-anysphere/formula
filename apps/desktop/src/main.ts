@@ -2422,8 +2422,10 @@ function installSheetStoreSubscription(): void {
 
           if (before.visibility !== after.visibility) {
             try {
-              if (before.visibility === "visible" && after.visibility !== "visible") {
+              if (before.visibility === "visible" && after.visibility === "hidden") {
                 doc.hideSheet(sheetId);
+              } else if (before.visibility === "visible" && after.visibility === "veryHidden") {
+                doc.setSheetVisibility(sheetId, after.visibility, { label: "Hide Sheet" });
               } else if (before.visibility !== "visible" && after.visibility === "visible") {
                 doc.unhideSheet(sheetId);
               } else {
