@@ -720,4 +720,152 @@ mod write_xlsx_from_storage_tests {
 
         Ok(())
     }
+
+    #[test]
+    fn write_xlsx_from_storage_reapplies_power_query_part() -> anyhow::Result<()> {
+        let storage = formula_storage::Storage::open_in_memory().context("open in-memory storage")?;
+
+        let mut workbook_meta = AppWorkbook::new_empty(None);
+        workbook_meta.add_sheet("Sheet1".to_string());
+        workbook_meta.ensure_sheet_ids();
+        workbook_meta.sheets[0].set_cell(
+            0,
+            0,
+            Cell::from_literal(Some(CellScalar::Text("hello".to_string()))),
+        );
+        let power_query_xml = b"<formula><powerQuery><![CDATA[{\"query\":\"test\"}]]></powerQuery></formula>".to_vec();
+        workbook_meta.power_query_xml = Some(power_query_xml.clone());
+
+        let workbook_id = import_app_workbook(&storage, &workbook_meta)?;
+
+        let tmp = tempfile::tempdir().context("temp dir")?;
+        let out_path = tmp.path().join("power-query.xlsx");
+        let bytes = write_xlsx_from_storage(&storage, workbook_id, &workbook_meta, &out_path)
+            .context("export workbook with power query")?;
+
+        let pkg =
+            formula_xlsx::XlsxPackage::from_bytes(bytes.as_ref()).context("parse exported package")?;
+        let out_power_query = pkg
+            .part("xl/formula/power-query.xml")
+            .context("expected xl/formula/power-query.xml to be present")?;
+        assert_eq!(
+            out_power_query,
+            power_query_xml.as_slice(),
+            "expected power query part bytes to round-trip"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn write_xlsx_from_storage_reapplies_preserved_drawing_parts() -> anyhow::Result<()> {
+        let fixture_path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/xlsx/basic/image.xlsx");
+        let workbook_meta =
+            crate::file_io::read_xlsx_blocking(&fixture_path).context("read image fixture")?;
+        let preserved = workbook_meta
+            .preserved_drawing_parts
+            .as_ref()
+            .context("expected image fixture to have preserved drawing parts")?;
+
+        let expected_image = preserved
+            .parts
+            .get("xl/media/image1.png")
+            .context("expected preserved drawing parts to contain xl/media/image1.png")?;
+        let expected_drawing = preserved
+            .parts
+            .get("xl/drawings/drawing1.xml")
+            .context("expected preserved drawing parts to contain xl/drawings/drawing1.xml")?;
+
+        let storage = formula_storage::Storage::open_in_memory().context("open in-memory storage")?;
+        let workbook_id = import_app_workbook(&storage, &workbook_meta)?;
+
+        let tmp = tempfile::tempdir().context("temp dir")?;
+        let out_path = tmp.path().join("image.xlsx");
+        let bytes = write_xlsx_from_storage(&storage, workbook_id, &workbook_meta, &out_path)
+            .context("export workbook with preserved drawings")?;
+
+        let pkg =
+            formula_xlsx::XlsxPackage::from_bytes(bytes.as_ref()).context("parse exported package")?;
+        let out_image = pkg
+            .part("xl/media/image1.png")
+            .context("expected xl/media/image1.png to be present in output")?;
+        assert_eq!(
+            out_image,
+            expected_image.as_slice(),
+            "expected image part to be copied byte-for-byte"
+        );
+
+        let out_drawing = pkg
+            .part("xl/drawings/drawing1.xml")
+            .context("expected xl/drawings/drawing1.xml to be present in output")?;
+        assert_eq!(
+            out_drawing,
+            expected_drawing.as_slice(),
+            "expected drawing part to be copied byte-for-byte"
+        );
+
+        let sheet_xml = pkg
+            .part("xl/worksheets/sheet1.xml")
+            .context("expected worksheet xml to be present")?;
+        let sheet_xml_str =
+            std::str::from_utf8(sheet_xml).context("worksheet xml is not valid utf8")?;
+        assert!(
+            sheet_xml_str.contains("<drawing"),
+            "expected output worksheet xml to contain a <drawing> tag after preserved drawing application, got:\n{sheet_xml_str}"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn write_xlsx_from_storage_reapplies_preserved_pivot_parts() -> anyhow::Result<()> {
+        let fixture_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../fixtures/xlsx/pivots/pivot-fixture.xlsx");
+        let workbook_meta =
+            crate::file_io::read_xlsx_blocking(&fixture_path).context("read pivot fixture")?;
+        let preserved = workbook_meta
+            .preserved_pivot_parts
+            .as_ref()
+            .context("expected pivot fixture to have preserved pivot parts")?;
+
+        let expected_pivot_table = preserved
+            .parts
+            .get("xl/pivotTables/pivotTable1.xml")
+            .context("expected preserved pivot parts to contain pivotTable1.xml")?;
+        let expected_cache_def = preserved
+            .parts
+            .get("xl/pivotCache/pivotCacheDefinition1.xml")
+            .context("expected preserved pivot parts to contain pivotCacheDefinition1.xml")?;
+
+        let storage = formula_storage::Storage::open_in_memory().context("open in-memory storage")?;
+        let workbook_id = import_app_workbook(&storage, &workbook_meta)?;
+
+        let tmp = tempfile::tempdir().context("temp dir")?;
+        let out_path = tmp.path().join("pivot.xlsx");
+        let bytes = write_xlsx_from_storage(&storage, workbook_id, &workbook_meta, &out_path)
+            .context("export workbook with preserved pivots")?;
+
+        let pkg =
+            formula_xlsx::XlsxPackage::from_bytes(bytes.as_ref()).context("parse exported package")?;
+        let out_pivot_table = pkg
+            .part("xl/pivotTables/pivotTable1.xml")
+            .context("expected xl/pivotTables/pivotTable1.xml to be present in output")?;
+        assert_eq!(
+            out_pivot_table,
+            expected_pivot_table.as_slice(),
+            "expected pivot table part to be copied byte-for-byte"
+        );
+
+        let out_cache_def = pkg
+            .part("xl/pivotCache/pivotCacheDefinition1.xml")
+            .context("expected xl/pivotCache/pivotCacheDefinition1.xml to be present in output")?;
+        assert_eq!(
+            out_cache_def,
+            expected_cache_def.as_slice(),
+            "expected pivot cache definition part to be copied byte-for-byte"
+        );
+
+        Ok(())
+    }
 }
