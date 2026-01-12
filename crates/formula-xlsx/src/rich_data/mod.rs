@@ -494,7 +494,18 @@ fn parse_rich_value_rel_rels(bytes: &[u8]) -> Result<HashMap<String, String>, Ri
         let Some(target) = rel.attribute("Target") else {
             continue;
         };
+        let target = strip_fragment(target);
+        if target.is_empty() {
+            continue;
+        }
         out.insert(id.to_string(), target.to_string());
     }
     Ok(out)
+}
+
+fn strip_fragment(target: &str) -> &str {
+    target
+        .split_once('#')
+        .map(|(base, _)| base)
+        .unwrap_or(target)
 }

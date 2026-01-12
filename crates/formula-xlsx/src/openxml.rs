@@ -42,10 +42,21 @@ pub fn resolve_relationship_target(
             {
                 return Ok(None);
             }
-            return Ok(Some(resolve_target(part_name, &rel.target)));
+            let target = strip_fragment(&rel.target);
+            if target.is_empty() {
+                return Ok(None);
+            }
+            return Ok(Some(resolve_target(part_name, target)));
         }
     }
     Ok(None)
+}
+
+fn strip_fragment(target: &str) -> &str {
+    target
+        .split_once('#')
+        .map(|(base, _)| base)
+        .unwrap_or(target)
 }
 
 pub fn resolve_target(base_part: &str, target: &str) -> String {
