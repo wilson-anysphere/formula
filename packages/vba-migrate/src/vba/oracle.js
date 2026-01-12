@@ -152,6 +152,11 @@ async function ensureBuilt({ repoRoot, binPath }) {
       const defaultJobs = cpuCount >= 64 ? "2" : "4";
       const jobs = process.env.FORMULA_CARGO_JOBS ?? process.env.CARGO_BUILD_JOBS ?? defaultJobs;
       const rayonThreads = process.env.RAYON_NUM_THREADS ?? process.env.FORMULA_RAYON_NUM_THREADS ?? jobs;
+      const rustcWrapper = process.env.RUSTC_WRAPPER ?? process.env.CARGO_BUILD_RUSTC_WRAPPER ?? "";
+      const rustcWorkspaceWrapper =
+        process.env.RUSTC_WORKSPACE_WRAPPER ??
+        process.env.CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER ??
+        "";
       const baseEnv = {
         ...process.env,
         CARGO_HOME: cargoHome,
@@ -166,14 +171,12 @@ async function ensureBuilt({ repoRoot, binPath }) {
         // Some environments configure Cargo globally with `build.rustc-wrapper`. When the
         // wrapper is unavailable/misconfigured, builds can fail even for `cargo metadata`.
         // Default to disabling any configured wrapper unless the user explicitly overrides it.
-        RUSTC_WRAPPER: process.env.RUSTC_WRAPPER ?? "",
-        RUSTC_WORKSPACE_WRAPPER: process.env.RUSTC_WORKSPACE_WRAPPER ?? "",
+        RUSTC_WRAPPER: rustcWrapper,
+        RUSTC_WORKSPACE_WRAPPER: rustcWorkspaceWrapper,
         // Cargo config can also be controlled via `CARGO_BUILD_RUSTC_WRAPPER`; set these so a
         // global config doesn't unexpectedly re-enable a flaky wrapper.
-        CARGO_BUILD_RUSTC_WRAPPER:
-          process.env.CARGO_BUILD_RUSTC_WRAPPER ?? process.env.RUSTC_WRAPPER ?? "",
-        CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER:
-          process.env.CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER ?? process.env.RUSTC_WORKSPACE_WRAPPER ?? "",
+        CARGO_BUILD_RUSTC_WRAPPER: rustcWrapper,
+        CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER: rustcWorkspaceWrapper,
       };
 
       let useCargoAgent = false;

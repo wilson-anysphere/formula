@@ -78,6 +78,12 @@ const defaultJobs = cpuCount >= 64 ? "2" : "4";
 
 const jobs = process.env.FORMULA_CARGO_JOBS ?? process.env.CARGO_BUILD_JOBS ?? defaultJobs;
 const rayonThreads = process.env.RAYON_NUM_THREADS ?? process.env.FORMULA_RAYON_NUM_THREADS ?? jobs;
+// Some environments configure Cargo to use `sccache` via `build.rustc-wrapper` (or equivalent
+// env-var configuration). Default to disabling any configured wrapper unless the user explicitly
+// opts in via environment variables.
+const rustcWrapper = process.env.RUSTC_WRAPPER ?? process.env.CARGO_BUILD_RUSTC_WRAPPER ?? "";
+const rustcWorkspaceWrapper =
+  process.env.RUSTC_WORKSPACE_WRAPPER ?? process.env.CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER ?? "";
 
 const cargoAgentPath = path.join(repoRoot, "scripts", "cargo_agent.sh");
 const useCargoAgent = process.platform !== "win32" && existsSync(cargoAgentPath);
@@ -108,16 +114,12 @@ const raw = await run(cargoCommand, cargoArgs, {
     // Rayon defaults to spawning one worker per core; cap it for multi-agent hosts unless
     // callers explicitly override it.
     RAYON_NUM_THREADS: rayonThreads,
-    // Some environments configure Cargo to use `sccache` via `build.rustc-wrapper`.
-    // Default to disabling any configured wrapper unless the user explicitly sets one.
-    RUSTC_WRAPPER: process.env.RUSTC_WRAPPER ?? "",
-    RUSTC_WORKSPACE_WRAPPER: process.env.RUSTC_WORKSPACE_WRAPPER ?? "",
+    RUSTC_WRAPPER: rustcWrapper,
+    RUSTC_WORKSPACE_WRAPPER: rustcWorkspaceWrapper,
     // Cargo config can also be set via `CARGO_BUILD_RUSTC_WRAPPER`; include it so we reliably
     // override global config (and avoid flaky sccache wrappers) when the caller didn't opt in.
-    CARGO_BUILD_RUSTC_WRAPPER:
-      process.env.CARGO_BUILD_RUSTC_WRAPPER ?? process.env.RUSTC_WRAPPER ?? "",
-    CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER:
-      process.env.CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER ?? process.env.RUSTC_WORKSPACE_WRAPPER ?? "",
+    CARGO_BUILD_RUSTC_WRAPPER: rustcWrapper,
+    CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER: rustcWorkspaceWrapper,
   },
 });
 
