@@ -102,5 +102,12 @@ describe("tauri.conf.json security guardrails", () => {
       forbiddenConnectSrcTokens,
       `connect-src must not allow wildcard/plaintext HTTP networking; found: ${forbiddenConnectSrcTokens.join(", ")}`,
     ).toEqual([]);
+
+    // Tauri capabilities are scoped via `src-tauri/capabilities/*.json` + the capability file's `"windows"` patterns.
+    // Our current `tauri-build` toolchain does not support `app.windows[].capabilities`, and adding it breaks builds.
+    const windows = Array.isArray(config?.app?.windows) ? (config.app.windows as Array<Record<string, unknown>>) : [];
+    for (const window of windows) {
+      expect(window).not.toHaveProperty("capabilities");
+    }
   });
 });

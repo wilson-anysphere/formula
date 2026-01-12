@@ -301,7 +301,7 @@ Minimal excerpt (not copy/pasteable; see the full file for everything):
       "csp": "..." // see `apps/desktop/src-tauri/tauri.conf.json` for the full, current CSP
     },
     "windows": [
-      { "label": "main", "capabilities": ["main"], "title": "Formula", "width": 1280, "height": 800, "dragDropEnabled": true }
+      { "label": "main", "title": "Formula", "width": 1280, "height": 800, "dragDropEnabled": true }
     ]
   },
   "bundle": {
