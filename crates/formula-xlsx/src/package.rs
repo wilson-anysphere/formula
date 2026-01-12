@@ -211,6 +211,7 @@ impl XlsxPackage {
         if parts.contains_key("xl/vbaProject.bin") {
             ensure_xlsm_content_types(&mut parts)?;
             ensure_workbook_rels_has_vba(&mut parts)?;
+            ensure_vba_project_rels_has_signature(&mut parts)?;
         }
 
         let cursor = Cursor::new(Vec::new());
@@ -562,13 +563,24 @@ fn ensure_xlsm_content_types(parts: &mut BTreeMap<String, Vec<u8>>) -> Result<()
 
     let mut xml = String::from_utf8(existing)?;
 
-    if !xml.contains("vbaProject.bin") {
-        // Insert before closing </Types>
-        if let Some(idx) = xml.rfind("</Types>") {
-            let insert = r#"<Override PartName="/xl/vbaProject.bin" ContentType="application/vnd.ms-office.vbaProject"/>"#;
-            xml.insert_str(idx, insert);
-        }
-    }
+    ensure_content_type_override(
+        &mut xml,
+        parts.contains_key("xl/vbaProject.bin"),
+        "/xl/vbaProject.bin",
+        "application/vnd.ms-office.vbaProject",
+    );
+    ensure_content_type_override(
+        &mut xml,
+        parts.contains_key("xl/vbaProjectSignature.bin"),
+        "/xl/vbaProjectSignature.bin",
+        "application/vnd.ms-office.vbaProjectSignature",
+    );
+    ensure_content_type_override(
+        &mut xml,
+        parts.contains_key("xl/vbaData.xml"),
+        "/xl/vbaData.xml",
+        "application/vnd.ms-office.vbaData+xml",
+    );
 
     // Ensure workbook content type reflects macro-enabled if we can find it.
     if xml.contains(r#"PartName="/xl/workbook.xml""#)
@@ -582,6 +594,27 @@ fn ensure_xlsm_content_types(parts: &mut BTreeMap<String, Vec<u8>>) -> Result<()
 
     parts.insert(ct_name.to_string(), xml.into_bytes());
     Ok(())
+}
+
+fn ensure_content_type_override(
+    xml: &mut String,
+    part_exists: bool,
+    part_name: &str,
+    content_type: &str,
+) {
+    if !part_exists {
+        return;
+    }
+
+    // Avoid creating duplicate override entries.
+    if xml.contains(&format!(r#"PartName="{part_name}""#)) {
+        return;
+    }
+
+    if let Some(idx) = xml.rfind("</Types>") {
+        let insert = format!(r#"<Override PartName="{part_name}" ContentType="{content_type}"/>"#);
+        xml.insert_str(idx, &insert);
+    }
 }
 
 fn ensure_workbook_rels_has_vba(parts: &mut BTreeMap<String, Vec<u8>>) -> Result<(), XlsxError> {
@@ -605,6 +638,50 @@ fn ensure_workbook_rels_has_vba(parts: &mut BTreeMap<String, Vec<u8>>) -> Result
         xml.insert_str(idx, &rel);
     }
     parts.insert(rels_name.to_string(), xml.into_bytes());
+    Ok(())
+}
+
+fn ensure_vba_project_rels_has_signature(
+    parts: &mut BTreeMap<String, Vec<u8>>,
+) -> Result<(), XlsxError> {
+    if !(parts.contains_key("xl/vbaProject.bin") && parts.contains_key("xl/vbaProjectSignature.bin")) {
+        return Ok(());
+    }
+
+    let rels_name = "xl/_rels/vbaProject.bin.rels";
+    let rel_type = "http://schemas.microsoft.com/office/2006/relationships/vbaProjectSignature";
+
+    match parts.get(rels_name).cloned() {
+        Some(existing) => {
+            let mut xml = String::from_utf8(existing)?;
+            if xml.contains(rel_type) {
+                return Ok(());
+            }
+
+            let next_rid = next_relationship_id(&xml);
+            let rel = format!(
+                r#"<Relationship Id="rId{next_rid}" Type="{rel_type}" Target="vbaProjectSignature.bin"/>"#
+            );
+
+            if let Some(idx) = xml.rfind("</Relationships>") {
+                xml.insert_str(idx, &rel);
+            }
+
+            parts.insert(rels_name.to_string(), xml.into_bytes());
+        }
+        None => {
+            // If the relationship part is missing, synthesize the minimal valid XML.
+            // We keep the relationship ID deterministic to keep write output stable.
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="{rel_type}" Target="vbaProjectSignature.bin"/>
+</Relationships>"#
+            );
+            parts.insert(rels_name.to_string(), xml.into_bytes());
+        }
+    }
+
     Ok(())
 }
 
@@ -713,6 +790,72 @@ mod tests {
 
         let rels = std::str::from_utf8(pkg2.part("xl/_rels/workbook.xml.rels").unwrap()).unwrap();
         assert!(rels.contains("http://schemas.microsoft.com/office/2006/relationships/vbaProject"));
+    }
+
+    #[test]
+    fn ensures_vba_signature_and_data_parts_for_signed_xlsm() {
+        let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="bin" ContentType="application/vnd.openxmlformats-officedocument.oleObject"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+</Types>"#;
+
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+        // Intentionally omit the vbaProject relationship to ensure we add it.
+        let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+
+        let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"></worksheet>"#;
+
+        // Intentionally omit `xl/_rels/vbaProject.bin.rels` to ensure we create it.
+        let bytes = build_package(&[
+            ("[Content_Types].xml", content_types.as_bytes()),
+            ("xl/workbook.xml", workbook_xml.as_bytes()),
+            ("xl/_rels/workbook.xml.rels", workbook_rels.as_bytes()),
+            ("xl/worksheets/sheet1.xml", worksheet_xml.as_bytes()),
+            ("xl/vbaProject.bin", b"fake-vba-project"),
+            ("xl/vbaProjectSignature.bin", b"fake-signature"),
+            ("xl/vbaData.xml", b"<vbaData/>"),
+        ]);
+
+        let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+        let written = pkg.write_to_bytes().expect("write pkg");
+        let pkg2 = XlsxPackage::from_bytes(&written).expect("read pkg2");
+
+        let ct = std::str::from_utf8(pkg2.part("[Content_Types].xml").unwrap()).unwrap();
+        assert!(ct.contains(
+            r#"PartName="/xl/vbaProject.bin" ContentType="application/vnd.ms-office.vbaProject""#
+        ));
+        assert!(ct.contains(
+            r#"PartName="/xl/vbaProjectSignature.bin" ContentType="application/vnd.ms-office.vbaProjectSignature""#
+        ));
+        assert!(ct.contains(
+            r#"PartName="/xl/vbaData.xml" ContentType="application/vnd.ms-office.vbaData+xml""#
+        ));
+        assert!(ct.contains("application/vnd.ms-excel.sheet.macroEnabled.main+xml"));
+
+        let rels = std::str::from_utf8(pkg2.part("xl/_rels/workbook.xml.rels").unwrap()).unwrap();
+        assert!(rels.contains("http://schemas.microsoft.com/office/2006/relationships/vbaProject"));
+        assert!(rels.contains(r#"Target="vbaProject.bin""#));
+
+        let vba_rels =
+            std::str::from_utf8(pkg2.part("xl/_rels/vbaProject.bin.rels").unwrap()).unwrap();
+        assert!(vba_rels
+            .contains("http://schemas.microsoft.com/office/2006/relationships/vbaProjectSignature"));
+        assert!(vba_rels.contains(r#"Target="vbaProjectSignature.bin""#));
+        assert!(vba_rels.contains(r#"Id="rId1""#));
     }
 
     #[test]
