@@ -109,4 +109,46 @@ describe("SecondaryGridView sheet view axis overrides", () => {
     gridView.destroy();
     container.remove();
   });
+
+  it("does not resync axis overrides back into the same pane after a local resize edit", () => {
+    const container = document.createElement("div");
+    Object.defineProperty(container, "clientWidth", { configurable: true, value: 0 });
+    Object.defineProperty(container, "clientHeight", { configurable: true, value: 0 });
+    document.body.appendChild(container);
+
+    const doc = new DocumentController();
+    const sheetId = "Sheet1";
+
+    const gridView = new SecondaryGridView({
+      container,
+      document: doc,
+      getSheetId: () => sheetId,
+      rowCount: 100,
+      colCount: 50,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const renderer = gridView.grid.renderer;
+    const batchSpy = vi.spyOn(renderer, "applyAxisSizeOverrides");
+    batchSpy.mockClear();
+
+    // Simulate the end-of-drag resize callback for this secondary pane. The renderer is already updated
+    // during the drag; this should only mutate the document and should not trigger a full re-sync of
+    // all overrides back into the same renderer instance.
+    (gridView as any).onAxisSizeChange({
+      kind: "row",
+      index: 2,
+      size: 40,
+      previousSize: 24,
+      defaultSize: 24,
+      zoom: 1,
+      source: "resize"
+    });
+
+    expect(batchSpy).not.toHaveBeenCalled();
+
+    gridView.destroy();
+    container.remove();
+  });
 });

@@ -207,4 +207,48 @@ describe("SpreadsheetApp shared-grid axis size sync", () => {
       else process.env.DESKTOP_GRID_MODE = prior;
     }
   });
+
+  it("does not resync axis overrides back into the same shared grid after a local resize edit", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div")
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      expect(app.getGridMode()).toBe("shared");
+
+      const sharedGrid = (app as any).sharedGrid;
+      expect(sharedGrid).toBeTruthy();
+      const renderer = sharedGrid.renderer;
+
+      const batchSpy = vi.spyOn(renderer, "applyAxisSizeOverrides");
+      batchSpy.mockClear();
+
+      // Simulate the end-of-drag resize callback. The renderer would already be updated during the drag;
+      // this should only mutate the document (source-tagged) and should not trigger a full re-sync of
+      // all axis overrides back into the same renderer instance.
+      (app as any).onSharedGridAxisSizeChange({
+        kind: "col",
+        index: 2,
+        size: 130,
+        previousSize: 120,
+        defaultSize: 100,
+        zoom: 1,
+        source: "resize"
+      });
+
+      expect(batchSpy).not.toHaveBeenCalled();
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
 });

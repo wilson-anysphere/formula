@@ -1521,11 +1521,19 @@ export class SpreadsheetApp {
       // DocumentController changes can also include sheet-level view deltas
       // (e.g. frozen panes). In shared-grid mode, frozen panes must be pushed
       // down to the CanvasGridRenderer explicitly.
+      //
+      // Avoid re-syncing axis sizes back into the *same* shared-grid renderer after local
+      // resize/auto-fit interactions. Those interactions update the renderer directly during
+      // the drag, and rebuilding large override maps here can be expensive for sheets with
+      // many explicit row/col sizes.
+      const source = typeof payload?.source === "string" ? payload.source : "";
       if (
         Array.isArray(payload?.sheetViewDeltas) &&
         payload.sheetViewDeltas.some((delta: any) => delta?.sheetId === this.sheetId)
       ) {
-        this.syncFrozenPanes();
+        if (source !== "sharedGridAxis") {
+          this.syncFrozenPanes();
+        }
       }
     });
 
@@ -3405,6 +3413,12 @@ export class SpreadsheetApp {
     this.clearSharedHoverCellCache();
     this.hideCommentTooltip();
 
+    // Tag sheet-view mutations originating from the primary shared grid so the document `change`
+    // listener can avoid redundantly re-syncing axis sizes back into the same renderer (which is
+    // already updated interactively during the drag). Other panes (e.g. split view) will still
+    // observe the change and sync their own renderer instances.
+    const source = "sharedGridAxis";
+
     const headerRows = this.sharedHeaderRows();
     const headerCols = this.sharedHeaderCols();
     const baseSize = change.size / change.zoom;
@@ -3416,9 +3430,9 @@ export class SpreadsheetApp {
       if (docCol < 0) return;
       const label = change.source === "autoFit" ? "Autofit Column Width" : "Resize Column";
       if (isDefault) {
-        this.document.resetColWidth(this.sheetId, docCol, { label });
+        this.document.resetColWidth(this.sheetId, docCol, { label, source });
       } else {
-        this.document.setColWidth(this.sheetId, docCol, baseSize, { label });
+        this.document.setColWidth(this.sheetId, docCol, baseSize, { label, source });
       }
       return;
     }
@@ -3427,9 +3441,9 @@ export class SpreadsheetApp {
     if (docRow < 0) return;
     const label = change.source === "autoFit" ? "Autofit Row Height" : "Resize Row";
     if (isDefault) {
-      this.document.resetRowHeight(this.sheetId, docRow, { label });
+      this.document.resetRowHeight(this.sheetId, docRow, { label, source });
     } else {
-      this.document.setRowHeight(this.sheetId, docRow, baseSize, { label });
+      this.document.setRowHeight(this.sheetId, docRow, baseSize, { label, source });
     }
   }
 

@@ -310,6 +310,11 @@ export class SecondaryGridView {
     const unsubscribeSheetView = this.document.on("change", (payload: any) => {
       const deltas = Array.isArray(payload?.sheetViewDeltas) ? payload.sheetViewDeltas : [];
       if (deltas.length === 0) return;
+      const source = typeof payload?.source === "string" ? payload.source : "";
+      // Avoid redundant re-sync into the same secondary pane after local axis resize/auto-fit edits
+      // (we update the renderer directly during the drag). Other panes (primary grid) will still
+      // observe the change and sync.
+      if (source === "secondaryGridAxis") return;
       const sheetId = this.getSheetId();
       if (!deltas.some((delta: any) => String(delta?.sheetId ?? "") === sheetId)) return;
       this.syncSheetViewFromDocument();
@@ -490,15 +495,19 @@ export class SecondaryGridView {
     const baseSize = change.size / change.zoom;
     const baseDefault = change.defaultSize / change.zoom;
     const isDefault = Math.abs(baseSize - baseDefault) < 1e-6;
+    // Tag sheet-view mutations originating from this secondary pane so we can avoid redundant
+    // view re-syncs back into the same renderer instance (the pane is already updated during the
+    // resize drag). Other panes (primary grid) still need to observe the change and sync.
+    const source = "secondaryGridAxis";
 
     if (change.kind === "col") {
       const docCol = change.index - this.headerCols;
       if (docCol < 0) return;
       const label = change.source === "autoFit" ? "Autofit Column Width" : "Resize Column";
       if (isDefault) {
-        this.document.resetColWidth(sheetId, docCol, { label });
+        this.document.resetColWidth(sheetId, docCol, { label, source });
       } else {
-        this.document.setColWidth(sheetId, docCol, baseSize, { label });
+        this.document.setColWidth(sheetId, docCol, baseSize, { label, source });
       }
       return;
     }
@@ -507,9 +516,9 @@ export class SecondaryGridView {
     if (docRow < 0) return;
     const label = change.source === "autoFit" ? "Autofit Row Height" : "Resize Row";
     if (isDefault) {
-      this.document.resetRowHeight(sheetId, docRow, { label });
+      this.document.resetRowHeight(sheetId, docRow, { label, source });
     } else {
-      this.document.setRowHeight(sheetId, docRow, baseSize, { label });
+      this.document.setRowHeight(sheetId, docRow, baseSize, { label, source });
     }
   }
 
