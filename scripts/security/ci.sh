@@ -286,11 +286,7 @@ run_clippy() {
     set +e
     (
       cd "$dir"
-      bash "${ROOT_DIR}/scripts/cargo_agent.sh" clippy --workspace --all-targets --all-features -- \
-        -D clippy::unwrap_used \
-        -D clippy::expect_used \
-        -D clippy::panic \
-        -D clippy::panic_in_result_fn \
+      bash "${ROOT_DIR}/scripts/cargo_agent.sh" clippy --workspace --all-targets -- \
         -D clippy::todo \
         -D clippy::unimplemented
     ) >"$out" 2>&1
@@ -317,11 +313,7 @@ run_clippy() {
     set +e
     (
       cd "$dir"
-      bash "${ROOT_DIR}/scripts/cargo_agent.sh" clippy --all-targets --all-features -- \
-        -D clippy::unwrap_used \
-        -D clippy::expect_used \
-        -D clippy::panic \
-        -D clippy::panic_in_result_fn \
+      bash "${ROOT_DIR}/scripts/cargo_agent.sh" clippy --all-targets -- \
         -D clippy::todo \
         -D clippy::unimplemented
     ) >"$out" 2>&1

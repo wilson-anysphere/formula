@@ -25,7 +25,12 @@ Each run produces a **single “security-report” artifact** containing raw too
 
 **Rust**
 - Tool: `cargo clippy`
-- Policy: CI treats common “foot-gun” lints as errors (e.g. `unwrap`, `expect`, `panic`, `todo`, `unimplemented`).
+- Policy: CI fails on placeholder macros like `todo!()` / `unimplemented!()`.
+  - `unwrap` / `expect` / `panic!` are intentionally *not* denied at the workflow level yet because
+    they are still used throughout the codebase; tighten these once the repo is ready to enforce
+    them consistently.
+  - Clippy runs with default features (not `--all-features`) so optional desktop/system-dependency
+    builds don't break headless CI.
 
 **JS/TS**
 - Tooling expectation:

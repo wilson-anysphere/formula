@@ -7,7 +7,7 @@ use formula_model::{
 #[test]
 fn tint_math_matches_excel() {
     // Base = 0x64 (100) so the expected values are easy to reason about.
-    let base = 0xFF64_64_64;
+    let base = 0xFF646464;
     let mut palette = ThemePalette::default();
     palette.lt1 = formula_model::ArgbColor(base);
 
@@ -48,7 +48,7 @@ fn tint_math_matches_excel() {
             tint: Some(-500)
         }
         .resolve(Some(&palette)),
-        Some(0xFF32_32_32)
+        Some(0xFF323232)
     );
 
     assert_eq!(
@@ -191,4 +191,3 @@ fn theme_palette_roundtrips_via_workbook_fixture() {
         assert_eq!(reparsed.theme, palette, "palette {name}");
     }
 }
-
