@@ -148,6 +148,7 @@ import {
 } from "./tauri/startupMetrics.js";
 import { openExternalHyperlink } from "./hyperlinks/openExternal.js";
 import { clampUsedRange, resolveWorkbookLoadLimits } from "./workbook/load/clampUsedRange.js";
+import { exportDocumentRangeToCsv } from "./import-export/csv/export.js";
 
 // Best-effort: older desktop builds persisted provider selection + API keys in localStorage.
 // Cursor desktop no longer supports user-provided keys; proactively delete stale secrets on startup.
@@ -5676,6 +5677,37 @@ function downloadBytes(bytes: Uint8Array, filename: string, mime: string): void 
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
+function selectionBoundingBox0Based(): CellRange {
+  const range1 = selectionBoundingBox1Based();
+  return {
+    start: { row: range1.startRow - 1, col: range1.startCol - 1 },
+    end: { row: range1.endRow - 1, col: range1.endCol - 1 },
+  };
+}
+
+function sanitizeFilename(raw: string): string {
+  const cleaned = String(raw ?? "")
+    // Windows-reserved + generally-illegal filename characters.
+    .replace(/[\\/:*?"<>|]+/g, "_")
+    .trim();
+  return cleaned || "export";
+}
+
+function handleExportDelimitedText(args: { delimiter: string; extension: string; mime: string; label: string }): void {
+  try {
+    const sheetId = app.getCurrentSheetId();
+    const sheetName = workbookSheetStore.getName(sheetId) ?? sheetId;
+    const range = selectionBoundingBox0Based();
+    const csv = exportDocumentRangeToCsv(app.getDocument(), sheetId, range, { delimiter: args.delimiter });
+    const bytes = new TextEncoder().encode(csv);
+    downloadBytes(bytes, `${sanitizeFilename(sheetName)}.${args.extension}`, args.mime);
+    app.focus();
+  } catch (err) {
+    console.error(`Failed to export ${args.label}:`, err);
+    showToast(`Failed to export ${args.label}: ${String(err)}`, "error");
+  }
+}
+
 type TauriPageSetup = {
   orientation: "portrait" | "landscape";
   paper_size: number;
@@ -6636,11 +6668,27 @@ mountRibbon(ribbonReactRoot, {
       }
 
       case "file.export.export.csv":
-      case "file.export.export.xlsx":
       case "file.export.changeFileType.csv":
+        handleExportDelimitedText({ delimiter: ",", extension: "csv", mime: "text/csv", label: "CSV" });
+        return;
       case "file.export.changeFileType.tsv":
+        handleExportDelimitedText({
+          delimiter: "\t",
+          extension: "tsv",
+          mime: "text/tab-separated-values",
+          label: "TSV",
+        });
+        return;
+      case "file.export.export.xlsx":
       case "file.export.changeFileType.xlsx": {
-        showToast("Export is not implemented yet.");
+        if (!tauriBackend) {
+          showDesktopOnlyToast("Exporting workbooks is available in the desktop app.");
+          return;
+        }
+        void handleSaveAs().catch((err) => {
+          console.error("Failed to save workbook:", err);
+          showToast(`Failed to save workbook: ${String(err)}`, "error");
+        });
         return;
       }
 
