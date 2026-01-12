@@ -162,7 +162,6 @@ export default defineConfig({
     setupFiles: ["./vitest.setup.ts"],
     environmentMatchGlobs: [
       ["src/panels/ai-audit/AIAuditPanel.vitest.ts", "jsdom"],
-      ["src/command-palette/commandPaletteController.vitest.ts", "jsdom"],
     ],
     include: [
       "src/**/*.vitest.ts",
