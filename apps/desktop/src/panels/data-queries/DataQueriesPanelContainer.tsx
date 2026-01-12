@@ -53,6 +53,8 @@ function hasTauri(): boolean {
   return Boolean((globalThis as any).__TAURI__);
 }
 
+const RECOMMENDED_DESKTOP_OAUTH_REDIRECT_URI = "formula://oauth/callback";
+
 function hasTauriEventApi(): boolean {
   return typeof (globalThis as any).__TAURI__?.event?.listen === "function";
 }
@@ -735,14 +737,16 @@ export function DataQueriesPanelContainer(props: Props) {
 
   const openProviderEditor = useCallback(
     (providerId: string) => {
-      const existing =
-        oauthProviders.find((p) => p.id === providerId) ??
+      const existing = oauthProviders.find((p) => p.id === providerId);
+      const draft =
+        existing ??
         ({
           id: providerId,
           clientId: "",
           tokenEndpoint: "",
+          ...(hasTauri() ? { redirectUri: RECOMMENDED_DESKTOP_OAUTH_REDIRECT_URI } : {}),
         } satisfies OAuth2ProviderConfig);
-      setEditingProvider(existing);
+      setEditingProvider(draft);
     },
     [oauthProviders],
   );
@@ -824,6 +828,11 @@ export function DataQueriesPanelContainer(props: Props) {
               onChange={(e) => setEditingProvider({ ...provider, redirectUri: e.target.value || undefined })}
               style={{ padding: 6 }}
             />
+            {hasTauri() ? (
+              <div style={{ fontSize: 11, opacity: 0.75 }}>
+                Tip: Use <code>{RECOMMENDED_DESKTOP_OAUTH_REDIRECT_URI}</code> on desktop to enable automatic redirect capture.
+              </div>
+            ) : null}
           </label>
           <div style={{ display: "flex", gap: 8 }}>
             <button
