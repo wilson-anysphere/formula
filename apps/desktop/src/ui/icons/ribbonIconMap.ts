@@ -7,10 +7,14 @@ import { AlignLeftIcon } from "./AlignLeftIcon";
 import { AlignMiddleIcon } from "./AlignMiddleIcon";
 import { AlignRightIcon } from "./AlignRightIcon";
 import { AlignTopIcon } from "./AlignTopIcon";
+import { ArrowLeftIcon } from "./ArrowLeftIcon";
+import { ArrowRightIcon } from "./ArrowRightIcon";
 import { AutoSumIcon } from "./AutoSumIcon";
 import { BoldIcon } from "./BoldIcon";
 import { BordersIcon } from "./BordersIcon";
 import { BringForwardIcon } from "./BringForwardIcon";
+import { CalculatorIcon } from "./CalculatorIcon";
+import { CalendarIcon } from "./CalendarIcon";
 import { CellStylesIcon } from "./CellStylesIcon";
 import { ClearFormattingIcon } from "./ClearFormattingIcon";
 import { ClearIcon } from "./ClearIcon";
@@ -40,6 +44,7 @@ import { FindIcon } from "./FindIcon";
 import { FolderIcon } from "./FolderIcon";
 import { FontColorIcon } from "./FontColorIcon";
 import { FontSizeIcon } from "./FontSizeIcon";
+import { FunctionIcon } from "./FunctionIcon";
 import { FormatAsTableIcon } from "./FormatAsTableIcon";
 import { FormatPainterIcon } from "./FormatPainterIcon";
 import { GlobeIcon } from "./GlobeIcon";
@@ -72,12 +77,14 @@ import { PaletteIcon } from "./PaletteIcon";
 import { PasteIcon } from "./PasteIcon";
 import { PasteSpecialIcon } from "./PasteSpecialIcon";
 import { PercentIcon } from "./PercentIcon";
+import { PiIcon } from "./PiIcon";
 import { PinIcon } from "./PinIcon";
 import { PictureIcon } from "./PictureIcon";
 import { PrintIcon } from "./PrintIcon";
 import { PrintAreaIcon } from "./PrintAreaIcon";
 import { PlusIcon } from "./PlusIcon";
 import { RedoIcon } from "./RedoIcon";
+import { RefreshIcon } from "./RefreshIcon";
 import { RulerIcon } from "./RulerIcon";
 import { SaveIcon } from "./SaveIcon";
 import { SendBackwardIcon } from "./SendBackwardIcon";
@@ -100,6 +107,7 @@ import { TextBoxIcon } from "./TextBoxIcon";
 import { UnderlineIcon } from "./UnderlineIcon";
 import { UndoIcon } from "./UndoIcon";
 import { UserIcon } from "./UserIcon";
+import { WarningIcon } from "./WarningIcon";
 import { WrapTextIcon } from "./WrapTextIcon";
 
 export type RibbonIconComponent = ComponentType<Omit<IconProps, "children">>;
@@ -318,6 +326,35 @@ export const ribbonIconMap = {
   "pageLayout.arrange.rotate": RedoIcon,
   "pageLayout.arrange.rotate.rotateRight90": RedoIcon,
   "pageLayout.arrange.rotate.rotateLeft90": UndoIcon,
+
+  // Formulas
+  "formulas.functionLibrary.insertFunction": FunctionIcon,
+  "formulas.functionLibrary.autoSum": AutoSumIcon,
+  "formulas.functionLibrary.recentlyUsed": ClockIcon,
+  "formulas.functionLibrary.financial": CurrencyIcon,
+  "formulas.functionLibrary.logical": FunctionIcon,
+  "formulas.functionLibrary.text": FontSizeIcon,
+  "formulas.functionLibrary.dateTime": CalendarIcon,
+  "formulas.functionLibrary.lookupReference": FindIcon,
+  "formulas.functionLibrary.mathTrig": PiIcon,
+  "formulas.functionLibrary.moreFunctions": PlusIcon,
+
+  "formulas.definedNames.nameManager": TagIcon,
+  "formulas.definedNames.defineName": PlusIcon,
+  "formulas.definedNames.useInFormula": FunctionIcon,
+  "formulas.definedNames.createFromSelection": GridlinesIcon,
+
+  "formulas.formulaAuditing.tracePrecedents": ArrowLeftIcon,
+  "formulas.formulaAuditing.traceDependents": ArrowRightIcon,
+  "formulas.formulaAuditing.removeArrows": CloseIcon,
+  "formulas.formulaAuditing.showFormulas": FunctionIcon,
+  "formulas.formulaAuditing.errorChecking": WarningIcon,
+  "formulas.formulaAuditing.evaluateFormula": CalculatorIcon,
+  "formulas.formulaAuditing.watchWindow": EyeIcon,
+
+  "formulas.calculation.calculationOptions": SettingsIcon,
+  "formulas.calculation.calculateNow": RefreshIcon,
+  "formulas.calculation.calculateSheet": RefreshIcon,
 
   // Fallbacks (re-usable)
   sort: SortIcon,
