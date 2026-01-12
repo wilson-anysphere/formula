@@ -2,6 +2,7 @@ use std::io::{Cursor, Read, Write};
 
 use formula_model::CellRef;
 use formula_xlsx::load_from_bytes;
+use roxmltree::Document;
 use zip::ZipArchive;
 
 fn build_richdata_recalc_fixture(
@@ -151,36 +152,57 @@ fn formula_edit_recalc_policy_preserves_linked_data_type_parts(
 
     let workbook_rels_xml =
         String::from_utf8(read_zip_part(&mut archive, "xl/_rels/workbook.xml.rels")?)?;
+    let rels_doc = Document::parse(&workbook_rels_xml)?;
+    let rels_ns = "http://schemas.openxmlformats.org/package/2006/relationships";
+    let relationships: Vec<(String, String, String)> = rels_doc
+        .descendants()
+        .filter(|n| n.is_element() && n.has_tag_name((rels_ns, "Relationship")))
+        .map(|n| {
+            (
+                n.attribute("Id").unwrap_or_default().to_string(),
+                n.attribute("Type").unwrap_or_default().to_string(),
+                n.attribute("Target").unwrap_or_default().to_string(),
+            )
+        })
+        .collect();
+
     assert!(
-        !workbook_rels_xml.contains("calcChain.xml"),
+        !relationships.iter().any(
+            |(_id, ty, target)| ty.ends_with("/calcChain") || target.ends_with("calcChain.xml")
+        ),
         "expected workbook.xml.rels to stop referencing calcChain.xml, got: {workbook_rels_xml}"
     );
     assert!(
-        workbook_rels_xml.contains(r#"Target="metadata.xml""#),
-        "expected workbook.xml.rels to preserve metadata relationship, got: {workbook_rels_xml}"
-    );
-    assert!(
-        workbook_rels_xml.contains(r#"Id="rId9""#),
-        "expected workbook.xml.rels to preserve metadata relationship id, got: {workbook_rels_xml}"
+        relationships
+            .iter()
+            .any(|(id, _ty, target)| id == "rId9" && target == "metadata.xml"),
+        "expected workbook.xml.rels to preserve metadata relationship rId9 -> metadata.xml, got: {workbook_rels_xml}"
     );
 
     let content_types_xml = String::from_utf8(read_zip_part(&mut archive, "[Content_Types].xml")?)?;
+    let ct_doc = Document::parse(&content_types_xml)?;
+    let ct_ns = "http://schemas.openxmlformats.org/package/2006/content-types";
+    let overrides: Vec<String> = ct_doc
+        .descendants()
+        .filter(|n| n.is_element() && n.has_tag_name((ct_ns, "Override")))
+        .filter_map(|n| n.attribute("PartName"))
+        .map(|v| v.to_string())
+        .collect();
+
     assert!(
-        !content_types_xml.contains("/xl/calcChain.xml"),
+        !overrides.iter().any(|p| p.ends_with("calcChain.xml")),
         "expected [Content_Types].xml override for calcChain.xml to be removed, got: {content_types_xml}"
     );
-    assert!(
-        content_types_xml.contains("/xl/metadata.xml"),
-        "expected [Content_Types].xml to preserve /xl/metadata.xml override, got: {content_types_xml}"
-    );
-    assert!(
-        content_types_xml.contains("/xl/richData/richValueTypes.xml"),
-        "expected [Content_Types].xml to preserve richValueTypes override, got: {content_types_xml}"
-    );
-    assert!(
-        content_types_xml.contains("/xl/richData/richValues.xml"),
-        "expected [Content_Types].xml to preserve richValues override, got: {content_types_xml}"
-    );
+    for required in [
+        "/xl/metadata.xml",
+        "/xl/richData/richValueTypes.xml",
+        "/xl/richData/richValues.xml",
+    ] {
+        assert!(
+            overrides.iter().any(|p| p == required),
+            "expected [Content_Types].xml to preserve {required}, got: {content_types_xml}"
+        );
+    }
 
     assert_eq!(
         read_zip_part(&mut archive, "xl/metadata.xml")?,
