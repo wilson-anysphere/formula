@@ -243,6 +243,27 @@ test("clipboard provider", async (t) => {
     );
   });
 
+  await t.test("tauri: read preserves pngBase64 when native result only includes image_png_base64", async () => {
+    await withGlobals(
+      {
+        __TAURI__: {
+          core: {
+            async invoke(cmd) {
+              assert.equal(cmd, "clipboard_read");
+              return { image_png_base64: "CQgH" };
+            },
+          },
+        },
+        navigator: undefined,
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        const content = await provider.read();
+        assert.deepEqual(content, { text: undefined, pngBase64: "CQgH" });
+      }
+    );
+  });
+
   await t.test("tauri: read falls back to web clipboard before tauri clipboard.readText", async () => {
     /** @type {number} */
     let tauriReadTextCalls = 0;
