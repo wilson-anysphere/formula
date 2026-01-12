@@ -172,6 +172,70 @@ fn find_cell_record(sheet_bin: &[u8], target_row: u32, target_col: u32) -> Optio
     None
 }
 
+fn rewrite_dimension_len_as_two_byte_varint(sheet_bin: &[u8]) -> Vec<u8> {
+    const DIMENSION: u32 = 0x0194;
+
+    let mut cursor = Cursor::new(sheet_bin);
+    let mut out = Vec::with_capacity(sheet_bin.len() + 4);
+
+    loop {
+        let record_start = cursor.position() as usize;
+        let Some(id) = biff12_varint::read_record_id(&mut cursor)
+            .ok()
+            .flatten()
+        else {
+            break;
+        };
+        let id_end = cursor.position() as usize;
+        let Some(len) = biff12_varint::read_record_len(&mut cursor)
+            .ok()
+            .flatten()
+        else {
+            break;
+        };
+        let len_start = id_end;
+        let len_end = cursor.position() as usize;
+
+        let payload_start = len_end;
+        let payload_end = payload_start + len as usize;
+        cursor.set_position(payload_end as u64);
+
+        out.extend_from_slice(&sheet_bin[record_start..id_end]); // id varint bytes
+        if id == DIMENSION && len == 16 {
+            // Non-canonical, but valid, 2-byte LEB128 encoding for length 16.
+            out.extend_from_slice(&[0x90, 0x00]);
+        } else {
+            out.extend_from_slice(&sheet_bin[len_start..len_end]); // original len varint bytes
+        }
+        out.extend_from_slice(&sheet_bin[payload_start..payload_end]);
+    }
+
+    out
+}
+
+fn dimension_header_raw(sheet_bin: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
+    const DIMENSION: u32 = 0x0194;
+
+    let mut cursor = Cursor::new(sheet_bin);
+    loop {
+        let record_start = cursor.position() as usize;
+        let id = biff12_varint::read_record_id(&mut cursor).ok().flatten()?;
+        let id_end = cursor.position() as usize;
+        let len = biff12_varint::read_record_len(&mut cursor).ok().flatten()? as usize;
+        let len_end = cursor.position() as usize;
+        let payload_start = len_end;
+        let payload_end = payload_start + len;
+        cursor.set_position(payload_end as u64);
+
+        if id == DIMENSION {
+            return Some((
+                sheet_bin[record_start..id_end].to_vec(),
+                sheet_bin[id_end..len_end].to_vec(),
+            ));
+        }
+    }
+}
+
 #[test]
 fn patch_sheet_bin_streaming_insert_matches_in_memory_insert() {
     let mut builder = XlsbFixtureBuilder::new();
@@ -571,6 +635,42 @@ fn patch_sheet_bin_streaming_inserts_missing_rows_between_existing_rows() {
         vec![(0, 0), (3, 0), (5, 0)]
     );
     assert_eq!(read_dimension_bounds(&patched_stream), Some((0, 5, 0, 0)));
+}
+
+#[test]
+fn patch_sheet_bin_streaming_preserves_dimension_header_varint_bytes() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_number(0, 0, 1.0);
+    let sheet_bin = read_sheet_bin(builder.build_bytes());
+    let tweaked = rewrite_dimension_len_as_two_byte_varint(&sheet_bin);
+
+    let Some((id_raw, len_raw)) = dimension_header_raw(&tweaked) else {
+        panic!("expected DIMENSION record");
+    };
+    assert_eq!(len_raw, vec![0x90, 0x00], "expected non-canonical len varint");
+
+    let edits = [CellEdit {
+        row: 5,
+        col: 3,
+        new_value: CellValue::Number(123.0),
+        new_formula: None,
+        new_rgcb: None,
+        shared_string_index: None,
+    }];
+
+    let patched_in_mem = patch_sheet_bin(&tweaked, &edits).expect("patch_sheet_bin");
+
+    let mut patched_stream = Vec::new();
+    patch_sheet_bin_streaming(Cursor::new(&tweaked), &mut patched_stream, &edits)
+        .expect("patch_sheet_bin_streaming");
+
+    assert_eq!(patched_stream, patched_in_mem);
+
+    let Some((patched_id_raw, patched_len_raw)) = dimension_header_raw(&patched_stream) else {
+        panic!("expected DIMENSION record");
+    };
+    assert_eq!(patched_id_raw, id_raw);
+    assert_eq!(patched_len_raw, len_raw);
 }
 
 #[test]
