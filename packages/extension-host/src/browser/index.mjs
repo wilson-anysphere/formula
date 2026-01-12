@@ -1184,8 +1184,20 @@ class BrowserExtensionHost {
       // ignore
     }
 
+    const disposedPanelIds = [];
     for (const [panelId, panel] of this._panels.entries()) {
-      if (panel?.extensionId === extension.id) this._panels.delete(panelId);
+      if (panel?.extensionId !== extension.id) continue;
+      this._panels.delete(panelId);
+      disposedPanelIds.push(panelId);
+    }
+    if (disposedPanelIds.length > 0) {
+      for (const panelId of disposedPanelIds) {
+        try {
+          this._uiApi?.onPanelDisposed?.(panelId);
+        } catch {
+          // ignore
+        }
+      }
     }
 
     for (const [registrationId, record] of this._contextMenus.entries()) {

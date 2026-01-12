@@ -35,6 +35,8 @@ test.describe("Marketplace install sync", () => {
     const displayName = "Marketplace Install Sync Test";
     const commandId = "marketplaceInstallSync.hello";
     const commandTitle = `Hello (${extensionId})`;
+    const panelId = `${extensionId}.panel`;
+    const panelTitle = `Panel (${extensionId})`;
 
     const keys = generateEd25519KeyPair();
 
@@ -55,7 +57,7 @@ test.describe("Marketplace install sync", () => {
       engines: {
         formula: "^1.0.0",
       },
-      activationEvents: ["onStartupFinished"],
+      activationEvents: ["onStartupFinished", `onView:${panelId}`],
       contributes: {
         commands: [
           {
@@ -64,14 +66,33 @@ test.describe("Marketplace install sync", () => {
             category: "Marketplace Test",
           },
         ],
+        panels: [
+          {
+            id: panelId,
+            title: panelTitle,
+            // Keep this panel out of the left dock so it doesn't collide with the Extensions panel itself.
+            defaultDock: "right",
+          },
+        ],
       },
-      permissions: ["ui.commands"],
+      permissions: ["ui.commands", "ui.panels"],
     };
 
     const entrypointSource = `
-import { commands, ui } from "@formula/extension-api";
+import { commands, events, ui } from "@formula/extension-api";
 
 export async function activate(context) {
+  context.subscriptions.push(
+    events.onViewActivated(({ viewId }) => {
+      if (viewId !== ${JSON.stringify(panelId)}) return;
+      void (async () => {
+        const created = await ui.createPanel(${JSON.stringify(panelId)}, { title: ${JSON.stringify(panelTitle)} });
+        await created.webview.setHtml(\`<!doctype html><html><body><h1>${panelTitle}</h1></body></html>\`);
+        context.subscriptions.push(created);
+      })().catch(() => {});
+    })
+  );
+
   context.subscriptions.push(
     await commands.registerCommand(${JSON.stringify(commandId)}, async () => {
       await ui.showMessage("Hello from marketplace install sync!");
@@ -216,6 +237,25 @@ export async function activate(context) {
 
       await expect(page.getByTestId("toast-root")).toContainText("Hello from marketplace install sync!");
 
+      // Verify the install triggers panel contribution sync too: open the Extensions panel and
+      // open the contributed view (panel) without reloading.
+      await page.getByRole("tab", { name: "Home", exact: true }).click();
+      await page.getByTestId("open-extensions-panel").click();
+      await expect(page.getByTestId("panel-extensions")).toBeVisible();
+
+      await page.getByTestId("panel-extensions").getByTestId(`open-panel-${panelId}`).click();
+      await expect(page.getByTestId(`panel-${panelId}`)).toBeVisible({ timeout: 30_000 });
+
+      const webview = page.getByTestId(`extension-webview-${panelId}`);
+      await expect(webview).toBeVisible();
+      await expect(page.frameLocator(`[data-testid="extension-webview-${panelId}"]`).getByRole("heading", { name: panelTitle })).toBeVisible({
+        timeout: 30_000,
+      });
+
+      // Switch back to Marketplace before clicking Uninstall.
+      await page.getByTestId("dock-tab-marketplace").click();
+      await expect(page.getByTestId("panel-marketplace")).toBeVisible();
+
       // Re-render the search results so the Marketplace panel can show the uninstall button.
       await panel.getByRole("button", { name: "Search", exact: true }).click();
       const installedRow = panel.locator(".marketplace-result").filter({ hasText: extensionId });
@@ -223,6 +263,9 @@ export async function activate(context) {
 
       await installedRow.getByRole("button", { name: "Uninstall", exact: true }).click();
       await expect(installedRow).toContainText("Uninstalled");
+
+      // Uninstall should close any open panels created by the extension.
+      await expect(page.getByTestId(`dock-tab-${panelId}`)).toHaveCount(0);
 
       // Confirm the desktop command registry updates after uninstall (command should disappear).
       await page.keyboard.press(`${primary}+Shift+P`);
