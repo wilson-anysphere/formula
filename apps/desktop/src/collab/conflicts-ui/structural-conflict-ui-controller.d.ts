@@ -1,0 +1,15 @@
+import type { SheetNameResolver } from "../../sheet/sheetNameResolver";
+
+export class StructuralConflictUiController {
+  [key: string]: any;
+  constructor(opts: {
+    container: HTMLElement;
+    monitor: { resolveConflict: (id: string, resolution: any) => boolean };
+    sheetNameResolver?: SheetNameResolver | null | undefined;
+  });
+
+  destroy(): void;
+  addConflict(conflict: any): void;
+  render(): void;
+}
+
