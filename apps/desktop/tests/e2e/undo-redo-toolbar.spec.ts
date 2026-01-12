@@ -28,6 +28,12 @@ test.describe("titlebar undo/redo buttons", () => {
       });
       await waitForIdle(page);
 
+      const initialValue = await page.evaluate(() => {
+        const app = (window as any).__formulaApp;
+        const sheetId = app.getCurrentSheetId();
+        return app.getDocument().getCell(sheetId, "A1").value;
+      });
+
       await expect(undo).toBeDisabled();
       await expect(redo).toBeDisabled();
 
@@ -44,7 +50,9 @@ test.describe("titlebar undo/redo buttons", () => {
       await expect(undo).toHaveAttribute("aria-label", "Undo Set Cell");
 
       // While editing, undo/redo should be disabled (Excel-like behavior: Ctrl+Z becomes text undo).
-      await page.getByTestId("formula-input").click();
+      // The formula bar hides the textarea in view mode; click the highlight layer to enter editing.
+      await page.getByTestId("formula-highlight").click();
+      await expect(page.getByTestId("formula-input")).toBeVisible();
       await expect(undo).toBeDisabled();
       await expect(redo).toBeDisabled();
       await page.keyboard.press("Escape");
@@ -62,7 +70,7 @@ test.describe("titlebar undo/redo buttons", () => {
         const sheetId = app.getCurrentSheetId();
         return app.getDocument().getCell(sheetId, "A1").value;
       });
-      expect(afterUndo).toBe(null);
+      expect(afterUndo).toEqual(initialValue);
 
       await redo.click();
       await waitForIdle(page);
