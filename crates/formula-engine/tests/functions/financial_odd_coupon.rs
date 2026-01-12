@@ -637,6 +637,15 @@ fn odd_coupon_functions_coerce_frequency_like_excel() {
         other => panic!("expected #NUM! for frequency=<explicit blank arg> (0), got {other:?}"),
     }
 
+    // Empty-string text coerces to 0 in numeric contexts.
+    let annual_empty_string_freq =
+        r#"=ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,100,"",0)"#;
+    match sheet.eval(annual_empty_string_freq) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM! for frequency=\"\" (0), got {other:?}"),
+    }
+
     // Spot-check ODDLPRICE as well (odd last coupon) to ensure the coercion behavior is consistent
     // across ODDF*/ODDL*.
     let oddl_baseline_semiannual =
@@ -669,6 +678,14 @@ fn odd_coupon_functions_coerce_frequency_like_excel() {
         Value::Error(ErrorKind::Name) => return,
         Value::Error(ErrorKind::Num) => {}
         other => panic!("expected #NUM! for ODDLPRICE frequency=FALSE (0), got {other:?}"),
+    }
+
+    let oddl_empty_string_freq =
+        r#"=ODDLPRICE(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,0.05,100,"",0)"#;
+    match sheet.eval(oddl_empty_string_freq) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM! for ODDLPRICE frequency=\"\" (0), got {other:?}"),
     }
 }
 
@@ -712,6 +729,11 @@ fn odd_coupon_functions_coerce_basis_like_excel() {
     let false_basis_value = eval_number_or_skip(&mut sheet, false_basis)
         .expect("ODDFPRICE should accept FALSE basis (FALSE->0)");
     assert_close(false_basis_value, baseline_basis_0_value, 1e-9);
+
+    let empty_string_basis = r#"=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,"")"#;
+    let empty_string_basis_value = eval_number_or_skip(&mut sheet, empty_string_basis)
+        .expect("ODDFPRICE should accept basis=\"\" and treat it as 0");
+    assert_close(empty_string_basis_value, baseline_basis_0_value, 1e-9);
 
     let text_basis_0 = r#"=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,"0")"#;
     let text_basis_0_value = eval_number_or_skip(&mut sheet, text_basis_0)
@@ -767,6 +789,12 @@ fn odd_coupon_functions_coerce_basis_like_excel() {
     let oddl_false_basis_value = eval_number_or_skip(&mut sheet, oddl_false_basis)
         .expect("ODDLPRICE should accept FALSE basis (FALSE->0)");
     assert_close(oddl_false_basis_value, oddl_baseline_basis_0_value, 1e-9);
+
+    let oddl_empty_string_basis =
+        r#"=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,"")"#;
+    let oddl_empty_string_basis_value = eval_number_or_skip(&mut sheet, oddl_empty_string_basis)
+        .expect("ODDLPRICE should accept basis=\"\" and treat it as 0");
+    assert_close(oddl_empty_string_basis_value, oddl_baseline_basis_0_value, 1e-9);
 
     let oddl_text_basis_0 =
         r#"=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,"0")"#;
@@ -845,6 +873,13 @@ fn odd_coupon_yield_functions_coerce_frequency_like_excel() {
             "expected #NUM! for ODDFYIELD frequency=<explicit blank arg> (0), got {other:?}"
         ),
     }
+    let oddf_empty_string_freq =
+        r#"=LET(pr,ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,100,1,0),ODDFYIELD(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,pr,100,"",0))"#;
+    match sheet.eval(oddf_empty_string_freq) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM! for ODDFYIELD frequency=\"\" (0), got {other:?}"),
+    }
 
     // Repeat the same checks for odd last coupon yield.
     let oddl_baseline =
@@ -890,6 +925,13 @@ fn odd_coupon_yield_functions_coerce_frequency_like_excel() {
             "expected #NUM! for ODDLYIELD frequency=<explicit blank arg> (0), got {other:?}"
         ),
     }
+    let oddl_empty_string_freq =
+        r#"=LET(pr,ODDLPRICE(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,0.05,100,1,0),ODDLYIELD(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,pr,100,"",0))"#;
+    match sheet.eval(oddl_empty_string_freq) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM! for ODDLYIELD frequency=\"\" (0), got {other:?}"),
+    }
 }
 
 #[test]
@@ -927,6 +969,12 @@ fn odd_coupon_yield_functions_coerce_basis_like_excel() {
     let oddf_false_basis_value = eval_number_or_skip(&mut sheet, oddf_false_basis)
         .expect("ODDFYIELD should accept FALSE basis (FALSE->0)");
     assert_close(oddf_false_basis_value, oddf_baseline_basis_0_value, 1e-9);
+
+    let oddf_empty_string_basis =
+        r#"=LET(pr,ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,0),ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,pr,100,2,""))"#;
+    let oddf_empty_string_basis_value = eval_number_or_skip(&mut sheet, oddf_empty_string_basis)
+        .expect("ODDFYIELD should treat basis=\"\" as 0");
+    assert_close(oddf_empty_string_basis_value, oddf_baseline_basis_0_value, 1e-9);
 
     let oddf_text_basis_0 =
         r#"=LET(pr,ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,0),ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,pr,100,2,"0"))"#;
@@ -977,6 +1025,12 @@ fn odd_coupon_yield_functions_coerce_basis_like_excel() {
     let oddl_false_basis_value = eval_number_or_skip(&mut sheet, oddl_false_basis)
         .expect("ODDLYIELD should accept FALSE basis (FALSE->0)");
     assert_close(oddl_false_basis_value, oddl_baseline_basis_0_value, 1e-9);
+
+    let oddl_empty_string_basis =
+        r#"=LET(pr,ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,0),ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,pr,100,2,""))"#;
+    let oddl_empty_string_basis_value = eval_number_or_skip(&mut sheet, oddl_empty_string_basis)
+        .expect("ODDLYIELD should treat basis=\"\" as 0");
+    assert_close(oddl_empty_string_basis_value, oddl_baseline_basis_0_value, 1e-9);
     let oddl_text_basis_0 =
         r#"=LET(pr,ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,0),ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,pr,100,2,"0"))"#;
     let oddl_text_basis_0_value = eval_number_or_skip(&mut sheet, oddl_text_basis_0)
