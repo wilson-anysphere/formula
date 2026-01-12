@@ -18,18 +18,80 @@ export type CellScalar = number | string | boolean | null;
  * Note: This type is intentionally minimal (best-effort) to avoid coupling the TS
  * public API too tightly to the Rust model while rich values are still evolving.
  */
+export type CellRef = { row: number; col: number };
+
+export type RichTextRunStyle = {
+  bold?: boolean;
+  italic?: boolean;
+  underline?: string;
+  color?: unknown;
+  font?: string;
+  size_100pt?: number;
+};
+
+export type RichTextRun = {
+  start: number;
+  end: number;
+  style: RichTextRunStyle;
+};
+
+export type RichTextValue = {
+  text: string;
+  runs: RichTextRun[];
+};
+
+export type EntityValue = {
+  /** Optional discriminator (e.g. "stock", "geography"). */
+  entityType?: string;
+  /** Optional entity id (e.g. "AAPL"). */
+  entityId?: string;
+  /**
+   * User-visible string representation (what Excel renders in the grid).
+   *
+   * Note: older payloads may use `display`.
+   */
+  displayValue: string;
+  /** Legacy alias for `displayValue` (accepted by formula-model). */
+  display?: string;
+  properties?: Record<string, CellValueRich>;
+};
+
+export type RecordValue = {
+  fields: Record<string, CellValueRich>;
+  displayField?: string;
+  /** Optional precomputed display string (legacy / fallback). */
+  displayValue?: string;
+  /** Legacy alias for `displayValue` (accepted by formula-model). */
+  display?: string;
+};
+
+export type ImageValue = {
+  imageId: string;
+  altText?: string;
+  width?: number;
+  height?: number;
+};
+
+export type ArrayValue = {
+  data: CellValueRich[][];
+};
+
+export type SpillValue = {
+  origin: CellRef;
+};
+
 export type CellValueRich =
   | { type: "empty" }
   | { type: "number"; value: number }
   | { type: "string"; value: string }
   | { type: "boolean"; value: boolean }
   | { type: "error"; value: string }
-  | { type: "rich_text"; value: unknown }
-  | { type: "entity"; value: unknown }
-  | { type: "record"; value: unknown }
-  | { type: "image"; value: unknown }
-  | { type: "array"; value: unknown }
-  | { type: "spill"; value: unknown };
+  | { type: "rich_text"; value: RichTextValue }
+  | { type: "entity"; value: EntityValue }
+  | { type: "record"; value: RecordValue }
+  | { type: "image"; value: ImageValue }
+  | { type: "array"; value: ArrayValue }
+  | { type: "spill"; value: SpillValue };
 
 export interface CellData {
   sheet: string;
