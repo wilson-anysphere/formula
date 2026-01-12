@@ -2,6 +2,8 @@ import type {
   CellChange,
   CellData,
   CellScalar,
+  FormulaPartialParseResult,
+  FormulaToken,
   InitMessage,
   RpcCancel,
   RpcOptions,
@@ -202,6 +204,31 @@ export class EngineWorker {
   async recalculate(sheet?: string, options?: RpcOptions): Promise<CellChange[]> {
     await this.flush();
     return (await this.invoke("recalculate", { sheet }, options)) as CellChange[];
+  }
+
+  /**
+   * Tokenize a formula string for editor tooling (syntax highlighting, etc).
+   *
+   * Note: this RPC is independent of workbook state and intentionally does NOT
+   * flush pending `setCell` batches.
+   */
+  async lexFormula(formula: string, options?: unknown, rpcOptions?: RpcOptions): Promise<FormulaToken[]> {
+    return (await this.invoke("lexFormula", { formula, options }, rpcOptions)) as FormulaToken[];
+  }
+
+  /**
+   * Best-effort partial parse for editor/autocomplete scenarios.
+   *
+   * Note: this RPC is independent of workbook state and intentionally does NOT
+   * flush pending `setCell` batches.
+   */
+  async parseFormulaPartial(
+    formula: string,
+    cursor?: number,
+    options?: unknown,
+    rpcOptions?: RpcOptions
+  ): Promise<FormulaPartialParseResult> {
+    return (await this.invoke("parseFormulaPartial", { formula, cursor, options }, rpcOptions)) as FormulaPartialParseResult;
   }
 
   private async scheduleFlush(): Promise<void> {

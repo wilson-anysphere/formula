@@ -1,6 +1,16 @@
 export { createEngineClient } from "./client";
 export type { EngineClient } from "./client";
-export type { CellChange, CellData, CellScalar, RpcOptions } from "./protocol";
+export type {
+  CellChange,
+  CellData,
+  CellScalar,
+  FormulaParseError,
+  FormulaPartialParseResult,
+  FormulaSpan,
+  FormulaToken,
+  FunctionContext,
+  RpcOptions,
+} from "./protocol";
 export { defaultWasmBinaryUrl, defaultWasmModuleUrl } from "./wasm";
 
 export { EngineWorker } from "./EngineWorker";

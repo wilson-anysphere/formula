@@ -1,4 +1,11 @@
-import type { CellChange, CellData, CellScalar, RpcOptions } from "./protocol";
+import type {
+  CellChange,
+  CellData,
+  CellScalar,
+  FormulaPartialParseResult,
+  FormulaToken,
+  RpcOptions,
+} from "./protocol";
 import { defaultWasmBinaryUrl, defaultWasmModuleUrl } from "./wasm";
 import { EngineWorker } from "./worker/EngineWorker";
 
@@ -50,6 +57,25 @@ export interface EngineClient {
    * cross-sheet caches coherent.
    */
   recalculate(sheet?: string, options?: RpcOptions): Promise<CellChange[]>;
+
+  /**
+   * Tokenize a formula string for editor tooling (syntax highlighting, etc).
+   *
+   * This call is independent of any loaded workbook.
+   */
+  lexFormula(formula: string, options?: unknown, rpcOptions?: RpcOptions): Promise<FormulaToken[]>;
+
+  /**
+   * Best-effort partial parse for editor/autocomplete scenarios.
+   *
+   * This call is independent of any loaded workbook.
+   */
+  parseFormulaPartial(
+    formula: string,
+    cursor?: number,
+    options?: unknown,
+    rpcOptions?: RpcOptions
+  ): Promise<FormulaPartialParseResult>;
   terminate(): void;
 }
 
@@ -141,6 +167,10 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
     setRange: async (range, values, sheet, rpcOptions) =>
       await withEngine((connected) => connected.setRange(range, values, sheet, rpcOptions)),
     recalculate: async (sheet, rpcOptions) => await withEngine((connected) => connected.recalculate(sheet, rpcOptions)),
+    lexFormula: async (formula, options, rpcOptions) =>
+      await withEngine((connected) => connected.lexFormula(formula, options, rpcOptions)),
+    parseFormulaPartial: async (formula, cursor, options, rpcOptions) =>
+      await withEngine((connected) => connected.parseFormulaPartial(formula, cursor, options, rpcOptions)),
     terminate: () => {
       generation++;
       enginePromise = null;

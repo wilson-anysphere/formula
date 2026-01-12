@@ -21,6 +21,8 @@ type WasmWorkbookInstance = {
 
 type WasmModule = {
   default?: (module_or_path?: unknown) => Promise<void> | void;
+  lexFormula: (formula: string, options?: unknown) => unknown;
+  parseFormulaPartial: (formula: string, cursor?: number, options?: unknown) => unknown;
   WasmWorkbook: {
     new (): WasmWorkbookInstance;
     fromJson(json: string): WasmWorkbookInstance;
@@ -62,6 +64,18 @@ function normalizeCellChanges(value: unknown): unknown {
     if (!("value" in obj)) return change;
     return { ...obj, value: normalizeCellScalar(obj.value) };
   });
+}
+
+function cloneToPlainData(value: unknown): unknown {
+  // wasm-bindgen APIs can return objects with prototypes that are structured-clone
+  // safe but not ideal for RPC consumers. Normalize editor-tooling results into
+  // plain objects/arrays at the worker boundary.
+  if (value === undefined) return null;
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return value;
+  }
 }
 
 let cancelledRequests = new Set<number>();
@@ -237,6 +251,24 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
     switch (req.method) {
       case "ping":
         result = "pong";
+        break;
+      case "lexFormula":
+        {
+          const lexFormula = mod.lexFormula;
+          if (typeof lexFormula !== "function") {
+            throw new Error("lexFormula: wasm module does not export lexFormula()");
+          }
+          result = cloneToPlainData(lexFormula(params.formula, params.options));
+        }
+        break;
+      case "parseFormulaPartial":
+        {
+          const parseFormulaPartial = mod.parseFormulaPartial;
+          if (typeof parseFormulaPartial !== "function") {
+            throw new Error("parseFormulaPartial: wasm module does not export parseFormulaPartial()");
+          }
+          result = cloneToPlainData(parseFormulaPartial(params.formula, params.cursor, params.options));
+        }
         break;
       case "newWorkbook":
         {

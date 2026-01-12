@@ -23,6 +23,59 @@ export interface CellChange {
   value: CellScalar;
 }
 
+/**
+ * Span in a formula string.
+ *
+ * Offsets are expressed as **UTF-16 code unit** indices (the same indexing used
+ * by JS `string.slice()` / `string.length`).
+ */
+export interface FormulaSpan {
+  start: number;
+  end: number;
+}
+
+/**
+ * Token returned by `lexFormula`.
+ *
+ * Note: This type intentionally mirrors the Rust wasm DTO shape. Treat unknown
+ * fields as implementation details; consumers should rely on `kind` + `span`
+ * for stable behavior.
+ */
+export interface FormulaToken {
+  kind: string;
+  span: FormulaSpan;
+  /**
+   * Optional token payload (depends on `kind`).
+   *
+   * For example:
+   * - literals may include a raw string/number representation
+   * - reference tokens may include structured metadata (row/col, absolutes)
+   */
+  value?: unknown;
+}
+
+export interface FormulaParseError {
+  message: string;
+  span: FormulaSpan;
+}
+
+export interface FunctionContext {
+  name: string;
+  /** 0-indexed argument index. */
+  argIndex: number;
+}
+
+export interface FormulaPartialParseResult {
+  /**
+   * Partial AST representation (Rust DTO; currently treated as opaque by the TS API).
+   */
+  ast: unknown;
+  error: FormulaParseError | null;
+  context: {
+    function: FunctionContext | null;
+  };
+}
+
 export interface RpcOptions {
   signal?: AbortSignal;
   timeoutMs?: number;

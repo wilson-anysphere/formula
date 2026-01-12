@@ -257,4 +257,38 @@ describe("EngineWorker RPC", () => {
 
     vi.useRealTimers();
   });
+
+  it("sends lexFormula RPC requests with the expected params", async () => {
+    const worker = new MockWorker();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    await engine.lexFormula("=1+2");
+
+    const requests = worker.received.filter(
+      (msg): msg is RpcRequest => msg.type === "request" && (msg as RpcRequest).method === "lexFormula"
+    );
+    expect(requests).toHaveLength(1);
+    expect(requests[0].params).toEqual({ formula: "=1+2", options: undefined });
+  });
+
+  it("sends parseFormulaPartial RPC requests with the expected params", async () => {
+    const worker = new MockWorker();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    await engine.parseFormulaPartial("=SUM(1,", 6);
+
+    const requests = worker.received.filter(
+      (msg): msg is RpcRequest => msg.type === "request" && (msg as RpcRequest).method === "parseFormulaPartial"
+    );
+    expect(requests).toHaveLength(1);
+    expect(requests[0].params).toEqual({ formula: "=SUM(1,", cursor: 6, options: undefined });
+  });
 });
