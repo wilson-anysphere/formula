@@ -196,12 +196,21 @@ def _compare_value(expected: Any, actual: Any, cfg: CompareConfig) -> tuple[bool
                     {"row": r, "expectedCols": len(erows[r]), "actualCols": len(arows[r])},
                 )
             for c in range(len(erows[r])):
-                ok, reason, detail = _compare_value(erows[r][c], arows[r][c], cfg)
+                expected_cell = erows[r][c]
+                actual_cell = arows[r][c]
+                ok, reason, detail = _compare_value(expected_cell, actual_cell, cfg)
                 if not ok:
                     return (
                         False,
                         f"array-mismatch:{reason}",
-                        {"row": r, "col": c, "reason": reason, "detail": detail},
+                        {
+                            "row": r,
+                            "col": c,
+                            "reason": reason,
+                            "detail": detail,
+                            "expected": expected_cell,
+                            "actual": actual_cell,
+                        },
                     )
         return True, "ok", None
 

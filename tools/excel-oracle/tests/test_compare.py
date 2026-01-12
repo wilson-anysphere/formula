@@ -485,7 +485,14 @@ class CompareArrayMismatchDetailTests(unittest.TestCase):
             detail = m.get("mismatchDetail")
             self.assertEqual(
                 detail,
-                {"row": 1, "col": 0, "reason": "number-mismatch", "detail": None},
+                {
+                    "row": 1,
+                    "col": 0,
+                    "reason": "number-mismatch",
+                    "detail": None,
+                    "expected": {"t": "n", "v": 3},
+                    "actual": {"t": "n", "v": 999},
+                },
             )
 
 
