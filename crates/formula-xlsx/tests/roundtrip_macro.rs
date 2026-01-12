@@ -27,6 +27,21 @@ fn roundtrip_preserves_vba_project_bytes() {
 }
 
 #[test]
+fn roundtrip_preserves_signed_vba_project_bytes() {
+    let fixture_path =
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/xlsx/macros/signed-basic.xlsm");
+    let bytes = std::fs::read(fixture_path).expect("read fixture");
+    let doc = load_from_bytes(&bytes).expect("load fixture");
+    let saved = doc.save_to_vec().expect("save");
+
+    assert_eq!(
+        zip_part(&bytes, "xl/vbaProject.bin"),
+        zip_part(&saved, "xl/vbaProject.bin"),
+        "signed vbaProject.bin must be preserved byte-for-byte"
+    );
+}
+
+#[test]
 fn parses_vba_modules_for_ui_display() {
     let fixture_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/xlsx/macros/basic.xlsm");
     let bytes = std::fs::read(fixture_path).expect("read fixture");
