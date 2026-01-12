@@ -3,9 +3,9 @@
     windows_subsystem = "windows"
 )]
 
-mod shortcuts;
 mod asset_protocol;
 mod menu;
+mod shortcuts;
 mod tray;
 
 use desktop::clipboard;
@@ -230,7 +230,7 @@ fn emit_open_file_event(app: &tauri::AppHandle, paths: Vec<String>) {
 }
 
 fn emit_oauth_redirect_event(app: &tauri::AppHandle, url: String) {
-    let trimmed = url.trim();
+    let trimmed = url.trim().trim_matches('"');
     if trimmed.is_empty() {
         return;
     }
@@ -267,7 +267,10 @@ fn normalize_oauth_redirect_request_urls(urls: Vec<String>) -> Vec<String> {
         if trimmed.is_empty() {
             continue;
         }
-        if !trimmed.starts_with("formula://") {
+        if !trimmed
+            .get(..8)
+            .map_or(false, |prefix| prefix.eq_ignore_ascii_case("formula:"))
+        {
             continue;
         }
         let normalized = trimmed.to_string();
@@ -331,7 +334,10 @@ fn extract_oauth_redirect_urls(argv: &[String]) -> Vec<String> {
     argv.iter()
         .filter_map(|arg| {
             let trimmed = arg.trim().trim_matches('"');
-            if trimmed.starts_with("formula://") {
+            if trimmed
+                .get(..8)
+                .map_or(false, |prefix| prefix.eq_ignore_ascii_case("formula:"))
+            {
                 Some(trimmed.to_string())
             } else {
                 None
@@ -353,10 +359,16 @@ fn signature_status(
     vba_project_signature_bin: Option<&[u8]>,
 ) -> commands::MacroSignatureStatus {
     let parsed = match vba_project_signature_bin {
-        Some(sig_part) => formula_vba::verify_vba_digital_signature_with_project(vba_project_bin, sig_part)
-            .ok()
-            .flatten()
-            .or_else(|| formula_vba::verify_vba_digital_signature(vba_project_bin).ok().flatten()),
+        Some(sig_part) => {
+            formula_vba::verify_vba_digital_signature_with_project(vba_project_bin, sig_part)
+                .ok()
+                .flatten()
+                .or_else(|| {
+                    formula_vba::verify_vba_digital_signature(vba_project_bin)
+                        .ok()
+                        .flatten()
+                })
+        }
         None => formula_vba::verify_vba_digital_signature(vba_project_bin)
             .ok()
             .flatten(),
@@ -365,11 +377,19 @@ fn signature_status(
     match parsed {
         Some(sig) => match sig.verification {
             formula_vba::VbaSignatureVerification::SignedVerified => match sig.binding {
-                formula_vba::VbaSignatureBinding::Bound => commands::MacroSignatureStatus::SignedVerified,
-                formula_vba::VbaSignatureBinding::NotBound => commands::MacroSignatureStatus::SignedInvalid,
-                formula_vba::VbaSignatureBinding::Unknown => commands::MacroSignatureStatus::SignedUnverified,
+                formula_vba::VbaSignatureBinding::Bound => {
+                    commands::MacroSignatureStatus::SignedVerified
+                }
+                formula_vba::VbaSignatureBinding::NotBound => {
+                    commands::MacroSignatureStatus::SignedInvalid
+                }
+                formula_vba::VbaSignatureBinding::Unknown => {
+                    commands::MacroSignatureStatus::SignedUnverified
+                }
             },
-            formula_vba::VbaSignatureVerification::SignedInvalid => commands::MacroSignatureStatus::SignedInvalid,
+            formula_vba::VbaSignatureVerification::SignedInvalid => {
+                commands::MacroSignatureStatus::SignedInvalid
+            }
             formula_vba::VbaSignatureVerification::SignedParseError => {
                 commands::MacroSignatureStatus::SignedParseError
             }
@@ -409,17 +429,14 @@ fn macros_trusted_for_before_close(
 
     let trust = trust_store.trust_state(&fingerprint);
 
-    let sig_part = workbook
-        .origin_xlsx_bytes
-        .as_deref()
-        .and_then(|origin| {
-            formula_xlsx::read_part_from_reader(
-                std::io::Cursor::new(origin.as_ref()),
-                "xl/vbaProjectSignature.bin",
-            )
-            .ok()
-            .flatten()
-        });
+    let sig_part = workbook.origin_xlsx_bytes.as_deref().and_then(|origin| {
+        formula_xlsx::read_part_from_reader(
+            std::io::Cursor::new(origin.as_ref()),
+            "xl/vbaProjectSignature.bin",
+        )
+        .ok()
+        .flatten()
+    });
     let sig_status = signature_status(vba_bin, sig_part.as_deref());
     Ok(commands::evaluate_macro_trust(trust, sig_status).is_ok())
 }
@@ -473,11 +490,7 @@ async fn show_system_notification(
         return Err("notifications are not allowed from this origin".to_string());
     }
 
-    let mut builder = window
-        .app_handle()
-        .notification()
-        .builder()
-        .title(title);
+    let mut builder = window.app_handle().notification().builder().title(title);
 
     if let Some(body) = body {
         builder = builder.body(body);
@@ -490,7 +503,8 @@ async fn show_system_notification(
 fn main() {
     // Record a monotonic startup timestamp as early as possible so we can measure
     // cold start time-to-window-visible / time-to-interactive.
-    let startup_metrics: SharedStartupMetrics = Arc::new(Mutex::new(StartupMetrics::new(Instant::now())));
+    let startup_metrics: SharedStartupMetrics =
+        Arc::new(Mutex::new(StartupMetrics::new(Instant::now())));
 
     let state: SharedAppState = Arc::new(Mutex::new(AppState::new()));
     let macro_trust: SharedMacroTrustStore = Arc::new(Mutex::new(
@@ -502,7 +516,8 @@ fn main() {
     ));
 
     let open_file_state: SharedOpenFileState = Arc::new(Mutex::new(OpenFileState::default()));
-    let oauth_redirect_state: SharedOauthRedirectState = Arc::new(Mutex::new(OauthRedirectState::default()));
+    let oauth_redirect_state: SharedOauthRedirectState =
+        Arc::new(Mutex::new(OauthRedirectState::default()));
     let initial_argv: Vec<String> = std::env::args().collect();
     let initial_cwd = std::env::current_dir().ok();
     let initial_paths = normalize_open_file_request_paths(extract_open_file_paths(
@@ -514,7 +529,8 @@ fn main() {
         guard.pending_paths.extend(initial_paths);
     }
 
-    let initial_oauth_urls = normalize_oauth_redirect_request_urls(extract_oauth_redirect_urls(&initial_argv));
+    let initial_oauth_urls =
+        normalize_oauth_redirect_request_urls(extract_oauth_redirect_urls(&initial_argv));
     if !initial_oauth_urls.is_empty() {
         let mut guard = oauth_redirect_state.lock().unwrap();
         guard.pending_urls.extend(initial_oauth_urls);
