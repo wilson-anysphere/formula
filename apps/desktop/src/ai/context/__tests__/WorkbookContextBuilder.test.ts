@@ -469,6 +469,80 @@ describe("WorkbookContextBuilder", () => {
     expect(ctx2.promptContext).not.toContain("TOP SECRET");
   });
 
+  it("does not reuse cached blocks when classification records change without updatedAt fields (cache key includes selector/classification)", async () => {
+    const workbookId = "wb_dlp_cache_key_records";
+    const documentController = new DocumentController();
+    documentController.setRangeValues("Sheet1", "A1", [
+      ["Public"],
+      ["TOP SECRET"],
+    ]);
+
+    const spreadsheet = new DocumentControllerSpreadsheetApi(documentController);
+    const builder = new WorkbookContextBuilder({
+      workbookId,
+      documentController,
+      spreadsheet,
+      ragService: null,
+      mode: "inline_edit",
+      model: "unit-test-model",
+      maxSheets: 1,
+    });
+
+    const policy = createDefaultOrgPolicy();
+    const auditLogger = { log: (_event: any) => {} };
+
+    const selector = { scope: "cell", documentId: workbookId, sheetId: "Sheet1", row: 1, col: 0 };
+
+    const publicRecord = { selector, classification: { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] } };
+    const restrictedRecord = { selector, classification: { level: CLASSIFICATION_LEVEL.RESTRICTED, labels: ["test"] } };
+
+    const dlpBase = {
+      // ContextManager style
+      documentId: workbookId,
+      sheetId: "Sheet1",
+      policy,
+      includeRestrictedContent: false,
+      auditLogger,
+      // ToolExecutor style
+      document_id: workbookId,
+      sheet_id: "Sheet1",
+      include_restricted_content: false,
+      audit_logger: auditLogger,
+    };
+
+    const dlpPublic = {
+      ...dlpBase,
+      classificationRecords: [publicRecord],
+      classification_records: [publicRecord],
+    };
+
+    const ctx1 = await builder.build({
+      activeSheetId: "Sheet1",
+      selectedRange: { sheetId: "Sheet1", range: { startRow: 0, endRow: 1, startCol: 0, endCol: 0 } },
+      dlp: dlpPublic,
+    });
+    const selection1 = ctx1.payload.blocks.find((b) => b.kind === "selection");
+    expect(selection1).toBeTruthy();
+    expect(selection1!.values[1]![0]).toBe("TOP SECRET");
+
+    // Now tighten classification to Restricted (no updatedAt field; cache key must still change).
+    const dlpRestricted = {
+      ...dlpBase,
+      classificationRecords: [restrictedRecord],
+      classification_records: [restrictedRecord],
+    };
+
+    const ctx2 = await builder.build({
+      activeSheetId: "Sheet1",
+      selectedRange: { sheetId: "Sheet1", range: { startRow: 0, endRow: 1, startCol: 0, endCol: 0 } },
+      dlp: dlpRestricted,
+    });
+    const selection2 = ctx2.payload.blocks.find((b) => b.kind === "selection");
+    expect(selection2).toBeTruthy();
+    expect(selection2!.values[1]![0]).toBe("[REDACTED]");
+    expect(ctx2.promptContext).not.toContain("TOP SECRET");
+  });
+
   it("reuses a single ToolExecutor instance for all read_range calls in a build", async () => {
     const documentController = new DocumentController();
     documentController.setRangeValues("Sheet1", "A1", [

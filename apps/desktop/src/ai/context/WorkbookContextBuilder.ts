@@ -1589,6 +1589,22 @@ function hashString(value: string): string {
   return fnv1a32(value).toString(16);
 }
 
+function normalizeClassificationRecordsForCacheKey(
+  records: unknown,
+): Array<{ selector: unknown; classification: unknown }> {
+  const list = Array.isArray(records) ? records : [];
+  const normalized = list.map((record) => ({
+    selector: (record as any)?.selector ?? null,
+    classification: (record as any)?.classification ?? null,
+  }));
+
+  // Ensure deterministic ordering even if the backing classification store does not
+  // guarantee record order.
+  const keyed = normalized.map((r) => ({ key: safeStableJsonStringify(r), value: r }));
+  keyed.sort((a, b) => a.key.localeCompare(b.key));
+  return keyed.map((r) => r.value);
+}
+
 function computeDlpCacheKey(dlp: any): string {
   if (!dlp) return "no_dlp";
 
@@ -1597,25 +1613,39 @@ function computeDlpCacheKey(dlp: any): string {
   const policyJson = safeStableJsonStringify(dlp.policy ?? null);
   const policyKey = `${policyJson.length}:${hashString(policyJson)}`;
 
-  const records: Array<any> = Array.isArray(dlp.classificationRecords)
+  // Prefer the explicit record list when available (callers often fetch it once for
+  // both ToolExecutor and cache key computation). Fall back to a provided store if
+  // the records array is omitted.
+  const explicitRecords: Array<any> | null = Array.isArray(dlp.classificationRecords)
     ? dlp.classificationRecords
     : Array.isArray(dlp.classification_records)
       ? dlp.classification_records
-      : [];
+      : null;
 
-  let maxUpdatedAt = "";
-  for (const record of records) {
-    const updatedAt =
-      typeof record?.updatedAt === "string"
-        ? record.updatedAt
-        : typeof record?.updated_at === "string"
-          ? record.updated_at
-          : "";
-    if (updatedAt > maxUpdatedAt) maxUpdatedAt = updatedAt;
-  }
+  const records: Array<any> =
+    explicitRecords ??
+    safeList(() => {
+      const store = dlp.classificationStore ?? dlp.classification_store;
+      if (!store || typeof store.list !== "function") return [];
+      const docId =
+        typeof dlp.documentId === "string"
+          ? dlp.documentId
+          : typeof dlp.document_id === "string"
+            ? dlp.document_id
+            : "";
+      if (!docId) return [];
+      const out = store.list(docId);
+      return Array.isArray(out) ? out : [];
+    });
 
-  const classKey = `${records.length}:${maxUpdatedAt}`;
-  return `dlp:${includeRestrictedContent ? "incl" : "excl"}:${policyKey}:${classKey}`;
+  // Cache keys must be sensitive to selector/classification changes; relying only on
+  // timestamps like `updatedAt` is unsafe in distributed systems (clock skew) and
+  // for callers that omit timestamps entirely.
+  const normalized = normalizeClassificationRecordsForCacheKey(records);
+  const recordsJson = safeStableJsonStringify(normalized);
+  const recordsKey = `${recordsJson.length}:${hashString(recordsJson)}`;
+
+  return `dlp:${includeRestrictedContent ? "incl" : "excl"}:${policyKey}:${recordsKey}`;
 }
 
 function sliceBlock(params: {
