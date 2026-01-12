@@ -283,7 +283,7 @@ fn verify_falls_back_to_vba_project_bin_when_signature_part_is_garbage() {
 fn verify_signature_part_binding_matches_vba_project_bin() {
     let vba_project_bin = build_minimal_vba_project_bin(b"module-bytes");
     let digest =
-        compute_vba_project_digest(&vba_project_bin, DigestAlg::Sha256).expect("project digest");
+        compute_vba_project_digest(&vba_project_bin, DigestAlg::Md5).expect("project digest");
     let spc = make_spc_indirect_data_content_sha256(&digest);
 
     let pkcs7 = make_pkcs7_signed_message(&spc);
@@ -305,7 +305,7 @@ fn verify_signature_part_binding_matches_vba_project_bin() {
 fn verify_signature_part_binding_detects_tampered_vba_project_bin() {
     let vba_project_bin = build_minimal_vba_project_bin(b"module-bytes");
     let digest =
-        compute_vba_project_digest(&vba_project_bin, DigestAlg::Sha256).expect("project digest");
+        compute_vba_project_digest(&vba_project_bin, DigestAlg::Md5).expect("project digest");
     let spc = make_spc_indirect_data_content_sha256(&digest);
 
     let pkcs7 = make_pkcs7_signed_message(&spc);
