@@ -47,6 +47,21 @@ fn translates_xlfn_prefixed_functions() {
 }
 
 #[test]
+fn translates_xlfn_prefixed_external_data_functions() {
+    // Some Excel files may include `_xlfn.` prefixes; ensure we translate the base function name
+    // even when the localized spelling contains dots (e.g. `VALEUR.CUBE`).
+    let fr = "=_xlfn.VALEUR.CUBE(\"conn\";\"member\";1,5)";
+    let canon = locale::canonicalize_formula(fr, &locale::FR_FR).unwrap();
+    assert_eq!(canon, "=_xlfn.CUBEVALUE(\"conn\",\"member\",1.5)");
+    assert_eq!(locale::localize_formula(&canon, &locale::FR_FR).unwrap(), fr);
+
+    let es = "=_xlfn.VALOR.CUBO(\"conn\";\"member\";1,5)";
+    let canon = locale::canonicalize_formula(es, &locale::ES_ES).unwrap();
+    assert_eq!(canon, "=_xlfn.CUBEVALUE(\"conn\",\"member\",1.5)");
+    assert_eq!(locale::localize_formula(&canon, &locale::ES_ES).unwrap(), es);
+}
+
+#[test]
 fn canonicalize_and_localize_round_trip_for_fr_fr_and_es_es() {
     let fr = "=SOMME(1,5;2,5)";
     let fr_canon = locale::canonicalize_formula(fr, &locale::FR_FR).unwrap();
