@@ -449,6 +449,24 @@ describe("ToolExecutor", () => {
     expect(result.error?.message).toMatch(/max_read_range_chars/i);
   });
 
+  it("apply_formatting returns runtime_error when SpreadsheetApi.applyFormatting throws", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]) as any;
+    workbook.applyFormatting = () => {
+      throw new Error("Formatting could not be applied to Sheet1!A1. Try selecting fewer cells/rows.");
+    };
+    const executor = new ToolExecutor(workbook as SpreadsheetApi, { default_sheet: "Sheet1" });
+
+    const result = await executor.execute({
+      name: "apply_formatting",
+      parameters: { range: "A1", format: { bold: true } },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.tool).toBe("apply_formatting");
+    expect(result.error?.code).toBe("runtime_error");
+    expect(result.error?.message ?? "").toMatch(/Formatting could not be applied/i);
+  });
+
   it("filter_range caps matching_rows list and preserves total match count", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const executor = new ToolExecutor(workbook);
