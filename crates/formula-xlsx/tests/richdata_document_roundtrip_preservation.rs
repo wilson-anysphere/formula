@@ -161,6 +161,16 @@ fn xlsx_document_roundtrip_preserves_richdata_parts_byte_for_byte() {
         .sheet_mut(sheet_id)
         .expect("sheet must exist")
         .set_value(CellRef::from_a1("A1").unwrap(), CellValue::Number(2.0));
+    // Also introduce a string cell to force sharedStrings generation, ensuring the save path
+    // performs additional workbook.xml.rels + [Content_Types].xml edits while still preserving
+    // RichData parts.
+    doc.workbook
+        .sheet_mut(sheet_id)
+        .expect("sheet must exist")
+        .set_value(
+            CellRef::from_a1("B1").unwrap(),
+            CellValue::String("World".to_string()),
+        );
 
     let output_xlsx = doc.save_to_vec().expect("save_to_vec should succeed");
 
@@ -209,4 +219,9 @@ fn xlsx_document_roundtrip_preserves_richdata_parts_byte_for_byte() {
             "expected [Content_Types].xml to contain an Override for {part}, got:\n{content_types}"
         );
     }
+
+    assert!(
+        overrides.contains("/xl/sharedStrings.xml"),
+        "expected writer to add sharedStrings override when writing string cell, got:\n{content_types}"
+    );
 }
