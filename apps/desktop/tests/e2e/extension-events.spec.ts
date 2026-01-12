@@ -9,6 +9,7 @@ async function grantSampleHelloPanelPermissions(page: Page): Promise<void> {
   await page.evaluate(() => {
     const key = "formula.extensionHost.permissions";
     const extensionId = "formula.sample-hello";
+    const e2eExtensionId = "formula.e2e-events";
     const existing = (() => {
       try {
         const raw = localStorage.getItem(key);
@@ -23,6 +24,13 @@ async function grantSampleHelloPanelPermissions(page: Page): Promise<void> {
       "ui.panels": true,
       "cells.read": true,
       "cells.write": true,
+    };
+
+    // The built-in e2e extension activates on startup and writes event traces into extension storage.
+    // Pre-grant its `storage` permission so permission prompts don't block this suite.
+    existing[e2eExtensionId] = {
+      ...(existing[e2eExtensionId] ?? {}),
+      storage: true,
     };
     localStorage.setItem(key, JSON.stringify(existing));
   });
