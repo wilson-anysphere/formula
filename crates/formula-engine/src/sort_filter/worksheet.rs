@@ -224,6 +224,7 @@ fn model_cell_value_to_sort_value(value: &ModelCellValue) -> CellValue {
             if let Some(display_field) = record.display_field.as_deref() {
                 if let Some(value) = record.fields.get(display_field) {
                     let display_value = match value {
+                        ModelCellValue::Empty => Some(CellValue::Blank),
                         ModelCellValue::Number(n) => Some(CellValue::Number(*n)),
                         ModelCellValue::String(s) => Some(CellValue::Text(s.clone())),
                         ModelCellValue::Boolean(b) => Some(CellValue::Bool(*b)),
@@ -231,6 +232,9 @@ fn model_cell_value_to_sort_value(value: &ModelCellValue) -> CellValue {
                         ModelCellValue::RichText(rt) => {
                             Some(CellValue::Text(rt.plain_text().to_string()))
                         }
+                        // If the display field points at another rich value, degrade it to the same
+                        // display string the user sees in the grid. This matches `formula-model`'s
+                        // `RecordValue::Display` semantics.
                         ModelCellValue::Entity(entity) => (!entity.display_value.is_empty())
                             .then(|| CellValue::Text(entity.display_value.clone()))
                             .or(Some(CellValue::Blank)),
@@ -499,7 +503,7 @@ mod tests {
         );
 
         // Records prefer the display field when it points at a scalar value. Rich values (like
-        // entities) degrade to their display string.
+        // entities or nested records) degrade to their display string.
         let record_entity_display_field: ModelCellValue = serde_json::from_value(json!({
             "type": "record",
             "value": {
