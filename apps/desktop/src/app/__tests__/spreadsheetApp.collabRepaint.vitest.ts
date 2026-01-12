@@ -198,6 +198,60 @@ describe("SpreadsheetApp collab repaint", () => {
     root.remove();
   });
 
+  it("schedules a repaint when sheet-rename formula rewrites arrive (legacy grid)", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    expect(app.getGridMode()).toBe("legacy");
+
+    const refreshSpy = vi.spyOn(app, "refresh");
+
+    const doc = app.getDocument() as any;
+    const sheetId = app.getCurrentSheetId();
+
+    doc.setCellInputs(
+      [{ sheetId, row: 0, col: 0, value: "Renamed Sheet Rewrite", formula: null }],
+      { label: "Rename Sheet", source: "sheetRename" },
+    );
+
+    expect(refreshSpy).toHaveBeenCalledWith("scroll");
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("schedules a repaint when sheet-delete formula rewrites arrive (legacy grid)", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    expect(app.getGridMode()).toBe("legacy");
+
+    const refreshSpy = vi.spyOn(app, "refresh");
+
+    const doc = app.getDocument() as any;
+    const sheetId = app.getCurrentSheetId();
+
+    doc.setCellInputs(
+      [{ sheetId, row: 0, col: 0, value: "Deleted Sheet Rewrite", formula: null }],
+      { label: "Delete Sheet", source: "sheetDelete" },
+    );
+
+    expect(refreshSpy).toHaveBeenCalledWith("scroll");
+
+    app.destroy();
+    root.remove();
+  });
+
   it("keeps the status bar in sync when a remote edit changes an active cell dependency", () => {
     const root = createRoot();
     const status = {
