@@ -22,6 +22,7 @@ import { setRibbonPressedOverrides } from "./ribbon/ribbonPressedOverrides.js";
 import { LayoutController } from "./layout/layoutController.js";
 import { LayoutWorkspaceManager } from "./layout/layoutPersistence.js";
 import { getPanelPlacement } from "./layout/layoutState.js";
+import { SecondaryGridView } from "./grid/splitView/secondaryGridView.js";
 import { getPanelTitle, panelRegistry, PanelIds } from "./panels/panelRegistry.js";
 import { createPanelBodyRenderer } from "./panels/panelBodyRenderer.js";
 import { MacroRecorder, generatePythonMacro, generateTypeScriptMacro } from "./macro-recorder/index.js";
@@ -914,6 +915,8 @@ if (
     dockBottomEl.dataset.hidden = zoneVisible(layout.docks.bottom) ? "false" : "true";
   }
 
+  let secondaryGridView: SecondaryGridView | null = null;
+
   function renderSplitView() {
     const split = layoutController.layout.splitView;
     const ratio = typeof split.ratio === "number" ? split.ratio : 0.5;
@@ -926,6 +929,10 @@ if (
       gridSplitEl.style.gridTemplateRows = "1fr";
       gridSecondaryEl.style.display = "none";
       gridSplitterEl.style.display = "none";
+      secondaryGridView?.destroy();
+      secondaryGridView = null;
+      gridRoot.dataset.splitActive = "false";
+      gridSecondaryEl.dataset.splitActive = "false";
       return;
     }
 
@@ -942,13 +949,45 @@ if (
       gridSplitterEl.style.cursor = "row-resize";
     }
 
-    const sheetLabel = split.panes.secondary.sheetId ?? "Sheet";
-    gridSecondaryEl.textContent = `Secondary view (${sheetLabel})`;
-    gridSecondaryEl.style.display = "flex";
-    gridSecondaryEl.style.alignItems = "center";
-    gridSecondaryEl.style.justifyContent = "center";
-    gridSecondaryEl.style.color = "var(--text-secondary)";
-    gridSecondaryEl.style.fontSize = "12px";
+    if (!secondaryGridView) {
+      const pane = split.panes.secondary;
+      const initialScroll = { scrollX: pane.scrollX ?? 0, scrollY: pane.scrollY ?? 0 };
+      const initialZoom = pane.zoom ?? 1;
+
+      // Use the same DocumentController / computed value cache as the primary grid so
+      // the secondary pane stays live with edits and formula recalculation.
+      const anyApp = app as any;
+      const limits = anyApp.limits ?? { maxRows: 10_000, maxCols: 200 };
+      const rowCount = Number.isInteger(limits.maxRows) ? limits.maxRows + 1 : 10_001;
+      const colCount = Number.isInteger(limits.maxCols) ? limits.maxCols + 1 : 201;
+
+      secondaryGridView = new SecondaryGridView({
+        container: gridSecondaryEl,
+        provider: (app as any).sharedProvider ?? undefined,
+        document: app.getDocument(),
+        getSheetId: () => app.getCurrentSheetId(),
+        rowCount,
+        colCount,
+        showFormulas: () => Boolean((app as any).showFormulas),
+        getComputedValue: (cell) => (app as any).getCellComputedValue(cell),
+        initialScroll,
+        initialZoom,
+        persistScroll: (scroll) => {
+          const pane = layoutController.layout.splitView.panes.secondary;
+          if (pane.scrollX === scroll.scrollX && pane.scrollY === scroll.scrollY) return;
+          layoutController.setSplitPaneScroll("secondary", scroll);
+        },
+        persistZoom: (zoom) => {
+          const pane = layoutController.layout.splitView.panes.secondary;
+          if (pane.zoom === zoom) return;
+          layoutController.setSplitPaneZoom("secondary", zoom);
+        },
+      });
+    }
+
+    const active = split.activePane ?? "primary";
+    gridRoot.dataset.splitActive = active === "primary" ? "true" : "false";
+    gridSecondaryEl.dataset.splitActive = active === "secondary" ? "true" : "false";
   }
 
   function panelTitle(panelId: string) {
@@ -2190,6 +2229,61 @@ if (
   splitVertical.addEventListener("click", () => layoutController.setSplitDirection("vertical", 0.5));
   splitHorizontal.addEventListener("click", () => layoutController.setSplitDirection("horizontal", 0.5));
   splitNone.addEventListener("click", () => layoutController.setSplitDirection("none", 0.5));
+
+  const setActivePane = (pane: "primary" | "secondary") => {
+    if (layoutController.layout.splitView.activePane === pane) return;
+    layoutController.setActiveSplitPane(pane);
+  };
+
+  // Minimal UX: clicking/focusing a pane marks it active so the split-view outline is stable.
+  gridRoot.addEventListener("pointerdown", () => setActivePane("primary"), { capture: true });
+  gridRoot.addEventListener("focusin", () => setActivePane("primary"));
+  gridSecondaryEl.addEventListener("pointerdown", () => setActivePane("secondary"), { capture: true });
+  gridSecondaryEl.addEventListener("focusin", () => setActivePane("secondary"));
+
+  // Splitter drag: pointermove adjusts ratio (0.1–0.9) based on cursor position.
+  gridSplitterEl.addEventListener("pointerdown", (event) => {
+    const direction = layoutController.layout.splitView.direction;
+    if (direction === "none") return;
+    if (event.button !== 0) return;
+    event.preventDefault();
+
+    const pointerId = event.pointerId;
+    gridSplitterEl.setPointerCapture(pointerId);
+
+    const updateRatio = (clientX: number, clientY: number) => {
+      const rect = gridSplitEl.getBoundingClientRect();
+      const size = direction === "vertical" ? rect.width : rect.height;
+      if (size <= 0) return;
+      const offset = direction === "vertical" ? clientX - rect.left : clientY - rect.top;
+      const ratio = Math.max(0.1, Math.min(0.9, offset / size));
+      layoutController.setSplitRatio(ratio);
+    };
+
+    updateRatio(event.clientX, event.clientY);
+
+    const onMove = (move: PointerEvent) => {
+      if (move.pointerId !== pointerId) return;
+      move.preventDefault();
+      updateRatio(move.clientX, move.clientY);
+    };
+
+    const onUp = (up: PointerEvent) => {
+      if (up.pointerId !== pointerId) return;
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      try {
+        gridSplitterEl.releasePointerCapture(pointerId);
+      } catch {
+        // Ignore capture release errors.
+      }
+    };
+
+    window.addEventListener("pointermove", onMove, { passive: false });
+    window.addEventListener("pointerup", onUp, { passive: false });
+    window.addEventListener("pointercancel", onUp, { passive: false });
+  });
 
   openAiPanel.addEventListener("click", () => {
     toggleAiChatPanel();
