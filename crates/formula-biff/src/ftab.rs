@@ -747,6 +747,27 @@ mod tests {
 
     use super::{function_id_from_name, FTAB, FTAB_USER_DEFINED, FUTURE_UDF_FUNCTIONS};
 
+    fn extract_const_str_list(src: &str, const_name: &str) -> Vec<String> {
+        let marker = format!("const {const_name}: &[&str] = &[");
+        let start = src
+            .find(&marker)
+            .unwrap_or_else(|| panic!("could not find start of `{const_name}` list"));
+        let rest = &src[start + marker.len()..];
+        let end = rest
+            .find("];")
+            .unwrap_or_else(|| panic!("could not find end of `{const_name}` list"));
+        let body = &rest[..end];
+
+        body.lines()
+            .filter_map(|line| {
+                let line = line.trim();
+                let line = line.strip_prefix('"')?;
+                let end = line.find('"')?;
+                Some(line[..end].to_string())
+            })
+            .collect()
+    }
+
     #[test]
     fn future_udf_functions_are_sorted_and_unique() {
         let mut prev: Option<&str> = None;
@@ -813,5 +834,19 @@ mod tests {
                 "missing FUTURE_UDF_FUNCTIONS entry for formula-engine function {name}"
             );
         }
+    }
+
+    #[test]
+    fn future_udf_functions_match_ooxml_xlfn_required_list() {
+        let xlsx_src = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../formula-xlsx/src/formula_text.rs"
+        ));
+        let xlsx = extract_const_str_list(xlsx_src, "XL_FN_REQUIRED_FUNCTIONS");
+        let biff = FUTURE_UDF_FUNCTIONS.iter().map(|s| (*s).to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            xlsx, biff,
+            "The OOXML `_xlfn.` required-function list (formula-xlsx) must match the BIFF future/UDF list (formula-biff)"
+        );
     }
 }
