@@ -3345,6 +3345,17 @@ fn estimate_tokenized_bytes(expr: &Expr) -> usize {
                 });
             }
             Expr::StructuredRef(_) => total = total.saturating_add(5),
+            Expr::FieldAccess(access) => {
+                // Field access isn't representable in Excel's legacy BIFF token stream, but we still
+                // need a stable, conservative estimate to enforce the 16,384 byte limit.
+                //
+                // Approximate as a small operator overhead plus a string-like payload for the field
+                // name, and include the base expression size.
+                total = total.saturating_add(1);
+                total = total
+                    .saturating_add(3usize.saturating_add(access.field.chars().count().saturating_mul(2)));
+                stack.push(access.base.as_ref());
+            }
             Expr::Array(arr) => {
                 // Arrays carry inline data; approximate by summing element sizes plus a small header.
                 total = total.saturating_add(4);

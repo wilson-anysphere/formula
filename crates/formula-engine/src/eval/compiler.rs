@@ -438,6 +438,7 @@ fn compile_expr_inner(
                     current_sheet,
                     current_cell,
                     resolve_sheet,
+                    sheet_dimensions,
                 ),
                 Expr::Text(access.field.clone()),
             ],

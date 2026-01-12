@@ -11,6 +11,9 @@ enum InfoType {
     Origin,
     OSVersion,
     Release,
+    Version,
+    MemAvail,
+    TotMem,
 }
 
 fn parse_info_type(key: &str) -> Option<InfoType> {
@@ -22,6 +25,9 @@ fn parse_info_type(key: &str) -> Option<InfoType> {
         "origin" => Some(InfoType::Origin),
         "osversion" => Some(InfoType::OSVersion),
         "release" => Some(InfoType::Release),
+        "version" => Some(InfoType::Version),
+        "memavail" => Some(InfoType::MemAvail),
+        "totmem" => Some(InfoType::TotMem),
         _ => None,
     }
 }
@@ -38,9 +44,14 @@ pub fn info(_ctx: &dyn FunctionContext, type_text: &str) -> Value {
         InfoType::Recalc => Value::Text("Automatic".to_string()),
         InfoType::System => Value::Text("pcdos".to_string()),
         // Known Excel keys that this engine does not currently expose.
-        InfoType::Directory | InfoType::NumFile | InfoType::Origin | InfoType::OSVersion | InfoType::Release => {
-            Value::Error(ErrorKind::NA)
-        }
+        InfoType::Directory
+        | InfoType::NumFile
+        | InfoType::Origin
+        | InfoType::OSVersion
+        | InfoType::Release
+        | InfoType::Version
+        | InfoType::MemAvail
+        | InfoType::TotMem => Value::Error(ErrorKind::NA),
     }
 }
 

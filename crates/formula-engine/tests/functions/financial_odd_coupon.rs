@@ -41,14 +41,6 @@ fn eval_value_or_skip(sheet: &mut TestSheet, formula: &str) -> Option<Value> {
     }
 }
 
-fn cell_number_or_skip(sheet: &TestSheet, addr: &str) -> Option<f64> {
-    match sheet.get(addr) {
-        Value::Number(n) => Some(n),
-        Value::Error(ErrorKind::Name) => None,
-        other => panic!("expected number, got {other:?} from cell {addr}"),
-    }
-}
-
 #[test]
 fn oddfprice_zero_coupon_rate_reduces_to_discounted_redemption() {
     let system = ExcelDateSystem::EXCEL_1900;
