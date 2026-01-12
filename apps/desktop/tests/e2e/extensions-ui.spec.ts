@@ -126,6 +126,15 @@ test.describe("Extensions UI integration", () => {
     const webviewFrame = await iframeHandle!.contentFrame();
     expect(webviewFrame, "expected webview iframe to have a content frame").not.toBeNull();
 
+    // Ensure the document lifecycle has advanced far enough that our simulated Tauri injection
+    // (DOMContentLoaded/load) and the hardening script's re-scrub passes have both executed.
+    await webviewFrame!.waitForFunction(() => document.readyState === "complete");
+    await webviewFrame!.waitForFunction(
+      () => (window as any).__formulaWebviewSandbox?.tauriGlobalsPresent === true,
+      undefined,
+      { timeout: 5_000 },
+    );
+
     const sandboxInfo = await webviewFrame!.evaluate(() => (window as any).__formulaWebviewSandbox);
     expect(sandboxInfo, "webview should inject a sandbox hardening script").toBeTruthy();
     expect(typeof sandboxInfo.tauriGlobalsPresent).toBe("boolean");
