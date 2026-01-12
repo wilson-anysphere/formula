@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use formula_io::{open_workbook, Workbook};
 
+use formula_io::{detect_workbook_format, WorkbookFormat};
+
 fn root_fixture_path(rel: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures").join(rel)
 }
@@ -62,3 +64,22 @@ fn opens_xls_even_with_unknown_extension() {
     }
 }
 
+#[test]
+fn detect_workbook_format_sniffs_csv_with_wrong_extension() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("data.xlsx");
+    std::fs::write(&path, "col1,col2\n1,hello\n2,world\n").expect("write csv");
+
+    let fmt = detect_workbook_format(&path).expect("detect format");
+    assert_eq!(fmt, WorkbookFormat::Csv);
+}
+
+#[test]
+fn detect_workbook_format_sniffs_extensionless_csv() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("data");
+    std::fs::write(&path, "col1,col2\n1,hello\n2,world\n").expect("write csv");
+
+    let fmt = detect_workbook_format(&path).expect("detect format");
+    assert_eq!(fmt, WorkbookFormat::Csv);
+}

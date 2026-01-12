@@ -200,7 +200,27 @@ pub fn detect_workbook_format(path: impl AsRef<Path>) -> Result<WorkbookFormat, 
         return Ok(WorkbookFormat::Unknown);
     }
 
-    // Only consider CSV once we have ruled out known binary formats.
+    // Fall back to CSV when the content looks like text (even if the extension is missing or
+    // incorrect).
+    //
+    // Keep this conservative by only checking a small prefix and requiring that it decodes as
+    // UTF-8 or Windows-1252 without obvious binary markers.
+    const TEXT_SNIFF_LEN: usize = 8 * 1024;
+    let mut prefix = Vec::with_capacity(TEXT_SNIFF_LEN.min(header.len()));
+    prefix.extend_from_slice(header);
+    if prefix.len() < TEXT_SNIFF_LEN {
+        let mut buf = vec![0u8; TEXT_SNIFF_LEN - prefix.len()];
+        let m = file.read(&mut buf).map_err(|source| Error::DetectIo {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        prefix.extend_from_slice(&buf[..m]);
+    }
+    if looks_like_text_csv(&prefix) {
+        return Ok(WorkbookFormat::Csv);
+    }
+
+    // Only consider CSV via extension once we have ruled out known binary formats.
     let ext = path
         .extension()
         .and_then(|s| s.to_str())
