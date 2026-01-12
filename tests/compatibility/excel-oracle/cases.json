@@ -29690,6 +29690,132 @@
       "id": "t_23c15393708b"
     },
     {
+      "formula": "=LET(x,1,x+1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "lambda",
+        "LET"
+      ],
+      "description": "LET basic binding",
+      "id": "lambda_let_541b4e7b019e"
+    },
+    {
+      "formula": "=LET(x,1,y,2,x+y)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "lambda",
+        "LET"
+      ],
+      "description": "LET multiple bindings",
+      "id": "lambda_let_d5297dfaf5ce"
+    },
+    {
+      "formula": "=LET(x,1,x,2,x)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "lambda",
+        "LET"
+      ],
+      "description": "LET shadowing (last binding wins)",
+      "id": "lambda_let_b0a1a4b0a168"
+    },
+    {
+      "formula": "=LAMBDA(x,x+1)(5)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "lambda",
+        "LAMBDA"
+      ],
+      "description": "Postfix lambda invocation (call expression)",
+      "id": "lambda_call_49fbe88e8304"
+    },
+    {
+      "formula": "=LET(inc,LAMBDA(x,x+1),(inc)(5))",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "lambda",
+        "LAMBDA"
+      ],
+      "description": "Call a lambda via a LET-bound name (call expression)",
+      "id": "lambda_call_053aeb67eaca"
+    },
+    {
+      "formula": "=MAP({1,2,3},LAMBDA(x,x*2))",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "lambda",
+        "MAP",
+        "spill"
+      ],
+      "description": "MAP over a 1x3 array literal",
+      "id": "lambda_map_a0df4e6ddcd2"
+    },
+    {
+      "formula": "=REDUCE(0,{1,2,3},LAMBDA(acc,x,acc+x))",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "lambda",
+        "REDUCE"
+      ],
+      "description": "REDUCE with explicit initial value",
+      "id": "lambda_reduce_e26d272972be"
+    },
+    {
+      "formula": "=SCAN(0,{1,2,3},LAMBDA(acc,x,acc+x))",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "lambda",
+        "SCAN",
+        "spill"
+      ],
+      "description": "SCAN running sum",
+      "id": "lambda_scan_76dea2b9fbdd"
+    },
+    {
+      "formula": "=BYROW({1,2;3,4},LAMBDA(r,SUM(r)))",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "lambda",
+        "BYROW",
+        "spill"
+      ],
+      "description": "BYROW with row-wise SUM",
+      "id": "lambda_byrow_4353191a0a7b"
+    },
+    {
+      "formula": "=BYCOL({1,2;3,4},LAMBDA(c,SUM(c)))",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "lambda",
+        "BYCOL",
+        "spill"
+      ],
+      "description": "BYCOL with column-wise SUM",
+      "id": "lambda_bycol_255f6c08614e"
+    },
+    {
+      "formula": "=MAKEARRAY(2,3,LAMBDA(r,c,r*10+c))",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "lambda",
+        "MAKEARRAY",
+        "spill"
+      ],
+      "description": "MAKEARRAY with index-based values",
+      "id": "lambda_makearray_ce970103b29c"
+    },
+    {
       "formula": "=1/0",
       "outputCell": "A1",
       "inputs": [],

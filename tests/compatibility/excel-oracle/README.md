@@ -69,6 +69,19 @@ coverage (tagged `coercion` / `VALUE` / `DATEVALUE` / `TIMEVALUE`), so changes t
 text→number/date/time semantics are exercised in CI even before a full Excel
 oracle dataset is generated.
 
+### Excel 365+ LET/LAMBDA + higher-order functions
+
+The corpus also includes a small, deterministic set of cases tagged `lambda`
+covering:
+
+* `LET` (basic binding, multi-binding, shadowing)
+* `LAMBDA` invocation patterns
+* Higher-order array functions: `MAP`, `REDUCE`, `SCAN`, `BYROW`, `BYCOL`, `MAKEARRAY`
+
+These cases are **not included** in the `compat_gate.py --tier smoke` preset until
+they are validated against a pinned dataset produced by **Windows + Microsoft Excel**
+(see below).
+
 ## Tiered compatibility gates (`--tier`)
 
 `compat_gate.py` supports tier presets so you can run progressively larger
