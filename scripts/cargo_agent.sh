@@ -271,9 +271,9 @@ if [[ -z "${CARGO_PROFILE_TEST_CODEGEN_UNITS:-}" ]]; then
   export CARGO_PROFILE_TEST_CODEGEN_UNITS="${default_codegen_units}"
 fi
 
-# `scripts/agent-init.sh` sets a default `RUSTFLAGS=-C codegen-units=4`. Cargo appends RUSTFLAGS at
-# the end of the rustc command line, which can override `CARGO_PROFILE_*_CODEGEN_UNITS` (including
-# our test default of 1).
+# Callers (or their shell environment) may set `RUSTFLAGS` with `-C codegen-units=...`.
+# Cargo appends `RUSTFLAGS` at the end of the rustc command line, which can override
+# `CARGO_PROFILE_*_CODEGEN_UNITS` (including our default of 1 for tests).
 #
 # To ensure our chosen test codegen-units value actually takes effect, append it to RUSTFLAGS so it
 # wins as the final `-C codegen-units=...` flag.
