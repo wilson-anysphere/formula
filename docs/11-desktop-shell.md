@@ -719,7 +719,6 @@ is a list of capability **identifiers** (e.g. `capabilities: ["main"]`). The mai
   - `dialog:allow-open`, `dialog:allow-save`
   - `core:window:allow-hide`, `core:window:allow-show`, `core:window:allow-set-focus`, `core:window:allow-close`
   - `clipboard-manager:allow-read-text`, `clipboard-manager:allow-write-text`
-  - `shell:allow-open`
   - `updater:allow-check`, `updater:allow-download`, `updater:allow-install`
 
 Note: the Tauri clipboard plugin permissions above only cover the legacy **plain-text** clipboard helpers
@@ -730,7 +729,7 @@ External URL opening is also routed through a custom Rust IPC command:
 
 - `open_external_url` (validates scheme at the Rust boundary: allows `http:`, `https:`, and `mailto:`; blocks `javascript:`, `data:`, `file:`)
 
-Note: the capability currently also grants `shell:allow-open` (the JS shell plugin API). Prefer using the `open_external_url`
+Note: this capability intentionally does **not** grant `shell:allow-open` (the JS shell plugin API). Prefer using the `open_external_url`
 command (via `apps/desktop/src/tauri/shellOpen.ts`) so link handling remains consistent and scheme allowlisting lives at a
 single trusted boundary.
 

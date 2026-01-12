@@ -114,17 +114,17 @@ Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the ful
     "core:default",
     { "identifier": "core:allow-invoke", "allow": ["open_workbook", "save_workbook", "open_external_url"] },
     // ...
-    { "identifier": "event:allow-listen", "allow": [{ "event": "open-file" }] },
-    { "identifier": "event:allow-emit", "allow": [{ "event": "open-file-ready" }] },
+    { "identifier": "core:event:allow-listen", "allow": [{ "event": "open-file" }] },
+    { "identifier": "core:event:allow-emit", "allow": [{ "event": "open-file-ready" }] },
     // ...
     "dialog:allow-open",
     "dialog:allow-save",
-    "window:allow-hide",
-    "window:allow-show",
-    "window:allow-set-focus",
-    "window:allow-close",
-    "clipboard:allow-read-text",
-    "clipboard:allow-write-text",
+    "core:window:allow-hide",
+    "core:window:allow-show",
+    "core:window:allow-set-focus",
+    "core:window:allow-close",
+    "clipboard-manager:allow-read-text",
+    "clipboard-manager:allow-write-text",
     "updater:allow-check",
     "updater:allow-download",
     "updater:allow-install"
@@ -135,7 +135,7 @@ Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the ful
 Note: external URL opening should go through the `open_external_url` Rust command (scheme allowlist enforced in Rust)
 rather than granting the webview direct access to the shell plugin (`shell:allow-open`).
 
-Note: `clipboard:allow-read-text` / `clipboard:allow-write-text` only grant access to the legacy plain-text
+Note: `clipboard-manager:allow-read-text` / `clipboard-manager:allow-write-text` only grant access to the legacy plain-text
 clipboard helpers (`globalThis.__TAURI__.clipboard.readText` / `writeText`). Rich clipboard formats
 (HTML/RTF/PNG) are handled via custom Rust commands and must be added to the `core:allow-invoke` allowlist
 when used.
@@ -143,14 +143,14 @@ when used.
 If you add new desktop IPC surface area, you must update the capability allowlists:
 
 - new `#[tauri::command]` names → `core:allow-invoke`
-- new frontend↔backend events → `event:allow-listen` / `event:allow-emit`
+- new frontend↔backend events → `core:event:allow-listen` / `core:event:allow-emit`
 
 Note: do **not** add `plugin:*` command names to `core:allow-invoke`. Plugin APIs are gated by their own permission strings
 (e.g. `dialog:allow-open`, `updater:allow-check`).
 
 We keep guardrail tests to ensure we don't accidentally broaden the desktop IPC surface:
 
-- **Event allowlists**: enforce the **exact** `event:allow-listen` / `event:allow-emit` sets (no wildcard / allow-all):
+- **Event allowlists**: enforce the **exact** `core:event:allow-listen` / `core:event:allow-emit` sets (no wildcard / allow-all):
   - `apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts`
 - **Invoke allowlist**: ensure `core:allow-invoke` matches the Rust `generate_handler![...]` registration list:
   - `apps/desktop/src-tauri/tests/tauri_ipc_allowlist.rs`
