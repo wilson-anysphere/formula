@@ -84,6 +84,12 @@ mod gtk_backend {
         }
 
         let ctx = glib::MainContext::default();
+        // `g_main_context_invoke` runs inline when called from the context owner thread. This can
+        // happen early in startup (before GTK has been initialized) and we must not block waiting
+        // for the main loop in that case.
+        if ctx.is_owner() {
+            return op();
+        }
         let (tx, rx) = std::sync::mpsc::channel::<Result<R, ClipboardError>>();
 
         ctx.invoke(move || {
