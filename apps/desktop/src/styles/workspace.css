@@ -61,6 +61,10 @@
   display: none;
 }
 
+#grid-split[data-split-direction="horizontal"] {
+  grid-template-columns: 1fr;
+}
+
 #grid-split[data-split-direction="vertical"] #grid-splitter {
   cursor: col-resize;
 }

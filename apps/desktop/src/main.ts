@@ -1088,9 +1088,13 @@ if (
 
     if (split.direction === "vertical") {
       gridSplitEl.style.gridTemplateColumns = `${primaryPct}% 4px ${secondaryPct}%`;
-      gridSplitEl.style.gridTemplateRows = "1fr";
+      // `grid-template-rows` is static for vertical splits; keep it in CSS and only
+      // update the dynamic column sizing here.
+      gridSplitEl.style.gridTemplateRows = "";
     } else {
-      gridSplitEl.style.gridTemplateColumns = "1fr";
+      // `grid-template-columns` is static for horizontal splits; keep it in CSS and
+      // only update the dynamic row sizing here.
+      gridSplitEl.style.gridTemplateColumns = "";
       gridSplitEl.style.gridTemplateRows = `${primaryPct}% 4px ${secondaryPct}%`;
     }
 
