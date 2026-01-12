@@ -130,6 +130,11 @@ test("diffFormula: normalize=false treats identifier case changes as edits", () 
   assert.equal(result.equal, false);
 });
 
+test("diffFormula: normalize=true treats comma/semicolon argument separators as equal", () => {
+  const result = diffFormula("=SUM(A1;B1)", "=SUM(A1,B1)", { normalize: true });
+  assert.equal(result.equal, true);
+});
+
 test("diffFormula: does not throw on unterminated string literals", () => {
   assert.doesNotThrow(() => diffFormula('=IF(A1="Hello', '=IF(A1="Hello!")'));
   const result = diffFormula('=IF(A1="Hello', '=IF(A1="Hello!")');

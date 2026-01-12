@@ -19,6 +19,13 @@ function tokenEquals(a, b, opts) {
   if (opts.normalize && a.type === "ident") {
     return a.value.toUpperCase() === b.value.toUpperCase();
   }
+  // Excel uses either `,` or `;` as the function argument separator depending
+  // on locale settings. Treat these as equivalent when normalization is enabled
+  // so diffs don't get noisy across locales.
+  if (opts.normalize && a.type === "punct") {
+    const isArgSep = (v) => v === "," || v === ";";
+    if (isArgSep(a.value) && isArgSep(b.value)) return true;
+  }
   return a.value === b.value;
 }
 
