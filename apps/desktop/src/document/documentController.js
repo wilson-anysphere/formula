@@ -608,6 +608,56 @@ export class DocumentController {
   }
 
   /**
+   * Apply a sparse list of cell input updates in a single change event / history entry.
+   *
+   * This is more efficient than calling `setCellInput()` in a loop because it:
+   * - emits one `change` event (instead of one per cell)
+   * - batches backend sync bridges (desktop Tauri workbookSync, etc)
+   *
+   * @param {ReadonlyArray<{ sheetId: string, row: number, col: number, value: any, formula: string | null }>} inputs
+   * @param {{ mergeKey?: string, label?: string, source?: string }} [options]
+   */
+  setCellInputs(inputs, options = {}) {
+    if (!Array.isArray(inputs) || inputs.length === 0) return;
+
+    /** @type {Map<string, { sheetId: string, row: number, col: number, value: any, formula: string | null }>} */
+    const deduped = new Map();
+    for (const input of inputs) {
+      const sheetId = String(input?.sheetId ?? "").trim();
+      if (!sheetId) continue;
+      const row = Number(input?.row);
+      const col = Number(input?.col);
+      if (!Number.isInteger(row) || row < 0) continue;
+      if (!Number.isInteger(col) || col < 0) continue;
+      deduped.set(`${sheetId}:${row},${col}`, {
+        sheetId,
+        row,
+        col,
+        value: input?.value ?? null,
+        formula: typeof input?.formula === "string" ? input.formula : null,
+      });
+    }
+    if (deduped.size === 0) return;
+
+    /** @type {CellDelta[]} */
+    const deltas = [];
+    for (const input of deduped.values()) {
+      const before = this.model.getCell(input.sheetId, input.row, input.col);
+      const after = this.#normalizeCellInput(before, { value: input.value, formula: input.formula });
+      if (cellStateEquals(before, after)) continue;
+      deltas.push({
+        sheetId: input.sheetId,
+        row: input.row,
+        col: input.col,
+        before,
+        after: cloneCellState(after),
+      });
+    }
+
+    this.#applyUserDeltas(deltas, options);
+  }
+
+  /**
    * Clear a single cell's contents (preserving formatting).
    *
    * @param {string} sheetId
