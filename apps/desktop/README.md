@@ -163,7 +163,7 @@ Formula Desktop runs extensions inside the **WebView** runtime (no Electron-styl
 At a high level:
 
 - **Runtime:** `BrowserExtensionHost` (Web Worker-based extension host)
-  - Source: `packages/extension-host/src/browser/index.mjs`
+  - Source: `packages/extension-host/src/browser/index.mjs` (exported as `@formula/extension-host/browser`)
   - Each extension runs in its own module `Worker` (`packages/extension-host/src/browser/extension-worker.mjs`).
 - **Installer + package store:** `WebExtensionManager` (IndexedDB-backed installer/loader)
   - Source: `packages/extension-marketplace/src/WebExtensionManager.ts`

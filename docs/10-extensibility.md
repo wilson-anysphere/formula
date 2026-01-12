@@ -271,6 +271,7 @@ Key components:
 - **`BrowserExtensionHost`** (`packages/extension-host/src/browser/index.mjs`)
   - Runs in the renderer and spawns one module `Worker` per extension (`extension-worker.mjs`).
   - Routes commands/panels/menus/keybindings to extensions and permission-checks API calls.
+  - Package entrypoint: `@formula/extension-host/browser`
 - **`WebExtensionManager`** (`packages/extension-marketplace/src/WebExtensionManager.ts`)
   - Marketplace installer for browser/WebView runtimes.
   - Downloads signed `.fextpkg` blobs, verifies them in the WebView, stores verified bytes in IndexedDB, and loads
