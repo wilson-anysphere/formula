@@ -9,7 +9,13 @@ export function registerInternalRoutes(app: FastifyInstance): void {
       void reply.code(404).send({ error: "not_found" });
       return false;
     }
-    const token = request.headers["x-internal-admin-token"];
+    const header = request.headers["x-internal-admin-token"];
+    const token =
+      typeof header === "string"
+        ? header
+        : Array.isArray(header)
+          ? header[0]
+          : undefined;
     if (token !== app.config.internalAdminToken) {
       void reply.code(403).send({ error: "forbidden" });
       return false;
