@@ -108,9 +108,9 @@ Tauri v2 permissions are granted via **capabilities**:
 - Some toolchains also support window-level opt-in via `app.windows[].capabilities` in `apps/desktop/src-tauri/tauri.conf.json`.
   - When present, the main window label is `main` and opts into the `main` capability via `"capabilities": ["main"]`.
 
-Keep `app.windows[].capabilities` (when present) and the capability file’s `"windows": [...]` scoping in sync so adding a
-new window never implicitly grants it the main capability (guardrailed by
-`apps/desktop/src/tauri/__tests__/tauriSecurityConfig.vitest.ts`).
+Note: window-level `app.windows[].capabilities` is **not supported** by the current tauri-build toolchain in this repo
+(guardrailed by `apps/desktop/src-tauri/tests/tauri_ipc_allowlist.rs`). Capability scoping must be done via the
+capability file’s `"windows": [...]` list.
 
 Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the full allowlists):
 
@@ -194,8 +194,8 @@ We keep guardrail tests to ensure we don't accidentally broaden the desktop IPC 
 - **Event allowlists**: enforce the **exact** `core:event:allow-listen` / `core:event:allow-emit` sets (no wildcard / allow-all):
   - `apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts`
 - **Core/plugin + invoke permissions**: ensure required plugin permissions are explicitly granted (dialogs, window ops,
-  clipboard plain text, updater, etc), we don't accidentally grant dangerous extras, and the invoke allowlists
-  stay scoped and in sync with frontend invoke usage (and that we don't rely on unsupported `core:allow-invoke`):
+  clipboard plain text, updater, etc), we don't accidentally grant dangerous extras, and `allow-invoke.json`
+  stays scoped and in sync with frontend invoke usage (and that we don't rely on unsupported `core:allow-invoke`):
   - `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts`
 - **App command allowlist**: ensure invokable `#[tauri::command]` surface stays explicit + in sync:
   - `apps/desktop/src-tauri/tests/tauri_ipc_allowlist.rs`

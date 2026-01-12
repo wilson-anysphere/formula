@@ -920,9 +920,11 @@ fn main() {
         // Guardrails:
         // - `apps/desktop/src-tauri/tests/tauri_ipc_allowlist.rs` asserts this
         //   `generate_handler![...]` list matches `src-tauri/permissions/allow-invoke.json`.
-        // - `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts` asserts
-        //   `allow-invoke.json` stays explicit/in sync with the frontend's `invoke("...")` usage, and that we don't
-        //   grant an unsupported `core:allow-invoke` permission.
+        // - `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts` asserts:
+        //   - the `allow-invoke` permission is granted to the main window
+        //   - the allowlist stays explicit (no wildcards) and covers frontend `invoke("...")` usage
+        //   - we don't grant an unsupported/unscoped `core:allow-invoke` permission
+        //   - the plugin permission surface stays minimal/explicit (dialogs/window ops/clipboard/updater)
         //
         // Note: we intentionally do not grant the JS shell plugin API (`shell:allow-open`);
         // external URL opening goes through the `open_external_url` Rust command which enforces a
