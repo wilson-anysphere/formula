@@ -336,10 +336,14 @@ fi
 # higher parallelism. This avoids sporadic rustc panics like:
 # "failed to spawn helper thread: Resource temporarily unavailable" (EAGAIN)
 if [[ "${subcommand}" == "test" ]]; then
-  if [[ -n "${FORMULA_CARGO_TEST_JOBS:-}" ]]; then
-    jobs="${FORMULA_CARGO_TEST_JOBS}"
-  elif [[ -z "${caller_jobs_env}" ]]; then
-    jobs="1"
+  # If the caller explicitly passed `-j/--jobs`, respect it even if
+  # `FORMULA_CARGO_TEST_JOBS` is set.
+  if [[ -z "${explicit_jobs}" ]]; then
+    if [[ -n "${FORMULA_CARGO_TEST_JOBS:-}" ]]; then
+      jobs="${FORMULA_CARGO_TEST_JOBS}"
+    elif [[ -z "${caller_jobs_env}" ]]; then
+      jobs="1"
+    fi
   fi
 
   export CARGO_BUILD_JOBS="${jobs}"

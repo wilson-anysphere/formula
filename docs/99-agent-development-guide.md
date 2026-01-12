@@ -108,11 +108,13 @@ bash scripts/cargo_agent.sh bench --bench perf_regressions
 
 Environment variables to tune behavior:
 - `FORMULA_CARGO_JOBS` - parallelism (default: 4)
+- `FORMULA_CARGO_TEST_JOBS` - `cargo test` parallelism (default: 1)
 - `FORMULA_CARGO_LIMIT_AS` - address space limit (default: 14G)
 - `FORMULA_RUST_TEST_THREADS` - test parallelism (default: min(nproc, 16))
 - `FORMULA_RAYON_NUM_THREADS` - Rayon thread pool size (`RAYON_NUM_THREADS`) (default: `FORMULA_CARGO_JOBS`)
 - `FORMULA_OPENSSL_VENDOR=1` - disable the wrapper's auto-setting of `OPENSSL_NO_VENDOR` (useful if you need vendored OpenSSL)
 - `FORMULA_CARGO_RETRY_ATTEMPTS` - retry count for transient OS resource exhaustion (default: 5)
+- `FORMULA_LLD_THREADS` - lld thread pool size for link steps (default: 1 on Linux host builds)
 
 #### npm/pnpm/yarn
 
