@@ -356,12 +356,25 @@ fn migrate_to_v8(tx: &Transaction<'_>) -> rusqlite::Result<()> {
     // We allocate ids per workbook, preserving the current sheet order, and ensuring they fit
     // within the `u32` domain used by `formula_model::WorksheetId`.
     let mut workbook_stmt = tx.prepare("SELECT id FROM workbooks")?;
-    let workbook_ids = workbook_stmt.query_map([], |row| row.get::<_, String>(0))?;
+    let workbook_ids = workbook_stmt
+        .query_map([], |row| Ok(row.get::<_, Option<String>>(0).ok().flatten()))?;
     for workbook_id in workbook_ids {
-        let workbook_id = workbook_id?;
-        // Treat out-of-range ids as unset so we can safely backfill them.
+        let Some(workbook_id) = workbook_id.ok().flatten() else {
+            continue;
+        };
+        // Treat invalid/out-of-range ids as unset so we can safely backfill them.
         tx.execute(
-            "UPDATE sheets SET model_sheet_id = NULL WHERE workbook_id = ?1 AND (model_sheet_id < 0 OR model_sheet_id > ?2)",
+            r#"
+            UPDATE sheets
+            SET model_sheet_id = NULL
+            WHERE workbook_id = ?1
+              AND model_sheet_id IS NOT NULL
+              AND (
+                typeof(model_sheet_id) != 'integer'
+                OR model_sheet_id < 0
+                OR model_sheet_id > ?2
+              )
+            "#,
             params![&workbook_id, u32::MAX as i64],
         )?;
 
@@ -379,10 +392,18 @@ fn migrate_to_v8(tx: &Transaction<'_>) -> rusqlite::Result<()> {
                 "#,
             )?;
             let rows = stmt.query_map(params![&workbook_id], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                Ok((
+                    row.get::<_, Option<String>>(0).ok().flatten(),
+                    row.get::<_, Option<i64>>(1).ok().flatten(),
+                ))
             })?;
             for row in rows {
-                let (sheet_id, raw) = row?;
+                let Ok((sheet_id, raw)) = row else {
+                    continue;
+                };
+                let (Some(sheet_id), Some(raw)) = (sheet_id, raw) else {
+                    continue;
+                };
                 let Ok(id) = u32::try_from(raw) else {
                     continue;
                 };
@@ -401,9 +422,11 @@ fn migrate_to_v8(tx: &Transaction<'_>) -> rusqlite::Result<()> {
             let mut stmt = tx.prepare(
                 "SELECT model_sheet_id FROM sheets WHERE workbook_id = ?1 AND model_sheet_id IS NOT NULL",
             )?;
-            let ids = stmt.query_map(params![&workbook_id], |row| row.get::<_, i64>(0))?;
+            let ids = stmt.query_map(params![&workbook_id], |row| Ok(row.get::<_, Option<i64>>(0).ok().flatten()))?;
             for raw in ids {
-                let raw = raw?;
+                let Some(raw) = raw? else {
+                    continue;
+                };
                 if let Ok(id) = u32::try_from(raw) {
                     used.insert(id);
                     max_existing = max_existing.max(id);
@@ -421,9 +444,12 @@ fn migrate_to_v8(tx: &Transaction<'_>) -> rusqlite::Result<()> {
             ORDER BY COALESCE(position, 0), id
             "#,
         )?;
-        let sheet_ids = sheet_stmt.query_map(params![&workbook_id], |row| row.get::<_, String>(0))?;
+        let sheet_ids =
+            sheet_stmt.query_map(params![&workbook_id], |row| Ok(row.get::<_, Option<String>>(0).ok().flatten()))?;
         for sheet_id in sheet_ids {
-            let sheet_id = sheet_id?;
+            let Some(sheet_id) = sheet_id.ok().flatten() else {
+                continue;
+            };
             while used.contains(&next_id) {
                 next_id = next_id.wrapping_add(1);
             }

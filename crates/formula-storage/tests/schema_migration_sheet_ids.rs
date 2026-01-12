@@ -77,3 +77,76 @@ fn migration_v8_deduplicates_model_sheet_ids() {
     assert!(result.is_err(), "expected unique index to reject duplicates");
 }
 
+#[test]
+fn migration_v8_tolerates_invalid_workbook_and_sheet_id_types() {
+    let tmp = NamedTempFile::new().expect("tmp file");
+    let path = tmp.path();
+
+    let storage = Storage::open_path(path).expect("open storage");
+    let workbook = storage
+        .create_workbook("Book", None)
+        .expect("create workbook");
+    let sheet_a = storage
+        .create_sheet(workbook.id, "SheetA", 0, None)
+        .expect("create sheet a");
+    let sheet_b = storage
+        .create_sheet(workbook.id, "SheetB", 1, None)
+        .expect("create sheet b");
+    drop(storage);
+
+    // Downgrade to schema v7 and inject corrupt rows that would previously crash the v8 migration
+    // when it attempted to read TEXT ids as Strings.
+    let conn = Connection::open(path).expect("open raw db");
+    conn.execute_batch("DROP INDEX IF EXISTS idx_sheets_workbook_model_sheet_id;")
+        .expect("drop unique index");
+    conn.execute("UPDATE schema_version SET version = 7 WHERE id = 1", [])
+        .expect("downgrade schema version");
+
+    // Corrupt an existing sheet's model_sheet_id with a non-integer type so the migration has to
+    // clear and reallocate it.
+    conn.execute(
+        "UPDATE sheets SET model_sheet_id = X'00' WHERE id = ?1",
+        params![sheet_a.id.to_string()],
+    )
+    .expect("corrupt model_sheet_id");
+
+    // Insert a corrupt workbook row with a non-TEXT primary key.
+    conn.execute(
+        "INSERT INTO workbooks (id, name) VALUES (X'00', 'Corrupt')",
+        [],
+    )
+    .expect("insert corrupt workbook");
+
+    // Insert a corrupt sheet row with a non-TEXT id (but a valid workbook_id) and a non-integer
+    // model_sheet_id.
+    conn.execute(
+        "INSERT INTO sheets (id, workbook_id, name, model_sheet_id) VALUES (X'00', ?1, 'Bad', X'00')",
+        params![workbook.id.to_string()],
+    )
+    .expect("insert corrupt sheet");
+    drop(conn);
+
+    let storage = Storage::open_path(path).expect("open with v8 migration");
+    drop(storage);
+
+    let conn = Connection::open(path).expect("reopen raw db");
+    let version: i64 = conn
+        .query_row("SELECT version FROM schema_version WHERE id = 1", [], |r| r.get(0))
+        .expect("schema version");
+    assert_eq!(version, 8);
+
+    let sheet_b_model_id: i64 = conn
+        .query_row(
+            "SELECT model_sheet_id FROM sheets WHERE id = ?1",
+            params![sheet_b.id.to_string()],
+            |r| r.get(0),
+        )
+        .expect("fetch sheet b model id");
+
+    // Ensure the unique index is active by attempting to introduce a duplicate.
+    let result = conn.execute(
+        "UPDATE sheets SET model_sheet_id = ?1 WHERE id = ?2",
+        params![sheet_b_model_id, sheet_a.id.to_string()],
+    );
+    assert!(result.is_err(), "expected unique index to reject duplicates");
+}
