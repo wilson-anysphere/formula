@@ -2087,7 +2087,7 @@ fn build_macro_security_status(
                             MacroSignatureStatus::SignedInvalid
                         }
                         formula_vba::VbaSignatureBinding::Unknown => {
-                            // We couldn't verify the MS-OVBA project digest binding. Treat it as
+                            // We couldn't verify the MS-OVBA Contents Hash binding. Treat it as
                             // unverified so `TrustedSignedOnly` continues to behave conservatively.
                             MacroSignatureStatus::SignedUnverified
                         }

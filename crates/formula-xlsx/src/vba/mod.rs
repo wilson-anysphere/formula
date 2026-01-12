@@ -61,7 +61,7 @@ impl XlsxPackage {
         verify_vba_digital_signature_with_trust_from_parts(self.parts_map(), options)
     }
 
-    /// Verify MS-OVBA "project digest" signature binding for an embedded VBA project.
+    /// Verify MS-OVBA "Contents Hash" signature binding for an embedded VBA project.
     ///
     /// Returns `Ok(None)` when there is no `xl/vbaProject.bin`.
     pub fn vba_project_signature_binding(
@@ -117,7 +117,7 @@ impl XlsxDocument {
         verify_vba_digital_signature_with_trust_from_parts(self.parts(), options)
     }
 
-    /// Verify MS-OVBA "project digest" signature binding for an embedded VBA project.
+    /// Verify MS-OVBA "Contents Hash" signature binding for an embedded VBA project.
     ///
     /// Returns `Ok(None)` when there is no `xl/vbaProject.bin`.
     pub fn vba_project_signature_binding(
@@ -201,7 +201,7 @@ fn verify_vba_digital_signature_from_parts(
                     // Preserve which part we read the signature from to avoid ambiguity.
                     sig.stream_path = format!("{signature_part_name}:{}", sig.stream_path);
                     // If we couldn't locate the corresponding `vbaProject.bin`, we can't evaluate the
-                    // MS-OVBA "project digest" binding and should not report a mismatch.
+                    // MS-OVBA "Contents Hash" binding and should not report a mismatch.
                     if vba_project_bin.is_none() {
                         sig.binding = formula_vba::VbaSignatureBinding::Unknown;
                     }
@@ -228,7 +228,7 @@ fn verify_vba_digital_signature_from_parts(
     if let Some(sig) = signature_part_result.as_mut() {
         if sig.verification == VbaSignatureVerification::SignedVerified {
             // For raw signature blobs (`vbaProjectSignature.bin` is not an OLE container), attempt
-            // to verify MS-OVBA project digest binding against the actual `vbaProject.bin`.
+            // to verify MS-OVBA Contents Hash binding against the actual `vbaProject.bin`.
             if sig.binding == formula_vba::VbaSignatureBinding::Unknown {
                 if let Some(vba_project_bin) = vba_project_bin {
                     sig.binding =

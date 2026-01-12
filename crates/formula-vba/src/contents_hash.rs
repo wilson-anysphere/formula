@@ -114,8 +114,8 @@ pub fn project_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
 
 /// Build the MS-OVBA "ContentNormalizedData" byte sequence for a VBA project.
 ///
-/// This is a building block used by MS-OVBA when computing the VBA project digest that a
-/// `\x05DigitalSignature*` stream signs.
+/// This is a building block used by MS-OVBA when computing the VBA signature binding digest
+/// ("Contents Hash") that a `\x05DigitalSignature*` stream signs.
 ///
 /// This implementation is intentionally focused on correctness for the trickier normalization
 /// rules that are easy to regress:

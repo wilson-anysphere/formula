@@ -2,15 +2,19 @@ use thiserror::Error;
 
 /// Digest extracted from the signed Authenticode / MS-OSHARED signature binding payload.
 ///
-/// Office can embed the VBA project digest in either:
+/// Office can embed the VBA signature binding digest (MS-OVBA "Contents Hash") in either:
 /// - classic Authenticode `SpcIndirectDataContent` (`DigestInfo.digest`), or
 /// - MS-OSHARED `SpcIndirectDataContentV2` (`SigDataV1Serialized.sourceHash`).
 ///
-/// In MS-OVBA terms, this corresponds to the "project digest" binding value
-/// stored inside the VBA digital signature stream.
+/// In MS-OVBA terms, this corresponds to the "Contents Hash" binding value stored inside the VBA
+/// digital signature stream.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VbaSignedDigest {
-    /// Digest algorithm OID (e.g. SHA1 `1.3.14.3.2.26`, SHA256 `2.16.840.1.101.3.4.2.1`).
+    /// Algorithm OID from the signed digest structure (often SHA-256 in the wild).
+    ///
+    /// Note: for VBA signatures the binding digest bytes are always a 16-byte MD5 per MS-OSHARED §4.3
+    /// regardless of this OID.
+    /// https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/40c8dab3-e8db-4c66-a6be-8cec06351b1e
     pub digest_algorithm_oid: String,
     /// Digest bytes.
     pub digest: Vec<u8>,
@@ -28,13 +32,13 @@ pub enum VbaSignatureSignedDigestError {
 const OID_PKCS7_SIGNED_DATA: &[u8] = b"\x2A\x86\x48\x86\xF7\x0D\x01\x07\x02"; // 1.2.840.113549.1.7.2
 const OID_MD5_STR: &str = "1.2.840.113549.2.5";
 
-/// Extract the signed VBA project digest from a raw VBA `\x05DigitalSignature*` stream.
+/// Extract the signed VBA signature binding digest from a raw VBA `\x05DigitalSignature*` stream.
 ///
 /// This supports both:
 /// - classic Authenticode `SpcIndirectDataContent` (extracts `DigestInfo`), and
 /// - MS-OSHARED `SpcIndirectDataContentV2` (extracts `SigDataV1Serialized.sourceHash`).
 ///
-/// This is a best-effort parser intended for binding verification (MS-OVBA "project digest").
+/// This is a best-effort parser intended for binding verification (MS-OVBA "Contents Hash").
 ///
 /// Returns:
 /// - `Ok(Some(_))` if a PKCS#7/CMS SignedData blob was found and its signed content parsed as either
