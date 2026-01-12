@@ -408,6 +408,44 @@ impl<'a> CompileCtx<'a> {
         self.alloc_local(Arc::from(label))
     }
 
+    fn compile_choose(&mut self, args: &[Expr]) {
+        // CHOOSE(index, value1, [value2, ...]) is lazy: only the selected value expression should be
+        // evaluated at runtime.
+        //
+        // We lower CHOOSE to:
+        //
+        //   SWITCH(INT(index), 1, value1, 2, value2, ..., #VALUE!)
+        //
+        // Where:
+        // - INT() matches CHOOSE's index coercion semantics for valid (positive) indices
+        //   (CHOOSE uses truncation; negative indices are invalid either way).
+        // - The default branch returns #VALUE! for out-of-range indices.
+        if args.len() < 2 {
+            self.push_error_const(ErrorKind::Value);
+            return;
+        }
+
+        // Build the synthetic SWITCH argument list:
+        //   [expr, value1, result1, value2, result2, ..., default]
+        let choices = &args[1..];
+        let mut switch_args: Vec<Expr> = Vec::with_capacity(2 * choices.len() + 2);
+        switch_args.push(Expr::FuncCall {
+            func: Function::Int,
+            args: vec![args[0].clone()],
+        });
+
+        for (idx, choice) in choices.iter().enumerate() {
+            let case_num = (idx + 1) as f64;
+            switch_args.push(Expr::Literal(Value::Number(case_num)));
+            switch_args.push(choice.clone());
+        }
+
+        // Out-of-range index => #VALUE!.
+        switch_args.push(Expr::Literal(Value::Error(ErrorKind::Value)));
+
+        self.compile_switch(&switch_args);
+    }
+
     fn compile_ifs(&mut self, args: &[Expr]) {
         // IFS requires at least one condition/value pair, and the argument count must be even.
         if args.len() < 2 {
