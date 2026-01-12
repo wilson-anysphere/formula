@@ -236,6 +236,15 @@ powershell -ExecutionPolicy Bypass -File tools/excel-oracle/patch-pinned-dataset
   -SubsetCasesPath tools/excel-oracle/odd_coupon_boundary_cases.json
 ```
 
+Other useful subset corpora include:
+
+- `tools/excel-oracle/odd_coupon_long_stub_cases.json`
+- `tools/excel-oracle/odd_coupon_basis4_cases.json`
+- `tools/excel-oracle/odd_coupon_validation_cases.json`
+- `tools/excel-oracle/odd_coupon_invalid_schedule_cases.json`
+
+See `tools/excel-oracle/README.md` for more examples.
+
 To validate the dataset and preview the output paths without writing files, use:
 
 ```bash
