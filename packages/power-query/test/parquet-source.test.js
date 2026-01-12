@@ -8,6 +8,7 @@ import { arrowTableFromColumns, arrowTableToParquet } from "../../data-io/src/in
 
 import { QueryEngine } from "../src/engine.js";
 import { ArrowTableAdapter } from "../src/arrowTable.js";
+import { DataTable } from "../src/table.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -90,6 +91,49 @@ test("parquet query source supports readBinaryStream for Arrow-backed execution"
     [3, "Carla", 3.75],
     [1, "Alice", 1.5],
   ]);
+});
+
+test("parquet query source falls back to readParquetTable when Arrow decoding fails", async () => {
+  let openFileCalls = 0;
+  let readParquetTableCalls = 0;
+
+  const engine = new QueryEngine({
+    fileAdapter: {
+      openFile: async () => {
+        openFileCalls += 1;
+        // Not a real parquet file: forces the Arrow/parquet-wasm path to throw when optional
+        // deps are installed, and also fails fast when they are missing.
+        return new Blob([new Uint8Array([0, 1, 2, 3, 4])]);
+      },
+      readParquetTable: async () => {
+        readParquetTableCalls += 1;
+        return DataTable.fromGrid(
+          [
+            ["id", "name"],
+            [1, "Alice"],
+          ],
+          { hasHeaders: true, inferTypes: true },
+        );
+      },
+    },
+  });
+
+  const query = {
+    id: "q_parquet_fallback",
+    name: "Parquet fallback",
+    source: { type: "parquet", path: "/tmp/fallback.parquet", options: { batchSize: 2 } },
+    steps: [],
+  };
+
+  const result = await engine.executeQuery(query, {}, {});
+  assert.ok(result instanceof DataTable);
+  assert.deepEqual(result.toGrid(), [
+    ["id", "name"],
+    [1, "Alice"],
+  ]);
+
+  assert.equal(openFileCalls, 1);
+  assert.equal(readParquetTableCalls, 1);
 });
 
 test("parquet query source supports executeQueryStreaming", { skip: !parquetAvailable }, async () => {
