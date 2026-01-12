@@ -32,6 +32,15 @@ fn eval_value_or_skip(sheet: &mut TestSheet, formula: &str) -> Option<Value> {
     }
 }
 
+fn eval_number_or_skip(sheet: &mut TestSheet, formula: &str) -> Option<f64> {
+    match sheet.eval(formula) {
+        Value::Number(n) => Some(n),
+        // These bond functions may not be registered in every build of the engine yet.
+        Value::Error(ErrorKind::Name) => None,
+        other => panic!("expected number, got {other:?} from {formula}"),
+    }
+}
+
 #[test]
 fn oddfprice_zero_coupon_rate_reduces_to_discounted_redemption() {
     let system = ExcelDateSystem::EXCEL_1900;

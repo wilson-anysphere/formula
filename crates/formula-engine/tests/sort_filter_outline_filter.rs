@@ -84,3 +84,35 @@ fn autofilter_preserves_user_hidden_rows() {
     assert!(outline.rows.entry(3).hidden.user);
     assert!(!outline.rows.entry(3).hidden.filter);
 }
+
+#[test]
+fn autofilter_blanks_does_not_treat_errors_as_blank() {
+    let mut sheet = Worksheet::new(1, "Sheet1");
+    sheet.set_value(CellRef::new(0, 0), CellValue::String("Val".into()));
+    sheet.set_value(CellRef::new(1, 0), CellValue::Error(formula_model::ErrorValue::Div0));
+    sheet.set_value(CellRef::new(2, 0), CellValue::Empty);
+
+    let range = Range::from_a1("A1:A3").unwrap();
+    let filter = SheetAutoFilter {
+        range,
+        filter_columns: vec![FilterColumn {
+            col_id: 0,
+            join: FilterJoin::Any,
+            criteria: vec![FilterCriterion::Blanks],
+            values: Vec::new(),
+            raw_xml: Vec::new(),
+        }],
+        sort_state: None,
+        raw_xml: Vec::new(),
+    };
+
+    let mut outline = Outline::default();
+    let result = apply_autofilter_to_outline(&sheet, &mut outline, range, Some(&filter));
+
+    // Row 2 is an error and should not match the Blanks criterion; row 3 is blank and should
+    // remain visible.
+    assert_eq!(result.visible_rows, vec![true, false, true]);
+    assert_eq!(result.hidden_sheet_rows, vec![1]);
+    assert!(outline.rows.entry(2).hidden.filter);
+    assert!(!outline.rows.entry(3).hidden.filter);
+}
