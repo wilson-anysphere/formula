@@ -31,12 +31,19 @@ function getYMap(value: unknown): any | null {
   if (value instanceof Y.Map) return value;
   if (!value || typeof value !== "object") return null;
   const maybe = value as any;
-  if (maybe.constructor?.name !== "YMap") return null;
+  // `y-websocket` and pnpm workspaces can load multiple `yjs` module instances
+  // (ESM + CJS). Bundlers can also rename constructors (e.g. `YMap` → `_YMap`),
+  // which makes `instanceof` / `constructor.name` checks unreliable.
+  //
+  // Prefer structural checks and require Yjs' observer APIs so we don't
+  // accidentally treat a plain JS `Map` as a Y.Map.
   if (typeof maybe.get !== "function") return null;
   if (typeof maybe.set !== "function") return null;
   if (typeof maybe.delete !== "function") return null;
   if (typeof maybe.keys !== "function") return null;
   if (typeof maybe.forEach !== "function") return null;
+  if (typeof maybe.observeDeep !== "function") return null;
+  if (typeof maybe.unobserveDeep !== "function") return null;
   return maybe;
 }
 
@@ -44,11 +51,13 @@ function getYArray(value: unknown): any | null {
   if (value instanceof Y.Array) return value;
   if (!value || typeof value !== "object") return null;
   const maybe = value as any;
-  if (maybe.constructor?.name !== "YArray") return null;
+  // See `getYMap` above for rationale.
   if (typeof maybe.get !== "function") return null;
   if (typeof maybe.toArray !== "function") return null;
   if (typeof maybe.push !== "function") return null;
   if (typeof maybe.delete !== "function") return null;
+  if (typeof maybe.observeDeep !== "function") return null;
+  if (typeof maybe.unobserveDeep !== "function") return null;
   return maybe;
 }
 
@@ -250,8 +259,14 @@ function normalizeForeignScalar(value: any): any {
   }
 
   if (value instanceof Y.Text) return value.toString();
-  if (value && typeof value === "object" && value.constructor?.name === "YText" && typeof value.toString === "function") {
-    return value.toString();
+  // Avoid relying on constructor names (`YText` vs `_YText`).
+  if (
+    value &&
+    typeof value === "object" &&
+    typeof (value as any).toString === "function" &&
+    typeof (value as any).toDelta === "function"
+  ) {
+    return (value as any).toString();
   }
 
   return value;
@@ -527,10 +542,12 @@ function getYMapCell(cellData: unknown): Y.Map<unknown> | null {
   // Use a small duck-type check so CollabSession APIs keep working regardless of module loader.
   if (!cellData || typeof cellData !== "object") return null;
   const maybe = cellData as any;
-  if (maybe.constructor?.name !== "YMap") return null;
   if (typeof maybe.get !== "function") return null;
   if (typeof maybe.set !== "function") return null;
   if (typeof maybe.delete !== "function") return null;
+  if (typeof maybe.forEach !== "function") return null;
+  if (typeof maybe.observeDeep !== "function") return null;
+  if (typeof maybe.unobserveDeep !== "function") return null;
   return maybe as Y.Map<unknown>;
 }
 
