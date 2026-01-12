@@ -6290,11 +6290,23 @@ try {
     app.focus();
   };
 
-  void listen("menu-undo", () => dispatchSpreadsheetShortcut("z"));
-  void listen("menu-redo", () => dispatchSpreadsheetShortcut("z", { shift: true }));
-  void listen("menu-cut", () => dispatchSpreadsheetShortcut("x"));
-  void listen("menu-copy", () => dispatchSpreadsheetShortcut("c"));
-  void listen("menu-paste", () => dispatchSpreadsheetShortcut("v"));
+  void listen("menu-undo", () => {
+    app.undo();
+    app.focus();
+  });
+  void listen("menu-redo", () => {
+    app.redo();
+    app.focus();
+  });
+  void listen("menu-cut", () => {
+    void app.cutToClipboard();
+  });
+  void listen("menu-copy", () => {
+    void app.copyToClipboard();
+  });
+  void listen("menu-paste", () => {
+    void app.pasteFromClipboard();
+  });
   void listen("menu-select-all", () => dispatchSpreadsheetShortcut("a"));
 
   const zoomStepPercent = 10;
@@ -6585,7 +6597,7 @@ try {
 
     if (!shift && keyLower === "q") {
       e.preventDefault();
-      void handleCloseRequest({ quit: true }).catch((err) => {
+      void requestAppQuit().catch((err) => {
         console.error("Failed to quit app:", err);
       });
       return;
