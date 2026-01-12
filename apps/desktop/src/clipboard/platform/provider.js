@@ -413,10 +413,15 @@ function createWebClipboardProvider() {
         try {
           const items = await clipboard.read();
           for (const item of items) {
-            const htmlType = item.types.find((t) => t === "text/html");
-            const textType = item.types.find((t) => t === "text/plain");
-            const rtfType = item.types.find((t) => t === "text/rtf" || t === "application/rtf");
-            const imagePngType = item.types.find((t) => t === "image/png");
+            const matchMime = (value, exact) =>
+              value === exact || (typeof value === "string" && value.toLowerCase().startsWith(`${exact};`));
+
+            const htmlType = item.types.find((t) => matchMime(t, "text/html"));
+            const textType = item.types.find((t) => matchMime(t, "text/plain"));
+            const rtfType = item.types.find(
+              (t) => matchMime(t, "text/rtf") || matchMime(t, "application/rtf")
+            );
+            const imagePngType = item.types.find((t) => matchMime(t, "image/png"));
 
             const html = htmlType ? await readClipboardItemText(item, htmlType, MAX_RICH_TEXT_BYTES) : undefined;
             const text = textType ? await readClipboardItemText(item, textType, Number.POSITIVE_INFINITY) : undefined;
