@@ -148,7 +148,23 @@ export class DocumentControllerBridge {
   }
 
   get_range_format({ range }) {
-    const cell = this.doc.getCell(range.sheet_id, { row: range.start_row, col: range.start_col });
+    const coord = { row: range.start_row, col: range.start_col };
+
+    // Prefer the newer effective (layered) formatting API when available. With layered
+    // formatting, `cell.styleId` can be 0 even when an effective format is inherited from
+    // sheet/row/column defaults.
+    if (typeof this.doc.getCellFormat === "function") {
+      const format = this.doc.getCellFormat(range.sheet_id, coord);
+      if (format == null) return {};
+      // Some controller implementations may return a styleId (number) instead of a style object.
+      if (typeof format === "number") {
+        return this.doc.styleTable?.get(format) ?? {};
+      }
+      return format;
+    }
+
+    // Back-compat: fall back to the legacy per-cell styleId lookup.
+    const cell = this.doc.getCell(range.sheet_id, coord);
     const styleId = cell?.styleId ?? 0;
     return this.doc.styleTable?.get(styleId) ?? {};
   }
