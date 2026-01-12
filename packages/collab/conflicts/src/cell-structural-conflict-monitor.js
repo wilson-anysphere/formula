@@ -143,10 +143,10 @@ export class CellStructuralConflictMonitor {
  
         this.doc.transact(() => {
           // Clear source + both destinations.
-          this.cells.delete(conflict.cellKey);
-          if (oursTo) this.cells.delete(oursTo);
-          if (theirsTo) this.cells.delete(theirsTo);
- 
+          this._clearCell(conflict.cellKey);
+          if (oursTo) this._clearCell(oursTo);
+          if (theirsTo) this._clearCell(theirsTo);
+
           if (chosenCell) {
             this._writeCell(target, chosenCell);
           }
@@ -159,7 +159,7 @@ export class CellStructuralConflictMonitor {
  
         this.doc.transact(() => {
           if (finalCell === null) {
-            this.cells.delete(conflict.cellKey);
+            this._clearCell(conflict.cellKey);
           } else {
             this._writeCell(conflict.cellKey, finalCell);
           }
@@ -681,9 +681,9 @@ export class CellStructuralConflictMonitor {
     try {
       try {
         this.doc.transact(() => {
-          this.cells.delete(move.fromCellKey);
+          this._clearCell(move.fromCellKey);
           if (desired === null) {
-            this.cells.delete(move.toCellKey);
+            this._clearCell(move.toCellKey);
           } else {
             this._writeCell(move.toCellKey, desired);
           }
@@ -747,16 +747,16 @@ export class CellStructuralConflictMonitor {
    * @param {NormalizedCell} cell
    */
   _writeCell(cellKey, cell) {
+    const normalized = normalizeCell(cell);
+    if (normalized === null) {
+      this._clearCell(cellKey);
+      return;
+    }
+ 
     let cellMap = /** @type {Y.Map<any> | undefined} */ (this.cells.get(cellKey));
     if (!isYMap(cellMap)) {
       cellMap = new Y.Map();
       this.cells.set(cellKey, cellMap);
-    }
- 
-    const normalized = normalizeCell(cell);
-    if (normalized === null) {
-      this.cells.delete(cellKey);
-      return;
     }
  
     const existingEnc = cellMap.get("enc");
@@ -797,6 +797,46 @@ export class CellStructuralConflictMonitor {
       cellMap.delete("format");
     }
  
+    cellMap.set("modified", Date.now());
+    cellMap.set("modifiedBy", this.localUserId);
+  }
+
+  /**
+   * Clear a cell while preserving its entry in the root `cells` Y.Map whenever
+   * possible (writes explicit `value=null` / `formula=null` markers).
+   *
+   * This preserves delete-vs-overwrite causal history for downstream observers
+   * (e.g. formula/value conflict monitors), since root map deletes do not create
+   * Yjs Items and deep observers may ignore them.
+   *
+   * Encrypted cells cannot be cleared safely without an encryption key, so we
+   * fall back to deleting the root entry in that case.
+   *
+   * @param {string} cellKey
+   */
+  _clearCell(cellKey) {
+    const existing = this.cells.get(cellKey);
+    if (existing === undefined) return;
+
+    let cellMap = isYMap(existing) ? existing : null;
+    if (!cellMap) {
+      cellMap = new Y.Map();
+      this.cells.set(cellKey, cellMap);
+    }
+
+    const existingEnc = cellMap.get("enc");
+    if (existingEnc !== undefined) {
+      // Without keys we cannot safely overwrite ciphertext; deleting avoids
+      // writing plaintext into an encrypted cell.
+      this.cells.delete(cellKey);
+      return;
+    }
+
+    cellMap.delete("enc");
+    cellMap.set("value", null);
+    cellMap.set("formula", null);
+    cellMap.delete("format");
+    cellMap.delete("style");
     cellMap.set("modified", Date.now());
     cellMap.set("modifiedBy", this.localUserId);
   }
