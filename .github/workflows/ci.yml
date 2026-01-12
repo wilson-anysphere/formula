@@ -25,6 +25,8 @@ jobs:
         run: cargo test -p xlsx-diff
       - name: Run formula-xlsx tests
         run: cargo test -p formula-xlsx
+      - name: Run formula-xls tests
+        run: cargo test -p formula-xls
 
   desktop-backend-tests:
     name: Desktop backend (Rust) tests
