@@ -573,10 +573,19 @@ impl XlsxDocument {
             .get(&(sheet_id, cell))
             .and_then(|m| m.formula.as_ref())
             .is_some_and(|f| !f.file_text.is_empty());
-        if keep_formula_meta {
+        let keep_vm_cm = self
+            .meta
+            .cell_meta
+            .get(&(sheet_id, cell))
+            .is_some_and(|m| m.vm.is_some() || m.cm.is_some());
+
+        if keep_formula_meta || keep_vm_cm {
             if let Some(meta) = self.meta.cell_meta.get_mut(&(sheet_id, cell)) {
                 meta.value_kind = None;
                 meta.raw_value = None;
+                if !keep_formula_meta {
+                    meta.formula = None;
+                }
             }
         } else {
             self.meta.cell_meta.remove(&(sheet_id, cell));
