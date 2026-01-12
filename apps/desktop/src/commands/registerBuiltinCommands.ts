@@ -71,7 +71,11 @@ export function registerBuiltinCommands(params: {
   };
 
   const activateRelativeSheet = (delta: -1 | 1): void => {
-    if (app.isEditing()) return;
+    // Excel-like behavior: generally do not allow sheet navigation while editing.
+    //
+    // Exception: while the formula bar is actively editing a *formula* (range selection mode),
+    // allow switching sheets so users can build cross-sheet references.
+    if (app.isEditing() && !app.isFormulaBarFormulaEditing()) return;
     const sheetIds = listVisibleSheetIds();
     if (sheetIds.length <= 1) return;
     const active = app.getCurrentSheetId();

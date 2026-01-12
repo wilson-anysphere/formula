@@ -154,6 +154,82 @@ describe("registerBuiltinCommands: sheet navigation", () => {
     expect(activated).toEqual(["Sheet3", "Sheet1", "Sheet3"]);
   });
 
+  it("blocks sheet navigation while editing non-formula content", async () => {
+    const commandRegistry = new CommandRegistry();
+    const layoutController = {
+      layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
+      openPanel(panelId: string) {
+        this.layout = openPanel(this.layout, panelId, { panelRegistry });
+      },
+      closePanel(panelId: string) {
+        this.layout = closePanel(this.layout, panelId);
+      },
+    } as any;
+
+    let current = "Sheet1";
+    const activated: string[] = [];
+
+    const doc = {
+      getVisibleSheetIds: () => ["Sheet1", "Sheet2"],
+    };
+
+    const app = {
+      getDocument: () => doc,
+      getCurrentSheetId: () => current,
+      isEditing: () => true,
+      isFormulaBarFormulaEditing: () => false,
+      activateSheet: (id: string) => {
+        current = id;
+        activated.push(id);
+      },
+      focusAfterSheetNavigation: () => {},
+    } as any;
+
+    registerBuiltinCommands({ commandRegistry, app, layoutController });
+
+    await commandRegistry.executeCommand("workbook.nextSheet");
+    expect(current).toBe("Sheet1");
+    expect(activated).toEqual([]);
+  });
+
+  it("allows sheet navigation while the formula bar is actively editing a formula", async () => {
+    const commandRegistry = new CommandRegistry();
+    const layoutController = {
+      layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
+      openPanel(panelId: string) {
+        this.layout = openPanel(this.layout, panelId, { panelRegistry });
+      },
+      closePanel(panelId: string) {
+        this.layout = closePanel(this.layout, panelId);
+      },
+    } as any;
+
+    let current = "Sheet1";
+    const activated: string[] = [];
+
+    const doc = {
+      getVisibleSheetIds: () => ["Sheet1", "Sheet2"],
+    };
+
+    const app = {
+      getDocument: () => doc,
+      getCurrentSheetId: () => current,
+      isEditing: () => true,
+      isFormulaBarFormulaEditing: () => true,
+      activateSheet: (id: string) => {
+        current = id;
+        activated.push(id);
+      },
+      focusAfterSheetNavigation: () => {},
+    } as any;
+
+    registerBuiltinCommands({ commandRegistry, app, layoutController });
+
+    await commandRegistry.executeCommand("workbook.nextSheet");
+    expect(current).toBe("Sheet2");
+    expect(activated).toEqual(["Sheet2"]);
+  });
+
   it("jumps to the first visible sheet when the current sheet is not visible", async () => {
     const commandRegistry = new CommandRegistry();
     const layoutController = {
