@@ -147,6 +147,98 @@ fn non_calcchain_rels_diffs_remain_critical() {
 }
 
 #[test]
+fn missing_and_extra_part_severity_is_part_aware() {
+    let content_types = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>"#;
+    let rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>"#;
+    let doc_props = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"/>"#;
+
+    // Missing parts: severity should match part importance.
+    let expected_zip = zip_bytes(&[
+        ("[Content_Types].xml", content_types),
+        ("xl/_rels/workbook.xml.rels", rels),
+        ("docProps/app.xml", doc_props),
+    ]);
+    let actual_zip = zip_bytes(&[]);
+    let expected = WorkbookArchive::from_bytes(&expected_zip).unwrap();
+    let actual = WorkbookArchive::from_bytes(&actual_zip).unwrap();
+
+    let report = xlsx_diff::diff_archives(&expected, &actual);
+    assert!(
+        report
+            .differences
+            .iter()
+            .any(|d| d.kind == "missing_part"
+                && d.part == "[Content_Types].xml"
+                && d.severity == Severity::Critical),
+        "expected missing [Content_Types].xml to be CRITICAL, got {:#?}",
+        report.differences
+    );
+    assert!(
+        report
+            .differences
+            .iter()
+            .any(|d| d.kind == "missing_part"
+                && d.part.ends_with(".rels")
+                && d.severity == Severity::Critical),
+        "expected missing *.rels to be CRITICAL, got {:#?}",
+        report.differences
+    );
+    assert!(
+        report
+            .differences
+            .iter()
+            .any(|d| d.kind == "missing_part"
+                && d.part == "docProps/app.xml"
+                && d.severity == Severity::Info),
+        "expected missing docProps/* to be INFO, got {:#?}",
+        report.differences
+    );
+
+    // Extra parts: `[Content_Types].xml` and `.rels` should remain CRITICAL, `docProps/*` INFO.
+    let expected_zip = zip_bytes(&[]);
+    let actual_zip = zip_bytes(&[
+        ("[Content_Types].xml", content_types),
+        ("xl/_rels/workbook.xml.rels", rels),
+        ("docProps/app.xml", doc_props),
+    ]);
+    let expected = WorkbookArchive::from_bytes(&expected_zip).unwrap();
+    let actual = WorkbookArchive::from_bytes(&actual_zip).unwrap();
+
+    let report = xlsx_diff::diff_archives(&expected, &actual);
+    assert!(
+        report
+            .differences
+            .iter()
+            .any(|d| d.kind == "extra_part"
+                && d.part == "[Content_Types].xml"
+                && d.severity == Severity::Critical),
+        "expected extra [Content_Types].xml to be CRITICAL, got {:#?}",
+        report.differences
+    );
+    assert!(
+        report
+            .differences
+            .iter()
+            .any(|d| d.kind == "extra_part" && d.part.ends_with(".rels") && d.severity == Severity::Critical),
+        "expected extra *.rels to be CRITICAL, got {:#?}",
+        report.differences
+    );
+    assert!(
+        report
+            .differences
+            .iter()
+            .any(|d| d.kind == "extra_part"
+                && d.part == "docProps/app.xml"
+                && d.severity == Severity::Info),
+        "expected extra docProps/* to be INFO, got {:#?}",
+        report.differences
+    );
+}
+
+#[test]
 fn ignore_glob_suppresses_calcchain_diffs() {
     let expected_zip = zip_bytes(&[("xl/calcChain.xml", br#"<calcChain/>"#)]);
     let actual_zip = zip_bytes(&[]);
