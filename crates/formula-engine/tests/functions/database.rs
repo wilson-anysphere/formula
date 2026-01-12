@@ -110,6 +110,21 @@ fn database_functions_computed_criteria_basic() {
     assert_number(&sheet.eval("=DAVERAGE(A1:D5,\"Salary\",F1:F2)"), 1750.0);
     assert_number(&sheet.eval("=DCOUNT(A1:D5,\"Salary\",F1:F2)"), 2.0);
     assert_number(&sheet.eval("=DCOUNTA(A1:D5,\"Salary\",F1:F2)"), 2.0);
+    assert_number(&sheet.eval("=DMAX(A1:D5,\"Salary\",F1:F2)"), 2000.0);
+    assert_number(&sheet.eval("=DMIN(A1:D5,\"Salary\",F1:F2)"), 1500.0);
+    assert_number(&sheet.eval("=DPRODUCT(A1:D5,\"Salary\",F1:F2)"), 3_000_000.0);
+
+    // Variance/stdev over two numeric values.
+    assert_number(&sheet.eval("=DVAR(A1:D5,\"Salary\",F1:F2)"), 125_000.0);
+    assert_number(
+        &sheet.eval("=DSTDEV(A1:D5,\"Salary\",F1:F2)"),
+        (125_000.0_f64).sqrt(),
+    );
+    assert_number(&sheet.eval("=DVARP(A1:D5,\"Salary\",F1:F2)"), 62_500.0);
+    assert_number(
+        &sheet.eval("=DSTDEVP(A1:D5,\"Salary\",F1:F2)"),
+        (62_500.0_f64).sqrt(),
+    );
 
     // Single-match computed criteria.
     sheet.set_formula("F2", "=C2>35");
