@@ -168,6 +168,7 @@ the `:` key on layouts where that shares the same physical key.
 - Some shortcuts are reserved by the desktop host and should not be used by extensions:
   - `Ctrl/Cmd+Shift+P` (command palette)
   - `Ctrl/Cmd+Shift+O` (quick open)
+  - `Ctrl/Cmd+K` (inline AI edit)
 
 ---
 
