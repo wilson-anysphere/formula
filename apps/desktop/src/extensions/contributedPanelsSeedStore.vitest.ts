@@ -95,6 +95,14 @@ describe("contributedPanelsSeedStore", () => {
     expect(storage.getItem(CONTRIBUTED_PANELS_SEED_STORE_KEY)).toBeNull();
   });
 
+  it("clears empty-string seed store values on read", () => {
+    const storage = new MemoryStorage();
+
+    storage.setItem(CONTRIBUTED_PANELS_SEED_STORE_KEY, "");
+    expect(readContributedPanelsSeedStore(storage as any)).toEqual({});
+    expect(storage.getItem(CONTRIBUTED_PANELS_SEED_STORE_KEY)).toBeNull();
+  });
+
   it("rejects conflicting panel ids across extensions without mutating the store", () => {
     const storage = new MemoryStorage();
 
