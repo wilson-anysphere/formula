@@ -211,7 +211,6 @@ fn rewrite_formula_for_move(formula: &str, from: CellAddr, to: CellAddr) -> Opti
 }
 
 fn model_cell_value_to_sort_value(value: &ModelCellValue) -> CellValue {
-    #[allow(unreachable_patterns)]
     match value {
         ModelCellValue::Empty => CellValue::Blank,
         ModelCellValue::Number(n) => CellValue::Number(*n),
@@ -282,6 +281,7 @@ fn model_cell_value_to_sort_value(value: &ModelCellValue) -> CellValue {
         //
         // Keep a wildcard arm for forward-compatibility with new `formula-model::CellValue`
         // variants. Best-effort: attempt to degrade the value to a scalar sort/filter value.
+        #[allow(unreachable_patterns)]
         _ => rich_model_cell_value_to_sort_value(value).unwrap_or(CellValue::Blank),
     }
 }
