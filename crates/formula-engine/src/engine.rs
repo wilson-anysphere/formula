@@ -8031,17 +8031,9 @@ fn bytecode_expr_is_eligible_inner(
                     return false;
                 }
 
-                let array_ok = match &args[1] {
-                    bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_) => true,
-                    bytecode::Expr::SpillRange(inner) => {
-                        bytecode_expr_is_eligible_inner(inner, true, false, lexical_scopes)
-                    }
-                    bytecode::Expr::NameRef(name) => matches!(
-                        local_binding_kind(lexical_scopes, name),
-                        Some(BytecodeLocalBindingKind::Range | BytecodeLocalBindingKind::RefSingle)
-                    ),
-                    _ => false,
-                };
+                // MATCH accepts either reference-like lookup arrays or array values. Allow both
+                // ranges (including spill ranges) and array literals/expressions here.
+                let array_ok = bytecode_expr_is_eligible_inner(&args[1], true, true, lexical_scopes);
                 // `lookup_value` is scalar and uses implicit intersection when passed a range.
                 let lookup_ok =
                     bytecode_expr_is_eligible_inner(&args[0], true, false, lexical_scopes);

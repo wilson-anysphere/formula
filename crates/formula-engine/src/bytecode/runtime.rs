@@ -7532,44 +7532,64 @@ fn fn_match(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         1
     };
 
-    let range = match &args[1] {
-        Value::Range(r) => r.resolve(base),
+    let pos = match &args[1] {
+        Value::Range(r) => {
+            let range = r.resolve(base);
+            if !range_in_bounds(grid, range) {
+                return Value::Error(ErrorKind::Ref);
+            }
+
+            if range.row_start == range.row_end {
+                let len = range.cols() as usize;
+                if len == 0 {
+                    return Value::Error(ErrorKind::NA);
+                }
+                let row = range.row_start;
+                let value_at =
+                    |idx: usize| grid.get_value(CellCoord { row, col: range.col_start + idx as i32 });
+                match match_type {
+                    0 => exact_match_1d(&lookup_value, len, &value_at),
+                    1 => approximate_match_1d(&lookup_value, len, &value_at, true),
+                    -1 => approximate_match_1d(&lookup_value, len, &value_at, false),
+                    _ => return Value::Error(ErrorKind::NA),
+                }
+            } else if range.col_start == range.col_end {
+                let len = range.rows() as usize;
+                if len == 0 {
+                    return Value::Error(ErrorKind::NA);
+                }
+                let col = range.col_start;
+                let value_at =
+                    |idx: usize| grid.get_value(CellCoord { row: range.row_start + idx as i32, col });
+                match match_type {
+                    0 => exact_match_1d(&lookup_value, len, &value_at),
+                    1 => approximate_match_1d(&lookup_value, len, &value_at, true),
+                    -1 => approximate_match_1d(&lookup_value, len, &value_at, false),
+                    _ => return Value::Error(ErrorKind::NA),
+                }
+            } else {
+                // MATCH requires a 1D array/range.
+                return Value::Error(ErrorKind::NA);
+            }
+        }
+        Value::Array(arr) => {
+            if arr.rows != 1 && arr.cols != 1 {
+                return Value::Error(ErrorKind::NA);
+            }
+            let len = arr.len();
+            if len == 0 {
+                return Value::Error(ErrorKind::NA);
+            }
+            let value_at = |idx: usize| arr.values.get(idx).cloned().unwrap_or(Value::Empty);
+            match match_type {
+                0 => exact_match_1d(&lookup_value, len, &value_at),
+                1 => approximate_match_1d(&lookup_value, len, &value_at, true),
+                -1 => approximate_match_1d(&lookup_value, len, &value_at, false),
+                _ => return Value::Error(ErrorKind::NA),
+            }
+        }
         Value::Error(e) => return Value::Error(*e),
         _ => return Value::Error(ErrorKind::Value),
-    };
-    if !range_in_bounds(grid, range) {
-        return Value::Error(ErrorKind::Ref);
-    }
-
-    let pos = if range.row_start == range.row_end {
-        let len = range.cols() as usize;
-        let row = range.row_start;
-        let value_at = |idx: usize| {
-            let col = range.col_start + idx as i32;
-            grid.get_value(CellCoord { row, col })
-        };
-        match match_type {
-            0 => exact_match_1d(&lookup_value, len, &value_at),
-            1 => approximate_match_1d(&lookup_value, len, &value_at, true),
-            -1 => approximate_match_1d(&lookup_value, len, &value_at, false),
-            _ => return Value::Error(ErrorKind::NA),
-        }
-    } else if range.col_start == range.col_end {
-        let len = range.rows() as usize;
-        let col = range.col_start;
-        let value_at = |idx: usize| {
-            let row = range.row_start + idx as i32;
-            grid.get_value(CellCoord { row, col })
-        };
-        match match_type {
-            0 => exact_match_1d(&lookup_value, len, &value_at),
-            1 => approximate_match_1d(&lookup_value, len, &value_at, true),
-            -1 => approximate_match_1d(&lookup_value, len, &value_at, false),
-            _ => return Value::Error(ErrorKind::NA),
-        }
-    } else {
-        // MATCH requires a 1D array/range.
-        return Value::Error(ErrorKind::NA);
     };
 
     match pos {

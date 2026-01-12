@@ -1892,25 +1892,72 @@ fn bytecode_backend_let_array_returning_function_locals_allow_abs_to_spill_via_b
 }
 
 #[test]
-fn bytecode_backend_let_array_result_is_not_treated_as_range_for_match() {
+fn bytecode_backend_match_accepts_array_lookup_arrays_including_let_locals() {
     let mut engine = Engine::new();
 
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
     engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
     engine.set_cell_value("Sheet1", "A3", 3.0).unwrap();
 
-    // MATCH is bytecode-eligible only for reference-like lookup arrays; ensure a LET-bound array
-    // result (from range arithmetic) does not incorrectly compile to bytecode.
+    // MATCH accepts both reference-like lookup arrays and array values. Ensure it compiles to
+    // bytecode when the lookup array is produced via range arithmetic (directly or via LET).
     engine
         .set_cell_formula("Sheet1", "B1", "=LET(x, A1:A3*10, MATCH(20, x, 0))")
         .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=MATCH(20, A1:A3*10, 0)")
+        .unwrap();
 
-    assert_eq!(engine.bytecode_program_count(), 0);
+    assert_eq!(engine.bytecode_program_count(), 2);
 
     engine.recalculate_single_threaded();
 
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(2.0));
     assert_engine_matches_ast(&engine, "=LET(x, A1:A3*10, MATCH(20, x, 0))", "B1");
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(2.0));
+    assert_engine_matches_ast(&engine, "=MATCH(20, A1:A3*10, 0)", "B2");
+}
+
+#[test]
+fn bytecode_backend_match_accepts_array_literal_lookup_arrays() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=MATCH(2, {1,2,3}, 0)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=MATCH(2, {1;2;3}, 0)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A3", "=MATCH(2.5, {1,2,3}, 1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A4", "=MATCH(2, {1,2;3,4}, 0)")
+        .unwrap();
+
+    assert_eq!(
+        engine.bytecode_program_count(),
+        4,
+        "expected MATCH array literal formulas to compile to bytecode"
+    );
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Number(2.0));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A4"),
+        Value::Error(ErrorKind::NA)
+    );
+
+    for (formula, cell) in [
+        ("=MATCH(2, {1,2,3}, 0)", "A1"),
+        ("=MATCH(2, {1;2;3}, 0)", "A2"),
+        ("=MATCH(2.5, {1,2,3}, 1)", "A3"),
+        ("=MATCH(2, {1,2;3,4}, 0)", "A4"),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
 }
 
 #[test]
