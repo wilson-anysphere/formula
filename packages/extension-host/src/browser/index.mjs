@@ -1584,6 +1584,14 @@ class BrowserExtensionHost {
     const networkUrl = isNetworkApi ? String(args?.[0] ?? "") : null;
 
     try {
+      // Validate obvious argument errors before prompting for permissions to avoid
+      // spurious permission prompts for calls that will fail fast anyway.
+      if (apiKey === "workbook.openWorkbook" || apiKey === "workbook.saveAs") {
+        const workbookPath = args?.[0];
+        if (typeof workbookPath !== "string" || workbookPath.trim().length === 0) {
+          throw new Error("Workbook path must be a non-empty string");
+        }
+      }
       await this._permissionManager.ensurePermissions(
         {
           extensionId: extension.id,

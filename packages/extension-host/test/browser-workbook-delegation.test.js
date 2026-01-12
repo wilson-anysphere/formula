@@ -220,6 +220,8 @@ test("BrowserExtensionHost: workbook.saveAs delegates to spreadsheetApi and emit
 test("BrowserExtensionHost: workbook.saveAs rejects whitespace-only paths", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
 
+  let promptCalls = 0;
+
   /** @type {any} */
   let apiError;
 
@@ -245,7 +247,10 @@ test("BrowserExtensionHost: workbook.saveAs rejects whitespace-only paths", asyn
   const host = new BrowserExtensionHost({
     engineVersion: "1.0.0",
     spreadsheetApi: {},
-    permissionPrompt: async () => true,
+    permissionPrompt: async () => {
+      promptCalls += 1;
+      return true;
+    },
   });
 
   t.after(async () => {
@@ -282,11 +287,14 @@ test("BrowserExtensionHost: workbook.saveAs rejects whitespace-only paths", asyn
 
   await done;
 
+  assert.equal(promptCalls, 0);
   assert.equal(apiError?.message, "Workbook path must be a non-empty string");
 });
 
 test("BrowserExtensionHost: workbook.saveAs rejects non-string paths", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
+
+  let promptCalls = 0;
 
   /** @type {any} */
   let apiError;
@@ -313,7 +321,10 @@ test("BrowserExtensionHost: workbook.saveAs rejects non-string paths", async (t)
   const host = new BrowserExtensionHost({
     engineVersion: "1.0.0",
     spreadsheetApi: {},
-    permissionPrompt: async () => true,
+    permissionPrompt: async () => {
+      promptCalls += 1;
+      return true;
+    },
   });
 
   t.after(async () => {
@@ -350,6 +361,7 @@ test("BrowserExtensionHost: workbook.saveAs rejects non-string paths", async (t)
 
   await done;
 
+  assert.equal(promptCalls, 0);
   assert.equal(apiError?.message, "Workbook path must be a non-empty string");
 });
 
@@ -469,6 +481,8 @@ test("BrowserExtensionHost: workbook.openWorkbook delegates to spreadsheetApi an
 test("BrowserExtensionHost: workbook.openWorkbook rejects empty paths", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
 
+  let promptCalls = 0;
+
   /** @type {any} */
   let apiError;
 
@@ -494,7 +508,10 @@ test("BrowserExtensionHost: workbook.openWorkbook rejects empty paths", async (t
   const host = new BrowserExtensionHost({
     engineVersion: "1.0.0",
     spreadsheetApi: {},
-    permissionPrompt: async () => true
+    permissionPrompt: async () => {
+      promptCalls += 1;
+      return true;
+    }
   });
 
   t.after(async () => {
@@ -531,11 +548,14 @@ test("BrowserExtensionHost: workbook.openWorkbook rejects empty paths", async (t
 
   await done;
 
+  assert.equal(promptCalls, 0);
   assert.equal(apiError?.message, "Workbook path must be a non-empty string");
 });
 
 test("BrowserExtensionHost: workbook.openWorkbook rejects whitespace-only paths", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
+
+  let promptCalls = 0;
 
   /** @type {any} */
   let apiError;
@@ -562,7 +582,10 @@ test("BrowserExtensionHost: workbook.openWorkbook rejects whitespace-only paths"
   const host = new BrowserExtensionHost({
     engineVersion: "1.0.0",
     spreadsheetApi: {},
-    permissionPrompt: async () => true
+    permissionPrompt: async () => {
+      promptCalls += 1;
+      return true;
+    }
   });
 
   t.after(async () => {
@@ -599,11 +622,14 @@ test("BrowserExtensionHost: workbook.openWorkbook rejects whitespace-only paths"
 
   await done;
 
+  assert.equal(promptCalls, 0);
   assert.equal(apiError?.message, "Workbook path must be a non-empty string");
 });
 
 test("BrowserExtensionHost: workbook.openWorkbook rejects non-string paths", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
+
+  let promptCalls = 0;
 
   /** @type {any} */
   let apiError;
@@ -630,7 +656,10 @@ test("BrowserExtensionHost: workbook.openWorkbook rejects non-string paths", asy
   const host = new BrowserExtensionHost({
     engineVersion: "1.0.0",
     spreadsheetApi: {},
-    permissionPrompt: async () => true
+    permissionPrompt: async () => {
+      promptCalls += 1;
+      return true;
+    }
   });
 
   t.after(async () => {
@@ -667,6 +696,7 @@ test("BrowserExtensionHost: workbook.openWorkbook rejects non-string paths", asy
 
   await done;
 
+  assert.equal(promptCalls, 0);
   assert.equal(apiError?.message, "Workbook path must be a non-empty string");
 });
 
