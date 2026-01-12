@@ -54,6 +54,14 @@ describe("shellOpen", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
+  it("blocks file: URLs even when the Tauri API is available", async () => {
+    const invoke = vi.fn().mockResolvedValue(undefined);
+    (globalThis as any).__TAURI__ = { core: { invoke } };
+
+    await expect(shellOpen("file:///etc/passwd")).rejects.toThrow(/blocked protocol/i);
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
   it("does not fall back to window.open when __TAURI__ is present but the invoke API is missing", async () => {
     (globalThis as any).__TAURI__ = { plugin: {} };
     const winOpen = vi.fn();

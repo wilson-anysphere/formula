@@ -1,4 +1,4 @@
-const BLOCKED_PROTOCOLS = new Set(["javascript", "data"]);
+const BLOCKED_PROTOCOLS = new Set(["javascript", "data", "file"]);
 
 function parseUrlOrThrow(url: string): URL {
   try {
@@ -21,7 +21,7 @@ function getTauriInvokeOrNull(): TauriInvoke | null {
  * - Desktop/Tauri: uses the Rust command `open_external_url` via `__TAURI__.core.invoke(...)`.
  * - Web builds: falls back to `window.open(..., "noopener,noreferrer")`.
  *
- * Security: blocks `javascript:` and `data:` URLs regardless of environment.
+ * Security: blocks `javascript:`, `data:`, and `file:` URLs regardless of environment.
  */
 export async function shellOpen(url: string): Promise<void> {
   const parsed = parseUrlOrThrow(url);
