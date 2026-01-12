@@ -251,6 +251,154 @@ describe("workbookSync", () => {
     sync.stop();
   });
 
+  it("style-only delta triggers apply_sheet_formatting_deltas and does not call set_cell/set_range", async () => {
+    const document = new DocumentController();
+    const sync = startWorkbookSync({ document: document as any });
+    const invoke = (globalThis as any).__TAURI__?.core?.invoke as ReturnType<typeof vi.fn>;
+
+    document.setRangeFormat("Sheet1", "A1", { font: { bold: true } });
+
+    await flushMicrotasks();
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith("apply_sheet_formatting_deltas", {
+      sheet_id: "Sheet1",
+      cell_deltas: [
+        {
+          row: 0,
+          col: 0,
+          beforeFormat: null,
+          afterFormat: { font: { bold: true } },
+        },
+      ],
+      row_style_deltas: [],
+      col_style_deltas: [],
+      sheet_style_deltas: [],
+      range_run_deltas: [],
+    });
+
+    const cmds = invoke.mock.calls.map((c) => c[0]);
+    expect(cmds).not.toContain("set_cell");
+    expect(cmds).not.toContain("set_range");
+
+    sync.stop();
+  });
+
+  it("combined value+style delta triggers both set_range and apply_sheet_formatting_deltas", async () => {
+    const document = new DocumentController();
+    const sync = startWorkbookSync({ document: document as any });
+    const invoke = (globalThis as any).__TAURI__?.core?.invoke as ReturnType<typeof vi.fn>;
+
+    document.setCellValue("Sheet1", { row: 0, col: 0 }, 123);
+    document.setRangeFormat("Sheet1", "A1", { fill: { color: "#ff0000" } });
+
+    await flushMicrotasks();
+
+    const cmds = invoke.mock.calls.map((c) => c[0]);
+    expect(cmds).toEqual(["set_range", "apply_sheet_formatting_deltas"]);
+
+    expect(invoke).toHaveBeenCalledWith("set_range", {
+      sheet_id: "Sheet1",
+      start_row: 0,
+      start_col: 0,
+      end_row: 0,
+      end_col: 0,
+      values: [[{ value: 123, formula: null }]],
+    });
+
+    expect(invoke).toHaveBeenCalledWith("apply_sheet_formatting_deltas", {
+      sheet_id: "Sheet1",
+      cell_deltas: [
+        {
+          row: 0,
+          col: 0,
+          beforeFormat: null,
+          afterFormat: { fill: { color: "#ff0000" } },
+        },
+      ],
+      row_style_deltas: [],
+      col_style_deltas: [],
+      sheet_style_deltas: [],
+      range_run_deltas: [],
+    });
+
+    sync.stop();
+  });
+
+  it("row/col/sheet/range-run deltas are forwarded", async () => {
+    const document = new DocumentController();
+    const sync = startWorkbookSync({ document: document as any });
+    const invoke = (globalThis as any).__TAURI__?.core?.invoke as ReturnType<typeof vi.fn>;
+
+    document.setSheetFormat("Sheet1", { font: { italic: true } });
+    document.setRowFormat("Sheet1", 1, { font: { bold: true } });
+    document.setColFormat("Sheet1", 2, { font: { underline: true } });
+    // Big enough to trigger range-run formatting deltas.
+    document.setRangeFormat(
+      "Sheet1",
+      {
+        start: { row: 0, col: 0 },
+        end: { row: 10_000, col: 4 },
+      },
+      { fill: { color: "#00ff00" } },
+    );
+
+    await flushMicrotasks();
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith(
+      "apply_sheet_formatting_deltas",
+      expect.objectContaining({
+        sheet_id: "Sheet1",
+        cell_deltas: [],
+        row_style_deltas: [
+          {
+            row: 1,
+            beforeFormat: null,
+            afterFormat: { font: { bold: true } },
+          },
+        ],
+        col_style_deltas: [
+          {
+            col: 2,
+            beforeFormat: null,
+            afterFormat: { font: { underline: true } },
+          },
+        ],
+        sheet_style_deltas: [
+          {
+            beforeFormat: null,
+            afterFormat: { font: { italic: true } },
+          },
+        ],
+      }),
+    );
+
+    const payload = invoke.mock.calls[0]?.[1];
+    expect(payload.range_run_deltas.length).toBeGreaterThan(0);
+    expect(payload.range_run_deltas[0]).toEqual(
+      expect.objectContaining({
+        col: 0,
+        startRow: 0,
+        endRowExclusive: 10_001,
+        beforeRuns: [],
+        afterRuns: [
+          {
+            startRow: 0,
+            endRowExclusive: 10_001,
+            format: { fill: { color: "#00ff00" } },
+          },
+        ],
+      }),
+    );
+
+    const cmds = invoke.mock.calls.map((c) => c[0]);
+    expect(cmds).not.toContain("set_cell");
+    expect(cmds).not.toContain("set_range");
+
+    sync.stop();
+  });
+
   it("clears the backend dirty flag when undo returns the document to a saved state", async () => {
     const document = createMaterializedDocument();
     const sync = startWorkbookSync({ document: document as any });

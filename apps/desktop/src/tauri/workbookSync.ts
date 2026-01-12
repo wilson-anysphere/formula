@@ -33,8 +33,8 @@ type SheetOrderDelta = {
 type CellState = {
   value: unknown;
   formula: string | null;
-  // DocumentController tracks styleId too, but the desktop workbook IPC currently
-  // only supports value/formula edits.
+  // DocumentController tracks styleId too; workbook sync mirrors formatting changes
+  // through a dedicated formatting IPC channel (not via set_cell/set_range).
   styleId?: number;
 };
 
@@ -51,6 +51,17 @@ type DocumentControllerLike = {
     event: "change",
     listener: (payload: {
       deltas: CellDelta[];
+      rowStyleDeltas?: Array<{ sheetId: string; row: number; beforeStyleId: number; afterStyleId: number }>;
+      colStyleDeltas?: Array<{ sheetId: string; col: number; beforeStyleId: number; afterStyleId: number }>;
+      sheetStyleDeltas?: Array<{ sheetId: string; beforeStyleId: number; afterStyleId: number }>;
+      rangeRunDeltas?: Array<{
+        sheetId: string;
+        col: number;
+        startRow: number;
+        endRowExclusive: number;
+        beforeRuns: Array<{ startRow: number; endRowExclusive: number; styleId: number }>;
+        afterRuns: Array<{ startRow: number; endRowExclusive: number; styleId: number }>;
+      }>;
       sheetMetaDeltas?: SheetMetaDelta[];
       sheetOrderDelta?: SheetOrderDelta | null;
       source?: string;
@@ -61,6 +72,7 @@ type DocumentControllerLike = {
   readonly isDirty: boolean;
   getSheetIds?(): string[];
   getSheetMeta?(sheetId: string): SheetMetaState | null;
+  readonly styleTable?: { get(styleId: number): any };
   // Optional APIs on the real DocumentController used to apply authoritative backend updates
   // (e.g. pivot auto-refresh output).
   getCell?(sheetId: string, coord: { row: number; col: number }): any;
@@ -172,6 +184,20 @@ function normalizeSheetMeta(raw: unknown, fallbackSheetId: string): SheetMetaSta
 
 type PendingEdit = { sheetId: string; row: number; col: number; edit: RangeCellEdit };
 
+type CellFormatDelta = { sheetId: string; row: number; col: number; beforeFormat: any | null; afterFormat: any | null };
+type RowStyleDelta = { sheetId: string; row: number; beforeFormat: any | null; afterFormat: any | null };
+type ColStyleDelta = { sheetId: string; col: number; beforeFormat: any | null; afterFormat: any | null };
+type SheetStyleDelta = { sheetId: string; beforeFormat: any | null; afterFormat: any | null };
+type RangeRun = { startRow: number; endRowExclusive: number; format: any | null };
+type RangeRunDelta = {
+  sheetId: string;
+  col: number;
+  startRow: number;
+  endRowExclusive: number;
+  beforeRuns: RangeRun[];
+  afterRuns: RangeRun[];
+};
+
 function toRangeCellEdit(state: CellState): RangeCellEdit {
   if (state.formula != null) {
     const normalized = normalizeFormulaTextOpt(state.formula);
@@ -191,11 +217,63 @@ function cellKey(sheetId: string, row: number, col: number): string {
   return `${sheetId}:${row},${col}`;
 }
 
+function rowStyleKey(sheetId: string, row: number): string {
+  return `${sheetId}:row:${row}`;
+}
+
+function colStyleKey(sheetId: string, col: number): string {
+  return `${sheetId}:col:${col}`;
+}
+
+function rangeRunKey(sheetId: string, col: number): string {
+  return `${sheetId}:rangeRun:${col}`;
+}
+
+function styleIdToFormat(document: DocumentControllerLike, styleId: unknown): any | null {
+  const id = typeof styleId === "number" ? styleId : 0;
+  if (!Number.isInteger(id) || id === 0) return null;
+  const table = document.styleTable;
+  if (!table || typeof table.get !== "function") return null;
+  return table.get(id) ?? null;
+}
+
 function sortPendingEdits(a: PendingEdit, b: PendingEdit): number {
   if (a.sheetId < b.sheetId) return -1;
   if (a.sheetId > b.sheetId) return 1;
   if (a.row !== b.row) return a.row - b.row;
   return a.col - b.col;
+}
+
+function sortCellFormatDeltas(a: CellFormatDelta, b: CellFormatDelta): number {
+  if (a.sheetId < b.sheetId) return -1;
+  if (a.sheetId > b.sheetId) return 1;
+  if (a.row !== b.row) return a.row - b.row;
+  return a.col - b.col;
+}
+
+function sortRowStyleDeltas(a: RowStyleDelta, b: RowStyleDelta): number {
+  if (a.sheetId < b.sheetId) return -1;
+  if (a.sheetId > b.sheetId) return 1;
+  return a.row - b.row;
+}
+
+function sortColStyleDeltas(a: ColStyleDelta, b: ColStyleDelta): number {
+  if (a.sheetId < b.sheetId) return -1;
+  if (a.sheetId > b.sheetId) return 1;
+  return a.col - b.col;
+}
+
+function sortSheetStyleDeltas(a: SheetStyleDelta, b: SheetStyleDelta): number {
+  if (a.sheetId < b.sheetId) return -1;
+  if (a.sheetId > b.sheetId) return 1;
+  return 0;
+}
+
+function sortRangeRunDeltas(a: RangeRunDelta, b: RangeRunDelta): number {
+  if (a.sheetId < b.sheetId) return -1;
+  if (a.sheetId > b.sheetId) return 1;
+  if (a.col !== b.col) return a.col - b.col;
+  return a.startRow - b.startRow;
 }
 
 function isFullRectangle(edits: PendingEdit[]): { startRow: number; startCol: number; endRow: number; endCol: number } | null {
@@ -410,6 +488,94 @@ function safeShowToast(message: string): void {
   }
 }
 
+async function sendFormattingViaTauri(
+  invoke: TauriInvoke,
+  deltas: {
+    cellDeltas: CellFormatDelta[];
+    rowStyleDeltas: RowStyleDelta[];
+    colStyleDeltas: ColStyleDelta[];
+    sheetStyleDeltas: SheetStyleDelta[];
+    rangeRunDeltas: RangeRunDelta[];
+  },
+): Promise<void> {
+  const hasAny =
+    deltas.cellDeltas.length > 0 ||
+    deltas.rowStyleDeltas.length > 0 ||
+    deltas.colStyleDeltas.length > 0 ||
+    deltas.sheetStyleDeltas.length > 0 ||
+    deltas.rangeRunDeltas.length > 0;
+  if (!hasAny) return;
+
+  type SheetPayload = {
+    cell_deltas: Array<{ row: number; col: number; beforeFormat: any | null; afterFormat: any | null }>;
+    row_style_deltas: Array<{ row: number; beforeFormat: any | null; afterFormat: any | null }>;
+    col_style_deltas: Array<{ col: number; beforeFormat: any | null; afterFormat: any | null }>;
+    sheet_style_deltas: Array<{ beforeFormat: any | null; afterFormat: any | null }>;
+    range_run_deltas: Array<{
+      col: number;
+      startRow: number;
+      endRowExclusive: number;
+      beforeRuns: Array<{ startRow: number; endRowExclusive: number; format: any | null }>;
+      afterRuns: Array<{ startRow: number; endRowExclusive: number; format: any | null }>;
+    }>;
+  };
+
+  const bySheet = new Map<string, SheetPayload>();
+  const ensure = (sheetId: string): SheetPayload => {
+    let payload = bySheet.get(sheetId);
+    if (!payload) {
+      payload = { cell_deltas: [], row_style_deltas: [], col_style_deltas: [], sheet_style_deltas: [], range_run_deltas: [] };
+      bySheet.set(sheetId, payload);
+    }
+    return payload;
+  };
+
+  for (const d of deltas.cellDeltas) {
+    const p = ensure(d.sheetId);
+    p.cell_deltas.push({ row: d.row, col: d.col, beforeFormat: d.beforeFormat, afterFormat: d.afterFormat });
+  }
+  for (const d of deltas.rowStyleDeltas) {
+    const p = ensure(d.sheetId);
+    p.row_style_deltas.push({ row: d.row, beforeFormat: d.beforeFormat, afterFormat: d.afterFormat });
+  }
+  for (const d of deltas.colStyleDeltas) {
+    const p = ensure(d.sheetId);
+    p.col_style_deltas.push({ col: d.col, beforeFormat: d.beforeFormat, afterFormat: d.afterFormat });
+  }
+  for (const d of deltas.sheetStyleDeltas) {
+    const p = ensure(d.sheetId);
+    p.sheet_style_deltas.push({ beforeFormat: d.beforeFormat, afterFormat: d.afterFormat });
+  }
+  for (const d of deltas.rangeRunDeltas) {
+    const p = ensure(d.sheetId);
+    p.range_run_deltas.push({
+      col: d.col,
+      startRow: d.startRow,
+      endRowExclusive: d.endRowExclusive,
+      beforeRuns: d.beforeRuns.map((r) => ({ startRow: r.startRow, endRowExclusive: r.endRowExclusive, format: r.format })),
+      afterRuns: d.afterRuns.map((r) => ({ startRow: r.startRow, endRowExclusive: r.endRowExclusive, format: r.format })),
+    });
+  }
+
+  const sheetIds = Array.from(bySheet.keys()).sort();
+  for (const sheetId of sheetIds) {
+    const payload = bySheet.get(sheetId);
+    if (!payload) continue;
+    payload.cell_deltas.sort((a, b) => (a.row - b.row === 0 ? a.col - b.col : a.row - b.row));
+    payload.row_style_deltas.sort((a, b) => a.row - b.row);
+    payload.col_style_deltas.sort((a, b) => a.col - b.col);
+    payload.range_run_deltas.sort((a, b) => (a.col - b.col === 0 ? a.startRow - b.startRow : a.col - b.col));
+    await invoke("apply_sheet_formatting_deltas", {
+      sheet_id: sheetId,
+      cell_deltas: payload.cell_deltas,
+      row_style_deltas: payload.row_style_deltas,
+      col_style_deltas: payload.col_style_deltas,
+      sheet_style_deltas: payload.sheet_style_deltas,
+      range_run_deltas: payload.range_run_deltas,
+    });
+  }
+}
+
 export function startWorkbookSync(args: {
   document: DocumentControllerLike;
   // Reserved for future engine-in-worker integration (e.g. skipping backend recalc).
@@ -429,6 +595,12 @@ export function startWorkbookSync(args: {
   const pendingCellEdits = new Map<string, PendingEdit>();
   const pendingSheetActions: SheetSyncAction[] = [];
 
+  const pendingCellFormats = new Map<string, CellFormatDelta>();
+  const pendingRowStyles = new Map<string, RowStyleDelta>();
+  const pendingColStyles = new Map<string, ColStyleDelta>();
+  const pendingSheetStyles = new Map<string, SheetStyleDelta>();
+  const pendingRangeRuns = new Map<string, RangeRunDelta>();
+
   let sheetMirror: SheetSnapshot | null = captureSheetSnapshot(args.document);
 
   let stopped = false;
@@ -436,7 +608,7 @@ export function startWorkbookSync(args: {
   let flushQueued = false;
   let flushPromise: Promise<void> | null = null;
 
-  const stopListening = args.document.on("change", ({ deltas, source, sheetMetaDeltas, sheetOrderDelta }) => {
+  const stopListening = args.document.on("change", ({ deltas, source, sheetMetaDeltas, sheetOrderDelta, rowStyleDeltas, colStyleDeltas, sheetStyleDeltas, rangeRunDeltas }) => {
     if (stopped) return;
     const hasSheetMetaDeltas = Array.isArray(sheetMetaDeltas) && sheetMetaDeltas.length > 0;
     const hasSheetOrderDelta = Boolean(sheetOrderDelta);
@@ -452,12 +624,19 @@ export function startWorkbookSync(args: {
       // meaningful, so drop any queued edits and reconcile to the new snapshot.
       pendingCellEdits.clear();
       pendingSheetActions.length = 0;
+      pendingCellFormats.clear();
+      pendingRowStyles.clear();
+      pendingColStyles.clear();
+      pendingSheetStyles.clear();
+      pendingRangeRuns.clear();
       queueMicrotask(() => {
         if (stopped) return;
         const snap = captureSheetSnapshot(args.document);
         if (!snap) return;
-        pendingSheetActions.push({ kind: "applyState", snapshot: snap });
-        scheduleFlush();
+        // `applyState` is generally used to apply an authoritative snapshot (e.g. open/reload/collab).
+        // Do not echo sheet structure changes back to the backend; instead, treat the post-applyState
+        // snapshot as the new baseline for filtering future cell/format deltas.
+        sheetMirror = snap;
       });
       return;
     }
@@ -493,7 +672,6 @@ export function startWorkbookSync(args: {
     // cell updates to apply to the frontend DocumentController. Those should not be echoed
     // back to the backend via set_cell/set_range.
     if (backendOriginated) return;
-    if (!Array.isArray(deltas) || deltas.length === 0) return;
 
     // Sheet deletion emits per-cell deltas that clear the deleted sheet's sparse cell map.
     // Those should NOT be mirrored to the backend via `set_cell`/`set_range` because:
@@ -511,20 +689,124 @@ export function startWorkbookSync(args: {
     }
 
     let didEnqueue = false;
-    for (const delta of deltas) {
-      if (deletedSheets.has(delta.sheetId)) continue;
-      // Ignore format-only deltas (we can't mirror those over set_cell/set_range yet).
-      if (inputEquals(delta.before, delta.after)) continue;
+    if (Array.isArray(deltas) && deltas.length > 0) {
+      for (const delta of deltas) {
+        if (deletedSheets.has(delta.sheetId)) continue;
 
-      const edit: PendingEdit = {
-        sheetId: delta.sheetId,
-        row: delta.row,
-        col: delta.col,
-        edit: toRangeCellEdit(delta.after)
-      };
-      pendingCellEdits.set(cellKey(delta.sheetId, delta.row, delta.col), edit);
-      didEnqueue = true;
+        if (!inputEquals(delta.before, delta.after)) {
+          const edit: PendingEdit = {
+            sheetId: delta.sheetId,
+            row: delta.row,
+            col: delta.col,
+            edit: toRangeCellEdit(delta.after),
+          };
+          pendingCellEdits.set(cellKey(delta.sheetId, delta.row, delta.col), edit);
+          didEnqueue = true;
+        }
+
+        if ((delta.before?.styleId ?? 0) !== (delta.after?.styleId ?? 0)) {
+          const key = cellKey(delta.sheetId, delta.row, delta.col);
+          const existing = pendingCellFormats.get(key);
+          const beforeFormat = styleIdToFormat(args.document, delta.before?.styleId ?? 0);
+          const afterFormat = styleIdToFormat(args.document, delta.after?.styleId ?? 0);
+          if (existing) {
+            existing.afterFormat = afterFormat;
+          } else {
+            pendingCellFormats.set(key, {
+              sheetId: delta.sheetId,
+              row: delta.row,
+              col: delta.col,
+              beforeFormat,
+              afterFormat,
+            });
+          }
+          didEnqueue = true;
+        }
+      }
     }
+
+    if (Array.isArray(rowStyleDeltas) && rowStyleDeltas.length > 0) {
+      for (const d of rowStyleDeltas) {
+        if (deletedSheets.has(d.sheetId)) continue;
+        const key = rowStyleKey(d.sheetId, d.row);
+        const existing = pendingRowStyles.get(key);
+        const beforeFormat = styleIdToFormat(args.document, d.beforeStyleId);
+        const afterFormat = styleIdToFormat(args.document, d.afterStyleId);
+        if (existing) {
+          existing.afterFormat = afterFormat;
+        } else {
+          pendingRowStyles.set(key, { sheetId: d.sheetId, row: d.row, beforeFormat, afterFormat });
+        }
+        didEnqueue = true;
+      }
+    }
+
+    if (Array.isArray(colStyleDeltas) && colStyleDeltas.length > 0) {
+      for (const d of colStyleDeltas) {
+        if (deletedSheets.has(d.sheetId)) continue;
+        const key = colStyleKey(d.sheetId, d.col);
+        const existing = pendingColStyles.get(key);
+        const beforeFormat = styleIdToFormat(args.document, d.beforeStyleId);
+        const afterFormat = styleIdToFormat(args.document, d.afterStyleId);
+        if (existing) {
+          existing.afterFormat = afterFormat;
+        } else {
+          pendingColStyles.set(key, { sheetId: d.sheetId, col: d.col, beforeFormat, afterFormat });
+        }
+        didEnqueue = true;
+      }
+    }
+
+    if (Array.isArray(sheetStyleDeltas) && sheetStyleDeltas.length > 0) {
+      for (const d of sheetStyleDeltas) {
+        if (deletedSheets.has(d.sheetId)) continue;
+        const key = d.sheetId;
+        const existing = pendingSheetStyles.get(key);
+        const beforeFormat = styleIdToFormat(args.document, d.beforeStyleId);
+        const afterFormat = styleIdToFormat(args.document, d.afterStyleId);
+        if (existing) {
+          existing.afterFormat = afterFormat;
+        } else {
+          pendingSheetStyles.set(key, { sheetId: d.sheetId, beforeFormat, afterFormat });
+        }
+        didEnqueue = true;
+      }
+    }
+
+    if (Array.isArray(rangeRunDeltas) && rangeRunDeltas.length > 0) {
+      for (const d of rangeRunDeltas) {
+        if (deletedSheets.has(d.sheetId)) continue;
+        const key = rangeRunKey(d.sheetId, d.col);
+        const convertRuns = (runs: Array<{ startRow: number; endRowExclusive: number; styleId: number }>): RangeRun[] =>
+          Array.isArray(runs)
+            ? runs.map((r) => ({
+                startRow: r.startRow,
+                endRowExclusive: r.endRowExclusive,
+                format: styleIdToFormat(args.document, r.styleId),
+              }))
+            : [];
+        const beforeRuns = convertRuns(d.beforeRuns);
+        const afterRuns = convertRuns(d.afterRuns);
+
+        const existing = pendingRangeRuns.get(key);
+        if (existing) {
+          existing.startRow = Math.min(existing.startRow, d.startRow);
+          existing.endRowExclusive = Math.max(existing.endRowExclusive, d.endRowExclusive);
+          existing.afterRuns = afterRuns;
+        } else {
+          pendingRangeRuns.set(key, {
+            sheetId: d.sheetId,
+            col: d.col,
+            startRow: d.startRow,
+            endRowExclusive: d.endRowExclusive,
+            beforeRuns,
+            afterRuns,
+          });
+        }
+        didEnqueue = true;
+      }
+    }
+
     if (didEnqueue) scheduleFlush();
   });
 
@@ -573,15 +855,43 @@ export function startWorkbookSync(args: {
       return;
     }
 
-    if (pendingCellEdits.size === 0 && pendingSheetActions.length === 0) {
+    const hasFormatting =
+      pendingCellFormats.size > 0 ||
+      pendingRowStyles.size > 0 ||
+      pendingColStyles.size > 0 ||
+      pendingSheetStyles.size > 0 ||
+      pendingRangeRuns.size > 0;
+
+    if (pendingCellEdits.size === 0 && pendingSheetActions.length === 0 && !hasFormatting) {
       return;
     }
 
     flushPromise = (async () => {
-      while (pendingCellEdits.size > 0 || pendingSheetActions.length > 0) {
+      while (
+        pendingCellEdits.size > 0 ||
+        pendingSheetActions.length > 0 ||
+        pendingCellFormats.size > 0 ||
+        pendingRowStyles.size > 0 ||
+        pendingColStyles.size > 0 ||
+        pendingSheetStyles.size > 0 ||
+        pendingRangeRuns.size > 0
+      ) {
         const sheetActions = pendingSheetActions.splice(0, pendingSheetActions.length);
         const cellBatch = Array.from(pendingCellEdits.values());
         pendingCellEdits.clear();
+
+        const formatBatch = {
+          cellDeltas: Array.from(pendingCellFormats.values()).sort(sortCellFormatDeltas),
+          rowStyleDeltas: Array.from(pendingRowStyles.values()).sort(sortRowStyleDeltas),
+          colStyleDeltas: Array.from(pendingColStyles.values()).sort(sortColStyleDeltas),
+          sheetStyleDeltas: Array.from(pendingSheetStyles.values()).sort(sortSheetStyleDeltas),
+          rangeRunDeltas: Array.from(pendingRangeRuns.values()).sort(sortRangeRunDeltas),
+        };
+        pendingCellFormats.clear();
+        pendingRowStyles.clear();
+        pendingColStyles.clear();
+        pendingSheetStyles.clear();
+        pendingRangeRuns.clear();
 
         // Apply sheet add/delete/rename/reorder deltas *before* sending cell edits so the backend
         // has the correct sheet structure for set_cell/set_range (especially for undo/redo of sheet deletes).
@@ -723,8 +1033,20 @@ export function startWorkbookSync(args: {
         const existingSheetIds =
           sheetMirror && sheetMirror.order.length > 0 ? new Set(sheetMirror.order) : null;
         const filteredCellBatch = existingSheetIds ? cellBatch.filter((e) => existingSheetIds.has(e.sheetId)) : cellBatch;
+
+        const filterSheet = <T extends { sheetId: string }>(items: T[]): T[] =>
+          existingSheetIds ? items.filter((d) => existingSheetIds.has(d.sheetId)) : items;
+        const filteredFormatBatch = {
+          cellDeltas: filterSheet(formatBatch.cellDeltas),
+          rowStyleDeltas: filterSheet(formatBatch.rowStyleDeltas),
+          colStyleDeltas: filterSheet(formatBatch.colStyleDeltas),
+          sheetStyleDeltas: filterSheet(formatBatch.sheetStyleDeltas),
+          rangeRunDeltas: filterSheet(formatBatch.rangeRunDeltas),
+        };
+
         const updates = await sendEditsViaTauri(invokeFn, filteredCellBatch);
         applyBackendUpdates(args.document, updates);
+        await sendFormattingViaTauri(invokeFn, filteredFormatBatch);
       }
 
       // If the user undoes back to the last-saved state, the DocumentController becomes clean
@@ -745,7 +1067,13 @@ export function startWorkbookSync(args: {
           });
           if (stopped) return;
           if (args.document.isDirty) return;
-          if (pendingCellEdits.size > 0 || pendingSheetActions.length > 0 || flushQueued) return;
+          const hasPendingFormatting =
+            pendingCellFormats.size > 0 ||
+            pendingRowStyles.size > 0 ||
+            pendingColStyles.size > 0 ||
+            pendingSheetStyles.size > 0 ||
+            pendingRangeRuns.size > 0;
+          if (pendingCellEdits.size > 0 || pendingSheetActions.length > 0 || hasPendingFormatting || flushQueued) return;
           await invokeFn("mark_saved", {});
         } catch {
           // Graceful degradation: older backends may not implement this command.
@@ -762,7 +1090,13 @@ export function startWorkbookSync(args: {
       .finally(() => {
         flushPromise = null;
         if (stopped) return;
-        if (pendingCellEdits.size > 0 || pendingSheetActions.length > 0 || flushQueued) {
+        const hasPendingFormatting =
+          pendingCellFormats.size > 0 ||
+          pendingRowStyles.size > 0 ||
+          pendingColStyles.size > 0 ||
+          pendingSheetStyles.size > 0 ||
+          pendingRangeRuns.size > 0;
+        if (pendingCellEdits.size > 0 || pendingSheetActions.length > 0 || hasPendingFormatting || flushQueued) {
           flushQueued = false;
           scheduleFlush();
         }
@@ -783,6 +1117,11 @@ export function startWorkbookSync(args: {
       stopped = true;
       pendingCellEdits.clear();
       pendingSheetActions.length = 0;
+      pendingCellFormats.clear();
+      pendingRowStyles.clear();
+      pendingColStyles.clear();
+      pendingSheetStyles.clear();
+      pendingRangeRuns.clear();
       stopListening();
     },
     async markSaved() {
