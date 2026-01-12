@@ -87,4 +87,44 @@ describe("computeWorkbookSheetMoveIndex", () => {
     const next = applyMove(sheets, "C", toIndex!);
     expect(next.map((s) => `${s.id}:${s.visibility}`)).toEqual(["A:visible", "C:visible", "B:hidden"]);
   });
+
+  it("preserves leading hidden sheets when inserting before the first visible tab", () => {
+    const sheets = [makeSheet("H", "hidden"), makeSheet("A", "visible"), makeSheet("B", "visible")];
+
+    const toIndex = computeWorkbookSheetMoveIndex({
+      sheets,
+      fromSheetId: "B",
+      dropTarget: { kind: "before", targetSheetId: "A" },
+    });
+
+    expect(toIndex).toBe(1);
+    const next = applyMove(sheets, "B", toIndex!);
+    expect(next.map((s) => `${s.id}:${s.visibility}`)).toEqual(["H:hidden", "B:visible", "A:visible"]);
+  });
+
+  it("handles multiple hidden blocks when inserting within the visible strip", () => {
+    const sheets = [
+      makeSheet("A", "visible"),
+      makeSheet("H1", "hidden"),
+      makeSheet("B", "visible"),
+      makeSheet("H2", "veryHidden"),
+      makeSheet("C", "visible"),
+    ];
+
+    const toIndex = computeWorkbookSheetMoveIndex({
+      sheets,
+      fromSheetId: "C",
+      dropTarget: { kind: "before", targetSheetId: "B" },
+    });
+
+    expect(toIndex).toBe(2);
+    const next = applyMove(sheets, "C", toIndex!);
+    expect(next.map((s) => `${s.id}:${s.visibility}`)).toEqual([
+      "A:visible",
+      "H1:hidden",
+      "C:visible",
+      "B:visible",
+      "H2:veryHidden",
+    ]);
+  });
 });
