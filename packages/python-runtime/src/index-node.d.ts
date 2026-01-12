@@ -16,3 +16,4 @@ export class PyodideRuntime {
 
 export const formulaFiles: any;
 
+export const __pyodideMocks: any;

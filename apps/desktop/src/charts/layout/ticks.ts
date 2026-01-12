@@ -99,8 +99,7 @@ export function generateLinearTicks(args: {
   const span = max - min;
   const target = 6;
 
-  /** @type {TickGenerationResult | null} */
-  let best = null;
+  let best: TickGenerationResult | null = null;
   let bestScore = Number.POSITIVE_INFINITY;
 
   for (const desired of [5, 6, 7]) {
@@ -150,4 +149,3 @@ function rangeTicks(start: number, end: number, step: number): number[] {
   }
   return ticks;
 }
-

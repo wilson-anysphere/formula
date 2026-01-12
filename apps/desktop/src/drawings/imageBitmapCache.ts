@@ -14,7 +14,9 @@ export class ImageBitmapCache {
     if (existing) return existing;
 
     const promise = (async () => {
-      const blob = new Blob([entry.bytes], { type: entry.mimeType });
+      const buffer = new ArrayBuffer(entry.bytes.byteLength);
+      new Uint8Array(buffer).set(entry.bytes);
+      const blob = new Blob([buffer], { type: entry.mimeType });
       return await createImageBitmap(blob);
     })();
     this.bitmaps.set(entry.id, promise);
@@ -29,4 +31,3 @@ export class ImageBitmapCache {
     this.bitmaps.clear();
   }
 }
-

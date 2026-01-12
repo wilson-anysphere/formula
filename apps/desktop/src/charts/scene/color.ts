@@ -8,9 +8,11 @@ export interface RGBA {
   a: number;
 }
 
-let cssParserCtx: CanvasRenderingContext2D | null | undefined;
+type CssParserCtx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 
-function getCssParserCtx(): CanvasRenderingContext2D | null {
+let cssParserCtx: CssParserCtx | null | undefined;
+
+function getCssParserCtx(): CssParserCtx | null {
   if (cssParserCtx !== undefined) return cssParserCtx;
 
   if (typeof OffscreenCanvas !== "undefined") {

@@ -18,6 +18,7 @@ export class BrowserExtensionHost {
   getContributedKeybindings(): any[];
   getContributedMenu(menuId: string): any[];
 
+  listExtensions(): any[];
+
   executeCommand(commandId: string, ...args: any[]): Promise<any>;
 }
-
