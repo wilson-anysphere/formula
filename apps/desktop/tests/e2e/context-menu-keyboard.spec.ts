@@ -21,6 +21,11 @@ test.describe("grid context menu keyboard invocation", () => {
     await expect(menu).toBeVisible();
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
 
+    // Built-in items should display the familiar shortcut hints (display-only).
+    const expectedCopyShortcut = process.platform === "darwin" ? "⌘C" : "Ctrl+C";
+    const copy = menu.getByRole("button", { name: "Copy" });
+    await expect(copy.locator('span[aria-hidden="true"]')).toHaveText(expectedCopyShortcut);
+
     await page.keyboard.press("Escape");
     await expect(menu).toBeHidden();
 
