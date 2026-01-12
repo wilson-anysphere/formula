@@ -140,34 +140,6 @@
   display: block;
 }
 
-.context-menu__leading--swatch-sheet-tab-red {
-  background: var(--sheet-tab-red);
-}
-
-.context-menu__leading--swatch-sheet-tab-orange {
-  background: var(--sheet-tab-orange);
-}
-
-.context-menu__leading--swatch-sheet-tab-yellow {
-  background: var(--sheet-tab-yellow);
-}
-
-.context-menu__leading--swatch-sheet-tab-green {
-  background: var(--sheet-tab-green);
-}
-
-.context-menu__leading--swatch-sheet-tab-blue {
-  background: var(--sheet-tab-blue);
-}
-
-.context-menu__leading--swatch-sheet-tab-purple {
-  background: var(--sheet-tab-purple);
-}
-
-.context-menu__leading--swatch-sheet-tab-gray {
-  background: var(--sheet-tab-gray);
-}
-
 .context-menu__shortcut {
   flex: none;
   color: var(--text-secondary);

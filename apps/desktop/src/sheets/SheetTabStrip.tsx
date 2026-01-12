@@ -409,7 +409,7 @@ export function SheetTabStrip({
             return {
               type: "item" as const,
               label: entry.label,
-              leading: { type: "swatch" as const, token: entry.token },
+              leading: { type: "swatch" as const, color: entry.token },
               onSelect: () => {
                 try {
                   store.setTabColor(sheet.id, { rgb });
