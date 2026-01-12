@@ -281,8 +281,17 @@ export interface SpreadsheetAppStatusElements {
   activeCell: HTMLElement;
   selectionRange: HTMLElement;
   activeValue: HTMLElement;
+  /**
+   * Optional status-bar element for Excel-like quick stats (sum of numeric values in selection).
+   */
   selectionSum?: HTMLElement;
+  /**
+   * Optional status-bar element for Excel-like quick stats (average of numeric values in selection).
+   */
   selectionAverage?: HTMLElement;
+  /**
+   * Optional status-bar element for Excel-like quick stats (count of non-empty cells in selection).
+   */
   selectionCount?: HTMLElement;
 }
 
@@ -1879,48 +1888,93 @@ export class SpreadsheetApp {
   /**
    * Compute Excel-like status bar stats (Sum / Average / Count) for the current selection.
    *
-   * Performance note: this is implemented by iterating only the *stored* cells in the
-   * DocumentController's sparse cell map (not every coordinate in the rectangular ranges).
+   * Performance note:
+   * - For small selections, we scan the selection coordinates directly.
+   * - For large selections (e.g. select-all), we iterate only the *stored* cells in the
+   *   DocumentController's sparse cell map (not every coordinate in the rectangular ranges).
    */
   getSelectionSummary(): SpreadsheetSelectionSummary {
-    const ranges = this.selection.ranges;
+    const ranges = this.selection.ranges.map((r) => ({
+      startRow: Math.min(r.startRow, r.endRow),
+      endRow: Math.max(r.startRow, r.endRow),
+      startCol: Math.min(r.startCol, r.endCol),
+      endCol: Math.max(r.startCol, r.endCol),
+    }));
     let countNonEmpty = 0;
     let numericCount = 0;
     let numericSum = 0;
 
-    // Iterate only stored cells (value/formula/format-only), then filter by selection.
-    this.document.forEachCellInSheet(this.sheetId, ({ row, col, cell }) => {
-      // Ignore cells outside the current selection ranges.
-      let inSelection = false;
+    const inSelection = (row: number, col: number): boolean =>
+      ranges.some((r) => row >= r.startRow && row <= r.endRow && col >= r.startCol && col <= r.endCol);
+
+    let selectionArea = 0;
+    const SELECTION_AREA_SCAN_THRESHOLD = 10_000;
+    for (const r of ranges) {
+      const rows = Math.max(0, r.endRow - r.startRow + 1);
+      const cols = Math.max(0, r.endCol - r.startCol + 1);
+      selectionArea += rows * cols;
+      if (selectionArea > SELECTION_AREA_SCAN_THRESHOLD) break;
+    }
+
+    if (selectionArea <= SELECTION_AREA_SCAN_THRESHOLD) {
+      const visited = ranges.length > 1 ? new Set<string>() : null;
       for (const r of ranges) {
-        if (row >= r.startRow && row <= r.endRow && col >= r.startCol && col <= r.endCol) {
-          inSelection = true;
-          break;
+        for (let row = r.startRow; row <= r.endRow; row += 1) {
+          for (let col = r.startCol; col <= r.endCol; col += 1) {
+            if (visited) {
+              const key = `${row},${col}`;
+              if (visited.has(key)) continue;
+              visited.add(key);
+            }
+
+            const cell = this.document.getCell(this.sheetId, { row, col });
+            // Ignore format-only cells (styleId-only).
+            const hasContent = cell.value != null || cell.formula != null;
+            if (!hasContent) continue;
+
+            countNonEmpty += 1;
+
+            // Sum/average operate on numeric values only (computed values for formulas).
+            if (cell.formula != null) {
+              const computed = this.getCellComputedValue({ row, col });
+              if (typeof computed === "number" && Number.isFinite(computed)) {
+                numericCount += 1;
+                numericSum += computed;
+              }
+            } else if (typeof cell.value === "number" && Number.isFinite(cell.value)) {
+              numericCount += 1;
+              numericSum += cell.value;
+            }
+          }
         }
       }
-      if (!inSelection) return;
+    } else {
+      // Iterate only stored cells (value/formula/format-only), then filter by selection.
+      this.document.forEachCellInSheet(this.sheetId, ({ row, col, cell }) => {
+        if (!inSelection(row, col)) return;
 
-      // Ignore format-only cells (styleId-only).
-      const hasContent = cell.value != null || cell.formula != null;
-      if (!hasContent) return;
+        // Ignore format-only cells (styleId-only).
+        const hasContent = cell.value != null || cell.formula != null;
+        if (!hasContent) return;
 
-      countNonEmpty += 1;
+        countNonEmpty += 1;
 
-      // Sum/average operate on numeric values only (computed values for formulas).
-      if (cell.formula != null) {
-        const computed = this.getCellComputedValue({ row, col });
-        if (typeof computed === "number" && Number.isFinite(computed)) {
+        // Sum/average operate on numeric values only (computed values for formulas).
+        if (cell.formula != null) {
+          const computed = this.getCellComputedValue({ row, col });
+          if (typeof computed === "number" && Number.isFinite(computed)) {
+            numericCount += 1;
+            numericSum += computed;
+          }
+          return;
+        }
+
+        if (typeof cell.value === "number" && Number.isFinite(cell.value)) {
           numericCount += 1;
-          numericSum += computed;
+          numericSum += cell.value;
         }
-        return;
-      }
-
-      if (typeof cell.value === "number" && Number.isFinite(cell.value)) {
-        numericCount += 1;
-        numericSum += cell.value;
-      }
-    });
+      });
+    }
 
     const sum = numericCount > 0 ? numericSum : null;
     const average = numericCount > 0 ? numericSum / numericCount : null;
@@ -3456,93 +3510,12 @@ export class SpreadsheetApp {
     const countEl = this.status.selectionCount;
     if (!sumEl && !avgEl && !countEl) return;
 
-    const { sum, avg, count } = this.computeSelectionStats();
+    const summary = this.getSelectionSummary();
     const formatter = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
 
-    if (sumEl) sumEl.textContent = `Sum: ${formatter.format(sum)}`;
-    if (avgEl) avgEl.textContent = `Avg: ${formatter.format(avg)}`;
-    if (countEl) countEl.textContent = `Count: ${formatter.format(count)}`;
-  }
-
-  private computeSelectionStats(): { sum: number; avg: number; count: number } {
-    const ranges = this.selection.ranges;
-    if (ranges.length === 0) return { sum: 0, avg: 0, count: 0 };
-
-    const normalized = ranges.map((range) => {
-      const startRow = Math.min(range.startRow, range.endRow);
-      const endRow = Math.max(range.startRow, range.endRow);
-      const startCol = Math.min(range.startCol, range.endCol);
-      const endCol = Math.max(range.startCol, range.endCol);
-      return { startRow, endRow, startCol, endCol };
-    });
-
-    let selectedCellCount = 0;
-    for (const range of normalized) {
-      const rows = Math.max(0, range.endRow - range.startRow + 1);
-      const cols = Math.max(0, range.endCol - range.startCol + 1);
-      selectedCellCount += rows * cols;
-    }
-
-    const useEngineCache = this.document.getSheetIds().length <= 1;
-    const memo = new Map<string, SpreadsheetValue>();
-    const stack = new Set<string>();
-
-    let sum = 0;
-    let count = 0;
-
-    const addValue = (value: SpreadsheetValue): void => {
-      const num = coerceNumber(value);
-      if (num == null) return;
-      sum += num;
-      count += 1;
-    };
-
-    // For small selections, iterate the selection window directly.
-    // For large selections (e.g. select-all), iterate sparse sheet data to avoid O(rows*cols) scans.
-    const SPARSE_SELECTION_THRESHOLD = 10_000;
-    if (selectedCellCount <= SPARSE_SELECTION_THRESHOLD) {
-      for (const range of normalized) {
-        for (let row = range.startRow; row <= range.endRow; row += 1) {
-          for (let col = range.startCol; col <= range.endCol; col += 1) {
-            const coord = { row, col };
-            const state = this.document.getCell(this.sheetId, coord) as { value: unknown; formula: string | null };
-            if (state?.formula != null) {
-              addValue(this.computeCellValue(this.sheetId, coord, memo, stack, { useEngineCache }));
-            } else if (isRichTextValue(state?.value)) {
-              // Rich text is treated as text (non-numeric) in the status bar quick stats.
-            } else {
-              addValue((state?.value as SpreadsheetValue) ?? null);
-            }
-          }
-        }
-      }
-    } else {
-      const sheetModel = (this.document as any)?.model?.sheets?.get(this.sheetId) as { cells?: Map<string, any> } | undefined;
-      const cells: Map<string, { value: unknown; formula: string | null }> | undefined = sheetModel?.cells;
-      if (cells) {
-        const inSelection = (row: number, col: number): boolean =>
-          normalized.some((range) => row >= range.startRow && row <= range.endRow && col >= range.startCol && col <= range.endCol);
-
-        for (const [key, cell] of cells.entries()) {
-          const [rowStr, colStr] = key.split(",");
-          const row = Number(rowStr);
-          const col = Number(colStr);
-          if (!Number.isInteger(row) || !Number.isInteger(col)) continue;
-          if (!inSelection(row, col)) continue;
-          const coord = { row, col };
-          if (cell.formula != null) {
-            addValue(this.computeCellValue(this.sheetId, coord, memo, stack, { useEngineCache }));
-          } else if (isRichTextValue(cell.value)) {
-            // Ignore rich text (non-numeric).
-          } else {
-            addValue((cell.value as SpreadsheetValue) ?? null);
-          }
-        }
-      }
-    }
-
-    const avg = count === 0 ? 0 : sum / count;
-    return { sum, avg, count };
+    if (sumEl) sumEl.textContent = `Sum: ${formatter.format(summary.sum ?? 0)}`;
+    if (avgEl) avgEl.textContent = `Avg: ${formatter.format(summary.average ?? 0)}`;
+    if (countEl) countEl.textContent = `Count: ${formatter.format(summary.count)}`;
   }
 
   private syncEngineNow(): void {
@@ -6428,18 +6401,6 @@ function intersectRanges(a: Range, b: Range): Range | null {
 function mod(n: number, m: number): number {
   if (!Number.isFinite(n) || !Number.isFinite(m) || m === 0) return 0;
   return ((n % m) + m) % m;
-}
-
-function coerceNumber(value: unknown): number | null {
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  if (typeof value === "boolean") return value ? 1 : 0;
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (trimmed === "") return null;
-    const num = Number(trimmed);
-    return Number.isFinite(num) ? num : null;
-  }
-  return null;
 }
 
 function colToName(col: number): string {
