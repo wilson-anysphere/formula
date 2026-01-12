@@ -677,6 +677,21 @@ export function registerBuiltinCommands(params: {
   );
 
   commandRegistry.registerBuiltinCommand(
+    "edit.selectCurrentRegion",
+    t("command.edit.selectCurrentRegion"),
+    () => {
+      if (app.isEditing()) return;
+      app.selectCurrentRegion();
+    },
+    {
+      category: t("commandCategory.editing"),
+      icon: null,
+      description: t("commandDescription.edit.selectCurrentRegion"),
+      keywords: ["select", "current region", "region", "excel", "ctrl+shift+8", "ctrl+shift+*"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
     "edit.insertDate",
     t("command.edit.insertDate"),
     () => app.insertDate(),

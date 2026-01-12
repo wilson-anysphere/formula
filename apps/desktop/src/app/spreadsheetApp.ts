@@ -3207,6 +3207,20 @@ export class SpreadsheetApp {
     this.applyFillShortcut("right");
   }
 
+  selectCurrentRegion(): void {
+    if (this.inlineEditController.isOpen()) return;
+    if (this.editor.isOpen()) return;
+    if (this.formulaBar?.isEditing() || this.formulaEditCell) return;
+
+    const active = { ...this.selection.active };
+    const range = computeCurrentRegionRange(active, this.usedRangeProvider(), this.limits);
+    this.selection = buildSelection({ ranges: [range], active, anchor: active, activeRangeIndex: 0 }, this.limits);
+    if (this.sharedGrid) this.syncSharedGridSelectionFromState();
+    this.renderSelection();
+    this.updateStatus();
+    this.focus();
+  }
+
   insertDate(): void {
     this.insertCurrentDateTimeIntoSelection("date");
     this.refresh();
@@ -7159,12 +7173,7 @@ export class SpreadsheetApp {
       ((e.shiftKey && (e.code === "Digit8" || e.key === "*" || e.key === "8")) || e.code === "NumpadMultiply")
     ) {
       e.preventDefault();
-      const active = { ...this.selection.active };
-      const range = computeCurrentRegionRange(active, this.usedRangeProvider(), this.limits);
-      this.selection = buildSelection({ ranges: [range], active, anchor: active, activeRangeIndex: 0 }, this.limits);
-      if (this.sharedGrid) this.syncSharedGridSelectionFromState();
-      this.renderSelection();
-      this.updateStatus();
+      this.selectCurrentRegion();
       return;
     }
 

@@ -177,6 +177,12 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     when: null,
   },
   {
+    command: "edit.selectCurrentRegion",
+    key: "ctrl+shift+8",
+    mac: "cmd+shift+8",
+    when: null,
+  },
+  {
     command: "edit.insertDate",
     key: "ctrl+;",
     mac: "cmd+;",
