@@ -107,7 +107,15 @@ function normalizeSheetView(value) {
         addColRuns(entry?.col ?? entry?.index ?? entry?.column, entry?.runs ?? entry?.formatRuns ?? entry?.segments);
       }
     } else if (isRecord(raw)) {
-      for (const [key, runs] of Object.entries(raw)) addColRuns(key, runs);
+      for (const [key, value] of Object.entries(raw)) {
+        if (Array.isArray(value)) {
+          addColRuns(key, value);
+          continue;
+        }
+        if (isRecord(value)) {
+          addColRuns(key, value.runs ?? value.formatRuns ?? value.segments);
+        }
+      }
     }
 
     out.sort((a, b) => a.col - b.col);

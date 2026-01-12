@@ -25,15 +25,18 @@ function getYMap(value: unknown): Y.Map<any> | null {
   if (value instanceof Y.Map) return value;
   if (!value || typeof value !== "object") return null;
   const maybe = value as any;
-  // Yjs constructor names can vary across builds (e.g. `YMap` vs `_YMap`), and
-  // pnpm workspaces can load multiple module instances (ESM/CJS). Prefer a
-  // tolerant constructor-name check before falling back to structural checks.
-  if (maybe.constructor?.name !== "YMap" && maybe.constructor?.name !== "_YMap") return null;
+  // Bundlers can rename constructors and pnpm workspaces can load multiple `yjs`
+  // module instances (ESM + CJS). Avoid relying on `constructor.name`; prefer a
+  // structural check instead.
   if (typeof maybe.get !== "function") return null;
   if (typeof maybe.set !== "function") return null;
   if (typeof maybe.delete !== "function") return null;
   if (typeof maybe.keys !== "function") return null;
   if (typeof maybe.forEach !== "function") return null;
+  // Plain JS Maps also have get/set/delete/keys/forEach, so additionally require
+  // Yjs' deep observer APIs.
+  if (typeof maybe.observeDeep !== "function") return null;
+  if (typeof maybe.unobserveDeep !== "function") return null;
   return maybe as Y.Map<any>;
 }
 
@@ -41,11 +44,13 @@ function getYArray(value: unknown): Y.Array<any> | null {
   if (value instanceof Y.Array) return value;
   if (!value || typeof value !== "object") return null;
   const maybe = value as any;
-  if (maybe.constructor?.name !== "YArray" && maybe.constructor?.name !== "_YArray") return null;
+  // See `getYMap` above for rationale.
   if (typeof maybe.get !== "function") return null;
   if (typeof maybe.toArray !== "function") return null;
   if (typeof maybe.push !== "function") return null;
   if (typeof maybe.delete !== "function") return null;
+  if (typeof maybe.observeDeep !== "function") return null;
+  if (typeof maybe.unobserveDeep !== "function") return null;
   return maybe as Y.Array<any>;
 }
 
@@ -53,10 +58,13 @@ function isYText(value: unknown): value is Y.Text {
   if (value instanceof Y.Text) return true;
   if (!value || typeof value !== "object") return false;
   const maybe = value as any;
-  if (maybe.constructor?.name !== "YText" && maybe.constructor?.name !== "_YText") return false;
   if (typeof maybe.toString !== "function") return false;
   if (typeof maybe.toDelta !== "function") return false;
   if (typeof maybe.applyDelta !== "function") return false;
+  if (typeof maybe.insert !== "function") return false;
+  if (typeof maybe.delete !== "function") return false;
+  if (typeof maybe.observeDeep !== "function") return false;
+  if (typeof maybe.unobserveDeep !== "function") return false;
   return true;
 }
 
@@ -270,7 +278,9 @@ export class CommentManager {
 
       // Fallback: comment map is usually from the same Yjs module instance as
       // its `replies` array.
-      return (yComment as any)?.constructor?.name === "YMap" ? ((yComment as any).constructor as any) : undefined;
+      const commentMap = getYMap(yComment);
+      if (commentMap && !(commentMap instanceof Y.Map)) return commentMap.constructor as any;
+      return undefined;
     })();
 
     this.transact(() => {

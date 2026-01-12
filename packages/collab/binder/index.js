@@ -58,22 +58,17 @@ function yjsValueToJson(value) {
   if (isYText(value)) return value.toString();
 
   if (value && typeof value === "object") {
-    if (
-      (value.constructor?.name === "YArray" || value.constructor?.name === "_YArray") &&
-      typeof value.toArray === "function"
-    ) {
-      return value.toArray().map((item) => yjsValueToJson(item));
+    const yArr = getYArray(value);
+    if (yArr) {
+      return yArr.toArray().map((item) => yjsValueToJson(item));
     }
 
-    if (
-      (value.constructor?.name === "YMap" || value.constructor?.name === "_YMap") &&
-      typeof value.keys === "function" &&
-      typeof value.get === "function"
-    ) {
+    const yMap = getYMap(value);
+    if (yMap) {
       /** @type {Record<string, any>} */
       const out = {};
-      const keys = Array.from(value.keys()).sort();
-      for (const key of keys) out[key] = yjsValueToJson(value.get(key));
+      const keys = Array.from(yMap.keys()).sort();
+      for (const key of keys) out[key] = yjsValueToJson(yMap.get(key));
       return out;
     }
 
@@ -212,6 +207,20 @@ function getYMap(value) {
   if (typeof maybe.delete !== "function") return null;
   if (typeof maybe.keys !== "function") return null;
   if (typeof maybe.forEach !== "function") return null;
+  if (typeof maybe.observeDeep !== "function") return null;
+  if (typeof maybe.unobserveDeep !== "function") return null;
+  return maybe;
+}
+
+function getYArray(value) {
+  if (!value || typeof value !== "object") return null;
+  if (value instanceof Y.Array) return value;
+  // See `getYMap` above for rationale.
+  const maybe = value;
+  if (typeof maybe.get !== "function") return null;
+  if (typeof maybe.toArray !== "function") return null;
+  if (typeof maybe.push !== "function") return null;
+  if (typeof maybe.delete !== "function") return null;
   if (typeof maybe.observeDeep !== "function") return null;
   if (typeof maybe.unobserveDeep !== "function") return null;
   return maybe;

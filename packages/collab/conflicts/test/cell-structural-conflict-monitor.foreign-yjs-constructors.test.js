@@ -21,7 +21,7 @@ function requireYjsCjs() {
   }
 }
 
-test("CellStructuralConflictMonitor preserves foreign cell maps even when constructors are renamed (e.g. _YMap)", () => {
+test("CellStructuralConflictMonitor preserves foreign cell maps even when constructors are renamed", () => {
   const Ycjs = requireYjsCjs();
 
   const remote = new Ycjs.Doc();
@@ -43,10 +43,10 @@ test("CellStructuralConflictMonitor preserves foreign cell maps even when constr
   const foreignCell = cells.get("Sheet1:0:0");
   assert.ok(foreignCell);
   assert.equal(foreignCell instanceof Y.Map, false);
-  // Simulate a bundler-renamed constructor (`YMap` -> `_YMap`) without mutating the global
-  // Yjs module state (which can cause cross-test interference under concurrency).
-  class _YMap extends foreignCell.constructor {}
-  Object.setPrototypeOf(foreignCell, _YMap.prototype);
+  // Simulate a bundler-renamed constructor without mutating the global Yjs module state
+  // (which can cause cross-test interference under concurrency).
+  class RenamedMap extends foreignCell.constructor {}
+  Object.setPrototypeOf(foreignCell, RenamedMap.prototype);
 
   const origin = { type: "local" };
   const monitor = new CellStructuralConflictMonitor({

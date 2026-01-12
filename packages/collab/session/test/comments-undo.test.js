@@ -241,7 +241,7 @@ test("CollabSession undo captures comment edits when comments root was created b
   doc.destroy();
 });
 
-test("CollabSession undo captures comment edits when foreign Yjs constructors are renamed (e.g. _YMap/_YArray)", () => {
+test("CollabSession undo captures comment edits when foreign Yjs constructors are renamed", () => {
   const Ycjs = requireYjsCjs();
   const remote = new Ycjs.Doc();
   const comments = remote.getMap("comments");
@@ -279,15 +279,15 @@ test("CollabSession undo captures comment edits when foreign Yjs constructors ar
     "expected nested comment to be a foreign Y.Map instance (not instanceof the ESM Y.Map)"
   );
 
-  // Simulate bundler-renamed constructors (`YMap` -> `_YMap`, `YArray` -> `_YArray`) without
-  // mutating global `yjs` state (which can cause cross-test interference under concurrency).
-  class _YMap extends foreignComment.constructor {}
-  Object.setPrototypeOf(foreignComment, _YMap.prototype);
+  // Simulate bundler-renamed constructors without mutating global `yjs` state
+  // (which can cause cross-test interference under concurrency).
+  class RenamedMap extends foreignComment.constructor {}
+  Object.setPrototypeOf(foreignComment, RenamedMap.prototype);
 
   const replies = foreignComment.get("replies");
   if (replies) {
-    class _YArray extends replies.constructor {}
-    Object.setPrototypeOf(replies, _YArray.prototype);
+    class RenamedArray extends replies.constructor {}
+    Object.setPrototypeOf(replies, RenamedArray.prototype);
   }
 
   const session = createCollabSession({ doc, undo: {} });

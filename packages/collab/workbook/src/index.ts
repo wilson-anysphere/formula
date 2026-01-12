@@ -406,25 +406,31 @@ type DocTypeConstructors = {
 };
 
 function cloneYjsValueWithCtors(value: any, ctors: DocTypeConstructors): any {
-  if (value?.constructor?.name === "YMap" && typeof value.forEach === "function") {
+  const map = getYMap(value);
+  if (map) {
     const out = new ctors.MapCtor();
-    value.forEach((v: any, k: string) => {
+    map.forEach((v: any, k: string) => {
       out.set(k, cloneYjsValueWithCtors(v, ctors));
     });
     return out;
   }
-  if (value?.constructor?.name === "YArray" && typeof value.toArray === "function") {
+
+  const array = getYArray(value);
+  if (array) {
     const out = new ctors.ArrayCtor();
-    for (const item of value.toArray()) {
+    for (const item of array.toArray()) {
       out.push([cloneYjsValueWithCtors(item, ctors)]);
     }
     return out;
   }
-  if (value?.constructor?.name === "YText" && typeof value.toDelta === "function") {
+
+  const text = getYText(value);
+  if (text) {
     const out = new ctors.TextCtor();
-    out.applyDelta(structuredClone(value.toDelta()));
+    out.applyDelta(structuredClone(text.toDelta()));
     return out;
   }
+
   if (value && typeof value === "object") {
     return structuredClone(value);
   }

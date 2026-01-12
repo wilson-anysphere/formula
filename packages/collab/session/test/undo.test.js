@@ -116,7 +116,7 @@ test("CollabSession undo captures cell edits when cell maps were created by a di
   doc.destroy();
 });
 
-test("CollabSession undo captures cell edits when foreign Yjs maps have renamed constructors (e.g. _YMap)", async () => {
+test("CollabSession undo captures cell edits when foreign Yjs maps have renamed constructors", async () => {
   const Ycjs = requireYjsCjs();
 
   const remote = new Ycjs.Doc();
@@ -135,12 +135,12 @@ test("CollabSession undo captures cell edits when foreign Yjs maps have renamed 
   doc.getMap("cells");
   Ycjs.applyUpdate(doc, update, REMOTE_ORIGIN);
 
-  // Simulate a bundler-renamed constructor (`YMap` -> `_YMap`) without mutating
-  // global `yjs` state (which can cause cross-test interference under concurrency).
+  // Simulate a bundler-renamed constructor without mutating global `yjs` state
+  // (which can cause cross-test interference under concurrency).
   const foreignCellMap = doc.getMap("cells").get("Sheet1:0:0");
   assert.ok(foreignCellMap);
-  class _YMap extends foreignCellMap.constructor {}
-  Object.setPrototypeOf(foreignCellMap, _YMap.prototype);
+  class RenamedMap extends foreignCellMap.constructor {}
+  Object.setPrototypeOf(foreignCellMap, RenamedMap.prototype);
 
   const session = createCollabSession({ doc, undo: {} });
 

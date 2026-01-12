@@ -21,7 +21,7 @@ function requireYjsCjs() {
   }
 }
 
-test("getWorkbookRoots normalizes foreign map roots even if constructor names are renamed (e.g. _YMap)", () => {
+test("getWorkbookRoots normalizes foreign map roots even if constructor names are renamed", () => {
   const Ycjs = requireYjsCjs();
   const doc = new Y.Doc();
 
@@ -30,24 +30,24 @@ test("getWorkbookRoots normalizes foreign map roots even if constructor names ar
   const foreignCells = Ycjs.Doc.prototype.getMap.call(doc, "cells");
   foreignCells.set("foo", "bar");
 
-  // Simulate a bundler-renamed constructor (`YMap` -> `_YMap`) on the foreign instance
-  // without mutating global module state.
-  class _YMap extends foreignCells.constructor {}
-  Object.setPrototypeOf(foreignCells, _YMap.prototype);
+  // Simulate a bundler-renamed constructor on the foreign instance without mutating
+  // global module state.
+  class RenamedMap extends foreignCells.constructor {}
+  Object.setPrototypeOf(foreignCells, RenamedMap.prototype);
 
   const roots = getWorkbookRoots(doc);
   assert.ok(roots.cells instanceof Y.Map, "expected getWorkbookRoots to normalize to local Y.Map constructor");
   assert.equal(roots.cells.get("foo"), "bar");
 });
 
-test("getWorkbookRoots detects foreign array-backed roots even if constructor names are renamed (e.g. _YArray)", () => {
+test("getWorkbookRoots detects foreign array-backed roots even if constructor names are renamed", () => {
   const Ycjs = requireYjsCjs();
   const doc = new Y.Doc();
 
   const foreignCells = Ycjs.Doc.prototype.getArray.call(doc, "cells");
   assert.ok(foreignCells);
-  class _YArray extends foreignCells.constructor {}
-  Object.setPrototypeOf(foreignCells, _YArray.prototype);
+  class RenamedArray extends foreignCells.constructor {}
+  Object.setPrototypeOf(foreignCells, RenamedArray.prototype);
 
   assert.throws(
     () => getWorkbookRoots(doc),
