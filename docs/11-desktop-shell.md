@@ -38,6 +38,11 @@ The desktop shell reports real startup timings from the Rust host + webview so w
   ```
 - **Release builds**: set `FORMULA_STARTUP_METRICS=1` to enable the same log line.
 - **Frontend access**: the latest metrics are mirrored into `globalThis.__FORMULA_STARTUP_TIMINGS__` (inspect via DevTools).
+- **Optional multi-run benchmark**: `apps/desktop/tests/performance/desktop-startup-runner.ts` can launch a built desktop binary multiple times and compute p50/p95 for window-visible + TTI.
+  - Example:
+    ```bash
+    node --experimental-strip-types apps/desktop/tests/performance/desktop-startup-runner.ts --bin apps/desktop/src-tauri/target/release/formula-desktop --runs 20
+    ```
 
 ---
 
