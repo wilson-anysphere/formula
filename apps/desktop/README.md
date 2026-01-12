@@ -166,7 +166,8 @@ localStorage.removeItem("formula.extensionHost.permissions");
 ### Marketplace base URL (Desktop)
 
 The marketplace base URL is chosen by `getMarketplaceBaseUrl()` (`apps/desktop/src/panels/marketplace/getMarketplaceBaseUrl.ts`).
-In dev, you can override it via `localStorage["formula:marketplace:baseUrl"]` and reload.
+In dev, you can override it via `localStorage["formula:marketplace:baseUrl"]` and reload (the value should include the
+`/api` suffix).
 
 ```js
 localStorage.setItem("formula:marketplace:baseUrl", "https://marketplace.formula.app/api");

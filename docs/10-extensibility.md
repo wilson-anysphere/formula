@@ -1258,51 +1258,47 @@ const manager = new WebExtensionManager({ marketplaceClient: marketplace, host, 
 **CSP constraint (Desktop):** marketplace installs are plain `fetch()` requests from the WebView, so they are subject
 to the app-level CSP (`apps/desktop/src-tauri/tauri.conf.json`, `connect-src`).
 
-### Extension Publishing
+### End-to-end: local marketplace → install in Desktop (dev)
 
-```typescript
-// CLI tool for publishing extensions
-class ExtensionPublisher {
-  async publish(extensionPath: string, options: PublishOptions): Promise<void> {
-    // Validate package.json
-    const manifest = await this.loadManifest(extensionPath);
-    this.validateManifest(manifest);
-    
-    // Build extension
-    await this.build(extensionPath);
-    
-    // Package
-    const vsix = await this.package(extensionPath);
-    
-    // Sign
-    const signed = await this.sign(vsix, options.privateKey);
-    
-    // Upload
-    const response = await fetch(`${this.apiEndpoint}/publish`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${options.accessToken}`,
-        "Content-Type": "application/octet-stream"
-      },
-      body: signed
-    });
-    
-    if (!response.ok) {
-      throw new Error(`Publish failed: ${await response.text()}`);
-    }
-    
-    console.log(`Successfully published ${manifest.name}@${manifest.version}`);
-  }
-  
-  private validateManifest(manifest: ExtensionManifest): void {
-    // Publishing uses the same core manifest validation rules as the extension hosts.
-    //
-    // Note: clients enforce `engines.formula` compatibility at runtime; marketplace publish-time
-    // validation checks the manifest structure but does not gate on a specific engine version.
-    validateExtensionManifest(manifest, { enforceEngine: false });
-  }
-}
-```
+1. Start a local marketplace server and register a publisher token/keypair:
+   - [`services/marketplace/README.md`](../services/marketplace/README.md)
+
+2. Build + publish your extension:
+
+   ```bash
+   pnpm extension:build extensions/my-extension
+
+   node tools/extension-publisher/src/cli.js publish extensions/my-extension \
+     --marketplace http://127.0.0.1:8787 \
+     --token publisher-token \
+     --private-key ./publisher-private.pem
+   ```
+
+3. Run the desktop app:
+
+   ```bash
+   pnpm -C apps/desktop dev
+   ```
+
+4. Point Desktop at your local marketplace API (note the `/api` suffix) and reload:
+
+   ```js
+   localStorage.setItem("formula:marketplace:baseUrl", "http://127.0.0.1:8787/api");
+   location.reload();
+   ```
+
+5. Open the Marketplace panel and install:
+
+   ```js
+   window.dispatchEvent(new CustomEvent("formula:open-panel", { detail: { panelId: "marketplace" } }));
+   ```
+
+6. Open the **Extensions** panel to see installed extensions and run contributed commands/panels.
+
+Notes:
+
+- Avoid publishing an extension id that conflicts with built-in/dev extensions (e.g. `formula.sample-hello`), or you may see
+  `Extension already loaded: ...` errors.
 
 ---
 
