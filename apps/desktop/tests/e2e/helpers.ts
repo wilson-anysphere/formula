@@ -137,7 +137,14 @@ export async function openExtensionsPanel(page: Page): Promise<void> {
   const panelVisible = await panel.isVisible().catch(() => false);
 
   if (!panelVisible) {
-    const ribbonButton = page.getByTestId("ribbon-root").getByTestId("open-extensions-panel");
+    const ribbonRoot = page.getByTestId("ribbon-root");
+    const ribbonButton = ribbonRoot.getByTestId("open-extensions-panel");
+    const ribbonButtonVisible = await ribbonButton.isVisible().catch(() => false);
+    if (!ribbonButtonVisible) {
+      // The Extensions toggle lives in the Home ribbon tab. If another tab is active, the button
+      // may not be rendered/visible, so select Home before clicking.
+      await ribbonRoot.getByRole("tab", { name: "Home", exact: true }).click();
+    }
     await ribbonButton.click({ timeout: 30_000 });
 
     await panel.waitFor({ state: "visible", timeout: 30_000 });
