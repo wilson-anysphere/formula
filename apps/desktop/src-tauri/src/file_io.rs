@@ -1532,6 +1532,95 @@ pub(crate) fn patch_workbook_main_content_type_in_package(
     Ok(Some(cursor.into_inner()))
 }
 
+fn workbook_xml_sheet_order_override(
+    origin_bytes: &[u8],
+    workbook: &Workbook,
+) -> anyhow::Result<Option<Vec<u8>>> {
+    let Some(workbook_xml_bytes) =
+        formula_xlsx::read_part_from_reader(Cursor::new(origin_bytes), "xl/workbook.xml")
+            .context("read xl/workbook.xml")?
+    else {
+        return Ok(None);
+    };
+    let workbook_xml =
+        std::str::from_utf8(&workbook_xml_bytes).context("decode xl/workbook.xml")?;
+
+    let worksheet_parts = formula_xlsx::worksheet_parts_from_reader(Cursor::new(origin_bytes))
+        .context("resolve worksheet parts")?;
+    if worksheet_parts.is_empty() {
+        return Ok(None);
+    }
+
+    // Only attempt to rewrite the sheet list when the in-memory workbook and the origin package
+    // agree on the set of sheets (reordering should not add/remove sheets).
+    if workbook.sheets.len() != worksheet_parts.len() {
+        return Ok(None);
+    }
+
+    let mut info_by_part: HashMap<String, formula_xlsx::WorkbookSheetInfo> =
+        HashMap::with_capacity(worksheet_parts.len());
+    for part in &worksheet_parts {
+        info_by_part.insert(
+            part.worksheet_part.clone(),
+            formula_xlsx::WorkbookSheetInfo {
+                name: part.name.clone(),
+                sheet_id: part.sheet_id,
+                rel_id: part.rel_id.clone(),
+                visibility: part.visibility,
+            },
+        );
+    }
+
+    let mut reordered_infos: Vec<formula_xlsx::WorkbookSheetInfo> =
+        Vec::with_capacity(workbook.sheets.len());
+    let mut reordered_parts: Vec<String> = Vec::with_capacity(workbook.sheets.len());
+    let mut seen_parts: HashSet<String> = HashSet::new();
+
+    for sheet in &workbook.sheets {
+        let resolved_part = match sheet.xlsx_worksheet_part.as_deref() {
+            Some(part) => Some(part.to_string()),
+            None => worksheet_parts
+                .iter()
+                .find(|p| p.name.eq_ignore_ascii_case(&sheet.name))
+                .map(|p| p.worksheet_part.clone()),
+        };
+
+        let Some(part) = resolved_part else {
+            return Ok(None);
+        };
+
+        if !seen_parts.insert(part.clone()) {
+            // Duplicate worksheet part resolution; bail out to avoid dropping sheets.
+            return Ok(None);
+        }
+
+        let Some(info) = info_by_part.get(&part) else {
+            return Ok(None);
+        };
+
+        reordered_parts.push(part);
+        reordered_infos.push(info.clone());
+    }
+
+    let original_parts: Vec<&str> = worksheet_parts
+        .iter()
+        .map(|p| p.worksheet_part.as_str())
+        .collect();
+    let next_parts: Vec<&str> = reordered_parts.iter().map(|p| p.as_str()).collect();
+    if next_parts == original_parts {
+        return Ok(None);
+    }
+
+    let rewritten = formula_xlsx::write_workbook_sheets(workbook_xml, &reordered_infos)
+        .map_err(|e| anyhow::anyhow!(e.to_string()))
+        .context("rewrite workbook.xml sheets")?;
+    if rewritten == workbook_xml {
+        return Ok(None);
+    }
+
+    Ok(Some(rewritten.into_bytes()))
+}
+
 pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[u8]>> {
     let extension = path
         .extension()
@@ -1608,12 +1697,12 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
 
     if let Some(origin_bytes) = workbook.origin_xlsx_bytes.as_deref() {
         // NOTE: This patch-based save path intentionally preserves most workbook-level parts
-        // from the original package (e.g. `xl/workbook.xml`). As a result, workbook-structure
-        // edits like sheet reorder/rename are not currently reflected in the saved
-        // `workbook.xml` when `origin_xlsx_bytes` is present. Sheet order *is* persisted in the
-        // autosave SQLite storage and round-trips through reopen within the app.
+        // from the original package. This keeps unsupported XLSX parts (theme, comments,
+        // conditional formatting, etc) intact by patching only the modified worksheet XML.
         let print_settings_changed = workbook.print_settings != workbook.original_print_settings;
         let power_query_changed = workbook.power_query_xml != workbook.original_power_query_xml;
+        let sheet_order_override =
+            workbook_xml_sheet_order_override(origin_bytes, workbook).ok().flatten();
 
         let mut patches = WorkbookCellPatches::default();
         for sheet in &workbook.sheets {
@@ -1705,6 +1794,7 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
         if patches.is_empty()
             && !print_settings_changed
             && !power_query_changed
+            && sheet_order_override.is_none()
             && !needs_strip_vba
             && !needs_inject_vba
             && !needs_workbook_content_type_update
@@ -1719,26 +1809,29 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
                 .clone());
         }
 
-        let mut bytes = if patches.is_empty() && !power_query_changed {
-            origin_bytes.to_vec()
-        } else {
-            let mut part_overrides: HashMap<String, PartOverride> = HashMap::new();
-            if power_query_changed {
-                match workbook.power_query_xml.as_ref() {
-                    Some(bytes) => {
-                        let override_op = if workbook.original_power_query_xml.is_some() {
-                            PartOverride::Replace(bytes.clone())
-                        } else {
-                            PartOverride::Add(bytes.clone())
-                        };
-                        part_overrides.insert(FORMULA_POWER_QUERY_PART.to_string(), override_op);
-                    }
-                    None => {
-                        part_overrides
-                            .insert(FORMULA_POWER_QUERY_PART.to_string(), PartOverride::Remove);
-                    }
+        let mut part_overrides: HashMap<String, PartOverride> = HashMap::new();
+        if let Some(xml) = sheet_order_override {
+            part_overrides.insert("xl/workbook.xml".to_string(), PartOverride::Replace(xml));
+        }
+        if power_query_changed {
+            match workbook.power_query_xml.as_ref() {
+                Some(bytes) => {
+                    let override_op = if workbook.original_power_query_xml.is_some() {
+                        PartOverride::Replace(bytes.clone())
+                    } else {
+                        PartOverride::Add(bytes.clone())
+                    };
+                    part_overrides.insert(FORMULA_POWER_QUERY_PART.to_string(), override_op);
+                }
+                None => {
+                    part_overrides.insert(FORMULA_POWER_QUERY_PART.to_string(), PartOverride::Remove);
                 }
             }
+        }
+
+        let mut bytes = if patches.is_empty() && part_overrides.is_empty() {
+            origin_bytes.to_vec()
+        } else {
             let mut cursor = Cursor::new(Vec::new());
             if part_overrides.is_empty() {
                 patch_xlsx_streaming_workbook_cell_patches(

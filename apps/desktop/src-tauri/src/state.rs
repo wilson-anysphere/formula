@@ -50,6 +50,11 @@ pub enum AppStateError {
     NoRedoHistory,
     #[error("unknown sheet id: {0}")]
     UnknownSheet(String),
+    #[error("invalid sheet index: {to_index} (sheet count {sheet_count})")]
+    InvalidSheetIndex {
+        to_index: usize,
+        sheet_count: usize,
+    },
     #[error("invalid range: start ({start_row},{start_col}) end ({end_row},{end_col})")]
     InvalidRange {
         start_row: usize,
@@ -776,46 +781,107 @@ impl AppState {
     }
 
     pub fn move_sheet(&mut self, sheet_id: &str, to_index: usize) -> Result<(), AppStateError> {
-        // When the workbook is backed by SQLite persistence, reorder the sheet in storage first so
-        // we don't leave the in-memory workbook in a partially updated state if persistence fails.
-        if let Some(persistent) = self.persistent.as_mut() {
-            // Best-effort: some workbook states (e.g. newly-created sheets) may not have been
-            // assigned a persistence UUID yet. In that case, still allow reordering the in-memory
-            // workbook so the UI behaves correctly.
-            if let Some(sheet_uuid) = persistent.sheet_uuid(sheet_id) {
-                persistent
-                    .storage
-                    .reorder_sheet(sheet_uuid, to_index as i64)
-                    .map_err(|e| match e {
-                        formula_storage::StorageError::SheetNotFound(_) => {
-                            AppStateError::UnknownSheet(sheet_id.to_string())
-                        }
-                        other => AppStateError::Persistence(other.to_string()),
-                    })?;
+        let (from_index, sheet_count, ctx, active_sheet_id, selection_sheet_id) = {
+            let workbook = self.get_workbook()?;
+            let sheet_count = workbook.sheets.len();
+            if to_index >= sheet_count {
+                return Err(AppStateError::InvalidSheetIndex {
+                    to_index,
+                    sheet_count,
+                });
+            }
+
+            let from_index = workbook
+                .sheets
+                .iter()
+                .position(|sheet| sheet.id == sheet_id)
+                .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
+            if from_index == to_index {
+                return Ok(());
+            }
+
+            let ctx = self.macro_host.runtime_context();
+            let active_sheet_id = workbook.sheets.get(ctx.active_sheet).map(|s| s.id.clone());
+            let selection_sheet_id = ctx
+                .selection
+                .as_ref()
+                .and_then(|sel| workbook.sheets.get(sel.sheet).map(|s| s.id.clone()));
+
+            (from_index, sheet_count, ctx, active_sheet_id, selection_sheet_id)
+        };
+
+        // Update persistent storage first so we can fail fast without mutating the in-memory workbook.
+        if let Some(persistent) = self.persistent.as_ref() {
+            let sheet_uuid = persistent.sheet_uuid(sheet_id).ok_or_else(|| {
+                AppStateError::Persistence(format!(
+                    "missing persistence mapping for sheet id {sheet_id}"
+                ))
+            })?;
+            persistent
+                .storage
+                .reorder_sheet(sheet_uuid, to_index as i64)
+                .map_err(|e| AppStateError::Persistence(e.to_string()))?;
+        }
+
+        {
+            let workbook = self.get_workbook_mut()?;
+            if sheet_count != workbook.sheets.len() {
+                // Shouldn't happen (sheet list mutates between validation and reorder), but avoid
+                // panicking on `remove`/`insert`.
+                return Err(AppStateError::InvalidSheetIndex {
+                    to_index,
+                    sheet_count: workbook.sheets.len(),
+                });
+            }
+
+            let sheet = workbook.sheets.remove(from_index);
+            workbook.sheets.insert(to_index, sheet);
+
+            // NOTE: Reordering sheets is a structural edit for XLSB inputs. The `.xlsb` writer
+            // cannot currently reorder workbook metadata, so treat this as a conversion to XLSX
+            // on the next save (consistent with other structural edits like add/delete/rename).
+            if workbook.origin_xlsb_path.is_some() {
+                workbook.origin_xlsb_path = None;
             }
         }
 
-        let workbook = self.get_workbook_mut()?;
-        let from_index = workbook
-            .sheets
-            .iter()
-            .position(|sheet| sheet.id == sheet_id)
-            .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
+        // The macro runtime context stores sheet indices; keep them stable so it continues to
+        // point at the same sheet(s) after reordering.
+        {
+            let workbook = self.get_workbook()?;
+            let mut new_ctx = ctx;
 
-        if workbook.sheets.len() <= 1 {
-            return Ok(());
+            if let Some(active_sheet_id) = active_sheet_id {
+                if let Some(idx) = workbook
+                    .sheets
+                    .iter()
+                    .position(|s| s.id == active_sheet_id)
+                {
+                    new_ctx.active_sheet = idx;
+                }
+            }
+
+            if let (Some(sel), Some(selection_sheet_id)) =
+                (new_ctx.selection.as_mut(), selection_sheet_id)
+            {
+                if let Some(idx) = workbook
+                    .sheets
+                    .iter()
+                    .position(|s| s.id == selection_sheet_id)
+                {
+                    sel.sheet = idx;
+                }
+            }
+
+            self.macro_host.sync_with_workbook(workbook);
+            self.macro_host.set_runtime_context(new_ctx);
         }
 
-        // Clamp to the valid insertion range after removal. This matches the remove+insert
-        // semantics used by the frontend sheet store and the SQLite persistence layer.
-        let sheet = workbook.sheets.remove(from_index);
-        let clamped = to_index.min(workbook.sheets.len());
-        workbook.sheets.insert(clamped, sheet);
-
-        // Reordering sheets is a structural XLSX edit. The patch-based save path cannot rewrite
-        // workbook.xml sheet ordering, so drop origin bytes to force regeneration from storage.
-        workbook.origin_xlsx_bytes = None;
-        workbook.origin_xlsb_path = None;
+        // Sheet order affects some Excel semantics (e.g. 3D references like `Sheet1:Sheet3!A1`).
+        // Rebuild to ensure evaluations reflect the updated sheet ordering.
+        self.rebuild_engine_from_workbook()?;
+        self.engine.recalculate();
+        let _ = self.refresh_computed_values()?;
 
         self.dirty = true;
         self.redo_stack.clear();
@@ -4107,6 +4173,59 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(after_order, vec!["Sheet3", "Sheet1", "Sheet2"]);
         assert!(state.has_unsaved_changes());
+    }
+
+    #[test]
+    fn move_sheet_reorders_workbook_and_storage() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+        workbook.add_sheet("Sheet3".to_string());
+
+        let sheet1_id = workbook.sheets[0].id.clone();
+        let sheet2_id = workbook.sheets[1].id.clone();
+        let sheet3_id = workbook.sheets[2].id.clone();
+
+        let mut state = AppState::new();
+        state
+            .load_workbook_persistent(workbook, WorkbookPersistenceLocation::InMemory)
+            .expect("load persistent workbook");
+
+        state.move_sheet(&sheet3_id, 0).expect("move sheet");
+
+        let info = state.workbook_info().expect("workbook info");
+        let ids: Vec<String> = info.sheets.iter().map(|s| s.id.clone()).collect();
+        assert_eq!(ids, vec![sheet3_id.clone(), sheet1_id.clone(), sheet2_id.clone()]);
+
+        let storage = state.persistent_storage().expect("storage available");
+        let workbook_id = state.persistent_workbook_id().expect("workbook id");
+        let metas = storage.list_sheets(workbook_id).expect("list sheets");
+        let names: Vec<String> = metas.iter().map(|m| m.name.clone()).collect();
+        assert_eq!(
+            names,
+            vec!["Sheet3".to_string(), "Sheet1".to_string(), "Sheet2".to_string()]
+        );
+    }
+
+    #[test]
+    fn move_sheet_validates_sheet_and_index() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+        let sheet1_id = workbook.sheets[0].id.clone();
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        assert!(matches!(
+            state.move_sheet("missing", 0),
+            Err(AppStateError::UnknownSheet(_))
+        ));
+
+        assert!(matches!(
+            state.move_sheet(&sheet1_id, 2),
+            Err(AppStateError::InvalidSheetIndex { .. })
+        ));
     }
 
     #[test]

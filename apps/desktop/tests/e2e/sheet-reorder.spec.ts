@@ -156,6 +156,19 @@ test.describe("sheet reorder", () => {
     expect(await tabOrder()).toEqual(["Sheet3", "Sheet1", "Sheet2"]);
     await expectSheetPositionMatchesTabOrder();
 
+    // The UI reorders optimistically before the backend persistence call resolves.
+    // Wait for the mocked Tauri backend to record the move before reloading.
+    await page.waitForFunction(() => {
+      const raw = localStorage.getItem("__formula_e2e_sheet_order__");
+      if (!raw) return false;
+      try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) && parsed[0] === "Sheet3";
+      } catch {
+        return false;
+      }
+    });
+
     // Reload and re-open; backend should return the same sheet order.
     await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);

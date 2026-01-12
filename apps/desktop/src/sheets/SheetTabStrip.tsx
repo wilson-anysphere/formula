@@ -100,7 +100,7 @@ type Props = {
    * Optional hook invoked when a sheet tab reorder is committed (drag-and-drop).
    *
    * The desktop shell can use this to persist the new sheet order to the backend.
-   * If this throws/rejects, the reorder is aborted.
+   * If this throws/rejects, the tab strip rolls back the reorder (best-effort).
    */
   onSheetMoved?: (event: { sheetId: string; toIndex: number }) => Promise<void> | void;
   /**
@@ -164,6 +164,7 @@ export function SheetTabStrip({
   const [renameInFlight, setRenameInFlight] = useState(false);
   const renameInputRef = useRef<HTMLInputElement>(null!);
   const renameCommitRef = useRef<Promise<boolean> | null>(null);
+  const moveCommitSeqRef = useRef(0);
   const [canScroll, setCanScroll] = useState<{ left: boolean; right: boolean }>({ left: false, right: false });
   const tabColorPickerRef = useRef<HTMLInputElement | null>(null);
   const tabColorPickerDefaultValueRef = useRef<string | null>(null);
@@ -301,15 +302,7 @@ export function SheetTabStrip({
     const toIndex = computeWorkbookSheetMoveIndex({ sheets: all, fromSheetId: sheetId, dropTarget });
     if (toIndex == null) return;
     if (toIndex === fromIndex) return;
-    if (onSheetMoved) {
-      try {
-        await onSheetMoved({ sheetId, toIndex });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        onError?.(message);
-        return;
-      }
-    }
+
     try {
       store.move(sheetId, toIndex);
     } catch (err) {
@@ -318,6 +311,25 @@ export function SheetTabStrip({
       return;
     }
     onSheetsReordered?.();
+
+    if (onSheetMoved) {
+      const seq = (moveCommitSeqRef.current += 1);
+      try {
+        await onSheetMoved({ sheetId, toIndex });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        onError?.(message);
+
+        // Best-effort rollback: only if no newer move has been committed since.
+        if (moveCommitSeqRef.current === seq) {
+          try {
+            store.move(sheetId, fromIndex);
+          } catch (rollbackErr) {
+            onError?.(rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr));
+          }
+        }
+      }
+    }
   };
 
   const activateSheetWithRenameGuard = async (sheetId: string) => {
