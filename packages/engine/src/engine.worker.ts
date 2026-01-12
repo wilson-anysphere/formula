@@ -13,6 +13,7 @@ type WasmWorkbookInstance = {
   getCell(address: string, sheet?: string): unknown;
   setCell(address: string, value: CellScalar, sheet?: string): void;
   setCells?: (updates: Array<{ address: string; value: CellScalar; sheet?: string }>) => void;
+  setLocale?: (localeId: string) => boolean;
   getRange(range: string, sheet?: string): unknown;
   setRange(range: string, values: CellScalar[][], sheet?: string): void;
   recalculate(sheet?: string): unknown;
@@ -345,6 +346,13 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
             case "setRange":
               wb.setRange(params.range, params.values, params.sheet);
               result = null;
+              break;
+            case "setLocale":
+              if (typeof (wb as any).setLocale === "function") {
+                result = (wb as any).setLocale(params.localeId);
+              } else {
+                result = false;
+              }
               break;
             case "recalculate":
               result = normalizeCellChanges(wb.recalculate(params.sheet));

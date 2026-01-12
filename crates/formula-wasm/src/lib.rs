@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use formula_engine::{Engine, ErrorKind, NameDefinition, NameScope, Value as EngineValue};
+use formula_engine::locale::{canonicalize_formula, get_locale, FormulaLocale, ValueLocaleConfig, EN_US};
 use formula_model::{display_formula_text, CellRef, CellValue, DateSystem, DefinedNameScope, Range};
 use js_sys::{Array, Object, Reflect};
 use serde::{Deserialize, Serialize};
@@ -187,9 +188,9 @@ fn cell_value_to_json(value: &CellValue) -> JsonValue {
     engine_value_to_json(cell_value_to_engine(value))
 }
 
-#[derive(Default)]
 struct WorkbookState {
     engine: Engine,
+    formula_locale: &'static FormulaLocale,
     /// Workbook input state for `toJson`/`getCell.input`.
     ///
     /// Mirrors the simple JSON workbook schema consumed by `packages/engine`.
@@ -218,6 +219,7 @@ impl WorkbookState {
         ensure_rust_constructors_run();
         Self {
             engine: Engine::new(),
+            formula_locale: &EN_US,
             sheets: BTreeMap::new(),
             sheet_lookup: HashMap::new(),
             pending_spill_clears: BTreeSet::new(),
@@ -324,8 +326,8 @@ impl WorkbookState {
             // Match `formula-model`'s display semantics so the worker protocol doesn't
             // drift from other layers (trim both ends, strip a single leading '=', and
             // treat bare '=' as empty).
-            let canonical = display_formula_text(raw);
-            if canonical.is_empty() {
+            let normalized = display_formula_text(raw);
+            if normalized.is_empty() {
                 // This should be unreachable because `is_formula_input` requires
                 // non-whitespace content after '=', but keep a defensive fallback so
                 // we never store a literal "=" formula.
@@ -339,6 +341,13 @@ impl WorkbookState {
                     .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
                 return Ok(());
             }
+
+            let canonical = if self.formula_locale.id == EN_US.id {
+                normalized
+            } else {
+                canonicalize_formula(&normalized, self.formula_locale)
+                    .map_err(|err| js_err(err.to_string()))?
+            };
 
             let key = FormulaCellKey::new(sheet.clone(), cell_ref);
             self.pending_formula_baselines
@@ -453,6 +462,20 @@ impl WorkbookState {
 
         Ok(changes)
     }
+
+    fn set_locale_id(&mut self, locale_id: &str) -> bool {
+        let Some(formula_locale) = get_locale(locale_id) else {
+            return false;
+        };
+        let Some(value_locale) = ValueLocaleConfig::for_locale_id(locale_id) else {
+            return false;
+        };
+
+        self.formula_locale = formula_locale;
+        self.engine.set_locale_config(formula_locale.config.clone());
+        self.engine.set_value_locale(value_locale);
+        true
+    }
 }
 
 fn json_scalar_to_js(value: &JsonValue) -> JsValue {
@@ -500,6 +523,11 @@ impl WasmWorkbook {
         WasmWorkbook {
             inner: WorkbookState::new_with_default_sheet(),
         }
+    }
+
+    #[wasm_bindgen(js_name = "setLocale")]
+    pub fn set_locale(&mut self, locale_id: String) -> bool {
+        self.inner.set_locale_id(&locale_id)
     }
 
     #[wasm_bindgen(js_name = "fromJson")]
@@ -995,5 +1023,35 @@ mod tests {
             wb.inner.engine.get_cell_value(DEFAULT_SHEET, "F1"),
             EngineValue::Text("Qty".into())
         );
+    }
+
+    #[test]
+    fn localized_formula_input_is_canonicalized_and_persisted() {
+        let mut wb = WasmWorkbook::new();
+        assert!(wb.set_locale("de-DE".to_string()));
+
+        wb.inner
+            .set_cell_internal(DEFAULT_SHEET, "A1", json!("=SUMME(1;2)"))
+            .unwrap();
+        wb.inner
+            .set_cell_internal(DEFAULT_SHEET, "A2", json!("=1,5+1"))
+            .unwrap();
+
+        wb.inner.recalculate_internal(None).unwrap();
+
+        assert_eq!(
+            wb.inner.engine.get_cell_value(DEFAULT_SHEET, "A1"),
+            EngineValue::Number(3.0)
+        );
+        assert_eq!(
+            wb.inner.engine.get_cell_value(DEFAULT_SHEET, "A2"),
+            EngineValue::Number(2.5)
+        );
+
+        let json_str = wb.to_json().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        assert_eq!(parsed["sheets"]["Sheet1"]["cells"]["A1"], json!("=SUM(1,2)"));
+        assert_eq!(parsed["sheets"]["Sheet1"]["cells"]["A2"], json!("=1.5+1"));
     }
 }

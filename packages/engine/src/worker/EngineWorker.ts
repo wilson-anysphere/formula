@@ -201,6 +201,11 @@ export class EngineWorker {
     await this.invoke("setRange", { range, values: normalizedValues, sheet }, options);
   }
 
+  async setLocale(localeId: string, options?: RpcOptions): Promise<boolean> {
+    await this.flush();
+    return (await this.invoke("setLocale", { localeId }, options)) as boolean;
+  }
+
   async recalculate(sheet?: string, options?: RpcOptions): Promise<CellChange[]> {
     await this.flush();
     return (await this.invoke("recalculate", { sheet }, options)) as CellChange[];

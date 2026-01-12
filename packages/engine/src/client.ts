@@ -49,6 +49,13 @@ export interface EngineClient {
   ): Promise<void>;
   setRange(range: string, values: CellScalar[][], sheet?: string, options?: RpcOptions): Promise<void>;
   /**
+   * Set the locale used by the WASM engine when interpreting user-entered formulas and when
+   * parsing locale-sensitive strings at runtime (criteria, VALUE/DATE parsing, etc).
+   *
+   * Returns `false` when the locale id is not supported by the engine build.
+   */
+  setLocale(localeId: string, options?: RpcOptions): Promise<boolean>;
+  /**
    * Recalculate the workbook and return value-change deltas.
    *
    * Note: the `sheet` argument is accepted for API symmetry with other surfaces,
@@ -166,6 +173,7 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
     setCells: async (updates, rpcOptions) => await withEngine((connected) => connected.setCells(updates, rpcOptions)),
     setRange: async (range, values, sheet, rpcOptions) =>
       await withEngine((connected) => connected.setRange(range, values, sheet, rpcOptions)),
+    setLocale: async (localeId, rpcOptions) => await withEngine((connected) => connected.setLocale(localeId, rpcOptions)),
     recalculate: async (sheet, rpcOptions) => await withEngine((connected) => connected.recalculate(sheet, rpcOptions)),
     lexFormula: async (formula, options, rpcOptions) =>
       await withEngine((connected) => connected.lexFormula(formula, options, rpcOptions)),

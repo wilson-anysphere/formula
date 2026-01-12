@@ -86,6 +86,16 @@ class MockWorker implements WorkerLike {
           this.serverPort?.postMessage(response);
           return;
         }
+        if (req.method === "setLocale") {
+          const response: WorkerOutboundMessage = {
+            type: "response",
+            id: req.id,
+            ok: true,
+            result: true
+          };
+          this.serverPort?.postMessage(response);
+          return;
+        }
 
         // Default: echo response.
         const response: WorkerOutboundMessage = {
@@ -290,5 +300,23 @@ describe("EngineWorker RPC", () => {
     );
     expect(requests).toHaveLength(1);
     expect(requests[0].params).toEqual({ formula: "=SUM(1,", cursor: 6, options: undefined });
+  });
+
+  it("forwards setLocale calls with the correct RPC method name", async () => {
+    const worker = new MockWorker();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    const ok = await engine.setLocale("de-DE");
+    expect(ok).toBe(true);
+
+    const requests = worker.received.filter(
+      (msg): msg is RpcRequest => msg.type === "request" && (msg as RpcRequest).method === "setLocale"
+    );
+    expect(requests).toHaveLength(1);
+    expect(requests[0].params).toEqual({ localeId: "de-DE" });
   });
 });
