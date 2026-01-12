@@ -337,7 +337,7 @@ const concurrency = defaultWasmConcurrency();
 let result = runWasmPack({
   jobs: concurrency.jobs,
   makeflags: concurrency.makeflags,
-  rustflags: concurrency.rustflags,
+  releaseCodegenUnits: concurrency.releaseCodegenUnits,
   rayonThreads: concurrency.rayonThreads,
   binaryenCores: concurrency.binaryenCores,
 });
