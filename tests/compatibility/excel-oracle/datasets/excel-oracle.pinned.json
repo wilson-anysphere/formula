@@ -16238,41 +16238,41 @@
       "caseId": "oddfprice_issue_eq_settlement_a2010fe89d14",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NUM!"
+        "t": "n",
+        "v": 104.49129250312109
       },
       "address": "C1",
-      "displayText": "#NUM!"
+      "displayText": "104.49129250312109"
     },
     {
       "caseId": "oddfyield_issue_eq_settlement_c09bb6a4ba69",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NUM!"
+        "t": "n",
+        "v": 0.04000000000000014
       },
       "address": "C1",
-      "displayText": "#NUM!"
+      "displayText": "0.04000000000000014"
     },
     {
       "caseId": "oddfprice_settlement_eq_first_coupon_1ea1c9b63a8c",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NUM!"
+        "t": "n",
+        "v": 104.08111835318353
       },
       "address": "C1",
-      "displayText": "#NUM!"
+      "displayText": "104.08111835318353"
     },
     {
       "caseId": "oddfyield_settlement_eq_first_coupon_8d835f172837",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NUM!"
+        "t": "n",
+        "v": 0.039999999999979614
       },
       "address": "C1",
-      "displayText": "#NUM!"
+      "displayText": "0.039999999999979614"
     },
     {
       "caseId": "oddfprice_first_coupon_eq_maturity_9d33aace26e7",
@@ -17884,41 +17884,41 @@
       "caseId": "sheet_7dce9a8d409b",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NAME?"
+        "t": "n",
+        "v": 1.0
       },
       "address": "C1",
-      "displayText": "#NAME?"
+      "displayText": "1"
     },
     {
       "caseId": "sheet_2adbaa985742",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NAME?"
+        "t": "n",
+        "v": 1.0
       },
       "address": "C1",
-      "displayText": "#NAME?"
+      "displayText": "1"
     },
     {
       "caseId": "sheets_7c3532d7395b",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NAME?"
+        "t": "n",
+        "v": 1.0
       },
       "address": "C1",
-      "displayText": "#NAME?"
+      "displayText": "1"
     },
     {
       "caseId": "formulatext_e475ecc3e23c",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NAME?"
+        "t": "s",
+        "v": "=1+1"
       },
       "address": "C1",
-      "displayText": "#NAME?"
+      "displayText": "=1+1"
     },
     {
       "caseId": "formulatext_6e53664936a7",
@@ -17934,21 +17934,21 @@
       "caseId": "isformula_de4876bb5980",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NAME?"
+        "t": "b",
+        "v": true
       },
       "address": "C1",
-      "displayText": "#NAME?"
+      "displayText": "TRUE"
     },
     {
       "caseId": "isformula_86cf6becefe7",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NAME?"
+        "t": "b",
+        "v": false
       },
       "address": "C1",
-      "displayText": "#NAME?"
+      "displayText": "FALSE"
     },
     {
       "caseId": "lambda_let_541b4e7b019e",
