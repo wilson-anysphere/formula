@@ -569,7 +569,11 @@ fn infer_csv_decimal_separator_from_sample(sample: &[u8]) -> Option<char> {
     // Additionally, avoid inferring decimal-comma for comma-delimited CSVs (where commas are more
     // likely to be field separators than decimal separators) by requiring some evidence of a
     // non-comma delimiter (`;`, tab, or `|`) appearing roughly once per line.
-    let line_breaks = sample.iter().filter(|b| **b == b'\n').count().max(1);
+    // Estimate the number of records in the prefix. Prefer `\n` count (covers LF + CRLF). Fall
+    // back to counting `\r` for old-Mac/CR-only inputs.
+    let lf = sample.iter().filter(|b| **b == b'\n').count();
+    let cr = sample.iter().filter(|b| **b == b'\r').count();
+    let line_breaks = (if lf > 0 { lf } else { cr }).max(1);
     let non_comma_delims = sample
         .iter()
         .filter(|b| matches!(**b, b';' | b'\t' | b'|'))
