@@ -143,12 +143,15 @@ test("CollabSession legacy `options.offline` (file) is implemented via collab-pe
 });
 
 test("CollabSession legacy `options.offline` (indexeddb) is implemented via collab-persistence", async () => {
-  const key = `doc-${randomUUID()}`;
+  const docId = `doc-${randomUUID()}`;
+  const keyA = `key-${randomUUID()}`;
+  const keyB = `key-${randomUUID()}`;
 
   {
     const session = createCollabSession({
       schema: { autoInit: false },
-      offline: { mode: "indexeddb", key },
+      docId,
+      offline: { mode: "indexeddb", key: keyA },
     });
 
     await session.offline?.whenLoaded();
@@ -164,11 +167,13 @@ test("CollabSession legacy `options.offline` (indexeddb) is implemented via coll
   {
     const session = createCollabSession({
       schema: { autoInit: false },
-      offline: { mode: "indexeddb", key },
+      docId,
+      offline: { mode: "indexeddb", key: keyB },
     });
 
     await session.offline?.whenLoaded();
-    assert.equal((await session.getCell("Sheet1:0:0"))?.value, 123);
+    // `offline.key` should override `docId`, so switching keys should isolate state.
+    assert.equal(await session.getCell("Sheet1:0:0"), null);
 
     await session.offline?.clear();
     session.destroy();
@@ -178,13 +183,29 @@ test("CollabSession legacy `options.offline` (indexeddb) is implemented via coll
   {
     const session = createCollabSession({
       schema: { autoInit: false },
-      offline: { mode: "indexeddb", key },
+      docId,
+      offline: { mode: "indexeddb", key: keyA },
+    });
+
+    await session.offline?.whenLoaded();
+    assert.equal((await session.getCell("Sheet1:0:0"))?.value, 123);
+
+    // Best-effort cleanup.
+    await session.offline?.clear();
+    session.destroy();
+    session.doc.destroy();
+  }
+
+  {
+    const session = createCollabSession({
+      schema: { autoInit: false },
+      docId,
+      offline: { mode: "indexeddb", key: keyA },
     });
 
     await session.offline?.whenLoaded();
     assert.equal(await session.getCell("Sheet1:0:0"), null);
 
-    // Best-effort cleanup (DB is already empty, but ensure the temp key is removed).
     await session.offline?.clear();
     session.destroy();
     session.doc.destroy();

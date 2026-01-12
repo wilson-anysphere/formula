@@ -1095,13 +1095,14 @@ export class CollabSession {
       return (
         ctx.connectionDocId ??
         ctx.explicitDocId ??
-        offline.key ??
         offline.filePath ??
+        offline.key ??
         this.doc.guid
       );
     }
-    // IndexedDB mode already uses a stable key namespace.
-    return ctx.connectionDocId ?? ctx.explicitDocId ?? offline.key ?? this.doc.guid;
+    // Preserve legacy semantics: `offline.key` (when provided) overrides any
+    // derived doc id so callers can control the persistence namespace.
+    return offline.key ?? ctx.connectionDocId ?? ctx.explicitDocId ?? this.doc.guid;
   }
 
   private dirnameForOfflineFilePath(filePath: string): string {
