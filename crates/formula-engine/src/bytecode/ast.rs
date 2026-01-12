@@ -184,6 +184,21 @@ pub fn parse_formula(formula: &str, origin: CellCoord) -> Result<Expr, ParseErro
     Parser::new(formula, origin).parse()
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InfixOp {
+    Binary(BinaryOp),
+    Concat,
+}
+
+impl InfixOp {
+    fn token_len(self) -> usize {
+        match self {
+            InfixOp::Binary(op) => op.token_len(),
+            InfixOp::Concat => 1,
+        }
+    }
+}
+
 struct Parser<'a> {
     input: &'a [u8],
     pos: usize,
@@ -217,6 +232,23 @@ impl<'a> Parser<'a> {
         let mut lhs = self.parse_prefix()?;
         loop {
             self.skip_ws();
+
+            // Postfix percent operator (`expr%`).
+            //
+            // This lowers directly to `expr / 100` so we can reuse existing numeric coercion
+            // semantics in `BinaryOp::Div` (including error propagation and spill behavior for
+            // range/array-as-scalar cases).
+            let postfix_bp = 10;
+            if self.peek_byte() == Some(b'%') && postfix_bp >= min_bp {
+                self.pos += 1;
+                lhs = Expr::Binary {
+                    op: BinaryOp::Div,
+                    left: Box::new(lhs),
+                    right: Box::new(Expr::Literal(Value::Number(100.0))),
+                };
+                continue;
+            }
+
             let op_pos = self.pos;
             let (op, l_bp, r_bp) = match self.peek_infix_op() {
                 Some(v) => v,
@@ -227,10 +259,16 @@ impl<'a> Parser<'a> {
             }
             self.pos = op_pos + op.token_len();
             let rhs = self.parse_bp(r_bp)?;
-            lhs = Expr::Binary {
-                op,
-                left: Box::new(lhs),
-                right: Box::new(rhs),
+            lhs = match op {
+                InfixOp::Binary(op) => Expr::Binary {
+                    op,
+                    left: Box::new(lhs),
+                    right: Box::new(rhs),
+                },
+                InfixOp::Concat => Expr::FuncCall {
+                    func: Function::Concat,
+                    args: vec![lhs, rhs],
+                },
             };
         }
         Ok(lhs)
@@ -243,14 +281,14 @@ impl<'a> Parser<'a> {
                 self.pos += 1;
                 Ok(Expr::Unary {
                     op: UnaryOp::Plus,
-                    expr: Box::new(self.parse_bp(10)?),
+                    expr: Box::new(self.parse_bp(9)?),
                 })
             }
             Some(b'-') => {
                 self.pos += 1;
                 Ok(Expr::Unary {
                     op: UnaryOp::Neg,
-                    expr: Box::new(self.parse_bp(10)?),
+                    expr: Box::new(self.parse_bp(9)?),
                 })
             }
             Some(b'@') => {
@@ -454,21 +492,22 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn peek_infix_op(&self) -> Option<(BinaryOp, u8, u8)> {
+    fn peek_infix_op(&self) -> Option<(InfixOp, u8, u8)> {
         let b0 = *self.input.get(self.pos)?;
         let b1 = *self.input.get(self.pos + 1).unwrap_or(&0);
         let (op, l_bp, r_bp) = match (b0, b1) {
-            (b'+', _) => (BinaryOp::Add, 5, 6),
-            (b'-', _) => (BinaryOp::Sub, 5, 6),
-            (b'*', _) => (BinaryOp::Mul, 7, 8),
-            (b'/', _) => (BinaryOp::Div, 7, 8),
-            (b'^', _) => (BinaryOp::Pow, 9, 9), // right associative
-            (b'=', _) => (BinaryOp::Eq, 3, 4),
-            (b'<', b'>') => (BinaryOp::Ne, 3, 4),
-            (b'<', b'=') => (BinaryOp::Le, 3, 4),
-            (b'>', b'=') => (BinaryOp::Ge, 3, 4),
-            (b'<', _) => (BinaryOp::Lt, 3, 4),
-            (b'>', _) => (BinaryOp::Gt, 3, 4),
+            (b'+', _) => (InfixOp::Binary(BinaryOp::Add), 5, 6),
+            (b'-', _) => (InfixOp::Binary(BinaryOp::Sub), 5, 6),
+            (b'*', _) => (InfixOp::Binary(BinaryOp::Mul), 7, 8),
+            (b'/', _) => (InfixOp::Binary(BinaryOp::Div), 7, 8),
+            (b'^', _) => (InfixOp::Binary(BinaryOp::Pow), 9, 9), // right associative
+            (b'&', _) => (InfixOp::Concat, 4, 5),
+            (b'=', _) => (InfixOp::Binary(BinaryOp::Eq), 3, 4),
+            (b'<', b'>') => (InfixOp::Binary(BinaryOp::Ne), 3, 4),
+            (b'<', b'=') => (InfixOp::Binary(BinaryOp::Le), 3, 4),
+            (b'>', b'=') => (InfixOp::Binary(BinaryOp::Ge), 3, 4),
+            (b'<', _) => (InfixOp::Binary(BinaryOp::Lt), 3, 4),
+            (b'>', _) => (InfixOp::Binary(BinaryOp::Gt), 3, 4),
             _ => return None,
         };
         Some((op, l_bp, r_bp))
@@ -489,12 +528,8 @@ impl<'a> Parser<'a> {
     }
 }
 
-trait BinaryOpExt {
-    fn token_len(&self) -> usize;
-}
-
-impl BinaryOpExt for BinaryOp {
-    fn token_len(&self) -> usize {
+impl BinaryOp {
+    fn token_len(self) -> usize {
         match self {
             BinaryOp::Ne | BinaryOp::Le | BinaryOp::Ge => 2,
             _ => 1,
@@ -568,6 +603,7 @@ fn col_letters_to_index(col: &str) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     #[test]
     fn parses_error_literals_as_scalar_values() {
@@ -591,5 +627,92 @@ mod tests {
             parse_formula("=#GETTING_DATA", origin).expect("parse"),
             Expr::Literal(Value::Error(ErrorKind::Value))
         );
+    }
+
+    #[test]
+    fn parses_concat_operator_as_concat_function_call() {
+        let origin = CellCoord::new(0, 0);
+        let expr = parse_formula("=\"a\"&\"b\"", origin).expect("parse");
+        assert_eq!(
+            expr,
+            Expr::FuncCall {
+                func: Function::Concat,
+                args: vec![
+                    Expr::Literal(Value::Text(Arc::from("a"))),
+                    Expr::Literal(Value::Text(Arc::from("b"))),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn concat_binds_looser_than_addition() {
+        let origin = CellCoord::new(0, 0);
+        let expr = parse_formula("=1+2&3", origin).expect("parse");
+        let Expr::FuncCall { func, args } = expr else {
+            panic!("expected concat function call");
+        };
+        assert_eq!(func, Function::Concat);
+        assert_eq!(args.len(), 2);
+        assert!(matches!(args[0], Expr::Binary { op: BinaryOp::Add, .. }));
+        assert!(matches!(
+            args[1],
+            Expr::Literal(Value::Number(n)) if n == 3.0
+        ));
+    }
+
+    #[test]
+    fn comparison_binds_looser_than_concat() {
+        let origin = CellCoord::new(0, 0);
+        let expr = parse_formula("=1&2=12", origin).expect("parse");
+        let Expr::Binary { op, left, right } = expr else {
+            panic!("expected binary expression");
+        };
+        assert_eq!(op, BinaryOp::Eq);
+        assert!(matches!(
+            left.as_ref(),
+            Expr::FuncCall {
+                func: Function::Concat,
+                ..
+            }
+        ));
+        assert!(matches!(
+            right.as_ref(),
+            Expr::Literal(Value::Number(n)) if *n == 12.0
+        ));
+    }
+
+    #[test]
+    fn percent_binds_tighter_than_exponent() {
+        let origin = CellCoord::new(0, 0);
+        let expr = parse_formula("=2^3%", origin).expect("parse");
+        let Expr::Binary { op, right, .. } = expr else {
+            panic!("expected binary expression");
+        };
+        assert_eq!(op, BinaryOp::Pow);
+        assert!(
+            matches!(
+                right.as_ref(),
+                Expr::Binary { op: BinaryOp::Div, .. }
+            ),
+            "expected RHS to be lowered as division by 100"
+        );
+    }
+
+    #[test]
+    fn unary_minus_binds_looser_than_exponent() {
+        let origin = CellCoord::new(0, 0);
+        let expr = parse_formula("=-2^2", origin).expect("parse");
+        let Expr::Unary { op, expr } = expr else {
+            panic!("expected unary expression");
+        };
+        assert_eq!(op, UnaryOp::Neg);
+        assert!(matches!(
+            expr.as_ref(),
+            Expr::Binary {
+                op: BinaryOp::Pow,
+                ..
+            }
+        ));
     }
 }

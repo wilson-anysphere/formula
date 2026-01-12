@@ -70,6 +70,9 @@ fn arb_literal() -> impl Strategy<Value = Expr> {
     prop_oneof![
         (-1000i32..=1000).prop_map(|v| Expr::Literal(Value::Number(v as f64))),
         any::<bool>().prop_map(|b| Expr::Literal(Value::Bool(b))),
+        Just(Expr::Literal(Value::Empty)),
+        Just(Expr::Literal(Value::Text(Arc::from("foo")))),
+        Just(Expr::Literal(Value::Text(Arc::from("")))),
         Just(Expr::FuncCall {
             func: Function::Na,
             args: vec![],
@@ -143,6 +146,17 @@ fn arb_expr(base: CellCoord, rows: i32, cols: i32) -> impl Strategy<Value = Expr
                 inner.clone().prop_map(|a| Expr::FuncCall {
                     func: Function::IsNa,
                     args: vec![a],
+                }),
+                // Percent postfix lowering: expr% -> expr / 100
+                inner.clone().prop_map(|e| Expr::Binary {
+                    op: BinaryOp::Div,
+                    left: Box::new(e),
+                    right: Box::new(Expr::Literal(Value::Number(100.0))),
+                }),
+                // CONCAT(a, b) (used by engine lowering for the `&` operator).
+                (inner.clone(), inner.clone()).prop_map(|(a, b)| Expr::FuncCall {
+                    func: Function::Concat,
+                    args: vec![a, b],
                 }),
                 // SUM(range)
                 arb_rect_range_ref(base, rows, cols).prop_map(|r| Expr::FuncCall {
@@ -226,6 +240,33 @@ fn cache_shares_filled_formula_patterns() {
     let p1 = cache.get_or_compile(&expr_c1);
     let p2 = cache.get_or_compile(&expr_c2);
 
+    assert_eq!(p1.key(), p2.key());
+    assert!(Arc::ptr_eq(&p1, &p2));
+}
+
+#[test]
+fn cache_shares_filled_formula_patterns_for_concat_and_percent() {
+    let cache = BytecodeCache::new();
+
+    // C1: =A1&B1
+    let expr_c1 = parse_formula("=A1&B1", CellCoord::new(0, 2)).unwrap();
+    // C2 after fill-down: =A2&B2
+    let expr_c2 = parse_formula("=A2&B2", CellCoord::new(1, 2)).unwrap();
+
+    let p1 = cache.get_or_compile(&expr_c1);
+    let p2 = cache.get_or_compile(&expr_c2);
+    assert_eq!(p1.key(), p2.key());
+    assert!(Arc::ptr_eq(&p1, &p2));
+
+    let cache = BytecodeCache::new();
+
+    // B1: =A1%
+    let expr_b1 = parse_formula("=A1%", CellCoord::new(0, 1)).unwrap();
+    // B2 after fill-down: =A2%
+    let expr_b2 = parse_formula("=A2%", CellCoord::new(1, 1)).unwrap();
+
+    let p1 = cache.get_or_compile(&expr_b1);
+    let p2 = cache.get_or_compile(&expr_b2);
     assert_eq!(p1.key(), p2.key());
     assert!(Arc::ptr_eq(&p1, &p2));
 }
