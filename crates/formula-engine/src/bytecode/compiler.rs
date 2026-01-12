@@ -258,7 +258,7 @@ impl<'a> CompileCtx<'a> {
                     self.program.instrs[jump_idx] =
                         Instruction::new(OpCode::JumpIfNotNaError, end_target, 0);
                 }
-                Function::Choose => self.compile_choose(args),
+                Function::Choose => self.compile_choose(args, allow_range),
                 Function::Switch => self.compile_switch(args),
                 _ => {
                     for (arg_idx, arg) in args.iter().enumerate() {
@@ -389,7 +389,7 @@ impl<'a> CompileCtx<'a> {
         }
     }
 
-    fn compile_choose(&mut self, args: &[Expr]) {
+    fn compile_choose(&mut self, args: &[Expr], allow_range: bool) {
         // CHOOSE(index, value1, value2, ...)
         // Excel semantics:
         // - Evaluate `index` once.
@@ -478,9 +478,10 @@ impl<'a> CompileCtx<'a> {
                 .push(Instruction::new(OpCode::JumpIfFalseOrError, 0, 0));
 
             // Match branch: evaluate the selected choice expression and jump to end.
-            // Evaluate in "argument mode" so direct cell refs are treated as references (ranges),
-            // matching the main evaluator's `eval_arg` semantics for CHOOSE.
-            self.compile_expr_inner(choice_expr, true);
+            //
+            // CHOOSE's value arguments may need to preserve references depending on surrounding
+            // context (e.g. `SUM(CHOOSE(1, A1, B1))`).
+            self.compile_expr_inner(choice_expr, allow_range);
 
             let jump_end_idx = self.program.instrs.len();
             self.program

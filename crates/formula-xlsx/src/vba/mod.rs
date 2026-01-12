@@ -231,8 +231,23 @@ fn verify_vba_digital_signature_from_parts(
             // to verify MS-OVBA Contents Hash binding against the actual `vbaProject.bin`.
             if sig.binding == formula_vba::VbaSignatureBinding::Unknown {
                 if let Some(vba_project_bin) = vba_project_bin {
-                    sig.binding =
-                        formula_vba::verify_vba_signature_binding(vba_project_bin, &sig.signature);
+                    sig.binding = match formula_vba::verify_vba_project_signature_binding(
+                        vba_project_bin,
+                        &sig.signature,
+                    ) {
+                        Ok(binding) => match binding {
+                            VbaProjectBindingVerification::BoundVerified(_) => {
+                                formula_vba::VbaSignatureBinding::Bound
+                            }
+                            VbaProjectBindingVerification::BoundMismatch(_) => {
+                                formula_vba::VbaSignatureBinding::NotBound
+                            }
+                            VbaProjectBindingVerification::BoundUnknown(_) => {
+                                formula_vba::VbaSignatureBinding::Unknown
+                            }
+                        },
+                        Err(_) => formula_vba::VbaSignatureBinding::Unknown,
+                    };
                 }
             }
             return Ok(signature_part_result);
@@ -304,7 +319,21 @@ fn verify_vba_digital_signature_with_trust_from_parts(
                     let (verification, signer_subject) = formula_vba::verify_vba_signature_blob(bytes);
 
                     let binding = if verification == VbaSignatureVerification::SignedVerified {
-                        formula_vba::verify_vba_signature_binding(vba_project_bin, bytes)
+                        match formula_vba::verify_vba_project_signature_binding(vba_project_bin, bytes)
+                        {
+                            Ok(binding) => match binding {
+                                VbaProjectBindingVerification::BoundVerified(_) => {
+                                    formula_vba::VbaSignatureBinding::Bound
+                                }
+                                VbaProjectBindingVerification::BoundMismatch(_) => {
+                                    formula_vba::VbaSignatureBinding::NotBound
+                                }
+                                VbaProjectBindingVerification::BoundUnknown(_) => {
+                                    formula_vba::VbaSignatureBinding::Unknown
+                                }
+                            },
+                            Err(_) => formula_vba::VbaSignatureBinding::Unknown,
+                        }
                     } else {
                         formula_vba::VbaSignatureBinding::Unknown
                     };

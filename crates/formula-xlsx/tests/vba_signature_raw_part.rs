@@ -3,7 +3,8 @@
 use std::io::{Cursor, Write};
 
 use formula_vba::{
-    compress_container, content_normalized_data, VbaSignatureBinding, VbaSignatureVerification,
+    compute_vba_project_digest_v3, compress_container, content_normalized_data, DigestAlg,
+    VbaProjectBindingVerification, VbaSignatureBinding, VbaSignatureVerification,
 };
 use formula_xlsx::XlsxPackage;
 use openssl::hash::{hash, MessageDigest};
@@ -128,6 +129,95 @@ fn build_minimal_vba_project_bin(module1: &[u8]) -> Vec<u8> {
     {
         let mut s = ole.create_stream("VBA/Module1").expect("module stream");
         s.write_all(&module_container).expect("write module");
+    }
+
+    ole.into_inner().into_inner()
+}
+
+fn build_minimal_vba_project_bin_v3(designer_payload: &[u8]) -> Vec<u8> {
+    let module_source = b"Sub Hello()\r\nEnd Sub\r\n";
+    let module_container = compress_container(module_source);
+    let userform_source = b"Sub FormHello()\r\nEnd Sub\r\n";
+    let userform_container = compress_container(userform_source);
+
+    // Minimal `dir` stream (decompressed form) with:
+    // - one standard module, and
+    // - one UserForm module so FormsNormalizedData is non-empty.
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        // Include a v3-specific reference record type so the transcript depends on it.
+        let libid_twiddled = b"REFCTRL-V3";
+        let reserved1: u32 = 0;
+        let reserved2: u16 = 0;
+        let mut reference_control = Vec::new();
+        reference_control.extend_from_slice(&(libid_twiddled.len() as u32).to_le_bytes());
+        reference_control.extend_from_slice(libid_twiddled);
+        reference_control.extend_from_slice(&reserved1.to_le_bytes());
+        reference_control.extend_from_slice(&reserved2.to_le_bytes());
+        push_record(&mut out, 0x002F, &reference_control);
+
+        // MODULENAME (standard module)
+        push_record(&mut out, 0x0019, b"Module1");
+        // MODULESTREAMNAME + reserved u16
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"Module1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+        // MODULETYPE (standard)
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes());
+        // MODULETEXTOFFSET
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+
+        // MODULENAME (UserForm/designer module referenced from PROJECT by BaseClass=)
+        push_record(&mut out, 0x0019, b"UserForm1");
+        // MODULESTREAMNAME + reserved u16
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"UserForm1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+        // MODULETYPE = UserForm (0x0003 per MS-OVBA).
+        push_record(&mut out, 0x0021, &0x0003u16.to_le_bytes());
+        // MODULETEXTOFFSET
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    ole.create_storage("UserForm1").expect("designer storage");
+
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(b"Name=\"VBAProject\"\r\nModule=Module1\r\nBaseClass=\"UserForm1\"\r\n")
+            .expect("write PROJECT");
+    }
+
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        let mut s = ole.create_stream("VBA/Module1").expect("module stream");
+        s.write_all(&module_container).expect("write module");
+    }
+    {
+        let mut s = ole
+            .create_stream("VBA/UserForm1")
+            .expect("userform module stream");
+        s.write_all(&userform_container)
+            .expect("write userform module");
+    }
+
+    // Designer payload so FormsNormalizedData is non-empty (and therefore bound by v3 digest).
+    {
+        let mut s = ole
+            .create_stream("UserForm1/Payload")
+            .expect("designer stream");
+        s.write_all(designer_payload)
+            .expect("write designer payload");
     }
 
     ole.into_inner().into_inner()
@@ -331,3 +421,59 @@ fn verifies_raw_signature_part_binding_against_vba_project_bin() {
     assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
     assert_eq!(sig.binding, VbaSignatureBinding::NotBound);
 }
+
+#[test]
+fn verifies_raw_vba_project_signature_part_binding_for_v3_digest() {
+    let vba_project_bin = build_minimal_vba_project_bin_v3(b"ABC");
+    let digest =
+        compute_vba_project_digest_v3(&vba_project_bin, DigestAlg::Sha256).expect("digest v3");
+    assert_eq!(digest.len(), 32, "SHA-256 digest must be 32 bytes");
+
+    let signed_content = make_spc_indirect_data_content_sha256(&digest);
+    let pkcs7 = make_pkcs7_signed_message(&signed_content);
+
+    let vba_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.microsoft.com/office/2006/relationships/vbaProjectSignature" Target="vbaProjectSignature.bin"/>
+</Relationships>"#;
+
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = zip::ZipWriter::new(cursor);
+    let options = FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+    zip.start_file("xl/vbaProject.bin", options).unwrap();
+    zip.write_all(&vba_project_bin).unwrap();
+
+    zip.start_file("xl/_rels/vbaProject.bin.rels", options).unwrap();
+    zip.write_all(vba_rels).unwrap();
+
+    // Raw PKCS#7/CMS bytes (not an OLE container).
+    zip.start_file("xl/vbaProjectSignature.bin", options).unwrap();
+    zip.write_all(&pkcs7).unwrap();
+
+    let bytes = zip.finish().unwrap().into_inner();
+    let pkg = XlsxPackage::from_bytes(&bytes).expect("read package");
+
+    let sig = pkg
+        .verify_vba_digital_signature()
+        .expect("signature verification should succeed")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(
+        sig.binding,
+        VbaSignatureBinding::Bound,
+        "expected v3 digest binding to be verified for raw signature part"
+    );
+    assert_eq!(sig.stream_path, "xl/vbaProjectSignature.bin");
+
+    let binding = pkg
+        .vba_project_signature_binding()
+        .expect("binding verification")
+        .expect("project should be present");
+    assert!(
+        matches!(binding, VbaProjectBindingVerification::BoundVerified(_)),
+        "expected BoundVerified, got {binding:?}"
+    );
+}
+
