@@ -22,7 +22,12 @@ fn imports_biff_hyperlinks() {
         .sheet_by_name("Links")
         .expect("Links missing");
 
-    assert_eq!(sheet.hyperlinks.len(), 1, "hyperlinks={:?}", sheet.hyperlinks);
+    assert_eq!(
+        sheet.hyperlinks.len(),
+        1,
+        "hyperlinks={:?}",
+        sheet.hyperlinks
+    );
     let link = &sheet.hyperlinks[0];
 
     assert_eq!(link.range, Range::from_a1("A1").unwrap());

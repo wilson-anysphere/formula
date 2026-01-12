@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, HashMap};
 
 use formula_model::{
-    CellRef, Hyperlink, HyperlinkTarget, OutlinePr, Range, SheetPane, SheetSelection, EXCEL_MAX_COLS,
-    EXCEL_MAX_ROWS, SheetProtection,
+    CellRef, Hyperlink, HyperlinkTarget, OutlinePr, Range, SheetPane, SheetSelection,
+    SheetProtection, EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
 };
 
 use super::records;
@@ -260,14 +260,18 @@ pub(crate) fn parse_biff_sheet_view_state(
             },
             RECORD_SCL => match parse_scl_zoom(data) {
                 Ok(zoom) => out.zoom = Some(zoom),
-                Err(err) => out.warnings.push(format!("failed to parse SCL record: {err}")),
+                Err(err) => out
+                    .warnings
+                    .push(format!("failed to parse SCL record: {err}")),
             },
             RECORD_PANE => match parse_pane_record(data, window2_frozen) {
                 Ok((pane, pnn_act)) => {
                     out.pane = Some(pane);
                     active_pane = Some(pnn_act);
                 }
-                Err(err) => out.warnings.push(format!("failed to parse PANE record: {err}")),
+                Err(err) => out
+                    .warnings
+                    .push(format!("failed to parse PANE record: {err}")),
             },
             RECORD_SELECTION => match parse_selection_record_best_effort(data) {
                 Ok((pane, selection)) => selections.push((pane, selection)),
@@ -305,7 +309,8 @@ fn parse_window2_flags(data: &[u8]) -> Result<Window2Flags, String> {
         show_grid_lines: (grbit & WINDOW2_FLAG_DSP_GRID) != 0,
         show_headings: (grbit & WINDOW2_FLAG_DSP_RW_COL) != 0,
         show_zeros: (grbit & WINDOW2_FLAG_DSP_ZEROS) != 0,
-        frozen_panes: (grbit & WINDOW2_FLAG_FROZEN) != 0 || (grbit & WINDOW2_FLAG_FROZEN_NO_SPLIT) != 0,
+        frozen_panes: (grbit & WINDOW2_FLAG_FROZEN) != 0
+            || (grbit & WINDOW2_FLAG_FROZEN_NO_SPLIT) != 0,
     })
 }
 
@@ -325,7 +330,10 @@ fn parse_scl_zoom(data: &[u8]) -> Result<f32, String> {
     Ok(zoom)
 }
 
-fn parse_pane_record(data: &[u8], frozen_from_window2: Option<bool>) -> Result<(SheetPane, u16), String> {
+fn parse_pane_record(
+    data: &[u8],
+    frozen_from_window2: Option<bool>,
+) -> Result<(SheetPane, u16), String> {
     // PANE record payload (BIFF8): [x:u16][y:u16][rwTop:u16][colLeft:u16][pnnAct:u16]
     if data.len() < 10 {
         return Err("PANE record too short".to_string());
@@ -401,7 +409,10 @@ enum SelectionLayout {
     PnnU16Ref8,
 }
 
-fn parse_selection_record(data: &[u8], layout: SelectionLayout) -> Result<(u16, SheetSelection), String> {
+fn parse_selection_record(
+    data: &[u8],
+    layout: SelectionLayout,
+) -> Result<(u16, SheetSelection), String> {
     let (pane, rw_active, col_active, cref, refs_start, ref_len) = match layout {
         SelectionLayout::PnnU8NoPadRefU => {
             if data.len() < 9 {
@@ -483,12 +494,7 @@ fn parse_selection_record(data: &[u8], layout: SelectionLayout) -> Result<(u16, 
     Ok((pane, SheetSelection::new(active_cell, ranges)))
 }
 
-fn make_range(
-    rw_first: u32,
-    rw_last: u32,
-    col_first: u32,
-    col_last: u32,
-) -> Result<Range, String> {
+fn make_range(rw_first: u32, rw_last: u32, col_first: u32, col_last: u32) -> Result<Range, String> {
     if rw_first >= EXCEL_MAX_ROWS
         || rw_last >= EXCEL_MAX_ROWS
         || col_first >= EXCEL_MAX_COLS
@@ -586,7 +592,8 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
                 let options = u16::from_le_bytes([data[8], data[9]]);
                 let hidden = (options & COLINFO_OPTION_HIDDEN) != 0;
                 let outline_level = ((options & COLINFO_OPTION_OUTLINE_LEVEL_MASK)
-                    >> COLINFO_OPTION_OUTLINE_LEVEL_SHIFT) as u8;
+                    >> COLINFO_OPTION_OUTLINE_LEVEL_SHIFT)
+                    as u8;
                 let collapsed = (options & COLINFO_OPTION_COLLAPSED) != 0;
 
                 let width = (width_raw > 0).then_some(width_raw as f32 / 256.0);
@@ -825,12 +832,10 @@ const HLINK_FLAG_HAS_TARGET_FRAME: u32 = 0x0000_0080;
 // CLSIDs (COM GUIDs) used by hyperlink monikers.
 // GUIDs are stored with the first 3 fields little-endian (standard COM GUID layout).
 const CLSID_URL_MONIKER: [u8; 16] = [
-    0xE0, 0xC9, 0xEA, 0x79, 0xF9, 0xBA, 0xCE, 0x11, 0x8C, 0x82, 0x00, 0xAA, 0x00, 0x4B,
-    0xA9, 0x0B,
+    0xE0, 0xC9, 0xEA, 0x79, 0xF9, 0xBA, 0xCE, 0x11, 0x8C, 0x82, 0x00, 0xAA, 0x00, 0x4B, 0xA9, 0x0B,
 ];
 const CLSID_FILE_MONIKER: [u8; 16] = [
-    0x03, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x46,
+    0x03, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
 ];
 
 /// Scan a worksheet BIFF substream for hyperlink records (HLINK, id 0x01B8).
@@ -848,7 +853,8 @@ pub(crate) fn parse_biff_sheet_hyperlinks(
     // payload exceeds the BIFF record size limit. Use the logical iterator so we can reassemble
     // those fragments before decoding.
     let allows_continuation = |record_id: u16| record_id == RECORD_HLINK;
-    let iter = records::LogicalBiffRecordIter::from_offset(workbook_stream, start, allows_continuation)?;
+    let iter =
+        records::LogicalBiffRecordIter::from_offset(workbook_stream, start, allows_continuation)?;
 
     for record in iter {
         let record = match record {
@@ -908,12 +914,16 @@ fn decode_hlink_record(data: &[u8], codepage: u16) -> Result<Option<Hyperlink>, 
         return Ok(None);
     }
 
-    let range = Range::new(CellRef::new(rw_first, col_first), CellRef::new(rw_last, col_last));
+    let range = Range::new(
+        CellRef::new(rw_first, col_first),
+        CellRef::new(rw_last, col_last),
+    );
 
     // Skip guid (16 bytes).
     let mut pos = 8usize + 16usize;
 
-    let stream_version = u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]);
+    let stream_version =
+        u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]);
     pos += 4;
     if stream_version != 2 {
         // Non-fatal; continue parsing.
@@ -993,8 +1003,8 @@ fn decode_hlink_record(data: &[u8], codepage: u16) -> Result<Option<Hyperlink>, 
             HyperlinkTarget::ExternalUrl { uri }
         }
     } else if let Some(mark) = text_mark.as_deref() {
-        let (sheet, cell) =
-            parse_internal_location(mark).ok_or_else(|| "unsupported internal hyperlink".to_string())?;
+        let (sheet, cell) = parse_internal_location(mark)
+            .ok_or_else(|| "unsupported internal hyperlink".to_string())?;
         HyperlinkTarget::Internal { sheet, cell }
     } else {
         return Err("HLINK record is missing target information".to_string());
@@ -1013,9 +1023,7 @@ fn parse_hyperlink_moniker(input: &[u8], codepage: u16) -> Result<(Option<String
     if input.len() < 16 {
         return Err("truncated hyperlink moniker".to_string());
     }
-    let clsid: [u8; 16] = input[0..16]
-        .try_into()
-        .expect("slice length verified");
+    let clsid: [u8; 16] = input[0..16].try_into().expect("slice length verified");
 
     // URL moniker: UTF-16LE URL with a 32-bit length prefix.
     if clsid == CLSID_URL_MONIKER {
@@ -1078,17 +1086,12 @@ fn parse_hyperlink_moniker(input: &[u8], codepage: u16) -> Result<(Option<String
             pos += 4;
 
             if unicode_len > 0 {
-                if input.len() < pos + unicode_len {
-                    return Err("truncated file moniker Unicode path".to_string());
-                }
-                if unicode_len % 2 != 0 {
-                    return Err("invalid file moniker Unicode path length".to_string());
-                }
-                let bytes = &input[pos..pos + unicode_len];
-                pos += unicode_len;
+                let (s, consumed) = parse_utf16_prefixed_string(&input[pos..], unicode_len)?;
+                pos = pos
+                    .checked_add(consumed)
+                    .ok_or_else(|| "file moniker length overflow".to_string())?;
 
-                let s = decode_utf16le(bytes)?;
-                let s = trim_at_first_nul(trim_trailing_nuls(s));
+                let s = trim_at_first_nul(s);
                 if !s.is_empty() {
                     unicode_path = Some(s);
                 }
@@ -1102,65 +1105,163 @@ fn parse_hyperlink_moniker(input: &[u8], codepage: u16) -> Result<(Option<String
         return Ok((Some(uri), pos));
     }
 
-    Err(format!("unsupported hyperlink moniker CLSID {:02X?}", clsid))
+    Err(format!(
+        "unsupported hyperlink moniker CLSID {:02X?}",
+        clsid
+    ))
+}
+
+fn percent_encode_uri_path(path: &str) -> String {
+    // RFC 3986 path characters: pchar + '/'.
+    // pchar = unreserved / pct-encoded / sub-delims / ":" / "@"
+    // We percent-encode everything else (including spaces and non-ASCII) for stability.
+    fn is_allowed(b: u8) -> bool {
+        matches!(
+            b,
+            b'A'..=b'Z'
+                | b'a'..=b'z'
+                | b'0'..=b'9'
+                | b'-'
+                | b'.'
+                | b'_'
+                | b'~'
+                | b'!'
+                | b'$'
+                | b'&'
+                | b'\''
+                | b'('
+                | b')'
+                | b'*'
+                | b'+'
+                | b','
+                | b';'
+                | b'='
+                | b':'
+                | b'@'
+                | b'/'
+        )
+    }
+
+    let mut out = String::with_capacity(path.len());
+    for &b in path.as_bytes() {
+        if is_allowed(b) {
+            out.push(b as char);
+        } else {
+            out.push('%');
+            out.push_str(&format!("{:02X}", b));
+        }
+    }
+    out
 }
 
 fn file_path_to_uri(path: &str) -> String {
-    let mut normalized = path.trim().replace('\\', "/");
-    if let Some(idx) = normalized.find('\0') {
-        normalized.truncate(idx);
+    let mut p = path.trim().to_string();
+    if let Some(idx) = p.find('\0') {
+        p.truncate(idx);
     }
-    if normalized.is_empty() {
-        return normalized;
+    if p.is_empty() {
+        return p;
     }
 
     // If the path already looks like a URI, preserve it.
-    if normalized.contains("://") {
-        return normalized;
+    if p.contains("://") {
+        return p;
     }
+
+    // Handle common Windows extended-length prefixes.
+    // - \\?\C:\... => C:\...
+    // - \\?\UNC\server\share\... => \\server\share\...
+    if let Some(rest) = p.strip_prefix(r"\\?\UNC\") {
+        p = format!(r"\\{rest}");
+    } else if let Some(rest) = p.strip_prefix(r"\\?\") {
+        p = rest.to_string();
+    } else if let Some(rest) = p.strip_prefix("//?/UNC/") {
+        p = format!("//{rest}");
+    } else if let Some(rest) = p.strip_prefix("//?/") {
+        p = rest.to_string();
+    }
+
+    // Some producers use `C|` instead of `C:` (legacy file URL encoding).
+    if p.len() >= 2 {
+        let bytes = p.as_bytes();
+        if bytes[1] == b'|' && bytes[0].is_ascii_alphabetic() {
+            p.replace_range(1..2, ":");
+        }
+    }
+
+    // Normalize separators to forward slashes and percent-encode unsafe characters.
+    let p = p.replace('\\', "/");
+    let encoded = percent_encode_uri_path(&p);
 
     // UNC paths are stored as `\\server\share\...`, which becomes `//server/share/...` after
     // normalization. `file:` + that string yields a valid UNC file URI (`file://server/share/...`).
-    if normalized.starts_with("//") {
-        return format!("file:{normalized}");
+    if encoded.starts_with("//") {
+        return format!("file:{encoded}");
     }
 
     // Absolute POSIX path.
-    if normalized.starts_with('/') {
-        return format!("file://{normalized}");
+    if encoded.starts_with('/') {
+        return format!("file://{encoded}");
     }
 
     // Windows drive letter path.
-    if normalized.as_bytes().get(1) == Some(&b':') {
+    if encoded.as_bytes().get(1) == Some(&b':') {
         // `file:///C:/path` is represented as `file://` + `/C:/path`.
-        return format!("file:///{normalized}");
+        return format!("file:///{encoded}");
     }
 
     // Relative path. Preserve as a relative Target for XLSX compatibility.
-    normalized
+    encoded
 }
 
 fn parse_utf16_prefixed_string(input: &[u8], len: usize) -> Result<(String, usize), String> {
-    // Heuristic: `len` may be either a byte length or a character count. Prefer byte length when
-    // it fits and is even; otherwise treat as chars.
+    // Heuristic: `len` may be either a byte length or a character count.
+    //
+    // In BIFF hyperlink structures, producers are inconsistent about whether the length includes:
+    // - UTF-16 code units (characters), or
+    // - raw bytes.
+    //
+    // Prefer interpretations that end with a UTF-16 NUL terminator (common in monikers), otherwise
+    // fall back to the smaller interpretation to avoid over-consuming into the next field.
     if len == 0 {
         return Ok((String::new(), 0));
     }
+
+    let mut candidates: Vec<(String, usize, bool)> = Vec::new();
+
+    // Candidate A: `len` as byte length.
     if len % 2 == 0 && input.len() >= len {
         let bytes = &input[..len];
+        let ends_with_nul = bytes
+            .chunks_exact(2)
+            .last()
+            .is_some_and(|chunk| chunk[0] == 0 && chunk[1] == 0);
         let s = decode_utf16le(bytes)?;
-        return Ok((trim_trailing_nuls(s), len));
+        candidates.push((trim_trailing_nuls(s), len, ends_with_nul));
     }
 
+    // Candidate B: `len` as character count.
     let byte_len = len
         .checked_mul(2)
         .ok_or_else(|| "string length overflow".to_string())?;
-    if input.len() < byte_len {
+    if byte_len % 2 == 0 && input.len() >= byte_len {
+        let bytes = &input[..byte_len];
+        let ends_with_nul = bytes
+            .chunks_exact(2)
+            .last()
+            .is_some_and(|chunk| chunk[0] == 0 && chunk[1] == 0);
+        let s = decode_utf16le(bytes)?;
+        candidates.push((trim_trailing_nuls(s), byte_len, ends_with_nul));
+    }
+
+    if candidates.is_empty() {
         return Err("truncated UTF-16 string".to_string());
     }
-    let bytes = &input[..byte_len];
-    let s = decode_utf16le(bytes)?;
-    Ok((trim_trailing_nuls(s), byte_len))
+
+    // Prefer NUL-terminated candidates; otherwise prefer the shorter byte length.
+    candidates.sort_by_key(|(_s, consumed, ends_with_nul)| (!*ends_with_nul, *consumed));
+    let (s, consumed, _nul) = candidates.into_iter().next().expect("non-empty candidates");
+    Ok((s, consumed))
 }
 
 fn parse_hyperlink_string(input: &[u8], codepage: u16) -> Result<(String, usize), String> {
@@ -1332,12 +1433,12 @@ mod tests {
         // Second record: one valid area (C2:D3) and one out-of-bounds (colFirst >= EXCEL_MAX_COLS).
         let mut merged2 = Vec::new();
         merged2.extend_from_slice(&2u16.to_le_bytes()); // cAreas
-        // C2:D3 => rows 1..2, cols 2..3 (0-based)
+                                                        // C2:D3 => rows 1..2, cols 2..3 (0-based)
         merged2.extend_from_slice(&1u16.to_le_bytes()); // rwFirst
         merged2.extend_from_slice(&2u16.to_le_bytes()); // rwLast
         merged2.extend_from_slice(&2u16.to_le_bytes()); // colFirst
         merged2.extend_from_slice(&3u16.to_le_bytes()); // colLast
-        // Out-of-bounds cols.
+                                                        // Out-of-bounds cols.
         merged2.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
         merged2.extend_from_slice(&0u16.to_le_bytes()); // rwLast
         merged2.extend_from_slice(&(EXCEL_MAX_COLS as u16).to_le_bytes()); // colFirst (OOB)

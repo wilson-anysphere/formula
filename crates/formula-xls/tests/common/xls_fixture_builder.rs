@@ -420,7 +420,15 @@ pub fn build_note_comment_split_across_continues_fixture_xls() -> Vec<u8> {
 pub fn build_hyperlink_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_hyperlink_workbook_stream(
         "Links",
-        hlink_external_url(0, 0, 0, 0, "https://example.com", "Example", "Example tooltip"),
+        hlink_external_url(
+            0,
+            0,
+            0,
+            0,
+            "https://example.com",
+            "Example",
+            "Example tooltip",
+        ),
     );
 
     let cursor = Cursor::new(Vec::new());
@@ -2132,7 +2140,11 @@ fn build_tab_color_workbook_stream() -> Vec<u8> {
 
     // SHEETEXT: store a tab color as an XColor RGB payload.
     // The importer converts this to an OOXML-style ARGB string.
-    push_record(&mut globals, RECORD_SHEETEXT, &sheetext_record_rgb(0x11, 0x22, 0x33));
+    push_record(
+        &mut globals,
+        RECORD_SHEETEXT,
+        &sheetext_record_rgb(0x11, 0x22, 0x33),
+    );
 
     push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
 
@@ -2487,7 +2499,15 @@ pub fn build_out_of_bounds_hyperlink_fixture_xls() -> Vec<u8> {
     let oob_col: u16 = EXCEL_MAX_COLS as u16;
     let workbook_stream = build_hyperlink_workbook_stream(
         "OOB",
-        hlink_external_url(0, 0, oob_col, oob_col, "https://example.com", "Example", "Tooltip"),
+        hlink_external_url(
+            0,
+            0,
+            oob_col,
+            oob_col,
+            "https://example.com",
+            "Example",
+            "Tooltip",
+        ),
     );
 
     let cursor = Cursor::new(Vec::new());
@@ -2627,9 +2647,7 @@ pub fn build_continued_hyperlink_fixture_xls() -> Vec<u8> {
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
     {
         let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
-        stream
-            .write_all(&globals)
-            .expect("write Workbook stream");
+        stream.write_all(&globals).expect("write Workbook stream");
     }
     ole.into_inner().into_inner()
 }
@@ -2702,7 +2720,15 @@ fn build_merged_hyperlink_sheet_stream(xf_cell: u16) -> Vec<u8> {
     push_record(
         &mut sheet,
         RECORD_HLINK,
-        &hlink_external_url(0, 0, 0, 0, "https://example.com", "Example", "Example tooltip"),
+        &hlink_external_url(
+            0,
+            0,
+            0,
+            0,
+            "https://example.com",
+            "Example",
+            "Example tooltip",
+        ),
     );
 
     push_record(&mut sheet, RECORD_EOF, &[]);
@@ -2764,8 +2790,8 @@ fn hlink_external_url(
 
     // URL moniker CLSID: 79EAC9E0-BAF9-11CE-8C82-00AA004BA90B (COM GUID little-endian fields).
     const CLSID_URL_MONIKER: [u8; 16] = [
-        0xE0, 0xC9, 0xEA, 0x79, 0xF9, 0xBA, 0xCE, 0x11, 0x8C, 0x82, 0x00, 0xAA, 0x00, 0x4B,
-        0xA9, 0x0B,
+        0xE0, 0xC9, 0xEA, 0x79, 0xF9, 0xBA, 0xCE, 0x11, 0x8C, 0x82, 0x00, 0xAA, 0x00, 0x4B, 0xA9,
+        0x0B,
     ];
 
     let link_opts = LINK_OPTS_HAS_MONIKER | LINK_OPTS_HAS_DISPLAY | LINK_OPTS_HAS_TOOLTIP;
@@ -2890,24 +2916,22 @@ fn hlink_file_moniker(
     // File moniker payload:
     // [CLSID][cAnti:u32][ansiPath:cAnti bytes incl NUL][endServer:u16][version:u16][cbUnicode:u32][unicodePath bytes].
     out.extend_from_slice(&CLSID_FILE_MONIKER);
-
-    // ANSI path (Windows-1252/ASCII in our fixtures) including a terminating NUL.
     let mut ansi_bytes = path.as_bytes().to_vec();
     ansi_bytes.push(0);
     out.extend_from_slice(&(ansi_bytes.len() as u32).to_le_bytes());
     out.extend_from_slice(&ansi_bytes);
 
-    // endServer + version (unused in our importer, but common in real-world monikers).
+    // endServer + version/reserved.
     out.extend_from_slice(&0u16.to_le_bytes());
     out.extend_from_slice(&0u16.to_le_bytes());
-
+ 
     // Unicode path (UTF-16LE) including a terminating NUL.
     let mut u16s: Vec<u16> = path.encode_utf16().collect();
     u16s.push(0);
     let unicode_bytes_len: u32 = (u16s.len() * 2) as u32;
     out.extend_from_slice(&unicode_bytes_len.to_le_bytes());
-    for cu in u16s {
-        out.extend_from_slice(&cu.to_le_bytes());
+    for code_unit in u16s {
+        out.extend_from_slice(&code_unit.to_le_bytes());
     }
     write_hyperlink_string(&mut out, tooltip);
 
@@ -3184,8 +3208,16 @@ fn build_outline_sheet_stream(xf: u16) -> Vec<u8> {
     // Outline columns:
     // - Columns B-C (1-based) are detail columns: outline level 1 and hidden (collapsed).
     // - Column D (1-based) is the collapsed summary column.
-    push_record(&mut sheet, RECORD_COLINFO, &colinfo_record(1, 2, true, 1, false));
-    push_record(&mut sheet, RECORD_COLINFO, &colinfo_record(3, 3, false, 0, true));
+    push_record(
+        &mut sheet,
+        RECORD_COLINFO,
+        &colinfo_record(1, 2, true, 1, false),
+    );
+    push_record(
+        &mut sheet,
+        RECORD_COLINFO,
+        &colinfo_record(3, 3, false, 0, true),
+    );
 
     // A1: number cell with a General XF.
     push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf, 1.0));
@@ -3504,7 +3536,11 @@ fn build_view_state_workbook_stream() -> Vec<u8> {
         push_record(&mut sheet, RECORD_PANE, &pane(1, 1, 1, 1, 0));
 
         // Active cell C3 (row=2, col=2) in the bottom-right pane.
-        push_record(&mut sheet, RECORD_SELECTION, &selection_single_cell(0, 2, 2));
+        push_record(
+            &mut sheet,
+            RECORD_SELECTION,
+            &selection_single_cell(0, 2, 2),
+        );
 
         push_record(&mut sheet, RECORD_EOF, &[]);
         sheet
