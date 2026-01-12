@@ -6,7 +6,7 @@ test.describe("keybindings: AI Chat toggle", () => {
   test("Ctrl+Shift+A (Win/Linux) / Cmd+I (macOS) toggles AI Chat without triggering Select All", async ({ page }) => {
     await gotoDesktop(page);
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
 
     // Select B2 first so we can assert the shortcut doesn't fall through to Ctrl/Cmd+A (Select All).

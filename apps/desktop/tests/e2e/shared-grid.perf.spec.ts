@@ -9,7 +9,7 @@ async function waitForIdle(page: import("@playwright/test").Page): Promise<void>
 }
 
 test("shared grid scroll perf smoke", async ({ page }) => {
-  await page.goto("/?grid=shared");
+  await page.goto("/?grid=shared", { waitUntil: "domcontentloaded" });
 
   await waitForIdle(page);
   await page.evaluate(() => (window as any).__formulaApp.setGridPerfStatsEnabled(true));
@@ -38,7 +38,7 @@ test("shared grid scroll perf smoke", async ({ page }) => {
 });
 
 test("shared grid million-row deep scroll perf smoke (A900001)", async ({ page }) => {
-  await page.goto("/?grid=shared");
+  await page.goto("/?grid=shared", { waitUntil: "domcontentloaded" });
 
   await waitForIdle(page);
   await page.evaluate(() => (window as any).__formulaApp.setGridPerfStatsEnabled(true));

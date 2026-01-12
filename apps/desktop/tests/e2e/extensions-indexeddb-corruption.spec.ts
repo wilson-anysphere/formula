@@ -31,7 +31,7 @@ function viteFsUrl(absPath: string) {
 async function gotoDesktop(page: Page, urlPath: string = "/"): Promise<void> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      await page.goto(urlPath);
+      await page.goto(urlPath, { waitUntil: "domcontentloaded" });
       await page.waitForFunction(() => Boolean((window as any).__formulaApp), undefined, { timeout: 120_000 });
       return;
     } catch (err) {
@@ -199,7 +199,7 @@ test.describe("IndexedDB extension install corruption", () => {
       { extensionId, version },
     );
 
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
 
     // Opening the extensions panel triggers extension host startup + auto-load of installed extensions.

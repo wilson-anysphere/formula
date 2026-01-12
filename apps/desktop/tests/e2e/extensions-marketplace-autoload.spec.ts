@@ -182,7 +182,7 @@ export async function activate(context) {
 
     // Reload to simulate desktop restart. The extension should be auto-loaded from IndexedDB
     // when the extension host boots (lazy, when opening the Extensions panel).
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
 
     await openExtensionsPanel(page);

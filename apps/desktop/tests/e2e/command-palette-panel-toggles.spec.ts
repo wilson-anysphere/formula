@@ -6,7 +6,7 @@ test.describe("command palette: panel toggles", () => {
   test("toggles AI Chat panel open/closed", async ({ page }) => {
     await gotoDesktop(page);
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
 
     const primary = process.platform === "darwin" ? "Meta" : "Control";
@@ -31,7 +31,7 @@ test.describe("command palette: panel toggles", () => {
   test("toggles Version History panel open/closed", async ({ page }) => {
     await gotoDesktop(page);
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
 
     const primary = process.platform === "darwin" ? "Meta" : "Control";
@@ -56,7 +56,7 @@ test.describe("command palette: panel toggles", () => {
   test("toggles Branch Manager panel open/closed", async ({ page }) => {
     await gotoDesktop(page);
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
 
     const primary = process.platform === "darwin" ? "Meta" : "Control";
@@ -81,7 +81,7 @@ test.describe("command palette: panel toggles", () => {
   test("toggles Marketplace panel open/closed", async ({ page }) => {
     await gotoDesktop(page);
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
 
     const primary = process.platform === "darwin" ? "Meta" : "Control";

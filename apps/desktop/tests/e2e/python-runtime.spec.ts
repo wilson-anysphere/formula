@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 test("python-runtime: runs Pyodide with SharedArrayBuffer-backed formula bridge", async ({ page }) => {
   test.setTimeout(120_000);
 
-  await page.goto("/python-runtime-test.html");
+  await page.goto("/python-runtime-test.html", { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => Boolean((globalThis as any).__formulaPythonRuntime));
 
   const runInPage = async () => {
@@ -68,4 +68,3 @@ test("python-runtime: runs Pyodide with SharedArrayBuffer-backed formula bridge"
   expect(result.execution.success).toBe(true);
   expect(result.values).toEqual([[1]]);
 });
-

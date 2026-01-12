@@ -59,7 +59,7 @@ test.describe("split view", () => {
 
     // Start from a clean persisted layout so the test is deterministic.
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
@@ -127,7 +127,7 @@ test.describe("split view", () => {
     expect(persistedZoom).not.toBe(1);
 
     // Reload and ensure split state + scroll/zoom restore.
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
@@ -147,7 +147,7 @@ test.describe("split view", () => {
     await gotoDesktop(page, "/?grid=shared");
 
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
@@ -184,7 +184,7 @@ test.describe("split view", () => {
       .toBe("horizontal");
 
     // Reload and ensure horizontal split restores.
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
@@ -197,7 +197,7 @@ test.describe("split view", () => {
 
     // Start from a clean persisted layout so the test is deterministic.
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
@@ -272,7 +272,7 @@ test.describe("split view", () => {
     expect(persistedRatio).toBeLessThanOrEqual(0.9);
 
     // Reload and ensure the ratio restores.
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
@@ -286,7 +286,7 @@ test.describe("split view", () => {
     await gotoDesktop(page, "/?grid=shared");
 
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
@@ -384,7 +384,7 @@ test.describe("split view", () => {
   test("secondary in-cell edits commit on blur when clicking the primary pane", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
@@ -414,7 +414,7 @@ test.describe("split view", () => {
   test("secondary in-cell edits commit when clicking another cell in the secondary pane", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
@@ -447,7 +447,7 @@ test.describe("split view", () => {
     await gotoDesktop(page, "/?grid=shared");
 
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
@@ -487,7 +487,7 @@ test.describe("split view", () => {
   test("primary selection sync does not scroll the secondary pane", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
@@ -530,7 +530,7 @@ test.describe("split view", () => {
   test("primary keyboard navigation sync does not scroll the secondary pane", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
@@ -575,7 +575,7 @@ test.describe("split view", () => {
   test("secondary drag selection preserves active cell semantics and does not scroll primary", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
@@ -629,7 +629,7 @@ test.describe("split view", () => {
   test("secondary multi-range selection syncs to primary without scrolling", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
@@ -668,7 +668,7 @@ test.describe("split view", () => {
   test("primary multi-range selection sync does not scroll the secondary pane", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
@@ -720,7 +720,7 @@ test.describe("split view", () => {
     await gotoDesktop(page, "/?grid=shared");
 
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
@@ -784,7 +784,7 @@ test.describe("split view", () => {
       .toBeCloseTo(secondaryScrollY, 1);
 
     // Reload and ensure both panes restore.
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
@@ -999,7 +999,7 @@ test.describe("split view", () => {
 
       // Ensure split-view layout is deterministic (no persisted sheet/scroll/zoom surprises).
       await page.evaluate(() => localStorage.clear());
-      await page.reload();
+      await page.reload({ waitUntil: "domcontentloaded" });
       await waitForDesktopReady(page);
       await waitForIdle(page);
 
@@ -1048,7 +1048,7 @@ test.describe("split view", () => {
   test("secondary pane supports in-place editing without scrolling the primary pane", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
@@ -1091,7 +1091,7 @@ test.describe("split view", () => {
   test("secondary keyboard navigation updates global selection without scrolling primary", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
@@ -1127,7 +1127,7 @@ test.describe("split view", () => {
   test("F2 starts editing in the secondary pane", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
@@ -1169,7 +1169,7 @@ test.describe("split view", () => {
   test("clicking inside the secondary cell editor does not commit the edit", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
@@ -1213,7 +1213,7 @@ test.describe("split view", () => {
   test("clicking the primary pane commits an in-progress secondary-pane edit", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
@@ -1242,7 +1242,7 @@ test.describe("split view", () => {
   test("disabling split view commits an in-progress secondary-pane edit", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
@@ -1317,7 +1317,7 @@ test.describe("split view / shared grid zoom", () => {
   });
 
   test("secondary pane column resize updates primary pane geometry", async ({ page }) => {
-    await page.goto("/?grid=shared");
+    await page.goto("/?grid=shared", { waitUntil: "domcontentloaded" });
 
     const secondaryGrid = page.getByTestId("grid-secondary");
 
@@ -1364,7 +1364,7 @@ test.describe("split view / shared grid zoom", () => {
   });
 
   test("fill handle drag works in the secondary pane", async ({ page }) => {
-    await page.goto("/?grid=shared");
+    await page.goto("/?grid=shared", { waitUntil: "domcontentloaded" });
     await page.waitForFunction(() => Boolean((window as any).__formulaApp), undefined, { timeout: 60_000 });
 
     await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
@@ -1424,7 +1424,7 @@ test.describe("split view / shared grid zoom", () => {
   });
 
   test("Escape cancels an in-progress fill handle drag in the secondary pane", async ({ page }) => {
-    await page.goto("/?grid=shared");
+    await page.goto("/?grid=shared", { waitUntil: "domcontentloaded" });
     await page.waitForFunction(() => Boolean((window as any).__formulaApp), undefined, { timeout: 60_000 });
 
     await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
@@ -1497,7 +1497,7 @@ test.describe("split view / shared grid zoom", () => {
   test("secondary pane opens the custom grid context menu on right click", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
@@ -1524,7 +1524,7 @@ test.describe("split view / shared grid zoom", () => {
   test("Shift+F10 opens the grid context menu anchored to the active split pane", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
     await waitForIdle(page);
 

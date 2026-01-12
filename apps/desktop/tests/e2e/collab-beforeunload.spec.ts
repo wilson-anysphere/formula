@@ -29,7 +29,7 @@ test.describe("collab: beforeunload unsaved-changes prompt", () => {
       await dialog.accept();
     });
 
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
 
     expect(beforeUnloadDialogs).toBe(0);

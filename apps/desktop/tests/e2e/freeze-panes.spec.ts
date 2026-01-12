@@ -13,7 +13,7 @@ function colToName(col0: number): string {
 
 test.describe("freeze panes", () => {
   test("Freeze Panes at B3 keeps rows 1-2 and col A frozen while scrolling", async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/", { waitUntil: "domcontentloaded" });
 
     const grid = page.locator("#grid");
 

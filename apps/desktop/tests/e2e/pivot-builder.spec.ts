@@ -171,7 +171,7 @@ test.describe("pivot builder", () => {
 
     await gotoDesktop(page);
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
 
     // Seed a small dataset.

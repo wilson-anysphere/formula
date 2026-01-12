@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test("scripting: runs TypeScript in a WebWorker with RPC + network sandbox", async ({ page }) => {
-  await page.goto("/scripting-test.html");
+  await page.goto("/scripting-test.html", { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => Boolean((globalThis as any).__formulaScripting));
 
   const runInPage = async () => {
@@ -171,7 +171,7 @@ export default async function main(ctx) {
 });
 
 test("scripting: times out hung scripts and ignores spoofed worker messages", async ({ page }) => {
-  await page.goto("/scripting-test.html");
+  await page.goto("/scripting-test.html", { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => Boolean((globalThis as any).__formulaScripting));
 
   const runInPage = async () => {
@@ -216,7 +216,7 @@ await new Promise(() => {});
 });
 
 test("scripting: forwards ctx.confirm/prompt/alert via RPC", async ({ page }) => {
-  await page.goto("/scripting-test.html");
+  await page.goto("/scripting-test.html", { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => Boolean((globalThis as any).__formulaScripting));
 
   const dialogs: Array<{ type: string; message: string }> = [];

@@ -84,7 +84,7 @@ test.describe("Content Security Policy (Tauri parity)", () => {
       }
     });
 
-    const response = await page.goto("/");
+    const response = await page.goto("/", { waitUntil: "domcontentloaded" });
     const cspHeader = response?.headers()["content-security-policy"];
     expect(cspHeader, "E2E server should emit Content-Security-Policy header").toBeTruthy();
 
@@ -388,7 +388,7 @@ test.describe("Content Security Policy (Tauri parity)", () => {
         }
       });
 
-      const response = await page.goto("/");
+      const response = await page.goto("/", { waitUntil: "domcontentloaded" });
       const cspHeader = response?.headers()["content-security-policy"];
       expect(cspHeader, "E2E server should emit Content-Security-Policy header").toBeTruthy();
 
@@ -484,7 +484,7 @@ test.describe("Content Security Policy (Tauri parity)", () => {
       }
     });
 
-    const response = await page.goto("/");
+    const response = await page.goto("/", { waitUntil: "domcontentloaded" });
     const cspHeader = response?.headers()["content-security-policy"];
     expect(cspHeader, "E2E server should emit Content-Security-Policy header").toBeTruthy();
 
@@ -528,7 +528,7 @@ test.describe("Content Security Policy (Tauri parity)", () => {
       }
     });
 
-    const response = await page.goto("/");
+    const response = await page.goto("/", { waitUntil: "domcontentloaded" });
     const cspHeader = response?.headers()["content-security-policy"];
     expect(cspHeader, "E2E server should emit Content-Security-Policy header").toBeTruthy();
 
@@ -603,7 +603,7 @@ test.describe("Content Security Policy (Tauri parity)", () => {
       }
     });
 
-    const response = await page.goto("/");
+    const response = await page.goto("/", { waitUntil: "domcontentloaded" });
     const cspHeader = response?.headers()["content-security-policy"];
     expect(cspHeader, "E2E server should emit Content-Security-Policy header").toBeTruthy();
 
@@ -796,7 +796,7 @@ test.describe("Content Security Policy (Tauri parity)", () => {
         };
       });
 
-      const response = await page.goto("/");
+      const response = await page.goto("/", { waitUntil: "domcontentloaded" });
       const cspHeader = response?.headers()["content-security-policy"];
       expect(cspHeader, "E2E server should emit Content-Security-Policy header").toBeTruthy();
 
@@ -969,7 +969,7 @@ test.describe("Content Security Policy (Tauri parity)", () => {
       });
     });
 
-    const response = await page.goto("/");
+    const response = await page.goto("/", { waitUntil: "domcontentloaded" });
     const cspHeader = response?.headers()["content-security-policy"];
     expect(cspHeader, "E2E server should emit Content-Security-Policy header").toBeTruthy();
 
@@ -1037,7 +1037,7 @@ test.describe("Content Security Policy (Tauri parity)", () => {
       }
     });
 
-    const response = await page.goto("/");
+    const response = await page.goto("/", { waitUntil: "domcontentloaded" });
     const cspHeader = response?.headers()["content-security-policy"];
     expect(cspHeader, "E2E server should emit Content-Security-Policy header").toBeTruthy();
 

@@ -157,7 +157,7 @@ test.describe("sheet reorder", () => {
     await expectSheetPositionMatchesTabOrder();
 
     // Reload and re-open; backend should return the same sheet order.
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
 
     await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["file-dropped"]));

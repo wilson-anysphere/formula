@@ -16,7 +16,7 @@ test.describe("theme selector", () => {
 
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
 
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");

@@ -95,7 +95,7 @@ test.describe("collab status indicator (collab mode)", () => {
       await dialog.accept();
     });
 
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await page.waitForFunction(() => Boolean((window as any).__formulaApp), undefined, { timeout: 60_000 });
     await page.evaluate(async () => {
       const app = (window as any).__formulaApp;

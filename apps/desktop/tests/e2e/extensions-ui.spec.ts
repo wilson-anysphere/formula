@@ -514,7 +514,7 @@ test.describe("Extensions UI integration", () => {
     const frame = page.frameLocator('iframe[data-testid="extension-webview-sampleHello.panel"]');
     await expect(frame.locator("h1")).toHaveText("Sample Hello Panel");
 
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
     await grantSampleHelloPermissions(page);
 

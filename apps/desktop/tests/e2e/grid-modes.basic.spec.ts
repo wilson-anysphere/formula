@@ -37,12 +37,12 @@ async function waitForIdle(page: import("@playwright/test").Page, capturedErrors
 
 const GRID_MODES = ["legacy", "shared"] as const;
 
-for (const mode of GRID_MODES) {
-  test.describe(`${mode} grid basics`, () => {
-    test("keyboard navigation, edit, and scroll", async ({ page }) => {
-      const capturedErrors = captureAppErrors(page);
-      await page.goto(`/?grid=${mode}`);
-      await waitForIdle(page, capturedErrors);
+  for (const mode of GRID_MODES) {
+    test.describe(`${mode} grid basics`, () => {
+      test("keyboard navigation, edit, and scroll", async ({ page }) => {
+        const capturedErrors = captureAppErrors(page);
+        await page.goto(`/?grid=${mode}`, { waitUntil: "domcontentloaded" });
+        await waitForIdle(page, capturedErrors);
 
       // Focus grid.
       await page.click("#grid", { position: { x: 60, y: 40 } });
@@ -80,7 +80,7 @@ for (const mode of GRID_MODES) {
 test.describe("shared grid resize", () => {
   test("column resize updates layout", async ({ page }) => {
     const capturedErrors = captureAppErrors(page);
-    await page.goto("/?grid=shared");
+    await page.goto("/?grid=shared", { waitUntil: "domcontentloaded" });
     await waitForIdle(page, capturedErrors);
 
     const gridBox = await page.locator("#grid").boundingBox();

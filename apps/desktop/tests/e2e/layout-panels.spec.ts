@@ -6,7 +6,7 @@ test.describe("dockable panels layout persistence", () => {
   test("open AI panel, dock left, reload restores layout", async ({ page }) => {
     await gotoDesktop(page);
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
 
     const ribbon = page.getByTestId("ribbon-root");
@@ -21,7 +21,7 @@ test.describe("dockable panels layout persistence", () => {
     await expect(page.getByTestId("dock-right").getByTestId("panel-aiChat")).toHaveCount(0);
 
     // Reload: layout should restore from localStorage.
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
 
     await expect(page.getByTestId("dock-left").getByTestId("panel-aiChat")).toBeVisible();
@@ -31,7 +31,7 @@ test.describe("dockable panels layout persistence", () => {
   test("different docId values isolate persisted layout", async ({ page }) => {
     await gotoDesktop(page, "/?docId=doc-a");
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
 
     const ribbon = page.getByTestId("ribbon-root");
@@ -46,7 +46,7 @@ test.describe("dockable panels layout persistence", () => {
     await expect(page.getByTestId("panel-aiChat")).toHaveCount(0);
 
     // Reload doc-b to ensure it remains isolated.
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
     await expect(page.getByTestId("panel-aiChat")).toHaveCount(0);
   });
@@ -54,7 +54,7 @@ test.describe("dockable panels layout persistence", () => {
   test("dock tab strip switches between multiple open panels", async ({ page }) => {
     await gotoDesktop(page);
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
 
     const ribbon = page.getByTestId("ribbon-root");
@@ -108,7 +108,7 @@ test.describe("dockable panels layout persistence", () => {
   test("ribbon button opens Version History panel", async ({ page }) => {
     await gotoDesktop(page);
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
 
     await page.getByRole("tab", { name: "View", exact: true }).click();
@@ -127,7 +127,7 @@ test.describe("dockable panels layout persistence", () => {
   test("ribbon button opens Branch Manager panel", async ({ page }) => {
     await gotoDesktop(page);
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
 
     await page.getByRole("tab", { name: "View", exact: true }).click();
@@ -167,7 +167,7 @@ test.describe("dockable panels layout persistence", () => {
   test("Cmd+I toggles AI chat panel open/closed", async ({ page }) => {
     await gotoDesktop(page);
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
 
     // Ensure focus is on the grid (not an input) so the global shortcut should fire.
@@ -184,7 +184,7 @@ test.describe("dockable panels layout persistence", () => {
   test("Cmd+I does not toggle AI chat while typing in the formula bar", async ({ page }) => {
     await gotoDesktop(page);
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
 
     // Enter formula-bar edit mode (this reveals + focuses the textarea).

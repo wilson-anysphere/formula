@@ -262,7 +262,7 @@ test.describe("formula auditing overlays", () => {
       (window as any).__auditingStub = { formulas };
     });
 
-    await page.goto("/");
+    await page.goto("/", { waitUntil: "domcontentloaded" });
 
     await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["file-dropped"]));
     await page.evaluate(() => {

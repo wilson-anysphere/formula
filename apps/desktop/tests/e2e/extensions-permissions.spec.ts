@@ -199,7 +199,7 @@ test.describe("Extensions permissions UI", () => {
       await expect(page.getByTestId("toast-root")).toContainText("Fetched: hello");
       await expect(page.getByTestId(`permission-row-${extensionId}-network`)).toContainText("127.0.0.1");
 
-      await page.reload();
+      await page.reload({ waitUntil: "domcontentloaded" });
       await waitForDesktopReady(page);
 
       await openExtensionsPanel(page);
@@ -411,7 +411,7 @@ test.describe("Extensions permissions UI", () => {
       await page.getByTestId(`revoke-permission-${extensionId}-network`).click();
       await expect(page.getByTestId(`permission-row-${extensionId}-network`)).toContainText("not granted");
 
-      await page.reload();
+      await page.reload({ waitUntil: "domcontentloaded" });
       await waitForDesktopReady(page);
 
       await openExtensionsPanel(page);

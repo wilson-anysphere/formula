@@ -66,7 +66,7 @@ test.describe("formatting shortcuts", () => {
   test("Ctrl+I toggles italic; Cmd+I opens AI panel without changing formatting", async ({ page }) => {
     await gotoDesktop(page);
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
 
     await page.evaluate(() => {

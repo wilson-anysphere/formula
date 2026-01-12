@@ -8,7 +8,7 @@ test.describe("shared grid zoom persistence", () => {
 
     // Start from a clean storage state so prior runs (or dev sessions) don't influence the test.
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
 
     const zoomControl = page.getByTestId("zoom-control");
@@ -23,7 +23,7 @@ test.describe("shared grid zoom persistence", () => {
       return typeof zoom === "number" && Math.abs(zoom - 0.75) < 0.01;
     });
 
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
 
     await expect(zoomControl).toHaveValue("75");
@@ -32,4 +32,3 @@ test.describe("shared grid zoom persistence", () => {
     expect(zoomAfter).toBeCloseTo(0.75, 2);
   });
 });
-

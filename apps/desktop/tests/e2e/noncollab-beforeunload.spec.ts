@@ -21,7 +21,7 @@ test.describe("non-collab: beforeunload unsaved-changes prompt", () => {
       await dialog.accept();
     });
 
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
 
     expect(beforeUnloadDialogs).toBeGreaterThan(0);
@@ -49,7 +49,7 @@ test.describe("non-collab: beforeunload unsaved-changes prompt", () => {
       await dialog.accept();
     });
 
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
 
     expect(beforeUnloadDialogs).toBeGreaterThan(0);
