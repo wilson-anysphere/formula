@@ -115,7 +115,21 @@ testConcurrency = Math.max(1, Math.min(testConcurrency, maxTestConcurrency));
 // spurious timeouts. Run them separately with `--test-concurrency=1` to keep the
 // suite reliable.
 const e2eTestFiles = runnableTestFiles.filter((file) => file.endsWith(".e2e.test.js"));
-const unitTestFiles = runnableTestFiles.filter((file) => !file.endsWith(".e2e.test.js"));
+const nonE2eTestFiles = runnableTestFiles.filter((file) => !file.endsWith(".e2e.test.js"));
+
+// Some unit tests still start sync-server child processes (via `startSyncServer`).
+// Running multiple of those alongside other suites can be noisy/flaky under load.
+// Detect and serialize them as a separate batch.
+/** @type {string[]} */
+const syncServerTestFiles = [];
+/** @type {string[]} */
+const unitTestFiles = [];
+const syncServerRe = /\bstartSyncServer\b/;
+for (const file of nonE2eTestFiles) {
+  const text = await readFile(file, "utf8").catch(() => "");
+  if (syncServerRe.test(text)) syncServerTestFiles.push(file);
+  else unitTestFiles.push(file);
+}
 
 /**
  * @param {string[]} files
@@ -141,6 +155,8 @@ async function runTestBatch(files, concurrency) {
 
 let exitCode = 0;
 exitCode = await runTestBatch(e2eTestFiles, 1);
+if (exitCode !== 0) process.exit(exitCode);
+exitCode = await runTestBatch(syncServerTestFiles, 1);
 if (exitCode !== 0) process.exit(exitCode);
 exitCode = await runTestBatch(unitTestFiles, testConcurrency);
 process.exit(exitCode);
