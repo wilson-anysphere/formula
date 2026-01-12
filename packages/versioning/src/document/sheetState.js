@@ -2,12 +2,27 @@ import { cellKey } from "../diff/semanticDiff.js";
 
 const decoder = new TextDecoder();
 
+/**
+ * @param {any} value
+ * @returns {value is Record<string, any>}
+ */
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+/**
+ * Deep-merge two format/style objects.
+ *
+ * Later layers override earlier ones, but nested objects are merged recursively.
+ *
+ * @param {any} base
+ * @param {any} patch
+ * @returns {any}
+ */
 function deepMerge(base, patch) {
+  if (patch == null) return base;
   if (!isPlainObject(base) || !isPlainObject(patch)) return patch;
+  /** @type {Record<string, any>} */
   const out = { ...base };
   for (const [key, value] of Object.entries(patch)) {
     if (value === undefined) continue;
@@ -20,43 +35,116 @@ function deepMerge(base, patch) {
   return out;
 }
 
-function mergeStyleLayers(base, layer) {
-  if (layer == null) return base;
-  if (!isPlainObject(base)) base = {};
-  if (!isPlainObject(layer)) return deepMerge(base, layer);
-  if (Object.keys(layer).length === 0) return base;
-  return deepMerge(base, layer);
+/**
+ * Remove empty nested objects from a style tree.
+ *
+ * This keeps format diffs stable by avoiding `{ font: {} }`-style artifacts.
+ *
+ * @param {any} value
+ * @returns {any}
+ */
+function pruneEmptyObjects(value) {
+  if (!isPlainObject(value)) return value;
+  /** @type {Record<string, any>} */
+  const out = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if (raw === undefined) continue;
+    const pruned = pruneEmptyObjects(raw);
+    if (isPlainObject(pruned) && Object.keys(pruned).length === 0) continue;
+    out[key] = pruned;
+  }
+  return out;
 }
 
-function normalizeAxisFormats(raw) {
-  /** @type {Map<number, any>} */
+/**
+ * @param {any} format
+ * @returns {any | null}
+ */
+function normalizeFormat(format) {
+  if (format == null) return null;
+  const pruned = pruneEmptyObjects(format);
+  if (isPlainObject(pruned) && Object.keys(pruned).length === 0) return null;
+  return pruned;
+}
+
+/**
+ * Snapshot formats are stored inconsistently across schema versions:
+ * - as a bare style object
+ * - wrapped in `{ format }` or `{ style }` containers
+ *
+ * @param {any} value
+ * @returns {Record<string, any> | null}
+ */
+function extractStyleObject(value) {
+  if (value == null) return null;
+  if (isPlainObject(value) && ("format" in value || "style" in value)) {
+    const nested = value.format ?? value.style ?? null;
+    return isPlainObject(nested) ? nested : null;
+  }
+  return isPlainObject(value) ? value : null;
+}
+
+/**
+ * @param {any} raw
+ * @param {{ indexKeys: string[] }} opts
+ * @returns {Map<number, Record<string, any>>}
+ */
+function parseIndexedFormats(raw, opts) {
+  /** @type {Map<number, Record<string, any>>} */
   const out = new Map();
   if (!raw) return out;
 
   if (Array.isArray(raw)) {
     for (const entry of raw) {
-      const index = Array.isArray(entry) ? entry[0] : entry?.index ?? entry?.col ?? entry?.row;
-      const format = Array.isArray(entry) ? entry[1] : entry?.format ?? entry?.style ?? entry?.value;
-      const idx = Number(index);
-      if (!Number.isInteger(idx) || idx < 0) continue;
-      out.set(idx, format ?? null);
+      let index = null;
+      let formatValue = null;
+
+      if (Array.isArray(entry)) {
+        index = Number(entry[0]);
+        formatValue = entry[1];
+      } else if (entry && typeof entry === "object") {
+        for (const key of opts.indexKeys) {
+          if (key in entry) {
+            index = Number(entry[key]);
+            break;
+          }
+        }
+        // Avoid treating arbitrary metadata blobs (e.g. row heights) as styles.
+        formatValue = entry?.format ?? entry?.style ?? entry?.value ?? null;
+      }
+
+      if (!Number.isInteger(index) || index < 0) continue;
+      const format = extractStyleObject(formatValue);
+      if (!format) continue;
+      out.set(index, format);
     }
     return out;
   }
 
   if (typeof raw === "object") {
     for (const [key, value] of Object.entries(raw)) {
-      const idx = Number(key);
-      if (!Number.isInteger(idx) || idx < 0) continue;
-      out.set(idx, value ?? null);
+      const index = Number(key);
+      if (!Number.isInteger(index) || index < 0) continue;
+      const format = extractStyleObject(value?.format ?? value?.style ?? value);
+      if (!format) continue;
+      out.set(index, format);
     }
   }
 
   return out;
 }
 
+/**
+ * Parse sparse rectangular format runs.
+ *
+ * This is an optional schema extension (Task 118) used to represent formatting applied
+ * to arbitrary ranges without materializing per-cell styles.
+ *
+ * @param {any} raw
+ * @returns {Array<{ startRow: number, startCol: number, endRow: number, endCol: number, format: Record<string, any> }>}
+ */
 function normalizeRangeRuns(raw) {
-  /** @type {Array<{ startRow: number, startCol: number, endRow: number, endCol: number, format: any }>} */
+  /** @type {Array<{ startRow: number, startCol: number, endRow: number, endCol: number, format: Record<string, any> }>} */
   const out = [];
   if (!Array.isArray(raw)) return out;
   for (const run of raw) {
@@ -69,7 +157,8 @@ function normalizeRangeRuns(raw) {
     if (!Number.isInteger(startCol) || startCol < 0) continue;
     if (!Number.isInteger(endRow) || endRow < 0) continue;
     if (!Number.isInteger(endCol) || endCol < 0) continue;
-    const format = run.format ?? run.style ?? run.value ?? null;
+    const format = extractStyleObject(run.format ?? run.style ?? run.value);
+    if (!format) continue;
     out.push({ startRow, startCol, endRow, endCol, format });
   }
   return out;
@@ -90,7 +179,7 @@ export function sheetStateFromDocumentSnapshot(snapshot, opts) {
   let parsed;
   try {
     parsed = JSON.parse(decoder.decode(snapshot));
-  } catch (err) {
+  } catch {
     throw new Error("Invalid document snapshot: not valid JSON");
   }
 
@@ -101,15 +190,81 @@ export function sheetStateFromDocumentSnapshot(snapshot, opts) {
   const sheet = sheets.find((s) => s?.id === sheetId);
   if (!sheet) return { cells };
 
-  // Layered formatting (Task 44):
-  // - sheet default format
-  // - column defaults
-  // - row defaults
-  // (Task 118) optional range format runs
+  // --- Formatting defaults (layered formats) ---
+  // Snapshot schema v1 stores formatting directly on each cell entry. Newer schema versions
+  // can store formats as layered defaults (sheet/row/col) and keep per-cell overrides in
+  // `entry.format`. For semantic diffs we want the *effective* cell format.
   const sheetDefaultFormat =
-    sheet?.sheetFormat ?? sheet?.defaultFormat ?? sheet?.format ?? sheet?.sheetDefaultFormat ?? null;
-  const colFormats = normalizeAxisFormats(sheet?.colFormats ?? sheet?.columnFormats ?? sheet?.colFormat ?? null);
-  const rowFormats = normalizeAxisFormats(sheet?.rowFormats ?? sheet?.rowsFormats ?? sheet?.rowFormat ?? null);
+    extractStyleObject(sheet?.defaultFormat) ??
+    extractStyleObject(sheet?.defaultStyle) ??
+    extractStyleObject(sheet?.defaultCellFormat) ??
+    extractStyleObject(sheet?.defaultCellStyle) ??
+    extractStyleObject(sheet?.sheetFormat) ??
+    extractStyleObject(sheet?.sheetStyle) ??
+    extractStyleObject(sheet?.sheetDefaultFormat) ??
+    extractStyleObject(sheet?.cellFormat) ??
+    extractStyleObject(sheet?.cellStyle) ??
+    extractStyleObject(sheet?.format) ??
+    extractStyleObject(sheet?.style) ??
+    extractStyleObject(sheet?.defaults?.format) ??
+    extractStyleObject(sheet?.defaults?.style) ??
+    extractStyleObject(sheet?.cellDefaults?.format) ??
+    extractStyleObject(sheet?.cellDefaults?.style) ??
+    extractStyleObject(sheet?.formatDefaults?.sheet) ??
+    extractStyleObject(sheet?.formatDefaults?.default) ??
+    null;
+
+  const rowFormatSources = [
+    sheet?.rowDefaults,
+    sheet?.rowFormats,
+    sheet?.rowsFormats,
+    sheet?.rowStyles,
+    sheet?.rowFormat,
+    sheet?.rowStyle,
+    sheet?.defaults?.rows,
+    sheet?.defaults?.rowDefaults,
+    sheet?.defaults?.rowFormats,
+    sheet?.defaults?.rowStyles,
+    sheet?.formatDefaults?.rows,
+    sheet?.formatDefaults?.rowDefaults,
+    sheet?.formatDefaults?.rowFormats,
+    sheet?.rows,
+  ];
+  /** @type {Map<number, Record<string, any>>} */
+  let rowFormats = new Map();
+  for (const source of rowFormatSources) {
+    rowFormats = parseIndexedFormats(source, { indexKeys: ["row", "r", "index"] });
+    if (rowFormats.size > 0) break;
+  }
+
+  const colFormatSources = [
+    sheet?.colDefaults,
+    sheet?.colFormats,
+    sheet?.colStyles,
+    sheet?.colFormat,
+    sheet?.colStyle,
+    sheet?.columnDefaults,
+    sheet?.columnFormats,
+    sheet?.columnStyles,
+    sheet?.defaults?.cols,
+    sheet?.defaults?.columns,
+    sheet?.defaults?.colDefaults,
+    sheet?.defaults?.colFormats,
+    sheet?.defaults?.colStyles,
+    sheet?.formatDefaults?.cols,
+    sheet?.formatDefaults?.columns,
+    sheet?.formatDefaults?.colDefaults,
+    sheet?.formatDefaults?.colFormats,
+    sheet?.cols,
+    sheet?.columns,
+  ];
+  /** @type {Map<number, Record<string, any>>} */
+  let colFormats = new Map();
+  for (const source of colFormatSources) {
+    colFormats = parseIndexedFormats(source, { indexKeys: ["col", "c", "index"] });
+    if (colFormats.size > 0) break;
+  }
+
   const formatRuns = normalizeRangeRuns(
     sheet?.formatRuns ?? sheet?.rangeFormatRuns ?? sheet?.rangeRuns ?? sheet?.formattingRuns ?? null,
   );
@@ -121,23 +276,23 @@ export function sheetStateFromDocumentSnapshot(snapshot, opts) {
     if (!Number.isInteger(row) || row < 0) continue;
     if (!Number.isInteger(col) || col < 0) continue;
 
-    let format = {};
-    format = mergeStyleLayers(format, sheetDefaultFormat);
-    format = mergeStyleLayers(format, colFormats.get(col) ?? null);
-    format = mergeStyleLayers(format, rowFormats.get(row) ?? null);
+    // Precedence (low -> high): sheet default, column default, row default, range runs, cell override.
+    let merged = deepMerge(deepMerge(sheetDefaultFormat ?? {}, colFormats.get(col) ?? null), rowFormats.get(row) ?? null);
+
     for (const run of formatRuns) {
       if (row < run.startRow || row > run.endRow) continue;
       if (col < run.startCol || col > run.endCol) continue;
-      format = mergeStyleLayers(format, run.format);
+      merged = deepMerge(merged, run.format);
     }
-    format = mergeStyleLayers(format, entry?.format ?? null);
 
-    const normalizedFormat = isPlainObject(format) && Object.keys(format).length === 0 ? null : format;
+    const cellFormat = extractStyleObject(entry?.format ?? entry?.style);
+    merged = deepMerge(merged, cellFormat);
+    const effective = normalizeFormat(merged);
 
     cells.set(cellKey(row, col), {
       value: entry?.value ?? null,
       formula: entry?.formula ?? null,
-      format: normalizedFormat,
+      format: effective,
     });
   }
 

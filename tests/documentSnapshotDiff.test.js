@@ -22,13 +22,13 @@ test("sheetStateFromDocumentSnapshot extracts a sheet into SheetState", () => {
 test("diffDocumentSnapshots computes semantic diffs between two snapshots", () => {
   const doc = new DocumentController();
   doc.setCellValue("Sheet1", "A1", 1);
-  const before = doc.encodeState();
+  const beforeSnapshot = doc.encodeState();
 
   doc.setCellValue("Sheet1", "A1", 2);
   doc.setCellValue("Sheet1", "B1", "new");
-  const after = doc.encodeState();
+  const afterSnapshot = doc.encodeState();
 
-  const diff = diffDocumentSnapshots({ beforeSnapshot: before, afterSnapshot: after, sheetId: "Sheet1" });
+  const diff = diffDocumentSnapshots({ beforeSnapshot, afterSnapshot, sheetId: "Sheet1" });
   assert.equal(diff.modified.length, 1);
   assert.equal(diff.added.length, 1);
   assert.equal(diff.removed.length, 0);
