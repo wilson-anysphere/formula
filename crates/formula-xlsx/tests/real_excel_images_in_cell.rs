@@ -1,0 +1,133 @@
+use std::io::{Cursor, Read};
+use std::path::Path;
+
+use formula_model::drawings::ImageId;
+use formula_model::{CellRef, CellValue};
+use formula_xlsx::load_from_bytes;
+use zip::ZipArchive;
+
+fn zip_part(zip_bytes: &[u8], name: &str) -> Vec<u8> {
+    let cursor = Cursor::new(zip_bytes);
+    let mut archive = ZipArchive::new(cursor).expect("open zip");
+    let mut file = archive.by_name(name).expect("part exists");
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf).expect("read part");
+    buf
+}
+
+fn zip_part_exists(zip_bytes: &[u8], name: &str) -> bool {
+    let cursor = Cursor::new(zip_bytes);
+    let mut archive = ZipArchive::new(cursor).expect("open zip");
+    // `ZipFile` borrows the archive, so ensure the result is dropped before `archive`.
+    let exists = archive.by_name(name).is_ok();
+    exists
+}
+
+#[test]
+fn real_excel_images_in_cell_roundtrip_preserves_richdata_and_loads_media(
+) -> Result<(), Box<dyn std::error::Error>> {
+    // This fixture was created to represent a modern Excel 365 “Place in Cell” image workbook and
+    // is expected to contain the full RichData + cellImages wiring:
+    //
+    //   unzip -Z1 fixtures/xlsx/rich-data/images-in-cell.xlsx | sort
+    //
+    // Must include at least:
+    // - xl/cellimages.xml + xl/_rels/cellimages.xml.rels
+    // - xl/metadata.xml + xl/_rels/metadata.xml.rels
+    // - xl/richData/richValue.xml
+    // - xl/richData/richValueRel.xml + xl/richData/_rels/richValueRel.xml.rels
+    // - xl/richData/richValueTypes.xml
+    // - xl/richData/richValueStructure.xml
+    // - xl/media/image*.png
+    // - c/@vm present on the image cell in xl/worksheets/sheet1.xml
+    let fixture_path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/xlsx/rich-data/images-in-cell.xlsx");
+    let fixture_bytes = std::fs::read(&fixture_path)?;
+
+    for part in [
+        "xl/cellimages.xml",
+        "xl/_rels/cellimages.xml.rels",
+        "xl/metadata.xml",
+        "xl/_rels/metadata.xml.rels",
+        "xl/richData/richValue.xml",
+        "xl/richData/richValueRel.xml",
+        "xl/richData/richValueTypes.xml",
+        "xl/richData/richValueStructure.xml",
+        "xl/richData/_rels/richValueRel.xml.rels",
+        "xl/media/image1.png",
+    ] {
+        assert!(
+            zip_part_exists(&fixture_bytes, part),
+            "expected fixture to contain {part}"
+        );
+    }
+
+    let sheet_xml = String::from_utf8(zip_part(&fixture_bytes, "xl/worksheets/sheet1.xml"))?;
+    assert!(
+        sheet_xml.contains(r#"<c r="A1" vm=""#),
+        "expected Sheet1!A1 cell to include a vm=\"...\" attribute, got: {sheet_xml}"
+    );
+
+    // Capture original bytes for all rich-data parts we need to preserve byte-for-byte.
+    let original_parts: Vec<(&str, Vec<u8>)> = [
+        "xl/cellimages.xml",
+        "xl/_rels/cellimages.xml.rels",
+        "xl/metadata.xml",
+        "xl/_rels/metadata.xml.rels",
+        "xl/richData/richValue.xml",
+        "xl/richData/richValueRel.xml",
+        "xl/richData/richValueTypes.xml",
+        "xl/richData/richValueStructure.xml",
+        "xl/richData/_rels/richValueRel.xml.rels",
+        "xl/media/image1.png",
+    ]
+    .into_iter()
+    .map(|name| (name, zip_part(&fixture_bytes, name)))
+    .collect();
+
+    let mut doc = load_from_bytes(&fixture_bytes)?;
+
+    // The document loader should import media referenced by xl/cellimages.xml into workbook.images.
+    assert!(
+        !doc.workbook.images.is_empty(),
+        "expected workbook.images to be non-empty"
+    );
+    assert!(
+        doc.workbook.images.get(&ImageId::new("image1.png")).is_some(),
+        "expected workbook.images to contain image1.png"
+    );
+
+    // Edit an unrelated cell to exercise worksheet patching while preserving rich-data parts.
+    let sheet_id = doc.workbook.sheets[0].id;
+    assert!(doc.set_cell_value(
+        sheet_id,
+        CellRef::from_a1("B1")?,
+        CellValue::Number(42.0)
+    ));
+
+    let saved = doc.save_to_vec()?;
+
+    // Ensure the rich-data parts and image bytes survive byte-for-byte after write.
+    for (name, original) in original_parts {
+        assert_eq!(
+            zip_part(&saved, name),
+            original,
+            "expected {name} to be preserved byte-for-byte"
+        );
+    }
+
+    // Ensure the vm attribute on the image cell is still present after editing another cell.
+    let saved_sheet_xml = String::from_utf8(zip_part(&saved, "xl/worksheets/sheet1.xml"))?;
+    let parsed = roxmltree::Document::parse(&saved_sheet_xml)?;
+    let cell_a1 = parsed
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "c" && n.attribute("r") == Some("A1"))
+        .expect("expected A1 cell");
+    assert_eq!(
+        cell_a1.attribute("vm"),
+        Some("1"),
+        "expected vm attribute to be preserved, got: {saved_sheet_xml}"
+    );
+
+    Ok(())
+}
