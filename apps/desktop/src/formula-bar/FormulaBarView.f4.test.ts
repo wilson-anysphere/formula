@@ -31,6 +31,30 @@ describe("FormulaBarView F4 absolute reference toggle", () => {
     host.remove();
   });
 
+  it("toggles when the caret is at the end of a reference token", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=A1";
+    // Caret at end of token.
+    view.textarea.setSelectionRange(3, 3);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", cancelable: true }));
+
+    expect(view.textarea.value).toBe("=$A$1");
+    expect(view.model.draft).toBe("=$A$1");
+    // Caret remains at the end of the token after expansion.
+    expect(view.textarea.selectionStart).toBe(5);
+    expect(view.textarea.selectionEnd).toBe(5);
+
+    host.remove();
+  });
+
   it("cycles absolute modes correctly on repeated F4 presses", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
