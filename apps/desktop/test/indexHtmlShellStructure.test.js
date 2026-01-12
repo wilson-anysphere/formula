@@ -179,6 +179,19 @@ test("desktop index.html exposes required shell containers and testids", () => {
     'Expected sheet-position element to include aria-atomic="true" for accessibility',
   );
 
+  // Sheet position: expose machine-readable numbers for tests/tooling so assertions don't
+  // need to depend on the translated text content.
+  assert.match(
+    html,
+    /data-testid="sheet-position"[^>]*\bdata-sheet-position=["'][^"']+["']/,
+    'Expected sheet-position element to include data-sheet-position',
+  );
+  assert.match(
+    html,
+    /data-testid="sheet-position"[^>]*\bdata-sheet-total=["'][^"']+["']/,
+    'Expected sheet-position element to include data-sheet-total',
+  );
+
   // Debug controls should live in the ribbon (React) rather than being duplicated in the
   // static `index.html` status bar. Duplicating them here causes Playwright strict-mode
   // failures because `getByTestId(...)` matches multiple elements with the same test id.
