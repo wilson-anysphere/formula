@@ -980,6 +980,56 @@ fn project_normalized_data_v3_treats_0048_as_modulestreamnameunicode_when_follow
 }
 
 #[test]
+fn project_normalized_data_v3_accepts_moduledocstring_record_id_001b() {
+    // Some producers use 0x001B instead of 0x001C for MODULEDOCSTRING (ANSI).
+    let dir_decompressed = {
+        let mut out = Vec::new();
+
+        push_record(&mut out, 0x0019, b"Module1");
+        push_record(&mut out, 0x001B, b"AnsiDoc");
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes()); // MODULETYPE
+
+        out
+    };
+
+    let vba_bin = build_vba_bin_with_dir_decompressed(&dir_decompressed);
+    let normalized =
+        project_normalized_data_v3_dir_records(&vba_bin).expect("ProjectNormalizedDataV3");
+
+    let expected = [b"Module1".to_vec(), b"AnsiDoc".to_vec(), 0u16.to_le_bytes().to_vec()].concat();
+
+    assert_eq!(normalized, expected);
+}
+
+#[test]
+fn project_normalized_data_v3_omits_moduledocstring_001b_when_unicode_record_present() {
+    // When the Unicode docstring variant is present, v3 should omit the ANSI docstring bytes (even
+    // when the ANSI record id is 0x001B).
+    let dir_decompressed = {
+        let mut out = Vec::new();
+
+        push_record(&mut out, 0x0019, b"Module1");
+        push_record(&mut out, 0x001B, b"AnsiDoc");
+        push_record(&mut out, 0x0048, &unicode_record_data("UniDoc"));
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes()); // MODULETYPE
+
+        out
+    };
+
+    let vba_bin = build_vba_bin_with_dir_decompressed(&dir_decompressed);
+    let normalized =
+        project_normalized_data_v3_dir_records(&vba_bin).expect("ProjectNormalizedDataV3");
+
+    let expected = [b"Module1".to_vec(), utf16le_bytes("UniDoc"), 0u16.to_le_bytes().to_vec()].concat();
+
+    assert_eq!(normalized, expected);
+    assert!(
+        !normalized.windows(b"AnsiDoc".len()).any(|w| w == b"AnsiDoc"),
+        "expected ANSI MODULEDOCSTRING bytes to be omitted when Unicode variant is present"
+    );
+}
+
+#[test]
 fn project_normalized_data_v3_strips_unicode_length_prefix_when_prefix_is_byte_count() {
     // Some producers embed an internal u32 length prefix in Unicode dir record payloads where the
     // length is the UTF-16LE byte count (not code units). Ensure we strip the prefix in this case.

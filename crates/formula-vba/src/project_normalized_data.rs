@@ -154,7 +154,9 @@ pub fn project_normalized_data_v3(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
             }
 
             // MODULEDOCSTRING (ANSI) vs MODULEDOCSTRINGUNICODE (Unicode)
-            0x001C => {
+            //
+            // Some producers use record id 0x001B instead of 0x001C for the ANSI form; accept both.
+            0x001B | 0x001C => {
                 if !current_module_unicode.module_docstring {
                     out.extend_from_slice(data);
                 }
@@ -281,7 +283,7 @@ fn scan_unicode_presence(
             }
             // Any non-name module record helps disambiguate MODULENAMEUNICODE as either an alternate
             // representation (immediately after MODULENAME) or the start of a new module group.
-            0x001C | 0x001E | 0x0021 | 0x0025 | 0x0028 | 0x002B | 0x002C | 0x0031 => {
+            0x001B | 0x001C | 0x001E | 0x0021 | 0x0025 | 0x0028 | 0x002B | 0x002C | 0x0031 => {
                 if current_module.is_some() {
                     current_module_seen_non_name_record = true;
                 }
