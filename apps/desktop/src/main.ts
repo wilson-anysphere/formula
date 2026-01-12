@@ -784,6 +784,8 @@ const sheetSwitcher = document.querySelector<HTMLSelectElement>('[data-testid="s
 const zoomControl = document.querySelector<HTMLSelectElement>('[data-testid="zoom-control"]');
 const statusZoom = document.querySelector<HTMLElement>('[data-testid="status-zoom"]');
 const sheetPosition = document.querySelector<HTMLElement>('[data-testid="sheet-position"]');
+const openVersionHistoryPanelButton = document.querySelector<HTMLButtonElement>('[data-testid="open-version-history-panel"]');
+const openBranchManagerPanelButton = document.querySelector<HTMLButtonElement>('[data-testid="open-branch-manager-panel"]');
 if (
   !activeCell ||
   !selectionRange ||
@@ -795,7 +797,9 @@ if (
   !sheetSwitcher ||
   !zoomControl ||
   !statusZoom ||
-  !sheetPosition
+  !sheetPosition ||
+  !openVersionHistoryPanelButton ||
+  !openBranchManagerPanelButton
 ) {
   throw new Error("Missing status bar elements");
 }
@@ -803,6 +807,18 @@ const sheetSwitcherEl = sheetSwitcher;
 const zoomControlEl = zoomControl;
 const statusZoomEl = statusZoom;
 const sheetPositionEl = sheetPosition;
+const openVersionHistoryPanelButtonEl = openVersionHistoryPanelButton;
+const openBranchManagerPanelButtonEl = openBranchManagerPanelButton;
+
+// Collaboration panels should be accessible via always-visible status bar buttons.
+openVersionHistoryPanelButtonEl.addEventListener("click", (e) => {
+  e.preventDefault();
+  toggleDockPanel(PanelIds.VERSION_HISTORY);
+});
+openBranchManagerPanelButtonEl.addEventListener("click", (e) => {
+  e.preventDefault();
+  toggleDockPanel(PanelIds.BRANCH_MANAGER);
+});
 
 const docIdParam = new URL(window.location.href).searchParams.get("docId");
 const docId = typeof docIdParam === "string" && docIdParam.trim() !== "" ? docIdParam : null;
