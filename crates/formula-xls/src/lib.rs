@@ -860,8 +860,8 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                     if let Some(resolved) = resolved_sheet_names.get(&key) {
                         *sheet = resolved.clone();
                     }
+                }
             }
-        }
         }
     }
 
