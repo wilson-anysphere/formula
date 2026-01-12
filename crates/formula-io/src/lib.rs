@@ -102,86 +102,91 @@ fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
         .unwrap_or_default()
         .to_ascii_lowercase();
 
-    match ext.as_str() {
-        "xlsx" | "xlsm" => Ok(WorkbookFormat::Xlsx),
-        "xls" => Ok(WorkbookFormat::Xls),
-        "xlsb" => Ok(WorkbookFormat::Xlsb),
-        "csv" => Ok(WorkbookFormat::Csv),
-        other => {
-            // Best-effort content sniffing for files with missing/unknown extensions.
-            //
-            // This allows opening renamed or extension-less spreadsheet files (common in
-            // temp-file workflows) without forcing callers to manually map extensions.
-            //
-            // NOTE: We only sniff when the extension is unknown to keep the common path fast
-            // and preserve historical behavior for recognized extensions.
-            let mut file = File::open(path).map_err(|source| Error::OpenIo {
+    let ext_format = match ext.as_str() {
+        "xlsx" | "xlsm" => Some(WorkbookFormat::Xlsx),
+        "xls" => Some(WorkbookFormat::Xls),
+        "xlsb" => Some(WorkbookFormat::Xlsb),
+        "csv" => Some(WorkbookFormat::Csv),
+        _ => None,
+    };
+
+    // Best-effort content sniffing.
+    //
+    // This enables:
+    // - extension-less spreadsheet files
+    // - spreadsheet files with the wrong extension (common in temp-file workflows)
+    //
+    // If the file doesn't exist (or can't be opened), fall back to extension-based dispatch so
+    // the downstream open path produces the most specific error variant (`OpenXls`, `OpenXlsb`,
+    // etc).
+    let mut file = match File::open(path) {
+        Ok(file) => file,
+        Err(source) => {
+            if let Some(fmt) = ext_format {
+                return Ok(fmt);
+            }
+            return Err(Error::OpenIo {
                 path: path.to_path_buf(),
                 source,
-            })?;
-
-            // OLE2 compound file signature (XLS/BIFF).
-            const OLE2_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
-            // ZIP local file header signature (XLSX/XLSM/XLSB).
-            const ZIP_MAGIC: [u8; 4] = [0x50, 0x4B, 0x03, 0x04];
-
-            let mut header = [0u8; 8];
-            let n = file.read(&mut header).map_err(|source| Error::OpenIo {
-                path: path.to_path_buf(),
-                source,
-            })?;
-
-            if n >= OLE2_MAGIC.len() && header[..OLE2_MAGIC.len()] == OLE2_MAGIC {
-                return Ok(WorkbookFormat::Xls);
-            }
-
-            if n >= ZIP_MAGIC.len() && header[..ZIP_MAGIC.len()] == ZIP_MAGIC {
-                // Rewind so ZipArchive can read from the start.
-                file.seek(SeekFrom::Start(0)).map_err(|source| Error::OpenIo {
-                    path: path.to_path_buf(),
-                    source,
-                })?;
-
-                let zip = match zip::ZipArchive::new(file) {
-                    Ok(zip) => zip,
-                    Err(_) => {
-                        return Err(Error::UnsupportedExtension {
-                            path: path.to_path_buf(),
-                            extension: other.to_string(),
-                        })
-                    }
-                };
-
-                let mut has_workbook_xml = false;
-                let mut has_workbook_bin = false;
-                for name in zip.file_names() {
-                    let mut normalized = name.trim_start_matches('/');
-                    let replaced;
-                    if normalized.contains('\\') {
-                        replaced = normalized.replace('\\', "/");
-                        normalized = &replaced;
-                    }
-                    if normalized.eq_ignore_ascii_case("xl/workbook.xml") {
-                        has_workbook_xml = true;
-                    } else if normalized.eq_ignore_ascii_case("xl/workbook.bin") {
-                        has_workbook_bin = true;
-                        break;
-                    }
-                }
-
-                if has_workbook_bin {
-                    return Ok(WorkbookFormat::Xlsb);
-                }
-                if has_workbook_xml {
-                    return Ok(WorkbookFormat::Xlsx);
-                }
-            }
-
-            Err(Error::UnsupportedExtension {
-                path: path.to_path_buf(),
-                extension: other.to_string(),
-            })
+            });
         }
+    };
+
+    // OLE2 compound file signature (XLS/BIFF).
+    const OLE2_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
+    // ZIP local file header signature (XLSX/XLSM/XLSB).
+    const ZIP_MAGIC: [u8; 4] = [0x50, 0x4B, 0x03, 0x04];
+
+    let mut header = [0u8; 8];
+    let n = file.read(&mut header).map_err(|source| Error::OpenIo {
+        path: path.to_path_buf(),
+        source,
+    })?;
+
+    if n >= OLE2_MAGIC.len() && header[..OLE2_MAGIC.len()] == OLE2_MAGIC {
+        return Ok(WorkbookFormat::Xls);
+    }
+
+    if n >= ZIP_MAGIC.len() && header[..ZIP_MAGIC.len()] == ZIP_MAGIC {
+        // Rewind so ZipArchive can read from the start.
+        file.seek(SeekFrom::Start(0)).map_err(|source| Error::OpenIo {
+            path: path.to_path_buf(),
+            source,
+        })?;
+
+        if let Ok(zip) = zip::ZipArchive::new(file) {
+            let mut has_workbook_xml = false;
+            let mut has_workbook_bin = false;
+            for name in zip.file_names() {
+                let mut normalized = name.trim_start_matches('/');
+                let replaced;
+                if normalized.contains('\\') {
+                    replaced = normalized.replace('\\', "/");
+                    normalized = &replaced;
+                }
+                if normalized.eq_ignore_ascii_case("xl/workbook.xml") {
+                    has_workbook_xml = true;
+                } else if normalized.eq_ignore_ascii_case("xl/workbook.bin") {
+                    has_workbook_bin = true;
+                    break;
+                }
+            }
+
+            if has_workbook_bin {
+                return Ok(WorkbookFormat::Xlsb);
+            }
+            if has_workbook_xml {
+                return Ok(WorkbookFormat::Xlsx);
+            }
+        }
+    }
+
+    match ext_format {
+        Some(fmt) => Ok(fmt),
+        None => Err(Error::UnsupportedExtension {
+            path: path.to_path_buf(),
+            extension: ext,
+        }),
     }
 }
 

@@ -55,6 +55,23 @@ fn open_workbook_model_sniffs_extensionless_xlsx() {
 }
 
 #[test]
+fn open_workbook_model_sniffs_xlsx_with_wrong_extension() {
+    let path = fixture_path("xlsx/basic/basic.xlsx");
+    let bytes = std::fs::read(&path).expect("read fixture");
+
+    let mut tmp = tempfile::Builder::new()
+        .prefix("basic_xlsx_wrong_ext_")
+        .suffix(".xls")
+        .tempfile()
+        .expect("tempfile");
+    tmp.write_all(&bytes).expect("write tempfile");
+
+    let workbook = formula_io::open_workbook_model(tmp.path()).expect("open workbook model");
+    assert_eq!(workbook.sheets.len(), 1);
+    assert_eq!(workbook.sheets[0].name, "Sheet1");
+}
+
+#[test]
 fn open_workbook_model_xlsb() {
     let path = xlsb_fixture_path("simple.xlsb");
     let workbook = formula_io::open_workbook_model(&path).expect("open workbook model");
@@ -81,6 +98,23 @@ fn open_workbook_model_sniffs_extensionless_xlsb() {
 
     let mut tmp = tempfile::Builder::new()
         .prefix("simple_xlsb_")
+        .tempfile()
+        .expect("tempfile");
+    tmp.write_all(&bytes).expect("write tempfile");
+
+    let workbook = formula_io::open_workbook_model(tmp.path()).expect("open workbook model");
+    assert_eq!(workbook.sheets.len(), 1);
+    assert_eq!(workbook.sheets[0].name, "Sheet1");
+}
+
+#[test]
+fn open_workbook_model_sniffs_xlsb_with_wrong_extension() {
+    let path = xlsb_fixture_path("simple.xlsb");
+    let bytes = std::fs::read(&path).expect("read fixture");
+
+    let mut tmp = tempfile::Builder::new()
+        .prefix("simple_xlsb_wrong_ext_")
+        .suffix(".xlsx")
         .tempfile()
         .expect("tempfile");
     tmp.write_all(&bytes).expect("write tempfile");
@@ -127,6 +161,24 @@ fn open_workbook_model_sniffs_extensionless_xls() {
 
     let mut tmp = tempfile::Builder::new()
         .prefix("basic_xls_")
+        .tempfile()
+        .expect("tempfile");
+    tmp.write_all(&bytes).expect("write tempfile");
+
+    let workbook = formula_io::open_workbook_model(tmp.path()).expect("open workbook model");
+    assert_eq!(workbook.sheets.len(), 2);
+    assert_eq!(workbook.sheets[0].name, "Sheet1");
+    assert_eq!(workbook.sheets[1].name, "Second");
+}
+
+#[test]
+fn open_workbook_model_sniffs_xls_with_wrong_extension() {
+    let path = xls_fixture_path("basic.xls");
+    let bytes = std::fs::read(&path).expect("read fixture");
+
+    let mut tmp = tempfile::Builder::new()
+        .prefix("basic_xls_wrong_ext_")
+        .suffix(".xlsx")
         .tempfile()
         .expect("tempfile");
     tmp.write_all(&bytes).expect("write tempfile");
