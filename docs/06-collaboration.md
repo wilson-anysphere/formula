@@ -51,6 +51,10 @@ The collaborative workbook is a single shared `Y.Doc` with these primary roots:
 - `namedRanges`: `Y.Map<unknown>` (named range definitions)
 - `comments`: optional (see `@formula/collab-comments`; supports legacy schemas)
 
+Note: even “empty” cells may still exist in Yjs as marker-only `Y.Map`s (for example, to
+record a causal `formula = null` clear for deterministic conflict detection; see “Conflict
+monitoring” below).
+
 `@formula/collab-workbook` (`getWorkbookRoots`, `ensureWorkbookSchema`) is the canonical place that defines/normalizes these roots.
 
 ### Canonical cell keys
@@ -73,12 +77,16 @@ Compatibility:
 
 Each cell is stored as a `Y.Map` with the following relevant fields:
 
-- `value`: any JSON-serializable scalar/object (only when not a formula)
-- `formula`: string (normalized; when present, `value` is set to `null`)
+- `value`: any JSON-serializable scalar/object (only when not a formula; when setting a formula string, set `value` to `null`)
+- `formula`: `string | null` (normalized; clears are represented as `null`)
 - `format`: JSON object for cell formatting (interned into `DocumentController.styleTable` on desktop)
 - `enc`: optional encrypted payload (see “Cell encryption” below)
 - `modified`: `number` (ms since epoch; best-effort)
 - `modifiedBy`: `string` (best-effort user id)
+
+Important: to clear a formula, write `formula = null` (don’t delete the `formula` key). Yjs map
+deletes do not create Items; a `null` marker preserves causal history for deterministic
+delete-vs-overwrite conflict detection.
 
 Formula normalization is consistent across the stack: formula strings are treated as canonical when they start with `"="` and have no leading/trailing whitespace (see binder/session implementations).
 
