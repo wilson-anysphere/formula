@@ -140,7 +140,7 @@ The user experience must honor Excel's familiar mental model while introducing m
 | `Ctrl+A` | Select all cells |
 | `Ctrl+Space` | Select entire column |
 | `Shift+Space` | Select entire row |
-| `Ctrl+Shift+*` | Select current region |
+| `Ctrl+Shift+*` (aka `Ctrl+Shift+8` on some keyboards) | Select current region |
 
 ### Editing
 
