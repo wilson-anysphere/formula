@@ -18,6 +18,8 @@ function getTauriDirectNotify(): TauriNotify | null {
     (tauri?.notification?.sendNotification as TauriNotify | undefined) ??
     (tauri?.plugin?.notification?.notify as TauriNotify | undefined) ??
     (tauri?.plugin?.notification?.sendNotification as TauriNotify | undefined) ??
+    (tauri?.plugins?.notification?.notify as TauriNotify | undefined) ??
+    (tauri?.plugins?.notification?.sendNotification as TauriNotify | undefined) ??
     null;
   return typeof direct === "function" ? direct : null;
 }
