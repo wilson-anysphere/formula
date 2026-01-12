@@ -85,9 +85,7 @@ fn build_project_no_designers() -> Vec<u8> {
         s.write_all(&dir_container).expect("write dir");
     }
     {
-        let mut s = ole
-            .create_stream("VBA/Module1")
-            .expect("module stream");
+        let mut s = ole.create_stream("VBA/Module1").expect("module stream");
         s.write_all(&module_container).expect("write module");
     }
 
@@ -393,11 +391,7 @@ fn build_project_with_ansi_and_unicode_module_stream_name_records() -> Vec<u8> {
         push_record(&mut out, 0x001A, &stream_name);
 
         // MODULESTREAMNAMEUNICODE points at the actual module stream.
-        push_record(
-            &mut out,
-            0x0032,
-            &utf16le_bytes(module_stream_name_unicode),
-        );
+        push_record(&mut out, 0x0032, &utf16le_bytes(module_stream_name_unicode));
 
         // MODULETYPE (procedural; TypeRecord.Id=0x0021)
         push_record(&mut out, 0x0021, &0u16.to_le_bytes());
@@ -517,9 +511,7 @@ fn build_project_with_projectcompatversion(include_compat: bool) -> (Vec<u8>, [u
         s.write_all(&dir_container).expect("write dir");
     }
     {
-        let mut s = ole
-            .create_stream("VBA/Module1")
-            .expect("module stream");
+        let mut s = ole.create_stream("VBA/Module1").expect("module stream");
         s.write_all(&module_container).expect("write module");
     }
 
@@ -540,7 +532,7 @@ fn build_project_with_project_info_records_only() -> Vec<u8> {
     let codepage = 0xCAFEu16; // value bytes must NOT appear in V3 transcript
 
     let docstring = b"__DOCSTRING_BYTES__"; // must NOT appear in V3 transcript
-    // UTF-16LE bytes; do not include NULs.
+                                            // UTF-16LE bytes; do not include NULs.
     let docstring_unicode = b"D\0O\0C\0U\0N\0I\0";
 
     let helpfile1 = b"__HELPFILE1_PATH__"; // must NOT appear in V3 transcript
@@ -724,7 +716,8 @@ fn v3_content_normalized_data_handles_modulestreamname_unicode_with_len_prefix_a
     // StreamNameUnicode bytes: `u32 byte_len || utf16le_bytes || trailing_nul`.
     let mut stream_name_utf16 = utf16le_bytes(module_stream_name_unicode);
     stream_name_utf16.extend_from_slice(&0u16.to_le_bytes()); // NUL terminator (defensive)
-    let mut module_stream_name_unicode_bytes = (stream_name_utf16.len() as u32).to_le_bytes().to_vec();
+    let mut module_stream_name_unicode_bytes =
+        (stream_name_utf16.len() as u32).to_le_bytes().to_vec();
     module_stream_name_unicode_bytes.extend_from_slice(&stream_name_utf16);
 
     let module_name_ansi = "AnsiModuleName";
@@ -772,8 +765,9 @@ fn v3_content_normalized_data_handles_modulestreamname_unicode_with_len_prefix_a
     }
 
     let vba_project_bin = ole.into_inner().into_inner();
-    let normalized = v3_content_normalized_data(&vba_project_bin)
-        .expect("V3ContentNormalizedData should succeed when StreamNameUnicode is decoded robustly");
+    let normalized = v3_content_normalized_data(&vba_project_bin).expect(
+        "V3ContentNormalizedData should succeed when StreamNameUnicode is decoded robustly",
+    );
 
     let mut expected_unicode_suffix = module_name_unicode_bytes.clone();
     expected_unicode_suffix.push(b'\n');
@@ -897,14 +891,17 @@ fn v3_content_normalized_data_errors_on_truncated_modulestreamname_unicode_tail(
     let vba_project_bin = ole.into_inner().into_inner();
     let err = v3_content_normalized_data(&vba_project_bin).expect_err("expected parse error");
     assert!(
-        matches!(err, formula_vba::ParseError::Dir(formula_vba::DirParseError::Truncated)),
+        matches!(
+            err,
+            formula_vba::ParseError::Dir(formula_vba::DirParseError::Truncated)
+        ),
         "unexpected error: {err:?}"
     );
 }
 
 #[test]
-fn v3_content_normalized_data_project_information_includes_only_fields_listed_in_ms_ovba_pseudocode()
-{
+fn v3_content_normalized_data_project_information_includes_only_fields_listed_in_ms_ovba_pseudocode(
+) {
     let vba_bin = build_project_with_project_info_records_only();
     let v3 = v3_content_normalized_data(&vba_bin).expect("V3ContentNormalizedData");
 
@@ -1163,7 +1160,8 @@ fn v3_content_normalized_data_resolves_module_stream_name_from_unicode_record_va
 }
 
 #[test]
-fn project_normalized_data_v3_includes_project_properties_and_resolves_unicode_module_stream_name() {
+fn project_normalized_data_v3_includes_project_properties_and_resolves_unicode_module_stream_name()
+{
     let vba_bin = build_project_unicode_only_module_stream_name_with_project_stream();
     let normalized =
         project_normalized_data_v3_transcript(&vba_bin).expect("ProjectNormalizedData v3");

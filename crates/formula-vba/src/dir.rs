@@ -120,6 +120,77 @@ impl DirStream {
                 continue;
             }
 
+            // MODULESTREAMNAME (0x001A) can also deviate from the common TLV-ish pattern.
+            //
+            // Per MS-OVBA §2.3.4.2.3.2.2, MODULESTREAMNAME is:
+            //   Id(u16)
+            //   SizeOfStreamName(u32)
+            //   StreamName(MBCS bytes)
+            //   Reserved(u16)=0x0032
+            //   SizeOfStreamNameUnicode(u32)
+            //   StreamNameUnicode(UTF-16LE bytes)
+            //
+            // i.e. the u32 after the Id is **SizeOfStreamName**, not the total record length.
+            // If we treat it as a generic `Size` field, parsing becomes misaligned when the
+            // Reserved=0x0032 + Unicode tail is present.
+            if id == 0x001A {
+                let record_start = offset;
+                if record_start + 6 > decompressed.len() {
+                    return Err(DirParseError::Truncated);
+                }
+                let size_name = u32::from_le_bytes([
+                    decompressed[record_start + 2],
+                    decompressed[record_start + 3],
+                    decompressed[record_start + 4],
+                    decompressed[record_start + 5],
+                ]) as usize;
+
+                let name_start = record_start + 6;
+                let name_end = name_start + size_name;
+                if name_end > decompressed.len() {
+                    return Err(DirParseError::BadRecordLength { id, len: size_name });
+                }
+
+                // Parse the Unicode stream name when the reserved marker is present immediately
+                // after the MBCS bytes.
+                if name_end + 6 <= decompressed.len() {
+                    let reserved =
+                        u16::from_le_bytes([decompressed[name_end], decompressed[name_end + 1]]);
+                    if reserved == 0x0032 {
+                        let size_unicode = u32::from_le_bytes([
+                            decompressed[name_end + 2],
+                            decompressed[name_end + 3],
+                            decompressed[name_end + 4],
+                            decompressed[name_end + 5],
+                        ]) as usize;
+                        let unicode_start = name_end + 6;
+                        let unicode_end = unicode_start + size_unicode;
+                        if unicode_end > decompressed.len() {
+                            return Err(DirParseError::BadRecordLength {
+                                id,
+                                len: size_unicode,
+                            });
+                        }
+
+                        if let Some(m) = current_module.as_mut() {
+                            m.stream_name =
+                                decode_unicode_bytes(&decompressed[unicode_start..unicode_end]);
+                        }
+                        offset = unicode_end;
+                        continue;
+                    }
+                }
+
+                // Otherwise, treat it as a normal `Id || Size || Data` record and decode the MBCS
+                // bytes (trimming a common trailing reserved u16=0x0000).
+                let data = &decompressed[name_start..name_end];
+                if let Some(m) = current_module.as_mut() {
+                    m.stream_name = decode_bytes(trim_reserved_u16(data), encoding);
+                }
+                offset = name_end;
+                continue;
+            }
+
             if offset + 6 > decompressed.len() {
                 return Err(DirParseError::Truncated);
             }
@@ -324,8 +395,22 @@ fn looks_like_projectversion_following_record(bytes: &[u8], offset: usize) -> bo
     // ProjectModules header, or (in some real-world streams) PROJECTCOMPATVERSION.
     if !matches!(
         id,
-        0x000C | 0x003C | 0x004A | 0x000D | 0x000E | 0x0016 | 0x002F | 0x0030 | 0x0033 | 0x000F
-            | 0x0013 | 0x0010 | 0x0019 | 0x0047 | 0x001A | 0x0032
+        0x000C
+            | 0x003C
+            | 0x004A
+            | 0x000D
+            | 0x000E
+            | 0x0016
+            | 0x002F
+            | 0x0030
+            | 0x0033
+            | 0x000F
+            | 0x0013
+            | 0x0010
+            | 0x0019
+            | 0x0047
+            | 0x001A
+            | 0x0032
     ) {
         return false;
     }
