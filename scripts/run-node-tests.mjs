@@ -219,7 +219,15 @@ function resolveNodeLoaderArgs(loaderUrl) {
       ? process.allowedNodeEnvironmentFlags
       : new Set();
 
-  if (allowedFlags.has("--import")) {
+  // `--import` exists before `module.register()` did, so gate on both.
+  let supportsRegister = false;
+  try {
+    supportsRegister = typeof require("node:module")?.register === "function";
+  } catch {
+    supportsRegister = false;
+  }
+
+  if (supportsRegister && allowedFlags.has("--import")) {
     const registerScript = `import { register } from "node:module"; register(${JSON.stringify(loaderUrl)});`;
     const dataUrl = `data:text/javascript;base64,${Buffer.from(registerScript, "utf8").toString("base64")}`;
     return ["--import", dataUrl];
