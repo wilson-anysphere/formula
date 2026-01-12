@@ -422,7 +422,7 @@ fn unicode_record_payload(data: &[u8]) -> Result<&[u8], DirParseError> {
         if n.saturating_add(2) == rest.len()
             || n.saturating_mul(2).saturating_add(2) == rest.len()
         {
-            return Ok(rest);
+            return Ok(&rest[..rest.len() - 2]);
         }
     }
 

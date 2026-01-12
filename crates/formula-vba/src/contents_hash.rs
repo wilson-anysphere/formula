@@ -2768,13 +2768,14 @@ fn trim_u32_len_prefix_unicode_string(bytes: &[u8]) -> &[u8] {
     }
     // Some producers include a trailing UTF-16 NUL terminator but do not count it in the internal
     // length prefix. Accept that form too, but only when an actual terminator is present (to avoid
-    // misclassifying random leading u32 values).
+    // misclassifying random leading u32 values). When matched, strip the trailing terminator bytes
+    // so downstream hashing/transcripts operate on the actual string bytes.
     if rest.len() >= 2 && rest.ends_with(&[0x00, 0x00]) {
         if n.saturating_add(2) == rest.len() {
-            return rest;
+            return &rest[..rest.len() - 2];
         }
         if rest.len().is_multiple_of(2) && n.saturating_mul(2).saturating_add(2) == rest.len() {
-            return rest;
+            return &rest[..rest.len() - 2];
         }
     }
     bytes
