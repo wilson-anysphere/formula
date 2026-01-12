@@ -156,7 +156,12 @@ export class DesktopSharedGrid {
     | { showV: boolean; showH: boolean; frozenWidth: number; frozenHeight: number }
     | null = null;
 
-  private lastScrollbarThumb: { vSize: number | null; hSize: number | null } = { vSize: null, hSize: null };
+  private lastScrollbarThumb: { vSize: number | null; vOffset: number | null; hSize: number | null; hOffset: number | null } = {
+    vSize: null,
+    vOffset: null,
+    hSize: null,
+    hOffset: null
+  };
 
   private readonly frozenRows: number;
   private readonly frozenCols: number;
@@ -1966,9 +1971,13 @@ export class DesktopSharedGrid {
         this.vThumb.style.height = `${thumb.size}px`;
         this.lastScrollbarThumb.vSize = thumb.size;
       }
-      this.vThumb.style.transform = `translateY(${thumb.offset}px)`;
+      if (this.lastScrollbarThumb.vOffset !== thumb.offset) {
+        this.vThumb.style.transform = `translateY(${thumb.offset}px)`;
+        this.lastScrollbarThumb.vOffset = thumb.offset;
+      }
     } else {
       this.lastScrollbarThumb.vSize = null;
+      this.lastScrollbarThumb.vOffset = null;
     }
 
     if (showH) {
@@ -1986,9 +1995,13 @@ export class DesktopSharedGrid {
         this.hThumb.style.width = `${thumb.size}px`;
         this.lastScrollbarThumb.hSize = thumb.size;
       }
-      this.hThumb.style.transform = `translateX(${thumb.offset}px)`;
+      if (this.lastScrollbarThumb.hOffset !== thumb.offset) {
+        this.hThumb.style.transform = `translateX(${thumb.offset}px)`;
+        this.lastScrollbarThumb.hOffset = thumb.offset;
+      }
     } else {
       this.lastScrollbarThumb.hSize = null;
+      this.lastScrollbarThumb.hOffset = null;
     }
   }
 
