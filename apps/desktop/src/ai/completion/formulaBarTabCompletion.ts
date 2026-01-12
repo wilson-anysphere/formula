@@ -1,6 +1,4 @@
 import {
-  LocalModelManager,
-  OllamaClient,
   TabCompletionEngine,
   type CompletionContext,
   type SchemaProvider,
@@ -18,10 +16,6 @@ export interface FormulaBarTabCompletionControllerOptions {
   limits?: { maxRows: number; maxCols: number };
   schemaProvider?: SchemaProvider | null;
 }
-
-const LOCAL_MODEL_ENABLED_KEY = "formula:aiCompletion:localModelEnabled";
-const LOCAL_MODEL_NAME_KEY = "formula:aiCompletion:localModelName";
-const LOCAL_MODEL_BASE_URL_KEY = "formula:aiCompletion:localModelBaseUrl";
 
 export class FormulaBarTabCompletionController {
   readonly #completion: TabCompletionEngine;
@@ -68,17 +62,9 @@ export class FormulaBarTabCompletionController {
     };
     this.#schemaProvider = schemaProvider;
 
-    const localModel = createLocalModelFromSettings();
-    // Initialize local models opportunistically in the background (pulling models
-    // can take time). Completion requests themselves are guarded by a strict
-    // timeout in `TabCompletionEngine`.
-    void localModel?.initialize?.().catch(() => {});
-
     this.#completion = new TabCompletionEngine({
-      localModel,
+      localModel: null,
       schemaProvider,
-      // Keep tab completion responsive even if the local model is slow/unavailable.
-      localModelTimeoutMs: 200,
     });
 
     const textarea = this.#formulaBar.textarea;
@@ -208,41 +194,6 @@ export class FormulaBarTabCompletionController {
         if (requestId !== this.#completionRequest) return;
         this.#formulaBar.setAiSuggestion(null);
       });
-  }
-}
-
-function readLocalStorage(key: string): string | null {
-  try {
-    const raw = globalThis.localStorage?.getItem(key);
-    return raw == null ? null : raw;
-  } catch {
-    return null;
-  }
-}
-
-function localStorageFlagEnabled(key: string): boolean {
-  const raw = readLocalStorage(key);
-  if (!raw) return false;
-  const normalized = raw.trim().toLowerCase();
-  return normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on";
-}
-
-function createLocalModelFromSettings(): LocalModelManager | null {
-  if (!localStorageFlagEnabled(LOCAL_MODEL_ENABLED_KEY)) return null;
-
-  const modelName = readLocalStorage(LOCAL_MODEL_NAME_KEY) ?? "formula-completion";
-  const baseUrl = readLocalStorage(LOCAL_MODEL_BASE_URL_KEY) ?? "http://localhost:11434";
-
-  try {
-    const ollamaClient = new OllamaClient({ baseUrl, timeoutMs: 2_000 });
-    return new LocalModelManager({
-      ollamaClient,
-      requiredModels: [modelName],
-      defaultModel: modelName,
-      cacheSize: 200,
-    });
-  } catch {
-    return null;
   }
 }
 
