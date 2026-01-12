@@ -16,10 +16,12 @@ import { BringForwardIcon } from "./BringForwardIcon";
 import { CalculatorIcon } from "./CalculatorIcon";
 import { CalendarIcon } from "./CalendarIcon";
 import { CellStylesIcon } from "./CellStylesIcon";
+import { CheckIcon } from "./CheckIcon";
 import { ClearFormattingIcon } from "./ClearFormattingIcon";
 import { ClearIcon } from "./ClearIcon";
 import { ClipboardPaneIcon } from "./ClipboardPaneIcon";
 import { ClockIcon } from "./ClockIcon";
+import { CloudIcon } from "./CloudIcon";
 import { CloseIcon } from "./CloseIcon";
 import { CommentIcon } from "./CommentIcon";
 import { ColumnWidthIcon } from "./ColumnWidthIcon";
@@ -28,6 +30,7 @@ import { ConditionalFormattingIcon } from "./ConditionalFormattingIcon";
 import { CopyIcon } from "./CopyIcon";
 import { CurrencyIcon } from "./CurrencyIcon";
 import { CutIcon } from "./CutIcon";
+import { DatabaseIcon } from "./DatabaseIcon";
 import { DeleteCellsIcon } from "./DeleteCellsIcon";
 import { DecreaseDecimalIcon } from "./DecreaseDecimalIcon";
 import { DecreaseFontIcon } from "./DecreaseFontIcon";
@@ -60,10 +63,12 @@ import { InsertRowsIcon } from "./InsertRowsIcon";
 import { InsertSheetIcon } from "./InsertSheetIcon";
 import { ItalicIcon } from "./ItalicIcon";
 import { LayersIcon } from "./LayersIcon";
+import { LightningIcon } from "./LightningIcon";
 import { LinkIcon } from "./LinkIcon";
 import { LockIcon } from "./LockIcon";
 import { MailIcon } from "./MailIcon";
 import { MergeCenterIcon } from "./MergeCenterIcon";
+import { MinusIcon } from "./MinusIcon";
 import { MoreFormatsIcon } from "./MoreFormatsIcon";
 import { NoteIcon } from "./NoteIcon";
 import { NumberFormatIcon } from "./NumberFormatIcon";
@@ -103,7 +108,9 @@ import { StrikethroughIcon } from "./StrikethroughIcon";
 import { SubscriptIcon } from "./SubscriptIcon";
 import { SuperscriptIcon } from "./SuperscriptIcon";
 import { TagIcon } from "./TagIcon";
+import { TargetIcon } from "./TargetIcon";
 import { TextBoxIcon } from "./TextBoxIcon";
+import { TrashIcon } from "./TrashIcon";
 import { UnderlineIcon } from "./UnderlineIcon";
 import { UndoIcon } from "./UndoIcon";
 import { UserIcon } from "./UserIcon";
@@ -355,6 +362,50 @@ export const ribbonIconMap = {
   "formulas.calculation.calculationOptions": SettingsIcon,
   "formulas.calculation.calculateNow": RefreshIcon,
   "formulas.calculation.calculateSheet": RefreshIcon,
+
+  // Data
+  "data.getTransform.getData": FileIcon,
+  "data.getTransform.getData.fromFile": FileIcon,
+  "data.getTransform.getData.fromDatabase": DatabaseIcon,
+  "data.getTransform.getData.fromAzure": CloudIcon,
+  "data.getTransform.getData.fromOnlineServices": GlobeIcon,
+  "data.getTransform.getData.fromOtherSources": PlusIcon,
+  "data.getTransform.recentSources": ClockIcon,
+  "data.getTransform.existingConnections": LinkIcon,
+
+  "data.queriesConnections.refreshAll": RefreshIcon,
+  "data.queriesConnections.queriesConnections": LayersIcon,
+  "data.queriesConnections.properties": SettingsIcon,
+
+  "data.sortFilter.sortAtoZ": SortIcon,
+  "data.sortFilter.sortZtoA": SortIcon,
+  "data.sortFilter.sort": SortIcon,
+  "data.sortFilter.filter": FilterIcon,
+  "data.sortFilter.clear": ClearIcon,
+  "data.sortFilter.reapply": RefreshIcon,
+  "data.sortFilter.advanced": SettingsIcon,
+
+  "data.dataTools.textToColumns": InsertColumnsIcon,
+  "data.dataTools.flashFill": LightningIcon,
+  "data.dataTools.removeDuplicates": TrashIcon,
+  "data.dataTools.dataValidation": CheckIcon,
+  "data.dataTools.relationships": LinkIcon,
+  "data.dataTools.manageDataModel": SmartArtIcon,
+
+  "data.forecast.whatIfAnalysis": TargetIcon,
+  "data.forecast.whatIfAnalysis.scenarioManager": LayersIcon,
+  "data.forecast.whatIfAnalysis.goalSeek": TargetIcon,
+  "data.forecast.whatIfAnalysis.dataTable": GridlinesIcon,
+  "data.forecast.forecastSheet": ChartIcon,
+
+  "data.outline.group": PlusIcon,
+  "data.outline.ungroup": MinusIcon,
+  "data.outline.subtotal": AutoSumIcon,
+  "data.outline.showDetail": PlusIcon,
+  "data.outline.hideDetail": MinusIcon,
+
+  "data.dataTypes.stocks": ChartIcon,
+  "data.dataTypes.geography": GlobeIcon,
 
   // Fallbacks (re-usable)
   sort: SortIcon,
