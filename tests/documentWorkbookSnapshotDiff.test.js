@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { DocumentController } from "../apps/desktop/src/document/documentController.js";
 import { diffDocumentWorkbookSnapshots } from "../packages/versioning/src/document/diffWorkbookSnapshots.js";
 
 const encoder = new TextEncoder();
@@ -137,6 +138,51 @@ test("diffDocumentWorkbookSnapshots reports formatOnly edits when default format
   assert.deepEqual(sheet1Diff.moved, []);
   assert.equal(sheet1Diff.formatOnly.length, 1);
   assert.deepEqual(sheet1Diff.formatOnly[0].cell, { row: 0, col: 0 });
+});
+
+test("diffDocumentWorkbookSnapshots reports formatOnly edits for column-default formatting (DocumentController snapshots)", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", "x");
+  const beforeSnapshot = doc.encodeState();
+
+  doc.setRangeFormat("Sheet1", "A1:A1048576", { font: { bold: true } });
+  const afterSnapshot = doc.encodeState();
+
+  const diff = diffDocumentWorkbookSnapshots({ beforeSnapshot, afterSnapshot });
+  const sheet1 = diff.cellsBySheet.find((entry) => entry.sheetId === "Sheet1");
+  assert.ok(sheet1);
+  assert.equal(sheet1.diff.formatOnly.length, 1);
+  assert.deepEqual(sheet1.diff.formatOnly[0].cell, { row: 0, col: 0 });
+});
+
+test("diffDocumentWorkbookSnapshots reports formatOnly edits for row-default formatting (DocumentController snapshots)", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", "x");
+  const beforeSnapshot = doc.encodeState();
+
+  doc.setRangeFormat("Sheet1", "A1:XFD1", { font: { italic: true } });
+  const afterSnapshot = doc.encodeState();
+
+  const diff = diffDocumentWorkbookSnapshots({ beforeSnapshot, afterSnapshot });
+  const sheet1 = diff.cellsBySheet.find((entry) => entry.sheetId === "Sheet1");
+  assert.ok(sheet1);
+  assert.equal(sheet1.diff.formatOnly.length, 1);
+  assert.deepEqual(sheet1.diff.formatOnly[0].cell, { row: 0, col: 0 });
+});
+
+test("diffDocumentWorkbookSnapshots reports formatOnly edits for sheet-default formatting (DocumentController snapshots)", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", "x");
+  const beforeSnapshot = doc.encodeState();
+
+  doc.setRangeFormat("Sheet1", "A1:XFD1048576", { font: { bold: true } });
+  const afterSnapshot = doc.encodeState();
+
+  const diff = diffDocumentWorkbookSnapshots({ beforeSnapshot, afterSnapshot });
+  const sheet1 = diff.cellsBySheet.find((entry) => entry.sheetId === "Sheet1");
+  assert.ok(sheet1);
+  assert.equal(sheet1.diff.formatOnly.length, 1);
+  assert.deepEqual(sheet1.diff.formatOnly[0].cell, { row: 0, col: 0 });
 });
 
 test("diffDocumentWorkbookSnapshots reports formatOnly edits when range format runs change (layered formats)", () => {
