@@ -361,6 +361,7 @@ export type SpreadsheetAppCollabOptions = {
   wsUrl: string;
   docId: string;
   token?: string;
+  offlineEnabled?: boolean;
   user: CollabUserIdentity;
   disableBc?: boolean;
 };
@@ -380,11 +381,17 @@ function resolveCollabOptionsFromUrl(): SpreadsheetAppCollabOptions | null {
     const identity = getCollabUserIdentity({ search: window.location.search });
     const disableBcRaw = params.get("collabDisableBc") ?? params.get("disableBc");
     const disableBc = disableBcRaw === "1" || disableBcRaw === "true" || disableBcRaw === "yes";
+    const offlineRaw = params.get("collabOffline");
+    const offlineEnabled =
+      offlineRaw == null
+        ? true
+        : !["0", "false", "off", "no"].includes(String(offlineRaw).trim().toLowerCase());
     return {
       wsUrl,
       docId,
       token,
       disableBc,
+      offlineEnabled,
       user: identity,
     };
   } catch {
@@ -705,8 +712,20 @@ export class SpreadsheetApp {
       // operations) still propagate back into the DocumentController.
       const binderOrigin = { type: "desktop-document-controller:binder" };
 
+      const offlineEnabled = collab.offlineEnabled ?? true;
+
       this.collabSession = createCollabSession({
         connection: { wsUrl: collab.wsUrl, docId: collab.docId, token: collab.token, disableBc: collab.disableBc },
+        ...(offlineEnabled
+          ? {
+              offline: {
+                mode: "indexeddb",
+                key: collab.docId,
+                autoLoad: true,
+                autoConnectAfterLoad: true,
+              },
+            }
+          : {}),
         presence: { user: collab.user, activeSheet: this.sheetId },
       });
       // Populate `modifiedBy` metadata for any direct `CollabSession.setCell*` writes
