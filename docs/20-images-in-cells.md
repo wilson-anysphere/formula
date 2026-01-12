@@ -303,6 +303,7 @@ Known (stable, used across OOXML):
 Partially known (fixture-driven details still recommended):
 
 - Workbook → `xl/cellimages.xml` relationship:
+  - Lives in `xl/_rels/workbook.xml.rels`.
   - Excel uses a Microsoft-extension relationship `Type` URI that has been observed to vary.
   - **Round-trip / detection rule:** identify the relationship by resolved `Target` (`/xl/cellimages.xml`)
     rather than hardcoding a single `Type`.

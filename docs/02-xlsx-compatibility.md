@@ -368,6 +368,10 @@ Newer versions of Excel can store “images in cell” (pictures that behave lik
 
 From a **packaging / round-trip** perspective, the important thing is the relationship chain that connects this part to the actual image blobs under `xl/media/*`.
 
+**Schema note:** `xl/cellimages.xml` is a Microsoft extension part; the root namespace / element vocabulary
+has been observed to vary across Excel versions (e.g. `…/2019/cellimages`, `…/2022/cellimages`). For
+round-trip, treat the **part path** (`/xl/cellimages.xml`) as authoritative, not the root namespace.
+
 #### How it’s usually connected
 
 1. `xl/workbook.xml` (via `xl/_rels/workbook.xml.rels`) contains a relationship that targets `cellimages.xml`:
