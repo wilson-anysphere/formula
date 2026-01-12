@@ -1188,6 +1188,20 @@ def generate(
         formula="=ODDLYIELD(DATE(2023,10,15),DATE(2025,3,1),DATE(2024,7,1),0.06,ODDLPRICE(DATE(2023,10,15),DATE(2025,3,1),DATE(2024,7,1),0.06,0.05,100,2,0),100,2,0)",
         description="ODDLYIELD inverts ODDLPRICE when settlement is before last_interest",
     )
+    add_case(
+        cases,
+        prefix="oddlprice_settlement_before_last_interest_eom",
+        tags=["financial", "odd_coupon", "ODDLPRICE"],
+        formula="=ODDLPRICE(DATE(2023,10,15),DATE(2025,2,15),DATE(2024,7,31),0.06,0.05,100,2,0)",
+        description="ODDLPRICE with settlement before last_interest on an end-of-month coupon schedule",
+    )
+    add_case(
+        cases,
+        prefix="oddlyield_settlement_before_last_interest_eom",
+        tags=["financial", "odd_coupon", "ODDLYIELD"],
+        formula="=ODDLYIELD(DATE(2023,10,15),DATE(2025,2,15),DATE(2024,7,31),0.06,ODDLPRICE(DATE(2023,10,15),DATE(2025,2,15),DATE(2024,7,31),0.06,0.05,100,2,0),100,2,0)",
+        description="ODDLYIELD inverts ODDLPRICE for an end-of-month coupon schedule when settlement is before last_interest",
+    )
 
     # Boundary-date equality behavior (Excel quirks).
     #
