@@ -89,6 +89,8 @@ Important nuance (conflict monitoring): for deterministic delete-vs-overwrite de
 written as `cell.set("formula", null)` (not `cell.delete("formula")`). Yjs map deletes do
 not create a new Item, which makes causality ambiguous.
 
+See: [`packages/collab/conflicts/src/formula-conflict-monitor.js`](../packages/collab/conflicts/src/formula-conflict-monitor.js)
+
 Implementation detail:
 
 - When `createCollabSession({ formulaConflicts: ... })` is enabled, `session.setCellFormula(...)`
@@ -737,6 +739,7 @@ Notes:
 - For deterministic delete-vs-overwrite detection, formula clears must be represented as `formula = null`
   (not `cell.delete("formula")`) because Yjs map deletes do not create Items.
 - `remoteUserId` attribution is best-effort and may be empty if the overwriting writer did not update `modifiedBy`.
+- Implementation: [`packages/collab/conflicts/src/formula-conflict-monitor.js`](../packages/collab/conflicts/src/formula-conflict-monitor.js)
 - Conflict monitors support an `ignoredOrigins` option to ignore bulk “time travel” transactions such as version restores
   (`"versioning-restore"`) and branch apply operations (`"branching-apply"`). `createCollabSession` wires this by default.
 
