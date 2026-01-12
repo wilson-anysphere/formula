@@ -287,4 +287,74 @@ describe("DocumentCellProvider formatting integration", () => {
       }
     });
   });
+
+  it("caches layered-format style resolution by style-id tuple", () => {
+    const doc = new DocumentController();
+
+    // Apply column formatting so many cells share the same effective style tuple
+    // (sheet default + row + col + cell).
+    doc.setColFormat("Sheet1", 0, { font: { bold: true } });
+
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => "Sheet1",
+      headerRows: 0,
+      headerCols: 0,
+      rowCount: 500,
+      colCount: 2,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const convertSpy = vi.spyOn(provider as any, "convertDocStyleToGridStyle");
+
+    for (let row = 0; row < 250; row++) {
+      const cell = provider.getCell(row, 0);
+      expect(cell?.style?.fontWeight).toBe("700");
+    }
+
+    // Without tuple caching we'd convert once per cell because DocumentController.getCellFormat()
+    // creates a fresh merged object every call (defeating the WeakMap cache).
+    expect(convertSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("honors explicit-false overrides when merging layered formatting", () => {
+    const doc = new DocumentController();
+
+    doc.setSheetFormat("Sheet1", {
+      font: { bold: true, italic: true, underline: true, strike: true },
+      alignment: { wrapText: true }
+    });
+
+    // Explicit `false` should clear inherited `true` values.
+    doc.setRowFormat("Sheet1", 0, {
+      font: { bold: false, italic: false, underline: false, strike: false },
+      alignment: { wrapText: false }
+    });
+
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => "Sheet1",
+      headerRows: 0,
+      headerCols: 0,
+      rowCount: 2,
+      colCount: 1,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const cleared = provider.getCell(0, 0);
+    expect(cleared?.style).toBeUndefined();
+
+    const inherited = provider.getCell(1, 0);
+    expect(inherited?.style).toEqual(
+      expect.objectContaining({
+        fontWeight: "700",
+        fontStyle: "italic",
+        underline: true,
+        strike: true,
+        wrapMode: "word"
+      })
+    );
+  });
 });

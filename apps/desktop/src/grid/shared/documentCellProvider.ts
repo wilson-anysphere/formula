@@ -1,6 +1,7 @@
 import type { CellData, CellProvider, CellProviderUpdate, CellRange, CellRichText, CellStyle } from "@formula/grid/node";
 import { LruCache } from "@formula/grid/node";
 import type { DocumentController } from "../../document/documentController.js";
+import { applyStylePatch } from "../../formatting/styleTable.js";
 import { resolveCssVar } from "../../theme/cssVars.js";
 import { formatValueWithNumberFormat } from "../../formatting/numberFormat.ts";
 import { normalizeExcelColorToCss } from "../../shared/colors.js";
@@ -73,7 +74,7 @@ export class DocumentCellProvider implements CellProvider {
   private lastSheetId: string | null = null;
   private lastSheetCache: LruCache<number, CellData | null> | null = null;
   private readonly styleCache = new Map<number, CellStyle | undefined>();
-  // Cache resolved layered formats by contributing style ids (sheet/row/col/cell). This avoids
+  // Cache resolved layered formats by contributing style ids (sheet/col/row/range-run/cell). This avoids
   // re-merging OOXML-ish style objects for every cell when large regions share the same
   // formatting layers (e.g. column formatting).
   private readonly resolvedFormatCache = new LruCache<string, { style: CellStyle | undefined; numberFormat: string | null }>(10_000);
@@ -123,23 +124,48 @@ export class DocumentCellProvider implements CellProvider {
       return typeof raw === "string" && raw.trim() !== "" ? raw : null;
     };
 
-    if (typeof controller.getCellFormat === "function") {
-      if (typeof controller.getCellFormatStyleIds === "function") {
-        const ids = controller.getCellFormatStyleIds(sheetId, coord);
-        const key = Array.isArray(ids) ? ids.join(",") : String(ids);
+    const styleTable: any = (this.options.document as any)?.styleTable;
+
+    // Prefer stable style-id tuples when available so we can cache formatting results
+    // without calling `DocumentController.getCellFormat()` for every cell.
+    if (typeof controller.getCellFormatStyleIds === "function" && typeof styleTable?.get === "function") {
+      const ids = controller.getCellFormatStyleIds(sheetId, coord) as unknown;
+      if (Array.isArray(ids) && ids.length >= 4) {
+        const normalizeId = (value: unknown): number =>
+          typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : 0;
+
+        const sheetDefaultStyleId = normalizeId(ids[0]);
+        const rowStyleId = normalizeId(ids[1]);
+        const colStyleId = normalizeId(ids[2]);
+        const cellStyleId = normalizeId(ids[3]);
+        const rangeRunStyleId = normalizeId(ids[4]);
+
+        // Key order matches merge precedence `sheet < col < row < range-run < cell`.
+        const key = `${sheetDefaultStyleId},${colStyleId},${rowStyleId},${rangeRunStyleId},${cellStyleId}`;
         const cached = this.resolvedFormatCache.get(key);
         if (cached !== undefined) return cached;
 
-        const resolvedDocStyle: unknown = controller.getCellFormat(sheetId, coord);
-        const docStyle: DocStyle = isPlainObject(resolvedDocStyle) ? (resolvedDocStyle as DocStyle) : {};
-        const style = this.convertDocStyleToGridStyle(docStyle);
-        const numberFormat = getNumberFormat(docStyle);
+        const sheetStyle = styleTable.get(sheetDefaultStyleId);
+        const colStyle = styleTable.get(colStyleId);
+        const rowStyle = styleTable.get(rowStyleId);
+        const runStyle = styleTable.get(rangeRunStyleId);
+        const cellStyle = styleTable.get(cellStyleId);
+
+        // Precedence: sheet < col < row < range-run < cell.
+        const sheetCol = applyStylePatch(sheetStyle, colStyle);
+        const sheetColRow = applyStylePatch(sheetCol, rowStyle);
+        const sheetColRowRun = applyStylePatch(sheetColRow, runStyle);
+        const merged = applyStylePatch(sheetColRowRun, cellStyle);
+
+        const style = this.convertDocStyleToGridStyle(merged);
+        const numberFormat = getNumberFormat(merged);
         const out = { style, numberFormat };
         this.resolvedFormatCache.set(key, out);
         return out;
       }
+    }
 
-      // Fallback: older controllers may not expose style-id tuples.
+    if (typeof controller.getCellFormat === "function") {
       const resolvedDocStyle: unknown = controller.getCellFormat(sheetId, coord);
       const docStyle: DocStyle = isPlainObject(resolvedDocStyle) ? (resolvedDocStyle as DocStyle) : {};
       return { style: this.convertDocStyleToGridStyle(docStyle), numberFormat: getNumberFormat(docStyle) };
@@ -367,6 +393,7 @@ export class DocumentCellProvider implements CellProvider {
     this.sheetCaches.clear();
     this.lastSheetId = null;
     this.lastSheetCache = null;
+    this.resolvedFormatCache.clear();
     for (const listener of this.listeners) listener({ type: "invalidateAll" });
   }
 
