@@ -121,6 +121,15 @@ powershell -ExecutionPolicy Bypass -File tools/excel-oracle/run-excel-oracle.ps1
   -ExcludeTags spill,dynarr
 ```
 
+To generate only the **long odd-coupon** stub scenarios (`ODDF*` / `ODDL*`) for quick iteration / pinning,
+use the small subset corpus:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/excel-oracle/run-excel-oracle.ps1 `
+  -CasesPath tests/compatibility/excel-oracle/cases_odd_coupon_long.json `
+  -OutPath  tests/compatibility/excel-oracle/datasets/excel-oracle.json
+```
+
 The output JSON includes:
 
 - Excel version/build metadata (because behavior can differ between Excel versions)
@@ -253,6 +262,26 @@ python tools/excel-oracle/compare.py \
   --report tests/compatibility/excel-oracle/reports/mismatch-report.json \
   --include-tag IF --include-tag SUM --include-tag cmp
 ```
+
+### Numeric tolerances (iterative functions)
+
+`compare.py` defaults to tight numeric tolerances (`abs=rel=1e-9`). Some functions are inherently
+iterative (for example yield solvers), and can differ from Excel by small floating point amounts even
+when the math is correct.
+
+You can override numeric tolerances for tagged subsets without loosening the entire corpus:
+
+```bash
+python tools/excel-oracle/compare.py \
+  --cases    tests/compatibility/excel-oracle/cases.json \
+  --expected tests/compatibility/excel-oracle/datasets/excel-oracle.pinned.json \
+  --actual   tests/compatibility/excel-oracle/datasets/engine-results.json \
+  --report   tests/compatibility/excel-oracle/reports/mismatch-report.json \
+  --tag-abs-tol odd_coupon=1e-6 \
+  --tag-rel-tol odd_coupon=1e-6
+```
+
+Note: `tools/excel-oracle/compat_gate.py` already applies `odd_coupon=1e-6` by default.
 
 ## Value encoding
 
