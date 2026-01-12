@@ -923,14 +923,16 @@ mod tests {
         state.load_workbook(workbook);
 
         let mut host = PythonRpcHost::new(&mut state, None).expect("host should init");
-        let err = host
-            .handle_rpc("create_sheet", Some(json!({ "name": "   " })))
-            .expect_err("expected create_sheet to reject blank name");
-        assert_eq!(
-            err,
-            formula_model::SheetNameError::EmptyName.to_string(),
-            "unexpected error: {err}"
-        );
+        for name in ["   ", "\n\t"] {
+            let err = host
+                .handle_rpc("create_sheet", Some(json!({ "name": name })))
+                .expect_err("expected create_sheet to reject blank name");
+            assert_eq!(
+                err,
+                formula_model::SheetNameError::EmptyName.to_string(),
+                "unexpected error: {err}"
+            );
+        }
     }
 
     #[test]
@@ -1096,17 +1098,19 @@ mod tests {
         state.load_workbook(workbook);
 
         let mut host = PythonRpcHost::new(&mut state, None).expect("host should init");
-        let err = host
-            .handle_rpc(
-                "rename_sheet",
-                Some(json!({ "sheet_id": "Sheet1", "name": "   " })),
-            )
-            .expect_err("expected rename_sheet to reject blank name");
-        assert_eq!(
-            err,
-            formula_model::SheetNameError::EmptyName.to_string(),
-            "unexpected error: {err}"
-        );
+        for name in ["   ", "\n\t"] {
+            let err = host
+                .handle_rpc(
+                    "rename_sheet",
+                    Some(json!({ "sheet_id": "Sheet1", "name": name })),
+                )
+                .expect_err("expected rename_sheet to reject blank name");
+            assert_eq!(
+                err,
+                formula_model::SheetNameError::EmptyName.to_string(),
+                "unexpected error: {err}"
+            );
+        }
     }
 
     #[test]

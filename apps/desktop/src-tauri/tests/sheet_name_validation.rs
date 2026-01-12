@@ -33,15 +33,17 @@ fn add_sheet_rejects_invalid_character() {
 #[test]
 fn add_sheet_rejects_empty_string() {
     let (mut state, _sheet1_id, _sheet2_id) = loaded_state_with_two_sheets();
-    let err = state
-        .add_sheet("   ".to_string(), None, None, None)
-        .expect_err("expected empty sheet name error");
-    match err {
-        AppStateError::WhatIf(msg) => assert!(
-            msg.contains("cannot be blank"),
-            "expected blank name error, got {msg:?}"
-        ),
-        other => panic!("expected WhatIf error, got {other:?}"),
+    for name in ["   ", "\n\t"] {
+        let err = state
+            .add_sheet(name.to_string(), None, None, None)
+            .expect_err("expected empty sheet name error");
+        match err {
+            AppStateError::WhatIf(msg) => assert!(
+                msg.contains("cannot be blank"),
+                "expected blank name error, got {msg:?}"
+            ),
+            other => panic!("expected WhatIf error, got {other:?}"),
+        }
     }
 }
 
@@ -263,15 +265,17 @@ fn create_sheet_rejects_invalid_character() {
 #[test]
 fn create_sheet_rejects_empty_string() {
     let (mut state, _sheet1_id, _sheet2_id) = loaded_state_with_two_sheets();
-    let err = state
-        .create_sheet("   ".to_string())
-        .expect_err("expected empty sheet name error");
-    match err {
-        AppStateError::WhatIf(msg) => assert!(
-            msg.contains("cannot be blank"),
-            "expected blank name error, got {msg:?}"
-        ),
-        other => panic!("expected WhatIf error, got {other:?}"),
+    for name in ["   ", "\n\t"] {
+        let err = state
+            .create_sheet(name.to_string())
+            .expect_err("expected empty sheet name error");
+        match err {
+            AppStateError::WhatIf(msg) => assert!(
+                msg.contains("cannot be blank"),
+                "expected blank name error, got {msg:?}"
+            ),
+            other => panic!("expected WhatIf error, got {other:?}"),
+        }
     }
 }
 
@@ -412,15 +416,17 @@ fn rename_sheet_rejects_leading_or_trailing_apostrophe() {
 #[test]
 fn rename_sheet_rejects_empty_string() {
     let (mut state, sheet1_id, _sheet2_id) = loaded_state_with_two_sheets();
-    let err = state
-        .rename_sheet(&sheet1_id, "   ".to_string())
-        .expect_err("expected empty sheet name error");
-    match err {
-        AppStateError::WhatIf(msg) => assert!(
-            msg.contains("cannot be blank"),
-            "expected blank name error, got {msg:?}"
-        ),
-        other => panic!("expected WhatIf error, got {other:?}"),
+    for name in ["   ", "\n\t"] {
+        let err = state
+            .rename_sheet(&sheet1_id, name.to_string())
+            .expect_err("expected empty sheet name error");
+        match err {
+            AppStateError::WhatIf(msg) => assert!(
+                msg.contains("cannot be blank"),
+                "expected blank name error, got {msg:?}"
+            ),
+            other => panic!("expected WhatIf error, got {other:?}"),
+        }
     }
 }
 
