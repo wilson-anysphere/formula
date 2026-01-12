@@ -541,15 +541,15 @@ fn numbervalue_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             return Value::Error(ErrorKind::Num);
         }
 
-        let text = match raw.coerce_to_string() {
+        let text = match raw.coerce_to_string_with_ctx(ctx) {
             Ok(s) => s,
             Err(e) => return Value::Error(e),
         };
-        let decimal = match coerce_single_char(dec) {
+        let decimal = match coerce_single_char(dec, ctx) {
             Ok(ch) => ch,
             Err(e) => return Value::Error(e),
         };
-        let group = match coerce_optional_single_char(group) {
+        let group = match coerce_optional_single_char(group, ctx) {
             Ok(ch) => ch,
             Err(e) => return Value::Error(e),
         };
@@ -1233,16 +1233,16 @@ fn excel_error_to_kind(err: ExcelError) -> ErrorKind {
     }
 }
 
-fn coerce_single_char(value: &Value) -> Result<char, ErrorKind> {
-    let s = value.coerce_to_string()?;
+fn coerce_single_char(value: &Value, ctx: &dyn FunctionContext) -> Result<char, ErrorKind> {
+    let s = value.coerce_to_string_with_ctx(ctx)?;
     match s.chars().collect::<Vec<_>>().as_slice() {
         [ch] => Ok(*ch),
         _ => Err(ErrorKind::Value),
     }
 }
 
-fn coerce_optional_single_char(value: &Value) -> Result<Option<char>, ErrorKind> {
-    let s = value.coerce_to_string()?;
+fn coerce_optional_single_char(value: &Value, ctx: &dyn FunctionContext) -> Result<Option<char>, ErrorKind> {
+    let s = value.coerce_to_string_with_ctx(ctx)?;
     if s.is_empty() {
         return Ok(None);
     }

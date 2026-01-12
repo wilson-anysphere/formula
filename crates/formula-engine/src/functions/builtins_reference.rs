@@ -28,11 +28,11 @@ fn offset_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         ArgValue::Scalar(_) => return Value::Error(ErrorKind::Value),
     };
 
-    let rows = match eval_scalar_arg(ctx, &args[1]).coerce_to_i64() {
+    let rows = match eval_scalar_arg(ctx, &args[1]).coerce_to_i64_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let cols = match eval_scalar_arg(ctx, &args[2]).coerce_to_i64() {
+    let cols = match eval_scalar_arg(ctx, &args[2]).coerce_to_i64_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
@@ -42,7 +42,7 @@ fn offset_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let default_width = (base_norm.end.col as i64) - (base_norm.start.col as i64) + 1;
 
     let height = if args.len() >= 4 {
-        match eval_scalar_arg(ctx, &args[3]).coerce_to_i64() {
+        match eval_scalar_arg(ctx, &args[3]).coerce_to_i64_with_ctx(ctx) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         }
@@ -51,7 +51,7 @@ fn offset_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
 
     let width = if args.len() >= 5 {
-        match eval_scalar_arg(ctx, &args[4]).coerce_to_i64() {
+        match eval_scalar_arg(ctx, &args[4]).coerce_to_i64_with_ctx(ctx) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         }
@@ -363,8 +363,8 @@ fn address_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let (sheet_rows, sheet_cols) = ctx.sheet_dimensions(&current_sheet);
 
     let base = array_lift::lift4(row_num, col_num, abs_num, a1, |row, col, abs, a1| {
-        let row_num = row.coerce_to_i64()?;
-        let col_num = col.coerce_to_i64()?;
+        let row_num = row.coerce_to_i64_with_ctx(ctx)?;
+        let col_num = col.coerce_to_i64_with_ctx(ctx)?;
         if row_num < 1 || row_num > sheet_rows as i64 {
             return Err(ErrorKind::Value);
         }
@@ -372,7 +372,7 @@ fn address_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             return Err(ErrorKind::Value);
         }
 
-        let abs_num = abs.coerce_to_i64()?;
+        let abs_num = abs.coerce_to_i64_with_ctx(ctx)?;
         let (col_abs, row_abs) = match abs_num {
             1 => (true, true),
             2 => (false, true),
@@ -381,7 +381,7 @@ fn address_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             _ => return Err(ErrorKind::Value),
         };
 
-        let a1 = a1.coerce_to_bool()?;
+        let a1 = a1.coerce_to_bool_with_ctx(ctx)?;
         let address = if a1 {
             format_a1_address(row_num as u32, col_num as u32, row_abs, col_abs)
         } else {
@@ -504,7 +504,7 @@ fn indirect_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
     let a1 = if args.len() >= 2 {
-        match eval_scalar_arg(ctx, &args[1]).coerce_to_bool() {
+        match eval_scalar_arg(ctx, &args[1]).coerce_to_bool_with_ctx(ctx) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         }

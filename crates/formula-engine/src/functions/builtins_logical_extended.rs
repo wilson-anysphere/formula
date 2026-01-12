@@ -25,7 +25,7 @@ inventory::submit! {
     }
 }
 
-fn xor_update(acc: &mut bool, value: &Value) -> Result<(), ErrorKind> {
+fn xor_update(ctx: &dyn FunctionContext, acc: &mut bool, value: &Value) -> Result<(), ErrorKind> {
     match value {
         Value::Error(e) => Err(*e),
         Value::Number(n) => {
@@ -39,7 +39,7 @@ fn xor_update(acc: &mut bool, value: &Value) -> Result<(), ErrorKind> {
         Value::Blank => Ok(()),
         // Scalar text arguments accept TRUE/FALSE (and numeric text) coercions like NOT().
         Value::Text(_) => {
-            *acc ^= value.coerce_to_bool()?;
+            *acc ^= value.coerce_to_bool_with_ctx(ctx)?;
             Ok(())
         }
         Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
@@ -82,7 +82,7 @@ fn xor_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     for arg in args {
         match ctx.eval_arg(arg) {
             ArgValue::Scalar(v) => {
-                if let Err(e) = xor_update(&mut acc, &v) {
+                if let Err(e) = xor_update(ctx, &mut acc, &v) {
                     return Value::Error(e);
                 }
             }

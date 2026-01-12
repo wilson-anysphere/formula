@@ -45,7 +45,7 @@ fn choose_scalar(ctx: &dyn FunctionContext, index_value: Value, choices: &[Compi
         return Value::Error(e);
     }
 
-    let idx = match index_value.coerce_to_i64() {
+    let idx = match index_value.coerce_to_i64_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
@@ -76,7 +76,7 @@ fn choose_array(ctx: &dyn FunctionContext, indices: &Array, choices: &[CompiledE
     for v in &indices.values {
         let res = match v {
             Value::Error(e) => Err(*e),
-            other => match other.coerce_to_i64() {
+            other => match other.coerce_to_i64_with_ctx(ctx) {
                 Ok(idx) if idx >= 1 && idx <= max_index => {
                     let zero_based = (idx - 1) as usize;
                     used_indices.insert(zero_based);
@@ -244,7 +244,7 @@ fn ifs_pairs(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             let mut needs_true = false;
             let mut needs_false = false;
             for el in arr.iter() {
-                match el.coerce_to_bool() {
+                match el.coerce_to_bool_with_ctx(ctx) {
                     Ok(true) => needs_true = true,
                     Ok(false) => needs_false = true,
                     Err(_) => {}
@@ -258,7 +258,7 @@ fn ifs_pairs(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 let true_val = array_lift::eval_arg(ctx, value_expr);
                 let false_val = ifs_pairs(ctx, remaining);
                 return array_lift::lift3(cond_val, true_val, false_val, |cond, t, f| {
-                    if cond.coerce_to_bool()? {
+                    if cond.coerce_to_bool_with_ctx(ctx)? {
                         Ok(t.clone())
                     } else {
                         Ok(f.clone())
@@ -269,7 +269,7 @@ fn ifs_pairs(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             if needs_true {
                 let true_val = array_lift::eval_arg(ctx, value_expr);
                 return array_lift::lift2(cond_val, true_val, |cond, t| {
-                    if cond.coerce_to_bool()? {
+                    if cond.coerce_to_bool_with_ctx(ctx)? {
                         Ok(t.clone())
                     } else {
                         Ok(Value::Error(ErrorKind::NA))
@@ -280,7 +280,7 @@ fn ifs_pairs(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             if needs_false {
                 let false_val = ifs_pairs(ctx, remaining);
                 return array_lift::lift2(cond_val, false_val, |cond, f| {
-                    if cond.coerce_to_bool()? {
+                    if cond.coerce_to_bool_with_ctx(ctx)? {
                         Ok(Value::Error(ErrorKind::NA))
                     } else {
                         Ok(f.clone())
@@ -291,7 +291,7 @@ fn ifs_pairs(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             // The condition array contains only errors/invalid values, so avoid forcing evaluation of
             // any branch expressions and simply map the coercion errors.
             array_lift::lift1(cond_val, |cond| {
-                let _ = cond.coerce_to_bool()?;
+                let _ = cond.coerce_to_bool_with_ctx(ctx)?;
                 Ok(Value::Error(ErrorKind::NA))
             })
         }
@@ -300,7 +300,7 @@ fn ifs_pairs(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 return Value::Error(e);
             }
 
-            let cond = match other.coerce_to_bool() {
+            let cond = match other.coerce_to_bool_with_ctx(ctx) {
                 Ok(b) => b,
                 Err(e) => return Value::Error(e),
             };
@@ -381,7 +381,7 @@ fn switch_pairs(
             let mut needs_true = false;
             let mut needs_false = false;
             for el in arr.iter() {
-                match el.coerce_to_bool() {
+                match el.coerce_to_bool_with_ctx(ctx) {
                     Ok(true) => needs_true = true,
                     Ok(false) => needs_false = true,
                     Err(_) => {}
@@ -395,7 +395,7 @@ fn switch_pairs(
                 let true_val = array_lift::eval_arg(ctx, result_expr);
                 let false_val = switch_pairs(ctx, expr_val, remaining, default);
                 return array_lift::lift3(cond_val, true_val, false_val, |cond, t, f| {
-                    if cond.coerce_to_bool()? {
+                    if cond.coerce_to_bool_with_ctx(ctx)? {
                         Ok(t.clone())
                     } else {
                         Ok(f.clone())
@@ -406,7 +406,7 @@ fn switch_pairs(
             if needs_true {
                 let true_val = array_lift::eval_arg(ctx, result_expr);
                 return array_lift::lift2(cond_val, true_val, |cond, t| {
-                    if cond.coerce_to_bool()? {
+                    if cond.coerce_to_bool_with_ctx(ctx)? {
                         Ok(t.clone())
                     } else {
                         Ok(Value::Error(ErrorKind::NA))
@@ -417,7 +417,7 @@ fn switch_pairs(
             if needs_false {
                 let false_val = switch_pairs(ctx, expr_val, remaining, default);
                 return array_lift::lift2(cond_val, false_val, |cond, f| {
-                    if cond.coerce_to_bool()? {
+                    if cond.coerce_to_bool_with_ctx(ctx)? {
                         Ok(Value::Error(ErrorKind::NA))
                     } else {
                         Ok(f.clone())
@@ -427,7 +427,7 @@ fn switch_pairs(
 
             // Only errors/invalid comparisons; map the coercion errors without forcing any branch evaluation.
             array_lift::lift1(cond_val, |cond| {
-                let _ = cond.coerce_to_bool()?;
+                let _ = cond.coerce_to_bool_with_ctx(ctx)?;
                 Ok(Value::Error(ErrorKind::NA))
             })
         }
@@ -435,7 +435,7 @@ fn switch_pairs(
             if let Value::Error(e) = other {
                 return Value::Error(e);
             }
-            let matched = match other.coerce_to_bool() {
+            let matched = match other.coerce_to_bool_with_ctx(ctx) {
                 Ok(b) => b,
                 Err(e) => return Value::Error(e),
             };

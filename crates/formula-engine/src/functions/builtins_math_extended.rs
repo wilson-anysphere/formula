@@ -186,7 +186,7 @@ fn sin_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     elementwise_unary(&value, |elem| match elem {
         Value::Error(e) => Value::Error(*e),
         other => {
-            let n = match other.coerce_to_number() {
+            let n = match other.coerce_to_number_with_ctx(ctx) {
                 Ok(n) => n,
                 Err(e) => return Value::Error(e),
             };
@@ -217,7 +217,7 @@ fn cos_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     elementwise_unary(&value, |elem| match elem {
         Value::Error(e) => Value::Error(*e),
         other => {
-            let n = match other.coerce_to_number() {
+            let n = match other.coerce_to_number_with_ctx(ctx) {
                 Ok(n) => n,
                 Err(e) => return Value::Error(e),
             };
@@ -248,7 +248,7 @@ fn tan_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     elementwise_unary(&value, |elem| match elem {
         Value::Error(e) => Value::Error(*e),
         other => {
-            let n = match other.coerce_to_number() {
+            let n = match other.coerce_to_number_with_ctx(ctx) {
                 Ok(n) => n,
                 Err(e) => return Value::Error(e),
             };
@@ -279,7 +279,7 @@ fn asin_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     elementwise_unary(&value, |elem| match elem {
         Value::Error(e) => Value::Error(*e),
         other => {
-            let n = match other.coerce_to_number() {
+            let n = match other.coerce_to_number_with_ctx(ctx) {
                 Ok(n) => n,
                 Err(e) => return Value::Error(e),
             };
@@ -310,7 +310,7 @@ fn acos_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     elementwise_unary(&value, |elem| match elem {
         Value::Error(e) => Value::Error(*e),
         other => {
-            let n = match other.coerce_to_number() {
+            let n = match other.coerce_to_number_with_ctx(ctx) {
                 Ok(n) => n,
                 Err(e) => return Value::Error(e),
             };
@@ -341,7 +341,7 @@ fn atan_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     elementwise_unary(&value, |elem| match elem {
         Value::Error(e) => Value::Error(*e),
         other => {
-            let n = match other.coerce_to_number() {
+            let n = match other.coerce_to_number_with_ctx(ctx) {
                 Ok(n) => n,
                 Err(e) => return Value::Error(e),
             };
@@ -377,11 +377,11 @@ fn atan2_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         if let Value::Error(e) = y_num {
             return Value::Error(*e);
         }
-        let x = match x_num.coerce_to_number() {
+        let x = match x_num.coerce_to_number_with_ctx(ctx) {
             Ok(n) => n,
             Err(e) => return Value::Error(e),
         };
-        let y = match y_num.coerce_to_number() {
+        let y = match y_num.coerce_to_number_with_ctx(ctx) {
             Ok(n) => n,
             Err(e) => return Value::Error(e),
         };
@@ -411,7 +411,7 @@ fn exp_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     elementwise_unary(&value, |elem| match elem {
         Value::Error(e) => Value::Error(*e),
         other => {
-            let n = match other.coerce_to_number() {
+            let n = match other.coerce_to_number_with_ctx(ctx) {
                 Ok(n) => n,
                 Err(e) => return Value::Error(e),
             };
@@ -442,7 +442,7 @@ fn ln_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     elementwise_unary(&value, |elem| match elem {
         Value::Error(e) => Value::Error(*e),
         other => {
-            let n = match other.coerce_to_number() {
+            let n = match other.coerce_to_number_with_ctx(ctx) {
                 Ok(n) => n,
                 Err(e) => return Value::Error(e),
             };
@@ -477,7 +477,7 @@ fn log_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return elementwise_unary(&number, |elem| match elem {
             Value::Error(e) => Value::Error(*e),
             other => {
-                let n = match other.coerce_to_number() {
+                let n = match other.coerce_to_number_with_ctx(ctx) {
                     Ok(n) => n,
                     Err(e) => return Value::Error(e),
                 };
@@ -497,11 +497,11 @@ fn log_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         if let Value::Error(e) = base {
             return Value::Error(*e);
         }
-        let n = match num.coerce_to_number() {
+        let n = match num.coerce_to_number_with_ctx(ctx) {
             Ok(n) => n,
             Err(e) => return Value::Error(e),
         };
-        let b = match base.coerce_to_number() {
+        let b = match base.coerce_to_number_with_ctx(ctx) {
             Ok(n) => n,
             Err(e) => return Value::Error(e),
         };
@@ -531,7 +531,7 @@ fn log10_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     elementwise_unary(&value, |elem| match elem {
         Value::Error(e) => Value::Error(*e),
         other => {
-            let n = match other.coerce_to_number() {
+            let n = match other.coerce_to_number_with_ctx(ctx) {
                 Ok(n) => n,
                 Err(e) => return Value::Error(e),
             };
@@ -562,7 +562,7 @@ fn sqrt_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     elementwise_unary(&value, |elem| match elem {
         Value::Error(e) => Value::Error(*e),
         other => {
-            let n = match other.coerce_to_number() {
+            let n = match other.coerce_to_number_with_ctx(ctx) {
                 Ok(n) => n,
                 Err(e) => return Value::Error(e),
             };
@@ -598,11 +598,11 @@ fn power_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         if let Value::Error(e) = power {
             return Value::Error(*e);
         }
-        let n = match num.coerce_to_number() {
+        let n = match num.coerce_to_number_with_ctx(ctx) {
             Ok(n) => n,
             Err(e) => return Value::Error(e),
         };
-        let p = match power.coerce_to_number() {
+        let p = match power.coerce_to_number_with_ctx(ctx) {
             Ok(n) => n,
             Err(e) => return Value::Error(e),
         };
@@ -637,7 +637,7 @@ fn product_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 Value::Number(n) => values.push(n),
                 Value::Bool(b) => values.push(if b { 1.0 } else { 0.0 }),
                 Value::Blank => {}
-                Value::Text(s) => match Value::Text(s).coerce_to_number() {
+                Value::Text(s) => match Value::Text(s).coerce_to_number_with_ctx(ctx) {
                     Ok(n) => values.push(n),
                     Err(e) => return Value::Error(e),
                 },
@@ -736,8 +736,8 @@ fn ceiling_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let number = array_lift::eval_arg(ctx, &args[0]);
     let significance = array_lift::eval_arg(ctx, &args[1]);
     array_lift::lift2(number, significance, |number, significance| {
-        let number = number.coerce_to_number()?;
-        let significance = significance.coerce_to_number()?;
+        let number = number.coerce_to_number_with_ctx(ctx)?;
+        let significance = significance.coerce_to_number_with_ctx(ctx)?;
         match crate::functions::math::ceiling(number, significance) {
             Ok(out) => Ok(Value::Number(out)),
             Err(e) => Err(excel_error_kind(e)),
@@ -763,8 +763,8 @@ fn floor_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let number = array_lift::eval_arg(ctx, &args[0]);
     let significance = array_lift::eval_arg(ctx, &args[1]);
     array_lift::lift2(number, significance, |number, significance| {
-        let number = number.coerce_to_number()?;
-        let significance = significance.coerce_to_number()?;
+        let number = number.coerce_to_number_with_ctx(ctx)?;
+        let significance = significance.coerce_to_number_with_ctx(ctx)?;
         match crate::functions::math::floor(number, significance) {
             Ok(out) => Ok(Value::Number(out)),
             Err(e) => Err(excel_error_kind(e)),
@@ -798,9 +798,9 @@ fn ceiling_math_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
 
     array_lift::lift3(number, significance, mode, |number, significance, mode| {
-        let number = number.coerce_to_number()?;
-        let significance = significance.coerce_to_number()?;
-        let mode = mode.coerce_to_number()?;
+        let number = number.coerce_to_number_with_ctx(ctx)?;
+        let significance = significance.coerce_to_number_with_ctx(ctx)?;
+        let mode = mode.coerce_to_number_with_ctx(ctx)?;
         match crate::functions::math::ceiling_math(number, Some(significance), Some(mode)) {
             Ok(out) => Ok(Value::Number(out)),
             Err(e) => Err(excel_error_kind(e)),
@@ -834,9 +834,9 @@ fn floor_math_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
 
     array_lift::lift3(number, significance, mode, |number, significance, mode| {
-        let number = number.coerce_to_number()?;
-        let significance = significance.coerce_to_number()?;
-        let mode = mode.coerce_to_number()?;
+        let number = number.coerce_to_number_with_ctx(ctx)?;
+        let significance = significance.coerce_to_number_with_ctx(ctx)?;
+        let mode = mode.coerce_to_number_with_ctx(ctx)?;
         match crate::functions::math::floor_math(number, Some(significance), Some(mode)) {
             Ok(out) => Ok(Value::Number(out)),
             Err(e) => Err(excel_error_kind(e)),
@@ -866,8 +866,8 @@ fn ceiling_precise_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value
     };
 
     array_lift::lift2(number, significance, |number, significance| {
-        let number = number.coerce_to_number()?;
-        let significance = significance.coerce_to_number()?;
+        let number = number.coerce_to_number_with_ctx(ctx)?;
+        let significance = significance.coerce_to_number_with_ctx(ctx)?;
         match crate::functions::math::ceiling_precise(number, Some(significance)) {
             Ok(out) => Ok(Value::Number(out)),
             Err(e) => Err(excel_error_kind(e)),
@@ -897,8 +897,8 @@ fn floor_precise_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
 
     array_lift::lift2(number, significance, |number, significance| {
-        let number = number.coerce_to_number()?;
-        let significance = significance.coerce_to_number()?;
+        let number = number.coerce_to_number_with_ctx(ctx)?;
+        let significance = significance.coerce_to_number_with_ctx(ctx)?;
         match crate::functions::math::floor_precise(number, Some(significance)) {
             Ok(out) => Ok(Value::Number(out)),
             Err(e) => Err(excel_error_kind(e)),
@@ -928,8 +928,8 @@ fn iso_ceiling_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
 
     array_lift::lift2(number, significance, |number, significance| {
-        let number = number.coerce_to_number()?;
-        let significance = significance.coerce_to_number()?;
+        let number = number.coerce_to_number_with_ctx(ctx)?;
+        let significance = significance.coerce_to_number_with_ctx(ctx)?;
         match crate::functions::math::iso_ceiling(number, Some(significance)) {
             Ok(out) => Ok(Value::Number(out)),
             Err(e) => Err(excel_error_kind(e)),
@@ -952,7 +952,7 @@ inventory::submit! {
 }
 
 fn subtotal_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let function_num = match scalar_from_arg(ctx, ctx.eval_arg(&args[0])).coerce_to_i64() {
+    let function_num = match scalar_from_arg(ctx, ctx.eval_arg(&args[0])).coerce_to_i64_with_ctx(ctx) {
         Ok(v) => match i32::try_from(v) {
             Ok(v) => v,
             Err(_) => return Value::Error(ErrorKind::Value),
@@ -986,14 +986,14 @@ inventory::submit! {
 }
 
 fn aggregate_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let function_num = match scalar_from_arg(ctx, ctx.eval_arg(&args[0])).coerce_to_i64() {
+    let function_num = match scalar_from_arg(ctx, ctx.eval_arg(&args[0])).coerce_to_i64_with_ctx(ctx) {
         Ok(v) => match i32::try_from(v) {
             Ok(v) => v,
             Err(_) => return Value::Error(ErrorKind::Value),
         },
         Err(e) => return Value::Error(e),
     };
-    let options = match scalar_from_arg(ctx, ctx.eval_arg(&args[1])).coerce_to_i64() {
+    let options = match scalar_from_arg(ctx, ctx.eval_arg(&args[1])).coerce_to_i64_with_ctx(ctx) {
         Ok(v) => match i32::try_from(v) {
             Ok(v) => v,
             Err(_) => return Value::Error(ErrorKind::Value),

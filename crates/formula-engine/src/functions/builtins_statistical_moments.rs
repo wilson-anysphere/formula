@@ -7,7 +7,11 @@ use crate::value::{ErrorKind, Value};
 
 const VAR_ARGS: usize = 255;
 
-fn push_numbers_from_scalar(out: &mut Vec<f64>, value: Value) -> Result<(), ErrorKind> {
+fn push_numbers_from_scalar(
+    ctx: &dyn FunctionContext,
+    out: &mut Vec<f64>,
+    value: Value,
+) -> Result<(), ErrorKind> {
     match value {
         Value::Error(e) => Err(e),
         Value::Number(n) => {
@@ -20,7 +24,7 @@ fn push_numbers_from_scalar(out: &mut Vec<f64>, value: Value) -> Result<(), Erro
         }
         Value::Blank => Ok(()),
         Value::Text(s) => {
-            let n = Value::Text(s).coerce_to_number()?;
+            let n = Value::Text(s).coerce_to_number_with_ctx(ctx)?;
             out.push(n);
             Ok(())
         }
@@ -112,7 +116,7 @@ fn push_numbers_from_arg(
     arg: ArgValue,
 ) -> Result<(), ErrorKind> {
     match arg {
-        ArgValue::Scalar(v) => push_numbers_from_scalar(out, v),
+        ArgValue::Scalar(v) => push_numbers_from_scalar(ctx, out, v),
         ArgValue::Reference(r) => push_numbers_from_reference(ctx, out, r),
         ArgValue::ReferenceUnion(ranges) => push_numbers_from_reference_union(ctx, out, ranges),
     }

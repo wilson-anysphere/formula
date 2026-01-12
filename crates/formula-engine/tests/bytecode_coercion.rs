@@ -100,6 +100,95 @@ fn bytecode_coercion_locale_aware_decimal_and_group_separators_match_ast() {
 }
 
 #[test]
+fn bytecode_coercion_locale_aware_decimal_separator_matches_ast() {
+    // de-DE uses ',' as decimal separator.
+    let formula = "=\"1,5\"+1";
+    let expected = 2.5;
+
+    let (ast_val, _) = eval_single_cell(formula, false, ValueLocaleConfig::de_de());
+    assert_number_close(&ast_val, expected);
+
+    let (bc_val, bc_programs) = eval_single_cell(formula, true, ValueLocaleConfig::de_de());
+    assert!(bc_programs > 0, "expected formula to compile to bytecode");
+    assert_number_close(&bc_val, expected);
+
+    let ast_n = match ast_val {
+        Value::Number(n) => n,
+        other => panic!("expected Value::Number from AST, got {other:?}"),
+    };
+    let bc_n = match bc_val {
+        Value::Number(n) => n,
+        other => panic!("expected Value::Number from bytecode, got {other:?}"),
+    };
+    assert!(
+        (bc_n - ast_n).abs() < 1e-9,
+        "expected AST and bytecode values to match; ast={ast_n}, bytecode={bc_n}"
+    );
+}
+
+#[test]
+fn bytecode_coercion_function_args_use_value_locale_for_text_to_number() {
+    let formula = "=AVERAGE(\"1,5\",1)";
+    let expected = 1.25;
+
+    let (ast_val, _) = eval_single_cell(formula, false, ValueLocaleConfig::de_de());
+    assert_number_close(&ast_val, expected);
+
+    let (bc_val, bc_programs) = eval_single_cell(formula, true, ValueLocaleConfig::de_de());
+    assert!(bc_programs > 0, "expected formula to compile to bytecode");
+    assert_number_close(&bc_val, expected);
+
+    let ast_n = match ast_val {
+        Value::Number(n) => n,
+        other => panic!("expected Value::Number from AST, got {other:?}"),
+    };
+    let bc_n = match bc_val {
+        Value::Number(n) => n,
+        other => panic!("expected Value::Number from bytecode, got {other:?}"),
+    };
+    assert!(
+        (bc_n - ast_n).abs() < 1e-9,
+        "expected AST and bytecode values to match; ast={ast_n}, bytecode={bc_n}"
+    );
+}
+
+#[test]
+fn bytecode_coercion_function_args_use_value_locale_for_text_to_bool() {
+    let formula = "=IFS(\"1,5\",10,TRUE,20)";
+
+    let (ast_val, _) = eval_single_cell(formula, false, ValueLocaleConfig::de_de());
+    assert_eq!(ast_val, Value::Number(10.0));
+
+    let (bc_val, bc_programs) = eval_single_cell(formula, true, ValueLocaleConfig::de_de());
+    assert!(bc_programs > 0, "expected formula to compile to bytecode");
+    assert_eq!(bc_val, ast_val);
+}
+
+#[test]
+fn bytecode_coercion_xor_uses_value_locale_for_text_to_bool() {
+    let formula = "=XOR(\"1,5\")";
+
+    let (ast_val, _) = eval_single_cell(formula, false, ValueLocaleConfig::de_de());
+    assert_eq!(ast_val, Value::Bool(true));
+
+    let (bc_val, bc_programs) = eval_single_cell(formula, true, ValueLocaleConfig::de_de());
+    assert!(bc_programs > 0, "expected formula to compile to bytecode");
+    assert_eq!(bc_val, ast_val);
+}
+
+#[test]
+fn bytecode_coercion_address_args_use_value_locale_for_text_to_number() {
+    let formula = "=ADDRESS(\"1,0\",\"1,0\")";
+
+    let (ast_val, _) = eval_single_cell(formula, false, ValueLocaleConfig::de_de());
+    assert_eq!(ast_val, Value::Text("$A$1".to_string()));
+
+    let (bc_val, bc_programs) = eval_single_cell(formula, true, ValueLocaleConfig::de_de());
+    assert!(bc_programs > 0, "expected formula to compile to bytecode");
+    assert_eq!(bc_val, ast_val);
+}
+
+#[test]
 fn bytecode_coercion_date_string_to_number_matches_ast() {
     // Text dates should coerce via DATEVALUE/TIMEVALUE-like rules in both AST and bytecode paths.
     let formula = "=\"2020-01-01\"+0";

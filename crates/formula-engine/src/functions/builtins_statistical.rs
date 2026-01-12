@@ -11,7 +11,11 @@ use crate::value::{Array, ErrorKind, Value};
 const VAR_ARGS: usize = 255;
 const SIMD_AGGREGATE_BLOCK: usize = 1024;
 
-fn push_numbers_from_scalar(out: &mut Vec<f64>, value: Value) -> Result<(), ErrorKind> {
+fn push_numbers_from_scalar(
+    ctx: &dyn FunctionContext,
+    out: &mut Vec<f64>,
+    value: Value,
+) -> Result<(), ErrorKind> {
     match value {
         Value::Error(e) => Err(e),
         Value::Number(n) => {
@@ -24,7 +28,7 @@ fn push_numbers_from_scalar(out: &mut Vec<f64>, value: Value) -> Result<(), Erro
         }
         Value::Blank => Ok(()),
         Value::Text(s) => {
-            let n = Value::Text(s).coerce_to_number()?;
+            let n = Value::Text(s).coerce_to_number_with_ctx(ctx)?;
             out.push(n);
             Ok(())
         }
@@ -116,7 +120,7 @@ fn push_numbers_from_arg(
     arg: ArgValue,
 ) -> Result<(), ErrorKind> {
     match arg {
-        ArgValue::Scalar(v) => push_numbers_from_scalar(out, v),
+        ArgValue::Scalar(v) => push_numbers_from_scalar(ctx, out, v),
         ArgValue::Reference(r) => push_numbers_from_reference(ctx, out, r),
         ArgValue::ReferenceUnion(ranges) => push_numbers_from_reference_union(ctx, out, ranges),
     }
@@ -406,7 +410,7 @@ fn sumsq_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 }
                 Value::Blank => {}
                 Value::Text(s) => {
-                    let n = match Value::Text(s).coerce_to_number() {
+                    let n = match Value::Text(s).coerce_to_number_with_ctx(ctx) {
                         Ok(n) => n,
                         Err(e) => return Value::Error(e),
                     };
@@ -639,7 +643,7 @@ fn trimmean_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(e);
     }
 
-    let percent = match eval_scalar_arg(ctx, &args[1]).coerce_to_number() {
+    let percent = match eval_scalar_arg(ctx, &args[1]).coerce_to_number_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
@@ -669,9 +673,9 @@ fn standardize_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let mean = array_lift::eval_arg(ctx, &args[1]);
     let std_dev = array_lift::eval_arg(ctx, &args[2]);
     array_lift::lift3(x, mean, std_dev, |x, mean, std_dev| {
-        let x = x.coerce_to_number()?;
-        let mean = mean.coerce_to_number()?;
-        let std_dev = std_dev.coerce_to_number()?;
+        let x = x.coerce_to_number_with_ctx(ctx)?;
+        let mean = mean.coerce_to_number_with_ctx(ctx)?;
+        let std_dev = std_dev.coerce_to_number_with_ctx(ctx)?;
         Ok(Value::Number(crate::functions::statistical::standardize(
             x, mean, std_dev,
         )?))
@@ -688,7 +692,7 @@ fn arg_to_numeric_sequence(
             Value::Number(n) => Ok(vec![Some(n)]),
             Value::Bool(b) => Ok(vec![Some(if b { 1.0 } else { 0.0 })]),
             Value::Blank => Ok(vec![None]),
-            Value::Text(s) => Ok(vec![Some(Value::Text(s).coerce_to_number()?)]),
+            Value::Text(s) => Ok(vec![Some(Value::Text(s).coerce_to_number_with_ctx(ctx)?)]),
             Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
             Value::Array(arr) => {
                 let mut out = Vec::with_capacity(arr.values.len());
@@ -1167,7 +1171,7 @@ fn large_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(e);
     }
 
-    let k = match eval_scalar_arg(ctx, &args[1]).coerce_to_i64() {
+    let k = match eval_scalar_arg(ctx, &args[1]).coerce_to_i64_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
@@ -1201,7 +1205,7 @@ fn small_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(e);
     }
 
-    let k = match eval_scalar_arg(ctx, &args[1]).coerce_to_i64() {
+    let k = match eval_scalar_arg(ctx, &args[1]).coerce_to_i64_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
@@ -1266,7 +1270,7 @@ fn rank_avg_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 }
 
 fn rank_impl(ctx: &dyn FunctionContext, args: &[CompiledExpr], method: RankMethod) -> Value {
-    let number = match eval_scalar_arg(ctx, &args[0]).coerce_to_number() {
+    let number = match eval_scalar_arg(ctx, &args[0]).coerce_to_number_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
@@ -1280,7 +1284,7 @@ fn rank_impl(ctx: &dyn FunctionContext, args: &[CompiledExpr], method: RankMetho
     }
 
     let order = if args.len() == 3 {
-        match eval_scalar_arg(ctx, &args[2]).coerce_to_number() {
+        match eval_scalar_arg(ctx, &args[2]).coerce_to_number_with_ctx(ctx) {
             Ok(v) if v != 0.0 => RankOrder::Ascending,
             Ok(_) => RankOrder::Descending,
             Err(e) => return Value::Error(e),
@@ -1329,7 +1333,7 @@ fn percentile_inc_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value 
         return Value::Error(e);
     }
 
-    let k = match eval_scalar_arg(ctx, &args[1]).coerce_to_number() {
+    let k = match eval_scalar_arg(ctx, &args[1]).coerce_to_number_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
@@ -1360,7 +1364,7 @@ fn percentile_exc_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value 
         return Value::Error(e);
     }
 
-    let k = match eval_scalar_arg(ctx, &args[1]).coerce_to_number() {
+    let k = match eval_scalar_arg(ctx, &args[1]).coerce_to_number_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
@@ -1405,7 +1409,7 @@ fn quartile_inc_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(e);
     }
 
-    let quart = match eval_scalar_arg(ctx, &args[1]).coerce_to_i64() {
+    let quart = match eval_scalar_arg(ctx, &args[1]).coerce_to_i64_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
@@ -1436,7 +1440,7 @@ fn quartile_exc_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(e);
     }
 
-    let quart = match eval_scalar_arg(ctx, &args[1]).coerce_to_i64() {
+    let quart = match eval_scalar_arg(ctx, &args[1]).coerce_to_i64_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
@@ -1513,13 +1517,13 @@ fn percentrank_impl(
         return Value::Error(e);
     }
 
-    let x = match eval_scalar_arg(ctx, &args[1]).coerce_to_number() {
+    let x = match eval_scalar_arg(ctx, &args[1]).coerce_to_number_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
 
     let significance = if args.len() == 3 {
-        match eval_scalar_arg(ctx, &args[2]).coerce_to_i64() {
+        match eval_scalar_arg(ctx, &args[2]).coerce_to_i64_with_ctx(ctx) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         }
@@ -1714,7 +1718,7 @@ inventory::submit! {
 
 fn forecast_linear_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     // Excel signature: FORECAST(x, known_y's, known_x's)
-    let x = match eval_scalar_arg(ctx, &args[0]).coerce_to_number() {
+    let x = match eval_scalar_arg(ctx, &args[0]).coerce_to_number_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };

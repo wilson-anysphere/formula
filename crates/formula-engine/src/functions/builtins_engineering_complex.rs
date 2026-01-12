@@ -73,7 +73,7 @@ fn complex_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
 
     let suffix = if args.len() == 3 {
-        let raw = match eval_scalar_arg(ctx, &args[2]).coerce_to_string() {
+        let raw = match eval_scalar_arg(ctx, &args[2]).coerce_to_string_with_ctx(ctx) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
