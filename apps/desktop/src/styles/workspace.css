@@ -17,7 +17,7 @@
 #dock-bottom {
   min-width: 0;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
 }
