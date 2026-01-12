@@ -148,7 +148,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 return ControlFlow::Break(());
             }
 
-            let Some(Formula { rgce, extra, .. }) = cell.formula else {
+            let Some(Formula { rgce, extra, text, .. }) = cell.formula else {
                 return ControlFlow::Continue(());
             };
 
@@ -169,25 +169,31 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 a1: addr,
                 rgce_hex,
                 rgcb_hex_len: extra.len(),
-                decoded: None,
+                decoded: text.clone(),
                 ptg: None,
                 offset: None,
             };
 
-            match decode_rgce_with_context_and_rgcb_and_base(&rgce, &extra, ctx, base) {
-                Ok(text) => {
-                    decoded_ok += 1;
-                    line.decoded = Some(text);
-                }
-                Err(err) => {
-                    decoded_failed += 1;
-                    let ptg_hex = err
-                        .ptg()
-                        .map(|b| format!("0x{b:02X}"))
-                        .unwrap_or_else(|| "null".to_string());
-                    *failures_by_ptg.entry(ptg_hex.clone()).or_insert(0) += 1;
-                    line.ptg = err.ptg().map(|b| format!("0x{b:02X}"));
-                    line.offset = Some(err.offset());
+            if line.decoded.is_some() {
+                decoded_ok += 1;
+            } else {
+                decoded_failed += 1;
+                // Re-run the decoder so we can surface `ptg` + `offset` for coverage analysis.
+                match decode_rgce_with_context_and_rgcb_and_base(&rgce, &extra, ctx, base) {
+                    Ok(decoded) => {
+                        decoded_ok += 1;
+                        decoded_failed = decoded_failed.saturating_sub(1);
+                        line.decoded = Some(decoded);
+                    }
+                    Err(err) => {
+                        let ptg_hex = err
+                            .ptg()
+                            .map(|b| format!("0x{b:02X}"))
+                            .unwrap_or_else(|| "null".to_string());
+                        *failures_by_ptg.entry(ptg_hex.clone()).or_insert(0) += 1;
+                        line.ptg = err.ptg().map(|b| format!("0x{b:02X}"));
+                        line.offset = Some(err.offset());
+                    }
                 }
             }
 
