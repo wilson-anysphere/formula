@@ -96,9 +96,11 @@ fn print_interesting_parts(pkg: &XlsxPackage) {
     let mut parts: Vec<&str> = pkg
         .part_names()
         .filter(|name| {
-            name.starts_with("xl/richData/")
-                || name.starts_with("xl/metadata.xml")
-                || name.starts_with("xl/cellimages")
+            let normalized = name.strip_prefix('/').unwrap_or(name);
+            let lower = normalized.to_ascii_lowercase();
+            lower.starts_with("xl/richdata/")
+                || lower.starts_with("xl/metadata.xml")
+                || lower.starts_with("xl/cellimages")
         })
         .collect();
     parts.sort();
@@ -117,16 +119,16 @@ fn print_interesting_parts(pkg: &XlsxPackage) {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn dump_metadata(pkg: &XlsxPackage) -> Option<HashMap<u32, u32>> {
-    let Some(bytes) = pkg.part("xl/metadata.xml") else {
+    let Some((part_name, bytes)) = find_part_case_insensitive(pkg, "xl/metadata.xml") else {
         println!();
         println!("xl/metadata.xml: (missing)");
         return None;
     };
 
     println!();
-    println!("xl/metadata.xml:");
+    println!("{part_name}:");
 
-    let xml = match std::str::from_utf8(bytes) {
+    let xml = match std::str::from_utf8(&bytes) {
         Ok(xml) => xml,
         Err(err) => {
             println!("  (not utf-8: {err})");
@@ -154,7 +156,7 @@ fn dump_metadata(pkg: &XlsxPackage) -> Option<HashMap<u32, u32>> {
         }
     }
 
-    match parse_value_metadata_vm_to_rich_value_index_map(bytes) {
+    match parse_value_metadata_vm_to_rich_value_index_map(&bytes) {
         Ok(mut map) => {
             if map.is_empty() {
                 println!("  vm -> rich_value_index: (none resolved)");
@@ -382,7 +384,11 @@ fn print_top_counts(label: &str, counts: &HashMap<u32, u64>, max: usize) {
 fn dump_rich_data_graph(pkg: &XlsxPackage) -> Result<(), Box<dyn Error>> {
     let mut rich_parts: Vec<&str> = pkg
         .part_names()
-        .filter(|name| name.starts_with("xl/richData/") && name.ends_with(".xml"))
+        .filter(|name| {
+            let normalized = name.strip_prefix('/').unwrap_or(name);
+            let lower = normalized.to_ascii_lowercase();
+            lower.starts_with("xl/richdata/") && lower.ends_with(".xml")
+        })
         .collect();
     rich_parts.sort();
     if rich_parts.is_empty() {
@@ -867,6 +873,7 @@ fn looks_like_rid(value: &str) -> bool {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn is_cell_images_part_name(path: &str) -> bool {
+    let path = path.strip_prefix('/').unwrap_or(path);
     let Some(rest) = path.strip_prefix("xl/") else {
         return false;
     };
@@ -879,6 +886,7 @@ fn is_cell_images_part_name(path: &str) -> bool {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn is_probable_image_target(path: &str) -> bool {
+    let path = path.strip_prefix('/').unwrap_or(path);
     if path.starts_with("xl/media/") {
         return true;
     }
@@ -891,9 +899,11 @@ fn is_probable_image_target(path: &str) -> bool {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn find_part_case_insensitive(pkg: &XlsxPackage, desired: &str) -> Option<(String, Vec<u8>)> {
+    let desired = desired.strip_prefix('/').unwrap_or(desired);
     let desired_lower = desired.to_ascii_lowercase();
     for name in pkg.part_names() {
-        if name.to_ascii_lowercase() == desired_lower {
+        let normalized = name.strip_prefix('/').unwrap_or(name);
+        if normalized.to_ascii_lowercase() == desired_lower {
             return pkg.part(name).map(|b| (name.to_string(), b.to_vec()));
         }
     }
