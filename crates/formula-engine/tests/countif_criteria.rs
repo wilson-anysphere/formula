@@ -64,6 +64,26 @@ fn countif_blank_criteria_equal_empty_string_literal_counts_blanks() {
 }
 
 #[test]
+fn countif_blank_criteria_equal_empty_string_literal_compiles_to_bytecode() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", "").unwrap();
+    // A3 left unset (blank).
+
+    engine
+        .set_cell_formula("Sheet1", "Z1", r#"=COUNTIF(A1:A3, "=""""")"#)
+        .unwrap();
+
+    assert!(
+        engine.bytecode_program_count() > 0,
+        "expected COUNTIF formula to compile to bytecode for this test"
+    );
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "Z1"), Value::Number(2.0));
+}
+
+#[test]
 fn countif_error_criteria_counts_errors_and_criteria_errors_propagate() {
     let mut engine = Engine::new();
     engine
