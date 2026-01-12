@@ -76,3 +76,21 @@ fn data_validations_apply_beyond_excel_max_rows_when_sheet_row_count_is_larger()
     assert_eq!(dvs.len(), 1);
     assert_eq!(dvs[0].id, id);
 }
+
+#[test]
+fn worksheet_deserialize_allows_row_count_above_excel_max_and_updates_editability() {
+    let sheet: Worksheet = serde_json::from_value(serde_json::json!({
+        "id": 1,
+        "name": "Sheet1",
+        "row_count": EXCEL_MAX_ROWS + 10,
+        "col_count": 1,
+    }))
+    .unwrap();
+
+    let styles = StyleTable::new();
+    assert!(sheet.is_cell_editable(CellRef::new(EXCEL_MAX_ROWS, 0), &styles));
+    assert!(!sheet.is_cell_editable(
+        CellRef::new(EXCEL_MAX_ROWS + 10, 0),
+        &styles
+    ));
+}
