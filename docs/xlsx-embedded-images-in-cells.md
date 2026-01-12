@@ -350,8 +350,21 @@ The fixture has two rich value bindings:
 
 ```xml
 <futureMetadata name="XLRICHVALUE" count="2">
-  <bk>...<xlrd:rvb i="0"/>...</bk>
-  <bk>...<xlrd:rvb i="1"/>...</bk>
+  <!-- Note: the `xlrd` prefix is declared on the `metadata` root element. -->
+  <bk>
+    <extLst>
+      <ext uri="{3e2802c4-a4d2-4d8b-9148-e3be6c30e623}">
+        <xlrd:rvb i="0"/>
+      </ext>
+    </extLst>
+  </bk>
+  <bk>
+    <extLst>
+      <ext uri="{3e2802c4-a4d2-4d8b-9148-e3be6c30e623}">
+        <xlrd:rvb i="1"/>
+      </ext>
+    </extLst>
+  </bk>
 </futureMetadata>
 
 <valueMetadata count="2">
@@ -386,8 +399,12 @@ The two rich values reference relationship slots `0` and `1` (and both have `Cal
 And the `.rels` maps those `rId`s to actual media parts (note: `.rels` ordering can differ):
 
 ```xml
-<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
-              Target="../media/image2.png"/>
-<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
-              Target="../media/image1.png"/>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId2"
+                Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+                Target="../media/image2.png"/>
+  <Relationship Id="rId1"
+                Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+                Target="../media/image1.png"/>
+</Relationships>
 ```
