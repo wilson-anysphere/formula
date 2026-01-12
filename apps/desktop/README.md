@@ -150,6 +150,9 @@ localStorage.setItem("formula:marketplace:baseUrl", "https://marketplace.formula
 location.reload();
 ```
 
+For running a local marketplace server (and registering a publisher for test publishes), see
+`services/marketplace/README.md`.
+
 To open the built-in Marketplace panel in dev (if it isn’t already exposed in the UI), run:
 
 ```js
