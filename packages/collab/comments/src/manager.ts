@@ -460,16 +460,40 @@ export function createCommentManagerForDoc(params: (
   //
   // Normalize any foreign nested types into local Yjs instances so comment edits
   // are undoable even when the doc was hydrated by a foreign Yjs build.
-  try {
-    // Only attempt normalization when the `comments` root already exists. This
-    // avoids eagerly instantiating a Map root for pre-hydration docs (which can
-    // clobber legacy Array-backed documents by fixing the root type too early).
-    if (params.doc.share.get("comments")) {
-      normalizeCommentsRootToLocalTypes(params.doc);
+  //
+  // Important: callers may create a CommentManager before the doc has been
+  // hydrated by a provider. In that case the `comments` root may not exist yet.
+  // We must not instantiate it eagerly (it could clobber legacy Array-backed docs
+  // by fixing the root kind too early).
+  let didAttemptNormalize = false;
+  const maybeNormalize = () => {
+    if (didAttemptNormalize) return;
+    if (!params.doc.share.get("comments")) return;
+    // Only "finish" normalization once the comments root is known to be safe to
+    // normalize (either it's a local `Y.Map`, or it's an Array schema where map
+    // normalization doesn't apply).
+    //
+    // If the root exists but is a foreign `Y.Map` constructor (cross-module Yjs),
+    // normalization cannot safely insert local types into it. In that case we
+    // keep trying on subsequent transactions in case some other code replaces the
+    // root with a local constructor (e.g. a session/binder undo-scope helper).
+    try {
+      const root = getCommentsRoot(params.doc);
+      if (root.kind === "map" && !(root.map instanceof Y.Map)) return;
+      didAttemptNormalize = true;
+    } catch {
+      didAttemptNormalize = true;
+      return;
     }
-  } catch {
-    // Best-effort; never block comment usage on normalization.
-  }
+    try {
+      normalizeCommentsRootToLocalTypes(params.doc);
+    } catch {
+      // Best-effort; never block comment usage on normalization.
+    }
+  };
+  // Normalize immediately if possible, and otherwise defer until the first local
+  // comment transaction after the root exists.
+  maybeNormalize();
 
   // Be careful to preserve the caller's `this` binding.
   //
@@ -478,6 +502,9 @@ export function createCommentManagerForDoc(params: (
   // invocation. Always invoke via the originating object.
   return new CommentManager(params.doc, {
     transact: (fn) => {
+      // Ensure the comments root is normalized to local Yjs constructors (when
+      // possible) before applying the user's tracked transaction.
+      maybeNormalize();
       if ("transactLocal" in params) params.transactLocal(fn);
       else params.transact(fn);
     },
