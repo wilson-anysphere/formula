@@ -208,7 +208,7 @@ export class ContextManager {
     }
 
     throwIfAborted(signal);
-    const schema = extractSheetSchema(sheetForContext);
+    const schema = extractSheetSchema(sheetForContext, { signal });
 
     // Index once per build for now; in the app this should be cached per sheet.
     throwIfAborted(signal);

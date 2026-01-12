@@ -5,6 +5,16 @@ import { isCellEmpty, normalizeRange, parseA1Range, rangeToA1 } from "./a1.js";
 // Excel-scale ranges (1,048,576 x 16,384).
 const DEFAULT_DATA_REGION_SCAN_CELL_LIMIT = 200_000;
 
+function createAbortError(message = "Aborted") {
+  const err = new Error(message);
+  err.name = "AbortError";
+  return err;
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw createAbortError();
+}
+
 /**
  * @typedef {"empty"|"number"|"boolean"|"date"|"string"|"formula"|"mixed"} InferredType
  */
@@ -38,11 +48,14 @@ export function inferCellType(value) {
 
 /**
  * @param {unknown[]} values
+ * @param {{ signal?: AbortSignal }} [options]
  * @returns {InferredType}
  */
-export function inferColumnType(values) {
+export function inferColumnType(values, options = {}) {
+  const signal = options.signal;
   const types = new Set();
   for (const value of values) {
+    throwIfAborted(signal);
     const t = inferCellType(value);
     if (t !== "empty") types.add(t);
   }
@@ -103,10 +116,12 @@ export function isLikelyHeaderRow(rowValues, nextRowValues) {
 
 /**
  * @param {unknown[][]} values
- * @param {{ maxCells?: number }} [options]
+ * @param {{ maxCells?: number, signal?: AbortSignal }} [options]
  * @returns {{ startRow: number, startCol: number, endRow: number, endCol: number }[]}
  */
 export function detectDataRegions(values, options = {}) {
+  const signal = options.signal;
+  throwIfAborted(signal);
   const maxCellsRaw = options.maxCells;
   const maxCells =
     typeof maxCellsRaw === "number" && Number.isFinite(maxCellsRaw) && maxCellsRaw > 0
@@ -149,9 +164,11 @@ export function detectDataRegions(values, options = {}) {
   const regions = [];
 
   for (let r = 0; r < rowCount; r++) {
+    throwIfAborted(signal);
     const row = values[r];
     const rowOffset = r * colCount;
     for (let c = 0; c < colCount; c++) {
+      throwIfAborted(signal);
       const startIdx = rowOffset + c;
       if (visited[startIdx]) continue;
       visited[startIdx] = 1;
@@ -169,6 +186,7 @@ export function detectDataRegions(values, options = {}) {
       let head = 0;
 
       while (head < queue.length) {
+        throwIfAborted(signal);
         const qr = queue[head++];
         const qc = queue[head++];
         if (qr < minRow) minRow = qr;
@@ -217,7 +235,9 @@ export function detectDataRegions(values, options = {}) {
     }
   }
 
+  throwIfAborted(signal);
   regions.sort((a, b) => (a.startRow - b.startRow) || (a.startCol - b.startCol));
+  throwIfAborted(signal);
   return regions;
 }
 
@@ -233,18 +253,23 @@ export function detectDataRegions(values, options = {}) {
  *   columnCount: number,
  * }}
  */
-function analyzeRegion(sheetValues, normalized) {
-  const regionValues = slice2D(sheetValues, normalized);
+function analyzeRegion(sheetValues, normalized, signal) {
+  const regionValues = slice2D(sheetValues, normalized, signal);
   const headerRowValues = regionValues[0] ?? [];
   const nextRowValues = regionValues[1];
   const hasHeader = isLikelyHeaderRow(headerRowValues, nextRowValues);
 
   const dataStartRow = hasHeader ? 1 : 0;
   const dataRows = regionValues.slice(dataStartRow);
-  const columnCount = Math.max(...regionValues.map((row) => row.length), 0);
+  let columnCount = 0;
+  for (const row of regionValues) {
+    throwIfAborted(signal);
+    columnCount = Math.max(columnCount, row.length);
+  }
 
   const headers = [];
   for (let c = 0; c < columnCount; c++) {
+    throwIfAborted(signal);
     const raw = headerRowValues[c];
     const fallback = `Column${c + 1}`;
     headers.push(hasHeader && isHeaderCandidateValue(raw) ? String(raw).trim() : fallback);
@@ -256,12 +281,20 @@ function analyzeRegion(sheetValues, normalized) {
   const columns = [];
 
   for (let c = 0; c < columnCount; c++) {
-    const colValues = dataRows.map((row) => row[c]).filter((v) => v !== undefined);
-    const type = inferColumnType(colValues);
+    throwIfAborted(signal);
+    /** @type {unknown[]} */
+    const colValues = [];
+    for (const row of dataRows) {
+      throwIfAborted(signal);
+      const v = row?.[c];
+      if (v !== undefined) colValues.push(v);
+    }
+    const type = inferColumnType(colValues, { signal });
     inferredColumnTypes.push(type);
 
     const sampleValues = [];
     for (const v of colValues) {
+      throwIfAborted(signal);
       if (isCellEmpty(v)) continue;
       const s = String(v);
       if (!sampleValues.includes(s)) sampleValues.push(s);
@@ -327,17 +360,25 @@ function rangeContains(outer, inner) {
  *   namedRanges?: NamedRangeSchema[],
  *   tables?: { name: string, range: string }[]
  * }} sheet
+ * @param {{ signal?: AbortSignal }} [options]
  * @returns {SheetSchema}
  */
-export function extractSheetSchema(sheet) {
+export function extractSheetSchema(sheet, options = {}) {
+  const signal = options.signal;
+  throwIfAborted(signal);
   const origin = sheet && typeof sheet === "object" && sheet.origin && typeof sheet.origin === "object"
     ? {
         row: Number.isInteger(sheet.origin.row) && sheet.origin.row >= 0 ? sheet.origin.row : 0,
         col: Number.isInteger(sheet.origin.col) && sheet.origin.col >= 0 ? sheet.origin.col : 0,
       }
     : { row: 0, col: 0 };
+  throwIfAborted(signal);
   const matrixRowCount = sheet.values.length;
-  const matrixColCount = sheet.values.reduce((max, row) => Math.max(max, row?.length ?? 0), 0);
+  let matrixColCount = 0;
+  for (const row of sheet.values) {
+    throwIfAborted(signal);
+    matrixColCount = Math.max(matrixColCount, row?.length ?? 0);
+  }
 
   /**
    * Clamp a rect (0-based) to the bounds of `sheet.values`.
@@ -357,7 +398,7 @@ export function extractSheetSchema(sheet) {
     const endCol = Math.max(0, Math.min(rect.endCol, matrixColCount - 1));
     return { startRow, startCol, endRow, endCol };
   }
-  const regions = detectDataRegions(sheet.values);
+  const regions = detectDataRegions(sheet.values, { signal });
 
   /** @type {DataRegionSchema[]} */
   const dataRegions = [];
@@ -367,9 +408,10 @@ export function extractSheetSchema(sheet) {
   const implicitTableRects = [];
 
   for (let i = 0; i < regions.length; i++) {
+    throwIfAborted(signal);
     const region = regions[i];
     const normalized = normalizeRange(region);
-    const analyzed = analyzeRegion(sheet.values, normalized);
+    const analyzed = analyzeRegion(sheet.values, normalized, signal);
     const rect = {
       startRow: normalized.startRow + origin.row,
       endRow: normalized.endRow + origin.row,
@@ -404,6 +446,7 @@ export function extractSheetSchema(sheet) {
   if (sheet.tables?.length) {
     const seenRanges = new Set();
     for (const table of sheet.tables) {
+      throwIfAborted(signal);
       if (!table || typeof table !== "object") continue;
       if (typeof table.range !== "string" || typeof table.name !== "string") continue;
 
@@ -430,8 +473,10 @@ export function extractSheetSchema(sheet) {
   if (explicitDefs.length) {
     const coveredImplicit = new Set();
     for (let i = 0; i < implicitTableRects.length; i++) {
+      throwIfAborted(signal);
       const implicitRect = implicitTableRects[i];
       for (const explicit of explicitDefs) {
+        throwIfAborted(signal);
         if (rangeContains(explicit.rect, implicitRect)) {
           coveredImplicit.add(i);
           break;
@@ -441,6 +486,7 @@ export function extractSheetSchema(sheet) {
 
     const implicitUncovered = [];
     for (let i = 0; i < implicitTables.length; i++) {
+      throwIfAborted(signal);
       if (coveredImplicit.has(i)) continue;
       implicitUncovered.push({ table: implicitTables[i], rect: implicitTableRects[i] });
     }
@@ -448,12 +494,14 @@ export function extractSheetSchema(sheet) {
     // Re-number implicit regions so we don't end up with confusing gaps when some
     // regions are replaced by explicit tables.
     for (let i = 0; i < implicitUncovered.length; i++) {
+      throwIfAborted(signal);
       implicitUncovered[i].table.name = `Region${i + 1}`;
     }
 
     tableEntries.push(...implicitUncovered);
 
     for (const explicit of explicitDefs) {
+      throwIfAborted(signal);
       const localRect =
         origin.row === 0 && origin.col === 0
           ? explicit.rect
@@ -464,7 +512,7 @@ export function extractSheetSchema(sheet) {
               endCol: explicit.rect.endCol - origin.col,
             };
       const clamped = clampRectToMatrix(localRect);
-      const analyzed = clamped ? analyzeRegion(sheet.values, clamped) : { columns: [], rowCount: 0 };
+      const analyzed = clamped ? analyzeRegion(sheet.values, clamped, signal) : { columns: [], rowCount: 0 };
       tableEntries.push({
         table: {
           name: explicit.name,
@@ -476,11 +524,13 @@ export function extractSheetSchema(sheet) {
       });
     }
 
+    throwIfAborted(signal);
     tableEntries.sort((a, b) => (a.rect.startRow - b.rect.startRow) || (a.rect.startCol - b.rect.startCol));
   } else {
     tableEntries.push(...implicitTables.map((t, idx) => ({ table: t, rect: implicitTableRects[idx] })));
   }
 
+  throwIfAborted(signal);
   return {
     name: sheet.name,
     tables: tableEntries.map((t) => t.table),
@@ -493,10 +543,11 @@ export function extractSheetSchema(sheet) {
  * @param {unknown[][]} values
  * @param {{ startRow: number, startCol: number, endRow: number, endCol: number }} range
  */
-function slice2D(values, range) {
+function slice2D(values, range, signal) {
   /** @type {unknown[][]} */
   const out = [];
   for (let r = range.startRow; r <= range.endRow; r++) {
+    throwIfAborted(signal);
     const row = values[r] ?? [];
     out.push(row.slice(range.startCol, range.endCol + 1));
   }

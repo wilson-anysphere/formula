@@ -1030,7 +1030,7 @@ export class WorkbookContextBuilder {
         values: [],
         ...(extras?.namedRanges?.length ? { namedRanges: extras.namedRanges } : {}),
         ...(extras?.tables?.length ? { tables: extras.tables } : {}),
-      } as any);
+      } as any, { signal } as any);
       const summary = { sheetId, schema };
       throwIfAborted(signal);
       this.rememberSheetSummary(cacheKey, { contentVersion, summary });
@@ -1067,7 +1067,7 @@ export class WorkbookContextBuilder {
         values: [],
         ...(extras?.namedRanges?.length ? { namedRanges: extras.namedRanges } : {}),
         ...(extras?.tables?.length ? { tables: extras.tables } : {}),
-      } as any);
+      } as any, { signal } as any);
       const summary = { sheetId, analyzedRange, schema };
       throwIfAborted(signal);
       this.rememberSheetSummary(cacheKey, { contentVersion, summary });
@@ -1084,7 +1084,7 @@ export class WorkbookContextBuilder {
       origin: { row: analyzedRange.startRow, col: analyzedRange.startCol },
       ...(extras?.namedRanges?.length ? { namedRanges: extras.namedRanges } : {}),
       ...(extras?.tables?.length ? { tables: extras.tables } : {}),
-    } as any);
+    } as any, { signal } as any);
     if (stats) stats.timingsMs.schemaMs += nowMs() - schemaStart;
 
     const summary = { sheetId, analyzedRange, schema };

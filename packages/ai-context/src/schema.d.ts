@@ -35,8 +35,11 @@ export interface SheetSchema {
 }
 
 export function inferCellType(value: unknown): InferredType;
-export function inferColumnType(values: unknown[]): InferredType;
-export function detectDataRegions(values: unknown[][]): Array<{ startRow: number; startCol: number; endRow: number; endCol: number }>;
+export function inferColumnType(values: unknown[], options?: { signal?: AbortSignal }): InferredType;
+export function detectDataRegions(
+  values: unknown[][],
+  options?: { maxCells?: number; signal?: AbortSignal },
+): Array<{ startRow: number; startCol: number; endRow: number; endCol: number }>;
 export function extractSheetSchema(sheet: {
   name: string;
   values: unknown[][];
@@ -49,4 +52,4 @@ export function extractSheetSchema(sheet: {
   origin?: { row: number; col: number };
   namedRanges?: NamedRangeSchema[];
   tables?: { name: string; range: string }[];
-}): SheetSchema;
+}, options?: { signal?: AbortSignal }): SheetSchema;

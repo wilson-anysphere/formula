@@ -171,13 +171,16 @@ function matrixToTsv(matrix, options) {
  * Chunk a sheet by detected regions for a simple RAG pipeline.
  *
  * @param {{ name: string, values: unknown[][] }} sheet
- * @param {{ maxChunkRows?: number }} [options]
+ * @param {{ maxChunkRows?: number, signal?: AbortSignal }} [options]
  */
 export function chunkSheetByRegions(sheet, options = {}) {
-  const schema = extractSheetSchema(sheet);
+  const signal = options.signal;
+  throwIfAborted(signal);
+  const schema = extractSheetSchema(sheet, { signal });
   const maxChunkRows = options.maxChunkRows ?? 30;
 
   return schema.dataRegions.map((region, index) => {
+    throwIfAborted(signal);
     const parsed = parseRangeFromSchemaRange(region.range);
     const matrix = slice2D(sheet.values, parsed);
     const text = matrixToTsv(matrix, { maxRows: maxChunkRows });
@@ -224,7 +227,7 @@ export class RagIndex {
     }
 
     throwIfAborted(signal);
-    const chunks = chunkSheetByRegions(sheet);
+    const chunks = chunkSheetByRegions(sheet, { signal });
     const items = [];
     for (const chunk of chunks) {
       throwIfAborted(signal);

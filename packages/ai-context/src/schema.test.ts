@@ -160,4 +160,31 @@ describe("extractSheetSchema", () => {
     const regions = detectDataRegions(values);
     expect(regions).toEqual([{ startRow: 0, startCol: 0, endRow: 1, endCol: 1 }]);
   });
+
+  it("respects AbortSignal", () => {
+    const abortController = new AbortController();
+    abortController.abort();
+
+    let dataRegionError: unknown = null;
+    try {
+      detectDataRegions([[1]], { signal: abortController.signal });
+    } catch (error) {
+      dataRegionError = error;
+    }
+    expect(dataRegionError).toMatchObject({ name: "AbortError" });
+
+    let schemaError: unknown = null;
+    try {
+      extractSheetSchema(
+        {
+          name: "Sheet1",
+          values: [[1]],
+        },
+        { signal: abortController.signal },
+      );
+    } catch (error) {
+      schemaError = error;
+    }
+    expect(schemaError).toMatchObject({ name: "AbortError" });
+  });
 });
