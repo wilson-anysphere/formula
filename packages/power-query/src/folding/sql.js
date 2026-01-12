@@ -1049,10 +1049,9 @@ export class QueryFoldingEngine {
         if (!join) return null;
 
         const leftCols = state.columns;
-        const excludeRightKeys = new Set();
-        for (let i = 0; i < leftKeys.length; i++) {
-          if (leftKeys[i] === rightKeys[i]) excludeRightKeys.add(rightKeys[i]);
-        }
+        // Match local `Table.Join` semantics: exclude right-side key columns from
+        // the output projection even when key names differ.
+        const excludeRightKeys = new Set(rightKeys);
 
         const rightColsToInclude = rightState.columns.filter((c) => !excludeRightKeys.has(c));
 

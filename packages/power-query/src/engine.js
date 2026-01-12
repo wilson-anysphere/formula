@@ -2630,10 +2630,9 @@ export class QueryEngine {
     }
 
     // Flat (Table.Join) semantics.
-    const excludeRightKeys = new Set();
-    for (let i = 0; i < leftKeys.length; i++) {
-      if (leftKeys[i] === rightKeys[i]) excludeRightKeys.add(rightKeys[i]);
-    }
+    // Power Query `Table.Join` excludes the right-side key columns from the output,
+    // even when the key column names differ.
+    const excludeRightKeys = new Set(rightKeys);
 
     const rightColumnsToInclude = right.columns
       .map((col, idx) => ({ col, idx }))

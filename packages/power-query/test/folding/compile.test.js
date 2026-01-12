@@ -597,6 +597,35 @@ test("compile: folds merge with multi-key join conditions", () => {
   });
 });
 
+test("compile: merge excludes right join key columns from the SQL projection even when names differ", () => {
+  const folding = new QueryFoldingEngine();
+  const connection = {};
+
+  const right = {
+    id: "q_right_key_diff",
+    name: "Targets",
+    source: { type: "database", connection, query: "SELECT * FROM targets" },
+    steps: [{ id: "r1", name: "Select", operation: { type: "selectColumns", columns: ["Key", "Target"] } }],
+  };
+
+  const left = {
+    id: "q_left_key_diff",
+    name: "Sales",
+    source: { type: "database", connection, query: "SELECT * FROM sales" },
+    steps: [
+      { id: "l1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Sales"] } },
+      { id: "l2", name: "Merge", operation: { type: "merge", rightQuery: "q_right_key_diff", joinType: "left", leftKeys: ["Id"], rightKeys: ["Key"], joinMode: "flat" } },
+    ],
+  };
+
+  const plan = folding.compile(left, { queries: { q_right_key_diff: right } });
+  assert.deepEqual(plan, {
+    type: "sql",
+    sql: 'SELECT l."Id" AS "Id", l."Sales" AS "Sales", r."Target" AS "Target" FROM (SELECT t."Id", t."Sales" FROM (SELECT * FROM sales) AS t) AS l LEFT JOIN (SELECT t."Key", t."Target" FROM (SELECT * FROM targets) AS t) AS r ON l."Id" IS NOT DISTINCT FROM r."Key"',
+    params: [],
+  });
+});
+
 test("compile: merge with a non-default comparer breaks folding into a hybrid plan", () => {
   const folding = new QueryFoldingEngine();
   const connection = {};

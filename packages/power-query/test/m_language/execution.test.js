@@ -543,6 +543,55 @@ in
   ]);
 });
 
+test("m_language execution: Table.Join excludes right join key columns (even when names differ)", async () => {
+  const left = compileMToQuery(
+    `
+let
+  Source = Range.FromValues({
+    {"Id", "Sales"},
+    {1, 100},
+    {2, 200}
+  })
+in
+  Source
+`,
+    { id: "q_left_key_diff", name: "Left" },
+  );
+
+  const right = compileMToQuery(
+    `
+let
+  Source = Range.FromValues({
+    {"Key", "Target"},
+    {2, "B"}
+  })
+in
+  Source
+`,
+    { id: "q_right_key_diff", name: "Right" },
+  );
+
+  const joinQuery = compileMToQuery(
+    `
+let
+  Left = Query.Reference("q_left_key_diff"),
+  Right = Query.Reference("q_right_key_diff"),
+  #"Merged Queries" = Table.Join(Left, {"Id"}, Right, {"Key"}, JoinKind.LeftOuter)
+in
+  #"Merged Queries"
+`,
+    { id: "q_join_key_diff", name: "Join Key Diff" },
+  );
+
+  const engine = new QueryEngine();
+  const result = await engine.executeQuery(joinQuery, { queries: { q_left_key_diff: left, q_right_key_diff: right } }, {});
+  assert.deepEqual(result.toGrid(), [
+    ["Id", "Sales", "Target"],
+    [1, 100, null],
+    [2, 200, "B"],
+  ]);
+});
+
 test("m_language execution: Table.Join accepts numeric join kind constants", async () => {
   const sales = compileMToQuery(
     `
