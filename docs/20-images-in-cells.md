@@ -387,7 +387,11 @@ Formula’s current understanding (implemented in `crates/formula-xlsx/src/rich_
      test-only richData fixtures). Treat `vm` as opaque and preserve it.
 2. `xl/metadata.xml` contains `<valueMetadata>` with a list of `<bk>` records; `vm` selects a `<bk>`.
 3. That `<bk>` contains `<rc t="…" v="…"/>` where:
-    - `t` is the **1-based** index of `"XLRICHVALUE"` inside `<metadataTypes>`.
+    - `t` selects `"XLRICHVALUE"` inside `<metadataTypes>`.
+      - In the Excel-generated fixtures in this repo, `t` is **1-based** (`t="1"` when
+        `<metadataTypes>` has a single `<metadataType name="XLRICHVALUE"/>`).
+      - Other workbooks/tests have been observed to use **0-based** indexing here; treat `t` as ambiguous
+        and resolve best-effort.
     - `v` is **0-based** (in this schema it indexes into `<futureMetadata name="XLRICHVALUE">`’s `<bk>` list; other schemas may use `v` differently).
 4. That future-metadata `<bk>` contains an extension element (commonly `xlrd:rvb`) with an `i="…"`
     attribute, which is a **0-based** index into the rich value store part (either `xl/richData/richValue*.xml`

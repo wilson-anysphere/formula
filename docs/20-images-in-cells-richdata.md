@@ -685,7 +685,7 @@ Current Formula behavior:
 
 | Index | Location | Base | Meaning |
 |------:|----------|------|---------|
-| `t` | `<valueMetadata><bk><rc t="…">` | 1-based | index into `<metadataTypes>` (selects `metadataType name="XLRICHVALUE"`) |
+| `t` | `<valueMetadata><bk><rc t="…">` | usually 1-based (0-based also observed) | index into `<metadataTypes>` (selects `metadataType name="XLRICHVALUE"`) |
 | `v` | `<valueMetadata><bk><rc v="…">` | 0-based | often an index into `<futureMetadata name="XLRICHVALUE"><bk>` (if present); other schemas may use `v` differently (including directly referencing the rich value index). |
 | `i` | `<xlrd:rvb i="…"/>` | 0-based | rich value index into the rich value instance table (e.g. `xl/richData/richValue*.xml` or `xl/richData/rdrichvalue.xml`, depending on naming scheme) |
 
