@@ -10,6 +10,7 @@ formula-xlsx = { path = "../formula-xlsx" }
 formula-xls = { path = "../formula-xls" }
 formula-xlsb = { path = "../formula-xlsb" }
 thiserror = "1.0"
+zip = { version = "2.1", default-features = false }
 
 [dev-dependencies]
 tempfile = "3.10"
