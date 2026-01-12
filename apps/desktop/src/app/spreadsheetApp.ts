@@ -1746,6 +1746,8 @@ export class SpreadsheetApp {
       this.commentsDocUpdateListener = null;
     }
 
+    this.conflictUi?.destroy();
+    this.conflictUi = null;
     this.structuralConflictUi?.destroy();
     this.structuralConflictUi = null;
     this.pendingFormulaConflicts = [];
@@ -1777,7 +1779,6 @@ export class SpreadsheetApp {
     }
     this.outlineButtons.clear();
     this.chartElements.clear();
-    this.conflictUi = null;
     this.conflictUiContainer = null;
     this.root.replaceChildren();
   }

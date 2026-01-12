@@ -34,6 +34,13 @@ export class ConflictUiController {
     this.render();
   }
 
+  destroy() {
+    this.conflicts = [];
+    this.activeConflictId = null;
+    this._toastEl.remove();
+    this._dialogEl.remove();
+  }
+
   /**
    * @param {any} conflict
    */
