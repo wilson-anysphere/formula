@@ -143,16 +143,24 @@ make network requests directly. Panels should communicate with extension code vi
   - key prefix: `formula.extensionHost.storage.`
   - key per extension: `formula.extensionHost.storage.<extensionId>`
 
+**Panel layout seed data (contributed panels):**
+
+- Stored in a synchronous localStorage “seed store” so contributed panel ids can be registered *before* layout
+  deserialization on startup:
+  - `localStorage["formula.extensions.contributedPanels.v1"]`
+
 To “reset” extensions in dev, clear:
 
 - IndexedDB database `formula.webExtensions`
 - localStorage keys `formula.extensionHost.permissions` and `formula.extensionHost.storage.*`
+- localStorage key `formula.extensions.contributedPanels.v1` (optional; only affects panel layout persistence)
 
 You can also do a quick reset from the console:
 
 ```js
 indexedDB.deleteDatabase("formula.webExtensions");
 localStorage.removeItem("formula.extensionHost.permissions");
+localStorage.removeItem("formula.extensions.contributedPanels.v1");
 // (Optional) clear per-extension storage keys under formula.extensionHost.storage.*
 ```
 
@@ -161,6 +169,7 @@ localStorage.removeItem("formula.extensionHost.permissions");
 - Use WebView DevTools to inspect:
   - **Application → IndexedDB →** `formula.webExtensions` (installed packages + versions)
   - **Application → Local Storage →** `formula.extensionHost.*` (permissions + extension storage)
+  - **Application → Local Storage →** `formula.extensions.contributedPanels.v1` (contributed panel seed store)
   - **Sources → Workers** to debug the extension worker runtime (`extension-worker.mjs`)
 
 ### Marketplace base URL (Desktop)
