@@ -184,17 +184,91 @@ fn parse_rich_value_store(pkg: &XlsxPackage) -> Result<Vec<RichValueScalarRecord
                 .or_else(|| rv.attribute("t"))
                 .and_then(|v| v.trim().parse::<u32>().ok());
 
-            let raw_values = rv
-                .children()
+            // Rich values store scalar payloads in `<v>` nodes, typically matching the ordering of
+            // members declared in `richValueStructure.xml`. Some producers wrap values in
+            // additional container nodes, so scan descendants but avoid crossing into nested `<rv>`
+            // records.
+            let mut raw_values: Vec<String> = Vec::new();
+            for v in rv
+                .descendants()
                 .filter(|n| n.is_element() && n.tag_name().name() == "v")
-                .map(|v| v.text().unwrap_or("").trim().to_string())
-                .collect();
+            {
+                if v.ancestors()
+                    .filter(|n| n.is_element())
+                    .find(|n| n.tag_name().name() == "rv")
+                    .is_some_and(|closest_rv| closest_rv != rv)
+                {
+                    continue;
+                }
+
+                raw_values.push(v.text().unwrap_or("").to_string());
+            }
 
             out.push(RichValueScalarRecord { type_id, raw_values });
         }
     }
 
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{Cursor, Write};
+
+    use zip::write::FileOptions;
+
+    use super::parse_rich_value_store;
+
+    #[test]
+    fn rich_value_store_collects_nested_v_elements_in_document_order() {
+        let rich_value_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <values>
+    <rv type="0">
+      <wrapper><v>one</v></wrapper>
+      <v>two</v>
+    </rv>
+    <rv type="1"><v>three</v></rv>
+  </values>
+</rvData>"#;
+
+        // Also include a second part to ensure multi-part concatenation is honored.
+        let rich_value10_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <values>
+    <rv type="2"><v>four</v></rv>
+  </values>
+</rvData>"#;
+
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options =
+            FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+        zip.start_file("xl/richData/richValue.xml", options).unwrap();
+        zip.write_all(rich_value_xml).unwrap();
+
+        // Use `richValue10.xml` to validate numeric sorting (10 should come after 0).
+        zip.start_file("xl/richData/richValue10.xml", options).unwrap();
+        zip.write_all(rich_value10_xml).unwrap();
+
+        let bytes = zip.finish().unwrap().into_inner();
+        let pkg = crate::XlsxPackage::from_bytes(&bytes).unwrap();
+
+        let parsed = parse_rich_value_store(&pkg).unwrap();
+        let got: Vec<(Option<u32>, Vec<String>)> = parsed
+            .into_iter()
+            .map(|rv| (rv.type_id, rv.raw_values))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (Some(0), vec!["one".to_string(), "two".to_string()]),
+                (Some(1), vec!["three".to_string()]),
+                (Some(2), vec!["four".to_string()]),
+            ]
+        );
+    }
 }
 
 fn parse_rich_value_types(
