@@ -7108,6 +7108,8 @@ fn bytecode_expr_is_eligible_inner(
             | bytecode::ast::Function::RoundDown
             | bytecode::ast::Function::Mod
             | bytecode::ast::Function::Sign
+            | bytecode::ast::Function::Db
+            | bytecode::ast::Function::Vdb
             | bytecode::ast::Function::Concat
             | bytecode::ast::Function::Rand
             | bytecode::ast::Function::RandBetween

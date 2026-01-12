@@ -412,6 +412,8 @@ fn eval_ast_inner(
                     | Function::RoundDown
                     | Function::Mod
                     | Function::Sign
+                    | Function::Db
+                    | Function::Vdb
                     | Function::Concat
                     | Function::Rand
                     | Function::RandBetween
@@ -918,6 +920,8 @@ pub fn call_function(
         Function::RoundDown => fn_rounddown(args),
         Function::Mod => fn_mod(args),
         Function::Sign => fn_sign(args),
+        Function::Db => fn_db(args),
+        Function::Vdb => fn_vdb(args),
         Function::Concat => fn_concat(args),
         Function::Rand => fn_rand(args, base),
         Function::RandBetween => fn_randbetween(args, base),
@@ -1058,6 +1062,96 @@ fn fn_now(args: &[Value]) -> Value {
     let seconds = now.time().num_seconds_from_midnight() as f64
         + (now.time().nanosecond() as f64 / 1_000_000_000.0);
     Value::Number(base + seconds / 86_400.0)
+}
+
+fn fn_db(args: &[Value]) -> Value {
+    if args.len() != 4 && args.len() != 5 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let cost = match coerce_to_number(&args[0]) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    let salvage = match coerce_to_number(&args[1]) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    let life = match coerce_to_number(&args[2]) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    let period = match coerce_to_number(&args[3]) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    let month = if args.len() == 5 {
+        match coerce_to_number(&args[4]) {
+            Ok(n) => Some(n),
+            Err(e) => return Value::Error(e),
+        }
+    } else {
+        None
+    };
+
+    match crate::functions::financial::db(cost, salvage, life, period, month) {
+        Ok(n) => Value::Number(n),
+        Err(e) => Value::Error(match e {
+            crate::error::ExcelError::Div0 => ErrorKind::Div0,
+            crate::error::ExcelError::Value => ErrorKind::Value,
+            crate::error::ExcelError::Num => ErrorKind::Num,
+        }),
+    }
+}
+
+fn fn_vdb(args: &[Value]) -> Value {
+    if args.len() < 5 || args.len() > 7 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let cost = match coerce_to_number(&args[0]) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    let salvage = match coerce_to_number(&args[1]) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    let life = match coerce_to_number(&args[2]) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    let start = match coerce_to_number(&args[3]) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    let end = match coerce_to_number(&args[4]) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    let factor = match args.get(5) {
+        None => None,
+        Some(v) => match coerce_to_number(v) {
+            Ok(n) => Some(n),
+            Err(e) => return Value::Error(e),
+        },
+    };
+    let no_switch = match args.get(6) {
+        None => None,
+        Some(v) => match coerce_to_number(v) {
+            Ok(n) => Some(n),
+            Err(e) => return Value::Error(e),
+        },
+    };
+
+    match crate::functions::financial::vdb(cost, salvage, life, start, end, factor, no_switch) {
+        Ok(n) => Value::Number(n),
+        Err(e) => Value::Error(match e {
+            crate::error::ExcelError::Div0 => ErrorKind::Div0,
+            crate::error::ExcelError::Value => ErrorKind::Value,
+            crate::error::ExcelError::Num => ErrorKind::Num,
+        }),
+    }
 }
 
 fn fn_abs(args: &[Value]) -> Value {

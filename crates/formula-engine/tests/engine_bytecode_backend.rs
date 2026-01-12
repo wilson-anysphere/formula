@@ -1312,6 +1312,42 @@ fn bytecode_backend_matches_ast_for_scalar_information_functions() {
 }
 
 #[test]
+fn bytecode_backend_matches_ast_for_depreciation_functions() {
+    let mut engine = Engine::new();
+
+    engine
+        .set_cell_formula("Sheet1", "A1", "=DB(10000,1000,5,1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=DB(10000,1000,5,6,7)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A3", "=VDB(2400,300,10,0,0.5)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A4", "=VDB(2400,0,10,6,10,2,FALSE)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A5", "=VDB(2400,0,10,6,10,2,TRUE)")
+        .unwrap();
+
+    // Ensure we're exercising the bytecode path for all formulas.
+    assert_eq!(engine.bytecode_program_count(), 5);
+
+    engine.recalculate_single_threaded();
+
+    for (formula, cell) in [
+        ("=DB(10000,1000,5,1)", "A1"),
+        ("=DB(10000,1000,5,6,7)", "A2"),
+        ("=VDB(2400,300,10,0,0.5)", "A3"),
+        ("=VDB(2400,0,10,6,10,2,FALSE)", "A4"),
+        ("=VDB(2400,0,10,6,10,2,TRUE)", "A5"),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_concat_operator() {
     let mut engine = Engine::new();
 
