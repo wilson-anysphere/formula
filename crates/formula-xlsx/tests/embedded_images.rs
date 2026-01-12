@@ -399,6 +399,69 @@ fn preserves_rich_value_rel_placeholders_to_avoid_index_shifts() {
 }
 
 #[test]
+fn extracts_when_rich_value_relationship_index_is_one_based() {
+    // Some producers have been observed to encode the relationship index in `richValue.xml` as
+    // 1-based (so `1` refers to the first `<rel>` entry in `richValueRel.xml`).
+    let png_bytes = STANDARD
+        .decode(PNG_1X1_TRANSPARENT_B64)
+        .expect("decode png base64");
+
+    let mut workbook = Workbook::new();
+    let worksheet = workbook.add_worksheet();
+    worksheet.write_number(1, 1, 1.0).unwrap(); // B2
+    let xlsx_bytes = workbook.save_to_buffer().unwrap();
+
+    let mut pkg = XlsxPackage::from_bytes(&xlsx_bytes).unwrap();
+
+    // Patch the worksheet cell to include the `vm` attribute expected by Excel's rich value schema.
+    let sheet_part = "xl/worksheets/sheet1.xml";
+    let mut sheet_xml = String::from_utf8(pkg.part(sheet_part).unwrap().to_vec()).unwrap();
+    sheet_xml = sheet_xml.replacen(r#"r="B2""#, r#"r="B2" vm="1""#, 1);
+    pkg.set_part(sheet_part, sheet_xml.into_bytes());
+
+    // Force the extractor down the `richValue.xml` path (no rdrichvalue.xml).
+    pkg.set_part("xl/metadata.xml", METADATA_XML.as_bytes().to_vec());
+    pkg.set_part(
+        "xl/richData/richValue.xml",
+        RICH_VALUE_XML_REL_INDEX_1.as_bytes().to_vec(),
+    );
+    pkg.set_part(
+        "xl/richData/richValueRel.xml",
+        RICH_VALUE_REL_XML.as_bytes().to_vec(),
+    );
+    pkg.set_part(
+        "xl/richData/_rels/richValueRel.xml.rels",
+        RICH_VALUE_REL_RELS_XML.as_bytes().to_vec(),
+    );
+    pkg.set_part("xl/media/image1.png", png_bytes.clone());
+
+    // Wire up workbook relationships for the parts we need.
+    let rels_part = "xl/_rels/workbook.xml.rels";
+    let mut rels_xml = String::from_utf8(pkg.part(rels_part).unwrap().to_vec()).unwrap();
+    let insert_idx = rels_xml
+        .rfind("</Relationships>")
+        .expect("closing Relationships tag");
+    rels_xml.insert_str(
+        insert_idx,
+        r#"
+  <Relationship Id="rId1000" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata" Target="metadata.xml"/>
+  <Relationship Id="rId1001" Type="http://schemas.microsoft.com/office/2017/06/relationships/richValue" Target="richData/richValue.xml"/>
+  <Relationship Id="rId1002" Type="http://schemas.microsoft.com/office/2022/10/relationships/richValueRel" Target="richData/richValueRel.xml"/>
+"#,
+    );
+    pkg.set_part(rels_part, rels_xml.into_bytes());
+
+    // Round-trip through ZIP writer to ensure the extractor works on a real package.
+    let bytes = pkg.write_to_bytes().unwrap();
+    let pkg = XlsxPackage::from_bytes(&bytes).unwrap();
+
+    let images = extract_embedded_images(&pkg).unwrap();
+    assert_eq!(images.len(), 1);
+    assert_eq!(images[0].image_target, "xl/media/image1.png");
+    assert_eq!(images[0].bytes, png_bytes);
+}
+
+#[test]
 fn extracts_from_multi_part_rich_value_tables() {
     // Some workbooks split the rich value table across multiple `richValue*.xml` parts. Ensure we
     // concatenate and index them correctly.

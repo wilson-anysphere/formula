@@ -62,6 +62,124 @@ struct LocalImageStructurePositions {
     text: Option<usize>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RelationshipIndexBase {
+    ZeroBased,
+    OneBased,
+    Unknown,
+}
+
+fn infer_relationship_index_base(
+    rich_values: &HashMap<u32, RichValueImage>,
+    rich_value_rel_indices: &[Option<usize>],
+    rel_ids: &[String],
+    rid_to_target: &HashMap<String, String>,
+) -> RelationshipIndexBase {
+    let rel_count = rel_ids.len();
+    if rel_count == 0 {
+        return RelationshipIndexBase::Unknown;
+    }
+    let Ok(rel_count_u32) = u32::try_from(rel_count) else {
+        return RelationshipIndexBase::Unknown;
+    };
+
+    let mut values: Vec<u32> = Vec::new();
+    values.extend(rich_values.values().map(|rv| rv.local_image_identifier));
+    values.extend(
+        rich_value_rel_indices
+            .iter()
+            .filter_map(|v| (*v).and_then(|v| u32::try_from(v).ok())),
+    );
+    if values.is_empty() {
+        return RelationshipIndexBase::Unknown;
+    }
+
+    let zero_possible = values.iter().all(|v| *v < rel_count_u32);
+    let one_possible = values
+        .iter()
+        .all(|v| *v >= 1 && *v <= rel_count_u32);
+
+    match (zero_possible, one_possible) {
+        (true, false) => RelationshipIndexBase::ZeroBased,
+        (false, true) => RelationshipIndexBase::OneBased,
+        (false, false) => RelationshipIndexBase::Unknown,
+        (true, true) => {
+            // Ambiguous: prefer the interpretation that yields more resolved targets.
+            let score = |base: RelationshipIndexBase| -> usize {
+                values
+                    .iter()
+                    .filter(|v| {
+                        resolve_image_target_for_local_image_identifier(
+                            **v,
+                            base,
+                            rel_ids,
+                            rid_to_target,
+                        )
+                        .is_some()
+                    })
+                    .count()
+            };
+
+            let score_zero = score(RelationshipIndexBase::ZeroBased);
+            let score_one = score(RelationshipIndexBase::OneBased);
+
+            match score_zero.cmp(&score_one) {
+                std::cmp::Ordering::Greater => RelationshipIndexBase::ZeroBased,
+                std::cmp::Ordering::Less => RelationshipIndexBase::OneBased,
+                std::cmp::Ordering::Equal => {
+                    if values.iter().any(|v| *v == 0) {
+                        RelationshipIndexBase::ZeroBased
+                    } else if values.iter().any(|v| *v == rel_count_u32) {
+                        RelationshipIndexBase::OneBased
+                    } else {
+                        RelationshipIndexBase::Unknown
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn resolve_image_target_for_local_image_identifier<'a>(
+    local_image_identifier: u32,
+    base: RelationshipIndexBase,
+    rel_ids: &'a [String],
+    rid_to_target: &'a HashMap<String, String>,
+) -> Option<&'a String> {
+    let mut candidates: Vec<u32> = Vec::with_capacity(2);
+    match base {
+        RelationshipIndexBase::ZeroBased => candidates.push(local_image_identifier),
+        RelationshipIndexBase::OneBased => {
+            candidates.push(local_image_identifier.checked_sub(1)?);
+        }
+        RelationshipIndexBase::Unknown => {
+            candidates.push(local_image_identifier);
+            if let Some(v) = local_image_identifier.checked_sub(1) {
+                if v != local_image_identifier {
+                    candidates.push(v);
+                }
+            }
+        }
+    }
+
+    for idx in candidates {
+        let Ok(idx) = usize::try_from(idx) else {
+            continue;
+        };
+        let Some(rid) = rel_ids.get(idx) else {
+            continue;
+        };
+        if rid.is_empty() {
+            continue;
+        }
+        if let Some(target) = rid_to_target.get(rid) {
+            return Some(target);
+        }
+    }
+
+    None
+}
+
 /// Extract embedded images-in-cells ("Place in Cell") using the `vm` + `metadata.xml` + `xl/richData/*`
 /// schema.
 ///
@@ -300,6 +418,13 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
         None => HashMap::new(),
     };
 
+    let rel_index_base = infer_relationship_index_base(
+        &rich_values,
+        &rich_value_rel_indices,
+        &local_image_identifier_to_rid,
+        &rid_to_target,
+    );
+
     let worksheet_parts: Vec<String> = match pkg.worksheet_parts() {
         Ok(infos) => infos.into_iter().map(|info| info.worksheet_part).collect(),
         Err(XlsxError::MissingPart(_))
@@ -375,12 +500,12 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
                 continue;
             };
 
-            let rid = match local_image_identifier_to_rid.get(local_image_identifier as usize) {
-                Some(rid) => rid,
-                None => continue,
-            };
-
-            let target = match rid_to_target.get(rid) {
+            let target = match resolve_image_target_for_local_image_identifier(
+                local_image_identifier,
+                rel_index_base,
+                &local_image_identifier_to_rid,
+                &rid_to_target,
+            ) {
                 Some(target) => target,
                 None => continue,
             };
