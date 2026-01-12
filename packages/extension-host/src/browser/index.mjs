@@ -2930,6 +2930,32 @@ class BrowserExtensionHost {
       const size = getRangeSize(coords);
       if (!size || size.cellCount <= DEFAULT_EXTENSION_RANGE_CELL_LIMIT) return data;
 
+      // Some hosts may emit very large selections but still attach a small (already truncated)
+      // value/formula matrix (e.g. a 1×1 preview cell). Treat those payloads as safe to forward
+      // so extensions can receive the limited data, and so taint tracking can reflect what was
+      // actually delivered.
+      //
+      // We intentionally avoid computing the full logical selection size (it can be millions of
+      // cells); instead, we bound based on the *delivered* matrix sizes, with early-exit to avoid
+      // scanning huge arrays.
+      const matrixCellCount = (matrix) => {
+        if (!Array.isArray(matrix)) return 0;
+        let total = 0;
+        for (const row of matrix) {
+          if (!Array.isArray(row) || row.length === 0) continue;
+          total += row.length;
+          if (total > DEFAULT_EXTENSION_RANGE_CELL_LIMIT) return total;
+        }
+        return total;
+      };
+
+      const deliveredValuesCells = matrixCellCount(selection.values);
+      const deliveredFormulasCells = matrixCellCount(selection.formulas);
+      const deliveredCells = Math.max(deliveredValuesCells, deliveredFormulasCells);
+      if (deliveredCells > 0 && deliveredCells <= DEFAULT_EXTENSION_RANGE_CELL_LIMIT) {
+        return data;
+      }
+
       return {
         ...(data ?? {}),
         selection: {
