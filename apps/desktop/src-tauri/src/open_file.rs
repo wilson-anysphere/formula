@@ -41,6 +41,12 @@ fn normalize_open_file_candidate(arg: &str, cwd: Option<&Path>) -> Option<PathBu
         return None;
     }
 
+    // Deep links (e.g. OAuth redirects) are delivered via argv on some platforms. Ignore them
+    // here so we don't attempt to treat `formula://...` as a filesystem path.
+    if arg.to_ascii_lowercase().starts_with("formula:") {
+        return None;
+    }
+
     // Finder launches can include args like `-psn_0_12345`. Tauri can also be passed flags.
     if arg.starts_with('-') {
         return None;
@@ -116,6 +122,16 @@ mod tests {
     }
 
     #[test]
+    fn ignores_formula_deep_links() {
+        let argv = vec![
+            "formula-desktop".to_string(),
+            "formula://oauth/callback?code=abc".to_string(),
+        ];
+        let paths = extract_open_file_paths_from_argv(&argv, None);
+        assert!(paths.is_empty());
+    }
+
+    #[test]
     fn resolves_relative_paths_against_cwd_and_filters_extensions_case_insensitively() {
         let dir = tempdir().unwrap();
         let cwd = dir.path();
@@ -158,7 +174,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let cwd = dir.path();
 
-        let fixture_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/xlsx/basic/basic.xlsx");
+        let fixture_path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/xlsx/basic/basic.xlsx");
         let renamed = cwd.join("basic.bin");
         std::fs::copy(&fixture_path, &renamed).expect("copy fixture");
 
@@ -172,7 +189,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let cwd = dir.path();
 
-        let fixture_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/xlsx/basic/basic.xlsx");
+        let fixture_path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/xlsx/basic/basic.xlsx");
         let renamed = cwd.join("basic");
         std::fs::copy(&fixture_path, &renamed).expect("copy fixture");
 
