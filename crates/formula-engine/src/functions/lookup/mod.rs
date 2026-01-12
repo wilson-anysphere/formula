@@ -272,11 +272,10 @@ fn lookup_cmp(a: &Value, b: &Value) -> Ordering {
             Value::Bool(_) => 2,
             Value::Blank => 3,
             Value::Error(_) => 4,
-            Value::Reference(_)
-            | Value::ReferenceUnion(_)
-            | Value::Array(_)
-            | Value::Lambda(_)
-            | Value::Spill { .. } => 5,
+            // Non-scalar values aren't comparable for lookup ordering; keep comparisons
+            // deterministic by sorting them after all scalar types. Using a catch-all here avoids
+            // build breakages if new `Value` variants are introduced.
+            _ => 5,
         }
     }
 
