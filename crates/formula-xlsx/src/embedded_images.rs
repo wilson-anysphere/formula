@@ -11,12 +11,16 @@ use crate::path;
 
 const REL_TYPE_SHEET_METADATA: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata";
+const REL_TYPE_METADATA: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata";
 const REL_TYPE_RD_RICH_VALUE: &str =
     "http://schemas.microsoft.com/office/2017/06/relationships/rdRichValue";
 const REL_TYPE_RD_RICH_VALUE_STRUCTURE: &str =
     "http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueStructure";
 const REL_TYPE_RICH_VALUE_REL: &str =
     "http://schemas.microsoft.com/office/2022/10/relationships/richValueRel";
+const REL_TYPE_RICH_VALUE_REL_2017: &str =
+    "http://schemas.microsoft.com/office/2017/06/relationships/richValueRel";
 const REL_TYPE_IMAGE: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
 
@@ -70,7 +74,10 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
     let mut rich_value_rel_part: Option<String> = None;
 
     for rel in relationships {
-        if metadata_part.is_none() && rel.type_uri.eq_ignore_ascii_case(REL_TYPE_SHEET_METADATA) {
+        if metadata_part.is_none()
+            && (rel.type_uri.eq_ignore_ascii_case(REL_TYPE_SHEET_METADATA)
+                || rel.type_uri.eq_ignore_ascii_case(REL_TYPE_METADATA))
+        {
             let target = path::resolve_target("xl/workbook.xml", &rel.target);
             metadata_part = Some(target);
         } else if rdrichvalue_part.is_none() && rel.type_uri.eq_ignore_ascii_case(REL_TYPE_RD_RICH_VALUE)
@@ -85,11 +92,28 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
             let target = path::resolve_target("xl/workbook.xml", &rel.target);
             rdrichvaluestructure_part = Some(target);
         } else if rich_value_rel_part.is_none()
-            && rel.type_uri.eq_ignore_ascii_case(REL_TYPE_RICH_VALUE_REL)
+            && (rel.type_uri.eq_ignore_ascii_case(REL_TYPE_RICH_VALUE_REL)
+                || rel.type_uri.eq_ignore_ascii_case(REL_TYPE_RICH_VALUE_REL_2017))
         {
             let target = path::resolve_target("xl/workbook.xml", &rel.target);
             rich_value_rel_part = Some(target);
         }
+    }
+
+    // Fallback to canonical part names when the workbook relationship graph doesn't include the
+    // expected rich-data relationships (best-effort).
+    if metadata_part.is_none() && pkg.part("xl/metadata.xml").is_some() {
+        metadata_part = Some("xl/metadata.xml".to_string());
+    }
+    if rdrichvalue_part.is_none() && pkg.part("xl/richData/rdrichvalue.xml").is_some() {
+        rdrichvalue_part = Some("xl/richData/rdrichvalue.xml".to_string());
+    }
+    if rdrichvaluestructure_part.is_none() && pkg.part("xl/richData/rdrichvaluestructure.xml").is_some()
+    {
+        rdrichvaluestructure_part = Some("xl/richData/rdrichvaluestructure.xml".to_string());
+    }
+    if rich_value_rel_part.is_none() && pkg.part("xl/richData/richValueRel.xml").is_some() {
+        rich_value_rel_part = Some("xl/richData/richValueRel.xml".to_string());
     }
 
     let vm_to_rich_value_index = match metadata_part
