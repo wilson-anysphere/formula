@@ -1697,22 +1697,13 @@ if (
       queueMicrotask(() => {
         try {
           body.replaceChildren();
-          body.style.display = "flex";
-          body.style.flexDirection = "column";
-          body.style.gap = "12px";
-          body.style.padding = "8px";
-          body.style.overflow = "auto";
+          body.classList.add("macros-panel");
 
           const recorderPanel = document.createElement("div");
-          recorderPanel.style.display = "flex";
-          recorderPanel.style.flexDirection = "column";
-          recorderPanel.style.gap = "8px";
-          recorderPanel.style.paddingBottom = "12px";
-          recorderPanel.style.borderBottom = "1px solid var(--panel-border)";
+          recorderPanel.className = "macros-panel__recorder";
 
           const runnerPanel = document.createElement("div");
-          runnerPanel.style.flex = "1";
-          runnerPanel.style.minHeight = "0";
+          runnerPanel.className = "macros-panel__runner";
 
           body.appendChild(recorderPanel);
           body.appendChild(runnerPanel);
@@ -1816,20 +1807,17 @@ if (
                 },
               });
 
-          const title = document.createElement("div");
-          title.textContent = "Macro Recorder";
-          title.style.fontWeight = "600";
+           const title = document.createElement("div");
+           title.textContent = "Macro Recorder";
+          title.className = "macros-panel__title";
           recorderPanel.appendChild(title);
 
           const status = document.createElement("div");
-          status.style.fontSize = "12px";
-          status.style.color = "var(--text-secondary)";
+          status.className = "macros-panel__status";
           recorderPanel.appendChild(status);
 
           const buttons = document.createElement("div");
-          buttons.style.display = "flex";
-          buttons.style.flexWrap = "wrap";
-          buttons.style.gap = "8px";
+          buttons.className = "macros-panel__buttons";
           recorderPanel.appendChild(buttons);
 
           const startButton = document.createElement("button");
@@ -1863,18 +1851,11 @@ if (
           buttons.appendChild(saveButton);
 
           const meta = document.createElement("div");
-          meta.style.fontSize = "12px";
-          meta.style.color = "var(--text-secondary)";
+          meta.className = "macros-panel__meta";
           recorderPanel.appendChild(meta);
 
           const preview = document.createElement("pre");
-          preview.style.whiteSpace = "pre-wrap";
-          preview.style.margin = "0";
-          preview.style.padding = "8px";
-          preview.style.border = "1px solid var(--panel-border)";
-          preview.style.borderRadius = "6px";
-          preview.style.maxHeight = "240px";
-          preview.style.overflow = "auto";
+          preview.className = "macros-panel__preview";
           recorderPanel.appendChild(preview);
 
           const copyText = async (text: string) => {
@@ -1883,8 +1864,7 @@ if (
             } catch {
               const textarea = document.createElement("textarea");
               textarea.value = text;
-              textarea.style.position = "fixed";
-              textarea.style.left = "-9999px";
+              textarea.className = "macros-panel__clipboard-textarea";
               document.body.appendChild(textarea);
               textarea.select();
               document.execCommand("copy");
