@@ -102,6 +102,40 @@ fn forms_normalized_data_pads_stream_to_1023_byte_blocks() {
 }
 
 #[test]
+fn forms_normalized_data_does_not_pad_when_stream_is_exact_multiple_of_1023() {
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create compound file");
+
+    {
+        let project_bytes = build_project_stream_for_designer_modules(&["UserForm1"]);
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(&project_bytes).expect("write PROJECT");
+    }
+    ole.create_storage("VBA").expect("create VBA storage");
+    {
+        let dir_container = build_dir_stream(&[("UserForm1", "UserForm1")]);
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+
+    ole.create_storage("UserForm1")
+        .expect("create designer storage");
+    {
+        let mut s = ole
+            .create_stream("UserForm1/Payload")
+            .expect("create stream");
+        let bytes = vec![b'A'; 1023];
+        s.write_all(&bytes).expect("write stream bytes");
+    }
+
+    let vba_project_bin = ole.into_inner().into_inner();
+    let normalized = forms_normalized_data(&vba_project_bin).expect("compute FormsNormalizedData");
+
+    assert_eq!(normalized.len(), 1023);
+    assert_eq!(normalized, vec![b'A'; 1023]);
+}
+
+#[test]
 fn forms_normalized_data_traverses_nested_storages_in_storage_element_order() {
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create compound file");
