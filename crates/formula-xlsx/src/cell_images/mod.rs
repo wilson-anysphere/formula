@@ -145,7 +145,6 @@ fn parse_cell_images_part(
     let doc = Document::parse(xml)?;
 
     let mut images = Vec::new();
-
     // Excel emits DrawingML `<xdr:pic>` payloads for in-cell images, which reference the media via
     // `<a:blip r:embed="…">`.
     for pic in doc

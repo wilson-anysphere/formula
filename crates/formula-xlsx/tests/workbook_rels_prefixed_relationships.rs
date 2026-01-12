@@ -104,7 +104,7 @@ fn build_prefixed_workbook_rels_xlsx_missing_styles_relationship() -> Vec<u8> {
 
     let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <rel:Relationships xmlns:rel="http://schemas.openxmlformats.org/package/2006/relationships">
-  <rel:Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/customSheet.xml"/>
+  <rel:Relationship Id = "rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/customSheet.xml"/>
 </rel:Relationships>"#;
 
     let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>

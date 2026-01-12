@@ -4171,23 +4171,81 @@ fn next_relationship_id<'a>(ids: impl Iterator<Item = &'a str>) -> u32 {
 }
 
 fn next_relationship_id_in_xml(xml: &str) -> u32 {
+    // Fast-ish path: parse the XML and extract `Relationship/@Id` values.
+    // This is more robust than substring search because valid OPC producers may
+    // add whitespace around `=` or use different attribute ordering.
     let mut max_id = 0u32;
-    let mut rest = xml;
-    while let Some(idx) = rest.find("Id=\"rId") {
-        let after = &rest[idx + "Id=\"rId".len()..];
-        let mut digits = String::new();
-        for ch in after.chars() {
-            if ch.is_ascii_digit() {
-                digits.push(ch);
-            } else {
+
+    let mut reader = Reader::from_reader(xml.as_bytes());
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationship") =>
+            {
+                for attr in e.attributes().with_checks(false) {
+                    let attr = match attr {
+                        Ok(attr) => attr,
+                        Err(_) => continue,
+                    };
+                    if !local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"Id") {
+                        continue;
+                    }
+                    let value = match attr.unescape_value() {
+                        Ok(v) => v.into_owned(),
+                        Err(_) => continue,
+                    };
+
+                    let value_bytes = value.as_bytes();
+                    if value_bytes.len() < 3 || !value_bytes[..3].eq_ignore_ascii_case(b"rId") {
+                        continue;
+                    }
+
+                    let mut n = 0u32;
+                    let mut saw_digit = false;
+                    for &b in &value_bytes[3..] {
+                        if b.is_ascii_digit() {
+                            saw_digit = true;
+                            n = n.saturating_mul(10).saturating_add((b - b'0') as u32);
+                        } else {
+                            break;
+                        }
+                    }
+                    if saw_digit {
+                        max_id = max_id.max(n);
+                    }
+                }
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(_) => {
+                // Fallback: if parsing fails (malformed XML), fall back to a simple substring scan
+                // so we can still make best-effort progress.
+                let mut rest = xml;
+                while let Some(idx) = rest.find("Id=\"rId") {
+                    let after = &rest[idx + "Id=\"rId".len()..];
+                    let mut digits = String::new();
+                    for ch in after.chars() {
+                        if ch.is_ascii_digit() {
+                            digits.push(ch);
+                        } else {
+                            break;
+                        }
+                    }
+                    if let Ok(n) = digits.parse::<u32>() {
+                        max_id = max_id.max(n);
+                    }
+                    rest = &after[digits.len()..];
+                }
                 break;
             }
         }
-        if let Ok(n) = digits.parse::<u32>() {
-            max_id = max_id.max(n);
-        }
-        rest = &after[digits.len()..];
+
+        buf.clear();
     }
+
     max_id + 1
 }
 
