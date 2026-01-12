@@ -1395,7 +1395,7 @@ fn bytecode_backend_matches_ast_for_common_logical_error_functions() {
 
     // IF lazy error propagation.
     engine
-        .set_cell_formula("Sheet1", "B1", "=IF(FALSE, 1/0, 1)")
+        .set_cell_formula("Sheet1", "B1", "=IF(FALSE, 1/0, 7)")
         .unwrap();
     engine
         .set_cell_formula("Sheet1", "B2", "=IF(TRUE, \"x\", 1/0)")
@@ -1411,6 +1411,9 @@ fn bytecode_backend_matches_ast_for_common_logical_error_functions() {
     engine
         .set_cell_formula("Sheet1", "B5", "=IFNA(NA(), 7)")
         .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B9", "=IFNA(1/0, 7)")
+        .unwrap();
 
     // Error helpers.
     engine.set_cell_formula("Sheet1", "B6", "=NA()").unwrap();
@@ -1423,18 +1426,19 @@ fn bytecode_backend_matches_ast_for_common_logical_error_functions() {
 
     assert_eq!(
         engine.bytecode_program_count(),
-        8,
+        9,
         "expected all formulas to compile to bytecode"
     );
 
     engine.recalculate_single_threaded();
 
     for (formula, cell) in [
-        ("=IF(FALSE, 1/0, 1)", "B1"),
+        ("=IF(FALSE, 1/0, 7)", "B1"),
         ("=IF(TRUE, \"x\", 1/0)", "B2"),
         ("=IFERROR(1, 1/0)", "B3"),
         ("=IFERROR(1/0, 7)", "B4"),
         ("=IFNA(NA(), 7)", "B5"),
+        ("=IFNA(1/0, 7)", "B9"),
         ("=NA()", "B6"),
         ("=ISERROR(1/0)", "B7"),
         ("=ISNA(NA())", "B8"),
