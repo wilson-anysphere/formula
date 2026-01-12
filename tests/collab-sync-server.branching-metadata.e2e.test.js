@@ -114,7 +114,11 @@ test("sync-server + BranchService (Yjs): merge preserves sheet metadata + namedR
   const featureBase = await branchService.checkoutBranch(actor, { name: "feature" });
   const featureNext = structuredClone(featureBase);
   featureNext.sheets.metaById.Sheet1.name = "FeatureName";
+  featureNext.sheets.metaById.Sheet1.visibility = "hidden";
+  featureNext.sheets.metaById.Sheet1.tabColor = "FF00FF00";
   featureNext.sheets.metaById.Sheet2 = { id: "Sheet2", name: "AddedSheet" };
+  featureNext.sheets.metaById.Sheet2.visibility = "veryHidden";
+  featureNext.sheets.metaById.Sheet2.tabColor = "FFFF0000";
   featureNext.cells.Sheet2 = {};
   featureNext.sheets.order = ["Sheet1", "Sheet2"];
   featureNext.metadata.title = "Budget";
@@ -156,7 +160,11 @@ test("sync-server + BranchService (Yjs): merge preserves sheet metadata + namedR
     return (
       stateB.sheets.order.join(",") === "Sheet1,Sheet2" &&
       stateB.sheets.metaById.Sheet1?.name === "FeatureName" &&
+      stateB.sheets.metaById.Sheet1?.visibility === "hidden" &&
+      stateB.sheets.metaById.Sheet1?.tabColor === "FF00FF00" &&
       stateB.sheets.metaById.Sheet2?.name === "AddedSheet" &&
+      stateB.sheets.metaById.Sheet2?.visibility === "veryHidden" &&
+      stateB.sheets.metaById.Sheet2?.tabColor === "FFFF0000" &&
       stateB.metadata.title === "Budget" &&
       stateB.namedRanges.NR1?.sheetId === "Sheet1" &&
       stateB.comments.c1?.content === "hello"
@@ -189,7 +197,11 @@ test("sync-server + BranchService (Yjs): merge preserves sheet metadata + namedR
     return (
       stateC.sheets.order.join(",") === "Sheet1,Sheet2" &&
       stateC.sheets.metaById.Sheet1?.name === "FeatureName" &&
+      stateC.sheets.metaById.Sheet1?.visibility === "hidden" &&
+      stateC.sheets.metaById.Sheet1?.tabColor === "FF00FF00" &&
       stateC.sheets.metaById.Sheet2?.name === "AddedSheet" &&
+      stateC.sheets.metaById.Sheet2?.visibility === "veryHidden" &&
+      stateC.sheets.metaById.Sheet2?.tabColor === "FFFF0000" &&
       stateC.metadata.title === "Budget" &&
       stateC.namedRanges.NR1?.sheetId === "Sheet1" &&
       stateC.comments.c1?.content === "hello"

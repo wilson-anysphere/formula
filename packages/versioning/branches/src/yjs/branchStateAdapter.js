@@ -713,6 +713,7 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
         const entry = new Y.Map();
         entry.set("id", "Sheet1");
         entry.set("name", "Sheet1");
+        entry.set("visibility", "visible");
         sheetsArray.push([entry]);
       }
 
