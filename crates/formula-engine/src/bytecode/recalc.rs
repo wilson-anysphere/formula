@@ -3,6 +3,8 @@ use super::grid::{Grid, GridMut};
 use super::value::{CellCoord, Value};
 use super::{BytecodeCache, Program, Vm};
 use ahash::{AHashMap, AHashSet};
+use crate::date::ExcelDateSystem;
+use crate::locale::ValueLocaleConfig;
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 use rayon::prelude::*;
 use std::sync::Arc;
@@ -119,6 +121,9 @@ impl RecalcEngine {
 
     pub fn recalc(&self, graph: &CalcGraph, grid: &mut dyn GridMut) {
         let mut results: Vec<Value> = Vec::with_capacity(graph.max_level_width);
+        let now_utc = chrono::Utc::now();
+        let date_system = ExcelDateSystem::EXCEL_1900;
+        let value_locale = ValueLocaleConfig::en_us();
 
         for level in &graph.levels {
             results.clear();
@@ -130,14 +135,31 @@ impl RecalcEngine {
                     results
                         .par_iter_mut()
                         .zip(level.par_iter())
-                        .for_each_init(|| Vm::with_capacity(32), |vm, (out, &idx)| {
-                            let node = &graph.nodes[idx];
-                            *out = vm.eval(&node.program, g, node.coord);
-                        });
+                        .for_each_init(
+                            || {
+                                (
+                                    Vm::with_capacity(32),
+                                    super::runtime::set_thread_eval_context(
+                                        date_system,
+                                        value_locale,
+                                        now_utc.clone(),
+                                    ),
+                                )
+                            },
+                            |(vm, _guard), (out, &idx)| {
+                                let node = &graph.nodes[idx];
+                                *out = vm.eval(&node.program, g, node.coord);
+                            },
+                        );
                 }
                 #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
                 {
                     let mut vm = Vm::with_capacity(32);
+                    let _guard = super::runtime::set_thread_eval_context(
+                        date_system,
+                        value_locale,
+                        now_utc.clone(),
+                    );
                     for (out, &idx) in results.iter_mut().zip(level.iter()) {
                         let node = &graph.nodes[idx];
                         *out = vm.eval(&node.program, g, node.coord);
