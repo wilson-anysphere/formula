@@ -436,74 +436,21 @@ mod tests {
         Some((w, h))
     }
 
-    fn run_on_main_thread<R: Send + 'static>(f: impl FnOnce() -> R + Send + 'static) -> R {
-        let is_main: bool = unsafe { objc2::msg_send![objc2::class!(NSThread), isMainThread] };
-        if is_main {
-            return f();
-        }
-
-        unsafe {
-            use std::ffi::c_void;
-            use std::sync::mpsc;
-            use std::thread;
-
-            type DispatchQueue = *mut c_void;
-            type DispatchFn = extern "C" fn(*mut c_void);
-
-            extern "C" {
-                fn dispatch_get_main_queue() -> DispatchQueue;
-                fn dispatch_sync_f(queue: DispatchQueue, context: *mut c_void, work: DispatchFn);
-            }
-
-            struct Ctx<R: Send + 'static> {
-                f: Option<Box<dyn FnOnce() -> R + Send + 'static>>,
-                tx: mpsc::Sender<thread::Result<R>>,
-            }
-
-            extern "C" fn trampoline<R: Send + 'static>(ctx: *mut c_void) {
-                unsafe {
-                    let mut ctx: Box<Ctx<R>> = Box::from_raw(ctx as *mut Ctx<R>);
-                    let f = ctx.f.take().expect("closure already taken");
-                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
-                    let _ = ctx.tx.send(result);
-                }
-            }
-
-            let (tx, rx) = mpsc::channel();
-            let ctx = Box::new(Ctx {
-                f: Some(Box::new(f)),
-                tx,
-            });
-            dispatch_sync_f(
-                dispatch_get_main_queue(),
-                Box::into_raw(ctx) as *mut c_void,
-                trampoline::<R>,
-            );
-            match rx.recv().expect("main-thread dispatch failed") {
-                Ok(result) => result,
-                Err(panic) => std::panic::resume_unwind(panic),
-            }
-        }
-    }
-
     #[test]
     fn png_tiff_png_roundtrip_preserves_dimensions() {
-        run_on_main_thread(|| {
-            // 1x1 transparent PNG.
-            let png = base64::engine::general_purpose::STANDARD
-                .decode(
-                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO9C9VwAAAAASUVORK5CYII=",
-                )
-                .unwrap();
-            let dims_before = png_dimensions(&png).expect("valid png");
+        // 1x1 transparent PNG.
+        let png = base64::engine::general_purpose::STANDARD
+            .decode(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO9C9VwAAAAASUVORK5CYII=",
+            )
+            .unwrap();
+        let dims_before = png_dimensions(&png).expect("valid png");
 
-            let tiff =
-                autoreleasepool(|_| unsafe { png_to_tiff_bytes(&png) }).expect("png -> tiff");
-            let png2 =
-                autoreleasepool(|_| unsafe { tiff_to_png_bytes(&tiff) }).expect("tiff -> png");
-            let dims_after = png_dimensions(&png2).expect("valid png output");
+        let tiff = autoreleasepool(|_| unsafe { png_to_tiff_bytes(&png) }).expect("png -> tiff");
+        let png2 =
+            autoreleasepool(|_| unsafe { tiff_to_png_bytes(&tiff) }).expect("tiff -> png");
+        let dims_after = png_dimensions(&png2).expect("valid png output");
 
-            assert_eq!(dims_before, dims_after);
-        });
+        assert_eq!(dims_before, dims_after);
     }
 }
