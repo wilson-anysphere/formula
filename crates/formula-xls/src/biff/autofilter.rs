@@ -527,9 +527,22 @@ fn decode_filter_database_rgce(
         }
     }
 
-    let sheet_idx = sheet_override.or(base_sheet).ok_or_else(|| {
-        "workbook-scope `_FilterDatabase` NAME formula does not specify a sheet".to_string()
-    })?;
+    let sheet_idx = match sheet_override.or(base_sheet) {
+        Some(idx) => idx,
+        None => {
+            // Some files in the wild appear to store workbook-scoped `_FilterDatabase` names even
+            // though the formula token stream does not include an explicit 3D sheet reference.
+            // When there is only a single sheet, treat that as the implied target.
+            if sheet_count == Some(1) {
+                0
+            } else {
+                return Err(
+                    "workbook-scope `_FilterDatabase` NAME formula does not specify a sheet"
+                        .to_string(),
+                );
+            }
+        }
+    };
 
     // Validate range bounds against Excel limits.
     if range.end.row >= EXCEL_MAX_ROWS || range.end.col >= EXCEL_MAX_COLS {
@@ -928,6 +941,43 @@ mod tests {
         let parsed = parse_biff_filter_database_ranges(&stream, BiffVersion::Biff8, 1252, Some(1))
             .expect("parse");
 
+        assert_eq!(
+            parsed.by_sheet.get(&0).copied(),
+            Some(Range::new(CellRef::new(0, 0), CellRef::new(4, 2)))
+        );
+    }
+
+    #[test]
+    fn decodes_workbook_scope_filter_database_without_sheet_when_single_sheet() {
+        // Some writers store `_FilterDatabase` as workbook-scoped (itab=0) but still use a 2D area
+        // token. When there is only one sheet, treat it as the implied target.
+        let mut rgce = Vec::new();
+        rgce.push(0x25); // PtgArea
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
+        rgce.extend_from_slice(&4u16.to_le_bytes()); // rwLast
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // colFirst
+        rgce.extend_from_slice(&2u16.to_le_bytes()); // colLast
+
+        let mut name_data = Vec::new();
+        name_data.extend_from_slice(&NAME_FLAG_BUILTIN.to_le_bytes()); // grbit (builtin)
+        name_data.push(0); // chKey
+        name_data.push(1); // cch (builtin id length)
+        name_data.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        name_data.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        name_data.extend_from_slice(&0u16.to_le_bytes()); // itab (workbook scope)
+        name_data.extend_from_slice(&[0, 0, 0, 0]); // cchCustMenu..cchStatusText
+        name_data.push(BUILTIN_NAME_FILTER_DATABASE); // built-in name id
+        name_data.extend_from_slice(&rgce);
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &bof_globals()),
+            record(RECORD_NAME, &name_data),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_filter_database_ranges(&stream, BiffVersion::Biff8, 1252, Some(1))
+            .expect("parse");
         assert_eq!(
             parsed.by_sheet.get(&0).copied(),
             Some(Range::new(CellRef::new(0, 0), CellRef::new(4, 2)))
