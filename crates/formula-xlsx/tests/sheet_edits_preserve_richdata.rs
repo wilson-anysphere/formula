@@ -313,6 +313,10 @@ fn sheet_edits_preserve_richdata_parts_and_relationships() {
         .expect("Added sheet r:id must exist in workbook.xml.rels");
     let added_part_name = workbook_target_to_part_name(added_target);
     assert!(
+        added_part_name.contains("worksheets/"),
+        "expected Added sheet relationship to resolve to a worksheet part, got {added_part_name}"
+    );
+    assert!(
         archive.by_name(&added_part_name).is_ok(),
         "expected Added sheet backing part to exist in output package: {added_part_name}"
     );
@@ -326,6 +330,10 @@ fn sheet_edits_preserve_richdata_parts_and_relationships() {
         .get(sheet1_rid)
         .expect("Sheet1 r:id must exist in workbook.xml.rels");
     let sheet1_part_name = workbook_target_to_part_name(sheet1_target);
+    assert!(
+        sheet1_part_name.contains("worksheets/"),
+        "expected Sheet1 relationship to resolve to a worksheet part, got {sheet1_part_name}"
+    );
     assert!(
         archive.by_name(&sheet1_part_name).is_ok(),
         "expected Sheet1 backing part to exist in output package: {sheet1_part_name}"
