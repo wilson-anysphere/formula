@@ -1,7 +1,7 @@
-use formula_desktop_tauri::file_io::read_xlsx_blocking;
-use formula_desktop_tauri::file_io::Workbook;
-use formula_desktop_tauri::macros::{MacroExecutionOptions, MacroPermission};
-use formula_desktop_tauri::state::{AppState, CellScalar};
+use desktop::file_io::read_xlsx_blocking;
+use desktop::file_io::Workbook;
+use desktop::macros::{MacroExecutionOptions, MacroPermission};
+use desktop::state::{AppState, CellScalar};
 use std::io::Write;
 use std::path::Path;
 
@@ -271,7 +271,7 @@ End Sub
             &sheet2_id,
             1,
             1,
-            Some(formula_desktop_tauri::state::CellRect {
+            Some(desktop::state::CellRect {
                 start_row: 1,
                 start_col: 1,
                 end_row: 2,

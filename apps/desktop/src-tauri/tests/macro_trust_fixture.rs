@@ -1,8 +1,8 @@
 use std::path::Path;
 
-use formula_desktop_tauri::commands::{evaluate_macro_trust, MacroBlockedReason, MacroSignatureStatus};
-use formula_desktop_tauri::file_io::read_xlsx_blocking;
-use formula_desktop_tauri::macro_trust::{MacroTrustDecision, MacroTrustStore};
+use desktop::commands::{evaluate_macro_trust, MacroBlockedReason, MacroSignatureStatus};
+use desktop::file_io::read_xlsx_blocking;
+use desktop::macro_trust::{MacroTrustDecision, MacroTrustStore};
 
 #[test]
 fn xlsm_fixture_is_blocked_by_default() {

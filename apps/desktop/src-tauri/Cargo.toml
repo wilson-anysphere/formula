@@ -1,5 +1,5 @@
 [package]
-name = "formula-desktop-tauri"
+name = "desktop"
 version = "0.1.0"
 edition = "2021"
 

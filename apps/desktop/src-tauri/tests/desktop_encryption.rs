@@ -1,6 +1,6 @@
 use std::fs;
 
-use formula_desktop_tauri::storage::encryption::{
+use desktop::storage::encryption::{
     DesktopStorageEncryption, InMemoryKeychainProvider, KeychainProvider,
 };
 use serde_json::json;
@@ -65,7 +65,7 @@ fn rotate_key_reencrypts_and_old_keyring_cannot_decrypt_new_store() {
         .unwrap()
         .expect("keyring missing");
     let old_keyring =
-        formula_desktop_tauri::storage::encryption::KeyRing::from_bytes(&old_keyring_bytes).unwrap();
+        desktop::storage::encryption::KeyRing::from_bytes(&old_keyring_bytes).unwrap();
 
     let raw_before = fs::read_to_string(&file_path).unwrap();
     let before: serde_json::Value = serde_json::from_str(&raw_before).unwrap();
@@ -80,13 +80,13 @@ fn rotate_key_reencrypts_and_old_keyring_cannot_decrypt_new_store() {
     assert_eq!(key_version_after, key_version_before + 1);
 
     // Ensure the *old* keyring alone cannot decrypt the rotated store.
-    let envelope: formula_desktop_tauri::storage::encryption::EncryptedEnvelope =
+    let envelope: desktop::storage::encryption::EncryptedEnvelope =
         serde_json::from_value(after.clone()).unwrap();
     let aad = serde_json::json!({ "scope": "formula-desktop-store", "schemaVersion": 1 });
     let decrypt_err = old_keyring.decrypt(&envelope, Some(&aad)).unwrap_err();
     assert!(matches!(
         decrypt_err,
-        formula_desktop_tauri::storage::encryption::DesktopStorageEncryptionError::MissingKeyVersion(_)
+        desktop::storage::encryption::DesktopStorageEncryptionError::MissingKeyVersion(_)
     ));
 
     // The store (with the rotated keyring in the keychain) can still load docs.

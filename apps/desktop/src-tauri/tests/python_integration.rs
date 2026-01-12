@@ -1,7 +1,7 @@
-use formula_desktop_tauri::commands::PythonRunContext;
-use formula_desktop_tauri::file_io::Workbook;
-use formula_desktop_tauri::python::run_python_script;
-use formula_desktop_tauri::state::{AppState, CellScalar};
+use desktop::commands::PythonRunContext;
+use desktop::file_io::Workbook;
+use desktop::python::run_python_script;
+use desktop::state::{AppState, CellScalar};
 use std::process::Command;
 
 fn python_executable() -> String {

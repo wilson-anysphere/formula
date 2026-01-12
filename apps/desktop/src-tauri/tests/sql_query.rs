@@ -1,4 +1,4 @@
-use formula_desktop_tauri::sql::{self, SqlDataType};
+use desktop::sql::{self, SqlDataType};
 use serde_json::json;
 
 #[tokio::test]

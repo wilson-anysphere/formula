@@ -7,13 +7,13 @@ mod shortcuts;
 mod tray;
 mod updater;
 
-use formula_desktop_tauri::commands;
-use formula_desktop_tauri::macro_trust::{
+use desktop::commands;
+use desktop::macro_trust::{
     compute_macro_fingerprint, MacroTrustStore, SharedMacroTrustStore,
 };
-use formula_desktop_tauri::macros::MacroExecutionOptions;
-use formula_desktop_tauri::open_file;
-use formula_desktop_tauri::state::{AppState, CellUpdateData, SharedAppState};
+use desktop::macros::MacroExecutionOptions;
+use desktop::open_file;
+use desktop::state::{AppState, CellUpdateData, SharedAppState};
 use serde::Serialize;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};

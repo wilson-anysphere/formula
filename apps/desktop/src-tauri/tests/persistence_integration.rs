@@ -1,6 +1,6 @@
-use formula_desktop_tauri::file_io::{read_xlsx_blocking, Workbook};
-use formula_desktop_tauri::persistence::{write_xlsx_from_storage, WorkbookPersistenceLocation};
-use formula_desktop_tauri::state::{AppState, CellScalar};
+use desktop::file_io::{read_xlsx_blocking, Workbook};
+use desktop::persistence::{write_xlsx_from_storage, WorkbookPersistenceLocation};
+use desktop::state::{AppState, CellScalar};
 use formula_storage::{CellRange, CellValue, Storage};
 use serde_json::json;
 use std::io::Cursor;

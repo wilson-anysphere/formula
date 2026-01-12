@@ -1,8 +1,8 @@
-use formula_desktop_tauri::commands::{
+use desktop::commands::{
     PythonFilesystemPermission, PythonNetworkPermission, PythonPermissions,
 };
-use formula_desktop_tauri::python::run_python_script;
-use formula_desktop_tauri::state::AppState;
+use desktop::python::run_python_script;
+use desktop::state::AppState;
 
 #[test]
 fn rejects_python_permission_escalation_without_spawning_python() {
