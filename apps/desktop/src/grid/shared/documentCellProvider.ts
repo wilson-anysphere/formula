@@ -530,7 +530,10 @@ export class DocumentCellProvider implements CellProvider {
       if (right) borders.right = right;
       if (top) borders.top = top;
       if (bottom) borders.bottom = bottom;
-      if (Object.keys(borders).length > 0) out.borders = borders;
+      for (const _key in borders) {
+        out.borders = borders;
+        break;
+      }
 
       const normalizeDiagonalBorderColor = (color: string): string => {
         const match = /^#([0-9a-f]{6})$/i.exec(color);
@@ -559,11 +562,15 @@ export class DocumentCellProvider implements CellProvider {
         const diagonalBorders: any = {};
         if (diagonalUp) diagonalBorders.up = diagonal;
         if (diagonalDown) diagonalBorders.down = diagonal;
-        if (Object.keys(diagonalBorders).length > 0) out.diagonalBorders = diagonalBorders;
+        for (const _key in diagonalBorders) {
+          out.diagonalBorders = diagonalBorders;
+          break;
+        }
       }
     }
 
-    return Object.keys(out).length > 0 ? (out as CellStyle) : undefined;
+    for (const _key in out) return out as CellStyle;
+    return undefined;
   }
 
   invalidateAll(): void {
