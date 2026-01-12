@@ -2590,6 +2590,113 @@ function installSheetStoreSubscription(): void {
     const nextSnapshot = captureSnapshot();
     lastSheetStoreSnapshot = nextSnapshot;
 
+    // In desktop (Tauri) mode, sheet operations can originate from `DocumentController` undo/redo and
+    // `applyState` restores. Those mutations flow doc -> sheet store inside `syncingSheetUi`
+    // transactions (see `installSheetStoreDocSync()`), which intentionally bypasses the normal
+    // "store -> doc" (and UI-hook backend) pathways.
+    //
+    // Mirror those doc-driven sheet mutations back into the backend workbook so:
+    // - `save_workbook` persists the same sheet list/order the user sees in the UI
+    // - subsequent `set_cell`/`set_range` flushes do not target a sheet the backend considers deleted
+    if (syncingSheetUi && prevSnapshot) {
+      const session = app.getCollabSession?.() ?? null;
+      if (!session) {
+        const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
+        const invoke =
+          typeof queuedInvoke === "function"
+            ? queuedInvoke
+            : typeof baseInvoke === "function"
+              ? ((cmd: string, args?: any) => queueBackendOp(() => baseInvoke(cmd, args)))
+              : null;
+
+        if (invoke) {
+          const tabColorEqual = (a: TabColor | undefined, b: TabColor | undefined): boolean => {
+            if (a === b) return true;
+            if (!a || !b) return !a && !b;
+            return (
+              (a.rgb ?? null) === (b.rgb ?? null) &&
+              (a.theme ?? null) === (b.theme ?? null) &&
+              (a.indexed ?? null) === (b.indexed ?? null) &&
+              (a.tint ?? null) === (b.tint ?? null) &&
+              (a.auto ?? null) === (b.auto ?? null)
+            );
+          };
+
+          const prevOrder = prevSnapshot.order;
+          const nextOrder = nextSnapshot.order;
+          const prevById = prevSnapshot.byId;
+          const nextById = nextSnapshot.byId;
+
+          const removed = prevOrder.filter((id) => !nextById.has(id));
+          const added = nextOrder.filter((id) => !prevById.has(id));
+          const addedSet = new Set(added);
+          const removedSet = new Set(removed);
+
+          // Remove sheets first so name uniqueness checks for restored sheets pass cleanly.
+          for (const sheetId of removed) {
+            void invoke("delete_sheet", { sheet_id: sheetId }).catch(() => {
+              // ignore (error is reported via the queued backend sync logger)
+            });
+          }
+
+          // Add restored/new sheets with stable ids (required for undo of renamed sheet deletion).
+          for (let idx = 0; idx < nextOrder.length; idx += 1) {
+            const sheetId = nextOrder[idx]!;
+            if (!addedSet.has(sheetId)) continue;
+            const meta = nextById.get(sheetId);
+            if (!meta) continue;
+            void invoke("add_sheet", { sheet_id: sheetId, name: meta.name, index: idx }).catch(() => {
+              // ignore
+            });
+          }
+
+          // Metadata changes.
+          for (const sheetId of nextOrder) {
+            if (removedSet.has(sheetId)) continue;
+            const after = nextById.get(sheetId);
+            if (!after) continue;
+            const before = prevById.get(sheetId) ?? null;
+
+            if (!addedSet.has(sheetId) && before && before.name !== after.name) {
+              void invoke("rename_sheet", { sheet_id: sheetId, name: after.name }).catch(() => {
+                // ignore
+              });
+            }
+
+            const beforeVisibility = before?.visibility ?? "visible";
+            if (beforeVisibility !== after.visibility) {
+              // Note: backend support is implemented in Task 319. Keep this best-effort so older
+              // binaries don't break undo/redo of visibility toggles.
+              void invoke("set_sheet_visibility", { sheet_id: sheetId, visibility: after.visibility }).catch(() => {
+                // ignore
+              });
+            }
+
+            if (!tabColorEqual(before?.tabColor, after.tabColor)) {
+              // Note: backend support is implemented in Task 319. Keep this best-effort so older
+              // binaries don't break undo/redo of tab color changes.
+              void invoke("set_sheet_tab_color", { sheet_id: sheetId, tab_color: after.tabColor ?? null }).catch(() => {
+                // ignore
+              });
+            }
+          }
+
+          // Order changes.
+          const prevKey = prevOrder.join("|");
+          const nextKey = nextOrder.join("|");
+          if (prevKey && nextKey && prevKey !== nextKey) {
+            for (let targetIndex = 0; targetIndex < nextOrder.length; targetIndex += 1) {
+              const sheetId = nextOrder[targetIndex]!;
+              if (!nextById.has(sheetId)) continue;
+              void invoke("move_sheet", { sheet_id: sheetId, to_index: targetIndex }).catch(() => {
+                // ignore
+              });
+            }
+          }
+        }
+      }
+    }
+
     // Keep DocumentController in sync with sheet UI store mutations so sheet-tab operations are
     // undoable via the existing Ctrl+Z/Ctrl+Y stack.
     //

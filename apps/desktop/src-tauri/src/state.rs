@@ -406,6 +406,7 @@ impl AppState {
     pub fn add_sheet(
         &mut self,
         name: String,
+        sheet_id: Option<String>,
         after_sheet_id: Option<String>,
         index: Option<usize>,
     ) -> Result<SheetInfoData, AppStateError> {
@@ -414,46 +415,6 @@ impl AppState {
             let base = name.trim();
             formula_model::validate_sheet_name(base)
                 .map_err(|e| AppStateError::WhatIf(e.to_string()))?;
-
-            let mut candidate_name = base.to_string();
-            let mut counter = 1usize;
-            while workbook
-                .sheets
-                .iter()
-                .any(|sheet| sheet_name_eq_case_insensitive(&sheet.name, &candidate_name))
-            {
-                counter += 1;
-                let suffix = format!(" {counter}");
-                let suffix_len = suffix.encode_utf16().count();
-                let max_base_len =
-                    formula_model::EXCEL_MAX_SHEET_NAME_LEN.saturating_sub(suffix_len);
-                let mut used_len = 0usize;
-                let mut truncated = String::new();
-                for ch in base.chars() {
-                    let ch_len = ch.len_utf16();
-                    if used_len + ch_len > max_base_len {
-                        break;
-                    }
-                    used_len += ch_len;
-                    truncated.push(ch);
-                }
-                candidate_name = format!("{truncated}{suffix}");
-            }
-            formula_model::validate_sheet_name(&candidate_name)
-                .map_err(|e| AppStateError::WhatIf(e.to_string()))?;
-
-            let base_id = candidate_name.clone();
-            let mut candidate_id = base_id.clone();
-            let mut id_counter = 1usize;
-            while workbook
-                .sheets
-                .iter()
-                .any(|sheet| sheet.id.eq_ignore_ascii_case(&candidate_id))
-            {
-                id_counter += 1;
-                candidate_id = format!("{base_id}-{id_counter}");
-            }
-
             let insert_index = after_sheet_id
                 .as_deref()
                 .map(str::trim)
@@ -468,7 +429,75 @@ impl AppState {
                 .unwrap_or_else(|| index.unwrap_or(workbook.sheets.len()))
                 .min(workbook.sheets.len());
 
-            (candidate_id, candidate_name, insert_index)
+            if let Some(sheet_id) = sheet_id {
+                let trimmed_id = sheet_id.trim();
+                if trimmed_id.is_empty() {
+                    return Err(AppStateError::WhatIf(
+                        "sheet id must not be empty".to_string(),
+                    ));
+                }
+                if workbook
+                    .sheets
+                    .iter()
+                    .any(|sheet| sheet.id.eq_ignore_ascii_case(trimmed_id))
+                {
+                    return Err(AppStateError::WhatIf(format!(
+                        "duplicate sheet id: {trimmed_id}"
+                    )));
+                }
+                if workbook
+                    .sheets
+                    .iter()
+                    .any(|sheet| sheet_name_eq_case_insensitive(&sheet.name, base))
+                {
+                    return Err(AppStateError::WhatIf(
+                        formula_model::SheetNameError::DuplicateName.to_string(),
+                    ));
+                }
+
+                (trimmed_id.to_string(), base.to_string(), insert_index)
+            } else {
+                let mut candidate_name = base.to_string();
+                let mut counter = 1usize;
+                while workbook
+                    .sheets
+                    .iter()
+                    .any(|sheet| sheet_name_eq_case_insensitive(&sheet.name, &candidate_name))
+                {
+                    counter += 1;
+                    let suffix = format!(" {counter}");
+                    let suffix_len = suffix.encode_utf16().count();
+                    let max_base_len =
+                        formula_model::EXCEL_MAX_SHEET_NAME_LEN.saturating_sub(suffix_len);
+                    let mut used_len = 0usize;
+                    let mut truncated = String::new();
+                    for ch in base.chars() {
+                        let ch_len = ch.len_utf16();
+                        if used_len + ch_len > max_base_len {
+                            break;
+                        }
+                        used_len += ch_len;
+                        truncated.push(ch);
+                    }
+                    candidate_name = format!("{truncated}{suffix}");
+                }
+                formula_model::validate_sheet_name(&candidate_name)
+                    .map_err(|e| AppStateError::WhatIf(e.to_string()))?;
+
+                let base_id = candidate_name.clone();
+                let mut candidate_id = base_id.clone();
+                let mut id_counter = 1usize;
+                while workbook
+                    .sheets
+                    .iter()
+                    .any(|sheet| sheet.id.eq_ignore_ascii_case(&candidate_id))
+                {
+                    id_counter += 1;
+                    candidate_id = format!("{base_id}-{id_counter}");
+                }
+
+                (candidate_id, candidate_name, insert_index)
+            }
         };
 
         if let Some(persistent) = self.persistent.as_mut() {
@@ -3884,7 +3913,12 @@ mod tests {
         state.load_workbook(workbook);
 
         let inserted = state
-            .add_sheet("Inserted".to_string(), Some("sHeEt2".to_string()), None)
+            .add_sheet(
+                "Inserted".to_string(),
+                None,
+                Some("sHeEt2".to_string()),
+                None,
+            )
             .expect("add sheet succeeds");
         let inserted_id = inserted.id;
 
@@ -3916,7 +3950,12 @@ mod tests {
         state.load_workbook(workbook);
 
         let inserted = state
-            .add_sheet("Inserted".to_string(), Some("does-not-exist".to_string()), None)
+            .add_sheet(
+                "Inserted".to_string(),
+                None,
+                Some("does-not-exist".to_string()),
+                None,
+            )
             .expect("add sheet succeeds");
         let inserted_id = inserted.id;
 
@@ -3947,7 +3986,12 @@ mod tests {
         state.load_workbook(workbook);
 
         let inserted = state
-            .add_sheet("Inserted".to_string(), Some("sheet2".to_string()), None)
+            .add_sheet(
+                "Inserted".to_string(),
+                None,
+                Some("sheet2".to_string()),
+                None,
+            )
             .expect("add sheet succeeds");
         let inserted_id = inserted.id;
 
@@ -3964,6 +4008,46 @@ mod tests {
                 "Sheet1".to_string(),
                 "Sheet2".to_string(),
                 inserted_id
+            ]
+        );
+    }
+
+    #[test]
+    fn add_sheet_allows_reusing_stable_id_after_delete_with_new_name() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        state
+            .rename_sheet("Sheet1", "Budget".to_string())
+            .expect("rename Sheet1");
+        state.delete_sheet("Sheet1").expect("delete Sheet1");
+
+        let restored = state
+            .add_sheet(
+                "Budget".to_string(),
+                Some("Sheet1".to_string()),
+                None,
+                Some(0),
+            )
+            .expect("re-add sheet with stable id");
+        assert_eq!(restored.id, "Sheet1");
+        assert_eq!(restored.name, "Budget");
+
+        let info = state.workbook_info().expect("workbook info");
+        let summary = info
+            .sheets
+            .iter()
+            .map(|s| (s.id.clone(), s.name.clone()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            summary,
+            vec![
+                ("Sheet1".to_string(), "Budget".to_string()),
+                ("Sheet2".to_string(), "Sheet2".to_string())
             ]
         );
     }
@@ -4252,7 +4336,7 @@ mod tests {
             .expect("load persistent workbook");
 
         state
-            .add_sheet("Inserted".to_string(), None, Some(1))
+            .add_sheet("Inserted".to_string(), None, None, Some(1))
             .expect("add sheet");
 
         let info = state.workbook_info().expect("workbook info");

@@ -65,7 +65,7 @@ function installTauriStubForTests(
           case "add_sheet":
             // Purposefully return an id that differs from the requested name to ensure
             // the frontend treats the backend response as canonical.
-            return { id: "Sheet2-backend", name: String(args?.name ?? "Sheet2") };
+            return { id: String(args?.sheet_id ?? "Sheet2-backend"), name: String(args?.name ?? "Sheet2") };
 
           case "list_defined_names":
             return [];
@@ -87,6 +87,8 @@ function installTauriStubForTests(
             return { ok: true, output: [], updates: [] };
 
           case "mark_saved":
+          case "delete_sheet":
+          case "rename_sheet":
           case "move_sheet":
           case "set_sheet_visibility":
           case "set_sheet_tab_color":
@@ -535,5 +537,82 @@ test.describe("tauri workbook integration", () => {
         ),
       )
       .toBe("FFFF0000");
+  });
+
+  test("undo restore of deleted renamed sheet re-adds backend sheet using stable id", async ({ page }) => {
+    await page.addInitScript(installTauriStubForTests, {
+      sheets: [
+        { id: "Sheet1", name: "Budget" },
+        { id: "Sheet2", name: "Sheet2" },
+      ],
+    });
+
+    await gotoDesktop(page);
+
+    await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["file-dropped"]));
+    await page.evaluate(() => {
+      (window as any).__tauriListeners["file-dropped"]({ payload: ["/tmp/fake.xlsx"] });
+    });
+
+    await page.waitForFunction(async () => (await (window as any).__formulaApp.getCellValueA1("A1")) === "Hello");
+
+    await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveText("Budget");
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveText("Sheet2");
+
+    // Delete the renamed sheet (Sheet1 -> "Budget").
+    await page.getByTestId("sheet-tab-Sheet1").click({ button: "right", position: { x: 10, y: 10 } });
+    const menu = page.getByTestId("sheet-tab-context-menu");
+    await expect(menu).toBeVisible();
+
+    page.once("dialog", (dialog) => dialog.accept());
+    await menu.getByRole("button", { name: "Delete" }).click();
+
+    await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveCount(0);
+
+    // Confirm backend delete_sheet invoked.
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__tauriInvokeCalls?.filter((c: any) => c.cmd === "delete_sheet")?.length ?? 0))
+      .toBe(1);
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__tauriInvokeCalls?.find((c: any) => c.cmd === "delete_sheet")?.args?.sheet_id))
+      .toBe("Sheet1");
+
+    // Undo should restore the sheet, and main.ts should reconcile the backend by creating the sheet with the same id.
+    await page.evaluate(async () => {
+      const registry = (window as any).__formulaCommandRegistry;
+      await registry.executeCommand("edit.undo");
+      await (window as any).__formulaApp.whenIdle();
+    });
+
+    await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveText("Budget");
+
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (window as any).__tauriInvokeCalls?.some(
+              (c: any) => c.cmd === "add_sheet" && c.args?.sheet_id === "Sheet1" && c.args?.name === "Budget",
+            ) ?? false,
+        ),
+      )
+      .toBe(true);
+
+    // Optional: a subsequent cell edit on the restored sheet should flush to the backend using the stable sheet id.
+    await page.getByTestId("sheet-tab-Sheet1").click();
+    const beforeEdits = await page.evaluate(() => (window as any).__tauriInvokeCalls?.length ?? 0);
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const doc = app.getDocument();
+      doc.setCellValue("Sheet1", "A1", "AfterUndo");
+      app.refresh();
+    });
+    await page.waitForFunction(
+      (beforeEdits) =>
+        ((window as any).__tauriInvokeCalls ?? []).slice(beforeEdits).some(
+          (c: any) =>
+            (c.cmd === "set_cell" || c.cmd === "set_range") && (c.args?.sheet_id ?? c.args?.sheetId) === "Sheet1",
+        ),
+      beforeEdits,
+    );
   });
 });
