@@ -82,7 +82,7 @@ Compatibility:
 Each cell is stored as a `Y.Map` with the following relevant fields:
 
 - `value`: any JSON-serializable scalar/object (only when not a formula; when setting a formula string, set `value` to `null`)
-- `formula`: `string | null` (normalized; clears should be represented as `null` — older writers may omit/delete the key, which readers should treat as `null`)
+- `formula`: `string | null` (may be written non-canonically; most readers normalize to a canonical `=...` form. Clears should be represented as `null` — older writers may omit/delete the key, which readers should treat as `null`)
 - `format`: JSON object for cell formatting (interned into `DocumentController.styleTable` on desktop)
 - `enc`: optional encrypted payload (see “Cell encryption” below)
 - `modified`: `number` (ms since epoch; best-effort)
