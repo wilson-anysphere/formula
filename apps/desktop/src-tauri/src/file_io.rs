@@ -1045,46 +1045,56 @@ fn formula_model_value_to_scalar(value: &ModelCellValue) -> CellScalar {
 }
 
 fn rich_model_cell_value_to_scalar(value: &ModelCellValue) -> Option<CellScalar> {
+    fn json_get_str<'a>(value: &'a serde_json::Value, keys: &[&str]) -> Option<&'a str> {
+        for key in keys {
+            if let Some(s) = value.get(key).and_then(|v| v.as_str()) {
+                return Some(s);
+            }
+        }
+        None
+    }
+
+    fn cell_value_json_to_display_string(value: &serde_json::Value) -> Option<String> {
+        let value_type = value.get("type")?.as_str()?;
+        match value_type {
+            "number" => Some(value.get("value")?.as_f64()?.to_string()),
+            "string" => Some(value.get("value")?.as_str()?.to_string()),
+            "boolean" => Some(if value.get("value")?.as_bool()? {
+                "TRUE".to_string()
+            } else {
+                "FALSE".to_string()
+            }),
+            "error" => Some(value.get("value")?.as_str()?.to_string()),
+            "rich_text" => Some(value.get("value")?.get("text")?.as_str()?.to_string()),
+            _ => None,
+        }
+    }
+
     let serialized = serde_json::to_value(value).ok()?;
     let value_type = serialized.get("type")?.as_str()?;
 
     match value_type {
         "entity" => {
-            let display_value = serialized
-                .get("value")?
-                .get("displayValue")
-                .or_else(|| serialized.get("value")?.get("display"))?
-                .as_str()?
-                .to_string();
+            let entity = serialized.get("value")?;
+            let display_value =
+                json_get_str(entity, &["displayValue", "display_value", "display"])?.to_string();
             Some(CellScalar::Text(display_value))
         }
         "record" => {
             let record = serialized.get("value")?;
-            let display_field = record
-                .get("displayField")
-                .or_else(|| record.get("display_field"))?
-                .as_str()?;
-            let fields = record.get("fields")?.as_object()?;
-            let display_value = fields.get(display_field)?;
-            let display_value_type = display_value.get("type")?.as_str()?;
-            match display_value_type {
-                "number" => Some(CellScalar::Number(display_value.get("value")?.as_f64()?)),
-                "string" => Some(CellScalar::Text(
-                    display_value.get("value")?.as_str()?.to_string(),
-                )),
-                "boolean" => Some(CellScalar::Bool(display_value.get("value")?.as_bool()?)),
-                "error" => Some(CellScalar::Error(
-                    display_value.get("value")?.as_str()?.to_string(),
-                )),
-                "rich_text" => Some(CellScalar::Text(
-                    display_value
-                        .get("value")?
-                        .get("text")?
-                        .as_str()?
-                        .to_string(),
-                )),
-                _ => Some(CellScalar::Empty),
+            if let Some(display_field) = json_get_str(record, &["displayField", "display_field"]) {
+                if let Some(fields) = record.get("fields").and_then(|v| v.as_object()) {
+                    if let Some(display_value) = fields.get(display_field) {
+                        if let Some(display) = cell_value_json_to_display_string(display_value) {
+                            return Some(CellScalar::Text(display));
+                        }
+                    }
+                }
             }
+
+            let display_value =
+                json_get_str(record, &["displayValue", "display_value", "display"])?.to_string();
+            Some(CellScalar::Text(display_value))
         }
         _ => None,
     }
@@ -2334,6 +2344,26 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
                 "expected part {name} to be preserved byte-for-byte"
             );
         }
+    }
+
+    #[test]
+    fn record_value_to_scalar_prefers_display_field_over_display_value() {
+        let record = formula_model::RecordValue::default()
+            .with_display_field("Name")
+            .with_field("Name", "Alice");
+
+        let value = ModelCellValue::Record(record);
+        assert_eq!(
+            formula_model_value_to_scalar(&value),
+            CellScalar::Text("Alice".to_string())
+        );
+
+        // Our JSON-introspection fallback should also understand the modern
+        // camelCase schema (`displayField`, `displayValue`).
+        assert_eq!(
+            rich_model_cell_value_to_scalar(&value),
+            Some(CellScalar::Text("Alice".to_string()))
+        );
     }
 
     #[test]
