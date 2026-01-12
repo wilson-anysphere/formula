@@ -202,8 +202,8 @@ This definition matches the needs of `PRICE`/`YIELD`/`DURATION` where “remaini
   `360/frequency` coupon period and Excel defines `DSC = E - A` (so `A + DSC = E` for any settlement date
   within the coupon period).
   - This means `E` can intentionally diverge from `DAYS360(PCD, NCD, TRUE)` for some February/EOM schedules.
-  - And `DSC` is not always equal to `DAYS360(settlement, NCD, TRUE)` if the day-count is non-additive
-    when the interval is split at month-end boundaries.
+  - Since `DSC` is defined as `E - A`, it can also diverge from `DAYS360(settlement, NCD, TRUE)`
+    in those schedules.
 - basis `1`/`2`/`3`: `DSC = NCD - settlement` (actual days).
 
 ### Computing `E` (days in coupon period)
