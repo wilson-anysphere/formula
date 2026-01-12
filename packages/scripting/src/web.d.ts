@@ -1,4 +1,4 @@
-import type { WorkbookLike } from "./index";
+import type { WorkbookLike } from "./index.js";
 
 export interface ScriptPrincipal {
   type: string;
@@ -53,4 +53,4 @@ export class ScriptRuntime {
   run(code: string, options?: ScriptRuntimeRunOptions): Promise<ScriptRunResult>;
 }
 
-export * from "./index";
+export * from "./index.js";
