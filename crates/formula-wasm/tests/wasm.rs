@@ -953,3 +953,41 @@ fn parse_formula_partial_reports_error_span_utf16() {
     assert_eq!(err.span.start, 1);
     assert_eq!(err.span.end, utf16_len);
 }
+
+#[wasm_bindgen_test]
+fn set_cell_rich_entity_properties_support_field_access_formulas() {
+    let mut wb = WasmWorkbook::new();
+
+    let entity = json!({
+        "type": "entity",
+        "value": {
+            "entityType": "stock",
+            "entityId": "AAPL",
+            "displayValue": "Apple",
+            "properties": {
+                "Price": { "type": "number", "value": 12.5 }
+            }
+        }
+    });
+
+    wb.set_cell_rich(
+        "A1".to_string(),
+        serde_wasm_bindgen::to_value(&entity).unwrap(),
+        None,
+    )
+    .unwrap();
+    wb.set_cell("B1".to_string(), JsValue::from_str("=A1.Price"), None)
+        .unwrap();
+
+    wb.recalculate(None).unwrap();
+
+    let b1_js = wb.get_cell("B1".to_string(), None).unwrap();
+    let b1: CellData = serde_wasm_bindgen::from_value(b1_js).unwrap();
+    assert_json_number(&b1.value, 12.5);
+
+    let a1_rich_js = wb.get_cell_rich("A1".to_string(), None).unwrap();
+    let a1_rich: JsonValue = serde_wasm_bindgen::from_value(a1_rich_js).unwrap();
+    assert_eq!(a1_rich["type"], json!("entity"));
+    assert_eq!(a1_rich["value"]["displayValue"], json!("Apple"));
+    assert_json_number(&a1_rich["value"]["properties"]["Price"]["value"], 12.5);
+}

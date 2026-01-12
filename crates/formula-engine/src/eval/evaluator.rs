@@ -666,11 +666,10 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             return Value::Error(ErrorKind::Value);
         }
 
-        // Field access (`A1.Price`) is currently parsed/serialized for round-trip and rewrite
-        // support, but the engine does not yet have a native rich value (Entity/Record) runtime.
+        // Field access (`A1.Price`) is lowered into a synthetic `_FIELDACCESS(base, "field")` call.
         //
         // Match Excel's error semantics by returning `#FIELD!` when attempting to read a field from
-        // a non-record value, while still propagating argument errors.
+        // a non-rich value, while still propagating argument errors.
         if name.eq_ignore_ascii_case("_FIELDACCESS") {
             if args.len() != 2 {
                 return Value::Error(ErrorKind::Value);
@@ -682,13 +681,35 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             }
 
             let field = self.deref_eval_value_dynamic(self.eval_value(&args[1]));
-            match field {
-                Value::Text(_) => {}
+            let field_name = match field {
+                Value::Text(s) => s,
                 Value::Error(e) => return Value::Error(e),
                 _ => return Value::Error(ErrorKind::Value),
+            };
+
+            fn map_lookup<'a>(
+                map: &'a std::collections::HashMap<String, Value>,
+                key: &str,
+            ) -> Option<&'a Value> {
+                if let Some(v) = map.get(key) {
+                    return Some(v);
+                }
+                let folded = crate::value::casefold(key);
+                map.iter()
+                    .find(|(k, _)| crate::value::casefold(k) == folded)
+                    .map(|(_, v)| v)
             }
 
-            return Value::Error(ErrorKind::Field);
+            return match base {
+                Value::Entity(entity) => map_lookup(&entity.fields, &field_name)
+                    .cloned()
+                    .unwrap_or(Value::Error(ErrorKind::Field)),
+                Value::Record(record) => map_lookup(&record.fields, &field_name)
+                    .cloned()
+                    .unwrap_or(Value::Error(ErrorKind::Field)),
+                // Field access on a non-rich value is a `#FIELD!` error.
+                _ => Value::Error(ErrorKind::Field),
+            };
         }
 
         if let Some(spec) = crate::functions::lookup_function(name) {

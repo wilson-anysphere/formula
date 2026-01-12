@@ -457,35 +457,169 @@ fn engine_value_to_json(value: EngineValue) -> JsonValue {
     }
 }
 
+fn model_error_to_engine(err: formula_model::ErrorValue) -> ErrorKind {
+    match err {
+        formula_model::ErrorValue::Null => ErrorKind::Null,
+        formula_model::ErrorValue::Div0 => ErrorKind::Div0,
+        formula_model::ErrorValue::Value => ErrorKind::Value,
+        formula_model::ErrorValue::Ref => ErrorKind::Ref,
+        formula_model::ErrorValue::Name => ErrorKind::Name,
+        formula_model::ErrorValue::Num => ErrorKind::Num,
+        formula_model::ErrorValue::NA => ErrorKind::NA,
+        formula_model::ErrorValue::GettingData => ErrorKind::GettingData,
+        formula_model::ErrorValue::Spill => ErrorKind::Spill,
+        formula_model::ErrorValue::Calc => ErrorKind::Calc,
+        formula_model::ErrorValue::Field => ErrorKind::Field,
+        formula_model::ErrorValue::Connect => ErrorKind::Connect,
+        formula_model::ErrorValue::Blocked => ErrorKind::Blocked,
+        formula_model::ErrorValue::Unknown => ErrorKind::Unknown,
+    }
+}
+
+fn engine_error_to_model(err: ErrorKind) -> formula_model::ErrorValue {
+    match err {
+        ErrorKind::Null => formula_model::ErrorValue::Null,
+        ErrorKind::Div0 => formula_model::ErrorValue::Div0,
+        ErrorKind::Value => formula_model::ErrorValue::Value,
+        ErrorKind::Ref => formula_model::ErrorValue::Ref,
+        ErrorKind::Name => formula_model::ErrorValue::Name,
+        ErrorKind::Num => formula_model::ErrorValue::Num,
+        ErrorKind::NA => formula_model::ErrorValue::NA,
+        ErrorKind::GettingData => formula_model::ErrorValue::GettingData,
+        ErrorKind::Spill => formula_model::ErrorValue::Spill,
+        ErrorKind::Calc => formula_model::ErrorValue::Calc,
+        ErrorKind::Field => formula_model::ErrorValue::Field,
+        ErrorKind::Connect => formula_model::ErrorValue::Connect,
+        ErrorKind::Blocked => formula_model::ErrorValue::Blocked,
+        ErrorKind::Unknown => formula_model::ErrorValue::Unknown,
+    }
+}
+
+/// Convert a `formula-model` [`CellValue`] (including entity/record rich values) into a
+/// `formula-engine` runtime [`Value`](formula_engine::Value).
+///
+/// Arrays are mapped into engine arrays (2D row-major). Note that the scalar JS-facing protocol
+/// (`getCell`/`recalculate`) still degrades arrays to their top-left value.
+fn cell_value_to_engine_rich(value: &CellValue) -> Result<EngineValue, JsValue> {
+    match value {
+        CellValue::Empty => Ok(EngineValue::Blank),
+        CellValue::Number(n) => Ok(EngineValue::Number(*n)),
+        CellValue::String(s) => Ok(EngineValue::Text(s.clone())),
+        CellValue::Boolean(b) => Ok(EngineValue::Bool(*b)),
+        CellValue::Error(err) => Ok(EngineValue::Error(model_error_to_engine(*err))),
+        CellValue::RichText(rt) => Ok(EngineValue::Text(rt.plain_text().to_string())),
+        CellValue::Entity(entity) => {
+            let mut fields = HashMap::new();
+            for (k, v) in &entity.properties {
+                fields.insert(k.clone(), cell_value_to_engine_rich(v)?);
+            }
+            Ok(EngineValue::Entity(formula_engine::value::EntityValue {
+                display: entity.display_value.clone(),
+                entity_type: (!entity.entity_type.is_empty()).then(|| entity.entity_type.clone()),
+                entity_id: (!entity.entity_id.is_empty()).then(|| entity.entity_id.clone()),
+                fields,
+            }))
+        }
+        CellValue::Record(record) => {
+            let mut fields = HashMap::new();
+            for (k, v) in &record.fields {
+                fields.insert(k.clone(), cell_value_to_engine_rich(v)?);
+            }
+            Ok(EngineValue::Record(formula_engine::value::RecordValue {
+                display: record.to_string(),
+                display_field: record.display_field.clone(),
+                fields,
+            }))
+        }
+        CellValue::Array(arr) => {
+            let rows = arr.data.len();
+            let cols = arr.data.first().map(|r| r.len()).unwrap_or(0);
+            if arr.data.iter().any(|r| r.len() != cols) {
+                return Err(js_err(
+                    "invalid array CellValue: expected a rectangular 2D array",
+                ));
+            }
+
+            let mut values = Vec::with_capacity(rows.saturating_mul(cols));
+            for row in &arr.data {
+                for v in row {
+                    values.push(cell_value_to_engine_rich(v)?);
+                }
+            }
+
+            Ok(EngineValue::Array(formula_engine::value::Array::new(
+                rows,
+                cols,
+                values,
+            )))
+        }
+        CellValue::Spill(spill) => Ok(EngineValue::Spill { origin: spill.origin }),
+    }
+}
+
+fn engine_value_to_cell_value_rich(value: EngineValue) -> CellValue {
+    match value {
+        EngineValue::Blank => CellValue::Empty,
+        EngineValue::Number(n) => CellValue::Number(n),
+        EngineValue::Text(s) => CellValue::String(s),
+        EngineValue::Bool(b) => CellValue::Boolean(b),
+        EngineValue::Error(err) => CellValue::Error(engine_error_to_model(err)),
+        EngineValue::Entity(entity) => {
+            let mut properties = HashMap::new();
+            for (k, v) in entity.fields {
+                properties.insert(k, engine_value_to_cell_value_rich(v));
+            }
+            CellValue::Entity(formula_model::EntityValue {
+                entity_type: entity.entity_type.unwrap_or_default(),
+                entity_id: entity.entity_id.unwrap_or_default(),
+                display_value: entity.display,
+                properties,
+            })
+        }
+        EngineValue::Record(record) => {
+            let mut fields = HashMap::new();
+            for (k, v) in record.fields {
+                fields.insert(k, engine_value_to_cell_value_rich(v));
+            }
+            CellValue::Record(formula_model::RecordValue {
+                fields,
+                display_field: record.display_field,
+                display_value: record.display,
+            })
+        }
+        EngineValue::Array(arr) => {
+            let mut data = Vec::with_capacity(arr.rows);
+            for r in 0..arr.rows {
+                let mut row = Vec::with_capacity(arr.cols);
+                for c in 0..arr.cols {
+                    row.push(engine_value_to_cell_value_rich(
+                        arr.get(r, c).cloned().unwrap_or(EngineValue::Blank),
+                    ));
+                }
+                data.push(row);
+            }
+            CellValue::Array(formula_model::ArrayValue { data })
+        }
+        EngineValue::Spill { origin } => CellValue::Spill(formula_model::SpillValue { origin }),
+        // These variants should not generally cross the rich-value boundary today. Degrade them
+        // into their Excel error equivalents so callers still get something meaningful.
+        EngineValue::Reference(_) | EngineValue::ReferenceUnion(_) => {
+            CellValue::Error(formula_model::ErrorValue::Value)
+        }
+        EngineValue::Lambda(_) => CellValue::Error(formula_model::ErrorValue::Calc),
+    }
+}
+
 fn cell_value_to_engine(value: &CellValue) -> EngineValue {
     match value {
         CellValue::Empty => EngineValue::Blank,
         CellValue::Number(n) => EngineValue::Number(*n),
         CellValue::String(s) => EngineValue::Text(s.clone()),
         CellValue::Boolean(b) => EngineValue::Bool(*b),
-        CellValue::Error(err) => match err {
-            formula_model::ErrorValue::Null => EngineValue::Error(ErrorKind::Null),
-            formula_model::ErrorValue::Div0 => EngineValue::Error(ErrorKind::Div0),
-            formula_model::ErrorValue::Value => EngineValue::Error(ErrorKind::Value),
-            formula_model::ErrorValue::Ref => EngineValue::Error(ErrorKind::Ref),
-            formula_model::ErrorValue::Name => EngineValue::Error(ErrorKind::Name),
-            formula_model::ErrorValue::Num => EngineValue::Error(ErrorKind::Num),
-            formula_model::ErrorValue::NA => EngineValue::Error(ErrorKind::NA),
-            formula_model::ErrorValue::GettingData => EngineValue::Error(ErrorKind::GettingData),
-            formula_model::ErrorValue::Spill => EngineValue::Error(ErrorKind::Spill),
-            formula_model::ErrorValue::Calc => EngineValue::Error(ErrorKind::Calc),
-            formula_model::ErrorValue::Field => EngineValue::Error(ErrorKind::Field),
-            formula_model::ErrorValue::Connect => EngineValue::Error(ErrorKind::Connect),
-            formula_model::ErrorValue::Blocked => EngineValue::Error(ErrorKind::Blocked),
-            formula_model::ErrorValue::Unknown => EngineValue::Error(ErrorKind::Unknown),
-        },
+        CellValue::Error(err) => EngineValue::Error(model_error_to_engine(*err)),
         CellValue::RichText(rt) => EngineValue::Text(rt.plain_text().to_string()),
-        CellValue::Entity(entity) => EngineValue::Entity(formula_engine::value::EntityValue::new(
-            entity.display_value.clone(),
-        )),
-        CellValue::Record(record) => EngineValue::Record(formula_engine::value::RecordValue::new(
-            record.to_string(),
-        )),
+        CellValue::Entity(_) | CellValue::Record(_) => cell_value_to_engine_rich(value)
+            .unwrap_or_else(|_| EngineValue::Error(ErrorKind::Value)),
         // The workbook model can store cached array/spill results, but the WASM worker API only
         // supports scalar values today. Treat these as spill errors so downstream formulas see an
         // error rather than silently treating an array as a string.
@@ -813,6 +947,81 @@ impl WorkbookState {
         self.pending_formula_baselines
             .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
         Ok(())
+    }
+
+    fn set_cell_rich_internal(
+        &mut self,
+        sheet: &str,
+        address: &str,
+        value: CellValue,
+    ) -> Result<(), JsValue> {
+        let sheet = self.ensure_sheet(sheet);
+        let cell_ref = Self::parse_address(address)?;
+        let address = cell_ref.to_a1();
+
+        // Overwriting any cell inside a spill range must clear the spill outputs so the JS
+        // consumer cache stays coherent (mirrors `set_cell_internal` semantics).
+        if let Some((origin, end)) = self.engine.spill_range(&sheet, &address) {
+            let edited_row = cell_ref.row;
+            let edited_col = cell_ref.col;
+            let edited_is_formula = false;
+            for row in origin.row..=end.row {
+                for col in origin.col..=end.col {
+                    // Skip the origin cell (top-left); we only need to clear spill outputs.
+                    if row == origin.row && col == origin.col {
+                        continue;
+                    }
+                    // If the user overwrote a spill output cell with a literal value, don't emit a
+                    // spill-clear change for that cell; the caller already knows its new input.
+                    if !edited_is_formula && row == edited_row && col == edited_col {
+                        continue;
+                    }
+                    self.pending_spill_clears
+                        .insert(FormulaCellKey::new(sheet.clone(), CellRef::new(row, col)));
+                }
+            }
+        }
+
+        let sheet_cells = self
+            .sheets
+            .get_mut(&sheet)
+            .expect("sheet just ensured must exist");
+
+        if value.is_empty() {
+            self.engine
+                .clear_cell(&sheet, &address)
+                .map_err(|err| js_err(err.to_string()))?;
+            sheet_cells.remove(&address);
+            self.pending_spill_clears
+                .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
+            self.pending_formula_baselines
+                .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
+            return Ok(());
+        }
+
+        let engine_value = cell_value_to_engine_rich(&value)?;
+        self.engine
+            .set_cell_value(&sheet, &address, engine_value)
+            .map_err(|err| js_err(err.to_string()))?;
+
+        // Preserve the legacy scalar workbook JSON schema by storing the degraded scalar input.
+        let input = cell_value_to_json(&value);
+        debug_assert!(is_scalar_json(&input));
+        sheet_cells.insert(address.clone(), input);
+
+        self.pending_spill_clears
+            .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
+        self.pending_formula_baselines
+            .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
+        Ok(())
+    }
+
+    fn get_cell_rich_internal(&self, sheet: &str, address: &str) -> Result<CellValue, JsValue> {
+        let sheet = self.require_sheet(sheet)?.to_string();
+        let address = Self::parse_address(address)?.to_a1();
+        Ok(engine_value_to_cell_value_rich(
+            self.engine.get_cell_value(&sheet, &address),
+        ))
     }
 
     fn get_cell_data(&self, sheet: &str, address: &str) -> Result<CellData, JsValue> {
@@ -1996,6 +2205,17 @@ impl WasmWorkbook {
         cell_data_to_js(&cell)
     }
 
+    #[wasm_bindgen(js_name = "getCellRich")]
+    pub fn get_cell_rich(
+        &self,
+        address: String,
+        sheet: Option<String>,
+    ) -> Result<JsValue, JsValue> {
+        let sheet = sheet.as_deref().unwrap_or(DEFAULT_SHEET);
+        let value = self.inner.get_cell_rich_internal(sheet, &address)?;
+        serde_wasm_bindgen::to_value(&value).map_err(|err| js_err(err.to_string()))
+    }
+
     #[wasm_bindgen(js_name = "setCell")]
     pub fn set_cell(
         &mut self,
@@ -2012,6 +2232,26 @@ impl WasmWorkbook {
         let input: JsonValue =
             serde_wasm_bindgen::from_value(input).map_err(|err| js_err(err.to_string()))?;
         self.inner.set_cell_internal(sheet, &address, input)
+    }
+
+    #[wasm_bindgen(js_name = "setCellRich")]
+    pub fn set_cell_rich(
+        &mut self,
+        address: String,
+        value: JsValue,
+        sheet: Option<String>,
+    ) -> Result<(), JsValue> {
+        let sheet = sheet.as_deref().unwrap_or(DEFAULT_SHEET);
+        if value.is_null() || value.is_undefined() {
+            // Preserve sparse semantics: treat null/undefined as clearing the cell.
+            return self
+                .inner
+                .set_cell_internal(sheet, &address, JsonValue::Null);
+        }
+
+        let value: CellValue =
+            serde_wasm_bindgen::from_value(value).map_err(|err| js_err(err.to_string()))?;
+        self.inner.set_cell_rich_internal(sheet, &address, value)
     }
 
     #[wasm_bindgen(js_name = "setCells")]
@@ -2158,6 +2398,41 @@ mod tests {
         let engine_value = cell_value_to_engine(&value);
         assert_eq!(engine_value, EngineValue::Error(ErrorKind::Connect));
         assert_eq!(engine_value_to_json(engine_value), json!("#CONNECT!"));
+    }
+
+    #[test]
+    fn set_cell_rich_entity_properties_flow_through_to_field_access_formulas() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+
+        let mut props = HashMap::new();
+        props.insert("Price".to_string(), CellValue::Number(12.5));
+        let entity = formula_model::EntityValue {
+            entity_type: "stock".to_string(),
+            entity_id: "AAPL".to_string(),
+            display_value: "Apple".to_string(),
+            properties: props,
+        };
+
+        wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", CellValue::Entity(entity.clone()))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("=A1.Price"))
+            .unwrap();
+        wb.recalculate_internal(None).unwrap();
+
+        let b1 = wb.get_cell_data(DEFAULT_SHEET, "B1").unwrap();
+        assert_eq!(b1.value, json!(12.5));
+
+        let a1_rich = wb.get_cell_rich_internal(DEFAULT_SHEET, "A1").unwrap();
+        match a1_rich {
+            CellValue::Entity(roundtripped) => {
+                assert_eq!(roundtripped.display_value, "Apple");
+                assert_eq!(
+                    roundtripped.properties.get("Price"),
+                    Some(&CellValue::Number(12.5))
+                );
+            }
+            other => panic!("expected entity value, got {other:?}"),
+        }
     }
 
     #[test]

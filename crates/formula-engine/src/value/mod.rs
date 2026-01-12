@@ -227,6 +227,10 @@ impl Array {
 pub struct EntityValue {
     /// Display string shown in the grid UI.
     pub display: String,
+    /// Optional entity type discriminator (e.g. `"stock"`, `"geography"`).
+    pub entity_type: Option<String>,
+    /// Optional entity identifier (e.g. `"AAPL"`).
+    pub entity_id: Option<String>,
     /// Field values for `.` access (case-insensitive at lookup time).
     pub fields: HashMap<String, Value>,
 }
@@ -236,6 +240,8 @@ impl EntityValue {
     pub fn new(display: impl Into<String>) -> Self {
         Self {
             display: display.into(),
+            entity_type: None,
+            entity_id: None,
             fields: HashMap::new(),
         }
     }
@@ -244,6 +250,8 @@ impl EntityValue {
     pub fn with_fields(display: impl Into<String>, fields: HashMap<String, Value>) -> Self {
         Self {
             display: display.into(),
+            entity_type: None,
+            entity_id: None,
             fields,
         }
     }
@@ -257,6 +265,8 @@ impl EntityValue {
 pub struct RecordValue {
     /// Display string shown in the grid UI.
     pub display: String,
+    /// Optional name of the field that should be used for display.
+    pub display_field: Option<String>,
     /// Field values for `.` access (case-insensitive at lookup time).
     pub fields: HashMap<String, Value>,
 }
@@ -266,6 +276,7 @@ impl RecordValue {
     pub fn new(display: impl Into<String>) -> Self {
         Self {
             display: display.into(),
+            display_field: None,
             fields: HashMap::new(),
         }
     }
@@ -274,6 +285,7 @@ impl RecordValue {
     pub fn with_fields(display: impl Into<String>, fields: HashMap<String, Value>) -> Self {
         Self {
             display: display.into(),
+            display_field: None,
             fields,
         }
     }
