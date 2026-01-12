@@ -58,3 +58,22 @@ fn xlsx_document_exposes_vm_metadata() -> Result<(), Box<dyn std::error::Error>>
 
     Ok(())
 }
+
+#[test]
+fn xlsx_document_exposes_vm_cm_metadata() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/xlsx/rich-data/images-in-cell.xlsx");
+
+    let doc = formula_xlsx::load_from_path(&fixture)?;
+    let sheet_id = doc.workbook.sheets[0].id;
+
+    let a1 = CellRef::from_a1("A1")?;
+    let meta = doc
+        .cell_meta(sheet_id, a1)
+        .expect("expected cell metadata for A1");
+
+    assert_eq!(meta.vm.as_deref(), Some("1"));
+    assert_eq!(meta.cm.as_deref(), Some("1"));
+
+    Ok(())
+}
