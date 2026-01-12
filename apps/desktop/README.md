@@ -171,6 +171,9 @@ At a high level:
     WebView**, and persists verified bytes + metadata to IndexedDB.
   - **Boot:** `WebExtensionManager.loadAllInstalled()` loads all installed extensions and triggers startup semantics
     (`onStartupFinished` + initial `workbookOpened`) in a way that avoids spamming already-running extensions.
+- **Desktop integration:** `DesktopExtensionHostManager` (`apps/desktop/src/extensions/extensionHostManager.ts`)
+  - Wires the host/manager into the desktop UI (toasts/prompts/panels, base URL config) and loads built-in +
+    IndexedDB-installed extensions on demand.
 
 Extension panels (`contributes.panels` / `formula.ui.createPanel`) are rendered in a sandboxed `<iframe>` with a
 restrictive CSP (see `apps/desktop/src/extensions/ExtensionPanelBody.tsx`), so panel HTML cannot load remote scripts or

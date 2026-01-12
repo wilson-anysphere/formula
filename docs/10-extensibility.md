@@ -24,6 +24,8 @@ devtools:
     ```js
     window.dispatchEvent(new CustomEvent("formula:open-panel", { detail: { panelId: "marketplace" } }));
     ```
+- **Desktop glue:** `DesktopExtensionHostManager` (`apps/desktop/src/extensions/extensionHostManager.ts`) wires the browser
+  extension host + marketplace manager into the desktop UI (toasts/prompts/panels).
 - **Executing commands**: clicking a command routes to `BrowserExtensionHost.executeCommand(commandId, ...args)`. Errors surface as a toast.
 - **Panels / webviews**:
   - Contributed panels (`contributes.panels`) are registered in the panel registry so they can be persisted in layouts.
