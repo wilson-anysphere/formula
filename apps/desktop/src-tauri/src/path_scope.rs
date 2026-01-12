@@ -38,7 +38,8 @@ impl PathScopePolicy {
         Self { roots }
     }
 
-    /// Default policy for the desktop app: allow `$HOME/**` and `$DOCUMENT/**`.
+    /// Default policy for the desktop app: allow `$HOME/**`, `$DOCUMENT/**`, and (optionally)
+    /// `$DOWNLOADS/**`.
     pub fn default_desktop() -> Self {
         let mut roots = Vec::new();
 
@@ -46,6 +47,13 @@ impl PathScopePolicy {
             roots.push(user_dirs.home_dir().to_path_buf());
             if let Some(documents) = user_dirs.document_dir() {
                 roots.push(documents.to_path_buf());
+            }
+            // Include Downloads only if it exists and can be canonicalized. On some systems
+            // (notably Linux with XDG user dirs), Downloads may be configured outside `$HOME`.
+            if let Some(downloads) = user_dirs.download_dir() {
+                if let Ok(canonical) = dunce::canonicalize(downloads) {
+                    roots.push(canonical);
+                }
             }
         } else {
             // Fallbacks if `directories` cannot determine platform user dirs.
@@ -117,6 +125,44 @@ mod tests {
     use super::PathScopePolicy;
     use directories::BaseDirs;
 
+    #[cfg(target_os = "linux")]
+    use std::ffi::OsString;
+    #[cfg(target_os = "linux")]
+    use std::sync::{Mutex, OnceLock};
+
+    #[cfg(target_os = "linux")]
+    static ENV_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
+
+    #[cfg(target_os = "linux")]
+    fn env_mutex() -> &'static Mutex<()> {
+        ENV_MUTEX.get_or_init(|| Mutex::new(()))
+    }
+
+    #[cfg(target_os = "linux")]
+    struct EnvVarGuard {
+        key: &'static str,
+        prev: Option<OsString>,
+    }
+
+    #[cfg(target_os = "linux")]
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let prev = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, prev }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.prev {
+                Some(prev) => std::env::set_var(self.key, prev),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
     #[test]
     fn read_allows_paths_within_allowed_root() {
         let allowed_temp = tempfile::tempdir().unwrap();
@@ -142,6 +188,62 @@ mod tests {
             err,
             "Access denied: path is outside the allowed filesystem scope"
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn default_desktop_allows_paths_in_downloads_dir_outside_home() {
+        // `directories::UserDirs` relies on process-wide environment variables (HOME/XDG_*), so
+        // guard against concurrent tests that might also manipulate them.
+        let _guard = env_mutex().lock().unwrap();
+
+        let tmp = tempfile::tempdir().unwrap();
+        let home_dir = tmp.path().join("home");
+        let downloads_dir = tmp.path().join("downloads");
+        let config_dir = tmp.path().join("config");
+        std::fs::create_dir_all(&home_dir).unwrap();
+        std::fs::create_dir_all(&downloads_dir).unwrap();
+        std::fs::create_dir_all(&config_dir).unwrap();
+
+        // Configure Downloads to resolve outside `$HOME` via XDG user-dirs config.
+        std::fs::write(
+            config_dir.join("user-dirs.dirs"),
+            "XDG_DOWNLOAD_DIR=\"$HOME/../downloads\"\n",
+        )
+        .unwrap();
+
+        let _home = EnvVarGuard::set("HOME", &home_dir);
+        let _xdg_config = EnvVarGuard::set("XDG_CONFIG_HOME", &config_dir);
+
+        // Sanity: Downloads is not a subdirectory of HOME.
+        assert!(
+            !downloads_dir.starts_with(&home_dir),
+            "test setup error: downloads_dir should be outside home_dir"
+        );
+
+        let file_path = downloads_dir.join("from_downloads.txt");
+        std::fs::write(&file_path, "hello").unwrap();
+
+        // PathScopePolicy (read + write path validation) should allow Downloads.
+        let policy = PathScopePolicy::default_desktop();
+        let validated = policy
+            .validate_read_path(&file_path)
+            .expect("downloads path should be allowed");
+        let downloads_root = dunce::canonicalize(&downloads_dir).unwrap();
+        assert!(
+            validated.starts_with(&downloads_root),
+            "expected validated path to be within downloads root"
+        );
+
+        // Lower-level fs scope helpers should allow the same roots.
+        let allowed_roots = crate::fs_scope::desktop_allowed_roots().unwrap();
+        let downloads_root_std = std::fs::canonicalize(&downloads_dir).unwrap();
+        assert!(
+            allowed_roots.iter().any(|root| root == &downloads_root_std),
+            "expected desktop_allowed_roots to include downloads root"
+        );
+        crate::fs_scope::canonicalize_in_allowed_roots(&file_path, &allowed_roots)
+            .expect("downloads path should be allowed by fs_scope");
     }
 
     #[test]

@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 /// This mirrors the desktop filesystem scope policy used for local file access:
 /// - `$HOME/**`
 /// - `$DOCUMENT/**`
+/// - `$DOWNLOADS/**` (if the OS/user has a Downloads dir configured and it exists)
 pub(crate) fn desktop_allowed_roots() -> Result<Vec<PathBuf>> {
     let base_dirs =
         BaseDirs::new().ok_or_else(|| anyhow!("unable to determine home directory"))?;
@@ -17,6 +18,9 @@ pub(crate) fn desktop_allowed_roots() -> Result<Vec<PathBuf>> {
     if let Some(user_dirs) = UserDirs::new() {
         if let Some(documents) = user_dirs.document_dir() {
             roots.push(documents.to_path_buf());
+        }
+        if let Some(downloads) = user_dirs.download_dir() {
+            roots.push(downloads.to_path_buf());
         }
     }
 
