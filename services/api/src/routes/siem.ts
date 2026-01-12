@@ -423,100 +423,100 @@ export function registerSiemRoutes(app: FastifyInstance): void {
       const dataResidencyAllowedRegions = settingsRow ? settingsRow.data_residency_allowed_regions : null;
       const allowCrossRegionProcessing = settingsRow ? Boolean(settingsRow.allow_cross_region_processing) : true;
 
-    let effectiveDataRegion: string;
-    try {
-      const primaryRegion = resolvePrimaryStorageRegion({
-        region: dataResidencyRegion,
-        allowedRegions: dataResidencyAllowedRegions
-      });
-      effectiveDataRegion = incomingConfig.dataRegion ?? primaryRegion;
+      let effectiveDataRegion: string;
+      try {
+        const primaryRegion = resolvePrimaryStorageRegion({
+          region: dataResidencyRegion,
+          allowedRegions: dataResidencyAllowedRegions
+        });
+        effectiveDataRegion = incomingConfig.dataRegion ?? primaryRegion;
 
-      assertOutboundRegionAllowed({
-        orgId,
-        requestedRegion: effectiveDataRegion,
-        operation: "siem.config.upsert",
-        region: dataResidencyRegion,
-        allowedRegions: dataResidencyAllowedRegions,
-        allowCrossRegionProcessing
-      });
-    } catch (err) {
-      if (err instanceof DataResidencyViolationError) {
-        app.metrics.dataResidencyBlockedTotal.inc({ operation: err.operation });
-        try {
-          await writeAuditEvent(
-            app.db,
-            createAuditEvent({
-              eventType: "org.data_residency.blocked",
-              actor: { type: "user", id: request.user!.id },
-              context: {
-                orgId,
-                userId: request.user!.id,
-                userEmail: request.user!.email,
-                sessionId: request.session?.id ?? null,
-                ipAddress: getClientIp(request),
-                userAgent: getUserAgent(request)
-              },
-              resource: { type: "integration", id: "siem", name: "siem" },
-              success: false,
-              error: { code: "data_residency_violation", message: err.message },
-              details: {
-                operation: err.operation,
-                requestedRegion: err.requestedRegion,
-                allowedRegions: err.allowedRegions,
-                dataResidencyRegion,
-                allowCrossRegionProcessing
-              }
-            })
-          );
-        } catch (auditErr) {
-          app.log.warn({ err: auditErr, orgId }, "data_residency_blocked_audit_failed");
+        assertOutboundRegionAllowed({
+          orgId,
+          requestedRegion: effectiveDataRegion,
+          operation: "siem.config.upsert",
+          region: dataResidencyRegion,
+          allowedRegions: dataResidencyAllowedRegions,
+          allowCrossRegionProcessing
+        });
+      } catch (err) {
+        if (err instanceof DataResidencyViolationError) {
+          app.metrics.dataResidencyBlockedTotal.inc({ operation: err.operation });
+          try {
+            await writeAuditEvent(
+              app.db,
+              createAuditEvent({
+                eventType: "org.data_residency.blocked",
+                actor: { type: "user", id: request.user!.id },
+                context: {
+                  orgId,
+                  userId: request.user!.id,
+                  userEmail: request.user!.email,
+                  sessionId: request.session?.id ?? null,
+                  ipAddress: getClientIp(request),
+                  userAgent: getUserAgent(request)
+                },
+                resource: { type: "integration", id: "siem", name: "siem" },
+                success: false,
+                error: { code: "data_residency_violation", message: err.message },
+                details: {
+                  operation: err.operation,
+                  requestedRegion: err.requestedRegion,
+                  allowedRegions: err.allowedRegions,
+                  dataResidencyRegion,
+                  allowCrossRegionProcessing
+                }
+              })
+            );
+          } catch (auditErr) {
+            app.log.warn({ err: auditErr, orgId }, "data_residency_blocked_audit_failed");
+          }
+          return reply.code(400).send({ error: "invalid_request", message: err.message });
         }
-        return reply.code(400).send({ error: "invalid_request", message: err.message });
-      }
-      throw err;
-    }
-
-    let endpointUrl: string;
-    try {
-      endpointUrl = validateEndpointUrl(incomingConfig.endpointUrl, {
-        // Pinning is only meaningful for https endpoints.
-        requireHttps: Boolean(enabled) && certificatePinningEnabled
-      });
-    } catch {
-      return reply.code(400).send({ error: "invalid_request" });
-    }
-
-    const { auth: incomingAuth, ...incomingWithoutAuth } = incomingConfig;
-
-    const config: Omit<SiemEndpointConfig, "auth"> = {
-      ...incomingWithoutAuth,
-      endpointUrl,
-      dataRegion: effectiveDataRegion,
-      batchSize:
-        typeof incomingConfig.batchSize === "number" ? clampInt(incomingConfig.batchSize, 1, 1000) : undefined,
-      timeoutMs:
-        typeof incomingConfig.timeoutMs === "number" ? clampInt(incomingConfig.timeoutMs, 100, 120_000) : undefined
-    };
-
-    try {
-      if (config.idempotencyKeyHeader) {
-        config.idempotencyKeyHeader = validateHeaderName(config.idempotencyKeyHeader, "idempotencyKeyHeader");
+        throw err;
       }
 
-      if (config.headers) {
-        const normalized: Record<string, string> = {};
-        for (const [key, value] of Object.entries(config.headers)) {
-          const header = validateHeaderName(key, "headers");
-          normalized[header] = value;
+      let endpointUrl: string;
+      try {
+        endpointUrl = validateEndpointUrl(incomingConfig.endpointUrl, {
+          // Pinning is only meaningful for https endpoints.
+          requireHttps: Boolean(enabled) && certificatePinningEnabled
+        });
+      } catch {
+        return reply.code(400).send({ error: "invalid_request" });
+      }
+
+      const { auth: incomingAuth, ...incomingWithoutAuth } = incomingConfig;
+
+      const config: Omit<SiemEndpointConfig, "auth"> = {
+        ...incomingWithoutAuth,
+        endpointUrl,
+        dataRegion: effectiveDataRegion,
+        batchSize:
+          typeof incomingConfig.batchSize === "number" ? clampInt(incomingConfig.batchSize, 1, 1000) : undefined,
+        timeoutMs:
+          typeof incomingConfig.timeoutMs === "number" ? clampInt(incomingConfig.timeoutMs, 100, 120_000) : undefined
+      };
+
+      try {
+        if (config.idempotencyKeyHeader) {
+          config.idempotencyKeyHeader = validateHeaderName(config.idempotencyKeyHeader, "idempotencyKeyHeader");
         }
-        config.headers = normalized;
-      }
-    } catch {
-      return reply.code(400).send({ error: "invalid_request" });
-    }
 
-    const isEnabling = Boolean(enabled) && !Boolean(prevEnabled);
-    if (isEnabling) {
+        if (config.headers) {
+          const normalized: Record<string, string> = {};
+          for (const [key, value] of Object.entries(config.headers)) {
+            const header = validateHeaderName(key, "headers");
+            normalized[header] = value;
+          }
+          config.headers = normalized;
+        }
+      } catch {
+        return reply.code(400).send({ error: "invalid_request" });
+      }
+
+      const isEnabling = Boolean(enabled) && !Boolean(prevEnabled);
+      if (isEnabling) {
         if (!incomingAuth) {
           // Enabling after SIEM was previously disabled requires re-supplying
           // secrets (they are deleted when disabled). If an existing auth mode
@@ -542,29 +542,29 @@ export function registerSiemRoutes(app: FastifyInstance): void {
             return reply.code(400).send({ error: "invalid_request" });
           }
         }
-    }
+      }
 
-    let storedAuth: SiemAuthConfig | undefined;
-    try {
-      storedAuth = await storeAuth({
-        db: app.db,
-        keyring: app.config.secretStoreKeys,
-        orgId,
-        enabled,
-        auth: incomingAuth,
-        existingAuth: existingConfig?.auth
-      });
-    } catch {
-      return reply.code(400).send({ error: "invalid_request" });
-    }
+      let storedAuth: SiemAuthConfig | undefined;
+      try {
+        storedAuth = await storeAuth({
+          db: app.db,
+          keyring: app.config.secretStoreKeys,
+          orgId,
+          enabled,
+          auth: incomingAuth,
+          existingAuth: existingConfig?.auth
+        });
+      } catch {
+        return reply.code(400).send({ error: "invalid_request" });
+      }
 
-    const storedConfig: SiemEndpointConfig = {
-      ...config,
-      auth: storedAuth
-    };
+      const storedConfig: SiemEndpointConfig = {
+        ...config,
+        auth: storedAuth
+      };
 
-    const oldRefs = new Set(collectSecretRefsFromConfig(existingConfig));
-    const newRefs = new Set(collectSecretRefsFromConfig(storedConfig));
+      const oldRefs = new Set(collectSecretRefsFromConfig(existingConfig));
+      const newRefs = new Set(collectSecretRefsFromConfig(storedConfig));
 
       await app.db.query(
         `
@@ -586,38 +586,38 @@ export function registerSiemRoutes(app: FastifyInstance): void {
         }
       }
 
-    const isAdd = Boolean(enabled) && !Boolean(prevEnabled);
-    const isRemove = !Boolean(enabled) && Boolean(prevEnabled);
-    const eventType = isAdd
-      ? "admin.integration_added"
-      : isRemove
-        ? "admin.integration_removed"
-        : "admin.integration_updated";
+      const isAdd = Boolean(enabled) && !Boolean(prevEnabled);
+      const isRemove = !Boolean(enabled) && Boolean(prevEnabled);
+      const eventType = isAdd
+        ? "admin.integration_added"
+        : isRemove
+          ? "admin.integration_removed"
+          : "admin.integration_updated";
 
-    await writeAuditEvent(
-      app.db,
-      createAuditEvent({
-        eventType,
-        actor: { type: "user", id: request.user!.id },
-        context: {
-          orgId,
-          userId: request.user!.id,
-          userEmail: request.user!.email,
-          sessionId: request.session?.id ?? null,
-          ipAddress: getClientIp(request),
-          userAgent: getUserAgent(request)
-        },
-        resource: { type: "integration", id: "siem", name: "siem" },
-        success: true,
-        details: {
-          integration: "siem",
-          enabled,
-          endpointUrl: config.endpointUrl,
-          format: config.format ?? "json",
-          dataRegion: storedConfig.dataRegion ?? null
-        }
-      })
-    );
+      await writeAuditEvent(
+        app.db,
+        createAuditEvent({
+          eventType,
+          actor: { type: "user", id: request.user!.id },
+          context: {
+            orgId,
+            userId: request.user!.id,
+            userEmail: request.user!.email,
+            sessionId: request.session?.id ?? null,
+            ipAddress: getClientIp(request),
+            userAgent: getUserAgent(request)
+          },
+          resource: { type: "integration", id: "siem", name: "siem" },
+          success: true,
+          details: {
+            integration: "siem",
+            enabled,
+            endpointUrl: config.endpointUrl,
+            format: config.format ?? "json",
+            dataRegion: storedConfig.dataRegion ?? null
+          }
+        })
+      );
 
       return reply.send({
         enabled,
