@@ -1209,6 +1209,10 @@ if (
 
   const invalidateSecondaryProvider = () => {
     if (!secondaryGridView) return;
+    // Sheet view state (frozen panes + axis overrides) lives in the DocumentController and is
+    // independent of cell contents. Even when we reuse the primary grid's provider, we still
+    // need to re-apply the current sheet's view state (e.g. when switching sheets).
+    secondaryGridView.syncSheetViewFromDocument();
     const sharedProvider = (app as any).sharedProvider ?? null;
     // In shared-grid mode we reuse the primary provider, and SpreadsheetApp already
     // invalidates it on sheet changes / show-formulas toggles. Avoid extra churn.
