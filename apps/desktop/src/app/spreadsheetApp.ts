@@ -1217,7 +1217,10 @@ export class SpreadsheetApp {
     if (this.gridMode === "shared") {
       // Shared-grid mode uses the CanvasGridRenderer selection layer, but we still
       // need pointer movement for comment tooltips.
-      this.root.addEventListener("pointermove", (e) => this.onSharedPointerMove(e), { signal: this.domAbort.signal });
+      this.root.addEventListener("pointermove", (e) => this.onSharedPointerMove(e), {
+        passive: true,
+        signal: this.domAbort.signal,
+      });
       this.root.addEventListener("pointerleave", () => this.hideCommentTooltip(), { signal: this.domAbort.signal });
       this.root.addEventListener("keydown", (e) => this.onKeyDown(e), { signal: this.domAbort.signal });
     } else {
