@@ -98,7 +98,9 @@ test.describe("command palette go to", () => {
     await page.keyboard.press(`${modifier}+Shift+P`);
     await expect(page.getByTestId("command-palette-input")).toBeVisible();
     await page.getByTestId("command-palette-input").fill("Budget!A1");
-    await page.keyboard.press("Enter");
+    await expect(page.locator("li.command-palette__item", { hasText: "Go to Budget!A1" })).toHaveCount(0);
+    // Close without executing any command result.
+    await page.keyboard.press("Escape");
 
     const state = await page.evaluate(() => {
       const app = (window as any).__formulaApp;
