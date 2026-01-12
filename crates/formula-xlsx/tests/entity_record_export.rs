@@ -1,6 +1,7 @@
 use std::io::Cursor;
 
-use formula_model::{CellRef, CellValue, EntityValue, RecordValue, Workbook};
+use formula_model::drawings::ImageId;
+use formula_model::{CellRef, CellValue, EntityValue, ImageValue, RecordValue, Workbook};
 
 #[test]
 fn export_degrades_entity_and_record_values_to_plain_strings() {
@@ -23,6 +24,31 @@ fn export_degrades_entity_and_record_values_to_plain_strings() {
                 .with_display_field("Name"),
         ),
     );
+    sheet.set_value(
+        CellRef::new(2, 0),
+        CellValue::Record(
+            RecordValue::new("Record Fallback")
+                .with_field(
+                    "Logo",
+                    CellValue::Image(ImageValue {
+                        image_id: ImageId::new("logo.png"),
+                        alt_text: Some("Logo".to_string()),
+                        width: None,
+                        height: None,
+                    }),
+                )
+                .with_display_field("Logo"),
+        ),
+    );
+    sheet.set_value(
+        CellRef::new(3, 0),
+        CellValue::Image(ImageValue {
+            image_id: ImageId::new("logo.png"),
+            alt_text: Some("Logo".to_string()),
+            width: None,
+            height: None,
+        }),
+    );
 
     let mut cursor = Cursor::new(Vec::new());
     formula_xlsx::write_workbook_to_writer(&workbook, &mut cursor).unwrap();
@@ -38,5 +64,13 @@ fn export_degrades_entity_and_record_values_to_plain_strings() {
     assert_eq!(
         sheet.value(CellRef::new(1, 0)),
         CellValue::String("Record Display".to_string())
+    );
+    assert_eq!(
+        sheet.value(CellRef::new(2, 0)),
+        CellValue::String("Logo".to_string())
+    );
+    assert_eq!(
+        sheet.value(CellRef::new(3, 0)),
+        CellValue::String("Logo".to_string())
     );
 }
