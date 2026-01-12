@@ -822,6 +822,9 @@ These values are copied from fixtures/tests in this repo and are safe to treat a
 | `richValueRel.xml` root + namespace | `<richValueRel>` / `http://schemas.microsoft.com/office/spreadsheetml/2017/richdata2` | `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` |
 | `richValueRel.xml` root + namespace | `<richValueRels>` / `http://schemas.microsoft.com/office/spreadsheetml/2022/richvaluerel` | `fixtures/xlsx/basic/image-in-cell.xlsx` |
 | `richValue.xml` namespace | `http://schemas.microsoft.com/office/spreadsheetml/2017/richdata` | `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` |
+| `rdrichvalue.xml` namespace | `http://schemas.microsoft.com/office/spreadsheetml/2017/richdata` | `fixtures/xlsx/basic/image-in-cell.xlsx` |
+| `rdrichvaluestructure.xml` root + namespace | `<rvStructures>` / `http://schemas.microsoft.com/office/spreadsheetml/2017/richdata` | `fixtures/xlsx/basic/image-in-cell.xlsx` |
+| `rdRichValueTypes.xml` root + namespace | `<rvTypesInfo>` / `http://schemas.microsoft.com/office/spreadsheetml/2017/richdata2` | `fixtures/xlsx/basic/image-in-cell.xlsx` |
 | `metadata.xml` content type override | `application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml` | `fixtures/xlsx/metadata/rich-values-vm.xlsx` |
 | `metadata.xml` content type override | `application/vnd.openxmlformats-officedocument.spreadsheetml.metadata+xml` | `crates/formula-xlsx/tests/metadata_rich_value_roundtrip.rs` |
 | No override for metadata/richData XML parts (default `application/xml`) | (none) | `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` |
