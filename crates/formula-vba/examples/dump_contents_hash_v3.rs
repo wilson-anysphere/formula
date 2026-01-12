@@ -118,20 +118,34 @@ fn parse_args(
         }
 
         if arg_str == "--alg" {
+            // If the caller didn't provide an explicit value, default to SHA-256 (the common case).
+            //
+            // Accepting `--alg <input-path>` is slightly non-standard, but it makes the tool easier
+            // to use when you want to print only one digest (the default SHA-256) without having to
+            // spell out `--alg sha256`.
             let Some(value) = args.next() else {
-                return Err(format!(
-                    "missing value for --alg (expected md5|sha256)\n{}",
-                    usage(program)
-                ));
+                alg = Some(Alg::Sha256);
+                continue;
             };
-            alg = Some(parse_alg(&value).ok_or_else(|| {
-                format!(
-                    "invalid --alg value (expected md5|sha256): {}\n{}",
-                    value.to_string_lossy(),
-                    usage(program)
-                )
-            })?);
-            continue;
+
+            if let Some(parsed) = parse_alg(&value) {
+                alg = Some(parsed);
+                continue;
+            }
+
+            // If the next arg isn't a known algorithm and we haven't seen an input path yet, treat
+            // it as the input path and keep the default SHA-256 selection.
+            if input.is_none() {
+                alg = Some(Alg::Sha256);
+                input = Some(PathBuf::from(value));
+                continue;
+            }
+
+            return Err(format!(
+                "invalid --alg value (expected md5|sha256): {}\n{}",
+                value.to_string_lossy(),
+                usage(program)
+            ));
         }
 
         if let Some(rest) = arg_str.strip_prefix("--alg=") {
