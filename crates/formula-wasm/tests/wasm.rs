@@ -182,6 +182,27 @@ fn lex_formula_honors_locale_id_option_for_arg_separator() {
 }
 
 #[wasm_bindgen_test]
+fn lex_formula_rejects_unknown_locale_id_option() {
+    let opts = Object::new();
+    Reflect::set(&opts, &JsValue::from_str("localeId"), &JsValue::from_str("xx-XX")).unwrap();
+
+    let err = lex_formula("=1+2", Some(opts.into())).unwrap_err();
+    let message = err
+        .as_string()
+        .unwrap_or_else(|| format!("unexpected error value: {err:?}"));
+    assert_eq!(message, "unknown localeId: xx-XX");
+}
+
+#[wasm_bindgen_test]
+fn lex_formula_rejects_non_object_options() {
+    let err = lex_formula("=1+2", Some(JsValue::from_f64(1.0))).unwrap_err();
+    let message = err
+        .as_string()
+        .unwrap_or_else(|| format!("unexpected error value: {err:?}"));
+    assert_eq!(message, "options must be an object");
+}
+
+#[wasm_bindgen_test]
 fn lex_formula_honors_reference_style_option() {
     let opts = Object::new();
     Reflect::set(
@@ -224,6 +245,27 @@ fn parse_formula_partial_honors_locale_id_option() {
     // Span should point at the `;` in `=SUMME(1;2)`.
     assert_eq!(default_err.span.start, 8);
     assert_eq!(default_err.span.end, 9);
+}
+
+#[wasm_bindgen_test]
+fn parse_formula_partial_rejects_unknown_locale_id_option() {
+    let opts = Object::new();
+    Reflect::set(&opts, &JsValue::from_str("localeId"), &JsValue::from_str("xx-XX")).unwrap();
+
+    let err = parse_formula_partial("=1+2".to_string(), None, Some(opts.into())).unwrap_err();
+    let message = err
+        .as_string()
+        .unwrap_or_else(|| format!("unexpected error value: {err:?}"));
+    assert_eq!(message, "unknown localeId: xx-XX");
+}
+
+#[wasm_bindgen_test]
+fn parse_formula_partial_rejects_non_object_options() {
+    let err = parse_formula_partial("=1+2".to_string(), None, Some(JsValue::from_f64(1.0))).unwrap_err();
+    let message = err
+        .as_string()
+        .unwrap_or_else(|| format!("unexpected error value: {err:?}"));
+    assert_eq!(message, "options must be an object");
 }
 
 #[wasm_bindgen_test]
