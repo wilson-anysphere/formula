@@ -87,6 +87,13 @@ fn evaluates_discount_security_and_tbill_financial_functions() {
             "=TBILLEQ(DATE(2020,1,1),DATE(2020,12,31),0.05)",
         )
         .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A11",
+            "=TBILLEQ(DATE(2020,1,1),DATE(2020,7,1),0.05)",
+        )
+        .unwrap();
 
     engine.recalculate();
 
@@ -131,6 +138,13 @@ fn evaluates_discount_security_and_tbill_financial_functions() {
     assert_close(
         assert_number(engine.get_cell_value("Sheet1", "A10")),
         expected_tbilleq,
+        1e-12,
+    );
+
+    let expected_tbilleq_short = 365.0 * 0.05 / (360.0 - 0.05 * 182.0);
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "A11")),
+        expected_tbilleq_short,
         1e-12,
     );
 }
