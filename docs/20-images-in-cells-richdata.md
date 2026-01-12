@@ -1021,7 +1021,9 @@ Implementation guidance:
 These values are copied from fixtures/tests in this repo. Sources include real Excel workbooks, synthetic
 fixture XLSX files (tagged `Application=Formula Fixtures`), and “synthetic packages” constructed directly in
 unit tests. Values that are only observed in synthetic fixtures/tests should not be treated as “confirmed
-Excel output”; preserve unknown URIs/content types rather than hardcoding assumptions.
+Excel output”; preserve unknown URIs/content types rather than hardcoding assumptions. Some tests
+intentionally use “wrong”/arbitrary namespaces to validate namespace-agnostic parsing; treat namespace URIs
+as opaque.
 
 | Kind | Value | Source |
 |------|-------|--------|
@@ -1041,9 +1043,11 @@ Excel output”; preserve unknown URIs/content types rather than hardcoding assu
 | `richValueRel.xml` root + namespace | `<richValueRel>` / `http://schemas.microsoft.com/office/spreadsheetml/2017/richdata2` | `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` |
 | `richValueRel.xml` root + namespace | `<rvRel>` / `http://schemas.microsoft.com/office/spreadsheetml/2017/richdata` | `fixtures/xlsx/rich-data/images-in-cell.xlsx` |
 | `richValueRel.xml` root + namespace | `<richValueRels>` / `http://schemas.microsoft.com/office/spreadsheetml/2022/richvaluerel` | `fixtures/xlsx/basic/image-in-cell.xlsx` |
+| `richValueRel.xml` root + namespace | `<richValueRel>` / `http://schemas.openxmlformats.org/spreadsheetml/2006/main` | `crates/formula-xlsx/tests/rich_data_cell_images.rs`, `crates/formula-xlsx/tests/extract_embedded_images_vm_zero_based_multi_record.rs` |
 | `richValueRel.xml` root + namespace | `<richValueRel>` / `http://schemas.microsoft.com/office/2022/10/richvaluerel` | `crates/formula-xlsx/tests/rich_value_part_numeric_suffix_order.rs`, `crates/formula-xlsx/tests/rich_value_plural_part_names.rs` |
 | `richValueRel.xml` root + namespace | `<richValueRel>` / `http://schemas.microsoft.com/office/2022/10/spreadsheetml/richvaluerelationships` | `crates/formula-xlsx/tests/embedded_images.rs` |
 | `richValueRel.xml` root + namespace | `<richValueRel>` / `http://schemas.microsoft.com/office/spreadsheetml/2017/richdata` | `crates/formula-xlsx/tests/rich_value_rels.rs` |
+| `richValueRel.xml` root + namespace | `<richValueRel>` / `http://example.com/richData` | `crates/formula-xlsx/tests/richdata_document_roundtrip_preservation.rs`, `crates/formula-xlsx/tests/richdata_preservation_on_formula_edit.rs` |
 | `richValue.xml` namespace | `http://schemas.microsoft.com/office/spreadsheetml/2017/richdata` | `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`, `fixtures/xlsx/rich-data/images-in-cell.xlsx` |
 | `rdrichvalue.xml` namespace | `http://schemas.microsoft.com/office/spreadsheetml/2017/richdata` | `fixtures/xlsx/basic/image-in-cell.xlsx` |
 | `rdrichvaluestructure.xml` root + namespace | `<rvStructures>` / `http://schemas.microsoft.com/office/spreadsheetml/2017/richdata` | `fixtures/xlsx/basic/image-in-cell.xlsx` |
