@@ -735,6 +735,18 @@ fn bytecode_backend_matches_ast_for_lambda_invocation_call_expr() {
 }
 
 #[test]
+fn bytecode_backend_matches_ast_for_lambda_call_with_array_literal_arg() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LAMBDA(x,SUM(x))({1,2,3})")
+        .unwrap();
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_engine_matches_ast(&engine, "=LAMBDA(x,SUM(x))({1,2,3})", "A1");
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_let_captured_env_lambda_call() {
     let mut engine = Engine::new();
     engine

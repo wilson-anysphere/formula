@@ -8569,7 +8569,7 @@ fn bytecode_expr_is_eligible_inner(
             if !bytecode_expr_is_eligible_inner(callee, false, false, lexical_scopes) {
                 return false;
             }
-            args.iter().all(|arg| bytecode_expr_is_eligible_inner(arg, true, false, lexical_scopes))
+            args.iter().all(|arg| bytecode_expr_is_eligible_inner(arg, true, true, lexical_scopes))
         }
     }
 }
