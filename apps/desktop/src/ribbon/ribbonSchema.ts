@@ -198,11 +198,11 @@ export const defaultRibbonSchema: RibbonSchema = {
               kind: "dropdown",
               menuItems: [
                  { id: "file.info.manageWorkbook.recoverUnsaved", label: "Recover Unsaved Workbooks…", ariaLabel: "Recover Unsaved Workbooks", iconId: "clock" },
-                 { id: "file.info.manageWorkbook.versions", label: "Version History", ariaLabel: "Version History" },
-                 { id: "file.info.manageWorkbook.branches", label: "Branches", ariaLabel: "Branches" },
+                 { id: "file.info.manageWorkbook.versions", label: "Version History", ariaLabel: "Version History", iconId: "clock" },
+                 { id: "file.info.manageWorkbook.branches", label: "Branches", ariaLabel: "Branches", iconId: "shuffle" },
                  { id: "file.info.manageWorkbook.properties", label: "Properties", ariaLabel: "Properties", iconId: "settings" },
-               ],
-             },
+                ],
+              },
            ],
          },
         {
