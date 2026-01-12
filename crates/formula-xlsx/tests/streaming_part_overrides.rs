@@ -25,6 +25,14 @@ fn inject_power_query_part(base: &[u8], bytes: Vec<u8>) -> Vec<u8> {
     pkg.write_to_bytes().expect("write injected package")
 }
 
+fn part_name_set(bytes: &[u8]) -> BTreeSet<String> {
+    XlsxPackage::from_bytes(bytes)
+        .expect("parse package")
+        .part_names()
+        .map(str::to_string)
+        .collect()
+}
+
 fn assert_parts_preserved_except(original: &[u8], patched: &[u8], except: &[&str]) {
     let original_pkg = XlsxPackage::from_bytes(original).expect("parse original package");
     let patched_pkg = XlsxPackage::from_bytes(patched).expect("parse patched package");
@@ -75,6 +83,9 @@ fn streaming_part_override_replaces_power_query_xml_without_touching_other_parts
         "expected power-query.xml to be replaced"
     );
 
+    // Replacing an existing part should not change the set of ZIP entries.
+    assert_eq!(part_name_set(&input), part_name_set(&out_bytes));
+
     // Ensure everything else is preserved.
     assert_parts_preserved_except(&input, &out_bytes, &[POWER_QUERY_PART]);
 
@@ -106,6 +117,11 @@ fn streaming_part_override_removes_power_query_xml_without_touching_other_parts(
         out_pkg.part(POWER_QUERY_PART).is_none(),
         "expected power-query.xml to be removed"
     );
+
+    // Removing should drop only the target part.
+    let mut expected_names = part_name_set(&input);
+    expected_names.remove(POWER_QUERY_PART);
+    assert_eq!(expected_names, part_name_set(&out_bytes));
 
     assert_parts_preserved_except(&input, &out_bytes, &[POWER_QUERY_PART]);
     Ok(())
@@ -140,10 +156,14 @@ fn streaming_part_override_adds_power_query_xml_without_touching_other_parts(
         "expected power-query.xml to be added"
     );
 
+    // Adding should introduce only the new part.
+    let mut expected_names = part_name_set(&input);
+    expected_names.insert(POWER_QUERY_PART.to_string());
+    assert_eq!(expected_names, part_name_set(&out_bytes));
+
     assert_parts_preserved_except(&input, &out_bytes, &[POWER_QUERY_PART]);
     Ok(())
 }
-
 #[test]
 fn streaming_part_override_recalc_policy_can_clear_cached_values_for_formula_patches(
 ) -> Result<(), Box<dyn std::error::Error>> {
