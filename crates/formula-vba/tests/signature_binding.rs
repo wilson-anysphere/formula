@@ -192,6 +192,27 @@ fn build_spc_indirect_data_content_sha1(project_digest: &[u8]) -> Vec<u8> {
     der_sequence(&spc)
 }
 
+fn build_spc_indirect_data_content_md5(project_digest: &[u8]) -> Vec<u8> {
+    // MD5 OID: 1.2.840.113549.2.5
+    let md5_oid = [0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x02, 0x05];
+
+    let mut alg_id = Vec::new();
+    alg_id.extend_from_slice(&der_oid_raw(&md5_oid));
+    alg_id.extend_from_slice(&der_null());
+    let alg_id = der_sequence(&alg_id);
+
+    let mut digest_info = Vec::new();
+    digest_info.extend_from_slice(&alg_id);
+    digest_info.extend_from_slice(&der_octet_string(project_digest));
+    let digest_info = der_sequence(&digest_info);
+
+    let mut spc = Vec::new();
+    // `data` (ignored by our parser) – use NULL.
+    spc.extend_from_slice(&der_null());
+    spc.extend_from_slice(&digest_info);
+    der_sequence(&spc)
+}
+
 #[test]
 fn bound_signature_sets_binding_bound() {
     let module1 = b"module1-bytes";
@@ -277,4 +298,48 @@ fn embedded_pkcs7_content_is_used_for_binding() {
 
     assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
     assert_eq!(sig.binding, VbaSignatureBinding::Bound);
+}
+
+#[test]
+fn md5_binding_is_supported() {
+    let module1 = b"module1-bytes";
+    let unsigned = build_minimal_vba_project_bin(module1, None);
+    let digest = compute_vba_project_digest(&unsigned, DigestAlg::Md5).expect("digest");
+    assert_eq!(digest.len(), 16, "MD5 digest should be 16 bytes");
+
+    let signed_content = build_spc_indirect_data_content_md5(&digest);
+    let pkcs7 = make_pkcs7_detached_signature(&signed_content);
+    let mut signature_stream = signed_content.clone();
+    signature_stream.extend_from_slice(&pkcs7);
+
+    // Baseline: signed project should be bound.
+    let signed = build_minimal_vba_project_bin(module1, Some(&signature_stream));
+    let sig = verify_vba_digital_signature(&signed)
+        .expect("signature verification should succeed")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(sig.binding, VbaSignatureBinding::Bound);
+
+    let bound = verify_vba_digital_signature_bound(&signed)
+        .expect("bound verify")
+        .expect("signature present");
+    match bound.binding {
+        VbaProjectBindingVerification::BoundVerified(info) => {
+            assert_eq!(info.hash_algorithm_name.as_deref(), Some("MD5"));
+        }
+        other => panic!("expected BoundVerified, got {other:?}"),
+    }
+
+    // Tamper with a project stream (module bytes) but keep the signature blob intact.
+    let mut tampered_module = module1.to_vec();
+    tampered_module[0] ^= 0xFF;
+
+    let tampered = build_minimal_vba_project_bin(&tampered_module, Some(&signature_stream));
+    let sig = verify_vba_digital_signature(&tampered)
+        .expect("signature verification should succeed")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(sig.binding, VbaSignatureBinding::NotBound);
 }
