@@ -28,7 +28,7 @@ import { MergeBranchPanel } from "./branch-manager/MergeBranchPanel.js";
 import { BranchService } from "../../../../packages/versioning/branches/src/BranchService.js";
 import { YjsBranchStore } from "../../../../packages/versioning/branches/src/store/YjsBranchStore.js";
 import { applyDocumentStateToYjsDoc, yjsDocToDocumentState } from "../../../../packages/versioning/branches/src/yjs/index.js";
-import { getMarketplaceBaseUrl } from "./marketplace/getMarketplaceBaseUrl.js";
+import { getMarketplaceBaseUrl } from "../marketplace/getMarketplaceBaseUrl.js";
 import { MarketplaceClient, WebExtensionManager } from "@formula/extension-marketplace";
 
 function formatVersionTimestamp(timestampMs: number): string {

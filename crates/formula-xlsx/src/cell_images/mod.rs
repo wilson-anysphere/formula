@@ -143,6 +143,26 @@ fn extract_relationship_ids(xml: &[u8]) -> HashSet<String> {
     out
 }
 
+/// Best-effort loader for Excel "in-cell" images.
+///
+/// This is intentionally best-effort:
+/// - Missing `cellimages*.xml` parts → no-op
+/// - Missing `.rels` → skip that part
+/// - Missing referenced media part → skip that image
+/// - Parse errors → skip that part
+///
+/// This is used by the workbook reader to populate `workbook.images` without
+/// blocking workbook load on incomplete/unsupported cell image metadata.
+pub fn load_cell_images_from_parts(parts: &BTreeMap<String, Vec<u8>>, workbook: &mut formula_model::Workbook) {
+    for path in parts.keys() {
+        if !is_cell_images_part(path) {
+            continue;
+        }
+        // Best-effort: ignore parse errors for cell image parts.
+        let _ = parse_cell_images_part(path, parts, workbook);
+    }
+}
+
 /// Parsed workbook-level cell images parts.
 #[derive(Debug, Clone, Default)]
 pub struct CellImages {
