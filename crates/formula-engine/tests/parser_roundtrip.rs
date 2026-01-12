@@ -131,3 +131,11 @@ fn serializes_external_workbook_prefixes_with_quoted_sheet_names_when_required()
         "='[Book.xlsx]My Sheet'!A1+1"
     );
 }
+
+#[test]
+fn serializes_degenerate_external_3d_sheet_spans_as_single_sheet() {
+    let opts = ParseOptions::default();
+    let ser = SerializeOptions::default();
+    let ast = parse_formula("=[Book.xlsx]Sheet1:Sheet1!A1", opts).unwrap();
+    assert_eq!(ast.to_string(ser).unwrap(), "=[Book.xlsx]Sheet1!A1");
+}
