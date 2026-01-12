@@ -67,7 +67,12 @@ export interface MarketplaceDownloadResult {
 
 export interface MarketplaceClientOptions {
   /**
-   * Base URL for marketplace API endpoints. Defaults to `"/api"`.
+   * Base URL for marketplace API endpoints.
+   *
+   * Defaults to:
+   * - `import.meta.env.VITE_FORMULA_MARKETPLACE_BASE_URL` when present (Vite)
+   * - `process.env.VITE_FORMULA_MARKETPLACE_BASE_URL` when present (Node tests/tooling)
+   * - `"/api"` otherwise
    *
    * The expected routes are:
    * - `${baseUrl}/search`
@@ -77,10 +82,60 @@ export interface MarketplaceClientOptions {
   baseUrl?: string;
 }
 
-function normalizeBaseUrl(baseUrl: string): string {
-  const trimmed = String(baseUrl || "").trim();
-  if (!trimmed) return "/api";
-  return trimmed.endsWith("/") ? trimmed.slice(0, -1) : trimmed;
+export function normalizeMarketplaceBaseUrl(baseUrl: string): string {
+  let raw = String(baseUrl ?? "").trim();
+  if (!raw) return "/api";
+
+  raw = raw.replace(/\\/g, "/");
+
+  // Strip trailing slashes, but keep a bare "/" intact.
+  raw = raw.replace(/\/+$/, "");
+  if (raw === "") return "/";
+
+  const looksAbsolute = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(raw);
+  if (looksAbsolute) {
+    let url: URL;
+    try {
+      url = new URL(raw);
+    } catch {
+      return "/api";
+    }
+
+    // Base URL should not carry query/hash.
+    url.search = "";
+    url.hash = "";
+
+    let pathname = url.pathname.replace(/\/+$/, "");
+    // Treat an origin ("https://host") as the marketplace host and append the standard "/api" prefix.
+    if (pathname === "" || pathname === "/") pathname = "/api";
+    url.pathname = pathname;
+
+    return `${url.origin}${url.pathname}`;
+  }
+
+  // Normalize relative paths (typically "/api").
+  let out = raw;
+  while (out.startsWith("./")) out = out.slice(2);
+  if (!out.startsWith("/")) out = `/${out}`;
+  out = out.replace(/\/+$/, "");
+  if (out === "") return "/";
+  return out;
+}
+
+function resolveDefaultMarketplaceBaseUrl(): string {
+  const metaEnv = (import.meta as any)?.env as Record<string, unknown> | undefined;
+  const viteValue = metaEnv?.VITE_FORMULA_MARKETPLACE_BASE_URL;
+  if (typeof viteValue === "string" && viteValue.trim().length > 0) {
+    return viteValue;
+  }
+
+  const nodeEnv = (globalThis as any)?.process?.env as Record<string, unknown> | undefined;
+  const nodeValue = nodeEnv?.VITE_FORMULA_MARKETPLACE_BASE_URL;
+  if (typeof nodeValue === "string" && nodeValue.trim().length > 0) {
+    return nodeValue;
+  }
+
+  return "/api";
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
@@ -105,7 +160,7 @@ export class MarketplaceClient {
   readonly baseUrl: string;
 
   constructor(options: MarketplaceClientOptions = {}) {
-    this.baseUrl = normalizeBaseUrl(options.baseUrl ?? "/api");
+    this.baseUrl = normalizeMarketplaceBaseUrl(options.baseUrl ?? resolveDefaultMarketplaceBaseUrl());
   }
 
   async search(params: {
