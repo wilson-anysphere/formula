@@ -172,7 +172,18 @@ impl WorkbookArchive {
 
 #[derive(Debug, Clone, Default)]
 pub struct DiffOptions {
+    /// Exact part names to ignore.
+    ///
+    /// These are matched against normalized OPC part names (forward slashes, no
+    /// leading `/`, and `..` segments resolved). For convenience, callers may
+    /// pass Windows-style separators (`\`) or leading slashes and they will be
+    /// normalized before matching.
     pub ignore_parts: BTreeSet<String>,
+    /// Glob patterns to ignore (see `globset` syntax).
+    ///
+    /// Patterns are matched against normalized OPC part names. Note that the
+    /// library intentionally ignores invalid glob patterns; the `xlsx_diff`
+    /// CLI validates globs up-front and will return an error instead.
     pub ignore_globs: Vec<String>,
 }
 
