@@ -2597,6 +2597,95 @@ const sheetTabsRootEl = sheetTabsRoot;
 sheetTabsRootEl.classList.add("sheet-bar");
 sheetTabsRootEl.classList.remove("sheet-tabs");
 
+// --- Keyboard focus cycling ----------------------------------------------------
+//
+// Tab is used for Excel-style grid navigation. Provide an explicit focus-cycle key
+// (F6 / Shift+F6) so keyboard users can still reach non-grid chrome (ribbon, formula
+// bar, sheet tabs) without relying on the browser's focus traversal.
+type FocusCycleRegion = "grid" | "ribbon" | "formulaBar" | "sheetTabs";
+
+const FOCUS_CYCLE_REGIONS: FocusCycleRegion[] = ["grid", "ribbon", "formulaBar", "sheetTabs"];
+
+function resolveFocusCycleRegion(active: Element | null): FocusCycleRegion {
+  if (!active) return "grid";
+
+  if (sheetTabsRootEl.contains(active)) return "sheetTabs";
+  if (formulaBarRoot.contains(active)) return "formulaBar";
+
+  const ribbonRoot = document.querySelector<HTMLElement>('[data-testid="ribbon-root"]');
+  if (ribbonRoot && ribbonRoot.contains(active)) return "ribbon";
+
+  if (gridRoot.contains(active)) return "grid";
+  return "grid";
+}
+
+function focusRegion(region: FocusCycleRegion): void {
+  if (region === "grid") {
+    app.focus();
+    return;
+  }
+
+  if (region === "ribbon") {
+    const ribbonRoot = document.querySelector<HTMLElement>('[data-testid="ribbon-root"]');
+    const tab =
+      ribbonRoot?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]') ??
+      ribbonRoot?.querySelector<HTMLElement>('[role="tab"]');
+    if (tab) {
+      try {
+        tab.focus({ preventScroll: true });
+      } catch {
+        tab.focus();
+      }
+      return;
+    }
+    return;
+  }
+
+  if (region === "formulaBar") {
+    const address = formulaBarRoot.querySelector<HTMLElement>('[data-testid="formula-address"]');
+    if (address) {
+      try {
+        address.focus({ preventScroll: true });
+      } catch {
+        address.focus();
+      }
+    }
+    return;
+  }
+
+  const activeSheetTab =
+    sheetTabsRootEl.querySelector<HTMLElement>('button[role="tab"][tabindex="0"]') ??
+    sheetTabsRootEl.querySelector<HTMLElement>('button[role="tab"]');
+  if (activeSheetTab) {
+    try {
+      activeSheetTab.focus({ preventScroll: true });
+    } catch {
+      activeSheetTab.focus();
+    }
+  }
+}
+
+window.addEventListener(
+  "keydown",
+  (event) => {
+    if (event.defaultPrevented) return;
+    if (event.key !== "F6") return;
+    // Only handle plain F6 / Shift+F6 (Excel-style). Leave Ctrl/Alt/Meta variants alone.
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const current = resolveFocusCycleRegion(document.activeElement);
+    const currentIndex = Math.max(0, FOCUS_CYCLE_REGIONS.indexOf(current));
+    const delta = event.shiftKey ? -1 : 1;
+    const nextIndex = (currentIndex + delta + FOCUS_CYCLE_REGIONS.length) % FOCUS_CYCLE_REGIONS.length;
+    const next = FOCUS_CYCLE_REGIONS[nextIndex];
+    if (next) focusRegion(next);
+  },
+  { capture: true },
+);
+
 let sheetTabsReactRoot: ReturnType<typeof createRoot> | null = null;
 let stopSheetStoreListener: (() => void) | null = null;
 let addSheetInFlight = false;

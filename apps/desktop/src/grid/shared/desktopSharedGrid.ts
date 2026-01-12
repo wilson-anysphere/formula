@@ -974,7 +974,30 @@ export class DesktopSharedGrid {
           nextRow = active.row + (event.shiftKey ? -1 : 1);
           break;
         case "Tab":
-          nextCol = active.col + (event.shiftKey ? -1 : 1);
+          // Excel-style:
+          // - Tab moves right; at the end of the row, wrap to the first column of the next row.
+          // - Shift+Tab moves left; at the start of the row, wrap to the last column of the previous row.
+          if (event.shiftKey) {
+            if (active.col - 1 >= dataStartCol) {
+              nextCol = active.col - 1;
+            } else if (active.row - 1 >= dataStartRow) {
+              nextRow = active.row - 1;
+              nextCol = colCount - 1;
+            } else {
+              nextRow = active.row;
+              nextCol = active.col;
+            }
+          } else {
+            if (active.col + 1 < colCount) {
+              nextCol = active.col + 1;
+            } else if (active.row + 1 < rowCount) {
+              nextRow = active.row + 1;
+              nextCol = dataStartCol;
+            } else {
+              nextRow = active.row;
+              nextCol = active.col;
+            }
+          }
           break;
         default:
           handled = false;

@@ -8486,13 +8486,6 @@ export class SpreadsheetApp {
       return;
     }
 
-    // When the formula bar is actively editing (including range-selection mode where focus may
-    // temporarily move to the grid), do not treat Tab as cell navigation. Let the formula bar
-    // and browser focus order stay in control (Excel-style editing surfaces win over grid nav).
-    if (e.key === "Tab" && (this.formulaBar?.isEditing() || this.formulaEditCell)) {
-      return;
-    }
-
     const next = navigateSelectionByKey(
       this.selection,
       e.key,

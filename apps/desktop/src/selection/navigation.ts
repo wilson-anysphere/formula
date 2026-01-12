@@ -210,8 +210,37 @@ function tab(state: SelectionState, mods: KeyModifiers, limits: GridLimits, data
     );
   }
 
-  const target = moveByOne(state.active, mods.shift ? "left" : "right", limits, data);
-  return setActiveCell(state, target, limits);
+  // Excel-style tab traversal for a single active cell:
+  // - Tab moves right; at the last column, wrap to the first column of the next row.
+  // - Shift+Tab moves left; at the first column, wrap to the last column of the previous row.
+  //
+  // This is distinct from multi-cell selection traversal (handled above), where Tab cycles
+  // within the selection bounds.
+  const active = clampCell(state.active, limits);
+
+  if (mods.shift) {
+    if (active.col > 0) {
+      const target = moveByOne(active, "left", limits, data);
+      return setActiveCell(state, target, limits);
+    }
+
+    // At the start of the row: wrap to the previous row's last column (if any).
+    if (active.row <= 0) return state;
+    const prevRow = nextVisibleRow(active.row - 1, -1, data, limits);
+    const lastCol = nextVisibleCol(limits.maxCols - 1, -1, data, limits);
+    return setActiveCell(state, { row: prevRow, col: lastCol }, limits);
+  }
+
+  if (active.col < limits.maxCols - 1) {
+    const target = moveByOne(active, "right", limits, data);
+    return setActiveCell(state, target, limits);
+  }
+
+  // At the end of the row: wrap to the next row's first column (if any).
+  if (active.row >= limits.maxRows - 1) return state;
+  const nextRow = nextVisibleRow(active.row + 1, 1, data, limits);
+  const firstCol = nextVisibleCol(0, 1, data, limits);
+  return setActiveCell(state, { row: nextRow, col: firstCol }, limits);
 }
 
 function enter(state: SelectionState, mods: KeyModifiers, limits: GridLimits, data: UsedRangeProvider): SelectionState {
