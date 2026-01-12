@@ -1,6 +1,6 @@
 use std::io::{Cursor, Write};
 
-use formula_vba::{compress_container, content_normalized_data};
+use formula_vba::{compress_container, v3_content_normalized_data};
 
 fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
     out.extend_from_slice(&id.to_le_bytes());
@@ -23,12 +23,15 @@ fn build_vba_project_with_dir(dir_decompressed: &[u8]) -> Vec<u8> {
 }
 
 #[test]
-fn content_normalized_data_includes_referencecontrol_and_referenceoriginal_records() {
+fn v3_content_normalized_data_includes_all_reference_record_types_in_order() {
     // Build a decompressed `VBA/dir` stream containing each supported reference record type.
     // We deliberately choose numeric little-endian fields that contain an early NUL (0x00) to
     // exercise the MS-OVBA "copy bytes until first NUL" normalization behavior.
     let dir_decompressed = {
         let mut out = Vec::new();
+
+        // REFERENCENAME (0x0016): copied as raw bytes.
+        push_record(&mut out, 0x0016, b"RefName");
 
         // REFERENCECONTROL (0x002F): u32-len-prefixed libid + reserved1(u32) + reserved2(u16).
         //
@@ -77,20 +80,23 @@ fn content_normalized_data_includes_referencecontrol_and_referenceoriginal_recor
     };
 
     let vba_bin = build_vba_project_with_dir(&dir_decompressed);
-    let normalized = content_normalized_data(&vba_bin).expect("ContentNormalizedData");
+    let normalized = v3_content_normalized_data(&vba_bin).expect("V3ContentNormalizedData");
 
     // Expected output is the concatenation of normalized reference record bytes in on-disk order:
+    // - 0x0016: raw payload bytes
     // - 0x002F: TempBuffer = LibidTwiddled || Reserved1 || Reserved2; copy until first 0x00
     // - 0x0030: raw payload bytes
     // - 0x0033: LibidOriginal; copy until first 0x00
     // - 0x000D: raw bytes
     // - 0x000E: TempBuffer = LibidAbsolute || LibidRelative || MajorVersion || MinorVersion; copy until first 0x00
+    let expected_name = b"RefName".as_slice();
     let expected_control = b"ControlLib\x01".as_slice();
     let expected_extended = b"EXTENDED".as_slice();
     let expected_original = b"OrigLib".as_slice();
     let expected_registered = b"{REG}".as_slice();
     let expected_project = b"ProjLib\x01".as_slice();
     let expected = [
+        expected_name,
         expected_control,
         expected_extended,
         expected_original,

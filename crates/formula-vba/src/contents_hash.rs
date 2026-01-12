@@ -1017,6 +1017,11 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
             // See MS-OVBA §2.4.2 for which reference record types are incorporated in each content
             // hash version.
 
+            // REFERENCENAME
+            0x0016 => {
+                out.extend_from_slice(data);
+            }
+
             // REFERENCEREGISTERED
             0x000D => {
                 out.extend_from_slice(data);
