@@ -24,6 +24,69 @@ type DesktopReadyOptions = {
  */
 export async function gotoDesktop(page: Page, path: string = "/", options: DesktopReadyOptions = {}): Promise<void> {
   const { waitForIdle = true, idleTimeoutMs } = options;
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+
+  const onConsole = (msg: any): void => {
+    try {
+      if (msg?.type?.() !== "error") return;
+      consoleErrors.push(msg.text());
+    } catch {
+      // ignore listener failures
+    }
+  };
+
+  const onPageError = (err: unknown): void => {
+    const message =
+      err instanceof Error
+        ? `${err.name}: ${err.message}\n${err.stack ?? ""}`.trim()
+        : String(err);
+    pageErrors.push(message);
+  };
+
+  page.on("console", onConsole);
+  page.on("pageerror", onPageError);
+
+  const formatStartupDiagnostics = async (): Promise<string> => {
+    const uniqueConsole = [...new Set(consoleErrors)];
+    const uniquePage = [...new Set(pageErrors)];
+
+    let appProbe: { present: boolean; truthy: boolean; type: string; nullish: boolean; ctor: string | null } | null = null;
+    try {
+      appProbe = await page.evaluate(() => {
+        const present = "__formulaApp" in window;
+        const value = (window as any).__formulaApp;
+        return {
+          present,
+          truthy: Boolean(value),
+          type: typeof value,
+          nullish: value == null,
+          ctor: value && typeof value === "object" ? (value as any).constructor?.name ?? null : null,
+        };
+      });
+    } catch {
+      // ignore
+    }
+
+    let viteOverlayText = "";
+    try {
+      viteOverlayText = await page.evaluate(() => {
+        const overlay = document.querySelector("vite-error-overlay") as any;
+        if (!overlay) return "";
+        return (overlay.textContent ?? "").trim();
+      });
+    } catch {
+      // ignore
+    }
+
+    const parts: string[] = [];
+    if (uniqueConsole.length > 0) parts.push(`Console errors:\n${uniqueConsole.join("\n")}`);
+    if (uniquePage.length > 0) parts.push(`Page errors:\n${uniquePage.join("\n")}`);
+    if (appProbe) parts.push(`window.__formulaApp probe:\n${JSON.stringify(appProbe, null, 2)}`);
+    if (viteOverlayText) parts.push(`Vite error overlay:\n${viteOverlayText}`);
+    return parts.length > 0 ? `\n\n${parts.join("\n\n")}` : "";
+  };
+
   // Vite may trigger a one-time full reload after dependency optimization. If that
   // happens mid-wait, retry once after the navigation completes.
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -81,6 +144,8 @@ export async function gotoDesktop(page: Page, path: string = "/", options: Deskt
         }
       });
 
+      page.off("console", onConsole);
+      page.off("pageerror", onPageError);
       return;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -93,9 +158,15 @@ export async function gotoDesktop(page: Page, path: string = "/", options: Deskt
         await page.waitForLoadState("domcontentloaded");
         continue;
       }
-      throw err;
+      const diag = await formatStartupDiagnostics();
+      page.off("console", onConsole);
+      page.off("pageerror", onPageError);
+      throw new Error(`${message}${diag}`);
     }
   }
+
+  page.off("console", onConsole);
+  page.off("pageerror", onPageError);
 }
 
 export async function waitForDesktopReady(page: Page): Promise<void> {
