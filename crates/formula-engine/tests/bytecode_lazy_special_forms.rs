@@ -181,6 +181,61 @@ fn bytecode_choose_nan_index_is_value_error_and_does_not_evaluate_choices() {
 }
 
 #[test]
+fn bytecode_eval_ast_choose_nan_index_is_value_error_and_does_not_evaluate_choices() {
+    // Ensure `bytecode::eval_ast` matches the VM semantics when the CHOOSE index is NaN: the
+    // index should coerce to 0, yielding #VALUE!, and CHOOSE must not evaluate any choice
+    // expressions.
+    let origin = CellCoord::new(0, 0);
+    // Use a non-finite cell value for the index so this test doesn't depend on the engine's
+    // arithmetic overflow/NaN behavior.
+    let expr = bytecode::parse_formula("=CHOOSE(B1, A2, 7)", origin).expect("parse");
+
+    #[derive(Clone, Copy)]
+    struct PanicGridWithNumber {
+        number_coord: CellCoord,
+        number: f64,
+        panic_coord: CellCoord,
+    }
+
+    impl bytecode::Grid for PanicGridWithNumber {
+        fn get_value(&self, coord: CellCoord) -> Value {
+            if coord == self.panic_coord {
+                panic!("attempted to evaluate forbidden cell reference at {coord:?}");
+            }
+            if coord == self.number_coord {
+                return Value::Number(self.number);
+            }
+            Value::Empty
+        }
+
+        fn column_slice(&self, _col: i32, _row_start: i32, _row_end: i32) -> Option<&[f64]> {
+            None
+        }
+
+        fn bounds(&self) -> (i32, i32) {
+            (10, 10)
+        }
+    }
+
+    let grid = PanicGridWithNumber {
+        // B1 relative to origin (A1) => (row=0, col=1)
+        number_coord: CellCoord::new(0, 1),
+        number: f64::NAN,
+        // A2 relative to origin (A1) => (row=1, col=0)
+        panic_coord: CellCoord::new(1, 0),
+    };
+
+    let value = bytecode::eval_ast(
+        &expr,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Error(bytecode::ErrorKind::Value));
+}
+
+#[test]
 fn bytecode_ifs_is_lazy() {
     // IFS(TRUE, 7, <unused_cond>, 8) must not evaluate the second condition/value pair.
     let origin = CellCoord::new(0, 0);
