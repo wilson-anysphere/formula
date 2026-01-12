@@ -84,7 +84,10 @@ export class DesktopOAuthBroker implements OAuthBroker {
   // Small buffer to avoid dropping redirects that arrive before `waitForRedirect(...)`
   // is registered (e.g. fast redirects, or deep-link events emitted at app startup).
   private static readonly OBSERVED_REDIRECT_LIMIT = 10;
-  private static readonly OBSERVED_REDIRECT_TTL_MS = 5 * 60_000;
+  // Keep this short: it only exists to bridge a tiny race between `openAuthUrl(...)`
+  // and `waitForRedirect(...)`. Longer TTLs risk consuming stale redirects in a
+  // future PKCE attempt and causing a confusing "unexpected state value" error.
+  private static readonly OBSERVED_REDIRECT_TTL_MS = 30_000;
 
   setOpenAuthUrlHandler(handler: ((url: string) => Promise<void> | void) | null) {
     this.openAuthUrlHandler = handler;
