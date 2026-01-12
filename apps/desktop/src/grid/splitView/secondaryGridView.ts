@@ -3,7 +3,7 @@ import type { CellRange as FillEngineRange } from "@formula/fill-engine";
 import type { DocumentController } from "../../document/documentController.js";
 import { showToast } from "../../extensions/ui.js";
 import { applyFillCommitToDocumentController } from "../../fill/applyFillCommit";
-import { CellEditorOverlay } from "../../editor/cellEditorOverlay.js";
+import { CellEditorOverlay, type EditorCommit } from "../../editor/cellEditorOverlay.js";
 import { DesktopSharedGrid, type DesktopSharedGridCallbacks } from "../shared/desktopSharedGrid.js";
 import { DocumentCellProvider } from "../shared/documentCellProvider.js";
 import { applyPlainTextEdit } from "../text/rich-text/edit.js";
@@ -672,6 +672,110 @@ export class SecondaryGridView {
     // pane observes DocumentController changes via its shared provider.
     this.onRequestRefresh?.();
     this.grid.renderer.requestRender();
+  }
+
+  private advanceSelectionAfterEdit(commit: EditorCommit): void {
+    if (commit.reason !== "enter" && commit.reason !== "tab") return;
+
+    const renderer = this.grid.renderer;
+    const selection = renderer.getSelection();
+    const range = renderer.getSelectionRange();
+    const ranges = renderer.getSelectionRanges();
+    const activeIndex = renderer.getActiveSelectionIndex();
+    const { rowCount, colCount } = renderer.scroll.getCounts();
+    if (rowCount === 0 || colCount === 0) return;
+
+    // Clamp navigation so we never land in the header region.
+    const dataStartRow = this.headerRows >= rowCount ? 0 : this.headerRows;
+    const dataStartCol = this.headerCols >= colCount ? 0 : this.headerCols;
+
+    const rangeArea = (r: CellRange) => Math.max(0, r.endRow - r.startRow) * Math.max(0, r.endCol - r.startCol);
+
+    // Excel-like behavior: when a multi-cell selection exists, Enter/Tab should move
+    // *within* the selection range (wrapping) instead of collapsing selection.
+    if (range && rangeArea(range) > 1) {
+      const current = selection ?? { row: range.startRow, col: range.startCol };
+      const activeRow = clamp(current.row, range.startRow, range.endRow - 1);
+      const activeCol = clamp(current.col, range.startCol, range.endCol - 1);
+      const backward = commit.shift;
+
+      let nextRow = activeRow;
+      let nextCol = activeCol;
+
+      if (commit.reason === "tab") {
+        if (!backward) {
+          if (activeCol + 1 < range.endCol) {
+            nextCol = activeCol + 1;
+          } else if (activeRow + 1 < range.endRow) {
+            nextRow = activeRow + 1;
+            nextCol = range.startCol;
+          } else {
+            nextRow = range.startRow;
+            nextCol = range.startCol;
+          }
+        } else {
+          if (activeCol - 1 >= range.startCol) {
+            nextCol = activeCol - 1;
+          } else if (activeRow - 1 >= range.startRow) {
+            nextRow = activeRow - 1;
+            nextCol = range.endCol - 1;
+          } else {
+            nextRow = range.endRow - 1;
+            nextCol = range.endCol - 1;
+          }
+        }
+      } else {
+        if (!backward) {
+          if (activeRow + 1 < range.endRow) {
+            nextRow = activeRow + 1;
+          } else if (activeCol + 1 < range.endCol) {
+            nextRow = range.startRow;
+            nextCol = activeCol + 1;
+          } else {
+            nextRow = range.startRow;
+            nextCol = range.startCol;
+          }
+        } else {
+          if (activeRow - 1 >= range.startRow) {
+            nextRow = activeRow - 1;
+          } else if (activeCol - 1 >= range.startCol) {
+            nextRow = range.endRow - 1;
+            nextCol = activeCol - 1;
+          } else {
+            nextRow = range.endRow - 1;
+            nextCol = range.endCol - 1;
+          }
+        }
+      }
+
+      nextRow = Math.max(dataStartRow, Math.min(rowCount - 1, nextRow));
+      nextCol = Math.max(dataStartCol, Math.min(colCount - 1, nextCol));
+
+      const updatedRanges = ranges.length === 0 ? [range] : ranges;
+      this.grid.setSelectionRanges(updatedRanges, {
+        activeIndex,
+        activeCell: { row: nextRow, col: nextCol },
+      });
+      return;
+    }
+
+    const current = selection ?? { row: commit.cell.row + this.headerRows, col: commit.cell.col + this.headerCols };
+    let nextRow = current.row;
+    let nextCol = current.col;
+
+    if (commit.reason === "enter") {
+      nextRow = current.row + (commit.shift ? -1 : 1);
+    } else {
+      nextCol = current.col + (commit.shift ? -1 : 1);
+    }
+
+    nextRow = Math.max(dataStartRow, Math.min(rowCount - 1, nextRow));
+    nextCol = Math.max(dataStartCol, Math.min(colCount - 1, nextCol));
+
+    this.grid.setSelectionRanges(
+      [{ startRow: nextRow, endRow: nextRow + 1, startCol: nextCol, endCol: nextCol + 1 }],
+      { activeIndex: 0, activeCell: { row: nextRow, col: nextCol } },
+    );
   }
 
   private schedulePersistScroll(scroll: ScrollState): void {
