@@ -253,6 +253,23 @@ describe("DocumentCellProvider (shared grid) style mapping", () => {
     // A1:D20000 => 20,000 rows * 4 cols = 80,000 cells (> 50,000 threshold).
     doc.setRangeFormat(sheetId, "A1:D20000", { fill: { pattern: "solid", fgColor: "#FF800080" } }); // purple (range-run)
 
+    // Assert the range-run layer is actually in use (not enumerated per-cell styles).
+    // DocumentController.getCellFormatStyleIds returns:
+    // [sheetDefaultStyleId, rowStyleId, colStyleId, cellStyleId, rangeRunStyleId].
+    const b1Ids = doc.getCellFormatStyleIds(sheetId, "B1");
+    expect(b1Ids[0]).not.toBe(0); // sheet
+    expect(b1Ids[1]).not.toBe(0); // row 1 (0-based row 0)
+    expect(b1Ids[2]).toBe(0); // no col formatting for col B
+    expect(b1Ids[3]).toBe(0); // no explicit cell formatting
+    expect(b1Ids[4]).not.toBe(0); // range-run formatting
+
+    const a2Ids = doc.getCellFormatStyleIds(sheetId, "A2");
+    expect(a2Ids[0]).not.toBe(0); // sheet
+    expect(a2Ids[1]).toBe(0); // no row formatting for row 2 (0-based row 1)
+    expect(a2Ids[2]).not.toBe(0); // col A formatting
+    expect(a2Ids[3]).toBe(0); // no explicit cell formatting
+    expect(a2Ids[4]).not.toBe(0); // range-run formatting
+
     // Cell formatting should still win over the range-run layer.
     doc.setRangeFormat(sheetId, "A1", { fill: { pattern: "solid", fgColor: "#FFFF0000" } }); // red (cell)
 
