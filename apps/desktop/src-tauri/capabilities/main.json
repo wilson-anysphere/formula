@@ -147,7 +147,6 @@
     "core:window:allow-close",
     "clipboard-manager:allow-read-text",
     "clipboard-manager:allow-write-text",
-    "shell:allow-open",
     "updater:allow-check",
     "updater:allow-download",
     "updater:allow-install"
