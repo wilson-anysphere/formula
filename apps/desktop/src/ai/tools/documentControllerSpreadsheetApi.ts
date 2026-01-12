@@ -412,21 +412,23 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
 
     const formatCache = new Map<string | number, CellFormat | undefined>();
 
-    const getFormatForStyleIds = (styleIds: [number, number, number, number]): CellFormat | undefined => {
-      const [sheetStyleId, rowStyleId, colStyleId, cellStyleId] = styleIds;
-      if (sheetStyleId === 0 && rowStyleId === 0 && colStyleId === 0 && cellStyleId === 0) return undefined;
-      const cacheKey = `${sheetStyleId},${rowStyleId},${colStyleId},${cellStyleId}`;
+    const getFormatForStyleIds = (styleIds: [number, number, number, number, number]): CellFormat | undefined => {
+      const [sheetStyleId, rowStyleId, colStyleId, runStyleId, cellStyleId] = styleIds;
+      if (sheetStyleId === 0 && rowStyleId === 0 && colStyleId === 0 && runStyleId === 0 && cellStyleId === 0) return undefined;
+      const cacheKey = `${sheetStyleId},${rowStyleId},${colStyleId},${runStyleId},${cellStyleId}`;
       if (formatCache.has(cacheKey)) return formatCache.get(cacheKey);
 
       const sheetStyle = this.controller.styleTable.get(sheetStyleId);
       const colStyle = this.controller.styleTable.get(colStyleId);
       const rowStyle = this.controller.styleTable.get(rowStyleId);
+      const runStyle = this.controller.styleTable.get(runStyleId);
       const cellStyle = this.controller.styleTable.get(cellStyleId);
 
-      // Precedence: sheet < col < row < cell.
+      // Precedence: sheet < col < row < range-run < cell.
       const sheetCol = applyStylePatch(sheetStyle, colStyle);
       const sheetColRow = applyStylePatch(sheetCol, rowStyle);
-      const effectiveStyle = applyStylePatch(sheetColRow, cellStyle);
+      const sheetColRowRun = applyStylePatch(sheetColRow, runStyle);
+      const effectiveStyle = applyStylePatch(sheetColRowRun, cellStyle);
 
       const format = styleToCellFormat(effectiveStyle);
       formatCache.set(cacheKey, format);
@@ -445,24 +447,66 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
     const startRow0 = range.startRow - 1;
     const startCol0 = range.startCol - 1;
 
+    type FormatRun = { startRow: number; endRowExclusive: number; styleId: number };
+    const runListsByCol: Array<FormatRun[] | null> = new Array(colCount).fill(null);
+    const runIndexByCol = new Array<number>(colCount).fill(0);
+
+    if (hasLayeredFormattingReadPath && sheetModel?.formatRunsByCol?.get) {
+      for (let c = 0; c < colCount; c++) {
+        const col0 = startCol0 + c;
+        const runs = sheetModel.formatRunsByCol.get(col0) as FormatRun[] | undefined;
+        if (!Array.isArray(runs) || runs.length === 0) continue;
+        runListsByCol[c] = runs;
+        if (startRow0 <= 0) continue;
+        // Initialize to the first run whose endRowExclusive is > startRow0.
+        let lo = 0;
+        let hi = runs.length - 1;
+        let idx = runs.length;
+        while (lo <= hi) {
+          const mid = (lo + hi) >> 1;
+          const run = runs[mid]!;
+          if (startRow0 < run.endRowExclusive) {
+            idx = mid;
+            hi = mid - 1;
+          } else {
+            lo = mid + 1;
+          }
+        }
+        runIndexByCol[c] = idx;
+      }
+    }
+
     for (let r = 0; r < rowCount; r++) {
       const row = new Array<CellData>(colCount);
       const row0 = startRow0 + r;
       for (let c = 0; c < colCount; c++) {
         const col0 = startCol0 + c;
         const cellState = cellMap?.get(`${row0},${col0}`);
-        const styleIds: [number, number, number, number] = hasLayeredFormattingReadPath
+        let runStyleId = 0;
+        const runs = runListsByCol[c];
+        if (runs) {
+          let idx = runIndexByCol[c]!;
+          while (idx < runs.length && row0 >= runs[idx]!.endRowExclusive) idx++;
+          runIndexByCol[c] = idx;
+          const run = idx < runs.length ? runs[idx] : null;
+          if (run && row0 >= run.startRow && row0 < run.endRowExclusive) {
+            runStyleId = typeof run.styleId === "number" ? run.styleId : 0;
+          }
+        }
+
+        const styleIds: [number, number, number, number, number] = hasLayeredFormattingReadPath
           ? [
               typeof sheetModel?.defaultStyleId === "number" ? sheetModel.defaultStyleId : 0,
               typeof sheetModel?.rowStyleIds?.get === "function" ? (sheetModel.rowStyleIds.get(row0) ?? 0) : 0,
               typeof sheetModel?.colStyleIds?.get === "function" ? (sheetModel.colStyleIds.get(col0) ?? 0) : 0,
+              runStyleId,
               typeof cellState?.styleId === "number" ? cellState.styleId : 0
             ]
-          : [0, 0, 0, typeof cellState?.styleId === "number" ? cellState.styleId : 0];
+          : [0, 0, 0, 0, typeof cellState?.styleId === "number" ? cellState.styleId : 0];
 
         const format = hasLayeredFormattingReadPath
           ? getFormatForStyleIds(styleIds)
-          : getFormatForLegacyStyleId(styleIds[3]);
+          : getFormatForLegacyStyleId(styleIds[4]);
 
         if (!cellState) {
           row[c] = { value: null, ...(format ? { format } : {}) };

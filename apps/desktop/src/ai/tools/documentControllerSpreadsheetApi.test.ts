@@ -214,6 +214,28 @@ describe("DocumentControllerSpreadsheetApi", () => {
     ]);
   });
 
+  it("readRange() includes range-run formatting for empty cells (large rectangle formatting layer)", () => {
+    const controller = new DocumentController();
+    // This range is large enough to trigger the compressed range-run formatting layer in DocumentController.
+    controller.setRangeFormat("Sheet1", "A1:C20000", { font: { bold: true } }, { label: "Bold large rectangle" });
+
+    const cellState = controller.getCell("Sheet1", "A1");
+    expect(cellState.styleId).toBe(0);
+
+    const api = new DocumentControllerSpreadsheetApi(controller);
+    const cells = api.readRange({ sheet: "Sheet1", startRow: 1, startCol: 1, endRow: 2, endCol: 2 });
+    expect(cells).toEqual([
+      [
+        { value: null, format: { bold: true } },
+        { value: null, format: { bold: true } }
+      ],
+      [
+        { value: null, format: { bold: true } },
+        { value: null, format: { bold: true } }
+      ]
+    ]);
+  });
+
   it("does not leak mutable references to DocumentController cell values from listNonEmptyCells()", () => {
     const controller = new DocumentController();
     controller.setCellValue("Sheet1", "A1", {
