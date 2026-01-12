@@ -821,10 +821,12 @@ not be blocked by DLP.
 ### Custom Functions API
 
 ```typescript
-// Register a custom function
-export function activate(context: ExtensionContext) {
+import * as formula from "@formula/extension-api";
+
+// Register custom functions
+export async function activate(context: formula.ExtensionContext) {
   // Simple function
-  const myFunc = formula.functions.register("MYFUNCTION", {
+  const myFunc = await formula.functions.register("MYFUNCTION", {
     description: "Doubles the input value",
     parameters: [
       { name: "value", type: "number", description: "Value to double" }
@@ -837,7 +839,7 @@ export function activate(context: ExtensionContext) {
   });
   
   // Async function (for external data)
-  const fetchFunc = formula.functions.register("FETCHDATA", {
+  const fetchFunc = await formula.functions.register("FETCHDATA", {
     description: "Fetches data from API",
     parameters: [
       { name: "endpoint", type: "string" },
@@ -847,14 +849,14 @@ export function activate(context: ExtensionContext) {
     isAsync: true,
     
     handler: async (endpoint: string, field: string) => {
-      const response = await fetch(endpoint);
+      const response = await formula.network.fetch(endpoint);
       const data = await response.json();
       return data[field];
     }
   });
   
   // Array-returning function
-  const splitFunc = formula.functions.register("SPLITALL", {
+  const splitFunc = await formula.functions.register("SPLITALL", {
     description: "Splits text into array",
     parameters: [
       { name: "text", type: "string" },
@@ -864,7 +866,7 @@ export function activate(context: ExtensionContext) {
     returnsArray: true,
     
     handler: (text: string, delimiter: string) => {
-      return text.split(delimiter).map(s => [s]);
+      return text.split(delimiter).map((s) => [s]);
     }
   });
   
@@ -933,7 +935,9 @@ export async function activate(context: formula.ExtensionContext) {
 ### Data Connector API
 
 ```typescript
-export function activate(context: ExtensionContext) {
+import * as formula from "@formula/extension-api";
+
+export async function activate(context: formula.ExtensionContext) {
   // The connector's metadata (name/icon) is declared in the extension manifest via
   // `contributes.dataConnectors`. Runtime registration only supplies implementation.
   const connector = await formula.dataConnectors.register("myExtension.salesforce", {
