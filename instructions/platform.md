@@ -115,7 +115,7 @@ Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the ful
     { "identifier": "core:allow-invoke", "allow": ["open_workbook", "save_workbook", "open_external_url"] },
     // ...
     {
-      "identifier": "core:event:allow-listen",
+      "identifier": "event:allow-listen",
       "allow": [
         { "event": "open-file" },
         { "event": "oauth-redirect" },
@@ -126,7 +126,7 @@ Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the ful
       ]
     },
     {
-      "identifier": "core:event:allow-emit",
+      "identifier": "event:allow-emit",
       "allow": [
         { "event": "open-file-ready" },
         { "event": "oauth-redirect-ready" },
@@ -161,14 +161,14 @@ when used.
 If you add new desktop IPC surface area, you must update the capability allowlists:
 
 - new `#[tauri::command]` names → `core:allow-invoke`
-- new frontend↔backend events → `core:event:allow-listen` / `core:event:allow-emit`
+- new frontend↔backend events → `event:allow-listen` / `event:allow-emit`
 
 Note: do **not** add `plugin:*` command names to `core:allow-invoke`. Plugin APIs are gated by their own permission strings
 (e.g. `dialog:allow-open`, `updater:allow-check`).
 
 We keep guardrail tests to ensure we don't accidentally broaden the desktop IPC surface:
 
-- **Event allowlists**: enforce the **exact** `core:event:allow-listen` / `core:event:allow-emit` sets (no wildcard / allow-all):
+- **Event allowlists**: enforce the **exact** `event:allow-listen` / `event:allow-emit` sets (no wildcard / allow-all):
   - `apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts`
 - **Invoke allowlist**: ensure `core:allow-invoke` matches the Rust `generate_handler![...]` registration list:
   - `apps/desktop/src-tauri/tests/tauri_ipc_allowlist.rs`
