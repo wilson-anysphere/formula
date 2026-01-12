@@ -7,6 +7,10 @@ const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 
 const extensionApiEntry = fileURLToPath(new URL("../../packages/extension-api/index.mjs", import.meta.url));
 const collabUndoEntry = fileURLToPath(new URL("../../packages/collab/undo/index.js", import.meta.url));
+const collabPersistenceEntry = fileURLToPath(new URL("../../packages/collab/persistence/src/index.ts", import.meta.url));
+const collabPersistenceIndexedDbEntry = fileURLToPath(
+  new URL("../../packages/collab/persistence/src/indexeddb.ts", import.meta.url),
+);
 const tauriConfigPath = fileURLToPath(new URL("./src-tauri/tauri.conf.json", import.meta.url));
 const tauriCsp = (JSON.parse(readFileSync(tauriConfigPath, "utf8")) as any)?.app?.security?.csp as unknown;
 const isE2E = process.env.FORMULA_E2E === "1";
@@ -68,10 +72,16 @@ export default defineConfig({
   envPrefix: ["VITE_", "DESKTOP_LOAD_"],
   plugins: [resolveJsToTs()],
   resolve: {
-    alias: {
-      "@formula/extension-api": extensionApiEntry,
-      "@formula/collab-undo": collabUndoEntry
-    }
+    alias: [
+      { find: "@formula/extension-api", replacement: extensionApiEntry },
+      { find: "@formula/collab-undo", replacement: collabUndoEntry },
+      // Workspace packages are linked via pnpm's node_modules symlinks. Some CI/dev environments
+      // can run with stale node_modules (e.g. cached installs), which causes Vite to fail to
+      // resolve new workspace dependencies. Alias the persistence entrypoints directly to keep
+      // the desktop dev server/e2e harness resilient.
+      { find: "@formula/collab-persistence/indexeddb", replacement: collabPersistenceIndexedDbEntry },
+      { find: /^@formula\/collab-persistence$/, replacement: collabPersistenceEntry },
+    ],
   },
   build: {
     // Desktop (Tauri/WebView) targets modern runtimes. Use a modern output target so
