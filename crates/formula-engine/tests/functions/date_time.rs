@@ -189,6 +189,11 @@ fn days360_accounts_for_lotus_bug_feb_1900() {
 
     assert_eq!(date_time::days360(feb29, mar31, false, system).unwrap(), 30);
     assert_eq!(date_time::days360(feb29, mar31, true, system).unwrap(), 31);
+
+    // Feb 28 is not month-end in the Lotus-bug date system (because Feb 29 exists), so US/NASD
+    // does not adjust the end date here.
+    assert_eq!(date_time::days360(jan31, feb28, false, system).unwrap(), 28);
+    assert_eq!(date_time::days360(jan31, feb28, true, system).unwrap(), 28);
 }
 
 #[test]
@@ -200,6 +205,11 @@ fn days360_respects_lotus_compat_flag_for_feb_1900() {
     // Without the Lotus bug, Feb 28 1900 is month-end (so the US/NASD method adjusts it to day 30).
     assert_eq!(date_time::days360(feb28, mar1, false, system).unwrap(), 1);
     assert_eq!(date_time::days360(feb28, mar1, true, system).unwrap(), 3);
+
+    let jan31 = ymd_to_serial(ExcelDate::new(1900, 1, 31), system).unwrap();
+    // Without the Lotus bug, Feb 28 is month-end so US/NASD adjusts it to day 30.
+    assert_eq!(date_time::days360(jan31, feb28, false, system).unwrap(), 30);
+    assert_eq!(date_time::days360(jan31, feb28, true, system).unwrap(), 28);
 }
 
 #[test]

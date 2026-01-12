@@ -375,6 +375,16 @@ fn days360_accounts_for_lotus_bug_feb_1900() {
         &sheet.eval("=DAYS360(DATE(1900,2,29),DATE(1900,3,31),TRUE)"),
         31.0,
     );
+
+    // Feb 28 is not month-end in the Lotus-bug date system (because Feb 29 exists).
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(1900,1,31),DATE(1900,2,28))"),
+        28.0,
+    );
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(1900,1,31),DATE(1900,2,28),TRUE)"),
+        28.0,
+    );
 }
 
 #[test]
@@ -390,6 +400,16 @@ fn days360_respects_lotus_compat_flag_for_feb_1900() {
     assert_number(
         &sheet.eval("=DAYS360(DATE(1900,2,28),DATE(1900,3,1),TRUE)"),
         3.0,
+    );
+
+    // Without the Lotus bug, Feb 28 is month-end so US/NASD adjusts it to day 30.
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(1900,1,31),DATE(1900,2,28))"),
+        30.0,
+    );
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(1900,1,31),DATE(1900,2,28),TRUE)"),
+        28.0,
     );
 }
 
