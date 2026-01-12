@@ -8992,18 +8992,18 @@ fn record_error_row_major(
 #[inline]
 fn record_error_sumproduct_offset(
     best: &mut Option<(i32, i32, u8, ErrorKind)>,
-    col_off: i32,
     row_off: i32,
+    col_off: i32,
     source_priority: u8,
     err: ErrorKind,
 ) {
-    // `sumproduct_range` scans `col_offset` outermost and `row_offset` innermost, and within each
-    // element it evaluates A then B. Preserve that precedence when iterating sparse stored cells.
+    // Preserve Excel/AST-style row-major error precedence for SUMPRODUCT: offsets are ordered by
+    // (row, col), and within each element we evaluate argument A before argument B.
     match best {
-        None => *best = Some((col_off, row_off, source_priority, err)),
-        Some((best_col, best_row, best_src, _)) => {
-            if (col_off, row_off, source_priority) < (*best_col, *best_row, *best_src) {
-                *best = Some((col_off, row_off, source_priority, err));
+        None => *best = Some((row_off, col_off, source_priority, err)),
+        Some((best_row, best_col, best_src, _)) => {
+            if (row_off, col_off, source_priority) < (*best_row, *best_col, *best_src) {
+                *best = Some((row_off, col_off, source_priority, err));
             }
         }
     }
@@ -10028,8 +10028,8 @@ fn sumproduct_range(grid: &dyn Grid, a: ResolvedRange, b: ResolvedRange) -> Resu
                             Err(e) => {
                                 record_error_sumproduct_offset(
                                     &mut best_error,
-                                    col_off,
                                     row_off,
+                                    col_off,
                                     0,
                                     e,
                                 );
@@ -10046,8 +10046,8 @@ fn sumproduct_range(grid: &dyn Grid, a: ResolvedRange, b: ResolvedRange) -> Resu
                             Err(e) => {
                                 record_error_sumproduct_offset(
                                     &mut best_error,
-                                    col_off,
                                     row_off,
+                                    col_off,
                                     1,
                                     e,
                                 );
@@ -10074,8 +10074,8 @@ fn sumproduct_range(grid: &dyn Grid, a: ResolvedRange, b: ResolvedRange) -> Resu
                             Err(e) => {
                                 record_error_sumproduct_offset(
                                     &mut best_error,
-                                    col_off,
                                     row_off,
+                                    col_off,
                                     0,
                                     e,
                                 );
@@ -10087,8 +10087,8 @@ fn sumproduct_range(grid: &dyn Grid, a: ResolvedRange, b: ResolvedRange) -> Resu
                             Err(e) => {
                                 record_error_sumproduct_offset(
                                     &mut best_error,
-                                    col_off,
                                     row_off,
+                                    col_off,
                                     1,
                                     e,
                                 );
@@ -10119,8 +10119,8 @@ fn sumproduct_range(grid: &dyn Grid, a: ResolvedRange, b: ResolvedRange) -> Resu
                                         Ok(y) => sum += x * y,
                                         Err(e) => record_error_sumproduct_offset(
                                             &mut best_error,
-                                            col_off_a,
                                             row_off_a,
+                                            col_off_a,
                                             1,
                                             e,
                                         ),
@@ -10128,8 +10128,8 @@ fn sumproduct_range(grid: &dyn Grid, a: ResolvedRange, b: ResolvedRange) -> Resu
                                 }
                                 Err(e) => record_error_sumproduct_offset(
                                     &mut best_error,
-                                    col_off_a,
                                     row_off_a,
+                                    col_off_a,
                                     0,
                                     *e,
                                 ),
@@ -10151,16 +10151,16 @@ fn sumproduct_range(grid: &dyn Grid, a: ResolvedRange, b: ResolvedRange) -> Resu
                                     Ok(y) => sum += x * (*y),
                                     Err(e) => record_error_sumproduct_offset(
                                         &mut best_error,
-                                        col_off_b,
                                         row_off_b,
+                                        col_off_b,
                                         1,
                                         *e,
                                     ),
                                 },
                                 Err(e) => record_error_sumproduct_offset(
                                     &mut best_error,
-                                    col_off_b,
                                     row_off_b,
+                                    col_off_b,
                                     0,
                                     e,
                                 ),
@@ -10177,18 +10177,54 @@ fn sumproduct_range(grid: &dyn Grid, a: ResolvedRange, b: ResolvedRange) -> Resu
         }
     }
 
-    let mut sum = 0.0;
+    // For strict numeric slices, SUMPRODUCT can run in SIMD without per-cell reads. Errors and
+    // non-numeric values disqualify strict numeric slices, so error precedence only matters on
+    // the fallback path below.
+    let cols_usize = cols as usize;
+    let mut slice_a: Vec<Option<&[f64]>> = Vec::with_capacity(cols_usize);
+    let mut slice_b: Vec<Option<&[f64]>> = Vec::with_capacity(cols_usize);
     for col_offset in 0..cols {
         let col_a = a.col_start + col_offset;
         let col_b = b.col_start + col_offset;
-        if let (Some(sa), Some(sb)) = (
-            grid.column_slice_strict_numeric(col_a, a.row_start, a.row_end),
-            grid.column_slice_strict_numeric(col_b, b.row_start, b.row_end),
-        ) {
+        slice_a.push(grid.column_slice_strict_numeric(col_a, a.row_start, a.row_end));
+        slice_b.push(grid.column_slice_strict_numeric(col_b, b.row_start, b.row_end));
+    }
+    let all_slices = slice_a
+        .iter()
+        .zip(slice_b.iter())
+        .all(|(sa, sb)| sa.is_some() && sb.is_some());
+    if all_slices {
+        let mut sum = 0.0;
+        for col_offset in 0..cols_usize {
+            let sa = slice_a[col_offset].expect("validated all_slices");
+            let sb = slice_b[col_offset].expect("validated all_slices");
             sum += simd::sumproduct_ignore_nan_f64(sa, sb);
-            continue;
         }
-        for row_offset in 0..rows {
+        return Ok(sum);
+    }
+
+    // Dense fallback: scan in row-major order so error precedence matches the AST evaluator.
+    let mut sum = 0.0;
+    for row_offset in 0..rows {
+        let row_idx = row_offset as usize;
+        for col_offset in 0..cols {
+            let col_idx = col_offset as usize;
+            if let (Some(sa), Some(sb)) = (slice_a[col_idx], slice_b[col_idx]) {
+                let mut x = sa[row_idx];
+                let mut y = sb[row_idx];
+                // Strict-numeric slices represent blanks as NaN; SUMPRODUCT treats blanks as 0.
+                if x.is_nan() {
+                    x = 0.0;
+                }
+                if y.is_nan() {
+                    y = 0.0;
+                }
+                sum += x * y;
+                continue;
+            }
+
+            let col_a = a.col_start + col_offset;
+            let col_b = b.col_start + col_offset;
             let ra = CellCoord {
                 row: a.row_start + row_offset,
                 col: col_a,
@@ -10202,6 +10238,7 @@ fn sumproduct_range(grid: &dyn Grid, a: ResolvedRange, b: ResolvedRange) -> Resu
             sum += x * y;
         }
     }
+
     Ok(sum)
 }
 
@@ -10391,6 +10428,77 @@ mod tests {
         let args = [Value::Range(range_a), Value::Range(range_b)];
         let out = fn_sumproduct(&args, &grid, CellCoord { row: 0, col: 0 });
         assert_eq!(out, Value::Number(26.0));
+    }
+
+    #[test]
+    fn sumproduct_sparse_error_precedence_is_row_major_for_huge_ranges() {
+        use std::collections::HashMap;
+
+        struct SparseErrorGrid {
+            bounds: (i32, i32),
+            cells: HashMap<(i32, i32), Value>,
+            stored: Vec<(CellCoord, Value)>,
+        }
+
+        impl Grid for SparseErrorGrid {
+            fn get_value(&self, coord: CellCoord) -> Value {
+                self.cells
+                    .get(&(coord.row, coord.col))
+                    .cloned()
+                    .unwrap_or(Value::Empty)
+            }
+
+            fn get_value_on_sheet(&self, _sheet: usize, coord: CellCoord) -> Value {
+                self.get_value(coord)
+            }
+
+            fn column_slice(&self, _col: i32, _row_start: i32, _row_end: i32) -> Option<&[f64]> {
+                None
+            }
+
+            fn iter_cells(&self) -> Option<Box<dyn Iterator<Item = (CellCoord, Value)> + '_>> {
+                Some(Box::new(self.stored.iter().cloned()))
+            }
+
+            fn bounds(&self) -> (i32, i32) {
+                self.bounds
+            }
+        }
+
+        let row_end = BYTECODE_SPARSE_RANGE_ROW_THRESHOLD; // rows() == threshold + 1
+        let range_a = RangeRef::new(
+            Ref::new(0, 0, true, true),
+            Ref::new(row_end, 1, true, true),
+        );
+        let range_b = RangeRef::new(
+            Ref::new(0, 2, true, true),
+            Ref::new(row_end, 3, true, true),
+        );
+
+        // Two different errors in the first (A) range:
+        // - B1 (row 0, col 1) is earlier in row-major order than A2 (row 1, col 0).
+        let mut cells: HashMap<(i32, i32), Value> = HashMap::new();
+        let mut stored = Vec::new();
+
+        // Insert out of order to ensure we rely on offset-based precedence, not iterator order.
+        let a2 = (CellCoord { row: 1, col: 0 }, Value::Error(ErrorKind::Ref));
+        let b1 = (CellCoord { row: 0, col: 1 }, Value::Error(ErrorKind::Div0));
+
+        for (coord, value) in [a2, b1] {
+            cells.insert((coord.row, coord.col), value.clone());
+            stored.push((coord, value));
+        }
+
+        let grid = SparseErrorGrid {
+            bounds: (row_end + 1, 4),
+            cells,
+            stored,
+        };
+
+        // SUMPRODUCT should return the earliest error in row-major order: B1 => #DIV/0!
+        let args = [Value::Range(range_a), Value::Range(range_b)];
+        let out = fn_sumproduct(&args, &grid, CellCoord { row: 0, col: 0 });
+        assert_eq!(out, Value::Error(ErrorKind::Div0));
     }
  
     #[test]
