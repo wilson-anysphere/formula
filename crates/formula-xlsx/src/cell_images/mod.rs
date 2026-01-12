@@ -220,26 +220,6 @@ impl CellImages {
     }
 }
 
-/// Best-effort loader for Excel "in-cell" images.
-///
-/// Excel stores the image catalog in `xl/cellimages*.xml`, with image payloads
-/// referenced via the part's relationships (`xl/_rels/cellimages*.xml.rels`).
-///
-/// This helper is intentionally tolerant: any errors while parsing a specific
-/// part are ignored so workbook loading does not fail.
-pub fn load_cell_images_from_parts(
-    parts: &BTreeMap<String, Vec<u8>>,
-    workbook: &mut formula_model::Workbook,
-) {
-    for path in parts.keys() {
-        if !is_cell_images_part(path) {
-            continue;
-        }
-        // Best-effort: ignore parse errors/missing parts so we don't fail workbook loads.
-        let _ = parse_cell_images_part(path, parts, workbook);
-    }
-}
-
 fn is_cell_images_part(path: &str) -> bool {
     let Some(rest) = path.strip_prefix("xl/") else {
         return false;
