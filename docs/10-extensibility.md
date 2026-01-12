@@ -1212,13 +1212,14 @@ guardrails:
 - Disable nested script-loading/execution primitives (`importScripts`, `Worker`, `SharedWorker`) to
   avoid spawning a fresh worker with pristine globals.
 - **Strict import policy (best-effort)**: before activating an extension, the worker fetches the
-  entrypoint module and its static dependency graph and rejects:
-  - any static import specifier that is not relative (`./` / `../`) or `@formula/extension-api`
-    (optionally `formula` if an import map/alias is provided)
-  - any dynamic `import(...)` usage
-  - any module URL that resolves outside the extension base URL (including redirects)
-  - implication: browser extensions must bundle third-party dependencies.
-    - When loaded from a normal (hierarchical) base URL, split chunks can be referenced via relative imports.
+   entrypoint module and its static dependency graph and rejects:
+   - any static import specifier that is not relative (`./` / `../`) or `@formula/extension-api` (or `formula`)
+     - Note: in production Desktop/Web marketplace installs, the loader rewrites these to an in-memory `blob:` module
+       shim (workers do not have import maps), so extensions can still author `import * as formula from "@formula/extension-api"`.
+   - any dynamic `import(...)` usage
+   - any module URL that resolves outside the extension base URL (including redirects)
+   - implication: browser extensions must bundle third-party dependencies.
+     - When loaded from a normal (hierarchical) base URL, split chunks can be referenced via relative imports.
     - When loaded from an in-memory `blob:`/`data:` entrypoint (marketplace installs), the entrypoint must be a
       **single-file ESM bundle** (no relative imports).
 - **Code generation lockdown (best-effort)**: `eval`, `Function` (and related constructors), and
