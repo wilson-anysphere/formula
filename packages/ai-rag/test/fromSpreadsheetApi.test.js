@@ -69,3 +69,25 @@ test("workbookFromSpreadsheetApi: coordinateBase='auto' prefers zero-based if an
   assert.equal(cells.get("1,1")?.value, "A");
 });
 
+test("workbookFromSpreadsheetApi: drops formatting-only / empty entries", () => {
+  const spreadsheet = {
+    listSheets() {
+      return ["Sheet1"];
+    },
+    listNonEmptyCells(sheet) {
+      assert.equal(sheet, "Sheet1");
+      return [
+        {
+          address: { sheet: "Sheet1", row: 1, col: 1 },
+          cell: { value: null, format: { bold: true } },
+        },
+      ];
+    },
+  };
+
+  const workbook = workbookFromSpreadsheetApi({ spreadsheet, workbookId: "wb1" });
+  assert.equal(workbook.sheets[0].cells.size, 0);
+
+  const chunks = chunkWorkbook(workbook);
+  assert.ok(!chunks.some((c) => c.kind === "dataRegion" && c.sheetName === "Sheet1"));
+});

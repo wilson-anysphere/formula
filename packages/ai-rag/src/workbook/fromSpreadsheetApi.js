@@ -65,7 +65,12 @@ export function workbookFromSpreadsheetApi(params) {
       if (!Number.isInteger(row) || row < 0) continue;
       if (!Number.isInteger(col) || col < 0) continue;
       const cell = entry?.cell ?? {};
-      cells.set(`${row},${col}`, { value: cell.value ?? null, formula: cell.formula ?? null });
+      const value = cell.value ?? null;
+      const formula = cell.formula ?? null;
+      // `SpreadsheetApi.listNonEmptyCells` may include formatting-only cells. These should
+      // be dropped from the ai-rag workbook to avoid bloating sparse cell maps.
+      if ((value == null || value === "") && (formula == null || String(formula).trim() === "")) continue;
+      cells.set(`${row},${col}`, { value, formula });
     }
     return { name: sheetName, cells };
   });
