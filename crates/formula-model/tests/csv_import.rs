@@ -135,6 +135,46 @@ fn csv_import_supports_utf16be_bom_tab_delimited_text() {
 }
 
 #[test]
+fn csv_import_utf16le_honors_excel_sep_directive() {
+    // Excel supports a special first line `sep=<delimiter>` which explicitly specifies the CSV
+    // delimiter and is not treated as a header/data row.
+    //
+    // Make the sample ambiguous for delimiter sniffing (commas appear inside unquoted fields).
+    // Without honoring `sep=;`, the sniffer would prefer `,` over `;` and parse the header/rows
+    // incorrectly.
+    let csv = "sep=;\r\na;b\r\n1,hello;world\r\n2,foo;bar\r\n";
+    let mut bytes = vec![0xFF, 0xFE];
+    for unit in csv.encode_utf16() {
+        bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+
+    let table =
+        import_csv_to_columnar_table(Cursor::new(bytes.clone()), CsvOptions::default()).unwrap();
+    assert_eq!(table.schema()[0].name, "a");
+    assert_eq!(table.schema()[1].name, "b");
+    assert_eq!(table.row_count(), 2);
+
+    let sheet = import_csv_to_worksheet(1, "Data", Cursor::new(bytes), CsvOptions::default())
+        .expect("import utf16 csv with sep directive");
+    assert_eq!(
+        sheet.value(CellRef::new(0, 0)),
+        CellValue::String("1,hello".to_string())
+    );
+    assert_eq!(
+        sheet.value(CellRef::new(0, 1)),
+        CellValue::String("world".to_string())
+    );
+    assert_eq!(
+        sheet.value(CellRef::new(1, 0)),
+        CellValue::String("2,foo".to_string())
+    );
+    assert_eq!(
+        sheet.value(CellRef::new(1, 1)),
+        CellValue::String("bar".to_string())
+    );
+}
+
+#[test]
 fn csv_import_handles_wide_rows() {
     let cols = 200usize;
     let header = (0..cols)

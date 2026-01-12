@@ -569,6 +569,43 @@ fn open_workbook_model_csv_honors_excel_sep_directive() {
 }
 
 #[test]
+fn open_workbook_model_sniffs_utf16le_csv_honors_excel_sep_directive() {
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let path = tmp.path().join("sep_utf16.txt");
+
+    let csv = "sep=;\r\na;b\r\n1,hello;world\r\n2,foo;bar\r\n";
+    let mut bytes = vec![0xFF, 0xFE];
+    for unit in csv.encode_utf16() {
+        bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+    std::fs::write(&path, &bytes).expect("write utf16 csv");
+
+    let workbook = formula_io::open_workbook_model(&path).expect("open workbook model");
+    assert_eq!(workbook.sheets.len(), 1);
+    assert_eq!(workbook.sheets[0].name, "sep_utf16");
+
+    let sheet = workbook
+        .sheet_by_name("sep_utf16")
+        .expect("sep_utf16 sheet missing");
+    assert_eq!(
+        sheet.value_a1("A1").unwrap(),
+        CellValue::String("1,hello".to_string())
+    );
+    assert_eq!(
+        sheet.value_a1("B1").unwrap(),
+        CellValue::String("world".to_string())
+    );
+    assert_eq!(
+        sheet.value_a1("A2").unwrap(),
+        CellValue::String("2,foo".to_string())
+    );
+    assert_eq!(
+        sheet.value_a1("B2").unwrap(),
+        CellValue::String("bar".to_string())
+    );
+}
+
+#[test]
 fn open_workbook_model_rejects_unknown_binary() {
     let mut tmp = tempfile::Builder::new()
         .prefix("binary_")
