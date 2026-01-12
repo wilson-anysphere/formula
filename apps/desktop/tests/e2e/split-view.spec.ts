@@ -527,6 +527,18 @@ test.describe("split view", () => {
       .toBeGreaterThan(secondaryScrollBefore);
     const secondaryScrollY = Number((await secondary.getAttribute("data-scroll-y")) ?? 0);
 
+    // Wait for the debounced layout persistence to flush the secondary scrollY before reloading.
+    await expect
+      .poll(async () => {
+        return await page.evaluate((key) => {
+          const raw = localStorage.getItem(key);
+          if (!raw) return 0;
+          const layout = JSON.parse(raw);
+          return layout?.splitView?.panes?.secondary?.scrollY ?? 0;
+        }, LAYOUT_KEY);
+      })
+      .toBeCloseTo(secondaryScrollY, 1);
+
     // Reload and ensure both panes restore.
     await page.reload();
     await waitForDesktopReady(page);
