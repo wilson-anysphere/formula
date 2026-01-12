@@ -115,11 +115,11 @@ pub(crate) fn days_between(
 
 /// Coupon-period length `E` (days) following Excel-compatible conventions:
 /// - basis 0/2: 360/frequency (constant)
-/// - basis 3: 365/frequency (constant)
-/// - basis 1: actual days between PCD and NCD (variable)
 /// - basis 4: 360/frequency (constant). Note that while basis=4 uses European 30E/360 (DAYS360 with
 ///   `method=true`) for day-counts like `COUPDAYBS`, Excel still models the *coupon period length*
 ///   returned by `COUPDAYS` as `360/frequency` (see tests in `financial_coupons.rs`).
+/// - basis 3: 365/frequency (constant)
+/// - basis 1: actual days between PCD and NCD (variable)
 pub(crate) fn coupon_period_e(
     pcd: i32,
     ncd: i32,
@@ -134,8 +134,7 @@ pub(crate) fn coupon_period_e(
 
     let e = match basis {
         1 => (i64::from(ncd) - i64::from(pcd)) as f64,
-        0 | 2 => 360.0 / freq,
-        4 => 360.0 / freq,
+        0 | 2 | 4 => 360.0 / freq,
         3 => 365.0 / freq,
         _ => return Err(ExcelError::Num),
     };
