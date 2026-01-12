@@ -376,11 +376,6 @@ fn prefers_bound_verified_digital_signature_ext_over_unbound_verified_ex_candida
         "expected bound DigitalSignatureExt stream to be selected, got {}",
         chosen.stream_path
     );
-    assert!(
-        chosen.stream_path.contains("DigitalSignatureExt"),
-        "expected stream_path to contain DigitalSignatureExt, got {}",
-        chosen.stream_path
-    );
 }
 
 #[test]
@@ -440,9 +435,4 @@ fn prefers_bound_verified_digital_signature_ext_when_signatures_are_in_separate_
     assert_eq!(chosen.verification, VbaSignatureVerification::SignedVerified);
     assert_eq!(chosen.binding, VbaSignatureBinding::Bound);
     assert_eq!(chosen.stream_kind, VbaSignatureStreamKind::DigitalSignatureExt);
-    assert!(
-        chosen.stream_path.contains("DigitalSignatureExt"),
-        "expected stream_path to contain DigitalSignatureExt, got {}",
-        chosen.stream_path
-    );
 }

@@ -44,8 +44,9 @@ fn parse_prefers_signature_component_even_when_stream_is_nested_under_storage() 
         sig.stream_kind,
         sig.stream_path
     );
-    assert!(
-        sig.stream_path.contains("/sig"),
+    assert_eq!(
+        sig.stream_path,
+        "\u{0005}DigitalSignatureEx/sig",
         "expected nested DigitalSignatureEx stream to be selected, got {}",
         sig.stream_path
     );
@@ -89,7 +90,7 @@ fn parse_prefers_digital_signature_ext_over_ex() {
 
     assert_eq!(sig.stream_kind, VbaSignatureStreamKind::DigitalSignatureExt);
     assert!(
-        sig.stream_path.contains("DigitalSignatureExt") && sig.stream_path.contains("/sig"),
+        sig.stream_path == "\u{0005}DigitalSignatureExt/sig",
         "expected nested DigitalSignatureExt stream to be selected, got {}",
         sig.stream_path
     );
@@ -116,7 +117,7 @@ fn parse_root_digital_signature_ext_sets_stream_kind() {
         .expect("signature should be present");
 
     assert_eq!(sig.stream_kind, VbaSignatureStreamKind::DigitalSignatureExt);
-    assert!(sig.stream_path.contains("DigitalSignatureExt"));
+    assert_eq!(sig.stream_path, "\u{0005}DigitalSignatureExt");
     assert_eq!(sig.signature, b"ext-signature");
 }
 
@@ -146,6 +147,6 @@ fn parse_signature_like_stream_sets_stream_kind_unknown() {
         .expect("signature should be present");
 
     assert_eq!(sig.stream_kind, VbaSignatureStreamKind::Unknown);
-    assert!(sig.stream_path.contains("DigitalSignatureExWeird"));
+    assert_eq!(sig.stream_path, "\u{0005}DigitalSignatureExWeird/sig");
     assert_eq!(sig.signature, b"weird-signature");
 }
