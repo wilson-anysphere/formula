@@ -1,6 +1,7 @@
 use formula_engine::pivot::PivotConfig;
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+use std::fmt;
 
 use crate::macro_trust::MacroTrustDecision;
 #[cfg(feature = "desktop")]
@@ -195,6 +196,151 @@ fn workbook_theme_palette(workbook: &crate::file_io::Workbook) -> Option<Workboo
 pub struct RangeCellEdit {
     pub value: Option<JsonValue>,
     pub formula: Option<String>,
+}
+
+/// IPC-deserialized matrix of cell edits with size limits applied during deserialization.
+///
+/// This prevents a compromised webview from sending arbitrarily large `values` payloads to the
+/// `set_range` command and forcing the backend to allocate excessive memory before we can apply
+/// range-size checks.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LimitedRangeCellEdits(pub Vec<Vec<RangeCellEdit>>);
+
+impl<'de> Deserialize<'de> for LimitedRangeCellEdits {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct MatrixVisitor;
+
+        impl<'de> de::Visitor<'de> for MatrixVisitor {
+            type Value = LimitedRangeCellEdits;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a 2D array of cell edits")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: de::SeqAccess<'de>,
+            {
+                use crate::resource_limits::{MAX_RANGE_CELLS_PER_CALL, MAX_RANGE_DIM};
+
+                struct RowSeed<'a> {
+                    total_cells: &'a mut usize,
+                }
+
+                impl<'de> de::DeserializeSeed<'de> for RowSeed<'_> {
+                    type Value = Vec<RangeCellEdit>;
+
+                    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+                    where
+                        D: serde::Deserializer<'de>,
+                    {
+                        struct RowVisitor<'a> {
+                            total_cells: &'a mut usize,
+                        }
+
+                        impl<'de> de::Visitor<'de> for RowVisitor<'_> {
+                            type Value = Vec<RangeCellEdit>;
+
+                            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                                formatter.write_str("an array of cell edits")
+                            }
+
+                            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+                            where
+                                A: de::SeqAccess<'de>,
+                            {
+                                let mut row = Vec::new();
+                                while let Some(cell) = seq.next_element::<RangeCellEdit>()? {
+                                    if row.len() >= MAX_RANGE_DIM {
+                                        return Err(de::Error::custom(format!(
+                                            "range values row is too large (max {MAX_RANGE_DIM} columns)"
+                                        )));
+                                    }
+
+                                    *self.total_cells = self.total_cells.saturating_add(1);
+                                    if *self.total_cells > MAX_RANGE_CELLS_PER_CALL {
+                                        return Err(de::Error::custom(format!(
+                                            "range values payload is too large (max {MAX_RANGE_CELLS_PER_CALL} cells)"
+                                        )));
+                                    }
+
+                                    row.push(cell);
+                                }
+                                Ok(row)
+                            }
+                        }
+
+                        deserializer.deserialize_seq(RowVisitor {
+                            total_cells: self.total_cells,
+                        })
+                    }
+                }
+
+                let mut rows = Vec::new();
+                let mut total_cells = 0usize;
+                while let Some(row) = seq.next_element_seed(RowSeed {
+                    total_cells: &mut total_cells,
+                })? {
+                    if rows.len() >= MAX_RANGE_DIM {
+                        return Err(de::Error::custom(format!(
+                            "range values payload is too large (max {MAX_RANGE_DIM} rows)"
+                        )));
+                    }
+                    rows.push(row);
+                }
+                Ok(LimitedRangeCellEdits(rows))
+            }
+        }
+
+        deserializer.deserialize_seq(MatrixVisitor)
+    }
+}
+
+/// IPC-deserialized vector of `f64` with a maximum length.
+///
+/// Used for PDF export inputs (`col_widths_points`, `row_heights_points`) to avoid unbounded IPC
+/// allocations from a compromised webview.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LimitedF64Vec(pub Vec<f64>);
+
+impl<'de> Deserialize<'de> for LimitedF64Vec {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct VecVisitor;
+
+        impl<'de> de::Visitor<'de> for VecVisitor {
+            type Value = LimitedF64Vec;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("an array of numbers")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: de::SeqAccess<'de>,
+            {
+                use crate::resource_limits::MAX_RANGE_DIM;
+
+                let mut out = Vec::new();
+                while let Some(v) = seq.next_element::<f64>()? {
+                    if out.len() >= MAX_RANGE_DIM {
+                        return Err(de::Error::custom(format!(
+                            "array is too large (max {MAX_RANGE_DIM} items)"
+                        )));
+                    }
+                    out.push(v);
+                }
+                Ok(LimitedF64Vec(out))
+            }
+        }
+
+        deserializer.deserialize_seq(VecVisitor)
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -1199,13 +1345,14 @@ pub async fn set_range(
     start_col: usize,
     end_row: usize,
     end_col: usize,
-    values: Vec<Vec<RangeCellEdit>>,
+    values: LimitedRangeCellEdits,
     state: State<'_, SharedAppState>,
 ) -> Result<Vec<CellUpdate>, String> {
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();
         let normalized = values
+            .0
             .into_iter()
             .map(|row| {
                 row.into_iter()
@@ -1516,8 +1663,8 @@ pub fn set_sheet_print_area(
 pub fn export_sheet_range_pdf(
     sheet_id: String,
     range: PrintCellRange,
-    col_widths_points: Option<Vec<f64>>,
-    row_heights_points: Option<Vec<f64>>,
+    col_widths_points: Option<LimitedF64Vec>,
+    row_heights_points: Option<LimitedF64Vec>,
     state: State<'_, SharedAppState>,
 ) -> Result<String, String> {
     use crate::resource_limits::{MAX_PDF_BYTES, MAX_PDF_CELLS_PER_CALL, MAX_RANGE_DIM};
@@ -1571,8 +1718,8 @@ pub fn export_sheet_range_pdf(
         }));
     }
 
-    let col_widths = col_widths_points.unwrap_or_default();
-    let row_heights = row_heights_points.unwrap_or_default();
+    let col_widths = col_widths_points.map(|v| v.0).unwrap_or_default();
+    let row_heights = row_heights_points.map(|v| v.0).unwrap_or_default();
 
     let pdf_bytes = formula_xlsx::print::export_range_to_pdf_bytes(
         &sheet.name,
@@ -3655,6 +3802,85 @@ mod tests {
     use crate::file_io::read_xlsx_blocking;
     use std::path::Path;
     use tempfile::TempDir;
+
+    #[test]
+    fn limited_range_cell_edits_deserializes_small_payloads() {
+        let value = serde_json::json!([
+            [
+                { "value": 1 },
+                { "value": 2, "formula": "=1+1" }
+            ],
+            [
+                { "value": 3 },
+                { "value": 4 }
+            ]
+        ]);
+
+        let parsed: LimitedRangeCellEdits =
+            serde_json::from_value(value).expect("expected limited matrix to deserialize");
+        assert_eq!(parsed.0.len(), 2);
+        assert_eq!(parsed.0[0].len(), 2);
+    }
+
+    #[test]
+    fn limited_range_cell_edits_rejects_too_many_rows() {
+        let max = crate::resource_limits::MAX_RANGE_DIM;
+        let mut json = String::from("[");
+        for idx in 0..=max {
+            if idx > 0 {
+                json.push(',');
+            }
+            json.push_str("[]");
+        }
+        json.push(']');
+
+        let err = serde_json::from_str::<LimitedRangeCellEdits>(&json)
+            .expect_err("expected oversized row count to be rejected");
+        assert!(
+            err.to_string().contains("max") && err.to_string().contains(&max.to_string()),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn limited_range_cell_edits_rejects_too_many_cols() {
+        let max = crate::resource_limits::MAX_RANGE_DIM;
+        let mut json = String::from("[[");
+        for idx in 0..=max {
+            if idx > 0 {
+                json.push(',');
+            }
+            json.push_str("{}");
+        }
+        json.push_str("]]");
+
+        let err = serde_json::from_str::<LimitedRangeCellEdits>(&json)
+            .expect_err("expected oversized column count to be rejected");
+        assert!(
+            err.to_string().contains("max") && err.to_string().contains(&max.to_string()),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn limited_f64_vec_rejects_too_many_entries() {
+        let max = crate::resource_limits::MAX_RANGE_DIM;
+        let mut json = String::from("[");
+        for idx in 0..=max {
+            if idx > 0 {
+                json.push(',');
+            }
+            json.push_str("0");
+        }
+        json.push(']');
+
+        let err =
+            serde_json::from_str::<LimitedF64Vec>(&json).expect_err("expected size limit to fail");
+        assert!(
+            err.to_string().contains("max") && err.to_string().contains(&max.to_string()),
+            "unexpected error: {err}"
+        );
+    }
 
     #[test]
     fn coerce_save_path_to_xlsx_rewrites_non_workbook_origins() {
