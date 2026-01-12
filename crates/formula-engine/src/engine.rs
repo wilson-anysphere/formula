@@ -6860,16 +6860,62 @@ fn walk_calc_expr(
             }
         }
         Expr::ImplicitIntersection(inner) => {
-            walk_calc_expr(
-                inner,
-                current_cell,
-                tables_by_sheet,
-                workbook,
-                spills,
-                precedents,
-                visiting_names,
-                lexical_scopes,
-            );
+            match inner.as_ref() {
+                // Implicit intersection over a static range only depends on the single intersected
+                // cell (if any), rather than the entire rectangle.
+                Expr::RangeRef(RangeRef { sheet, start, end }) => {
+                    let row_start = start.row.min(end.row);
+                    let row_end = start.row.max(end.row);
+                    let col_start = start.col.min(end.col);
+                    let col_end = start.col.max(end.col);
+                    let cur = current_cell.addr;
+
+                    let intersected = if row_start == row_end && col_start == col_end {
+                        Some(CellAddr {
+                            row: row_start,
+                            col: col_start,
+                        })
+                    } else if col_start == col_end {
+                        (cur.row >= row_start && cur.row <= row_end).then(|| CellAddr {
+                            row: cur.row,
+                            col: col_start,
+                        })
+                    } else if row_start == row_end {
+                        (cur.col >= col_start && cur.col <= col_end).then(|| CellAddr {
+                            row: row_start,
+                            col: cur.col,
+                        })
+                    } else {
+                        (cur.row >= row_start
+                            && cur.row <= row_end
+                            && cur.col >= col_start
+                            && cur.col <= col_end)
+                            .then(|| cur)
+                    };
+
+                    if let (Some(intersected), Some(sheets)) =
+                        (intersected, resolve_sheet_span(sheet, current_cell.sheet, workbook))
+                    {
+                        for sheet_id in sheets {
+                            precedents.insert(Precedent::Cell(CellId::new(
+                                sheet_id_for_graph(sheet_id),
+                                intersected.row,
+                                intersected.col,
+                            )));
+                        }
+                    }
+                }
+                _ => walk_calc_expr(
+                    inner,
+                    current_cell,
+                    tables_by_sheet,
+                    workbook,
+                    spills,
+                    precedents,
+                    visiting_names,
+                    lexical_scopes,
+                ),
+            }
         }
         Expr::Number(_) | Expr::Text(_) | Expr::Bool(_) | Expr::Blank | Expr::Error(_) => {}
     }
@@ -7654,6 +7700,28 @@ mod tests {
         assert_eq!(
             engine.get_cell_value("Sheet1", "XFD1"),
             Value::Error(ErrorKind::Value)
+        );
+    }
+
+    #[test]
+    fn implicit_intersection_range_dependencies_point_to_intersected_cell() {
+        let mut engine = Engine::new();
+        engine
+            .set_cell_formula("Sheet1", "B2", "=@A1:A3")
+            .unwrap();
+
+        let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
+        let b2 = parse_a1("B2").unwrap();
+        let key = CellKey {
+            sheet: sheet_id,
+            addr: b2,
+        };
+
+        let precedents = engine.calc_graph.precedents_of(cell_id_from_key(key));
+        assert_eq!(
+            precedents,
+            vec![Precedent::Cell(CellId::new(sheet_id_for_graph(sheet_id), 1, 0))],
+            "=@A1:A3 in row 2 should only depend on A2"
         );
     }
 
