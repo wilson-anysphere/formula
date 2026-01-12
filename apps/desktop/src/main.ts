@@ -815,7 +815,13 @@ const sheetPositionEl = sheetPosition;
 const docIdParam = new URL(window.location.href).searchParams.get("docId");
 const docId = typeof docIdParam === "string" && docIdParam.trim() !== "" ? docIdParam : null;
 const workbookId = docId ?? "local-workbook";
-const legacyGridLimits = resolveDesktopGridMode() === "legacy" ? getWorkbookLoadLimits() : undefined;
+const legacyGridLimits = (() => {
+  if (resolveDesktopGridMode() !== "legacy") return undefined;
+  // `getWorkbookLoadLimits` also resolves snapshot chunking controls; strip it down to
+  // `GridLimits` so SpreadsheetApp doesn't accidentally retain unrelated fields.
+  const { maxRows, maxCols } = getWorkbookLoadLimits();
+  return { maxRows, maxCols };
+})();
 const app = new SpreadsheetApp(
   gridRoot,
   { activeCell, selectionRange, activeValue, selectionSum, selectionAverage, selectionCount },
