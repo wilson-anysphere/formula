@@ -681,14 +681,20 @@ impl XlsxDocument {
             rel_index: Option<u32>,
         }
 
-        fn is_rich_value_part(part_name: &str) -> bool {
+        fn rich_value_part_suffix(part_name: &str) -> Option<u32> {
             const PREFIX: &str = "xl/richData/richValue";
             const SUFFIX: &str = ".xml";
             if !part_name.starts_with(PREFIX) || !part_name.ends_with(SUFFIX) {
-                return false;
+                return None;
             }
             let mid = &part_name[PREFIX.len()..part_name.len() - SUFFIX.len()];
-            mid.chars().all(|c| c.is_ascii_digit())
+            if mid.is_empty() {
+                return Some(0);
+            }
+            if !mid.chars().all(|c| c.is_ascii_digit()) {
+                return None;
+            }
+            mid.parse::<u32>().ok()
         }
 
         fn parse_rv_explicit_index(rv: roxmltree::Node<'_, '_>) -> Option<u32> {
@@ -744,11 +750,24 @@ impl XlsxDocument {
 
         let mut parsed: Vec<ParsedRv> = Vec::new();
 
-        for (part_name, bytes) in self.parts.iter() {
-            if !is_rich_value_part(part_name) {
-                continue;
-            }
+        // Deterministic part ordering (numeric suffix; not lexicographic).
+        //
+        // Excel can split rich value stores across many parts (e.g. richValue.xml, richValue1.xml, ...,
+        // richValue10.xml). A lexicographic sort puts richValue10 before richValue2, corrupting the
+        // implicit index assignment.
+        let mut part_names: Vec<(u32, &str)> = self
+            .parts
+            .keys()
+            .filter_map(|name| rich_value_part_suffix(name).map(|idx| (idx, name.as_str())))
+            .collect();
+        part_names.sort_by(|(a_idx, a_name), (b_idx, b_name)| {
+            a_idx.cmp(b_idx).then_with(|| a_name.cmp(b_name))
+        });
 
+        for (_idx, part_name) in part_names {
+            let Some(bytes) = self.parts.get(part_name) else {
+                continue;
+            };
             let xml = std::str::from_utf8(bytes).map_err(|e| {
                 XlsxError::Invalid(format!("{part_name} is not valid UTF-8: {e}"))
             })?;
