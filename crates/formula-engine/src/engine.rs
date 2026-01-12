@@ -1426,6 +1426,7 @@ impl Engine {
                 Vec::with_capacity(parallel_tasks.len() + serial_tasks.len());
             let eval_parallel_tasks_serial = |results: &mut Vec<(CellKey, Value)>| {
                 let mut vm = bytecode::Vm::with_capacity(32);
+                let _date_guard = bytecode::runtime::set_thread_date_system(date_system);
                 for (k, compiled) in &parallel_tasks {
                     let ctx = crate::eval::EvalContext {
                         current_sheet: k.sheet,
@@ -1470,8 +1471,13 @@ impl Engine {
                         parallel_tasks
                             .par_iter()
                             .map_init(
-                                || bytecode::Vm::with_capacity(32),
-                                |vm, (k, compiled)| {
+                                || {
+                                    (
+                                        bytecode::Vm::with_capacity(32),
+                                        bytecode::runtime::set_thread_date_system(date_system),
+                                    )
+                                },
+                                |(vm, _date_guard), (k, compiled)| {
                                     let ctx = crate::eval::EvalContext {
                                         current_sheet: k.sheet,
                                         current_cell: k.addr,
@@ -1524,6 +1530,7 @@ impl Engine {
 
             // Non-thread-safe tasks are always serialized.
             let mut vm = bytecode::Vm::with_capacity(32);
+            let _date_guard = bytecode::runtime::set_thread_date_system(date_system);
             for (k, compiled) in &serial_tasks {
                 let ctx = crate::eval::EvalContext {
                     current_sheet: k.sheet,

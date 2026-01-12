@@ -1,6 +1,7 @@
 use super::ast::{BinaryOp, Expr, Function, UnaryOp};
 use super::grid::Grid;
 use super::value::{Array as ArrayValue, CellCoord, ErrorKind, RangeRef, ResolvedRange, Value};
+use crate::date::ExcelDateSystem;
 use crate::error::ExcelError;
 use crate::functions::math::criteria::Criteria as EngineCriteria;
 use crate::value::{
@@ -8,8 +9,36 @@ use crate::value::{
 };
 use crate::simd::{self, CmpOp, NumericCriteria};
 use smallvec::SmallVec;
+use std::cell::Cell;
 use std::cmp::Ordering;
 use std::sync::Arc;
+
+thread_local! {
+    static BYTECODE_DATE_SYSTEM: Cell<ExcelDateSystem> = Cell::new(ExcelDateSystem::EXCEL_1900);
+}
+
+pub(crate) struct BytecodeDateSystemGuard {
+    prev: ExcelDateSystem,
+}
+
+impl Drop for BytecodeDateSystemGuard {
+    fn drop(&mut self) {
+        BYTECODE_DATE_SYSTEM.with(|cell| cell.set(self.prev));
+    }
+}
+
+pub(crate) fn set_thread_date_system(system: ExcelDateSystem) -> BytecodeDateSystemGuard {
+    let prev = BYTECODE_DATE_SYSTEM.with(|cell| {
+        let prev = cell.get();
+        cell.set(system);
+        prev
+    });
+    BytecodeDateSystemGuard { prev }
+}
+
+fn thread_date_system() -> ExcelDateSystem {
+    BYTECODE_DATE_SYSTEM.with(|cell| cell.get())
+}
 
 pub fn eval_ast(expr: &Expr, grid: &dyn Grid, base: CellCoord) -> Value {
     match expr {
@@ -785,7 +814,8 @@ fn parse_countif_criteria(criteria: &Value) -> Result<EngineCriteria, ErrorKind>
         Value::Array(_) | Value::Range(_) => return Err(ErrorKind::Value),
     };
 
-    EngineCriteria::parse(&criteria_value).map_err(engine_error_to_bytecode)
+    EngineCriteria::parse_with_date_system(&criteria_value, thread_date_system())
+        .map_err(engine_error_to_bytecode)
 }
 
 fn count_if_range_criteria(

@@ -67,7 +67,14 @@ fn eval_via_ast(engine: &Engine, formula: &str, current_cell: &str) -> Value {
         current_sheet: 0,
         current_cell: parse_a1(current_cell).unwrap(),
     };
-    Evaluator::new(&resolver, ctx, &recalc_ctx).eval_formula(&compiled)
+    Evaluator::new_with_date_system_and_locale(
+        &resolver,
+        ctx,
+        &recalc_ctx,
+        engine.date_system(),
+        engine.value_locale(),
+    )
+    .eval_formula(&compiled)
 }
 
 fn assert_engine_matches_ast(engine: &Engine, formula: &str, cell: &str) {
@@ -329,4 +336,38 @@ fn bytecode_backend_matches_ast_for_countif_full_criteria_semantics() {
 
     assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(2.0));
     assert_engine_matches_ast(&engine, "=COUNTIF(B1:B3, D2)", "C2");
+}
+
+#[test]
+fn bytecode_backend_countif_date_criteria_respects_engine_date_system() {
+    let mut engine = Engine::new();
+    engine.set_date_system(ExcelDateSystem::Excel1904);
+
+    let system = ExcelDateSystem::Excel1904;
+    let d2019 = ymd_to_serial(ExcelDate::new(2019, 12, 31), system).unwrap();
+    let d2020 = ymd_to_serial(ExcelDate::new(2020, 1, 1), system).unwrap();
+    let d2020_next = ymd_to_serial(ExcelDate::new(2020, 1, 2), system).unwrap();
+
+    engine.set_cell_value("Sheet1", "A1", d2019 as f64).unwrap();
+    engine.set_cell_value("Sheet1", "A2", d2020 as f64).unwrap();
+    engine
+        .set_cell_value("Sheet1", "A3", d2020_next as f64)
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", r#"=COUNTIF(A1:A3, ">1/1/2020")"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", r#"=COUNTIF(A1:A3, "=1/1/2020")"#)
+        .unwrap();
+
+    // Ensure we're exercising the bytecode path.
+    assert_eq!(engine.bytecode_program_count(), 2);
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(1.0));
+    assert_engine_matches_ast(&engine, r#"=COUNTIF(A1:A3, ">1/1/2020")"#, "B1");
+    assert_engine_matches_ast(&engine, r#"=COUNTIF(A1:A3, "=1/1/2020")"#, "B2");
 }
