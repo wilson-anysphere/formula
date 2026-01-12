@@ -213,6 +213,20 @@ fn detect_project_codepage(project_stream_bytes: &[u8]) -> Option<&'static Encod
         }
         let mut line = &line[start..];
 
+        // Trim trailing ASCII whitespace.
+        let mut end = line.len();
+        while end > 0 && matches!(line[end - 1], b' ' | b'\t') {
+            end -= 1;
+        }
+        line = &line[..end];
+
+        // MS-OVBA `ProjectProperties` ends at the first section header like `[Host Extender Info]`
+        // or `[Workspace]`. The CodePage directive is a ProjectProperty, so stop scanning once we've
+        // reached a section header.
+        if line.starts_with(b"[") && line.ends_with(b"]") {
+            break;
+        }
+
         // Parse `CodePage` key.
         const KEY: &[u8] = b"CodePage";
         let Some(prefix) = line.get(..KEY.len()) else {
@@ -511,6 +525,15 @@ mod tests {
         let bytes = b"CodePage=99999999999999999999999999999999\r\nCodePage=1251\r\n";
         let enc = detect_project_codepage(bytes).expect("detect CodePage");
         assert_eq!(enc, WINDOWS_1251);
+    }
+
+    #[test]
+    fn detects_project_codepage_stops_at_section_headers() {
+        // MS-OVBA ProjectProperties ends at the first section header like `[Host Extender Info]` or
+        // `[Workspace]`. CodePage is a ProjectProperty and should not be read from later sections.
+        let bytes = b"CodePage=1252\r\n[Workspace]\r\nCodePage=1251\r\n";
+        let enc = detect_project_codepage(bytes).expect("detect CodePage");
+        assert_eq!(enc, WINDOWS_1252);
     }
 
     #[test]
