@@ -2142,19 +2142,26 @@ fn parse_worksheet_into_model(
 
     // Resolve `c/@vm` values to rich value record indices after parsing the sheet.
     //
-    // Some producers encode worksheet `vm` values as 0-based, while `xl/metadata.xml` is commonly
-    // 1-based for `<valueMetadata>` `<bk>` indices. When multiple rich values are present, we
-    // cannot represent both index bases simultaneously in a single `HashMap` without collisions.
+    // Some producers encode worksheet `vm` values as 0-based, while `xl/metadata.xml` commonly
+    // references `<valueMetadata><bk>` indices as 1-based.
     //
-    // To be robust, infer a sheet-local offset: if any cell uses `vm="0"`, treat all worksheet `vm`
-    // values as 0-based and add 1 before resolving.
+    // When we have a direct `vm -> rich value` mapping (from the DOM-based metadata parser), base
+    // handling is already done inside `MetadataPart::vm_to_rich_value_index`, so we must not apply
+    // an additional sheet-local `+1` offset here.
+    //
+    // When we *don't* have a direct mapping (streaming metadata parser), we still need a
+    // best-effort offset to avoid ambiguous 0/1-based interpretations for multi-entry workbooks.
     if !pending_vm_cells.is_empty() {
         if let (Some(metadata_part), Some(rich_value_cells)) = (metadata_part, rich_value_cells) {
-            let vm_offset = pending_vm_cells
-                .iter()
-                .any(|(_cell_ref, vm)| *vm == 0)
-                .then_some(1u32)
-                .unwrap_or(0);
+            let vm_offset = if metadata_part.vm_to_rich_value.is_empty() {
+                pending_vm_cells
+                    .iter()
+                    .any(|(_cell_ref, vm)| *vm == 0)
+                    .then_some(1u32)
+                    .unwrap_or(0)
+            } else {
+                0
+            };
             for (cell_ref, vm) in pending_vm_cells {
                 let vm = vm.saturating_add(vm_offset);
                 if let Some(idx) = metadata_part.vm_to_rich_value_index(vm) {
