@@ -173,12 +173,12 @@
 }
 
 .dock-panel__tab:hover {
-  background: var(--bg-tertiary);
+  background: var(--bg-hover);
   color: var(--text-primary);
 }
 
 .dock-panel__tab:active {
-  background: var(--bg-tertiary);
+  background: var(--bg-active);
 }
 
 .dock-panel__tab[aria-selected="true"] {
@@ -219,12 +219,12 @@
 }
 
 .dock-panel__control:hover {
-  background: var(--bg-tertiary);
+  background: var(--bg-hover);
   color: var(--text-primary);
 }
 
 .dock-panel__control:active {
-  background: var(--bg-tertiary);
+  background: var(--bg-active);
 }
 
 .dock-panel__control:focus-visible {
