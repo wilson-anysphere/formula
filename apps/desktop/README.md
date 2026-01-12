@@ -96,11 +96,11 @@ All of this is encrypted-at-rest in production builds:
 
 ## AI
 
-Formula is a **Cursor product**: AI features are powered by Cursor’s backend (no local models, no API keys, no provider configuration).
+Formula is a **Cursor product**: all AI features are powered by Cursor's backend—no local models, no API keys, no provider configuration.
 
 The formula bar supports tab completion suggestions while you type, including:
 
 - fast rule-based suggestions (function names, ranges, named ranges, sheet-qualified ranges, tables/structured refs)
 - optional inline preview values (when the lightweight evaluator supports the suggested formula)
 
-Caching, timeouts, and routing are internal implementation details and are not user-configurable.
+Tab completion is currently heuristic-only. Caching, timeouts, and routing are internal implementation details and are not user-configurable.
