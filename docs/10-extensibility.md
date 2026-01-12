@@ -818,10 +818,8 @@ declare namespace formula {
 
 In desktop builds with DLP enabled, `formula.clipboard.writeText(...)` may be **blocked** by your organization’s policy.
 
-To prevent DLP bypasses, the desktop host evaluates clipboard policy over:
-
-- the **current UI selection** (active-cell fallback), and
-- any spreadsheet ranges your extension has actually **read** during the current session (“taint tracking”).
+To prevent DLP bypasses, the desktop host evaluates clipboard policy over any spreadsheet ranges your extension has
+actually **read** (or otherwise been given access to) during the current session (“taint tracking”).
 
 To minimize false positives, taint tracking is best-effort and only applies to spreadsheet data the host knows your
 extension accessed:
@@ -829,13 +827,11 @@ extension accessed:
 - Any successful calls to `cells.getSelection`, `cells.getRange`, or `cells.getCell` will “taint” the accessed ranges.
 - Any spreadsheet values received via `events.onSelectionChanged` and `events.onCellChanged` will also “taint” the
   corresponding ranges/cells (best-effort).
-- Before allowing `clipboard.writeText`, the host evaluates DLP policy over the current selection *and* any tainted ranges.
-- If the selection or any tainted range is classified above the allowed threshold (e.g. `Restricted`), the clipboard
-  write throws.
+- Before allowing `clipboard.writeText`, the host evaluates DLP policy over the tainted ranges.
+- If any tainted range is classified above the allowed threshold (e.g. `Restricted`), the clipboard write throws.
 
 Writing arbitrary text to the clipboard **without reading or receiving any spreadsheet cell values** (via `cells.*`
-or `events.*`) does not taint any ranges (so it will not be blocked *due to taint*), but it may still be blocked if
-the *current selection* is classified above the allowed threshold.
+or `events.*`) does not taint any ranges and should not be blocked by DLP.
 
 ### Custom Functions API
 

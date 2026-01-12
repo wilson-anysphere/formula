@@ -4327,6 +4327,8 @@ if (
         return text ?? "";
       },
       writeText: async (text: string) => {
+        // DLP enforcement for extension clipboard writes is handled by `clipboardWriteGuard`
+        // using per-extension taint tracking (data read via `cells.*` and `events.*`).
         const provider = await clipboardProviderPromise;
         await provider.write({ text: String(text ?? "") });
       },
