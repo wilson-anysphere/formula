@@ -93,6 +93,35 @@ describe("security hardening", () => {
     expect((limited.json() as any).error).toBe("too_many_requests");
   });
 
+  it("rate limits repeated registration attempts and returns Retry-After", async () => {
+    let limited: any = null;
+    const payload = {
+      email: "rate-limited-register@example.com",
+      password: "password1234",
+      name: "Register Rate Limit"
+    };
+
+    for (let i = 0; i < 50; i++) {
+      const res = await app.inject({
+        method: "POST",
+        url: "/auth/register",
+        remoteAddress: "198.51.100.30",
+        payload
+      });
+
+      if (res.statusCode === 429) {
+        limited = res;
+        break;
+      }
+    }
+
+    expect(limited).toBeTruthy();
+    expect(limited.statusCode).toBe(429);
+    expect(limited.headers["retry-after"]).toBeTypeOf("string");
+    expect(Number(limited.headers["retry-after"])).toBeGreaterThan(0);
+    expect((limited.json() as any).error).toBe("too_many_requests");
+  });
+
   it("rate limits repeated OIDC start requests and returns Retry-After", async () => {
     let limited: any = null;
     const orgId = "00000000-0000-0000-0000-000000000000";
