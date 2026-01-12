@@ -182,6 +182,8 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
     let format_html = register_format("HTML Format")?;
     let format_rtf = register_format("Rich Text Format")?;
     let format_png = register_format("PNG")?;
+    // Some producers use a MIME-like name for PNG. Treat this as best-effort fallback.
+    let format_image_png = register_format("image/png").ok();
 
     let _guard = open_clipboard_with_retry()?;
 
@@ -201,6 +203,8 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
 
     let png_base64 = if let Some(png_bytes) = try_get_clipboard_bytes(format_png)? {
         Some(STANDARD.encode(png_bytes))
+    } else if let Some(format) = format_image_png {
+        try_get_clipboard_bytes(format)?.map(|bytes| STANDARD.encode(bytes))
     } else if let Some(dib_bytes) = try_get_clipboard_bytes(CF_DIBV5)? {
         match dibv5_to_png(&dib_bytes) {
             Ok(png) => Some(STANDARD.encode(png)),
@@ -262,6 +266,8 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
         .as_ref()
         .map(|_| register_format("PNG"))
         .transpose()?;
+    // Best-effort PNG variant used by some apps.
+    let format_image_png = png_bytes.as_ref().and_then(|_| register_format("image/png").ok());
 
     let _guard = open_clipboard_with_retry()?;
 
@@ -285,6 +291,10 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
 
     if let (Some(format), Some(bytes)) = (format_png, png_bytes.as_deref()) {
         set_clipboard_bytes(format, bytes)?;
+    }
+    if let (Some(format), Some(bytes)) = (format_image_png, png_bytes.as_deref()) {
+        // Best-effort; don't fail the entire clipboard write if this alias can't be set.
+        let _ = set_clipboard_bytes(format, bytes);
     }
 
     // Interop: also provide a DIBV5 representation.
