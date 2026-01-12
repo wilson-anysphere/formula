@@ -45,6 +45,45 @@ describe("StructuralConflictUiController", () => {
     container.remove();
   });
 
+  it("supports manual resolution for cell conflicts", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const resolveConflict = vi.fn(() => true);
+    const ui = new StructuralConflictUiController({
+      container,
+      monitor: { resolveConflict },
+    });
+
+    ui.addConflict({
+      id: "c2",
+      type: "cell",
+      reason: "content",
+      sheetId: "Sheet1",
+      cell: "B2",
+      cellKey: "Sheet1:1:1",
+      local: { kind: "edit", cellKey: "Sheet1:1:1", before: null, after: { value: 1 } },
+      remote: { kind: "edit", cellKey: "Sheet1:1:1", before: null, after: { value: 2 } },
+      remoteUserId: "u2",
+      detectedAt: 0,
+    });
+
+    container.querySelector<HTMLButtonElement>('[data-testid="structural-conflict-toast-open"]')!.click();
+    container.querySelector<HTMLButtonElement>('[data-testid="structural-conflict-manual"]')!.click();
+
+    const textarea = container.querySelector<HTMLTextAreaElement>('[data-testid="structural-conflict-manual-cell"]');
+    expect(textarea).not.toBeNull();
+    textarea!.value = JSON.stringify({ value: "manual" });
+
+    container.querySelector<HTMLButtonElement>('[data-testid="structural-conflict-manual-apply"]')!.click();
+
+    expect(resolveConflict).toHaveBeenCalledWith("c2", { choice: "manual", cell: { value: "manual" } });
+    expect(container.querySelector('[data-testid="structural-conflict-toast"]')).toBeNull();
+
+    ui.destroy();
+    container.remove();
+  });
+
   it("resolves a move conflict via 'Use theirs destination' and removes it from the UI", () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -85,5 +124,47 @@ describe("StructuralConflictUiController", () => {
     ui.destroy();
     container.remove();
   });
-});
 
+  it("supports manual resolution for move conflicts", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const resolveConflict = vi.fn(() => true);
+    const ui = new StructuralConflictUiController({
+      container,
+      monitor: { resolveConflict },
+    });
+
+    ui.addConflict({
+      id: "m2",
+      type: "move",
+      reason: "move-destination",
+      sheetId: "Sheet1",
+      cell: "A1",
+      cellKey: "Sheet1:0:0",
+      local: { kind: "move", fromCellKey: "Sheet1:0:0", toCellKey: "Sheet1:1:0", cell: { value: 1 } },
+      remote: { kind: "move", fromCellKey: "Sheet1:0:0", toCellKey: "Sheet1:2:0", cell: { value: 1 } },
+      remoteUserId: "u2",
+      detectedAt: 0,
+    });
+
+    container.querySelector<HTMLButtonElement>('[data-testid="structural-conflict-toast-open"]')!.click();
+    container.querySelector<HTMLButtonElement>('[data-testid="structural-conflict-manual"]')!.click();
+
+    const dest = container.querySelector<HTMLInputElement>('[data-testid="structural-conflict-manual-destination"]');
+    expect(dest).not.toBeNull();
+    dest!.value = "Sheet1:5:5";
+
+    const textarea = container.querySelector<HTMLTextAreaElement>('[data-testid="structural-conflict-manual-cell"]');
+    expect(textarea).not.toBeNull();
+    textarea!.value = JSON.stringify({ value: 42 });
+
+    container.querySelector<HTMLButtonElement>('[data-testid="structural-conflict-manual-apply"]')!.click();
+
+    expect(resolveConflict).toHaveBeenCalledWith("m2", { choice: "manual", to: "Sheet1:5:5", cell: { value: 42 } });
+    expect(container.querySelector('[data-testid="structural-conflict-toast"]')).toBeNull();
+
+    ui.destroy();
+    container.remove();
+  });
+});

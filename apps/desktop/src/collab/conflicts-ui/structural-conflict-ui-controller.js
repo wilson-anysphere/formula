@@ -149,6 +149,12 @@ export class StructuralConflictUiController {
     }
 
     actions.appendChild(
+      this._button("Manual…", "structural-conflict-manual", () => {
+        this._renderManualEditor(dialog, conflict);
+      }),
+    );
+
+    actions.appendChild(
       this._button("Close", "structural-conflict-close", () => {
         this.activeConflictId = null;
         this.render();
@@ -207,6 +213,93 @@ export class StructuralConflictUiController {
     btn.dataset.testid = testid;
     btn.addEventListener("click", onClick);
     return btn;
+  }
+
+  /**
+   * @param {HTMLElement} dialog
+   * @param {any} conflict
+   */
+  _renderManualEditor(dialog, conflict) {
+    const existing = dialog.querySelector('[data-testid="structural-conflict-manual-editor"]');
+    if (existing) existing.remove();
+
+    const editor = document.createElement("div");
+    editor.dataset.testid = "structural-conflict-manual-editor";
+    editor.style.marginTop = "12px";
+
+    if (conflict.type === "move") {
+      const destLabel = document.createElement("div");
+      destLabel.textContent = "Destination cellKey (e.g. Sheet1:0:1)";
+      editor.appendChild(destLabel);
+
+      const destInput = document.createElement("input");
+      destInput.type = "text";
+      destInput.size = 40;
+      destInput.dataset.testid = "structural-conflict-manual-destination";
+      destInput.value = conflict.local?.toCellKey ?? conflict.remote?.toCellKey ?? "";
+      editor.appendChild(destInput);
+
+      const cellLabel = document.createElement("div");
+      cellLabel.style.marginTop = "8px";
+      cellLabel.textContent = "Optional moved cell JSON (leave blank to use ours/theirs content)";
+      editor.appendChild(cellLabel);
+
+      const textarea = document.createElement("textarea");
+      textarea.rows = 5;
+      textarea.cols = 60;
+      textarea.dataset.testid = "structural-conflict-manual-cell";
+      textarea.value = formatJson(conflict.local?.cell ?? null);
+      editor.appendChild(textarea);
+
+      const apply = this._button("Apply", "structural-conflict-manual-apply", () => {
+        const to = destInput.value.trim();
+        if (!to) return;
+        const raw = textarea.value.trim();
+        let cell = undefined;
+        if (raw) {
+          try {
+            cell = JSON.parse(raw);
+          } catch {
+            return;
+          }
+        }
+        const resolution = { choice: "manual", to, ...(cell !== undefined ? { cell } : {}) };
+        this._resolve(conflict.id, resolution);
+      });
+      editor.appendChild(apply);
+
+      dialog.appendChild(editor);
+      return;
+    }
+
+    const label = document.createElement("div");
+    label.textContent = "Manual cell JSON (leave blank for delete)";
+    editor.appendChild(label);
+
+    const textarea = document.createElement("textarea");
+    textarea.rows = 6;
+    textarea.cols = 60;
+    textarea.dataset.testid = "structural-conflict-manual-cell";
+    textarea.value = formatJson(conflict.local?.after ?? null);
+    editor.appendChild(textarea);
+
+    const apply = this._button("Apply", "structural-conflict-manual-apply", () => {
+      const raw = textarea.value.trim();
+      if (!raw) {
+        this._resolve(conflict.id, { choice: "manual", cell: null });
+        return;
+      }
+      let cell;
+      try {
+        cell = JSON.parse(raw);
+      } catch {
+        return;
+      }
+      this._resolve(conflict.id, { choice: "manual", cell });
+    });
+
+    editor.appendChild(apply);
+    dialog.appendChild(editor);
   }
 
   /**
