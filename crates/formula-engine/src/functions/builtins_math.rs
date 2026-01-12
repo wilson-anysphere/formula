@@ -660,6 +660,19 @@ fn countifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             }
         }
 
+        fn value_at_offset(&self, ctx: &dyn FunctionContext, row_off: usize, col_off: usize) -> Value {
+            match self {
+                CriteriaRange::Reference(r) => {
+                    let addr = CellAddr {
+                        row: r.start.row + row_off as u32,
+                        col: r.start.col + col_off as u32,
+                    };
+                    ctx.get_cell_value(&r.sheet_id, addr)
+                }
+                CriteriaRange::Array(arr) => arr.get(row_off, col_off).cloned().unwrap_or(Value::Blank),
+            }
+        }
+
         fn value_at(&self, ctx: &dyn FunctionContext, idx: usize, cols: usize) -> Value {
             match self {
                 CriteriaRange::Reference(r) => {
@@ -714,15 +727,85 @@ fn countifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Number(0.0);
     }
 
-    let mut count: u64 = 0;
-    'row: for idx in 0..len {
+    let blank_matches: Vec<bool> = criteria.iter().map(|crit| crit.matches(&Value::Blank)).collect();
+
+    // When all criteria match blank cells and all ranges are references, implicit blanks contribute
+    // to the result. Avoid scanning the full shape by counting total cells minus the set of
+    // explicitly-stored cells that fail any criteria.
+    let all_blank_matches = blank_matches.iter().all(|matches_blank| *matches_blank);
+    if all_blank_matches && ranges.iter().all(|r| matches!(r, CriteriaRange::Reference(_))) {
+        let total_cells = (rows as u64).saturating_mul(cols as u64);
+        let mut mismatches: std::collections::HashSet<u64> = std::collections::HashSet::new();
+
         for (range, crit) in ranges.iter().zip(criteria.iter()) {
-            let v = range.value_at(ctx, idx, cols);
-            if !crit.matches(&v) {
-                continue 'row;
+            let CriteriaRange::Reference(r) = range else {
+                unreachable!("all ranges are references");
+            };
+            for addr in ctx.iter_reference_cells(r) {
+                let v = ctx.get_cell_value(&r.sheet_id, addr);
+                if crit.matches(&v) {
+                    continue;
+                }
+
+                let row_off = (addr.row - r.start.row) as u64;
+                let col_off = (addr.col - r.start.col) as u64;
+                let idx = row_off.saturating_mul(cols as u64).saturating_add(col_off);
+                mismatches.insert(idx);
             }
         }
-        count += 1;
+
+        return Value::Number(total_cells.saturating_sub(mismatches.len() as u64) as f64);
+    }
+
+    // If any criteria cannot match implicit blanks, we can iterate the matching cells of that
+    // criteria range and avoid scanning the entire shape.
+    let driver_idx = blank_matches
+        .iter()
+        .enumerate()
+        .find_map(|(idx, matches_blank)| {
+            if *matches_blank {
+                return None;
+            }
+            matches!(&ranges[idx], CriteriaRange::Reference(_)).then_some(idx)
+        });
+
+    let mut count: u64 = 0;
+    if let Some(driver_idx) = driver_idx {
+        let CriteriaRange::Reference(driver_range) = &ranges[driver_idx] else {
+            unreachable!("driver_idx always points at a reference range");
+        };
+        let driver_crit = &criteria[driver_idx];
+
+        'cell: for addr in ctx.iter_reference_cells(driver_range) {
+            let driver_val = ctx.get_cell_value(&driver_range.sheet_id, addr);
+            if !driver_crit.matches(&driver_val) {
+                continue;
+            }
+
+            let row_off = (addr.row - driver_range.start.row) as usize;
+            let col_off = (addr.col - driver_range.start.col) as usize;
+
+            for (idx, (range, crit)) in ranges.iter().zip(criteria.iter()).enumerate() {
+                if idx == driver_idx {
+                    continue;
+                }
+                let v = range.value_at_offset(ctx, row_off, col_off);
+                if !crit.matches(&v) {
+                    continue 'cell;
+                }
+            }
+            count += 1;
+        }
+    } else {
+        'row: for idx in 0..len {
+            for (range, crit) in ranges.iter().zip(criteria.iter()) {
+                let v = range.value_at(ctx, idx, cols);
+                if !crit.matches(&v) {
+                    continue 'row;
+                }
+            }
+            count += 1;
+        }
     }
 
     Value::Number(count as f64)

@@ -126,6 +126,34 @@ fn countif_sparse_blank_counting_counts_missing_cells() {
 }
 
 #[test]
+fn countifs_sparse_blank_counting_counts_missing_cells() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A1048576", 2.0).unwrap();
+
+    assert_eq!(
+        eval(&mut engine, r#"=COUNTIFS(A1:A1048576, "")"#),
+        Value::Number(1_048_574.0)
+    );
+}
+
+#[test]
+fn countifs_sparse_driver_iteration_skips_implicit_blanks() {
+    let mut engine = Engine::new();
+    // A1 is non-blank, A2 is implicit blank.
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+
+    // B>0 matches rows 1 and 2, but only row 2 should be counted because A2 is blank.
+    engine.set_cell_value("Sheet1", "B1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 1.0).unwrap();
+
+    assert_eq!(
+        eval(&mut engine, r#"=COUNTIFS(A1:A1048576, "", B1:B1048576, ">0")"#),
+        Value::Number(1.0)
+    );
+}
+
+#[test]
 fn countif_reference_union_dedupes_overlaps() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
