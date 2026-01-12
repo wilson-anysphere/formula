@@ -489,6 +489,20 @@ def main() -> int:
         lines.append(f"* Mismatches: {summary.get('mismatches')}")
         lines.append(f"* Mismatch rate: {summary.get('mismatchRate')}")
         lines.append(f"* Max mismatch rate: {summary.get('maxMismatchRate')}")
+        lines.append(f"* absTol: {summary.get('absTol')}")
+        lines.append(f"* relTol: {summary.get('relTol')}")
+        tag_abs_tol = summary.get("tagAbsTol")
+        if isinstance(tag_abs_tol, dict) and tag_abs_tol:
+            parts = [f"{k}={v}" for k, v in sorted(tag_abs_tol.items())]
+            lines.append(f"* tagAbsTol: {', '.join(parts)}")
+        else:
+            lines.append("* tagAbsTol: <none>")
+        tag_rel_tol = summary.get("tagRelTol")
+        if isinstance(tag_rel_tol, dict) and tag_rel_tol:
+            parts = [f"{k}={v}" for k, v in sorted(tag_rel_tol.items())]
+            lines.append(f"* tagRelTol: {', '.join(parts)}")
+        else:
+            lines.append("* tagRelTol: <none>")
         include_tags_summary = summary.get("includeTags")
         if isinstance(include_tags_summary, list) and include_tags_summary:
             lines.append(f"* Include tags: {', '.join(str(t) for t in include_tags_summary)}")
