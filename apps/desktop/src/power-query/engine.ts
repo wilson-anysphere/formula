@@ -352,6 +352,200 @@ function isListDirLimitError(message: string): boolean {
 }
 
 function createDefaultFileAdapter(): FileAdapter {
+  // Must stay in sync with the backend IPC limit (`MAX_READ_FULL_BYTES`).
+  //
+  // This adapter may internally issue multiple range reads, but callers that request a single
+  // in-memory buffer should still be bounded to avoid crashing the desktop process.
+  const MAX_IN_MEMORY_FILE_BYTES = 64 * 1024 * 1024; // 64MiB
+
+  // Prefer Formula's hardened invoke commands when available. These enforce backend-side scope and
+  // size limits; the official FS plugin APIs may allow unbounded in-memory reads.
+  if (hasTauriInvoke()) {
+    const invoke = getTauriInvoke();
+    return {
+      readText: async (path) => String(await invoke("read_text_file", { path })),
+      readBinary: async (path) => {
+        const statPayload = await invoke("stat_file", { path });
+        const fileSize = normalizeFileSize(statPayload);
+        if (fileSize <= 0) return new Uint8Array(0);
+        if (fileSize > MAX_IN_MEMORY_FILE_BYTES) {
+          throw new Error(
+            `File is too large to read into memory (${fileSize} bytes, max ${MAX_IN_MEMORY_FILE_BYTES}). Use streaming reads instead.`,
+          );
+        }
+
+        // Keep single-call reads for small payloads, but avoid `read_binary_file` for large files
+        // because the backend enforces a full-read size limit and base64 payloads get expensive.
+        const chunkSize = 1024 * 1024; // 1MiB (must be <= backend MAX_READ_RANGE_BYTES)
+        const smallFileThreshold = 4 * chunkSize;
+        if (fileSize <= smallFileThreshold) {
+          return normalizeBinaryPayload(await invoke("read_binary_file", { path }));
+        }
+
+        const chunks: Uint8Array[] = [];
+        let offset = 0;
+
+        while (offset < fileSize) {
+          const nextLength = Math.min(chunkSize, fileSize - offset);
+          const payload = await invoke("read_binary_file_range", { path, offset, length: nextLength });
+          const bytes = normalizeBinaryPayload(payload);
+          if (bytes.length === 0) break;
+          chunks.push(bytes);
+          offset += bytes.length;
+          if (bytes.length < nextLength) break;
+        }
+
+        const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+        const out = new Uint8Array(totalLength);
+        let pos = 0;
+        for (const chunk of chunks) {
+          out.set(chunk, pos);
+          pos += chunk.length;
+        }
+        return out;
+      },
+      readBinaryStream: async function* (path, options = {}) {
+        const signal = options.signal;
+        const chunkSize = 1024 * 1024; // 1MiB
+        let offset = 0;
+
+        while (true) {
+          if (signal?.aborted) {
+            const err = new Error("Aborted");
+            (err as any).name = "AbortError";
+            throw err;
+          }
+          const payload = await invoke("read_binary_file_range", { path, offset, length: chunkSize });
+          const bytes = normalizeBinaryPayload(payload);
+          if (bytes.length === 0) break;
+          yield bytes;
+          offset += bytes.length;
+          if (bytes.length < chunkSize) break;
+        }
+      },
+      openFile: async (path, options = {}) => {
+        const signal = options.signal;
+        if (signal?.aborted) {
+          const err = new Error("Aborted");
+          (err as any).name = "AbortError";
+          throw err;
+        }
+
+        const statPayload = await invoke("stat_file", { path });
+        const fileSize = normalizeFileSize(statPayload);
+        if (signal?.aborted) {
+          const err = new Error("Aborted");
+          (err as any).name = "AbortError";
+          throw err;
+        }
+
+        class TauriFileBlob {
+          path: string;
+          invoke: TauriInvoke;
+          start: number;
+          end: number;
+          size: number;
+          type: string;
+
+          constructor(path: string, invoke: TauriInvoke, start: number, end: number) {
+            this.path = path;
+            this.invoke = invoke;
+            this.start = start;
+            this.end = end;
+            this.size = Math.max(0, end - start);
+            this.type = "";
+            // Best-effort compatibility with code that checks for Blob-ish objects.
+            (this as any)[Symbol.toStringTag] = "Blob";
+          }
+
+          slice(start = 0, end = this.size): TauriFileBlob {
+            const sliceStart = Math.max(0, Math.min(this.size, start));
+            const sliceEnd = Math.max(sliceStart, Math.min(this.size, end));
+            return new TauriFileBlob(this.path, this.invoke, this.start + sliceStart, this.start + sliceEnd);
+          }
+
+          async arrayBuffer(): Promise<ArrayBuffer> {
+            const length = this.size;
+            if (length <= 0) return new ArrayBuffer(0);
+            if (length > MAX_IN_MEMORY_FILE_BYTES) {
+              throw new Error(
+                `File slice is too large to read into memory (${length} bytes, max ${MAX_IN_MEMORY_FILE_BYTES}).`,
+              );
+            }
+            const chunkSize = 1024 * 1024; // 1MiB (must be <= backend MAX_READ_RANGE_BYTES)
+            const chunks: Uint8Array[] = [];
+            let offset = this.start;
+            let remaining = length;
+
+            while (remaining > 0) {
+              const nextLength = Math.min(chunkSize, remaining);
+              const payload = await this.invoke("read_binary_file_range", { path: this.path, offset, length: nextLength });
+              const bytes = normalizeBinaryPayload(payload);
+              if (bytes.length === 0) break;
+              chunks.push(bytes);
+              offset += bytes.length;
+              remaining -= bytes.length;
+              if (bytes.length < nextLength) break;
+            }
+
+            const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+            const out = new Uint8Array(totalLength);
+            let pos = 0;
+            for (const chunk of chunks) {
+              out.set(chunk, pos);
+              pos += chunk.length;
+            }
+            return out.buffer;
+          }
+        }
+
+        return new TauriFileBlob(path, invoke, 0, fileSize) as unknown as Blob;
+      },
+      stat: async (path) => {
+        const payload = await invoke("stat_file", { path });
+        return {
+          mtimeMs: normalizeMtimeMs(payload),
+          size: (() => {
+            try {
+              return normalizeFileSize(payload);
+            } catch {
+              return undefined;
+            }
+          })(),
+        };
+      },
+      listDir: async (path, options = {}) => {
+        const recursive = options.recursive ?? false;
+        let payload: unknown;
+        try {
+          payload = await invoke("list_dir", { path, recursive });
+        } catch (err) {
+          const message = normalizeInvokeErrorMessage(err);
+          if (isListDirLimitError(message)) {
+            throw new Error(
+              `This folder contains too many items (files/folders), or is too deeply nested, to list safely.\n\n${message}\n\nTry selecting a smaller folder or disabling recursive listing.`,
+            );
+          }
+          throw err instanceof Error ? err : new Error(message);
+        }
+        if (!Array.isArray(payload)) throw new Error("Unexpected list_dir payload returned from filesystem API");
+        return payload.map((entry) => ({
+          path: String((entry as any)?.path ?? ""),
+          name: typeof (entry as any)?.name === "string" ? (entry as any).name : undefined,
+          size: (() => {
+            try {
+              return normalizeFileSize((entry as any)?.size);
+            } catch {
+              return undefined;
+            }
+          })(),
+          mtimeMs: (entry as any)?.mtimeMs != null ? normalizeMtimeMs((entry as any).mtimeMs) : undefined,
+          isDir: Boolean((entry as any)?.isDir),
+        }));
+      },
+    };
+  }
+
   const fs = getTauriFs();
   const readTextFile = fs?.readTextFile;
   const readFile = fs?.readFile ?? fs?.readBinaryFile;
@@ -359,18 +553,66 @@ function createDefaultFileAdapter(): FileAdapter {
   const readDir = fs?.readDir;
 
   if (typeof readTextFile === "function" && typeof readFile === "function") {
+    const enforceMaxFileSize = async (path: string): Promise<void> => {
+      if (typeof statFile !== "function") return;
+      let payload: unknown;
+      try {
+        payload = await statFile(path);
+      } catch {
+        // Best-effort: if we can't stat the file, fall back to reading and checking the result size.
+        return;
+      }
+      let size: number;
+      try {
+        size = normalizeFileSize(payload);
+      } catch {
+        // Best-effort: if we can't parse file size, fall back to reading and checking the result size.
+        return;
+      }
+      if (size > MAX_IN_MEMORY_FILE_BYTES) {
+        throw new Error(
+          `File is too large to read into memory (${size} bytes, max ${MAX_IN_MEMORY_FILE_BYTES}). Use streaming reads instead.`,
+        );
+      }
+    };
+
     const openFile = async (path: string): Promise<Blob> => {
       // Best-effort: the FS plugin does not currently expose a streamable file handle, so fall back
       // to an in-memory Blob.
+      await enforceMaxFileSize(path);
       const bytes = normalizeBinaryPayload(await readFile(path));
+      if (bytes.length > MAX_IN_MEMORY_FILE_BYTES) {
+        throw new Error(
+          `File is too large to read into memory (${bytes.length} bytes, max ${MAX_IN_MEMORY_FILE_BYTES}). Use streaming reads instead.`,
+        );
+      }
       return new Blob([uint8ArrayToArrayBuffer(bytes)]);
     };
 
     return {
-      readText: async (path) => readTextFile(path),
-      readBinary: async (path) => normalizeBinaryPayload(await readFile(path)),
+      readText: async (path) => {
+        await enforceMaxFileSize(path);
+        return readTextFile(path);
+      },
+      readBinary: async (path) => {
+        await enforceMaxFileSize(path);
+        const bytes = normalizeBinaryPayload(await readFile(path));
+        if (bytes.length > MAX_IN_MEMORY_FILE_BYTES) {
+          throw new Error(
+            `File is too large to read into memory (${bytes.length} bytes, max ${MAX_IN_MEMORY_FILE_BYTES}). Use streaming reads instead.`,
+          );
+        }
+        return bytes;
+      },
       readBinaryStream: async function* (path) {
-        yield normalizeBinaryPayload(await readFile(path));
+        await enforceMaxFileSize(path);
+        const bytes = normalizeBinaryPayload(await readFile(path));
+        if (bytes.length > MAX_IN_MEMORY_FILE_BYTES) {
+          throw new Error(
+            `File is too large to read into memory (${bytes.length} bytes, max ${MAX_IN_MEMORY_FILE_BYTES}). Use streaming reads instead.`,
+          );
+        }
+        yield bytes;
       },
       openFile,
       stat:
@@ -471,196 +713,7 @@ function createDefaultFileAdapter(): FileAdapter {
     };
   }
 
-  // The desktop app does not currently ship with the official Tauri FS plugin enabled.
-  // Use our own invoke commands as a fallback.
-  const invoke = getTauriInvoke();
-
-  // Must stay in sync with the backend IPC limit (`MAX_READ_FULL_BYTES`).
-  // This adapter may internally issue multiple range reads, but callers that request a single
-  // in-memory buffer should still be bounded to avoid crashing the desktop process.
-  const MAX_IN_MEMORY_FILE_BYTES = 64 * 1024 * 1024; // 64MiB
-  return {
-    readText: async (path) => String(await invoke("read_text_file", { path })),
-    readBinary: async (path) => {
-      const statPayload = await invoke("stat_file", { path });
-      const fileSize = normalizeFileSize(statPayload);
-      if (fileSize <= 0) return new Uint8Array(0);
-      if (fileSize > MAX_IN_MEMORY_FILE_BYTES) {
-        throw new Error(
-          `File is too large to read into memory (${fileSize} bytes, max ${MAX_IN_MEMORY_FILE_BYTES}). Use streaming reads instead.`,
-        );
-      }
-
-      // Keep single-call reads for small payloads, but avoid `read_binary_file` for large files
-      // because the backend enforces a full-read size limit and base64 payloads get expensive.
-      const chunkSize = 1024 * 1024; // 1MiB (must be <= backend MAX_READ_RANGE_BYTES)
-      const smallFileThreshold = 4 * chunkSize;
-      if (fileSize <= smallFileThreshold) {
-        return normalizeBinaryPayload(await invoke("read_binary_file", { path }));
-      }
-
-      const chunks: Uint8Array[] = [];
-      let offset = 0;
-
-      while (offset < fileSize) {
-        const nextLength = Math.min(chunkSize, fileSize - offset);
-        const payload = await invoke("read_binary_file_range", { path, offset, length: nextLength });
-        const bytes = normalizeBinaryPayload(payload);
-        if (bytes.length === 0) break;
-        chunks.push(bytes);
-        offset += bytes.length;
-        if (bytes.length < nextLength) break;
-      }
-
-      const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-      const out = new Uint8Array(totalLength);
-      let pos = 0;
-      for (const chunk of chunks) {
-        out.set(chunk, pos);
-        pos += chunk.length;
-      }
-      return out;
-    },
-    readBinaryStream: async function* (path, options = {}) {
-      const signal = options.signal;
-      const chunkSize = 1024 * 1024; // 1MiB
-      let offset = 0;
-
-      while (true) {
-        if (signal?.aborted) {
-          const err = new Error("Aborted");
-          (err as any).name = "AbortError";
-          throw err;
-        }
-        const payload = await invoke("read_binary_file_range", { path, offset, length: chunkSize });
-        const bytes = normalizeBinaryPayload(payload);
-        if (bytes.length === 0) break;
-        yield bytes;
-        offset += bytes.length;
-        if (bytes.length < chunkSize) break;
-      }
-    },
-    openFile: async (path, options = {}) => {
-      const signal = options.signal;
-      if (signal?.aborted) {
-        const err = new Error("Aborted");
-        (err as any).name = "AbortError";
-        throw err;
-      }
-
-      const statPayload = await invoke("stat_file", { path });
-      const fileSize = normalizeFileSize(statPayload);
-      if (signal?.aborted) {
-        const err = new Error("Aborted");
-        (err as any).name = "AbortError";
-        throw err;
-      }
-
-      class TauriFileBlob {
-        path: string;
-        invoke: TauriInvoke;
-        start: number;
-        end: number;
-        size: number;
-        type: string;
-
-        constructor(path: string, invoke: TauriInvoke, start: number, end: number) {
-          this.path = path;
-          this.invoke = invoke;
-          this.start = start;
-          this.end = end;
-          this.size = Math.max(0, end - start);
-          this.type = "";
-          // Best-effort compatibility with code that checks for Blob-ish objects.
-          (this as any)[Symbol.toStringTag] = "Blob";
-        }
-
-        slice(start = 0, end = this.size): TauriFileBlob {
-          const sliceStart = Math.max(0, Math.min(this.size, start));
-          const sliceEnd = Math.max(sliceStart, Math.min(this.size, end));
-          return new TauriFileBlob(this.path, this.invoke, this.start + sliceStart, this.start + sliceEnd);
-        }
-
-        async arrayBuffer(): Promise<ArrayBuffer> {
-          const length = this.size;
-          if (length <= 0) return new ArrayBuffer(0);
-          if (length > MAX_IN_MEMORY_FILE_BYTES) {
-            throw new Error(
-              `File slice is too large to read into memory (${length} bytes, max ${MAX_IN_MEMORY_FILE_BYTES}).`,
-            );
-          }
-          const chunkSize = 1024 * 1024; // 1MiB (must be <= backend MAX_READ_RANGE_BYTES)
-          const chunks: Uint8Array[] = [];
-          let offset = this.start;
-          let remaining = length;
-
-          while (remaining > 0) {
-            const nextLength = Math.min(chunkSize, remaining);
-            const payload = await this.invoke("read_binary_file_range", { path: this.path, offset, length: nextLength });
-            const bytes = normalizeBinaryPayload(payload);
-            if (bytes.length === 0) break;
-            chunks.push(bytes);
-            offset += bytes.length;
-            remaining -= bytes.length;
-            if (bytes.length < nextLength) break;
-          }
-
-          const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-          const out = new Uint8Array(totalLength);
-          let pos = 0;
-          for (const chunk of chunks) {
-            out.set(chunk, pos);
-            pos += chunk.length;
-          }
-          return out.buffer;
-        }
-      }
-
-      return new TauriFileBlob(path, invoke, 0, fileSize) as unknown as Blob;
-    },
-    stat: async (path) => {
-      const payload = await invoke("stat_file", { path });
-      return {
-        mtimeMs: normalizeMtimeMs(payload),
-        size: (() => {
-          try {
-            return normalizeFileSize(payload);
-          } catch {
-            return undefined;
-          }
-        })(),
-      };
-    },
-    listDir: async (path, options = {}) => {
-      const recursive = options.recursive ?? false;
-      let payload: unknown;
-      try {
-        payload = await invoke("list_dir", { path, recursive });
-      } catch (err) {
-        const message = normalizeInvokeErrorMessage(err);
-        if (isListDirLimitError(message)) {
-          throw new Error(
-            `This folder contains too many items (files/folders), or is too deeply nested, to list safely.\n\n${message}\n\nTry selecting a smaller folder or disabling recursive listing.`,
-          );
-        }
-        throw err instanceof Error ? err : new Error(message);
-      }
-      if (!Array.isArray(payload)) throw new Error("Unexpected list_dir payload returned from filesystem API");
-      return payload.map((entry) => ({
-        path: String((entry as any)?.path ?? ""),
-        name: typeof (entry as any)?.name === "string" ? (entry as any).name : undefined,
-        size: (() => {
-          try {
-            return normalizeFileSize((entry as any)?.size);
-          } catch {
-            return undefined;
-          }
-        })(),
-        mtimeMs: (entry as any)?.mtimeMs != null ? normalizeMtimeMs((entry as any).mtimeMs) : undefined,
-        isDir: Boolean((entry as any)?.isDir),
-      }));
-    },
-  };
+  throw new Error("Filesystem file read API not available");
 }
 
 function deleteIndexedDbDatabase(dbName: string): Promise<"success" | "blocked"> {

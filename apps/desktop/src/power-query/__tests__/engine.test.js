@@ -72,6 +72,63 @@ test("createDesktopQueryEngine uses Tauri invoke file commands when FS plugin is
   }
 });
 
+test("createDesktopQueryEngine prefers invoke file commands even when the FS plugin is available", async () => {
+  const originalTauri = globalThis.__TAURI__;
+
+  /** @type {{ cmd: string, args: any }[]} */
+  const calls = [];
+
+  globalThis.__TAURI__ = {
+    core: {
+      invoke: async (cmd, args) => {
+        calls.push({ cmd, args });
+        if (cmd === "stat_file") {
+          return { mtimeMs: 123, sizeBytes: 3 };
+        }
+        if (cmd === "read_text_file") {
+          return ["A,B", "1,2"].join("\n");
+        }
+        if (cmd === "read_binary_file") {
+          // Base64 for bytes [1, 2, 3].
+          return "AQID";
+        }
+        throw new Error(`Unexpected invoke: ${cmd}`);
+      },
+    },
+    fs: {
+      readTextFile: async () => {
+        throw new Error("FS plugin readTextFile should not be used when invoke is available");
+      },
+      readFile: async () => {
+        throw new Error("FS plugin readFile should not be used when invoke is available");
+      },
+    },
+  };
+
+  try {
+    const engine = createDesktopQueryEngine();
+
+    const query = {
+      id: "q_csv_invoke_preferred",
+      name: "CSV",
+      source: { type: "csv", path: "/tmp/test.csv", options: { hasHeaders: true } },
+      steps: [],
+    };
+
+    const table = await engine.executeQuery(query, {}, {});
+    assert.deepEqual(table.toGrid(), [["A", "B"], [1, 2]]);
+
+    const bytes = await engine.fileAdapter.readBinary("/tmp/test.bin");
+    assert.deepEqual(Array.from(bytes), [1, 2, 3]);
+
+    assert.ok(calls.some((c) => c.cmd === "read_text_file"));
+    assert.ok(calls.some((c) => c.cmd === "read_binary_file"));
+    assert.ok(calls.some((c) => c.cmd === "stat_file"));
+  } finally {
+    globalThis.__TAURI__ = originalTauri;
+  }
+});
+
 test("createDesktopQueryEngine exposes chunked file reads for streaming (readBinaryStream/openFile)", async () => {
   const originalTauri = globalThis.__TAURI__;
 
