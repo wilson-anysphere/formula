@@ -9,10 +9,15 @@ function flushMicrotasks(): Promise<void> {
 
 class MockDoc {
   sheetIds: string[] = [];
+  sheetMetaById: Record<string, any> = {};
   private readonly listeners = new Map<string, Set<(payload: any) => void>>();
 
   getSheetIds(): string[] {
     return [...this.sheetIds];
+  }
+
+  getSheetMeta(sheetId: string): any {
+    return this.sheetMetaById[sheetId] ?? null;
   }
 
   on(event: string, listener: (payload: any) => void): () => void {
@@ -164,6 +169,37 @@ describe("sheetStoreDocumentSync", () => {
     await flushMicrotasks();
 
     expect(store.listAll().map((s) => s.id)).toEqual(["Sheet2", "Sheet1"]);
+
+    handle.dispose();
+  });
+
+  test("syncs sheet metadata (name/visibility/tabColor) from the doc on applyState", async () => {
+    const doc = new MockDoc();
+    doc.sheetIds = ["Sheet1"];
+    doc.sheetMetaById = {
+      Sheet1: { name: "Budget", visibility: "hidden", tabColor: { rgb: "FF0000" } },
+    };
+
+    const store = new WorkbookSheetStore([{ id: "Sheet1", name: "Sheet1", visibility: "visible" }]);
+    let activeSheetId = "Sheet1";
+
+    const handle = startSheetStoreDocumentSync(
+      doc,
+      store,
+      () => activeSheetId,
+      (id) => {
+        activeSheetId = id;
+      },
+    );
+
+    await flushMicrotasks();
+
+    doc.emit("change", { source: "applyState" });
+    await flushMicrotasks();
+
+    expect(store.getById("Sheet1")?.name).toBe("Budget");
+    expect(store.getById("Sheet1")?.visibility).toBe("hidden");
+    expect(store.getById("Sheet1")?.tabColor?.rgb).toBe("FF0000");
 
     handle.dispose();
   });
