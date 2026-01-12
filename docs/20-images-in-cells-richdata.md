@@ -1105,7 +1105,7 @@ explicit `[Content_Types].xml` `<Override>` entries for those parts. Observed pa
   * `xl/cellimages.xml`
   * `xl/metadata.xml`
   * `xl/richData/richValue*.xml` (including `richValueTypes.xml` / `richValueStructure.xml`)
-* `fixtures/xlsx/metadata/rich-values-vm.xlsx` includes an override:
+* The synthetic fixture `fixtures/xlsx/metadata/rich-values-vm.xlsx` includes an override:
   * `<Override PartName="/xl/metadata.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"/>`
 * Some tests construct workbooks that use:
   * `application/vnd.openxmlformats-officedocument.spreadsheetml.metadata+xml` for `/xl/metadata.xml`
