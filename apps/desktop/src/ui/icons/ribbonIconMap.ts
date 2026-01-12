@@ -199,6 +199,36 @@ export const ribbonIconMap = {
   // Misc generic
   link: LinkIcon,
 
+  // App panels / debug commands (stable ids used by desktop/e2e)
+  "open-panel-ai-chat": SparklesIcon,
+  "open-ai-panel": SparklesIcon,
+  "open-inline-ai-edit": PencilIcon,
+  "open-panel-ai-audit": ClipboardPaneIcon,
+  "open-ai-audit-panel": ClipboardPaneIcon,
+  "open-data-queries-panel": DatabaseIcon,
+  "open-macros-panel": MacroIcon,
+  "open-script-editor-panel": CodeIcon,
+  "open-python-panel": CodeIcon,
+  "open-extensions-panel": PuzzleIcon,
+  "open-vba-migrate-panel": RefreshIcon,
+  "open-comments-panel": CommentIcon,
+  "open-marketplace-panel": PuzzleIcon,
+  "open-version-history-panel": ClockIcon,
+  "open-branch-manager-panel": LayersIcon,
+
+  "audit-precedents": ArrowLeftIcon,
+  "audit-dependents": ArrowRightIcon,
+  "audit-transitive": RefreshIcon,
+
+  "split-vertical": SplitIcon,
+  "split-horizontal": SplitIcon,
+  "split-none": CloseIcon,
+
+  "freeze-panes": SnowflakeIcon,
+  "freeze-top-row": ArrowUpIcon,
+  "freeze-first-column": ArrowLeftIcon,
+  "unfreeze-panes": ClearIcon,
+
   // Clipboard
   "home.clipboard.paste": PasteIcon,
   "home.clipboard.pasteSpecial": PasteSpecialIcon,
