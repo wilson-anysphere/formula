@@ -115,6 +115,7 @@ impl CellEdit {
             {
                 // Without the AST encoder, the sheet name currently only affects structured
                 // reference inference (not supported), so fall back to the legacy path.
+                let _ = sheet;
                 crate::rgce::encode_rgce_with_context(formula, ctx, base)?
             }
         };
@@ -181,6 +182,7 @@ impl CellEdit {
             }
             #[cfg(not(feature = "write"))]
             {
+                let _ = sheet;
                 crate::rgce::encode_rgce_with_context(formula, ctx, base)?
             }
         };

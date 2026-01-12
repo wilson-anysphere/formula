@@ -1,15 +1,65 @@
 #![cfg(feature = "write")]
 
-use std::io::Write;
+use std::io::{Cursor, Write};
 
-use formula_xlsb::rgce::{
-    decode_rgce_with_context, encode_rgce_with_context_ast_in_sheet, CellCoord,
-};
-use formula_xlsb::XlsbWorkbook;
+use formula_xlsb::rgce::{decode_rgce_with_context, encode_rgce_with_context_ast_in_sheet, CellCoord};
+use formula_xlsb::{patch_sheet_bin, parse_sheet_bin_with_context, CellEdit, CellValue, XlsbWorkbook};
 use pretty_assertions::assert_eq;
 
 mod fixture_builder;
 use fixture_builder::XlsbFixtureBuilder;
+
+fn build_two_table_fixture(prefix: &str) -> tempfile::NamedTempFile {
+    let mut builder = XlsbFixtureBuilder::new();
+
+    let table1_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+       id="1"
+       name="Table1"
+       displayName="Table1"
+       ref="A1:B10">
+  <tableColumns count="2">
+    <tableColumn id="1" name="Item"/>
+    <tableColumn id="2" name="Qty"/>
+  </tableColumns>
+</table>
+"#;
+    builder.add_extra_zip_part("xl/tables/table1.xml", table1_xml.as_bytes().to_vec());
+
+    let table2_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+       id="2"
+       name="Table2"
+       displayName="Table2"
+       ref="D1:E10">
+  <tableColumns count="2">
+    <tableColumn id="1" name="Item"/>
+    <tableColumn id="2" name="Qty"/>
+  </tableColumns>
+</table>
+"#;
+    builder.add_extra_zip_part("xl/tables/table2.xml", table2_xml.as_bytes().to_vec());
+
+    let sheet_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table2.xml"/>
+</Relationships>
+"#;
+    builder.add_extra_zip_part(
+        "xl/worksheets/_rels/sheet1.bin.rels",
+        sheet_rels.as_bytes().to_vec(),
+    );
+
+    let bytes = builder.build_bytes();
+    let mut tmp = tempfile::Builder::new()
+        .prefix(prefix)
+        .suffix(".xlsb")
+        .tempfile()
+        .expect("create temp xlsb");
+    tmp.write_all(&bytes).expect("write temp xlsb");
+    tmp
+}
 
 #[test]
 fn encodes_tableless_this_row_structured_ref_using_sheet_context() {
@@ -129,57 +179,7 @@ fn encodes_tableless_this_row_structured_ref_outside_table_range_when_single_tab
 
 #[test]
 fn encodes_tableless_this_row_structured_ref_using_sheet_context_in_multi_table_workbook() {
-    let mut builder = XlsbFixtureBuilder::new();
-
-    // Provide two Office-style table definition XML parts.
-    let table1_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
-       id="1"
-       name="Table1"
-       displayName="Table1"
-       ref="A1:B10">
-  <tableColumns count="2">
-    <tableColumn id="1" name="Item"/>
-    <tableColumn id="2" name="Qty"/>
-  </tableColumns>
-</table>
-"#;
-    builder.add_extra_zip_part("xl/tables/table1.xml", table1_xml.as_bytes().to_vec());
-
-    let table2_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
-       id="2"
-       name="Table2"
-       displayName="Table2"
-       ref="D1:E10">
-  <tableColumns count="2">
-    <tableColumn id="1" name="Item"/>
-    <tableColumn id="2" name="Qty"/>
-  </tableColumns>
-</table>
-"#;
-    builder.add_extra_zip_part("xl/tables/table2.xml", table2_xml.as_bytes().to_vec());
-
-    // Associate both tables with Sheet1 via the worksheet relationships part.
-    let sheet_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/>
-  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table2.xml"/>
-</Relationships>
-"#;
-    builder.add_extra_zip_part(
-        "xl/worksheets/_rels/sheet1.bin.rels",
-        sheet_rels.as_bytes().to_vec(),
-    );
-
-    let bytes = builder.build_bytes();
-    let mut tmp = tempfile::Builder::new()
-        .prefix("formula_xlsb_tableless_structured_ref_")
-        .suffix(".xlsb")
-        .tempfile()
-        .expect("create temp xlsb");
-    tmp.write_all(&bytes).expect("write temp xlsb");
-
+    let tmp = build_two_table_fixture("formula_xlsb_tableless_structured_ref_multi_");
     let wb = XlsbWorkbook::open(tmp.path()).expect("open xlsb");
     let ctx = wb.workbook_context();
 
@@ -208,56 +208,7 @@ fn encodes_tableless_this_row_structured_ref_using_sheet_context_in_multi_table_
 #[test]
 fn rejects_tableless_this_row_structured_ref_outside_tables_using_sheet_context_in_multi_table_workbook(
 ) {
-    let mut builder = XlsbFixtureBuilder::new();
-
-    // Same two tables as the test above.
-    let table1_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
-       id="1"
-       name="Table1"
-       displayName="Table1"
-       ref="A1:B10">
-  <tableColumns count="2">
-    <tableColumn id="1" name="Item"/>
-    <tableColumn id="2" name="Qty"/>
-  </tableColumns>
-</table>
-"#;
-    builder.add_extra_zip_part("xl/tables/table1.xml", table1_xml.as_bytes().to_vec());
-
-    let table2_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
-       id="2"
-       name="Table2"
-       displayName="Table2"
-       ref="D1:E10">
-  <tableColumns count="2">
-    <tableColumn id="1" name="Item"/>
-    <tableColumn id="2" name="Qty"/>
-  </tableColumns>
-</table>
-"#;
-    builder.add_extra_zip_part("xl/tables/table2.xml", table2_xml.as_bytes().to_vec());
-
-    let sheet_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/>
-  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table2.xml"/>
-</Relationships>
-"#;
-    builder.add_extra_zip_part(
-        "xl/worksheets/_rels/sheet1.bin.rels",
-        sheet_rels.as_bytes().to_vec(),
-    );
-
-    let bytes = builder.build_bytes();
-    let mut tmp = tempfile::Builder::new()
-        .prefix("formula_xlsb_tableless_structured_ref_")
-        .suffix(".xlsb")
-        .tempfile()
-        .expect("create temp xlsb");
-    tmp.write_all(&bytes).expect("write temp xlsb");
-
+    let tmp = build_two_table_fixture("formula_xlsb_tableless_structured_ref_outside_");
     let wb = XlsbWorkbook::open(tmp.path()).expect("open xlsb");
     let ctx = wb.workbook_context();
 
@@ -273,4 +224,46 @@ fn rejects_tableless_this_row_structured_ref_outside_tables_using_sheet_context_
         msg.contains("cannot infer table") || msg.contains("inside exactly one table"),
         "unexpected error: {err}"
     );
+}
+
+#[test]
+fn cell_edit_with_sheet_context_can_patch_tableless_structured_ref_in_multi_table_workbook() {
+    let tmp = build_two_table_fixture("formula_xlsb_tableless_structured_ref_patch_");
+    let wb = XlsbWorkbook::open(tmp.path()).expect("open xlsb");
+    let ctx = wb.workbook_context();
+    let sheet_bin = wb.worksheet_bin_bytes(0).expect("read worksheet bytes");
+
+    // Patch a formula into D2 (row=1,col=3), which is inside Table2's range `D1:E10`.
+    let edit = CellEdit::with_formula_text_with_context_in_sheet(
+        1,
+        3,
+        CellValue::Number(0.0),
+        "=[@Qty]",
+        "Sheet1",
+        ctx,
+    )
+    .expect("encode formula");
+
+    let patched = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch sheet bin");
+    let parsed =
+        parse_sheet_bin_with_context(&mut Cursor::new(&patched), &[], ctx).expect("parse patched");
+    let cell = parsed
+        .cells
+        .iter()
+        .find(|c| c.row == 1 && c.col == 3)
+        .expect("D2 exists");
+    assert_eq!(cell.value, CellValue::Number(0.0));
+    let formula = cell.formula.as_ref().expect("formula");
+    assert_eq!(
+        formula.rgce,
+        vec![
+            0x18, 0x19, // PtgExtend + etpg=PtgList
+            2, 0, 0, 0, // table id (inferred by sheet+cell)
+            0x10, 0x00, // flags (#This Row)
+            2, 0, // col_first (Qty)
+            2, 0, // col_last (Qty)
+            0, 0, // reserved
+        ]
+    );
+    assert_eq!(formula.text.as_deref(), Some("[@Qty]"));
 }
