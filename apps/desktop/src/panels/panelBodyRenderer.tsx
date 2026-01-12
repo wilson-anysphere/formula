@@ -348,6 +348,7 @@ export interface PanelBodyRendererOptions {
   extensionHostManager?: DesktopExtensionHostManager;
   onExecuteExtensionCommand?: (commandId: string, ...args: any[]) => Promise<unknown> | void;
   onOpenExtensionPanel?: (panelId: string) => void;
+  onSyncExtensions?: () => void;
 }
 
 export interface PanelBodyRenderer {
@@ -393,7 +394,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
     }
 
     if (!marketplaceClient) {
-      marketplaceClient = new MarketplaceClient({ baseUrl: getMarketplaceBaseUrl() });
+      marketplaceClient = marketplaceExtensionManager?.marketplaceClient ?? new MarketplaceClient({ baseUrl: getMarketplaceBaseUrl() });
     }
 
     if (!marketplaceExtensionManager) {
@@ -408,18 +409,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
       marketplaceExtensionHostManager = {
         syncInstalledExtensions: async () => {
           const manager = marketplaceExtensionManager!;
-          const installed = await manager.listInstalled();
-          for (const item of installed) {
-            // Best-effort: ignore failures to load individual extensions so the UI
-            // can keep going.
-            try {
-              if (manager.isLoaded(item.id)) continue;
-              // eslint-disable-next-line no-await-in-loop
-              await manager.loadInstalled(item.id);
-            } catch {
-              // ignore
-            }
-          }
+          await manager.loadAllInstalled().catch(() => {});
         },
         reloadExtension: async (id: string) => {
           const manager = marketplaceExtensionManager!;
@@ -519,11 +509,20 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
 
     if (panelId === PanelIds.EXTENSIONS && options.extensionHostManager && options.onExecuteExtensionCommand && options.onOpenExtensionPanel) {
       makeBodyFillAvailableHeight(body);
+      const marketplaceManager = (() => {
+        try {
+          return getMarketplaceServices().extensionManager;
+        } catch {
+          return null;
+        }
+      })();
       renderReactPanel(
         panelId,
         body,
         <ExtensionsPanel
           manager={options.extensionHostManager}
+          webExtensionManager={marketplaceManager}
+          onSyncExtensions={options.onSyncExtensions}
           onExecuteCommand={options.onExecuteExtensionCommand}
           onOpenPanel={options.onOpenExtensionPanel}
         />,

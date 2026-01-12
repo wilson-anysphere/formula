@@ -1,5 +1,6 @@
 import React from "react";
 
+import type { WebExtensionManager } from "@formula/extension-marketplace";
 import type { DesktopExtensionHostManager } from "./extensionHostManager.js";
 import { buildCommandKeybindingDisplayIndex, getPrimaryCommandKeybindingDisplay } from "./keybindings.js";
 import { showInputBox, showToast } from "./ui.js";
@@ -44,10 +45,14 @@ function normalizeStringArray(value: unknown): string[] {
 
 export function ExtensionsPanel({
   manager,
+  webExtensionManager,
+  onSyncExtensions,
   onExecuteCommand,
   onOpenPanel,
 }: {
   manager: DesktopExtensionHostManager;
+  webExtensionManager?: WebExtensionManager | null;
+  onSyncExtensions?: (() => void) | null;
   onExecuteCommand: (commandId: string, ...args: any[]) => Promise<unknown> | void;
   onOpenPanel: (panelId: string) => void;
 }) {
@@ -57,6 +62,32 @@ export function ExtensionsPanel({
   const [permissionsByExtension, setPermissionsByExtension] = React.useState<Record<string, GrantedPermissions>>({});
   const [permissionsError, setPermissionsError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState<string | null>(null);
+
+  const [installed, setInstalled] = React.useState<Array<{
+    id: string;
+    version: string;
+    corrupted?: boolean;
+    corruptedReason?: string;
+  }> | null>(null);
+  const [installError, setInstallError] = React.useState<string | null>(null);
+  const [repairingId, setRepairingId] = React.useState<string | null>(null);
+
+  const refreshInstalled = React.useCallback(async () => {
+    if (!webExtensionManager) return;
+    try {
+      setInstallError(null);
+      await webExtensionManager.verifyAllInstalled();
+      const next = await webExtensionManager.listInstalled();
+      setInstalled(next);
+    } catch (err: any) {
+      setInstallError(String(err?.message ?? err));
+    }
+  }, [webExtensionManager]);
+
+  React.useEffect(() => {
+    if (!webExtensionManager) return;
+    void refreshInstalled();
+  }, [refreshInstalled, webExtensionManager]);
 
   const extensions = manager.host.listExtensions();
   const commands = manager.getContributedCommands() as ContributedCommand[];
@@ -149,12 +180,93 @@ export function ExtensionsPanel({
     return <div>Failed to load extensions: {String((manager.error as any)?.message ?? manager.error)}</div>;
   }
 
-  if (extensions.length === 0) {
-    return <div>No extensions installed.</div>;
-  }
-
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+      {webExtensionManager ? (
+        <div
+          style={{
+            border: "1px solid var(--panel-border)",
+            borderRadius: "10px",
+            background: "var(--bg-primary)",
+            padding: "12px",
+          }}
+        >
+          <div style={{ fontWeight: 700, marginBottom: "8px" }}>Installed (IndexedDB)</div>
+          {installError ? (
+            <div style={{ color: "var(--text-secondary)" }}>Failed to read installed extensions: {installError}</div>
+          ) : installed && installed.length > 0 ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              {installed.map((item) => {
+                const isCorrupted = Boolean(item.corrupted);
+                return (
+                  <div
+                    key={item.id}
+                    data-testid={`installed-extension-${item.id}`}
+                    style={{
+                      border: "1px solid var(--border)",
+                      borderRadius: "10px",
+                      padding: "10px 12px",
+                      background: "var(--bg-secondary)",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "6px",
+                    }}
+                  >
+                    <div style={{ fontWeight: 600 }}>{item.id}</div>
+                    <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>v{item.version}</div>
+                    <div
+                      data-testid={`installed-extension-status-${item.id}`}
+                      style={{ fontSize: "12px", color: isCorrupted ? "var(--text-error)" : "var(--text-secondary)" }}
+                    >
+                      {isCorrupted ? `Corrupted: ${item.corruptedReason ?? "unknown reason"}` : "OK"}
+                    </div>
+                    {isCorrupted ? (
+                      <button
+                        type="button"
+                        data-testid={`repair-extension-${item.id}`}
+                        disabled={repairingId === item.id}
+                        onClick={() => {
+                          void (async () => {
+                            if (!webExtensionManager) return;
+                            setRepairingId(item.id);
+                            try {
+                              await webExtensionManager.repair(item.id);
+                              await webExtensionManager.loadInstalled(item.id);
+                              await refreshInstalled();
+                              onSyncExtensions?.();
+                              bump((v) => v + 1);
+                            } catch (error: any) {
+                              setInstallError(String(error?.message ?? error));
+                            } finally {
+                              setRepairingId((prev) => (prev === item.id ? null : prev));
+                            }
+                          })();
+                        }}
+                        style={{
+                          alignSelf: "flex-start",
+                          padding: "8px 10px",
+                          borderRadius: "10px",
+                          border: "1px solid var(--border)",
+                          background: "var(--bg-primary)",
+                          color: "var(--text-primary)",
+                          cursor: "pointer",
+                        }}
+                      >
+                        {repairingId === item.id ? "Repairing…" : "Repair"}
+                      </button>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          ) : installed ? (
+            <div style={{ color: "var(--text-secondary)" }}>No marketplace extensions installed.</div>
+          ) : (
+            <div style={{ color: "var(--text-secondary)" }}>Loading installed extensions…</div>
+          )}
+        </div>
+      ) : null}
+
       <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
         <button
           type="button"

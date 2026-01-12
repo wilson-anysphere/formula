@@ -993,6 +993,109 @@ export class WebExtensionManager {
     return this._loadedMainUrls.has(String(id));
   }
 
+  /**
+   * Verifies the persisted installation state for an extension without loading it
+   * into the host.
+   *
+   * When verification fails, the install is quarantined in IndexedDB (marked
+   * `corrupted` or `incompatible`) so the UI can surface the failure and offer
+   * a repair path.
+   */
+  async verifyInstalled(id: string): Promise<{ ok: boolean; reason?: string }> {
+    const installed = await this.getInstalled(id);
+    if (!installed) return { ok: false, reason: `Not installed: ${id}` };
+    if (installed.corrupted) {
+      return { ok: false, reason: installed.corruptedReason ? String(installed.corruptedReason) : "Extension is corrupted" };
+    }
+    if (installed.incompatible) {
+      return {
+        ok: false,
+        reason: installed.incompatibleReason ? String(installed.incompatibleReason) : "Extension is incompatible"
+      };
+    }
+
+    const pkg = await this._getPackage(installed.id, installed.version);
+    if (!pkg) {
+      const reason = `missing stored package record for ${installed.id}@${installed.version}`;
+      await this._quarantineCorruptedInstall(installed, reason);
+      return { ok: false, reason };
+    }
+
+    try {
+      await this._verifyStoredPackageIntegrity(installed, pkg);
+    } catch (error) {
+      // `_verifyStoredPackageIntegrity` is responsible for quarantining; surface its error.
+      const msg = String((error as Error)?.message ?? error);
+      return { ok: false, reason: msg };
+    }
+
+    let manifest: Record<string, any>;
+    try {
+      manifest = this._validateManifest(pkg.verified.manifest, { id: installed.id, version: installed.version });
+    } catch (error) {
+      const msg = String((error as Error)?.message ?? error);
+      await this._quarantineIncompatibleInstall(installed, msg).catch(() => {});
+      return { ok: false, reason: msg };
+    }
+
+    const bundleId = `${manifest.publisher}.${manifest.name}`;
+    if (bundleId !== installed.id) {
+      const reason = `package id mismatch (expected ${installed.id} but got ${bundleId})`;
+      await this._quarantineCorruptedInstall(installed, reason);
+      return { ok: false, reason };
+    }
+    if (manifest.version !== installed.version) {
+      const reason = `package version mismatch (expected ${installed.version} but got ${manifest.version})`;
+      await this._quarantineCorruptedInstall(installed, reason);
+      return { ok: false, reason };
+    }
+
+    // Ensure the stored bytes are parseable as a v2 package. `packageSha256` only
+    // detects bit-flips; this catches truncated/invalid archives where the sha
+    // still matches (eg: metadata corruption) or legacy installs where we only
+    // verified file lists.
+    try {
+      const parsed: ReadExtensionPackageV2Result = readExtensionPackageV2(new Uint8Array(pkg.bytes));
+      const parsedManifest = parsed.manifest as any;
+      const parsedBundleId =
+        parsedManifest && typeof parsedManifest === "object"
+          ? `${String(parsedManifest.publisher ?? "")}.${String(parsedManifest.name ?? "")}`
+          : "";
+      const parsedVersion = parsedManifest && typeof parsedManifest === "object" ? String(parsedManifest.version ?? "") : "";
+      if (parsedBundleId && parsedBundleId !== installed.id) {
+        const reason = `package id mismatch (expected ${installed.id} but got ${parsedBundleId})`;
+        await this._quarantineCorruptedInstall(installed, reason);
+        return { ok: false, reason };
+      }
+      if (parsedVersion && parsedVersion !== installed.version) {
+        const reason = `package version mismatch (expected ${installed.version} but got ${parsedVersion})`;
+        await this._quarantineCorruptedInstall(installed, reason);
+        return { ok: false, reason };
+      }
+    } catch (error) {
+      const msg = String((error as Error)?.message ?? error);
+      const reason = `stored package is not a valid v2 extension package: ${msg}`;
+      await this._quarantineCorruptedInstall(installed, reason);
+      return { ok: false, reason };
+    }
+
+    return { ok: true };
+  }
+
+  async verifyAllInstalled(): Promise<Record<string, { ok: boolean; reason?: string }>> {
+    const installed = await this.listInstalled();
+    const out: Record<string, { ok: boolean; reason?: string }> = {};
+    for (const item of installed) {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        out[item.id] = await this.verifyInstalled(item.id);
+      } catch (error) {
+        out[item.id] = { ok: false, reason: String((error as Error)?.message ?? error) };
+      }
+    }
+    return out;
+  }
+
   async loadInstalled(id: string): Promise<string> {
     return this._loadInstalledInternal(id, { start: true });
   }
@@ -1127,7 +1230,27 @@ export class WebExtensionManager {
       this._extensionApiModule = createModuleUrlFromText(EXTENSION_API_SHIM_SOURCE);
     }
 
-    const { mainUrl, revoke } = await this._createMainModuleUrl(pkg, manifest, this._extensionApiModule.url);
+    let mainUrl: string;
+    let revoke: () => void;
+    try {
+      ({ mainUrl, revoke } = await this._createMainModuleUrl(pkg, manifest, this._extensionApiModule.url));
+    } catch (error) {
+      const msg = String((error as Error)?.message ?? error);
+      let reason = msg;
+      try {
+        // If parsing fails, surface a more specific corruption diagnosis so callers can distinguish
+        // it from other load failures (e.g. unsupported imports).
+        readExtensionPackageV2(new Uint8Array(pkg.bytes));
+      } catch (parseError) {
+        reason = `stored package is not a valid v2 extension package: ${String(
+          (parseError as Error)?.message ?? parseError
+        )}`;
+      }
+      // Treat archive parse failures as corruption: these commonly show up as partial writes or
+      // IndexedDB byte corruption even when the stored sha256 matches.
+      await this._quarantineCorruptedInstall(installed, reason).catch(() => {});
+      throw new Error(`Extension package integrity check failed for ${installed.id}@${installed.version}: ${reason}`);
+    }
 
     const extensionPath = `indexeddb://formula/extensions/${installed.id}/${installed.version}`;
 
@@ -1283,6 +1406,14 @@ export class WebExtensionManager {
       await txDone(tx);
     } finally {
       db.close();
+    }
+
+    // Best-effort: if this manager (or another shared instance) has the extension loaded,
+    // proactively unload it so corrupted code cannot continue executing.
+    try {
+      await this.unload(installed.id);
+    } catch {
+      // ignore
     }
   }
 

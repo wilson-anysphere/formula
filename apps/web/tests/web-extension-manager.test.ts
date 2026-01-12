@@ -1178,7 +1178,6 @@ test("uninstall clears persisted permission + extension storage state (localStor
     spreadsheetApi: new TestSpreadsheetApi(),
     permissionPrompt: async () => true,
   });
-
   const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
 
   await manager.install("formula.sample-hello");
@@ -1740,6 +1739,60 @@ test("missing stored package record is quarantined and can be repaired", async (
   expect(repaired?.corrupted).not.toBe(true);
 
   await manager.loadInstalled("formula.sample-hello");
+
+  await manager.dispose();
+  await host.dispose();
+});
+
+test("loadInstalled quarantines when stored bytes are not parseable as a v2 package", async () => {
+  const keys = generateEd25519KeyPair();
+  const extensionDir = path.resolve("extensions/sample-hello");
+  const pkgBytes = await createExtensionPackageV2(extensionDir, { privateKeyPem: keys.privateKeyPem });
+
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "formula.sample-hello",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes }
+  });
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: new TestSpreadsheetApi(),
+    permissionPrompt: async () => true
+  });
+  const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
+
+  await manager.install("formula.sample-hello");
+
+  // Replace bytes with an invalid buffer but keep sha256 metadata consistent so we exercise the
+  // "not parseable" path (rather than sha mismatch).
+  const invalid = Buffer.from([0x01, 0x02, 0x03, 0x04]);
+  const invalidSha256 = crypto.createHash("sha256").update(invalid).digest("hex");
+
+  const db = await requestToPromise(indexedDB.open("formula.webExtensions"));
+  try {
+    const tx = db.transaction(["packages"], "readwrite");
+    const store = tx.objectStore("packages");
+    const record: any = await requestToPromise(store.get("formula.sample-hello@1.0.0"));
+    record.bytes = invalid.buffer.slice(invalid.byteOffset, invalid.byteOffset + invalid.byteLength);
+    record.packageSha256 = invalidSha256;
+    store.put(record);
+    await txDone(tx);
+  } finally {
+    db.close();
+  }
+
+  await expect(manager.loadInstalled("formula.sample-hello")).rejects.toThrow(/valid v2 extension package/i);
+  const installed = await manager.getInstalled("formula.sample-hello");
+  expect(installed?.corrupted).toBe(true);
+  expect(String(installed?.corruptedReason ?? "")).toMatch(/valid v2 extension package/i);
+
+  const verification = await manager.verifyInstalled("formula.sample-hello");
+  expect(verification.ok).toBe(false);
+  expect(verification.reason).toMatch(/valid v2 extension package/i);
+
+  expect(host.listExtensions().some((e: any) => e.id === "formula.sample-hello")).toBe(false);
 
   await manager.dispose();
   await host.dispose();

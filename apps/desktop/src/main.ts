@@ -3537,7 +3537,9 @@ if (
   const ensureExtensionsLoaded = async () => {
     if (extensionHostManager.ready) return;
     if (!extensionsLoadPromise) {
-      extensionsLoadPromise = extensionHostManager.loadBuiltInExtensions();
+      extensionsLoadPromise = (async () => {
+        await extensionHostManager.loadBuiltInExtensions();
+      })();
     }
     await extensionsLoadPromise;
   };
@@ -4236,6 +4238,12 @@ if (
     extensionHostManager,
     onExecuteExtensionCommand: executeExtensionCommand,
     onOpenExtensionPanel: openExtensionPanel,
+    onSyncExtensions: () => {
+      syncContributedCommands();
+      syncContributedPanels();
+      updateKeybindings();
+      activateOpenExtensionPanels();
+    },
     renderMacrosPanel: (body) => {
       body.textContent = "Loading macros…";
       queueMicrotask(() => {
