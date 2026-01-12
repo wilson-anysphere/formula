@@ -213,8 +213,14 @@ class PermissionManager {
 
   async getGrantedPermissions(extensionId) {
     await this._ensureLoaded();
-    const record = normalizePermissionRecord(this._data[extensionId]);
-    this._data[extensionId] = record;
+    const id = String(extensionId);
+    const hadEntry = Object.prototype.hasOwnProperty.call(this._data, id);
+    const record = normalizePermissionRecord(this._data[id]);
+    // Do not create empty permission records for unknown extensions. Callers may query
+    // permissions for UI/inspection purposes, and persisting `{ "<id>": {} }` adds noise.
+    if (hadEntry) {
+      this._data[id] = record;
+    }
     return JSON.parse(JSON.stringify(record));
   }
 

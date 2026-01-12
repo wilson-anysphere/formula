@@ -279,3 +279,27 @@ test("permission storage: does not rewrite v2 permission records when no migrati
   const after = await fs.readFile(storePath, "utf8");
   assert.equal(after, initial);
 });
+
+test("permission storage: getGrantedPermissions for an unknown extension does not create an empty record", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-perms-empty-record-"));
+  const storePath = path.join(dir, "permissions.json");
+
+  const pm = new PermissionManager({
+    storagePath: storePath,
+    prompt: async () => true
+  });
+
+  assert.deepEqual(await pm.getGrantedPermissions("pub.unknown"), {});
+
+  await pm.ensurePermissions(
+    {
+      extensionId: "pub.other",
+      displayName: "Other",
+      declaredPermissions: ["clipboard"]
+    },
+    ["clipboard"]
+  );
+
+  const stored = JSON.parse(await fs.readFile(storePath, "utf8"));
+  assert.deepEqual(stored, { "pub.other": { clipboard: true } });
+});

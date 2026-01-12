@@ -310,3 +310,30 @@ test("browser PermissionManager: does not rewrite v2 permission records when no 
   assert.equal(setCalls, 0);
   assert.equal(storage.getItem(storageKey), initial);
 });
+
+test("browser PermissionManager: getGrantedPermissions for unknown extension does not persist empty records", async () => {
+  const { PermissionManager } = await importBrowserPermissionManager();
+
+  const storage = createMemoryStorage();
+  const storageKey = "formula.test.permissions.unknown";
+
+  const pm = new PermissionManager({
+    storage,
+    storageKey,
+    prompt: async () => true
+  });
+
+  assert.deepEqual(await pm.getGrantedPermissions("pub.unknown"), {});
+
+  await pm.ensurePermissions(
+    {
+      extensionId: "pub.other",
+      displayName: "Other",
+      declaredPermissions: ["clipboard"]
+    },
+    ["clipboard"]
+  );
+
+  const stored = JSON.parse(storage.getItem(storageKey));
+  assert.deepEqual(stored, { "pub.other": { clipboard: true } });
+});

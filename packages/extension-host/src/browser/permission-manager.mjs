@@ -220,8 +220,12 @@ class PermissionManager {
    */
   async getGrantedPermissions(extensionId) {
     this._ensureLoaded();
-    const record = normalizePermissionRecord(this._data[extensionId]);
-    this._data[extensionId] = record;
+    const id = String(extensionId);
+    const hadEntry = Object.prototype.hasOwnProperty.call(this._data, id);
+    const record = normalizePermissionRecord(this._data[id]);
+    if (hadEntry) {
+      this._data[id] = record;
+    }
     return JSON.parse(JSON.stringify(record));
   }
 
