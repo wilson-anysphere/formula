@@ -1199,8 +1199,10 @@ fn update_sheet_protection_xml(
     let mut buf = Vec::new();
 
     let mut skip_depth: usize = 0;
+    let mut sheet_calc_pr_depth: usize = 0;
     let mut replaced = false;
     let mut inserted = false;
+    let mut pending_insert_after_sheet_data = false;
 
     loop {
         let event = reader.read_event_into(&mut buf)?;
@@ -1212,8 +1214,32 @@ fn update_sheet_protection_xml(
                 Event::Empty(_) => {}
                 _ => {}
             },
+            _ if sheet_calc_pr_depth > 0 => {
+                match event {
+                    Event::Start(ref e) => {
+                        sheet_calc_pr_depth = sheet_calc_pr_depth.saturating_add(1);
+                        writer.write_event(Event::Start(e.to_owned()))?;
+                    }
+                    Event::Empty(ref e) => {
+                        writer.write_event(Event::Empty(e.to_owned()))?;
+                    }
+                    Event::End(ref e) => {
+                        sheet_calc_pr_depth = sheet_calc_pr_depth.saturating_sub(1);
+                        writer.write_event(Event::End(e.to_owned()))?;
+                        if sheet_calc_pr_depth == 0 && !replaced && !inserted && !new_section.is_empty()
+                        {
+                            writer.get_mut().extend_from_slice(new_section.as_bytes());
+                            inserted = true;
+                        }
+                    }
+                    _ => {
+                        writer.write_event(event.to_owned())?;
+                    }
+                }
+            }
             Event::Start(ref e) if e.local_name().as_ref() == b"sheetProtection" => {
                 replaced = true;
+                pending_insert_after_sheet_data = false;
                 if !new_section.is_empty() {
                     writer.get_mut().extend_from_slice(new_section.as_bytes());
                 }
@@ -1223,6 +1249,7 @@ fn update_sheet_protection_xml(
             }
             Event::Empty(ref e) if e.local_name().as_ref() == b"sheetProtection" => {
                 replaced = true;
+                pending_insert_after_sheet_data = false;
                 if !new_section.is_empty() {
                     writer.get_mut().extend_from_slice(new_section.as_bytes());
                 }
@@ -1230,16 +1257,45 @@ fn update_sheet_protection_xml(
             Event::End(ref e) if e.local_name().as_ref() == b"sheetData" => {
                 writer.write_event(Event::End(e.to_owned()))?;
                 if !replaced && !inserted && !new_section.is_empty() {
-                    writer.get_mut().extend_from_slice(new_section.as_bytes());
-                    inserted = true;
+                    pending_insert_after_sheet_data = true;
                 }
             }
             Event::Empty(ref e) if e.local_name().as_ref() == b"sheetData" => {
                 writer.write_event(Event::Empty(e.to_owned()))?;
                 if !replaced && !inserted && !new_section.is_empty() {
+                    pending_insert_after_sheet_data = true;
+                }
+            }
+            Event::Start(ref e) if e.local_name().as_ref() == b"sheetCalcPr" => {
+                if pending_insert_after_sheet_data && !replaced && !inserted && !new_section.is_empty()
+                {
+                    // Schema order is `sheetData`, `sheetCalcPr`, then `sheetProtection`.
+                    // If `sheetCalcPr` exists, insert after it instead of immediately after
+                    // `sheetData`.
+                    pending_insert_after_sheet_data = false;
+                    sheet_calc_pr_depth = 1;
+                }
+                writer.write_event(Event::Start(e.to_owned()))?;
+            }
+            Event::Empty(ref e) if e.local_name().as_ref() == b"sheetCalcPr" => {
+                writer.write_event(Event::Empty(e.to_owned()))?;
+                if pending_insert_after_sheet_data && !replaced && !inserted && !new_section.is_empty()
+                {
+                    pending_insert_after_sheet_data = false;
                     writer.get_mut().extend_from_slice(new_section.as_bytes());
                     inserted = true;
                 }
+            }
+            Event::Start(ref e) | Event::Empty(ref e) if pending_insert_after_sheet_data => {
+                // We just finished `<sheetData>` and the next element is *not* `<sheetCalcPr>`,
+                // meaning we can insert `<sheetProtection>` immediately after sheetData while
+                // preserving SpreadsheetML element ordering.
+                if !replaced && !inserted && !new_section.is_empty() {
+                    pending_insert_after_sheet_data = false;
+                    writer.get_mut().extend_from_slice(new_section.as_bytes());
+                    inserted = true;
+                }
+                writer.write_event(event.to_owned())?;
             }
             Event::Start(ref e) | Event::Empty(ref e)
                 if e.local_name().as_ref() == b"autoFilter" =>
@@ -1253,7 +1309,12 @@ fn update_sheet_protection_xml(
                 writer.write_event(event.to_owned())?;
             }
             Event::End(ref e) if e.local_name().as_ref() == b"worksheet" => {
-                if !replaced && !inserted && !new_section.is_empty() {
+                if pending_insert_after_sheet_data && !replaced && !inserted && !new_section.is_empty()
+                {
+                    pending_insert_after_sheet_data = false;
+                    writer.get_mut().extend_from_slice(new_section.as_bytes());
+                    inserted = true;
+                } else if !replaced && !inserted && !new_section.is_empty() {
                     writer.get_mut().extend_from_slice(new_section.as_bytes());
                     inserted = true;
                 }

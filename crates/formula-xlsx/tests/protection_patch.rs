@@ -433,3 +433,50 @@ fn inserts_sheet_protection_after_non_empty_sheet_data() -> Result<(), Box<dyn s
 
     Ok(())
 }
+
+#[test]
+fn inserts_sheet_protection_after_sheet_calc_pr_when_present() -> Result<(), Box<dyn std::error::Error>>
+{
+    let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <x:workbookPr/>
+  <x:sheets>
+    <x:sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </x:sheets>
+</x:workbook>"#;
+
+    let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <x:sheetData/>
+  <x:sheetCalcPr iterate="1"/>
+  <x:autoFilter ref="A1:A1"/>
+</x:worksheet>"#;
+
+    let bytes = build_minimal_xlsx(workbook_xml, sheet_xml);
+    let mut doc = load_from_bytes(&bytes)?;
+
+    let sheet = &mut doc.workbook.sheets[0];
+    sheet.sheet_protection.enabled = true;
+    sheet.sheet_protection.password_hash = Some(0xABCD);
+
+    let out = doc.save_to_vec()?;
+    let sheet_xml = read_part(&out, "xl/worksheets/sheet1.xml")?;
+    roxmltree::Document::parse(&sheet_xml)?;
+
+    let calc_pr = sheet_xml
+        .find("<x:sheetCalcPr")
+        .expect("sheetCalcPr exists");
+    let sheet_prot = sheet_xml
+        .find("<x:sheetProtection")
+        .expect("sheetProtection inserted");
+    let auto_filter = sheet_xml.find("<x:autoFilter").expect("autoFilter exists");
+
+    assert!(
+        calc_pr < sheet_prot && sheet_prot < auto_filter,
+        "expected sheetProtection after sheetCalcPr and before autoFilter, got:\n{sheet_xml}"
+    );
+
+    Ok(())
+}
