@@ -63,6 +63,12 @@
 
 #grid-split[data-split-direction="horizontal"] {
   grid-template-columns: 1fr;
+  grid-template-rows: var(--split-primary-size, 1fr) 4px var(--split-secondary-size, 1fr);
+}
+
+#grid-split[data-split-direction="vertical"] {
+  grid-template-columns: var(--split-primary-size, 1fr) 4px var(--split-secondary-size, 1fr);
+  grid-template-rows: 1fr;
 }
 
 #grid-split[data-split-direction="vertical"] #grid-splitter {

@@ -1079,28 +1079,15 @@ if (
     const primaryPct = Math.round(clamped * 1000) / 10;
     const secondaryPct = Math.round((100 - primaryPct) * 10) / 10;
     gridSplitEl.dataset.splitDirection = split.direction;
+    gridSplitEl.style.setProperty("--split-primary-size", `${primaryPct}%`);
+    gridSplitEl.style.setProperty("--split-secondary-size", `${secondaryPct}%`);
 
     if (split.direction === "none") {
-      // Reset to the default split-view layout defined in CSS.
-      gridSplitEl.style.gridTemplateColumns = "";
-      gridSplitEl.style.gridTemplateRows = "";
       secondaryGridView?.destroy();
       secondaryGridView = null;
       gridRoot.dataset.splitActive = "false";
       gridSecondaryEl.dataset.splitActive = "false";
       return;
-    }
-
-    if (split.direction === "vertical") {
-      gridSplitEl.style.gridTemplateColumns = `${primaryPct}% 4px ${secondaryPct}%`;
-      // `grid-template-rows` is static for vertical splits; keep it in CSS and only
-      // update the dynamic column sizing here.
-      gridSplitEl.style.gridTemplateRows = "";
-    } else {
-      // `grid-template-columns` is static for horizontal splits; keep it in CSS and
-      // only update the dynamic row sizing here.
-      gridSplitEl.style.gridTemplateColumns = "";
-      gridSplitEl.style.gridTemplateRows = `${primaryPct}% 4px ${secondaryPct}%`;
     }
 
     if (!secondaryGridView) {
