@@ -23,7 +23,9 @@ API notes:
   - Note: for legacy VBA signature streams (`DigitalSignature` / `DigitalSignatureEx`), Office uses
     **MD5 digest bytes** for binding even when `DigestInfo.digestAlgorithm.algorithm` indicates
     SHA-256 (MS-OSHARED §4.3). For the v3 `DigitalSignatureExt` stream, the digest algorithm OID is
-    meaningful (typically SHA-256) and the digest bytes are computed over the v3 MS-OVBA transcript.
+    typically SHA-256 and the digest bytes are computed over the v3 MS-OVBA transcript. In practice,
+    some producers may still emit an inconsistent OID, so our verifier primarily infers the digest
+    algorithm from the digest length (16/20/32 → MD5/SHA-1/SHA-256), falling back to the OID.
 - PKCS#7/CMS verification is *internal* signature verification only: by default we do **not**
   validate the signer certificate chain (OpenSSL `NOVERIFY`). If you need opt-in “trusted publisher”
   evaluation, use `formula_vba::verify_vba_digital_signature_with_trust` with an explicit root
@@ -143,7 +145,8 @@ High-level extraction steps:
 That `(hash_oid, digest_bytes)` pair is the “signed digest” we use to bind a VBA signature to a
 specific VBA project. For VBA signatures, the `digest_bytes` are the *binding* value; for legacy
 v1/v2 streams the `hash_oid` is frequently misleading, but for v3 (`DigitalSignatureExt`) the OID is
-meaningful and should be honored when selecting the expected digest algorithm.
+often meaningful. Our implementation is resilient to mismatches by inferring the digest algorithm
+from the digest length when possible (and using the OID as a fallback).
 
 ### Relevant ASN.1 shapes (high level)
 
@@ -225,7 +228,7 @@ At a high level:
 
 - **v1 / `DigitalSignature`**: `ContentHash = MD5(ContentNormalizedData)`
 - **v2 / `DigitalSignatureEx`**: `AgileContentHash = MD5(ContentNormalizedData || FormsNormalizedData)`
-- **v3 / `DigitalSignatureExt`**: `V3ContentHash = SHA-256(ProjectNormalizedData)`
+- **v3 / `DigitalSignatureExt`**: `V3ContentHash = Hash(ProjectNormalizedData)` (typically SHA-256)
   - where `ProjectNormalizedData = V3ContentNormalizedData || FormsNormalizedData`
 
 Reference record normalization note:
@@ -254,8 +257,8 @@ To bind the signature to the VBA project contents, `formula-vba`:
 2. Computes the appropriate MS-OVBA Contents Hash transcript (v1/v2/v3) for the current project.
 3. Computes digest bytes for that transcript:
    - v1/v2: compute **MD5** (per MS-OSHARED §4.3, regardless of the signature's `DigestInfo` OID)
-   - v3: compute the digest algorithm indicated by `DigestInfo.digestAlgorithm.algorithm` (typically
-     SHA-256)
+   - v3: infer the digest algorithm primarily from the signed digest length (16/20/32 →
+     MD5/SHA-1/SHA-256), falling back to `DigestInfo.digestAlgorithm.algorithm` when needed
 4. Compares the computed digest bytes to the signed digest bytes.
 
 Result interpretation:
