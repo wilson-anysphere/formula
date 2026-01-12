@@ -138,4 +138,55 @@ mod tests {
             "unexpected error: {err}"
         );
     }
+
+    #[test]
+    fn invalid_signature_length_returns_err() {
+        let (_signing_key, public_key_pem) = test_keypair();
+        let payload = b"hello world".to_vec();
+        let signature_base64 = STANDARD.encode([0u8; 10]);
+
+        let err = verify_ed25519_signature_payload(&payload, &signature_base64, &public_key_pem)
+            .expect_err("expected invalid signature length to return Err");
+        assert!(
+            err.to_ascii_lowercase().contains("signature length"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn oversized_payload_returns_err() {
+        let payload = vec![0u8; MAX_SIGNATURE_PAYLOAD_BYTES + 1];
+        let err = verify_ed25519_signature_payload(&payload, "", "")
+            .expect_err("expected oversized payload to return Err");
+        assert!(
+            err.to_ascii_lowercase().contains("payload is too large"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn oversized_public_key_pem_returns_err() {
+        let payload = b"hello world".to_vec();
+        let oversized_pem = "A".repeat(MAX_PUBLIC_KEY_PEM_BYTES + 1);
+
+        let err = verify_ed25519_signature_payload(&payload, "AA==", &oversized_pem)
+            .expect_err("expected oversized public key PEM to return Err");
+        assert!(
+            err.to_ascii_lowercase().contains("public key pem is too large"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn oversized_signature_base64_returns_err() {
+        let payload = b"hello world".to_vec();
+        let oversized_sig = "A".repeat(MAX_SIGNATURE_BASE64_BYTES + 1);
+
+        let err = verify_ed25519_signature_payload(&payload, &oversized_sig, "")
+            .expect_err("expected oversized signature base64 to return Err");
+        assert!(
+            err.to_ascii_lowercase().contains("signature base64 is too large"),
+            "unexpected error: {err}"
+        );
+    }
 }
