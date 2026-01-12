@@ -226,6 +226,7 @@ pub(crate) fn decode_biff8_rgce_with_base(
     ctx: &RgceDecodeContext<'_>,
     base: Option<CellCoord>,
 ) -> DecodeRgceResult {
+    let base_is_default = base.is_none();
     let base = base.unwrap_or(CellCoord::new(0, 0));
     if rgce.is_empty() {
         return DecodeRgceResult {
@@ -237,6 +238,7 @@ pub(crate) fn decode_biff8_rgce_with_base(
     let mut input = rgce;
     let mut stack: Vec<ExprFragment> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
+    let mut warned_default_base_for_relative = false;
 
     while !input.is_empty() {
         let ptg = input[0];
@@ -697,7 +699,23 @@ pub(crate) fn decode_biff8_rgce_with_base(
                 let row_raw = u16::from_le_bytes([input[0], input[1]]);
                 let col_field = u16::from_le_bytes([input[2], input[3]]);
                 input = &input[4..];
-                stack.push(ExprFragment::new(decode_ref_n(row_raw, col_field, base)));
+                if base_is_default
+                    && !warned_default_base_for_relative
+                    && (col_field & RELATIVE_MASK) != 0
+                {
+                    warnings.push(
+                        "relative reference tokens are interpreted relative to A1 (no base cell provided)"
+                            .to_string(),
+                    );
+                    warned_default_base_for_relative = true;
+                }
+                stack.push(ExprFragment::new(decode_ref_n(
+                    row_raw,
+                    col_field,
+                    base,
+                    &mut warnings,
+                    "PtgRefN",
+                )));
             }
             // PtgAreaN: [rwFirst: u16][rwLast: u16][colFirst: u16][colLast: u16]
             0x2D | 0x4D | 0x6D => {
@@ -710,12 +728,24 @@ pub(crate) fn decode_biff8_rgce_with_base(
                 let col_first_field = u16::from_le_bytes([input[4], input[5]]);
                 let col_last_field = u16::from_le_bytes([input[6], input[7]]);
                 input = &input[8..];
+                if base_is_default
+                    && !warned_default_base_for_relative
+                    && ((col_first_field & RELATIVE_MASK) != 0 || (col_last_field & RELATIVE_MASK) != 0)
+                {
+                    warnings.push(
+                        "relative reference tokens are interpreted relative to A1 (no base cell provided)"
+                            .to_string(),
+                    );
+                    warned_default_base_for_relative = true;
+                }
                 stack.push(ExprFragment::new(decode_area_n(
                     row_first_raw,
                     col_first_field,
                     row_last_raw,
                     col_last_field,
                     base,
+                    &mut warnings,
+                    "PtgAreaN",
                 )));
             }
             // PtgRef3d
@@ -783,7 +813,24 @@ pub(crate) fn decode_biff8_rgce_with_base(
                 let col_field = u16::from_le_bytes([input[4], input[5]]);
                 input = &input[6..];
 
-                let cell = decode_ref_n(row_raw, col_field, base);
+                if base_is_default
+                    && !warned_default_base_for_relative
+                    && (col_field & RELATIVE_MASK) != 0
+                {
+                    warnings.push(
+                        "relative reference tokens are interpreted relative to A1 (no base cell provided)"
+                            .to_string(),
+                    );
+                    warned_default_base_for_relative = true;
+                }
+
+                let cell = decode_ref_n(
+                    row_raw,
+                    col_field,
+                    base,
+                    &mut warnings,
+                    "PtgRefN3d",
+                );
                 if cell == "#REF!" {
                     stack.push(ExprFragment::new(cell));
                 } else {
@@ -805,12 +852,25 @@ pub(crate) fn decode_biff8_rgce_with_base(
                 let col_last_field = u16::from_le_bytes([input[8], input[9]]);
                 input = &input[10..];
 
+                if base_is_default
+                    && !warned_default_base_for_relative
+                    && ((col_first_field & RELATIVE_MASK) != 0 || (col_last_field & RELATIVE_MASK) != 0)
+                {
+                    warnings.push(
+                        "relative reference tokens are interpreted relative to A1 (no base cell provided)"
+                            .to_string(),
+                    );
+                    warned_default_base_for_relative = true;
+                }
+
                 let area = decode_area_n(
                     row_first_raw,
                     col_first_field,
                     row_last_raw,
                     col_last_field,
                     base,
+                    &mut warnings,
+                    "PtgAreaN3d",
                 );
                 if area == "#REF!" {
                     stack.push(ExprFragment::new(area));
@@ -862,25 +922,51 @@ const ROW_RELATIVE_BIT: u16 = 0x4000;
 const COL_RELATIVE_BIT: u16 = 0x8000;
 const RELATIVE_MASK: u16 = 0xC000;
 
-fn decode_ref_n(row_raw: u16, col_field: u16, base: CellCoord) -> String {
+fn decode_ref_n(
+    row_raw: u16,
+    col_field: u16,
+    base: CellCoord,
+    warnings: &mut Vec<String>,
+    ptg_name: &str,
+) -> String {
     let row_relative = (col_field & ROW_RELATIVE_BIT) == ROW_RELATIVE_BIT;
     let col_relative = (col_field & COL_RELATIVE_BIT) == COL_RELATIVE_BIT;
     let col_raw = col_field & COL_INDEX_MASK;
 
+    let row_off = if row_relative { row_raw as i16 } else { 0 };
+    let col_off = if col_relative {
+        sign_extend_14(col_raw)
+    } else {
+        0
+    };
+
     let abs_row = if row_relative {
-        (base.row as i64).saturating_add(row_raw as i16 as i64)
+        (base.row as i64).saturating_add(row_off as i64)
     } else {
         row_raw as i64
     };
 
     let abs_col = if col_relative {
-        let col_off = sign_extend_14(col_raw) as i64;
-        (base.col as i64).saturating_add(col_off)
+        (base.col as i64).saturating_add(col_off as i64)
     } else {
         col_raw as i64
     };
 
     if !cell_in_bounds(abs_row, abs_col) {
+        let row_desc = if row_relative {
+            format!("row_off={row_off}")
+        } else {
+            format!("row={row_raw}")
+        };
+        let col_desc = if col_relative {
+            format!("col_off={col_off}")
+        } else {
+            format!("col={col_raw}")
+        };
+        warnings.push(format!(
+            "{ptg_name} produced out-of-bounds reference: base=({},{}), {row_desc}, {col_desc} -> #REF!",
+            base.row, base.col
+        ));
         return "#REF!".to_string();
     }
 
@@ -894,6 +980,8 @@ fn decode_area_n(
     row2_raw: u16,
     col2_field: u16,
     base: CellCoord,
+    warnings: &mut Vec<String>,
+    ptg_name: &str,
 ) -> String {
     let row1_relative = (col1_field & ROW_RELATIVE_BIT) == ROW_RELATIVE_BIT;
     let col1_relative = (col1_field & COL_RELATIVE_BIT) == COL_RELATIVE_BIT;
@@ -928,6 +1016,30 @@ fn decode_area_n(
     };
 
     if !cell_in_bounds(abs_row1, abs_col1) || !cell_in_bounds(abs_row2, abs_col2) {
+        let row1_desc = if row1_relative {
+            format!("row1_off={}", row1_raw as i16)
+        } else {
+            format!("row1={row1_raw}")
+        };
+        let row2_desc = if row2_relative {
+            format!("row2_off={}", row2_raw as i16)
+        } else {
+            format!("row2={row2_raw}")
+        };
+        let col1_desc = if col1_relative {
+            format!("col1_off={}", sign_extend_14(col1_raw))
+        } else {
+            format!("col1={col1_raw}")
+        };
+        let col2_desc = if col2_relative {
+            format!("col2_off={}", sign_extend_14(col2_raw))
+        } else {
+            format!("col2={col2_raw}")
+        };
+        warnings.push(format!(
+            "{ptg_name} produced out-of-bounds area: base=({},{}), {row1_desc}, {row2_desc}, {col1_desc}, {col2_desc} -> #REF!",
+            base.row, base.col
+        ));
         return "#REF!".to_string();
     }
 
@@ -1299,7 +1411,10 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "A1");
         assert!(
-            decoded.warnings.is_empty(),
+            decoded
+                .warnings
+                .iter()
+                .any(|w| w.contains("interpreted relative to A1")),
             "warnings={:?}",
             decoded.warnings
         );
@@ -1351,7 +1466,10 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "B2");
         assert!(
-            decoded.warnings.is_empty(),
+            decoded
+                .warnings
+                .iter()
+                .any(|w| w.contains("interpreted relative to A1")),
             "warnings={:?}",
             decoded.warnings
         );
@@ -1409,7 +1527,12 @@ mod tests {
         let decoded = decode_biff8_rgce_with_base(&rgce, &ctx, Some(base));
         assert_eq!(decoded.text, "#REF!");
         assert!(
-            decoded.warnings.is_empty(),
+            decoded.warnings.iter().any(|w| w.contains("PtgRefN")),
+            "warnings={:?}",
+            decoded.warnings
+        );
+        assert!(
+            decoded.warnings.iter().any(|w| w.contains("row_off=-1")),
             "warnings={:?}",
             decoded.warnings
         );
@@ -1438,7 +1561,12 @@ mod tests {
         let decoded = decode_biff8_rgce_with_base(&rgce, &ctx, Some(base));
         assert_eq!(decoded.text, "#REF!");
         assert!(
-            decoded.warnings.is_empty(),
+            decoded.warnings.iter().any(|w| w.contains("PtgRefN")),
+            "warnings={:?}",
+            decoded.warnings
+        );
+        assert!(
+            decoded.warnings.iter().any(|w| w.contains("col_off=1")),
             "warnings={:?}",
             decoded.warnings
         );
@@ -1501,7 +1629,10 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "A1:B2");
         assert!(
-            decoded.warnings.is_empty(),
+            decoded
+                .warnings
+                .iter()
+                .any(|w| w.contains("interpreted relative to A1")),
             "warnings={:?}",
             decoded.warnings
         );
@@ -1572,7 +1703,10 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "C3:D4");
         assert!(
-            decoded.warnings.is_empty(),
+            decoded
+                .warnings
+                .iter()
+                .any(|w| w.contains("interpreted relative to A1")),
             "warnings={:?}",
             decoded.warnings
         );
@@ -1897,7 +2031,10 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "Sheet1!A1:B2");
         assert!(
-            decoded.warnings.is_empty(),
+            decoded
+                .warnings
+                .iter()
+                .any(|w| w.contains("interpreted relative to A1")),
             "warnings={:?}",
             decoded.warnings
         );
@@ -1929,7 +2066,10 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "Sheet1!A1");
         assert!(
-            decoded.warnings.is_empty(),
+            decoded
+                .warnings
+                .iter()
+                .any(|w| w.contains("interpreted relative to A1")),
             "warnings={:?}",
             decoded.warnings
         );

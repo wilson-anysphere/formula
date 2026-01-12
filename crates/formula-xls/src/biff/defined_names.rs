@@ -928,7 +928,14 @@ mod tests {
         assert_eq!(parsed.names.len(), 1);
         assert_eq!(parsed.names[0].name, name);
         assert_eq!(parsed.names[0].refers_to, "A1&\"ABCDE\"");
-        assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.contains("interpreted relative to A1")),
+            "warnings={:?}",
+            parsed.warnings
+        );
     }
 
     #[test]
