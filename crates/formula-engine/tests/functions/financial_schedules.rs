@@ -28,14 +28,13 @@ fn fvschedule_propagates_errors_from_schedule() {
 }
 
 #[test]
-fn fvschedule_text_in_schedule_is_value_error() {
+fn fvschedule_text_in_schedule_is_zero_rate() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", 0.1);
     sheet.set("A2", Value::Text("not a number".to_string()));
-    assert_eq!(
-        sheet.eval("=FVSCHEDULE(100,A1:A2)"),
-        Value::Error(ErrorKind::Value)
-    );
+    // Excel: text inside a reference/range does not participate.
+    // For FVSCHEDULE, treating it as a 0% rate yields the same behavior.
+    assert_number(&sheet.eval("=FVSCHEDULE(100,A1:A2)"), 110.0);
 }
 
 #[test]
@@ -46,4 +45,3 @@ fn fvschedule_blank_in_schedule_is_zero_rate() {
     sheet.set("A3", 0.2);
     assert_number(&sheet.eval("=FVSCHEDULE(100,A1:A3)"), 132.0);
 }
-

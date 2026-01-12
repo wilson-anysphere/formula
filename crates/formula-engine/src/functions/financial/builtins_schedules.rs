@@ -21,6 +21,7 @@ fn collect_schedule_values_from_arg(
 ) -> Result<Vec<f64>, ErrorKind> {
     match ctx.eval_arg(arg) {
         ArgValue::Scalar(v) => match v {
+            Value::Error(e) => Err(e),
             Value::Array(arr) => {
                 let mut out = Vec::with_capacity(arr.rows.saturating_mul(arr.cols));
                 for v in arr.iter() {
@@ -28,6 +29,8 @@ fn collect_schedule_values_from_arg(
                 }
                 Ok(out)
             }
+            Value::Lambda(_) => Err(ErrorKind::Value),
+            Value::Reference(_) | Value::ReferenceUnion(_) => Err(ErrorKind::Value),
             other => Ok(vec![other.coerce_to_number_with_ctx(ctx)?]),
         },
         ArgValue::Reference(r) => {
@@ -36,7 +39,22 @@ fn collect_schedule_values_from_arg(
             let mut out = Vec::new();
             for addr in r.iter_cells() {
                 let v = ctx.get_cell_value(&r.sheet_id, addr);
-                out.push(v.coerce_to_number_with_ctx(ctx)?);
+                match v {
+                    Value::Error(e) => return Err(e),
+                    Value::Number(n) => out.push(n),
+                    Value::Lambda(_) => return Err(ErrorKind::Value),
+                    // Excel: within a reference/range, blanks/text/logicals do not participate.
+                    // For FVSCHEDULE, treating them as 0% yields the same result as ignoring them.
+                    Value::Bool(_)
+                    | Value::Text(_)
+                    | Value::Blank
+                    | Value::Entity(_)
+                    | Value::Record(_)
+                    | Value::Array(_)
+                    | Value::Spill { .. }
+                    | Value::Reference(_)
+                    | Value::ReferenceUnion(_) => out.push(0.0),
+                }
             }
             Ok(out)
         }
@@ -47,7 +65,20 @@ fn collect_schedule_values_from_arg(
                 ctx.record_reference(&r);
                 for addr in r.iter_cells() {
                     let v = ctx.get_cell_value(&r.sheet_id, addr);
-                    out.push(v.coerce_to_number_with_ctx(ctx)?);
+                    match v {
+                        Value::Error(e) => return Err(e),
+                        Value::Number(n) => out.push(n),
+                        Value::Lambda(_) => return Err(ErrorKind::Value),
+                        Value::Bool(_)
+                        | Value::Text(_)
+                        | Value::Blank
+                        | Value::Entity(_)
+                        | Value::Record(_)
+                        | Value::Array(_)
+                        | Value::Spill { .. }
+                        | Value::Reference(_)
+                        | Value::ReferenceUnion(_) => out.push(0.0),
+                    }
                 }
             }
             Ok(out)
@@ -62,7 +93,7 @@ inventory::submit! {
         max_args: 2,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::SupportsArrays,
+        array_support: ArraySupport::ScalarOnly,
         return_type: ValueType::Number,
         arg_types: &[ValueType::Number, ValueType::Any],
         implementation: fvschedule_fn,
@@ -82,4 +113,3 @@ fn fvschedule_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
     excel_result_number(super::fvschedule(principal, &schedule))
 }
-
