@@ -778,7 +778,11 @@ export class DesktopSharedGrid {
         this.emitSelectionRangeChange(prevRange, nextRange);
       };
 
+      // Excel semantics:
+      // - F2 edits the active cell.
+      // - Shift+F2 adds/edits a comment (handled globally via KeybindingService / CommandRegistry).
       if (event.key === "F2") {
+        if (event.shiftKey) return;
         event.preventDefault();
         if (!selection) renderer.setSelection(active);
         this.callbacks.onRequestCellEdit?.({ row: active.row, col: active.col });
