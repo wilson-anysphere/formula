@@ -784,14 +784,6 @@ const sheetSwitcher = document.querySelector<HTMLSelectElement>('[data-testid="s
 const zoomControl = document.querySelector<HTMLSelectElement>('[data-testid="zoom-control"]');
 const statusZoom = document.querySelector<HTMLElement>('[data-testid="status-zoom"]');
 const sheetPosition = document.querySelector<HTMLElement>('[data-testid="sheet-position"]');
-// These buttons live in the status bar (`apps/desktop/index.html`).
-// Scope the selector to avoid collisions with similarly-named ribbon commands.
-const openVersionHistoryPanel = document.querySelector<HTMLButtonElement>(
-  '.statusbar__main [data-testid="open-version-history-panel"]',
-);
-const openBranchManagerPanel = document.querySelector<HTMLButtonElement>(
-  '.statusbar__main [data-testid="open-branch-manager-panel"]',
-);
 if (
   !activeCell ||
   !selectionRange ||
@@ -2870,18 +2862,6 @@ if (
     }
     syncZoomControl();
   }
-
-  openVersionHistoryPanel?.addEventListener("click", () => {
-    const placement = getPanelPlacement(layoutController.layout, PanelIds.VERSION_HISTORY);
-    if (placement.kind === "closed") layoutController.openPanel(PanelIds.VERSION_HISTORY);
-    else layoutController.closePanel(PanelIds.VERSION_HISTORY);
-  });
-
-  openBranchManagerPanel?.addEventListener("click", () => {
-    const placement = getPanelPlacement(layoutController.layout, PanelIds.BRANCH_MANAGER);
-    if (placement.kind === "closed") layoutController.openPanel(PanelIds.BRANCH_MANAGER);
-    else layoutController.closePanel(PanelIds.BRANCH_MANAGER);
-  });
 
   const panelMounts = new Map<string, { container: HTMLElement; dispose: () => void }>();
 
