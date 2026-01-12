@@ -12,6 +12,30 @@ function normalizeSheetNameForCaseInsensitiveCompare(name) {
   }
 }
 
+const EXCEL_MAX_SHEET_NAME_LEN = 31;
+const INVALID_SHEET_NAME_CHAR_SET = new Set([":", "\\", "/", "?", "*", "[", "]"]);
+
+function validateSheetName(rawName) {
+  const name = String(rawName ?? "").trim();
+  if (name.length === 0) {
+    throw new Error("sheet name cannot be blank");
+  }
+  // Excel's 31-character limit is measured in UTF-16 code units. JS `string.length`
+  // matches the UTF-16 code unit count.
+  if (name.length > EXCEL_MAX_SHEET_NAME_LEN) {
+    throw new Error(`sheet name cannot exceed ${EXCEL_MAX_SHEET_NAME_LEN} characters`);
+  }
+  for (const ch of name) {
+    if (INVALID_SHEET_NAME_CHAR_SET.has(ch)) {
+      throw new Error(`sheet name contains invalid character \`${ch}\``);
+    }
+  }
+  if (name.startsWith("'") || name.endsWith("'")) {
+    throw new Error("sheet name cannot begin or end with an apostrophe");
+  }
+  return name;
+}
+
 function cellKey(row, col) {
   return `${row},${col}`;
 }
@@ -221,10 +245,7 @@ export class MockWorkbook {
   }
 
   create_sheet({ name, index }) {
-    const desiredName = String(name ?? "").trim();
-    if (!desiredName) {
-      throw new Error("create_sheet expects a non-empty name");
-    }
+    const desiredName = validateSheetName(name);
     const desiredNormalized = normalizeSheetNameForCaseInsensitiveCompare(desiredName);
     for (const sheet of this.sheets.values()) {
       if (normalizeSheetNameForCaseInsensitiveCompare(sheet.name) === desiredNormalized) {
@@ -271,10 +292,7 @@ export class MockWorkbook {
   rename_sheet({ sheet_id, name }) {
     const sheet = this.sheets.get(sheet_id);
     if (!sheet) throw new Error(`Unknown sheet_id "${sheet_id}"`);
-    const desiredName = String(name ?? "").trim();
-    if (!desiredName) {
-      throw new Error("sheet name cannot be blank");
-    }
+    const desiredName = validateSheetName(name);
     const desiredNormalized = normalizeSheetNameForCaseInsensitiveCompare(desiredName);
     for (const other of this.sheets.values()) {
       if (other.id === sheet_id) continue;
