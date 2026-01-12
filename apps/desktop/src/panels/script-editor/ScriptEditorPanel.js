@@ -28,32 +28,23 @@ export function mountScriptEditorPanel({ workbook, container, monaco }) {
   container.innerHTML = "";
 
   const toolbar = document.createElement("div");
-  toolbar.style.display = "flex";
-  toolbar.style.gap = "8px";
-  toolbar.style.padding = "8px";
-  toolbar.style.borderBottom = "1px solid var(--panel-border)";
+  toolbar.className = "script-editor__toolbar";
 
   const runButton = document.createElement("button");
   runButton.textContent = "Run";
+  runButton.className = "script-editor__run-button";
   runButton.dataset.testid = "script-editor-run";
   toolbar.appendChild(runButton);
 
   const editorHost = document.createElement("div");
-  editorHost.style.flex = "1";
-  editorHost.style.minHeight = "0";
+  editorHost.className = "script-editor__editor-host";
 
   const consoleHost = document.createElement("pre");
-  consoleHost.style.height = "140px";
-  consoleHost.style.margin = "0";
-  consoleHost.style.padding = "8px";
-  consoleHost.style.overflow = "auto";
-  consoleHost.style.borderTop = "1px solid var(--panel-border)";
+  consoleHost.className = "script-editor__console";
   consoleHost.textContent = "Output…";
 
   const root = document.createElement("div");
-  root.style.display = "flex";
-  root.style.flexDirection = "column";
-  root.style.height = "100%";
+  root.className = "script-editor";
 
   root.appendChild(toolbar);
   root.appendChild(editorHost);
@@ -68,16 +59,7 @@ export function mountScriptEditorPanel({ workbook, container, monaco }) {
   fallbackEditor.value = currentCode;
   fallbackEditor.dataset.testid = "script-editor-code";
   fallbackEditor.spellcheck = false;
-  fallbackEditor.style.width = "100%";
-  fallbackEditor.style.height = "100%";
-  fallbackEditor.style.resize = "none";
-  fallbackEditor.style.border = "none";
-  fallbackEditor.style.outline = "none";
-  fallbackEditor.style.padding = "8px";
-  fallbackEditor.style.boxSizing = "border-box";
-  fallbackEditor.style.fontFamily =
-    'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
-  fallbackEditor.style.fontSize = "13px";
+  fallbackEditor.className = "script-editor__fallback-editor";
   fallbackEditor.addEventListener("input", () => {
     currentCode = fallbackEditor.value;
   });
