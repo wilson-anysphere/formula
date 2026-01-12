@@ -1107,6 +1107,28 @@ test.describe("desktop updater UI wiring (tauri)", () => {
     expect(afterUpdateAvailable.showCalls).toBe(baseline.showCalls);
     expect(afterUpdateAvailable.focusCalls).toBe(baseline.focusCalls);
 
+    // Startup update-check lifecycle events should also be silent (no toast/focus).
+    await waitForTauriListeners(page, "update-check-started");
+    await dispatchTauriEvent(page, "update-check-started", { source: "startup" });
+    await waitForTauriListeners(page, "update-check-already-running");
+    await dispatchTauriEvent(page, "update-check-already-running", { source: "startup" });
+    await flushMicrotasks(page);
+
+    const afterStartupCheckEvents = await page.evaluate(() => ({
+      toastCount: document.querySelectorAll('#toast-root [data-testid="toast"]').length,
+      showCalls: (window as any).__tauriShowCalls ?? 0,
+      focusCalls: (window as any).__tauriFocusCalls ?? 0,
+      notificationsCount: (window as any).__tauriNotifications?.length ?? 0,
+      invokeNotificationCount: Array.isArray((window as any).__tauriInvokes)
+        ? (window as any).__tauriInvokes.filter((entry: any) => entry?.cmd === "show_system_notification").length
+        : 0,
+    }));
+    expect(afterStartupCheckEvents.toastCount).toBe(baseline.toastCount);
+    expect(afterStartupCheckEvents.showCalls).toBe(baseline.showCalls);
+    expect(afterStartupCheckEvents.focusCalls).toBe(baseline.focusCalls);
+    expect(afterStartupCheckEvents.notificationsCount).toBe(afterUpdateAvailable.notificationsCount);
+    expect(afterStartupCheckEvents.invokeNotificationCount).toBe(afterUpdateAvailable.invokeNotificationCount);
+
     // Startup completion events should also remain silent unless a manual follow-up is pending.
     await waitForTauriListeners(page, "update-not-available");
     await dispatchTauriEvent(page, "update-not-available", { source: "startup" });
