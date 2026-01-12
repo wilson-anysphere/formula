@@ -139,7 +139,8 @@ Relevant relationships (IDs will vary, types/targets are the important part):
 
 `xl/metadata.xml` is the “bridge” between worksheet cells (`vm="…"`) and Rich Data rich values (`xl/richData/rdrichvalue.xml`).
 
-Minimal structure from the observed file:
+Minimal structure from the smallest observed file (the `rust_xlsxwriter`-generated sample with a single
+image). The real Excel fixture with **multiple images** is shown in [section 9](#9-real-excel-example-multiple-cells--multiple-images-fixture).
 
 ```xml
 <metadata
@@ -201,7 +202,8 @@ Notes:
 
 The rich value records are stored in `rdrichvalue.xml`. The `<v>` elements are **positional**, matching the key order from `rdrichvaluestructure.xml`.
 
-Observed minimal file:
+Observed minimal file (single image). The real Excel fixture with multiple images is shown in
+[section 9](#9-real-excel-example-multiple-cells--multiple-images-fixture).
 
 ```xml
 <rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata" count="1">
