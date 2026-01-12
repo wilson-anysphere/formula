@@ -2,8 +2,17 @@ import { readFile } from "node:fs/promises";
 
 import ts from "typescript";
 
-/** @type {Map<string, { format: "module", source: string }>} */
-const transpileCache = new Map();
+/**
+ * In-flight transpile de-dupe.
+ *
+ * Node's ESM loader caches modules after they've been loaded, so `load()` is usually
+ * only called once per URL. However, Node may call loader hooks concurrently during
+ * graph construction; this prevents redundant TypeScript transpiles without keeping
+ * another long-lived copy of every module's JS in memory.
+ *
+ * @type {Map<string, Promise<{ format: "module", source: string }>>}
+ */
+const transpileInFlight = new Map();
 
 /**
  * Minimal Node ESM loader that lets us run repo TypeScript sources directly under `node --test`.
@@ -113,29 +122,35 @@ export async function load(url, context, defaultLoad) {
   const urlObj = new URL(url);
   const pathname = urlObj.pathname;
   if (pathname.endsWith(".ts") || pathname.endsWith(".tsx")) {
-    const cached = transpileCache.get(url);
-    if (cached) {
-      return { ...cached, shortCircuit: true };
+    let promise = transpileInFlight.get(url);
+    if (!promise) {
+      promise = (async () => {
+        urlObj.search = "";
+        urlObj.hash = "";
+        const source = await readFile(urlObj, "utf8");
+        const isTsx = pathname.endsWith(".tsx");
+        const result = ts.transpileModule(source, {
+          fileName: pathname,
+          compilerOptions: {
+            module: ts.ModuleKind.ESNext,
+            target: ts.ScriptTarget.ES2022,
+            // Helpful stack traces when running with `node --enable-source-maps`.
+            inlineSourceMap: true,
+            ...(isTsx ? { jsx: ts.JsxEmit.ReactJSX } : {}),
+          },
+        });
+
+        /** @type {{ format: "module", source: string }} */
+        return { format: "module", source: result.outputText };
+      })();
+
+      transpileInFlight.set(url, promise);
+      promise.finally(() => {
+        transpileInFlight.delete(url);
+      });
     }
 
-    urlObj.search = "";
-    urlObj.hash = "";
-    const source = await readFile(urlObj, "utf8");
-    const isTsx = pathname.endsWith(".tsx");
-    const result = ts.transpileModule(source, {
-      fileName: pathname,
-      compilerOptions: {
-        module: ts.ModuleKind.ESNext,
-        target: ts.ScriptTarget.ES2022,
-        // Helpful stack traces when running with `node --enable-source-maps`.
-        inlineSourceMap: true,
-        ...(isTsx ? { jsx: ts.JsxEmit.ReactJSX } : {}),
-      },
-    });
-
-    /** @type {{ format: "module", source: string }} */
-    const loaded = { format: "module", source: result.outputText };
-    transpileCache.set(url, loaded);
+    const loaded = await promise;
     return { ...loaded, shortCircuit: true };
   }
 
