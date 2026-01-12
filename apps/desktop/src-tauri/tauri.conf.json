@@ -56,6 +56,21 @@
         "role": "Editor"
       },
       {
+        "ext": ["xltx"],
+        "name": "Excel Template",
+        "role": "Editor"
+      },
+      {
+        "ext": ["xltm"],
+        "name": "Excel Macro-Enabled Template",
+        "role": "Editor"
+      },
+      {
+        "ext": ["xlam"],
+        "name": "Excel Add-In",
+        "role": "Editor"
+      },
+      {
         "ext": ["xlsb"],
         "name": "Excel Binary Spreadsheet",
         "role": "Editor"
