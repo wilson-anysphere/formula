@@ -159,7 +159,8 @@ test.describe("tauri workbook integration", () => {
     await page.getByTestId("sheet-tab-Sheet1").click({ button: "right" });
     const menu = page.getByTestId("sheet-tab-context-menu");
     await expect(menu).toBeVisible();
-    await menu.getByRole("button", { name: "Unhide Sheet2" }).click();
+    await menu.getByRole("button", { name: "Unhide…" }).click();
+    await menu.getByRole("button", { name: "Sheet2" }).click();
 
     await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
     await expect(switcher.locator("option")).toHaveText(["Sheet1", "Sheet2", "Sheet3"]);
@@ -196,10 +197,12 @@ test.describe("tauri workbook integration", () => {
     const menu = page.getByTestId("sheet-tab-context-menu");
     await expect(menu).toBeVisible();
 
-    await expect(menu.getByRole("button", { name: "Unhide Sheet2" })).toBeVisible();
-    await expect(menu.getByRole("button", { name: "Unhide Sheet3" })).toHaveCount(0);
+    await expect(menu.getByRole("button", { name: "Unhide…" })).toBeVisible();
+    await menu.getByRole("button", { name: "Unhide…" }).click();
+    await expect(menu.getByRole("button", { name: "Sheet2" })).toBeVisible();
+    await expect(menu.getByRole("button", { name: "Sheet3" })).toHaveCount(0);
 
-    await menu.getByRole("button", { name: "Unhide Sheet2" }).click();
+    await menu.getByRole("button", { name: "Sheet2" }).click();
 
     await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
     await expect(page.getByTestId("sheet-tab-Sheet3")).toHaveCount(0);

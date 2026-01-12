@@ -34,7 +34,7 @@ test.describe("sheet switcher", () => {
     const menu = page.getByTestId("sheet-tab-context-menu");
     await expect(page.getByTestId("context-menu")).toBeHidden();
     await expect(menu).toBeVisible();
-    await menu.getByRole("button", { name: "Hide sheet" }).click();
+    await menu.getByRole("button", { name: "Hide" }).click();
 
     await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveCount(0);
     await expect(switcher.locator("option")).toHaveCount(2);
@@ -55,7 +55,8 @@ test.describe("sheet switcher", () => {
     await page.getByTestId("sheet-tab-Sheet1").click({ button: "right" });
     await expect(page.getByTestId("context-menu")).toBeHidden();
     await expect(menu).toBeVisible();
-    await menu.getByRole("button", { name: "Unhide Sheet2" }).click();
+    await menu.getByRole("button", { name: "Unhide…" }).click();
+    await menu.getByRole("button", { name: "Sheet2" }).click();
 
     await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
     await expect(switcher.locator("option")).toHaveCount(3);
