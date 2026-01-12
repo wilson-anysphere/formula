@@ -1054,3 +1054,50 @@ fn debug_trace_rejects_external_3d_sheet_spans() {
     assert!(matches!(dbg.trace.kind, TraceKind::CellRef));
     assert!(dbg.trace.reference.is_none());
 }
+
+#[test]
+fn debug_trace_supports_field_access_on_record_values() {
+    use formula_engine::value::Record;
+
+    let mut engine = Engine::new();
+
+    let mut record = Record::new("Widget");
+    record.fields.insert("Price".to_string(), Value::Number(19.99));
+    engine
+        .set_cell_value("Sheet1", "A1", Value::Record(record))
+        .unwrap();
+
+    engine.set_cell_formula("Sheet1", "B1", "=A1.Price").unwrap();
+    engine.recalculate();
+
+    let computed = engine.get_cell_value("Sheet1", "B1");
+    assert_eq!(computed, Value::Number(19.99));
+
+    let dbg = engine.debug_evaluate("Sheet1", "B1").unwrap();
+    assert_eq!(dbg.value, computed);
+    assert_eq!(slice(&dbg.formula, dbg.trace.span), "A1.Price");
+    assert!(matches!(dbg.trace.kind, TraceKind::FieldAccess { .. }));
+}
+
+#[test]
+fn debug_trace_propagates_field_error_for_missing_record_fields() {
+    use formula_engine::value::Record;
+
+    let mut engine = Engine::new();
+
+    let mut record = Record::new("Widget");
+    record.fields.insert("Other".to_string(), Value::Number(1.0));
+    engine
+        .set_cell_value("Sheet1", "A1", Value::Record(record))
+        .unwrap();
+
+    engine.set_cell_formula("Sheet1", "B1", "=A1.Price").unwrap();
+    engine.recalculate();
+
+    let computed = engine.get_cell_value("Sheet1", "B1");
+    assert_eq!(computed, Value::Error(formula_engine::ErrorKind::Field));
+
+    let dbg = engine.debug_evaluate("Sheet1", "B1").unwrap();
+    assert_eq!(dbg.value, computed);
+    assert_eq!(slice(&dbg.formula, dbg.trace.span), "A1.Price");
+}
