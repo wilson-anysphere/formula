@@ -3258,6 +3258,58 @@ fn bytecode_backend_bond_text_dates_reject_numeric_strings() {
 }
 
 #[test]
+fn bytecode_backend_bond_numeric_text_respects_value_locale() {
+    let mut engine = Engine::new();
+    engine.set_value_locale(ValueLocaleConfig::de_de());
+
+    // Use ISO dates to avoid locale-dependent date order ambiguity; focus this test on numeric text
+    // coercion ("0,05" -> 0.05 under de-DE).
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A1",
+            r#"=YIELD("2020-02-01","2025-01-15","0,05","95","100","2")"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A2",
+            r#"=YIELD("2020-02-01","2025-01-15",0.05,95,100,2)"#,
+        )
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 2);
+    assert_eq!(stats.compiled, 2);
+    assert_eq!(stats.fallback, 0);
+
+    engine.recalculate_single_threaded();
+
+    let Value::Number(text_coerced) = engine.get_cell_value("Sheet1", "A1") else {
+        panic!("expected YIELD with numeric text args to return a number");
+    };
+    let Value::Number(numeric_literal) = engine.get_cell_value("Sheet1", "A2") else {
+        panic!("expected YIELD with numeric literals to return a number");
+    };
+    assert!(
+        (text_coerced - numeric_literal).abs() <= 1e-12,
+        "expected numeric text coercion to match numeric literals under de-DE; got {text_coerced} vs {numeric_literal}"
+    );
+
+    assert_engine_matches_ast(
+        &engine,
+        r#"=YIELD("2020-02-01","2025-01-15","0,05","95","100","2")"#,
+        "A1",
+    );
+    assert_engine_matches_ast(
+        &engine,
+        r#"=YIELD("2020-02-01","2025-01-15",0.05,95,100,2)"#,
+        "A2",
+    );
+}
+
+#[test]
 fn bytecode_backend_financial_date_text_respects_value_locale() {
     let mut engine = Engine::new();
     let formula = r#"=DISC("01/02/2020","01/03/2020",97,100)"#;
