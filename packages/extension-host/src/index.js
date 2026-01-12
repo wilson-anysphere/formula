@@ -64,6 +64,114 @@ const API_PERMISSIONS = {
   "config.update": ["storage"]
 };
 
+// Extension APIs represent ranges as full 2D JS arrays. With Excel-scale sheets, unbounded
+// ranges can allocate millions of entries and OOM the host/worker. Keep reads/writes bounded
+// to match the desktop extension API guardrails.
+const DEFAULT_EXTENSION_RANGE_CELL_LIMIT = 200000;
+
+function getRangeSize(range) {
+  if (!range || typeof range !== "object") return null;
+  const startRow = Number(range.startRow);
+  const startCol = Number(range.startCol);
+  const endRow = Number(range.endRow);
+  const endCol = Number(range.endCol);
+  if (![startRow, startCol, endRow, endCol].every((v) => Number.isFinite(v))) return null;
+  const rows = Math.max(0, Math.max(startRow, endRow) - Math.min(startRow, endRow) + 1);
+  const cols = Math.max(0, Math.max(startCol, endCol) - Math.min(startCol, endCol) + 1);
+  return { rows, cols, cellCount: rows * cols };
+}
+
+function assertExtensionRangeWithinLimits(range, { label, maxCells } = {}) {
+  const size = getRangeSize(range);
+  if (!size) return null;
+  const limit = Number.isFinite(maxCells) ? maxCells : DEFAULT_EXTENSION_RANGE_CELL_LIMIT;
+  if (size.cellCount > limit) {
+    const name = String(label ?? "Range");
+    throw new Error(`${name} is too large (${size.rows}x${size.cols}=${size.cellCount} cells). Limit is ${limit} cells.`);
+  }
+  return size;
+}
+
+function columnLettersToIndex(letters) {
+  const cleaned = String(letters ?? "").trim().toUpperCase();
+  if (!/^[A-Z]+$/.test(cleaned)) {
+    throw new Error(`Invalid column letters: ${letters}`);
+  }
+
+  let index = 0;
+  for (const ch of cleaned) {
+    index = index * 26 + (ch.charCodeAt(0) - 64); // A=1
+  }
+  return index - 1; // 0-based
+}
+
+function parseA1CellRef(ref) {
+  const match = /^\s*\$?([A-Za-z]+)\$?(\d+)\s*$/.exec(String(ref ?? ""));
+  if (!match) throw new Error(`Invalid A1 cell reference: ${ref}`);
+  const [, colLetters, rowDigits] = match;
+  const row = Number.parseInt(rowDigits, 10) - 1; // 0-based
+  const col = columnLettersToIndex(colLetters);
+  if (!Number.isFinite(row) || row < 0) throw new Error(`Invalid row in A1 reference: ${ref}`);
+  return { row, col };
+}
+
+function parseSheetPrefix(raw) {
+  const str = String(raw ?? "");
+  const bang = str.indexOf("!");
+  if (bang === -1) return { sheetName: null, a1Ref: str };
+  const sheetPart = str.slice(0, bang).trim();
+  const rest = str.slice(bang + 1);
+  if (sheetPart.length === 0) throw new Error(`Invalid sheet-qualified reference: ${raw}`);
+  if (sheetPart.startsWith("'") && sheetPart.endsWith("'") && sheetPart.length >= 2) {
+    const unquoted = sheetPart.slice(1, -1).replace(/''/g, "'");
+    return { sheetName: unquoted, a1Ref: rest };
+  }
+  return { sheetName: sheetPart, a1Ref: rest };
+}
+
+function parseA1RangeRef(ref) {
+  const { sheetName, a1Ref } = parseSheetPrefix(ref);
+  const parts = String(a1Ref ?? "").split(":");
+  if (parts.length > 2) throw new Error(`Invalid A1 range reference: ${ref}`);
+  const start = parseA1CellRef(parts[0]);
+  const end = parts.length === 2 ? parseA1CellRef(parts[1]) : start;
+  return {
+    sheetName,
+    startRow: Math.min(start.row, end.row),
+    startCol: Math.min(start.col, end.col),
+    endRow: Math.max(start.row, end.row),
+    endCol: Math.max(start.col, end.col)
+  };
+}
+
+function sanitizeEventPayload(event, data) {
+  const evt = String(event ?? "");
+  if (evt !== "selectionChanged") return data;
+  if (!data || typeof data !== "object") return data;
+  const selection = data.selection;
+  if (!selection || typeof selection !== "object") return data;
+
+  let size = getRangeSize(selection);
+  if (!size && typeof selection.address === "string" && selection.address.trim()) {
+    try {
+      size = getRangeSize(parseA1RangeRef(selection.address));
+    } catch {
+      size = null;
+    }
+  }
+  if (!size || size.cellCount <= DEFAULT_EXTENSION_RANGE_CELL_LIMIT) return data;
+
+  return {
+    ...(data ?? {}),
+    selection: {
+      ...(selection ?? {}),
+      values: [],
+      formulas: [],
+      truncated: true
+    }
+  };
+}
+
 const STORAGE_PROTO_POLLUTION_KEY = "__proto__";
 // Persist `__proto__` under an internal alias so JSON parsing/loading cannot mutate prototypes.
 // This preserves round-trip behavior for extensions that (intentionally or accidentally) use the key.
@@ -1370,18 +1478,40 @@ class ExtensionHost {
         this._spreadsheet.deleteSheet(args[0]);
         return null;
 
-      case "cells.getSelection":
-        return this._spreadsheet.getSelection();
-      case "cells.getRange":
+      case "cells.getSelection": {
+        const result = await this._spreadsheet.getSelection();
+        assertExtensionRangeWithinLimits(result, { label: "Selection" });
+        return result;
+      }
+      case "cells.getRange": {
+        // Fail fast on unbounded A1 ranges so we don't ask the spreadsheet implementation to
+        // materialize huge 2D arrays. Ignore parse failures so non-A1 identifiers (e.g. named
+        // ranges) can still be handled by the host spreadsheet implementation.
+        let coords = null;
+        try {
+          coords = parseA1RangeRef(args[0]);
+        } catch {
+          coords = null;
+        }
+        if (coords) assertExtensionRangeWithinLimits(coords, { label: "Range" });
         return this._spreadsheet.getRange(args[0]);
+      }
       case "cells.getCell":
         return this._spreadsheet.getCell(args[0], args[1]);
       case "cells.setCell":
         this._spreadsheet.setCell(args[0], args[1], args[2]);
         return null;
-      case "cells.setRange":
+      case "cells.setRange": {
+        let coords = null;
+        try {
+          coords = parseA1RangeRef(args[0]);
+        } catch {
+          coords = null;
+        }
+        if (coords) assertExtensionRangeWithinLimits(coords, { label: "Range" });
         this._spreadsheet.setRange(args[0], args[1]);
         return null;
+      }
 
       case "commands.registerCommand":
         if (this._commands.has(args[0]) && this._commands.get(args[0]) !== extension.id) {
@@ -1786,6 +1916,7 @@ class ExtensionHost {
   }
 
   _broadcastEvent(event, data) {
+    const payload = sanitizeEventPayload(event, data);
     for (const extension of this._extensions.values()) {
       // Only deliver events to active extensions. Workers are spawned eagerly on load, but the
       // extension entrypoint is not imported/executed until activation. Broadcasting workbook/grid
@@ -1796,7 +1927,7 @@ class ExtensionHost {
         extension.worker.postMessage({
           type: "event",
           event,
-          data
+          data: payload
         });
       } catch {
         // ignore
