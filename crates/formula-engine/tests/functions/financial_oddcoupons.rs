@@ -1,6 +1,6 @@
 use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
 use formula_engine::functions::financial::{oddfprice, oddfyield, oddlprice, oddlyield};
-use formula_engine::Value;
+use formula_engine::{ErrorKind, ExcelError, Value};
 
 use super::harness::TestSheet;
 
