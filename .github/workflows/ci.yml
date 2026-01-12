@@ -177,7 +177,12 @@ jobs:
         # GitHub Actions can parse the environment file.
         run: echo "CARGO_HOME=$HOME/.cargo" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Check desktop builds with full desktop feature set
-        run: cargo check -p desktop --features desktop
+        run: |
+          if (cargo metadata --no-deps --format-version=1 | Select-String -Pattern '"name":"formula-desktop-tauri"' -Quiet) {
+            cargo check -p formula-desktop-tauri --features desktop
+          } else {
+            cargo check -p desktop --features desktop
+          }
 
   desktop-tauri-check-macos:
     name: Desktop (Tauri) Rust compile check (macOS)
@@ -191,7 +196,12 @@ jobs:
       - name: Use shared Cargo home for CI caching
         run: echo "CARGO_HOME=$HOME/.cargo" >> "$GITHUB_ENV"
       - name: Check desktop builds with full desktop feature set
-        run: cargo check -p desktop --features desktop
+        run: |
+          if cargo metadata --no-deps --format-version=1 | grep -q '"name":"formula-desktop-tauri"'; then
+            cargo check -p formula-desktop-tauri --features desktop
+          else
+            cargo check -p desktop --features desktop
+          fi
 
   node-tests:
     name: Node tests
