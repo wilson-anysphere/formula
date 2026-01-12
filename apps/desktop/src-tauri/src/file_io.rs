@@ -21,7 +21,7 @@ use formula_xlsx::{
     CellPatch as XlsxCellPatch, PartOverride, PreservedPivotParts, WorkbookCellPatches, XlsxPackage,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::io::{BufReader, Cursor};
+use std::io::{BufReader, Cursor, Read};
 use std::path::Path;
 #[cfg(feature = "desktop")]
 use std::path::PathBuf;
@@ -1425,6 +1425,60 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
         WorkbookDateSystem::Excel1904 => formula_xlsx::DateSystem::V1904,
     };
 
+    fn origin_package_has_macro_content(origin_bytes: &[u8]) -> bool {
+        // Determining whether we need to run the (potentially expensive) macro-stripping rewrite
+        // must not depend on `Workbook::vba_project_bin`, because macro-enabled workbooks can
+        // contain non-VBA macro surfaces (e.g. XLM macrosheets / legacy dialog sheets).
+        //
+        // Keep this check cheap: only scan ZIP entry names and (when present) inspect
+        // `[Content_Types].xml` for macro-enabled workbook types.
+        let mut archive = match zip::ZipArchive::new(Cursor::new(origin_bytes)) {
+            Ok(archive) => archive,
+            Err(_) => return false,
+        };
+
+        let mut saw_content_types = false;
+        for i in 0..archive.len() {
+            let file = match archive.by_index(i) {
+                Ok(file) => file,
+                Err(_) => continue,
+            };
+            if file.is_dir() {
+                continue;
+            }
+
+            let name = file.name();
+            let name = name.strip_prefix('/').unwrap_or(name);
+            let lower = name.to_ascii_lowercase();
+            if lower == "xl/vbaproject.bin"
+                || lower == "xl/vbadata.xml"
+                || lower == "xl/vbaprojectsignature.bin"
+                || lower.starts_with("xl/macrosheets/")
+                || lower.starts_with("xl/dialogsheets/")
+            {
+                return true;
+            }
+
+            if lower == "[content_types].xml" {
+                saw_content_types = true;
+            }
+        }
+
+        if saw_content_types {
+            if let Ok(mut file) = archive.by_name("[Content_Types].xml") {
+                let mut bytes = Vec::new();
+                if file.read_to_end(&mut bytes).is_ok() {
+                    let content_types = String::from_utf8_lossy(&bytes);
+                    if content_types.contains("macroEnabled.main+xml") {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        false
+    }
+
     if let Some(origin_bytes) = workbook.origin_xlsx_bytes.as_deref() {
         // NOTE: This patch-based save path intentionally preserves most workbook-level parts
         // from the original package (e.g. `xl/workbook.xml`). As a result, workbook-structure
@@ -1480,7 +1534,7 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
         }
 
         let wants_drop_vba = matches!(extension.as_deref(), Some("xlsx") | Some("xltx"))
-            && workbook.vba_project_bin.is_some();
+            && (workbook.vba_project_bin.is_some() || origin_package_has_macro_content(origin_bytes));
 
         if patches.is_empty() && !print_settings_changed && !wants_drop_vba && !power_query_changed {
             write_file_atomic(path, origin_bytes).with_context(|| format!("write workbook {:?}", path))?;
@@ -3569,6 +3623,134 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
         assert!(
             written_pkg.vba_project_bin().is_none(),
             "expected vbaProject.bin to be removed when saving as .xltx"
+        );
+    }
+
+    #[test]
+    fn xlsx_save_strips_macrosheets_even_without_vba_project_bin() {
+        // Build a macro-enabled package that contains XLM macrosheets + dialog sheets but no
+        // `xl/vbaProject.bin`. The desktop save path should still run the macro-stripping pipeline
+        // when saving as `.xlsx`/`.xltx`.
+        fn build_macrosheet_only_fixture() -> Vec<u8> {
+            use std::io::Write;
+
+            let content_types = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.ms-excel.sheet.macroEnabled.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/macrosheets/sheet2.xml" ContentType="application/vnd.ms-excel.macrosheet+xml"/>
+  <Override PartName="/xl/dialogsheets/sheet3.xml" ContentType="application/vnd.ms-excel.dialogsheet+xml"/>
+</Types>"#;
+
+            let root_rels = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
+    Target="xl/workbook.xml"/>
+</Relationships>"#;
+
+            let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+    <sheet name="MacroSheet" sheetId="2" r:id="rId2"/>
+    <sheet name="DialogSheet" sheetId="3" r:id="rId3"/>
+  </sheets>
+</workbook>"#;
+
+            let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+    Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2"
+    Type="http://schemas.microsoft.com/office/2006/relationships/xlMacrosheet"
+    Target="macrosheets/sheet2.xml"/>
+  <Relationship Id="rId3"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/dialogsheet"
+    Target="dialogsheets/sheet3.xml"/>
+</Relationships>"#;
+
+            let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>"#;
+
+            let macro_sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<macroSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>"#;
+
+            let dialog_sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<dialogsheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>"#;
+
+            let empty_rels = br#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>"#;
+
+            let cursor = Cursor::new(Vec::new());
+            let mut zip = zip::ZipWriter::new(cursor);
+            let options = zip::write::FileOptions::<()>::default()
+                .compression_method(zip::CompressionMethod::Deflated);
+
+            fn add_file(
+                zip: &mut zip::ZipWriter<Cursor<Vec<u8>>>,
+                options: zip::write::FileOptions<()>,
+                name: &str,
+                bytes: &[u8],
+            ) {
+                zip.start_file(name, options).unwrap();
+                zip.write_all(bytes).unwrap();
+            }
+
+            add_file(&mut zip, options, "[Content_Types].xml", content_types.as_bytes());
+            add_file(&mut zip, options, "_rels/.rels", root_rels.as_bytes());
+            add_file(&mut zip, options, "xl/workbook.xml", workbook_xml.as_bytes());
+            add_file(
+                &mut zip,
+                options,
+                "xl/_rels/workbook.xml.rels",
+                workbook_rels.as_bytes(),
+            );
+            add_file(&mut zip, options, "xl/worksheets/sheet1.xml", worksheet_xml.as_bytes());
+            add_file(&mut zip, options, "xl/macrosheets/sheet2.xml", macro_sheet_xml.as_bytes());
+            add_file(&mut zip, options, "xl/dialogsheets/sheet3.xml", dialog_sheet_xml.as_bytes());
+            add_file(
+                &mut zip,
+                options,
+                "xl/macrosheets/_rels/sheet2.xml.rels",
+                empty_rels,
+            );
+            add_file(
+                &mut zip,
+                options,
+                "xl/dialogsheets/_rels/sheet3.xml.rels",
+                empty_rels,
+            );
+
+            zip.finish().unwrap().into_inner()
+        }
+
+        let bytes = build_macrosheet_only_fixture();
+        let mut workbook = Workbook::new_empty(Some("macrosheet.xlsm".to_string()));
+        workbook.origin_xlsx_bytes = Some(Arc::<[u8]>::from(bytes));
+        // Ensure we are exercising the "macros present but vba_project_bin is None" path.
+        workbook.vba_project_bin = None;
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("out.xlsx");
+        let out_bytes = write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
+        let out_pkg = XlsxPackage::from_bytes(out_bytes.as_ref()).expect("parse output package");
+
+        assert!(
+            !out_pkg.macro_presence().any(),
+            "expected save-as-xlsx to strip macro content"
+        );
+        assert!(out_pkg.part("xl/macrosheets/sheet2.xml").is_none());
+        assert!(out_pkg.part("xl/dialogsheets/sheet3.xml").is_none());
+
+        let content_types = std::str::from_utf8(out_pkg.part("[Content_Types].xml").unwrap())
+            .expect("content types xml utf-8");
+        assert!(
+            !content_types.contains("macroEnabled.main+xml"),
+            "expected workbook content type to be downgraded (got {content_types:?})"
         );
     }
 
