@@ -39,6 +39,45 @@ fn randarray_spills_2_by_3() {
 }
 
 #[test]
+fn randarray_spill_blocking_produces_spill_error_and_resolves_after_clear() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=RANDARRAY(1,2)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "A1").expect("spill range");
+    assert_eq!(start, parse_a1("A1").unwrap());
+    assert_eq!(end, parse_a1("B1").unwrap());
+
+    // Block the spill output cell with a user value.
+    engine.set_cell_value("Sheet1", "B1", 99.0).unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Spill)
+    );
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(99.0));
+    assert!(engine.spill_range("Sheet1", "A1").is_none());
+
+    // Clearing the blocker should allow the volatile formula to spill again.
+    engine.set_cell_value("Sheet1", "B1", Value::Blank).unwrap();
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "A1").expect("spill range");
+    assert_eq!(start, parse_a1("A1").unwrap());
+    assert_eq!(end, parse_a1("B1").unwrap());
+
+    for addr in ["A1", "B1"] {
+        let Value::Number(n) = engine.get_cell_value("Sheet1", addr) else {
+            panic!("expected {addr} to be a number after spill resolves");
+        };
+        assert!((0.0..1.0).contains(&n), "expected 0 <= {n} < 1");
+    }
+}
+
+#[test]
 fn randarray_missing_rows_uses_default() {
     let mut engine = Engine::new();
     engine
