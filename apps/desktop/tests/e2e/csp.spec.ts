@@ -430,9 +430,9 @@ test.describe("Content Security Policy (Tauri parity)", () => {
             spreadsheetApi,
             permissionPrompt: async () => true,
             // The strict import preflight uses `fetch()` to walk module graphs.
-            // Under the production CSP emulation (`connect-src 'self'`), `fetch(blob:...)`
-            // is blocked in some WebViews. The import sandbox is covered in unit tests;
-            // disable preflight here so this e2e suite can focus on CSP + Tauri IPC.
+            // Some WebViews can be finicky about `fetch(blob:...)` during module preflight,
+            // even when `connect-src` includes `blob:`. The import sandbox is covered in unit
+            // tests; disable preflight here so this e2e suite can focus on CSP + Tauri IPC.
             sandbox: { strictImports: false }
           });
 

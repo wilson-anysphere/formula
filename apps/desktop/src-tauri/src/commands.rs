@@ -4013,12 +4013,15 @@ pub async fn write_clipboard(
 // Network + Marketplace proxy (desktop webview)
 //
 // Desktop extensions and the in-webview marketplace client run inside the Tauri WebView, which is
-// governed by the app CSP (including `connect-src`). We keep `connect-src` locked down (no outbound
-// http(s) from the WebView) so the extension permission system cannot be bypassed via direct
-// `fetch()` / `WebSocket` calls.
+// governed by the app CSP (including `connect-src`). The production CSP is intentionally
+// restrictive (TLS-only outbound networking via `https:`/`wss:`; no `http:`/`ws:`).
 //
-// To still enable outbound HTTP(S) in production builds, the webview calls these Tauri commands and
-// the Rust backend performs the network request.
+// Network access for extensions is primarily enforced by Formula's permission model + extension
+// worker guardrails (which replace `fetch`/`WebSocket` inside the worker); CSP is defense-in-depth.
+//
+// To avoid relying on permissive CORS headers for the `tauri://…` origin (and to keep networking
+// behavior consistent across WebViews), the WebView prefers routing outbound HTTP(S) through these
+// Tauri commands so the Rust backend performs the network request.
 
 #[cfg(feature = "desktop")]
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
