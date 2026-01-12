@@ -834,8 +834,8 @@ impl MetadataPart {
                 // insert both the original key and its 0-based equivalent.
                 //
                 // Note: `parsed` is a `HashMap`, so iteration order is not deterministic. Insert in
-                // two passes so the canonical (1-based) keys always win when the shifted `vm-1`
-                // entries collide (e.g. vm=1 and vm=2 both attempt to populate key 1).
+                // two passes so the canonical (1-based) `vm` keys always win when the shifted
+                // `vm-1` entries collide (e.g. vm=1 and vm=2 both attempt to populate key 1).
                 let mut vm_to_rich_value: HashMap<u32, u32> =
                     HashMap::with_capacity(parsed.len().saturating_mul(2));
 
