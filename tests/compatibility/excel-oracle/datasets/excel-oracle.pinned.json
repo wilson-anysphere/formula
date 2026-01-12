@@ -16956,41 +16956,41 @@
       "caseId": "oddfprice_issue_eq_settlement_a2010fe89d14",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NUM!"
+        "t": "n",
+        "v": 104.49129250312109
       },
       "address": "C1",
-      "displayText": "#NUM!"
+      "displayText": "104.49129250312109"
     },
     {
       "caseId": "oddfyield_issue_eq_settlement_c09bb6a4ba69",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NUM!"
+        "t": "n",
+        "v": 0.04000000000000014
       },
       "address": "C1",
-      "displayText": "#NUM!"
+      "displayText": "0.04000000000000014"
     },
     {
       "caseId": "oddfprice_settlement_eq_first_coupon_1ea1c9b63a8c",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NUM!"
+        "t": "n",
+        "v": 104.08111835318353
       },
       "address": "C1",
-      "displayText": "#NUM!"
+      "displayText": "104.08111835318353"
     },
     {
       "caseId": "oddfyield_settlement_eq_first_coupon_8d835f172837",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NUM!"
+        "t": "n",
+        "v": 0.039999999999979614
       },
       "address": "C1",
-      "displayText": "#NUM!"
+      "displayText": "0.039999999999979614"
     },
     {
       "caseId": "oddfprice_first_coupon_eq_maturity_9d33aace26e7",
