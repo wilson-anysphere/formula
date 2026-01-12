@@ -2014,6 +2014,8 @@ export class SpreadsheetApp {
    * This is intentionally public so UI chrome (e.g. sheet tabs) can preserve
    * "formula-bar-driven navigation" workflows while the user is selecting ranges
    * across sheets.
+   *
+   * `opts.cursor` can be used to control the selection on focus (`"end"` / `"all"`).
    */
   focusFormulaBar(opts: { cursor?: "end" | "all" } = {}): void {
     this.formulaBar?.focus(opts);
