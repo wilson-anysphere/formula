@@ -228,7 +228,10 @@ fn dump_dir_records(decompressed: &[u8]) {
                     Some(payload) => (payload, "utf16le(payload)"),
                     None => (data, "utf16le(raw)"),
                 };
-                if looks_like_utf16le(bytes_to_decode) {
+                if !bytes_to_decode.is_empty() && bytes_to_decode.len() % 2 == 0 {
+                    // For known Unicode record IDs, it's more useful to decode unconditionally than
+                    // to rely on heuristics based on NUL high bytes (which only works for
+                    // ASCII-range strings).
                     let (cow, had_errors) = UTF_16LE.decode_without_bom_handling(bytes_to_decode);
                     let mut s = cow.into_owned();
                     s.retain(|c| c != '\u{0000}');
