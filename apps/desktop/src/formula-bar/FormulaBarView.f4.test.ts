@@ -49,9 +49,8 @@ describe("FormulaBarView F4 absolute reference toggle", () => {
 
     expect(view.textarea.value).toBe("=$A$1");
     expect(view.model.draft).toBe("=$A$1");
-    // Excel UX: keep the full reference token selected so repeated F4 presses
-    // keep cycling the same token.
-    expect(view.textarea.selectionStart).toBe(1);
+    // Caret was at the end of the token. Keep it at the end after expansion.
+    expect(view.textarea.selectionStart).toBe(5);
     expect(view.textarea.selectionEnd).toBe(5);
 
     host.remove();
@@ -96,9 +95,8 @@ describe("FormulaBarView F4 absolute reference toggle", () => {
     view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", cancelable: true }));
 
     expect(view.textarea.value).toBe("='My Sheet'!$A$1:$B$2");
-    // Excel UX: keep the full reference token selected so repeated F4 presses
-    // keep cycling the same token.
-    expect(view.textarea.selectionStart).toBe(1);
+    // Caret started at the end of the token, so keep it at the end of the updated token.
+    expect(view.textarea.selectionStart).toBe(view.textarea.value.length);
     expect(view.textarea.selectionEnd).toBe(view.textarea.value.length);
 
     host.remove();
