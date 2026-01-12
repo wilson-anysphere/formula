@@ -17,6 +17,7 @@ const RECORD_CALCMODE: u16 = 0x000D;
 const RECORD_PRECISION: u16 = 0x000E;
 const RECORD_DELTA: u16 = 0x0010;
 const RECORD_ITERATION: u16 = 0x0011;
+const RECORD_PALETTE: u16 = 0x0092;
 const RECORD_FORMAT: u16 = 0x041E;
 const RECORD_CONTINUE: u16 = 0x003C;
 const RECORD_NOTE: u16 = 0x001C;
@@ -326,6 +327,30 @@ pub fn build_view_state_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture that exercises rich style import (FONT/XF/PALETTE).
+///
+/// The fixture contains a single sheet named `Styles` with a value cell (`A1`) that references
+/// a rich XF record using:
+/// - a non-default font (name/bold/italic/underline/strike/color)
+/// - fill pattern + colors
+/// - borders
+/// - alignment
+/// - protection flags
+/// - a built-in number format
+pub fn build_rich_styles_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_rich_styles_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 fn build_workbook_stream(date_1904: bool) -> Vec<u8> {
     // -- Globals -----------------------------------------------------------------
     let mut globals = Vec::<u8>::new();
@@ -426,7 +451,6 @@ fn build_note_comment_workbook_stream(kind: NoteCommentSheetKind) -> Vec<u8> {
 
     // One default cell XF (General).
     push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
-
     let boundsheet_start = globals.len();
     let mut boundsheet = Vec::<u8>::new();
     boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
@@ -567,6 +591,88 @@ fn push_txo_logical_record(out: &mut Vec<u8>, text: &str) {
 
     // Second CONTINUE record: formatting runs. We use 4 bytes of dummy data.
     push_record(out, RECORD_CONTINUE, &[0u8; 4]);
+}
+
+fn build_rich_styles_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS)); // BOF: workbook globals
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes()); // CODEPAGE: Windows-1252
+    push_record(&mut globals, RECORD_WINDOW1, &window1()); // WINDOW1
+
+    // Custom palette: indices start at 8.
+    // - 8 => red
+    // - 9 => green
+    push_record(&mut globals, RECORD_PALETTE, &palette(&[(255, 0, 0), (0, 255, 0)]));
+
+    // Font table: default + styled.
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+    push_record(
+        &mut globals,
+        RECORD_FONT,
+        &font_with_options(FontOptions {
+            name: "Courier New",
+            height_twips: 200, // 10pt
+            weight: 700,       // bold
+            italic: true,
+            underline: true,
+            strike: true,
+            color_idx: 8, // palette red
+        }),
+    );
+
+    // XF table. Many readers expect at least 16 style XFs before cell XFs.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+
+    // One rich cell XF (index 16).
+    let xf_rich = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record_rich());
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "Styles");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    // -- Sheet -------------------------------------------------------------------
+    let sheet_offset = globals.len();
+    let sheet = build_rich_styles_sheet_stream(xf_rich);
+
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+
+    globals.extend_from_slice(&sheet);
+    globals
+}
+
+fn build_rich_styles_sheet_stream(xf_rich: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
+
+    // A1: number cell with rich style.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_rich, 0.5));
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
 }
 
 fn build_merged_formatted_blank_workbook_stream() -> Vec<u8> {
@@ -2007,17 +2113,60 @@ fn window2() -> [u8; 18] {
 }
 
 fn font(name: &str) -> Vec<u8> {
+    font_with_options(FontOptions {
+        name,
+        height_twips: 200, // 10pt
+        weight: 400,
+        italic: false,
+        underline: false,
+        strike: false,
+        color_idx: COLOR_AUTOMATIC,
+    })
+}
+
+struct FontOptions<'a> {
+    name: &'a str,
+    height_twips: u16,
+    weight: u16,
+    italic: bool,
+    underline: bool,
+    strike: bool,
+    color_idx: u16,
+}
+
+fn font_with_options(opts: FontOptions<'_>) -> Vec<u8> {
     let mut out = Vec::<u8>::new();
-    out.extend_from_slice(&200u16.to_le_bytes()); // height = 10pt
-    out.extend_from_slice(&0u16.to_le_bytes()); // option flags
-    out.extend_from_slice(&COLOR_AUTOMATIC.to_le_bytes()); // color: automatic
-    out.extend_from_slice(&400u16.to_le_bytes()); // weight: normal
+    out.extend_from_slice(&opts.height_twips.to_le_bytes()); // height
+
+    let mut flags: u16 = 0;
+    if opts.italic {
+        flags |= 0x0002;
+    }
+    if opts.strike {
+        flags |= 0x0008;
+    }
+    out.extend_from_slice(&flags.to_le_bytes()); // option flags
+
+    out.extend_from_slice(&opts.color_idx.to_le_bytes()); // color
+    out.extend_from_slice(&opts.weight.to_le_bytes()); // weight
     out.extend_from_slice(&0u16.to_le_bytes()); // escapement
-    out.push(0); // underline
+    out.push(if opts.underline { 1 } else { 0 }); // underline
     out.push(0); // family
     out.push(0); // charset
     out.push(0); // reserved
-    write_short_unicode_string(&mut out, name);
+    write_short_unicode_string(&mut out, opts.name);
+    out
+}
+
+fn palette(colors: &[(u8, u8, u8)]) -> Vec<u8> {
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&(colors.len() as u16).to_le_bytes());
+    for &(r, g, b) in colors {
+        out.push(r);
+        out.push(g);
+        out.push(b);
+        out.push(0); // reserved
+    }
     out
 }
 
@@ -2039,6 +2188,47 @@ fn xf_record(font_idx: u16, fmt_idx: u16, is_style_xf: bool) -> [u8; 20] {
     // bits4-15: parent style XF index (0)
     let flags: u16 = XF_FLAG_LOCKED | if is_style_xf { XF_FLAG_STYLE } else { 0 };
     out[4..6].copy_from_slice(&flags.to_le_bytes());
+
+    // Default BIFF8 alignment: General + Bottom.
+    out[6] = 0x20;
+
+    // Attribute flags: apply all so fixture cell XFs don't rely on inheritance.
+    out[9] = 0x3F;
+    out
+}
+
+fn xf_record_rich() -> [u8; 20] {
+    // This encoding matches the best-effort BIFF8 XF parser in `formula-xls`.
+    //
+    // Font index = 1 (2nd FONT record)
+    // Number format = 10 (built-in percent "0.00%")
+    // Protection: unlocked + hidden
+    // Alignment: Center + Wrap + Top
+    // Rotation: 45 degrees
+    // Indent: 2
+    // Borders: Thin, palette index 9 (green)
+    // Fill: Solid, fg=8 (red), bg=9 (green)
+    let mut out = [0u8; 20];
+    out[0..2].copy_from_slice(&1u16.to_le_bytes()); // ifnt
+    out[2..4].copy_from_slice(&10u16.to_le_bytes()); // ifmt
+
+    // flags (protection/type/parent)
+    out[4..6].copy_from_slice(&0x0002u16.to_le_bytes()); // hidden=1, locked=0, cell XF, parent=0
+
+    // alignment / rotation / text props / attribute flags
+    out[6] = 0x0A; // horiz=center (2), wrap, vert=top (0)
+    out[7] = 45; // rotation
+    out[8] = 0x02; // indent=2
+    out[9] = 0x3F; // apply all
+
+    // border + fill
+    let border1: u32 = 0x8489_1111;
+    let border2: u32 = 0x0222_4489;
+    let pattern: u16 = 8 | (9 << 7);
+
+    out[10..14].copy_from_slice(&border1.to_le_bytes());
+    out[14..18].copy_from_slice(&border2.to_le_bytes());
+    out[18..20].copy_from_slice(&pattern.to_le_bytes());
     out
 }
 

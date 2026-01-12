@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use formula_model::{CalculationMode, DateSystem, TabColor};
+use formula_model::{
+    Alignment, Border, BorderEdge, BorderStyle, CalculationMode, Color, DateSystem, Fill,
+    FillPattern, Font, HorizontalAlignment, Protection, Style, TabColor, VerticalAlignment,
+};
 
 use super::{records, strings, BiffVersion};
 
@@ -16,6 +19,8 @@ pub(crate) struct BoundSheetInfo {
 // - BoundSheet8: 2.4.28
 // - 1904: 2.4.169
 // - FORMAT / FORMAT2: 2.4.90
+// - PALETTE: 2.4.155
+// - FONT: 2.4.92
 // - XF: 2.4.353
 // - WINDOW1: 2.4.346
 const RECORD_CODEPAGE: u16 = 0x0042;
@@ -29,6 +34,8 @@ const RECORD_ITERATION: u16 = 0x0011;
 const RECORD_WINDOW1: u16 = 0x003D;
 const RECORD_FORMAT_BIFF8: u16 = 0x041E;
 const RECORD_FORMAT2_BIFF5: u16 = 0x001E;
+const RECORD_PALETTE: u16 = 0x0092;
+const RECORD_FONT: u16 = 0x0031;
 const RECORD_XF: u16 = 0x00E0;
 const RECORD_SAVERECALC: u16 = 0x005F;
 // SHEETEXT [MS-XLS 2.4.269] (BIFF8 only) stores extended sheet metadata such as sheet tab color.
@@ -127,6 +134,8 @@ pub(crate) struct BiffWorkbookGlobals {
     pub(crate) calculate_before_save: Option<bool>,
     pub(crate) active_tab_index: Option<u16>,
     formats: HashMap<u16, String>,
+    palette: Vec<u32>,
+    fonts: Vec<BiffFont>,
     xfs: Vec<BiffXf>,
     /// Sheet tab colors parsed from BIFF8 `SHEETEXT` records, in stream order.
     ///
@@ -149,11 +158,24 @@ impl Default for BiffWorkbookGlobals {
             calculate_before_save: None,
             active_tab_index: None,
             formats: HashMap::new(),
+            palette: Vec::new(),
+            fonts: Vec::new(),
             xfs: Vec::new(),
             sheet_tab_colors: Vec::new(),
             warnings: Vec::new(),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BiffFont {
+    name: String,
+    size_100pt: u16,
+    bold: bool,
+    italic: bool,
+    underline: bool,
+    strike: bool,
+    color_idx: u16,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -162,10 +184,66 @@ pub(crate) enum BiffXfKind {
     Style,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct BiffXfApplyFlags {
+    num_fmt: bool,
+    font: bool,
+    alignment: bool,
+    border: bool,
+    fill: bool,
+    protection: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct BiffXfProtection {
+    locked: bool,
+    hidden: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct BiffXfAlignment {
+    horizontal: Option<HorizontalAlignment>,
+    vertical: Option<VerticalAlignment>,
+    wrap_text: bool,
+    rotation: Option<i16>,
+    indent: Option<u16>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct BiffXfBorderEdge {
+    style: u8,
+    color_idx: u16,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct BiffXfBorder {
+    left: BiffXfBorderEdge,
+    right: BiffXfBorderEdge,
+    top: BiffXfBorderEdge,
+    bottom: BiffXfBorderEdge,
+    diagonal: BiffXfBorderEdge,
+    diagonal_up: bool,
+    diagonal_down: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct BiffXfFill {
+    pattern: u8,
+    fg_color_idx: u16,
+    bg_color_idx: u16,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) struct BiffXf {
+    pub(crate) font_idx: u16,
     pub(crate) num_fmt_id: u16,
     pub(crate) kind: Option<BiffXfKind>,
+    pub(crate) parent_xf: Option<u16>,
+    apply: BiffXfApplyFlags,
+    protection: BiffXfProtection,
+    alignment: BiffXfAlignment,
+    border: BiffXfBorder,
+    fill: BiffXfFill,
 }
 
 impl BiffWorkbookGlobals {
@@ -198,8 +276,238 @@ impl BiffWorkbookGlobals {
         ))
     }
 
+    #[allow(dead_code)]
     pub(crate) fn xf_count(&self) -> usize {
         self.xfs.len()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn resolve_style(&self, xf_index: u32) -> Style {
+        let mut cache: Vec<Option<Style>> = vec![None; self.xfs.len()];
+        let mut stack = Vec::new();
+        self.resolve_style_inner(xf_index as usize, &mut cache, &mut stack)
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn resolve_all_styles(&self) -> Vec<Style> {
+        let mut cache: Vec<Option<Style>> = vec![None; self.xfs.len()];
+        let mut stack: Vec<usize> = Vec::new();
+        for idx in 0..self.xfs.len() {
+            let _ = self.resolve_style_inner(idx, &mut cache, &mut stack);
+        }
+        cache.into_iter().map(|s| s.unwrap_or_default()).collect()
+    }
+
+    fn resolve_style_inner(
+        &self,
+        xf_index: usize,
+        cache: &mut [Option<Style>],
+        stack: &mut Vec<usize>,
+    ) -> Option<Style> {
+        if xf_index >= self.xfs.len() {
+            log::warn!("XF index {xf_index} out of range (xf_count={})", self.xfs.len());
+            return Some(Style::default());
+        }
+
+        if let Some(style) = cache[xf_index].clone() {
+            return Some(style);
+        }
+
+        if stack.contains(&xf_index) {
+            log::warn!("cycle detected while resolving XF inheritance at index {xf_index}");
+            return Some(Style::default());
+        }
+
+        stack.push(xf_index);
+
+        let xf = self.xfs[xf_index];
+        let kind = xf.kind.unwrap_or(BiffXfKind::Cell);
+
+        // Base style: parent XF (best-effort).
+        let mut base = if let Some(parent) = xf.parent_xf {
+            let parent_idx = parent as usize;
+            if parent_idx != xf_index && parent_idx < self.xfs.len() {
+                self.resolve_style_inner(parent_idx, cache, stack)
+                    .unwrap_or_default()
+            } else {
+                Style::default()
+            }
+        } else {
+            Style::default()
+        };
+
+        // Always apply style XFs; for cell XFs, obey attribute flags (best-effort).
+        let apply = |flag: bool| kind == BiffXfKind::Style || flag;
+
+        // Some BIFF writers appear to leave the attribute flags unset even when `ifmt` is
+        // meaningful. Since number formats are critical for correct value rendering (especially
+        // dates), treat any non-General `ifmt` as applied even when the "apply" bit is missing.
+        if apply(xf.apply.num_fmt) || xf.num_fmt_id != 0 {
+            base.number_format = self.resolve_number_format_code(xf_index as u32);
+        }
+
+        if apply(xf.apply.font) {
+            base.font = self.resolve_font(xf.font_idx);
+        }
+
+        if apply(xf.apply.fill) {
+            base.fill = self.resolve_fill(xf.fill);
+        }
+
+        if apply(xf.apply.border) {
+            base.border = self.resolve_border(xf.border);
+        }
+
+        if apply(xf.apply.alignment) {
+            base.alignment = self.resolve_alignment(xf.alignment);
+        }
+
+        if apply(xf.apply.protection) {
+            base.protection = self.resolve_protection(xf.protection);
+        }
+
+        stack.pop();
+        cache[xf_index] = Some(base.clone());
+        Some(base)
+    }
+
+    fn resolve_color_idx(&self, idx: u16) -> Option<Color> {
+        // 0x7FFF indicates automatic color.
+        if idx == 0x7FFF {
+            return Some(Color::Auto);
+        }
+
+        // Palette entries correspond to indices starting at 8.
+        if idx >= 8 {
+            let pal_idx = (idx - 8) as usize;
+            if let Some(&argb) = self.palette.get(pal_idx) {
+                return Some(Color::Argb(argb));
+            }
+        }
+
+        Some(Color::Indexed(idx))
+    }
+
+    fn resolve_font(&self, ifnt: u16) -> Option<Font> {
+        let Some(base_font) = self.fonts.first() else {
+            return None;
+        };
+
+        // BIFF quirk: font index 4 is reserved and omitted from the FONT record stream.
+        // When referencing fonts at indices >= 4, subtract 1 to index into the stored list.
+        let idx = if ifnt >= 4 { ifnt - 1 } else { ifnt } as usize;
+        let Some(font) = self.fonts.get(idx) else {
+            log::warn!(
+                "XF references out-of-range font index {ifnt} (resolved idx={idx}, font_count={})",
+                self.fonts.len()
+            );
+            return None;
+        };
+
+        if font == base_font {
+            return None;
+        }
+
+        Some(Font {
+            name: Some(font.name.clone()),
+            size_100pt: Some(font.size_100pt),
+            bold: font.bold,
+            italic: font.italic,
+            underline: font.underline,
+            strike: font.strike,
+            color: self.resolve_color_idx(font.color_idx),
+        })
+    }
+
+    fn resolve_fill(&self, fill: BiffXfFill) -> Option<Fill> {
+        // BIFF uses a pattern code to indicate if a fill is present; pattern 0 means no fill.
+        if fill.pattern == 0 {
+            return None;
+        }
+
+        let pattern = match fill.pattern {
+            1 => FillPattern::Solid,
+            0x11 => FillPattern::Gray125,
+            other => FillPattern::Other(format!("biff:{other}")),
+        };
+
+        // Only interpret colors when the pattern is meaningful.
+        let fg_color = self.resolve_color_idx(fill.fg_color_idx);
+        let bg_color = self.resolve_color_idx(fill.bg_color_idx);
+
+        Some(Fill {
+            pattern,
+            fg_color,
+            bg_color,
+        })
+    }
+
+    fn resolve_border(&self, border: BiffXfBorder) -> Option<Border> {
+        let to_style = |code: u8| match code {
+            0 => BorderStyle::None,
+            1 => BorderStyle::Thin,
+            2 => BorderStyle::Medium,
+            3 => BorderStyle::Dashed,
+            4 => BorderStyle::Dotted,
+            5 => BorderStyle::Thick,
+            6 => BorderStyle::Double,
+            _ => BorderStyle::None,
+        };
+
+        let edge = |e: BiffXfBorderEdge| {
+            let style = to_style(e.style);
+            BorderEdge {
+                style,
+                // Avoid treating default/unused border colors as meaningful when the border is "none".
+                color: (style != BorderStyle::None).then(|| self.resolve_color_idx(e.color_idx))
+                    .flatten(),
+            }
+        };
+
+        let out = Border {
+            left: edge(border.left),
+            right: edge(border.right),
+            top: edge(border.top),
+            bottom: edge(border.bottom),
+            diagonal: edge(border.diagonal),
+            diagonal_up: border.diagonal_up,
+            diagonal_down: border.diagonal_down,
+        };
+
+        if out == Border::default() {
+            None
+        } else {
+            Some(out)
+        }
+    }
+
+    fn resolve_alignment(&self, alignment: BiffXfAlignment) -> Option<Alignment> {
+        let out = Alignment {
+            horizontal: alignment.horizontal,
+            vertical: alignment.vertical,
+            wrap_text: alignment.wrap_text,
+            rotation: alignment.rotation,
+            indent: alignment.indent,
+        };
+
+        if out == Alignment::default() {
+            None
+        } else {
+            Some(out)
+        }
+    }
+
+    fn resolve_protection(&self, protection: BiffXfProtection) -> Option<Protection> {
+        let out = Protection {
+            locked: protection.locked,
+            hidden: protection.hidden,
+        };
+
+        if out == Protection::default() {
+            None
+        } else {
+            Some(out)
+        }
     }
 }
 
@@ -353,9 +661,20 @@ pub(crate) fn parse_biff_workbook_globals(
                     Err(_) => {}
                 }
             }
+            // PALETTE [MS-XLS 2.4.155]
+            RECORD_PALETTE => {
+                if let Some(palette) = parse_biff_palette_record(data) {
+                    out.palette = palette;
+                }
+            }
+            // FONT [MS-XLS 2.4.92]
+            RECORD_FONT => match parse_biff_font_record(data, biff, codepage) {
+                Ok(font) => out.fonts.push(font),
+                Err(err) => out.warnings.push(format!("failed to parse FONT record: {err}")),
+            },
             // XF [MS-XLS 2.4.353]
             RECORD_XF => {
-                if let Ok(xf) = parse_biff_xf_record(data) {
+                if let Ok(xf) = parse_biff_xf_record(data, biff) {
                     out.xfs.push(xf);
                 }
             }
@@ -537,24 +856,255 @@ fn workbook_globals_allows_continuation_biff8(record_id: u16) -> bool {
     record_id == RECORD_FORMAT_BIFF8
 }
 
-fn parse_biff_xf_record(data: &[u8]) -> Result<BiffXf, String> {
+fn parse_biff_xf_record(data: &[u8], biff: BiffVersion) -> Result<BiffXf, String> {
     if data.len() < 4 {
         return Err("XF record too short".to_string());
     }
 
+    let font_idx = u16::from_le_bytes([data[0], data[1]]);
     let num_fmt_id = u16::from_le_bytes([data[2], data[3]]);
 
+    let mut xf = BiffXf {
+        font_idx,
+        num_fmt_id,
+        kind: None,
+        parent_xf: None,
+        apply: BiffXfApplyFlags::default(),
+        protection: BiffXfProtection::default(),
+        alignment: BiffXfAlignment::default(),
+        border: BiffXfBorder::default(),
+        fill: BiffXfFill::default(),
+    };
+
     // Optional: in BIFF5/8 this is part of the "type/protection" flags field and bit 2 is `fStyle`.
-    let kind = data.get(4..6).map(|bytes| {
-        let flags = u16::from_le_bytes([bytes[0], bytes[1]]);
-        if (flags & XF_FLAG_STYLE) != 0 {
+    if data.len() >= 6 {
+        let flags = u16::from_le_bytes([data[4], data[5]]);
+        xf.kind = Some(if (flags & XF_FLAG_STYLE) != 0 {
             BiffXfKind::Style
         } else {
             BiffXfKind::Cell
-        }
-    });
+        });
+        xf.protection.locked = (flags & 0x0001) != 0;
+        xf.protection.hidden = (flags & 0x0002) != 0;
+        xf.parent_xf = Some(flags >> 4);
+    } else {
+        xf.protection.locked = true;
+        xf.protection.hidden = false;
+    }
 
-    Ok(BiffXf { num_fmt_id, kind })
+    match biff {
+        BiffVersion::Biff8 => {
+            if data.len() >= 20 {
+                parse_biff8_xf_payload(data, &mut xf);
+            }
+        }
+        BiffVersion::Biff5 => {
+            // BIFF5 XF records are 16 bytes; the field packing differs from BIFF8.
+            // Parse best-effort using a BIFF8-compatible layout when enough bytes are present.
+            if data.len() >= 16 {
+                parse_biff5_xf_payload_best_effort(data, &mut xf);
+            }
+        }
+    }
+
+    Ok(xf)
+}
+
+fn parse_biff8_xf_payload(data: &[u8], xf: &mut BiffXf) {
+    // BIFF8 XF record layout (20 bytes), best-effort:
+    // [0..2]  ifnt
+    // [2..4]  ifmt
+    // [4..6]  type/protection/parent flags
+    // [6]     alignment
+    // [7]     rotation
+    // [8]     text properties (indent, etc.)
+    // [9]     attribute flags (apply bits)
+    // [10..14] border1
+    // [14..18] border2
+    // [18..20] pattern (fill colors)
+    let alignment = data[6];
+    let rotation = data[7];
+    let text_props = data[8];
+    let used_attr = data[9];
+
+    xf.alignment.horizontal = parse_biff_horizontal_alignment(alignment & 0x07);
+    xf.alignment.wrap_text = (alignment & 0x08) != 0;
+    xf.alignment.vertical = parse_biff_vertical_alignment((alignment >> 4) & 0x07);
+
+    xf.alignment.rotation = (rotation != 0).then_some(rotation as i16);
+
+    let indent = (text_props & 0x0F) as u16;
+    xf.alignment.indent = (indent != 0).then_some(indent);
+
+    // Attribute flags (apply bits) [MS-XLS 2.4.353]: best-effort mapping.
+    //
+    // Some BIFF files appear to leave this field as 0. Treat 0 as "apply all" so we preserve
+    // formatting rather than dropping it.
+    if used_attr == 0 {
+        xf.apply.num_fmt = true;
+        xf.apply.font = true;
+        xf.apply.alignment = true;
+        xf.apply.border = true;
+        xf.apply.fill = true;
+        xf.apply.protection = true;
+    } else {
+        xf.apply.num_fmt = (used_attr & 0x01) != 0;
+        xf.apply.font = (used_attr & 0x02) != 0;
+        xf.apply.alignment = (used_attr & 0x04) != 0;
+        xf.apply.border = (used_attr & 0x08) != 0;
+        xf.apply.fill = (used_attr & 0x10) != 0;
+        xf.apply.protection = (used_attr & 0x20) != 0;
+    }
+
+    let border1 = u32::from_le_bytes([data[10], data[11], data[12], data[13]]);
+    let border2 = u32::from_le_bytes([data[14], data[15], data[16], data[17]]);
+    let pattern = u16::from_le_bytes([data[18], data[19]]);
+
+    xf.border.left.style = (border1 & 0xF) as u8;
+    xf.border.right.style = ((border1 >> 4) & 0xF) as u8;
+    xf.border.top.style = ((border1 >> 8) & 0xF) as u8;
+    xf.border.bottom.style = ((border1 >> 12) & 0xF) as u8;
+
+    xf.border.left.color_idx = ((border1 >> 16) & 0x7F) as u16;
+    xf.border.right.color_idx = ((border1 >> 23) & 0x7F) as u16;
+
+    xf.border.diagonal_down = ((border1 >> 30) & 0x1) != 0;
+    xf.border.diagonal_up = ((border1 >> 31) & 0x1) != 0;
+
+    xf.border.top.color_idx = (border2 & 0x7F) as u16;
+    xf.border.bottom.color_idx = ((border2 >> 7) & 0x7F) as u16;
+    xf.border.diagonal.color_idx = ((border2 >> 14) & 0x7F) as u16;
+    xf.border.diagonal.style = ((border2 >> 21) & 0x0F) as u8;
+
+    xf.fill.pattern = ((border2 >> 25) & 0x3F) as u8;
+    xf.fill.fg_color_idx = (pattern & 0x7F) as u16;
+    xf.fill.bg_color_idx = ((pattern >> 7) & 0x7F) as u16;
+}
+
+fn parse_biff5_xf_payload_best_effort(data: &[u8], xf: &mut BiffXf) {
+    // BIFF5 XF records are 16 bytes. Parse a subset by treating:
+    // [6] alignment, [7] rotation, [8] text_props, [9] attr flags, [10..14] border1, [14..16] pattern.
+    let alignment = data[6];
+    let rotation = data[7];
+    let text_props = data[8];
+    let used_attr = data[9];
+
+    xf.alignment.horizontal = parse_biff_horizontal_alignment(alignment & 0x07);
+    xf.alignment.wrap_text = (alignment & 0x08) != 0;
+    xf.alignment.vertical = parse_biff_vertical_alignment((alignment >> 4) & 0x07);
+    xf.alignment.rotation = (rotation != 0).then_some(rotation as i16);
+
+    let indent = (text_props & 0x0F) as u16;
+    xf.alignment.indent = (indent != 0).then_some(indent);
+
+    if used_attr == 0 {
+        xf.apply.num_fmt = true;
+        xf.apply.font = true;
+        xf.apply.alignment = true;
+        xf.apply.border = true;
+        xf.apply.fill = true;
+        xf.apply.protection = true;
+    } else {
+        xf.apply.num_fmt = (used_attr & 0x01) != 0;
+        xf.apply.font = (used_attr & 0x02) != 0;
+        xf.apply.alignment = (used_attr & 0x04) != 0;
+        xf.apply.border = (used_attr & 0x08) != 0;
+        xf.apply.fill = (used_attr & 0x10) != 0;
+        xf.apply.protection = (used_attr & 0x20) != 0;
+    }
+
+    let border1 = u32::from_le_bytes([data[10], data[11], data[12], data[13]]);
+    let pattern = u16::from_le_bytes([data[14], data[15]]);
+
+    xf.border.left.style = (border1 & 0xF) as u8;
+    xf.border.right.style = ((border1 >> 4) & 0xF) as u8;
+    xf.border.top.style = ((border1 >> 8) & 0xF) as u8;
+    xf.border.bottom.style = ((border1 >> 12) & 0xF) as u8;
+
+    xf.border.left.color_idx = ((border1 >> 16) & 0x7F) as u16;
+    xf.border.right.color_idx = ((border1 >> 23) & 0x7F) as u16;
+    xf.border.diagonal_down = ((border1 >> 30) & 0x1) != 0;
+    xf.border.diagonal_up = ((border1 >> 31) & 0x1) != 0;
+
+    xf.fill.fg_color_idx = (pattern & 0x7F) as u16;
+    xf.fill.bg_color_idx = ((pattern >> 7) & 0x7F) as u16;
+}
+
+fn parse_biff_horizontal_alignment(code: u8) -> Option<HorizontalAlignment> {
+    match code {
+        0 => None, // General
+        1 => Some(HorizontalAlignment::Left),
+        2 => Some(HorizontalAlignment::Center),
+        3 => Some(HorizontalAlignment::Right),
+        4 => Some(HorizontalAlignment::Fill),
+        5 => Some(HorizontalAlignment::Justify),
+        _ => None,
+    }
+}
+
+fn parse_biff_vertical_alignment(code: u8) -> Option<VerticalAlignment> {
+    match code {
+        0 => Some(VerticalAlignment::Top),
+        1 => Some(VerticalAlignment::Center),
+        // Bottom is the default alignment in Excel; treat it as "unset" for stable style tables.
+        2 => None,
+        _ => None,
+    }
+}
+
+fn parse_biff_palette_record(data: &[u8]) -> Option<Vec<u32>> {
+    if data.len() < 2 {
+        return None;
+    }
+    let count = u16::from_le_bytes([data[0], data[1]]) as usize;
+    let mut out = Vec::with_capacity(count);
+    let mut offset = 2usize;
+    for _ in 0..count {
+        if data.len() < offset + 4 {
+            break;
+        }
+        let r = data[offset];
+        let g = data[offset + 1];
+        let b = data[offset + 2];
+        // data[offset + 3] is reserved.
+        let argb = 0xFF00_0000u32 | ((r as u32) << 16) | ((g as u32) << 8) | (b as u32);
+        out.push(argb);
+        offset += 4;
+    }
+    Some(out)
+}
+
+fn parse_biff_font_record(data: &[u8], biff: BiffVersion, codepage: u16) -> Result<BiffFont, String> {
+    if data.len() < 14 {
+        return Err("FONT record too short".to_string());
+    }
+
+    let height_twips = u16::from_le_bytes([data[0], data[1]]);
+    let grbit = u16::from_le_bytes([data[2], data[3]]);
+    let color_idx = u16::from_le_bytes([data[4], data[5]]);
+    let weight = u16::from_le_bytes([data[6], data[7]]);
+    // let escapement = u16::from_le_bytes([data[8], data[9]]);
+    let underline = data[10];
+    // let family = data[11];
+    // let charset = data[12];
+    // let reserved = data[13];
+
+    let (name, _) = strings::parse_biff_short_string(&data[14..], biff, codepage)?;
+
+    let size_100pt = height_twips.saturating_mul(5);
+    let bold = weight >= 700;
+    let italic = (grbit & 0x0002) != 0;
+    let strike = (grbit & 0x0008) != 0;
+
+    Ok(BiffFont {
+        name,
+        size_100pt,
+        bold,
+        italic,
+        underline: underline != 0,
+        strike,
+        color_idx,
+    })
 }
 
 fn parse_biff_format_record_strict(

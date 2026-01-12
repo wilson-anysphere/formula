@@ -179,8 +179,8 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
         }
     };
 
-    let mut xf_style_ids: Option<Vec<Option<u32>>> = None;
-    let mut xf_has_number_format: Option<Vec<bool>> = None;
+    let mut xf_style_ids: Option<Vec<u32>> = None;
+    let mut xf_is_interesting: Option<Vec<bool>> = None;
     let mut sheet_tab_colors: Option<Vec<Option<TabColor>>> = None;
     let mut workbook_active_tab: Option<u16> = None;
     let mut biff_sheets: Option<Vec<biff::BoundSheetInfo>> = None;
@@ -219,34 +219,22 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                 warnings.extend(globals.warnings.drain(..).map(ImportWarning::new));
                 sheet_tab_colors = Some(std::mem::take(&mut globals.sheet_tab_colors));
 
-                let mut cache: HashMap<String, u32> = HashMap::new();
-                let mut style_ids = Vec::with_capacity(globals.xf_count());
-                let mut has_number_format = Vec::with_capacity(globals.xf_count());
-                for xf_index in 0..globals.xf_count() as u32 {
-                    let style_id = match globals.resolve_number_format_code(xf_index) {
-                        Some(code) => {
-                            has_number_format.push(true);
-                            if let Some(existing) = cache.get(&code) {
-                                Some(*existing)
-                            } else {
-                                let style_id = out.intern_style(Style {
-                                    number_format: Some(code.clone()),
-                                    ..Default::default()
-                                });
-                                cache.insert(code, style_id);
-                                Some(style_id)
-                            }
-                        }
-                        None => {
-                            has_number_format.push(false);
-                            None
-                        }
+                let resolved_styles = globals.resolve_all_styles();
+                let mut style_ids = Vec::with_capacity(resolved_styles.len());
+                let mut interesting = Vec::with_capacity(resolved_styles.len());
+
+                for style in resolved_styles {
+                    let style_id = if style == Style::default() {
+                        0
+                    } else {
+                        out.intern_style(style)
                     };
+                    interesting.push(style_id != 0);
                     style_ids.push(style_id);
                 }
 
                 xf_style_ids = Some(style_ids);
-                xf_has_number_format = Some(has_number_format);
+                xf_is_interesting = Some(interesting);
             }
             Err(err) => warnings.push(ImportWarning::new(format!(
                 "failed to import `.xls` workbook globals: {err}"
@@ -297,7 +285,7 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
             }
             row_col_props = Some(props_by_sheet);
 
-            if let Some(mask) = xf_has_number_format.as_deref() {
+            if let Some(mask) = xf_is_interesting.as_deref() {
                 // Even if the workbook contains no non-General number formats, scan for
                 // out-of-range XF indices so corrupt files still surface a warning.
                 if !mask.is_empty() {
@@ -678,7 +666,8 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
         // `calamine` does not surface `BLANK` records via `used_cells()`, but Excel
         // allows formatting empty cells. Apply any XF-derived number formats to
         // the sheet even when the value is empty so those cells round-trip.
-        if let (Some(xf_style_ids), Some(sheet_cell_xfs)) = (xf_style_ids.as_deref(), sheet_cell_xfs)
+        if let (Some(xf_style_ids), Some(sheet_cell_xfs)) =
+            (xf_style_ids.as_deref(), sheet_cell_xfs)
         {
             let mut out_of_range_xf_count: usize = 0;
             if sheet.merged_regions.is_empty() {
@@ -687,11 +676,11 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                         continue;
                     }
 
-                    let Some(style_id) = xf_style_ids.get(xf_idx as usize).copied() else {
+                    let Some(&style_id) = xf_style_ids.get(xf_idx as usize) else {
                         out_of_range_xf_count = out_of_range_xf_count.saturating_add(1);
                         continue;
                     };
-                    let Some(style_id) = style_id else {
+                    if style_id == 0 {
                         continue;
                     };
 
@@ -721,11 +710,11 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                     // region round-trips consistently with the importer’s value/formula semantics.
                     let anchor = maybe_anchor.unwrap_or(cell_ref);
 
-                    let Some(style_id) = xf_style_ids.get(xf_idx as usize).copied() else {
+                    let Some(&style_id) = xf_style_ids.get(xf_idx as usize) else {
                         out_of_range_xf_count = out_of_range_xf_count.saturating_add(1);
                         continue;
                     };
-                    let Some(style_id) = style_id else {
+                    if style_id == 0 {
                         continue;
                     };
                     if maybe_anchor.is_none() {
@@ -901,12 +890,13 @@ fn convert_value(
 }
 
 fn style_id_for_cell_xf(
-    xf_style_ids: Option<&[Option<u32>]>,
+    xf_style_ids: Option<&[u32]>,
     sheet_cell_xfs: Option<&HashMap<CellRef, u16>>,
     cell_ref: CellRef,
 ) -> Option<u32> {
     let xf_index = sheet_cell_xfs?.get(&cell_ref).copied()? as usize;
-    xf_style_ids?.get(xf_index).copied().flatten()
+    let style_id = *xf_style_ids?.get(xf_index)?;
+    (style_id != 0).then_some(style_id)
 }
 
 fn cell_error_to_error_value(err: calamine::CellErrorType) -> ErrorValue {
