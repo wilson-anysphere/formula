@@ -280,3 +280,40 @@ fn database_functions_computed_criteria_respects_absolute_references() {
         Value::Error(ErrorKind::Value)
     );
 }
+
+#[test]
+fn database_functions_computed_criteria_coerces_numeric_results_to_bool() {
+    let mut sheet = TestSheet::new();
+    seed_database(&mut sheet);
+
+    // Computed-criteria formulas don't have to literally return TRUE/FALSE; Excel boolean coercion
+    // treats non-zero numbers as TRUE.
+    sheet.set_formula("F2", "=--(C2>30)");
+
+    // Matches Bob (35) and Dan (40) => Salary sum = 1500 + 2000.
+    assert_number(&sheet.eval("=DSUM(A1:D5,\"Salary\",F1:F2)"), 3500.0);
+
+    // Single-match computed criteria (numeric TRUE/FALSE).
+    sheet.set_formula("F2", "=--(C2>35)");
+    assert_number(&sheet.eval("=DGET(A1:D5,\"Salary\",F1:F2)"), 2000.0);
+}
+
+#[test]
+fn database_functions_computed_criteria_blank_row_matches_all_records() {
+    let mut sheet = TestSheet::new();
+    seed_database(&mut sheet);
+
+    // Criteria (F1:F2): blank header + blank criteria row should behave like "no criteria".
+    //
+    // DSUM ignores non-numeric values in the field ("n/a" for Carol).
+    assert_number(&sheet.eval("=DSUM(A1:D5,\"Salary\",F1:F2)"), 4500.0);
+    assert_number(&sheet.eval("=DAVERAGE(A1:D5,\"Salary\",F1:F2)"), 1500.0);
+    assert_number(&sheet.eval("=DCOUNT(A1:D5,\"Salary\",F1:F2)"), 3.0);
+    assert_number(&sheet.eval("=DCOUNTA(A1:D5,\"Salary\",F1:F2)"), 4.0);
+
+    // DGET requires exactly one matching record; "match all" is #NUM!.
+    assert_eq!(
+        sheet.eval("=DGET(A1:D5,\"Salary\",F1:F2)"),
+        Value::Error(ErrorKind::Num)
+    );
+}
