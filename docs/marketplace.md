@@ -24,7 +24,8 @@ Authorization: Bearer <token>
 - Responses are served with `Cache-Control: public, max-age=0, must-revalidate` so intermediaries may cache
   but must revalidate via `ETag` before reuse.
 - `304` package download responses still include the same `X-*` metadata headers as `200` responses (sha256,
-  signature, format version, publisher, key id) so clients can update caches without re-downloading bytes.
+  signature, scan status, files sha256, format version, publisher, key id, etc) so clients can update caches without
+  re-downloading bytes.
 
 ## Endpoints
 
@@ -115,7 +116,11 @@ Downloads raw package bytes.
 - `ETag`: the package sha256 (used for conditional requests)
 - `X-Package-Sha256`: hex sha256 of the response body (**clients must verify**)
 - `X-Package-Signature`: base64 signature (detached for v1; for v2 this matches the in-package signature payload)
+- `X-Package-Scan-Status`: `pending|passed|failed|unknown` (may be used by clients to enforce install policy)
+- `X-Package-Files-Sha256`: sha256 of the server-side file inventory for the package version (used as an optional
+  cross-check against the client-verified file list)
 - `X-Package-Format-Version`: `1` or `2`
+- `X-Package-Published-At`: publish timestamp for the package version
 - `X-Publisher`: publisher id
 - `X-Publisher-Key-Id`: key id (sha256 fingerprint) identifying which publisher key signed this version
 - `X-Package-Scan-Status`: package scan status (e.g. `passed`, `pending`, `failed`, `unknown`)

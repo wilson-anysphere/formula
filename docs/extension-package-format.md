@@ -45,8 +45,8 @@ which keeps the initial code load fully verified:
    - compute SHA-256 checksums (WebCrypto)
    - verify the Ed25519 signature (WebCrypto Ed25519)
 3. Persist the verified package bytes + verification metadata in IndexedDB (keyed by `{id, version}`).
-4. Extract the entrypoint (`manifest.browser`, falling back to `module`/`main`) from the archive,
-    create a `blob:` URL for that module, and load it into `BrowserExtensionHost`.
+4. Extract the entrypoint (`manifest.browser`, falling back to `module`/`main`) from the archive, create a `blob:` URL
+   for that module, and load it into `BrowserExtensionHost`.
 
 This same model is used in Desktop/Tauri builds: verified packages persist in IndexedDB
 (`formula.webExtensions`) and are loaded from in-memory `blob:`/`data:` module URLs (no Node runtime, no extracted

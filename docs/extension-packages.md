@@ -3,8 +3,8 @@
 Formula extensions are distributed as *extension packages* (`.fextpkg`). Packages contain the
 extension's `package.json` manifest and the full extension file tree.
 
-Because extension files are executable code, **verification must be tied to extraction**: never
-write package contents to disk unless the package has been successfully verified first.
+Because extension files are executable code, **verification must be tied to installation**: never
+persist package contents (disk extraction or IndexedDB installs) unless the package has been successfully verified first.
 
 ## Formats
 
@@ -19,7 +19,24 @@ write package contents to disk unless the package has been successfully verified
 - Signature: **embedded** (`signature.json`), over `manifest.json` + `checksums.json`
 - Integrity: per-file SHA-256 checksums in `checksums.json`
 
-## Recommended install flow
+## Browser/WebView install flow (Web + Desktop/Tauri)
+
+The production Web + Desktop/Tauri runtime installs extensions without Node/`fs`:
+
+- `WebExtensionManager` (`packages/extension-marketplace/src/WebExtensionManager.ts`) downloads `.fextpkg` bytes,
+  verifies them client-side (SHA-256 + Ed25519), and persists verified packages in IndexedDB (`formula.webExtensions`).
+- Extensions are loaded into `BrowserExtensionHost` from in-memory `blob:`/`data:` module URLs (no extracted extension
+  directory on disk).
+
+For details, see:
+
+- [`docs/10-extensibility.md`](./10-extensibility.md) (Desktop/Tauri runtime + CSP/sandbox model)
+- [`docs/extension-package-format.md`](./extension-package-format.md) (package format + browser install model)
+
+## Node filesystem install flow (legacy/test harness)
+
+The repository also includes a Node-only helper for verified, atomic extraction to disk. This is used by
+Node-based tooling/tests and legacy installers; it is **not used** by the Desktop/Tauri WebView runtime.
 
 Use the high-level helper in `shared/extension-package`:
 
@@ -48,13 +65,13 @@ This function:
 Callers should only update any persistent state (e.g. an "installed extensions" state file) **after**
 `verifyAndExtractExtensionPackage` succeeds.
 
-## Why verification must be tied to extraction
+## Why verification must be tied to installation
 
-If extraction happens before verification:
+If installation happens before verification:
 
 - A tampered download can write attacker-controlled files to disk.
 - Failed installs/updates can leave partially-written extension directories behind.
 - Updates can accidentally delete a working install before discovering the new package is invalid.
 
-Tying verification to atomic extraction prevents these footguns and ensures installs are all-or-nothing.
-
+Tying verification to atomic extraction (or to IndexedDB persistence in browser/WebView runtimes) prevents these
+footguns and ensures installs are all-or-nothing.
