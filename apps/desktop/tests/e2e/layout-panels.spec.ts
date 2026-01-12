@@ -10,7 +10,7 @@ test.describe("dockable panels layout persistence", () => {
     await waitForDesktopReady(page);
 
     // Open AI panel (defaults to right dock via panel registry).
-    await page.getByTestId("open-panel-ai-chat").click();
+    await page.getByTestId("ribbon-root").getByTestId("open-panel-ai-chat").click();
     await expect(page.getByTestId("dock-right").getByTestId("panel-aiChat")).toBeVisible();
 
     // Dock to left.
@@ -33,7 +33,7 @@ test.describe("dockable panels layout persistence", () => {
     await waitForDesktopReady(page);
 
     // Persist a non-default layout under doc-a.
-    await page.getByTestId("open-panel-ai-chat").click();
+    await page.getByTestId("ribbon-root").getByTestId("open-panel-ai-chat").click();
     await page.getByTestId("dock-ai-panel-left").click();
     await expect(page.getByTestId("dock-left").getByTestId("panel-aiChat")).toBeVisible();
 
@@ -54,12 +54,12 @@ test.describe("dockable panels layout persistence", () => {
     await waitForDesktopReady(page);
 
     // Open AI panel (defaults to right dock).
-    await page.getByTestId("open-panel-ai-chat").click();
+    await page.getByTestId("ribbon-root").getByTestId("open-panel-ai-chat").click();
     const rightDock = page.getByTestId("dock-right");
     await expect(rightDock.getByTestId("panel-aiChat")).toBeVisible();
 
     // Open another panel in the same dock.
-    await page.getByTestId("open-macros-panel").click();
+    await page.getByTestId("ribbon-root").getByTestId("open-macros-panel").click();
     await expect(rightDock.getByTestId("panel-macros")).toBeVisible();
 
     // Tab strip should be visible and allow switching between panels.

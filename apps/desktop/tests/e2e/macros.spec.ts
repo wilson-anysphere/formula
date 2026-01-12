@@ -110,7 +110,7 @@ test.describe("macros panel", () => {
     await page.reload();
     await waitForDesktopReady(page);
 
-    await page.getByTestId("open-macros-panel").click();
+    await page.getByTestId("ribbon-root").getByTestId("open-macros-panel").click();
     const panel = page.getByTestId("dock-right").getByTestId("panel-macros");
     await expect(panel).toBeVisible();
 
@@ -147,7 +147,7 @@ test.describe("macros panel", () => {
 
     await gotoDesktop(page);
 
-    await page.getByTestId("open-macros-panel").click();
+    await page.getByTestId("ribbon-root").getByTestId("open-macros-panel").click();
 
     const panel = page.getByTestId("dock-right").getByTestId("panel-macros");
     await expect(panel).toBeVisible();

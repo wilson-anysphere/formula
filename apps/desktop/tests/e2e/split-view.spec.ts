@@ -63,7 +63,7 @@ test.describe("split view", () => {
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
-    await page.getByTestId("split-vertical").click();
+    await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
 
     const secondary = page.locator("#grid-secondary");
     await expect(secondary).toBeVisible();
@@ -152,7 +152,7 @@ test.describe("split view", () => {
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
-    await page.getByTestId("split-vertical").click();
+    await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
 
     const secondary = page.locator("#grid-secondary");
     await expect(secondary).toBeVisible();
@@ -218,7 +218,7 @@ test.describe("split view", () => {
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
-    await page.getByTestId("split-vertical").click();
+    await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
 
     const secondary = page.locator("#grid-secondary");
     await expect(secondary).toBeVisible();
@@ -258,7 +258,7 @@ test.describe("split view", () => {
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
-    await page.getByTestId("split-vertical").click();
+    await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
 
     const secondary = page.locator("#grid-secondary");
     await expect(secondary).toBeVisible();
@@ -301,7 +301,7 @@ test.describe("split view", () => {
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
-    await page.getByTestId("split-vertical").click();
+    await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
 
     const secondary = page.locator("#grid-secondary");
     await expect(secondary).toBeVisible();
@@ -346,7 +346,7 @@ test.describe("split view", () => {
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
-    await page.getByTestId("split-vertical").click();
+    await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
 
     const secondary = page.locator("#grid-secondary");
     await expect(secondary).toBeVisible();
@@ -400,7 +400,7 @@ test.describe("split view", () => {
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
-    await page.getByTestId("split-vertical").click();
+    await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
 
     const secondary = page.locator("#grid-secondary");
     await expect(secondary).toBeVisible();
@@ -439,7 +439,7 @@ test.describe("split view", () => {
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
-    await page.getByTestId("split-vertical").click();
+    await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
 
     const secondary = page.locator("#grid-secondary");
     await expect(secondary).toBeVisible();
@@ -491,7 +491,7 @@ test.describe("split view", () => {
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
-    await page.getByTestId("split-vertical").click();
+    await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
 
     const secondary = page.locator("#grid-secondary");
     await expect(secondary).toBeVisible();
@@ -588,7 +588,7 @@ test.describe("split view", () => {
       });
       await waitForIdle(page);
 
-      await page.getByTestId("split-vertical").click();
+      await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
       await expect(page.getByTestId("grid-secondary")).toBeVisible();
       await waitForGridCanvasesToBeSized(page, "#grid-secondary");
       const secondary = page.locator("#grid-secondary");
@@ -676,7 +676,7 @@ test.describe("split view", () => {
       });
       await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
 
-      await page.getByTestId("split-vertical").click();
+      await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
       await expect(page.getByTestId("grid-secondary")).toBeVisible();
       await waitForGridCanvasesToBeSized(page, "#grid-secondary");
 
@@ -763,7 +763,7 @@ test.describe("split view", () => {
     await waitForIdle(page);
 
     // Enable split view.
-    await page.getByTestId("split-vertical").click();
+    await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
     const secondary = page.locator("#grid-secondary");
     await expect(secondary).toBeVisible();
     await expect(secondary.locator("canvas")).toHaveCount(3);
@@ -861,7 +861,7 @@ test.describe("split view / shared grid zoom", () => {
     });
 
     // Enable split view.
-    await page.getByTestId("split-vertical").click();
+    await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
     await expect(secondaryGrid).toBeVisible();
 
     // Wait for the secondary grid canvases to mount + size.
@@ -900,7 +900,7 @@ test.describe("split view / shared grid zoom", () => {
     await page.goto("/?grid=shared");
     await page.waitForFunction(() => Boolean((window as any).__formulaApp), undefined, { timeout: 60_000 });
 
-    await page.getByTestId("split-vertical").click();
+    await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
     await page.waitForFunction(() => Boolean((window as any).__formulaSecondaryGrid), undefined, { timeout: 10_000 });
 
     await page.evaluate(() => {

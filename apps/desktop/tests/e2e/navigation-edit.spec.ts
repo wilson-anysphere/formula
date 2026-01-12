@@ -206,7 +206,7 @@ test.describe("grid keyboard navigation + in-place editing", () => {
     expect(b1AfterRedoY).toBe("Hello");
 
     // Undo/redo should still work even if the grid is not focused (e.g. after clicking a toolbar button).
-    await page.getByTestId("split-vertical").click();
+    await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
     await page.keyboard.press(`${modifier}+Z`);
     await waitForIdle(page);
     const a1AfterUndoFromToolbar = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));

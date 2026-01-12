@@ -15,7 +15,7 @@ await ctx.activeSheet.getRange("C1").setValue(99);
     for (let attempt = 0; attempt < 2; attempt += 1) {
       await gotoDesktop(page);
 
-      await page.getByTestId("open-script-editor-panel").click();
+      await page.getByTestId("ribbon-root").getByTestId("open-script-editor-panel").click();
       const panel = page.getByTestId("dock-bottom").getByTestId("panel-scriptEditor");
       await expect(panel).toBeVisible();
 

@@ -27,7 +27,7 @@ print("Hello from Python")
         expect(isolation.crossOriginIsolated).toBe(true);
         expect(isolation.sharedArrayBuffer).toBe(true);
 
-        await page.getByTestId("open-python-panel").click();
+        await page.getByTestId("ribbon-root").getByTestId("open-python-panel").click();
         const panel = page.getByTestId("dock-bottom").getByTestId("panel-python");
         await expect(panel).toBeVisible();
 

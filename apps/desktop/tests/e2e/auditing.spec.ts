@@ -301,8 +301,8 @@ test.describe("formula auditing overlays", () => {
     await page.keyboard.press("ArrowUp");
     await page.keyboard.press("ArrowLeft");
 
-    await page.getByTestId("audit-precedents").click();
-    await page.getByTestId("audit-dependents").click();
+    await page.getByTestId("ribbon-root").getByTestId("audit-precedents").click();
+    await page.getByTestId("ribbon-root").getByTestId("audit-dependents").click();
     await waitForIdle(page);
 
     await expect(page.getByTestId("active-cell")).toHaveText("B1");
@@ -318,7 +318,7 @@ test.describe("formula auditing overlays", () => {
     expect(highlightsC1.precedents).toEqual(["B1"]);
     expect(highlightsC1.dependents).toEqual([]);
 
-    await page.getByTestId("audit-transitive").click();
+    await page.getByTestId("ribbon-root").getByTestId("audit-transitive").click();
     await waitForIdle(page);
     const highlightsC1Transitive = await page.evaluate(() => (window as any).__formulaApp.getAuditingHighlights());
     expect(highlightsC1Transitive.transitive).toBe(true);
