@@ -3343,6 +3343,63 @@ mod tests {
     }
 
     #[test]
+    fn decodes_ptg_area3d_external_workbook_sheet_range_with_quoting() {
+        let sheet_names: Vec<String> = Vec::new();
+        // External workbook sheet span (itabFirst != itabLast).
+        let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
+            supbook: 1,
+            itab_first: 0,
+            itab_last: 1,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+
+        let supbooks = vec![
+            SupBookInfo {
+                ctab: 0,
+                virt_path: "\u{0001}".to_string(),
+                kind: SupBookKind::Internal,
+                workbook_name: None,
+                sheet_names: Vec::new(),
+                extern_names: Vec::new(),
+            },
+            SupBookInfo {
+                ctab: 0,
+                virt_path: "Book2.xlsx".to_string(),
+                kind: SupBookKind::ExternalWorkbook,
+                workbook_name: Some("Book2.xlsx".to_string()),
+                sheet_names: vec!["Sheet 1".to_string(), "Sheet3".to_string()],
+                extern_names: Vec::new(),
+            },
+        ];
+
+        let ctx = RgceDecodeContext {
+            codepage: 1252,
+            sheet_names: &sheet_names,
+            externsheet: &externsheet,
+            supbooks: &supbooks,
+            defined_names: &defined_names,
+        };
+
+        // '[Book2.xlsx]Sheet 1:Sheet3'!A1:B2
+        let mut rgce = Vec::new();
+        rgce.push(0x3B); // PtgArea3d
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // ixti=0
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // rowFirst=0
+        rgce.extend_from_slice(&1u16.to_le_bytes()); // rowLast=1
+        rgce.extend_from_slice(&0xC000u16.to_le_bytes()); // colFirst=A relative
+        rgce.extend_from_slice(&0xC001u16.to_le_bytes()); // colLast=B relative
+
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "'[Book2.xlsx]Sheet 1:Sheet3'!A1:B2");
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
     fn decodes_ptg_ref3d_external_workbook_sheet_ref_strips_paths_from_virtpath() {
         let sheet_names: Vec<String> = Vec::new();
         let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
