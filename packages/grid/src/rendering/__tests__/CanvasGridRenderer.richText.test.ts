@@ -9,11 +9,13 @@ function createMock2dContext(options: {
   canvas: HTMLCanvasElement;
   onFillText?: (args: { text: string; x: number; y: number; font: string; fillStyle: FillStyle }) => void;
   onStroke?: () => void;
+  onClipRect?: (rect: { x: number; y: number; width: number; height: number }) => void;
 }): CanvasRenderingContext2D {
   const noop = () => {};
   let fillStyle: FillStyle = "#000";
   let strokeStyle: FillStyle = "#000";
   let font = "";
+  let lastRect: { x: number; y: number; width: number; height: number } | null = null;
 
   return {
     canvas: options.canvas,
@@ -45,8 +47,12 @@ function createMock2dContext(options: {
     fillRect: noop,
     strokeRect: noop,
     beginPath: noop,
-    rect: noop,
-    clip: noop,
+    rect: (x: number, y: number, width: number, height: number) => {
+      lastRect = { x, y, width, height };
+    },
+    clip: () => {
+      if (lastRect) options.onClipRect?.(lastRect);
+    },
     fill: noop,
     stroke: () => options.onStroke?.(),
     moveTo: noop,
@@ -196,5 +202,55 @@ describe("CanvasGridRenderer rich text rendering", () => {
     renderer.renderImmediately();
 
     expect(fillTextCalls.map((c) => c.text)).toContain("😀");
+  });
+
+  it("clips rich-text underline drawing to the cell rect even when text overflows into adjacent empty cells", () => {
+    const richText = {
+      text: "This is a long underlined string that should overflow",
+      runs: [{ start: 0, end: 53, style: { underline: true } }]
+    };
+
+    const provider: CellProvider = {
+      getCell: (row, col) => {
+        if (row !== 0) return null;
+        if (col === 0) return { row, col, value: richText.text, richText };
+        // Adjacent empty cell allows overflow.
+        if (col === 1) return { row, col, value: null };
+        return null;
+      }
+    };
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const clipRects: Array<{ x: number; y: number; width: number; height: number }> = [];
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>();
+    contexts.set(gridCanvas, createMock2dContext({ canvas: gridCanvas }));
+    contexts.set(
+      contentCanvas,
+      createMock2dContext({
+        canvas: contentCanvas,
+        onClipRect: (rect) => clipRects.push(rect)
+      })
+    );
+    contexts.set(selectionCanvas, createMock2dContext({ canvas: selectionCanvas }));
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      const ctx = contexts.get(this);
+      return ctx ?? createMock2dContext({ canvas: this });
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const renderer = new CanvasGridRenderer({ provider, rowCount: 1, colCount: 2, defaultColWidth: 100 });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(200, 80, 1);
+    renderer.renderImmediately();
+
+    const roundedWidths = clipRects.map((r) => Math.round(r.width));
+    // Text overflow clip extends into the adjacent column (200px total).
+    expect(roundedWidths.some((w) => w > 100)).toBe(true);
+    // Underline clip stays within the original cell width (100px).
+    expect(clipRects.some((r) => Math.round(r.x) === 0 && Math.round(r.width) === 100)).toBe(true);
   });
 });

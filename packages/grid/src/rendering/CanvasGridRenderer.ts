@@ -2920,9 +2920,11 @@ export class CanvasGridRenderer {
             }
 
             if (underlineSegments.length > 0 || strikeSegments.length > 0) {
+              // Excel clips text decorations (underline/strike) to the cell's own rect, even when
+              // the text itself overflows into adjacent empty cells.
               contentCtx.save();
               contentCtx.beginPath();
-              contentCtx.rect(clipX, y, clipWidth, height);
+              contentCtx.rect(x, y, width, height);
               contentCtx.clip();
               drawDecorationSegments(underlineSegments);
               drawDecorationSegments(strikeSegments);
