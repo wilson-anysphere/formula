@@ -1,6 +1,8 @@
 use std::io::Write;
 
+use formula_engine::{parse_formula, ParseOptions};
 use formula_model::Range;
+use formula_model::{DefinedNameScope, XLNM_FILTER_DATABASE};
 
 mod common;
 
@@ -18,6 +20,11 @@ fn import_fixture_without_biff(bytes: &[u8]) -> formula_xls::XlsImportResult {
     formula_xls::import_xls_path_without_biff(tmp.path()).expect("import xls")
 }
 
+fn assert_parseable(expr: &str) {
+    parse_formula(&format!("={expr}"), ParseOptions::default())
+        .unwrap_or_else(|e| panic!("expected expression to be parseable, expr={expr:?}, err={e:?}"));
+}
+
 #[test]
 fn imports_autofilter_range_from_filterdatabase_defined_name() {
     let bytes = xls_fixture_builder::build_defined_names_builtins_fixture_xls();
@@ -30,6 +37,12 @@ fn imports_autofilter_range_from_filterdatabase_defined_name() {
         .expect("expected Sheet1.auto_filter to be set");
 
     assert_eq!(auto_filter.range, Range::from_a1("A1:C10").unwrap());
+
+    let filter_db = result
+        .workbook
+        .get_defined_name(DefinedNameScope::Sheet(sheet.id), XLNM_FILTER_DATABASE)
+        .expect("expected _FilterDatabase defined name");
+    assert_parseable(&filter_db.refers_to);
 }
 
 #[test]
@@ -44,6 +57,12 @@ fn imports_autofilter_fixture_range_and_empty_state() {
     assert!(auto_filter.filter_columns.is_empty());
     assert!(auto_filter.sort_state.is_none());
     assert!(auto_filter.raw_xml.is_empty());
+
+    let filter_db = result
+        .workbook
+        .get_defined_name(DefinedNameScope::Sheet(sheet.id), XLNM_FILTER_DATABASE)
+        .expect("expected _FilterDatabase defined name");
+    assert_parseable(&filter_db.refers_to);
 }
 
 #[test]
@@ -63,6 +82,16 @@ fn imports_autofilter_range_from_filterdatabase_defined_name_without_biff() {
     assert!(af.filter_columns.is_empty());
     assert!(af.sort_state.is_none());
     assert!(af.raw_xml.is_empty());
+
+    // Calamine fallback does not reliably surface built-in defined names like `_FilterDatabase`.
+    // If the name was imported anyway (e.g. due to future calamine improvements), it should remain
+    // parseable.
+    if let Some(filter_db) = result
+        .workbook
+        .get_defined_name(DefinedNameScope::Sheet(sheet.id), XLNM_FILTER_DATABASE)
+    {
+        assert_parseable(&filter_db.refers_to);
+    }
 }
 
 #[test]
@@ -80,4 +109,10 @@ fn imports_autofilter_range_from_workbook_scope_filterdatabase_name_via_externsh
     assert!(auto_filter.filter_columns.is_empty());
     assert!(auto_filter.sort_state.is_none());
     assert!(auto_filter.raw_xml.is_empty());
+
+    let filter_db = result
+        .workbook
+        .get_defined_name(DefinedNameScope::Workbook, XLNM_FILTER_DATABASE)
+        .expect("expected workbook-scoped _FilterDatabase defined name");
+    assert_parseable(&filter_db.refers_to);
 }

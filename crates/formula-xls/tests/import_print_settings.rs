@@ -1,6 +1,8 @@
 use std::io::Write;
 
+use formula_engine::{parse_formula, ParseOptions};
 use formula_model::{ColRange, Range, RowRange};
+use formula_model::{DefinedNameScope, XLNM_PRINT_AREA, XLNM_PRINT_TITLES};
 
 mod common;
 
@@ -18,6 +20,11 @@ fn import_fixture_without_biff(bytes: &[u8]) -> formula_xls::XlsImportResult {
     formula_xls::import_xls_path_without_biff(tmp.path()).expect("import xls")
 }
 
+fn assert_parseable(expr: &str) {
+    parse_formula(&format!("={expr}"), ParseOptions::default())
+        .unwrap_or_else(|e| panic!("expected expression to be parseable, expr={expr:?}, err={e:?}"));
+}
+
 #[test]
 fn imports_print_settings_from_biff_builtin_defined_names() {
     let bytes = xls_fixture_builder::build_defined_names_builtins_fixture_xls();
@@ -32,6 +39,11 @@ fn imports_print_settings_from_biff_builtin_defined_names() {
             Range::from_a1("C1:C2").unwrap()
         ])
     );
+    let sheet1_id = workbook.sheet_by_name("Sheet1").expect("Sheet1 missing").id;
+    let print_area = workbook
+        .get_defined_name(DefinedNameScope::Sheet(sheet1_id), XLNM_PRINT_AREA)
+        .expect("missing Print_Area defined name");
+    assert_parseable(&print_area.refers_to);
 
     let sheet2_settings = workbook.sheet_print_settings_by_name("Sheet2");
     let titles = sheet2_settings
@@ -39,6 +51,11 @@ fn imports_print_settings_from_biff_builtin_defined_names() {
         .expect("expected print_titles for Sheet2");
     assert_eq!(titles.repeat_rows, Some(RowRange { start: 0, end: 0 }));
     assert_eq!(titles.repeat_cols, Some(ColRange { start: 0, end: 0 }));
+    let sheet2_id = workbook.sheet_by_name("Sheet2").expect("Sheet2 missing").id;
+    let print_titles = workbook
+        .get_defined_name(DefinedNameScope::Sheet(sheet2_id), XLNM_PRINT_TITLES)
+        .expect("missing Print_Titles defined name");
+    assert_parseable(&print_titles.refers_to);
 }
 
 #[test]
@@ -52,6 +69,10 @@ fn imports_print_settings_via_calamine_defined_name_fallback_when_biff_unavailab
         sheet1_settings.print_area,
         Some(vec![Range::from_a1("A1:A2").unwrap()])
     );
+    let print_area = workbook
+        .get_defined_name(DefinedNameScope::Workbook, XLNM_PRINT_AREA)
+        .expect("missing Print_Area defined name");
+    assert_parseable(&print_area.refers_to);
 
     let sheet2_settings = workbook.sheet_print_settings_by_name("Sheet2");
     let titles = sheet2_settings.print_titles.unwrap_or_else(|| {
@@ -62,6 +83,10 @@ fn imports_print_settings_via_calamine_defined_name_fallback_when_biff_unavailab
     });
     assert_eq!(titles.repeat_rows, Some(RowRange { start: 0, end: 0 }));
     assert_eq!(titles.repeat_cols, None);
+    let print_titles = workbook
+        .get_defined_name(DefinedNameScope::Workbook, XLNM_PRINT_TITLES)
+        .expect("missing Print_Titles defined name");
+    assert_parseable(&print_titles.refers_to);
 }
 
 #[test]
