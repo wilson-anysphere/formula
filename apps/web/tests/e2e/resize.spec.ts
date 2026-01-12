@@ -151,7 +151,7 @@ test("row/col size overrides persist per sheet (and do not leak across sheets)",
   expect(sheet1RowHeight).not.toBe(21);
 
   // Switch to Sheet2: sizes should reset to defaults (no leak from Sheet1).
-  const sheetSelect = page.getByRole("combobox").first();
+  const sheetSelect = page.getByTestId("sheet-switcher");
   await sheetSelect.selectOption("Sheet2");
 
   await page.waitForFunction(() => (window as any).__gridApi.getColWidth(1) === 100);

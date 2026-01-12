@@ -1227,6 +1227,7 @@ function EngineDemoApp() {
       <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
         Sheet:
         <select
+          data-testid="sheet-switcher"
           value={activeSheet}
           onChange={(e) => {
             // Treat sheet switching as a navigation action: after the change, restore

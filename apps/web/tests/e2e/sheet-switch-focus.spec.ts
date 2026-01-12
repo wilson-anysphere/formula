@@ -5,7 +5,7 @@ test("switching sheets restores grid focus for immediate keyboard editing", asyn
 
   await expect(page.getByTestId("engine-status")).toContainText("ready", { timeout: 30_000 });
 
-  const sheetSelect = page.getByRole("combobox").first();
+  const sheetSelect = page.getByTestId("sheet-switcher");
   await sheetSelect.selectOption("Sheet2");
 
   const grid = page.getByTestId("canvas-grid");
@@ -15,4 +15,3 @@ test("switching sheets restores grid focus for immediate keyboard editing", asyn
   await page.keyboard.press("F2");
   await expect(page.getByTestId("cell-editor")).toBeVisible();
 });
-
