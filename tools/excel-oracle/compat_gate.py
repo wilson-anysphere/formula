@@ -717,11 +717,26 @@ def main() -> int:
                 actual_display = m.get("actualDisplayText")
                 if not isinstance(actual_display, str) or not actual_display:
                     actual_display = m.get("actual")
+                mismatch_detail = m.get("mismatchDetail")
+                detail_str = ""
+                if mismatch_detail is not None:
+                    try:
+                        detail_str = json.dumps(mismatch_detail, ensure_ascii=False)
+                    except Exception:
+                        detail_str = str(mismatch_detail)
+                abs_diff = m.get("absDiff")
+                rel_diff = m.get("relDiff")
+                diff_str = ""
+                if isinstance(abs_diff, (int, float)) or isinstance(rel_diff, (int, float)):
+                    diff_str = f" absDiff={abs_diff} relDiff={rel_diff}"
+                if detail_str:
+                    diff_str += f" detail={detail_str}"
                 lines.append(
                     f"* `{m.get('caseId')}` `{m.get('reason')}` "
                     f"`tags={tags_str}` "
                     f"`expected={expected_display}` "
                     f"`actual={actual_display}` "
+                    f"`{diff_str.strip()}` "
                     f"`{m.get('formula')}`"
                 )
             lines.append("")
