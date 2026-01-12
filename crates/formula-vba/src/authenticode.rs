@@ -15,8 +15,9 @@ pub struct VbaSignedDigest {
     /// Note: for VBA signatures this OID is not authoritative for binding:
     /// - v1/v2 (`\x05DigitalSignature` / `\x05DigitalSignatureEx`): digest bytes are always
     ///   **16-byte MD5** per MS-OSHARED §4.3 even when this OID indicates SHA-256.
-    /// - v3 (`\x05DigitalSignatureExt`): digest bytes are expected to be the MS-OVBA `ContentsHashV3`
-    ///   (SHA-256); some producers emit inconsistent OIDs.
+    /// - v3 (`\x05DigitalSignatureExt`): digest bytes are the MS-OVBA v3 binding digest over the
+    ///   v3 transcript. In the wild this is commonly a 32-byte SHA-256, but producers can vary and
+    ///   some emit inconsistent OIDs.
     ///
     /// This field is surfaced for debugging/UI display only.
     ///
