@@ -22,7 +22,6 @@
 // Keep this in sync with the Rust backend clipboard guards (`MAX_PNG_BYTES`).
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB (raw PNG bytes)
 const MAX_RICH_TEXT_BYTES = 2 * 1024 * 1024; // 2MB (HTML / RTF / text)
-const MAX_RICH_TEXT_CHARS = 2 * 1024 * 1024; // writing: approximate guard for JS strings
 
 // Internal marker used to communicate "we detected an oversized text/plain blob" between provider
 // layers (e.g. Web Clipboard API read -> Tauri provider fallback logic) without surfacing it to
@@ -34,6 +33,59 @@ function hasTauri() {
 }
 
 const isTrimChar = (code) => code === 0x20 || code === 0x09 || code === 0x0a || code === 0x0d; // space, tab, lf, cr
+
+/**
+ * Returns `true` if `text` is within `maxBytes` when encoded as UTF-8.
+ *
+ * This is a guardrail used to avoid allocating large buffers or sending huge IPC payloads.
+ * It intentionally avoids `TextEncoder` so we don't materialize the full encoded byte array.
+ *
+ * @param {string} text
+ * @param {number} maxBytes
+ * @returns {boolean}
+ */
+function utf8WithinLimit(text, maxBytes) {
+  if (text.length > maxBytes) return false;
+
+  let bytes = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    if (code < 0x80) {
+      bytes += 1;
+    } else if (code < 0x800) {
+      bytes += 2;
+    } else if (code >= 0xd800 && code <= 0xdbff) {
+      // High surrogate (potential start of a surrogate pair).
+      const next = text.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        // Valid surrogate pair -> 4 bytes.
+        bytes += 4;
+        i += 1;
+      } else {
+        // Unpaired surrogate -> U+FFFD replacement (3 bytes).
+        bytes += 3;
+      }
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      // Unpaired low surrogate -> U+FFFD replacement (3 bytes).
+      bytes += 3;
+    } else {
+      bytes += 3;
+    }
+
+    if (bytes > maxBytes) return false;
+  }
+
+  return true;
+}
+
+/**
+ * @param {unknown} value
+ * @param {number} maxBytes
+ * @returns {value is string}
+ */
+function isStringWithinUtf8Limit(value, maxBytes) {
+  return typeof value === "string" && utf8WithinLimit(value, maxBytes);
+}
 
 function hasDataUrlPrefixAt(str, start) {
   if (start + 5 > str.length) return false;
@@ -277,17 +329,16 @@ function mergeClipboardContent(target, source) {
 
   if (
     typeof target.text !== "string" &&
-    typeof source.text === "string" &&
-    source.text.length <= MAX_RICH_TEXT_CHARS
+    isStringWithinUtf8Limit(source.text, MAX_RICH_TEXT_BYTES)
   ) {
     target.text = source.text;
   }
 
-  if (typeof target.html !== "string" && typeof source.html === "string" && source.html.length <= MAX_RICH_TEXT_CHARS) {
+  if (typeof target.html !== "string" && isStringWithinUtf8Limit(source.html, MAX_RICH_TEXT_BYTES)) {
     target.html = source.html;
   }
 
-  if (typeof target.rtf !== "string" && typeof source.rtf === "string" && source.rtf.length <= MAX_RICH_TEXT_CHARS) {
+  if (typeof target.rtf !== "string" && isStringWithinUtf8Limit(source.rtf, MAX_RICH_TEXT_BYTES)) {
     target.rtf = source.rtf;
   }
 
@@ -380,9 +431,9 @@ function createTauriClipboardProvider() {
               /** @type {any} */
               const r = result;
               native = {};
-              if (typeof r.text === "string" && r.text.length <= MAX_RICH_TEXT_CHARS) native.text = r.text;
-              if (typeof r.html === "string" && r.html.length <= MAX_RICH_TEXT_CHARS) native.html = r.html;
-              if (typeof r.rtf === "string" && r.rtf.length <= MAX_RICH_TEXT_CHARS) native.rtf = r.rtf;
+              if (isStringWithinUtf8Limit(r.text, MAX_RICH_TEXT_BYTES)) native.text = r.text;
+              if (isStringWithinUtf8Limit(r.html, MAX_RICH_TEXT_BYTES)) native.html = r.html;
+              if (isStringWithinUtf8Limit(r.rtf, MAX_RICH_TEXT_BYTES)) native.rtf = r.rtf;
 
               const pngBase64 = readPngBase64(r);
             if (pngBase64) {
@@ -449,7 +500,7 @@ function createTauriClipboardProvider() {
       if (!skippedOversizedPlainText && typeof merged.text !== "string" && tauriClipboard?.readText) {
         try {
           const text = await tauriClipboard.readText();
-          if (typeof text === "string" && text.length <= MAX_RICH_TEXT_CHARS) merged.text = text;
+          if (isStringWithinUtf8Limit(text, MAX_RICH_TEXT_BYTES)) merged.text = text;
         } catch {
           // Ignore.
         }
@@ -460,10 +511,11 @@ function createTauriClipboardProvider() {
 
     async write(payload) {
       const text = typeof payload.text === "string" ? payload.text : "";
+      const textWithinLimit = utf8WithinLimit(text, MAX_RICH_TEXT_BYTES);
 
       // Avoid sending extremely large plain-text payloads over the rich clipboard IPC path.
       // For oversized payloads, best-effort write plain text only.
-      if (text.length > MAX_RICH_TEXT_CHARS) {
+      if (!textWithinLimit) {
         if (tauriClipboard?.writeText) {
           try {
             await tauriClipboard.writeText(text);
@@ -476,8 +528,8 @@ function createTauriClipboardProvider() {
         return;
       }
 
-      const html = typeof payload.html === "string" && payload.html.length <= MAX_RICH_TEXT_CHARS ? payload.html : undefined;
-      const rtf = typeof payload.rtf === "string" && payload.rtf.length <= MAX_RICH_TEXT_CHARS ? payload.rtf : undefined;
+      const html = isStringWithinUtf8Limit(payload.html, MAX_RICH_TEXT_BYTES) ? payload.html : undefined;
+      const rtf = isStringWithinUtf8Limit(payload.rtf, MAX_RICH_TEXT_BYTES) ? payload.rtf : undefined;
       const imageBytes = await normalizeImagePngBytes(payload.imagePng);
 
       const pngBase64FromImage = imageBytes ? encodeBase64(imageBytes) : undefined;
@@ -643,11 +695,20 @@ function createWebClipboardProvider() {
       } catch {
         text = undefined;
       }
-      if (typeof text === "string" && text.length > MAX_RICH_TEXT_CHARS) {
+      if (typeof text === "string" && !utf8WithinLimit(text, MAX_RICH_TEXT_BYTES)) {
         // Best-effort guardrail: `readText()` provides no size metadata, so we can only cap after
         // the fact. Still avoid returning huge strings downstream.
+        skipped_oversized_plain_text = true;
         text = undefined;
       }
+
+      if (skipped_oversized_plain_text) {
+        /** @type {any} */
+        const out = {};
+        Object.defineProperty(out, SKIPPED_OVERSIZED_PLAINTEXT, { value: true });
+        return out;
+      }
+
       return { text };
     },
 
@@ -655,10 +716,11 @@ function createWebClipboardProvider() {
       const clipboard = globalThis.navigator?.clipboard;
 
       const text = typeof payload.text === "string" ? payload.text : "";
+      const textWithinLimit = utf8WithinLimit(text, MAX_RICH_TEXT_BYTES);
 
       // For very large text payloads, prefer `writeText()` and skip rich ClipboardItem writes to
       // avoid allocating large intermediate Blobs.
-      if (text.length > MAX_RICH_TEXT_CHARS) {
+      if (!textWithinLimit) {
         if (clipboard?.writeText) {
           try {
             await clipboard.writeText(text);
@@ -683,8 +745,8 @@ function createWebClipboardProvider() {
         return;
       }
 
-      const html = typeof payload.html === "string" && payload.html.length <= MAX_RICH_TEXT_CHARS ? payload.html : undefined;
-      const rtf = typeof payload.rtf === "string" && payload.rtf.length <= MAX_RICH_TEXT_CHARS ? payload.rtf : undefined;
+      const html = isStringWithinUtf8Limit(payload.html, MAX_RICH_TEXT_BYTES) ? payload.html : undefined;
+      const rtf = isStringWithinUtf8Limit(payload.rtf, MAX_RICH_TEXT_BYTES) ? payload.rtf : undefined;
       const imagePngBlob = normalizeImagePngBlob(payload.imagePng) ?? normalizeImagePngBlob(payload.pngBase64);
 
       // Prefer writing rich formats when possible.

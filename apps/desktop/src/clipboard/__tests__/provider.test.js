@@ -760,6 +760,48 @@ test("clipboard provider", async (t) => {
     );
   });
 
+  await t.test("web: write uses writeText for oversized UTF-8 plain text", async () => {
+    /** @type {any[]} */
+    const writes = [];
+    /** @type {string[]} */
+    const writeTextCalls = [];
+
+    class MockClipboardItem {
+      /**
+       * @param {Record<string, Blob>} data
+       */
+      constructor(data) {
+        this.data = data;
+      }
+    }
+
+    const largeText = "€".repeat(700_000);
+
+    await withGlobals(
+      {
+        __TAURI__: undefined,
+        ClipboardItem: MockClipboardItem,
+        navigator: {
+          clipboard: {
+            async write(items) {
+              writes.push(items);
+            },
+            async writeText(text) {
+              writeTextCalls.push(text);
+            },
+          },
+        },
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        await provider.write({ text: largeText, html: "<p>hello</p>", rtf: "{\\\\rtf1 hello}" });
+
+        assert.equal(writes.length, 0);
+        assert.deepEqual(writeTextCalls, [largeText]);
+      }
+    );
+  });
+
   await t.test("web: provider tolerates missing Clipboard APIs", async () => {
     await withGlobals(
       {
@@ -1232,6 +1274,46 @@ test("clipboard provider", async (t) => {
     );
   });
 
+  await t.test("tauri: read drops oversized UTF-8 tauri clipboard.readText payloads", async () => {
+    // "€" is 3 bytes in UTF-8, so this exceeds MAX_RICH_TEXT_BYTES without exceeding the char limit.
+    const largeText = "€".repeat(700_000);
+
+    await withGlobals(
+      {
+        __TAURI__: {
+          core: {
+            async invoke(cmd) {
+              if (cmd === "clipboard_read" || cmd === "read_clipboard") {
+                throw new Error("command not found");
+              }
+              throw new Error(`Unexpected command: ${cmd}`);
+            },
+          },
+          clipboard: {
+            async readText() {
+              return largeText;
+            },
+          },
+        },
+        navigator: {
+          clipboard: {
+            async read() {
+              throw new Error("permission denied");
+            },
+            async readText() {
+              throw new Error("permission denied");
+            },
+          },
+        },
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        const content = await provider.read();
+        assert.deepEqual(content, { text: undefined });
+      }
+    );
+  });
+
   await t.test("tauri: read falls back to core.invoke('read_clipboard') when clipboard_read is unavailable", async () => {
     await withGlobals(
       {
@@ -1323,6 +1405,51 @@ test("clipboard provider", async (t) => {
     );
   });
 
+  await t.test("tauri: read ignores oversized legacy UTF-8 text payloads", async () => {
+    const largeText = "€".repeat(700_000);
+
+    await withGlobals(
+      {
+        __TAURI__: {
+          core: {
+            async invoke(cmd) {
+              if (cmd === "clipboard_read") {
+                throw new Error("command not found");
+              }
+              if (cmd === "read_clipboard") {
+                return { text: largeText, html: "legacy html", rtf: "legacy rtf", image_png_base64: "CQgH" };
+              }
+              throw new Error(`Unexpected command: ${cmd}`);
+            },
+          },
+          clipboard: {},
+        },
+        navigator: {
+          clipboard: {
+            async read() {
+              throw new Error("permission denied");
+            },
+            async readText() {
+              throw new Error("permission denied");
+            },
+          },
+        },
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        const content = await provider.read();
+        assert.ok(content.imagePng instanceof Uint8Array);
+        assert.equal(content.text, undefined);
+        assert.deepEqual(content, {
+          text: undefined,
+          html: "legacy html",
+          rtf: "legacy rtf",
+          imagePng: new Uint8Array([0x09, 0x08, 0x07]),
+        });
+      }
+    );
+  });
+
   await t.test("tauri: provider tolerates missing core.invoke and clipboard APIs", async () => {
     await withGlobals(
       {
@@ -1341,6 +1468,40 @@ test("clipboard provider", async (t) => {
 
   await t.test("tauri: write uses legacy writeText for oversized plain text", async () => {
     const largeText = "x".repeat(3 * 1024 * 1024);
+
+    /** @type {any[]} */
+    const invokeCalls = [];
+    /** @type {string[]} */
+    const writeTextCalls = [];
+
+    await withGlobals(
+      {
+        __TAURI__: {
+          core: {
+            async invoke(cmd, args) {
+              invokeCalls.push([cmd, args]);
+              throw new Error("should not call invoke for oversized text");
+            },
+          },
+          clipboard: {
+            async writeText(text) {
+              writeTextCalls.push(text);
+            },
+          },
+        },
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        await provider.write({ text: largeText, html: "<p>hello</p>" });
+
+        assert.deepEqual(invokeCalls, []);
+        assert.deepEqual(writeTextCalls, [largeText]);
+      }
+    );
+  });
+
+  await t.test("tauri: write uses legacy writeText for oversized UTF-8 plain text", async () => {
+    const largeText = "€".repeat(700_000);
 
     /** @type {any[]} */
     const invokeCalls = [];
