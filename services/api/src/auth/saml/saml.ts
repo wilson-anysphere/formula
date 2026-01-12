@@ -524,12 +524,22 @@ class SamlValidationError extends Error {
 }
 
 function decodeSamlXml(base64: string): string {
-  let xml: string;
-  try {
-    xml = Buffer.from(base64, "base64").toString("utf8");
-  } catch {
+  const trimmed = base64.trim();
+  // Note: Buffer.from(..., "base64") is permissive and ignores many invalid
+  // characters. Validate the alphabet and ensure a stable round-trip so malformed
+  // inputs fail fast.
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(trimmed)) {
     throw new SamlValidationError("invalid_response", "SAMLResponse was not valid base64");
   }
+
+  const decoded = Buffer.from(trimmed, "base64");
+  const normalizedInput = trimmed.replace(/=+$/, "");
+  const normalizedRoundTrip = decoded.toString("base64").replace(/=+$/, "");
+  if (normalizedInput !== normalizedRoundTrip) {
+    throw new SamlValidationError("invalid_response", "SAMLResponse was not valid base64");
+  }
+
+  const xml = decoded.toString("utf8");
 
   if (!xml || xml.trim().length === 0) {
     throw new SamlValidationError("invalid_response", "SAMLResponse decoded to an empty document");
@@ -878,7 +888,7 @@ export async function samlCallback(request: FastifyRequest, reply: FastifyReply)
   });
 
   let decodedXml: string;
-  const samlResponse = parsed.data.SAMLResponse.replace(/ /g, "+");
+  const samlResponse = parsed.data.SAMLResponse.replace(/ /g, "+").replace(/\s+/g, "");
   try {
     decodedXml = decodeSamlXml(samlResponse);
     preflightSamlResponseXml(decodedXml);
