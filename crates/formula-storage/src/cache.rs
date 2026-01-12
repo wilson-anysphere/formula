@@ -241,6 +241,23 @@ impl MemoryManager {
         }
     }
 
+    /// Clear the in-memory page + sheet metadata caches.
+    ///
+    /// This is intended for workbook-level operations that mutate sheet structure or rewrite
+    /// formulas directly in SQLite (e.g. sheet rename/delete). Those operations bypass the
+    /// normal `record_change` pathway, so any cached pages can become stale.
+    ///
+    /// Callers should flush dirty pages (via [`MemoryManager::flush_dirty_pages`]) before invoking
+    /// this to avoid discarding in-memory edits that haven't been persisted yet.
+    pub fn clear_cache(&self) {
+        let mut inner = self.inner.lock().expect("memory manager mutex poisoned");
+        inner.pages.clear();
+        inner.sheet_meta.clear();
+        inner.dirty_pages.clear();
+        inner.bytes = 0;
+        inner.needs_persist = false;
+    }
+
     pub fn get_sheet(&self, sheet_id: Uuid) -> StorageResult<SheetMeta> {
         {
             let inner = self.inner.lock().expect("memory manager mutex poisoned");

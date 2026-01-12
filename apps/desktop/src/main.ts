@@ -3633,7 +3633,19 @@ if (
       const wasActive = app.getCurrentSheetId() === sheetId;
       const deletedName = workbookSheetStore.getName(sheetId) ?? sheetId;
 
-      // Update sheet metadata first to enforce workbook invariants (e.g. last-sheet guard).
+      const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
+      if (typeof baseInvoke === "function") {
+        // Prefer the queued invoke (it sequences behind pending `set_cell` / `set_range` sync work).
+        const invoke = queuedInvoke ?? ((cmd: string, args?: any) => queueBackendOp(() => baseInvoke(cmd, args)));
+
+        // Allow any microtask-batched workbook edits to enqueue before we request deletion.
+        await new Promise<void>((resolve) => queueMicrotask(resolve));
+        await invoke("delete_sheet", { sheet_id: sheetId });
+      }
+
+      // Update sheet metadata to enforce workbook invariants (e.g. last-sheet guard) and drive UI
+      // reconciliation. In desktop mode we perform the backend delete first so a failure does not
+      // leave the frontend store out of sync with the host workbook.
       workbookSheetStore.remove(sheetId);
       if (wasActive) {
         const next =

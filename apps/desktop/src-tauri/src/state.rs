@@ -373,53 +373,78 @@ impl AppState {
     }
 
     pub fn add_sheet(&mut self, name: String) -> Result<SheetInfoData, AppStateError> {
-        let workbook = self.get_workbook_mut()?;
-        let base = name.trim();
-        formula_model::validate_sheet_name(base).map_err(|e| AppStateError::WhatIf(e.to_string()))?;
+        let (candidate_id, candidate_name, position) = {
+            let workbook = self.get_workbook()?;
+            let base = name.trim();
+            formula_model::validate_sheet_name(base)
+                .map_err(|e| AppStateError::WhatIf(e.to_string()))?;
 
-        let mut candidate_name = base.to_string();
-        let mut counter = 1usize;
-        while workbook
-            .sheets
-            .iter()
-            .any(|sheet| sheet.name.eq_ignore_ascii_case(&candidate_name))
-        {
-            counter += 1;
-            let suffix = format!(" {counter}");
-            let suffix_len = suffix.encode_utf16().count();
-            let max_base_len =
-                formula_model::EXCEL_MAX_SHEET_NAME_LEN.saturating_sub(suffix_len);
-            let mut used_len = 0usize;
-            let mut truncated = String::new();
-            for ch in base.chars() {
-                let ch_len = ch.len_utf16();
-                if used_len + ch_len > max_base_len {
-                    break;
+            let mut candidate_name = base.to_string();
+            let mut counter = 1usize;
+            while workbook
+                .sheets
+                .iter()
+                .any(|sheet| sheet.name.eq_ignore_ascii_case(&candidate_name))
+            {
+                counter += 1;
+                let suffix = format!(" {counter}");
+                let suffix_len = suffix.encode_utf16().count();
+                let max_base_len =
+                    formula_model::EXCEL_MAX_SHEET_NAME_LEN.saturating_sub(suffix_len);
+                let mut used_len = 0usize;
+                let mut truncated = String::new();
+                for ch in base.chars() {
+                    let ch_len = ch.len_utf16();
+                    if used_len + ch_len > max_base_len {
+                        break;
+                    }
+                    used_len += ch_len;
+                    truncated.push(ch);
                 }
-                used_len += ch_len;
-                truncated.push(ch);
+                candidate_name = format!("{truncated}{suffix}");
             }
-            candidate_name = format!("{truncated}{suffix}");
-        }
-        formula_model::validate_sheet_name(&candidate_name)
-            .map_err(|e| AppStateError::WhatIf(e.to_string()))?;
+            formula_model::validate_sheet_name(&candidate_name)
+                .map_err(|e| AppStateError::WhatIf(e.to_string()))?;
 
-        let base_id = candidate_name.clone();
-        let mut candidate_id = base_id.clone();
-        let mut id_counter = 1usize;
-        while workbook
-            .sheets
-            .iter()
-            .any(|sheet| sheet.id.eq_ignore_ascii_case(&candidate_id))
+            let base_id = candidate_name.clone();
+            let mut candidate_id = base_id.clone();
+            let mut id_counter = 1usize;
+            while workbook
+                .sheets
+                .iter()
+                .any(|sheet| sheet.id.eq_ignore_ascii_case(&candidate_id))
+            {
+                id_counter += 1;
+                candidate_id = format!("{base_id}-{id_counter}");
+            }
+
+            // Append by default.
+            let position = workbook.sheets.len() as i64;
+            (candidate_id, candidate_name, position)
+        };
+
+        if let Some(persistent) = self.persistent.as_mut() {
+            let sheet = persistent
+                .storage
+                .create_sheet(persistent.workbook_id, &candidate_name, position, None)
+                .map_err(|e| AppStateError::Persistence(e.to_string()))?;
+            persistent.sheet_map.insert(candidate_id.clone(), sheet.id);
+        }
+
         {
-            id_counter += 1;
-            candidate_id = format!("{base_id}-{id_counter}");
+            let workbook = self.get_workbook_mut()?;
+            workbook.sheets.push(crate::file_io::Sheet::new(
+                candidate_id.clone(),
+                candidate_name.clone(),
+            ));
+
+            // Adding sheets is a structural XLSX edit. The patch-based save path (which relies on
+            // `origin_xlsx_bytes`) can only patch existing worksheet parts; it cannot add new sheets.
+            // Drop the origin bytes so the next save/export regenerates from storage.
+            workbook.origin_xlsx_bytes = None;
+            workbook.origin_xlsb_path = None;
         }
 
-        workbook.sheets.push(crate::file_io::Sheet::new(
-            candidate_id.clone(),
-            candidate_name.clone(),
-        ));
         self.engine.ensure_sheet(&candidate_name);
 
         self.dirty = true;
@@ -434,7 +459,8 @@ impl AppState {
         let trimmed = name.trim();
         formula_model::validate_sheet_name(trimmed)
             .map_err(|e| AppStateError::WhatIf(e.to_string()))?;
-        let (old_name, new_name) = {
+
+        {
             let workbook = self.get_workbook()?;
             if workbook.sheets.iter().any(|sheet| {
                 sheet.id != sheet_id && sheet.name.eq_ignore_ascii_case(trimmed)
@@ -443,6 +469,10 @@ impl AppState {
                     formula_model::SheetNameError::DuplicateName.to_string(),
                 ));
             }
+        }
+
+        let (old_name, new_name) = {
+            let workbook = self.get_workbook()?;
             let sheet = workbook
                 .sheet(sheet_id)
                 .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
@@ -450,12 +480,13 @@ impl AppState {
             if old_name == trimmed {
                 return Ok(());
             }
+
             (old_name, trimmed.to_string())
         };
 
         // When the workbook is backed by SQLite persistence, rename the sheet in storage first so
         // validation/rewrite failures don't leave the in-memory model in a partially updated state.
-        if let Some(persistent) = self.persistent.as_mut() {
+        if let Some(persistent) = self.persistent.as_ref() {
             let sheet_uuid = persistent.sheet_uuid(sheet_id).ok_or_else(|| {
                 AppStateError::Persistence(format!(
                     "missing persistence mapping for sheet id {sheet_id}"
@@ -488,71 +519,205 @@ impl AppState {
                     other => AppStateError::Persistence(other.to_string()),
                 })?;
 
-            // Drop cached viewports so formula text reads reflect the updated workbook state.
-            let new_memory = open_memory_manager(persistent.storage.clone());
-            let new_autosave = tokio::runtime::Handle::try_current().ok().map(|_| {
-                Arc::new(AutoSaveManager::spawn(
-                    new_memory.clone(),
-                    AutoSaveConfig::default(),
-                ))
-            });
-            persistent.memory = new_memory;
-            persistent.autosave = new_autosave;
+            // Sheet renames rewrite formulas directly in SQLite; clear the page cache so subsequent
+            // viewport reads observe updated formula text.
+            persistent.memory.clear_cache();
         }
 
-        let workbook = self.get_workbook_mut()?;
-
         {
+            let workbook = self.get_workbook_mut()?;
             let sheet = workbook
                 .sheet_mut(sheet_id)
                 .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
             sheet.name = new_name.clone();
-        }
 
-        // Rewrite cross-sheet references in formulas and workbook-level metadata.
-        for sheet in &mut workbook.sheets {
-            for ((row, col), cell) in sheet.cells.iter_mut() {
-                let Some(formula) = cell.formula.as_mut() else {
-                    continue;
-                };
-                let rewritten =
-                    formula_model::rewrite_sheet_names_in_formula(formula, &old_name, &new_name);
-                if rewritten != *formula {
-                    *formula = rewritten;
-                    // Track as an input edit so patch-based XLSX saves include updated formulas.
-                    sheet.dirty_cells.insert((*row, *col));
+            // Rewrite cross-sheet references in formulas and workbook-level metadata.
+            for sheet in &mut workbook.sheets {
+                for ((row, col), cell) in sheet.cells.iter_mut() {
+                    let Some(formula) = cell.formula.as_mut() else {
+                        continue;
+                    };
+                    let rewritten =
+                        formula_model::rewrite_sheet_names_in_formula(formula, &old_name, &new_name);
+                    if rewritten != *formula {
+                        *formula = rewritten;
+                        // Track as an input edit so patch-based XLSX saves include updated formulas.
+                        sheet.dirty_cells.insert((*row, *col));
+                    }
                 }
             }
-        }
 
-        for name in &mut workbook.defined_names {
-            name.refers_to = formula_model::rewrite_sheet_names_in_formula(
-                &name.refers_to,
-                &old_name,
-                &new_name,
-            );
-            if let Some(sheet_key) = name.sheet_id.as_mut() {
-                if sheet_key.eq_ignore_ascii_case(&old_name) {
-                    *sheet_key = new_name.clone();
+            for name in &mut workbook.defined_names {
+                name.refers_to = formula_model::rewrite_sheet_names_in_formula(
+                    &name.refers_to,
+                    &old_name,
+                    &new_name,
+                );
+                if let Some(sheet_key) = name.sheet_id.as_mut() {
+                    if sheet_key.eq_ignore_ascii_case(&old_name) {
+                        *sheet_key = new_name.clone();
+                    }
                 }
             }
-        }
 
-        for table in &mut workbook.tables {
-            if table.sheet_id.eq_ignore_ascii_case(&old_name) {
-                table.sheet_id = new_name.clone();
+            for table in &mut workbook.tables {
+                if table.sheet_id.eq_ignore_ascii_case(&old_name) {
+                    table.sheet_id = new_name.clone();
+                }
             }
-        }
 
-        // Preserve print settings keyed by sheet name.
-        for settings in &mut workbook.print_settings.sheets {
-            if settings.sheet_name.eq_ignore_ascii_case(&old_name) {
-                settings.sheet_name = new_name.clone();
+            // Preserve print settings keyed by sheet name.
+            for settings in &mut workbook.print_settings.sheets {
+                if settings.sheet_name.eq_ignore_ascii_case(&old_name) {
+                    settings.sheet_name = new_name.clone();
+                }
             }
+            for settings in &mut workbook.original_print_settings.sheets {
+                if settings.sheet_name.eq_ignore_ascii_case(&old_name) {
+                    settings.sheet_name = new_name.clone();
+                }
+            }
+
+            // Renaming sheets is a structural XLSX edit. The patch-based save path cannot rewrite
+            // workbook.xml relationships/sheet names, so drop origin bytes to force regeneration
+            // from storage on the next save.
+            workbook.origin_xlsx_bytes = None;
+            workbook.origin_xlsb_path = None;
         }
 
         // The formula engine indexes sheets by name and does not support renames in-place.
         // Rebuild to ensure subsequent evaluations resolve the updated sheet name.
+        self.rebuild_engine_from_workbook()?;
+        self.engine.recalculate();
+        let _ = self.refresh_computed_values()?;
+
+        self.dirty = true;
+        self.redo_stack.clear();
+        Ok(())
+    }
+
+    pub fn delete_sheet(&mut self, sheet_id: &str) -> Result<(), AppStateError> {
+        let (deleted_name, sheet_order) = {
+            let workbook = self.get_workbook()?;
+            if workbook.sheets.len() <= 1 {
+                return Err(AppStateError::WhatIf(
+                    "cannot delete the last sheet".to_string(),
+                ));
+            }
+            let sheet = workbook
+                .sheet(sheet_id)
+                .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
+
+            let order = workbook
+                .sheets
+                .iter()
+                .map(|s| s.name.clone())
+                .collect::<Vec<_>>();
+            (sheet.name.clone(), order)
+        };
+
+        if let Some(persistent) = self.persistent.as_mut() {
+            let sheet_uuid = persistent.sheet_uuid(sheet_id).ok_or_else(|| {
+                AppStateError::Persistence(format!(
+                    "missing persistence mapping for sheet id {sheet_id}"
+                ))
+            })?;
+            // Ensure any pending cell edits are persisted before deleting/rewriting in SQLite,
+            // then clear the cache so subsequent viewports observe the updated workbook state.
+            persistent
+                .memory
+                .flush_dirty_pages()
+                .map_err(|e| AppStateError::Persistence(e.to_string()))?;
+            persistent
+                .storage
+                .delete_sheet(sheet_uuid)
+                .map_err(|e| AppStateError::Persistence(e.to_string()))?;
+            persistent.sheet_map.remove(sheet_id);
+            persistent.memory.clear_cache();
+        }
+
+        {
+            let workbook = self.get_workbook_mut()?;
+            if workbook.sheets.len() <= 1 {
+                return Err(AppStateError::WhatIf(
+                    "cannot delete the last sheet".to_string(),
+                ));
+            }
+
+            let idx = workbook
+                .sheets
+                .iter()
+                .position(|s| s.id == sheet_id)
+                .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
+            workbook.sheets.remove(idx);
+
+            // Drop print settings for the deleted sheet.
+            workbook
+                .print_settings
+                .sheets
+                .retain(|s| !s.sheet_name.eq_ignore_ascii_case(&deleted_name));
+            workbook
+                .original_print_settings
+                .sheets
+                .retain(|s| !s.sheet_name.eq_ignore_ascii_case(&deleted_name));
+
+            // Drop sheet-scoped metadata that no longer has a home.
+            workbook.defined_names.retain(|name| match name.sheet_id.as_deref() {
+                None => true,
+                Some(scope) => {
+                    !scope.eq_ignore_ascii_case(sheet_id) && !scope.eq_ignore_ascii_case(&deleted_name)
+                }
+            });
+            workbook.tables.retain(|table| {
+                !table.sheet_id.eq_ignore_ascii_case(sheet_id)
+                    && !table.sheet_id.eq_ignore_ascii_case(&deleted_name)
+            });
+
+            // Clear patch-save bookkeeping for deleted sheet cells.
+            workbook
+                .cell_input_baseline
+                .retain(|(id, _, _), _| id != sheet_id);
+
+            // Rewrite formulas that referenced the deleted sheet.
+            for sheet in &mut workbook.sheets {
+                for cell in sheet.cells.values_mut() {
+                    let Some(formula) = cell.formula.as_deref() else {
+                        continue;
+                    };
+                    let rewritten = formula_model::rewrite_deleted_sheet_references_in_formula(
+                        formula,
+                        &deleted_name,
+                        &sheet_order,
+                    );
+                    if rewritten != formula {
+                        cell.formula = Some(rewritten);
+                    }
+                }
+            }
+
+            for defined in &mut workbook.defined_names {
+                let rewritten = formula_model::rewrite_deleted_sheet_references_in_formula(
+                    &defined.refers_to,
+                    &deleted_name,
+                    &sheet_order,
+                );
+                if rewritten != defined.refers_to {
+                    defined.refers_to = rewritten;
+                }
+            }
+
+            // Deleting sheets is a structural edit; force future saves through the regeneration
+            // path (storage export) rather than attempting to patch the original XLSX package.
+            workbook.origin_xlsx_bytes = None;
+            workbook.origin_xlsb_path = None;
+        }
+
+        // Drop any pivot registrations that referenced the deleted sheet.
+        self.pivots.pivots.retain(|pivot| {
+            pivot.source_sheet_id != sheet_id && pivot.destination.sheet_id != sheet_id
+        });
+
+        // Rebuild after deletion so the formula engine drops the removed sheet.
         self.rebuild_engine_from_workbook()?;
         self.engine.recalculate();
         let _ = self.refresh_computed_values()?;
