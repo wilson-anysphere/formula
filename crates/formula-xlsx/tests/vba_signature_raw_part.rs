@@ -3,7 +3,7 @@
 use std::io::{Cursor, Write};
 
 use formula_vba::{
-    compute_vba_project_digest_v3, compress_container, content_normalized_data, DigestAlg,
+    compress_container, compute_vba_project_digest_v3, content_normalized_data, DigestAlg,
     VbaProjectBindingVerification, VbaSignatureBinding, VbaSignatureVerification,
 };
 use formula_xlsx::XlsxPackage;
@@ -235,18 +235,25 @@ fn build_oshared_digsig_blob(valid_pkcs7: &[u8]) -> Vec<u8> {
     // MS-OSHARED describes a DigSigBlob wrapper around the PKCS#7 signature bytes.
     //
     // This test blob intentionally contains *multiple* PKCS#7 SignedData blobs:
-    // - a corrupted (but still parseable) one early, and
-    // - a corrupted one after the real signature.
+    // - an invalid (but parseable) one early, and
+    // - an invalid one after the real signature.
     //
     // This ensures verification succeeds only when the DigSigBlob offsets are honored, not when
     // relying on heuristic scan-for-0x30 fallbacks.
     let mut invalid_pkcs7 = valid_pkcs7.to_vec();
-    let last = invalid_pkcs7.len().saturating_sub(1);
-    invalid_pkcs7[last] ^= 0xFF;
+    if let Some((idx, _)) = invalid_pkcs7
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|&(_i, &b)| b != 0)
+    {
+        invalid_pkcs7[idx] ^= 0xFF;
+    } else if let Some(first) = invalid_pkcs7.get_mut(0) {
+        *first ^= 0xFF;
+    }
 
     let digsig_blob_header_len = 8usize; // cb + serializedPointer
     let digsig_info_len = 0x24usize; // 9 DWORDs (cbSignature/signatureOffset + 7 reserved)
-
     let invalid_offset = digsig_blob_header_len + digsig_info_len; // 0x2C
     assert_eq!(invalid_offset, 0x2C);
 
@@ -381,6 +388,34 @@ fn build_oshared_wordsig_blob(valid_pkcs7: &[u8]) -> Vec<u8> {
     out
 }
 
+fn build_digsig_info_serialized_wrapper(pkcs7: &[u8]) -> Vec<u8> {
+    // Some real-world `\x05DigitalSignature*` streams are prefixed by a length-prefixed
+    // DigSigInfoSerialized-like header rather than by a full MS-OSHARED DigSigBlob offset table.
+    //
+    // Layout (one common variant):
+    //   [cbSignature, cbSigningCertStore, cchProjectName] (LE u32)
+    //   [projectName UTF-16LE] [certStore bytes] [signature bytes]
+    let project_name_utf16: Vec<u16> = "VBAProject\0".encode_utf16().collect();
+    let mut project_name_bytes = Vec::new();
+    for ch in &project_name_utf16 {
+        project_name_bytes.extend_from_slice(&ch.to_le_bytes());
+    }
+    let cert_store = vec![0xAA, 0xBB, 0xCC, 0xDD];
+
+    let cb_signature = u32::try_from(pkcs7.len()).expect("pkcs7 fits u32");
+    let cb_cert_store = u32::try_from(cert_store.len()).expect("cert store fits u32");
+    let cch_project = u32::try_from(project_name_utf16.len()).expect("project name fits u32");
+
+    let mut out = Vec::new();
+    out.extend_from_slice(&cb_signature.to_le_bytes());
+    out.extend_from_slice(&cb_cert_store.to_le_bytes());
+    out.extend_from_slice(&cch_project.to_le_bytes());
+    out.extend_from_slice(&project_name_bytes);
+    out.extend_from_slice(&cert_store);
+    out.extend_from_slice(pkcs7);
+    out
+}
+
 #[test]
 fn verifies_raw_vba_project_signature_part_when_not_ole() {
     let pkcs7 = make_pkcs7_signed_message(b"formula-vba-test");
@@ -405,10 +440,12 @@ fn verifies_raw_vba_project_signature_part_when_not_ole() {
     zip.start_file("xl/vbaProject.bin", options).unwrap();
     zip.write_all(&vba_project_bin).unwrap();
 
-    zip.start_file("xl/_rels/vbaProject.bin.rels", options).unwrap();
+    zip.start_file("xl/_rels/vbaProject.bin.rels", options)
+        .unwrap();
     zip.write_all(vba_rels).unwrap();
 
-    zip.start_file("xl/vbaProjectSignature.bin", options).unwrap();
+    zip.start_file("xl/vbaProjectSignature.bin", options)
+        .unwrap();
     zip.write_all(&pkcs7).unwrap();
 
     let bytes = zip.finish().unwrap().into_inner();
@@ -457,11 +494,13 @@ fn verifies_raw_signature_part_binding_against_vba_project_bin() {
     zip.start_file("xl/vbaProject.bin", options).unwrap();
     zip.write_all(&vba_project_bin).unwrap();
 
-    zip.start_file("xl/_rels/vbaProject.bin.rels", options).unwrap();
+    zip.start_file("xl/_rels/vbaProject.bin.rels", options)
+        .unwrap();
     zip.write_all(vba_rels).unwrap();
 
     // Raw PKCS#7 blob: not an OLE container.
-    zip.start_file("xl/vbaProjectSignature.bin", options).unwrap();
+    zip.start_file("xl/vbaProjectSignature.bin", options)
+        .unwrap();
     zip.write_all(&pkcs7).unwrap();
 
     let bytes = zip.finish().unwrap().into_inner();
@@ -487,10 +526,12 @@ fn verifies_raw_signature_part_binding_against_vba_project_bin() {
     zip.start_file("xl/vbaProject.bin", options).unwrap();
     zip.write_all(&tampered_project).unwrap();
 
-    zip.start_file("xl/_rels/vbaProject.bin.rels", options).unwrap();
+    zip.start_file("xl/_rels/vbaProject.bin.rels", options)
+        .unwrap();
     zip.write_all(vba_rels).unwrap();
 
-    zip.start_file("xl/vbaProjectSignature.bin", options).unwrap();
+    zip.start_file("xl/vbaProjectSignature.bin", options)
+        .unwrap();
     zip.write_all(&pkcs7).unwrap();
 
     let bytes = zip.finish().unwrap().into_inner();
@@ -639,11 +680,13 @@ fn verifies_raw_vba_project_signature_part_binding_for_v3_digest() {
     zip.start_file("xl/vbaProject.bin", options).unwrap();
     zip.write_all(&vba_project_bin).unwrap();
 
-    zip.start_file("xl/_rels/vbaProject.bin.rels", options).unwrap();
+    zip.start_file("xl/_rels/vbaProject.bin.rels", options)
+        .unwrap();
     zip.write_all(vba_rels).unwrap();
 
     // Raw PKCS#7/CMS bytes (not an OLE container).
-    zip.start_file("xl/vbaProjectSignature.bin", options).unwrap();
+    zip.start_file("xl/vbaProjectSignature.bin", options)
+        .unwrap();
     zip.write_all(&pkcs7).unwrap();
 
     let bytes = zip.finish().unwrap().into_inner();
@@ -670,4 +713,172 @@ fn verifies_raw_vba_project_signature_part_binding_for_v3_digest() {
         matches!(binding, VbaProjectBindingVerification::BoundVerified(_)),
         "expected BoundVerified, got {binding:?}"
     );
+}
+
+#[test]
+fn verifies_raw_signature_part_binding_when_digsig_blob_wrapped_and_tampered_project_is_not_bound() {
+    let module1 = b"Sub Hello()\r\nEnd Sub\r\n";
+    let vba_project_bin = build_minimal_vba_project_bin(module1);
+
+    // Signed digest is MD5(ContentNormalizedData) per MS-OVBA.
+    let normalized = content_normalized_data(&vba_project_bin).expect("content normalized data");
+    let digest = hash(MessageDigest::md5(), &normalized)
+        .expect("md5 digest")
+        .to_vec();
+
+    let spc = make_spc_indirect_data_content_sha256(&digest);
+    let pkcs7 = make_pkcs7_signed_message(&spc);
+    let wrapped = build_oshared_digsig_blob(&pkcs7);
+
+    let vba_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.microsoft.com/office/2006/relationships/vbaProjectSignature" Target="vbaProjectSignature.bin"/>
+</Relationships>"#;
+
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = zip::ZipWriter::new(cursor);
+    let options = FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+    zip.start_file("xl/vbaProject.bin", options).unwrap();
+    zip.write_all(&vba_project_bin).unwrap();
+
+    zip.start_file("xl/_rels/vbaProject.bin.rels", options)
+        .unwrap();
+    zip.write_all(vba_rels).unwrap();
+
+    // Raw DigSigBlob wrapper bytes (not an OLE container).
+    zip.start_file("xl/vbaProjectSignature.bin", options)
+        .unwrap();
+    zip.write_all(&wrapped).unwrap();
+
+    let bytes = zip.finish().unwrap().into_inner();
+    let pkg = XlsxPackage::from_bytes(&bytes).expect("read package");
+
+    let sig = pkg
+        .verify_vba_digital_signature()
+        .expect("signature verification should succeed")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(sig.binding, VbaSignatureBinding::Bound);
+
+    // Tamper with a covered project stream but keep the signature bytes the same.
+    let mut tampered_module = module1.to_vec();
+    tampered_module[0] ^= 0xFF;
+    let tampered_project = build_minimal_vba_project_bin(&tampered_module);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = zip::ZipWriter::new(cursor);
+    let options = FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+    zip.start_file("xl/vbaProject.bin", options).unwrap();
+    zip.write_all(&tampered_project).unwrap();
+
+    zip.start_file("xl/_rels/vbaProject.bin.rels", options)
+        .unwrap();
+    zip.write_all(vba_rels).unwrap();
+
+    zip.start_file("xl/vbaProjectSignature.bin", options)
+        .unwrap();
+    zip.write_all(&wrapped).unwrap();
+
+    let bytes = zip.finish().unwrap().into_inner();
+    let pkg = XlsxPackage::from_bytes(&bytes).expect("read tampered package");
+
+    let sig = pkg
+        .verify_vba_digital_signature()
+        .expect("signature verification should succeed")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(sig.binding, VbaSignatureBinding::NotBound);
+}
+
+#[test]
+fn verifies_raw_signature_part_binding_when_digsig_info_serialized_wrapped() {
+    let module1 = b"Sub Hello()\r\nEnd Sub\r\n";
+    let vba_project_bin = build_minimal_vba_project_bin(module1);
+
+    let normalized = content_normalized_data(&vba_project_bin).expect("content normalized data");
+    let digest = hash(MessageDigest::md5(), &normalized)
+        .expect("md5 digest")
+        .to_vec();
+
+    let spc = make_spc_indirect_data_content_sha256(&digest);
+    let pkcs7 = make_pkcs7_signed_message(&spc);
+    let wrapped = build_digsig_info_serialized_wrapper(&pkcs7);
+
+    let vba_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.microsoft.com/office/2006/relationships/vbaProjectSignature" Target="vbaProjectSignature.bin"/>
+</Relationships>"#;
+
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = zip::ZipWriter::new(cursor);
+    let options = FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+    zip.start_file("xl/vbaProject.bin", options).unwrap();
+    zip.write_all(&vba_project_bin).unwrap();
+
+    zip.start_file("xl/_rels/vbaProject.bin.rels", options)
+        .unwrap();
+    zip.write_all(vba_rels).unwrap();
+
+    zip.start_file("xl/vbaProjectSignature.bin", options)
+        .unwrap();
+    zip.write_all(&wrapped).unwrap();
+
+    let bytes = zip.finish().unwrap().into_inner();
+    let pkg = XlsxPackage::from_bytes(&bytes).expect("read package");
+
+    let sig = pkg
+        .verify_vba_digital_signature()
+        .expect("signature verification should succeed")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(sig.binding, VbaSignatureBinding::Bound);
+}
+
+#[test]
+fn verifies_raw_vba_project_signature_part_binding_for_v3_digest_when_digsig_blob_wrapped() {
+    let vba_project_bin = build_minimal_vba_project_bin_v3(b"ABC");
+    let digest =
+        compute_vba_project_digest_v3(&vba_project_bin, DigestAlg::Sha256).expect("digest v3");
+    assert_eq!(digest.len(), 32, "SHA-256 digest must be 32 bytes");
+
+    let signed_content = make_spc_indirect_data_content_sha256(&digest);
+    let pkcs7 = make_pkcs7_signed_message(&signed_content);
+    let wrapped = build_oshared_digsig_blob(&pkcs7);
+
+    let vba_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.microsoft.com/office/2006/relationships/vbaProjectSignature" Target="vbaProjectSignature.bin"/>
+</Relationships>"#;
+
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = zip::ZipWriter::new(cursor);
+    let options = FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+    zip.start_file("xl/vbaProject.bin", options).unwrap();
+    zip.write_all(&vba_project_bin).unwrap();
+
+    zip.start_file("xl/_rels/vbaProject.bin.rels", options)
+        .unwrap();
+    zip.write_all(vba_rels).unwrap();
+
+    zip.start_file("xl/vbaProjectSignature.bin", options)
+        .unwrap();
+    zip.write_all(&wrapped).unwrap();
+
+    let bytes = zip.finish().unwrap().into_inner();
+    let pkg = XlsxPackage::from_bytes(&bytes).expect("read package");
+
+    let sig = pkg
+        .verify_vba_digital_signature()
+        .expect("signature verification should succeed")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(sig.binding, VbaSignatureBinding::Bound);
 }
