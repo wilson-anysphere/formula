@@ -4,8 +4,26 @@ import { normalizeFormulaTextOpt } from "./backend/formula";
 
 export type EngineCellScalar = number | string | boolean | null;
 
+export type EngineSheetJson = {
+  /**
+   * Sparse cell map keyed by A1 address.
+   */
+  cells: Record<string, EngineCellScalar>;
+  /**
+   * Optional logical worksheet dimensions (row count).
+   *
+   * When set, this controls how whole-column/row references like `A:A` / `1:1`
+   * are expanded by the WASM engine.
+   */
+  rowCount?: number;
+  /**
+   * Optional logical worksheet dimensions (column count).
+   */
+  colCount?: number;
+};
+
 export type EngineWorkbookJson = {
-  sheets: Record<string, { cells: Record<string, EngineCellScalar> }>;
+  sheets: Record<string, EngineSheetJson>;
 };
 
 export type DocumentCellState = {
@@ -71,7 +89,7 @@ function cellStateToEngineInput(cell: DocumentCellState): EngineCellScalar | nul
  * Note: empty/cleared cells are omitted from the JSON entirely (sparse semantics).
  */
 export function exportDocumentToEngineWorkbookJson(doc: any): EngineWorkbookJson {
-  const sheets: Record<string, { cells: Record<string, EngineCellScalar> }> = {};
+  const sheets: Record<string, EngineSheetJson> = {};
 
   const sheetIds: string[] =
     typeof doc?.getSheetIds === "function" ? (doc.getSheetIds() as string[]) : [];
