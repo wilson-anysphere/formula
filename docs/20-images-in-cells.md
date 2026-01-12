@@ -75,12 +75,12 @@ For a concrete, fixture-backed “Place in Cell” schema walkthrough (including
 `_rvRel:LocalImageIdentifier` and `CalcOrigin`), see:
 
 - [`docs/xlsx-embedded-images-in-cells.md`](./xlsx-embedded-images-in-cells.md)
-  - The Excel-produced fixture `fixtures/xlsx/basic/image-in-cell.xlsx` uses the same richData-only wiring
-    (and does **not** use `xl/cellImages.xml`), with notes in `fixtures/xlsx/basic/image-in-cell.md`.
+  - The Excel-produced fixture [`fixtures/xlsx/basic/image-in-cell.xlsx`](../fixtures/xlsx/basic/image-in-cell.xlsx) uses the same richData-only wiring
+    (and does **not** use `xl/cellImages.xml`), with notes in [`fixtures/xlsx/basic/image-in-cell.md`](../fixtures/xlsx/basic/image-in-cell.md).
 
 ## In-repo fixture (cell image store part)
 
-Fixture workbook: `fixtures/xlsx/basic/cell-images.xlsx`
+Fixture workbook: [`fixtures/xlsx/basic/cell-images.xlsx`](../fixtures/xlsx/basic/cell-images.xlsx)
 
 Confirmed values from this fixture:
 
@@ -106,7 +106,7 @@ variant shapes are documented further below.
 
 - A workbook can contain a dedicated `cellImages` part (seen in tests as `xl/cellimages.xml` and
   `xl/cellImages.xml`) plus a matching relationship part at `xl/_rels/<part>.rels`.
-- `fixtures/xlsx/basic/cell-images.xlsx` contains `xl/cellImages.xml` with namespace:
+- [`fixtures/xlsx/basic/cell-images.xlsx`](../fixtures/xlsx/basic/cell-images.xlsx) contains `xl/cellImages.xml` with namespace:
   - `http://schemas.microsoft.com/office/spreadsheetml/2023/02/main`
 - The `cellImages` XML can reference binary images via DrawingML-style `r:embed="rIdX"` references.
 - `rIdX` is resolved through the `*.rels` part to an image under `xl/media/*`.
@@ -130,7 +130,7 @@ variant shapes are documented further below.
     - no `xl/cellImages.xml`/`xl/cellimages.xml` part is used in that case
     - see: [`docs/xlsx-embedded-images-in-cells.md`](./xlsx-embedded-images-in-cells.md)
   - Confirmed for a real Excel-generated fixture workbook checked into this repo:
-    - `fixtures/xlsx/basic/image-in-cell.xlsx` (see `fixtures/xlsx/basic/image-in-cell.md`)
+    - [`fixtures/xlsx/basic/image-in-cell.xlsx`](../fixtures/xlsx/basic/image-in-cell.xlsx) (see [`fixtures/xlsx/basic/image-in-cell.md`](../fixtures/xlsx/basic/image-in-cell.md))
     - same pattern: error cell `t="e"`/`#VALUE!` + `vm="…"` → `xl/metadata.xml` + `xl/richData/rd*` + `richValueRel` → `xl/media/*`
     - no `xl/cellImages.xml`/`xl/cellimages.xml` part is used in that fixture
   - Still an open question for real Excel-generated `IMAGE()` results and other producers (where `xl/cellImages*.xml` may appear).
@@ -149,7 +149,7 @@ variant shapes are documented further below.
   - `http://schemas.microsoft.com/office/spreadsheetml/2022/cellimages`
 - Some in-repo synthetic fixtures also use a more generic Microsoft SpreadsheetML namespace:
   - `http://schemas.microsoft.com/office/spreadsheetml/2020/07/main` (unverified vs real Excel)
-- `fixtures/xlsx/basic/cell-images.xlsx` uses:
+- [`fixtures/xlsx/basic/cell-images.xlsx`](../fixtures/xlsx/basic/cell-images.xlsx) uses:
   - `http://schemas.microsoft.com/office/spreadsheetml/2023/02/main`
 - The root contains one or more `<cellImage>` entries, each containing a DrawingML picture subtree
   (typically `<xdr:pic>`) and a blip like:
@@ -170,7 +170,7 @@ variant shapes are documented further below.
 - Image relationship type (standard OOXML):
   - `http://schemas.openxmlformats.org/officeDocument/2006/relationships/image`
 - Relationship type for “workbook/worksheet → `cellImages.xml`” discovery:
-  - Confirmed in `fixtures/xlsx/basic/cell-images.xlsx`:
+  - Confirmed in [`fixtures/xlsx/basic/cell-images.xlsx`](../fixtures/xlsx/basic/cell-images.xlsx):
     - `http://schemas.microsoft.com/office/2023/02/relationships/cellImage`
   - Other candidates observed in synthetic fixtures / tooling:
     - `http://schemas.microsoft.com/office/2020/07/relationships/cellImages`
@@ -556,10 +556,10 @@ Note: some workbooks omit the override entirely and rely on the package default
 Content types for `xl/richData/*` vary across Excel/producers and across the two naming schemes
 (`richValue*.xml` vs `rdRichValue*`).
 
-Observed in `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`: no explicit `[Content_Types].xml` overrides
+Observed in [`fixtures/xlsx/basic/image-in-cell-richdata.xlsx`](../fixtures/xlsx/basic/image-in-cell-richdata.xlsx): no explicit `[Content_Types].xml` overrides
 for `xl/richData/*` (falls back to the package default `application/xml`).
 
-Observed in `fixtures/xlsx/basic/image-in-cell.xlsx` (explicit overrides present):
+Observed in [`fixtures/xlsx/basic/image-in-cell.xlsx`](../fixtures/xlsx/basic/image-in-cell.xlsx) (explicit overrides present):
 
 - `/xl/richData/richValueRel.xml`: `application/vnd.ms-excel.richvaluerel+xml`
 - `/xl/richData/rdrichvalue.xml`: `application/vnd.ms-excel.rdrichvalue+xml`
@@ -622,13 +622,13 @@ Partially known (fixture-driven details still recommended):
   - Lives in `xl/_rels/workbook.xml.rels`.
   - Observed in `fixtures/xlsx/metadata/rich-values-vm.xlsx`:
     - `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata"`
-  - Observed in `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`:
+  - Observed in [`fixtures/xlsx/basic/image-in-cell-richdata.xlsx`](../fixtures/xlsx/basic/image-in-cell-richdata.xlsx):
     - `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata"`
-  - Observed in `fixtures/xlsx/basic/image-in-cell.xlsx`:
+  - Observed in [`fixtures/xlsx/basic/image-in-cell.xlsx`](../fixtures/xlsx/basic/image-in-cell.xlsx):
     - `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata"`
   - Preservation is covered by `crates/formula-xlsx/tests/metadata_rich_values_vm_roundtrip.rs`.
 - Workbook → richData parts (when stored directly in workbook relationships):
-  - Observed in `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`:
+  - Observed in [`fixtures/xlsx/basic/image-in-cell-richdata.xlsx`](../fixtures/xlsx/basic/image-in-cell-richdata.xlsx):
     - `Type="http://schemas.microsoft.com/office/2017/06/relationships/richValue"`
       - `Target="richData/richValue.xml"`
     - `Type="http://schemas.microsoft.com/office/2017/06/relationships/richValueRel"`
@@ -660,14 +660,14 @@ Partially known (fixture-driven details still recommended):
   - Workbook → richData relationships (Type URIs are Microsoft-specific and versioned). Observed in this repo:
     - `http://schemas.microsoft.com/office/2017/06/relationships/richValue` (fixture: `image-in-cell-richdata.xlsx`)
     - `http://schemas.microsoft.com/office/2017/06/relationships/richValueRel` (fixture: `image-in-cell-richdata.xlsx`)
-    - `http://schemas.microsoft.com/office/2017/relationships/richValue` (fixture: `rich-data/richdata-minimal.xlsx` via `xl/_rels/metadata.xml.rels`)
-    - `http://schemas.microsoft.com/office/2017/relationships/richValueRel` (fixture: `rich-data/richdata-minimal.xlsx` via `xl/_rels/metadata.xml.rels`)
-    - `http://schemas.microsoft.com/office/2017/relationships/richValueTypes` (fixture: `rich-data/richdata-minimal.xlsx` via `xl/_rels/metadata.xml.rels`)
-    - `http://schemas.microsoft.com/office/2017/relationships/richValueStructure` (fixture: `rich-data/richdata-minimal.xlsx` via `xl/_rels/metadata.xml.rels`)
-    - `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValue` (fixture: `image-in-cell.xlsx`; also test: `embedded_images_place_in_cell_roundtrip.rs`)
-    - `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueStructure` (fixture: `image-in-cell.xlsx`)
-    - `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueTypes` (fixture: `image-in-cell.xlsx`)
-    - `http://schemas.microsoft.com/office/2022/10/relationships/richValueRel` (fixture: `image-in-cell.xlsx`; also test: `embedded_images_place_in_cell_roundtrip.rs`)
+    - `http://schemas.microsoft.com/office/2017/relationships/richValue` (fixture: [`richdata-minimal.xlsx`](../fixtures/xlsx/rich-data/richdata-minimal.xlsx) via `xl/_rels/metadata.xml.rels`)
+    - `http://schemas.microsoft.com/office/2017/relationships/richValueRel` (fixture: [`richdata-minimal.xlsx`](../fixtures/xlsx/rich-data/richdata-minimal.xlsx) via `xl/_rels/metadata.xml.rels`)
+    - `http://schemas.microsoft.com/office/2017/relationships/richValueTypes` (fixture: [`richdata-minimal.xlsx`](../fixtures/xlsx/rich-data/richdata-minimal.xlsx) via `xl/_rels/metadata.xml.rels`)
+    - `http://schemas.microsoft.com/office/2017/relationships/richValueStructure` (fixture: [`richdata-minimal.xlsx`](../fixtures/xlsx/rich-data/richdata-minimal.xlsx) via `xl/_rels/metadata.xml.rels`)
+    - `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValue` (fixture: [`image-in-cell.xlsx`](../fixtures/xlsx/basic/image-in-cell.xlsx); also test: `embedded_images_place_in_cell_roundtrip.rs`)
+    - `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueStructure` (fixture: [`image-in-cell.xlsx`](../fixtures/xlsx/basic/image-in-cell.xlsx))
+    - `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueTypes` (fixture: [`image-in-cell.xlsx`](../fixtures/xlsx/basic/image-in-cell.xlsx))
+    - `http://schemas.microsoft.com/office/2022/10/relationships/richValueRel` (fixture: [`image-in-cell.xlsx`](../fixtures/xlsx/basic/image-in-cell.xlsx); also test: `embedded_images_place_in_cell_roundtrip.rs`)
   - (Exact `richValue` schemas and relationship discovery still vary; preserve unknown relationships.)
 
 TODO (confirm via real Excel fixture, then harden parsers/writers):
@@ -685,7 +685,7 @@ best-effort reverse engineering.
 Current status:
 
 - **Confirmed** for a real Excel-generated “Place in Cell” workbook in this repo:
-  - `fixtures/xlsx/basic/image-in-cell.xlsx` (see `fixtures/xlsx/basic/image-in-cell.md`)
+  - [`fixtures/xlsx/basic/image-in-cell.xlsx`](../fixtures/xlsx/basic/image-in-cell.xlsx) (see [`fixtures/xlsx/basic/image-in-cell.md`](../fixtures/xlsx/basic/image-in-cell.md))
   - uses `t="e"` / cached `#VALUE!` + `vm="…"` → `xl/metadata.xml` → `xl/richData/rd*` → `richValueRel.xml` → `xl/media/*`
   - does **not** use `xl/cellImages.xml`
 - **Still needed**: a real Excel-generated workbook that includes:
@@ -712,7 +712,7 @@ Checklist:
    - owning part (`xl/workbook.xml` vs per-sheet)
    - relationship `Type` URI (likely Microsoft-specific)
 6. Confirm how the worksheet cell references an image:
-   - Confirmed for `fixtures/xlsx/basic/image-in-cell.xlsx`: `vm` → `xl/metadata.xml` (`futureMetadata` + `xlrd:rvb`) → `xl/richData/rdrichvalue.xml` → `xl/richData/richValueRel.xml(.rels)` → `xl/media/*`.
+   - Confirmed for [`fixtures/xlsx/basic/image-in-cell.xlsx`](../fixtures/xlsx/basic/image-in-cell.xlsx): `vm` → `xl/metadata.xml` (`futureMetadata` + `xlrd:rvb`) → `xl/richData/rdrichvalue.xml` → `xl/richData/richValueRel.xml(.rels)` → `xl/media/*`.
    - Still needs confirmation for real Excel `=IMAGE(...)` cells and any scenarios involving `xl/cellImages*.xml`.
 
 ## Round-trip constraints for Formula
@@ -786,7 +786,7 @@ Limitations (current Formula behavior):
 
 - Fixture coverage status:
   - ✅ Real Excel “Place in Cell” fixture (richData-backed, no `xl/cellImages*.xml`):
-    - `fixtures/xlsx/basic/image-in-cell.xlsx`
+    - [`fixtures/xlsx/basic/image-in-cell.xlsx`](../fixtures/xlsx/basic/image-in-cell.xlsx)
   - Still needed:
     - a real Excel-generated “Place in Cell” workbook that uses `xl/cellImages*.xml` (if present in modern Excel builds)
     - a real Excel-generated workbook with `=IMAGE(...)` cells, to confirm whether they use the same `t="e"`/`#VALUE!` encoding or a different formula-based encoding
