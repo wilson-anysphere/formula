@@ -161,7 +161,7 @@ impl RichDataVmIndex {
     pub fn resolve_vm(&self, vm: u32) -> RichDataVmResolution {
         let vm = vm.saturating_add(self.vm_offset);
         let rich_value_index = self.vm_to_rich_value_index.get(&vm).copied();
-        let rel_index = rich_value_index.and_then(|idx| {
+        let mut rel_index = rich_value_index.and_then(|idx| {
             self.rich_value_index_to_rel_index
                 .get(&idx)
                 .copied()
@@ -175,12 +175,33 @@ impl RichDataVmIndex {
                     }
                 })
         });
-        let target_part = rel_index.and_then(|idx| {
+        let mut target_part = rel_index.and_then(|idx| {
             self.rel_index_to_target_part
                 .get(idx as usize)
                 .cloned()
                 .flatten()
         });
+
+        // Additional best-effort fallback: some producers omit `xl/metadata.xml` and/or use `vm`
+        // as a direct index into `xl/richData/richValueRel.xml`. In that case we can still resolve
+        // targets even though we can't infer a `rich_value_index`.
+        if target_part.is_none() && rich_value_index.is_none() {
+            // Excel's `vm` is commonly 1-based; the RichData relationship table appears 0-based.
+            // Try `vm-1` first, then `vm`.
+            for candidate in [vm.saturating_sub(1), vm] {
+                if let Some(part) = self
+                    .rel_index_to_target_part
+                    .get(candidate as usize)
+                    .cloned()
+                    .flatten()
+                {
+                    rel_index = Some(candidate);
+                    target_part = Some(part);
+                    break;
+                }
+            }
+        }
+
         RichDataVmResolution {
             rich_value_index,
             rel_index,
