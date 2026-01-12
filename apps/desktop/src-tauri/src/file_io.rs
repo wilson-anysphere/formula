@@ -1339,20 +1339,50 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
             return Ok(bytes);
         }
 
-        if wants_drop_vba && !power_query_changed {
-            let mut bytes = if patches.is_empty() {
+        if wants_drop_vba {
+            let mut bytes = if patches.is_empty() && !power_query_changed {
+                // Fast path: nothing to patch besides macro stripping.
                 let mut cursor = Cursor::new(Vec::new());
                 strip_vba_project_streaming(Cursor::new(origin_bytes), &mut cursor)
                     .context("strip VBA project (streaming)")?;
                 cursor.into_inner()
             } else {
+                let mut part_overrides: HashMap<String, PartOverride> = HashMap::new();
+                if power_query_changed {
+                    match workbook.power_query_xml.as_ref() {
+                        Some(bytes) => {
+                            let override_op = if workbook.original_power_query_xml.is_some() {
+                                PartOverride::Replace(bytes.clone())
+                            } else {
+                                PartOverride::Add(bytes.clone())
+                            };
+                            part_overrides.insert(FORMULA_POWER_QUERY_PART.to_string(), override_op);
+                        }
+                        None => {
+                            part_overrides
+                                .insert(FORMULA_POWER_QUERY_PART.to_string(), PartOverride::Remove);
+                        }
+                    }
+                }
+
+                // First apply worksheet cell patches + any part overrides, then strip VBA parts.
                 let mut cursor = Cursor::new(Vec::new());
-                patch_xlsx_streaming_workbook_cell_patches(
-                    Cursor::new(origin_bytes),
-                    &mut cursor,
-                    &patches,
-                )
-                .context("apply worksheet cell patches (streaming)")?;
+                if part_overrides.is_empty() {
+                    patch_xlsx_streaming_workbook_cell_patches(
+                        Cursor::new(origin_bytes),
+                        &mut cursor,
+                        &patches,
+                    )
+                    .context("apply worksheet cell patches (streaming)")?;
+                } else {
+                    patch_xlsx_streaming_workbook_cell_patches_with_part_overrides(
+                        Cursor::new(origin_bytes),
+                        &mut cursor,
+                        &patches,
+                        &part_overrides,
+                    )
+                    .context("apply worksheet cell patches + part overrides (streaming)")?;
+                }
                 let patched = cursor.into_inner();
 
                 let mut stripped = Cursor::new(Vec::new());
@@ -3938,6 +3968,54 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
             report.count(Severity::Critical),
             0,
             "unexpected critical diffs after macro stripping: {report:?}"
+        );
+    }
+
+    #[test]
+    fn saving_xlsm_as_xlsx_drops_vba_project_and_applies_power_query_override() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/macros/basic.xlsm"
+        ));
+        let mut workbook = read_xlsx_blocking(fixture_path).expect("read fixture workbook");
+
+        // Force the save path to apply a streaming part override in addition to macro stripping.
+        let power_query_xml = br#"<FormulaPowerQuery version="1"><![CDATA[{"queries":[{"id":"q1"}]}]]></FormulaPowerQuery>"#.to_vec();
+        workbook.power_query_xml = Some(power_query_xml.clone());
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("converted-with-pq.xlsx");
+        write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
+
+        let written_bytes = std::fs::read(&out_path).expect("read written xlsx");
+        let written_pkg = XlsxPackage::from_bytes(&written_bytes).expect("parse written package");
+
+        assert!(
+            written_pkg.vba_project_bin().is_none(),
+            "expected vbaProject.bin to be removed when saving as .xlsx"
+        );
+        assert_eq!(
+            written_pkg.part(FORMULA_POWER_QUERY_PART),
+            Some(power_query_xml.as_slice()),
+            "expected power-query.xml override to be applied"
+        );
+
+        // Ensure macro stripping doesn't perturb unrelated parts.
+        let mut ignore_parts = BTreeSet::new();
+        ignore_parts.insert("xl/vbaProject.bin".to_string());
+        ignore_parts.insert("[Content_Types].xml".to_string());
+        ignore_parts.insert("xl/_rels/workbook.xml.rels".to_string());
+        ignore_parts.insert(FORMULA_POWER_QUERY_PART.to_string());
+        let options = DiffOptions {
+            ignore_parts,
+            ignore_globs: Vec::new(),
+        };
+        let report =
+            diff_workbooks_with_options(fixture_path, &out_path, &options).expect("diff workbooks");
+        assert_eq!(
+            report.count(Severity::Critical),
+            0,
+            "unexpected critical diffs after macro stripping + power query override: {report:?}"
         );
     }
 
