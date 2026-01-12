@@ -239,12 +239,8 @@ pub fn coupdaysnc(
     // This preserves the additivity invariant `A + DSC == E`. For basis=0, this is required
     // because `DAYS360(..., FALSE)` is not additive for some month-end schedules.
     //
-    // For basis=4 (European 30E/360), day-counts like `A` use `DAYS360(..., TRUE)`, but the modeled
-    // coupon period length `E` used by COUPDAYS/COUPDAYSNC is still the fixed `360/frequency` value.
-    //
-    // This can therefore differ from `DAYS360(PCD, NCD, TRUE)` for some end-of-month schedules
-    // involving February (e.g. Feb 28 -> Aug 31 yields 182 under European DAYS360, not 180), and
-    // `COUPDAYSNC = E - A` is not always equal to `DAYS360(settlement, NCD, TRUE)`.
+    // For basis=4 (European 30E/360), keep `E` consistent with `COUPDAYS` by using
+    // `coupon_period_e`, which models the coupon period length via `DAYS360(PCD, NCD, TRUE)`.
     let dsc = match basis {
         0 => {
             let e = coupon_period_e(pcd, ncd, frequency, basis, system)?;

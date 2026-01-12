@@ -306,9 +306,23 @@ def generate(
     )
     add_case(
         cases,
+        prefix="disc",
+        tags=["financial", "DISC"],
+        formula="=DISC(45292.9,45475.1,97,100,1)",
+        description="Fractional serial date inputs should be floored (2024-01-01..2024-07-02, basis=1)",
+    )
+    add_case(
+        cases,
         prefix="pricedisc",
         tags=["financial", "PRICEDISC"],
         formula="=PRICEDISC(DATE(2020,1,1),DATE(2021,1,1),0.05,100)",
+    )
+    add_case(
+        cases,
+        prefix="pricedisc",
+        tags=["financial", "PRICEDISC"],
+        formula="=PRICEDISC(DATE(2024,1,1),DATE(2024,7,2),0.05,100,1)",
+        description="PRICEDISC with leap-year interval (183 days) using basis=1",
     )
     add_case(
         cases,
@@ -318,9 +332,23 @@ def generate(
     )
     add_case(
         cases,
+        prefix="yielddisc",
+        tags=["financial", "YIELDDISC"],
+        formula="=YIELDDISC(DATE(2024,1,1),DATE(2024,7,2),97,100,1)",
+        description="YIELDDISC with leap-year interval (183 days) using basis=1",
+    )
+    add_case(
+        cases,
         prefix="intrate",
         tags=["financial", "INTRATE"],
         formula="=INTRATE(DATE(2020,1,1),DATE(2021,1,1),97,100)",
+    )
+    add_case(
+        cases,
+        prefix="intrate",
+        tags=["financial", "INTRATE"],
+        formula="=INTRATE(DATE(2024,1,1),DATE(2024,7,2),97,100,1)",
+        description="INTRATE with leap-year interval (183 days) using basis=1",
     )
     add_case(
         cases,
@@ -330,15 +358,36 @@ def generate(
     )
     add_case(
         cases,
+        prefix="received",
+        tags=["financial", "RECEIVED"],
+        formula='=RECEIVED("2024-01-01","2024-07-02",95,0.05,1)',
+        description="RECEIVED with ISO date text inputs using basis=1",
+    )
+    add_case(
+        cases,
         prefix="pricemat",
         tags=["financial", "PRICEMAT"],
         formula="=PRICEMAT(DATE(2020,1,1),DATE(2021,1,1),DATE(2019,1,1),0.05,0.04)",
     )
     add_case(
         cases,
+        prefix="pricemat",
+        tags=["financial", "PRICEMAT"],
+        formula="=PRICEMAT(DATE(2024,1,1),DATE(2024,7,2),DATE(2024,1,1),0.05,0.04,1)",
+        description="PRICEMAT with issue=settlement and leap-year interval using basis=1",
+    )
+    add_case(
+        cases,
         prefix="yieldmat",
         tags=["financial", "YIELDMAT"],
         formula="=YIELDMAT(DATE(2020,1,1),DATE(2021,1,1),DATE(2019,1,1),0.05,100.76923076923077)",
+    )
+    add_case(
+        cases,
+        prefix="yieldmat",
+        tags=["financial", "YIELDMAT"],
+        formula="=YIELDMAT(DATE(2024,1,1),DATE(2024,7,2),DATE(2024,1,1),0.05,99,1)",
+        description="YIELDMAT with issue=settlement and leap-year interval using basis=1",
     )
     add_case(
         cases,

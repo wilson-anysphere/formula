@@ -34194,6 +34194,17 @@
       "id": "disc_816f7b8fb795"
     },
     {
+      "formula": "=DISC(45292.9,45475.1,97,100,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "DISC"
+      ],
+      "description": "Fractional serial date inputs should be floored (2024-01-01..2024-07-02, basis=1)",
+      "id": "disc_5df6462fe81b"
+    },
+    {
       "formula": "=PRICEDISC(DATE(2020,1,1),DATE(2021,1,1),0.05,100)",
       "outputCell": "C1",
       "inputs": [],
@@ -34202,6 +34213,17 @@
         "PRICEDISC"
       ],
       "id": "pricedisc_c0ba7c6e35b0"
+    },
+    {
+      "formula": "=PRICEDISC(DATE(2024,1,1),DATE(2024,7,2),0.05,100,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "PRICEDISC"
+      ],
+      "description": "PRICEDISC with leap-year interval (183 days) using basis=1",
+      "id": "pricedisc_ff02a31f29c7"
     },
     {
       "formula": "=YIELDDISC(DATE(2020,1,1),DATE(2021,1,1),97,100)",
@@ -34214,6 +34236,17 @@
       "id": "yielddisc_c0ce703a8f95"
     },
     {
+      "formula": "=YIELDDISC(DATE(2024,1,1),DATE(2024,7,2),97,100,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "YIELDDISC"
+      ],
+      "description": "YIELDDISC with leap-year interval (183 days) using basis=1",
+      "id": "yielddisc_b5eadf58ce0c"
+    },
+    {
       "formula": "=INTRATE(DATE(2020,1,1),DATE(2021,1,1),97,100)",
       "outputCell": "C1",
       "inputs": [],
@@ -34222,6 +34255,17 @@
         "INTRATE"
       ],
       "id": "intrate_47147f5e0eb8"
+    },
+    {
+      "formula": "=INTRATE(DATE(2024,1,1),DATE(2024,7,2),97,100,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "INTRATE"
+      ],
+      "description": "INTRATE with leap-year interval (183 days) using basis=1",
+      "id": "intrate_0073f96f4499"
     },
     {
       "formula": "=RECEIVED(DATE(2020,1,1),DATE(2021,1,1),95,0.05)",
@@ -34234,6 +34278,17 @@
       "id": "received_e30404ee3543"
     },
     {
+      "formula": "=RECEIVED(\"2024-01-01\",\"2024-07-02\",95,0.05,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "RECEIVED"
+      ],
+      "description": "RECEIVED with ISO date text inputs using basis=1",
+      "id": "received_132419e5fa7b"
+    },
+    {
       "formula": "=PRICEMAT(DATE(2020,1,1),DATE(2021,1,1),DATE(2019,1,1),0.05,0.04)",
       "outputCell": "C1",
       "inputs": [],
@@ -34244,6 +34299,17 @@
       "id": "pricemat_3a94d6cbb2a2"
     },
     {
+      "formula": "=PRICEMAT(DATE(2024,1,1),DATE(2024,7,2),DATE(2024,1,1),0.05,0.04,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "PRICEMAT"
+      ],
+      "description": "PRICEMAT with issue=settlement and leap-year interval using basis=1",
+      "id": "pricemat_dda44c099d00"
+    },
+    {
       "formula": "=YIELDMAT(DATE(2020,1,1),DATE(2021,1,1),DATE(2019,1,1),0.05,100.76923076923077)",
       "outputCell": "C1",
       "inputs": [],
@@ -34252,6 +34318,17 @@
         "YIELDMAT"
       ],
       "id": "yieldmat_46441701164a"
+    },
+    {
+      "formula": "=YIELDMAT(DATE(2024,1,1),DATE(2024,7,2),DATE(2024,1,1),0.05,99,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "YIELDMAT"
+      ],
+      "description": "YIELDMAT with issue=settlement and leap-year interval using basis=1",
+      "id": "yieldmat_7faa327e8d44"
     },
     {
       "formula": "=TBILLPRICE(DATE(2020,1,1),DATE(2020,7,1),0.05)",

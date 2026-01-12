@@ -616,3 +616,68 @@ fn discount_security_functions_coerce_date_serials_like_excel() {
         Value::Error(ErrorKind::Num)
     );
 }
+
+#[test]
+fn discount_security_basis_variants_produce_different_results_on_leap_year_interval() {
+    let mut engine = Engine::new();
+
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A1",
+            "=DISC(DATE(2024,1,1),DATE(2024,7,2),97,100,0)",
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A2",
+            "=DISC(DATE(2024,1,1),DATE(2024,7,2),97,100,1)",
+        )
+        .unwrap();
+
+    engine.recalculate();
+
+    let basis_0 = assert_number(engine.get_cell_value("Sheet1", "A1"));
+    let basis_1 = assert_number(engine.get_cell_value("Sheet1", "A2"));
+    assert!(
+        (basis_0 - basis_1).abs() > 1e-12,
+        "expected basis variants to differ; got basis0={basis_0}, basis1={basis_1}"
+    );
+}
+
+#[test]
+fn discount_security_date_text_inputs_work_for_iso_and_slash_formats() {
+    let mut engine = Engine::new();
+
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A1",
+            "=DISC(DATE(2024,1,1),DATE(2024,7,2),97,100,1)",
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A2",
+            "=DISC(\"2024-01-01\",\"2024-07-02\",97,100,1)",
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A3",
+            "=DISC(\"1/1/2024\",\"7/2/2024\",97,100,1)",
+        )
+        .unwrap();
+
+    engine.recalculate();
+
+    let expected = assert_number(engine.get_cell_value("Sheet1", "A1"));
+    let iso = assert_number(engine.get_cell_value("Sheet1", "A2"));
+    let slash = assert_number(engine.get_cell_value("Sheet1", "A3"));
+
+    assert_close(iso, expected, 1e-12);
+    assert_close(slash, expected, 1e-12);
+}

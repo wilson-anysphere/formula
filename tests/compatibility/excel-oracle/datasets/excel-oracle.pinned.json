@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-01-12T21:49:22.241805405Z",
+  "generatedAt": "2026-01-12T21:58:09.766552154Z",
   "source": {
     "kind": "excel",
     "version": "unknown",
@@ -17,8 +17,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "980c94f7828a2143475746002f427000325f464bc0086c707eb7d752d13c5be9",
-    "count": 1924
+    "sha256": "9973e6d5fd6149c84e72040e3a9734cbb7bb143cc5d9f7a202526d7dd91d2ad7",
+    "count": 1931
   },
   "results": [
     {
@@ -16533,6 +16533,16 @@
       "displayText": "0.03"
     },
     {
+      "caseId": "disc_5df6462fe81b",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.06
+      },
+      "address": "C1",
+      "displayText": "0.06"
+    },
+    {
       "caseId": "pricedisc_c0ba7c6e35b0",
       "outputCell": "C1",
       "result": {
@@ -16541,6 +16551,16 @@
       },
       "address": "C1",
       "displayText": "95"
+    },
+    {
+      "caseId": "pricedisc_ff02a31f29c7",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 97.5
+      },
+      "address": "C1",
+      "displayText": "97.5"
     },
     {
       "caseId": "yielddisc_c0ce703a8f95",
@@ -16553,6 +16573,16 @@
       "displayText": "0.030927835051546393"
     },
     {
+      "caseId": "yielddisc_b5eadf58ce0c",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.061855670103092786
+      },
+      "address": "C1",
+      "displayText": "0.061855670103092786"
+    },
+    {
       "caseId": "intrate_47147f5e0eb8",
       "outputCell": "C1",
       "result": {
@@ -16561,6 +16591,16 @@
       },
       "address": "C1",
       "displayText": "0.030927835051546393"
+    },
+    {
+      "caseId": "intrate_0073f96f4499",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.061855670103092786
+      },
+      "address": "C1",
+      "displayText": "0.061855670103092786"
     },
     {
       "caseId": "received_e30404ee3543",
@@ -16573,6 +16613,16 @@
       "displayText": "100"
     },
     {
+      "caseId": "received_132419e5fa7b",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 97.43589743589745
+      },
+      "address": "C1",
+      "displayText": "97.43589743589745"
+    },
+    {
       "caseId": "pricemat_3a94d6cbb2a2",
       "outputCell": "C1",
       "result": {
@@ -16583,6 +16633,16 @@
       "displayText": "100.76923076923077"
     },
     {
+      "caseId": "pricemat_dda44c099d00",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 100.49019607843135
+      },
+      "address": "C1",
+      "displayText": "100.49019607843135"
+    },
+    {
       "caseId": "yieldmat_46441701164a",
       "outputCell": "C1",
       "result": {
@@ -16591,6 +16651,16 @@
       },
       "address": "C1",
       "displayText": "0.040000000000000036"
+    },
+    {
+      "caseId": "yieldmat_7faa327e8d44",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.0707070707070705
+      },
+      "address": "C1",
+      "displayText": "0.0707070707070705"
     },
     {
       "caseId": "tbillprice_cba2022248c6",
