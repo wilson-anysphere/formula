@@ -176,6 +176,7 @@ export function GridPerformanceHarness(props?: {
         frozenCols={1}
         onZoomChange={setZoom}
         apiRef={apiRef}
+        enableResize
       />
     </div>
   );

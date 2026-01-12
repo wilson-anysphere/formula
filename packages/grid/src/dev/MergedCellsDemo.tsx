@@ -121,6 +121,9 @@ export function MergedCellsDemo(): React.ReactElement {
           </a>{" "}
           (performance).
         </div>
+        <div style={{ marginTop: 6, color: "var(--formula-grid-cell-text, #4b5563)", opacity: 0.7, fontSize: 12 }}>
+          Tip: drag row/column header boundaries to resize; double-click to auto-fit.
+        </div>
         <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
           Zoom
           <input
@@ -148,6 +151,7 @@ export function MergedCellsDemo(): React.ReactElement {
           defaultColWidth={80}
           onZoomChange={setZoom}
           apiRef={apiRef}
+          enableResize
         />
       </div>
     </div>
