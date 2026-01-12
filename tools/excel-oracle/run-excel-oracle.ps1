@@ -195,6 +195,9 @@ $caseHash = (Get-FileHash -LiteralPath $CasesPath -Algorithm SHA256).Hash.ToLowe
 $excel = $null
 $workbook = $null
 $sheet = $null
+$origUseSystemSeparators = $null
+$origDecimalSeparator = $null
+$origThousandsSeparator = $null
 
 try {
   try {
@@ -210,6 +213,22 @@ try {
   try { $excel.AskToUpdateLinks = $false } catch {}
   # msoAutomationSecurityForceDisable = 3 (disable macros)
   try { $excel.AutomationSecurity = 3 } catch {}
+
+  # For deterministic text->number coercion (e.g. "1,234", "$1,234.50"), force US-style
+  # decimal/thousands separators regardless of the runner machine locale.
+  #
+  # This makes the oracle dataset more portable across self-hosted runners.
+  try {
+    $origUseSystemSeparators = $excel.UseSystemSeparators
+    $origDecimalSeparator = $excel.DecimalSeparator
+    $origThousandsSeparator = $excel.ThousandsSeparator
+
+    $excel.UseSystemSeparators = $false
+    $excel.DecimalSeparator = "."
+    $excel.ThousandsSeparator = ","
+  } catch {
+    # Best-effort; Excel/Office versions can differ in COM surface area.
+  }
 
   # Manual calculation for performance; we explicitly calculate after setting inputs.
   # xlCalculationManual = -4135, xlCalculationAutomatic = -4105
@@ -320,6 +339,18 @@ try {
     try { $workbook.Close($false) } catch {}
   }
   if ($null -ne $excel) {
+    # Restore locale/separator settings before quitting (best-effort).
+    try {
+      if ($null -ne $origUseSystemSeparators) {
+        $excel.UseSystemSeparators = $origUseSystemSeparators
+      }
+      if ($null -ne $origDecimalSeparator) {
+        $excel.DecimalSeparator = $origDecimalSeparator
+      }
+      if ($null -ne $origThousandsSeparator) {
+        $excel.ThousandsSeparator = $origThousandsSeparator
+      }
+    } catch {}
     try { $excel.Quit() } catch {}
   }
 

@@ -1117,6 +1117,14 @@ def generate_cases() -> dict[str, Any]:
         inputs=textjoin_inputs,
     )
 
+    # TEXTSPLIT (dynamic array)
+    _add_case(
+        cases,
+        prefix="textsplit_basic",
+        tags=["text", "TEXTSPLIT"],
+        formula='=TEXTSPLIT("a,b,c",",")',
+    )
+
     # TEXT / VALUE / NUMBERVALUE / DOLLAR
     _add_case(cases, prefix="text_fmt", tags=["text", "TEXT"], formula='=TEXT(1234.567,"#,##0.00")')
     _add_case(cases, prefix="text_pct", tags=["text", "TEXT"], formula='=TEXT(1.23,"0%")')

@@ -40,4 +40,4 @@ Commit the pinned dataset to enable PR/push validation without Excel.
 - **First-run prompts:** Excel may show first-run UI / privacy prompts. Launch Excel once manually under the runner user to clear them.
 - **Popups/alerts:** The harness sets `DisplayAlerts = false`, but other dialogs can still appear if Excel isn't fully configured.
 - **Locale:** The harness uses `Range.Formula2` / `Range.Formula` (English) rather than `FormulaLocal`, which is usually safer across locales.
-
+- **Number separators:** The harness forces US-style decimal/thousands separators (`.` / `,`) so text→number coercion cases like `"1,234"` are deterministic across runner locales.
