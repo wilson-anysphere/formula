@@ -303,18 +303,18 @@ All records are processed in the **stored order** from `VBA/dir`.
 
 Project info records:
 
-- Fixed-size records included verbatim: `0x0001`, `0x0002`, `0x0003`, `0x0007`, `0x0008`, `0x0009`
+- Fixed-size records included verbatim: `0x0001`, `0x0002`, `0x0003`, `0x0007`, `0x0008`, `0x0009`,
+  `0x0014`
   - (`PROJECTSYSKIND`, `PROJECTLCID`, `PROJECTCODEPAGE`, `PROJECTHELPCONTEXT`, `PROJECTLIBFLAGS`,
-    `PROJECTVERSION`)
-- String records with ANSI/Unicode variants (Unicode preferred when present):
-  - `0x0004` `PROJECTNAME` (ANSI)
-  - `0x0040` `PROJECTNAMEUNICODE` (Unicode)
+    `PROJECTVERSION`, `PROJECTLCIDINVOKE`)
+- String(-like) records with ANSI/Unicode (or alternate) variants (Unicode preferred when present):
+  - `0x0004` `PROJECTNAME` (ANSI; no Unicode variant currently handled by `formula-vba`)
   - `0x0005` `PROJECTDOCSTRING` (ANSI)
-  - `0x0041` `PROJECTDOCSTRINGUNICODE` (Unicode)
+  - `0x0040` `PROJECTDOCSTRINGUNICODE` (Unicode)
   - `0x0006` `PROJECTHELPFILEPATH` (ANSI)
-  - `0x0042` `PROJECTHELPFILEPATHUNICODE` (Unicode)
+  - `0x003D` `PROJECTHELPFILEPATH2` (alternate form; commonly UTF-16LE)
   - `0x000C` `PROJECTCONSTANTS` (ANSI)
-  - `0x0043` `PROJECTCONSTANTSUNICODE` (Unicode)
+  - `0x003C` `PROJECTCONSTANTSUNICODE` (Unicode)
 
 Module metadata records (for each module record group, in stored order; a new module group begins at
 `MODULENAME` (`0x0019`)):
@@ -323,11 +323,9 @@ Module metadata records (for each module record group, in stored order; a new mo
   - `0x0019` `MODULENAME` (ANSI)
   - `0x0047` `MODULENAMEUNICODE` (Unicode)
   - `0x001A` `MODULESTREAMNAME` (ANSI; see reserved trimming below)
-  - `0x0048` `MODULESTREAMNAMEUNICODE` (Unicode)
-  - `0x001B` `MODULEDOCSTRING` (ANSI)
-  - `0x0049` `MODULEDOCSTRINGUNICODE` (Unicode)
-  - `0x001D` `MODULEHELPFILEPATH` (ANSI)
-  - `0x004A` `MODULEHELPFILEPATHUNICODE` (Unicode)
+  - `0x0032` `MODULESTREAMNAMEUNICODE` (Unicode)
+  - `0x001C` `MODULEDOCSTRING` (ANSI)
+  - `0x0048` `MODULEDOCSTRINGUNICODE` (Unicode)
 - Non-string module metadata records included verbatim: `0x001E`, `0x0021`, `0x0025`, `0x0028`
   - (e.g. module help context / type / readonly / private flags per MS-OVBA)
 
@@ -336,10 +334,10 @@ Module metadata records (for each module record group, in stored order; a new mo
 For string-like fields that have both ANSI/MBCS and Unicode record variants:
 
 - If the Unicode record exists, the ANSI record does **not** contribute.
-- Unicode record payloads contain an *internal* `u32le` length prefix followed by UTF-16LE bytes.
-  When hashing, append **only the UTF-16LE bytes** (skip the internal length prefix).
-  - The length field is commonly a UTF-16 code unit count, but some producers treat it as a byte
-    count. `formula-vba` accepts both as long as bounds are valid.
+- Unicode record payloads are UTF-16LE bytes. Some producers also embed an *internal* `u32le` length
+  prefix before the UTF-16LE bytes (with the length interpreted as either code units or bytes).
+  `formula-vba` strips that internal length prefix only when it is consistent with the record length;
+  otherwise it treats the full payload as raw UTF-16LE bytes.
 
 #### `MODULESTREAMNAME` reserved trimming
 

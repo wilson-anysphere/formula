@@ -2,7 +2,6 @@ use crate::{decompress_container, DirParseError, OleFile, ParseError};
 
 #[derive(Debug, Default, Clone, Copy)]
 struct ProjectUnicodePresence {
-    project_name: bool,
     project_docstring: bool,
     project_help_filepath: bool,
     project_constants: bool,
@@ -13,7 +12,6 @@ struct ModuleUnicodePresence {
     module_name: bool,
     module_stream_name: bool,
     module_docstring: bool,
-    module_help_filepath: bool,
 }
 
 /// Build a dir-record-only v3 project/module metadata transcript derived from selected `VBA/dir`
@@ -60,14 +58,15 @@ pub fn project_normalized_data_v3_dir_records(vba_project_bin: &[u8]) -> Result<
             // ---------------------------------------------------------------------
             // PROJECTSYSKIND, PROJECTLCID, PROJECTCODEPAGE, PROJECTHELPCONTEXT,
             // PROJECTLIBFLAGS, PROJECTVERSION.
-            0x0001 | 0x0002 | 0x0003 | 0x0007 | 0x0008 | 0x0009 => {
+            0x0001 | 0x0002 | 0x0003 | 0x0007 | 0x0008 | 0x0009 | 0x0014 => {
                 out.extend_from_slice(data);
             }
 
-            // PROJECTNAME (ANSI) vs PROJECTNAMEUNICODE (Unicode)
-            0x0004 if !project_unicode.project_name => {
-                out.extend_from_slice(data);
-            }
+            // PROJECTNAME (ANSI)
+            //
+            // Note: this repo's hashing implementation does not currently special-case a Unicode
+            // variant for PROJECTNAME.
+            0x0004 => out.extend_from_slice(data),
             // PROJECTDOCSTRING (ANSI) vs PROJECTDOCSTRINGUNICODE (Unicode)
             0x0005 if !project_unicode.project_docstring => {
                 out.extend_from_slice(data);
@@ -81,9 +80,14 @@ pub fn project_normalized_data_v3_dir_records(vba_project_bin: &[u8]) -> Result<
                 out.extend_from_slice(data);
             }
 
-            // Unicode project string record variants: normalize by dropping the internal length
-            // prefix (u32) and appending only the UTF-16LE payload bytes.
-            0x0040 | 0x0041 | 0x0042 | 0x0043 => {
+            // Unicode/alternate project string record variants: normalize by dropping an internal
+            // u32 length prefix when present, and appending only the UTF-16LE payload bytes.
+            //
+            // Observed record IDs:
+            // - 0x0040: PROJECTDOCSTRING (Unicode)
+            // - 0x003D: PROJECTHELPFILEPATH (second form / commonly Unicode)
+            // - 0x003C: PROJECTCONSTANTS (Unicode)
+            0x0040 | 0x003D | 0x003C => {
                 out.extend_from_slice(unicode_record_payload(data)?);
             }
 
@@ -111,12 +115,7 @@ pub fn project_normalized_data_v3_dir_records(vba_project_bin: &[u8]) -> Result<
             }
 
             // MODULEDOCSTRING (ANSI) vs MODULEDOCSTRINGUNICODE (Unicode)
-            0x001B if !current_module_unicode.module_docstring => {
-                out.extend_from_slice(data);
-            }
-
-            // MODULEHELPFILEPATH (ANSI) vs MODULEHELPFILEPATHUNICODE (Unicode)
-            0x001D if !current_module_unicode.module_help_filepath => {
+            0x001C if !current_module_unicode.module_docstring => {
                 out.extend_from_slice(data);
             }
 
@@ -126,22 +125,13 @@ pub fn project_normalized_data_v3_dir_records(vba_project_bin: &[u8]) -> Result<
             }
 
             // Unicode module string record variants.
-            0x0047 | 0x0048 | 0x0049 => {
+            //
+            // Observed record IDs:
+            // - 0x0047: MODULENAME (Unicode)
+            // - 0x0032: MODULESTREAMNAME (Unicode)
+            // - 0x0048: MODULEDOCSTRING (Unicode)
+            0x0047 | 0x0032 | 0x0048 => {
                 out.extend_from_slice(unicode_record_payload(data)?);
-            }
-
-            // 0x004A is an unfortunate ID collision between:
-            // - PROJECTCOMPATVERSION (project-level, optional), and
-            // - MODULEHELPFILEPATHUNICODE (module-level Unicode string variant).
-            //
-            // For our TLV-style dir-record fixtures, PROJECTCOMPATVERSION appears in the project
-            // information section before any module record groups; it MUST be ignored for hashing.
-            //
-            // If we've already encountered a module group, treat it as the module Unicode variant.
-            0x004A => {
-                if module_idx != 0 {
-                    out.extend_from_slice(unicode_record_payload(data)?);
-                }
             }
 
             // All other records (references, module offsets, etc.) are excluded from V3
@@ -172,11 +162,10 @@ fn scan_unicode_presence(
                 modules_unicode.push(ModuleUnicodePresence::default());
             }
 
-            // Project-level Unicode string variants.
-            0x0040 => project_unicode.project_name = true,
-            0x0041 => project_unicode.project_docstring = true,
-            0x0042 => project_unicode.project_help_filepath = true,
-            0x0043 => project_unicode.project_constants = true,
+            // Project-level Unicode/alternate string variants.
+            0x0040 => project_unicode.project_docstring = true,
+            0x003D => project_unicode.project_help_filepath = true,
+            0x003C => project_unicode.project_constants = true,
 
             // Module-level Unicode string variants.
             0x0047 => {
@@ -184,19 +173,14 @@ fn scan_unicode_presence(
                     modules_unicode[idx].module_name = true;
                 }
             }
-            0x0048 => {
+            0x0032 => {
                 if let Some(idx) = current_module {
                     modules_unicode[idx].module_stream_name = true;
                 }
             }
-            0x0049 => {
+            0x0048 => {
                 if let Some(idx) = current_module {
                     modules_unicode[idx].module_docstring = true;
-                }
-            }
-            0x004A => {
-                if let Some(idx) = current_module {
-                    modules_unicode[idx].module_help_filepath = true;
                 }
             }
 
@@ -238,38 +222,24 @@ fn trim_reserved_u16(bytes: &[u8]) -> &[u8] {
 }
 
 fn unicode_record_payload(data: &[u8]) -> Result<&[u8], DirParseError> {
-    // MS-OVBA Unicode string record payloads contain a u32 length prefix followed by UTF-16LE data.
-    // The length is commonly a UTF-16 code unit count, but some producers treat it as a byte count;
-    // accept both as long as bounds are valid (deterministic choice: prefer the interpretation that
-    // exactly consumes the record, otherwise prefer the spec's UTF-16 code unit count).
+    // MS-OVBA "Unicode" record payloads are commonly UTF-16LE bytes.
+    //
+    // Some producers also embed an *internal* u32 length prefix before the UTF-16LE bytes
+    // (length can be either code units or byte count). Accept both:
+    // - raw UTF-16LE bytes (no internal prefix), and
+    // - `u32 length || utf16le_bytes`.
     if data.len() < 4 {
-        return Err(DirParseError::Truncated);
+        return Ok(data);
     }
 
     let n = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
     let remaining = data.len() - 4;
 
-    let bytes_by_units = n.checked_mul(2);
-
-    // Prefer interpretations that exactly match the record length.
-    if let Some(bytes) = bytes_by_units {
-        if bytes == remaining {
-            return Ok(&data[4..4 + bytes]);
-        }
-    }
-    if n == remaining {
-        return Ok(&data[4..4 + n]);
+    // Treat the leading u32 as a length prefix only when it is consistent with the remaining bytes.
+    if n == remaining || n.saturating_mul(2) == remaining {
+        return Ok(&data[4..]);
     }
 
-    // Otherwise, prefer UTF-16 code unit count when it fits; fall back to byte count.
-    if let Some(bytes) = bytes_by_units {
-        if bytes <= remaining {
-            return Ok(&data[4..4 + bytes]);
-        }
-    }
-    if n <= remaining {
-        return Ok(&data[4..4 + n]);
-    }
-
-    Err(DirParseError::Truncated)
+    // Otherwise assume the record is raw UTF-16LE bytes.
+    Ok(data)
 }

@@ -538,10 +538,6 @@ fn project_normalized_data_v3_minimal_project_concatenates_selected_records() {
 fn project_normalized_data_v3_dir_records_skips_projectcompatversion_record() {
     // `project_normalized_data_v3_dir_records` is used as a v3 building block and should be robust
     // to PROJECTCOMPATVERSION (0x004A) appearing in the project information record list.
-    //
-    // Note: 0x004A is also used for a *module-level* Unicode string record ID
-    // (MODULEHELPFILEPATHUNICODE), so this test ensures we don't misinterpret the project-level
-    // record as a Unicode string.
     let compat_version = 0xDEADBEEFu32.to_le_bytes();
 
     fn build_dir(include_compat: bool, compat_version: &[u8; 4]) -> Vec<u8> {
@@ -600,13 +596,21 @@ fn project_normalized_data_v3_prefers_unicode_over_ansi_for_strings() {
     let dir_decompressed = {
         let mut out = Vec::new();
 
-        // Both ANSI and Unicode project name records; v3 should emit only Unicode payload bytes.
-        push_record(&mut out, 0x0004, b"AnsiProj");
-        push_record(&mut out, 0x0040, &unicode_record_data("UniProj"));
+        // Both ANSI and Unicode project docstring records; v3 should emit only Unicode payload bytes.
+        push_record(&mut out, 0x0005, b"AnsiDoc");
+        push_record(&mut out, 0x0040, &unicode_record_data("UniDoc"));
 
         // Module group with both MODULENAME and MODULENAMEUNICODE.
         push_record(&mut out, 0x0019, b"AnsiMod");
         push_record(&mut out, 0x0047, &unicode_record_data("UniMod"));
+
+        // Both ANSI and Unicode MODULESTREAMNAME records.
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"AnsiStream");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+        push_record(&mut out, 0x0032, &unicode_record_data("UniStream"));
+
         push_record(&mut out, 0x0021, &0u16.to_le_bytes()); // MODULETYPE
 
         out
@@ -616,17 +620,28 @@ fn project_normalized_data_v3_prefers_unicode_over_ansi_for_strings() {
     let normalized =
         project_normalized_data_v3_dir_records(&vba_bin).expect("ProjectNormalizedDataV3");
 
-    let expected = [utf16le_bytes("UniProj"), utf16le_bytes("UniMod"), 0u16.to_le_bytes().to_vec()]
-        .concat();
+    let expected = [
+        utf16le_bytes("UniDoc"),
+        utf16le_bytes("UniMod"),
+        utf16le_bytes("UniStream"),
+        0u16.to_le_bytes().to_vec(),
+    ]
+    .concat();
 
     assert_eq!(normalized, expected);
     assert!(
-        !normalized.windows(b"AnsiProj".len()).any(|w| w == b"AnsiProj"),
-        "expected ANSI PROJECTNAME bytes to be omitted when PROJECTNAMEUNICODE is present"
+        !normalized.windows(b"AnsiDoc".len()).any(|w| w == b"AnsiDoc"),
+        "expected ANSI PROJECTDOCSTRING bytes to be omitted when PROJECTDOCSTRINGUNICODE is present"
     );
     assert!(
         !normalized.windows(b"AnsiMod".len()).any(|w| w == b"AnsiMod"),
         "expected ANSI MODULENAME bytes to be omitted when MODULENAMEUNICODE is present"
+    );
+    assert!(
+        !normalized
+            .windows(b"AnsiStream".len())
+            .any(|w| w == b"AnsiStream"),
+        "expected ANSI MODULESTREAMNAME bytes to be omitted when MODULESTREAMNAMEUNICODE is present"
     );
 }
 
