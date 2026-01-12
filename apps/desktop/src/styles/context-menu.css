@@ -122,6 +122,17 @@
   background: transparent;
 }
 
+.context-menu__leading--swatch {
+  display: flex;
+  overflow: hidden;
+}
+
+.context-menu__leading--swatch > svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
 .context-menu__leading--swatch-sheet-tab-red {
   background: var(--sheet-tab-red);
 }

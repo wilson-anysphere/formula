@@ -459,10 +459,27 @@ export class ContextMenu {
         swatch.className = "context-menu__leading context-menu__leading--swatch";
         swatch.setAttribute("aria-hidden", "true");
         const token = String(item.leading.token ?? "").trim();
-        const tokenName = token.startsWith("--") ? token.slice(2) : token;
+        const tokenRef = token.startsWith("--") ? token : `--${token}`;
+        const tokenName = tokenRef.startsWith("--") ? tokenRef.slice(2) : tokenRef;
         if (tokenName) {
           // See styles/context-menu.css for the token->background mapping.
           swatch.classList.add(`context-menu__leading--swatch-${tokenName}`);
+
+          // Render an SVG swatch so we can apply the token color without setting
+          // inline styles (the ContextMenu guard test only allows left/top).
+          const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+          svg.setAttribute("viewBox", "0 0 14 14");
+          svg.setAttribute("aria-hidden", "true");
+
+          const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+          rect.setAttribute("x", "0");
+          rect.setAttribute("y", "0");
+          rect.setAttribute("width", "14");
+          rect.setAttribute("height", "14");
+          rect.setAttribute("fill", `var(${tokenRef}, none)`);
+
+          svg.appendChild(rect);
+          swatch.appendChild(svg);
         }
         btn.appendChild(swatch);
       }
