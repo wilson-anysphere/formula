@@ -499,6 +499,8 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
       reactPanels.set(panelId, instance);
     }
 
+    // Re-assert the sizing/flex class in case callers (or devtools) mutate it.
+    instance.container.classList.add("panel-body__container");
     body.appendChild(instance.container);
     instance.root.render(element);
   }
@@ -513,6 +515,8 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
       domPanels.set(panelId, instance);
     }
 
+    // Re-assert the sizing/flex class in case the mount implementation overwrote it.
+    instance.container.classList.add("panel-body__container");
     body.appendChild(instance.container);
     void instance.refresh?.();
   }
