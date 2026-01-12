@@ -243,7 +243,6 @@ fn header_label(ctx: &dyn FunctionContext, value: &Value) -> Result<Option<Strin
         Value::Reference(_)
         | Value::ReferenceUnion(_)
         | Value::Array(_)
-        | Value::Record(_)
         | Value::Lambda(_)
         | Value::Spill { .. } => Ok(None),
     }

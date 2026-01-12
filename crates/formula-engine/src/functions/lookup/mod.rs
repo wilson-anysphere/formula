@@ -55,7 +55,6 @@ fn coerce_to_string_with_format_options(value: &Value, options: &FormatOptions) 
         Value::Reference(_)
         | Value::ReferenceUnion(_)
         | Value::Array(_)
-        | Value::Record(_)
         | Value::Lambda(_)
         | Value::Spill { .. } => Err(ErrorKind::Value),
     }
@@ -276,7 +275,6 @@ fn lookup_cmp(a: &Value, b: &Value) -> Ordering {
             Value::Reference(_)
             | Value::ReferenceUnion(_)
             | Value::Array(_)
-            | Value::Record(_)
             | Value::Lambda(_)
             | Value::Spill { .. } => 5,
         }

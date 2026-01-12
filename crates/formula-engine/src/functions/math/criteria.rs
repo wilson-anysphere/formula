@@ -484,7 +484,6 @@ fn coerce_to_number(value: &Value, locale: NumberLocale) -> Option<f64> {
         Value::Error(_)
         | Value::Reference(_)
         | Value::ReferenceUnion(_)
-        | Value::Record(_)
         | Value::Lambda(_)
         | Value::Spill { .. } => None,
     }
@@ -508,7 +507,6 @@ fn coerce_to_text(value: &Value, value_locale: ValueLocaleConfig) -> Option<Stri
         Value::Error(_)
         | Value::Reference(_)
         | Value::ReferenceUnion(_)
-        | Value::Record(_)
         | Value::Lambda(_)
         | Value::Spill { .. } => None,
         Value::Array(arr) => coerce_to_text(&arr.top_left(), value_locale),
