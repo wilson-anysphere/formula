@@ -84,7 +84,7 @@ test.describe("sheet navigation shortcuts", () => {
       app.getDocument().setCellValue("Sheet2", "A1", "Hello from Sheet2");
     });
     await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
-    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 2");
+    await expectSheetPosition(page, { position: 1, total: 2 });
 
     const sheet1Tab = page.getByTestId("sheet-tab-Sheet1");
     await sheet1Tab.focus();
