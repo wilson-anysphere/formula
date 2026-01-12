@@ -461,7 +461,6 @@ function createWebClipboardProvider() {
 
       const html = typeof payload.html === "string" && payload.html.length <= MAX_RICH_TEXT_CHARS ? payload.html : undefined;
       const rtf = typeof payload.rtf === "string" && payload.rtf.length <= MAX_RICH_TEXT_CHARS ? payload.rtf : undefined;
-      // @ts-ignore - payload may optionally include image bytes.
       const imagePngBlob = normalizeImagePngBlob(payload.imagePng);
 
       // Prefer writing rich formats when possible.
