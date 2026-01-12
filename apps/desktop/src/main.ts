@@ -406,6 +406,57 @@ const app = new SpreadsheetApp(
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (window as any).__formulaApp = app;
 
+function sharedGridZoomStorageKey(): string {
+  // Scope zoom persistence by workbook/session id. For file-backed workbooks this can be
+  // swapped to a path-based id if/when the desktop shell exposes it.
+  return `formula:shared-grid:zoom:${workbookId}`;
+}
+
+function loadPersistedSharedGridZoom(): number | null {
+  try {
+    const storage = globalThis.localStorage;
+    if (!storage) return null;
+    const raw = storage.getItem(sharedGridZoomStorageKey());
+    if (!raw) return null;
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value <= 0) return null;
+    return value;
+  } catch {
+    return null;
+  }
+}
+
+function persistSharedGridZoom(value: number): void {
+  try {
+    const storage = globalThis.localStorage;
+    if (!storage) return;
+    storage.setItem(sharedGridZoomStorageKey(), String(value));
+  } catch {
+    // Ignore storage errors (disabled storage, quota, etc).
+  }
+}
+
+function persistCurrentSharedGridZoom(): void {
+  if (!app.supportsZoom()) return;
+  persistSharedGridZoom(app.getZoom());
+}
+
+function applyPersistedSharedGridZoom(): void {
+  if (!app.supportsZoom()) return;
+  const persisted = loadPersistedSharedGridZoom();
+  if (persisted == null) return;
+  app.setZoom(persisted);
+}
+
+// Apply persisted zoom as early as possible so shared-grid renders at the user's
+// preferred zoom before they interact with the sheet.
+applyPersistedSharedGridZoom();
+
+window.addEventListener("formula:zoom-changed", () => {
+  syncZoomControl();
+  persistCurrentSharedGridZoom();
+});
+
 function normalizeSelectionRange(range: Range): CellRange {
   const startRow = Math.min(range.startRow, range.endRow);
   const endRow = Math.max(range.startRow, range.endRow);
@@ -824,6 +875,7 @@ zoomControlEl.addEventListener("change", () => {
   if (!Number.isFinite(nextPercent) || nextPercent <= 0) return;
   app.setZoom(nextPercent / 100);
   syncZoomControl();
+  persistCurrentSharedGridZoom();
   app.focus();
 });
 

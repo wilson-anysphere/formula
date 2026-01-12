@@ -944,42 +944,42 @@ export class SpreadsheetApp {
           hTrack: this.hScrollbarTrack,
           hThumb: this.hScrollbarThumb
         },
-          callbacks: {
-            onScroll: (scroll, viewport) => {
-              let effectiveViewport = viewport;
-              const prevZoom = this.sharedGridZoom;
-              const nextZoom = this.sharedGrid?.renderer.getZoom() ?? prevZoom;
+        callbacks: {
+          onScroll: (scroll, viewport) => {
+            let effectiveViewport = viewport;
+            const prevZoom = this.sharedGridZoom;
+            const nextZoom = this.sharedGrid?.renderer.getZoom() ?? prevZoom;
 
-              const zoomChanged = nextZoom !== prevZoom;
-              if (zoomChanged) {
-                this.sharedGridZoom = nextZoom;
-                // Document sheet views store base axis sizes at zoom=1. When zoom changes via
-                // gestures (e.g. Ctrl/Cmd+wheel), the renderer scales its internal state but we
-                // still need to reapply persisted axis overrides at the new zoom level.
-                this.syncSharedGridAxisSizesFromDocument();
-                this.dispatchZoomChanged();
-                effectiveViewport = this.sharedGrid?.renderer.getViewportState() ?? viewport;
-              }
+            const zoomChanged = nextZoom !== prevZoom;
+            if (zoomChanged) {
+              this.sharedGridZoom = nextZoom;
+              // Document sheet views store base axis sizes at zoom=1. When zoom changes via
+              // gestures (e.g. Ctrl/Cmd+wheel), the renderer scales its internal state but we
+              // still need to reapply persisted axis overrides at the new zoom level.
+              this.syncSharedGridAxisSizesFromDocument();
+              this.dispatchZoomChanged();
+              effectiveViewport = this.sharedGrid?.renderer.getViewportState() ?? viewport;
+            }
 
-              const prevX = this.scrollX;
-              const prevY = this.scrollY;
-              const nextScroll = zoomChanged ? (this.sharedGrid?.renderer.scroll.getScroll() ?? scroll) : scroll;
-              this.scrollX = nextScroll.x;
-              this.scrollY = nextScroll.y;
-              this.syncSharedChartPanes(effectiveViewport);
-              this.hideCommentTooltip();
-              this.renderCharts(zoomChanged);
-              this.renderAuditing();
-              this.renderOutlineControls();
-              this.renderSelection();
-              if (this.scrollX !== prevX || this.scrollY !== prevY) {
-                this.notifyScrollListeners();
-              }
-            },
-            onSelectionChange: () => {
-              if (this.sharedGridSelectionSyncInProgress) return;
-              this.syncSelectionFromSharedGrid();
-              this.updateStatus();
+            const prevX = this.scrollX;
+            const prevY = this.scrollY;
+            const nextScroll = zoomChanged ? (this.sharedGrid?.renderer.scroll.getScroll() ?? scroll) : scroll;
+            this.scrollX = nextScroll.x;
+            this.scrollY = nextScroll.y;
+            this.syncSharedChartPanes(effectiveViewport);
+            this.hideCommentTooltip();
+            this.renderCharts(zoomChanged);
+            this.renderAuditing();
+            this.renderOutlineControls();
+            this.renderSelection();
+            if (this.scrollX !== prevX || this.scrollY !== prevY) {
+              this.notifyScrollListeners();
+            }
+          },
+          onSelectionChange: () => {
+            if (this.sharedGridSelectionSyncInProgress) return;
+            this.syncSelectionFromSharedGrid();
+            this.updateStatus();
           },
           onSelectionRangeChange: () => {
             if (this.sharedGridSelectionSyncInProgress) return;
