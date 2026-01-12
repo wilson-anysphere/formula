@@ -317,3 +317,35 @@ fn database_functions_computed_criteria_blank_row_matches_all_records() {
         Value::Error(ErrorKind::Num)
     );
 }
+
+#[test]
+fn database_functions_computed_criteria_accepts_true_false_text_results() {
+    let mut sheet = TestSheet::new();
+    seed_database(&mut sheet);
+
+    // Computed criteria formulas can return text. Excel boolean coercion treats "TRUE"/"FALSE"
+    // (case-insensitive) as logical values.
+    sheet.set_formula("F2", "=\"TRUE\"");
+
+    assert_number(&sheet.eval("=DSUM(A1:D5,\"Salary\",F1:F2)"), 4500.0);
+    assert_number(&sheet.eval("=DAVERAGE(A1:D5,\"Salary\",F1:F2)"), 1500.0);
+    assert_number(&sheet.eval("=DCOUNT(A1:D5,\"Salary\",F1:F2)"), 3.0);
+    assert_number(&sheet.eval("=DCOUNTA(A1:D5,\"Salary\",F1:F2)"), 4.0);
+}
+
+#[test]
+fn database_functions_computed_criteria_falsey_empty_string_results_in_no_matches() {
+    let mut sheet = TestSheet::new();
+    seed_database(&mut sheet);
+
+    // Empty string coerces to FALSE.
+    sheet.set_formula("F2", "=\"\"");
+
+    assert_number(&sheet.eval("=DSUM(A1:D5,\"Salary\",F1:F2)"), 0.0);
+    assert_number(&sheet.eval("=DCOUNT(A1:D5,\"Salary\",F1:F2)"), 0.0);
+    assert_number(&sheet.eval("=DCOUNTA(A1:D5,\"Salary\",F1:F2)"), 0.0);
+    assert_eq!(
+        sheet.eval("=DGET(A1:D5,\"Salary\",F1:F2)"),
+        Value::Error(ErrorKind::Value)
+    );
+}
