@@ -178,3 +178,70 @@ test("permission gating: accepts object-form declared permissions", async () => 
     clipboard: true
   });
 });
+
+test("permission storage: resetAllPermissions clears all extensions and forces re-prompt", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-perms-reset-all-"));
+  const storePath = path.join(dir, "permissions.json");
+
+  const pm = new PermissionManager({
+    storagePath: storePath,
+    prompt: async () => true
+  });
+
+  await pm.ensurePermissions(
+    {
+      extensionId: "pub.one",
+      displayName: "One",
+      declaredPermissions: ["cells.write"]
+    },
+    ["cells.write"]
+  );
+
+  await pm.ensurePermissions(
+    {
+      extensionId: "pub.two",
+      displayName: "Two",
+      declaredPermissions: ["clipboard"]
+    },
+    ["clipboard"]
+  );
+
+  assert.deepEqual(await pm.getGrantedPermissions("pub.one"), { "cells.write": true });
+  assert.deepEqual(await pm.getGrantedPermissions("pub.two"), { clipboard: true });
+
+  await pm.resetAllPermissions();
+  assert.deepEqual(await pm.getGrantedPermissions("pub.one"), {});
+  assert.deepEqual(await pm.getGrantedPermissions("pub.two"), {});
+
+  const promptCalls = [];
+  const pm2 = new PermissionManager({
+    storagePath: storePath,
+    prompt: async ({ extensionId, permissions }) => {
+      promptCalls.push({ extensionId, permissions: [...permissions] });
+      return true;
+    }
+  });
+
+  await pm2.ensurePermissions(
+    {
+      extensionId: "pub.one",
+      displayName: "One",
+      declaredPermissions: ["cells.write"]
+    },
+    ["cells.write"]
+  );
+
+  await pm2.ensurePermissions(
+    {
+      extensionId: "pub.two",
+      displayName: "Two",
+      declaredPermissions: ["clipboard"]
+    },
+    ["clipboard"]
+  );
+
+  assert.deepEqual(promptCalls, [
+    { extensionId: "pub.one", permissions: ["cells.write"] },
+    { extensionId: "pub.two", permissions: ["clipboard"] }
+  ]);
+});
