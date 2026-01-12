@@ -28,3 +28,20 @@ test(
     assert.equal(jsxMod.getJsxImportValue(), 42);
   },
 );
+
+test(
+  "TS transpile loader reports TypeScript diagnostics on syntax errors",
+  { skip: !hasTypeScriptDependency() },
+  async () => {
+    await assert.rejects(
+      () => import("./__fixtures__/resolve-ts-loader/broken.ts"),
+      (err) => {
+        assert.ok(err instanceof SyntaxError);
+        assert.match(err.message, /Failed to transpile TypeScript module/);
+        assert.match(err.message, /broken\.ts/);
+        assert.match(err.message, /TS\d+:/);
+        return true;
+      },
+    );
+  },
+);
