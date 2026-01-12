@@ -578,3 +578,42 @@ fn indirect_resolves_sheet_names_with_trailing_spaces() {
 
     assert_eq!(engine.get_cell_value("Summary", "A1"), Value::Number(42.0));
 }
+
+#[test]
+fn indirect_supports_degenerate_3d_sheet_spans() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 42.0).unwrap();
+    engine
+        .set_cell_formula("Summary", "A1", "=INDIRECT(\"Sheet1:Sheet1!A1\")")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Summary", "A1"), Value::Number(42.0));
+    assert_eq!(
+        engine.precedents("Summary", "A1").unwrap(),
+        vec![PrecedentNode::Cell {
+            sheet: 0,
+            addr: CellAddr { row: 0, col: 0 }
+        }]
+    );
+}
+
+#[test]
+fn indirect_rejects_non_degenerate_3d_sheet_spans() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet2", "A1", 2.0).unwrap();
+    engine.set_cell_value("Sheet3", "A1", 3.0).unwrap();
+
+    engine
+        .set_cell_formula("Summary", "A1", "=INDIRECT(\"Sheet1:Sheet3!A1\")")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(
+        engine.get_cell_value("Summary", "A1"),
+        Value::Error(formula_engine::ErrorKind::Ref)
+    );
+    assert!(engine.precedents("Summary", "A1").unwrap().is_empty());
+    assert!(engine.dependents("Sheet2", "A1").unwrap().is_empty());
+}
