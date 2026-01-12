@@ -173,7 +173,9 @@ export class WorkbookSheetStore {
     if (this.sheets.some((s) => s.id === id)) throw new Error(`Duplicate sheet id: ${id}`);
 
     const name =
-      input.name !== undefined ? validateSheetName(input.name, { sheets: this.sheets, ignoreId: null }) : generateDefaultSheetName(this.sheets);
+      input.name !== undefined
+        ? validateSheetName(input.name, { sheets: this.sheets, ignoreId: null })
+        : generateDefaultSheetName(this.sheets);
 
     const sheet: SheetMeta = { id, name, visibility: "visible" };
 
@@ -262,5 +264,34 @@ export class WorkbookSheetStore {
     this.sheets = next;
     this.emit();
   }
-}
 
+  /**
+   * Replace the entire ordered sheet list.
+   *
+   * This is useful when switching workbooks (e.g. after opening a file) where the backend
+   * provides a canonical sheet ordering + display names.
+   */
+  replaceAll(nextSheets: ReadonlyArray<{ id: string; name: string; visibility?: SheetVisibility; tabColor?: TabColor }>): void {
+    const byId = new Set<string>();
+    for (const sheet of nextSheets) {
+      const id = String(sheet?.id ?? "").trim();
+      if (!id) throw new Error("Sheet id cannot be empty");
+      if (byId.has(id)) throw new Error(`Duplicate sheet id: ${id}`);
+      byId.add(id);
+    }
+
+    const normalizedSheets: SheetMeta[] = [];
+    for (const sheet of nextSheets) {
+      const normalizedName = validateSheetName(sheet.name, { sheets: normalizedSheets, ignoreId: null });
+      normalizedSheets.push({
+        id: String(sheet.id).trim(),
+        name: normalizedName,
+        visibility: sheet.visibility ?? "visible",
+        tabColor: sheet.tabColor ? { ...sheet.tabColor } : undefined,
+      });
+    }
+
+    this.sheets = normalizedSheets;
+    this.emit();
+  }
+}

@@ -104,6 +104,7 @@ import { registerBuiltinCommands } from "./commands/registerBuiltinCommands.js";
 import type { Range, SelectionState } from "./selection/types";
 import { ContextMenu, type ContextMenuItem } from "./menus/contextMenu.js";
 import { WorkbookSheetStore, generateDefaultSheetName } from "./sheets/workbookSheetStore";
+import { startSheetStoreDocumentSync } from "./sheets/sheetStoreDocumentSync";
 import {
   applyAllBorders,
   applyNumberFormatPreset,
@@ -1316,17 +1317,41 @@ let sheetTabsReactRoot: ReturnType<typeof createRoot> | null = null;
 let stopSheetStoreListener: (() => void) | null = null;
 let addSheetInFlight = false;
 
-let lastDocSheetIdsKey = "";
+let sheetStoreDocSync: ReturnType<typeof startSheetStoreDocumentSync> | null = null;
+let sheetStoreDocSyncStore: WorkbookSheetStore | null = null;
 
 type SheetUiInfo = { id: string; name: string };
-
-function stableSheetIdKey(ids: string[]): string {
-  return ids.slice().sort((a, b) => a.localeCompare(b)).join("|");
-}
 
 function listDocumentSheetIds(): string[] {
   const sheetIds = app.getDocument().getSheetIds();
   return sheetIds.length > 0 ? sheetIds : ["Sheet1"];
+}
+
+function installSheetStoreDocSync(): void {
+  // In collab mode, the sheet list is driven by the Yjs workbook schema (`session.sheets`).
+  // Avoid reconciling the UI sheet store against DocumentController's lazily-created sheets.
+  const session = app.getCollabSession?.() ?? null;
+  if (session) {
+    sheetStoreDocSync?.dispose();
+    sheetStoreDocSync = null;
+    sheetStoreDocSyncStore = null;
+    return;
+  }
+
+  // When `workbookSheetStore` is replaced (workbook open, collab teardown), restart the sync.
+  if (sheetStoreDocSync && sheetStoreDocSyncStore === workbookSheetStore) return;
+
+  sheetStoreDocSync?.dispose();
+  sheetStoreDocSync = startSheetStoreDocumentSync(
+    app.getDocument(),
+    workbookSheetStore,
+    () => app.getCurrentSheetId(),
+    (sheetId) => {
+      app.activateSheet(sheetId);
+      app.focus();
+    },
+  );
+  sheetStoreDocSyncStore = workbookSheetStore;
 }
 
 function coerceCollabSheetField(value: unknown): string | null {
@@ -1359,34 +1384,6 @@ function listSheetsFromCollabSession(session: CollabSession): SheetUiInfo[] {
     out.push({ id: trimmed, name });
   }
   return out.length > 0 ? out : [{ id: "Sheet1", name: "Sheet1" }];
-}
-
-function reconcileSheetStoreWithDocument(ids: string[]): void {
-  if (ids.length === 0) return;
-
-  const docIdSet = new Set(ids);
-  const existing = workbookSheetStore.listAll();
-  const existingIdSet = new Set(existing.map((s) => s.id));
-
-  // Add missing sheets (append in document order; UI order remains store-managed).
-  let insertAfterId = workbookSheetStore.listAll().at(-1)?.id ?? "";
-  for (const id of ids) {
-    if (existingIdSet.has(id)) continue;
-    workbookSheetStore.addAfter(insertAfterId, { id, name: id });
-    existingIdSet.add(id);
-    insertAfterId = id;
-  }
-
-  // Remove sheets that no longer exist in the document.
-  for (const sheet of existing) {
-    if (docIdSet.has(sheet.id)) continue;
-    try {
-      workbookSheetStore.remove(sheet.id);
-    } catch {
-      // Best-effort: avoid crashing the UI if the sheet store invariants don't
-      // allow the removal (e.g. last-sheet guard).
-    }
-  }
 }
 
 let lastCollabSheetsKey = "";
@@ -1639,15 +1636,23 @@ function installSheetStoreSubscription(): void {
 }
 
 {
-  const session = app.getCollabSession?.() ?? null;
-  if (!session) {
-    const ids = listDocumentSheetIds();
-    reconcileSheetStoreWithDocument(ids);
-    lastDocSheetIdsKey = stableSheetIdKey(ids);
-  }
+  installSheetStoreDocSync();
   installSheetStoreSubscription();
   syncSheetUi();
 }
+
+// `SpreadsheetApp.restoreDocumentState()` replaces the DocumentController model (including sheet ids).
+// Keep the sheet metadata store in sync so tabs/switcher reflect the restored workbook.
+const originalRestoreDocumentState = app.restoreDocumentState.bind(app);
+app.restoreDocumentState = async (...args: Parameters<SpreadsheetApp["restoreDocumentState"]>): Promise<void> => {
+  await originalRestoreDocumentState(...args);
+
+  // `restoreDocumentState()` is used by version restore and workbook open. Ensure the doc->store sync
+  // is installed for the current store instance, then force a synchronous reconciliation.
+  installSheetStoreDocSync();
+  sheetStoreDocSync?.syncNow();
+  syncSheetUi();
+};
 
 const originalActivateSheet = app.activateSheet.bind(app);
 app.activateSheet = (sheetId: string): void => {
@@ -1684,6 +1689,13 @@ app.selectRange = (...args: Parameters<SpreadsheetApp["selectRange"]>): void => 
 // and re-render when edits create new sheets (DocumentController creates sheets lazily).
 app.getDocument().on("change", () => {
   app.refresh();
+
+  // Keep the sheet metadata store aligned with the DocumentController's sheet ids.
+  // DocumentController can create sheets lazily (e.g. `setCellValue("Sheet2", ...)`) and
+  // `applyState` can remove sheets after emitting its change event, so the sync layer
+  // is microtask-debounced (see `sheetStoreDocumentSync.ts`).
+  installSheetStoreDocSync();
+
   // In collab mode, the sheet list is driven by the Yjs workbook schema (`session.sheets`).
   // Avoid reconciling the UI sheet store against DocumentController's lazily-created sheets.
   const session = app.getCollabSession?.() ?? null;
@@ -1693,12 +1705,6 @@ app.getDocument().on("change", () => {
     if (observedCollabSession !== session) syncSheetUi();
     return;
   }
-  const ids = listDocumentSheetIds();
-  const key = stableSheetIdKey(ids);
-  if (key === lastDocSheetIdsKey) return;
-  lastDocSheetIdsKey = key;
-  reconcileSheetStoreWithDocument(ids);
-  syncSheetUi();
 });
 
 // --- Dock layout + persistence (minimal shell wiring for e2e + demos) ----------
@@ -6113,6 +6119,12 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
   if (sheets.length === 0) {
     throw new Error("Workbook contains no sheets");
   }
+
+  // We're about to replace the sheet metadata store; restart the doc->store sync once
+  // `restoreDocumentState()` has applied the workbook snapshot.
+  sheetStoreDocSync?.dispose();
+  sheetStoreDocSync = null;
+  sheetStoreDocSyncStore = null;
 
   workbookSheetStore = new WorkbookSheetStore(
     sheets.map((sheet) => ({

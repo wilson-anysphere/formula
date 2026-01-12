@@ -1,0 +1,137 @@
+import { describe, expect, test } from "vitest";
+
+import { startSheetStoreDocumentSync } from "./sheetStoreDocumentSync";
+import { WorkbookSheetStore } from "./workbookSheetStore";
+
+function flushMicrotasks(): Promise<void> {
+  return new Promise((resolve) => queueMicrotask(resolve));
+}
+
+class MockDoc {
+  sheetIds: string[] = [];
+  private readonly listeners = new Map<string, Set<(payload: any) => void>>();
+
+  getSheetIds(): string[] {
+    return [...this.sheetIds];
+  }
+
+  on(event: string, listener: (payload: any) => void): () => void {
+    let set = this.listeners.get(event);
+    if (!set) {
+      set = new Set();
+      this.listeners.set(event, set);
+    }
+    set.add(listener);
+    return () => set?.delete(listener);
+  }
+
+  emit(event: string, payload: any = {}): void {
+    const set = this.listeners.get(event);
+    if (!set) return;
+    for (const listener of set) listener(payload);
+  }
+}
+
+describe("sheetStoreDocumentSync", () => {
+  test("adds missing doc sheet ids into the store (lazy sheet creation)", async () => {
+    const doc = new MockDoc();
+    doc.sheetIds = ["Sheet1"];
+
+    const store = new WorkbookSheetStore();
+    let activeSheetId = "Sheet1";
+
+    const handle = startSheetStoreDocumentSync(
+      doc,
+      store,
+      () => activeSheetId,
+      (id) => {
+        activeSheetId = id;
+      },
+    );
+    await flushMicrotasks();
+
+    expect(store.listAll().map((s) => s.id)).toEqual(["Sheet1"]);
+    expect(store.getById("Sheet1")?.name).toBe("Sheet1");
+
+    // Add Sheet2 by mutating the doc, then emit a change.
+    doc.sheetIds = ["Sheet1", "Sheet2"];
+    doc.emit("change");
+    await flushMicrotasks();
+
+    expect(store.listAll().map((s) => s.id)).toEqual(["Sheet1", "Sheet2"]);
+    expect(store.getById("Sheet2")?.name).toBe("Sheet2");
+
+    handle.dispose();
+  });
+
+  test("removes store entries that no longer exist in the doc (applyState removal)", async () => {
+    const doc = new MockDoc();
+    doc.sheetIds = ["Sheet1", "Sheet2"];
+
+    const store = new WorkbookSheetStore([
+      { id: "Sheet1", name: "Sheet1", visibility: "visible" },
+      { id: "Sheet2", name: "Sheet2", visibility: "visible" },
+    ]);
+
+    let activeSheetId = "Sheet1";
+
+    const handle = startSheetStoreDocumentSync(
+      doc,
+      store,
+      () => activeSheetId,
+      (id) => {
+        activeSheetId = id;
+      },
+    );
+
+    await flushMicrotasks();
+    expect(store.listAll().map((s) => s.id)).toEqual(["Sheet1", "Sheet2"]);
+
+    // Simulate DocumentController.applyState ordering:
+    // 1) change event fires while `getSheetIds()` still includes the soon-to-be-removed sheet
+    // 2) the sheet is removed from the model after the event (same tick)
+    doc.emit("change", { source: "applyState" });
+    doc.sheetIds = ["Sheet1"];
+    await flushMicrotasks();
+
+    expect(store.listAll().map((s) => s.id)).toEqual(["Sheet1"]);
+
+    handle.dispose();
+  });
+
+  test("auto-activates first visible sheet if the active sheet no longer exists", async () => {
+    const doc = new MockDoc();
+    doc.sheetIds = ["Sheet1", "Sheet2"];
+
+    const store = new WorkbookSheetStore([
+      { id: "Sheet1", name: "Sheet1", visibility: "visible" },
+      { id: "Sheet2", name: "Sheet2", visibility: "visible" },
+    ]);
+
+    let activeSheetId = "Sheet2";
+    let activated: string | null = null;
+
+    const handle = startSheetStoreDocumentSync(
+      doc,
+      store,
+      () => activeSheetId,
+      (id) => {
+        activated = id;
+        activeSheetId = id;
+      },
+    );
+
+    await flushMicrotasks();
+    expect(store.listAll().map((s) => s.id)).toEqual(["Sheet1", "Sheet2"]);
+
+    // Remove the active sheet.
+    doc.emit("change");
+    doc.sheetIds = ["Sheet1"];
+    await flushMicrotasks();
+
+    expect(store.listAll().map((s) => s.id)).toEqual(["Sheet1"]);
+    expect(activated).toBe("Sheet1");
+
+    handle.dispose();
+  });
+});
