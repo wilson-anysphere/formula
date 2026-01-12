@@ -23,10 +23,30 @@ export interface CellStyle {
   rotationDeg?: number;
 }
 
+export interface CellRichTextRun {
+  /** Unicode code point start index (inclusive). */
+  start: number;
+  /** Unicode code point end index (exclusive). */
+  end: number;
+  style?: Record<string, unknown>;
+}
+
+export interface CellRichText {
+  text: string;
+  runs?: CellRichTextRun[];
+}
+
 export interface CellData {
   row: number;
   col: number;
   value: string | number | boolean | null;
+  /**
+   * Optional rich text payload for cell rendering.
+   *
+   * When present, `value` should typically be set to `richText.text` as a plain-text
+   * fallback for accessibility / status strings.
+   */
+  richText?: CellRichText;
   style?: CellStyle;
   /**
    * Optional comment metadata used for rendering a cell comment indicator.

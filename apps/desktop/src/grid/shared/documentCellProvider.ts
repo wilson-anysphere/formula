@@ -276,6 +276,7 @@ export class DocumentCellProvider implements CellProvider {
     }
 
     let value: string | number | boolean | null = null;
+    let richText: RichTextValue | undefined;
     if (state.formula != null) {
       if (this.options.showFormulas()) {
         value = state.formula;
@@ -283,7 +284,12 @@ export class DocumentCellProvider implements CellProvider {
         value = this.options.getComputedValue({ row: docRow, col: docCol });
       }
     } else if (state.value != null) {
-      value = isRichTextValue(state.value) ? state.value.text : (state.value as any);
+      if (isRichTextValue(state.value)) {
+        richText = state.value;
+        value = richText.text;
+      } else {
+        value = state.value as any;
+      }
       if (value !== null && typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
         value = String(state.value);
       }
@@ -319,7 +325,7 @@ export class DocumentCellProvider implements CellProvider {
       return { resolved: meta.resolved };
     })();
 
-    const cell: CellData = { row, col, value, style, comment };
+    const cell: CellData = richText ? { row, col, value, richText, style, comment } : { row, col, value, style, comment };
     this.cache.set(key, cell);
     return cell;
   }

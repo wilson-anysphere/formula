@@ -146,6 +146,81 @@ function pickTextColor(backgroundColor: string): string {
   return luma > 0.6 ? "#000000" : "#ffffff";
 }
 
+type FontSpec = { family: string; sizePx: number; weight?: string | number; style?: string };
+
+type RichTextRunStyle = {
+  bold?: boolean;
+  italic?: boolean;
+  underline?: string | boolean;
+  color?: string;
+  font?: string;
+  size_100pt?: number;
+};
+
+function pointsToPx(points: number): number {
+  // Excel point sizes are typically interpreted at 96DPI.
+  return (points * 96) / 72;
+}
+
+function engineColorToCanvasColor(color: unknown): string | undefined {
+  if (typeof color !== "string") return undefined;
+  if (!color.startsWith("#")) return color;
+  if (color.length !== 9) return color;
+
+  // Engine colors are serialized as `#AARRGGBB`.
+  const hex = color.slice(1);
+  const a = Number.parseInt(hex.slice(0, 2), 16) / 255;
+  const r = Number.parseInt(hex.slice(2, 4), 16);
+  const g = Number.parseInt(hex.slice(4, 6), 16);
+  const b = Number.parseInt(hex.slice(6, 8), 16);
+
+  if (Number.isNaN(a) || Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) {
+    return color;
+  }
+
+  if (a >= 1) {
+    return `rgb(${r}, ${g}, ${b})`;
+  }
+  return `rgba(${r}, ${g}, ${b}, ${a})`;
+}
+
+function buildCodePointIndex(text: string): number[] {
+  const offsets: number[] = [0];
+  let utf16Offset = 0;
+  for (const ch of text) {
+    utf16Offset += ch.length;
+    offsets.push(utf16Offset);
+  }
+  return offsets;
+}
+
+function sliceByCodePointRange(text: string, offsets: number[], start: number, end: number): string {
+  const len = offsets.length - 1;
+  const s = clampIndex(start, 0, len);
+  const e = clampIndex(end, s, len);
+  return text.slice(offsets[s], offsets[e]);
+}
+
+function isUnderline(style: RichTextRunStyle | undefined): boolean {
+  const value = style?.underline;
+  return Boolean(value && value !== "none");
+}
+
+function fontSpecForRichTextStyle(
+  style: RichTextRunStyle | undefined,
+  defaults: Required<Pick<FontSpec, "family" | "sizePx">> & { weight: string | number; style: string },
+  zoom: number
+): FontSpec {
+  const family = typeof style?.font === "string" ? style.font : defaults.family;
+  const sizePx =
+    typeof style?.size_100pt === "number" && Number.isFinite(style.size_100pt)
+      ? pointsToPx(style.size_100pt / 100) * zoom
+      : defaults.sizePx;
+  const weight = style?.bold === true ? "bold" : defaults.weight;
+  const fontStyle = style?.italic === true ? "italic" : defaults.style;
+  return { family, sizePx, weight, style: fontStyle };
+}
+
 const EXPLICIT_NEWLINE_RE = /[\r\n]/;
 const MAX_TEXT_OVERFLOW_COLUMNS = 128;
 const EMPTY_MERGED_INDEX = new MergedCellIndex([]);
@@ -979,13 +1054,78 @@ export class CanvasGridRenderer {
     let maxMeasured = 0;
     const measureRow = (row: number) => {
       const cell = this.provider.getCell(row, col);
-      if (!cell || cell.value === null) return;
+      if (!cell) return;
+      const richText = cell.richText;
+      const richTextText = richText?.text ?? "";
+      const hasRichText = Boolean(richText && richTextText);
+      if (cell.value === null && !hasRichText) return;
 
       const style = cell.style;
       const fontSize = (style?.fontSize ?? 12) * zoom;
       const fontFamily = style?.fontFamily ?? "system-ui";
       const fontWeight = style?.fontWeight ?? "400";
-      const fontSpec = { family: fontFamily, sizePx: fontSize, weight: fontWeight };
+      const fontSpec = { family: fontFamily, sizePx: fontSize, weight: fontWeight } satisfies FontSpec;
+
+      if (hasRichText) {
+        const offsets = buildCodePointIndex(richTextText);
+        const textLen = offsets.length - 1;
+        const rawRuns =
+          Array.isArray(richText?.runs) && richText.runs.length > 0
+            ? richText.runs
+            : [{ start: 0, end: textLen, style: undefined }];
+
+        const defaults = {
+          family: fontFamily,
+          sizePx: fontSize,
+          weight: fontWeight,
+          style: "normal"
+        } satisfies Required<Pick<FontSpec, "family" | "sizePx">> & { weight: string | number; style: string };
+
+        const layoutRuns = rawRuns.map((run) => {
+          const runStyle =
+            run.style && typeof run.style === "object" ? (run.style as RichTextRunStyle) : (undefined as RichTextRunStyle | undefined);
+          return {
+            text: sliceByCodePointRange(richTextText, offsets, run.start, run.end),
+            font: fontSpecForRichTextStyle(runStyle, defaults, zoom)
+          };
+        });
+
+        let maxLineWidth = 0;
+        let currentLineWidth = 0;
+        const newlineRe = /\r\n|\r|\n/g;
+
+        for (const run of layoutRuns) {
+          if (!run.text) continue;
+
+          let lastIndex = 0;
+          newlineRe.lastIndex = 0;
+          let match: RegExpExecArray | null;
+
+          while ((match = newlineRe.exec(run.text))) {
+            const segment = run.text.slice(lastIndex, match.index);
+            if (segment.length > 0) {
+              const measurement = layoutEngine?.measure(segment, run.font);
+              const width = measurement?.width ?? segment.length * run.font.sizePx * 0.6;
+              if (Number.isFinite(width)) currentLineWidth += width;
+            }
+
+            maxLineWidth = Math.max(maxLineWidth, currentLineWidth);
+            currentLineWidth = 0;
+            lastIndex = match.index + match[0].length;
+          }
+
+          const tail = run.text.slice(lastIndex);
+          if (tail.length > 0) {
+            const measurement = layoutEngine?.measure(tail, run.font);
+            const width = measurement?.width ?? tail.length * run.font.sizePx * 0.6;
+            if (Number.isFinite(width)) currentLineWidth += width;
+          }
+        }
+
+        maxLineWidth = Math.max(maxLineWidth, currentLineWidth);
+        if (Number.isFinite(maxLineWidth)) maxMeasured = Math.max(maxMeasured, maxLineWidth);
+        return;
+      }
 
       const text = formatCellDisplayText(cell.value);
       if (text === "") return;
@@ -1044,12 +1184,16 @@ export class CanvasGridRenderer {
 
     const measureCol = (col: number) => {
       const cell = this.provider.getCell(row, col);
-      if (!cell || cell.value === null) return;
+      if (!cell) return;
+      const richText = cell.richText;
+      const richTextText = richText?.text ?? "";
+      const hasRichText = Boolean(richText && richTextText);
+      if (cell.value === null && !hasRichText) return;
 
       const style = cell.style;
       const wrapMode = style?.wrapMode ?? "none";
 
-      const text = formatCellDisplayText(cell.value);
+      const text = hasRichText ? richTextText : formatCellDisplayText(cell.value);
       if (text === "") return;
 
       hasContent = true;
@@ -1057,9 +1201,37 @@ export class CanvasGridRenderer {
       const fontSize = (style?.fontSize ?? 12) * zoom;
       const fontFamily = style?.fontFamily ?? "system-ui";
       const fontWeight = style?.fontWeight ?? "400";
-      const fontSpec = { family: fontFamily, sizePx: fontSize, weight: fontWeight };
+      const fontSpec = { family: fontFamily, sizePx: fontSize, weight: fontWeight } satisfies FontSpec;
 
-      const lineHeight = Math.ceil(fontSize * 1.2);
+      const defaults = {
+        family: fontFamily,
+        sizePx: fontSize,
+        weight: fontWeight,
+        style: "normal"
+      } satisfies Required<Pick<FontSpec, "family" | "sizePx">> & { weight: string | number; style: string };
+
+      const layoutRuns = (() => {
+        if (!hasRichText) return null;
+
+        const offsets = buildCodePointIndex(richTextText);
+        const textLen = offsets.length - 1;
+        const rawRuns =
+          Array.isArray(richText?.runs) && richText.runs.length > 0
+            ? richText.runs
+            : [{ start: 0, end: textLen, style: undefined }];
+
+        return rawRuns.map((run) => {
+          const runStyle =
+            run.style && typeof run.style === "object" ? (run.style as RichTextRunStyle) : (undefined as RichTextRunStyle | undefined);
+          return {
+            text: sliceByCodePointRange(richTextText, offsets, run.start, run.end),
+            font: fontSpecForRichTextStyle(runStyle, defaults, zoom)
+          };
+        });
+      })();
+
+      const maxFontSizePx = layoutRuns ? layoutRuns.reduce((acc, run) => Math.max(acc, run.font.sizePx), defaults.sizePx) : fontSize;
+      const lineHeight = Math.ceil(maxFontSizePx * 1.2);
       // Even without wrapping, large fonts should auto-fit the row height.
       maxMeasuredHeight = Math.max(maxMeasuredHeight, lineHeight + paddingY * 2);
 
@@ -1077,16 +1249,28 @@ export class CanvasGridRenderer {
           : "start";
       const direction = style?.direction ?? "auto";
 
-      const layout = layoutEngine.layout({
-        text,
-        font: fontSpec,
-        maxWidth: availableWidth,
-        wrapMode,
-        align: layoutAlign,
-        direction,
-        lineHeightPx: lineHeight,
-        maxLines: 1000
-      });
+      const layout = layoutRuns
+        ? layoutEngine.layout({
+            runs: layoutRuns.map((r) => ({ text: r.text, font: r.font })),
+            text: undefined,
+            font: defaults,
+            maxWidth: availableWidth,
+            wrapMode,
+            align: layoutAlign,
+            direction,
+            lineHeightPx: lineHeight,
+            maxLines: 1000
+          })
+        : layoutEngine.layout({
+            text,
+            font: fontSpec,
+            maxWidth: availableWidth,
+            wrapMode,
+            align: layoutAlign,
+            direction,
+            lineHeightPx: lineHeight,
+            maxLines: 1000
+          });
 
       const height = layout.height + paddingY * 2;
       if (Number.isFinite(height)) maxMeasuredHeight = Math.max(maxMeasuredHeight, height);
@@ -2151,7 +2335,12 @@ export class CanvasGridRenderer {
       const { cell, x, y, width, height, spanStartRow, spanEndRow, spanStartCol, spanEndCol, isHeader } = options;
       const style = cell.style;
 
-      if (cell.value !== null) {
+      const richText = cell.richText;
+      const richTextText = richText?.text ?? "";
+      const hasRichText = Boolean(richText && richTextText);
+      const hasValue = cell.value !== null;
+
+      if (hasValue || hasRichText) {
         const fontSize = (style?.fontSize ?? 12) * zoom;
         const fontFamily = style?.fontFamily ?? "system-ui";
         const fontWeight = style?.fontWeight ?? "400";
@@ -2165,10 +2354,11 @@ export class CanvasGridRenderer {
         }
 
         const explicitColor = style?.color;
+        const valueForColor = cell.value !== null ? cell.value : richTextText;
         const fillStyle =
           explicitColor !== undefined
             ? explicitColor
-            : typeof cell.value === "string" && cell.value.startsWith("#")
+            : typeof valueForColor === "string" && valueForColor.startsWith("#")
               ? errorTextColor
               : isHeader
                 ? headerTextColor
@@ -2178,170 +2368,486 @@ export class CanvasGridRenderer {
           currentTextFill = fillStyle;
         }
 
-        const text = formatCellDisplayText(cell.value);
-        const wrapMode = style?.wrapMode ?? "none";
-        const direction = style?.direction ?? "auto";
-        const verticalAlign = style?.verticalAlign ?? "middle";
-        const rotationDeg = style?.rotationDeg ?? 0;
+        if (hasRichText) {
+          const text = richTextText;
+          const wrapMode = style?.wrapMode ?? "none";
+          const direction = style?.direction ?? "auto";
+          const verticalAlign = style?.verticalAlign ?? "middle";
+          const rotationDeg = style?.rotationDeg ?? 0;
 
-        const availableWidth = Math.max(0, width - paddingX * 2);
-        const availableHeight = Math.max(0, height - paddingY * 2);
-        const lineHeight = Math.ceil(fontSize * 1.2);
-        const maxLines = Math.max(1, Math.floor(availableHeight / lineHeight));
+          const availableWidth = Math.max(0, width - paddingX * 2);
+          const availableHeight = Math.max(0, height - paddingY * 2);
 
-        const align: CanvasTextAlign = style?.textAlign ?? (typeof cell.value === "number" ? "end" : "start");
-        const layoutAlign =
-          align === "left" || align === "right" || align === "center" || align === "start" || align === "end"
-            ? (align as "left" | "right" | "center" | "start" | "end")
-            : "start";
+          const align: CanvasTextAlign = style?.textAlign ?? (typeof cell.value === "number" ? "end" : "start");
+          const layoutAlign =
+            align === "left" || align === "right" || align === "center" || align === "start" || align === "end"
+              ? (align as "left" | "right" | "center" | "start" | "end")
+              : "start";
 
-        const hasExplicitNewline = EXPLICIT_NEWLINE_RE.test(text);
-        const rotationRad = (rotationDeg * Math.PI) / 180;
+          const hasExplicitNewline = EXPLICIT_NEWLINE_RE.test(text);
+          const rotationRad = (rotationDeg * Math.PI) / 180;
 
-        if (wrapMode === "none" && !hasExplicitNewline && rotationDeg === 0) {
-          const resolvedAlign =
-            layoutAlign === "left" || layoutAlign === "right" || layoutAlign === "center"
-              ? layoutAlign
-              : resolveAlign(
-                  layoutAlign,
-                  direction === "auto" ? (typeof cell.value === "string" ? detectBaseDirection(text) : "ltr") : direction
-                );
+          const offsets = buildCodePointIndex(text);
+          const textLen = offsets.length - 1;
+          const rawRuns =
+            Array.isArray(richText?.runs) && richText.runs.length > 0
+              ? richText.runs
+              : [{ start: 0, end: textLen, style: undefined }];
 
-          const measurement = layoutEngine?.measure(text, fontSpec);
-          const textWidth = measurement?.width ?? contentCtx.measureText(text).width;
-          const ascent = measurement?.ascent ?? fontSize * 0.8;
-          const descent = measurement?.descent ?? fontSize * 0.2;
+          const defaults = {
+            family: fontFamily,
+            sizePx: fontSize,
+            weight: fontWeight,
+            style: "normal"
+          } satisfies Required<Pick<FontSpec, "family" | "sizePx">> & { weight: string | number; style: string };
 
-          let textX = x + paddingX;
-          if (resolvedAlign === "center") {
-            textX = x + paddingX + (availableWidth - textWidth) / 2;
-          } else if (resolvedAlign === "right") {
-            textX = x + paddingX + (availableWidth - textWidth);
-          }
-
-          let baselineY = y + paddingY + ascent;
-          if (verticalAlign === "middle") {
-            baselineY = y + height / 2 + (ascent - descent) / 2;
-          } else if (verticalAlign === "bottom") {
-            baselineY = y + height - paddingY - descent;
-          }
-
-          const shouldClip = textWidth > availableWidth;
-          if (shouldClip) {
-            let clipX = x;
-            let clipWidth = width;
-
-            if ((resolvedAlign === "left" || resolvedAlign === "right") && textWidth > width - paddingX) {
-              const requiredExtra = paddingX + textWidth - width;
-              if (requiredExtra > 0) {
-                if (resolvedAlign === "left") {
-                  let extra = 0;
-                  for (
-                    let probeCol = spanEndCol, steps = 0;
-                    probeCol < colCount && steps < MAX_TEXT_OVERFLOW_COLUMNS && extra < requiredExtra;
-                    probeCol++, steps++
-                  ) {
-                    let blocked = false;
-                    for (let r = spanStartRow; r < spanEndRow; r++) {
-                      if (r < 0 || r >= rowCount) {
-                        blocked = true;
-                        break;
-                      }
-                      if (isBlockedForOverflow(r, probeCol)) {
-                        blocked = true;
-                        break;
-                      }
-                    }
-                    if (blocked) break;
-                    extra += colAxis.getSize(probeCol);
-                  }
-                  clipWidth += extra;
-                } else {
-                  let extra = 0;
-                  for (
-                    let probeCol = spanStartCol - 1, steps = 0;
-                    probeCol >= 0 && steps < MAX_TEXT_OVERFLOW_COLUMNS && extra < requiredExtra;
-                    probeCol--, steps++
-                  ) {
-                    let blocked = false;
-                    for (let r = spanStartRow; r < spanEndRow; r++) {
-                      if (r < 0 || r >= rowCount) {
-                        blocked = true;
-                        break;
-                      }
-                      if (isBlockedForOverflow(r, probeCol)) {
-                        blocked = true;
-                        break;
-                      }
-                    }
-                    if (blocked) break;
-                    extra += colAxis.getSize(probeCol);
-                  }
-                  clipX -= extra;
-                  clipWidth += extra;
-                }
-              }
-            }
-
-            contentCtx.save();
-            contentCtx.beginPath();
-            contentCtx.rect(clipX, y, clipWidth, height);
-            contentCtx.clip();
-            contentCtx.fillText(text, textX, baselineY);
-            contentCtx.restore();
-          } else {
-            contentCtx.fillText(text, textX, baselineY);
-          }
-        } else if (layoutEngine && availableWidth > 0) {
-          const layout = layoutEngine.layout({
-            text,
-            font: fontSpec,
-            maxWidth: availableWidth,
-            wrapMode,
-            align: layoutAlign,
-            direction,
-            lineHeightPx: lineHeight,
-            maxLines
+          const layoutRuns = rawRuns.map((run) => {
+            const runStyle =
+              run.style && typeof run.style === "object" ? (run.style as RichTextRunStyle) : (undefined as RichTextRunStyle | undefined);
+            return {
+              text: sliceByCodePointRange(text, offsets, run.start, run.end),
+              font: fontSpecForRichTextStyle(runStyle, defaults, zoom),
+              color: engineColorToCanvasColor(runStyle?.color),
+              underline: isUnderline(runStyle)
+            };
           });
 
-          let originY = y + paddingY;
-          if (verticalAlign === "middle") {
-            originY = y + paddingY + Math.max(0, (availableHeight - layout.height) / 2);
-          } else if (verticalAlign === "bottom") {
-            originY = y + height - paddingY - layout.height;
-          }
+          const maxFontSizePx = layoutRuns.reduce((acc, run) => Math.max(acc, run.font.sizePx), defaults.sizePx);
+          const lineHeight = Math.ceil(maxFontSizePx * 1.2);
+          const maxLines = Math.max(1, Math.floor(availableHeight / lineHeight));
 
-          const originX = x + paddingX;
-          const shouldClip = layout.width > availableWidth || layout.height > availableHeight || rotationDeg !== 0;
+          contentCtx.save();
 
-          if (shouldClip) {
+          if (wrapMode === "none" && !hasExplicitNewline && rotationDeg === 0) {
+            // Fast path: single-line rich text (no wrapping). Uses cached measurements.
+            const baseDirection = direction === "auto" ? detectBaseDirection(text) : direction;
+            const resolvedAlign =
+              layoutAlign === "left" || layoutAlign === "right" || layoutAlign === "center"
+                ? layoutAlign
+                : resolveAlign(layoutAlign, baseDirection);
+
+            const fragments = layoutRuns
+              .map((fragment) => {
+                if (fragment.text.length === 0) return null;
+                const measurement = layoutEngine?.measure(fragment.text, fragment.font);
+                const width = measurement?.width ?? contentCtx.measureText(fragment.text).width;
+                const ascent = measurement?.ascent ?? fragment.font.sizePx * 0.8;
+                const descent = measurement?.descent ?? fragment.font.sizePx * 0.2;
+                return {
+                  ...fragment,
+                  width,
+                  ascent,
+                  descent
+                };
+              })
+              .filter((fragment): fragment is NonNullable<typeof fragment> => Boolean(fragment));
+
+            const totalWidth = fragments.reduce((acc, fragment) => acc + fragment.width, 0);
+            const lineAscent = fragments.reduce((acc, fragment) => Math.max(acc, fragment.ascent), 0);
+            const lineDescent = fragments.reduce((acc, fragment) => Math.max(acc, fragment.descent), 0);
+
+            let cursorX = x + paddingX;
+            if (resolvedAlign === "center") {
+              cursorX = x + paddingX + (availableWidth - totalWidth) / 2;
+            } else if (resolvedAlign === "right") {
+              cursorX = x + paddingX + (availableWidth - totalWidth);
+            }
+
+            let baselineY = y + paddingY + lineAscent;
+            if (verticalAlign === "middle") {
+              baselineY = y + height / 2 + (lineAscent - lineDescent) / 2;
+            } else if (verticalAlign === "bottom") {
+              baselineY = y + height - paddingY - lineDescent;
+            }
+
+            const underlineSegments: Array<{ x1: number; x2: number; y: number; color: string; lineWidth: number }> = [];
+
+            const drawFragments = () => {
+              let xCursor = cursorX;
+              for (const fragment of fragments) {
+                contentCtx.font = toCanvasFontString(fragment.font);
+                contentCtx.fillStyle = fragment.color ?? fillStyle;
+                contentCtx.fillText(fragment.text, xCursor, baselineY);
+
+                if (fragment.underline) {
+                  const underlineOffset = Math.max(1, Math.round(fragment.font.sizePx * 0.08));
+                  const underlineY = baselineY + underlineOffset;
+                  underlineSegments.push({
+                    x1: xCursor,
+                    x2: xCursor + fragment.width,
+                    y: underlineY,
+                    color: contentCtx.fillStyle as string,
+                    lineWidth: Math.max(1, Math.round(fragment.font.sizePx / 16))
+                  });
+                }
+
+                xCursor += fragment.width;
+              }
+            };
+
+            const shouldClip = totalWidth > availableWidth;
+            if (shouldClip) {
+              let clipX = x;
+              let clipWidth = width;
+
+              if ((resolvedAlign === "left" || resolvedAlign === "right") && totalWidth > width - paddingX) {
+                const requiredExtra = paddingX + totalWidth - width;
+                if (requiredExtra > 0) {
+                  if (resolvedAlign === "left") {
+                    let extra = 0;
+                    for (
+                      let probeCol = spanEndCol, steps = 0;
+                      probeCol < colCount && steps < MAX_TEXT_OVERFLOW_COLUMNS && extra < requiredExtra;
+                      probeCol++, steps++
+                    ) {
+                      let blocked = false;
+                      for (let r = spanStartRow; r < spanEndRow; r++) {
+                        if (r < 0 || r >= rowCount) {
+                          blocked = true;
+                          break;
+                        }
+                        if (isBlockedForOverflow(r, probeCol)) {
+                          blocked = true;
+                          break;
+                        }
+                      }
+                      if (blocked) break;
+                      extra += colAxis.getSize(probeCol);
+                    }
+                    clipWidth += extra;
+                  } else {
+                    let extra = 0;
+                    for (
+                      let probeCol = spanStartCol - 1, steps = 0;
+                      probeCol >= 0 && steps < MAX_TEXT_OVERFLOW_COLUMNS && extra < requiredExtra;
+                      probeCol--, steps++
+                    ) {
+                      let blocked = false;
+                      for (let r = spanStartRow; r < spanEndRow; r++) {
+                        if (r < 0 || r >= rowCount) {
+                          blocked = true;
+                          break;
+                        }
+                        if (isBlockedForOverflow(r, probeCol)) {
+                          blocked = true;
+                          break;
+                        }
+                      }
+                      if (blocked) break;
+                      extra += colAxis.getSize(probeCol);
+                    }
+                    clipX -= extra;
+                    clipWidth += extra;
+                  }
+                }
+              }
+
+              contentCtx.save();
+              contentCtx.beginPath();
+              contentCtx.rect(clipX, y, clipWidth, height);
+              contentCtx.clip();
+              drawFragments();
+              contentCtx.restore();
+            } else {
+              drawFragments();
+            }
+
+            if (underlineSegments.length > 0) {
+              contentCtx.save();
+              contentCtx.beginPath();
+              contentCtx.rect(x, y, width, height);
+              contentCtx.clip();
+              for (const segment of underlineSegments) {
+                contentCtx.beginPath();
+                contentCtx.strokeStyle = segment.color;
+                contentCtx.lineWidth = segment.lineWidth;
+                contentCtx.moveTo(segment.x1, segment.y);
+                contentCtx.lineTo(segment.x2, segment.y);
+                contentCtx.stroke();
+              }
+              contentCtx.restore();
+            }
+          } else if (layoutEngine && availableWidth > 0) {
+            const layout = layoutEngine.layout({
+              runs: layoutRuns.map((r) => ({ text: r.text, font: r.font, color: r.color, underline: r.underline })),
+              text: undefined,
+              font: defaults,
+              maxWidth: availableWidth,
+              wrapMode,
+              align: layoutAlign,
+              direction,
+              lineHeightPx: lineHeight,
+              maxLines
+            });
+
+            let originY = y + paddingY;
+            if (verticalAlign === "middle") {
+              originY = y + paddingY + Math.max(0, (availableHeight - layout.height) / 2);
+            } else if (verticalAlign === "bottom") {
+              originY = y + height - paddingY - layout.height;
+            }
+
+            const originX = x + paddingX;
+            const shouldClip = layout.width > availableWidth || layout.height > availableHeight || rotationDeg !== 0;
+
+            const drawLayout = (collectUnderlines: boolean) => {
+              const underlineSegments: Array<{ x1: number; x2: number; y: number; color: string; lineWidth: number }> = [];
+
+              for (let i = 0; i < layout.lines.length; i++) {
+                const line = layout.lines[i];
+                let xCursor = originX + line.x;
+                const baselineY = originY + i * layout.lineHeight + line.ascent;
+
+                for (const run of line.runs as Array<{ text: string; font: FontSpec; color?: string; underline?: boolean }>) {
+                  const measurement = layoutEngine.measure(run.text, run.font);
+                  contentCtx.font = toCanvasFontString(run.font);
+                  contentCtx.fillStyle = run.color ?? fillStyle;
+                  contentCtx.fillText(run.text, xCursor, baselineY);
+
+                  if (run.underline) {
+                    const underlineOffset = Math.max(1, Math.round(run.font.sizePx * 0.08));
+                    const underlineY = baselineY + underlineOffset;
+                    const lineWidth = Math.max(1, Math.round(run.font.sizePx / 16));
+                    if (collectUnderlines) {
+                      underlineSegments.push({
+                        x1: xCursor,
+                        x2: xCursor + measurement.width,
+                        y: underlineY,
+                        color: contentCtx.fillStyle as string,
+                        lineWidth
+                      });
+                    } else {
+                      contentCtx.beginPath();
+                      contentCtx.strokeStyle = contentCtx.fillStyle;
+                      contentCtx.lineWidth = lineWidth;
+                      contentCtx.moveTo(xCursor, underlineY);
+                      contentCtx.lineTo(xCursor + measurement.width, underlineY);
+                      contentCtx.stroke();
+                    }
+                  }
+
+                  xCursor += measurement.width;
+                }
+              }
+
+              return underlineSegments;
+            };
+
+            if (shouldClip) {
+              contentCtx.save();
+              contentCtx.beginPath();
+              contentCtx.rect(x, y, width, height);
+              contentCtx.clip();
+
+              if (rotationRad) {
+                const cx = x + width / 2;
+                const cy = y + height / 2;
+                contentCtx.translate(cx, cy);
+                contentCtx.rotate(rotationRad);
+                contentCtx.translate(-cx, -cy);
+              }
+
+              drawLayout(false);
+              contentCtx.restore();
+            } else {
+              const underlineSegments = drawLayout(true);
+              if (underlineSegments.length > 0) {
+                contentCtx.save();
+                contentCtx.beginPath();
+                contentCtx.rect(x, y, width, height);
+                contentCtx.clip();
+                for (const segment of underlineSegments) {
+                  contentCtx.beginPath();
+                  contentCtx.strokeStyle = segment.color;
+                  contentCtx.lineWidth = segment.lineWidth;
+                  contentCtx.moveTo(segment.x1, segment.y);
+                  contentCtx.lineTo(segment.x2, segment.y);
+                  contentCtx.stroke();
+                }
+                contentCtx.restore();
+              }
+            }
+          } else {
+            // Fallback: no layout engine available (shouldn't happen in supported environments).
             contentCtx.save();
             contentCtx.beginPath();
             contentCtx.rect(x, y, width, height);
             contentCtx.clip();
+            contentCtx.textBaseline = "middle";
+            contentCtx.fillStyle = fillStyle;
+            contentCtx.font = toCanvasFontString(fontSpec);
+            contentCtx.fillText(text, x + paddingX, y + height / 2);
+            contentCtx.textBaseline = "alphabetic";
+            contentCtx.restore();
+          }
 
-            if (rotationRad) {
-              const cx = x + width / 2;
-              const cy = y + height / 2;
-              contentCtx.translate(cx, cy);
-              contentCtx.rotate(rotationRad);
-              contentCtx.translate(-cx, -cy);
+          contentCtx.restore();
+        } else if (hasValue) {
+          const text = formatCellDisplayText(cell.value);
+          const wrapMode = style?.wrapMode ?? "none";
+          const direction = style?.direction ?? "auto";
+          const verticalAlign = style?.verticalAlign ?? "middle";
+          const rotationDeg = style?.rotationDeg ?? 0;
+
+          const availableWidth = Math.max(0, width - paddingX * 2);
+          const availableHeight = Math.max(0, height - paddingY * 2);
+          const lineHeight = Math.ceil(fontSize * 1.2);
+          const maxLines = Math.max(1, Math.floor(availableHeight / lineHeight));
+
+          const align: CanvasTextAlign = style?.textAlign ?? (typeof cell.value === "number" ? "end" : "start");
+          const layoutAlign =
+            align === "left" || align === "right" || align === "center" || align === "start" || align === "end"
+              ? (align as "left" | "right" | "center" | "start" | "end")
+              : "start";
+
+          const hasExplicitNewline = EXPLICIT_NEWLINE_RE.test(text);
+          const rotationRad = (rotationDeg * Math.PI) / 180;
+
+          if (wrapMode === "none" && !hasExplicitNewline && rotationDeg === 0) {
+            const resolvedAlign =
+              layoutAlign === "left" || layoutAlign === "right" || layoutAlign === "center"
+                ? layoutAlign
+                : resolveAlign(
+                    layoutAlign,
+                    direction === "auto" ? (typeof cell.value === "string" ? detectBaseDirection(text) : "ltr") : direction
+                  );
+
+            const measurement = layoutEngine?.measure(text, fontSpec);
+            const textWidth = measurement?.width ?? contentCtx.measureText(text).width;
+            const ascent = measurement?.ascent ?? fontSize * 0.8;
+            const descent = measurement?.descent ?? fontSize * 0.2;
+
+            let textX = x + paddingX;
+            if (resolvedAlign === "center") {
+              textX = x + paddingX + (availableWidth - textWidth) / 2;
+            } else if (resolvedAlign === "right") {
+              textX = x + paddingX + (availableWidth - textWidth);
             }
 
-            drawTextLayout(contentCtx, layout, originX, originY);
-            contentCtx.restore();
+            let baselineY = y + paddingY + ascent;
+            if (verticalAlign === "middle") {
+              baselineY = y + height / 2 + (ascent - descent) / 2;
+            } else if (verticalAlign === "bottom") {
+              baselineY = y + height - paddingY - descent;
+            }
+
+            const shouldClip = textWidth > availableWidth;
+            if (shouldClip) {
+              let clipX = x;
+              let clipWidth = width;
+
+              if ((resolvedAlign === "left" || resolvedAlign === "right") && textWidth > width - paddingX) {
+                const requiredExtra = paddingX + textWidth - width;
+                if (requiredExtra > 0) {
+                  if (resolvedAlign === "left") {
+                    let extra = 0;
+                    for (
+                      let probeCol = spanEndCol, steps = 0;
+                      probeCol < colCount && steps < MAX_TEXT_OVERFLOW_COLUMNS && extra < requiredExtra;
+                      probeCol++, steps++
+                    ) {
+                      let blocked = false;
+                      for (let r = spanStartRow; r < spanEndRow; r++) {
+                        if (r < 0 || r >= rowCount) {
+                          blocked = true;
+                          break;
+                        }
+                        if (isBlockedForOverflow(r, probeCol)) {
+                          blocked = true;
+                          break;
+                        }
+                      }
+                      if (blocked) break;
+                      extra += colAxis.getSize(probeCol);
+                    }
+                    clipWidth += extra;
+                  } else {
+                    let extra = 0;
+                    for (
+                      let probeCol = spanStartCol - 1, steps = 0;
+                      probeCol >= 0 && steps < MAX_TEXT_OVERFLOW_COLUMNS && extra < requiredExtra;
+                      probeCol--, steps++
+                    ) {
+                      let blocked = false;
+                      for (let r = spanStartRow; r < spanEndRow; r++) {
+                        if (r < 0 || r >= rowCount) {
+                          blocked = true;
+                          break;
+                        }
+                        if (isBlockedForOverflow(r, probeCol)) {
+                          blocked = true;
+                          break;
+                        }
+                      }
+                      if (blocked) break;
+                      extra += colAxis.getSize(probeCol);
+                    }
+                    clipX -= extra;
+                    clipWidth += extra;
+                  }
+                }
+              }
+
+              contentCtx.save();
+              contentCtx.beginPath();
+              contentCtx.rect(clipX, y, clipWidth, height);
+              contentCtx.clip();
+              contentCtx.fillText(text, textX, baselineY);
+              contentCtx.restore();
+            } else {
+              contentCtx.fillText(text, textX, baselineY);
+            }
+          } else if (layoutEngine && availableWidth > 0) {
+            const layout = layoutEngine.layout({
+              text,
+              font: fontSpec,
+              maxWidth: availableWidth,
+              wrapMode,
+              align: layoutAlign,
+              direction,
+              lineHeightPx: lineHeight,
+              maxLines
+            });
+
+            let originY = y + paddingY;
+            if (verticalAlign === "middle") {
+              originY = y + paddingY + Math.max(0, (availableHeight - layout.height) / 2);
+            } else if (verticalAlign === "bottom") {
+              originY = y + height - paddingY - layout.height;
+            }
+
+            const originX = x + paddingX;
+            const shouldClip = layout.width > availableWidth || layout.height > availableHeight || rotationDeg !== 0;
+
+            if (shouldClip) {
+              contentCtx.save();
+              contentCtx.beginPath();
+              contentCtx.rect(x, y, width, height);
+              contentCtx.clip();
+
+              if (rotationRad) {
+                const cx = x + width / 2;
+                const cy = y + height / 2;
+                contentCtx.translate(cx, cy);
+                contentCtx.rotate(rotationRad);
+                contentCtx.translate(-cx, -cy);
+              }
+
+              drawTextLayout(contentCtx, layout, originX, originY);
+              contentCtx.restore();
+            } else {
+              drawTextLayout(contentCtx, layout, originX, originY);
+            }
           } else {
-            drawTextLayout(contentCtx, layout, originX, originY);
+            contentCtx.save();
+            contentCtx.beginPath();
+            contentCtx.rect(x, y, width, height);
+            contentCtx.clip();
+            contentCtx.textBaseline = "middle";
+            contentCtx.fillText(text, x + paddingX, y + height / 2);
+            contentCtx.textBaseline = "alphabetic";
+            contentCtx.restore();
           }
-        } else {
-          contentCtx.save();
-          contentCtx.beginPath();
-          contentCtx.rect(x, y, width, height);
-          contentCtx.clip();
-          contentCtx.textBaseline = "middle";
-          contentCtx.fillText(text, x + paddingX, y + height / 2);
-          contentCtx.textBaseline = "alphabetic";
-          contentCtx.restore();
         }
       }
 
