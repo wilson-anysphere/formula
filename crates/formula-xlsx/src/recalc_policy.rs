@@ -237,7 +237,10 @@ fn relationship_is_calc_chain(e: &BytesStart<'_>, expected_type: &str) -> Result
     Ok(target.as_deref().is_some_and(|t| {
         let t = t.trim();
         let base = t.split_once('#').map(|(base, _)| base).unwrap_or(t);
-        base.ends_with("calcChain.xml")
+        let file_name = base.rsplit('/').next().unwrap_or(base);
+        // Be strict about the filename so we don't accidentally drop unrelated relationships like
+        // `mycalcChain.xml`.
+        file_name == "calcChain.xml"
     }))
 }
 
@@ -297,7 +300,8 @@ fn override_part_name_is_calc_chain(e: &BytesStart<'_>) -> Result<bool, RecalcPo
                 .split_once('#')
                 .map(|(base, _)| base)
                 .unwrap_or(value);
-            return Ok(base.ends_with("calcChain.xml"));
+            let file_name = base.rsplit('/').next().unwrap_or(base);
+            return Ok(file_name == "calcChain.xml");
         }
     }
     Ok(false)
@@ -461,6 +465,28 @@ mod tests {
     }
 
     #[test]
+    fn content_types_remove_calc_chain_preserves_similarly_named_overrides() {
+        let input = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Override PartName="/xl/calcChain.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.calcChain+xml"/>
+  <Override PartName="/xl/mycalcChain.xml" ContentType="application/xml"/>
+</Types>"#;
+
+        let updated = content_types_remove_calc_chain(input.as_bytes())
+            .expect("remove calc chain from content types");
+        let updated_overrides = content_types_override_part_names(&updated);
+
+        assert!(
+            !updated_overrides.contains("/xl/calcChain.xml"),
+            "calcChain override should be removed"
+        );
+        assert!(
+            updated_overrides.contains("/xl/mycalcChain.xml"),
+            "expected similarly-named override to be preserved"
+        );
+    }
+
+    #[test]
     fn workbook_xml_force_full_calc_on_load_patches_prefixed_calc_pr() {
         let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
@@ -620,6 +646,37 @@ mod tests {
         assert!(
             updated.contains("metadata.xml"),
             "expected metadata relationship to be preserved, got: {updated}"
+        );
+    }
+
+    #[test]
+    fn workbook_rels_remove_calc_chain_preserves_similarly_named_targets() {
+        let rels_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId2" Type="http://example.com/not-calc-chain" Target="mycalcChain.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain" Target="calcChain.xml"/>
+  <Relationship Id="rId9" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata" Target="metadata.xml"/>
+</Relationships>
+"#;
+
+        let updated = workbook_rels_remove_calc_chain(rels_xml.as_bytes())
+            .expect("remove calc chain relationship from workbook.xml.rels");
+
+        let rels = crate::openxml::parse_relationships(&updated)
+            .expect("parse updated workbook relationships");
+        let targets: BTreeSet<String> = rels.into_iter().map(|r| r.target).collect();
+
+        assert!(
+            !targets.contains("calcChain.xml"),
+            "expected calcChain.xml relationship to be removed"
+        );
+        assert!(
+            targets.contains("mycalcChain.xml"),
+            "expected similarly-named relationship target to be preserved"
+        );
+        assert!(
+            targets.contains("metadata.xml"),
+            "expected metadata relationship to be preserved"
         );
     }
 
