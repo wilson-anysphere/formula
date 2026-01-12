@@ -625,10 +625,11 @@ pub fn build_defined_names_builtins_fixture_xls() -> Vec<u8> {
 }
 
 /// Build a BIFF8 `.xls` fixture like [`build_defined_names_builtins_fixture_xls`], but with a
-/// deliberate mismatch between the built-in name id stored in `NAME.chKey` and the one stored in
+/// deliberate mismatch between the `NAME.chKey` byte and the built-in name id stored in
 /// `NAME.rgchName`.
 ///
-/// The BIFF8 defined-name parser should prefer the `chKey` value when present.
+/// `chKey` is documented as a keyboard shortcut; Excel appears to prefer the `rgchName` built-in id
+/// when both fields are populated.
 pub fn build_defined_names_builtins_chkey_mismatch_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_defined_names_builtins_chkey_mismatch_workbook_stream();
 
