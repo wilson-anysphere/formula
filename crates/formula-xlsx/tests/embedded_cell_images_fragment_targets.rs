@@ -19,8 +19,25 @@ fn embedded_cell_images_strip_uri_fragments_in_relationship_targets() {
     let bytes = workbook.save_to_buffer().expect("save workbook");
     let bytes = rewrite_zip_part(&bytes, "xl/richData/_rels/richValueRel.xml.rels", |rels| {
         let xml = std::str::from_utf8(rels).expect("rels xml utf-8");
-        // Append a fragment to the first PNG target.
-        let patched = xml.replacen(".png\"", ".png#fragment\"", 1);
+        let doc = roxmltree::Document::parse(xml).expect("parse rels xml");
+        let ns = "http://schemas.openxmlformats.org/package/2006/relationships";
+        let relationship = doc
+            .descendants()
+            .find(|n| {
+                n.has_tag_name((ns, "Relationship"))
+                    && n.attribute("Type")
+                        .is_some_and(|t| t.ends_with("/relationships/image"))
+            })
+            .expect("expected an image relationship");
+        let target = relationship
+            .attribute("Target")
+            .expect("expected image relationship Target attribute");
+        assert!(
+            !target.contains('#'),
+            "expected image relationship Target to have no URI fragment, got: {target}"
+        );
+        // Append a fragment to the image target.
+        let patched = xml.replacen(target, &format!("{target}#fragment"), 1);
         assert!(
             patched.contains("#fragment"),
             "expected patched rels xml to contain #fragment, got: {patched}"
