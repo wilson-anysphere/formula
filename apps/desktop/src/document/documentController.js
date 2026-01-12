@@ -1269,8 +1269,15 @@ export class DocumentController {
     }
 
     this.#commitHistoryEntry(batch);
-    this.engine?.recalculate();
-    this.#emit("change", { deltas: [], sheetViewDeltas: [], source: "endBatch", recalc: true });
+
+    // Only recalculate for batches that included cell input edits. Sheet view changes
+    // (frozen panes, row/col sizes, etc.) do not affect formula results.
+    const shouldRecalc = batch.deltasByCell.size > 0;
+    if (shouldRecalc) {
+      this.engine?.recalculate();
+      // Emit a follow-up change so observers know formula results may have changed.
+      this.#emit("change", { deltas: [], sheetViewDeltas: [], source: "endBatch", recalc: true });
+    }
   }
 
   /**
@@ -1300,8 +1307,11 @@ export class DocumentController {
     }
 
     this.engine?.endBatch?.();
-    if (hadDeltas) this.engine?.recalculate();
-    if (hadDeltas) {
+
+    // Only recalculate when canceling a batch that mutated cell inputs.
+    const shouldRecalc = Boolean(batch && batch.deltasByCell.size > 0);
+    if (shouldRecalc) {
+      this.engine?.recalculate();
       this.#emit("change", { deltas: [], sheetViewDeltas: [], source: "cancelBatch", recalc: true });
     }
 
@@ -1326,7 +1336,8 @@ export class DocumentController {
     this.lastMergeKey = null;
     this.lastMergeTime = 0;
 
-    this.#applyEdits(inverseCells, inverseViews, { recalc: true, emitChange: true, source: "undo" });
+    const shouldRecalc = cellDeltas.length > 0;
+    this.#applyEdits(inverseCells, inverseViews, { recalc: shouldRecalc, emitChange: true, source: "undo" });
     this.#emitHistory();
     this.#emitDirty();
     return true;
@@ -1346,7 +1357,8 @@ export class DocumentController {
     this.lastMergeKey = null;
     this.lastMergeTime = 0;
 
-    this.#applyEdits(cellDeltas, viewDeltas, { recalc: true, emitChange: true, source: "redo" });
+    const shouldRecalc = cellDeltas.length > 0;
+    this.#applyEdits(cellDeltas, viewDeltas, { recalc: shouldRecalc, emitChange: true, source: "redo" });
     this.#emitHistory();
     this.#emitDirty();
     return true;

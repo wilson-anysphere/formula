@@ -170,6 +170,20 @@ test("setFrozen preserves row/col size overrides", () => {
   });
 });
 
+test("undo/redo of sheet view changes does not trigger engine recalc", () => {
+  const engine = new MockEngine();
+  const doc = new DocumentController({ engine });
+
+  doc.setColWidth("Sheet1", 0, 120);
+  assert.equal(engine.recalcCount, 0);
+
+  doc.undo();
+  assert.equal(engine.recalcCount, 0);
+
+  doc.redo();
+  assert.equal(engine.recalcCount, 0);
+});
+
 test("setColWidth/setRowHeight are undoable", () => {
   const doc = new DocumentController();
 
