@@ -82,6 +82,20 @@ export function ExtensionsPanel({
     }
   }, [manager]);
 
+  const refreshPermissionsForExtension = React.useCallback(
+    async (extensionId: string) => {
+      if (!manager.ready || manager.error) return;
+      setPermissionsError(null);
+      try {
+        const data = (await manager.getGrantedPermissions(extensionId)) as GrantedPermissions;
+        setPermissionsByExtension((prev) => ({ ...prev, [extensionId]: data }));
+      } catch (err) {
+        setPermissionsError(String((err as any)?.message ?? err));
+      }
+    },
+    [manager],
+  );
+
   const extensionsKey = extensions.map((ext: any) => String(ext.id)).join("|");
 
   React.useEffect(() => {
@@ -89,14 +103,14 @@ export function ExtensionsPanel({
   }, [refreshPermissions, manager.ready, manager.error, extensionsKey]);
 
   const executeCommandAndRefreshPermissions = React.useCallback(
-    async (_extensionId: string, commandId: string, args: any[] = []) => {
+    async (extensionId: string, commandId: string, args: any[] = []) => {
       try {
         await Promise.resolve(onExecuteCommand(commandId, ...args));
       } finally {
-        await refreshPermissions();
+        await refreshPermissionsForExtension(extensionId);
       }
     },
-    [onExecuteCommand, refreshPermissions],
+    [onExecuteCommand, refreshPermissionsForExtension],
   );
 
   const runCommandWithArgs = React.useCallback(
@@ -272,15 +286,15 @@ export function ExtensionsPanel({
                           onClick={() => {
                             void (async () => {
                               const key = `revoke:${ext.id}:${perm}`;
-                              setBusy(key);
-                              try {
-                                await manager.revokePermission(ext.id, perm);
-                                await refreshPermissions();
-                              } finally {
-                                setBusy(null);
-                              }
-                            })();
-                          }}
+                                setBusy(key);
+                                try {
+                                  await manager.revokePermission(ext.id, perm);
+                                await refreshPermissionsForExtension(ext.id);
+                                } finally {
+                                  setBusy(null);
+                                }
+                              })();
+                            }}
                           style={{
                             flex: "0 0 auto",
                             padding: "8px 10px",
@@ -309,7 +323,7 @@ export function ExtensionsPanel({
                         setBusy(key);
                         try {
                           await manager.resetPermissionsForExtension(ext.id);
-                          await refreshPermissions();
+                          await refreshPermissionsForExtension(ext.id);
                         } finally {
                           setBusy(null);
                         }
