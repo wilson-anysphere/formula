@@ -1790,7 +1790,9 @@ fn append_v3_reference_registered(
     if id != 0x000D {
         return Err(DirParseError::UnexpectedRecordId { expected: 0x000D, found: id }.into());
     }
-    cur.read_u32().ok_or(DirParseError::Truncated)?; // Size (ignored)
+    // Record-size field (u32). MS-OVBA v3 transcript does not include this value, but we may use it
+    // as an upper bound when advancing the cursor (to safely skip any trailing bytes).
+    let size_total = cur.read_u32().ok_or(DirParseError::Truncated)? as usize;
     let payload_start = cur.offset;
     let size_of_libid = cur.read_u32().ok_or(DirParseError::Truncated)? as usize;
     cur.skip(size_of_libid).ok_or(DirParseError::Truncated)?;
@@ -1800,7 +1802,13 @@ fn append_v3_reference_registered(
 
     out.extend_from_slice(&id.to_le_bytes());
     out.extend_from_slice(&dir_decompressed[payload_start..payload_end]);
-    *offset = payload_end;
+    let minimal_len = payload_end.saturating_sub(payload_start);
+    let record_end_by_size = payload_start.saturating_add(size_total);
+    *offset = if size_total >= minimal_len && record_end_by_size <= dir_decompressed.len() {
+        record_end_by_size
+    } else {
+        payload_end
+    };
     Ok(())
 }
 
@@ -1817,7 +1825,9 @@ fn append_v3_reference_project(
     if id != 0x000E {
         return Err(DirParseError::UnexpectedRecordId { expected: 0x000E, found: id }.into());
     }
-    cur.read_u32().ok_or(DirParseError::Truncated)?; // Size (ignored)
+    // Record-size field (u32). MS-OVBA v3 transcript does not include this value, but we use it to
+    // safely advance past any trailing bytes after the version fields.
+    let size_total = cur.read_u32().ok_or(DirParseError::Truncated)? as usize;
     let payload_start = cur.offset;
 
     let size_abs = cur.read_u32().ok_or(DirParseError::Truncated)? as usize;
@@ -1830,7 +1840,13 @@ fn append_v3_reference_project(
 
     out.extend_from_slice(&id.to_le_bytes());
     out.extend_from_slice(&dir_decompressed[payload_start..payload_end]);
-    *offset = payload_end;
+    let minimal_len = payload_end.saturating_sub(payload_start);
+    let record_end_by_size = payload_start.saturating_add(size_total);
+    *offset = if size_total >= minimal_len && record_end_by_size <= dir_decompressed.len() {
+        record_end_by_size
+    } else {
+        payload_end
+    };
     Ok(())
 }
 
@@ -1847,7 +1863,9 @@ fn append_v3_reference_control(
     if id != 0x002F {
         return Err(DirParseError::UnexpectedRecordId { expected: 0x002F, found: id }.into());
     }
-    cur.read_u32().ok_or(DirParseError::Truncated)?; // SizeTwiddled (ignored)
+    // Record-size field (u32). MS-OVBA v3 transcript does not include this value, but we use it as
+    // an upper bound when advancing the cursor.
+    let size_total = cur.read_u32().ok_or(DirParseError::Truncated)? as usize;
     let payload_start = cur.offset;
 
     let size_of_libid_twiddled = cur.read_u32().ok_or(DirParseError::Truncated)? as usize;
@@ -1859,7 +1877,13 @@ fn append_v3_reference_control(
 
     out.extend_from_slice(&id.to_le_bytes());
     out.extend_from_slice(&dir_decompressed[payload_start..payload_end]);
-    *offset = payload_end;
+    let minimal_len = payload_end.saturating_sub(payload_start);
+    let record_end_by_size = payload_start.saturating_add(size_total);
+    *offset = if size_total >= minimal_len && record_end_by_size <= dir_decompressed.len() {
+        record_end_by_size
+    } else {
+        payload_end
+    };
     Ok(())
 }
 
@@ -1876,7 +1900,9 @@ fn append_v3_reference_extended(
     if id != 0x0030 {
         return Err(DirParseError::UnexpectedRecordId { expected: 0x0030, found: id }.into());
     }
-    cur.read_u32().ok_or(DirParseError::Truncated)?; // SizeExtended (ignored)
+    // Record-size field (u32). MS-OVBA v3 transcript does not include this value, but we use it as
+    // an upper bound when advancing the cursor.
+    let size_total = cur.read_u32().ok_or(DirParseError::Truncated)? as usize;
     let payload_start = cur.offset;
 
     let size_of_libid_extended = cur.read_u32().ok_or(DirParseError::Truncated)? as usize;
@@ -1890,7 +1916,13 @@ fn append_v3_reference_extended(
 
     out.extend_from_slice(&id.to_le_bytes());
     out.extend_from_slice(&dir_decompressed[payload_start..payload_end]);
-    *offset = payload_end;
+    let minimal_len = payload_end.saturating_sub(payload_start);
+    let record_end_by_size = payload_start.saturating_add(size_total);
+    *offset = if size_total >= minimal_len && record_end_by_size <= dir_decompressed.len() {
+        record_end_by_size
+    } else {
+        payload_end
+    };
     Ok(())
 }
 
@@ -1904,13 +1936,21 @@ fn skip_v3_reference_control(dir_decompressed: &[u8], offset: &mut usize) -> Res
     if id != 0x002F {
         return Err(DirParseError::UnexpectedRecordId { expected: 0x002F, found: id }.into());
     }
-    cur.read_u32().ok_or(DirParseError::Truncated)?; // SizeTwiddled (ignored)
+    let size_total = cur.read_u32().ok_or(DirParseError::Truncated)? as usize;
+    let payload_start = cur.offset;
     let size_of_libid_twiddled = cur.read_u32().ok_or(DirParseError::Truncated)? as usize;
     cur.skip(size_of_libid_twiddled)
         .ok_or(DirParseError::Truncated)?;
     cur.read_u32().ok_or(DirParseError::Truncated)?; // Reserved1
     cur.read_u16().ok_or(DirParseError::Truncated)?; // Reserved2
-    *offset = cur.offset;
+    let payload_end = cur.offset;
+    let minimal_len = payload_end.saturating_sub(payload_start);
+    let record_end_by_size = payload_start.saturating_add(size_total);
+    *offset = if size_total >= minimal_len && record_end_by_size <= dir_decompressed.len() {
+        record_end_by_size
+    } else {
+        payload_end
+    };
     Ok(())
 }
 
@@ -1923,7 +1963,8 @@ fn skip_v3_reference_extended(dir_decompressed: &[u8], offset: &mut usize) -> Re
     if id != 0x0030 {
         return Err(DirParseError::UnexpectedRecordId { expected: 0x0030, found: id }.into());
     }
-    cur.read_u32().ok_or(DirParseError::Truncated)?; // SizeExtended (ignored)
+    let size_total = cur.read_u32().ok_or(DirParseError::Truncated)? as usize;
+    let payload_start = cur.offset;
     let size_of_libid_extended = cur.read_u32().ok_or(DirParseError::Truncated)? as usize;
     cur.skip(size_of_libid_extended)
         .ok_or(DirParseError::Truncated)?;
@@ -1931,7 +1972,14 @@ fn skip_v3_reference_extended(dir_decompressed: &[u8], offset: &mut usize) -> Re
     cur.read_u16().ok_or(DirParseError::Truncated)?; // Reserved5
     cur.skip(16).ok_or(DirParseError::Truncated)?; // OriginalTypeLib GUID
     cur.read_u32().ok_or(DirParseError::Truncated)?; // Cookie
-    *offset = cur.offset;
+    let payload_end = cur.offset;
+    let minimal_len = payload_end.saturating_sub(payload_start);
+    let record_end_by_size = payload_start.saturating_add(size_total);
+    *offset = if size_total >= minimal_len && record_end_by_size <= dir_decompressed.len() {
+        record_end_by_size
+    } else {
+        payload_end
+    };
     Ok(())
 }
 

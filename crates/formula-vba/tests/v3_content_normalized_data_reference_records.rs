@@ -243,3 +243,64 @@ fn v3_content_normalized_data_reference_handling_ignores_malformed_record_size_f
     let actual = v3_content_normalized_data(&vba_bin).expect("V3ContentNormalizedData");
     assert_eq!(actual, expected);
 }
+
+#[test]
+fn v3_content_normalized_data_reference_project_skips_trailing_bytes_after_version_fields() {
+    // Some producers include trailing bytes in REFERENCEPROJECT records after the Major/Minor
+    // version fields. The MS-OVBA v3 transcript includes only the fields listed in §2.4.2.5, but
+    // parsing must still advance past the full record so subsequent records are framed correctly.
+    let mut dir_decompressed = Vec::new();
+    let mut expected = Vec::new();
+
+    // ---- REFERENCEPROJECT with trailing bytes ----
+    push_reference_name(&mut dir_decompressed, &mut expected, "ProjectRef");
+
+    let libid_absolute = b"ABS-PATH";
+    let libid_relative = b"REL-PATH";
+    let major: u32 = 0x01020304;
+    let minor: u16 = 0x0506;
+    let trailing = b"TRAILING_BYTES";
+    let mut reference_project = Vec::new();
+    reference_project.extend_from_slice(&(libid_absolute.len() as u32).to_le_bytes());
+    reference_project.extend_from_slice(libid_absolute);
+    reference_project.extend_from_slice(&(libid_relative.len() as u32).to_le_bytes());
+    reference_project.extend_from_slice(libid_relative);
+    reference_project.extend_from_slice(&major.to_le_bytes());
+    reference_project.extend_from_slice(&minor.to_le_bytes());
+    reference_project.extend_from_slice(trailing);
+    push_record(&mut dir_decompressed, 0x000E, &reference_project);
+
+    // Transcript should include only the defined fields (exclude trailing bytes).
+    expected.extend_from_slice(&0x000Eu16.to_le_bytes());
+    expected.extend_from_slice(&reference_project[..reference_project.len() - trailing.len()]);
+
+    // ---- Follow-up reference to ensure parsing is aligned ----
+    push_reference_name(&mut dir_decompressed, &mut expected, "RegisteredRef");
+    let libid_registered = b"LIBID-REGISTERED";
+    let mut reference_registered = Vec::new();
+    reference_registered.extend_from_slice(&(libid_registered.len() as u32).to_le_bytes());
+    reference_registered.extend_from_slice(libid_registered);
+    reference_registered.extend_from_slice(&0u32.to_le_bytes()); // Reserved1
+    reference_registered.extend_from_slice(&0u16.to_le_bytes()); // Reserved2
+    push_record(&mut dir_decompressed, 0x000D, &reference_registered);
+    expected.extend_from_slice(&0x000Du16.to_le_bytes());
+    expected.extend_from_slice(&reference_registered);
+
+    // ---- Build OLE with the `VBA/dir` stream ----
+    let dir_container = compress_container(&dir_decompressed);
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    let vba_bin = ole.into_inner().into_inner();
+
+    let actual = v3_content_normalized_data(&vba_bin).expect("V3ContentNormalizedData");
+    assert_eq!(actual, expected);
+    assert!(
+        !actual.windows(trailing.len()).any(|w| w == trailing),
+        "did not expect trailing REFERENCEPROJECT bytes to be included in transcript"
+    );
+}
