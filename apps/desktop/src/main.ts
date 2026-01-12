@@ -3698,6 +3698,19 @@ if (
       endCol: number;
       address: string;
       values: Array<Array<string | number | boolean | null>>;
+      /**
+       * Optional formulas matrix for the selection.
+       *
+       * Note: the extension API runtime will synthesize this when absent, but that synthesis
+       * involves allocating a full 2D array. For very large selections we include an empty array
+       * to avoid catastrophic allocations in the worker runtime.
+       */
+      formulas?: Array<Array<string | null>>;
+      /**
+       * Indicates that the selection range was too large to safely materialize `values`/`formulas`
+       * in memory, so the payload may contain empty matrices.
+       */
+      truncated?: boolean;
     };
   };
 
@@ -3756,17 +3769,40 @@ if (
       lastSelectionEventKey = key;
       extensionClipboardSelectionChanged = true;
 
-      const values: Array<Array<string | number | boolean | null>> = [];
-      for (let r = range.startRow; r <= range.endRow; r++) {
-        const row: Array<string | number | boolean | null> = [];
-        for (let c = range.startCol; c <= range.endCol; c++) {
-          const cell = app.getDocument().getCell(rect.sheetId, { row: r, col: c }) as any;
-          row.push(normalizeExtensionCellValue(cell?.value ?? null));
+      let values: Array<Array<string | number | boolean | null>> = [];
+      let formulas: Array<Array<string | null>> | undefined;
+      let truncated = false;
+
+      try {
+        // Keep selectionChanged payloads consistent with the hard cap used by
+        // `cells.getSelection/getRange`: extensions should not be able to trigger multi-million-cell
+        // allocations by selecting an entire sheet/row/column.
+        assertExtensionRangeWithinLimits(range, { label: "Selection" });
+
+        values = [];
+        for (let r = range.startRow; r <= range.endRow; r++) {
+          const row: Array<string | number | boolean | null> = [];
+          for (let c = range.startCol; c <= range.endCol; c++) {
+            const cell = app.getDocument().getCell(rect.sheetId, { row: r, col: c }) as any;
+            row.push(normalizeExtensionCellValue(cell?.value ?? null));
+          }
+          values.push(row);
         }
-        values.push(row);
+      } catch {
+        // Best-effort: still emit the event so extensions can observe selection movement, but do
+        // not materialize per-cell matrices for huge selections (Excel-scale sheets).
+        truncated = true;
+        values = [];
+        // Defensive: `packages/extension-api` runtime auto-fills `formulas` with a null matrix when
+        // absent. For huge ranges, that would allocate millions of elements, so provide an empty
+        // matrix here to skip that path.
+        formulas = [];
       }
 
-      const payload: ExtensionSelectionChangedEvent = { sheetId: rect.sheetId, selection: { ...range, address, values } };
+      const payload: ExtensionSelectionChangedEvent = {
+        sheetId: rect.sheetId,
+        selection: { ...range, address, values, ...(formulas ? { formulas } : {}), ...(truncated ? { truncated } : {}) },
+      };
       for (const listener of [...selectionChangedEventListeners]) {
         try {
           listener(payload);

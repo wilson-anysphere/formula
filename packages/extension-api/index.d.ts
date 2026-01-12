@@ -54,6 +54,11 @@ export interface Range {
   readonly values: CellValue[][];
   /** Formula strings for the range (null when not available). */
   readonly formulas: (string | null)[][];
+  /**
+   * Indicates the range payload was truncated due to size limits. When true, `values`/`formulas`
+   * may be empty to avoid allocating multi-million-cell matrices in memory.
+   */
+  readonly truncated?: boolean;
 }
 
 export interface PanelWebview {

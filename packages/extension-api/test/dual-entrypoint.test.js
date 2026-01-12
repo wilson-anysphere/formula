@@ -303,6 +303,32 @@ test("dual entrypoint: CJS + ESM stay in lockstep", async (t) => {
     assert.equal(selectionEvent.selection.address, "A1");
     assert.deepEqual(selectionEvent.selection.formulas, [[null]]);
 
+    // When hosts omit `selection.formulas`, the runtime backfills it with a null matrix for
+    // API consistency. That behavior must be capped so selecting very large ranges (eg: entire
+    // Excel sheets) can't OOM the worker by allocating millions of entries.
+    const hugeSelectionEvent = await new Promise((resolve) => {
+      const disposable = esmApi.events.onSelectionChanged((e) => {
+        disposable.dispose();
+        resolve(e);
+      });
+      cjsApi.__handleMessage({
+        type: "event",
+        event: "selectionChanged",
+        data: {
+          selection: {
+            startRow: 0,
+            startCol: 0,
+            endRow: 449,
+            endCol: 449,
+            values: []
+          }
+        }
+      });
+    });
+
+    assert.deepEqual(hugeSelectionEvent.selection.formulas, []);
+    assert.equal(hugeSelectionEvent.selection.truncated, true);
+
     const workbookOpenedEvent = await new Promise((resolve) => {
       const disposable = cjsApi.events.onWorkbookOpened((e) => {
         disposable.dispose();

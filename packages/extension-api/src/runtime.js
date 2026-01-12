@@ -319,6 +319,12 @@ function buildA1Address(startRow, startCol, endRow, endCol) {
   return start === end ? start : `${start}:${end}`;
 }
 
+// When the host omits `formulas`, we synthesize a null matrix so the runtime matches the
+// `.d.ts` contract (`Range.formulas` always exists). However, unbounded ranges (eg: selecting
+// an entire Excel-sized sheet) would allocate millions of elements and can OOM the worker.
+// Cap the synthesis and fall back to an empty matrix instead.
+const DEFAULT_FORMULAS_MATRIX_CELL_LIMIT = 200000;
+
 function createNullMatrix(rows, cols) {
   const out = [];
   for (let r = 0; r < rows; r++) {
@@ -336,15 +342,25 @@ function enhanceRange(range) {
   const startCol = Number(obj.startCol ?? 0);
   const endRow = Number(obj.endRow ?? startRow);
   const endCol = Number(obj.endCol ?? startCol);
+  const rows = Math.max(0, endRow - startRow + 1);
+  const cols = Math.max(0, endCol - startCol + 1);
 
   if (typeof obj.address !== "string" || obj.address.trim().length === 0) {
     obj.address = buildA1Address(startRow, startCol, endRow, endCol);
   }
 
   if (!Object.prototype.hasOwnProperty.call(obj, "formulas")) {
-    const rows = Math.max(0, endRow - startRow + 1);
-    const cols = Math.max(0, endCol - startCol + 1);
-    obj.formulas = createNullMatrix(rows, cols);
+    const cellCount = rows * cols;
+    if (cellCount > DEFAULT_FORMULAS_MATRIX_CELL_LIMIT) {
+      // Preserve the invariant that `range.formulas` exists without attempting to allocate
+      // a multi-megabyte 2D array.
+      obj.formulas = [];
+      if (!Object.prototype.hasOwnProperty.call(obj, "truncated")) {
+        obj.truncated = true;
+      }
+    } else {
+      obj.formulas = createNullMatrix(rows, cols);
+    }
   }
 
   return obj;
