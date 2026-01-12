@@ -10,6 +10,11 @@ import { validateExtensionManifest } from "../../../shared/extension-manifest/in
 
 import { MarketplaceClient } from "./MarketplaceClient";
 
+export type VerifyExtensionPackageV2Fn = (
+  packageBytes: Uint8Array,
+  publicKeyPem: string
+) => Promise<VerifiedExtensionPackageV2>;
+
 // The extension worker (`packages/extension-host/src/browser/extension-worker.mjs`) eagerly imports
 // `@formula/extension-api`, which initializes the runtime and installs the API object on
 // `globalThis[Symbol.for("formula.extensionApi.api")]`.
@@ -651,6 +656,7 @@ export class WebExtensionManager {
   readonly host: BrowserExtensionHostLike | null;
   readonly engineVersion: string;
   readonly scanPolicy: ExtensionScanPolicy;
+  readonly verifyPackage: VerifyExtensionPackageV2Fn;
 
   private readonly _loadedMainUrls = new Map<string, { mainUrl: string; revoke: () => void }>();
   private _extensionApiModule: { url: string; revoke: () => void } | null = null;
@@ -662,6 +668,7 @@ export class WebExtensionManager {
       host?: BrowserExtensionHostLike | null;
       engineVersion?: string;
       scanPolicy?: ExtensionScanPolicy;
+      verifyPackage?: VerifyExtensionPackageV2Fn;
     } = {}
   ) {
     this.marketplaceClient = options.marketplaceClient ?? new MarketplaceClient();
@@ -672,6 +679,7 @@ export class WebExtensionManager {
     const rawEngine = options.engineVersion ?? fromHost ?? "1.0.0";
     this.engineVersion = typeof rawEngine === "string" && rawEngine.trim().length > 0 ? rawEngine.trim() : "1.0.0";
     this.scanPolicy = options.scanPolicy ?? defaultScanPolicyFromEnv();
+    this.verifyPackage = options.verifyPackage ?? verifyExtensionPackageV2Browser;
   }
 
   search(params: Parameters<MarketplaceClient["search"]>[0]) {
@@ -863,7 +871,7 @@ export class WebExtensionManager {
     for (const key of candidateKeys) {
       try {
         // eslint-disable-next-line no-await-in-loop
-        verified = await verifyExtensionPackageV2Browser(download.bytes, key.publicKeyPem);
+        verified = await this.verifyPackage(download.bytes, key.publicKeyPem);
         break;
       } catch (error) {
         const msg = String((error as Error)?.message ?? error);

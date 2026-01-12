@@ -2001,7 +2001,7 @@ fn value_semantics_eq(existing: &ExistingCellValue, patch_value: Option<&CellVal
                 ExistingCellValue::SharedString(rich) => rich.text == display,
                 _ => false,
             }
-        }
+        },
         CellValue::Record(record) => {
             let display = record.to_string();
             let display = display.as_str();
