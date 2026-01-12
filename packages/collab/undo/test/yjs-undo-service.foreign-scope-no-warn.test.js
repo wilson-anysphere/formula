@@ -66,7 +66,9 @@ test("collab undo: does not warn [yjs#509] when scope contains a foreign root ty
 
   const placeholder = doc.share.get("comments");
   assert.ok(placeholder, "expected comments root placeholder to exist");
-  assert.equal(placeholder.constructor?.name, "AbstractType", "expected generic root placeholder");
+  // Don't rely on constructor names (bundlers can rename `AbstractType`). We
+  // only care that this is *not* already a concrete Y.Map instance.
+  assert.notEqual(typeof placeholder.get, "function");
 
   // Find the nested map value created by the CJS build.
   const item = placeholder._map?.get("c1");
