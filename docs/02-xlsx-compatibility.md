@@ -200,6 +200,26 @@ Key observed behavior for “Place in Cell” images: the worksheet cell is enco
 
 `sheetN.xml c@vm` → `xl/metadata.xml <valueMetadata>` → `xl/richData/rdrichvalue.xml` (or `xl/richData/richValue*.xml`) → `xl/richData/richValueRel.xml` → `xl/richData/_rels/richValueRel.xml.rels` → `xl/media/imageN.*`
 
+##### `xl/richData/rdrichvalue.xml` (rich value instances)
+
+`xl/richData/rdrichvalue.xml` is the workbook-level table of rich value *instances*. The `i="…"` from `xlrd:rvb` selects a record from this table.
+
+The exact element vocabulary inside each rich value varies by Excel version and feature, but for in-cell images the rich value ultimately encodes a **relationship slot index** (an integer) that points into `xl/richData/richValueRel.xml`.
+
+Representative (synthetic) shape:
+
+```xml
+<rv:richData xmlns:rv="http://schemas.microsoft.com/office/spreadsheetml/2017/06/main">
+  <rv:richValues count="1">
+    <!-- rich value index 0 -->
+    <rv:rv>
+      <!-- relationship slot index into richValueRel.xml -->
+      <rv:rel>0</rv:rel>
+    </rv:rv>
+  </rv:richValues>
+</rv:richData>
+```
+
 ##### 1) `vm="N"` maps into `xl/metadata.xml`
 
 `xl/metadata.xml` stores workbook-level metadata tables. For rich values, `vm="N"` selects the `N`th `<bk>` (“metadata block”) inside `<valueMetadata>`, which then links (via extension metadata) to a rich value record stored under `xl/richData/`.
