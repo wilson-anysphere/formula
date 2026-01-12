@@ -1766,6 +1766,31 @@ pub fn build_autofilter_workbook_scope_externsheet_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing two sheets:
+/// - `Unqualified`: contains `AUTOFILTERINFO` so the importer infers an AutoFilter range from the
+///   worksheet substream (DIMENSIONS + AUTOFILTERINFO), and
+/// - `Other`: contains no AutoFilter records.
+///
+/// The workbook contains a *workbook-scoped* built-in `_xlnm._FilterDatabase` name whose formula is
+/// an unqualified 2D range (e.g. `=$A$1:$B$3`).
+///
+/// Some `.xls` writers emit this form even for multi-sheet workbooks. This fixture validates the
+/// importer's heuristic that, when the sheet scope is otherwise unknown, we attach such a
+/// FilterDatabase range to the only sheet that already has AutoFilter metadata.
+pub fn build_autofilter_workbook_scope_unqualified_multisheet_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_autofilter_workbook_scope_unqualified_multisheet_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing a single sheet named `AutoFilter` with a
 /// workbook-scoped `_FilterDatabase` defined name encoded as a *normal* (non-built-in) NAME string.
 ///
@@ -1833,6 +1858,64 @@ fn build_autofilter_workbook_scope_externsheet_workbook_stream() -> Vec<u8> {
         .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
 
     globals.extend_from_slice(&sheet);
+    globals
+}
+
+fn build_autofilter_workbook_scope_unqualified_multisheet_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // XF table. Keep the usual 16 style XFs so BIFF consumers stay happy.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+    let xf_cell = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Two worksheets.
+    let boundsheet1_start = globals.len();
+    let mut boundsheet1 = Vec::<u8>::new();
+    boundsheet1.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet1.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet1, "Unqualified");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet1);
+    let boundsheet1_offset_pos = boundsheet1_start + 4;
+
+    let boundsheet2_start = globals.len();
+    let mut boundsheet2 = Vec::<u8>::new();
+    boundsheet2.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet2.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet2, "Other");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet2);
+    let boundsheet2_offset_pos = boundsheet2_start + 4;
+
+    // Workbook-scoped built-in `_FilterDatabase` name (hidden), but with a 2D PtgArea token that
+    // does not specify a sheet.
+    let filter_db_rgce = ptg_area(0, 2, 0, 1); // $A$1:$B$3
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &builtin_name_record(true, 0, 0x0D, &filter_db_rgce),
+    );
+
+    push_record(&mut globals, RECORD_EOF, &[]);
+
+    let sheet1_offset = globals.len();
+    let sheet1 = build_autofilter_filterdatabase_arean_sheet_stream(xf_cell);
+    let sheet2_offset = sheet1_offset + sheet1.len();
+    let sheet2 = build_autofilter_sheet_stream_with_dimensions(xf_cell, 1, 1);
+
+    globals[boundsheet1_offset_pos..boundsheet1_offset_pos + 4]
+        .copy_from_slice(&(sheet1_offset as u32).to_le_bytes());
+    globals[boundsheet2_offset_pos..boundsheet2_offset_pos + 4]
+        .copy_from_slice(&(sheet2_offset as u32).to_le_bytes());
+
+    globals.extend_from_slice(&sheet1);
+    globals.extend_from_slice(&sheet2);
     globals
 }
 

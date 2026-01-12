@@ -1435,7 +1435,37 @@ fn import_xls_path_with_biff_reader(
                     &name.refers_to,
                     &mut warnings,
                 )
-                .or_else(|| (out.sheets.len() == 1).then(|| out.sheets[0].name.clone()));
+                .or_else(|| (out.sheets.len() == 1).then(|| out.sheets[0].name.clone()))
+                .or_else(|| {
+                    // Some `.xls` files store a workbook-scoped `_FilterDatabase` name whose
+                    // `refers_to` is an unqualified 2D range (e.g. `=$A$1:$B$3`), even when the
+                    // workbook contains multiple sheets. In this case, we have no explicit sheet
+                    // scope to apply.
+                    //
+                    // Best-effort: if exactly one sheet already has AutoFilter metadata inferred
+                    // from the worksheet substream (AUTOFILTERINFO / FILTERMODE + DIMENSIONS),
+                    // assume this FilterDatabase range belongs to that sheet.
+                    //
+                    // Do not guess when multiple sheets have AutoFilter metadata.
+                    if warnings.len() != warnings_before_infer {
+                        return None;
+                    }
+
+                    let refers_to = name.refers_to.trim();
+                    let refers_to = refers_to.strip_prefix('=').unwrap_or(refers_to).trim();
+                    let refers_to = refers_to.strip_prefix('@').unwrap_or(refers_to).trim();
+                    if refers_to.contains('!') {
+                        return None;
+                    }
+
+                    let mut sheets_with_autofilter =
+                        out.sheets.iter().filter(|s| s.auto_filter.is_some());
+                    let only = sheets_with_autofilter.next()?;
+                    sheets_with_autofilter
+                        .next()
+                        .is_none()
+                        .then(|| only.name.clone())
+                });
                 let Some(sheet_name) = sheet_name else {
                     if warnings.len() == warnings_before_infer {
                         warnings.push(ImportWarning::new(format!(

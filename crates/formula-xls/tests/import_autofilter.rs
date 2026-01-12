@@ -243,3 +243,34 @@ fn imports_autofilter_range_from_filterdatabase_defined_name_even_when_rgce_is_p
         .expect("expected _FilterDatabase defined name");
     assert_parseable(&filter_db.refers_to);
 }
+
+#[test]
+fn attaches_workbook_scoped_unqualified_filterdatabase_range_to_only_sheet_with_autofilter() {
+    // Some `.xls` writers store a workbook-scoped `_FilterDatabase` defined name whose `refers_to`
+    // is an unqualified 2D range (e.g. `=$A$1:$B$3`) even when the workbook contains multiple
+    // sheets. When only one sheet has AutoFilter metadata, we should attach the range to it.
+    let bytes =
+        xls_fixture_builder::build_autofilter_workbook_scope_unqualified_multisheet_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let unqualified = result
+        .workbook
+        .sheet_by_name("Unqualified")
+        .expect("Unqualified sheet missing");
+    let other = result.workbook.sheet_by_name("Other").expect("Other sheet missing");
+
+    let af = unqualified
+        .auto_filter
+        .as_ref()
+        .expect("expected Unqualified.auto_filter to be set");
+    assert_eq!(af.range, Range::from_a1("A1:B3").unwrap());
+
+    assert!(other.auto_filter.is_none());
+
+    let filter_db = result
+        .workbook
+        .get_defined_name(DefinedNameScope::Workbook, XLNM_FILTER_DATABASE)
+        .expect("expected workbook-scoped _FilterDatabase defined name");
+    assert_parseable(&filter_db.refers_to);
+    assert!(!filter_db.refers_to.contains('!'));
+}
