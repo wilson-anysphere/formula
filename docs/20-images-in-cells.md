@@ -163,6 +163,18 @@ variant shapes are documented further below.
 </Relationships>
 ```
 
+#### Minimal example (`xl/_rels/workbook.xml.rels` entry) (synthetic; **Type URI unverified**)
+
+Some files link `xl/workbook.xml` → `xl/cellImages.xml` via an OPC relationship in
+`xl/_rels/workbook.xml.rels`. The relationship `Type` is currently **unverified** against real Excel,
+but is likely Microsoft-specific.
+
+```xml
+<Relationship Id="rIdCellImages"
+              Type="http://schemas.microsoft.com/office/.../relationships/cellImages"
+              Target="cellImages.xml"/>
+```
+
 ## Worksheet cell references (`c/@vm`, `c/@cm`, `<extLst>`)
 
 SpreadsheetML’s `<c>` (cell) element can carry metadata indices:
