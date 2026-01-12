@@ -421,7 +421,6 @@ impl AppState {
     }
 
     pub fn rename_sheet(&mut self, sheet_id: &str, name: String) -> Result<(), AppStateError> {
-        let workbook = self.get_workbook_mut()?;
         let trimmed = name.trim();
         if trimmed.is_empty() {
             return Err(AppStateError::WhatIf(
@@ -430,27 +429,115 @@ impl AppState {
         }
         validate_sheet_name(trimmed)
             .map_err(|e| AppStateError::WhatIf(e.to_string()))?;
-        if workbook.sheets.iter().any(|sheet| {
-            sheet.id != sheet_id && sheet.name.eq_ignore_ascii_case(trimmed)
-        }) {
-            return Err(AppStateError::WhatIf(format!(
-                "sheet name already exists: {trimmed}"
-            )));
-        }
-
         let (old_name, new_name) = {
+            let workbook = self.get_workbook()?;
+            if workbook.sheets.iter().any(|sheet| {
+                sheet.id != sheet_id && sheet.name.eq_ignore_ascii_case(trimmed)
+            }) {
+                return Err(AppStateError::WhatIf(format!(
+                    "sheet name already exists: {trimmed}"
+                )));
+            }
             let sheet = workbook
-                .sheet_mut(sheet_id)
+                .sheet(sheet_id)
                 .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
-
             let old_name = sheet.name.clone();
             if old_name == trimmed {
                 return Ok(());
             }
-
-            sheet.name = trimmed.to_string();
-            (old_name, sheet.name.clone())
+            (old_name, trimmed.to_string())
         };
+
+        // When the workbook is backed by SQLite persistence, rename the sheet in storage first so
+        // validation/rewrite failures don't leave the in-memory model in a partially updated state.
+        if let Some(persistent) = self.persistent.as_mut() {
+            let sheet_uuid = persistent.sheet_uuid(sheet_id).ok_or_else(|| {
+                AppStateError::Persistence(format!(
+                    "missing persistence mapping for sheet id {sheet_id}"
+                ))
+            })?;
+
+            // Ensure all pending in-memory edits are reflected in SQLite so the rewrite pass runs
+            // against the latest cell formulas.
+            persistent
+                .memory
+                .flush_dirty_pages()
+                .map_err(|e| AppStateError::Persistence(e.to_string()))?;
+
+            persistent
+                .storage
+                .rename_sheet(sheet_uuid, &new_name)
+                .map_err(|e| match e {
+                    formula_storage::StorageError::EmptySheetName => {
+                        AppStateError::WhatIf("sheet name cannot be empty".to_string())
+                    }
+                    formula_storage::StorageError::InvalidSheetName(err) => {
+                        AppStateError::WhatIf(err.to_string())
+                    }
+                    formula_storage::StorageError::DuplicateSheetName(name) => {
+                        AppStateError::WhatIf(format!("sheet name already exists: {name}"))
+                    }
+                    formula_storage::StorageError::SheetNotFound(_) => {
+                        AppStateError::UnknownSheet(sheet_id.to_string())
+                    }
+                    other => AppStateError::Persistence(other.to_string()),
+                })?;
+
+            // Drop cached viewports so formula text reads reflect the updated workbook state.
+            let new_memory = open_memory_manager(persistent.storage.clone());
+            let new_autosave = tokio::runtime::Handle::try_current().ok().map(|_| {
+                Arc::new(AutoSaveManager::spawn(
+                    new_memory.clone(),
+                    AutoSaveConfig::default(),
+                ))
+            });
+            persistent.memory = new_memory;
+            persistent.autosave = new_autosave;
+        }
+
+        let workbook = self.get_workbook_mut()?;
+
+        {
+            let sheet = workbook
+                .sheet_mut(sheet_id)
+                .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
+            sheet.name = new_name.clone();
+        }
+
+        // Rewrite cross-sheet references in formulas and workbook-level metadata.
+        for sheet in &mut workbook.sheets {
+            for ((row, col), cell) in sheet.cells.iter_mut() {
+                let Some(formula) = cell.formula.as_mut() else {
+                    continue;
+                };
+                let rewritten =
+                    formula_model::rewrite_sheet_names_in_formula(formula, &old_name, &new_name);
+                if rewritten != *formula {
+                    *formula = rewritten;
+                    // Track as an input edit so patch-based XLSX saves include updated formulas.
+                    sheet.dirty_cells.insert((*row, *col));
+                }
+            }
+        }
+
+        for name in &mut workbook.defined_names {
+            name.refers_to = formula_model::rewrite_sheet_names_in_formula(
+                &name.refers_to,
+                &old_name,
+                &new_name,
+            );
+            if let Some(sheet_key) = name.sheet_id.as_mut() {
+                if sheet_key.eq_ignore_ascii_case(&old_name) {
+                    *sheet_key = new_name.clone();
+                }
+            }
+        }
+
+        for table in &mut workbook.tables {
+            if table.sheet_id.eq_ignore_ascii_case(&old_name) {
+                table.sheet_id = new_name.clone();
+            }
+        }
 
         // Preserve print settings keyed by sheet name.
         for settings in &mut workbook.print_settings.sheets {
@@ -4530,6 +4617,142 @@ mod tests {
 
         let a1 = state.get_cell(&sheet1_id, 0, 0).unwrap();
         assert_eq!(a1.value, CellScalar::Number(11.0));
+    }
+
+    #[test]
+    fn rename_sheet_rewrites_cross_sheet_formulas_and_metadata() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+        let sheet1_id = workbook.sheets[0].id.clone();
+        let sheet2_id = workbook.sheets[1].id.clone();
+
+        workbook.sheet_mut(&sheet2_id).unwrap().set_cell(
+            0,
+            0,
+            Cell::from_literal(Some(CellScalar::Number(41.0))),
+        );
+        workbook.sheet_mut(&sheet1_id).unwrap().set_cell(
+            0,
+            1,
+            Cell::from_formula("=Sheet2!A1+1".to_string()),
+        );
+
+        workbook.defined_names.push(crate::file_io::DefinedName {
+            name: "MyRange".to_string(),
+            refers_to: "Sheet2!A1".to_string(),
+            sheet_id: None,
+            hidden: false,
+        });
+        workbook.defined_names.push(crate::file_io::DefinedName {
+            name: "LocalRange".to_string(),
+            refers_to: "Sheet2!A1".to_string(),
+            sheet_id: Some("Sheet2".to_string()),
+            hidden: false,
+        });
+
+        workbook.tables.push(crate::file_io::Table {
+            name: "Table1".to_string(),
+            sheet_id: "Sheet2".to_string(),
+            start_row: 0,
+            start_col: 0,
+            end_row: 0,
+            end_col: 0,
+            columns: vec!["Col1".to_string()],
+        });
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let initial = state.get_cell(&sheet1_id, 0, 1).unwrap();
+        assert_eq!(initial.formula.as_deref(), Some("=Sheet2!A1+1"));
+        assert_eq!(initial.value, CellScalar::Number(42.0));
+
+        // Plain rename: unquoted -> unquoted.
+        state
+            .rename_sheet(&sheet2_id, "Budget".to_string())
+            .expect("rename Sheet2 -> Budget");
+        let renamed = state.get_cell(&sheet1_id, 0, 1).unwrap();
+        assert_eq!(renamed.formula.as_deref(), Some("=Budget!A1+1"));
+        assert_eq!(renamed.value, CellScalar::Number(42.0));
+
+        let wb = state.get_workbook().unwrap();
+        assert!(wb.defined_names.iter().any(|n| n.name == "MyRange" && n.refers_to == "Budget!A1"));
+        assert!(wb
+            .defined_names
+            .iter()
+            .any(|n| n.name == "LocalRange" && n.refers_to == "Budget!A1" && n.sheet_id.as_deref() == Some("Budget")));
+        assert!(wb.tables.iter().any(|t| t.name == "Table1" && t.sheet_id == "Budget"));
+
+        // Tricky sheet names should be quoted/escaped like Excel.
+        let cases = [
+            ("My Sheet", "='My Sheet'!A1+1", "'My Sheet'!A1"),
+            ("O'Brien", "='O''Brien'!A1+1", "'O''Brien'!A1"),
+            ("预算", "='预算'!A1+1", "'预算'!A1"),
+        ];
+
+        for (new_name, expected_cell_formula, expected_defined_ref) in cases {
+            state
+                .rename_sheet(&sheet2_id, new_name.to_string())
+                .unwrap_or_else(|e| panic!("rename Budget -> {new_name} failed: {e}"));
+            let cell = state.get_cell(&sheet1_id, 0, 1).unwrap();
+            assert_eq!(cell.formula.as_deref(), Some(expected_cell_formula));
+            assert_eq!(cell.value, CellScalar::Number(42.0));
+
+            let wb = state.get_workbook().unwrap();
+            assert!(wb
+                .defined_names
+                .iter()
+                .any(|n| n.name == "MyRange" && n.refers_to == expected_defined_ref));
+            assert!(wb.defined_names.iter().any(|n| {
+                n.name == "LocalRange"
+                    && n.refers_to == expected_defined_ref
+                    && n.sheet_id.as_deref() == Some(new_name)
+            }));
+            assert!(wb.tables.iter().any(|t| t.name == "Table1" && t.sheet_id == new_name));
+        }
+    }
+
+    #[test]
+    fn rename_sheet_updates_persistent_storage_formulas() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let db_path = tmp.path().join("workbook.sqlite");
+
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+        let sheet1_id = workbook.sheets[0].id.clone();
+        let sheet2_id = workbook.sheets[1].id.clone();
+
+        workbook.sheet_mut(&sheet2_id).unwrap().set_cell(
+            0,
+            0,
+            Cell::from_literal(Some(CellScalar::Number(1.0))),
+        );
+        workbook.sheet_mut(&sheet1_id).unwrap().set_cell(
+            0,
+            0,
+            Cell::from_formula("=Sheet2!A1+1".to_string()),
+        );
+
+        let mut state = AppState::new();
+        state
+            .load_workbook_persistent(workbook, WorkbookPersistenceLocation::OnDisk(db_path))
+            .expect("load persistent workbook");
+
+        let before = state.get_cell(&sheet1_id, 0, 0).unwrap();
+        assert_eq!(before.formula.as_deref(), Some("=Sheet2!A1+1"));
+        assert_eq!(before.value, CellScalar::Number(2.0));
+
+        state
+            .rename_sheet(&sheet2_id, "Budget".to_string())
+            .expect("rename Sheet2 -> Budget");
+
+        // Ensure the viewport/cache path returns the rewritten formula text (not the stale value
+        // from the pre-rename in-memory pages).
+        let after = state.get_cell(&sheet1_id, 0, 0).unwrap();
+        assert_eq!(after.formula.as_deref(), Some("=Budget!A1+1"));
+        assert_eq!(after.value, CellScalar::Number(2.0));
     }
 
     #[test]
