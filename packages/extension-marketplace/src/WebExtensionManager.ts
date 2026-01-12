@@ -846,7 +846,15 @@ export class WebExtensionManager {
     }
     // Repair always re-downloads the currently-installed version, replacing the stored bytes and
     // clearing any corruption markers.
-    return this.install(id, installed.version);
+    try {
+      return await this.install(id, installed.version);
+    } catch (error) {
+      const msg = String((error as Error)?.message ?? error);
+      // If the exact version is no longer available (yanked/deleted), fall back to installing the
+      // latest version so users still have a recovery path without manual DB clearing.
+      if (!/Package not found/i.test(msg)) throw error;
+      return this.install(id);
+    }
   }
 
   isLoaded(id: string): boolean {
@@ -867,7 +875,12 @@ export class WebExtensionManager {
 
     const pkg = await this._getPackage(installed.id, installed.version);
     if (!pkg) {
-      throw new Error(`Missing stored package for ${installed.id}@${installed.version}`);
+      const reason = `missing stored package record for ${installed.id}@${installed.version}`;
+      await this._quarantineCorruptedInstall(installed, reason);
+      throw new Error(
+        `Extension package integrity check failed for ${installed.id}@${installed.version}: ${reason}. ` +
+          "Call WebExtensionManager.repair(id) to re-download the package."
+      );
     }
 
     await this._verifyStoredPackageIntegrity(installed, pkg);
@@ -875,10 +888,14 @@ export class WebExtensionManager {
     const manifest = this._validateManifest(pkg.verified.manifest, { id: installed.id, version: installed.version });
     const bundleId = `${manifest.publisher}.${manifest.name}`;
     if (bundleId !== installed.id) {
-      throw new Error(`Package id mismatch: expected ${installed.id} but got ${bundleId}`);
+      const reason = `package id mismatch (expected ${installed.id} but got ${bundleId})`;
+      await this._quarantineCorruptedInstall(installed, reason);
+      throw new Error(`Extension package integrity check failed for ${installed.id}@${installed.version}: ${reason}`);
     }
     if (manifest.version !== installed.version) {
-      throw new Error(`Package version mismatch: expected ${installed.version} but got ${manifest.version}`);
+      const reason = `package version mismatch (expected ${installed.version} but got ${manifest.version})`;
+      await this._quarantineCorruptedInstall(installed, reason);
+      throw new Error(`Extension package integrity check failed for ${installed.id}@${installed.version}: ${reason}`);
     }
 
     if (!this._extensionApiModule) {

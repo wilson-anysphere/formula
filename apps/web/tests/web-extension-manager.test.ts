@@ -983,3 +983,47 @@ test("scanStatus is allowed by default in dev/test builds (warn-only)", async ()
   await manager.dispose();
   await host.dispose();
 });
+
+test("missing stored package record is quarantined and can be repaired", async () => {
+  const keys = generateEd25519KeyPair();
+  const extensionDir = path.resolve("extensions/sample-hello");
+  const pkgBytes = await createExtensionPackageV2(extensionDir, { privateKeyPem: keys.privateKeyPem });
+
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "formula.sample-hello",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes }
+  });
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: new TestSpreadsheetApi(),
+    permissionPrompt: async () => true
+  });
+  const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
+
+  await manager.install("formula.sample-hello");
+
+  // Delete the stored package record to simulate a partial write / IndexedDB corruption.
+  const db = await requestToPromise(indexedDB.open("formula.webExtensions"));
+  try {
+    const tx = db.transaction(["packages"], "readwrite");
+    tx.objectStore("packages").delete("formula.sample-hello@1.0.0");
+    await txDone(tx);
+  } finally {
+    db.close();
+  }
+
+  await expect(manager.loadInstalled("formula.sample-hello")).rejects.toThrow(/missing stored package|integrity/i);
+  expect(await manager.getInstalled("formula.sample-hello")).toMatchObject({ corrupted: true });
+
+  await manager.repair("formula.sample-hello");
+  const repaired = await manager.getInstalled("formula.sample-hello");
+  expect(repaired?.corrupted).not.toBe(true);
+
+  await manager.loadInstalled("formula.sample-hello");
+
+  await manager.dispose();
+  await host.dispose();
+});
