@@ -224,6 +224,17 @@ export async function introspectSyncToken(
     return { active: false, reason: "doc_deleted", userId, orgId, role };
   }
 
+  if (!isClientIpAllowed(params.clientIp ?? null, row.ip_allowlist)) {
+    return {
+      active: false,
+      reason: "ip_not_allowed",
+      userId,
+      orgId,
+      role,
+      sessionId: claims.sessionId
+    };
+  }
+
   const memberRoleParsed = RoleSchema.safeParse(row.member_role);
   const memberRole = memberRoleParsed.success ? (memberRoleParsed.data as DocumentRole) : null;
   if (!memberRole) {
@@ -239,10 +250,6 @@ export async function introspectSyncToken(
   // the current DB role to prevent privilege escalation without requiring the
   // client to refresh its sync token.
   const effectiveRole = roleRank(role) > roleRank(memberRole) ? memberRole : role;
-
-  if (!isClientIpAllowed(params.clientIp ?? null, row.ip_allowlist)) {
-    return { active: false, reason: "ip_not_allowed", userId, orgId, role, sessionId: claims.sessionId };
-  }
 
   return {
     active: true,
