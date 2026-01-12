@@ -257,6 +257,20 @@ export class ContextManager {
     const classificationRecords =
       dlp?.classificationRecords ?? dlp?.classificationStore?.list(dlp.documentId) ?? [];
 
+    // Large enterprise classification record sets can make per-chunk range classification
+    // expensive if we linearly scan `classificationRecords` for every chunk. Build a
+    // document-level selector index once and reuse it for all range lookups in this call.
+    /** @type {ReturnType<typeof buildDlpDocumentIndex> | null} */
+    let dlpDocumentIndex = null;
+    const getDlpDocumentIndex = () => {
+      if (!dlp) return null;
+      if (!classificationRecords.length) return null;
+      if (!dlpDocumentIndex) {
+        dlpDocumentIndex = buildDlpDocumentIndex({ documentId: dlp.documentId, records: classificationRecords });
+      }
+      return dlpDocumentIndex;
+    };
+
     /**
      * @param {any} rect
      */
@@ -319,10 +333,10 @@ export class ContextManager {
                 const range = rectToRange(record.metadata?.rect);
                 const sheetName = record.metadata?.sheetName;
                 if (range && sheetName) {
-                  recordClassification = effectiveRangeClassification(
-                    { documentId: dlp.documentId, sheetId: sheetName, range },
-                    classificationRecords,
-                  );
+                  const index = getDlpDocumentIndex();
+                  recordClassification = index
+                    ? effectiveRangeClassificationFromDocumentIndex(index, { documentId: dlp.documentId, sheetId: sheetName, range })
+                    : effectiveRangeClassification({ documentId: dlp.documentId, sheetId: sheetName, range }, classificationRecords);
                 }
 
                 const classification = maxClassification(recordClassification, heuristicClassification);
@@ -446,10 +460,10 @@ export class ContextManager {
         const range = rectToRange(meta.rect);
         const sheetName = meta.sheetName;
         if (range && sheetName) {
-          recordClassification = effectiveRangeClassification(
-            { documentId: dlp.documentId, sheetId: sheetName, range },
-            classificationRecords,
-          );
+          const index = getDlpDocumentIndex();
+          recordClassification = index
+            ? effectiveRangeClassificationFromDocumentIndex(index, { documentId: dlp.documentId, sheetId: sheetName, range })
+            : effectiveRangeClassification({ documentId: dlp.documentId, sheetId: sheetName, range }, classificationRecords);
         }
       }
 
@@ -823,6 +837,182 @@ function effectiveCellClassificationFromIndex(index, cellRef) {
   if (classification.level !== CLASSIFICATION_LEVEL.RESTRICTED && index.fallbackRecords.length > 0) {
     const fallback = effectiveCellClassification(cellRef, index.fallbackRecords);
     classification = maxClassification(classification, fallback);
+  }
+
+  return classification;
+}
+
+function buildDlpDocumentIndex(params) {
+  let docClassificationMax = { ...DEFAULT_CLASSIFICATION };
+  const sheetClassificationMaxBySheetId = new Map();
+  const columnClassificationBySheetId = new Map();
+  const cellClassificationBySheetId = new Map();
+  const rangeRecordsBySheetId = new Map();
+
+  /**
+   * @param {string} sheetId
+   */
+  function ensureSheetMax(sheetId) {
+    const existing = sheetClassificationMaxBySheetId.get(sheetId);
+    if (existing) return existing;
+    const init = { ...DEFAULT_CLASSIFICATION };
+    sheetClassificationMaxBySheetId.set(sheetId, init);
+    return init;
+  }
+
+  /**
+   * @param {string} sheetId
+   */
+  function ensureColMap(sheetId) {
+    const existing = columnClassificationBySheetId.get(sheetId);
+    if (existing) return existing;
+    const init = new Map();
+    columnClassificationBySheetId.set(sheetId, init);
+    return init;
+  }
+
+  /**
+   * @param {string} sheetId
+   */
+  function ensureCellMap(sheetId) {
+    const existing = cellClassificationBySheetId.get(sheetId);
+    if (existing) return existing;
+    const init = new Map();
+    cellClassificationBySheetId.set(sheetId, init);
+    return init;
+  }
+
+  /**
+   * @param {string} sheetId
+   */
+  function ensureRangeList(sheetId) {
+    const existing = rangeRecordsBySheetId.get(sheetId);
+    if (existing) return existing;
+    const init = [];
+    rangeRecordsBySheetId.set(sheetId, init);
+    return init;
+  }
+
+  for (const record of params.records || []) {
+    if (!record || !record.selector || typeof record.selector !== "object") continue;
+    const selector = record.selector;
+    if (selector.documentId !== params.documentId) continue;
+
+    switch (selector.scope) {
+      case "document": {
+        docClassificationMax = maxClassification(docClassificationMax, record.classification);
+        break;
+      }
+      case "sheet": {
+        if (!selector.sheetId) break;
+        const existing = ensureSheetMax(selector.sheetId);
+        sheetClassificationMaxBySheetId.set(selector.sheetId, maxClassification(existing, record.classification));
+        break;
+      }
+      case "column": {
+        if (!selector.sheetId) break;
+        if (typeof selector.columnIndex !== "number") break;
+        const colMap = ensureColMap(selector.sheetId);
+        const existing = colMap.get(selector.columnIndex);
+        colMap.set(selector.columnIndex, existing ? maxClassification(existing, record.classification) : record.classification);
+        break;
+      }
+      case "cell": {
+        if (!selector.sheetId) break;
+        if (typeof selector.row !== "number" || typeof selector.col !== "number") break;
+        const key = `${selector.row},${selector.col}`;
+        const cellMap = ensureCellMap(selector.sheetId);
+        const existing = cellMap.get(key);
+        cellMap.set(key, existing ? maxClassification(existing, record.classification) : record.classification);
+        break;
+      }
+      case "range": {
+        if (!selector.sheetId) break;
+        if (!selector.range) break;
+        let normalized;
+        try {
+          normalized = normalizeRange(selector.range);
+        } catch {
+          break;
+        }
+        ensureRangeList(selector.sheetId).push({ range: normalized, classification: record.classification });
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  return {
+    documentId: params.documentId,
+    docClassificationMax,
+    sheetClassificationMaxBySheetId,
+    columnClassificationBySheetId,
+    cellClassificationBySheetId,
+    rangeRecordsBySheetId,
+  };
+}
+
+function effectiveRangeClassificationFromDocumentIndex(index, rangeRef) {
+  if (!index || rangeRef.documentId !== index.documentId) return { ...DEFAULT_CLASSIFICATION };
+
+  let classification = { ...DEFAULT_CLASSIFICATION };
+  classification = maxClassification(classification, index.docClassificationMax);
+  if (classification.level === CLASSIFICATION_LEVEL.RESTRICTED) return classification;
+
+  const normalized = normalizeRange(rangeRef.range);
+
+  const sheetMax = index.sheetClassificationMaxBySheetId.get(rangeRef.sheetId);
+  if (sheetMax) classification = maxClassification(classification, sheetMax);
+  if (classification.level === CLASSIFICATION_LEVEL.RESTRICTED) return classification;
+
+  const colMap = index.columnClassificationBySheetId.get(rangeRef.sheetId);
+  if (colMap) {
+    for (let col = normalized.start.col; col <= normalized.end.col; col++) {
+      const colClassification = colMap.get(col);
+      if (!colClassification) continue;
+      classification = maxClassification(classification, colClassification);
+      if (classification.level === CLASSIFICATION_LEVEL.RESTRICTED) return classification;
+    }
+  }
+
+  const rangeRecords = index.rangeRecordsBySheetId.get(rangeRef.sheetId) ?? [];
+  for (const record of rangeRecords) {
+    if (!rangesIntersectNormalized(record.range, normalized)) continue;
+    classification = maxClassification(classification, record.classification);
+    if (classification.level === CLASSIFICATION_LEVEL.RESTRICTED) return classification;
+  }
+
+  const cellMap = index.cellClassificationBySheetId.get(rangeRef.sheetId);
+  if (cellMap) {
+    const rows = normalized.end.row - normalized.start.row + 1;
+    const cols = normalized.end.col - normalized.start.col + 1;
+    const rangeCells = rows * cols;
+
+    // The chunk ranges used in workbook RAG are bounded (50x50 by default). Prefer
+    // scanning the range coordinates rather than all classified cells on the sheet.
+    // Use the smaller side if the caller ever passes a very large range.
+    if (rangeCells <= cellMap.size) {
+      for (let row = normalized.start.row; row <= normalized.end.row; row++) {
+        for (let col = normalized.start.col; col <= normalized.end.col; col++) {
+          const cellClassification = cellMap.get(`${row},${col}`);
+          if (!cellClassification) continue;
+          classification = maxClassification(classification, cellClassification);
+          if (classification.level === CLASSIFICATION_LEVEL.RESTRICTED) return classification;
+        }
+      }
+    } else {
+      for (const [key, cellClassification] of cellMap.entries()) {
+        const [rowRaw, colRaw] = String(key).split(",");
+        const row = Number(rowRaw);
+        const col = Number(colRaw);
+        if (!Number.isInteger(row) || !Number.isInteger(col)) continue;
+        if (row < normalized.start.row || row > normalized.end.row) continue;
+        if (col < normalized.start.col || col > normalized.end.col) continue;
+        classification = maxClassification(classification, cellClassification);
+        if (classification.level === CLASSIFICATION_LEVEL.RESTRICTED) return classification;
+      }
+    }
   }
 
   return classification;
