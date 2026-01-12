@@ -264,11 +264,15 @@ fn v3_content_normalized_data_respects_module_text_offset_when_stream_has_prefix
 
     let normalized = v3_content_normalized_data(&vba_bin).expect("V3ContentNormalizedData");
     let mut expected = Vec::new();
-    expected.extend_from_slice(b"Module1"); // MODULENAME record payload
-    expected.extend_from_slice(b"Module1"); // MODULESTREAMNAME payload (trimmed)
+    // v3 transcript module prefix:
+    // - Procedural module `TypeRecord.Id || TypeRecord.Reserved` (0x0021 + u16 reserved)
+    //
+    // Note: Unlike v1/v2 normalization, v3 module source normalization uses LF line endings and
+    // appends the module name to the transcript when at least one non-skipped line contributes.
     expected.extend_from_slice(&0x0021u16.to_le_bytes());
     expected.extend_from_slice(&0u16.to_le_bytes());
-    expected.extend_from_slice(b"Sub Hello()\r\nEnd Sub\r\n"); // normalized source (Attribute stripped)
+    // Normalized source (Attribute VB_Name stripped) + trailing empty line + module name.
+    expected.extend_from_slice(b"Sub Hello()\nEnd Sub\n\nModule1\n");
     assert_eq!(normalized, expected);
 
     // If TextOffset is wrong, we should fail (proves we actually use 0x0031, rather than scanning
