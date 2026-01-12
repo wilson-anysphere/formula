@@ -1,4 +1,4 @@
-use formula_engine::{parse_formula, Engine, ParseOptions, SerializeOptions, Value};
+use formula_engine::{parse_formula, Engine, ErrorKind, ParseOptions, SerializeOptions, Value};
 use pretty_assertions::assert_eq;
 
 #[test]
@@ -280,4 +280,48 @@ fn bytecode_compiles_count_over_sheet_range_area_ref_and_matches_ast() {
 
     assert_eq!(bytecode_value, ast_value);
     assert_eq!(bytecode_value, Value::Number(9.0));
+}
+
+#[test]
+fn bytecode_compiles_counta_and_countblank_over_sheet_range_area_ref_and_matches_ast() {
+    let mut engine = Engine::new();
+
+    // 3 sheets x 3 rows = 9 cells total.
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    // Sheet1!A2 left blank
+    engine.set_cell_value("Sheet1", "A3", "").unwrap(); // empty string
+
+    engine.set_cell_value("Sheet2", "A1", "hello").unwrap();
+    engine.set_cell_value("Sheet2", "A2", Value::Blank).unwrap();
+    engine
+        .set_cell_value("Sheet2", "A3", Value::Error(ErrorKind::Div0))
+        .unwrap();
+
+    engine.set_cell_value("Sheet3", "A1", true).unwrap();
+    engine.set_cell_value("Sheet3", "A2", 2.0).unwrap();
+    // Sheet3!A3 left blank
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=COUNTA(Sheet1:Sheet3!A1:A3)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=COUNTBLANK(Sheet1:Sheet3!A1:A3)")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 2);
+
+    engine.recalculate_single_threaded();
+    let bytecode_counta = engine.get_cell_value("Sheet1", "B1");
+    let bytecode_countblank = engine.get_cell_value("Sheet1", "B2");
+
+    engine.set_bytecode_enabled(false);
+    engine.recalculate_single_threaded();
+    let ast_counta = engine.get_cell_value("Sheet1", "B1");
+    let ast_countblank = engine.get_cell_value("Sheet1", "B2");
+
+    assert_eq!(bytecode_counta, ast_counta);
+    assert_eq!(bytecode_countblank, ast_countblank);
+
+    assert_eq!(bytecode_counta, Value::Number(6.0));
+    assert_eq!(bytecode_countblank, Value::Number(4.0));
 }
