@@ -121,6 +121,10 @@ test.describe("formatting shortcuts", () => {
     await waitForIdle(page);
 
     expect(await getA1Underline(page)).toBe(true);
+
+    await page.keyboard.press("ControlOrMeta+U");
+    await waitForIdle(page);
+    expect(await getA1Underline(page)).toBe(false);
   });
 
   for (const [name, cfg] of [
