@@ -25,7 +25,8 @@ function safeParseRecents(raw: string | null): CommandRecentEntry[] {
       if (!item || typeof item !== "object") continue;
       const commandId = typeof (item as any).commandId === "string" ? String((item as any).commandId).trim() : "";
       const lastUsedMs = typeof (item as any).lastUsedMs === "number" ? (item as any).lastUsedMs : NaN;
-      const count = typeof (item as any).count === "number" ? (item as any).count : undefined;
+      const count =
+        typeof (item as any).count === "number" && Number.isFinite((item as any).count) ? (item as any).count : undefined;
       if (!commandId) continue;
       if (!Number.isFinite(lastUsedMs)) continue;
       if (seen.has(commandId)) continue;

@@ -238,4 +238,14 @@ describe("command-palette/recents", () => {
 
     expect(readCommandRecents(storage).map((entry) => entry.commandId)).toEqual(["cmd.d", "cmd.c", "cmd.b"]);
   });
+
+  test("ignores non-finite counts in stored JSON", () => {
+    const storage = new MemoryStorage();
+    // `1e309` parses to Infinity in JS. Ensure we don't persist/read non-finite counts.
+    storage.setItem(
+      COMMAND_RECENTS_STORAGE_KEY,
+      '[{"commandId":"cmd.normal","lastUsedMs":1234,"count":1e309}]',
+    );
+    expect(readCommandRecents(storage)).toEqual([{ commandId: "cmd.normal", lastUsedMs: 1234 }]);
+  });
 });
