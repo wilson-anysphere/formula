@@ -20,6 +20,7 @@
   /* Base text */
   --text-primary: #1a1a1a;
   --text-secondary: #666666;
+  --text-muted: var(--text-secondary);
 
   /* Lines / separators */
   --border: #d4d4d4;
