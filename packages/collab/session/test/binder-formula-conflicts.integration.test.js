@@ -211,7 +211,13 @@ test("CollabSession↔DocumentController binder edits are treated as local by Fo
   disconnect = connectDocs(docA, docB);
 
   await waitForCondition(() => conflictsA.length >= 1);
-  assert.equal(conflictsA[0].kind, "formula");
+  const conflict = conflictsA[0];
+  assert.equal(conflict.kind, "formula");
+
+  // Optional: resolve the conflict and assert convergence.
+  assert.ok(sessionA.formulaConflictMonitor?.resolveConflict(conflict.id, conflict.localFormula));
+  await waitForCondition(async () => (await sessionA.getCell("Sheet1:0:0"))?.formula === conflict.localFormula.trim());
+  await waitForCondition(async () => (await sessionB.getCell("Sheet1:0:0"))?.formula === conflict.localFormula.trim());
 
   binder.destroy();
   sessionA.destroy();
