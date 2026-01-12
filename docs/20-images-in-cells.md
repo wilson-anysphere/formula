@@ -82,6 +82,8 @@ variant shapes are documented further below.
   - `http://schemas.microsoft.com/office/spreadsheetml/2019/cellimages`
 - Some files may use newer versions like:
   - `http://schemas.microsoft.com/office/spreadsheetml/2022/cellimages`
+- Some in-repo synthetic fixtures also use a more generic Microsoft SpreadsheetML namespace:
+  - `http://schemas.microsoft.com/office/spreadsheetml/2020/07/main` (unverified vs real Excel)
 - The root contains one or more `<cellImage>` entries, each containing a DrawingML picture subtree
   (typically `<xdr:pic>`) and a blip like:
   - `<a:blip r:embed="rIdX"/>`
@@ -102,6 +104,8 @@ variant shapes are documented further below.
   - `http://schemas.openxmlformats.org/officeDocument/2006/relationships/image`
 - Relationship type for “workbook/worksheet → `cellImages.xml`”: **unknown** (likely Microsoft-specific);
   discover from a real Excel-generated file and preserve byte-for-byte until verified.
+  - Candidate observed in a synthetic round-trip test:
+    - `http://schemas.microsoft.com/office/2020/07/relationships/cellImages`
 
 #### Minimal example (`xl/cellImages.xml`) (synthetic)
 
@@ -454,6 +458,8 @@ Partially known (fixture-driven details still recommended):
 - Workbook → `xl/cellImages.xml` relationship:
   - Lives in `xl/_rels/workbook.xml.rels`.
   - Excel uses a Microsoft-extension relationship `Type` URI that has been observed to vary.
+  - Candidate observed in `crates/formula-xlsx/tests/cellimages_roundtrip_preserves_parts.rs`:
+    - `Type="http://schemas.microsoft.com/office/2020/07/relationships/cellImages"`
   - **Round-trip / detection rule:** identify the relationship by resolved `Target`
     (`/xl/cellImages.xml` or `/xl/cellimages.xml`) rather than hardcoding a single `Type`.
 - RichData relationship indirection (images referenced via `richValueRel.xml`):
