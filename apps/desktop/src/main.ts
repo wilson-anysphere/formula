@@ -108,6 +108,7 @@ import { buildContextMenuModel } from "./extensions/contextMenuModel.js";
 import { getPrimaryCommandKeybindingDisplay, type ContributedKeybinding } from "./extensions/keybindings.js";
 import { KeybindingService } from "./extensions/keybindingService.js";
 import { deriveSelectionContextKeys } from "./extensions/selectionContextKeys.js";
+import { installKeyboardContextKeys } from "./keyboard/installKeyboardContextKeys.js";
 import { CommandRegistry } from "./extensions/commandRegistry.js";
 import { createCommandPalette, installCommandPaletteRecentsTracking } from "./command-palette/index.js";
 import { registerBuiltinCommands } from "./commands/registerBuiltinCommands.js";
@@ -1220,6 +1221,7 @@ app.focus();
 // only reflects its *primary* editor/formula bar/inline edit state, so track the secondary
 // editor separately for global UI state (status bar, shortcut gating, etc).
 let splitViewSecondaryIsEditing = false;
+let recomputeKeyboardContextKeys: (() => void) | null = null;
 
 const isSpreadsheetEditing = (): boolean => app.isEditing() || splitViewSecondaryIsEditing;
 
@@ -3888,6 +3890,7 @@ if (
         renderStatusMode();
         syncTitlebar();
         scheduleRibbonSelectionFormatStateUpdate();
+        recomputeKeyboardContextKeys?.();
       }
       stopPrimarySplitPanePersistence();
       primaryPaneViewportRestored = false;
@@ -3955,6 +3958,7 @@ if (
           renderStatusMode();
           syncTitlebar();
           scheduleRibbonSelectionFormatStateUpdate();
+          recomputeKeyboardContextKeys?.();
         },
       });
 
@@ -4062,6 +4066,20 @@ if (
   }
 
   const contextKeys = new ContextKeyService();
+  const disposeKeyboardContextKeys = installKeyboardContextKeys({
+    contextKeys,
+    app,
+    formulaBarRoot,
+    sheetTabsRoot: sheetTabsRootEl,
+    isCommandPaletteOpen: () => {
+      // The palette is mounted lazily; treat "overlay exists and is visible" as open.
+      const overlay = document.querySelector<HTMLElement>(".command-palette-overlay");
+      return overlay != null && overlay.hidden === false;
+    },
+    isSplitViewSecondaryEditing: () => splitViewSecondaryIsEditing,
+  });
+  recomputeKeyboardContextKeys = disposeKeyboardContextKeys.recompute;
+  window.addEventListener("unload", () => disposeKeyboardContextKeys());
   type GridArea = "cell" | "rowHeader" | "colHeader" | "corner";
   let currentGridArea: GridArea = "cell";
 

@@ -1,0 +1,171 @@
+// @vitest-environment jsdom
+
+import { beforeEach, describe, expect, it } from "vitest";
+
+import { ContextKeyService } from "../extensions/contextKeys.js";
+import { installKeyboardContextKeys, KeyboardContextKeyIds } from "./installKeyboardContextKeys.js";
+
+function flushMicrotasks(): Promise<void> {
+  return new Promise((resolve) => queueMicrotask(resolve));
+}
+
+class FakeSpreadsheetApp {
+  private baseEditing = false;
+  private formulaBarEditing = false;
+  private formulaBarFormulaEditing = false;
+
+  private readonly editStateListeners = new Set<(isEditing: boolean) => void>();
+  private readonly formulaOverlayListeners = new Set<() => void>();
+
+  isEditing(): boolean {
+    return this.baseEditing || this.formulaBarEditing;
+  }
+
+  isFormulaBarEditing(): boolean {
+    return this.formulaBarEditing;
+  }
+
+  isFormulaBarFormulaEditing(): boolean {
+    return this.formulaBarFormulaEditing;
+  }
+
+  onEditStateChange(listener: (isEditing: boolean) => void): () => void {
+    this.editStateListeners.add(listener);
+    listener(this.isEditing());
+    return () => this.editStateListeners.delete(listener);
+  }
+
+  onFormulaBarOverlayChange(listener: () => void): () => void {
+    this.formulaOverlayListeners.add(listener);
+    listener();
+    return () => this.formulaOverlayListeners.delete(listener);
+  }
+
+  setBaseEditing(value: boolean): void {
+    this.baseEditing = value;
+    for (const listener of [...this.editStateListeners]) listener(this.isEditing());
+  }
+
+  setFormulaBarEditing(value: boolean): void {
+    this.formulaBarEditing = value;
+    for (const listener of [...this.editStateListeners]) listener(this.isEditing());
+  }
+
+  setFormulaBarFormulaEditing(value: boolean): void {
+    this.formulaBarFormulaEditing = value;
+    for (const listener of [...this.formulaOverlayListeners]) listener();
+  }
+}
+
+describe("installKeyboardContextKeys", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("tracks focus and spreadsheet editing state", async () => {
+    const formulaBarRoot = document.createElement("div");
+    const formulaInput = document.createElement("input");
+    formulaBarRoot.appendChild(formulaInput);
+    document.body.appendChild(formulaBarRoot);
+
+    const sheetTabsRoot = document.createElement("div");
+    const renameInput = document.createElement("input");
+    sheetTabsRoot.appendChild(renameInput);
+    document.body.appendChild(sheetTabsRoot);
+
+    const outsideButton = document.createElement("button");
+    outsideButton.textContent = "Outside";
+    document.body.appendChild(outsideButton);
+    outsideButton.focus();
+
+    const contextKeys = new ContextKeyService();
+    const app = new FakeSpreadsheetApp();
+
+    let commandPaletteOpen = false;
+    let splitViewSecondaryEditing = false;
+
+    const dispose = installKeyboardContextKeys({
+      contextKeys,
+      app,
+      formulaBarRoot,
+      sheetTabsRoot,
+      isCommandPaletteOpen: () => commandPaletteOpen,
+      isSplitViewSecondaryEditing: () => splitViewSecondaryEditing,
+    });
+
+    await flushMicrotasks();
+
+    expect(contextKeys.get(KeyboardContextKeyIds.focusInTextInput)).toBe(false);
+    expect(contextKeys.get(KeyboardContextKeyIds.focusInFormulaBar)).toBe(false);
+    expect(contextKeys.get(KeyboardContextKeyIds.focusInSheetTabRename)).toBe(false);
+    expect(contextKeys.get(KeyboardContextKeyIds.spreadsheetIsEditing)).toBe(false);
+    expect(contextKeys.get(KeyboardContextKeyIds.spreadsheetFormulaBarEditing)).toBe(false);
+    expect(contextKeys.get(KeyboardContextKeyIds.spreadsheetFormulaBarFormulaEditing)).toBe(false);
+    expect(contextKeys.get(KeyboardContextKeyIds.workbenchCommandPaletteOpen)).toBe(false);
+
+    // Focus: formula bar.
+    formulaInput.focus();
+    await flushMicrotasks();
+
+    expect(contextKeys.get(KeyboardContextKeyIds.focusInTextInput)).toBe(true);
+    expect(contextKeys.get(KeyboardContextKeyIds.focusInFormulaBar)).toBe(true);
+    expect(contextKeys.get(KeyboardContextKeyIds.focusInSheetTabRename)).toBe(false);
+
+    // Focus: sheet tab rename.
+    renameInput.focus();
+    await flushMicrotasks();
+
+    expect(contextKeys.get(KeyboardContextKeyIds.focusInTextInput)).toBe(true);
+    expect(contextKeys.get(KeyboardContextKeyIds.focusInFormulaBar)).toBe(false);
+    expect(contextKeys.get(KeyboardContextKeyIds.focusInSheetTabRename)).toBe(true);
+
+    // Focus: non-input element.
+    outsideButton.focus();
+    await flushMicrotasks();
+
+    expect(contextKeys.get(KeyboardContextKeyIds.focusInTextInput)).toBe(false);
+    expect(contextKeys.get(KeyboardContextKeyIds.focusInFormulaBar)).toBe(false);
+    expect(contextKeys.get(KeyboardContextKeyIds.focusInSheetTabRename)).toBe(false);
+
+    // Spreadsheet edit state.
+    app.setBaseEditing(true);
+    await flushMicrotasks();
+    expect(contextKeys.get(KeyboardContextKeyIds.spreadsheetIsEditing)).toBe(true);
+
+    app.setBaseEditing(false);
+    await flushMicrotasks();
+    expect(contextKeys.get(KeyboardContextKeyIds.spreadsheetIsEditing)).toBe(false);
+
+    // Formula bar edit state.
+    app.setFormulaBarEditing(true);
+    await flushMicrotasks();
+    expect(contextKeys.get(KeyboardContextKeyIds.spreadsheetIsEditing)).toBe(true);
+    expect(contextKeys.get(KeyboardContextKeyIds.spreadsheetFormulaBarEditing)).toBe(true);
+
+    // Formula bar formula-editing state is driven by overlay changes while typing.
+    app.setFormulaBarFormulaEditing(true);
+    await flushMicrotasks();
+    expect(contextKeys.get(KeyboardContextKeyIds.spreadsheetFormulaBarFormulaEditing)).toBe(true);
+
+    // Hook-driven state should be recomputed on demand (eg split view, palette).
+    app.setFormulaBarEditing(false);
+    app.setFormulaBarFormulaEditing(false);
+    await flushMicrotasks();
+
+    expect(contextKeys.get(KeyboardContextKeyIds.spreadsheetIsEditing)).toBe(false);
+    expect(contextKeys.get(KeyboardContextKeyIds.spreadsheetFormulaBarEditing)).toBe(false);
+    expect(contextKeys.get(KeyboardContextKeyIds.spreadsheetFormulaBarFormulaEditing)).toBe(false);
+
+    commandPaletteOpen = true;
+    dispose.recompute();
+    await flushMicrotasks();
+    expect(contextKeys.get(KeyboardContextKeyIds.workbenchCommandPaletteOpen)).toBe(true);
+
+    splitViewSecondaryEditing = true;
+    dispose.recompute();
+    await flushMicrotasks();
+    expect(contextKeys.get(KeyboardContextKeyIds.spreadsheetIsEditing)).toBe(true);
+
+    dispose();
+  });
+});
