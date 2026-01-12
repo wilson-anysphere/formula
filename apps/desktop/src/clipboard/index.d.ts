@@ -1,5 +1,5 @@
-export type ClipboardContent = { text?: string; html?: string; rtf?: string; imagePng?: Uint8Array };
-export type ClipboardWritePayload = { text: string; html?: string; rtf?: string; imagePng?: Uint8Array };
+export type ClipboardContent = { text?: string; html?: string; rtf?: string; pngBase64?: string };
+export type ClipboardWritePayload = { text: string; html?: string; rtf?: string; pngBase64?: string };
 
 export type ClipboardProvider = {
   read(): Promise<ClipboardContent>;

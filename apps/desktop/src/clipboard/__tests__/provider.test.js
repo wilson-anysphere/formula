@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Buffer as NodeBuffer } from "node:buffer";
 
 import { createClipboardProvider } from "../platform/provider.js";
 
@@ -36,10 +35,8 @@ async function withGlobals(overrides, fn) {
   }
 }
 
-test("clipboard provider: rich MIME handling", async (t) => {
-  await t.test("web read returns html/text/rtf/image when available", async () => {
-    const imageBytes = Uint8Array.from([1, 2, 3, 4]);
-
+test("clipboard provider", async (t) => {
+  await t.test("web: read returns html/text when available", async () => {
     await withGlobals(
       {
         __TAURI__: undefined,
@@ -48,7 +45,7 @@ test("clipboard provider: rich MIME handling", async (t) => {
             async read() {
               return [
                 {
-                  types: ["text/plain", "text/html", "text/rtf", "image/png"],
+                  types: ["text/plain", "text/html"],
                   /**
                    * @param {string} type
                    */
@@ -58,10 +55,6 @@ test("clipboard provider: rich MIME handling", async (t) => {
                         return new Blob(["hello"], { type });
                       case "text/html":
                         return new Blob(["<b>hi</b>"], { type });
-                      case "text/rtf":
-                        return new Blob(["{\\\\rtf1 hi}"], { type });
-                      case "image/png":
-                        return new Blob([imageBytes], { type });
                       default:
                         throw new Error(`Unexpected clipboard type: ${type}`);
                     }
@@ -69,8 +62,28 @@ test("clipboard provider: rich MIME handling", async (t) => {
                 },
               ];
             },
+          },
+        },
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        const content = await provider.read();
+        assert.deepEqual(content, { text: "hello", html: "<b>hi</b>" });
+      }
+    );
+  });
+
+  await t.test("web: read falls back to readText when rich read throws", async () => {
+    await withGlobals(
+      {
+        __TAURI__: undefined,
+        navigator: {
+          clipboard: {
+            async read() {
+              throw new Error("permission denied");
+            },
             async readText() {
-              return "fallback";
+              return "fallback text";
             },
           },
         },
@@ -78,19 +91,12 @@ test("clipboard provider: rich MIME handling", async (t) => {
       async () => {
         const provider = await createClipboardProvider();
         const content = await provider.read();
-
-        assert.equal(content.text, "hello");
-        assert.equal(content.html, "<b>hi</b>");
-        assert.equal(content.rtf, "{\\\\rtf1 hi}");
-        assert.ok(content.imagePng instanceof Uint8Array);
-        assert.deepEqual(Array.from(content.imagePng), Array.from(imageBytes));
+        assert.deepEqual(content, { text: "fallback text" });
       }
     );
   });
 
-  await t.test("web write uses navigator.clipboard.write with all provided MIME keys", async () => {
-    const imageBytes = Uint8Array.from([5, 6, 7]);
-
+  await t.test("web: write uses navigator.clipboard.write with text/plain + text/html", async () => {
     /** @type {any[]} */
     const writes = [];
     /** @type {string[]} */
@@ -122,12 +128,7 @@ test("clipboard provider: rich MIME handling", async (t) => {
       },
       async () => {
         const provider = await createClipboardProvider();
-        await provider.write({
-          text: "plain",
-          html: "<p>hello</p>",
-          rtf: "{\\\\rtf1 hello}",
-          imagePng: imageBytes,
-        });
+        await provider.write({ text: "plain", html: "<p>hello</p>" });
 
         assert.equal(writes.length, 1);
         assert.equal(writeTextCalls.length, 0);
@@ -137,48 +138,18 @@ test("clipboard provider: rich MIME handling", async (t) => {
         assert.ok(item instanceof MockClipboardItem);
 
         const keys = Object.keys(item.data).sort();
-        assert.deepEqual(keys, ["image/png", "text/html", "text/plain", "text/rtf"].sort());
+        assert.deepEqual(keys, ["text/html", "text/plain"].sort());
 
         assert.equal(item.data["text/plain"].type, "text/plain");
         assert.equal(await item.data["text/plain"].text(), "plain");
 
         assert.equal(item.data["text/html"].type, "text/html");
         assert.equal(await item.data["text/html"].text(), "<p>hello</p>");
-
-        assert.equal(item.data["text/rtf"].type, "text/rtf");
-        assert.equal(await item.data["text/rtf"].text(), "{\\\\rtf1 hello}");
-
-        assert.equal(item.data["image/png"].type, "image/png");
-        const ab = await item.data["image/png"].arrayBuffer();
-        assert.deepEqual(Array.from(new Uint8Array(ab)), Array.from(imageBytes));
       }
     );
   });
 
-  await t.test("web read falls back to readText when rich read throws", async () => {
-    await withGlobals(
-      {
-        __TAURI__: undefined,
-        navigator: {
-          clipboard: {
-            async read() {
-              throw new Error("permission denied");
-            },
-            async readText() {
-              return "fallback text";
-            },
-          },
-        },
-      },
-      async () => {
-        const provider = await createClipboardProvider();
-        const content = await provider.read();
-        assert.deepEqual(content, { text: "fallback text" });
-      }
-    );
-  });
-
-  await t.test("web write falls back to writeText when rich write throws", async () => {
+  await t.test("web: write falls back to writeText when rich write throws", async () => {
     /** @type {string[]} */
     const writeTextCalls = [];
 
@@ -203,13 +174,13 @@ test("clipboard provider: rich MIME handling", async (t) => {
       },
       async () => {
         const provider = await createClipboardProvider();
-        await provider.write({ text: "plain" });
+        await provider.write({ text: "plain", html: "<p>x</p>" });
         assert.deepEqual(writeTextCalls, ["plain"]);
       }
     );
   });
 
-  await t.test("web provider tolerates missing Clipboard APIs", async () => {
+  await t.test("web: provider tolerates missing Clipboard APIs", async () => {
     await withGlobals(
       {
         __TAURI__: undefined,
@@ -226,44 +197,33 @@ test("clipboard provider: rich MIME handling", async (t) => {
     );
   });
 
-  await t.test("tauri provider merges invoke('read_clipboard') results without clobbering web fields", async () => {
+  await t.test("tauri: read prefers core.invoke('clipboard_read')", async () => {
+    /** @type {any[]} */
+    const invokeCalls = [];
+    /** @type {number} */
+    let webReadCalls = 0;
+
     await withGlobals(
       {
         __TAURI__: {
           core: {
-            /**
-             * @param {string} cmd
-             */
             async invoke(cmd) {
-              assert.equal(cmd, "read_clipboard");
-              return {
-                text: "tauri text",
-                html: "tauri html",
-                rtf: "tauri rtf",
-                image_png_base64: "CQgH", // [9, 8, 7]
-              };
+              invokeCalls.push(cmd);
+              assert.equal(cmd, "clipboard_read");
+              return { text: "tauri text", html: "tauri html", rtf: "tauri rtf", pngBase64: "CQgH" };
             },
           },
-          clipboard: {},
+          clipboard: {
+            async readText() {
+              throw new Error("should not read text when clipboard_read succeeds");
+            },
+          },
         },
         navigator: {
           clipboard: {
             async read() {
-              return [
-                {
-                  types: ["text/plain", "text/html"],
-                  async getType(type) {
-                    switch (type) {
-                      case "text/plain":
-                        return new Blob(["web text"], { type });
-                      case "text/html":
-                        return new Blob(["<div>web</div>"], { type });
-                      default:
-                        throw new Error(`Unexpected clipboard type: ${type}`);
-                    }
-                  },
-                },
-              ];
+              webReadCalls += 1;
+              throw new Error("should not call web clipboard when clipboard_read succeeds");
             },
           },
         },
@@ -271,50 +231,65 @@ test("clipboard provider: rich MIME handling", async (t) => {
       async () => {
         const provider = await createClipboardProvider();
         const content = await provider.read();
-
-        // Web clipboard values win.
-        assert.equal(content.text, "web text");
-        assert.equal(content.html, "<div>web</div>");
-
-        // Tauri invoke fills in missing rich formats.
-        assert.equal(content.rtf, "tauri rtf");
-        assert.ok(content.imagePng instanceof Uint8Array);
-        assert.deepEqual(Array.from(content.imagePng), [9, 8, 7]);
+        assert.deepEqual(content, {
+          text: "tauri text",
+          html: "tauri html",
+          rtf: "tauri rtf",
+          pngBase64: "CQgH",
+        });
+        assert.equal(webReadCalls, 0);
+        assert.deepEqual(invokeCalls, ["clipboard_read"]);
       }
     );
   });
 
-  await t.test("tauri provider decodes image base64 without Buffer (atob fallback)", async () => {
+  await t.test("tauri: read falls back to web clipboard before tauri clipboard.readText", async () => {
+    /** @type {number} */
+    let tauriReadTextCalls = 0;
+
     await withGlobals(
       {
-        Buffer: undefined,
-        atob: (base64) => NodeBuffer.from(base64, "base64").toString("binary"),
         __TAURI__: {
           core: {
             async invoke(cmd) {
-              assert.equal(cmd, "read_clipboard");
-              return { image_png_base64: "CQgH" }; // [9, 8, 7]
+              assert.equal(cmd, "clipboard_read");
+              return {};
             },
           },
-          clipboard: {},
+          clipboard: {
+            async readText() {
+              tauriReadTextCalls += 1;
+              return "tauri text";
+            },
+          },
         },
-        navigator: { clipboard: {} },
+        navigator: {
+          clipboard: {
+            async read() {
+              throw new Error("permission denied");
+            },
+            async readText() {
+              return "web text";
+            },
+          },
+        },
       },
       async () => {
         const provider = await createClipboardProvider();
         const content = await provider.read();
-        assert.ok(content.imagePng instanceof Uint8Array);
-        assert.deepEqual(Array.from(content.imagePng), [9, 8, 7]);
+        assert.deepEqual(content, { text: "web text" });
+        assert.equal(tauriReadTextCalls, 0);
       }
     );
   });
 
-  await t.test("tauri provider falls back gracefully when invoke throws", async () => {
+  await t.test("tauri: read falls back to tauri clipboard.readText when web clipboard yields no content", async () => {
     await withGlobals(
       {
         __TAURI__: {
           core: {
-            async invoke() {
+            async invoke(cmd) {
+              assert.equal(cmd, "clipboard_read");
               throw new Error("command not found");
             },
           },
@@ -343,41 +318,7 @@ test("clipboard provider: rich MIME handling", async (t) => {
     );
   });
 
-  await t.test("tauri provider prefers tauri readText over web readText fallback", async () => {
-    /** @type {number} */
-    let webReadTextCalls = 0;
-
-    await withGlobals(
-      {
-        __TAURI__: {
-          clipboard: {
-            async readText() {
-              return "tauri text";
-            },
-          },
-        },
-        navigator: {
-          clipboard: {
-            async read() {
-              throw new Error("permission denied");
-            },
-            async readText() {
-              webReadTextCalls += 1;
-              return "web text";
-            },
-          },
-        },
-      },
-      async () => {
-        const provider = await createClipboardProvider();
-        const content = await provider.read();
-        assert.deepEqual(content, { text: "tauri text" });
-        assert.equal(webReadTextCalls, 0);
-      }
-    );
-  });
-
-  await t.test("tauri provider tolerates missing core.invoke and clipboard APIs", async () => {
+  await t.test("tauri: provider tolerates missing core.invoke and clipboard APIs", async () => {
     await withGlobals(
       {
         __TAURI__: {},
@@ -393,13 +334,20 @@ test("clipboard provider: rich MIME handling", async (t) => {
     );
   });
 
-  await t.test("tauri provider write calls invoke('write_clipboard') for rich payloads", async () => {
-    const imageBytes = Uint8Array.from([9, 8, 7]);
-
+  await t.test("tauri: write invokes core.invoke('clipboard_write') and then attempts ClipboardItem write", async () => {
     /** @type {any[]} */
     const invokeCalls = [];
-    /** @type {string[]} */
-    const writeTextCalls = [];
+    /** @type {any[]} */
+    const writes = [];
+
+    class MockClipboardItem {
+      /**
+       * @param {Record<string, Blob>} data
+       */
+      constructor(data) {
+        this.data = data;
+      }
+    }
 
     await withGlobals(
       {
@@ -410,76 +358,45 @@ test("clipboard provider: rich MIME handling", async (t) => {
             },
           },
           clipboard: {
-            async writeText(text) {
-              writeTextCalls.push(text);
+            async writeText() {
+              throw new Error("should not call legacy writeText when clipboard_write succeeds");
             },
           },
         },
+        ClipboardItem: MockClipboardItem,
         navigator: {
           clipboard: {
-            async write() {
-              throw new Error("web clipboard should not be used when invoke succeeds");
-            },
-            async writeText() {
-              throw new Error("web clipboard should not be used when invoke succeeds");
+            async write(items) {
+              writes.push(items);
             },
           },
         },
       },
       async () => {
         const provider = await createClipboardProvider();
-        await provider.write({
+        await provider.write({ text: "plain", html: "<p>hello</p>", rtf: "{\\\\rtf1 hello}", pngBase64: "CQgH" });
+
+        assert.equal(invokeCalls.length, 1);
+        assert.equal(invokeCalls[0][0], "clipboard_write");
+        assert.deepEqual(invokeCalls[0][1], {
           text: "plain",
           html: "<p>hello</p>",
-          imagePng: imageBytes,
+          rtf: "{\\\\rtf1 hello}",
+          pngBase64: "CQgH",
         });
 
-        assert.deepEqual(writeTextCalls, ["plain"]);
-        assert.equal(invokeCalls.length, 1);
+        assert.equal(writes.length, 1);
+        assert.equal(writes[0].length, 1);
+        const item = writes[0][0];
+        assert.ok(item instanceof MockClipboardItem);
 
-        const [cmd, args] = invokeCalls[0];
-        assert.equal(cmd, "write_clipboard");
-        assert.equal(args.text, "plain");
-        assert.equal(args.html, "<p>hello</p>");
-        assert.equal(args.rtf, undefined);
-        assert.equal(args.image_png_base64, "CQgH");
+        const keys = Object.keys(item.data).sort();
+        assert.deepEqual(keys, ["text/html", "text/plain"].sort());
       }
     );
   });
 
-  await t.test("tauri provider encodes image base64 without Buffer (btoa fallback)", async () => {
-    const imageBytes = Uint8Array.from([9, 8, 7]);
-
-    /** @type {any[]} */
-    const invokeCalls = [];
-
-    await withGlobals(
-      {
-        Buffer: undefined,
-        btoa: (binary) => NodeBuffer.from(binary, "binary").toString("base64"),
-        __TAURI__: {
-          core: {
-            async invoke(cmd, args) {
-              invokeCalls.push([cmd, args]);
-            },
-          },
-          clipboard: {},
-        },
-        navigator: undefined,
-      },
-      async () => {
-        const provider = await createClipboardProvider();
-        await provider.write({ text: "plain", imagePng: imageBytes });
-
-        assert.equal(invokeCalls.length, 1);
-        const [cmd, args] = invokeCalls[0];
-        assert.equal(cmd, "write_clipboard");
-        assert.equal(args.image_png_base64, "CQgH");
-      }
-    );
-  });
-
-  await t.test("tauri provider write falls back when invoke throws", async () => {
+  await t.test("tauri: write falls back to legacy __TAURI__.clipboard.writeText when clipboard_write throws", async () => {
     /** @type {string[]} */
     const writeTextCalls = [];
 
@@ -487,7 +404,8 @@ test("clipboard provider: rich MIME handling", async (t) => {
       {
         __TAURI__: {
           core: {
-            async invoke() {
+            async invoke(cmd) {
+              assert.equal(cmd, "clipboard_write");
               throw new Error("command not found");
             },
           },
@@ -507,3 +425,4 @@ test("clipboard provider: rich MIME handling", async (t) => {
     );
   });
 });
+
