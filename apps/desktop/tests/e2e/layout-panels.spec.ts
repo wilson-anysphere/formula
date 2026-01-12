@@ -143,6 +143,27 @@ test.describe("dockable panels layout persistence", () => {
     await expect(page.getByTestId("panel-branchManager")).toHaveCount(0);
   });
 
+  test("status bar buttons toggle Version History + Branch Manager panels", async ({ page }) => {
+    await gotoDesktop(page);
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await waitForDesktopReady(page);
+
+    const statusbar = page.locator(".statusbar__main");
+
+    await statusbar.getByTestId("open-version-history-panel").click();
+    await expect(page.getByTestId("dock-right").getByTestId("panel-versionHistory")).toBeVisible();
+
+    await statusbar.getByTestId("open-version-history-panel").click();
+    await expect(page.getByTestId("panel-versionHistory")).toHaveCount(0);
+
+    await statusbar.getByTestId("open-branch-manager-panel").click();
+    await expect(page.getByTestId("dock-right").getByTestId("panel-branchManager")).toBeVisible();
+
+    await statusbar.getByTestId("open-branch-manager-panel").click();
+    await expect(page.getByTestId("panel-branchManager")).toHaveCount(0);
+  });
+
   test("Cmd+I toggles AI chat panel open/closed", async ({ page }) => {
     await gotoDesktop(page);
     await page.evaluate(() => localStorage.clear());
