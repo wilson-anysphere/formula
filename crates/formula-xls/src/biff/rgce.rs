@@ -11,6 +11,11 @@
 
 use super::strings;
 
+// BIFF8 supports 65,536 rows (0-based 0..=65,535).
+const BIFF8_MAX_ROW0: i64 = u16::MAX as i64;
+// Columns are stored in a 14-bit field in many BIFF8 structures.
+const BIFF8_MAX_COL0: i64 = 0x3FFF;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ExternSheetRef {
     pub(crate) itab_first: u16,
@@ -537,6 +542,88 @@ pub(crate) fn decode_biff8_rgce(rgce: &[u8], ctx: &RgceDecodeContext<'_>) -> Dec
                 }
                 input = &input[cce..];
             }
+            // PtgRefErr (2D): consume payload and emit `#REF!`.
+            0x2A | 0x4A | 0x6A => {
+                if input.len() < 4 {
+                    warnings.push("unexpected end of rgce stream".to_string());
+                    return unsupported(ptg, warnings);
+                }
+                input = &input[4..];
+                stack.push(ExprFragment::new("#REF!".to_string()));
+            }
+            // PtgAreaErr (2D): consume payload and emit `#REF!`.
+            0x2B | 0x4B | 0x6B => {
+                if input.len() < 8 {
+                    warnings.push("unexpected end of rgce stream".to_string());
+                    return unsupported(ptg, warnings);
+                }
+                input = &input[8..];
+                stack.push(ExprFragment::new("#REF!".to_string()));
+            }
+            // PtgRefN (relative reference): [row_off: i16][col_off: i16]
+            0x2C | 0x4C | 0x6C => {
+                if input.len() < 4 {
+                    warnings.push("unexpected end of rgce stream".to_string());
+                    return unsupported(ptg, warnings);
+                }
+                let row_off = i16::from_le_bytes([input[0], input[1]]) as i64;
+                let col_off = i16::from_le_bytes([input[2], input[3]]) as i64;
+                input = &input[4..];
+
+                // Defined-name formulas do not have a stable origin cell; decode relative refs
+                // best-effort relative to (0,0) / A1.
+                let abs_row0 = row_off;
+                let abs_col0 = col_off;
+                if abs_row0 < 0
+                    || abs_row0 > BIFF8_MAX_ROW0
+                    || abs_col0 < 0
+                    || abs_col0 > BIFF8_MAX_COL0
+                {
+                    stack.push(ExprFragment::new("#REF!".to_string()));
+                } else {
+                    stack.push(ExprFragment::new(format_cell_ref_no_dollars(
+                        abs_row0 as u32,
+                        abs_col0 as u32,
+                    )));
+                }
+            }
+            // PtgAreaN (relative area): [rowFirst_off: i16][rowLast_off: i16][colFirst_off: i16][colLast_off: i16]
+            0x2D | 0x4D | 0x6D => {
+                if input.len() < 8 {
+                    warnings.push("unexpected end of rgce stream".to_string());
+                    return unsupported(ptg, warnings);
+                }
+                let row_first_off = i16::from_le_bytes([input[0], input[1]]) as i64;
+                let row_last_off = i16::from_le_bytes([input[2], input[3]]) as i64;
+                let col_first_off = i16::from_le_bytes([input[4], input[5]]) as i64;
+                let col_last_off = i16::from_le_bytes([input[6], input[7]]) as i64;
+                input = &input[8..];
+
+                let abs_row_first = row_first_off;
+                let abs_row_last = row_last_off;
+                let abs_col_first = col_first_off;
+                let abs_col_last = col_last_off;
+
+                if abs_row_first < 0
+                    || abs_row_first > BIFF8_MAX_ROW0
+                    || abs_row_last < 0
+                    || abs_row_last > BIFF8_MAX_ROW0
+                    || abs_col_first < 0
+                    || abs_col_first > BIFF8_MAX_COL0
+                    || abs_col_last < 0
+                    || abs_col_last > BIFF8_MAX_COL0
+                {
+                    stack.push(ExprFragment::new("#REF!".to_string()));
+                } else {
+                    let start = format_cell_ref_no_dollars(abs_row_first as u32, abs_col_first as u32);
+                    let end = format_cell_ref_no_dollars(abs_row_last as u32, abs_col_last as u32);
+                    if start == end {
+                        stack.push(ExprFragment::new(start));
+                    } else {
+                        stack.push(ExprFragment::new(format!("{start}:{end}")));
+                    }
+                }
+            }
             // PtgRef3d
             0x3A | 0x5A | 0x7A => {
                 if input.len() < 6 {
@@ -627,6 +714,13 @@ fn format_cell_ref(row: u16, col_with_flags: u16) -> String {
     out
 }
 
+fn format_cell_ref_no_dollars(row0: u32, col0: u32) -> String {
+    let mut out = String::new();
+    push_column(col0, &mut out);
+    out.push_str(&(row0.saturating_add(1)).to_string());
+    out
+}
+
 fn format_area_ref(row1: u16, col1: u16, row2: u16, col2: u16) -> String {
     let start = format_cell_ref(row1, col1);
     let end = format_cell_ref(row2, col2);
@@ -708,3 +802,159 @@ fn push_column(col: u32, out: &mut String) {
     out.push_str(&String::from_utf8(buf).expect("A1 column bytes"));
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use formula_engine::{parse_formula, ParseOptions};
+
+    fn assert_parseable(expr: &str) {
+        parse_formula(&format!("={expr}"), ParseOptions::default()).expect("parse formula");
+    }
+
+    fn empty_ctx<'a>(
+        sheet_names: &'a [String],
+        externsheet: &'a [ExternSheetRef],
+        defined_names: &'a [DefinedNameMeta],
+    ) -> RgceDecodeContext<'a> {
+        RgceDecodeContext {
+            codepage: 1252,
+            sheet_names,
+            externsheet,
+            defined_names,
+        }
+    }
+
+    #[test]
+    fn decodes_ptg_refn_to_a1() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // row_off=0 col_off=0 => A1 (base A1).
+        let rgce = [0x2C, 0x00, 0x00, 0x00, 0x00];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "A1");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_ptg_refn_value_class_variant() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // row_off=1 col_off=1 => B2.
+        let rgce = [0x4C, 0x01, 0x00, 0x01, 0x00];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "B2");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_ptg_refn_oob_to_ref() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // row_off=-1 => out-of-bounds.
+        let rgce = [0x2C, 0xFF, 0xFF, 0x00, 0x00];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "#REF!");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_ptg_refn_col_oob_to_ref() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // col_off=20000 -> out of Excel column bounds (16,384 cols).
+        let col_off: i16 = 20_000;
+        let [c0, c1] = col_off.to_le_bytes();
+        let rgce = [0x2C, 0x00, 0x00, c0, c1];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "#REF!");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_ptg_arean_to_range() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // A1:B2.
+        let rgce = [
+            0x2D, // PtgAreaN
+            0x00, 0x00, // rowFirst_off = 0
+            0x01, 0x00, // rowLast_off = 1
+            0x00, 0x00, // colFirst_off = 0
+            0x01, 0x00, // colLast_off = 1
+        ];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "A1:B2");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_ptg_arean_array_class_variant() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // C3:D4.
+        let rgce = [
+            0x6D, // PtgAreaNA
+            0x02, 0x00, // rowFirst_off = 2
+            0x03, 0x00, // rowLast_off = 3
+            0x02, 0x00, // colFirst_off = 2
+            0x03, 0x00, // colLast_off = 3
+        ];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "C3:D4");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_ptg_referr_to_ref() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // Dummy payload (4 bytes).
+        let rgce = [0x2A, 0x00, 0x00, 0x00, 0x00];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "#REF!");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_ptg_areaerr_to_ref() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // Dummy payload (8 bytes).
+        let rgce = [0x2B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "#REF!");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
+    }
+}
