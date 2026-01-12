@@ -1570,7 +1570,8 @@ pub fn verify_vba_project_signature_binding(
     let mut any_signed_digest = None::<VbaProjectDigestDebugInfo>;
     // First comparison attempt (may be ambiguous/unknown).
     let mut first_any_comparison = None::<VbaProjectDigestDebugInfo>;
-    // First *definite* mismatch (stream kind is known and we could compute the expected digest).
+    // First *definite* mismatch (we could compute the relevant digest candidate(s) and none
+    // matched).
     let mut first_definite_mismatch = None::<VbaProjectDigestDebugInfo>;
 
     // Lazily computed MS-OVBA v1/v2 digests for the project bytes.
