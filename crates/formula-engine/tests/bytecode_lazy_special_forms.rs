@@ -209,6 +209,55 @@ fn bytecode_eval_ast_choose_nan_index_is_value_error_and_does_not_evaluate_choic
 }
 
 #[test]
+fn bytecode_choose_in_scalar_context_returns_scalar_value() {
+    // Regression test: when CHOOSE is used in a scalar-function context (like ABS), it must not
+    // return a reference value for a selected cell reference argument, otherwise scalar bytecode
+    // functions will treat it as a spill attempt.
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=ABS(CHOOSE(1, A2, 2))", origin).expect("parse");
+    let program = bytecode::Compiler::compile(Arc::from("choose_scalar_context"), &expr);
+
+    #[derive(Clone, Copy)]
+    struct ValueGrid {
+        coord: CellCoord,
+        value: f64,
+    }
+
+    impl bytecode::Grid for ValueGrid {
+        fn get_value(&self, coord: CellCoord) -> Value {
+            if coord == self.coord {
+                return Value::Number(self.value);
+            }
+            Value::Empty
+        }
+
+        fn column_slice(&self, _col: i32, _row_start: i32, _row_end: i32) -> Option<&[f64]> {
+            None
+        }
+
+        fn bounds(&self) -> (i32, i32) {
+            (10, 10)
+        }
+    }
+
+    let grid = ValueGrid {
+        // A2 relative to origin (A1) => (row=1, col=0)
+        coord: CellCoord::new(1, 0),
+        value: -5.0,
+    };
+
+    let mut vm = bytecode::Vm::with_capacity(32);
+    let value = vm.eval(
+        &program,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Number(5.0));
+}
+
+#[test]
 fn bytecode_ifs_is_lazy() {
     // IFS(TRUE, 7, <unused_cond>, 8) must not evaluate the second condition/value pair.
     let origin = CellCoord::new(0, 0);
