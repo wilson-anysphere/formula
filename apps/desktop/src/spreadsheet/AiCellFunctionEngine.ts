@@ -158,6 +158,8 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
       args: params.args,
       provenance: params.argProvenance,
       defaultSheetId,
+      documentId: this.workbookId,
+      functionName: fn,
     });
 
     // AI prompts are authored directly in formulas, so we can safely inspect a bit more text
@@ -525,7 +527,14 @@ function rangeRefFromArray(value: CellValue): string | null {
   return typeof ref === "string" && ref.trim() ? ref.trim() : null;
 }
 
-function inferProvenanceFromValue(value: CellValue): AiFunctionArgumentProvenance {
+function inferProvenanceFromValue(params: {
+  value: CellValue;
+  documentId: string;
+  defaultSheetId: string;
+  functionName: string;
+  argIndex: number;
+}): AiFunctionArgumentProvenance {
+  const value = params.value;
   const cells = new Set<string>();
   const ranges = new Set<string>();
 
@@ -548,10 +557,29 @@ function inferProvenanceFromValue(value: CellValue): AiFunctionArgumentProvenanc
   }
 
   if (Array.isArray(value)) {
-    for (const entry of value as any[]) {
-      if (!isProvenanceCellValue(entry)) continue;
+    const arr = value as any[];
+    const total = arr.length;
+
+    // Avoid scanning arbitrarily large arrays. For arrays without a `__rangeRef`, we
+    // sample the same preview + sample indices we include in the prompt compaction
+    // so DLP policy decisions cover exactly the values we might send to the model.
+    const seedHex = hashText(`${params.documentId}:${params.defaultSheetId}:${params.functionName}:${params.argIndex}:array`);
+    const rand = mulberry32(Number.parseInt(seedHex, 16) >>> 0);
+    const previewCount = Math.min(MAX_RANGE_PREVIEW_VALUES, total);
+    const previewIndices = new Set<number>();
+    for (let i = 0; i < previewCount; i += 1) previewIndices.add(i);
+    const availableForSample = Math.max(0, total - previewCount);
+    const sampleCount = Math.min(MAX_RANGE_SAMPLE_VALUES, availableForSample);
+    const sampleIndices = pickSampleIndices({ total, count: sampleCount, rand, exclude: previewIndices });
+
+    const visit = (index: number): void => {
+      const entry = arr[index];
+      if (!isProvenanceCellValue(entry)) return;
       for (const ref of String(entry.__cellRef).split(PROVENANCE_REF_SEPARATOR)) addRef(ref);
-    }
+    };
+
+    for (let i = 0; i < previewCount; i += 1) visit(i);
+    for (const idx of sampleIndices) visit(idx);
   }
 
   return { cells: Array.from(cells), ranges: Array.from(ranges) };
@@ -578,11 +606,22 @@ function alignArgProvenance(params: {
   args: CellValue[];
   provenance: AiFunctionArgumentProvenance[] | undefined;
   defaultSheetId: string;
+  documentId: string;
+  functionName: string;
 }): AiFunctionArgumentProvenance[] {
   const out: AiFunctionArgumentProvenance[] = [];
   for (let i = 0; i < params.args.length; i += 1) {
     const fromCaller = normalizeProvenance(params.provenance?.[i], params.defaultSheetId);
-    const fromValue = normalizeProvenance(inferProvenanceFromValue(params.args[i]!), params.defaultSheetId);
+    const fromValue = normalizeProvenance(
+      inferProvenanceFromValue({
+        value: params.args[i]!,
+        documentId: params.documentId,
+        defaultSheetId: params.defaultSheetId,
+        functionName: params.functionName,
+        argIndex: i,
+      }),
+      params.defaultSheetId,
+    );
     out.push(mergeProvenance(fromCaller, fromValue));
   }
   return out;
@@ -869,11 +908,29 @@ function compactArrayForPrompt(params: {
   classificationRecords: Array<{ selector: any; classification: any }>;
   maxCellChars: number;
 }): { value: unknown; compaction: unknown; redactedCount: number } {
-  const values: SpreadsheetValue[] = params.entries.map((entry) => (isProvenanceCellValue(entry) ? entry.value : (entry as SpreadsheetValue)));
-  const cellRefs: Array<string | null> = params.entries.map((entry) => (isProvenanceCellValue(entry) ? String(entry.__cellRef) : null));
-  const hasPerCellRefs = cellRefs.some((r) => Boolean(r && r.trim()));
+  const providedCount = params.entries.length;
 
-  const providedCount = values.length;
+  // Avoid materializing copies of large arrays; we only access the handful of indices
+  // that we include in the prompt compaction.
+  const getEntryAt = (index: number): SpreadsheetValue | ProvenanceCellValue | null => {
+    if (index < 0 || index >= providedCount) return null;
+    return (params.entries[index] ?? null) as any;
+  };
+
+  const getCellRefAt = (index: number): string | null => {
+    const entry = getEntryAt(index);
+    if (!entry || !isProvenanceCellValue(entry)) return null;
+    const ref = String(entry.__cellRef ?? "").trim();
+    return ref ? ref : null;
+  };
+
+  const hasPerCellRefs = (() => {
+    const scanCount = Math.min(providedCount, 5);
+    for (let i = 0; i < scanCount; i += 1) {
+      if (getCellRefAt(i)) return true;
+    }
+    return false;
+  })();
 
   const rangeCandidate = params.provenance.ranges?.length === 1 ? params.provenance.ranges[0]! : params.rangeRef;
   const parsedRange = rangeCandidate ? parseProvenanceRef(rangeCandidate, params.defaultSheetId) : null;
@@ -981,8 +1038,9 @@ function compactArrayForPrompt(params: {
   };
 
   const formatAt = (index: number): string => {
-    const raw = values[index] ?? null;
-    const cellRef = cellRefs[index];
+    const entry = getEntryAt(index);
+    const raw = entry && isProvenanceCellValue(entry) ? entry.value : (entry as SpreadsheetValue);
+    const cellRef = entry && isProvenanceCellValue(entry) ? String(entry.__cellRef ?? "").trim() : null;
 
     if (params.shouldRedact) {
       if (shouldRedactAll) {
@@ -1166,8 +1224,35 @@ function firstErrorCodeInValue(value: CellValue): string | null {
     return isErrorCode(value.value) ? value.value : null;
   }
   if (Array.isArray(value)) {
-    for (const entry of value) {
-      const err = firstErrorCodeInValue(entry as any);
+    const arr = value as any[];
+    const total = arr.length;
+    const max = Math.min(total, DEFAULT_RANGE_SAMPLE_LIMIT);
+    if (total <= max) {
+      for (let i = 0; i < total; i += 1) {
+        const err = firstErrorCodeInValue(arr[i] as any);
+        if (err) return err;
+      }
+      return null;
+    }
+
+    // For very large arrays, scan a small deterministic prefix plus a seeded sample
+    // from the remainder. This avoids O(N) scans on huge arrays.
+    const prefixCount = Math.min(max, 50);
+    for (let i = 0; i < prefixCount; i += 1) {
+      const err = firstErrorCodeInValue(arr[i] as any);
+      if (err) return err;
+    }
+
+    const remaining = max - prefixCount;
+    if (remaining <= 0) return null;
+
+    const exclude = new Set<number>();
+    for (let i = 0; i < prefixCount; i += 1) exclude.add(i);
+    const seedHex = hashText(`errors:${total}:${max}`);
+    const rand = mulberry32(Number.parseInt(seedHex, 16) >>> 0);
+    const sample = pickSampleIndices({ total, count: remaining, rand, exclude });
+    for (const idx of sample) {
+      const err = firstErrorCodeInValue(arr[idx] as any);
       if (err) return err;
     }
   }

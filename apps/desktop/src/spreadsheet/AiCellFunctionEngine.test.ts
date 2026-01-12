@@ -521,6 +521,48 @@ describe("AiCellFunctionEngine", () => {
     expect(userMessage).not.toContain("secret payload");
   });
 
+  it("does not iterate over full array inputs when compacting large AI arguments", async () => {
+    const workbookId = "budget-large-array";
+    const llmClient = {
+      chat: vi.fn(async () => ({
+        message: { role: "assistant", content: "ok" },
+        usage: { promptTokens: 1, completionTokens: 1 },
+      })),
+    };
+
+    const engine = new AiCellFunctionEngine({
+      llmClient: llmClient as any,
+      auditStore: new MemoryAIAuditStore(),
+      workbookId,
+    });
+
+    const length = 100_000;
+    let indexReads = 0;
+    const backing: any[] = [];
+    const large = new Proxy(backing, {
+      get(_target, prop) {
+        if (prop === "length") return length;
+        if (typeof prop === "string" && /^\d+$/.test(prop)) {
+          indexReads += 1;
+          const idx = Number(prop);
+          return `V${idx}`;
+        }
+        return undefined;
+      },
+    });
+
+    const pending = engine.evaluateAiFunction({
+      name: "AI",
+      args: ["summarize", large as any],
+      cellAddress: "Sheet1!B1",
+    });
+    expect(pending).toBe(AI_CELL_PLACEHOLDER);
+    await engine.waitForIdle();
+
+    // We should only touch the handful of indices used for preview + sampling, not 100k.
+    expect(indexReads).toBeLessThan(500);
+  });
+
   it("propagates spreadsheet error codes from referenced cells", () => {
     const llmClient = { chat: vi.fn() };
     const engine = new AiCellFunctionEngine({
