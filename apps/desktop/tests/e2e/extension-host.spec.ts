@@ -595,4 +595,86 @@ test.describe("BrowserExtensionHost", () => {
     expect(result.wsResult.status).toBe("closed");
     expect(String(result.wsResult.reason ?? "")).toContain("Permission denied");
   });
+
+  test("desktop host forwards selectionChanged events to extensions", async ({ page }) => {
+    await gotoDesktop(page);
+
+    const result = await page.evaluate(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const app: any = (window as any).__formulaApp;
+      if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const host: any = (window as any).__formulaExtensionHost;
+      if (!host) throw new Error("Missing window.__formulaExtensionHost (desktop runtime)");
+
+      const commandId = "selectionEvents.getCount";
+      const extensionId = "formula-test.selection-events";
+
+      const manifest = {
+        name: "selection-events",
+        version: "1.0.0",
+        publisher: "formula-test",
+        main: "./dist/extension.mjs",
+        engines: { formula: "^1.0.0" },
+        activationEvents: [`onCommand:${commandId}`],
+        contributes: { commands: [{ command: commandId, title: "Read selection event count" }] },
+        permissions: ["ui.commands"],
+      };
+
+      const code = `
+        const formula = globalThis[Symbol.for("formula.extensionApi.api")];
+        if (!formula) throw new Error("Missing formula extension API runtime");
+        let count = 0;
+
+        export async function activate(context) {
+          context.subscriptions.push(formula.events.onSelectionChanged(() => { count += 1; }));
+          context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
+            commandId,
+          )}, () => count));
+        }
+
+        export default { activate };
+      `;
+
+      const blob = new Blob([code], { type: "text/javascript" });
+      const mainUrl = URL.createObjectURL(blob);
+
+      try {
+        await host.loadExtension({
+          extensionId,
+          extensionPath: "memory://selection-events/",
+          manifest,
+          mainUrl,
+        });
+
+        // Activate the extension (onCommand) and get the initial count.
+        const initialCount = await host.executeCommand(commandId);
+
+        // Change selection in the grid.
+        const sheetId = app.getCurrentSheetId();
+        app.selectRange({ sheetId, range: { startRow: 0, startCol: 0, endRow: 1, endCol: 1 } });
+
+        // Wait for the event to propagate through the host/worker bridge.
+        let updatedCount = initialCount;
+        for (let attempt = 0; attempt < 40; attempt += 1) {
+          // eslint-disable-next-line no-await-in-loop
+          await new Promise((resolve) => setTimeout(resolve, 25));
+          // eslint-disable-next-line no-await-in-loop
+          updatedCount = await host.executeCommand(commandId);
+          if (updatedCount > initialCount) break;
+        }
+
+        return { initialCount, updatedCount };
+      } finally {
+        try {
+          await host.unloadExtension(extensionId);
+        } catch {
+          // ignore
+        }
+        URL.revokeObjectURL(mainUrl);
+      }
+    });
+
+    expect(result.updatedCount).toBeGreaterThan(result.initialCount);
+  });
 });

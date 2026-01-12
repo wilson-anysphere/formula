@@ -274,6 +274,21 @@ try {
 // Exposed to Playwright tests via `window.__formulaExtensionHostManager`.
 let extensionHostManagerForE2e: DesktopExtensionHostManager | null = null;
 
+type SheetActivatedEvent = { sheet: { id: string; name: string } };
+const sheetActivatedListeners = new Set<(event: SheetActivatedEvent) => void>();
+
+function emitSheetActivated(sheetId: string): void {
+  const id = String(sheetId ?? "").trim();
+  if (!id) return;
+  const event: SheetActivatedEvent = { sheet: { id, name: workbookSheetStore.getName(id) ?? id } };
+  for (const listener of [...sheetActivatedListeners]) {
+    try {
+      listener(event);
+    } catch {
+      // ignore listener errors
+    }
+  }
+}
 // Seed contributed panels early so layout persistence doesn't drop their ids before the
 // extension host finishes loading installed extensions.
 const contributedPanelsSeedStorage = getDefaultSeedStoreStorage();
@@ -1017,8 +1032,11 @@ function syncSheetUi(): void {
 
 const originalActivateSheet = app.activateSheet.bind(app);
 app.activateSheet = (sheetId: string): void => {
+  const prevSheet = app.getCurrentSheetId();
   originalActivateSheet(sheetId);
   syncSheetUi();
+  const nextSheet = app.getCurrentSheetId();
+  if (nextSheet !== prevSheet) emitSheetActivated(nextSheet);
 };
 
 const originalActivateCell = app.activateCell.bind(app);
@@ -1026,7 +1044,11 @@ app.activateCell = (...args: Parameters<SpreadsheetApp["activateCell"]>): void =
   const target = args[0];
   const prevSheet = app.getCurrentSheetId();
   originalActivateCell(...args);
-  if (target.sheetId && target.sheetId !== prevSheet) syncSheetUi();
+  const nextSheet = app.getCurrentSheetId();
+  if (nextSheet !== prevSheet) {
+    syncSheetUi();
+    emitSheetActivated(nextSheet);
+  }
 };
 
 const originalSelectRange = app.selectRange.bind(app);
@@ -1034,7 +1056,11 @@ app.selectRange = (...args: Parameters<SpreadsheetApp["selectRange"]>): void => 
   const target = args[0];
   const prevSheet = app.getCurrentSheetId();
   originalSelectRange(...args);
-  if (target.sheetId && target.sheetId !== prevSheet) syncSheetUi();
+  const nextSheet = app.getCurrentSheetId();
+  if (nextSheet !== prevSheet) {
+    syncSheetUi();
+    emitSheetActivated(nextSheet);
+  }
 };
 
 // Keep the canvas renderer in sync with programmatic document mutations (e.g. AI tools)
@@ -1611,6 +1637,82 @@ if (
       }
 
       app.getDocument().setCellInputs(inputs, { label: "Extension setRange" });
+    },
+    onSelectionChanged(callback: (e: { selection: any }) => void) {
+      let disposed = false;
+      let initialized = false;
+      let lastKey = "";
+      const unsubscribe = app.subscribeSelection((selection: SelectionState) => {
+        if (disposed) return;
+        const sheetId = app.getCurrentSheetId();
+        const range = selection?.ranges?.[0] ?? { startRow: 0, startCol: 0, endRow: 0, endCol: 0 };
+        const startRow = Math.min(range.startRow, range.endRow);
+        const endRow = Math.max(range.startRow, range.endRow);
+        const startCol = Math.min(range.startCol, range.endCol);
+        const endCol = Math.max(range.startCol, range.endCol);
+        const key = `${sheetId}:${startRow},${startCol}:${endRow},${endCol}`;
+        if (!initialized) {
+          initialized = true;
+          lastKey = key;
+          return;
+        }
+        if (key === lastKey) return;
+        lastKey = key;
+
+        const values: Array<Array<string | number | boolean | null>> = [];
+        for (let r = startRow; r <= endRow; r++) {
+          const row: Array<string | number | boolean | null> = [];
+          for (let c = startCol; c <= endCol; c++) {
+            const cell = app.getDocument().getCell(sheetId, { row: r, col: c }) as any;
+            row.push(normalizeExtensionCellValue(cell?.value ?? null));
+          }
+          values.push(row);
+        }
+
+        try {
+          callback({ selection: { startRow, startCol, endRow, endCol, values } });
+        } catch {
+          // ignore
+        }
+      });
+
+      return {
+        dispose() {
+          if (disposed) return;
+          disposed = true;
+          unsubscribe();
+        },
+      };
+    },
+    onCellChanged(callback: (e: { row: number; col: number; value: any }) => void) {
+      const unsubscribe = app.getDocument().on("change", ({ deltas }) => {
+        const sheetId = app.getCurrentSheetId();
+        if (!Array.isArray(deltas) || deltas.length === 0) return;
+        for (const delta of deltas as any[]) {
+          if (!delta || typeof delta !== "object") continue;
+          if (delta.sheetId !== sheetId) continue;
+          const row = delta.row;
+          const col = delta.col;
+          if (!Number.isInteger(row) || row < 0) continue;
+          if (!Number.isInteger(col) || col < 0) continue;
+          const beforeFormula = delta.before?.formula ?? null;
+          const afterFormula = delta.after?.formula ?? null;
+          const beforeValue = delta.before?.value ?? null;
+          const afterValue = delta.after?.value ?? null;
+          if (beforeFormula === afterFormula && beforeValue === afterValue) continue;
+          const value = normalizeExtensionCellValue(afterValue);
+          try {
+            callback({ row, col, value });
+          } catch {
+            // ignore
+          }
+        }
+      });
+      return { dispose: unsubscribe };
+    },
+    onSheetActivated(callback: (e: SheetActivatedEvent) => void) {
+      sheetActivatedListeners.add(callback);
+      return { dispose: () => sheetActivatedListeners.delete(callback) };
     },
   };
 
@@ -4560,6 +4662,11 @@ async function openWorkbookFromPath(path: string): Promise<void> {
 
     activeWorkbook = await tauriBackend.openWorkbook(path);
     await loadWorkbookIntoDocument(activeWorkbook);
+    try {
+      extensionHostManagerForE2e?.host.openWorkbook(activeWorkbook.path ?? activeWorkbook.origin_path ?? path);
+    } catch {
+      // Ignore extension host errors; workbook open should still succeed.
+    }
     activePanelWorkbookId = activeWorkbook.path ?? activeWorkbook.origin_path ?? path;
     startPowerQueryService();
     rerenderLayout?.();
@@ -4640,6 +4747,11 @@ async function handleSave(): Promise<void> {
     return;
   }
 
+  try {
+    extensionHostManagerForE2e?.host.saveWorkbook();
+  } catch {
+    // Ignore extension host errors; save should still succeed.
+  }
   await workbookSync.markSaved();
 }
 
@@ -4673,6 +4785,11 @@ async function handleSaveAsPath(
   // Ensure any pending microtask-batched workbook edits are flushed before saving.
   await new Promise<void>((resolve) => queueMicrotask(resolve));
   await drainBackendSync();
+  try {
+    extensionHostManagerForE2e?.host.saveWorkbookAs(path);
+  } catch {
+    // Ignore extension host errors; save should still succeed.
+  }
   if (queuedInvoke) {
     await queuedInvoke("save_workbook", { path });
   } else {
@@ -4720,6 +4837,11 @@ async function handleNewWorkbook(): Promise<void> {
 
     activeWorkbook = await tauriBackend.newWorkbook();
     await loadWorkbookIntoDocument(activeWorkbook);
+    try {
+      extensionHostManagerForE2e?.host.openWorkbook(activeWorkbook.path ?? activeWorkbook.origin_path);
+    } catch {
+      // Ignore extension host errors; new workbook should still succeed.
+    }
     activePanelWorkbookId = nextPanelWorkbookId;
     startPowerQueryService();
     rerenderLayout?.();
@@ -5235,6 +5357,8 @@ try {
 (window as any).__formulaApp = app;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (window as any).__formulaExtensionHostManager = extensionHostManagerForE2e;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(window as any).__formulaExtensionHost = extensionHostManagerForE2e?.host ?? null;
 
 // Time-to-interactive instrumentation (best-effort, no-op for web builds).
 void markStartupTimeToInteractive({ whenIdle: () => app.whenIdle() }).catch(() => {});
