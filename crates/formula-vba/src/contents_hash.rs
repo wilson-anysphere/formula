@@ -109,7 +109,99 @@ pub fn project_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
         }
     }
 
+    // MS-OVBA ProjectNormalizedData also incorporates specific data from the `PROJECT` stream and
+    // (when present) the designer storage bytes referenced by `BaseClass=`. These are subtle to get
+    // right because MS-OVBA defines `NWLN` as CRLF *or* LFCR.
+    //
+    // Keep this best-effort: if the project stream or designer storages are missing, we still
+    // return the dir-record-derived prefix above (useful for unit tests and partial inputs).
+    if let Some(project_stream_bytes) = ole.read_stream_opt("PROJECT")? {
+        out.extend_from_slice(&host_extender_info_normalized_bytes(&project_stream_bytes));
+    }
+
+    if let Ok(forms) = forms_normalized_data(vba_project_bin) {
+        out.extend_from_slice(&forms);
+    }
+
     Ok(out)
+}
+
+fn host_extender_info_normalized_bytes(project_stream_bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+
+    let mut in_section = false;
+    for raw_line in split_nwln_lines(project_stream_bytes) {
+        let line = trim_ascii_whitespace(raw_line);
+
+        if line == b"[Host Extender Info]" {
+            in_section = true;
+            out.extend_from_slice(b"Host Extender Info");
+            continue;
+        }
+
+        if in_section {
+            // Any new section header ends the `[Host Extender Info]` section.
+            if line.starts_with(b"[") && line.ends_with(b"]") {
+                break;
+            }
+
+            if line.starts_with(b"HostExtenderRef=") {
+                // MS-OVBA pseudocode appends HostExtenderRef "without NWLN". Be robust even if
+                // newline bytes slip through by stripping both CR and LF explicitly.
+                out.extend(line.iter().copied().filter(|&b| b != b'\r' && b != b'\n'));
+            }
+        }
+    }
+
+    out
+}
+
+fn split_nwln_lines(bytes: &[u8]) -> Vec<&[u8]> {
+    // MS-OVBA `NWLN` is either CRLF or LFCR. Some producers also emit lone CR or lone LF.
+    let mut lines = Vec::new();
+    let mut start = 0usize;
+    let mut i = 0usize;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\r' => {
+                lines.push(&bytes[start..i]);
+                if i + 1 < bytes.len() && bytes[i + 1] == b'\n' {
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+                start = i;
+            }
+            b'\n' => {
+                lines.push(&bytes[start..i]);
+                if i + 1 < bytes.len() && bytes[i + 1] == b'\r' {
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+                start = i;
+            }
+            _ => i += 1,
+        }
+    }
+
+    if start < bytes.len() {
+        lines.push(&bytes[start..]);
+    }
+
+    lines
+}
+
+fn trim_ascii_whitespace(bytes: &[u8]) -> &[u8] {
+    let mut start = 0usize;
+    let mut end = bytes.len();
+    while start < end && bytes[start].is_ascii_whitespace() {
+        start += 1;
+    }
+    while end > start && bytes[end - 1].is_ascii_whitespace() {
+        end -= 1;
+    }
+    &bytes[start..end]
 }
 
 /// Build the MS-OVBA "ContentNormalizedData" byte sequence for a VBA project.

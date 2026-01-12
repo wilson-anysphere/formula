@@ -276,3 +276,111 @@ fn project_normalized_data_v3_is_sensitive_to_module_record_group_order() {
     );
 }
 
+#[test]
+fn project_normalized_data_handles_lfcr_nwln_and_strips_host_extender_ref_newlines() {
+    // Regression test:
+    // - MS-OVBA defines `NWLN` as CRLF *or* LFCR (not only CRLF).
+    // - `String::lines()` does not treat LFCR as a single newline and can leave a leading `\r`
+    //   on the next line, breaking section parsing and hashing.
+    //
+    // Construct a PROJECT stream using LFCR for the key lines we care about, and include both LFCR
+    // and CRLF variants in HostExtenderRef lines so we assert both are stripped.
+    let project_stream_bytes = concat!(
+        "BaseClass=UserForm1\n\r",
+        "Name=\"VBAProject\"\n\r",
+        "[Host Extender Info]\n\r",
+        "HostExtenderRef=RefLFCR-0123456789\n\r",
+        "HostExtenderRef=RefCRLF-ABCDEFGHIJ\r\n",
+        "[Workspace]\n\r",
+    )
+    .as_bytes();
+
+    let designer_bytes = b"DESIGNER-STORAGE-BYTES";
+
+    // Minimal decompressed `VBA/dir` describing a single UserForm module so FormsNormalizedData can
+    // resolve the `BaseClass=` identifier to a designer storage name.
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        // PROJECTCODEPAGE (optional, but makes the encoding choice explicit).
+        push_record(&mut out, 0x0003, &1252u16.to_le_bytes());
+
+        // Module group: UserForm1
+        push_record(&mut out, 0x0019, b"UserForm1"); // MODULENAME
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"UserForm1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name); // MODULESTREAMNAME (+ reserved u16)
+        push_record(&mut out, 0x0021, &0x0003u16.to_le_bytes()); // MODULETYPE (UserForm)
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create compound file");
+
+    ole.create_storage("VBA").expect("create VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(project_stream_bytes)
+            .expect("write PROJECT bytes");
+    }
+
+    ole.create_storage("UserForm1")
+        .expect("create designer storage");
+    {
+        let mut s = ole
+            .create_stream("UserForm1/Payload")
+            .expect("create designer stream");
+        s.write_all(designer_bytes)
+            .expect("write designer stream bytes");
+    }
+
+    let vba_project_bin = ole.into_inner().into_inner();
+    let normalized =
+        project_normalized_data(&vba_project_bin).expect("compute ProjectNormalizedData");
+
+    // Ensure LFCR line endings do not prevent `[Host Extender Info]` section detection.
+    assert!(
+        find_subslice(&normalized, b"Host Extender Info").is_some(),
+        "expected ProjectNormalizedData to include `Host Extender Info` section marker"
+    );
+
+    // Ensure HostExtenderRef values are present...
+    assert!(
+        find_subslice(&normalized, b"RefLFCR-0123456789").is_some(),
+        "expected ProjectNormalizedData to include HostExtenderRef value (LFCR)"
+    );
+    assert!(
+        find_subslice(&normalized, b"RefCRLF-ABCDEFGHIJ").is_some(),
+        "expected ProjectNormalizedData to include HostExtenderRef value (CRLF)"
+    );
+
+    // ...but with all newline forms removed (both LFCR and CRLF).
+    assert!(
+        find_subslice(&normalized, b"RefLFCR-0123456789\n\r").is_none(),
+        "expected HostExtenderRef (LFCR) to have NWLN removed"
+    );
+    assert!(
+        find_subslice(&normalized, b"RefLFCR-0123456789\r\n").is_none(),
+        "expected HostExtenderRef (LFCR) to have NWLN removed"
+    );
+    assert!(
+        find_subslice(&normalized, b"RefCRLF-ABCDEFGHIJ\r\n").is_none(),
+        "expected HostExtenderRef (CRLF) to have NWLN removed"
+    );
+    assert!(
+        find_subslice(&normalized, b"RefCRLF-ABCDEFGHIJ\n\r").is_none(),
+        "expected HostExtenderRef (CRLF) to have NWLN removed"
+    );
+
+    // Ensure designer storage bytes referenced by `BaseClass=` are included.
+    assert!(
+        find_subslice(&normalized, designer_bytes).is_some(),
+        "expected ProjectNormalizedData to include designer storage stream bytes for BaseClass"
+    );
+}
