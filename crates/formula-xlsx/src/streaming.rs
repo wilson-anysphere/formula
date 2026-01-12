@@ -323,6 +323,31 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_part_overrides<
     patches: &WorkbookCellPatches,
     part_overrides: &HashMap<String, PartOverride>,
 ) -> Result<(), StreamingPatchError> {
+    patch_xlsx_streaming_workbook_cell_patches_with_part_overrides_and_recalc_policy(
+        input,
+        output,
+        patches,
+        part_overrides,
+        RecalcPolicy::default(),
+    )
+}
+
+/// Apply [`WorkbookCellPatches`] using the streaming ZIP rewriter, plus arbitrary part overrides,
+/// with a configurable [`RecalcPolicy`].
+///
+/// `policy_on_formula_change` is applied **only** when the patch set changes formulas (including
+/// removing formulas). When no formulas change, [`RecalcPolicy::PRESERVE`] is used regardless of
+/// the provided policy.
+pub fn patch_xlsx_streaming_workbook_cell_patches_with_part_overrides_and_recalc_policy<
+    R: Read + Seek,
+    W: Write + Seek,
+>(
+    input: R,
+    output: W,
+    patches: &WorkbookCellPatches,
+    part_overrides: &HashMap<String, PartOverride>,
+    policy_on_formula_change: RecalcPolicy,
+) -> Result<(), StreamingPatchError> {
     if patches.is_empty() {
         let mut archive = ZipArchive::new(input)?;
         patch_xlsx_streaming_with_archive(
@@ -403,7 +428,7 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_part_overrides<
         formula_changed = streaming_patches_remove_existing_formulas(&mut archive, &patches_by_part)?;
     }
     let recalc_policy = if formula_changed {
-        RecalcPolicy::default()
+        policy_on_formula_change
     } else {
         RecalcPolicy::PRESERVE
     };

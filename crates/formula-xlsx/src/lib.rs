@@ -105,6 +105,7 @@ pub use streaming::{
     patch_xlsx_streaming, patch_xlsx_streaming_with_recalc_policy,
     patch_xlsx_streaming_workbook_cell_patches,
     patch_xlsx_streaming_workbook_cell_patches_with_part_overrides, PartOverride,
+    patch_xlsx_streaming_workbook_cell_patches_with_part_overrides_and_recalc_policy,
     patch_xlsx_streaming_workbook_cell_patches_with_recalc_policy,
     patch_xlsx_streaming_workbook_cell_patches_with_styles,
     patch_xlsx_streaming_workbook_cell_patches_with_styles_and_recalc_policy, StreamingPatchError,
