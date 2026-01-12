@@ -98,17 +98,19 @@ impl ClipboardWritePayload {
         }
 
         if let Some(html) = self.html.as_deref() {
-            if html.as_bytes().len() > max_rich_text_bytes {
+            let len = html.as_bytes().len();
+            if len > max_rich_text_bytes {
                 return Err(ClipboardError::InvalidPayload(format!(
-                    "html exceeds maximum size ({max_rich_text_bytes} bytes)"
+                    "html exceeds maximum size ({len} > {max_rich_text_bytes} bytes)"
                 )));
             }
         }
 
         if let Some(rtf) = self.rtf.as_deref() {
-            if rtf.as_bytes().len() > max_rich_text_bytes {
+            let len = rtf.as_bytes().len();
+            if len > max_rich_text_bytes {
                 return Err(ClipboardError::InvalidPayload(format!(
-                    "rtf exceeds maximum size ({max_rich_text_bytes} bytes)"
+                    "rtf exceeds maximum size ({len} > {max_rich_text_bytes} bytes)"
                 )));
             }
         }
@@ -118,7 +120,7 @@ impl ClipboardWritePayload {
                 let decoded_len = estimate_base64_decoded_len(png_base64).unwrap_or(usize::MAX);
                 if decoded_len > max_image_bytes {
                     return Err(ClipboardError::InvalidPayload(format!(
-                        "pngBase64 exceeds maximum size ({max_image_bytes} bytes)"
+                        "pngBase64 exceeds maximum size ({decoded_len} > {max_image_bytes} bytes)"
                     )));
                 }
             }
