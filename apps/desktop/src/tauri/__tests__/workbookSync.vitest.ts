@@ -109,8 +109,9 @@ describe("workbookSync", () => {
 
     invoke.mockClear();
 
-    // Deleting Sheet2 emits per-cell deltas for the removed sheet. Those should be skipped by
-    // the workbook sync bridge because the desktop shell persists deletions via `delete_sheet`.
+    // Deleting Sheet2 emits per-cell deltas for the removed sheet. Those must be skipped by
+    // the workbook sync bridge because we persist deletions via the dedicated `delete_sheet`
+    // command (mirroring sparse clears is expensive and can race with deletion).
     document.deleteSheet("Sheet2");
     await flushMicrotasks();
 
