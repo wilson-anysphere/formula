@@ -79,13 +79,14 @@ fn build_minimal_vba_project_bin_v3_with_signature_streams(
     let userform_container = compress_container(userform_source);
 
     // Minimal `dir` stream (decompressed form) with:
-    // - a v3-specific reference record,
+    // - a v3-specific reference record group,
     // - one standard module, and
     // - one UserForm module so FormsNormalizedData is non-empty.
     let dir_decompressed = {
         let mut out = Vec::new();
 
-        // Include a v3-specific reference record type so the transcript depends on it.
+        // Reference record group: REFERENCENAME + REFERENCECONTROL.
+        push_record(&mut out, 0x0016, b"RefCtrl");
         let libid_twiddled = b"REFCTRL-V3";
         let reserved1: u32 = 0;
         let reserved2: u16 = 0;
@@ -95,6 +96,10 @@ fn build_minimal_vba_project_bin_v3_with_signature_streams(
         reference_control.extend_from_slice(&reserved1.to_le_bytes());
         reference_control.extend_from_slice(&reserved2.to_le_bytes());
         push_record(&mut out, 0x002F, &reference_control);
+
+        // PROJECTMODULES (count = 2) and PROJECTCOOKIE.
+        push_record(&mut out, 0x000F, &2u16.to_le_bytes());
+        push_record(&mut out, 0x0013, &0xFFFFu16.to_le_bytes());
 
         // MODULENAME (standard module)
         push_record(&mut out, 0x0019, b"Module1");
@@ -107,6 +112,10 @@ fn build_minimal_vba_project_bin_v3_with_signature_streams(
         push_record(&mut out, 0x0021, &0u16.to_le_bytes());
         // MODULETEXTOFFSET
         push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+        // MODULEREADONLY / MODULEPRIVATE / MODULE terminator
+        push_record(&mut out, 0x0025, b"");
+        push_record(&mut out, 0x0028, b"");
+        push_record(&mut out, 0x002B, b"");
 
         // MODULENAME (UserForm/designer module referenced from PROJECT by BaseClass=)
         push_record(&mut out, 0x0019, b"UserForm1");
@@ -119,6 +128,12 @@ fn build_minimal_vba_project_bin_v3_with_signature_streams(
         push_record(&mut out, 0x0021, &0x0003u16.to_le_bytes());
         // MODULETEXTOFFSET
         push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+        push_record(&mut out, 0x0025, b"");
+        push_record(&mut out, 0x0028, b"");
+        push_record(&mut out, 0x002B, b"");
+
+        // dir terminator
+        push_record(&mut out, 0x0010, b"");
 
         out
     };

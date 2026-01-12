@@ -4,8 +4,7 @@ use std::io::{Cursor, Write};
 
 use formula_vba::{
     agile_content_hash_md5, compress_container, compute_vba_project_digest_v3, content_hash_md5,
-    verify_vba_digital_signature,
-    verify_vba_digital_signature_bound, verify_vba_project_signature_binding,
+    verify_vba_digital_signature, verify_vba_digital_signature_bound, verify_vba_project_signature_binding,
     verify_vba_signature_binding, verify_vba_signature_binding_with_stream_path, DigestAlg,
     VbaProjectBindingVerification, VbaSignatureBinding, VbaSignatureStreamKind,
     VbaSignatureVerification,
@@ -23,9 +22,9 @@ fn build_minimal_vba_project_bin_v3(
     signature_blob: Option<&[u8]>,
     designer_payload: &[u8],
 ) -> Vec<u8> {
-    let module_source = b"Sub Hello()\r\nEnd Sub\r\n";
+    let module_source = b"Sub Hello()\r\nEnd Sub";
     let module_container = compress_container(module_source);
-    let userform_source = b"Sub FormHello()\r\nEnd Sub\r\n";
+    let userform_source = b"Sub FormHello()\r\nEnd Sub";
     let userform_container = compress_container(userform_source);
 
     // Minimal `dir` stream (decompressed form) with:
@@ -33,16 +32,10 @@ fn build_minimal_vba_project_bin_v3(
     // - one UserForm module so FormsNormalizedData is non-empty.
     let dir_decompressed = {
         let mut out = Vec::new();
-        // Include a v3-specific reference record type so the transcript depends on it.
-        let libid_twiddled = b"REFCTRL-V3";
-        let reserved1: u32 = 0;
-        let reserved2: u16 = 0;
-        let mut reference_control = Vec::new();
-        reference_control.extend_from_slice(&(libid_twiddled.len() as u32).to_le_bytes());
-        reference_control.extend_from_slice(libid_twiddled);
-        reference_control.extend_from_slice(&reserved1.to_le_bytes());
-        reference_control.extend_from_slice(&reserved2.to_le_bytes());
-        push_record(&mut out, 0x002F, &reference_control);
+
+        // PROJECTMODULES (count = 2) and PROJECTCOOKIE (arbitrary).
+        push_record(&mut out, 0x000F, &2u16.to_le_bytes());
+        push_record(&mut out, 0x0013, &0xFFFFu16.to_le_bytes());
 
         // MODULENAME (standard module)
         push_record(&mut out, 0x0019, b"Module1");
@@ -55,6 +48,10 @@ fn build_minimal_vba_project_bin_v3(
         push_record(&mut out, 0x0021, &0u16.to_le_bytes());
         // MODULETEXTOFFSET
         push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+        // MODULEREADONLY / MODULEPRIVATE / MODULE terminator
+        push_record(&mut out, 0x0025, b"");
+        push_record(&mut out, 0x0028, b"");
+        push_record(&mut out, 0x002B, b"");
 
         // MODULENAME (UserForm/designer module referenced from PROJECT by BaseClass=)
         push_record(&mut out, 0x0019, b"UserForm1");
@@ -67,6 +64,12 @@ fn build_minimal_vba_project_bin_v3(
         push_record(&mut out, 0x0021, &0x0003u16.to_le_bytes());
         // MODULETEXTOFFSET
         push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+        push_record(&mut out, 0x0025, b"");
+        push_record(&mut out, 0x0028, b"");
+        push_record(&mut out, 0x002B, b"");
+
+        // dir terminator
+        push_record(&mut out, 0x0010, b"");
         out
     };
     let dir_container = compress_container(&dir_decompressed);
@@ -329,9 +332,7 @@ fn digital_signature_ext_uses_v3_project_digest_for_binding() {
         sig.stream_path
     );
 
-    // `formula-xlsx` prefixes OLE stream paths with the source part name
-    // (`xl/vbaProjectSignature.bin:<ole-path>`). Ensure stream-kind detection remains robust when
-    // callers pass such a prefixed path to the binding helper.
+    // `formula-xlsx` prefixes OLE stream paths with the source part name.
     let prefixed_path = format!("xl/vbaProjectSignature.bin:{}", sig.stream_path);
     let binding = verify_vba_signature_binding_with_stream_path(
         &signed,
@@ -344,8 +345,8 @@ fn digital_signature_ext_uses_v3_project_digest_for_binding() {
         "expected binding to remain Bound for prefixed stream path {prefixed_path}"
     );
 
-    // If callers don't know the original OLE stream name, we still try to infer v3 binding via the
-    // digest length (v3 signatures are typically non-16-byte digests).
+    // If callers don't know the original OLE stream name, we fall back to trying all digest
+    // variants; for a non-16-byte digest this should still bind via v3.
     let binding2 = verify_vba_signature_binding(&signed, &signature_stream);
     assert_eq!(binding2, VbaSignatureBinding::Bound);
 
@@ -475,6 +476,11 @@ fn verify_vba_project_signature_binding_supports_v3_signature_part_md5_digest() 
         }
         other => panic!("expected BoundVerified, got {other:?}"),
     }
+
+    // Also ensure binding works when callers provide only the raw signature payload bytes (no OLE
+    // stream name). This exercises the "try all candidate digests" logic for 16-byte digests.
+    let binding2 = verify_vba_signature_binding(&project_ole, &signature_stream_payload);
+    assert_eq!(binding2, VbaSignatureBinding::Bound);
 }
 
 #[test]
