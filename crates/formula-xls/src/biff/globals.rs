@@ -196,7 +196,7 @@ pub(crate) fn parse_biff_workbook_globals(
         // BOF indicates the start of a new substream; the workbook globals contain
         // a single BOF at offset 0, so a second BOF means we're past the globals
         // section (even if the EOF record is missing).
-        if record.offset != 0 && (record_id == 0x0809 || record_id == 0x0009) {
+        if record.offset != 0 && records::is_bof_record(record_id) {
             saw_eof = true;
             break;
         }
@@ -501,6 +501,35 @@ mod tests {
         assert_eq!(
             globals.resolve_number_format_code(0).as_deref(),
             Some("m/d/yyyy")
+        );
+    }
+
+    #[test]
+    fn globals_scan_stops_on_malformed_record_and_warns() {
+        let r_bof_globals = record(0x0809, &[0u8; 16]);
+        let r_1904 = record(0x0022, &[1, 0]);
+
+        // Truncated record: declares 4 bytes but only provides 2.
+        let mut truncated = Vec::new();
+        truncated.extend_from_slice(&0x1234u16.to_le_bytes());
+        truncated.extend_from_slice(&4u16.to_le_bytes());
+        truncated.extend_from_slice(&[1, 2]);
+
+        let stream = [r_bof_globals, r_1904, truncated].concat();
+        let globals = parse_biff_workbook_globals(&stream, BiffVersion::Biff8).expect("parse");
+        assert_eq!(globals.date_system, DateSystem::Excel1904);
+        assert!(
+            globals
+                .warnings
+                .iter()
+                .any(|w| w.contains("malformed BIFF record")),
+            "expected malformed-record warning, got {:?}",
+            globals.warnings
+        );
+        assert!(
+            globals.warnings.iter().any(|w| w.contains("missing EOF")),
+            "expected missing-EOF warning, got {:?}",
+            globals.warnings
         );
     }
 

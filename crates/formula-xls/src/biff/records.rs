@@ -9,13 +9,11 @@ pub(crate) fn is_bof_record(record_id: u16) -> bool {
 
 /// Read a single physical BIFF record at `offset`.
 pub(crate) fn read_biff_record(workbook_stream: &[u8], offset: usize) -> Option<(u16, &[u8])> {
-    let header = workbook_stream.get(offset..offset + 4)?;
-    let record_id = u16::from_le_bytes([header[0], header[1]]);
-    let len = u16::from_le_bytes([header[2], header[3]]) as usize;
-    let data_start = offset + 4;
-    let data_end = data_start.checked_add(len)?;
-    let data = workbook_stream.get(data_start..data_end)?;
-    Some((record_id, data))
+    let mut iter = BiffRecordIter::from_offset(workbook_stream, offset).ok()?;
+    match iter.next()? {
+        Ok(record) => Some((record.record_id, record.data)),
+        Err(_) => None,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
