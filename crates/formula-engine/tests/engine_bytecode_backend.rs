@@ -2594,6 +2594,44 @@ fn bytecode_backend_propagates_error_literals_through_and_or() {
 }
 
 #[test]
+fn bytecode_backend_propagates_error_literals_through_xor() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=XOR(TRUE, #DIV/0!)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=XOR(FALSE, #DIV/0!)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A3", "=XOR(#DIV/0!)")
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(
+        stats.fallback,
+        0,
+        "expected all XOR formulas to compile to bytecode (report={:?})",
+        engine.bytecode_compile_report(100)
+    );
+    assert_eq!(stats.total_formula_cells, 3);
+    assert_eq!(stats.compiled, 3);
+
+    engine.recalculate_single_threaded();
+
+    for (formula, cell) in [
+        ("=XOR(TRUE, #DIV/0!)", "A1"),
+        ("=XOR(FALSE, #DIV/0!)", "A2"),
+        ("=XOR(#DIV/0!)", "A3"),
+    ] {
+        assert_eq!(
+            engine.get_cell_value("Sheet1", cell),
+            Value::Error(ErrorKind::Div0)
+        );
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_information_functions_scalar() {
     let mut engine = Engine::new();
 
