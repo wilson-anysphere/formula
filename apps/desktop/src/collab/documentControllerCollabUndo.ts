@@ -118,6 +118,33 @@ export async function bindDocumentControllerWithCollabUndo(options: {
     };
     provider.on("sync", onSync);
     if ((provider as any).synced) onSync(true);
+
+    // If the comments root already exists before the provider reports `sync=true`
+    // (e.g. offline persistence hydration, or an early local comment), attempt to
+    // add it to scope immediately so comment edits are undoable without waiting
+    // for provider sync.
+    try {
+      if (session.doc.share.get("comments")) ensureCommentsUndoScope();
+    } catch {
+      // Best-effort.
+    }
+
+    // Offline persistence can hydrate the Y.Doc before provider sync. Ensure we
+    // add comments to the undo scope as soon as offline hydration completes.
+    if (typeof (session as any).offline?.whenLoaded === "function") {
+      void (session as any).offline
+        .whenLoaded()
+        .then(() => {
+          try {
+            if (session.doc.share.get("comments")) ensureCommentsUndoScope();
+          } catch {
+            // Best-effort.
+          }
+        })
+        .catch(() => {
+          // ignore
+        });
+    }
   } else {
     ensureCommentsUndoScope();
   }
