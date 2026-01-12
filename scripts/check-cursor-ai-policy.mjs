@@ -860,43 +860,51 @@ export async function checkCursorAiPolicy(options = {}) {
       }
     }
   } else {
-    const dirsToScan = [];
-    for (const dir of includedDirs) {
-      const abs = path.join(rootDir, dir);
-      try {
-        // Use lstat() so we detect symlinked root dirs (e.g. `packages` -> external path).
-        const st = await lstat(abs);
-        if (st.isSymbolicLink()) {
-          record({
-            file: relativeToRoot(abs, rootDir),
-            ruleId: "symlink",
-            message: "Forbidden: symlinked files/directories are not allowed (can bypass Cursor-only AI policy scans).",
-          });
-          continue;
+    if (!restrictToIncludedDirs) {
+      // In non-git environments (tarballs, vendored snapshots), scan the entire
+      // directory tree by default (excluding docs/instructions/mockups + generated
+      // dirs). This matches the git-tracked behavior where we scan all tracked
+      // files by default, and prevents bypasses via new top-level directories.
+      await walkDir(rootDir, rootDir, scanFile);
+    } else {
+      const dirsToScan = [];
+      for (const dir of includedDirs) {
+        const abs = path.join(rootDir, dir);
+        try {
+          // Use lstat() so we detect symlinked root dirs (e.g. `packages` -> external path).
+          const st = await lstat(abs);
+          if (st.isSymbolicLink()) {
+            record({
+              file: relativeToRoot(abs, rootDir),
+              ruleId: "symlink",
+              message: "Forbidden: symlinked files/directories are not allowed (can bypass Cursor-only AI policy scans).",
+            });
+            continue;
+          }
+          if (st.isDirectory()) dirsToScan.push(abs);
+        } catch {
+          // ignore missing
         }
-        if (st.isDirectory()) dirsToScan.push(abs);
-      } catch {
-        // ignore missing
       }
-    }
 
-    for (const dir of dirsToScan) {
-      await walkDir(dir, rootDir, scanFile);
-      if (violations.length >= maxViolations) break;
-    }
+      for (const dir of dirsToScan) {
+        await walkDir(dir, rootDir, scanFile);
+        if (violations.length >= maxViolations) break;
+      }
 
-    // Also scan root-level config files (package.json, Cargo.toml, etc). Those can
-    // reintroduce forbidden dependencies without touching the main code trees.
-    if (violations.length < maxViolations) {
-      try {
-        const rootEntries = await readdir(rootDir, { withFileTypes: true });
-        for (const entry of rootEntries) {
-          if (violations.length >= maxViolations) break;
-          if (!(entry.isFile() || entry.isSymbolicLink())) continue;
-          await scanFile(path.join(rootDir, entry.name));
+      // Also scan root-level config files (package.json, Cargo.toml, etc). Those can
+      // reintroduce forbidden dependencies without touching the main code trees.
+      if (violations.length < maxViolations) {
+        try {
+          const rootEntries = await readdir(rootDir, { withFileTypes: true });
+          for (const entry of rootEntries) {
+            if (violations.length >= maxViolations) break;
+            if (!(entry.isFile() || entry.isSymbolicLink())) continue;
+            await scanFile(path.join(rootDir, entry.name));
+          }
+        } catch {
+          // ignore
         }
-      } catch {
-        // ignore
       }
     }
   }

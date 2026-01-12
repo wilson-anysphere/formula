@@ -117,6 +117,19 @@ test("cursor AI policy guard scans .env* files for provider strings", async () =
   }
 });
 
+test("cursor AI policy guard scans all files in non-git mode (even outside the default scan roots)", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-nogit-extra-dir-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, "extra/notes.js", 'const provider = "OpenAI";\n');
+
+    const result = await runPolicyApi(tmpRoot, { maxViolations: 1 });
+    assert.equal(result.ok, false);
+    assert.match(formatViolations(result.violations), /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test(
   "cursor AI policy guard ignores untracked .env* files when scanning a git repo (tracked-files mode)",
   { skip: !HAS_GIT },
