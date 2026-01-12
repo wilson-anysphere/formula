@@ -1576,7 +1576,12 @@ def generate_cases() -> dict[str, Any]:
     _add_case(cases, prefix="syd", tags=["financial", "SYD"], formula="=SYD(30, 0, 3, 1)")
     _add_case(cases, prefix="ddb", tags=["financial", "DDB"], formula="=DDB(1000, 100, 5, 1)")
     _add_case(cases, prefix="db", tags=["financial", "DB"], formula="=DB(10000, 1000, 5, 1)")
+    _add_case(cases, prefix="db", tags=["financial", "DB"], formula="=DB(10000, 1000, 5, 1, 7)")
+    _add_case(cases, prefix="db", tags=["financial", "DB"], formula="=DB(10000, 1000, 5, 6, 7)")
     _add_case(cases, prefix="vdb", tags=["financial", "VDB"], formula="=VDB(2400, 300, 10, 0, 1)")
+    _add_case(cases, prefix="vdb", tags=["financial", "VDB"], formula="=VDB(2400, 300, 10, 0, 0.5)")
+    _add_case(cases, prefix="vdb", tags=["financial", "VDB"], formula="=VDB(2400, 0, 10, 6, 10, 2, FALSE)")
+    _add_case(cases, prefix="vdb", tags=["financial", "VDB"], formula="=VDB(2400, 0, 10, 6, 10, 2, TRUE)")
 
     # Discount securities / T-bills.
     _add_case(

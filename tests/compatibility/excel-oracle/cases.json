@@ -29198,6 +29198,26 @@
       "id": "db_e269ef6b98fa"
     },
     {
+      "formula": "=DB(10000, 1000, 5, 1, 7)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "DB"
+      ],
+      "id": "db_37445de5d8b8"
+    },
+    {
+      "formula": "=DB(10000, 1000, 5, 6, 7)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "DB"
+      ],
+      "id": "db_1c7ed794ced5"
+    },
+    {
       "formula": "=VDB(2400, 300, 10, 0, 1)",
       "outputCell": "C1",
       "inputs": [],
@@ -29206,6 +29226,36 @@
         "VDB"
       ],
       "id": "vdb_fc81ac00a5c2"
+    },
+    {
+      "formula": "=VDB(2400, 300, 10, 0, 0.5)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "VDB"
+      ],
+      "id": "vdb_7345f637d9dc"
+    },
+    {
+      "formula": "=VDB(2400, 0, 10, 6, 10, 2, FALSE)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "VDB"
+      ],
+      "id": "vdb_28b4339c9bcb"
+    },
+    {
+      "formula": "=VDB(2400, 0, 10, 6, 10, 2, TRUE)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "VDB"
+      ],
+      "id": "vdb_4d50a1c722d7"
     },
     {
       "formula": "=DISC(DATE(2020,1,1),DATE(2021,1,1),97,100)",
