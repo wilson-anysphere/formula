@@ -2730,6 +2730,115 @@ export class DocumentController {
       }
     };
 
+    const styledCellsByRow = sheet.styledCellsByRow;
+    const styledCellsByCol = sheet.styledCellsByCol;
+    const hasAxisIndex =
+      styledCellsByRow && typeof styledCellsByRow.get === "function" && styledCellsByCol && typeof styledCellsByCol.get === "function";
+
+    const forEachStyledCellInColRange = (startCol, endCol, visitor) => {
+      if (!hasAxisIndex) {
+        forEachStyledCell((key, cell) => {
+          const { col } = parseRowColKey(key);
+          if (col < startCol || col > endCol) return;
+          visitor(key, cell);
+        });
+        return;
+      }
+
+      for (let col = startCol; col <= endCol; col++) {
+        const rows = styledCellsByCol.get(col);
+        if (!rows || rows.size === 0) continue;
+        for (const row of rows) {
+          const key = `${row},${col}`;
+          const cell = sheet.cells.get(key);
+          if (!cell || cell.styleId === 0) continue;
+          visitor(key, cell);
+        }
+      }
+    };
+
+    const forEachStyledCellInRowRange = (startRow, endRow, visitor) => {
+      if (!hasAxisIndex) {
+        forEachStyledCell((key, cell) => {
+          const { row } = parseRowColKey(key);
+          if (row < startRow || row > endRow) return;
+          visitor(key, cell);
+        });
+        return;
+      }
+
+      const rowLen = endRow - startRow + 1;
+      if (rowLen <= maxEnumeratedRows) {
+        for (let row = startRow; row <= endRow; row++) {
+          const cols = styledCellsByRow.get(row);
+          if (!cols || cols.size === 0) continue;
+          for (const col of cols) {
+            const key = `${row},${col}`;
+            const cell = sheet.cells.get(key);
+            if (!cell || cell.styleId === 0) continue;
+            visitor(key, cell);
+          }
+        }
+        return;
+      }
+
+      // Avoid enumerating huge row ranges; scan only rows that actually contain styled cells.
+      for (const [row, cols] of styledCellsByRow.entries()) {
+        if (row < startRow || row > endRow) continue;
+        for (const col of cols) {
+          const key = `${row},${col}`;
+          const cell = sheet.cells.get(key);
+          if (!cell || cell.styleId === 0) continue;
+          visitor(key, cell);
+        }
+      }
+    };
+
+    const forEachStyledCellInRect = (startRow, endRow, startCol, endCol, visitor) => {
+      if (!hasAxisIndex) {
+        forEachStyledCell((key, cell) => {
+          const { row, col } = parseRowColKey(key);
+          if (row < startRow || row > endRow) return;
+          if (col < startCol || col > endCol) return;
+          visitor(key, cell);
+        });
+        return;
+      }
+
+      const rowCount = endRow - startRow + 1;
+      const colCount = endCol - startCol + 1;
+      const canEnumerateRows = rowCount <= maxEnumeratedRows;
+
+      if (canEnumerateRows && rowCount <= colCount) {
+        for (let row = startRow; row <= endRow; row++) {
+          const cols = styledCellsByRow.get(row);
+          if (!cols || cols.size === 0) continue;
+          for (const col of cols) {
+            if (col < startCol || col > endCol) continue;
+            const key = `${row},${col}`;
+            const cell = sheet.cells.get(key);
+            if (!cell || cell.styleId === 0) continue;
+            visitor(key, cell);
+          }
+        }
+        return;
+      }
+
+      // Column iteration is bounded by Excel's maximum column count (16,384), and avoids
+      // enumerating huge row ranges.
+      for (let col = startCol; col <= endCol; col++) {
+        const rows = styledCellsByCol.get(col);
+        if (!rows || rows.size === 0) continue;
+        for (const row of rows) {
+          if (row < startRow || row > endRow) continue;
+          const key = `${row},${col}`;
+          const cell = sheet.cells.get(key);
+          if (!cell || cell.styleId === 0) continue;
+          visitor(key, cell);
+        }
+      }
+    };
+
     if (isFullSheet) {
       if (this.canEditCell && !this.canEditCell({ sheetId, row: 0, col: 0 })) return false;
 
@@ -2791,9 +2900,8 @@ export class DocumentController {
       }
 
       // Ensure the patch overrides explicit cell formatting (sparse overrides only).
-      forEachStyledCell((key) => {
+      forEachStyledCellInColRange(r.start.col, r.end.col, (key) => {
         const { row, col } = parseRowColKey(key);
-        if (col < r.start.col || col > r.end.col) return;
         const before = this.model.getCell(sheetId, row, col);
         const cellAfterStyleId = patchStyleId(before.styleId);
         const after = { value: before.value, formula: before.formula, styleId: cellAfterStyleId };
@@ -2841,9 +2949,8 @@ export class DocumentController {
       }
 
       // Ensure the patch overrides explicit cell formatting (sparse overrides only).
-      forEachStyledCell((key) => {
+      forEachStyledCellInRowRange(r.start.row, r.end.row, (key) => {
         const { row, col } = parseRowColKey(key);
-        if (row < r.start.row || row > r.end.row) return;
         const before = this.model.getCell(sheetId, row, col);
         const cellAfterStyleId = patchStyleId(before.styleId);
         const after = { value: before.value, formula: before.formula, styleId: cellAfterStyleId };
@@ -2896,11 +3003,9 @@ export class DocumentController {
 
       // Ensure patches apply to cells that already have explicit per-cell styles inside the
       // rectangle (cell formatting is higher precedence than range runs).
-      forEachStyledCell((key, cell) => {
+      forEachStyledCellInRect(r.start.row, r.end.row, r.start.col, r.end.col, (key, cell) => {
         if (!cell || !cell.styleId || cell.styleId === 0) return;
         const { row, col } = parseRowColKey(key);
-        if (row < r.start.row || row > r.end.row) return;
-        if (col < r.start.col || col > r.end.col) return;
         const before = this.model.getCell(sheetId, row, col);
         const cellAfterStyleId = patchStyleId(before.styleId);
         const after = { value: before.value, formula: before.formula, styleId: cellAfterStyleId };
