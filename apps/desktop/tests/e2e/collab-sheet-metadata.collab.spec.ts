@@ -115,6 +115,29 @@ test.describe("collaboration: sheet metadata", () => {
         timeout: 30_000,
       });
 
+      // 2.5) Set Sheet1 tab color via Yjs metadata (remote-driven tab color).
+      await pageA.evaluate(() => {
+        const app = (window as any).__formulaApp;
+        const session = app?.getCollabSession?.() ?? null;
+        if (!session) throw new Error("Missing collab session");
+
+        session.transactLocal(() => {
+          for (let i = 0; i < session.sheets.length; i += 1) {
+            const entry: any = session.sheets.get(i);
+            const id = String(entry?.get?.("id") ?? entry?.id ?? "").trim();
+            if (id !== "Sheet1") continue;
+            if (typeof entry?.set !== "function") throw new Error("Sheet entry is not a Y.Map");
+            entry.set("tabColor", "FFFF0000");
+            return;
+          }
+          throw new Error("Sheet1 not found in session.sheets");
+        });
+      });
+
+      await expect(pageB.getByTestId("sheet-tab-Sheet1")).toHaveAttribute("data-tab-color", "#ff0000", {
+        timeout: 30_000,
+      });
+
       // 3) Reorder Sheet2 before Sheet1 in Yjs (remote-driven reorder).
       await pageA.evaluate(() => {
         const app = (window as any).__formulaApp;
@@ -165,6 +188,51 @@ test.describe("collaboration: sheet metadata", () => {
           ),
         )
         .toEqual(["Sheet2", "Sheet1"]);
+
+      // 3.5) Mark Sheet2 as "veryHidden" and ensure it is not shown in the tab UI.
+      await pageA.evaluate(() => {
+        const app = (window as any).__formulaApp;
+        const session = app?.getCollabSession?.() ?? null;
+        if (!session) throw new Error("Missing collab session");
+
+        session.transactLocal(() => {
+          for (let i = 0; i < session.sheets.length; i += 1) {
+            const entry: any = session.sheets.get(i);
+            const id = String(entry?.get?.("id") ?? entry?.id ?? "").trim();
+            if (id !== "Sheet2") continue;
+            if (typeof entry?.set !== "function") throw new Error("Sheet entry is not a Y.Map");
+            entry.set("visibility", "veryHidden");
+            return;
+          }
+          throw new Error("Sheet2 not found in session.sheets");
+        });
+      });
+
+      await expect(pageB.locator('[data-testid="sheet-tab-Sheet2"]')).toHaveCount(0, { timeout: 30_000 });
+
+      // 3.6) Restore Sheet2 to visible and ensure it reappears.
+      await pageA.evaluate(() => {
+        const app = (window as any).__formulaApp;
+        const session = app?.getCollabSession?.() ?? null;
+        if (!session) throw new Error("Missing collab session");
+
+        session.transactLocal(() => {
+          for (let i = 0; i < session.sheets.length; i += 1) {
+            const entry: any = session.sheets.get(i);
+            const id = String(entry?.get?.("id") ?? entry?.id ?? "").trim();
+            if (id !== "Sheet2") continue;
+            if (typeof entry?.set !== "function") throw new Error("Sheet entry is not a Y.Map");
+            entry.set("visibility", "visible");
+            return;
+          }
+          throw new Error("Sheet2 not found in session.sheets");
+        });
+      });
+
+      await expect(pageB.getByTestId("sheet-tab-Sheet2")).toBeVisible({ timeout: 30_000 });
+      await expect(pageB.getByTestId("sheet-tab-Sheet1")).toHaveAttribute("data-tab-color", "#ff0000", {
+        timeout: 30_000,
+      });
 
       // 4) Remove the currently active sheet (Sheet1) and ensure the UI auto-switches.
       await expect
