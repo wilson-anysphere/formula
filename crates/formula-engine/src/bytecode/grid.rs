@@ -4,6 +4,16 @@ use ahash::AHashMap;
 pub trait Grid: Sync {
     fn get_value(&self, coord: CellCoord) -> Value;
 
+    /// Get a value from a specific sheet.
+    ///
+    /// Bytecode formulas that don't use explicit sheet-qualified references can ignore the sheet
+    /// id. Multi-sheet backends (like the engine) should override this to support 3D references.
+    #[inline]
+    fn get_value_on_sheet(&self, sheet: usize, coord: CellCoord) -> Value {
+        let _ = sheet;
+        self.get_value(coord)
+    }
+
     #[inline]
     fn get_number(&self, coord: CellCoord) -> Option<f64> {
         match self.get_value(coord) {
@@ -22,7 +32,12 @@ pub trait Grid: Sync {
     /// incorrect comparison ordering (e.g. for approximate matches). Implementations that allow
     /// non-numeric values in `column_slice` should override this to apply stricter validation.
     #[inline]
-    fn column_slice_strict_numeric(&self, col: i32, row_start: i32, row_end: i32) -> Option<&[f64]> {
+    fn column_slice_strict_numeric(
+        &self,
+        col: i32,
+        row_start: i32,
+        row_end: i32,
+    ) -> Option<&[f64]> {
         self.column_slice(col, row_start, row_end)
     }
 
@@ -39,11 +54,36 @@ pub trait Grid: Sync {
         None
     }
 
+    /// Sheet-aware variant of [`Grid::column_slice`].
+    #[inline]
+    fn column_slice_on_sheet(
+        &self,
+        sheet: usize,
+        col: i32,
+        row_start: i32,
+        row_end: i32,
+    ) -> Option<&[f64]> {
+        let _ = sheet;
+        self.column_slice(col, row_start, row_end)
+    }
     fn bounds(&self) -> (i32, i32);
+
+    /// Sheet-aware variant of [`Grid::bounds`].
+    #[inline]
+    fn bounds_on_sheet(&self, sheet: usize) -> (i32, i32) {
+        let _ = sheet;
+        self.bounds()
+    }
 
     #[inline]
     fn in_bounds(&self, coord: CellCoord) -> bool {
         let (rows, cols) = self.bounds();
+        coord.row >= 0 && coord.col >= 0 && coord.row < rows && coord.col < cols
+    }
+
+    #[inline]
+    fn in_bounds_on_sheet(&self, sheet: usize, coord: CellCoord) -> bool {
+        let (rows, cols) = self.bounds_on_sheet(sheet);
         coord.row >= 0 && coord.col >= 0 && coord.row < rows && coord.col < cols
     }
 }

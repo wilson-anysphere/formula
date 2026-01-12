@@ -1,6 +1,6 @@
 use super::ast::{BinaryOp, Expr, Function, UnaryOp};
 use super::program::{ConstValue, Instruction, OpCode, Program};
-use super::value::{ErrorKind, RangeRef, Value};
+use super::value::{ErrorKind, RangeRef, SheetRangeRef, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -76,6 +76,13 @@ impl<'a> CompileCtx<'a> {
                 self.program
                     .instrs
                     .push(Instruction::new(OpCode::LoadRange, idx, 0));
+            }
+            Expr::MultiRangeRef(r) => {
+                let idx = self.program.multi_range_refs.len() as u32;
+                self.program.multi_range_refs.push(r.clone());
+                self.program
+                    .instrs
+                    .push(Instruction::new(OpCode::LoadMultiRange, idx, 0));
             }
             Expr::NameRef(name) => {
                 if let Some(idx) = self.resolve_local(name) {
@@ -349,6 +356,16 @@ fn expr_to_key(expr: &Expr, out: &mut String) {
                 ref_to_key(r.end, out);
                 out.push(')');
             }
+            Value::MultiRange(r) => {
+                out.push_str("MRANGE(");
+                out.push_str(&r.areas.len().to_string());
+                out.push(':');
+                for area in r.areas.iter() {
+                    sheet_range_to_key(*area, out);
+                    out.push(',');
+                }
+                out.push(')');
+            }
             Value::Array(a) => {
                 out.push_str("ARR(");
                 out.push_str(&a.rows.to_string());
@@ -377,6 +394,16 @@ fn expr_to_key(expr: &Expr, out: &mut String) {
         Expr::NameRef(name) => {
             out.push_str("NAME(");
             out.push_str(name);
+            out.push(')');
+        }
+        Expr::MultiRangeRef(r) => {
+            out.push_str("MRANGE(");
+            out.push_str(&r.areas.len().to_string());
+            out.push(':');
+            for area in r.areas.iter() {
+                sheet_range_to_key(*area, out);
+                out.push(',');
+            }
             out.push(')');
         }
         Expr::Unary { op, expr } => {
@@ -431,4 +458,13 @@ fn ref_to_key(r: super::value::Ref, out: &mut String) {
     out.push_str(&r.row.to_string());
     out.push_str(if r.col_abs { "C$" } else { "C" });
     out.push_str(&r.col.to_string());
+}
+
+fn sheet_range_to_key(r: SheetRangeRef, out: &mut String) {
+    out.push_str("S");
+    out.push_str(&r.sheet.to_string());
+    out.push(':');
+    ref_to_key(r.range.start, out);
+    out.push(',');
+    ref_to_key(r.range.end, out);
 }

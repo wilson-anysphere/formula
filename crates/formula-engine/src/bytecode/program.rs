@@ -1,5 +1,5 @@
 use super::ast::Function;
-use super::value::{RangeRef, Ref, Value};
+use super::value::{MultiRangeRef, RangeRef, Ref, Value};
 use std::sync::Arc;
 
 #[repr(u8)]
@@ -37,6 +37,7 @@ pub enum OpCode {
     /// Inspect the top of the stack: if it's NOT `#N/A`, jump to instruction index `a`.
     /// Otherwise (it is `#N/A`), pop it and continue.
     JumpIfNotNaError = 23,
+    LoadMultiRange = 24,
 }
 
 /// Packed instruction:
@@ -81,6 +82,7 @@ impl Instruction {
             21 => OpCode::JumpIfFalseOrError,
             22 => OpCode::JumpIfNotError,
             23 => OpCode::JumpIfNotNaError,
+            24 => OpCode::LoadMultiRange,
             _ => unreachable!("invalid opcode"),
         }
     }
@@ -116,6 +118,7 @@ pub struct Program {
     pub(crate) consts: Vec<ConstValue>,
     pub(crate) cell_refs: Vec<Ref>,
     pub(crate) range_refs: Vec<RangeRef>,
+    pub(crate) multi_range_refs: Vec<MultiRangeRef>,
     pub(crate) funcs: Vec<Function>,
     pub(crate) locals: Vec<Arc<str>>,
     pub(crate) key: Arc<str>,
@@ -128,6 +131,7 @@ impl Program {
             consts: Vec::new(),
             cell_refs: Vec::new(),
             range_refs: Vec::new(),
+            multi_range_refs: Vec::new(),
             funcs: Vec::new(),
             locals: Vec::new(),
             key,

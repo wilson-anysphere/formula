@@ -19,4 +19,7 @@ pub use ast::{parse_formula, Expr, ParseError};
 pub use grid::{ColumnarGrid, Grid, GridMut, SparseGrid};
 pub use recalc::{CalcGraph, FormulaCell, RecalcEngine};
 pub use runtime::eval_ast;
-pub use value::{Array, CellCoord, ErrorKind, RangeRef, Ref, ResolvedRange, Value};
+pub use value::{
+    Array, CellCoord, ErrorKind, MultiRangeRef, RangeRef, Ref, ResolvedRange, SheetId,
+    SheetRangeRef, Value,
+};

@@ -57,6 +57,10 @@ impl Vm {
                     let r = program.range_refs[inst.a() as usize];
                     self.stack.push(Value::Range(r));
                 }
+                OpCode::LoadMultiRange => {
+                    let r = program.multi_range_refs[inst.a() as usize].clone();
+                    self.stack.push(Value::MultiRange(r));
+                }
                 OpCode::StoreLocal => {
                     let v = self.stack.pop().unwrap_or(Value::Empty);
                     let idx = inst.a() as usize;

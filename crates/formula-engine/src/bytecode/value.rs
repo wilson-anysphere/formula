@@ -1,6 +1,9 @@
 use std::fmt;
 use std::sync::Arc;
 
+/// Engine sheet id (0-indexed).
+pub type SheetId = usize;
+
 /// 0-indexed cell coordinate.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct CellCoord {
@@ -69,6 +72,41 @@ impl RangeRef {
         let a = self.start.resolve(base);
         let b = self.end.resolve(base);
         ResolvedRange::from_coords(a, b)
+    }
+}
+
+/// A range on a specific sheet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct SheetRangeRef {
+    pub sheet: SheetId,
+    pub range: RangeRef,
+}
+
+impl SheetRangeRef {
+    #[inline]
+    pub const fn new(sheet: SheetId, range: RangeRef) -> Self {
+        Self { sheet, range }
+    }
+}
+
+/// A discontiguous reference consisting of multiple per-sheet range areas.
+///
+/// This is used to represent 3D sheet spans like `Sheet1:Sheet3!A1:B2`, which
+/// expand to one rectangular area per sheet.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MultiRangeRef {
+    pub areas: Arc<[SheetRangeRef]>,
+}
+
+impl MultiRangeRef {
+    #[inline]
+    pub fn new(areas: Arc<[SheetRangeRef]>) -> Self {
+        Self { areas }
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.areas.is_empty()
     }
 }
 
@@ -195,6 +233,7 @@ pub enum Value {
     Text(Arc<str>),
     Array(Array),
     Range(RangeRef),
+    MultiRange(MultiRangeRef),
     Empty,
     Error(ErrorKind),
 }
@@ -221,6 +260,7 @@ impl PartialEq for Value {
             (Empty, Empty) => true,
             (Error(a), Error(b)) => a == b,
             (Range(a), Range(b)) => a == b,
+            (MultiRange(a), MultiRange(b)) => a == b,
             (Array(a), Array(b)) => {
                 a.rows == b.rows
                     && a.cols == b.cols

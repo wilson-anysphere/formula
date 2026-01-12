@@ -1975,6 +1975,7 @@ impl Engine {
                                 snapshot: &snapshot,
                                 sheet: k.sheet,
                                 cols,
+                                cols_by_sheet: &column_cache.by_sheet,
                                 slice_mode,
                             };
                             let base = bytecode::CellCoord {
@@ -2034,6 +2035,7 @@ impl Engine {
                                                 snapshot: &snapshot,
                                                 sheet: k.sheet,
                                                 cols,
+                                                cols_by_sheet: &column_cache.by_sheet,
                                                 slice_mode,
                                             };
                                             let base = bytecode::CellCoord {
@@ -2089,6 +2091,7 @@ impl Engine {
                             snapshot: &snapshot,
                             sheet: k.sheet,
                             cols,
+                            cols_by_sheet: &column_cache.by_sheet,
                             slice_mode,
                         };
                         let base = bytecode::CellCoord {
@@ -2146,6 +2149,7 @@ impl Engine {
                             snapshot: &snapshot,
                             sheet: k.sheet,
                             cols,
+                            cols_by_sheet: &column_cache.by_sheet,
                             slice_mode,
                         };
                         let base = bytecode::CellCoord {
@@ -5444,7 +5448,9 @@ fn bytecode_value_to_engine(value: bytecode::Value) -> Value {
         bytecode::Value::Text(s) => Value::Text(s.to_string()),
         bytecode::Value::Empty => Value::Blank,
         bytecode::Value::Error(e) => Value::Error(bytecode_error_to_engine(e)),
-        bytecode::Value::Array(_) | bytecode::Value::Range(_) => Value::Error(ErrorKind::Spill),
+        bytecode::Value::Array(_) | bytecode::Value::Range(_) | bytecode::Value::MultiRange(_) => {
+            Value::Error(ErrorKind::Spill)
+        }
     }
 }
 
@@ -5532,6 +5538,11 @@ impl BytecodeColumnCache {
                     bytecode::OpCode::LoadRange => {
                         stack.push(StackValue::Range(inst.a() as usize));
                     }
+                    bytecode::OpCode::LoadMultiRange => {
+                        // Multi-range references (e.g. 3D sheet spans) are tracked separately from
+                        // `range_refs`, so treat them as opaque stack values here.
+                        stack.push(StackValue::Other);
+                    }
                     bytecode::OpCode::StoreLocal => {
                         let idx = inst.a() as usize;
                         let v = stack.pop().unwrap_or(StackValue::Other);
@@ -5603,15 +5614,16 @@ impl BytecodeColumnCache {
                 continue;
             };
 
-            if bc.program.range_refs.is_empty() {
+            if bc.program.range_refs.is_empty() && bc.program.multi_range_refs.is_empty() {
                 continue;
             }
 
             let program_key = Arc::as_ptr(&bc.program) as usize;
+            let has_multi_ranges = !bc.program.multi_range_refs.is_empty();
             let used = range_usage_cache
                 .entry(program_key)
                 .or_insert_with(|| range_refs_used_by_functions(&bc.program));
-            if !used.iter().any(|v| *v) {
+            if !has_multi_ranges && !used.iter().any(|v| *v) {
                 // Ranges that are only used for implicit intersection don't require a columnar
                 // cache because evaluation can fetch a single cell via `get_value`.
                 continue;
@@ -5646,6 +5658,28 @@ impl BytecodeColumnCache {
                         .entry(col)
                         .or_default()
                         .push((resolved.row_start, resolved.row_end));
+                }
+            }
+
+            for multi in &bc.program.multi_range_refs {
+                for area in multi.areas.iter() {
+                    if area.sheet >= sheet_count {
+                        continue;
+                    }
+                    let resolved = area.range.resolve(base);
+                    if resolved.row_start < 0
+                        || resolved.col_start < 0
+                        || resolved.row_end >= EXCEL_MAX_ROWS_I32
+                        || resolved.col_end >= EXCEL_MAX_COLS_I32
+                    {
+                        continue;
+                    }
+                    for col in resolved.col_start..=resolved.col_end {
+                        row_ranges_by_col[area.sheet]
+                            .entry(col)
+                            .or_default()
+                            .push((resolved.row_start, resolved.row_end));
+                    }
                 }
             }
         }
@@ -5801,6 +5835,7 @@ struct EngineBytecodeGrid<'a> {
     snapshot: &'a Snapshot,
     sheet: SheetId,
     cols: &'a HashMap<i32, BytecodeColumn>,
+    cols_by_sheet: &'a [HashMap<i32, BytecodeColumn>],
     slice_mode: ColumnSliceMode,
 }
 
@@ -5849,6 +5884,13 @@ impl<'a> EngineBytecodeGrid<'a> {
 
 impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
     fn get_value(&self, coord: bytecode::CellCoord) -> bytecode::Value {
+        self.get_value_on_sheet(self.sheet, coord)
+    }
+
+    fn get_value_on_sheet(&self, sheet: usize, coord: bytecode::CellCoord) -> bytecode::Value {
+        if !self.snapshot.sheets.contains(&sheet) {
+            return bytecode::Value::Error(bytecode::ErrorKind::Ref);
+        }
         if coord.row < 0
             || coord.col < 0
             || coord.row >= EXCEL_MAX_ROWS_I32
@@ -5862,14 +5904,11 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
         };
         self.snapshot
             .values
-            .get(&CellKey {
-                sheet: self.sheet,
-                addr,
-            })
+            .get(&CellKey { sheet, addr })
             .map(engine_value_to_bytecode)
             .or_else(|| {
                 let provider = self.snapshot.external_value_provider.as_ref()?;
-                let sheet_name = self.snapshot.sheet_names_by_id.get(self.sheet)?;
+                let sheet_name = self.snapshot.sheet_names_by_id.get(sheet)?;
                 provider
                     .get(sheet_name, addr)
                     .as_ref()
@@ -5925,8 +5964,61 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
         ))
     }
 
+    fn column_slice_on_sheet(
+        &self,
+        sheet: usize,
+        col: i32,
+        row_start: i32,
+        row_end: i32,
+    ) -> Option<&[f64]> {
+        if col < 0
+            || col >= EXCEL_MAX_COLS_I32
+            || row_start < 0
+            || row_end < 0
+            || row_start > row_end
+            || row_end >= EXCEL_MAX_ROWS_I32
+        {
+            return None;
+        }
+        if !self.snapshot.sheets.contains(&sheet) {
+            return None;
+        }
+        let sheet_cols = self.cols_by_sheet.get(sheet)?;
+        let data = sheet_cols.get(&col)?;
+        let idx = data
+            .segments
+            .partition_point(|seg| seg.row_end() < row_start);
+        let seg = data.segments.get(idx)?;
+        if row_start < seg.row_start || row_end > seg.row_end() {
+            return None;
+        }
+
+        let blocked_rows = match self.slice_mode {
+            ColumnSliceMode::StrictNumeric => &seg.blocked_rows_strict,
+            ColumnSliceMode::IgnoreNonNumeric => &seg.blocked_rows_ignore_nonnumeric,
+        };
+        if has_blocked_row(blocked_rows, row_start, row_end) {
+            return None;
+        }
+
+        let start = (row_start - seg.row_start) as usize;
+        let end = (row_end - seg.row_start) as usize;
+        if end >= seg.values.len() {
+            return None;
+        }
+        Some(&seg.values[start..=end])
+    }
+
     fn bounds(&self) -> (i32, i32) {
         (EXCEL_MAX_ROWS_I32, EXCEL_MAX_COLS_I32)
+    }
+
+    fn bounds_on_sheet(&self, sheet: usize) -> (i32, i32) {
+        if self.snapshot.sheets.contains(&sheet) {
+            (EXCEL_MAX_ROWS_I32, EXCEL_MAX_COLS_I32)
+        } else {
+            (0, 0)
+        }
     }
 }
 
@@ -5969,6 +6061,25 @@ fn bytecode_expr_within_grid_limits(
                 Err(BytecodeCompileReason::ExceedsRangeCellLimit)
             }
         }
+        bytecode::Expr::MultiRangeRef(r) => {
+            let mut total: i64 = 0;
+            for area in r.areas.iter() {
+                let resolved = area.range.resolve(origin);
+                if resolved.row_start < 0
+                    || resolved.col_start < 0
+                    || resolved.row_end >= EXCEL_MAX_ROWS_I32
+                    || resolved.col_end >= EXCEL_MAX_COLS_I32
+                {
+                    return Err(BytecodeCompileReason::ExceedsGridLimits);
+                }
+                let cells = (resolved.rows() as i64) * (resolved.cols() as i64);
+                total = total.saturating_add(cells);
+                if total > BYTECODE_MAX_RANGE_CELLS {
+                    return Err(BytecodeCompileReason::ExceedsRangeCellLimit);
+                }
+            }
+            Ok(())
+        }
         bytecode::Expr::NameRef(_) => Ok(()),
         bytecode::Expr::Unary { op, expr } => match op {
             bytecode::ast::UnaryOp::Plus | bytecode::ast::UnaryOp::Neg => {
@@ -5989,6 +6100,19 @@ fn bytecode_expr_within_grid_limits(
                     } else {
                         Ok(())
                     }
+                }
+                bytecode::Expr::MultiRangeRef(r) => {
+                    for area in r.areas.iter() {
+                        let resolved = area.range.resolve(origin);
+                        if resolved.row_start < 0
+                            || resolved.col_start < 0
+                            || resolved.row_end >= EXCEL_MAX_ROWS_I32
+                            || resolved.col_end >= EXCEL_MAX_COLS_I32
+                        {
+                            return Err(BytecodeCompileReason::ExceedsGridLimits);
+                        }
+                    }
+                    Ok(())
                 }
                 _ => bytecode_expr_within_grid_limits(expr, origin),
             },
@@ -6031,11 +6155,12 @@ fn bytecode_expr_is_eligible_inner(
             // (e.g. `AND(range)`), but our numeric-only array literal lowering cannot preserve
             // typed/mixed array semantics for those functions yet.
             bytecode::Value::Array(_) => allow_array_literals,
-            bytecode::Value::Range(_) => false,
+            bytecode::Value::Range(_) | bytecode::Value::MultiRange(_) => false,
         },
         bytecode::Expr::CellRef(_) => true,
         bytecode::Expr::RangeRef(_) => allow_range,
         bytecode::Expr::NameRef(name) => name_is_local(lexical_scopes, name),
+        bytecode::Expr::MultiRangeRef(_) => allow_range,
         bytecode::Expr::Unary { op, expr } => match op {
             bytecode::ast::UnaryOp::Plus | bytecode::ast::UnaryOp::Neg => {
                 bytecode_expr_is_eligible_inner(expr, false, false, lexical_scopes)
@@ -6196,7 +6321,9 @@ fn bytecode_expr_is_eligible_inner(
                 }
                 let range_ok = matches!(
                     args[0],
-                    bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)
+                    bytecode::Expr::RangeRef(_)
+                        | bytecode::Expr::MultiRangeRef(_)
+                        | bytecode::Expr::CellRef(_)
                 );
                 let criteria_ok =
                     bytecode_expr_is_eligible_inner(&args[1], false, false, lexical_scopes);
@@ -8215,6 +8342,7 @@ mod tests {
             snapshot: &snapshot,
             sheet: 0,
             cols: &cols,
+            cols_by_sheet: std::slice::from_ref(&cols),
             slice_mode: ColumnSliceMode::IgnoreNonNumeric,
         };
 

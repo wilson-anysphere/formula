@@ -1,5 +1,7 @@
 use super::ast::{BinaryOp, Expr as BytecodeExpr, Function, UnaryOp};
-use super::value::{Array, ErrorKind as BytecodeErrorKind, RangeRef, Ref, Value};
+use super::value::{
+    Array, ErrorKind as BytecodeErrorKind, MultiRangeRef, RangeRef, Ref, SheetRangeRef, Value,
+};
 use std::sync::Arc;
 
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -45,17 +47,40 @@ fn validate_prefix(
         return Err(LowerError::ExternalReference);
     }
     if let Some(sheet) = prefix.sheet.as_ref() {
-        let Some(sheet_name) = sheet.as_single_sheet() else {
-            return Err(LowerError::CrossSheetReference);
-        };
-        let Some(sheet_id) = resolve_sheet(sheet_name) else {
-            return Err(LowerError::UnknownSheet);
-        };
-        if sheet_id != current_sheet {
-            return Err(LowerError::CrossSheetReference);
+        match sheet {
+            crate::SheetRef::Sheet(name) => {
+                let Some(sheet_id) = resolve_sheet(name) else {
+                    return Err(LowerError::UnknownSheet);
+                };
+                if sheet_id != current_sheet {
+                    return Err(LowerError::CrossSheetReference);
+                }
+            }
+            crate::SheetRef::SheetRange { start, end } => {
+                // Sheet-span references are allowed in the bytecode backend (lowered as a
+                // multi-area reference). We still validate that both sheet names resolve.
+                if resolve_sheet(start).is_none() || resolve_sheet(end).is_none() {
+                    return Err(LowerError::UnknownSheet);
+                }
+            }
         }
     }
     Ok(())
+}
+
+fn expand_sheet_span(
+    start: &str,
+    end: &str,
+    resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
+) -> Result<Vec<usize>, LowerError> {
+    let Some(a) = resolve_sheet(start) else {
+        return Err(LowerError::UnknownSheet);
+    };
+    let Some(b) = resolve_sheet(end) else {
+        return Err(LowerError::UnknownSheet);
+    };
+    let (start, end) = if a <= b { (a, b) } else { (b, a) };
+    Ok((start..=end).collect())
 }
 
 fn lower_coord(coord: &crate::Coord, origin: u32) -> (i32, bool) {
@@ -86,6 +111,37 @@ fn lower_cell_ref(
     let (row, row_abs) = lower_coord(&r.row, origin.row);
     let (col, col_abs) = lower_coord(&r.col, origin.col);
     Ok(Ref::new(row, col, row_abs, col_abs))
+}
+
+fn lower_cell_ref_expr(
+    r: &crate::CellRef,
+    origin: crate::CellAddr,
+    current_sheet: usize,
+    resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
+) -> Result<BytecodeExpr, LowerError> {
+    let prefix = RefPrefix::from_parts(&r.workbook, &r.sheet);
+    if prefix.workbook.is_some() {
+        return Err(LowerError::ExternalReference);
+    }
+
+    let cell = lower_cell_ref(r, origin, current_sheet, resolve_sheet)?;
+
+    match prefix.sheet.as_ref() {
+        None => Ok(BytecodeExpr::CellRef(cell)),
+        Some(crate::SheetRef::Sheet(_)) => {
+            // `lower_cell_ref` validated that the sheet matches the current sheet.
+            Ok(BytecodeExpr::CellRef(cell))
+        }
+        Some(crate::SheetRef::SheetRange { start, end }) => {
+            let sheets = expand_sheet_span(start, end, resolve_sheet)?;
+            let range = RangeRef::new(cell, cell);
+            let areas: Vec<SheetRangeRef> = sheets
+                .into_iter()
+                .map(|sheet| SheetRangeRef::new(sheet, range))
+                .collect();
+            Ok(BytecodeExpr::MultiRangeRef(MultiRangeRef::new(areas.into())))
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -175,7 +231,17 @@ fn lower_range_ref(
         _ => return Err(LowerError::Unsupported),
     };
 
-    Ok(BytecodeExpr::RangeRef(range))
+    match merged_prefix.sheet.as_ref() {
+        Some(crate::SheetRef::SheetRange { start, end }) => {
+            let sheets = expand_sheet_span(start, end, resolve_sheet)?;
+            let areas: Vec<SheetRangeRef> = sheets
+                .into_iter()
+                .map(|sheet| SheetRangeRef::new(sheet, range))
+                .collect();
+            Ok(BytecodeExpr::MultiRangeRef(MultiRangeRef::new(areas.into())))
+        }
+        _ => Ok(BytecodeExpr::RangeRef(range)),
+    }
 }
 
 fn parse_number(raw: &str) -> Result<f64, LowerError> {
@@ -261,12 +327,7 @@ pub fn lower_canonical_expr(
         ))),
         crate::Expr::Missing => Ok(BytecodeExpr::Literal(Value::Empty)),
         crate::Expr::Array(arr) => Ok(BytecodeExpr::Literal(lower_array_literal(arr)?)),
-        crate::Expr::CellRef(r) => Ok(BytecodeExpr::CellRef(lower_cell_ref(
-            r,
-            origin,
-            current_sheet,
-            resolve_sheet,
-        )?)),
+        crate::Expr::CellRef(r) => lower_cell_ref_expr(r, origin, current_sheet, resolve_sheet),
         crate::Expr::Binary(b) => match b.op {
             crate::BinaryOp::Range => {
                 lower_range_ref(&b.left, &b.right, origin, current_sheet, resolve_sheet)

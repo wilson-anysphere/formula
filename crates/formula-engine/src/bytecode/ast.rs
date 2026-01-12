@@ -1,4 +1,4 @@
-use super::value::{CellCoord, ErrorKind, RangeRef, Ref, Value};
+use super::value::{CellCoord, ErrorKind, MultiRangeRef, RangeRef, Ref, Value};
 use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -160,6 +160,7 @@ pub enum Expr {
     Literal(Value),
     CellRef(Ref),
     RangeRef(RangeRef),
+    MultiRangeRef(MultiRangeRef),
     NameRef(Arc<str>),
     Unary {
         op: UnaryOp,

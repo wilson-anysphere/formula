@@ -131,7 +131,9 @@ fn bytecode_value_to_engine(value: formula_engine::bytecode::Value) -> Value {
             ByteErrorKind::Calc => ErrorKind::Calc,
         }),
         // Array/range values are not valid scalar results for the engine API; treat them as spills.
-        ByteValue::Array(_) | ByteValue::Range(_) => Value::Error(ErrorKind::Spill),
+        ByteValue::Array(_) | ByteValue::Range(_) | ByteValue::MultiRange(_) => {
+            Value::Error(ErrorKind::Spill)
+        }
     }
 }
 
@@ -508,6 +510,48 @@ fn bytecode_backend_rejects_invalid_let_arity() {
     engine.recalculate_single_threaded();
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::Value));
     assert_engine_matches_ast(&engine, "=LET(x, 1)", "A1");
+}
+
+#[test]
+fn bytecode_backend_supports_3d_sheet_span_references() {
+    let mut engine = Engine::new();
+
+    for (sheet, values) in [
+        ("Sheet1", [1.0, 2.0, 3.0]),
+        ("Sheet2", [4.0, 5.0, 6.0]),
+        ("Sheet3", [7.0, 8.0, 9.0]),
+    ] {
+        for (idx, v) in values.into_iter().enumerate() {
+            engine
+                .set_cell_value(sheet, &format!("A{}", idx + 1), v)
+                .unwrap();
+        }
+    }
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=SUM(Sheet1:Sheet3!A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=COUNT(Sheet1:Sheet3!A1:A3)")
+        .unwrap();
+
+    // Both formulas should compile to bytecode (3D spans shouldn't force AST fallback).
+    assert_eq!(engine.bytecode_program_count(), 2);
+
+    engine.recalculate_single_threaded();
+
+    let bc_sum = engine.get_cell_value("Sheet1", "B1");
+    let bc_count = engine.get_cell_value("Sheet1", "B2");
+
+    // Compare against the AST backend by disabling bytecode and re-evaluating.
+    engine.set_bytecode_enabled(false);
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), bc_sum);
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), bc_count);
+
+    assert_eq!(bc_sum, Value::Number(12.0)); // 1 + 4 + 7
+    assert_eq!(bc_count, Value::Number(9.0));
 }
 
 #[test]

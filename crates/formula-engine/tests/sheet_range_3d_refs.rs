@@ -223,3 +223,61 @@ fn evaluates_sum_over_reversed_sheet_range_ref() {
 
     assert_eq!(engine.get_cell_value("Summary", "A1"), Value::Number(6.0));
 }
+
+#[test]
+fn bytecode_compiles_sum_over_sheet_range_cell_ref_and_matches_ast() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet2", "A1", 2.0).unwrap();
+    engine.set_cell_value("Sheet3", "A1", 3.0).unwrap();
+
+    // Place the formula on Sheet1 so the 3D span includes the current sheet.
+    engine
+        .set_cell_formula("Sheet1", "B1", "=SUM(Sheet1:Sheet3!A1)")
+        .unwrap();
+
+    // Ensure the bytecode backend accepted the 3D reference.
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    let bytecode_value = engine.get_cell_value("Sheet1", "B1");
+
+    engine.set_bytecode_enabled(false);
+    engine.recalculate_single_threaded();
+    let ast_value = engine.get_cell_value("Sheet1", "B1");
+
+    assert_eq!(bytecode_value, ast_value);
+    assert_eq!(bytecode_value, Value::Number(6.0));
+}
+
+#[test]
+fn bytecode_compiles_count_over_sheet_range_area_ref_and_matches_ast() {
+    let mut engine = Engine::new();
+    for (sheet, values) in [
+        ("Sheet1", [1.0, 2.0, 3.0]),
+        ("Sheet2", [4.0, 5.0, 6.0]),
+        ("Sheet3", [7.0, 8.0, 9.0]),
+    ] {
+        for (idx, v) in values.into_iter().enumerate() {
+            engine
+                .set_cell_value(sheet, &format!("A{}", idx + 1), v)
+                .unwrap();
+        }
+    }
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=COUNT(Sheet1:Sheet3!A1:A3)")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    let bytecode_value = engine.get_cell_value("Sheet1", "B1");
+
+    engine.set_bytecode_enabled(false);
+    engine.recalculate_single_threaded();
+    let ast_value = engine.get_cell_value("Sheet1", "B1");
+
+    assert_eq!(bytecode_value, ast_value);
+    assert_eq!(bytecode_value, Value::Number(9.0));
+}

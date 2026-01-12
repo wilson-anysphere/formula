@@ -197,6 +197,18 @@ fn collect_deps_inner(expr: &Expr, base: CellCoord, out: &mut AHashSet<(i32, i32
                 }
             }
         }
+        Expr::MultiRangeRef(r) => {
+            // The standalone bytecode recalc engine is sheet-agnostic, so treat multi-area
+            // references as a simple union of their cell footprints.
+            for area in r.areas.iter() {
+                let rr = area.range.resolve(base);
+                for col in rr.col_start..=rr.col_end {
+                    for row in rr.row_start..=rr.row_end {
+                        out.insert((row, col));
+                    }
+                }
+            }
+        }
         Expr::Literal(_) => {}
         Expr::NameRef(_) => {}
         Expr::Unary { expr, .. } => collect_deps_inner(expr, base, out),

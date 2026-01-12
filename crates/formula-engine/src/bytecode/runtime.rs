@@ -116,6 +116,7 @@ fn eval_ast_inner(
         Expr::Literal(v) => v.clone(),
         Expr::CellRef(r) => grid.get_value(r.resolve(base)),
         Expr::RangeRef(r) => Value::Range(*r),
+        Expr::MultiRangeRef(r) => Value::MultiRange(r.clone()),
         Expr::NameRef(name) => {
             for scope in lexical_scopes.iter().rev() {
                 if let Some(v) = scope.get(name) {
@@ -270,7 +271,7 @@ fn coerce_to_number(v: Value) -> Result<f64, ErrorKind> {
         Value::Text(s) => parse_value_from_text(&s),
         Value::Error(e) => Err(e),
         // Dynamic arrays / range-as-scalar: treat as a spill attempt (engine semantics).
-        Value::Array(_) | Value::Range(_) => Err(ErrorKind::Spill),
+        Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => Err(ErrorKind::Spill),
     }
 }
 
@@ -296,7 +297,7 @@ pub(crate) fn coerce_to_bool(v: Value) -> Result<bool, ErrorKind> {
             Ok(n != 0.0)
         }
         Value::Error(e) => Err(e),
-        Value::Array(_) | Value::Range(_) => Err(ErrorKind::Spill),
+        Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => Err(ErrorKind::Spill),
     }
 }
 
@@ -317,7 +318,7 @@ fn coerce_countif_value_to_number(v: Value) -> Option<f64> {
         Value::Bool(b) => Some(if b { 1.0 } else { 0.0 }),
         Value::Empty => Some(0.0),
         Value::Text(s) => parse_number(&s, thread_number_locale()).ok(),
-        Value::Error(_) | Value::Array(_) | Value::Range(_) => None,
+        Value::Error(_) | Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => None,
     }
 }
 
@@ -493,8 +494,8 @@ fn excel_order(left: Value, right: Value) -> Result<Ordering, ErrorKind> {
     if let Value::Error(e) = right {
         return Err(e);
     }
-    if matches!(left, Value::Array(_) | Value::Range(_))
-        || matches!(right, Value::Array(_) | Value::Range(_))
+    if matches!(left, Value::Array(_) | Value::Range(_) | Value::MultiRange(_))
+        || matches!(right, Value::Array(_) | Value::Range(_) | Value::MultiRange(_))
     {
         return Err(ErrorKind::Value);
     }
@@ -529,7 +530,9 @@ fn excel_order(left: Value, right: Value) -> Result<Ordering, ErrorKind> {
         (Value::Array(_), _)
         | (_, Value::Array(_))
         | (Value::Range(_), _)
-        | (_, Value::Range(_)) => Ordering::Equal,
+        | (_, Value::Range(_))
+        | (Value::MultiRange(_), _)
+        | (_, Value::MultiRange(_)) => Ordering::Equal,
     })
 }
 
@@ -936,7 +939,7 @@ fn and_scalar(v: &Value, all_true: &mut bool, any: &mut bool) -> Option<ErrorKin
         Value::Empty => None,
         Value::Text(_) => Some(ErrorKind::Value),
         // Ranges/arrays are handled by the caller.
-        Value::Array(_) | Value::Range(_) => Some(ErrorKind::Spill),
+        Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => Some(ErrorKind::Spill),
     }
 }
 
@@ -960,7 +963,7 @@ fn or_scalar(v: &Value, any_true: &mut bool, any: &mut bool) -> Option<ErrorKind
         Value::Empty => None,
         Value::Text(_) => Some(ErrorKind::Value),
         // Ranges/arrays are handled by the caller.
-        Value::Array(_) | Value::Range(_) => Some(ErrorKind::Spill),
+        Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => Some(ErrorKind::Spill),
     }
 }
 
@@ -1013,7 +1016,11 @@ fn and_range(
                     }
                 }
                 // Text/blanks in references are ignored.
-                Value::Text(_) | Value::Empty | Value::Array(_) | Value::Range(_) => {}
+                Value::Text(_)
+                | Value::Empty
+                | Value::Array(_)
+                | Value::Range(_)
+                | Value::MultiRange(_) => {}
             }
         }
     }
@@ -1043,7 +1050,11 @@ fn or_range(
                     }
                 }
                 // Text/blanks in references are ignored.
-                Value::Text(_) | Value::Empty | Value::Array(_) | Value::Range(_) => {}
+                Value::Text(_)
+                | Value::Empty
+                | Value::Array(_)
+                | Value::Range(_)
+                | Value::MultiRange(_) => {}
             }
         }
     }
@@ -1076,7 +1087,7 @@ fn coerce_to_string(v: Value) -> Result<String, ErrorKind> {
         Value::Bool(b) => Ok(if b { "TRUE" } else { "FALSE" }.to_string()),
         Value::Empty => Ok(String::new()),
         Value::Error(e) => Err(e),
-        Value::Array(_) | Value::Range(_) => Err(ErrorKind::Value),
+        Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => Err(ErrorKind::Value),
     }
 }
 
@@ -1105,6 +1116,14 @@ fn fn_sum(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 Ok(v) => sum += v,
                 Err(e) => return Value::Error(e),
             },
+            Value::MultiRange(r) => {
+                for area in r.areas.iter() {
+                    match sum_range_on_sheet(grid, area.sheet, area.range.resolve(base)) {
+                        Ok(v) => sum += v,
+                        Err(e) => return Value::Error(e),
+                    }
+                }
+            }
             Value::Empty => {}
             Value::Error(e) => return Value::Error(*e),
             Value::Text(s) => match parse_value_from_text(s) {
@@ -1144,6 +1163,17 @@ fn fn_average(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 }
                 Err(e) => return Value::Error(e),
             },
+            Value::MultiRange(r) => {
+                for area in r.areas.iter() {
+                    match sum_count_range_on_sheet(grid, area.sheet, area.range.resolve(base)) {
+                        Ok((s, c)) => {
+                            sum += s;
+                            count += c;
+                        }
+                        Err(e) => return Value::Error(e),
+                    }
+                }
+            }
             Value::Empty => {}
             Value::Error(e) => return Value::Error(*e),
             Value::Text(s) => match parse_value_from_text(s) {
@@ -1184,6 +1214,15 @@ fn fn_min(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 Ok(None) => {}
                 Err(e) => return Value::Error(e),
             },
+            Value::MultiRange(r) => {
+                for area in r.areas.iter() {
+                    match min_range_on_sheet(grid, area.sheet, area.range.resolve(base)) {
+                        Ok(Some(m)) => out = Some(out.map_or(m, |prev| prev.min(m))),
+                        Ok(None) => {}
+                        Err(e) => return Value::Error(e),
+                    }
+                }
+            }
             Value::Empty => out = Some(out.map_or(0.0, |prev| prev.min(0.0))),
             Value::Error(e) => return Value::Error(*e),
             Value::Text(s) => match parse_value_from_text(s) {
@@ -1218,6 +1257,15 @@ fn fn_max(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 Ok(None) => {}
                 Err(e) => return Value::Error(e),
             },
+            Value::MultiRange(r) => {
+                for area in r.areas.iter() {
+                    match max_range_on_sheet(grid, area.sheet, area.range.resolve(base)) {
+                        Ok(Some(m)) => out = Some(out.map_or(m, |prev| prev.max(m))),
+                        Ok(None) => {}
+                        Err(e) => return Value::Error(e),
+                    }
+                }
+            }
             Value::Empty => out = Some(out.map_or(0.0, |prev| prev.max(0.0))),
             Value::Error(e) => return Value::Error(*e),
             Value::Text(s) => match parse_value_from_text(s) {
@@ -1239,6 +1287,14 @@ fn fn_count(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 Ok(c) => count += c,
                 Err(e) => return Value::Error(e),
             },
+            Value::MultiRange(r) => {
+                for area in r.areas.iter() {
+                    match count_range_on_sheet(grid, area.sheet, area.range.resolve(base)) {
+                        Ok(c) => count += c,
+                        Err(e) => return Value::Error(e),
+                    }
+                }
+            }
             Value::Bool(_) | Value::Empty | Value::Error(_) | Value::Text(_) => {}
         }
     }
@@ -1256,6 +1312,7 @@ fn fn_countif(
     }
     let range = match &args[0] {
         Value::Range(r) => RangeArg::Range(*r),
+        Value::MultiRange(r) => RangeArg::MultiRange(r),
         Value::Array(a) => RangeArg::Array(a),
         _ => return Value::Error(ErrorKind::Value),
     };
@@ -1271,6 +1328,21 @@ fn fn_countif(
                 Ok(c) => c,
                 Err(e) => return Value::Error(e),
             },
+            RangeArg::MultiRange(r) => {
+                let mut count = 0usize;
+                for area in r.areas.iter() {
+                    match count_if_range_on_sheet(
+                        grid,
+                        area.sheet,
+                        area.range.resolve(base),
+                        numeric,
+                    ) {
+                        Ok(c) => count += c,
+                        Err(e) => return Value::Error(e),
+                    }
+                }
+                count
+            }
             RangeArg::Array(a) => simd::count_if_blank_as_zero_f64(a.as_slice(), numeric),
         };
         return Value::Number(count as f64);
@@ -1281,6 +1353,21 @@ fn fn_countif(
             Ok(c) => c,
             Err(e) => return Value::Error(e),
         },
+        RangeArg::MultiRange(r) => {
+            let mut count = 0usize;
+            for area in r.areas.iter() {
+                match count_if_range_criteria_on_sheet(
+                    grid,
+                    area.sheet,
+                    area.range.resolve(base),
+                    &criteria,
+                ) {
+                    Ok(c) => count += c,
+                    Err(e) => return Value::Error(e),
+                }
+            }
+            count
+        }
         RangeArg::Array(a) => count_if_array_criteria(a, &criteria),
     };
     Value::Number(count as f64)
@@ -1388,7 +1475,8 @@ fn fn_sumif(
                 | Value::Text(_)
                 | Value::Empty
                 | Value::Array(_)
-                | Value::Range(_) => {}
+                | Value::Range(_)
+                | Value::MultiRange(_) => {}
             }
         }
     }
@@ -1578,7 +1666,8 @@ fn fn_sumifs(
                 | Value::Text(_)
                 | Value::Empty
                 | Value::Array(_)
-                | Value::Range(_) => {}
+                | Value::Range(_)
+                | Value::MultiRange(_) => {}
             }
         }
     }
@@ -1829,7 +1918,8 @@ fn fn_averageif(
                 | Value::Text(_)
                 | Value::Empty
                 | Value::Array(_)
-                | Value::Range(_) => {}
+                | Value::Range(_)
+                | Value::MultiRange(_) => {}
             }
         }
     }
@@ -2034,7 +2124,8 @@ fn fn_averageifs(
                 | Value::Text(_)
                 | Value::Empty
                 | Value::Array(_)
-                | Value::Range(_) => {}
+                | Value::Range(_)
+                | Value::MultiRange(_) => {}
             }
         }
     }
@@ -2192,7 +2283,8 @@ fn fn_minifs(
                 | Value::Text(_)
                 | Value::Empty
                 | Value::Array(_)
-                | Value::Range(_) => {}
+                | Value::Range(_)
+                | Value::MultiRange(_) => {}
             }
         }
     }
@@ -2350,7 +2442,8 @@ fn fn_maxifs(
                 | Value::Text(_)
                 | Value::Empty
                 | Value::Array(_)
-                | Value::Range(_) => {}
+                | Value::Range(_)
+                | Value::MultiRange(_) => {}
             }
         }
     }
@@ -2635,7 +2728,7 @@ fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
             Value::Bool(_) => Some(2),
             Value::Empty => Some(3),
             Value::Error(_) => Some(4),
-            Value::Array(_) | Value::Range(_) => None,
+            Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => None,
         }
     }
 
@@ -2867,6 +2960,7 @@ fn approximate_match_1d(
 
 enum RangeArg<'a> {
     Range(RangeRef),
+    MultiRange(&'a super::value::MultiRangeRef),
     Array(&'a ArrayValue),
 }
 
@@ -2879,7 +2973,9 @@ fn bytecode_value_to_engine(value: Value) -> EngineValue {
         Value::Error(e) => EngineValue::Error(e.into()),
         // Array/range values are not valid scalar values, but the bytecode runtime uses `#SPILL!`
         // for "range-as-scalar" cases elsewhere.
-        Value::Array(_) | Value::Range(_) => EngineValue::Error(EngineErrorKind::Spill),
+        Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => {
+            EngineValue::Error(EngineErrorKind::Spill)
+        }
     }
 }
 
@@ -2897,7 +2993,7 @@ fn parse_countif_criteria(
             bytecode_value_to_engine(criteria.clone())
         }
         Value::Error(_) => unreachable!("handled above"),
-        Value::Array(_) | Value::Range(_) => return Err(ErrorKind::Value),
+        Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => return Err(ErrorKind::Value),
     };
 
     EngineCriteria::parse_with_date_system_and_locales(
@@ -2948,6 +3044,29 @@ fn count_if_range_criteria(
     for col in range.col_start..=range.col_end {
         for row in range.row_start..=range.row_end {
             let engine_value = bytecode_value_to_engine(grid.get_value(CellCoord { row, col }));
+            if criteria.matches(&engine_value) {
+                count += 1;
+            }
+        }
+    }
+    Ok(count)
+}
+
+fn count_if_range_criteria_on_sheet(
+    grid: &dyn Grid,
+    sheet: usize,
+    range: ResolvedRange,
+    criteria: &EngineCriteria,
+) -> Result<usize, ErrorKind> {
+    if !range_in_bounds_on_sheet(grid, sheet, range) {
+        return Err(ErrorKind::Ref);
+    }
+
+    let mut count = 0usize;
+    for col in range.col_start..=range.col_end {
+        for row in range.row_start..=range.row_end {
+            let engine_value =
+                bytecode_value_to_engine(grid.get_value_on_sheet(sheet, CellCoord { row, col }));
             if criteria.matches(&engine_value) {
                 count += 1;
             }
@@ -3007,6 +3126,23 @@ fn record_error_col_major(
     }
 }
 
+#[inline]
+fn range_in_bounds_on_sheet(grid: &dyn Grid, sheet: usize, range: ResolvedRange) -> bool {
+    grid.in_bounds_on_sheet(
+        sheet,
+        CellCoord {
+            row: range.row_start,
+            col: range.col_start,
+        },
+    ) && grid.in_bounds_on_sheet(
+        sheet,
+        CellCoord {
+            row: range.row_end,
+            col: range.col_end,
+        },
+    )
+}
+
 fn sum_range(grid: &dyn Grid, range: ResolvedRange) -> Result<f64, ErrorKind> {
     if !range_in_bounds(grid, range) {
         return Err(ErrorKind::Ref);
@@ -3028,7 +3164,8 @@ fn sum_range(grid: &dyn Grid, range: ResolvedRange) -> Result<f64, ErrorKind> {
                     | Value::Text(_)
                     | Value::Empty
                     | Value::Array(_)
-                    | Value::Range(_) => {}
+                    | Value::Range(_)
+                    | Value::MultiRange(_) => {}
                 }
             }
             if let Some((_, _, err)) = best_error {
@@ -3052,7 +3189,39 @@ fn sum_range(grid: &dyn Grid, range: ResolvedRange) -> Result<f64, ErrorKind> {
                     | Value::Text(_)
                     | Value::Empty
                     | Value::Array(_)
-                    | Value::Range(_) => {}
+                    | Value::Range(_)
+                    | Value::MultiRange(_) => {}
+                }
+            }
+        }
+    }
+    Ok(sum)
+}
+
+fn sum_range_on_sheet(
+    grid: &dyn Grid,
+    sheet: usize,
+    range: ResolvedRange,
+) -> Result<f64, ErrorKind> {
+    if !range_in_bounds_on_sheet(grid, sheet, range) {
+        return Err(ErrorKind::Ref);
+    }
+    let mut sum = 0.0;
+    for col in range.col_start..=range.col_end {
+        if let Some(slice) = grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end) {
+            sum += simd::sum_ignore_nan_f64(slice);
+        } else {
+            for row in range.row_start..=range.row_end {
+                match grid.get_value_on_sheet(sheet, CellCoord { row, col }) {
+                    Value::Number(v) => sum += v,
+                    Value::Error(e) => return Err(e),
+                    // SUM ignores text/logicals/blanks in references.
+                    Value::Bool(_)
+                    | Value::Text(_)
+                    | Value::Empty
+                    | Value::Array(_)
+                    | Value::Range(_)
+                    | Value::MultiRange(_) => {}
                 }
             }
         }
@@ -3085,7 +3254,8 @@ fn sum_count_range(grid: &dyn Grid, range: ResolvedRange) -> Result<(f64, usize)
                     | Value::Text(_)
                     | Value::Empty
                     | Value::Array(_)
-                    | Value::Range(_) => {}
+                    | Value::Range(_)
+                    | Value::MultiRange(_) => {}
                 }
             }
             if let Some((_, _, err)) = best_error {
@@ -3115,7 +3285,45 @@ fn sum_count_range(grid: &dyn Grid, range: ResolvedRange) -> Result<(f64, usize)
                     | Value::Text(_)
                     | Value::Empty
                     | Value::Array(_)
-                    | Value::Range(_) => {}
+                    | Value::Range(_)
+                    | Value::MultiRange(_) => {}
+                }
+            }
+        }
+    }
+    Ok((sum, count))
+}
+
+fn sum_count_range_on_sheet(
+    grid: &dyn Grid,
+    sheet: usize,
+    range: ResolvedRange,
+) -> Result<(f64, usize), ErrorKind> {
+    if !range_in_bounds_on_sheet(grid, sheet, range) {
+        return Err(ErrorKind::Ref);
+    }
+    let mut sum = 0.0;
+    let mut count = 0usize;
+    for col in range.col_start..=range.col_end {
+        if let Some(slice) = grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end) {
+            let (s, c) = simd::sum_count_ignore_nan_f64(slice);
+            sum += s;
+            count += c;
+        } else {
+            for row in range.row_start..=range.row_end {
+                match grid.get_value_on_sheet(sheet, CellCoord { row, col }) {
+                    Value::Number(v) => {
+                        sum += v;
+                        count += 1;
+                    }
+                    Value::Error(e) => return Err(e),
+                    // Ignore non-numeric values in references.
+                    Value::Bool(_)
+                    | Value::Text(_)
+                    | Value::Empty
+                    | Value::Array(_)
+                    | Value::Range(_)
+                    | Value::MultiRange(_) => {}
                 }
             }
         }
@@ -3158,6 +3366,32 @@ fn count_range(grid: &dyn Grid, range: ResolvedRange) -> Result<usize, ErrorKind
     Ok(count)
 }
 
+fn count_range_on_sheet(
+    grid: &dyn Grid,
+    sheet: usize,
+    range: ResolvedRange,
+) -> Result<usize, ErrorKind> {
+    if !range_in_bounds_on_sheet(grid, sheet, range) {
+        return Err(ErrorKind::Ref);
+    }
+    let mut count = 0usize;
+    for col in range.col_start..=range.col_end {
+        if let Some(slice) = grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end) {
+            count += simd::count_ignore_nan_f64(slice);
+        } else {
+            for row in range.row_start..=range.row_end {
+                if matches!(
+                    grid.get_value_on_sheet(sheet, CellCoord { row, col }),
+                    Value::Number(_)
+                ) {
+                    count += 1
+                }
+            }
+        }
+    }
+    Ok(count)
+}
+
 fn min_range(grid: &dyn Grid, range: ResolvedRange) -> Result<Option<f64>, ErrorKind> {
     if !range_in_bounds(grid, range) {
         return Err(ErrorKind::Ref);
@@ -3178,7 +3412,8 @@ fn min_range(grid: &dyn Grid, range: ResolvedRange) -> Result<Option<f64>, Error
                     | Value::Text(_)
                     | Value::Empty
                     | Value::Array(_)
-                    | Value::Range(_) => {}
+                    | Value::Range(_)
+                    | Value::MultiRange(_) => {}
                 }
             }
             if let Some((_, _, err)) = best_error {
@@ -3202,11 +3437,49 @@ fn min_range(grid: &dyn Grid, range: ResolvedRange) -> Result<Option<f64>, Error
                     | Value::Text(_)
                     | Value::Empty
                     | Value::Array(_)
-                    | Value::Range(_) => {}
+                    | Value::Range(_)
+                    | Value::MultiRange(_) => {}
                 }
             }
             m
         };
+        if let Some(m) = col_min {
+            out = Some(out.map_or(m, |prev| prev.min(m)));
+        }
+    }
+    Ok(out)
+}
+
+fn min_range_on_sheet(
+    grid: &dyn Grid,
+    sheet: usize,
+    range: ResolvedRange,
+) -> Result<Option<f64>, ErrorKind> {
+    if !range_in_bounds_on_sheet(grid, sheet, range) {
+        return Err(ErrorKind::Ref);
+    }
+    let mut out: Option<f64> = None;
+    for col in range.col_start..=range.col_end {
+        let col_min =
+            if let Some(slice) = grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end)
+            {
+                simd::min_ignore_nan_f64(slice)
+            } else {
+                let mut m: Option<f64> = None;
+                for row in range.row_start..=range.row_end {
+                    match grid.get_value_on_sheet(sheet, CellCoord { row, col }) {
+                        Value::Number(v) => m = Some(m.map_or(v, |prev| prev.min(v))),
+                        Value::Error(e) => return Err(e),
+                        Value::Bool(_)
+                        | Value::Text(_)
+                        | Value::Empty
+                        | Value::Array(_)
+                        | Value::Range(_)
+                        | Value::MultiRange(_) => {}
+                    }
+                }
+                m
+            };
         if let Some(m) = col_min {
             out = Some(out.map_or(m, |prev| prev.min(m)));
         }
@@ -3234,7 +3507,8 @@ fn max_range(grid: &dyn Grid, range: ResolvedRange) -> Result<Option<f64>, Error
                     | Value::Text(_)
                     | Value::Empty
                     | Value::Array(_)
-                    | Value::Range(_) => {}
+                    | Value::Range(_)
+                    | Value::MultiRange(_) => {}
                 }
             }
             if let Some((_, _, err)) = best_error {
@@ -3258,11 +3532,49 @@ fn max_range(grid: &dyn Grid, range: ResolvedRange) -> Result<Option<f64>, Error
                     | Value::Text(_)
                     | Value::Empty
                     | Value::Array(_)
-                    | Value::Range(_) => {}
+                    | Value::Range(_)
+                    | Value::MultiRange(_) => {}
                 }
             }
             m
         };
+        if let Some(m) = col_max {
+            out = Some(out.map_or(m, |prev| prev.max(m)));
+        }
+    }
+    Ok(out)
+}
+
+fn max_range_on_sheet(
+    grid: &dyn Grid,
+    sheet: usize,
+    range: ResolvedRange,
+) -> Result<Option<f64>, ErrorKind> {
+    if !range_in_bounds_on_sheet(grid, sheet, range) {
+        return Err(ErrorKind::Ref);
+    }
+    let mut out: Option<f64> = None;
+    for col in range.col_start..=range.col_end {
+        let col_max =
+            if let Some(slice) = grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end)
+            {
+                simd::max_ignore_nan_f64(slice)
+            } else {
+                let mut m: Option<f64> = None;
+                for row in range.row_start..=range.row_end {
+                    match grid.get_value_on_sheet(sheet, CellCoord { row, col }) {
+                        Value::Number(v) => m = Some(m.map_or(v, |prev| prev.max(v))),
+                        Value::Error(e) => return Err(e),
+                        Value::Bool(_)
+                        | Value::Text(_)
+                        | Value::Empty
+                        | Value::Array(_)
+                        | Value::Range(_)
+                        | Value::MultiRange(_) => {}
+                    }
+                }
+                m
+            };
         if let Some(m) = col_max {
             out = Some(out.map_or(m, |prev| prev.max(m)));
         }
@@ -3325,6 +3637,36 @@ fn count_if_range(
     Ok(count)
 }
 
+fn count_if_range_on_sheet(
+    grid: &dyn Grid,
+    sheet: usize,
+    range: ResolvedRange,
+    criteria: NumericCriteria,
+) -> Result<usize, ErrorKind> {
+    if !range_in_bounds_on_sheet(grid, sheet, range) {
+        return Err(ErrorKind::Ref);
+    }
+    let mut count = 0usize;
+    for col in range.col_start..=range.col_end {
+        if let Some(slice) =
+            grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end)
+        {
+            count += simd::count_if_blank_as_zero_f64(slice, criteria);
+        } else {
+            for row in range.row_start..=range.row_end {
+                if let Some(v) = coerce_countif_value_to_number(
+                    grid.get_value_on_sheet(sheet, CellCoord { row, col }),
+                ) {
+                    if matches_numeric_criteria(v, criteria) {
+                        count += 1;
+                    }
+                }
+            }
+        }
+    }
+    Ok(count)
+}
+
 fn coerce_sumproduct_number(v: Value) -> Result<f64, ErrorKind> {
     match v {
         Value::Number(n) => Ok(n),
@@ -3337,7 +3679,7 @@ fn coerce_sumproduct_number(v: Value) -> Result<f64, ErrorKind> {
         },
         Value::Empty => Ok(0.0),
         Value::Error(e) => Err(e),
-        Value::Array(_) | Value::Range(_) => Err(ErrorKind::Value),
+        Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => Err(ErrorKind::Value),
     }
 }
 
