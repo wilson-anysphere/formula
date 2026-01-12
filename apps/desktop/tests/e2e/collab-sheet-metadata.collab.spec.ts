@@ -118,23 +118,31 @@ test.describe("collaboration: sheet metadata", () => {
       // via the shared session.sheets schema (this exercises CollabWorkbookSheetStore write-backs).
       //
       // Hide Sheet2.
-      await pageA.getByTestId("sheet-tab-Sheet2").click({ button: "right" });
+      const sheet2TabA = pageA.getByTestId("sheet-tab-Sheet2");
+      await sheet2TabA.focus();
+      await expect(sheet2TabA).toBeFocused();
+      await pageA.keyboard.press("Shift+F10");
       const menuA = pageA.getByTestId("sheet-tab-context-menu");
       await expect(menuA).toBeVisible();
-      await menuA.getByRole("button", { name: "Hide" }).click();
+      await menuA.getByRole("button", { name: "Hide", exact: true }).click();
       await expect(pageA.locator('[data-testid="sheet-tab-Sheet2"]')).toHaveCount(0);
       await expect(pageB.locator('[data-testid="sheet-tab-Sheet2"]')).toHaveCount(0, { timeout: 30_000 });
 
       // Unhide Sheet2.
-      await pageA.getByTestId("sheet-tab-Sheet1").click({ button: "right" });
+      const sheet1TabA = pageA.getByTestId("sheet-tab-Sheet1");
+      await sheet1TabA.focus();
+      await expect(sheet1TabA).toBeFocused();
+      await pageA.keyboard.press("Shift+F10");
       await expect(menuA).toBeVisible();
-      await menuA.getByRole("button", { name: "Unhide…" }).click();
+      await menuA.getByRole("button", { name: "Unhide…", exact: true }).click();
       await menuA.getByRole("button", { name: "Sheet2" }).click();
       await expect(pageA.getByTestId("sheet-tab-Sheet2")).toBeVisible();
       await expect(pageB.getByTestId("sheet-tab-Sheet2")).toBeVisible({ timeout: 30_000 });
 
       // Set Sheet2 tab color (pick a non-red color so we can distinguish from Sheet1 later).
-      await pageA.getByTestId("sheet-tab-Sheet2").click({ button: "right" });
+      await sheet2TabA.focus();
+      await expect(sheet2TabA).toBeFocused();
+      await pageA.keyboard.press("Shift+F10");
       await expect(menuA).toBeVisible();
       await menuA.getByRole("button", { name: "Tab Color" }).click();
       await menuA.getByRole("button", { name: "Blue" }).click();
@@ -143,9 +151,8 @@ test.describe("collaboration: sheet metadata", () => {
       });
 
       // Rename Sheet2 via the UI on client A and ensure it propagates to client B.
-      const sheet2TabA = pageA.getByTestId("sheet-tab-Sheet2");
       await sheet2TabA.dblclick();
-      const renameInputA = sheet2TabA.locator("input");
+      const renameInputA = pageA.getByTestId("input-box-field");
       await expect(renameInputA).toBeVisible();
       await renameInputA.fill("Expenses");
       await renameInputA.press("Enter");
