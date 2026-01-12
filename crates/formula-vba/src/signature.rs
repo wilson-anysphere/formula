@@ -8,6 +8,7 @@ use crate::{
     OleError,
     OleFile,
 };
+
 use md5::{Digest as _, Md5};
 
 /// Identifies which `\x05DigitalSignature*` stream/storage variant a signature was loaded from.
