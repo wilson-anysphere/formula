@@ -336,9 +336,25 @@ export class FormulaBarView {
       if (!toggled) return;
 
       this.textarea.value = toggled.text;
-      this.textarea.setSelectionRange(toggled.cursorStart, toggled.cursorEnd);
+      // Prime the model with the mapped caret/selection so we can resolve the
+      // active reference token in the new text.
       this.model.updateDraft(toggled.text, toggled.cursorStart, toggled.cursorEnd);
-      this.#selectedReferenceIndex = this.#inferSelectedReferenceIndex(toggled.cursorStart, toggled.cursorEnd);
+
+      // Excel UX: after toggling, keep the full reference token selected so repeated
+      // F4 presses continue cycling the same reference.
+      const activeIndex = this.model.activeReferenceIndex();
+      const active = activeIndex == null ? null : this.model.coloredReferences()[activeIndex] ?? null;
+
+      if (active && active.start !== active.end) {
+        this.textarea.setSelectionRange(active.start, active.end);
+        this.model.updateDraft(toggled.text, active.start, active.end);
+        this.#selectedReferenceIndex = this.#inferSelectedReferenceIndex(active.start, active.end);
+      } else {
+        // Fallback: preserve the mapped cursor positions from the toggle helper.
+        this.textarea.setSelectionRange(toggled.cursorStart, toggled.cursorEnd);
+        this.#selectedReferenceIndex = this.#inferSelectedReferenceIndex(toggled.cursorStart, toggled.cursorEnd);
+      }
+
       this.#render({ preserveTextareaValue: true });
       this.#emitOverlays();
       return;
