@@ -48,5 +48,26 @@ describe("CanvasGridRenderer.applyAxisSizeOverrides", () => {
     expect(renderer.getRowHeight(1)).toBe(10);
     expect(renderer.getRowHeight(2)).toBe(35);
   });
-});
 
+  it("does nothing when applying the same overrides again (no extra invalidation)", () => {
+    const provider: CellProvider = { getCell: () => null };
+    const renderer = new CanvasGridRenderer({ provider, rowCount: 100, colCount: 100 });
+
+    const requestRenderSpy = vi.spyOn(renderer, "requestRender");
+
+    const rows = new Map<number, number>([
+      [1, 30],
+      [5, 45]
+    ]);
+    const cols = new Map<number, number>([
+      [2, 120],
+      [4, 80]
+    ]);
+
+    renderer.applyAxisSizeOverrides({ rows, cols }, { resetUnspecified: true });
+    renderer.applyAxisSizeOverrides({ rows, cols }, { resetUnspecified: true });
+
+    // The second call should be a no-op and not schedule another frame.
+    expect(requestRenderSpy).toHaveBeenCalledTimes(1);
+  });
+});
