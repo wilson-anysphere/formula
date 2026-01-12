@@ -7,8 +7,8 @@ use crate::{
     contents_hash::content_normalized_data,
     DigestAlg,
     normalized_data::forms_normalized_data,
-    OleError,
-    OleFile,
+    project_digest::DigestAlg,
+    OleError, OleFile,
 };
 
 use md5::{Digest as _, Md5};
