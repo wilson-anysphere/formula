@@ -645,6 +645,9 @@ Rust implementation:
 - Tauri commands: `apps/desktop/src-tauri/src/clipboard/mod.rs` (`clipboard_read`, `clipboard_write`)
 - Legacy clipboard commands (fallback path / main-thread bridging on macOS): `apps/desktop/src-tauri/src/commands.rs` (`read_clipboard`, `write_clipboard`)
 - Platform backends: `apps/desktop/src-tauri/src/clipboard/platform/*` (delegates into OS-specific modules like `clipboard/macos.rs`)
+- Windows helpers:
+  - CF_HTML encode/decode for the `"HTML Format"` clipboard format: `apps/desktop/src-tauri/src/clipboard/cf_html.rs`
+  - PNG ↔ DIBV5 conversion for image clipboard interop: `apps/desktop/src-tauri/src/clipboard/windows_dib.rs`
 - Linux clipboard fallback heuristics (X11 `PRIMARY` vs `CLIPBOARD`): `apps/desktop/src-tauri/src/clipboard_fallback.rs`
 
 Provider selection:
