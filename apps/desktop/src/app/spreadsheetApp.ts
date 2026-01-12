@@ -8588,26 +8588,29 @@ export class SpreadsheetApp {
 
       if (row === undefined || col === undefined) continue;
 
-      if (row >= 0 && col >= 0 && col < COMPUTED_COORD_COL_STRIDE) {
-        if (sheetId !== lastSheetId) {
-          lastSheetId = sheetId;
-          lastSheetCache = this.computedValuesByCoord.get(sheetId) ?? null;
-        }
+      // Only cache within the supported coordinate encoding range (Excel-style columns).
+      if (row < 0 || col < 0 || col >= COMPUTED_COORD_COL_STRIDE) continue;
 
-        let sheetCache = lastSheetCache;
-        if (!sheetCache) {
-          sheetCache = new Map();
-          this.computedValuesByCoord.set(sheetId, sheetCache);
-          lastSheetCache = sheetCache;
-          if (this.lastComputedValuesSheetId === sheetId) {
-            this.lastComputedValuesSheetCache = sheetCache;
-          }
-        }
-
-        const key = row * COMPUTED_COORD_COL_STRIDE + col;
-        sheetCache.set(key, value);
+      if (sheetId !== lastSheetId) {
+        lastSheetId = sheetId;
+        lastSheetCache = this.computedValuesByCoord.get(sheetId) ?? null;
       }
 
+      let sheetCache = lastSheetCache;
+      if (!sheetCache) {
+        sheetCache = new Map();
+        this.computedValuesByCoord.set(sheetId, sheetCache);
+        lastSheetCache = sheetCache;
+        if (this.lastComputedValuesSheetId === sheetId) {
+          this.lastComputedValuesSheetCache = sheetCache;
+        }
+      }
+
+      const key = row * COMPUTED_COORD_COL_STRIDE + col;
+      const prev = sheetCache.get(key);
+      if (prev === value) continue;
+
+      sheetCache.set(key, value);
       updated = true;
 
       if (shouldInvalidate && sheetId === this.sheetId) {
@@ -8616,7 +8619,7 @@ export class SpreadsheetApp {
         // trigger massive provider invalidations.
         const maxDocRows = this.limits.maxRows;
         const maxDocCols = this.limits.maxCols;
-        if (row >= 0 && col >= 0 && row < maxDocRows && col < maxDocCols) {
+        if (row < maxDocRows && col < maxDocCols) {
           sawActiveSheet = true;
           minRow = Math.min(minRow, row);
           maxRow = Math.max(maxRow, row);
