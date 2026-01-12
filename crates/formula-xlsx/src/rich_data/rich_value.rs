@@ -109,8 +109,14 @@ pub fn parse_rich_values_xml(xml_bytes: &[u8]) -> Result<RichValues, XlsxError> 
         .descendants()
         .filter(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("rv"))
     {
-        let type_id =
-            attr_local(&rv, &["t", "type", "id"]).and_then(|v| v.trim().parse::<u32>().ok());
+        // Rich value instances typically use `t`/`type` to reference a type definition from
+        // `richValueTypes.xml`.
+        //
+        // Some producers also use `id`/`idx` to assign a *global rich value index* (used when the
+        // rich value store is split across multiple `richValue*.xml` parts). Do not treat those as
+        // type IDs.
+        let type_id = attr_local(&rv, &["t", "type", "typeId", "type_id"])
+            .and_then(|v| v.trim().parse::<u32>().ok());
         let structure_id = attr_local(&rv, &["s", "structure", "structureId", "structure_id"]);
 
         let mut fields = Vec::new();
@@ -202,6 +208,10 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::parse_rich_value_relationship_indices;
+    use super::parse_rich_values_xml;
+    use super::RichValueFieldValue;
+    use super::RichValueInstance;
+    use super::RichValues;
 
     #[test]
     fn parses_kind_rel_values() {
@@ -253,5 +263,90 @@ mod tests {
 
         let parsed = parse_rich_value_relationship_indices(xml.as_bytes()).expect("parse");
         assert_eq!(parsed, vec![None, Some(12)]);
+    }
+
+    #[test]
+    fn rich_values_xml_parses_fields_in_document_order() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rd:rvData xmlns:rd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <rd:values>
+    <rd:wrapper>
+      <rd:rv t="7" s="s_image">
+        <rd:v kind="rel">12</rd:v>
+        <rd:v kind="string">Alt</rd:v>
+      </rd:rv>
+    </rd:wrapper>
+  </rd:values>
+</rd:rvData>"#;
+
+        let parsed = parse_rich_values_xml(xml.as_bytes()).expect("parse");
+        assert_eq!(
+            parsed,
+            RichValues {
+                values: vec![RichValueInstance {
+                    type_id: Some(7),
+                    structure_id: Some("s_image".to_string()),
+                    fields: vec![
+                        RichValueFieldValue {
+                            kind: Some("rel".to_string()),
+                            value: Some("12".to_string()),
+                        },
+                        RichValueFieldValue {
+                            kind: Some("string".to_string()),
+                            value: Some("Alt".to_string()),
+                        },
+                    ],
+                }],
+            }
+        );
+    }
+
+    #[test]
+    fn rich_values_xml_does_not_treat_id_as_type_id() {
+        // Some producers assign a global rich value index via `id`/`idx`. Ensure we don't parse it
+        // as the type id.
+        let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <values>
+    <rv id="10">
+      <v kind="string">Hello</v>
+    </rv>
+    <rv id="11" t="2">
+      <v kind="string">World</v>
+    </rv>
+  </values>
+</rvData>"#;
+
+        let parsed = parse_rich_values_xml(xml.as_bytes()).expect("parse");
+        assert_eq!(parsed.values.len(), 2);
+        assert_eq!(parsed.values[0].type_id, None);
+        assert_eq!(parsed.values[1].type_id, Some(2));
+    }
+
+    #[test]
+    fn rich_values_xml_ignores_nested_rv_fields() {
+        // Ensure `<v>` values inside nested `<rv>` blocks are not attributed to the outer `<rv>`.
+        let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <values>
+    <rv t="1">
+      <wrapper>
+        <rv t="2">
+          <v kind="string">inner</v>
+        </rv>
+      </wrapper>
+      <v kind="string">outer</v>
+    </rv>
+  </values>
+</rvData>"#;
+
+        let parsed = parse_rich_values_xml(xml.as_bytes()).expect("parse");
+        assert_eq!(
+            parsed.values[0].fields,
+            vec![RichValueFieldValue {
+                kind: Some("string".to_string()),
+                value: Some("outer".to_string())
+            }]
+        );
     }
 }
