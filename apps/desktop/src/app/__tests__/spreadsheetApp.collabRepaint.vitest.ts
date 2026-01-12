@@ -150,6 +150,30 @@ describe("SpreadsheetApp collab repaint", () => {
     root.remove();
   });
 
+  it("schedules a repaint when pivot-driven updates arrive (legacy grid)", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    expect(app.getGridMode()).toBe("legacy");
+
+    const refreshSpy = vi.spyOn(app, "refresh");
+
+    const doc = app.getDocument();
+    const sheetId = app.getCurrentSheetId();
+
+    doc.setCellValue(sheetId, { row: 0, col: 0 }, "Pivot Result", { source: "pivot" });
+
+    expect(refreshSpy).toHaveBeenCalledWith("scroll");
+
+    app.destroy();
+    root.remove();
+  });
+
   it("keeps the status bar in sync when a remote edit changes an active cell dependency", () => {
     const root = createRoot();
     const status = {

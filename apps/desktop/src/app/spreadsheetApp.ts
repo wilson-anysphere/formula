@@ -1488,7 +1488,8 @@ export class SpreadsheetApp {
     // deltas so collaboration never appears "stuck" until the next scroll/input event.
     this.externalRepaintUnsubscribe = this.document.on("change", (payload: any) => {
       const source = typeof payload?.source === "string" ? payload.source : "";
-      const isExternalSource = source === "collab" || source === "backend" || source === "python" || source === "macro";
+      const isExternalSource =
+        source === "collab" || source === "backend" || source === "python" || source === "macro" || source === "pivot";
       if (!isExternalSource) return;
       // Shared-grid mode repaints via CanvasGridRenderer/provider invalidations; avoid scheduling
       // redundant SpreadsheetApp refreshes (which mainly exist for the legacy renderer).
