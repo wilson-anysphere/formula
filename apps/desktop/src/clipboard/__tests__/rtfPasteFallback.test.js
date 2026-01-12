@@ -52,3 +52,11 @@ test("clipboard RTF table fallback treats \\tab/\\line inside cells as whitespac
   assert.equal(grid[0][0].value, "A B C");
   assert.equal(grid[0][1].value, "D");
 });
+
+test("RTF fallback preserves literal leading spaces after control word delimiters", () => {
+  // Two spaces after \pard: first is the control-word delimiter, second is literal content.
+  const rtf = "{\\rtf1\\ansi\\deff0\\uc1\\pard  A\\par}";
+  const grid = parseClipboardContentToCellGrid({ rtf });
+  assert.ok(grid);
+  assert.equal(grid[0][0].value, " A");
+});

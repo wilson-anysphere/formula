@@ -563,10 +563,20 @@ export function extractPlainTextFromRtf(rtf) {
 
     const param = numStr ? sign * Number.parseInt(numStr, 10) : null;
 
-    // A whitespace sequence following a control word is a delimiter and should be consumed.
-    // RTF payloads often include newlines/indentation for readability; treat these as syntax,
-    // not literal text.
-    while (j < len && (rtf[j] === " " || rtf[j] === "\r" || rtf[j] === "\n")) j += 1;
+    // A control word is terminated either by a space delimiter or by any non-alphanumeric
+    // character. The delimiter space is not literal text and should be consumed.
+    //
+    // RTF clipboard payloads are also frequently pretty-printed with newlines + indentation.
+    // Treat newline + subsequent indentation as delimiter whitespace (so formatting spaces
+    // don't leak into extracted cell values), but preserve multiple literal spaces when
+    // they appear directly after the control word (Excel can encode leading spaces as
+    // `\word  X`, where the first space is the delimiter and the second is literal).
+    if (rtf[j] === " ") {
+      j += 1;
+    } else if (rtf[j] === "\r" || rtf[j] === "\n") {
+      while (j < len && (rtf[j] === "\r" || rtf[j] === "\n")) j += 1;
+      while (j < len && (rtf[j] === " " || rtf[j] === "\t")) j += 1;
+    }
 
     // Some destinations should be skipped entirely (font tables, embedded images, etc).
     if (atStart) {
