@@ -406,6 +406,15 @@ impl Default for Engine {
 }
 
 impl Engine {
+    /// Create a new in-memory engine instance backed by an empty workbook.
+    ///
+    /// # Calculation mode
+    ///
+    /// The engine defaults to **manual** calculation mode to preserve historical behavior (and so
+    /// formula evaluation happens when callers explicitly request it via `recalculate_*`).
+    ///
+    /// To opt into Excel-like automatic calculation semantics, set
+    /// [`CalcSettings::calculation_mode`] via [`Engine::set_calc_settings`].
     pub fn new() -> Self {
         Self {
             workbook: Workbook::default(),
