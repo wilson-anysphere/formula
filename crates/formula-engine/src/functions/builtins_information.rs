@@ -282,7 +282,6 @@ fn n_value(v: &Value) -> Value {
         Value::Reference(_)
         | Value::ReferenceUnion(_)
         | Value::Array(_)
-        | Value::Record(_)
         | Value::Lambda(_)
         | Value::Spill { .. } => Value::Error(ErrorKind::Value),
     }
@@ -318,7 +317,6 @@ fn t_value(v: &Value) -> Value {
         | Value::Reference(_)
         | Value::ReferenceUnion(_)
         | Value::Array(_)
-        | Value::Record(_)
         | Value::Lambda(_)
         | Value::Spill { .. } => Value::Text(String::new()),
     }

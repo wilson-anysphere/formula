@@ -81,7 +81,6 @@ fn collect_npv_values_from_arg(
                         | Value::Record(_)
                         | Value::Blank
                         | Value::Array(_)
-                        | Value::Record(_)
                         | Value::Spill { .. }
                         | Value::Reference(_)
                         | Value::ReferenceUnion(_) => out.push(0.0),
@@ -108,7 +107,6 @@ fn collect_npv_values_from_arg(
                     | Value::Record(_)
                     | Value::Blank
                     | Value::Array(_)
-                    | Value::Record(_)
                     | Value::Spill { .. }
                     | Value::Reference(_)
                     | Value::ReferenceUnion(_) => out.push(0.0),
@@ -133,7 +131,6 @@ fn collect_npv_values_from_arg(
                         | Value::Record(_)
                         | Value::Blank
                         | Value::Array(_)
-                        | Value::Record(_)
                         | Value::Spill { .. }
                         | Value::Reference(_)
                         | Value::ReferenceUnion(_) => out.push(0.0),
@@ -157,7 +154,6 @@ fn collect_irr_values_from_arg(
             Value::Error(e) => Err(e),
             Value::Number(n) => Ok(vec![n]),
             Value::Bool(_) | Value::Text(_) | Value::Entity(_) | Value::Record(_) | Value::Blank => Ok(vec![0.0]),
-            Value::Bool(_) | Value::Text(_) | Value::Entity(_) | Value::Record(_) | Value::Blank => Ok(vec![0.0]),
             Value::Lambda(_) => Err(ErrorKind::Value),
             Value::Reference(_) | Value::ReferenceUnion(_) => Err(ErrorKind::Value),
             Value::Array(arr) => {
@@ -173,7 +169,6 @@ fn collect_irr_values_from_arg(
                         | Value::Record(_)
                         | Value::Blank
                         | Value::Array(_)
-                        | Value::Record(_)
                         | Value::Spill { .. }
                         | Value::Reference(_)
                         | Value::ReferenceUnion(_) => out.push(0.0),
@@ -199,7 +194,6 @@ fn collect_irr_values_from_arg(
                     | Value::Record(_)
                     | Value::Blank
                     | Value::Array(_)
-                    | Value::Record(_)
                     | Value::Spill { .. }
                     | Value::Reference(_)
                     | Value::ReferenceUnion(_) => out.push(0.0),
@@ -224,7 +218,6 @@ fn collect_irr_values_from_arg(
                         | Value::Record(_)
                         | Value::Blank
                         | Value::Array(_)
-                        | Value::Record(_)
                         | Value::Spill { .. }
                         | Value::Reference(_)
                         | Value::ReferenceUnion(_) => out.push(0.0),

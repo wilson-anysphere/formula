@@ -2978,7 +2978,6 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                                 | Value::Record(_)
                                 | Value::Entity(_)
                                 | Value::Array(_)
-                                | Value::Record(_)
                                 | Value::Lambda(_)
                                 | Value::Spill { .. }
                                 | Value::Reference(_)
@@ -3002,7 +3001,6 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                                 | Value::Record(_)
                                 | Value::Entity(_)
                                 | Value::Array(_)
-                                | Value::Record(_)
                                 | Value::Lambda(_)
                                 | Value::Spill { .. }
                                 | Value::Reference(_)
@@ -3408,7 +3406,6 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
             | Value::Record(_)
             | Value::Lambda(_)
             | Value::Spill { .. }
-            | Value::Record(_)
             | Value::Entity(_)
             | Value::Reference(_)
             | Value::ReferenceUnion(_)
@@ -3418,7 +3415,6 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
             | Value::Record(_)
             | Value::Lambda(_)
             | Value::Spill { .. }
-            | Value::Record(_)
             | Value::Entity(_)
             | Value::Reference(_)
             | Value::ReferenceUnion(_)
@@ -3518,8 +3514,6 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
         | (Value::Reference(_), _)
         | (_, Value::Reference(_))
         | (Value::ReferenceUnion(_), _)
-        | (_, Value::ReferenceUnion(_)) => Ordering::Equal,
-        _ => Ordering::Equal,
         | (_, Value::ReferenceUnion(_)) => Ordering::Equal,
         _ => Ordering::Equal,
     })

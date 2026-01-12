@@ -388,7 +388,6 @@ pub(super) fn sort_key(value: &Value) -> SortKeyValue {
         Value::Reference(_)
         | Value::ReferenceUnion(_)
         | Value::Array(_)
-        | Value::Record(_)
         | Value::Lambda(_)
         | Value::Spill { .. } => SortKeyValue::Error(ErrorKind::Value),
     }
@@ -491,7 +490,6 @@ fn unique_key_cell(value: &Value) -> UniqueKeyCell {
         Value::Reference(_)
         | Value::ReferenceUnion(_)
         | Value::Array(_)
-        | Value::Record(_)
         | Value::Lambda(_)
         | Value::Spill { .. } => UniqueKeyCell::Error(ErrorKind::Value),
     }

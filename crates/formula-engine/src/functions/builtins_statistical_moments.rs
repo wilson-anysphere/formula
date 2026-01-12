@@ -41,7 +41,6 @@ fn push_numbers_from_scalar(
                     | Value::Record(_)
                     | Value::Blank
                     | Value::Array(_)
-                    | Value::Record(_)
                     | Value::Spill { .. }
                     | Value::Reference(_)
                     | Value::ReferenceUnion(_) => {}
@@ -51,7 +50,6 @@ fn push_numbers_from_scalar(
         }
         Value::Reference(_)
         | Value::ReferenceUnion(_)
-        | Value::Record(_)
         | Value::Lambda(_)
         | Value::Spill { .. } => Err(ErrorKind::Value),
     }
@@ -74,7 +72,6 @@ fn push_numbers_from_reference(
             | Value::Record(_)
             | Value::Blank
             | Value::Array(_)
-            | Value::Record(_)
             | Value::Spill { .. }
             | Value::Reference(_)
             | Value::ReferenceUnion(_) => {}
@@ -105,7 +102,6 @@ fn push_numbers_from_reference_union(
                 | Value::Record(_)
                 | Value::Blank
                 | Value::Array(_)
-                | Value::Record(_)
                 | Value::Spill { .. }
                 | Value::Reference(_)
                 | Value::ReferenceUnion(_) => {}

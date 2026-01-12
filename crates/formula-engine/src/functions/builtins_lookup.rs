@@ -1972,7 +1972,6 @@ fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
             Value::Reference(_)
             | Value::ReferenceUnion(_)
             | Value::Array(_)
-            | Value::Record(_)
             | Value::Lambda(_)
             | Value::Spill { .. } => None,
         }
