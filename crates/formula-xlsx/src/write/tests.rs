@@ -2,6 +2,7 @@ use super::*;
 
 use quick_xml::events::Event;
 use quick_xml::Reader;
+use std::collections::BTreeMap;
 use std::io::Read;
 use zip::ZipArchive;
 
@@ -75,4 +76,47 @@ fn writes_spreadsheetml_formula_text_without_leading_equals() {
             "SpreadsheetML <f> text must not start with '=' (got {f:?})"
         );
     }
+}
+
+#[test]
+fn ensure_content_types_default_inserts_png() {
+    let mut parts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    let minimal = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">"#,
+        r#"<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>"#,
+        r#"<Default Extension="xml" ContentType="application/xml"/>"#,
+        r#"</Types>"#
+    );
+    parts.insert("[Content_Types].xml".to_string(), minimal.as_bytes().to_vec());
+
+    ensure_content_types_default(&mut parts, "png", "image/png").expect("insert png default");
+
+    let xml = std::str::from_utf8(parts.get("[Content_Types].xml").unwrap()).unwrap();
+    let entry = r#"<Default Extension="png" ContentType="image/png"/>"#;
+    assert!(xml.contains(entry));
+    assert_eq!(xml.matches(r#"Extension="png""#).count(), 1);
+
+    let idx_entry = xml.find(entry).unwrap();
+    let idx_close = xml.rfind("</Types>").unwrap();
+    assert!(idx_entry < idx_close);
+}
+
+#[test]
+fn ensure_content_types_default_idempotent() {
+    let mut parts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    let minimal = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">"#,
+        r#"<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>"#,
+        r#"<Default Extension="xml" ContentType="application/xml"/>"#,
+        r#"</Types>"#
+    );
+    parts.insert("[Content_Types].xml".to_string(), minimal.as_bytes().to_vec());
+
+    ensure_content_types_default(&mut parts, "png", "image/png").expect("first insert");
+    let once = parts.get("[Content_Types].xml").cloned().unwrap();
+    ensure_content_types_default(&mut parts, "png", "image/png").expect("second insert");
+    let twice = parts.get("[Content_Types].xml").cloned().unwrap();
+    assert_eq!(once, twice);
 }

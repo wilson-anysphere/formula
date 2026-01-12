@@ -3605,6 +3605,33 @@ fn ensure_content_types_override(
     Ok(())
 }
 
+#[allow(dead_code)]
+fn ensure_content_types_default(
+    parts: &mut BTreeMap<String, Vec<u8>>,
+    ext: &str,
+    content_type: &str,
+) -> Result<(), WriteError> {
+    let Some(existing) = parts.get("[Content_Types].xml").cloned() else {
+        // Avoid synthesizing a full file for existing packages.
+        return Ok(());
+    };
+    let mut xml = String::from_utf8(existing)
+        .map_err(|e| WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
+
+    // Match exact `Extension="{ext}"` occurrences to avoid false positives (e.g. `Extension="xpng"`).
+    if xml.contains(&format!(r#"Extension="{ext}""#)) {
+        parts.insert("[Content_Types].xml".to_string(), xml.into_bytes());
+        return Ok(());
+    }
+
+    if let Some(idx) = xml.rfind("</Types>") {
+        let insert = format!(r#"<Default Extension="{ext}" ContentType="{content_type}"/>"#);
+        xml.insert_str(idx, &insert);
+    }
+    parts.insert("[Content_Types].xml".to_string(), xml.into_bytes());
+    Ok(())
+}
+
 fn relationship_target_by_type(rels_xml: &[u8], rel_type: &str) -> Result<Option<String>, WriteError> {
     let mut reader = Reader::from_reader(rels_xml);
     reader.config_mut().trim_text(false);
