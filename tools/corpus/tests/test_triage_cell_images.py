@@ -208,7 +208,20 @@ class TriageCellImagesTests(unittest.TestCase):
         self.assertTrue(report["features"]["has_cell_images"])
         self.assertIn("cell_images", report)
 
-        self.assertEqual(report["cell_images"]["part_name"], "xl/cellimages1.xml")
+        cell_images = report["cell_images"]
+        self.assertEqual(cell_images["part_name"], "xl/cellimages1.xml")
+        self.assertEqual(cell_images["content_type"], "application/vnd.ms-excel.cellimages+xml")
+        self.assertEqual(cell_images["workbook_rel_type"], "http://example.com/relationships/cellImages")
+        self.assertEqual(cell_images["root_local_name"], "cellImages")
+        self.assertEqual(
+            cell_images["root_namespace"],
+            "http://schemas.microsoft.com/office/spreadsheetml/2024/cellimages",
+        )
+        self.assertEqual(cell_images["embed_rids_count"], 1)
+        self.assertEqual(
+            cell_images["rels_types"],
+            ["http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"],
+        )
 
     def test_triage_counts_embed_rids_outside_blips(self) -> None:
         import tools.corpus.triage as triage_mod
