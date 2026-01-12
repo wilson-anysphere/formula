@@ -159,6 +159,9 @@ describe("builtin keybinding catalog", () => {
     expect(getPrimaryCommandKeybindingDisplay("edit.insertDate", otherIndex)).toBe("Ctrl+;");
     expect(getPrimaryCommandKeybindingDisplay("edit.insertTime", otherIndex)).toBe("Ctrl+Shift+;");
     expect(getPrimaryCommandKeybindingDisplay("edit.autoSum", otherIndex)).toBe("Alt+=");
+    expect(getPrimaryCommandKeybindingDisplay("format.numberFormat.currency", otherIndex)).toBe("Ctrl+Shift+$");
+    expect(getPrimaryCommandKeybindingDisplay("format.numberFormat.percent", otherIndex)).toBe("Ctrl+Shift+%");
+    expect(getPrimaryCommandKeybindingDisplay("format.numberFormat.date", otherIndex)).toBe("Ctrl+Shift+#");
 
     const macIndex = buildCommandKeybindingDisplayIndex({ platform: "mac", contributed: [], builtin: builtinKeybindings });
     expect(getPrimaryCommandKeybindingDisplay("workbench.showCommandPalette", macIndex)).toBe("⇧⌘P");
@@ -188,5 +191,8 @@ describe("builtin keybinding catalog", () => {
     expect(getPrimaryCommandKeybindingDisplay("edit.insertDate", macIndex)).toBe("⌘;");
     expect(getPrimaryCommandKeybindingDisplay("edit.insertTime", macIndex)).toBe("⇧⌘;");
     expect(getPrimaryCommandKeybindingDisplay("edit.autoSum", macIndex)).toBe("⌥=");
+    expect(getPrimaryCommandKeybindingDisplay("format.numberFormat.currency", macIndex)).toBe("⇧⌘$");
+    expect(getPrimaryCommandKeybindingDisplay("format.numberFormat.percent", macIndex)).toBe("⇧⌘%");
+    expect(getPrimaryCommandKeybindingDisplay("format.numberFormat.date", macIndex)).toBe("⇧⌘#");
   });
 });

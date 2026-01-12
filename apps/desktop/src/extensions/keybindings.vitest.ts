@@ -249,6 +249,18 @@ describe("keybindings", () => {
     const equal = parseKeybinding("cmd.test", "ctrl+shift+=")!;
     expect(formatKeybindingForDisplay(equal, "other")).toBe("Ctrl+Shift+=");
     expect(formatKeybindingForDisplay(equal, "mac")).toBe("⌃⇧=");
+
+    const currency = parseKeybinding("cmd.test", "ctrl+shift+$")!;
+    expect(formatKeybindingForDisplay(currency, "other")).toBe("Ctrl+Shift+$");
+    expect(formatKeybindingForDisplay(currency, "mac")).toBe("⌃⇧$");
+
+    const percent = parseKeybinding("cmd.test", "ctrl+shift+%")!;
+    expect(formatKeybindingForDisplay(percent, "other")).toBe("Ctrl+Shift+%");
+    expect(formatKeybindingForDisplay(percent, "mac")).toBe("⌃⇧%");
+
+    const date = parseKeybinding("cmd.test", "ctrl+shift+#")!;
+    expect(formatKeybindingForDisplay(date, "other")).toBe("Ctrl+Shift+#");
+    expect(formatKeybindingForDisplay(date, "mac")).toBe("⌃⇧#");
   });
 
   it("buildCommandKeybindingDisplayIndex returns primary binding for a command", () => {
