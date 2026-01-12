@@ -213,10 +213,13 @@ fn record_name(id: u16) -> Option<&'static str> {
         0x002F => "REFERENCECONTROL",
         0x0030 => "REFERENCEEXTENDED",
         0x0033 => "REFERENCEORIGINAL",
-        0x0010 => "REFERENCETYPELIB",
 
         // ---- Module records ----
-        0x0015 => "MODULECOUNT",
+        // ProjectModules / terminators (spec-accurate `VBA/dir` layouts use these).
+        0x000F => "PROJECTMODULES (ModuleCount)",
+        0x0013 => "PROJECTCOOKIE",
+        0x0010 => "PROJECTTERMINATOR (dir stream end)",
+
         0x0019 => "MODULENAME",
         0x0047 => "MODULENAMEUNICODE",
         0x001A => "MODULESTREAMNAME",
