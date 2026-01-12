@@ -405,6 +405,40 @@ test.describe("split view", () => {
     await expect(editor).toBeHidden();
   });
 
+  test("primary in-cell edits commit on blur without stealing focus when clicking the formula bar (shared grid)", async ({
+    page,
+  }) => {
+    await gotoDesktop(page, "/?grid=shared");
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await waitForDesktopReady(page);
+    await waitForIdle(page);
+    await waitForGridCanvasesToBeSized(page, "#grid");
+
+    const primary = page.locator("#grid");
+
+    // Begin editing A1 in the primary pane, but do not press Enter.
+    await primary.click({ position: { x: 48 + 12, y: 24 + 12 } }); // A1
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+    await page.keyboard.press("h");
+    const editor = primary.locator("textarea.cell-editor");
+    await expect(editor).toBeVisible();
+    await page.keyboard.type("ello");
+    await expect(editor).toHaveValue("hello");
+
+    // Clicking the formula bar should commit the edit but keep the formula bar focused
+    // (no focus ping-pong back to the grid).
+    await page.getByTestId("formula-highlight").click();
+    const input = page.getByTestId("formula-input");
+    await expect(input).toBeVisible();
+    await expect(input).toBeFocused();
+    await waitForIdle(page);
+
+    expect(await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"))).toBe("hello");
+    await expect(editor).toBeHidden();
+    await expect(input).toBeFocused();
+  });
+
   test("secondary in-cell edits commit on blur when clicking the primary pane", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
     await page.evaluate(() => localStorage.clear());
