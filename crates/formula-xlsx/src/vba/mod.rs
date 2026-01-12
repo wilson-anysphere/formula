@@ -240,7 +240,7 @@ fn verify_vba_digital_signature_with_trust_from_parts(
 ) -> Result<Option<formula_vba::VbaDigitalSignatureTrusted>, formula_vba::SignatureError> {
     // Unlike the non-trusty helper, require that the workbook actually contains a VBA project.
     // Trust-center semantics are only meaningful in the context of `xl/vbaProject.bin`.
-    let Some(vba_project_bin) = parts.get("xl/vbaProject.bin") else {
+    let Some(vba_project_bin) = parts.get(VBA_PROJECT_BIN) else {
         return Ok(None);
     };
 
@@ -250,18 +250,10 @@ fn verify_vba_digital_signature_with_trust_from_parts(
     if let Some(signature_part_name) = signature_part_name {
         if let Some(bytes) = parts.get(&signature_part_name) {
             // Attempt to treat the part as an OLE/CFB container first (the most common format).
-            match formula_vba::verify_vba_digital_signature(bytes) {
+            match formula_vba::verify_vba_digital_signature_with_project(vba_project_bin, bytes) {
                 Ok(Some(mut sig)) => {
                     // Preserve which part we read the signature from to avoid ambiguity.
                     sig.stream_path = format!("{signature_part_name}:{}", sig.stream_path);
-
-                    // `vbaProjectSignature.bin` does not contain the full VBA project streams, so
-                    // binding must be evaluated against `xl/vbaProject.bin` when possible.
-                    sig.binding = if sig.verification == VbaSignatureVerification::SignedVerified {
-                        formula_vba::verify_vba_signature_binding(vba_project_bin, &sig.signature)
-                    } else {
-                        formula_vba::VbaSignatureBinding::Unknown
-                    };
 
                     let cert_trust = if sig.verification == VbaSignatureVerification::SignedVerified {
                         formula_vba::verify_vba_signature_certificate_trust(&sig.signature, options)
