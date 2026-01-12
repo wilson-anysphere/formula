@@ -458,11 +458,18 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
   let hasEverSynced = false;
   let currentOffline: unknown = null;
   let offlinePollTimer: number | null = null;
+  let providerPollTimer: number | null = null;
 
   const stopOfflinePoll = (): void => {
     if (offlinePollTimer == null) return;
     globalThis.clearTimeout(offlinePollTimer);
     offlinePollTimer = null;
+  };
+
+  const stopProviderPoll = (): void => {
+    if (providerPollTimer == null) return;
+    globalThis.clearTimeout(providerPollTimer);
+    providerPollTimer = null;
   };
 
   const startOfflinePoll = (offline: unknown): void => {
@@ -484,6 +491,19 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
       offlinePollTimer = globalThis.setTimeout(tick, 1000) as unknown as number;
     };
     offlinePollTimer = globalThis.setTimeout(tick, 250) as unknown as number;
+  };
+
+  const startProviderPoll = (): void => {
+    if (providerPollTimer != null) return;
+    const tick = (): void => {
+      if (abortController.signal.aborted) {
+        stopProviderPoll();
+        return;
+      }
+      render();
+      providerPollTimer = globalThis.setTimeout(tick, 1000) as unknown as number;
+    };
+    providerPollTimer = globalThis.setTimeout(tick, 1000) as unknown as number;
   };
 
   const setIndicatorText = (
@@ -523,7 +543,9 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
     if (!provider) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const anyProvider = provider as any;
-    if (typeof anyProvider.on !== "function") return;
+    // Only subscribe when we can also detach later. If `off` is unavailable, fall back
+    // to polling (see `startProviderPoll`) to avoid leaking listeners.
+    if (typeof anyProvider.on !== "function" || typeof anyProvider.off !== "function") return;
     try {
       anyProvider.on("status", onProviderStatus);
     } catch {
@@ -581,6 +603,7 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
     if (!session) {
       detachProviderListeners(currentProvider);
       stopOfflinePoll();
+      stopProviderPoll();
       currentProvider = null;
       providerStatus = null;
       providerSynced = null;
@@ -617,6 +640,7 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
     const provider = (s?.provider as unknown) ?? null;
     if (provider !== currentProvider) {
       detachProviderListeners(currentProvider);
+      stopProviderPoll();
       currentProvider = provider;
       providerStatus = null;
       providerSynced = null;
@@ -632,9 +656,17 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
 
     // No provider: offline-only/local collab session.
     if (!currentProvider) {
+      stopProviderPoll();
       setIndicatorText(`${docId} • Offline`, { mode: "collab", conn: "offline", sync: "offline", docId });
       return;
     }
+
+    // Provider exists. If it doesn't support event subscriptions, fall back to polling
+    // so the UI eventually reflects connection/sync changes.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const canSubscribe = typeof (currentProvider as any)?.on === "function" && typeof (currentProvider as any)?.off === "function";
+    if (!canSubscribe) startProviderPoll();
+    else stopProviderPoll();
 
     const synced = (() => {
       if (typeof providerSynced === "boolean") return providerSynced;
@@ -694,6 +726,7 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
     window.removeEventListener("offline", onNetworkChange);
     detachProviderListeners(currentProvider);
     stopOfflinePoll();
+    stopProviderPoll();
   });
 
   render();
