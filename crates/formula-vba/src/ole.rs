@@ -36,7 +36,11 @@ impl OleFile {
         let mut out = Vec::new();
         for entry in self.file.walk() {
             if entry.is_stream() {
-                out.push(entry.path().to_string_lossy().to_string());
+                let mut path = entry.path().to_string_lossy().to_string();
+                if let Some(stripped) = path.strip_prefix('/') {
+                    path = stripped.to_owned();
+                }
+                out.push(path);
             }
         }
         Ok(out)

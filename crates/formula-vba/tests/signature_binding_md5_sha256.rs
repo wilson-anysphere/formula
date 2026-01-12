@@ -3,9 +3,10 @@
 use std::io::{Cursor, Write};
 
 use formula_vba::{
-    compress_container, compute_vba_project_digest, verify_vba_digital_signature, DigestAlg,
-    VbaSignatureBinding, VbaSignatureVerification,
+    compress_container, content_normalized_data, verify_vba_digital_signature, VbaSignatureBinding,
+    VbaSignatureVerification,
 };
+use md5::{Digest as _, Md5};
 
 const TEST_KEY_PEM: &str = r#"-----BEGIN PRIVATE KEY-----
 MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQC8kN1a0raWt6a7
@@ -97,15 +98,16 @@ fn ms_oshared_md5_digest_bytes_even_when_signeddata_uses_sha256() {
         ("VBA/Module1", &module_container),
     ]);
 
-    let project_md5 =
-        compute_vba_project_digest(&unsigned_vba_project_bin, DigestAlg::Md5).expect("md5 digest");
+    let normalized = content_normalized_data(&unsigned_vba_project_bin).expect("ContentNormalizedData");
+    let project_md5: [u8; 16] = Md5::digest(&normalized).into();
     assert_eq!(project_md5.len(), 16, "VBA project digest must be 16-byte MD5");
 
     // ---- 2) Construct SpcIndirectDataContent with sha256 OID but MD5 digest bytes. ----
     // DigestInfo.digestAlgorithm.algorithm = sha256 (2.16.840.1.101.3.4.2.1)
     // DigestInfo.digestAlgorithm.parameters = NULL (per MS-OSHARED)
     // DigestInfo.digest = MD5(project)
-    let spc_indirect_data_content = build_spc_indirect_data_content_sha256_oid_with_md5_digest(&project_md5);
+    let spc_indirect_data_content =
+        build_spc_indirect_data_content_sha256_oid_with_md5_digest(&project_md5);
 
     // ---- 3) Produce PKCS#7 SignedData using OpenSSL (signing with SHA-256 by default). ----
     let pkey = PKey::private_key_from_pem(TEST_KEY_PEM.as_bytes()).expect("parse private key");

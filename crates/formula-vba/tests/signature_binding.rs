@@ -3,9 +3,11 @@
 use std::io::{Cursor, Write};
 
 use formula_vba::{
-    compute_vba_project_digest, verify_vba_digital_signature, verify_vba_digital_signature_bound,
-    DigestAlg, VbaProjectBindingVerification, VbaSignatureBinding, VbaSignatureVerification,
+    compress_container, content_normalized_data, verify_vba_digital_signature,
+    verify_vba_digital_signature_bound, VbaProjectBindingVerification, VbaSignatureBinding,
+    VbaSignatureVerification,
 };
+use md5::{Digest as _, Md5};
 
 const TEST_KEY_PEM: &str = r#"-----BEGIN PRIVATE KEY-----
 MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQC8kN1a0raWt6a7
@@ -98,7 +100,36 @@ fn make_pkcs7_signed_message(data: &[u8]) -> Vec<u8> {
     pkcs7.to_der().expect("pkcs7 DER")
 }
 
+fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
+    out.extend_from_slice(&id.to_le_bytes());
+    out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    out.extend_from_slice(data);
+}
+
 fn build_minimal_vba_project_bin(module1: &[u8], signature_blob: Option<&[u8]>) -> Vec<u8> {
+    // `content_normalized_data` expects a decompressed-and-parsable `VBA/dir` stream and module
+    // streams containing MS-OVBA compressed containers.
+    let module_container = compress_container(module1);
+
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        // Minimal module record group.
+        push_record(&mut out, 0x0019, b"Module1"); // MODULENAME
+
+        // MODULESTREAMNAME + reserved u16.
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"Module1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+
+        // MODULETYPE (standard)
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes());
+        // MODULETEXTOFFSET: our module stream is just the compressed container.
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
 
@@ -112,12 +143,12 @@ fn build_minimal_vba_project_bin(module1: &[u8], signature_blob: Option<&[u8]>) 
 
     {
         let mut s = ole.create_stream("VBA/dir").expect("dir stream");
-        s.write_all(b"dir-stream").expect("write dir");
+        s.write_all(&dir_container).expect("write dir");
     }
 
     {
         let mut s = ole.create_stream("VBA/Module1").expect("module stream");
-        s.write_all(module1).expect("write module");
+        s.write_all(&module_container).expect("write module");
     }
 
     if let Some(sig) = signature_blob {
@@ -215,9 +246,10 @@ fn build_spc_indirect_data_content_md5(project_digest: &[u8]) -> Vec<u8> {
 
 #[test]
 fn bound_signature_sets_binding_bound() {
-    let module1 = b"module1-bytes";
+    let module1 = b"Sub Hello()\r\nEnd Sub\r\n";
     let unsigned = build_minimal_vba_project_bin(module1, None);
-    let digest = compute_vba_project_digest(&unsigned, DigestAlg::Md5).expect("digest");
+    let normalized = content_normalized_data(&unsigned).expect("content normalized data");
+    let digest: [u8; 16] = Md5::digest(&normalized).into();
 
     let signed_content = build_spc_indirect_data_content_sha1(&digest);
     let pkcs7 = make_pkcs7_detached_signature(&signed_content);
@@ -248,9 +280,10 @@ fn bound_signature_sets_binding_bound() {
 
 #[test]
 fn tampering_project_changes_binding_but_not_pkcs7_verification() {
-    let module1 = b"module1-bytes";
+    let module1 = b"Sub Hello()\r\nEnd Sub\r\n";
     let unsigned = build_minimal_vba_project_bin(module1, None);
-    let digest = compute_vba_project_digest(&unsigned, DigestAlg::Md5).expect("digest");
+    let normalized = content_normalized_data(&unsigned).expect("content normalized data");
+    let digest: [u8; 16] = Md5::digest(&normalized).into();
 
     let signed_content = build_spc_indirect_data_content_sha1(&digest);
     let pkcs7 = make_pkcs7_detached_signature(&signed_content);
@@ -284,9 +317,10 @@ fn tampering_project_changes_binding_but_not_pkcs7_verification() {
 
 #[test]
 fn embedded_pkcs7_content_is_used_for_binding() {
-    let module1 = b"module1-bytes";
+    let module1 = b"Sub Hello()\r\nEnd Sub\r\n";
     let unsigned = build_minimal_vba_project_bin(module1, None);
-    let digest = compute_vba_project_digest(&unsigned, DigestAlg::Md5).expect("digest");
+    let normalized = content_normalized_data(&unsigned).expect("content normalized data");
+    let digest: [u8; 16] = Md5::digest(&normalized).into();
 
     let signed_content = build_spc_indirect_data_content_sha1(&digest);
     let pkcs7 = make_pkcs7_signed_message(&signed_content);

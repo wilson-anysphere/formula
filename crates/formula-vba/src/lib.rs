@@ -86,6 +86,8 @@ pub enum ParseError {
     Dir(#[from] DirParseError),
     #[error("missing required stream {0}")]
     MissingStream(&'static str),
+    #[error("missing required storage {0}")]
+    MissingStorage(String),
 }
 
 impl VBAProject {

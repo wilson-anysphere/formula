@@ -3,9 +3,10 @@
 use std::io::{Cursor, Write};
 
 use formula_vba::{
-    compute_vba_project_digest, verify_vba_digital_signature, DigestAlg, VbaSignatureBinding,
+    compress_container, content_normalized_data, verify_vba_digital_signature, VbaSignatureBinding,
     VbaSignatureVerification,
 };
+use md5::{Digest as _, Md5};
 
 mod signature_test_utils;
 
@@ -13,6 +14,21 @@ fn build_minimal_vba_project_bin_with_signature_streams(
     module1: &[u8],
     signature_streams: &[(&str, &[u8])],
 ) -> Vec<u8> {
+    let module_container = compress_container(module1);
+
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        push_record(&mut out, 0x0019, b"Module1"); // MODULENAME
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"Module1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name); // MODULESTREAMNAME
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes()); // MODULETYPE (standard)
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes()); // MODULETEXTOFFSET
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
 
@@ -26,12 +42,12 @@ fn build_minimal_vba_project_bin_with_signature_streams(
 
     {
         let mut s = ole.create_stream("VBA/dir").expect("dir stream");
-        s.write_all(b"dir-stream").expect("write dir");
+        s.write_all(&dir_container).expect("write dir");
     }
 
     {
         let mut s = ole.create_stream("VBA/Module1").expect("module stream");
-        s.write_all(module1).expect("write module");
+        s.write_all(&module_container).expect("write module");
     }
 
     for (path, bytes) in signature_streams {
@@ -40,6 +56,12 @@ fn build_minimal_vba_project_bin_with_signature_streams(
     }
 
     ole.into_inner().into_inner()
+}
+
+fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
+    out.extend_from_slice(&id.to_le_bytes());
+    out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    out.extend_from_slice(data);
 }
 
 fn der_len(len: usize) -> Vec<u8> {
@@ -106,11 +128,12 @@ fn build_spc_indirect_data_content_sha1(project_digest: &[u8]) -> Vec<u8> {
 
 #[test]
 fn prefers_bound_verified_signature_stream_over_unbound_verified_candidate() {
-    let module1 = b"module1-bytes";
+    let module1 = b"Sub Hello()\r\nEnd Sub\r\n";
 
     // Build an unsigned project first to compute the digest that Office would sign.
     let unsigned = build_minimal_vba_project_bin_with_signature_streams(module1, &[]);
-    let digest = compute_vba_project_digest(&unsigned, DigestAlg::Md5).expect("digest");
+    let normalized = content_normalized_data(&unsigned).expect("content normalized data");
+    let digest: [u8; 16] = Md5::digest(&normalized).into();
 
     // Create a bound signature stream (digest matches the project).
     let bound_content = build_spc_indirect_data_content_sha1(&digest);

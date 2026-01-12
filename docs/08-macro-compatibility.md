@@ -1021,14 +1021,20 @@ Important notes:
   as "is signed".
 - Signature verification includes *binding* the signature to the VBA project contents by extracting
   the signed digest (`SpcIndirectDataContent` → `DigestInfo`) and comparing it to a freshly computed
-  MS-OVBA-style project digest over the OLE streams (excluding the signature streams). This is
+  MS-OVBA-style digest:
+  - `Content Hash` (MS-OVBA §2.4.2.3), computed over `ContentNormalizedData` (normalized module
+    source and select metadata), and
+  - `Agile Content Hash` (MS-OVBA §2.4.2.4), which extends the hash transcript with
+    `FormsNormalizedData` (designer/UserForm storages).
+  
+  Per MS-OSHARED §4.3, the digest bytes embedded in the signature are always **MD5 (16 bytes)** even
+  when the `DigestInfo` algorithm OID indicates SHA-256. This binding check is
   exposed via `formula-vba` as `VbaDigitalSignature::binding`. The desktop Trust Center treats a VBA
   project as "signed" only when the PKCS#7/CMS signature verifies **and** the digest binding check
   reports `Bound`.
   - For callers that need more detail (hash algorithm OID/name, signed digest bytes, computed digest
     bytes), use `formula_vba::verify_vba_digital_signature_bound`.
-- We currently support digest algorithm OIDs SHA-1 and SHA-256 (best-effort) when verifying binding.
-  Unknown/unsupported digest OIDs are treated conservatively as unverified (`binding == Unknown`).
+- Unknown/unparseable digest structures are treated conservatively as unverified (`binding == Unknown`).
 - Binding verification is deterministic best-effort and may not match Excel/MS-OVBA for all
   real-world files yet; this policy can produce **false negatives** (a legitimately signed workbook
   treated as untrusted). We prefer false negatives over false positives for `trusted_signed_only`.
@@ -1061,7 +1067,7 @@ Common signature stream payload shapes we must handle:
 3. **Detached `content || pkcs7`**, where the stream is `signed_content_bytes` followed by a
    detached PKCS#7 signature over those bytes.
 
-How to obtain the signed digest for MS-OVBA “project digest” binding:
+How to obtain the signed digest for MS-OVBA signature binding:
 
 - Parse the PKCS#7/CMS `ContentInfo`. The `contentType` is typically `signedData`
   (`1.2.840.113549.1.7.2`).
@@ -1071,18 +1077,18 @@ How to obtain the signed digest for MS-OVBA “project digest” binding:
     as `eContent`.
 - Decode the `SpcIndirectDataContent` / `SpcIndirectDataContentV2` structure and extract its
   `messageDigest: DigestInfo`:
-  - digest algorithm (hash OID; currently SHA-1 / SHA-256 supported)
-  - digest bytes (length depends on the hash algorithm)
+  - digest algorithm (hash OID; informational for VBA signatures)
+  - digest bytes (expected to be 16-byte MD5 for VBA per MS-OSHARED §4.3)
 
 Binding (best-effort; see MS-OVBA):
 
-1. Compute the MS-OVBA-style “VBA project digest” over the project streams (excluding the signature
-   streams), using the hash algorithm indicated by the extracted `DigestInfo` (currently SHA-1 /
-   SHA-256 supported).
-2. Compare the computed digest to the `DigestInfo` digest bytes.
-3. `trusted_signed_only` is treated as satisfied only when:
-    - the PKCS#7/CMS signature verifies (`SignedVerified`), **and**
-    - the digest comparison matches (`VbaSignatureBinding::Bound`).
+1. Compute the MS-OVBA `Content Hash` = `MD5(ContentNormalizedData)` (MS-OVBA §2.4.2.3).
+2. Compute the MS-OVBA `Agile Content Hash` = `MD5(ContentNormalizedData || FormsNormalizedData)`
+   (MS-OVBA §2.4.2.4).
+3. Compare the signed `DigestInfo.digest` bytes to **either** digest.
+4. `trusted_signed_only` is treated as satisfied only when:
+     - the PKCS#7/CMS signature verifies (`SignedVerified`), **and**
+     - the digest comparison matches (`VbaSignatureBinding::Bound`).
 
 If the PKCS#7/CMS signature verifies but the digest comparison fails, the signature is treated as
 present-but-invalid for Trust Center purposes. If binding cannot be verified (`Unknown`), it is
@@ -1092,7 +1098,7 @@ For more detail, see [`vba-digital-signatures.md`](./vba-digital-signatures.md).
 
 Relevant specs:
 
-- MS-OVBA (VBA project storage + project digest): https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-ovba/
+- MS-OVBA (VBA project storage + Contents Hash / Agile Content Hash): https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-ovba/
 - MS-OFFCRYPTO (`DigSigInfoSerialized` wrapper): https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-offcrypto/
 
 ### Script Sandboxing

@@ -2,10 +2,11 @@ use thiserror::Error;
 
 use crate::{
     authenticode::extract_vba_signature_signed_digest,
-    project_digest::compute_vba_project_digest,
-    project_digest::DigestAlg,
+    contents_hash::content_normalized_data,
+    normalized_data::forms_normalized_data,
     OleError, OleFile,
 };
+use md5::{Digest as _, Md5};
 
 /// Metadata extracted from the signer certificate embedded in a VBA digital signature.
 ///
@@ -46,16 +47,18 @@ pub struct VbaDigitalSignature {
     pub signature: Vec<u8>,
     /// Verification state (best-effort).
     pub verification: VbaSignatureVerification,
-    /// Whether the signature is bound to the VBA project streams via the MS-OVBA "project digest"
-    /// mechanism.
+    /// Whether the signature is bound to the VBA project streams via the MS-OVBA digest ("Contents
+    /// Hash") mechanism.
     pub binding: VbaSignatureBinding,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VbaSignatureBinding {
-    /// The signature's signed digest matches the computed digest of the project streams.
+    /// The signature's signed digest matches the computed Content Hash (MS-OVBA §2.4.2.3) or Agile
+    /// Content Hash (MS-OVBA §2.4.2.4) of the project.
     Bound,
-    /// We extracted the signed digest and computed a project digest, but they do not match.
+    /// We extracted the signed digest and computed the relevant project digests, but they do not
+    /// match.
     NotBound,
     /// Binding could not be verified (unsupported/unknown format, missing data, or signature not
     /// cryptographically verified).
@@ -81,7 +84,7 @@ pub struct VbaProjectDigestDebugInfo {
     pub hash_algorithm_name: Option<String>,
     /// Digest bytes extracted from the signed Authenticode `SpcIndirectDataContent` (if found).
     pub signed_digest: Option<Vec<u8>>,
-    /// Digest bytes computed from the current `vbaProject.bin` streams (if computed).
+    /// Digest bytes computed from the current `vbaProject.bin` (if computed).
     pub computed_digest: Option<Vec<u8>>,
 }
 
@@ -89,9 +92,10 @@ pub struct VbaProjectDigestDebugInfo {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VbaProjectBindingVerification {
     /// Signature is present and the signed digest matches the digest computed from the current
-    /// project streams.
+    /// project contents.
     BoundVerified(VbaProjectDigestDebugInfo),
-    /// Signature is present and parses, but the signed digest does not match the current project.
+    /// Signature is present and parses, but the signed digest does not match the current project
+    /// contents.
     BoundMismatch(VbaProjectDigestDebugInfo),
     /// Binding could not be verified (unsupported algorithm, missing digest structure, etc).
     BoundUnknown(VbaProjectDigestDebugInfo),
@@ -390,16 +394,46 @@ pub fn verify_vba_digital_signature_bound(
         debug.hash_algorithm_name =
             digest_name_from_oid_str(&signed.digest_algorithm_oid).map(str::to_owned);
 
-        // MS-OSHARED §4.3: the VBA project digest is always MD5 (16 bytes), even if the PKCS#7
-        // signature uses SHA-1/SHA-256 and even if the DigestInfo algorithm OID indicates SHA-256.
-        if let Ok(computed) = compute_vba_project_digest(vba_project_bin, DigestAlg::Md5) {
-            debug.computed_digest = Some(computed.clone());
+        // MS-OSHARED §4.3: for VBA signatures, Office stores an MD5 digest in `DigestInfo.digest`
+        // even when `DigestInfo.algorithm` indicates SHA-256. Some fixtures/tests may use other
+        // lengths; in that case we can still treat the digest as "not bound" (it cannot match the
+        // 16-byte Content/Agile hashes we compute).
+        if let Ok(content_normalized) = content_normalized_data(vba_project_bin) {
+            let content_hash: [u8; 16] = Md5::digest(&content_normalized).into();
+
+            // Best-effort: only compute Agile hash when FormsNormalizedData can be derived.
+            let agile_hash: Option<[u8; 16]> = forms_normalized_data(vba_project_bin)
+                .ok()
+                .map(|forms| {
+                    let mut h = Md5::new();
+                    h.update(&content_normalized);
+                    h.update(&forms);
+                    h.finalize().into()
+                });
+
+            // For debug output, pick the digest we actually matched (if any).
+            let computed_for_debug = if signed.digest.as_slice() == content_hash {
+                content_hash.to_vec()
+            } else if let Some(h) = agile_hash {
+                if signed.digest.as_slice() == h {
+                    h.to_vec()
+                } else {
+                    content_hash.to_vec()
+                }
+            } else {
+                content_hash.to_vec()
+            };
+            debug.computed_digest = Some(computed_for_debug);
 
             if signature.verification == VbaSignatureVerification::SignedVerified {
-                let binding = if computed == signed.digest {
+                let binding = if signed.digest.as_slice() == content_hash
+                    || matches!(agile_hash, Some(h) if signed.digest.as_slice() == h)
+                {
                     VbaProjectBindingVerification::BoundVerified(debug)
-                } else {
+                } else if agile_hash.is_some() {
                     VbaProjectBindingVerification::BoundMismatch(debug)
+                } else {
+                    VbaProjectBindingVerification::BoundUnknown(debug)
                 };
                 return Ok(Some(VbaDigitalSignatureBound { signature, binding }));
             }
@@ -417,10 +451,12 @@ pub fn verify_vba_digital_signature_bound(
 /// Returns `Ok(None)` when the project appears unsigned.
 ///
 /// Verification is "internal" CMS/PKCS#7 verification only: we validate that the signature blob
-/// is well-formed and that the signature matches the signed attributes / embedded content. We do
-/// best-effort binding verification by extracting the signed project digest (Authenticode-style
-/// `SpcIndirectDataContent`) and comparing it to a freshly computed digest over the project's OLE
-/// streams (excluding any signature streams).
+/// is well-formed and that the signature matches the signed attributes / embedded content.
+///
+/// We also perform a best-effort MS-OVBA binding check: we extract the signed 16-byte VBA project
+/// digest (`SpcIndirectDataContent.messageDigest.digest`) and compare it against:
+/// - the legacy `Content Hash` (MS-OVBA §2.4.2.3), and
+/// - the `Agile Content Hash` (MS-OVBA §2.4.2.4), which incorporates UserForm/designer storages.
 ///
 /// If multiple signature streams are present, we prefer:
 /// 1) The first signature stream (by Excel-like stream-name ordering; see `signature_path_rank`)
@@ -579,7 +615,7 @@ pub fn verify_vba_digital_signature_with_trust(
 }
 
 /// Verify whether a VBA signature blob is bound to the given `vbaProject.bin` payload via the
-/// MS-OVBA "project digest" mechanism.
+/// MS-OVBA "Contents Hash" mechanism.
 ///
 /// This is a best-effort helper: it returns [`VbaSignatureBinding::Unknown`] when the signature
 /// does not contain a supported digest structure, uses an unsupported hash algorithm, or the VBA
@@ -598,17 +634,42 @@ pub fn verify_vba_signature_binding(vba_project_bin: &[u8], signature: &[u8]) ->
             _ => return VbaSignatureBinding::Unknown,
         };
 
-        // MS-OSHARED §4.3: the VBA project digest is always MD5 (16 bytes), even if the PKCS#7
-        // signature uses SHA-1/SHA-256 and even if the DigestInfo algorithm OID indicates SHA-256.
-        let Ok(computed) = compute_vba_project_digest(vba_project_bin, DigestAlg::Md5) else {
-            return VbaSignatureBinding::Unknown;
+        let content_normalized = match content_normalized_data(vba_project_bin) {
+            Ok(v) => v,
+            Err(_) => return VbaSignatureBinding::Unknown,
         };
 
-        if computed == signed.digest {
-            VbaSignatureBinding::Bound
-        } else {
-            VbaSignatureBinding::NotBound
+        let content_hash_md5: [u8; 16] = Md5::digest(&content_normalized).into();
+        let signed_digest = signed.digest.as_slice();
+
+        if signed_digest == content_hash_md5 {
+            return VbaSignatureBinding::Bound;
         }
+
+        // Agile Content Hash (MS-OVBA §2.4.2.4) incorporates designer storages.
+        let agile_hash_md5: Option<[u8; 16]> = match forms_normalized_data(vba_project_bin) {
+            Ok(forms_normalized) => {
+                let mut h = Md5::new();
+                h.update(&content_normalized);
+                h.update(&forms_normalized);
+                Some(h.finalize().into())
+            }
+            Err(_) => None,
+        };
+
+        if let Some(h) = agile_hash_md5 {
+            if signed_digest == h {
+                return VbaSignatureBinding::Bound;
+            }
+        }
+
+        // If we couldn't compute the Agile hash, we can't distinguish "truly unbound" from "bound
+        // but forms data missing/unparseable", so treat binding as unknown.
+        if agile_hash_md5.is_none() {
+            return VbaSignatureBinding::Unknown;
+        }
+
+        VbaSignatureBinding::NotBound
     }
 }
 
