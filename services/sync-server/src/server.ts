@@ -1160,18 +1160,10 @@ export function createSyncServer(
     metrics.wsConnectionsCurrent.set(wss.clients.size);
 
     let messagesInWindow = 0;
+    let messageWindowStartedAtMs = Date.now();
     let oversizeMessageCounted = false;
     const messageWindowMs = config.limits.messageWindowMs;
-    const messageWindow =
-      messageWindowMs > 0
-        ? (() => {
-            const timer = setInterval(() => {
-              messagesInWindow = 0;
-            }, messageWindowMs);
-            timer.unref();
-            return timer;
-          })()
-        : null;
+    const maxMessagesPerWindow = config.limits.maxMessagesPerWindow;
 
     ws.on("message", (data) => {
       const messageBytes = rawDataByteLength(data);
@@ -1190,8 +1182,14 @@ export function createSyncServer(
         return;
       }
 
+      const nowMs = Date.now();
+      if (messageWindowMs > 0 && nowMs - messageWindowStartedAtMs >= messageWindowMs) {
+        messageWindowStartedAtMs = nowMs;
+        messagesInWindow = 0;
+      }
+
       messagesInWindow += 1;
-      if (messagesInWindow > config.limits.maxMessagesPerWindow) {
+      if (messagesInWindow > maxMessagesPerWindow) {
         metrics.wsMessagesRateLimitedTotal.inc();
         logger.warn(
           { ip, docName, userId: authCtx?.userId },
@@ -1230,7 +1228,6 @@ export function createSyncServer(
           metrics.wsMessagesTooLargeTotal.inc();
         }
       }
-      if (messageWindow) clearInterval(messageWindow);
       connectionTracker.unregister(ip);
       docConnectionTracker.unregister(persistedName);
       if (leveldbDocNameHashingEnabled) {
