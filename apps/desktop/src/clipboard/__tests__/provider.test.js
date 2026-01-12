@@ -825,6 +825,29 @@ test("clipboard provider", async (t) => {
     );
   });
 
+  await t.test("tauri: read decodes data URL pngBase64 when atob is unavailable (Buffer fallback)", async () => {
+    await withGlobals(
+      {
+        __TAURI__: {
+          core: {
+            async invoke(cmd) {
+              assert.equal(cmd, "clipboard_read");
+              return { pngBase64: "DATA:image/png;base64,CQgH" };
+            },
+          },
+        },
+        navigator: undefined,
+        atob: undefined,
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        const content = await provider.read();
+        assert.ok(content.imagePng instanceof Uint8Array);
+        assert.deepEqual(content, { text: undefined, imagePng: new Uint8Array([0x09, 0x08, 0x07]) });
+      }
+    );
+  });
+
   await t.test("tauri: read drops oversized pngBase64 payloads", async () => {
     const largeBase64 = "A".repeat(14 * 1024 * 1024);
 

@@ -162,13 +162,8 @@ function coerceUint8Array(val) {
     // Estimate size before decoding and (importantly) before slicing data URLs into a second large string.
     if (estimateBase64Bytes(val) > MAX_IMAGE_BYTES) return undefined;
 
-    let base64 = val;
-    if (val.startsWith("data:")) {
-      const comma = val.indexOf(",");
-      if (comma === -1) return undefined;
-      base64 = val.slice(comma + 1);
-    }
-    base64 = base64.trim();
+    const base64 = normalizeBase64String(val);
+    if (!base64) return undefined;
 
     try {
       if (typeof atob === "function") {
