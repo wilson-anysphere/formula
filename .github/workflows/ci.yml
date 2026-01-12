@@ -280,19 +280,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Desktop open-file IPC readiness unit tests
-        # Keep this lightweight: run only the targeted unit tests that guard the
-        # `open-file` readiness handshake (no Tauri/WebView build required).
-        run: pnpm -C apps/desktop test -- src/tauri/__tests__/openFileIpc.vitest.ts src/tauri/__tests__/openFileIpcWiring.vitest.ts
-
-      - name: Run desktop Tauri guardrail Vitest suite (capabilities/event allowlists)
+      - name: Run desktop Tauri guardrail Vitest suite (capabilities/event allowlists + IPC readiness)
         env:
           # These tests only parse JSON/config and source files; skip the repo-wide
           # wasm-pack build performed by scripts/vitest.global-setup.mjs.
           FORMULA_SKIP_WASM_BUILD: "1"
         # NOTE: Do not include an extra `--` after the script name. Vitest treats it as
         # an argument separator and will fall back to running the full test suite.
-        run: pnpm test:vitest apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts
+        run: pnpm test:vitest apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts apps/desktop/src/tauri/__tests__/openFileIpc.vitest.ts apps/desktop/src/tauri/__tests__/openFileIpcWiring.vitest.ts
 
   sync-server-docker:
     name: Sync server Docker build
