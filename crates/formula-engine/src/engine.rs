@@ -5600,6 +5600,11 @@ impl BytecodeColumnCache {
                         }
                         stack.push(StackValue::Other);
                     }
+                    bytecode::OpCode::Jump => {}
+                    bytecode::OpCode::JumpIfFalseOrError => {
+                        let _ = stack.pop();
+                    }
+                    bytecode::OpCode::JumpIfNotError | bytecode::OpCode::JumpIfNotNaError => {}
                 }
             }
 

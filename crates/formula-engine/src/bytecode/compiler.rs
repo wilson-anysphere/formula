@@ -124,6 +124,83 @@ impl<'a> CompileCtx<'a> {
             }
             Expr::FuncCall { func, args } => match func {
                 Function::Let => self.compile_let(args),
+                // Certain logical/error functions are lazy in Excel: they should only evaluate
+                // the branch argument that is selected at runtime (e.g. `IF(FALSE, <expensive>, 0)`).
+                //
+                // Implement these with explicit control flow opcodes so the VM can short-circuit.
+                Function::If if args.len() == 2 || args.len() == 3 => {
+                    self.compile_expr(&args[0]);
+                    let jump_idx = self.program.instrs.len();
+                    // Patched below: a=false_target, b=end_target.
+                    self.program.instrs.push(Instruction::new(
+                        OpCode::JumpIfFalseOrError,
+                        0,
+                        0,
+                    ));
+
+                    // TRUE branch.
+                    self.compile_expr(&args[1]);
+                    let jump_end_idx = self.program.instrs.len();
+                    self.program
+                        .instrs
+                        .push(Instruction::new(OpCode::Jump, 0, 0));
+
+                    // FALSE branch.
+                    let false_target = self.program.instrs.len() as u32;
+                    if args.len() == 3 {
+                        self.compile_expr(&args[2]);
+                    } else {
+                        // Engine behavior: missing false branch defaults to FALSE (not blank).
+                        let idx = self.program.consts.len() as u32;
+                        self.program
+                            .consts
+                            .push(ConstValue::Value(Value::Bool(false)));
+                        self.program
+                            .instrs
+                            .push(Instruction::new(OpCode::PushConst, idx, 0));
+                    }
+
+                    let end_target = self.program.instrs.len() as u32;
+                    self.program.instrs[jump_idx] = Instruction::new(
+                        OpCode::JumpIfFalseOrError,
+                        false_target,
+                        end_target,
+                    );
+                    self.program.instrs[jump_end_idx] =
+                        Instruction::new(OpCode::Jump, end_target, 0);
+                }
+                Function::IfError if args.len() == 2 => {
+                    // Evaluate the first argument. If it's not an error, short-circuit and
+                    // return it without evaluating the fallback.
+                    self.compile_expr(&args[0]);
+                    let jump_idx = self.program.instrs.len();
+                    self.program
+                        .instrs
+                        .push(Instruction::new(OpCode::JumpIfNotError, 0, 0));
+
+                    // Error fallback branch (only evaluated if arg0 is an error).
+                    self.compile_expr(&args[1]);
+                    let end_target = self.program.instrs.len() as u32;
+                    self.program.instrs[jump_idx] =
+                        Instruction::new(OpCode::JumpIfNotError, end_target, 0);
+                }
+                Function::IfNa if args.len() == 2 => {
+                    // Evaluate the first argument. If it's not #N/A, short-circuit and return
+                    // it without evaluating the fallback.
+                    self.compile_expr(&args[0]);
+                    let jump_idx = self.program.instrs.len();
+                    self.program.instrs.push(Instruction::new(
+                        OpCode::JumpIfNotNaError,
+                        0,
+                        0,
+                    ));
+
+                    // #N/A fallback branch (only evaluated if arg0 is #N/A).
+                    self.compile_expr(&args[1]);
+                    let end_target = self.program.instrs.len() as u32;
+                    self.program.instrs[jump_idx] =
+                        Instruction::new(OpCode::JumpIfNotNaError, end_target, 0);
+                }
                 _ => {
                     for (arg_idx, arg) in args.iter().enumerate() {
                         self.compile_func_arg(func, arg_idx, arg);

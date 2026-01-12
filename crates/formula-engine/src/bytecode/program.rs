@@ -25,6 +25,18 @@ pub enum OpCode {
     ImplicitIntersection = 17,
     StoreLocal = 18,
     LoadLocal = 19,
+    /// Unconditional jump to instruction index `a`.
+    Jump = 20,
+    /// Pop a value, coerce it to bool, and if FALSE jump to instruction index `a`.
+    ///
+    /// If coercion fails with an error, pushes the error value and jumps to instruction index `b`.
+    JumpIfFalseOrError = 21,
+    /// Inspect the top of the stack: if it's NOT an error, jump to instruction index `a`.
+    /// Otherwise (it is an error), pop it and continue.
+    JumpIfNotError = 22,
+    /// Inspect the top of the stack: if it's NOT `#N/A`, jump to instruction index `a`.
+    /// Otherwise (it is `#N/A`), pop it and continue.
+    JumpIfNotNaError = 23,
 }
 
 /// Packed instruction:
@@ -65,6 +77,10 @@ impl Instruction {
             17 => OpCode::ImplicitIntersection,
             18 => OpCode::StoreLocal,
             19 => OpCode::LoadLocal,
+            20 => OpCode::Jump,
+            21 => OpCode::JumpIfFalseOrError,
+            22 => OpCode::JumpIfNotError,
+            23 => OpCode::JumpIfNotNaError,
             _ => unreachable!("invalid opcode"),
         }
     }

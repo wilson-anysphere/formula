@@ -40,7 +40,10 @@ impl Vm {
         self.stack.clear();
         self.locals.clear();
         self.locals.resize(program.locals.len(), Value::Empty);
-        for inst in program.instrs() {
+        let instrs = program.instrs();
+        let mut pc: usize = 0;
+        while pc < instrs.len() {
+            let inst = instrs[pc];
             match inst.op() {
                 OpCode::PushConst => {
                     let v = program.consts[inst.a() as usize].to_value();
@@ -117,7 +120,43 @@ impl Vm {
                     self.stack.truncate(start);
                     self.stack.push(result);
                 }
+                OpCode::Jump => {
+                    pc = inst.a() as usize;
+                    continue;
+                }
+                OpCode::JumpIfFalseOrError => {
+                    let v = self.stack.pop().unwrap_or(Value::Empty);
+                    match super::runtime::coerce_to_bool(v) {
+                        Ok(true) => {}
+                        Ok(false) => {
+                            pc = inst.a() as usize;
+                            continue;
+                        }
+                        Err(e) => {
+                            self.stack.push(Value::Error(e));
+                            pc = inst.b() as usize;
+                            continue;
+                        }
+                    }
+                }
+                OpCode::JumpIfNotError => {
+                    let is_error = matches!(self.stack.last(), Some(Value::Error(_)));
+                    if !is_error {
+                        pc = inst.a() as usize;
+                        continue;
+                    }
+                    let _ = self.stack.pop();
+                }
+                OpCode::JumpIfNotNaError => {
+                    let is_na = matches!(self.stack.last(), Some(Value::Error(super::value::ErrorKind::NA)));
+                    if !is_na {
+                        pc = inst.a() as usize;
+                        continue;
+                    }
+                    let _ = self.stack.pop();
+                }
             }
+            pc += 1;
         }
         self.stack.pop().unwrap_or(Value::Empty)
     }
@@ -166,6 +205,7 @@ mod tests {
     use super::*;
     use crate::date::{ymd_to_serial, ExcelDate};
     use chrono::TimeZone;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
     fn eval_with_value_locale_parses_numeric_text_using_locale() {
@@ -242,5 +282,86 @@ mod tests {
             Value::Number(n) => assert!((n - expected).abs() < 1e-9, "got {n}"),
             other => panic!("expected Value::Number, got {other:?}"),
         }
+    }
+
+    struct CountingGrid {
+        inner: super::super::grid::ColumnarGrid,
+        reads: AtomicUsize,
+    }
+
+    impl CountingGrid {
+        fn new(rows: i32, cols: i32) -> Self {
+            Self {
+                inner: super::super::grid::ColumnarGrid::new(rows, cols),
+                reads: AtomicUsize::new(0),
+            }
+        }
+
+        fn reads(&self) -> usize {
+            self.reads.load(Ordering::SeqCst)
+        }
+    }
+
+    impl super::super::grid::Grid for CountingGrid {
+        fn get_value(&self, coord: CellCoord) -> Value {
+            self.reads.fetch_add(1, Ordering::SeqCst);
+            self.inner.get_value(coord)
+        }
+
+        fn column_slice(&self, col: i32, row_start: i32, row_end: i32) -> Option<&[f64]> {
+            self.inner.column_slice(col, row_start, row_end)
+        }
+
+        fn bounds(&self) -> (i32, i32) {
+            self.inner.bounds()
+        }
+    }
+
+    #[test]
+    fn vm_short_circuits_if_branches() {
+        let origin = CellCoord::new(0, 0);
+        let expr = super::super::parse_formula("=IF(FALSE, A1, 1)", origin).expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+
+        let grid = CountingGrid::new(10, 10);
+        let mut vm = Vm::with_capacity(32);
+        let locale = crate::LocaleConfig::en_us();
+        let value = vm.eval(&program, &grid, origin, &locale);
+
+        assert_eq!(value, Value::Number(1.0));
+        assert_eq!(grid.reads(), 0, "unused IF branch should not be evaluated");
+    }
+
+    #[test]
+    fn vm_short_circuits_iferror_and_ifna_fallbacks() {
+        let origin = CellCoord::new(0, 0);
+        let locale = crate::LocaleConfig::en_us();
+
+        // IFERROR(1, A1) should not evaluate the fallback.
+        let expr = super::super::parse_formula("=IFERROR(1, A1)", origin).expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+        let grid = CountingGrid::new(10, 10);
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval(&program, &grid, origin, &locale);
+        assert_eq!(value, Value::Number(1.0));
+        assert_eq!(grid.reads(), 0, "unused IFERROR fallback should not be evaluated");
+
+        // IFNA(1, A1) should not evaluate the fallback.
+        let expr = super::super::parse_formula("=IFNA(1, A1)", origin).expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+        let grid = CountingGrid::new(10, 10);
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval(&program, &grid, origin, &locale);
+        assert_eq!(value, Value::Number(1.0));
+        assert_eq!(grid.reads(), 0, "unused IFNA fallback should not be evaluated");
+
+        // IFNA(NA(), A1) should evaluate the fallback.
+        let expr = super::super::parse_formula("=IFNA(NA(), A1)", origin).expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+        let grid = CountingGrid::new(10, 10);
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval(&program, &grid, origin, &locale);
+        assert_eq!(value, Value::Empty); // A1 is empty.
+        assert_eq!(grid.reads(), 1, "IFNA fallback should be evaluated for #N/A");
     }
 }

@@ -227,7 +227,7 @@ fn coerce_to_number(v: Value) -> Result<f64, ErrorKind> {
     }
 }
 
-fn coerce_to_bool(v: Value) -> Result<bool, ErrorKind> {
+pub(crate) fn coerce_to_bool(v: Value) -> Result<bool, ErrorKind> {
     match v {
         Value::Bool(b) => Ok(b),
         Value::Number(n) => Ok(n != 0.0),
