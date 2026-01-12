@@ -152,7 +152,12 @@ impl RichDataVmIndex {
         })
     }
 
-    /// Resolve a worksheet `c/@vm` value into rich value + relationship indices and a target part.
+    /// Resolve a canonical worksheet value-metadata index (`c/@vm`) into rich value + relationship
+    /// indices and a target part.
+    ///
+    /// Note: Excel has been observed to encode worksheet `c/@vm` as either 1-based (canonical) or
+    /// 0-based. This index stores the canonical 1-based mapping from `xl/metadata.xml`; callers
+    /// should normalize 0-based worksheet indices by adding 1 before calling `resolve_vm`.
     pub fn resolve_vm(&self, vm: u32) -> RichDataVmResolution {
         let vm = vm.saturating_add(self.vm_offset);
         let rich_value_index = self.vm_to_rich_value_index.get(&vm).copied();
@@ -290,14 +295,21 @@ fn extract_rich_data_images_via_rel_table(
             continue;
         };
         let cells = parse_worksheet_vm_cells(sheet_bytes)?;
-        let vm_offset: u32 = if !vm_to_rich_value.is_empty()
-            && !vm_to_rich_value.contains_key(&0)
+
+        // See `parse_vm_to_rich_value_index_map` for rationale: keep the metadata mapping in its
+        // canonical 1-based form and infer whether this worksheet uses 0-based `vm` indices by
+        // checking for any `vm="0"` cells.
+        //
+        // As a small safety guard, only apply the offset when the mapping doesn't already contain
+        // 0-based keys.
+        let vm_offset: u32 = if !vm_to_rich_value.contains_key(&0)
             && cells.iter().any(|(_, vm)| *vm == 0)
         {
             1
         } else {
             0
         };
+
         for (cell, vm) in cells {
             let vm = vm.saturating_add(vm_offset);
             let Some(&rich_value_idx) = vm_to_rich_value.get(&vm) else {
@@ -354,22 +366,21 @@ pub fn extract_rich_cell_images(
             continue;
         };
         let cells = parse_worksheet_vm_cells(sheet_bytes)?;
-        // Excel has been observed to encode worksheet `c/@vm` as both 0-based and 1-based indices
-        // into `xl/metadata.xml`'s `<valueMetadata>` `<bk>` list. When a workbook uses 0-based `vm`
-        // values and has multiple `<valueMetadata>` records, inserting both `vm` and `vm-1` into a
-        // single `HashMap` creates ambiguous collisions (e.g. `vm="1"` could refer to the first
-        // record in a 1-based scheme or the second record in a 0-based scheme).
+
+        // See `parse_vm_to_rich_value_index_map` for rationale: keep the metadata mapping in its
+        // canonical 1-based form and infer whether this worksheet uses 0-based `vm` indices by
+        // checking for any `vm="0"` cells.
         //
-        // Instead, infer a per-sheet offset by checking whether any cell uses `vm="0"` and adjust
-        // the sheet values before lookup.
-        let vm_offset: u32 = if !vm_to_rich_value.is_empty()
-            && !vm_to_rich_value.contains_key(&0)
+        // As a small safety guard, only apply the offset when the mapping doesn't already contain
+        // 0-based keys.
+        let vm_offset: u32 = if !vm_to_rich_value.contains_key(&0)
             && cells.iter().any(|(_, vm)| *vm == 0)
         {
             1
         } else {
             0
         };
+
         for (cell, vm) in cells {
             let vm = vm.saturating_add(vm_offset);
             let Some(&rich_value_idx) = vm_to_rich_value.get(&vm) else {
@@ -606,9 +617,13 @@ fn parse_vm_to_rich_value_index_map(
         // The structured metadata parser returns a canonical mapping keyed by the `<valueMetadata>`
         // `<bk>` record index, which is **1-based**.
         //
-        // Some worksheets encode `c/@vm` as 0-based in the wild. Callers that have access to the
-        // worksheet cells should infer that offset (e.g. by checking for any `vm="0"` cells) and
-        // adjust the sheet values before using this map.
+        // Some worksheets encode `c/@vm` as 0-based in the wild. Attempting to store both 0-based
+        // and 1-based keys in a single map is ambiguous when multiple `<valueMetadata>` records
+        // exist (e.g. `vm="1"` could refer to the first record in a 1-based scheme or the second
+        // record in a 0-based scheme).
+        //
+        // Callers that have access to the worksheet cells should infer that offset (e.g. by
+        // checking for any `vm="0"` cells) and adjust worksheet `vm` values before using this map.
         return Ok(primary);
     }
 
@@ -655,7 +670,10 @@ fn parse_metadata_vm_mapping_fallback(
     };
 
     let mut out: HashMap<u32, u32> = HashMap::new();
-    let mut vm_idx: u32 = 0;
+    // Canonical worksheet `c/@vm` indexing is 1-based (vm=1 refers to the first `<bk>` entry).
+    // Some producers have been observed to emit 0-based worksheet indices; callers can handle that
+    // via the same per-worksheet offset inference used for the structured parser.
+    let mut vm_idx: u32 = 1;
     for bk in value_metadata
         .children()
         .filter(|n| n.is_element() && n.tag_name().name() == "bk")

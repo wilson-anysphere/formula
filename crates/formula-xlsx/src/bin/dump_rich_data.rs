@@ -752,6 +752,16 @@ fn dump_vm_mappings(pkg: &XlsxPackage) -> bool {
         return false;
     }
 
+    // Excel worksheets have been observed to encode `c/@vm` as either 1-based (canonical) or
+    // 0-based. The rich-data index (`RichDataVmIndex`) stores the canonical 1-based mapping from
+    // `xl/metadata.xml`, so normalize per-worksheet before attempting to resolve.
+    let mut vm_offset_by_sheet_index: HashMap<usize, u32> = HashMap::new();
+    for cell in &vm_cells {
+        if cell.vm.trim() == "0" {
+            vm_offset_by_sheet_index.insert(cell.sheet_index, 1);
+        }
+    }
+
     let index = match RichDataVmIndex::build(pkg) {
         Ok(index) => index,
         Err(err) => {
@@ -766,7 +776,13 @@ fn dump_vm_mappings(pkg: &XlsxPackage) -> bool {
             .vm
             .parse::<u32>()
             .ok()
-            .map(|vm| index.resolve_vm(vm))
+            .map(|vm| {
+                let offset = vm_offset_by_sheet_index
+                    .get(&cell.sheet_index)
+                    .copied()
+                    .unwrap_or(0);
+                index.resolve_vm(vm.saturating_add(offset))
+            })
             .unwrap_or_default();
 
         rows.push(MappingRow {

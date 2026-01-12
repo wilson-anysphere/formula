@@ -76,7 +76,13 @@ pub fn extract_linked_data_types(
             continue;
         };
         let cells = super::parse_worksheet_vm_cells(sheet_bytes)?;
+
+        // Keep the metadata mapping in its canonical 1-based form and infer whether this worksheet
+        // uses 0-based `vm` indices by checking for any `vm="0"` cells.
+        let vm_offset: u32 = if cells.iter().any(|(_, vm)| *vm == 0) { 1 } else { 0 };
+
         for (cell, vm) in cells {
+            let vm = vm.saturating_add(vm_offset);
             let Some(&rich_value_idx) = vm_to_rich_value.get(&vm) else {
                 continue;
             };
