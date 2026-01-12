@@ -164,8 +164,9 @@ describe("DocumentCellProvider (shared grid)", () => {
   });
 
   it("looks up comment metadata by numeric coords (no A1 string conversion)", () => {
+    const meta = { resolved: false };
     const getCommentMeta = vi.fn((row: number, col: number) => {
-      if (row === 0 && col === 0) return { resolved: false };
+      if (row === 0 && col === 0) return meta;
       return null;
     });
 
@@ -180,6 +181,8 @@ describe("DocumentCellProvider (shared grid)", () => {
     expect(withComment).not.toBeNull();
     expect(getCommentMeta).toHaveBeenCalledWith(0, 0);
     expect(withComment).toMatchObject({ comment: { resolved: false } });
+    // Ensure DocumentCellProvider reuses the meta object (no per-cell allocations).
+    expect((withComment as any).comment).toBe(meta);
 
     // Grid (2,2) maps to document (1,1); our meta provider returns null there.
     const withoutComment = provider.getCell(2, 2);
