@@ -329,7 +329,7 @@ fn oddf_equation(
         return Err(ExcelError::Num);
     }
 
-    // Excel-style chronology constraints.
+    // Excel-style chronology constraints:
     //
     // Excel's docs and the curated excel-oracle corpus both pin ODDF* to strict inequalities:
     //
@@ -442,7 +442,9 @@ fn oddl_equation(
     // - settlement < maturity
     // - last_interest < maturity
     //
-    // Settlement may be before, on, or after `last_interest` (see `bonds_odd.rs`).
+    // Settlement may be before, on, or after `last_interest` (see `bonds_odd.rs`). If it's before,
+    // we PV the remaining regular coupons through `last_interest` plus the final odd stub cashflow
+    // at maturity.
     if !(settlement < maturity) {
         return Err(ExcelError::Num);
     }
@@ -496,8 +498,9 @@ fn oddl_equation(
 
         BondEquation::new(freq, accrued_interest, vec![(t, maturity_amount)])
     } else {
-        // Settlement before the last regular coupon date: PV all remaining regular coupons
-        // through `last_interest` plus the final odd stub cashflow at maturity.
+        // Settlement before the last coupon date: PV remaining regular coupons through
+        // `last_interest` plus the final odd stub cashflow at maturity.
+        //
         // Find the regular coupon period containing settlement (PCD <= S < NCD) by stepping
         // backward from `last_interest`. We compute each coupon date from the fixed `last_interest`
         // anchor (not by iterative EDATE stepping) to avoid "EDATE drift" across short months.

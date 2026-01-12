@@ -720,7 +720,6 @@ impl Engine {
                 let (compiled_formula, bytecode_compile_reason) = match self.try_compile_bytecode(
                     &parsed.expr,
                     key,
-                    cell.volatile,
                     cell.thread_safe,
                     cell.dynamic_deps,
                 ) {
@@ -1000,7 +999,6 @@ impl Engine {
                     Ok(parsed) => match self.try_compile_bytecode(
                         &parsed.expr,
                         key,
-                        volatile,
                         thread_safe,
                         dynamic_deps,
                     ) {
@@ -1121,7 +1119,6 @@ impl Engine {
             let (compiled_formula, bytecode_compile_reason) = match self.try_compile_bytecode(
                 &parsed.expr,
                 key,
-                volatile,
                 thread_safe,
                 dynamic_deps,
             ) {
@@ -1336,7 +1333,7 @@ impl Engine {
         self.calc_graph.update_cell_dependencies(cell_id, deps);
 
         let (compiled_formula, bytecode_compile_reason) =
-            match self.try_compile_bytecode(&parsed.expr, key, volatile, thread_safe, dynamic_deps)
+            match self.try_compile_bytecode(&parsed.expr, key, thread_safe, dynamic_deps)
             {
                 Ok(program) => (
                     CompiledFormula::Bytecode(BytecodeFormula {
@@ -3090,7 +3087,6 @@ impl Engine {
         &self,
         expr: &crate::Expr,
         key: CellKey,
-        _volatile: bool,
         thread_safe: bool,
         dynamic_deps: bool,
     ) -> Result<Arc<bytecode::Program>, BytecodeCompileReason> {
@@ -3937,7 +3933,6 @@ impl Engine {
                     Ok(parsed) => match self.try_compile_bytecode(
                         &parsed.expr,
                         key,
-                        volatile,
                         thread_safe,
                         dynamic_deps,
                     ) {
