@@ -274,6 +274,7 @@ fn database_functions_support_computed_criteria_over_external_database() {
         .set_cell_formula("Sheet1", "F2", "=C2>30")
         .unwrap();
 
+    // Evaluate a representative set of D* functions over the external database range.
     engine
         .set_cell_formula(
             "Sheet1",
@@ -281,8 +282,32 @@ fn database_functions_support_computed_criteria_over_external_database() {
             "=DSUM([Book.xlsx]Sheet1!A1:D4,\"Salary\",F1:F2)",
         )
         .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A2",
+            "=DGET([Book.xlsx]Sheet1!A1:D4,\"Salary\",F1:F2)",
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A3",
+            "=DCOUNT([Book.xlsx]Sheet1!A1:D4,\"Salary\",F1:F2)",
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A4",
+            "=DVARP([Book.xlsx]Sheet1!A1:D4,\"Salary\",F1:F2)",
+        )
+        .unwrap();
     engine.recalculate();
 
     // Age > 30 matches only Bob => sum salary = 1500.
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1500.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(1500.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A4"), Value::Number(0.0));
 }
