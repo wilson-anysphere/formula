@@ -16,6 +16,7 @@ import {
   parseClipboardContentToCellGrid,
 } from "../clipboard/index.js";
 import { cellToA1, rangeToA1 } from "../selection/a1";
+import { computeCurrentRegionRange } from "../selection/currentRegion";
 import { navigateSelectionByKey } from "../selection/navigation";
 import { SelectionRenderer } from "../selection/renderer";
 import type { CellCoord, GridLimits, Range, SelectionState } from "../selection/types";
@@ -5844,6 +5845,24 @@ export class SpreadsheetApp {
     if (primary && (e.key === "a" || e.key === "A")) {
       e.preventDefault();
       this.selection = selectAll(this.limits);
+      if (this.sharedGrid) this.syncSharedGridSelectionFromState();
+      this.renderSelection();
+      this.updateStatus();
+      return;
+    }
+
+    // Excel-style select current region: Ctrl/Cmd+Shift+* (aka Ctrl/Cmd+Shift+8).
+    // Use `code===Digit8` to catch layouts where `key` is not "*".
+    if (
+      primary &&
+      !e.altKey &&
+      e.shiftKey &&
+      (e.code === "Digit8" || e.key === "*" || e.key === "8")
+    ) {
+      e.preventDefault();
+      const active = { ...this.selection.active };
+      const range = computeCurrentRegionRange(active, this.usedRangeProvider(), this.limits);
+      this.selection = buildSelection({ ranges: [range], active, anchor: active, activeRangeIndex: 0 }, this.limits);
       if (this.sharedGrid) this.syncSharedGridSelectionFromState();
       this.renderSelection();
       this.updateStatus();
