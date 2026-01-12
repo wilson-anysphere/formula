@@ -507,9 +507,17 @@ fi
 # - test execution failure: "could not execute process ... Resource temporarily unavailable (os error 11)"
 # - rustc execution failure: "could not execute process `rustc ...` (never executed)"
 #
+# Some agent hosts also run with `RUSTC_WRAPPER=sccache`. In practice the sccache daemon can die
+# under heavy load, causing builds to fail with:
+# - `sccache: error: failed to execute compile`
+# - `Failed to send data to or receive data from server`
+# In that case, retry once more with `RUSTC_WRAPPER` disabled so builds can proceed without the
+# cache rather than failing spuriously.
+#
 # Retrying after a short backoff usually succeeds once other agents finish their compile/test bursts.
 max_attempts="${FORMULA_CARGO_RETRY_ATTEMPTS:-5}"
 attempt=1
+disabled_rustc_wrapper_for_retry=false
 while true; do
   # Capture output for error pattern detection while still streaming it to the console.
   tmp_log="$(mktemp -t cargo_agent.XXXXXX)"
@@ -524,17 +532,30 @@ while true; do
   fi
 
   retryable=false
+  sccache_failed=false
   if grep -Eq "(Resource temporarily unavailable|os error 11)" "${tmp_log}"; then
     retryable=true
   elif grep -Eq "(rust-lld|ld\\.lld)" "${tmp_log}" \
     && { grep -q "__throw_system_error" "${tmp_log}" || grep -q "ThreadPoolExecutor" "${tmp_log}"; }; then
     retryable=true
+  elif grep -Eq "(^sccache: error:|Failed to send data to or receive data from server)" "${tmp_log}"; then
+    retryable=true
+    sccache_failed=true
   fi
 
   if [[ "${retryable}" == "true" ]]; then
     if [[ "${attempt}" -ge "${max_attempts}" ]]; then
       rm -f "${tmp_log}"
       exit "${status}"
+    fi
+
+    if [[ "${sccache_failed}" == "true" && "${disabled_rustc_wrapper_for_retry}" == "false" ]]; then
+      rustc_wrapper_basename="${RUSTC_WRAPPER##*/}"
+      if [[ "${rustc_wrapper_basename}" == "sccache" ]]; then
+        echo "cargo_agent: sccache failure; retrying with RUSTC_WRAPPER disabled" >&2
+        unset RUSTC_WRAPPER
+        disabled_rustc_wrapper_for_retry=true
+      fi
     fi
 
     # Exponential-ish backoff with jitter.
