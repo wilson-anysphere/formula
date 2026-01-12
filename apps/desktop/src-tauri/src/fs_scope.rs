@@ -328,6 +328,38 @@ mod tests {
     }
 
     #[test]
+    fn resolve_save_path_in_allowed_roots_rejects_missing_file_name() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let allowed_roots = vec![dunce::canonicalize(tmp.path()).expect("canonicalize root")];
+
+        let err = resolve_save_path_in_allowed_roots(Path::new(""), &allowed_roots).unwrap_err();
+        assert!(err.to_string().to_lowercase().contains("file name"));
+    }
+
+    #[test]
+    fn resolve_save_path_in_allowed_roots_rejects_dot_and_dotdot_file_names() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let allowed_root = tmp.path().join("root");
+        fs::create_dir_all(&allowed_root).expect("create root");
+        let allowed_roots = vec![dunce::canonicalize(&allowed_root).expect("canonicalize root")];
+
+        let err = resolve_save_path_in_allowed_roots(&allowed_root.join("."), &allowed_roots).unwrap_err();
+        let msg = err.to_string().to_lowercase();
+        assert!(
+            msg.contains("file name") || msg.contains("outside"),
+            "unexpected error for dot path: {err}"
+        );
+
+        let err =
+            resolve_save_path_in_allowed_roots(&allowed_root.join(".."), &allowed_roots).unwrap_err();
+        let msg = err.to_string().to_lowercase();
+        assert!(
+            msg.contains("file name") || msg.contains("outside"),
+            "unexpected error for dotdot path: {err}"
+        );
+    }
+
+    #[test]
     fn desktop_scope_open_validation_allows_home_file_and_rejects_out_of_scope() {
         let _guard = env_mutex().lock().unwrap();
 
