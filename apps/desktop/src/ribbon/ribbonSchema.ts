@@ -1669,7 +1669,7 @@ export const defaultRibbonSchema: RibbonSchema = {
               size: "large",
               menuItems: [
                 { id: "data.queriesConnections.refreshAll", label: "Refresh All", ariaLabel: "Refresh All", icon: "⟳" },
-                { id: "data.queriesConnections.refreshAll.refresh", label: "Refresh", ariaLabel: "Refresh", icon: "⟳" },
+                { id: "data.queriesConnections.refreshAll.refresh", label: "Refresh", ariaLabel: "Refresh", iconId: "refresh" },
                 { id: "data.queriesConnections.refreshAll.refreshAllConnections", label: "Refresh All Connections", ariaLabel: "Refresh All Connections", iconId: "link" },
                 { id: "data.queriesConnections.refreshAll.refreshAllQueries", label: "Refresh All Queries", ariaLabel: "Refresh All Queries", iconId: "folderOpen" },
               ],
@@ -1692,8 +1692,8 @@ export const defaultRibbonSchema: RibbonSchema = {
               kind: "dropdown",
               menuItems: [
                 { id: "data.sortFilter.sort.customSort", label: "Custom Sort…", ariaLabel: "Custom Sort", iconId: "settings" },
-                { id: "data.sortFilter.sort.sortAtoZ", label: "Sort A to Z", ariaLabel: "Sort A to Z", icon: "A→Z" },
-                { id: "data.sortFilter.sort.sortZtoA", label: "Sort Z to A", ariaLabel: "Sort Z to A", icon: "Z→A" },
+                { id: "data.sortFilter.sort.sortAtoZ", label: "Sort A to Z", ariaLabel: "Sort A to Z", iconId: "sort" },
+                { id: "data.sortFilter.sort.sortZtoA", label: "Sort Z to A", ariaLabel: "Sort Z to A", iconId: "sort" },
               ],
             },
             { id: "data.sortFilter.filter", label: "Filter", ariaLabel: "Filter", icon: "⏷", kind: "toggle" },
@@ -1724,7 +1724,7 @@ export const defaultRibbonSchema: RibbonSchema = {
               kind: "dropdown",
               menuItems: [
                 { id: "data.dataTools.textToColumns", label: "Text to Columns…", ariaLabel: "Text to Columns", icon: "⇥" },
-                { id: "data.dataTools.textToColumns.reapply", label: "Reapply", ariaLabel: "Reapply", icon: "⟳" },
+                { id: "data.dataTools.textToColumns.reapply", label: "Reapply", ariaLabel: "Reapply", iconId: "refresh" },
               ],
             },
             { id: "data.dataTools.flashFill", label: "Flash Fill", ariaLabel: "Flash Fill", iconId: "lightning" },
