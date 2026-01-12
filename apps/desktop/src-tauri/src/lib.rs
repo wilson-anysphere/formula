@@ -20,6 +20,7 @@ pub mod persistence;
 mod power_query_validation;
 pub mod python;
 pub mod resource_limits;
+pub(crate) mod sheet_name;
 pub mod sql;
 pub mod state;
 pub mod storage;

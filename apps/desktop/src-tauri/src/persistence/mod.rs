@@ -8,6 +8,7 @@ use crate::file_io::{
     Workbook as AppWorkbook,
 };
 use crate::atomic_write::write_file_atomic;
+use crate::sheet_name::sheet_name_eq_case_insensitive;
 use crate::state::{Cell, CellScalar};
 use anyhow::Context;
 use directories::ProjectDirs;
@@ -437,7 +438,7 @@ fn apply_cached_formula_values(model: &mut ModelWorkbook, workbook: &AppWorkbook
         let Some(model_sheet) = model
             .sheets
             .iter_mut()
-            .find(|s| s.name.eq_ignore_ascii_case(&sheet.name))
+            .find(|s| sheet_name_eq_case_insensitive(&s.name, &sheet.name))
         else {
             continue;
         };

@@ -1,4 +1,5 @@
 use crate::file_io::Workbook;
+use crate::sheet_name::sheet_name_eq_case_insensitive;
 use crate::state::{AppState, CellScalar, CellUpdateData};
 use formula_vba_runtime::Spreadsheet;
 use serde::{Deserialize, Serialize};
@@ -611,7 +612,7 @@ impl formula_vba_runtime::Spreadsheet for AppStateSpreadsheet<'_> {
         self.state.get_workbook().ok().and_then(|w| {
             w.sheets
                 .iter()
-                .position(|s| s.name.eq_ignore_ascii_case(name))
+                .position(|s| sheet_name_eq_case_insensitive(&s.name, name))
         })
     }
 

@@ -3,6 +3,7 @@ use crate::commands::{
     PythonPermissions, PythonRunContext, PythonRunResult, PythonSelection,
 };
 use crate::resource_limits::{MAX_RANGE_CELLS_PER_CALL, MAX_RANGE_DIM};
+use crate::sheet_name::sheet_name_eq_case_insensitive;
 use crate::state::{AppState, AppStateError, CellUpdateData};
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
@@ -293,7 +294,7 @@ impl<'a> PythonRpcHost<'a> {
                 let found = workbook
                     .sheets
                     .iter()
-                    .find(|s| s.name.eq_ignore_ascii_case(name))
+                    .find(|s| sheet_name_eq_case_insensitive(&s.name, name))
                     .map(|s| JsonValue::String(s.id.clone()))
                     .unwrap_or(JsonValue::Null);
                 Ok(found)
@@ -314,7 +315,7 @@ impl<'a> PythonRpcHost<'a> {
                     if workbook
                         .sheets
                         .iter()
-                        .any(|sheet| sheet.name.eq_ignore_ascii_case(&name))
+                        .any(|sheet| sheet_name_eq_case_insensitive(&sheet.name, &name))
                     {
                         return Err(formula_model::SheetNameError::DuplicateName.to_string());
                     }

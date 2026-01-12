@@ -31,6 +31,7 @@ use formula_xlsx::print::{
     CellRange as PrintCellRange, ManualPageBreaks, PageSetup, SheetPrintSettings,
 };
 use crate::resource_limits::{MAX_RANGE_CELLS_PER_CALL, MAX_RANGE_DIM};
+use crate::sheet_name::sheet_name_eq_case_insensitive;
 use serde_json::Value as JsonValue;
 use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
@@ -38,14 +39,6 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use uuid::Uuid;
-
-fn sheet_name_eq_case_insensitive(a: &str, b: &str) -> bool {
-    use unicode_normalization::UnicodeNormalization as _;
-
-    a.nfkc()
-        .flat_map(|c| c.to_uppercase())
-        .eq(b.nfkc().flat_map(|c| c.to_uppercase()))
-}
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppStateError {
@@ -609,26 +602,26 @@ impl AppState {
                     &new_name,
                 );
                 if let Some(sheet_key) = name.sheet_id.as_mut() {
-                    if sheet_key.eq_ignore_ascii_case(&old_name) {
+                    if sheet_name_eq_case_insensitive(sheet_key, &old_name) {
                         *sheet_key = new_name.clone();
                     }
                 }
             }
 
             for table in &mut workbook.tables {
-                if table.sheet_id.eq_ignore_ascii_case(&old_name) {
+                if sheet_name_eq_case_insensitive(&table.sheet_id, &old_name) {
                     table.sheet_id = new_name.clone();
                 }
             }
 
             // Preserve print settings keyed by sheet name.
             for settings in &mut workbook.print_settings.sheets {
-                if settings.sheet_name.eq_ignore_ascii_case(&old_name) {
+                if sheet_name_eq_case_insensitive(&settings.sheet_name, &old_name) {
                     settings.sheet_name = new_name.clone();
                 }
             }
             for settings in &mut workbook.original_print_settings.sheets {
-                if settings.sheet_name.eq_ignore_ascii_case(&old_name) {
+                if sheet_name_eq_case_insensitive(&settings.sheet_name, &old_name) {
                     settings.sheet_name = new_name.clone();
                 }
             }
@@ -710,22 +703,23 @@ impl AppState {
             workbook
                 .print_settings
                 .sheets
-                .retain(|s| !s.sheet_name.eq_ignore_ascii_case(&deleted_name));
+                .retain(|s| !sheet_name_eq_case_insensitive(&s.sheet_name, &deleted_name));
             workbook
                 .original_print_settings
                 .sheets
-                .retain(|s| !s.sheet_name.eq_ignore_ascii_case(&deleted_name));
+                .retain(|s| !sheet_name_eq_case_insensitive(&s.sheet_name, &deleted_name));
 
             // Drop sheet-scoped metadata that no longer has a home.
             workbook.defined_names.retain(|name| match name.sheet_id.as_deref() {
                 None => true,
                 Some(scope) => {
-                    !scope.eq_ignore_ascii_case(sheet_id) && !scope.eq_ignore_ascii_case(&deleted_name)
+                    !scope.eq_ignore_ascii_case(sheet_id)
+                        && !sheet_name_eq_case_insensitive(scope, &deleted_name)
                 }
             });
             workbook.tables.retain(|table| {
                 !table.sheet_id.eq_ignore_ascii_case(sheet_id)
-                    && !table.sheet_id.eq_ignore_ascii_case(&deleted_name)
+                    && !sheet_name_eq_case_insensitive(&table.sheet_id, &deleted_name)
             });
 
             // Clear patch-save bookkeeping for deleted sheet cells.
@@ -963,7 +957,7 @@ impl AppState {
                 if let Some(src) = workbook
                     .sheets
                     .iter()
-                    .find(|s| s.name.eq_ignore_ascii_case(&recovered_sheet.name))
+                    .find(|s| sheet_name_eq_case_insensitive(&s.name, &recovered_sheet.name))
                 {
                     recovered_sheet.columnar = src.columnar.clone();
                 }
@@ -1023,7 +1017,7 @@ impl AppState {
             for sheet in &workbook.sheets {
                 if let Some(meta) = sheet_metas
                     .iter()
-                    .find(|m| m.name.eq_ignore_ascii_case(&sheet.name))
+                    .find(|m| sheet_name_eq_case_insensitive(&m.name, &sheet.name))
                 {
                     sheet_map.insert(sheet.id.clone(), meta.id);
                 }
@@ -1193,7 +1187,7 @@ impl AppState {
             for sheet in &workbook.sheets {
                 if let Some(meta) = new_sheet_metas
                     .iter()
-                    .find(|m| m.name.eq_ignore_ascii_case(&sheet.name))
+                    .find(|m| sheet_name_eq_case_insensitive(&m.name, &sheet.name))
                 {
                     sheet_map.insert(sheet.id.clone(), meta.id);
                 }
@@ -1238,7 +1232,7 @@ impl AppState {
             .print_settings
             .sheets
             .iter()
-            .find(|s| s.sheet_name.eq_ignore_ascii_case(&sheet.name));
+            .find(|s| sheet_name_eq_case_insensitive(&s.sheet_name, &sheet.name));
 
         let mut out = settings
             .cloned()
@@ -2920,7 +2914,7 @@ impl AppState {
             let Some(sheet) = workbook
                 .sheets
                 .iter_mut()
-                .find(|s| s.name.eq_ignore_ascii_case(&change.sheet))
+                .find(|s| sheet_name_eq_case_insensitive(&s.name, &change.sheet))
             else {
                 continue;
             };
@@ -3124,7 +3118,12 @@ fn resolve_sheet_case_insensitive<'a>(
         .sheets
         .iter()
         .find(|s| s.id.eq_ignore_ascii_case(sheet_id))
-        .or_else(|| workbook.sheets.iter().find(|s| s.name.eq_ignore_ascii_case(sheet_id)))
+        .or_else(|| {
+            workbook
+                .sheets
+                .iter()
+                .find(|s| sheet_name_eq_case_insensitive(&s.name, sheet_id))
+        })
 }
 
 fn format_auditing_cells(
@@ -3138,7 +3137,7 @@ fn format_auditing_cells(
             continue;
         };
         let a1 = coord_to_a1(addr.row as usize, addr.col as usize);
-        if sheet.name.eq_ignore_ascii_case(active_sheet_name) {
+        if sheet_name_eq_case_insensitive(&sheet.name, active_sheet_name) {
             out.push(a1);
         } else {
             out.push(format!("{}!{}", quote_sheet_name(&sheet.name), a1));
@@ -3528,13 +3527,13 @@ fn resolve_cell_ref(
         None => (default_sheet_name.to_string(), raw.to_string()),
     };
 
-    let sheet_id = if sheet_name.eq_ignore_ascii_case(default_sheet_name) {
+    let sheet_id = if sheet_name_eq_case_insensitive(&sheet_name, default_sheet_name) {
         default_sheet_id.to_string()
     } else {
         workbook
             .sheets
             .iter()
-            .find(|s| s.name.eq_ignore_ascii_case(&sheet_name))
+            .find(|s| sheet_name_eq_case_insensitive(&s.name, &sheet_name))
             .map(|s| s.id.clone())
             .ok_or_else(|| AppStateError::UnknownSheet(sheet_name.clone()))?
     };
@@ -3778,7 +3777,7 @@ fn ensure_sheet_print_settings<'a>(
 ) -> &'a mut SheetPrintSettings {
     if let Some(idx) = sheets
         .iter()
-        .position(|s| s.sheet_name.eq_ignore_ascii_case(sheet_name))
+        .position(|s| sheet_name_eq_case_insensitive(&s.sheet_name, sheet_name))
     {
         if sheets[idx].sheet_name != sheet_name {
             sheets[idx].sheet_name = sheet_name.to_string();
