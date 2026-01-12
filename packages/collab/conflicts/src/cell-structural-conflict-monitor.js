@@ -1204,10 +1204,18 @@ function isYMap(value) {
   if (value instanceof Y.Map) return true;
   if (!value || typeof value !== "object") return false;
   const maybe = value;
-  if (maybe.constructor?.name !== "YMap") return false;
+  // Bundlers can rename constructors (e.g. `YMap` -> `_YMap`) and pnpm workspaces
+  // can load multiple `yjs` module instances (ESM + CJS). Avoid relying on
+  // `constructor.name`; prefer a structural check instead.
   if (typeof maybe.get !== "function") return false;
   if (typeof maybe.set !== "function") return false;
   if (typeof maybe.delete !== "function") return false;
+  if (typeof maybe.keys !== "function") return false;
+  if (typeof maybe.forEach !== "function") return false;
+  // Plain JS Maps also have get/set/delete/keys/forEach, so additionally require
+  // Yjs' deep observer APIs.
+  if (typeof maybe.observeDeep !== "function") return false;
+  if (typeof maybe.unobserveDeep !== "function") return false;
   return true;
 }
 

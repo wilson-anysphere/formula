@@ -24,12 +24,18 @@ function getYMap(value: unknown): any | null {
   if (value instanceof Y.Map) return value;
   if (!value || typeof value !== "object") return null;
   const maybe = value as any;
-  if (maybe.constructor?.name !== "YMap") return null;
+  // Bundlers can rename constructors (e.g. `YMap` -> `_YMap`) and pnpm workspaces
+  // can load multiple `yjs` module instances (ESM + CJS). Avoid relying on
+  // `constructor.name` and prefer a structural check instead.
   if (typeof maybe.get !== "function") return null;
   if (typeof maybe.set !== "function") return null;
   if (typeof maybe.delete !== "function") return null;
   if (typeof maybe.keys !== "function") return null;
   if (typeof maybe.forEach !== "function") return null;
+  // Plain JS Maps also have get/set/delete/keys/forEach, so additionally require
+  // Yjs' deep observer APIs.
+  if (typeof maybe.observeDeep !== "function") return null;
+  if (typeof maybe.unobserveDeep !== "function") return null;
   return maybe;
 }
 
@@ -37,11 +43,13 @@ function getYArray(value: unknown): any | null {
   if (value instanceof Y.Array) return value;
   if (!value || typeof value !== "object") return null;
   const maybe = value as any;
-  if (maybe.constructor?.name !== "YArray") return null;
+  // See `getYMap` above for rationale.
   if (typeof maybe.get !== "function") return null;
   if (typeof maybe.toArray !== "function") return null;
   if (typeof maybe.push !== "function") return null;
   if (typeof maybe.delete !== "function") return null;
+  if (typeof maybe.observeDeep !== "function") return null;
+  if (typeof maybe.unobserveDeep !== "function") return null;
   return maybe;
 }
 
@@ -49,11 +57,12 @@ function getYText(value: unknown): any | null {
   if (value instanceof Y.Text) return value;
   if (!value || typeof value !== "object") return null;
   const maybe = value as any;
-  if (maybe.constructor?.name !== "YText") return null;
   if (typeof maybe.toDelta !== "function") return null;
   if (typeof maybe.applyDelta !== "function") return null;
   if (typeof maybe.insert !== "function") return null;
   if (typeof maybe.delete !== "function") return null;
+  if (typeof maybe.observeDeep !== "function") return null;
+  if (typeof maybe.unobserveDeep !== "function") return null;
   return maybe;
 }
 

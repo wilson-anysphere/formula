@@ -119,42 +119,42 @@ test("CollabSession undo captures cell edits when cell maps were created by a di
 test("CollabSession undo captures cell edits when foreign Yjs maps have renamed constructors (e.g. _YMap)", async () => {
   const Ycjs = requireYjsCjs();
 
-  const prevName = Ycjs.Map.name;
-  Object.defineProperty(Ycjs.Map, "name", { value: "_YMap" });
+  const remote = new Ycjs.Doc();
+  const cells = remote.getMap("cells");
+  remote.transact(() => {
+    const cell = new Ycjs.Map();
+    cell.set("value", "from-cjs");
+    cell.set("formula", null);
+    cell.set("modified", 1);
+    cells.set("Sheet1:0:0", cell);
+  });
 
-  try {
-    const remote = new Ycjs.Doc();
-    const cells = remote.getMap("cells");
-    remote.transact(() => {
-      const cell = new Ycjs.Map();
-      cell.set("value", "from-cjs");
-      cell.set("formula", null);
-      cell.set("modified", 1);
-      cells.set("Sheet1:0:0", cell);
-    });
+  const update = Ycjs.encodeStateAsUpdate(remote);
 
-    const update = Ycjs.encodeStateAsUpdate(remote);
+  const doc = new Y.Doc();
+  doc.getMap("cells");
+  Ycjs.applyUpdate(doc, update, REMOTE_ORIGIN);
 
-    const doc = new Y.Doc();
-    doc.getMap("cells");
-    Ycjs.applyUpdate(doc, update, REMOTE_ORIGIN);
+  // Simulate a bundler-renamed constructor (`YMap` -> `_YMap`) without mutating
+  // global `yjs` state (which can cause cross-test interference under concurrency).
+  const foreignCellMap = doc.getMap("cells").get("Sheet1:0:0");
+  assert.ok(foreignCellMap);
+  class _YMap extends foreignCellMap.constructor {}
+  Object.setPrototypeOf(foreignCellMap, _YMap.prototype);
 
-    const session = createCollabSession({ doc, undo: {} });
+  const session = createCollabSession({ doc, undo: {} });
 
-    assert.equal((await session.getCell("Sheet1:0:0"))?.value, "from-cjs");
+  assert.equal((await session.getCell("Sheet1:0:0"))?.value, "from-cjs");
 
-    await session.setCellValue("Sheet1:0:0", "edited");
-    assert.equal((await session.getCell("Sheet1:0:0"))?.value, "edited");
-    assert.equal(session.undo?.canUndo(), true);
+  await session.setCellValue("Sheet1:0:0", "edited");
+  assert.equal((await session.getCell("Sheet1:0:0"))?.value, "edited");
+  assert.equal(session.undo?.canUndo(), true);
 
-    session.undo?.undo();
-    assert.equal((await session.getCell("Sheet1:0:0"))?.value, "from-cjs");
+  session.undo?.undo();
+  assert.equal((await session.getCell("Sheet1:0:0"))?.value, "from-cjs");
 
-    session.destroy();
-    doc.destroy();
-  } finally {
-    Object.defineProperty(Ycjs.Map, "name", { value: prevName });
-  }
+  session.destroy();
+  doc.destroy();
 });
 
 test("CollabSession undo works when the cells root was created by a different Yjs instance (CJS Doc.getMap)", async () => {
