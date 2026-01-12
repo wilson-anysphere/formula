@@ -1,7 +1,7 @@
 import React from "react";
 
 import type { RibbonFileActions } from "./ribbonSchema.js";
-import { getRibbonIcon } from "../ui/icons/ribbonIconMap.js";
+import { RibbonIcon, type RibbonIconId } from "./icons/index.js";
 
 export interface FileBackstageProps {
   open: boolean;
@@ -10,7 +10,7 @@ export interface FileBackstageProps {
 }
 
 type BackstageItem = {
-  iconId: string;
+  iconId: RibbonIconId;
   label: string;
   hint: string;
   ariaKeyShortcuts: string;
@@ -52,7 +52,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
   const items = React.useMemo<BackstageItem[]>(
     () => [
       {
-        iconId: "file.new.new",
+        iconId: "filePlus",
         label: "New Workbook",
         hint: shortcut("N"),
         ariaKeyShortcuts: ariaShortcut("N"),
@@ -61,7 +61,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         onInvoke: actions?.newWorkbook,
       },
       {
-        iconId: "file.open.open",
+        iconId: "folderOpen",
         label: "Open…",
         hint: shortcut("O"),
         ariaKeyShortcuts: ariaShortcut("O"),
@@ -70,7 +70,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         onInvoke: actions?.openWorkbook,
       },
       {
-        iconId: "file.save.save",
+        iconId: "save",
         label: "Save",
         hint: shortcut("S"),
         ariaKeyShortcuts: ariaShortcut("S"),
@@ -79,7 +79,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         onInvoke: actions?.saveWorkbook,
       },
       {
-        iconId: "file.save.saveAs",
+        iconId: "edit",
         label: "Save As…",
         hint: shortcut("S", { shift: true }),
         ariaKeyShortcuts: ariaShortcut("S", { shift: true }),
@@ -88,7 +88,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         onInvoke: actions?.saveWorkbookAs,
       },
       {
-        iconId: "file.info.manageWorkbook.versions",
+        iconId: "clock",
         label: "Version History",
         hint: "",
         ariaKeyShortcuts: "",
@@ -97,7 +97,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         onInvoke: actions?.versionHistory,
       },
       {
-        iconId: "file.info.manageWorkbook.branches",
+        iconId: "shuffle",
         label: "Branches",
         hint: "",
         ariaKeyShortcuts: "",
@@ -106,7 +106,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         onInvoke: actions?.branchManager,
       },
       {
-        iconId: "file.print.print",
+        iconId: "print",
         label: "Print…",
         hint: shortcut("P"),
         ariaKeyShortcuts: ariaShortcut("P"),
@@ -115,7 +115,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         onInvoke: actions?.print,
       },
       {
-        iconId: "file.print.pageSetup",
+        iconId: "settings",
         label: "Page Setup…",
         hint: "",
         ariaKeyShortcuts: "",
@@ -124,7 +124,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         onInvoke: actions?.pageSetup,
       },
       {
-        iconId: "file.options.close",
+        iconId: "close",
         label: "Close Window",
         hint: shortcut("W"),
         ariaKeyShortcuts: ariaShortcut("W"),
@@ -133,7 +133,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         onInvoke: actions?.closeWindow,
       },
       {
-        iconId: "file.options.close",
+        iconId: "close",
         label: "Quit",
         hint: shortcut("Q"),
         ariaKeyShortcuts: ariaShortcut("Q"),
@@ -254,14 +254,9 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
                 }}
               >
                 <span className="ribbon-backstage__item-main">
-                  {(() => {
-                    const IconComponent = getRibbonIcon(item.iconId);
-                    return IconComponent ? (
-                      <span className="ribbon-backstage__icon" aria-hidden="true">
-                        <IconComponent width="100%" height="100%" />
-                      </span>
-                    ) : null;
-                  })()}
+                  <span className="ribbon-backstage__icon" aria-hidden="true">
+                    <RibbonIcon id={item.iconId} />
+                  </span>
                   <span className="ribbon-backstage__label">{item.label}</span>
                 </span>
                 <span className="ribbon-backstage__hint">{item.hint}</span>
