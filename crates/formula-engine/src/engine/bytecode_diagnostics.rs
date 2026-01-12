@@ -11,7 +11,12 @@ use std::collections::HashMap;
 pub enum BytecodeCompileReason {
     /// The bytecode backend is disabled via [`crate::Engine::set_bytecode_enabled`].
     Disabled,
-    /// The formula is volatile (e.g. `RAND()`) and must be re-evaluated each recalc pass.
+    /// The formula was rejected because it is volatile.
+    ///
+    /// Note: The bytecode backend now supports *thread-safe* volatile formulas (e.g. `NOW()`,
+    /// `TODAY()`) as long as they do not require dynamic dependency tracking. As a result this
+    /// reason is no longer emitted by the engine, but is kept for backward compatibility with
+    /// earlier coverage-reporting tooling.
     Volatile,
     /// The formula calls a non-thread-safe function and cannot be evaluated in the bytecode VM.
     NotThreadSafe,
