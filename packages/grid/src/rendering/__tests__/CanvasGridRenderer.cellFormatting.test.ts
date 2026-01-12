@@ -465,6 +465,74 @@ describe("CanvasGridRenderer cell formatting primitives", () => {
     expect(borderSegments.some((s) => s.y1 === interiorY && s.y2 === interiorY)).toBe(false);
   });
 
+  it("draws merged borders when the merged anchor is offscreen", () => {
+    const merge = { startRow: 0, endRow: 2, startCol: 0, endCol: 2 };
+    const provider: CellProvider = {
+      getMergedRangesInRange: () => [merge],
+      getCell: (row, col) => {
+        if (row === 0 && col === 0) {
+          return {
+            row,
+            col,
+            value: "x",
+            style: {
+              borders: {
+                bottom: { width: 1, style: "solid", color: "rgb(255,0,0)" }
+              }
+            }
+          };
+        }
+        return null;
+      }
+    };
+
+    const gridCalls: Array<[string, ...any[]]> = [];
+    const contentCalls: Array<[string, ...any[]]> = [];
+    const selectionCalls: Array<[string, ...any[]]> = [];
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>();
+    contexts.set(gridCanvas, createRecording2dContext({ canvas: gridCanvas, calls: gridCalls }));
+    contexts.set(contentCanvas, createRecording2dContext({ canvas: contentCanvas, calls: contentCalls }));
+    contexts.set(selectionCanvas, createRecording2dContext({ canvas: selectionCanvas, calls: selectionCalls }));
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      const existing = contexts.get(this);
+      if (existing) return existing;
+      const fallback = createRecording2dContext({ canvas: this, calls: [] });
+      contexts.set(this, fallback);
+      return fallback;
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    // Make viewport width < deltaX so blitting is disabled and we get a clean full redraw on scroll.
+    const renderer = new CanvasGridRenderer({ provider, rowCount: 10, colCount: 10 });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(80, 60, 1);
+
+    // Clear initial render calls (resize triggers markAllDirty + render via stubbed rAF).
+    gridCalls.length = 0;
+
+    // Scroll so the merged anchor (0,0) is offscreen, but the merged range still intersects the viewport.
+    renderer.setScroll(100, 21);
+
+    const crispStrokePos = (pos: number, lineWidth: number): number => {
+      const roundedPos = Math.round(pos);
+      const roundedWidth = Math.round(lineWidth);
+      return roundedWidth % 2 === 1 ? roundedPos + 0.5 : roundedPos;
+    };
+    const expectedBottomY = crispStrokePos(21, 1);
+
+    const borderSegments = segmentsForStroke(gridCalls, (state) => state.strokeStyle === "rgb(255,0,0)" && state.lineWidth === 1);
+    expect(borderSegments.some((s) => s.y1 === expectedBottomY && s.y2 === expectedBottomY)).toBe(true);
+
+    // The interior merged horizontal gridline at sheet y=21 becomes viewport y=0; it should NOT receive border segments.
+    const interiorY = crispStrokePos(0, 1);
+    expect(borderSegments.some((s) => s.y1 === interiorY && s.y2 === interiorY)).toBe(false);
+  });
+
   it("resolves shared-edge border conflicts by preferring the thicker border", () => {
     const provider: CellProvider = {
       getCell: (row, col) => {
