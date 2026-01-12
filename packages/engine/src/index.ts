@@ -3,7 +3,9 @@ export type { EngineClient } from "./client.ts";
 export type {
   CellChange,
   CellData,
+  CellDataRich,
   CellScalar,
+  CellValueRich,
   EditCellChange,
   EditCellSnapshot,
   EditFormulaRewrite,

@@ -1,7 +1,9 @@
 import type {
   CellChange,
   CellData,
+  CellDataRich,
   CellScalar,
+  CellValueRich,
   EditOp,
   EditResult,
   FormulaPartialParseResult,
@@ -167,6 +169,15 @@ export class EngineWorker {
     return (await this.invoke("getCell", { address, sheet }, options)) as CellData;
   }
 
+  async getCellRich(
+    address: string,
+    sheet?: string,
+    options?: RpcOptions
+  ): Promise<CellDataRich> {
+    await this.flush();
+    return (await this.invoke("getCellRich", { address, sheet }, options)) as CellDataRich;
+  }
+
   async getRange(
     range: string,
     sheet?: string,
@@ -179,6 +190,11 @@ export class EngineWorker {
   async setCell(address: string, value: CellScalar, sheet?: string): Promise<void> {
     this.pendingCellUpdates.push({ address, value: normalizeCellScalar(value), sheet });
     await this.scheduleFlush();
+  }
+
+  async setCellRich(address: string, value: CellValueRich | null, sheet?: string, options?: RpcOptions): Promise<void> {
+    await this.flush();
+    await this.invoke("setCellRich", { address, value, sheet }, options);
   }
 
   async setCells(

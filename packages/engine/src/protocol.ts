@@ -10,11 +10,39 @@
  */
 export type CellScalar = number | string | boolean | null;
 
+/**
+ * JSON-friendly rich cell value transported over the worker RPC boundary.
+ *
+ * This mirrors `formula_model::CellValue`'s `{type,value}` tagged schema.
+ *
+ * Note: This type is intentionally minimal (best-effort) to avoid coupling the TS
+ * public API too tightly to the Rust model while rich values are still evolving.
+ */
+export type CellValueRich =
+  | { type: "empty" }
+  | { type: "number"; value: number }
+  | { type: "string"; value: string }
+  | { type: "boolean"; value: boolean }
+  | { type: "error"; value: string }
+  | { type: "rich_text"; value: unknown }
+  | { type: "entity"; value: unknown }
+  | { type: "record"; value: unknown }
+  | { type: "image"; value: unknown }
+  | { type: "array"; value: unknown }
+  | { type: "spill"; value: unknown };
+
 export interface CellData {
   sheet: string;
   address: string;
   input: CellScalar;
   value: CellScalar;
+}
+
+export interface CellDataRich {
+  sheet: string;
+  address: string;
+  input: CellValueRich;
+  value: CellValueRich;
 }
 
 export interface CellChange {

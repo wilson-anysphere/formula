@@ -1,7 +1,9 @@
 import type {
   CellChange,
   CellData,
+  CellDataRich,
   CellScalar,
+  CellValueRich,
   EditOp,
   EditResult,
   FormulaPartialParseResult,
@@ -34,12 +36,27 @@ export interface EngineClient {
   loadWorkbookFromXlsxBytes(bytes: Uint8Array, options?: RpcOptions): Promise<void>;
   toJson(): Promise<string>;
   getCell(address: string, sheet?: string, options?: RpcOptions): Promise<CellData>;
+  /**
+   * Read a cell's rich `{type,value}` input/value.
+   *
+   * This is an additive API: rich values are not representable in the legacy
+   * scalar workbook JSON schema returned by `toJson()`.
+   */
+  getCellRich?(address: string, sheet?: string, options?: RpcOptions): Promise<CellDataRich>;
   getRange(range: string, sheet?: string, options?: RpcOptions): Promise<CellData[][]>;
   /**
    * Set a single cell, batched across the current microtask to minimize RPC
    * overhead.
    */
   setCell(address: string, value: CellScalar, sheet?: string): Promise<void>;
+  /**
+   * Set a cell's rich `{type,value}` input.
+   *
+   * For scalar inputs (number/string/bool/error), callers should prefer
+   * `setCell` for compatibility; `setCellRich` exists for entity/record/image
+   * rich values.
+   */
+  setCellRich?(address: string, value: CellValueRich | null, sheet?: string): Promise<void>;
   /**
    * Set multiple cells in a single RPC call.
    *
@@ -192,9 +209,13 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
     toJson: async () => await withEngine((connected) => connected.toJson()),
     getCell: async (address, sheet, rpcOptions) =>
       await withEngine((connected) => connected.getCell(address, sheet, rpcOptions)),
+    getCellRich: async (address, sheet, rpcOptions) =>
+      await withEngine((connected) => connected.getCellRich(address, sheet, rpcOptions)),
     getRange: async (range, sheet, rpcOptions) =>
       await withEngine((connected) => connected.getRange(range, sheet, rpcOptions)),
     setCell: async (address, value, sheet) => await withEngine((connected) => connected.setCell(address, value, sheet)),
+    setCellRich: async (address, value, sheet) =>
+      await withEngine((connected) => connected.setCellRich(address, value, sheet)),
     setCells: async (updates, rpcOptions) => await withEngine((connected) => connected.setCells(updates, rpcOptions)),
     setRange: async (range, values, sheet, rpcOptions) =>
       await withEngine((connected) => connected.setRange(range, values, sheet, rpcOptions)),

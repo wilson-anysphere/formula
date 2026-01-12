@@ -12,7 +12,9 @@ import type {
 
 type WasmWorkbookInstance = {
   getCell(address: string, sheet?: string): unknown;
+  getCellRich?: (address: string, sheet?: string) => unknown;
   setCell(address: string, value: CellScalar, sheet?: string): void;
+  setCellRich?: (address: string, value: unknown, sheet?: string) => void;
   setCells?: (updates: Array<{ address: string; value: CellScalar; sheet?: string }>) => void;
   setLocale?: (localeId: string) => boolean;
   getRange(range: string, sheet?: string): unknown;
@@ -334,6 +336,12 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
             case "getCell":
               result = normalizeCellData(wb.getCell(params.address, params.sheet));
               break;
+            case "getCellRich":
+              if (typeof (wb as any).getCellRich !== "function") {
+                throw new Error("getCellRich: WasmWorkbook.getCellRich is not available in this WASM build");
+              }
+              result = cloneToPlainData((wb as any).getCellRich(params.address, params.sheet));
+              break;
             case "getRange":
               result = normalizeRangeData(wb.getRange(params.range, params.sheet));
               break;
@@ -358,6 +366,13 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                   wb.setCell(update.address, update.value, update.sheet);
                 }
               }
+              result = null;
+              break;
+            case "setCellRich":
+              if (typeof (wb as any).setCellRich !== "function") {
+                throw new Error("setCellRich: WasmWorkbook.setCellRich is not available in this WASM build");
+              }
+              (wb as any).setCellRich(params.address, params.value, params.sheet);
               result = null;
               break;
             case "setRange":
