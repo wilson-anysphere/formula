@@ -2701,6 +2701,24 @@ export class CanvasGridRenderer {
           const verticalAlign = style?.verticalAlign ?? "middle";
           const rotationDeg = style?.rotationDeg ?? 0;
 
+          const underline = style?.underline === true;
+          const strike = style?.strike === true;
+          const hasTextDecorations = underline || strike;
+          const decorationLineWidth = hasTextDecorations ? Math.max(1, Math.round(fontSize / 12)) : 0;
+          const alignDecorationY = (pos: number): number => {
+            if (decorationLineWidth === 1) return crispLine(pos);
+            return pos;
+          };
+          const prepareDecorationStroke = () => {
+            if (!hasTextDecorations) return;
+            if (contentCtx.strokeStyle !== currentTextFill) {
+              contentCtx.strokeStyle = currentTextFill;
+            }
+            contentCtx.lineWidth = decorationLineWidth;
+            // Ensure borders/dashes from other callers do not leak into text decorations.
+            (contentCtx as any).setLineDash?.([]);
+          };
+
           const availableWidth = Math.max(0, width - paddingX * 2);
           const availableHeight = Math.max(0, height - paddingY * 2);
           const lineHeight = Math.ceil(fontSize * 1.2);
@@ -2805,9 +2823,43 @@ export class CanvasGridRenderer {
               contentCtx.rect(clipX, y, clipWidth, height);
               contentCtx.clip();
               contentCtx.fillText(text, textX, baselineY);
+              if (hasTextDecorations && textWidth > 0) {
+                prepareDecorationStroke();
+                if (underline) {
+                  const underlineY = alignDecorationY(baselineY + Math.max(1, Math.round(descent * 0.5)));
+                  contentCtx.beginPath();
+                  contentCtx.moveTo(textX, underlineY);
+                  contentCtx.lineTo(textX + textWidth, underlineY);
+                  contentCtx.stroke();
+                }
+                if (strike) {
+                  const strikeY = alignDecorationY(baselineY - Math.max(1, Math.round(ascent * 0.3)));
+                  contentCtx.beginPath();
+                  contentCtx.moveTo(textX, strikeY);
+                  contentCtx.lineTo(textX + textWidth, strikeY);
+                  contentCtx.stroke();
+                }
+              }
               contentCtx.restore();
             } else {
               contentCtx.fillText(text, textX, baselineY);
+              if (hasTextDecorations && textWidth > 0) {
+                prepareDecorationStroke();
+                if (underline) {
+                  const underlineY = alignDecorationY(baselineY + Math.max(1, Math.round(descent * 0.5)));
+                  contentCtx.beginPath();
+                  contentCtx.moveTo(textX, underlineY);
+                  contentCtx.lineTo(textX + textWidth, underlineY);
+                  contentCtx.stroke();
+                }
+                if (strike) {
+                  const strikeY = alignDecorationY(baselineY - Math.max(1, Math.round(ascent * 0.3)));
+                  contentCtx.beginPath();
+                  contentCtx.moveTo(textX, strikeY);
+                  contentCtx.lineTo(textX + textWidth, strikeY);
+                  contentCtx.stroke();
+                }
+              }
             }
           } else if (layoutEngine && availableWidth > 0) {
             const layout = layoutEngine.layout({
@@ -2830,6 +2882,38 @@ export class CanvasGridRenderer {
 
             const originX = x + paddingX;
             const shouldClip = layout.width > availableWidth || layout.height > availableHeight || rotationDeg !== 0;
+            const drawLayoutDecorations = () => {
+              if (!hasTextDecorations) return;
+              prepareDecorationStroke();
+              if (underline) {
+                contentCtx.beginPath();
+                for (let i = 0; i < layout.lines.length; i++) {
+                  const line = layout.lines[i];
+                  if (line.width <= 0) continue;
+                  const x1 = originX + line.x;
+                  const x2 = x1 + line.width;
+                  const baselineY = originY + i * layout.lineHeight + line.ascent;
+                  const underlineY = alignDecorationY(baselineY + Math.max(1, Math.round(line.descent * 0.5)));
+                  contentCtx.moveTo(x1, underlineY);
+                  contentCtx.lineTo(x2, underlineY);
+                }
+                contentCtx.stroke();
+              }
+              if (strike) {
+                contentCtx.beginPath();
+                for (let i = 0; i < layout.lines.length; i++) {
+                  const line = layout.lines[i];
+                  if (line.width <= 0) continue;
+                  const x1 = originX + line.x;
+                  const x2 = x1 + line.width;
+                  const baselineY = originY + i * layout.lineHeight + line.ascent;
+                  const strikeY = alignDecorationY(baselineY - Math.max(1, Math.round(line.ascent * 0.3)));
+                  contentCtx.moveTo(x1, strikeY);
+                  contentCtx.lineTo(x2, strikeY);
+                }
+                contentCtx.stroke();
+              }
+            };
 
             if (shouldClip) {
               contentCtx.save();
@@ -2846,9 +2930,11 @@ export class CanvasGridRenderer {
               }
 
               drawTextLayout(contentCtx, layout, originX, originY);
+              drawLayoutDecorations();
               contentCtx.restore();
             } else {
               drawTextLayout(contentCtx, layout, originX, originY);
+              drawLayoutDecorations();
             }
           } else {
             contentCtx.save();
@@ -3028,6 +3114,108 @@ export class CanvasGridRenderer {
     // Gridlines (grid layer), drawn after fills.
     gridCtx.strokeStyle = theme.gridLine;
     gridCtx.lineWidth = 1;
+    (gridCtx as any).setLineDash?.([]);
+
+    const drawCellBorders = () => {
+      // Border rendering is intentionally conservative: draw explicit per-cell borders
+      // (Excel-like styling) on top of gridlines.
+      //
+      // Note: This currently ignores merged-cell border collapsing rules. Merged regions
+      // are rendered separately above and their constituent cells are skipped below.
+      let currentStrokeStyle = "";
+      let currentLineWidth = -1;
+      let currentDashKey = "";
+
+      const applyBorderStroke = (spec: any, scale: number) => {
+        const color = typeof spec?.color === "string" ? spec.color : "#000000";
+        const width = typeof spec?.width === "number" && Number.isFinite(spec.width) ? spec.width * scale : 1 * scale;
+        const style = typeof spec?.style === "string" ? spec.style : "solid";
+
+        if (color !== currentStrokeStyle) {
+          gridCtx.strokeStyle = color;
+          currentStrokeStyle = color;
+        }
+        if (width !== currentLineWidth) {
+          gridCtx.lineWidth = width;
+          currentLineWidth = width;
+        }
+
+        let dash: number[] = [];
+        if (style === "dashed") dash = [4 * scale, 4 * scale];
+        else if (style === "dotted") dash = [1 * scale, 2 * scale];
+
+        const dashKey = dash.length === 0 ? "" : dash.join(",");
+        if (dashKey !== currentDashKey) {
+          currentDashKey = dashKey;
+          (gridCtx as any).setLineDash?.(dash);
+        }
+      };
+
+      const alignPos = (pos: number, width: number) => {
+        if (Math.abs(width - 1) < 0.001) return crispLine(pos);
+        return pos;
+      };
+
+      const drawLine = (x1: number, y1: number, x2: number, y2: number) => {
+        gridCtx.beginPath();
+        gridCtx.moveTo(x1, y1);
+        gridCtx.lineTo(x2, y2);
+        gridCtx.stroke();
+      };
+
+      const zoomScale = zoom;
+
+      let borderRowYSheet = startRowYSheet;
+      for (let row = startRow; row < endRow; row++) {
+        const rowHeight = rowAxis.getSize(row);
+        const y = borderRowYSheet - quadrant.scrollBaseY + quadrant.originY;
+
+        let borderColXSheet = startColXSheet;
+        for (let col = startCol; col < endCol; col++) {
+          const colWidth = colAxis.getSize(col);
+          const x = borderColXSheet - quadrant.scrollBaseX + quadrant.originX;
+
+          if (hasMerges && mergedIndex.rangeAt({ row, col })) {
+            borderColXSheet += colWidth;
+            continue;
+          }
+
+          const cell = getCellCached(row, col);
+          const borders = cell?.style?.borders as any;
+          if (borders) {
+            const top = borders.top;
+            const right = borders.right;
+            const bottom = borders.bottom;
+            const left = borders.left;
+
+            if (top) {
+              applyBorderStroke(top, zoomScale);
+              const y1 = alignPos(y, currentLineWidth);
+              drawLine(x, y1, x + colWidth, y1);
+            }
+            if (right) {
+              applyBorderStroke(right, zoomScale);
+              const x1 = alignPos(x + colWidth, currentLineWidth);
+              drawLine(x1, y, x1, y + rowHeight);
+            }
+            if (bottom) {
+              applyBorderStroke(bottom, zoomScale);
+              const y1 = alignPos(y + rowHeight, currentLineWidth);
+              drawLine(x, y1, x + colWidth, y1);
+            }
+            if (left) {
+              applyBorderStroke(left, zoomScale);
+              const x1 = alignPos(x, currentLineWidth);
+              drawLine(x1, y, x1, y + rowHeight);
+            }
+          }
+
+          borderColXSheet += colWidth;
+        }
+
+        borderRowYSheet += rowHeight;
+      }
+    };
 
     if (!hasMerges) {
       const xStart = startColXSheet - quadrant.scrollBaseX + quadrant.originX;
@@ -3056,6 +3244,7 @@ export class CanvasGridRenderer {
       }
 
       gridCtx.stroke();
+      drawCellBorders();
       return;
     }
 
@@ -3104,6 +3293,7 @@ export class CanvasGridRenderer {
     }
 
     gridCtx.stroke();
+    drawCellBorders();
   }
 
   private renderQuadrants(layer: Layer, viewport: GridViewportState, region: Rect): void {

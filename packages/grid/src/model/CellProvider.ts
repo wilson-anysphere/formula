@@ -11,6 +11,9 @@ export interface CellStyle {
    */
   fontStyle?: string;
   textAlign?: CanvasTextAlign;
+  underline?: boolean;
+  strike?: boolean;
+  borders?: CellBorders;
   /**
    * Wrapping strategy for cell text.
    *
@@ -27,6 +30,21 @@ export interface CellStyle {
   verticalAlign?: "top" | "middle" | "bottom";
   /** Basic rotation support (clockwise, degrees). */
   rotationDeg?: number;
+}
+
+export type CellBorderLineStyle = "solid" | "dashed" | "dotted" | "double";
+
+export interface CellBorderSpec {
+  width: number;
+  style: CellBorderLineStyle;
+  color: string;
+}
+
+export interface CellBorders {
+  top?: CellBorderSpec;
+  right?: CellBorderSpec;
+  bottom?: CellBorderSpec;
+  left?: CellBorderSpec;
 }
 
 export interface CellRichTextRun {
