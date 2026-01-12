@@ -17,8 +17,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "7eee5e135a0aa3ea4f1ef504690446ad1ef653af5e5df5e9cb37a2bb89ef74fa",
-    "count": 1526
+    "sha256": "c450c18ba34b367f69a707648f8e5b1ed43676bfa4a7c651a424d4d752688760",
+    "count": 1537
   },
   "results": [
     {
@@ -15908,6 +15908,116 @@
       },
       "address": "A1",
       "displayText": "#NAME?"
+    },
+    {
+      "caseId": "thai_069fcbbf18de",
+      "outputCell": "C1",
+      "result": {
+        "t": "s",
+        "v": "หนึ่งพันสองร้อยสามสิบสี่บาทห้าสิบสตางค์"
+      },
+      "address": "C1",
+      "displayText": "หนึ่งพันสองร้อยสามสิบสี่บาทห้าสิบสตางค์"
+    },
+    {
+      "caseId": "thai_d4a11c47141a",
+      "outputCell": "C1",
+      "result": {
+        "t": "s",
+        "v": "๑๒๓"
+      },
+      "address": "C1",
+      "displayText": "๑๒๓"
+    },
+    {
+      "caseId": "thai_9f9a50e82a56",
+      "outputCell": "C1",
+      "result": {
+        "t": "b",
+        "v": true
+      },
+      "address": "C1",
+      "displayText": "TRUE"
+    },
+    {
+      "caseId": "thai_959abe135b90",
+      "outputCell": "C1",
+      "result": {
+        "t": "s",
+        "v": "๑๒๓๔.๕"
+      },
+      "address": "C1",
+      "displayText": "๑๒๓๔.๕"
+    },
+    {
+      "caseId": "thai_6b997365ec98",
+      "outputCell": "C1",
+      "result": {
+        "t": "s",
+        "v": "หนึ่งพันสองร้อยสามสิบสี่จุดห้า"
+      },
+      "address": "C1",
+      "displayText": "หนึ่งพันสองร้อยสามสิบสี่จุดห้า"
+    },
+    {
+      "caseId": "thai_a1d0e5414f02",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 3.0
+      },
+      "address": "C1",
+      "displayText": "3"
+    },
+    {
+      "caseId": "thai_7dbf0a687c46",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 1.25
+      },
+      "address": "C1",
+      "displayText": "1.25"
+    },
+    {
+      "caseId": "thai_2ffc96d30ff1",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 1.5
+      },
+      "address": "C1",
+      "displayText": "1.5"
+    },
+    {
+      "caseId": "thai_cec3b3faf981",
+      "outputCell": "C1",
+      "result": {
+        "t": "s",
+        "v": "วันพุธ"
+      },
+      "address": "C1",
+      "displayText": "วันพุธ"
+    },
+    {
+      "caseId": "thai_b01b1aaf649a",
+      "outputCell": "C1",
+      "result": {
+        "t": "s",
+        "v": "มกราคม"
+      },
+      "address": "C1",
+      "displayText": "มกราคม"
+    },
+    {
+      "caseId": "thai_bff36ef1b3d1",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 2563.0
+      },
+      "address": "C1",
+      "displayText": "2563"
     }
   ]
 }

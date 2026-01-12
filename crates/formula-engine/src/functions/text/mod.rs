@@ -3,6 +3,7 @@ pub(crate) mod dbcs;
 mod format;
 mod join;
 mod replace;
+pub(crate) mod thai;
 mod transform;
 
 pub use convert::{numbervalue, value};

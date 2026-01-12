@@ -50,3 +50,4 @@ mod statistical_distributions_normal;
 mod criteria_locale;
 mod text;
 mod text_dbcs;
+mod thai;

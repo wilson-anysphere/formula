@@ -264,6 +264,16 @@ export default {
       ]
     },
     {
+      "name": "BAHTTEXT",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
       "name": "BYCOL",
       "min_args": 2,
       "max_args": 2,
@@ -1542,6 +1552,16 @@ export default {
       ]
     },
     {
+      "name": "ISTHAIDIGIT",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "bool",
+      "arg_types": [
+        "text"
+      ]
+    },
+    {
       "name": "KURT",
       "min_args": 1,
       "max_args": 255,
@@ -2606,6 +2626,26 @@ export default {
       ]
     },
     {
+      "name": "ROUNDBAHTDOWN",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "ROUNDBAHTUP",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
       "name": "ROUNDDOWN",
       "min_args": 2,
       "max_args": 2,
@@ -3210,6 +3250,76 @@ export default {
         "bool",
         "number",
         "any"
+      ]
+    },
+    {
+      "name": "THAIDAYOFWEEK",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "THAIDIGIT",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text"
+      ]
+    },
+    {
+      "name": "THAIMONTHOFYEAR",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "THAINUMSOUND",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "THAINUMSTRING",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "THAISTRINGLENGTH",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "text"
+      ]
+    },
+    {
+      "name": "THAIYEAR",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
       ]
     },
     {

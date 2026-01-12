@@ -1196,6 +1196,34 @@ def generate_cases() -> dict[str, Any]:
         inputs=[CellInput("A1", "abc")],
     )
 
+    # Thai localization functions (deterministic, locale-independent).
+    _add_case(cases, prefix="thai", tags=["thai", "BAHTTEXT"], formula="=BAHTTEXT(1234.5)")
+    _add_case(cases, prefix="thai", tags=["thai", "THAIDIGIT"], formula='=THAIDIGIT("123")')
+    _add_case(
+        cases,
+        prefix="thai",
+        tags=["thai", "ISTHAIDIGIT", "THAIDIGIT"],
+        formula='=ISTHAIDIGIT(THAIDIGIT("123"))',
+    )
+    _add_case(cases, prefix="thai", tags=["thai", "THAINUMSTRING"], formula="=THAINUMSTRING(1234.5)")
+    _add_case(cases, prefix="thai", tags=["thai", "THAINUMSOUND"], formula="=THAINUMSOUND(1234.5)")
+    _add_case(cases, prefix="thai", tags=["thai", "THAISTRINGLENGTH"], formula='=THAISTRINGLENGTH("เก้า")')
+    _add_case(cases, prefix="thai", tags=["thai", "ROUNDBAHTDOWN"], formula="=ROUNDBAHTDOWN(1.26)")
+    _add_case(cases, prefix="thai", tags=["thai", "ROUNDBAHTUP"], formula="=ROUNDBAHTUP(1.26)")
+    _add_case(
+        cases,
+        prefix="thai",
+        tags=["thai", "THAIDAYOFWEEK", "DATE"],
+        formula="=THAIDAYOFWEEK(DATE(2020,1,1))",
+    )
+    _add_case(
+        cases,
+        prefix="thai",
+        tags=["thai", "THAIMONTHOFYEAR", "DATE"],
+        formula="=THAIMONTHOFYEAR(DATE(2020,1,1))",
+    )
+    _add_case(cases, prefix="thai", tags=["thai", "THAIYEAR", "DATE"], formula="=THAIYEAR(DATE(2020,1,1))")
+
     # CONCAT (unlike CONCATENATE, CONCAT flattens ranges)
     _add_case(
         cases,

@@ -25303,6 +25303,120 @@
       "id": "phonetic_b695fcc6ae90"
     },
     {
+      "formula": "=BAHTTEXT(1234.5)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "thai",
+        "BAHTTEXT"
+      ],
+      "id": "thai_069fcbbf18de"
+    },
+    {
+      "formula": "=THAIDIGIT(\"123\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "thai",
+        "THAIDIGIT"
+      ],
+      "id": "thai_d4a11c47141a"
+    },
+    {
+      "formula": "=ISTHAIDIGIT(THAIDIGIT(\"123\"))",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "thai",
+        "ISTHAIDIGIT",
+        "THAIDIGIT"
+      ],
+      "id": "thai_9f9a50e82a56"
+    },
+    {
+      "formula": "=THAINUMSTRING(1234.5)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "thai",
+        "THAINUMSTRING"
+      ],
+      "id": "thai_959abe135b90"
+    },
+    {
+      "formula": "=THAINUMSOUND(1234.5)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "thai",
+        "THAINUMSOUND"
+      ],
+      "id": "thai_6b997365ec98"
+    },
+    {
+      "formula": "=THAISTRINGLENGTH(\"เก้า\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "thai",
+        "THAISTRINGLENGTH"
+      ],
+      "id": "thai_a1d0e5414f02"
+    },
+    {
+      "formula": "=ROUNDBAHTDOWN(1.26)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "thai",
+        "ROUNDBAHTDOWN"
+      ],
+      "id": "thai_7dbf0a687c46"
+    },
+    {
+      "formula": "=ROUNDBAHTUP(1.26)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "thai",
+        "ROUNDBAHTUP"
+      ],
+      "id": "thai_2ffc96d30ff1"
+    },
+    {
+      "formula": "=THAIDAYOFWEEK(DATE(2020,1,1))",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "thai",
+        "THAIDAYOFWEEK",
+        "DATE"
+      ],
+      "id": "thai_cec3b3faf981"
+    },
+    {
+      "formula": "=THAIMONTHOFYEAR(DATE(2020,1,1))",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "thai",
+        "THAIMONTHOFYEAR",
+        "DATE"
+      ],
+      "id": "thai_b01b1aaf649a"
+    },
+    {
+      "formula": "=THAIYEAR(DATE(2020,1,1))",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "thai",
+        "THAIYEAR",
+        "DATE"
+      ],
+      "id": "thai_bff36ef1b3d1"
+    },
+    {
       "formula": "=CONCAT(A1:A2,\"c\")",
       "outputCell": "C1",
       "inputs": [

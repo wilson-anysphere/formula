@@ -1939,6 +1939,7 @@ dependencies = [
  "smallvec",
  "statrs",
  "thiserror 2.0.17",
+ "unicode-segmentation",
  "wide",
 ]
 

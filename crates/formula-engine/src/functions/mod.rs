@@ -55,6 +55,7 @@ mod builtins_statistical_moments;
 mod builtins_statistical_distributions;
 mod builtins_text;
 mod builtins_text_dbcs;
+mod builtins_thai;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Volatility {

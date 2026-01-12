@@ -7,6 +7,8 @@ use crate::coercion::ValueLocaleConfig;
 use crate::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
 use crate::error::{ExcelError, ExcelResult};
 
+pub(crate) mod thai;
+
 const DEFAULT_WEEKEND_MASK: u8 = (1 << 5) | (1 << 6); // Saturday + Sunday (Mon=0..Sun=6)
 
 /// TIME(hour, minute, second)
