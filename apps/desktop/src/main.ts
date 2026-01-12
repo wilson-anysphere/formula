@@ -3790,20 +3790,6 @@ if (
   type GridArea = "cell" | "rowHeader" | "colHeader" | "corner";
   let currentGridArea: GridArea = "cell";
 
-  // Track whether a text-input-like element is currently focused so "global" keybindings
-  // (file/menu commands, command palette, etc.) can opt out via when-clauses.
-  const syncTextInputFocusContextKey = () => {
-    try {
-      contextKeys.set("textInputFocus", isTextInputTarget(document.activeElement));
-    } catch {
-      // Best-effort: if focus probing fails, treat as not focused.
-      contextKeys.set("textInputFocus", false);
-    }
-  };
-  syncTextInputFocusContextKey();
-  window.addEventListener("focusin", syncTextInputFocusContextKey, true);
-  window.addEventListener("focusout", () => queueMicrotask(syncTextInputFocusContextKey), true);
-
   let lastSelection: SelectionState | null = null;
 
   const updateContextKeysInternal = (selection?: SelectionState | null) => {

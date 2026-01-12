@@ -45,6 +45,10 @@ describe("builtin keybinding catalog", () => {
     expect(typeof paletteWhen).toBe("string");
     expect(evaluateWhenClause(paletteWhen, emptyLookup)).toBe(false);
 
+    const saveWhen = builtinKeybindings.find((kb) => kb.command === "workbench.saveWorkbook" && kb.key === "ctrl+s")?.when;
+    expect(typeof saveWhen).toBe("string");
+    expect(evaluateWhenClause(saveWhen, emptyLookup)).toBe(false);
+
     const sheetPrevWhen = builtinKeybindings.find((kb) => kb.command === "workbook.previousSheet" && kb.key === "ctrl+pageup")?.when;
     expect(typeof sheetPrevWhen).toBe("string");
     expect(evaluateWhenClause(sheetPrevWhen, emptyLookup)).toBe(false);
@@ -55,9 +59,11 @@ describe("builtin keybinding catalog", () => {
     // Clipboard operations should be disabled while editing or inside text inputs.
     contextKeys.batch({ "spreadsheet.isEditing": false, "focus.inTextInput": false });
     expect(evaluateWhenClause(copyWhen, lookup)).toBe(true);
+    expect(evaluateWhenClause(saveWhen, lookup)).toBe(true);
 
     contextKeys.set("focus.inTextInput", true);
     expect(evaluateWhenClause(copyWhen, lookup)).toBe(false);
+    expect(evaluateWhenClause(saveWhen, lookup)).toBe(false);
 
     contextKeys.batch({ "spreadsheet.isEditing": true, "focus.inTextInput": false });
     expect(evaluateWhenClause(copyWhen, lookup)).toBe(false);
@@ -163,4 +169,3 @@ describe("builtin keybinding catalog", () => {
     expect(getPrimaryCommandKeybindingDisplay("edit.autoSum", macIndex)).toBe("⌥=");
   });
 });
-
