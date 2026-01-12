@@ -18,6 +18,7 @@ use thiserror::Error;
 use zip::ZipArchive;
 
 use crate::autofilter::{parse_worksheet_autofilter, AutoFilterParseError};
+use crate::calc_settings::read_calc_settings_from_workbook_xml;
 use crate::path::{rels_for_part, resolve_target};
 use crate::shared_strings::parse_shared_strings_xml;
 use crate::sheet_metadata::parse_sheet_tab_color;
@@ -63,6 +64,18 @@ pub enum ReadError {
     InvalidRangeRef(String),
 }
 
+impl From<crate::calc_settings::CalcSettingsError> for ReadError {
+    fn from(err: crate::calc_settings::CalcSettingsError) -> Self {
+        match err {
+            crate::calc_settings::CalcSettingsError::MissingPart(part) => Self::MissingPart(part),
+            crate::calc_settings::CalcSettingsError::Io(err) => Self::Io(err),
+            crate::calc_settings::CalcSettingsError::Xml(err) => Self::Xml(err),
+            crate::calc_settings::CalcSettingsError::XmlAttr(err) => Self::XmlAttr(err),
+            crate::calc_settings::CalcSettingsError::Utf8(err) => Self::Utf8(err),
+        }
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub fn load_from_path(path: impl AsRef<Path>) -> Result<XlsxDocument, ReadError> {
     let mut file = File::open(path)?;
@@ -99,8 +112,10 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
     let rels_info = parse_relationships(&workbook_rels)?;
     let (date_system, _calc_pr, sheets, defined_names) =
         parse_workbook_metadata(&workbook_xml, &rels_info.id_to_target)?;
+    let calc_settings = read_calc_settings_from_workbook_xml(&workbook_xml)?;
 
     let mut workbook = Workbook::new();
+    workbook.calc_settings = calc_settings;
     workbook.date_system = match date_system {
         DateSystem::V1900 => formula_model::DateSystem::Excel1900,
         DateSystem::V1904 => formula_model::DateSystem::Excel1904,
@@ -323,8 +338,10 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
     let rels_info = parse_relationships(workbook_rels)?;
     let (date_system, calc_pr, sheets, defined_names) =
         parse_workbook_metadata(workbook_xml, &rels_info.id_to_target)?;
+    let calc_settings = read_calc_settings_from_workbook_xml(workbook_xml)?;
 
     let mut workbook = Workbook::new();
+    workbook.calc_settings = calc_settings;
     workbook.date_system = match date_system {
         DateSystem::V1900 => formula_model::DateSystem::Excel1900,
         DateSystem::V1904 => formula_model::DateSystem::Excel1904,
