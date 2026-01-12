@@ -882,7 +882,20 @@ fn shared_strings_xml(shared: &SharedStrings) -> String {
     let count = shared.values.len();
     let mut si = String::new();
     for v in &shared.values {
-        si.push_str(&format!(r#"<si><t>{}</t></si>"#, escape_xml(v)));
+        let preserve = v
+            .chars()
+            .next()
+            .map(|c| c.is_whitespace())
+            .unwrap_or(false)
+            || v.chars().last().map(|c| c.is_whitespace()).unwrap_or(false);
+        if preserve {
+            si.push_str(&format!(
+                r#"<si><t xml:space="preserve">{}</t></si>"#,
+                escape_xml(v)
+            ));
+        } else {
+            si.push_str(&format!(r#"<si><t>{}</t></si>"#, escape_xml(v)));
+        }
     }
     format!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
