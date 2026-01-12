@@ -544,6 +544,112 @@ test("install refuses when all publisher signing keys are revoked", async () => 
   await host.dispose();
 });
 
+test("install rejects conflicting contributed panel ids across installed extensions", async () => {
+  const keys = generateEd25519KeyPair();
+
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-web-ext-panel-conflict-"));
+  const extDirA = path.join(tmpRoot, "ext-a");
+  const extDirB = path.join(tmpRoot, "ext-b");
+
+  const writeExtension = async (dir: string, { name, publisher, version }: { name: string; publisher: string; version: string }) => {
+    await fs.mkdir(path.join(dir, "dist"), { recursive: true });
+    const manifest = {
+      name,
+      publisher,
+      version,
+      main: "./dist/extension.js",
+      browser: "./dist/extension.mjs",
+      engines: { formula: "^1.0.0" },
+      contributes: {
+        panels: [{ id: "shared.panel", title: "Shared Panel" }]
+      }
+    };
+    await fs.writeFile(path.join(dir, "package.json"), JSON.stringify(manifest, null, 2));
+    const source = `export async function activate() {}\n`;
+    await fs.writeFile(path.join(dir, "dist", "extension.mjs"), source);
+    await fs.writeFile(path.join(dir, "dist", "extension.js"), source);
+    return createExtensionPackageV2(dir, { privateKeyPem: keys.privateKeyPem });
+  };
+
+  const pkgA = await writeExtension(extDirA, { publisher: "acme", name: "one", version: "1.0.0" });
+  const pkgB = await writeExtension(extDirB, { publisher: "acme", name: "two", version: "1.0.0" });
+
+  const packages: Record<string, Record<string, ArrayBuffer>> = {
+    "acme.one": { "1.0.0": pkgA },
+    "acme.two": { "1.0.0": pkgB },
+  };
+
+  const marketplaceClient = {
+    async getExtension(id: string) {
+      if (!packages[id]) return null;
+      return {
+        id,
+        name: id.split(".")[1],
+        displayName: id,
+        publisher: id.split(".")[0],
+        description: "",
+        latestVersion: "1.0.0",
+        verified: true,
+        featured: false,
+        categories: [],
+        tags: [],
+        screenshots: [],
+        downloadCount: 0,
+        updatedAt: new Date().toISOString(),
+        versions: [],
+        readme: "",
+        publisherPublicKeyPem: keys.publicKeyPem,
+        createdAt: new Date().toISOString(),
+        deprecated: false,
+        blocked: false,
+        malicious: false
+      };
+    },
+    async downloadPackage(id: string, version: string) {
+      const bytes = packages[id]?.[version];
+      if (!bytes) return null;
+      return {
+        bytes: new Uint8Array(bytes),
+        signatureBase64: null,
+        sha256: null,
+        formatVersion: 2,
+        publisher: id.split(".")[0],
+        publisherKeyId: null,
+        scanStatus: null,
+        filesSha256: null
+      };
+    }
+  };
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: new TestSpreadsheetApi(),
+    permissionPrompt: async () => true
+  });
+  const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
+
+  await manager.install("acme.one");
+  expect(await manager.listInstalled()).toEqual([
+    expect.objectContaining({ id: "acme.one", version: "1.0.0" })
+  ]);
+
+  // Installing a second extension that claims the same panel id should be rejected, and should
+  // not corrupt the installed list or the seed store.
+  await expect(manager.install("acme.two")).rejects.toThrow(/panel id already contributed/i);
+
+  const installedAfter = await manager.listInstalled();
+  expect(installedAfter.map((r) => r.id).sort()).toEqual(["acme.one"]);
+
+  const seedRaw = globalThis.localStorage.getItem("formula.extensions.contributedPanels.v1");
+  expect(seedRaw).not.toBeNull();
+  const seed = JSON.parse(String(seedRaw));
+  expect(seed["shared.panel"]).toMatchObject({ extensionId: "acme.one" });
+
+  await manager.dispose();
+  await host.dispose();
+  await fs.rm(tmpRoot, { recursive: true, force: true });
+});
+
 test("install fails for packages signed by a revoked key even if other keys exist", async () => {
   const keysA = generateEd25519KeyPair();
   const keysB = generateEd25519KeyPair();
