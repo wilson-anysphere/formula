@@ -38,6 +38,7 @@ export async function notify(payload: NotifyPayload): Promise<void> {
   const title = payload.title.trim();
   if (!title) return;
   const body = typeof payload.body === "string" ? payload.body : undefined;
+  const tauri = (globalThis as any).__TAURI__ ?? null;
 
   const directNotify = getTauriDirectNotify();
   if (directNotify) {
@@ -60,5 +61,10 @@ export async function notify(payload: NotifyPayload): Promise<void> {
     }
   }
 
-  await notifyWeb({ title, body });
+  // Only fall back to the Web Notification API in *web builds* (no Tauri runtime). In the desktop
+  // shell we intentionally do **not** fall back to the web API because that would allow remote or
+  // navigated-to content to create system notifications outside the hardened Rust command path.
+  if (!tauri) {
+    await notifyWeb({ title, body });
+  }
 }

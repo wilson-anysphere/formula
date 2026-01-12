@@ -72,4 +72,23 @@ describe("tauri/notifications", () => {
 
     expect(created).toEqual([{ title: "Hi", options: { body: "There" } }]);
   });
+
+  it("does not fall back to the Web Notification API when __TAURI__ is present", async () => {
+    (globalThis as any).__TAURI__ = {};
+
+    const created: Array<{ title: string; options?: NotificationOptions }> = [];
+    class MockNotification {
+      static permission = "granted";
+
+      constructor(title: string, options?: NotificationOptions) {
+        created.push({ title, options });
+      }
+    }
+
+    (globalThis as any).Notification = MockNotification;
+
+    await notify({ title: "Hi", body: "There" });
+
+    expect(created).toEqual([]);
+  });
 });
