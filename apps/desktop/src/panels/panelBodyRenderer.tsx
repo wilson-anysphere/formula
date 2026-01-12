@@ -347,6 +347,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
       marketplaceExtensionManager = new WebExtensionManager({
         marketplaceClient,
         host: (options.extensionHostManager?.host as any) ?? null,
+        engineVersion: options.extensionHostManager?.engineVersion ?? "1.0.0",
       });
     }
 

@@ -121,6 +121,7 @@ function createDesktopClipboardApi(uiApi: ExtensionHostUiApi): ClipboardApi {
 
 export class DesktopExtensionHostManager {
   readonly host: InstanceType<typeof BrowserExtensionHost>;
+  readonly engineVersion: string;
   private readonly listeners = new Set<() => void>();
   private _ready = false;
   private _error: unknown = null;
@@ -146,8 +147,9 @@ export class DesktopExtensionHostManager {
         return await basePrompt(req as any);
       });
 
+    this.engineVersion = String(params.engineVersion ?? "");
     this.host = new BrowserExtensionHost({
-      engineVersion: params.engineVersion,
+      engineVersion: this.engineVersion,
       spreadsheetApi: params.spreadsheetApi,
       uiApi: params.uiApi,
       permissionPrompt,
