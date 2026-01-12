@@ -6877,6 +6877,7 @@ if (
 
     const onUp = (up: PointerEvent) => {
       if (up.pointerId !== pointerId) return;
+      gridSplitterEl.removeEventListener("lostpointercapture", onUp);
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
@@ -6892,7 +6893,7 @@ if (
 
       // pointercancel events may not have meaningful coordinates; in that case, fall back
       // to the last known pointermove position.
-      if (up.type !== "pointercancel") {
+      if (up.type !== "pointercancel" && up.type !== "lostpointercapture") {
         latestClientX = up.clientX;
         latestClientY = up.clientY;
       }
@@ -6910,6 +6911,11 @@ if (
         persistLayoutNow();
       }
     };
+
+    // Ensure we always clean up the drag if capture is lost unexpectedly (e.g. OS gesture,
+    // element teardown). Note: `releasePointerCapture()` also triggers `lostpointercapture`,
+    // so the handler removes itself before calling `releasePointerCapture` to avoid reentrancy.
+    gridSplitterEl.addEventListener("lostpointercapture", onUp, { passive: true });
 
     // `touch-action: none` on `#grid-splitter` prevents native touch panning during drags,
     // so these listeners can remain passive (avoids scroll-blocking overhead).
