@@ -293,6 +293,26 @@ impl EntityValue {
         }
     }
 
+    #[must_use]
+    pub fn with_properties<I, K, V>(display: impl Into<String>, properties: I) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: Into<String>,
+        V: Into<Value>,
+    {
+        let mut map = HashMap::new();
+        for (k, v) in properties {
+            map.insert(k.into(), v.into());
+        }
+        Self::with_fields(display, map)
+    }
+
+    #[must_use]
+    pub fn property(mut self, name: impl Into<String>, value: impl Into<Value>) -> Self {
+        self.fields.insert(name.into(), value.into());
+        self
+    }
+
     pub fn get_field_case_insensitive(&self, field: &str) -> Option<Value> {
         self.fields
             .iter()
@@ -328,6 +348,26 @@ impl RecordValue {
             display_field: None,
             fields,
         }
+    }
+
+    #[must_use]
+    pub fn with_fields_iter<I, K, V>(display: impl Into<String>, fields: I) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: Into<String>,
+        V: Into<Value>,
+    {
+        let mut map = HashMap::new();
+        for (k, v) in fields {
+            map.insert(k.into(), v.into());
+        }
+        Self::with_fields(display, map)
+    }
+
+    #[must_use]
+    pub fn field(mut self, name: impl Into<String>, value: impl Into<Value>) -> Self {
+        self.fields.insert(name.into(), value.into());
+        self
     }
 
     pub fn get_field_case_insensitive(&self, field: &str) -> Option<Value> {

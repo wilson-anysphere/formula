@@ -710,51 +710,6 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         if args.len() > crate::EXCEL_MAX_ARGS {
             return Value::Error(ErrorKind::Value);
         }
-
-        // Field access (`A1.Price`) is lowered into a synthetic `_FIELDACCESS(base, "field")` call.
-        //
-        // Semantics:
-        // - Base is Entity/Record: return matching field (case-insensitive), else `#FIELD!`
-        // - Base is not Entity/Record: `#FIELD!`
-        // - Errors propagate
-        // - Arrays lift elementwise
-        if name.eq_ignore_ascii_case("_FIELDACCESS") {
-            if args.len() != 2 {
-                return Value::Error(ErrorKind::Value);
-            }
-
-            let base = self.deref_eval_value_dynamic(self.eval_value(&args[0]));
-            let field = self.deref_eval_value_dynamic(self.eval_value(&args[1]));
-            let field = match field {
-                Value::Text(s) => s,
-                Value::Error(e) => return Value::Error(e),
-                _ => return Value::Error(ErrorKind::Value),
-            };
-
-            fn eval_field_access(base: Value, field: &str) -> Value {
-                match base {
-                    Value::Error(e) => Value::Error(e),
-                    Value::Array(arr) => {
-                        let values = arr
-                            .values
-                            .into_iter()
-                            .map(|v| eval_field_access(v, field))
-                            .collect();
-                        Value::Array(Array::new(arr.rows, arr.cols, values))
-                    }
-                    Value::Entity(entity) => entity
-                        .get_field_case_insensitive(field)
-                        .unwrap_or(Value::Error(ErrorKind::Field)),
-                    Value::Record(record) => record
-                        .get_field_case_insensitive(field)
-                        .unwrap_or(Value::Error(ErrorKind::Field)),
-                    _ => Value::Error(ErrorKind::Field),
-                }
-            }
-
-            return eval_field_access(base, &field);
-        }
-
         if let Some(spec) = crate::functions::lookup_function(name) {
             if args.len() < spec.min_args || args.len() > spec.max_args {
                 return Value::Error(ErrorKind::Value);

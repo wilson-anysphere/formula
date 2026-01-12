@@ -58,6 +58,7 @@ mod builtins_engineering_special;
 mod builtins_roman;
 mod builtins_select;
 mod builtins_reference;
+mod builtins_rich_values;
 mod builtins_statistical;
 mod builtins_statistical_distributions;
 mod builtins_statistical_moments;
@@ -314,6 +315,12 @@ fn registry() -> &'static HashMap<String, &'static FunctionSpec> {
         for spec in inventory::iter::<FunctionSpec> {
             map.insert(spec.name.to_ascii_uppercase(), spec);
         }
+
+        // Internal synthetic functions used by expression lowering.
+        map.insert(
+            builtins_rich_values::FIELDACCESS_SPEC.name.to_ascii_uppercase(),
+            &builtins_rich_values::FIELDACCESS_SPEC,
+        );
         map
     })
 }

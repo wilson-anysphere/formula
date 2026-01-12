@@ -4177,7 +4177,7 @@ fn oddlprice_matches_excel_model_for_30_360_bases() {
     // `E = DAYS360(PCD, NCD, TRUE)` (European 30/360; can differ from `360/frequency`).
     //
     // last_interest is EOM Feb 28, so the EOM-pinned prior coupon date is Aug 31.
-    // DAYS360_EU(Aug 31, Feb 28) = 178 != 180 (=360/frequency).
+    // DAYS360_EU(Aug 31, Feb 28) = 178.
     let months_per_period = 12 / frequency;
     let eom = is_end_of_month(last_interest, system);
     assert!(eom, "expected last_interest to be EOM for this scenario");

@@ -375,6 +375,8 @@ fn price_matches_pv_when_settlement_is_coupon_date() {
                                 let pv = eval_number(
                                     &mut sheet,
                                     &format!(
+                                        // Excel's `rate` is defined per $100 face value (not scaled by
+                                        // `redemption`, which is the amount repaid per $100 at maturity).
                                         "=LET(n,{k},c,100*({rate})/{frequency},r,({yld})/{frequency},PV(r,n,-c,-{redemption}))"
                                     ),
                                 );
