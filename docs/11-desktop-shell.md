@@ -144,7 +144,7 @@ Minimal excerpt (not copy/pasteable; see the full file for everything):
 
 The desktop app deliberately **does not exit on window close** so the tray remains available.
 
-The close sequence is:
+The window-close sequence is:
 
 1. Rust receives `WindowEvent::CloseRequested` and calls `api.prevent_close()`.
 2. Rust emits `close-prep` with a random token.
@@ -152,8 +152,8 @@ The close sequence is:
 4. Rust runs a best-effort `Workbook_BeforeClose` macro (if trusted) and collects any cell updates.
 5. Rust emits `close-requested` with `{ token, updates }`.
 6. Frontend applies any macro cell updates, prompts for unsaved changes if needed, then either:
-   - hides the window (default close) or
-   - invokes `quit_app` (tray quit)
+   - hides the window (default behavior; app keeps running in the tray), or
+   - keeps the window open if the user cancels the close (e.g. cancels the unsaved-changes prompt)
 7. Frontend emits `close-handled` with the token so Rust can clear its “close in flight” guard.
 
 Implementation detail: `main.rs` uses an `AtomicBool` (`CLOSE_REQUEST_IN_FLIGHT`) to prevent overlapping close flows if the user clicks close repeatedly while a prompt is still open.
@@ -191,6 +191,11 @@ Implementation notes:
 - Global shortcuts are registered in `apps/desktop/src-tauri/src/shortcuts.rs`.
   - Accelerators: `CmdOrCtrl+Shift+O`, `CmdOrCtrl+Shift+P`
   - The plugin handler in `main.rs` emits: `shortcut-quick-open`, `shortcut-command-palette`
+
+Note on quitting from the tray:
+
+- The Rust host emits `tray-quit`, but it does **not** hard-exit immediately.
+- The frontend handles `tray-quit` by running its quit flow (best-effort `Workbook_BeforeClose`, unsaved changes prompt) and finally invoking the `quit_app` command to exit the process.
 
 ---
 
