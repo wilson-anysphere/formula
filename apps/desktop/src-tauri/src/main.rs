@@ -8,7 +8,9 @@ mod tray;
 mod updater;
 
 use formula_desktop_tauri::commands;
-use formula_desktop_tauri::macro_trust::{compute_macro_fingerprint, MacroTrustStore, SharedMacroTrustStore};
+use formula_desktop_tauri::macro_trust::{
+    compute_macro_fingerprint, MacroTrustStore, SharedMacroTrustStore,
+};
 use formula_desktop_tauri::macros::MacroExecutionOptions;
 use formula_desktop_tauri::state::{AppState, CellUpdateData, SharedAppState};
 use serde::Serialize;
@@ -193,7 +195,7 @@ fn main() {
             // Auto-update is configured via `tauri.conf.json`. We do a lightweight startup check
             // in release builds; users can also trigger checks from the tray menu.
             #[cfg(not(debug_assertions))]
-            updater::spawn_update_check(app.handle());
+            updater::spawn_update_check(app.handle(), updater::UpdateCheckSource::Startup);
 
             Ok(())
         })

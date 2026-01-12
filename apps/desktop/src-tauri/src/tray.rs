@@ -12,8 +12,13 @@ pub fn init(app: &mut App) -> tauri::Result<()> {
 
     let new = MenuItem::with_id(handle, ITEM_NEW, "New Workbook", true, None::<&str>)?;
     let open = MenuItem::with_id(handle, ITEM_OPEN, "Open…", true, None::<&str>)?;
-    let check_updates =
-        MenuItem::with_id(handle, ITEM_CHECK_UPDATES, "Check for Updates", true, None::<&str>)?;
+    let check_updates = MenuItem::with_id(
+        handle,
+        ITEM_CHECK_UPDATES,
+        "Check for Updates",
+        true,
+        None::<&str>,
+    )?;
     let quit = MenuItem::with_id(handle, ITEM_QUIT, "Quit", true, None::<&str>)?;
 
     let menu = Menu::with_items(
@@ -40,7 +45,9 @@ pub fn init(app: &mut App) -> tauri::Result<()> {
                 let _ = app.emit("tray-open", ());
                 show_main_window(app);
             }
-            ITEM_CHECK_UPDATES => crate::updater::spawn_update_check(app),
+            ITEM_CHECK_UPDATES => {
+                crate::updater::spawn_update_check(app, crate::updater::UpdateCheckSource::Manual)
+            }
             ITEM_QUIT => {
                 // Delegate quit-handling to the frontend so it can:
                 // - fire `Workbook_BeforeClose` macros
