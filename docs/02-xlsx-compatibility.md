@@ -203,6 +203,9 @@ Key observed behavior for “Place in Cell” images: the worksheet cell is enco
 <c t="e" vm="N"><v>#VALUE!</v></c>
 ```
 
+Indexing note:
+- Excel commonly uses **1-based** `vm` values, but some producers/fixtures use **0-based** `vm` values. For round-trip safety, treat `vm` as an opaque integer index and preserve it exactly.
+
 ##### Mapping chain (high-level)
 
 `sheetN.xml c@vm` → `xl/metadata.xml <valueMetadata>` → `xl/richData/rdrichvalue.xml` (or `xl/richData/richValue*.xml`) → `xl/richData/richValueRel.xml` → `xl/richData/_rels/richValueRel.xml.rels` → `xl/media/imageN.*`
