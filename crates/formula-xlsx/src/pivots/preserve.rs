@@ -597,8 +597,8 @@ struct PivotCacheEntry {
 /// - Inserts `<pivotCaches>` at a schema-safe location when missing.
 /// - When `<pivotCaches>` already exists, merges only the missing `<pivotCache cacheId="…">`
 ///   entries (does not delete or reorder existing entries).
-/// - Ensures the `<workbook>` element declares `xmlns:r` if any inserted pivot cache uses
-///   `r:id`.
+/// - Ensures the `<workbook>` element declares the relationships namespace (`{REL_NS}`) for any
+///   prefixes used in inserted `*:id="..."` attributes (e.g. `r:id` or `rel:id`).
 pub fn apply_preserved_pivot_caches_to_workbook_xml(
     workbook_xml: &str,
     preserved_pivot_caches_xml: &str,
@@ -632,8 +632,18 @@ fn apply_preserved_pivot_caches_to_workbook_xml_with_part(
         insert_pivot_caches(workbook_xml, &workbook, preserved_pivot_caches_xml)?
     };
 
-    if updated.contains("r:id") && !updated.contains("xmlns:r=") {
-        updated = ensure_workbook_has_r_namespace(&updated, part_name)?;
+    // If we didn't insert anything, avoid mutating the workbook.
+    if updated == workbook_xml {
+        return Ok(updated);
+    }
+
+    // Ensure the `<workbook>` element declares the relationships namespace for any prefixes used
+    // in the inserted fragment (e.g. `r:id` or `rel:id`).
+    for prefix in detect_attr_prefixes(preserved_pivot_caches_xml, "id") {
+        if prefix == "xmlns" {
+            continue;
+        }
+        updated = ensure_workbook_has_namespace_prefix(&updated, part_name, &prefix, REL_NS)?;
     }
 
     Ok(updated)
@@ -839,17 +849,21 @@ fn parse_pivot_cache_entries(xml: &str) -> Result<Vec<PivotCacheEntry>, ChartExt
     Ok(entries)
 }
 
-fn ensure_workbook_has_r_namespace(
+fn ensure_workbook_has_namespace_prefix(
     workbook_xml: &str,
     part_name: &str,
+    prefix: &str,
+    uri: &str,
 ) -> Result<String, ChartExtractionError> {
-    if workbook_xml.contains("xmlns:r=") {
+    if prefix.is_empty() {
         return Ok(workbook_xml.to_string());
     }
 
-    // This helper is commonly called when we've just inserted `r:id="..."` attributes into a
-    // workbook that did not previously declare `xmlns:r`. At that point the XML isn't
-    // namespace-well-formed, so we can't rely on a namespace-aware parser like `roxmltree`.
+    let needle = format!("xmlns:{prefix}=");
+
+    // This helper is commonly called when we've just inserted `*:id="..."` attributes into a
+    // workbook that did not previously declare the corresponding `xmlns:*`. At that point the XML
+    // isn't namespace-well-formed, so we can't rely on a namespace-aware parser like `roxmltree`.
     //
     // Use a fast streaming parser to locate the `<workbook ...>` start tag and patch it in-place.
     let mut reader = Reader::from_str(workbook_xml);
@@ -864,7 +878,9 @@ fn ensure_workbook_has_r_namespace(
         let pos_after = reader.buffer_position() as usize;
 
         match event {
-            Event::Start(ref e) | Event::Empty(ref e) if e.local_name().as_ref() == b"workbook" => {
+            Event::Start(ref e) | Event::Empty(ref e)
+                if e.local_name().as_ref() == b"workbook" =>
+            {
                 let tag = workbook_xml
                     .get(pos_before..pos_after)
                     .ok_or_else(|| {
@@ -872,6 +888,9 @@ fn ensure_workbook_has_r_namespace(
                             "{part_name}: invalid <workbook> start tag offsets"
                         ))
                     })?;
+                if tag.contains(&needle) {
+                    return Ok(workbook_xml.to_string());
+                }
                 let trimmed = tag.trim_end();
                 let insert_rel = if trimmed.ends_with("/>") {
                     trimmed.len().saturating_sub(2)
@@ -885,7 +904,7 @@ fn ensure_workbook_has_r_namespace(
                 let insert_pos = pos_before + insert_rel;
 
                 let mut out = workbook_xml.to_string();
-                out.insert_str(insert_pos, &format!(" xmlns:r=\"{REL_NS}\""));
+                out.insert_str(insert_pos, &format!(" xmlns:{prefix}=\"{uri}\""));
                 return Ok(out);
             }
             Event::Eof => break,
@@ -1594,6 +1613,29 @@ mod tests {
         assert!(
             !updated.contains("</pivotCaches>"),
             "introduced unprefixed pivotCaches close tag: {updated}"
+        );
+    }
+
+    #[test]
+    fn inserts_pivot_caches_adds_relationship_namespace_for_non_r_prefix() {
+        let workbook = format!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="{SPREADSHEETML_NS}" xmlns:r="{REL_NS}"><sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>"#
+        );
+        // Simulate a preserved fragment that used a non-`r` relationships prefix with the
+        // declaration living on the original `<workbook>` element (so it's missing here).
+        let fragment = r#"<pivotCaches><pivotCache cacheId="1" rel:id="rId2"/></pivotCaches>"#;
+
+        let updated =
+            apply_preserved_pivot_caches_to_workbook_xml(&workbook, fragment).expect("patch");
+
+        Document::parse(&updated).expect("output should be parseable XML");
+        assert!(
+            updated.contains(r#"xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#),
+            "missing xmlns:rel declaration: {updated}"
+        );
+        assert!(
+            updated.contains(r#"rel:id="rId2""#),
+            "missing rel:id attribute: {updated}"
         );
     }
 
