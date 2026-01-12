@@ -20,3 +20,34 @@ test("Macro recorder handles DocumentController formatDeltas (layered column for
   workbook.dispose();
 });
 
+test("Macro recorder handles DocumentController formatDeltas (layered row formatting)", () => {
+  const doc = new DocumentController();
+  const workbook = new DocumentControllerWorkbookAdapter(doc, { activeSheetName: "Sheet1" });
+
+  const recorder = new MacroRecorder(workbook);
+  recorder.start();
+
+  doc.setRowFormat("Sheet1", 5, { font: { italic: true } });
+
+  const actions = recorder.stop();
+  assert.deepEqual(actions, [{ type: "setFormat", sheetName: "Sheet1", address: "A6:XFD6", format: { italic: true } }]);
+
+  workbook.dispose();
+});
+
+test("Macro recorder handles DocumentController formatDeltas (layered sheet formatting)", () => {
+  const doc = new DocumentController();
+  const workbook = new DocumentControllerWorkbookAdapter(doc, { activeSheetName: "Sheet1" });
+
+  const recorder = new MacroRecorder(workbook);
+  recorder.start();
+
+  doc.setSheetFormat("Sheet1", { fill: { fgColor: "#FF00FF00" } });
+
+  const actions = recorder.stop();
+  assert.deepEqual(actions, [
+    { type: "setFormat", sheetName: "Sheet1", address: "A1:XFD1048576", format: { backgroundColor: "#FF00FF00" } },
+  ]);
+
+  workbook.dispose();
+});
