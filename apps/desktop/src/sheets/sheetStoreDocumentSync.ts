@@ -245,6 +245,18 @@ export function startSheetStoreDocumentSync(
   const unsubscribeChange = doc.on("change", (payload) => {
     lastChangeSource = typeof (payload as any)?.source === "string" ? (payload as any).source : null;
     if ((payload as any)?.sheetOrderDelta) pendingSheetOrderSync = true;
+    // Undo/redo can delete the currently-active sheet. If we wait until a microtask to
+    // reconcile the sheet list, other synchronous `document.on("change")` listeners
+    // (e.g. `main.ts` calling `app.refresh()`) may read from the now-deleted sheet id,
+    // which would lazily recreate it via `DocumentController.getCell(...)`.
+    //
+    // Sync immediately for undo/redo so we:
+    // - remove deleted sheet ids from the UI store before other listeners run
+    // - activate a fallback sheet if the active sheet no longer exists
+    if (lastChangeSource === "undo" || lastChangeSource === "redo") {
+      syncNow();
+      return;
+    }
     schedule();
   });
   const unsubscribeUpdate = doc.on("update", schedule);

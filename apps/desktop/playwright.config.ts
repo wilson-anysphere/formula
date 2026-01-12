@@ -35,7 +35,9 @@ const basePort = (() => {
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
   if (Number.isFinite(parsed) && parsed > 0) return parsed;
   if (process.env.CI) return defaultBasePort;
-  return stablePortFromString(repoRoot, { base: defaultBasePort, range: 1000 });
+  // Use a wide range so developers are less likely to collide with a concurrently running
+  // `pnpm dev` (fixed port) or another local service.
+  return stablePortFromString(repoRoot, { base: defaultBasePort, range: 20_000 });
 })();
 const cspPort = basePort + 1;
 const desktopPort = basePort + 2;
