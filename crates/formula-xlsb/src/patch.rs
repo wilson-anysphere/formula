@@ -55,6 +55,11 @@ impl CellEdit {
     /// ([`crate::rgce::encode_rgce_with_context_ast`]) for improved grammar coverage. Without
     /// `write`, it falls back to [`crate::rgce::encode_rgce_with_context`].
     ///
+    /// Note: table-less structured references like `[@Qty]` can only be encoded when the table id
+    /// is unambiguous. If the workbook context contains multiple tables, prefer
+    /// [`Self::with_formula_text_with_context_in_sheet`] so the encoder can infer the correct
+    /// table id from the sheet + base cell location.
+    ///
     /// `formula` may include a leading `=`.
     pub fn with_formula_text_with_context(
         row: u32,
@@ -129,6 +134,10 @@ impl CellEdit {
     /// When the `write` feature is enabled, this prefers the AST-based encoder
     /// ([`crate::rgce::encode_rgce_with_context_ast`]) for improved grammar coverage. Without
     /// `write`, it falls back to [`crate::rgce::encode_rgce_with_context`].
+    ///
+    /// Note: if `formula` uses table-less structured references like `[@Qty]` and the workbook
+    /// context contains multiple tables, prefer [`Self::set_formula_text_with_context_in_sheet`]
+    /// so the encoder can infer the correct table id from the sheet + base cell location.
     ///
     /// `formula` may include a leading `=`.
     pub fn set_formula_text_with_context(
