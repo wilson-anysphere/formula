@@ -93,6 +93,73 @@ test("FormulaConflictMonitor tracks local-origin edits for causal conflict detec
   docB.destroy();
 });
 
+test("FormulaConflictMonitor tracks local-origin formula clears for causal conflict detection (without setLocalFormula)", () => {
+  // Ensure deterministic map-entry overwrite tie-breaking: higher clientID wins.
+  const docA = new Y.Doc();
+  docA.clientID = 1;
+  const docB = new Y.Doc();
+  docB.clientID = 2;
+
+  let disconnect = connectDocs(docA, docB);
+
+  const localOrigin = { type: "local-a" };
+  const cellKey = "Sheet1:0:0";
+
+  // Establish base cell map + formula so the conflict is an overwrite on the
+  // formula key (not the cell map insertion).
+  docA.transact(() => {
+    const cell = new Y.Map();
+    cell.set("formula", "=0");
+    cell.set("value", null);
+    docA.getMap("cells").set(cellKey, cell);
+  }, localOrigin);
+  assert.equal(
+    /** @type {any} */ (docB.getMap("cells").get(cellKey))?.get?.("formula"),
+    "=0",
+    "expected base cell to sync to docB"
+  );
+
+  /** @type {Array<any>} */
+  const conflicts = [];
+
+  const monitor = new FormulaConflictMonitor({
+    doc: docA,
+    localUserId: "user-a",
+    origin: localOrigin,
+    localOrigins: new Set([localOrigin]),
+    onConflict: (c) => conflicts.push(c)
+  });
+
+  // Offline concurrent edits: A clears; B overwrites with a new formula (B wins).
+  disconnect();
+  docA.transact(() => {
+    const cell = /** @type {Y.Map<any>} */ (docA.getMap("cells").get(cellKey));
+    cell.set("formula", null);
+    cell.set("value", null);
+    // Intentionally omit `modifiedBy` so conflict detection must rely on causality.
+  }, localOrigin);
+
+  docB.transact(() => {
+    const cell = /** @type {Y.Map<any>} */ (docB.getMap("cells").get(cellKey));
+    cell.set("formula", "=2");
+    cell.set("value", null);
+    // Intentionally omit `modifiedBy`.
+  });
+
+  // Reconnect and sync state.
+  disconnect = connectDocs(docA, docB);
+
+  assert.ok(conflicts.length >= 1, "expected at least one conflict to be detected");
+  assert.equal(conflicts[0].kind, "formula");
+  assert.equal(conflicts[0].localFormula.trim(), "");
+  assert.equal(conflicts[0].remoteFormula.trim(), "=2");
+
+  monitor.dispose();
+  disconnect();
+  docA.destroy();
+  docB.destroy();
+});
+
 test("FormulaConflictMonitor tracks local-origin value clears for value conflicts (binder-style order, formula+value mode)", () => {
   // Ensure deterministic map-entry overwrite tie-breaking: higher clientID wins.
   const docA = new Y.Doc();
