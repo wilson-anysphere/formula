@@ -165,4 +165,36 @@ describe("mountTitlebar", () => {
       handle?.dispose();
     });
   }, TEST_TIMEOUT_MS);
+
+  it("supports updating props via handle.update()", async () => {
+    const container = document.createElement("div");
+    container.classList.add("formula-titlebar");
+    document.body.appendChild(container);
+
+    let handle: ReturnType<typeof mountTitlebar> | null = null;
+    await act(async () => {
+      handle = mountTitlebar(container, { documentName: "Doc 1", actions: [] });
+    });
+    if (!handle) throw new Error("Expected mountTitlebar to return a handle");
+    expect(container.classList.contains("formula-titlebar")).toBe(false);
+    expect(container.querySelector('[data-testid="titlebar-actions"]')).toBeNull();
+    expect(container.querySelector('[data-testid="titlebar-document-name"]')?.textContent).toBe("Doc 1");
+
+    act(() => {
+      handle?.update({
+        documentName: "Doc 2",
+        actions: [{ id: "share", label: "Share", ariaLabel: "Share document", disabled: true }],
+      });
+    });
+
+    expect(container.querySelector('[data-testid="titlebar-document-name"]')?.textContent).toBe("Doc 2");
+    expect(container.querySelector('[data-testid="titlebar-document-name"]')?.getAttribute("title")).toBe("Doc 2");
+    expect(container.querySelector('[data-testid="titlebar-actions"]')).toBeTruthy();
+    expect(container.querySelector<HTMLButtonElement>('[aria-label="Share document"]')?.disabled).toBe(true);
+
+    act(() => {
+      handle?.dispose();
+    });
+    expect(container.classList.contains("formula-titlebar")).toBe(true);
+  }, TEST_TIMEOUT_MS);
 });
