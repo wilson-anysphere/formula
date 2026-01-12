@@ -128,6 +128,10 @@ const MAX_BYTES_TO_SCAN = 2 * 1024 * 1024; // 2 MiB guard against generated/bina
 // direct dependency/config regression (not an incidental string in code/comments).
 const CONFIG_FILE_EXTENSIONS = new Set([".json", ".toml", ".yaml", ".yml", ".lock"]);
 
+// Some important config/build files have no extension. Scan these by basename so
+// they can't be used to smuggle provider integrations into the repo.
+const SCANNED_BASENAMES_WITHOUT_EXTENSION = new Set(["dockerfile"]);
+
 /**
  * @typedef {{ file: string, ruleId: string, message: string, line?: number, column?: number }} Violation
  */
@@ -199,7 +203,10 @@ function shouldScanFile(filePath) {
   if (extLower && !SCANNED_FILE_EXTENSIONS.has(extLower)) return false;
   // Files without extensions (rare) are ignored by default to reduce false
   // positives on license/readme-style blobs that can live inside packages.
-  if (!extLower) return false;
+  if (!extLower) {
+    const baseLower = path.basename(filePath).toLowerCase();
+    return SCANNED_BASENAMES_WITHOUT_EXTENSION.has(baseLower);
+  }
   return true;
 }
 
