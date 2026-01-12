@@ -221,9 +221,11 @@ mod gtk_backend {
     }
 
     pub(super) fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
-        let text = payload.text.clone();
-        let html = payload.html.clone();
-        let rtf = payload.rtf.clone();
+        use std::sync::Arc;
+
+        let text = payload.text.clone().map(Arc::new);
+        let html = payload.html.clone().map(Arc::new);
+        let rtf = payload.rtf.clone().map(Arc::new);
         let png_bytes = payload
             .png_base64
             .as_deref()
@@ -233,93 +235,117 @@ mod gtk_backend {
                     .decode(s)
                     .map_err(|e| ClipboardError::InvalidPayload(format!("invalid pngBase64: {e}")))
             })
-            .transpose()?;
+            .transpose()?
+            .map(Arc::new);
 
         with_gtk_main_thread(move || {
             ensure_gtk()?;
 
+            let set_clipboard_data = |clipboard: &gtk::Clipboard| {
+                const INFO_TEXT: u32 = 1;
+                const INFO_HTML: u32 = 2;
+                const INFO_RTF: u32 = 3;
+                const INFO_PNG: u32 = 4;
+
+                // Do not restrict targets based on app identity; we want both intra-app copy/paste and
+                // interoperability with other apps (LibreOffice, browser, image editors, etc.).
+                let flags = gtk::TargetFlags::empty();
+                let mut targets: Vec<gtk::TargetEntry> = Vec::new();
+
+                if text.is_some() {
+                    // Provide common plaintext targets so other apps can pick their preferred flavor.
+                    // (GTK's own `set_text` would also do this, but we need to set multiple targets at once.)
+                    targets.push(gtk::TargetEntry::new("text/plain", flags, INFO_TEXT));
+                    targets.push(gtk::TargetEntry::new(
+                        "text/plain;charset=utf-8",
+                        flags,
+                        INFO_TEXT,
+                    ));
+                    targets.push(gtk::TargetEntry::new("UTF8_STRING", flags, INFO_TEXT));
+                    targets.push(gtk::TargetEntry::new("STRING", flags, INFO_TEXT));
+                    targets.push(gtk::TargetEntry::new("TEXT", flags, INFO_TEXT));
+                }
+
+                if html.is_some() {
+                    targets.push(gtk::TargetEntry::new("text/html", flags, INFO_HTML));
+                    targets.push(gtk::TargetEntry::new(
+                        "text/html;charset=utf-8",
+                        flags,
+                        INFO_HTML,
+                    ));
+                }
+
+                if rtf.is_some() {
+                    targets.push(gtk::TargetEntry::new("text/rtf", flags, INFO_RTF));
+                    targets.push(gtk::TargetEntry::new("application/rtf", flags, INFO_RTF));
+                    targets.push(gtk::TargetEntry::new("application/x-rtf", flags, INFO_RTF));
+                }
+
+                if png_bytes.is_some() {
+                    targets.push(gtk::TargetEntry::new("image/png", flags, INFO_PNG));
+                }
+
+                // Note: the closure captures owned copies of the strings/bytes so the clipboard stays
+                // valid after this function returns.
+                let text = text.clone();
+                let html = html.clone();
+                let rtf = rtf.clone();
+                let png_bytes = png_bytes.clone();
+                let success =
+                    clipboard.set_with_data(&targets, move |_clipboard, selection_data, info| {
+                        match info {
+                            INFO_TEXT => {
+                                if let Some(ref text) = text {
+                                    selection_data.set(
+                                        &selection_data.target(),
+                                        8,
+                                        text.as_bytes(),
+                                    );
+                                }
+                            }
+                            INFO_HTML => {
+                                if let Some(ref html) = html {
+                                    selection_data.set(
+                                        &selection_data.target(),
+                                        8,
+                                        html.as_bytes(),
+                                    );
+                                }
+                            }
+                            INFO_RTF => {
+                                if let Some(ref rtf) = rtf {
+                                    selection_data.set(&selection_data.target(), 8, rtf.as_bytes());
+                                }
+                            }
+                            INFO_PNG => {
+                                if let Some(ref bytes) = png_bytes {
+                                    selection_data.set(&selection_data.target(), 8, bytes);
+                                }
+                            }
+                            _ => {}
+                        }
+                    });
+
+                if !success {
+                    return Err(ClipboardError::OperationFailed(
+                        "gtk_clipboard_set_with_data returned false".to_string(),
+                    ));
+                }
+
+                Ok(())
+            };
+
             let clipboard = gtk::Clipboard::get(&gdk::SELECTION_CLIPBOARD);
-
-            const INFO_TEXT: u32 = 1;
-            const INFO_HTML: u32 = 2;
-            const INFO_RTF: u32 = 3;
-            const INFO_PNG: u32 = 4;
-
-            // Do not restrict targets based on app identity; we want both intra-app copy/paste and
-            // interoperability with other apps (LibreOffice, browser, image editors, etc.).
-            let flags = gtk::TargetFlags::empty();
-            let mut targets: Vec<gtk::TargetEntry> = Vec::new();
-
-            if text.is_some() {
-                // Provide common plaintext targets so other apps can pick their preferred flavor.
-                // (GTK's own `set_text` would also do this, but we need to set multiple targets at once.)
-                targets.push(gtk::TargetEntry::new("text/plain", flags, INFO_TEXT));
-                targets.push(gtk::TargetEntry::new(
-                    "text/plain;charset=utf-8",
-                    flags,
-                    INFO_TEXT,
-                ));
-                targets.push(gtk::TargetEntry::new("UTF8_STRING", flags, INFO_TEXT));
-                targets.push(gtk::TargetEntry::new("STRING", flags, INFO_TEXT));
-                targets.push(gtk::TargetEntry::new("TEXT", flags, INFO_TEXT));
-            }
-
-            if html.is_some() {
-                targets.push(gtk::TargetEntry::new("text/html", flags, INFO_HTML));
-                targets.push(gtk::TargetEntry::new(
-                    "text/html;charset=utf-8",
-                    flags,
-                    INFO_HTML,
-                ));
-            }
-
-            if rtf.is_some() {
-                targets.push(gtk::TargetEntry::new("text/rtf", flags, INFO_RTF));
-                targets.push(gtk::TargetEntry::new("application/rtf", flags, INFO_RTF));
-                targets.push(gtk::TargetEntry::new("application/x-rtf", flags, INFO_RTF));
-            }
-
-            if png_bytes.is_some() {
-                targets.push(gtk::TargetEntry::new("image/png", flags, INFO_PNG));
-            }
-
-            // Note: the closure captures owned copies of the strings/bytes so the clipboard stays
-            // valid after this function returns.
-            let success = clipboard.set_with_data(
-                &targets,
-                move |_clipboard, selection_data, info| match info {
-                    INFO_TEXT => {
-                        if let Some(ref text) = text {
-                            selection_data.set(&selection_data.target(), 8, text.as_bytes());
-                        }
-                    }
-                    INFO_HTML => {
-                        if let Some(ref html) = html {
-                            selection_data.set(&selection_data.target(), 8, html.as_bytes());
-                        }
-                    }
-                    INFO_RTF => {
-                        if let Some(ref rtf) = rtf {
-                            selection_data.set(&selection_data.target(), 8, rtf.as_bytes());
-                        }
-                    }
-                    INFO_PNG => {
-                        if let Some(ref bytes) = png_bytes {
-                            selection_data.set(&selection_data.target(), 8, bytes);
-                        }
-                    }
-                    _ => {}
-                },
-            );
-
-            if !success {
-                return Err(ClipboardError::OperationFailed(
-                    "gtk_clipboard_set_with_data returned false".to_string(),
-                ));
-            }
+            set_clipboard_data(&clipboard)?;
 
             // Best-effort request to persist clipboard data via a clipboard manager (X11).
             clipboard.store();
+
+            // Optional: also populate X11 PRIMARY selection (middle-click paste) when available.
+            if clipboard_fallback::should_attempt_primary_selection_from_env() {
+                let primary = gtk::Clipboard::get(&gdk::SELECTION_PRIMARY);
+                let _ = set_clipboard_data(&primary);
+            }
 
             Ok(())
         })
