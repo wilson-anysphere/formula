@@ -93,6 +93,11 @@ export async function resolve(specifier, context, defaultResolve) {
       } catch (candidateErr) {
         if (!isResolutionMiss(candidateErr)) throw candidateErr;
       }
+      try {
+        return await defaultResolve(base.slice(0, -4) + ".ts" + suffix, context, defaultResolve);
+      } catch (candidateErr) {
+        if (!isResolutionMiss(candidateErr)) throw candidateErr;
+      }
     }
 
     // Extensionless `./foo` -> try TS/JS.
