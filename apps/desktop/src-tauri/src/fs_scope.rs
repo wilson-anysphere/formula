@@ -22,7 +22,9 @@ pub(crate) fn desktop_allowed_roots() -> Result<Vec<PathBuf>> {
 
     let mut canonical_roots = Vec::new();
     for root in roots {
-        if let Ok(canon) = std::fs::canonicalize(&root) {
+        // `dunce::canonicalize` avoids Windows `\\?\` prefix issues and behaves consistently across
+        // platforms for scope comparisons.
+        if let Ok(canon) = dunce::canonicalize(&root) {
             if !canonical_roots.iter().any(|existing| *existing == canon) {
                 canonical_roots.push(canon);
             }
@@ -57,7 +59,7 @@ pub(crate) fn canonicalize_in_allowed_roots_with_error(
     allowed_roots: &[PathBuf],
 ) -> std::result::Result<PathBuf, CanonicalizeInAllowedRootsError> {
     let canonical =
-        std::fs::canonicalize(path).map_err(|e| CanonicalizeInAllowedRootsError::Canonicalize {
+        dunce::canonicalize(path).map_err(|e| CanonicalizeInAllowedRootsError::Canonicalize {
             path: path.to_path_buf(),
             source: e,
         })?;
@@ -99,7 +101,7 @@ mod tests {
         let file_path = allowed_root.join("hello.txt");
         fs::write(&file_path, "hello").expect("write file");
 
-        let allowed_roots = vec![std::fs::canonicalize(&allowed_root).expect("canonicalize root")];
+        let allowed_roots = vec![dunce::canonicalize(&allowed_root).expect("canonicalize root")];
         let resolved = canonicalize_in_allowed_roots(&file_path, &allowed_roots).expect("in scope");
         assert!(resolved.is_absolute());
     }
@@ -114,7 +116,7 @@ mod tests {
         let file_path = outside_root.join("secret.txt");
         fs::write(&file_path, "secret").expect("write file");
 
-        let allowed_roots = vec![std::fs::canonicalize(&allowed_root).expect("canonicalize root")];
+        let allowed_roots = vec![dunce::canonicalize(&allowed_root).expect("canonicalize root")];
         let err = canonicalize_in_allowed_roots(&file_path, &allowed_roots).unwrap_err();
         assert!(err.to_string().to_lowercase().contains("outside"));
     }
@@ -135,7 +137,7 @@ mod tests {
         let symlink_path = allowed_root.join("escape.txt");
         unix_fs::symlink(&outside_file, &symlink_path).expect("symlink");
 
-        let allowed_roots = vec![std::fs::canonicalize(&allowed_root).expect("canonicalize root")];
+        let allowed_roots = vec![dunce::canonicalize(&allowed_root).expect("canonicalize root")];
         let err = canonicalize_in_allowed_roots(&symlink_path, &allowed_roots).unwrap_err();
         assert!(err.to_string().to_lowercase().contains("outside"));
     }
