@@ -1,5 +1,6 @@
 use std::io::Write;
 
+use formula_engine::{parse_formula, ParseOptions};
 use formula_model::CellRef;
 
 mod common;
@@ -10,6 +11,12 @@ fn import_fixture(bytes: &[u8]) -> formula_xls::XlsImportResult {
     let mut tmp = tempfile::NamedTempFile::new().expect("temp file");
     tmp.write_all(bytes).expect("write xls bytes");
     formula_xls::import_xls_path(tmp.path()).expect("import xls")
+}
+
+fn assert_parseable(formula_body: &str) {
+    let formula = format!("={formula_body}");
+    parse_formula(&formula, ParseOptions::default())
+        .unwrap_or_else(|e| panic!("expected formula to be parseable, formula={formula:?}, err={e:?}"));
 }
 
 #[test]
@@ -47,4 +54,5 @@ fn rewrites_cross_sheet_formulas_to_sanitized_sheet_names() {
         !formula.contains("Bad_Name (2)"),
         "expected formula to reference the sanitized sheet, not the deduped collision, got {formula:?}"
     );
+    assert_parseable(formula);
 }
