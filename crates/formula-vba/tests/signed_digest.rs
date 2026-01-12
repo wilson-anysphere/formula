@@ -183,6 +183,25 @@ fn der_oid(oid: &str) -> Vec<u8> {
     der_tlv(0x06, &out)
 }
 
+fn der_integer_u32(n: u32) -> Vec<u8> {
+    // DER INTEGER encoding (positive).
+    let mut bytes = Vec::new();
+    let mut v = n;
+    while v > 0 {
+        bytes.push((v & 0xFF) as u8);
+        v >>= 8;
+    }
+    if bytes.is_empty() {
+        bytes.push(0);
+    }
+    bytes.reverse();
+    // Ensure the integer is interpreted as positive.
+    if bytes[0] & 0x80 != 0 {
+        bytes.insert(0, 0);
+    }
+    der_tlv(0x02, &bytes)
+}
+
 fn make_spc_indirect_data_content_sha256(digest: &[u8]) -> Vec<u8> {
     // data SpcAttributeTypeAndOptionalValue ::= SEQUENCE { type OBJECT IDENTIFIER, value [0] EXPLICIT ANY OPTIONAL }
     let data = der_sequence(&[der_oid("1.3.6.1.4.1.311.2.1.15")]);
@@ -192,6 +211,73 @@ fn make_spc_indirect_data_content_sha256(digest: &[u8]) -> Vec<u8> {
     let digest_info = der_sequence(&[alg, der_octet_string(digest)]);
 
     der_sequence(&[data, digest_info])
+}
+
+fn make_spc_indirect_data_content_v2_sha256(source_hash: &[u8]) -> Vec<u8> {
+    // MS-OSHARED §2.3.2.4.3.2
+    // - data.type = 1.3.6.1.4.1.311.2.1.31
+    // - data.value = OCTET STRING containing DER SigFormatDescriptorV1
+    // - messageDigest.digest = OCTET STRING containing DER SigDataV1Serialized
+    let sig_format_descriptor_v1 = der_sequence(&[
+        der_integer_u32(0), // size (ignored by our parser)
+        der_integer_u32(1), // version
+        der_integer_u32(1), // format
+    ]);
+
+    let data = der_sequence(&[
+        der_oid("1.3.6.1.4.1.311.2.1.31"),
+        // value [0] EXPLICIT OCTET STRING containing SigFormatDescriptorV1 DER.
+        der_tlv(0xA0, &der_octet_string(&sig_format_descriptor_v1)),
+    ]);
+
+    // SigDataV1Serialized ::= SEQUENCE { 6 INTEGERs, algorithmId OID, compiledHash OCTET STRING, sourceHash OCTET STRING }
+    let sig_data = der_sequence(&[
+        der_integer_u32(0), // algorithmIdSize
+        der_integer_u32(0), // compiledHashSize
+        der_integer_u32(source_hash.len() as u32), // sourceHashSize
+        der_integer_u32(0), // algorithmIdOffset
+        der_integer_u32(0), // compiledHashOffset
+        der_integer_u32(0), // sourceHashOffset
+        der_oid("2.16.840.1.101.3.4.2.1"), // algorithmId (sha256)
+        der_octet_string(&[]),            // compiledHash (empty)
+        der_octet_string(source_hash),    // sourceHash (VBA project digest, MD5 bytes)
+    ]);
+
+    let alg = der_sequence(&[der_oid("2.16.840.1.101.3.4.2.1"), der_null()]);
+    let digest_info = der_sequence(&[alg, der_octet_string(&sig_data)]);
+
+    der_sequence(&[data, digest_info])
+}
+
+fn wrap_in_digsig_blob(pkcs7: &[u8]) -> Vec<u8> {
+    // Minimal DigSigBlob (MS-OSHARED §2.3.2.2) containing a DigSigInfoSerialized (MS-OSHARED
+    // §2.3.2.1) header and the pbSignatureBuffer (PKCS#7 SignedData bytes).
+    let signature_offset = 8 + 36;
+    let mut blob = Vec::new();
+    blob.extend_from_slice(&0u32.to_le_bytes()); // cb placeholder
+    blob.extend_from_slice(&8u32.to_le_bytes()); // serializedPointer
+
+    // DigSigInfoSerialized fixed header (9 u32s).
+    blob.extend_from_slice(&(pkcs7.len() as u32).to_le_bytes()); // cbSignature
+    blob.extend_from_slice(&(signature_offset as u32).to_le_bytes()); // signatureOffset
+    blob.extend_from_slice(&0u32.to_le_bytes()); // cbSigningCertStore
+    blob.extend_from_slice(&0u32.to_le_bytes()); // certStoreOffset
+    blob.extend_from_slice(&0u32.to_le_bytes()); // cbProjectName
+    blob.extend_from_slice(&0u32.to_le_bytes()); // projectNameOffset
+    blob.extend_from_slice(&0u32.to_le_bytes()); // fTimestamp
+    blob.extend_from_slice(&0u32.to_le_bytes()); // cbTimestampUrl
+    blob.extend_from_slice(&0u32.to_le_bytes()); // timestampUrlOffset
+
+    blob.extend_from_slice(pkcs7);
+
+    // Pad signatureInfo to 4-byte alignment.
+    while (blob.len() - 8) % 4 != 0 {
+        blob.push(0);
+    }
+
+    let cb = (blob.len() - 8) as u32;
+    blob[0..4].copy_from_slice(&cb.to_le_bytes());
+    blob
 }
 
 #[test]
@@ -272,4 +358,27 @@ fn extracts_signed_digest_when_pkcs7_is_wrapped_in_digsig_info_serialized() {
         .expect("digest present");
     assert_eq!(got.digest_algorithm_oid, "2.16.840.1.101.3.4.2.1");
     assert_eq!(got.digest, digest);
+}
+
+#[test]
+fn extracts_signed_digest_from_digsig_blob_preferring_wrapper_over_trailing_pkcs7() {
+    // Digest that should be extracted from the DigSigBlob's pbSignatureBuffer (V2 format).
+    let source_hash = (0u8..16).collect::<Vec<_>>();
+    let spc_v2 = make_spc_indirect_data_content_v2_sha256(&source_hash);
+    let pkcs7_v2 = make_pkcs7_signed_message(&spc_v2);
+    let mut stream = wrap_in_digsig_blob(&pkcs7_v2);
+
+    // Append a second PKCS#7 blob containing a *different* digest. A naive scanner that just picks
+    // the last SignedData in the stream would return this digest instead of the DigSigBlob one.
+    let trailing_digest = vec![0xAAu8; 16];
+    let spc_trailing = make_spc_indirect_data_content_sha256(&trailing_digest);
+    let pkcs7_trailing = make_pkcs7_signed_message(&spc_trailing);
+    stream.extend_from_slice(&pkcs7_trailing);
+
+    let got = extract_vba_signature_signed_digest(&stream)
+        .expect("extract digest")
+        .expect("digest present");
+
+    assert_eq!(got.digest_algorithm_oid, "2.16.840.1.101.3.4.2.1");
+    assert_eq!(got.digest, source_hash);
 }

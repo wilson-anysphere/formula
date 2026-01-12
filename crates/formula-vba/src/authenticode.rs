@@ -715,6 +715,66 @@ fn extract_source_hash_from_sig_data_v1_serialized_asn1(
         }
     }
 
+    // Pattern (3): MS-OSHARED SigDataV1Serialized ASN.1 as defined in §2.3.2.4.3.2:
+    //
+    // SigDataV1Serialized ::= SEQUENCE {
+    //   algorithmIdSize INTEGER,
+    //   compiledHashSize INTEGER,
+    //   sourceHashSize INTEGER,
+    //   algorithmIdOffset INTEGER,
+    //   compiledHashOffset INTEGER,
+    //   sourceHashOffset INTEGER,
+    //   algorithmId OBJECT IDENTIFIER,
+    //   compiledHash OCTET STRING,
+    //   sourceHash OCTET STRING
+    // }
+    //
+    // This is the normative MS-OSHARED structure used by `SpcIndirectDataContentV2`, where the VBA
+    // project digest bytes live in `sourceHash` (MD5, 16 bytes).
+    let mut cur = content;
+    for _ in 0..6 {
+        let (tag, _len, _rest) = match parse_tag_and_length(cur) {
+            Ok(v) => v,
+            Err(_) => return Ok(None),
+        };
+        if tag.class != Asn1Class::Universal || tag.constructed || tag.number != 2 {
+            return Ok(None);
+        }
+        cur = match skip_element(cur) {
+            Ok(v) => v,
+            Err(_) => return Ok(None),
+        };
+    }
+    // algorithmId OBJECT IDENTIFIER
+    let (_alg_oid, after_oid) = match parse_oid(cur) {
+        Ok(v) => v,
+        Err(_) => return Ok(None),
+    };
+    cur = after_oid;
+
+    // compiledHash OCTET STRING (often empty)
+    let (tag, _len, _rest) = match parse_tag_and_length(cur) {
+        Ok(v) => v,
+        Err(_) => return Ok(None),
+    };
+    if tag.class != Asn1Class::Universal || tag.number != 4 {
+        return Ok(None);
+    }
+    cur = parse_octet_string(cur)?.1;
+
+    // sourceHash OCTET STRING (MD5 bytes)
+    let (tag, _len, _rest) = match parse_tag_and_length(cur) {
+        Ok(v) => v,
+        Err(_) => return Ok(None),
+    };
+    if tag.class != Asn1Class::Universal || tag.number != 4 {
+        return Ok(None);
+    }
+    let (hash, _after) = parse_octet_string(cur)?;
+    if hash.len() == 16 {
+        return Ok(Some(hash));
+    }
+
     Ok(None)
 }
 

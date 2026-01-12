@@ -205,6 +205,24 @@ fn der_oid_raw(oid: &[u8]) -> Vec<u8> {
     der_tlv(0x06, oid)
 }
 
+fn der_integer_u32(n: u32) -> Vec<u8> {
+    // DER INTEGER encoding, positive.
+    let mut bytes = Vec::new();
+    let mut v = n;
+    while v > 0 {
+        bytes.push((v & 0xFF) as u8);
+        v >>= 8;
+    }
+    if bytes.is_empty() {
+        bytes.push(0);
+    }
+    bytes.reverse();
+    if bytes[0] & 0x80 != 0 {
+        bytes.insert(0, 0);
+    }
+    der_tlv(0x02, &bytes)
+}
+
 fn der_octet_string(bytes: &[u8]) -> Vec<u8> {
     der_tlv(0x04, bytes)
 }
@@ -249,6 +267,92 @@ fn build_spc_indirect_data_content_md5(project_digest: &[u8]) -> Vec<u8> {
     spc.extend_from_slice(&der_null());
     spc.extend_from_slice(&digest_info);
     der_sequence(&spc)
+}
+
+fn build_spc_indirect_data_content_v2_sha256(project_digest_md5: &[u8]) -> Vec<u8> {
+    // MS-OSHARED §2.3.2.4.3.2: SpcIndirectDataContentV2
+    //
+    // The VBA project hash bytes are stored in SigDataV1Serialized.sourceHash (MD5 per MS-OVBA).
+    let spc_indirect_data_v2_oid = [0x2B, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x01, 0x1F];
+    let sha256_oid = [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01];
+
+    let sig_format_descriptor_v1 = der_sequence(&{
+        let mut v = Vec::new();
+        v.extend_from_slice(&der_integer_u32(0)); // size (ignored by our parser)
+        v.extend_from_slice(&der_integer_u32(1)); // version
+        v.extend_from_slice(&der_integer_u32(1)); // format
+        v
+    });
+
+    let mut spc_attr = Vec::new();
+    spc_attr.extend_from_slice(&der_oid_raw(&spc_indirect_data_v2_oid));
+    // value [0] EXPLICIT OCTET STRING containing DER SigFormatDescriptorV1.
+    spc_attr.extend_from_slice(&der_tlv(0xA0, &der_octet_string(&sig_format_descriptor_v1)));
+    let spc_attr = der_sequence(&spc_attr);
+
+    // SigDataV1Serialized ::= SEQUENCE { 6 INTEGERs, algorithmId OID, compiledHash OCTET STRING, sourceHash OCTET STRING }
+    let sig_data_v1 = der_sequence(&{
+        let mut v = Vec::new();
+        v.extend_from_slice(&der_integer_u32(0)); // algorithmIdSize
+        v.extend_from_slice(&der_integer_u32(0)); // compiledHashSize
+        v.extend_from_slice(&der_integer_u32(project_digest_md5.len() as u32)); // sourceHashSize
+        v.extend_from_slice(&der_integer_u32(0)); // algorithmIdOffset
+        v.extend_from_slice(&der_integer_u32(0)); // compiledHashOffset
+        v.extend_from_slice(&der_integer_u32(0)); // sourceHashOffset
+        v.extend_from_slice(&der_oid_raw(&sha256_oid)); // algorithmId
+        v.extend_from_slice(&der_octet_string(&[])); // compiledHash (empty)
+        v.extend_from_slice(&der_octet_string(project_digest_md5)); // sourceHash (MD5 bytes)
+        v
+    });
+
+    let alg_id = der_sequence(&{
+        let mut v = Vec::new();
+        v.extend_from_slice(&der_oid_raw(&sha256_oid));
+        v.extend_from_slice(&der_null());
+        v
+    });
+
+    let digest_info = der_sequence(&{
+        let mut v = Vec::new();
+        v.extend_from_slice(&alg_id);
+        v.extend_from_slice(&der_octet_string(&sig_data_v1));
+        v
+    });
+
+    let mut spc = Vec::new();
+    spc.extend_from_slice(&spc_attr);
+    spc.extend_from_slice(&digest_info);
+    der_sequence(&spc)
+}
+
+fn wrap_in_digsig_blob(pkcs7: &[u8]) -> Vec<u8> {
+    // Minimal DigSigBlob (MS-OSHARED §2.3.2.2) containing a DigSigInfoSerialized (MS-OSHARED
+    // §2.3.2.1) header and the pbSignatureBuffer (PKCS#7 SignedData bytes).
+    let signature_offset = 8 + 36;
+    let mut blob = Vec::new();
+    blob.extend_from_slice(&0u32.to_le_bytes()); // cb placeholder
+    blob.extend_from_slice(&8u32.to_le_bytes()); // serializedPointer
+
+    // DigSigInfoSerialized fixed header (9 u32s).
+    blob.extend_from_slice(&(pkcs7.len() as u32).to_le_bytes()); // cbSignature
+    blob.extend_from_slice(&(signature_offset as u32).to_le_bytes()); // signatureOffset
+    blob.extend_from_slice(&0u32.to_le_bytes()); // cbSigningCertStore
+    blob.extend_from_slice(&0u32.to_le_bytes()); // certStoreOffset
+    blob.extend_from_slice(&0u32.to_le_bytes()); // cbProjectName
+    blob.extend_from_slice(&0u32.to_le_bytes()); // projectNameOffset
+    blob.extend_from_slice(&0u32.to_le_bytes()); // fTimestamp
+    blob.extend_from_slice(&0u32.to_le_bytes()); // cbTimestampUrl
+    blob.extend_from_slice(&0u32.to_le_bytes()); // timestampUrlOffset
+
+    blob.extend_from_slice(pkcs7);
+
+    // Pad signatureInfo to 4-byte alignment.
+    while (blob.len() - 8) % 4 != 0 {
+        blob.push(0);
+    }
+    let cb = (blob.len() - 8) as u32;
+    blob[0..4].copy_from_slice(&cb.to_le_bytes());
+    blob
 }
 
 #[test]
@@ -387,4 +491,35 @@ fn md5_binding_is_supported() {
 
     assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
     assert_eq!(sig.binding, VbaSignatureBinding::NotBound);
+}
+
+#[test]
+fn v2_signed_digest_source_hash_is_used_for_binding() {
+    let module1 = b"Sub Hello()\r\nEnd Sub\r\n";
+    let unsigned = build_minimal_vba_project_bin(module1, None);
+    let normalized = content_normalized_data(&unsigned).expect("content normalized data");
+    let digest: [u8; 16] = Md5::digest(&normalized).into();
+
+    let signed_content = build_spc_indirect_data_content_v2_sha256(&digest);
+    let pkcs7 = make_pkcs7_signed_message(&signed_content);
+    let signature_stream = wrap_in_digsig_blob(&pkcs7);
+
+    let signed = build_minimal_vba_project_bin(module1, Some(&signature_stream));
+    let sig = verify_vba_digital_signature(&signed)
+        .expect("signature verification should succeed")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(sig.binding, VbaSignatureBinding::Bound);
+
+    let bound = verify_vba_digital_signature_bound(&signed)
+        .expect("bound verify")
+        .expect("signature present");
+    match bound.binding {
+        VbaProjectBindingVerification::BoundVerified(info) => {
+            assert_eq!(info.signed_digest.as_deref(), Some(digest.as_ref()));
+            assert_eq!(info.computed_digest.as_deref(), Some(digest.as_ref()));
+        }
+        other => panic!("expected BoundVerified, got {other:?}"),
+    }
 }
