@@ -1522,6 +1522,57 @@ fn import_xls_path_with_biff_reader(
                 sheet_names_by_biff_idx
             };
 
+            // Attempt to recover AutoFilter ranges even when `_FilterDatabase` is workbook-scoped.
+            //
+            // Some `.xls` files store the FilterDatabase NAME with workbook scope (`itab==0`) and
+            // reference the target sheet via a 3D token (`PtgArea3d` / `PtgRef3d`) that requires
+            // resolving through `EXTERNSHEET` (and sometimes `SUPBOOK`). This helper recovers a
+            // BIFF-sheet-index -> range mapping directly from the BIFF workbook stream.
+            match biff::parse_biff_filter_database_ranges(
+                workbook_stream_bytes,
+                biff_version,
+                codepage,
+                Some(sheet_names_by_biff_idx.len()),
+            ) {
+                Ok(parsed) => {
+                    for warning in parsed.warnings {
+                        warnings.push(ImportWarning::new(format!(
+                            "failed to fully recover `.xls` AutoFilter ranges from workbook stream: {warning}"
+                        )));
+                    }
+
+                    for (biff_sheet_idx, range) in parsed.by_sheet {
+                        // Best-effort mapping of BIFF sheet index -> output WorksheetId.
+                        //
+                        // Prefer sheet-name match (more robust when sheet orders differ), but fall
+                        // back to assuming BIFF sheet indices align with calamine's sheet order.
+                        let sheet_id = sheet_names_by_biff_idx
+                            .get(biff_sheet_idx)
+                            .and_then(|biff_name| {
+                                out.sheets
+                                    .iter()
+                                    .find(|s| sheet_name_eq_case_insensitive(&s.name, biff_name))
+                                    .map(|s| s.id)
+                            })
+                            .or_else(|| sheet_ids_by_calamine_idx.get(biff_sheet_idx).copied());
+
+                        let Some(sheet_id) = sheet_id else {
+                            warnings.push(ImportWarning::new(format!(
+                                "skipping `.xls` AutoFilter range `{range}`: out-of-range sheet index {} (sheet count={})",
+                                biff_sheet_idx.saturating_add(1),
+                                out.sheets.len()
+                            )));
+                            continue;
+                        };
+
+                        autofilters.push((sheet_id, range));
+                    }
+                }
+                Err(err) => warnings.push(ImportWarning::new(format!(
+                    "failed to recover `.xls` AutoFilter ranges from workbook stream: {err}"
+                ))),
+            }
+
             match biff::parse_biff_defined_names(
                 workbook_stream_bytes,
                 biff_version,

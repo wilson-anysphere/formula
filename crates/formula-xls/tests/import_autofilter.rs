@@ -116,3 +116,26 @@ fn imports_autofilter_range_from_workbook_scope_filterdatabase_name_via_externsh
         .expect("expected workbook-scoped _FilterDatabase defined name");
     assert_parseable(&filter_db.refers_to);
 }
+
+#[test]
+fn imports_autofilter_range_from_workbook_scope_filterdatabase_name_without_biff() {
+    let bytes = xls_fixture_builder::build_autofilter_workbook_scope_externsheet_fixture_xls();
+    let result = import_fixture_without_biff(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("AutoFilter")
+        .expect("AutoFilter sheet missing");
+
+    let af = sheet.auto_filter.as_ref().unwrap_or_else(|| {
+        panic!(
+            "auto_filter missing; defined_names={:?}; warnings={:?}",
+            result.workbook.defined_names, result.warnings
+        )
+    });
+
+    assert_eq!(af.range, Range::from_a1("A1:C5").unwrap());
+    assert!(af.filter_columns.is_empty());
+    assert!(af.sort_state.is_none());
+    assert!(af.raw_xml.is_empty());
+}
