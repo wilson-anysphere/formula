@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { DocumentController } from "../../document/documentController.js";
-import { pasteClipboardContent } from "../clipboard.js";
+import { DocumentController } from "../src/document/documentController.js";
+import { pasteClipboardContent } from "../src/clipboard/clipboard.js";
 
 test("pasteClipboardContent: Paste Special Values ignores formulas", () => {
   const doc = new DocumentController();

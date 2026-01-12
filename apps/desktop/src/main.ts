@@ -2336,7 +2336,6 @@ if (
   // Keybindings used for UI surfaces (command palette, context menu shortcut hints).
   // Prefer using `./commands/builtinKeybindings.ts` for new bindings.
   const extraBuiltinKeybindings = [
-    { command: "clipboard.pasteSpecial", key: "ctrl+alt+v", mac: "cmd+option+v" },
     { command: "edit.find", key: "ctrl+f", mac: "cmd+f" },
     { command: "edit.replace", key: "ctrl+h", mac: "cmd+h" },
     { command: "navigation.goTo", key: "ctrl+g", mac: "cmd+g" },
