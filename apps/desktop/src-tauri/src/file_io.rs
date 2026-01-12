@@ -1,3 +1,4 @@
+use crate::atomic_write::write_file_atomic;
 use crate::state::{Cell, CellScalar};
 use anyhow::Context;
 use calamine::{open_workbook_auto, Data, Reader};
@@ -20,12 +21,11 @@ use formula_xlsx::{
     CellPatch as XlsxCellPatch, PartOverride, PreservedPivotParts, WorkbookCellPatches, XlsxPackage,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::io::{BufReader, Cursor, Write};
+use std::io::{BufReader, Cursor};
 use std::path::Path;
 #[cfg(feature = "desktop")]
 use std::path::PathBuf;
 use std::sync::Arc;
-use tempfile::NamedTempFile;
 
 use crate::macro_trust::compute_macro_fingerprint;
 
@@ -1291,28 +1291,6 @@ fn xlsb_error_display(code: u8) -> String {
     formula_xlsb::errors::xlsb_error_display(code)
 }
 
-fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let dir = path.parent().unwrap_or_else(|| Path::new("."));
-    std::fs::create_dir_all(dir)?;
-
-    let mut temp = NamedTempFile::new_in(dir)?;
-    temp.write_all(bytes)?;
-    temp.flush()?;
-    temp.as_file().sync_all()?;
-
-    match temp.persist(path) {
-        Ok(_) => Ok(()),
-        Err(err) => match err.error.kind() {
-            // Best-effort replacement on platforms where rename doesn't clobber.
-            std::io::ErrorKind::AlreadyExists => {
-                let _ = std::fs::remove_file(path);
-                err.file.persist(path).map(|_| ()).map_err(|e| e.error)
-            }
-            _ => Err(err.error),
-        },
-    }
-}
-
 #[cfg(feature = "desktop")]
 pub async fn write_xlsx(
     path: impl Into<PathBuf> + Send + 'static,
@@ -1392,7 +1370,7 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
             matches!(extension.as_deref(), Some("xlsx") | Some("xltx")) && workbook.vba_project_bin.is_some();
 
         if patches.is_empty() && !print_settings_changed && !wants_drop_vba && !power_query_changed {
-            atomic_write_bytes(path, origin_bytes).with_context(|| format!("write workbook {:?}", path))?;
+            write_file_atomic(path, origin_bytes).with_context(|| format!("write workbook {:?}", path))?;
             return Ok(workbook
                 .origin_xlsx_bytes
                 .as_ref()
@@ -1405,7 +1383,7 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
                 .map_err(|e| anyhow::anyhow!(e.to_string()))?;
 
             let bytes = Arc::<[u8]>::from(bytes);
-            atomic_write_bytes(path, bytes.as_ref()).with_context(|| format!("write workbook {:?}", path))?;
+            write_file_atomic(path, bytes.as_ref()).with_context(|| format!("write workbook {:?}", path))?;
             return Ok(bytes);
         }
 
@@ -1441,7 +1419,7 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
             }
 
             let bytes = Arc::<[u8]>::from(bytes);
-            atomic_write_bytes(path, bytes.as_ref()).with_context(|| format!("write workbook {:?}", path))?;
+            write_file_atomic(path, bytes.as_ref()).with_context(|| format!("write workbook {:?}", path))?;
             return Ok(bytes);
         }
 
@@ -1460,7 +1438,7 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
             }
 
             let bytes = Arc::<[u8]>::from(bytes);
-            atomic_write_bytes(path, bytes.as_ref()).with_context(|| format!("write workbook {:?}", path))?;
+            write_file_atomic(path, bytes.as_ref()).with_context(|| format!("write workbook {:?}", path))?;
             return Ok(bytes);
         }
 
@@ -1522,7 +1500,7 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
             }
 
             let bytes = Arc::<[u8]>::from(bytes);
-            atomic_write_bytes(path, bytes.as_ref()).with_context(|| format!("write workbook {:?}", path))?;
+            write_file_atomic(path, bytes.as_ref()).with_context(|| format!("write workbook {:?}", path))?;
             return Ok(bytes);
         }
 
@@ -1562,7 +1540,7 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
         }
 
         let bytes = Arc::<[u8]>::from(bytes);
-        atomic_write_bytes(path, bytes.as_ref()).with_context(|| format!("write workbook {:?}", path))?;
+        write_file_atomic(path, bytes.as_ref()).with_context(|| format!("write workbook {:?}", path))?;
         return Ok(bytes);
     }
 
@@ -1628,7 +1606,7 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
     }
 
     let bytes = Arc::<[u8]>::from(bytes);
-    atomic_write_bytes(path, bytes.as_ref()).with_context(|| format!("write workbook {:?}", path))?;
+    write_file_atomic(path, bytes.as_ref()).with_context(|| format!("write workbook {:?}", path))?;
     Ok(bytes)
 }
 
