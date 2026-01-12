@@ -54,7 +54,11 @@ pub(crate) fn collect_transitive_related_parts(
                 continue;
             }
 
-            let target_part = resolve_target(&part_name, &rel.target);
+            let target = strip_fragment(&rel.target);
+            if target.is_empty() {
+                continue;
+            }
+            let target_part = resolve_target(&part_name, target);
             if pkg.part(&target_part).is_some() {
                 queue.push_back(target_part);
             }
@@ -62,6 +66,13 @@ pub(crate) fn collect_transitive_related_parts(
     }
 
     Ok(out)
+}
+
+fn strip_fragment(target: &str) -> &str {
+    target
+        .split_once('#')
+        .map(|(base, _)| base)
+        .unwrap_or(target)
 }
 
 #[cfg(test)]
