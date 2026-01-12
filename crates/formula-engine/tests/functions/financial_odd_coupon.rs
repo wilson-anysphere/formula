@@ -264,7 +264,9 @@ fn odd_coupon_boundary_date_validations_match_engine_behavior() {
     // ODDL* boundaries
     // settlement == last_interest is allowed (zero accrued interest).
     // (Also covered by `odd_coupon_date_boundaries.rs`.)
-    match sheet.eval("=ODDLPRICE(DATE(2020,10,15),DATE(2021,3,1),DATE(2020,10,15),0.05,0.06,100,2,0)") {
+    match sheet
+        .eval("=ODDLPRICE(DATE(2020,10,15),DATE(2021,3,1),DATE(2020,10,15),0.05,0.06,100,2,0)")
+    {
         Value::Error(ErrorKind::Name) => return,
         Value::Number(n) => assert!(n.is_finite(), "expected finite number, got {n}"),
         other => panic!("expected number from ODDLPRICE boundary case, got {other:?}"),
@@ -1371,7 +1373,10 @@ fn odd_last_coupon_supports_settlement_before_last_interest() {
         system,
     )
     .expect("ODDLPRICE should accept settlement before last_interest");
-    assert!(price.is_finite() && price > 0.0, "expected finite positive price, got {price}");
+    assert!(
+        price.is_finite() && price > 0.0,
+        "expected finite positive price, got {price}"
+    );
 
     let recovered_yield = oddlyield(
         settlement,
@@ -1419,7 +1424,11 @@ fn odd_last_coupon_supports_settlement_before_last_interest_for_other_bases() {
             basis,
             system,
         )
-        .unwrap_or_else(|e| panic!("ODDLPRICE should accept settlement before last_interest for basis={basis}: {e:?}"));
+        .unwrap_or_else(|e| {
+            panic!(
+                "ODDLPRICE should accept settlement before last_interest for basis={basis}: {e:?}"
+            )
+        });
         assert!(
             price.is_finite() && price > 0.0,
             "expected finite positive price for basis={basis}, got {price}"

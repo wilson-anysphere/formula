@@ -134,12 +134,21 @@ fn coup_functions_apply_end_of_month_schedule_when_maturity_is_month_end_basis_1
     let expected_pcd = ymd_to_serial(ExcelDate::new(2020, 1, 31), system).unwrap();
     let expected_ncd = maturity;
 
-    assert_eq!(couppcd(settlement, maturity, 4, 1, system).unwrap(), expected_pcd);
-    assert_eq!(coupncd(settlement, maturity, 4, 1, system).unwrap(), expected_ncd);
+    assert_eq!(
+        couppcd(settlement, maturity, 4, 1, system).unwrap(),
+        expected_pcd
+    );
+    assert_eq!(
+        coupncd(settlement, maturity, 4, 1, system).unwrap(),
+        expected_ncd
+    );
     assert_eq!(coupnum(settlement, maturity, 4, 1, system).unwrap(), 1.0);
 
     assert_eq!(coupdaybs(settlement, maturity, 4, 1, system).unwrap(), 15.0);
-    assert_eq!(coupdaysnc(settlement, maturity, 4, 1, system).unwrap(), 75.0);
+    assert_eq!(
+        coupdaysnc(settlement, maturity, 4, 1, system).unwrap(),
+        75.0
+    );
     assert_eq!(coupdays(settlement, maturity, 4, 1, system).unwrap(), 90.0);
 
     // Semiannual schedule, maturity=2021-02-28 => PCD=2020-08-31, NCD=2021-02-28.
@@ -148,12 +157,21 @@ fn coup_functions_apply_end_of_month_schedule_when_maturity_is_month_end_basis_1
     let expected_pcd = ymd_to_serial(ExcelDate::new(2020, 8, 31), system).unwrap();
     let expected_ncd = maturity;
 
-    assert_eq!(couppcd(settlement, maturity, 2, 1, system).unwrap(), expected_pcd);
-    assert_eq!(coupncd(settlement, maturity, 2, 1, system).unwrap(), expected_ncd);
+    assert_eq!(
+        couppcd(settlement, maturity, 2, 1, system).unwrap(),
+        expected_pcd
+    );
+    assert_eq!(
+        coupncd(settlement, maturity, 2, 1, system).unwrap(),
+        expected_ncd
+    );
     assert_eq!(coupnum(settlement, maturity, 2, 1, system).unwrap(), 1.0);
 
     assert_eq!(coupdaybs(settlement, maturity, 2, 1, system).unwrap(), 76.0);
-    assert_eq!(coupdaysnc(settlement, maturity, 2, 1, system).unwrap(), 105.0);
+    assert_eq!(
+        coupdaysnc(settlement, maturity, 2, 1, system).unwrap(),
+        105.0
+    );
     assert_eq!(coupdays(settlement, maturity, 2, 1, system).unwrap(), 181.0);
 }
 
@@ -173,8 +191,17 @@ fn coupdays_basis_4_uses_fixed_360_over_frequency_and_preserves_additivity() {
     let expected_pcd = ymd_to_serial(ExcelDate::new(2020, 8, 31), system).unwrap();
     let expected_ncd = maturity;
 
-    assert_eq!(couppcd(settlement, maturity, 2, 4, system).unwrap(), expected_pcd);
-    assert_eq!(coupncd(settlement, maturity, 2, 4, system).unwrap(), expected_ncd);
+    let days360 = date_time::days360(expected_pcd, expected_ncd, true, system).unwrap();
+    assert_eq!(days360, 178);
+
+    assert_eq!(
+        couppcd(settlement, maturity, 2, 4, system).unwrap(),
+        expected_pcd
+    );
+    assert_eq!(
+        coupncd(settlement, maturity, 2, 4, system).unwrap(),
+        expected_ncd
+    );
     assert_eq!(coupnum(settlement, maturity, 2, 4, system).unwrap(), 1.0);
 
     assert_eq!(
@@ -311,23 +338,31 @@ fn builtins_coup_dates_handle_eom_and_leap_day_schedules() {
     sheet.set("B2", "2024-05-31");
 
     // EOM maturity clamping (Mar 31 -> Sep 30).
-    let expected_pcd_a =
-        ymd_to_serial(ExcelDate::new(2023, 9, 30), system).unwrap() as f64;
-    let expected_ncd_a =
-        ymd_to_serial(ExcelDate::new(2024, 3, 31), system).unwrap() as f64;
+    let expected_pcd_a = ymd_to_serial(ExcelDate::new(2023, 9, 30), system).unwrap() as f64;
+    let expected_ncd_a = ymd_to_serial(ExcelDate::new(2024, 3, 31), system).unwrap() as f64;
     for basis in [0, 1, 2, 3, 4] {
-        assert_number(&sheet.eval(&format!("=COUPPCD(A1,A2,2,{basis})")), expected_pcd_a);
-        assert_number(&sheet.eval(&format!("=COUPNCD(A1,A2,2,{basis})")), expected_ncd_a);
+        assert_number(
+            &sheet.eval(&format!("=COUPPCD(A1,A2,2,{basis})")),
+            expected_pcd_a,
+        );
+        assert_number(
+            &sheet.eval(&format!("=COUPNCD(A1,A2,2,{basis})")),
+            expected_ncd_a,
+        );
     }
 
     // Leap-day clamping (May 31 -> Feb 29).
-    let expected_pcd_b =
-        ymd_to_serial(ExcelDate::new(2024, 2, 29), system).unwrap() as f64;
-    let expected_ncd_b =
-        ymd_to_serial(ExcelDate::new(2024, 5, 31), system).unwrap() as f64;
+    let expected_pcd_b = ymd_to_serial(ExcelDate::new(2024, 2, 29), system).unwrap() as f64;
+    let expected_ncd_b = ymd_to_serial(ExcelDate::new(2024, 5, 31), system).unwrap() as f64;
     for basis in [0, 1, 2, 3, 4] {
-        assert_number(&sheet.eval(&format!("=COUPPCD(B1,B2,4,{basis})")), expected_pcd_b);
-        assert_number(&sheet.eval(&format!("=COUPNCD(B1,B2,4,{basis})")), expected_ncd_b);
+        assert_number(
+            &sheet.eval(&format!("=COUPPCD(B1,B2,4,{basis})")),
+            expected_pcd_b,
+        );
+        assert_number(
+            &sheet.eval(&format!("=COUPNCD(B1,B2,4,{basis})")),
+            expected_ncd_b,
+        );
     }
 }
 

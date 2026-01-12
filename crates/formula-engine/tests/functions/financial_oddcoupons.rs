@@ -123,8 +123,9 @@ fn odd_coupon_settlement_boundary_behavior() {
     // - ODDF*: issue <= settlement <= first_coupon <= maturity (with `issue < first_coupon` and
     //   `settlement < maturity`).
     //
-    // ODDF* rejects settlement > first_coupon and settlement >= maturity (see
-    // `crates/formula-engine/tests/odd_coupon_date_boundaries.rs` for pinned boundary behavior).
+    // ODDF* rejects settlement > first_coupon, issue > settlement, issue == first_coupon, and
+    // settlement >= maturity (see `crates/formula-engine/tests/odd_coupon_date_boundaries.rs` for
+    // pinned boundary behavior).
 
     // ODDL*: settlement == last_interest should be accepted.
     let maturity = ymd_to_serial(ExcelDate::new(2023, 5, 15), system).unwrap();
@@ -205,7 +206,10 @@ fn odd_coupon_settlement_boundary_behavior() {
         system,
     )
     .expect("ODDFPRICE should allow settlement == first_coupon");
-    assert!(pr.is_finite() && pr > 0.0, "expected finite price, got {pr}");
+    assert!(
+        pr.is_finite() && pr > 0.0,
+        "expected finite price, got {pr}"
+    );
     let yld_out = oddfyield(
         first_coupon,
         maturity2,
