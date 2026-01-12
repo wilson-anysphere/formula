@@ -32,7 +32,7 @@ function classForSize(size: RibbonButtonSize): string {
   }
 }
 
-export function RibbonButton({ button, pressed, onActivate }: RibbonButtonProps) {
+export const RibbonButton = React.memo(function RibbonButton({ button, pressed, onActivate }: RibbonButtonProps) {
   const kind = button.kind ?? "button";
   const size = button.size ?? "small";
   const ariaPressed = kind === "toggle" ? Boolean(pressed) : undefined;
@@ -158,4 +158,6 @@ export function RibbonButton({ button, pressed, onActivate }: RibbonButtonProps)
       ) : null}
     </div>
   );
-}
+});
+
+RibbonButton.displayName = "RibbonButton";

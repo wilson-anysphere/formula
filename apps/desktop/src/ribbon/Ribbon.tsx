@@ -50,8 +50,13 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
 
   const [activeTabId, setActiveTabId] = React.useState<string>(defaultTabId);
   const [pressedById, setPressedById] = React.useState<Record<string, boolean>>(() => computeInitialPressed(schema));
+  const pressedByIdRef = React.useRef<Record<string, boolean>>(pressedById);
 
   const tabButtonRefs = React.useRef<Record<string, HTMLButtonElement | null>>({});
+
+  React.useEffect(() => {
+    pressedByIdRef.current = pressedById;
+  }, [pressedById]);
 
   React.useEffect(() => {
     // Keep internal toggle state in sync with schema changes (e.g. when tabs/groups
@@ -78,7 +83,7 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
       const kind = button.kind ?? "button";
 
       if (kind === "toggle") {
-        const nextPressed = !pressedById[button.id];
+        const nextPressed = !pressedByIdRef.current[button.id];
         setPressedById((prev) => ({ ...prev, [button.id]: !prev[button.id] }));
         actions.onToggle?.(button.id, nextPressed);
         actions.onCommand?.(button.id);
@@ -87,7 +92,7 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
 
       actions.onCommand?.(button.id);
     },
-    [actions, pressedById],
+    [actions],
   );
 
   const selectTabByIndex = React.useCallback(
