@@ -81,6 +81,68 @@ fn coup_invariants_when_settlement_is_coupon_date() {
 }
 
 #[test]
+fn coup_days_additivity_for_30_360_bases() {
+    let mut sheet = TestSheet::new();
+
+    // Skip if the COUP* helpers aren't registered yet.
+    if eval_number_or_skip(
+        &mut sheet,
+        "=COUPDAYBS(DATE(2020,7,15),DATE(2021,7,15),2,0)",
+    )
+    .is_none()
+        || eval_number_or_skip(
+            &mut sheet,
+            "=COUPDAYSNC(DATE(2020,7,15),DATE(2021,7,15),2,0)",
+        )
+        .is_none()
+        || eval_number_or_skip(
+            &mut sheet,
+            "=COUPDAYS(DATE(2020,7,15),DATE(2021,7,15),2,0)",
+        )
+        .is_none()
+    {
+        return;
+    }
+
+    let maturities = ["DATE(2030,12,31)", "DATE(2031,2,28)", "DATE(2030,7,15)"];
+    let frequencies = [1, 2, 4];
+    let bases = [0, 4];
+    let deltas = [1, 15, 30];
+
+    for maturity in maturities {
+        for &frequency in &frequencies {
+            let months_per_period = 12 / frequency;
+
+            // Ensure there's room to step back and still have a valid next coupon date.
+            for k in 1..=6 {
+                let months_back = k * months_per_period;
+                let pcd = format!("EDATE({maturity},-{months_back})");
+
+                for &delta in &deltas {
+                    let settlement = format!("({pcd}+{delta})");
+
+                    for &basis in &bases {
+                        let daybs = eval_number(
+                            &mut sheet,
+                            &format!("=COUPDAYBS({settlement},{maturity},{frequency},{basis})"),
+                        );
+                        let daysnc = eval_number(
+                            &mut sheet,
+                            &format!("=COUPDAYSNC({settlement},{maturity},{frequency},{basis})"),
+                        );
+                        let days = eval_number(
+                            &mut sheet,
+                            &format!("=COUPDAYS({settlement},{maturity},{frequency},{basis})"),
+                        );
+                        assert_close(daybs + daysnc, days, 1e-12);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn price_yield_roundtrip_consistency() {
     let mut sheet = TestSheet::new();
 
@@ -189,4 +251,3 @@ fn mduration_matches_duration_identity() {
         }
     }
 }
-
