@@ -135,3 +135,18 @@ test("diffFormula: does not throw on unterminated string literals", () => {
   const result = diffFormula('=IF(A1="Hello', '=IF(A1="Hello!")');
   assert.equal(result.equal, false);
 });
+
+test("diffFormula: long formulas avoid pathological diff work (guardrail)", () => {
+  const terms = 1200;
+  const oldFormula = `=${Array.from({ length: terms }, () => "A1").join("+")}`;
+  const newFormula = `=${Array.from({ length: terms }, () => "B1").join("+")}`;
+  const result = diffFormula(oldFormula, newFormula);
+  assert.equal(result.equal, false);
+  assert.equal(result.ops[0].type, "equal");
+  assert.equal(result.ops[1].type, "delete");
+  assert.equal(result.ops[2].type, "insert");
+  // Ensure we didn't run Myers on the full token stream (which would usually
+  // produce many alternating ops due to the repeated "+" tokens). The guardrail
+  // fallback should produce a simple equal/delete/insert structure.
+  assert.equal(result.ops.length, 3);
+});
