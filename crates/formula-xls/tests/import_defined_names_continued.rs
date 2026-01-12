@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use formula_model::DefinedNameScope;
+use formula_model::{CellRef, DefinedNameScope};
 
 mod common;
 
@@ -27,4 +27,15 @@ fn imports_defined_names_split_across_continue_records() {
         name.comment.as_deref(),
         Some("This is a long description used to test continued NAME records.")
     );
+
+    // Ensure worksheet formulas that reference the defined name decode correctly (calamine needs
+    // the NAME table for `PtgName` tokens).
+    let sheet = result
+        .workbook
+        .sheet_by_name("DefinedNames")
+        .expect("expected sheet to be present");
+    let formula = sheet
+        .formula(CellRef::from_a1("A1").unwrap())
+        .expect("expected formula in DefinedNames!A1");
+    assert_eq!(formula, "MyContinuedName");
 }

@@ -1721,7 +1721,9 @@ fn build_continued_name_record_workbook_stream() -> Vec<u8> {
 
     // -- Sheet -------------------------------------------------------------------
     let sheet_offset = globals.len();
-    let sheet = build_empty_sheet_stream(xf_general);
+    // Include a formula cell that references the defined name so we exercise calamine's `PtgName`
+    // decoding path (which depends on successfully ingesting the NAME record header).
+    let sheet = build_name_reference_formula_sheet_stream(xf_general, 1);
 
     globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
         .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
@@ -1971,6 +1973,40 @@ fn build_empty_sheet_stream(xf_general: u16) -> Vec<u8> {
 
     // A1: a single General cell so calamine populates a range for the sheet.
     push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_general, 0.0));
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
+fn build_name_reference_formula_sheet_stream(xf_cell: u16, name_index: u32) -> Vec<u8> {
+    // Single-sheet stream containing one formula cell (A1) whose formula is a `PtgName` reference
+    // to a workbook defined name.
+    //
+    // `name_index` is one-based (PtgName.iname).
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1) (A1)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
+
+    let mut rgce = Vec::<u8>::new();
+    rgce.push(0x23); // PtgName
+    rgce.extend_from_slice(&name_index.to_le_bytes());
+
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(0, 0, xf_cell, 0.0, &rgce),
+    );
+
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
     sheet
 }

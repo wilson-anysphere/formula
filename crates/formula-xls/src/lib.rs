@@ -252,15 +252,26 @@ fn import_xls_path_with_biff_reader(
     }
 
     // `calamine` can panic when parsing BIFF8 defined-name `NAME` (0x0018) records that are split
-    // across `CONTINUE` records. Detect and mask *continued* NAME records before handing the
-    // workbook stream to calamine; we parse defined names ourselves via BIFF.
+    // across `CONTINUE` records. Calamine reads the `cce` formula length from the NAME header, but
+    // (incorrectly) assumes the entire token stream lives in the *first* physical record fragment.
+    //
+    // When a NAME record is continued, `cce` can exceed the first fragment length and calamine
+    // panics while slicing `rgce`.
+    //
+    // Work around this by sanitizing *continued* NAME records in the workbook stream before
+    // handing it to calamine:
+    // - Zero out `NAME.cce` so calamine doesn't attempt to slice past the first fragment.
+    // - (Best-effort) clamp `NAME.cch` if the name string itself would not fit in the first
+    //   fragment.
+    //
+    // We still import defined names ourselves via BIFF parsing (including CONTINUE handling), so
+    // calamine's defined-name formulas are not used for correctness here. However, calamine *does*
+    // need the defined-name *names* table to decode `PtgName` tokens in worksheet formulas, so we
+    // avoid masking out the NAME records entirely.
     let mut workbook: Xls<_> = match workbook_stream.as_deref() {
         Some(stream) => {
-            let xls_bytes = match mask_biff_record_id_followed_by_continue(stream, 0x0018, 0xFFFF)
-            {
-                Some(sanitized) => build_in_memory_xls(&sanitized)?,
-                None => build_in_memory_xls(stream)?,
-            };
+            let sanitized = sanitize_biff8_continued_name_records_for_calamine(stream);
+            let xls_bytes = build_in_memory_xls(sanitized.as_deref().unwrap_or(stream))?;
             Xls::new(Cursor::new(xls_bytes))?
         }
         None => {
@@ -882,6 +893,17 @@ fn import_xls_path_with_biff_reader(
                             "skipping out-of-bounds formula in sheet `{sheet_name}` at ({row},{col})"
                         )));
                         continue;
+                    };
+
+                    // Calamine may surface BIFF8 Unicode strings with embedded NUL bytes (notably
+                    // defined-name references via `PtgName`). Strip them so the formula text is
+                    // parseable and stable across import paths.
+                    let formula_clean;
+                    let formula = if formula.contains('\0') {
+                        formula_clean = formula.replace('\0', "");
+                        formula_clean.as_str()
+                    } else {
+                        formula
                     };
 
                     let Some(normalized) = normalize_formula_text(formula) else {
@@ -2106,19 +2128,31 @@ fn reconcile_biff_sheet_mapping(
     (mapping, warning)
 }
 
-fn mask_biff_record_id_followed_by_continue(
-    stream: &[u8],
-    target_id: u16,
-    replacement_id: u16,
-) -> Option<Vec<u8>> {
-    let mut offsets = Vec::<usize>::new();
+fn sanitize_biff8_continued_name_records_for_calamine(stream: &[u8]) -> Option<Vec<u8>> {
+    const RECORD_NAME: u16 = 0x0018;
+    const RECORD_CONTINUE: u16 = 0x003C;
+
+    // Calamine's NAME parser reads:
+    // - cch (u8) at offset 3 in the NAME payload
+    // - cce (u16) at offset 4 in the NAME payload
+    //
+    // It can panic when `cce` exceeds the first physical fragment length. To avoid that, patch
+    // `cce` to 0 for any NAME record that is continued.
+    //
+    // This keeps the name string available (so `PtgName` tokens can still resolve) while making
+    // calamine skip parsing the formula payload.
+    let mut name_header_offsets: Vec<usize> = Vec::new();
     let mut offset: usize = 0;
 
     while offset + 4 <= stream.len() {
         let record_id = u16::from_le_bytes([stream[offset], stream[offset + 1]]);
         let len = u16::from_le_bytes([stream[offset + 2], stream[offset + 3]]) as usize;
 
-        let next = match offset.checked_add(4 + len) {
+        let data_start = match offset.checked_add(4) {
+            Some(v) => v,
+            None => break,
+        };
+        let next = match data_start.checked_add(len) {
             Some(v) => v,
             None => break,
         };
@@ -2126,25 +2160,45 @@ fn mask_biff_record_id_followed_by_continue(
             break;
         }
 
-        if record_id == target_id && next + 4 <= stream.len() {
+        if record_id == RECORD_NAME && next + 4 <= stream.len() {
             let next_id = u16::from_le_bytes([stream[next], stream[next + 1]]);
-            // BIFF `CONTINUE` record id.
-            if next_id == 0x003C {
-                offsets.push(offset);
+            if next_id == RECORD_CONTINUE {
+                name_header_offsets.push(offset);
             }
         }
 
         offset = next;
     }
 
-    if offsets.is_empty() {
+    if name_header_offsets.is_empty() {
         return None;
     }
 
     let mut out = stream.to_vec();
-    for offset in offsets {
-        out[offset..offset + 2].copy_from_slice(&replacement_id.to_le_bytes());
+    for header_offset in name_header_offsets {
+        let len = u16::from_le_bytes([out[header_offset + 2], out[header_offset + 3]]) as usize;
+        let data_start = header_offset + 4;
+
+        // Patch `cce` (u16) at payload offset 4.
+        if len >= 6 && data_start + 6 <= out.len() {
+            out[data_start + 4..data_start + 6].copy_from_slice(&0u16.to_le_bytes());
+        }
+
+        // Best-effort: clamp `cch` if the name string cannot fit in the first fragment.
+        //
+        // Calamine slices `&payload[14..]` then indexes `buf[1..=cch]`, which requires
+        // `payload.len() > 14 + cch`.
+        if len >= 4 && len > 14 {
+            let cch = out[data_start + 3] as usize;
+            let available = len - 14;
+            if available <= cch {
+                // Ensure `available > cch` (or set to 0 if we can't even fit the flags byte).
+                let new_cch = available.saturating_sub(1).min(u8::MAX as usize) as u8;
+                out[data_start + 3] = new_cch;
+            }
+        }
     }
+
     Some(out)
 }
 
