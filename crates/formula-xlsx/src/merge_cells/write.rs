@@ -88,6 +88,7 @@ pub fn write_worksheet_xml(merges: &[Range]) -> String {
 /// (preferably before elements that are required to come after it, e.g.
 /// `<conditionalFormatting>`, `<hyperlinks>`, `<pageMargins>`, `<tableParts>`, `<extLst>`).
 pub fn update_worksheet_xml(sheet_xml: &str, merges: &[Range]) -> Result<String, XlsxError> {
+    let worksheet_prefix = crate::xml::worksheet_spreadsheetml_prefix(sheet_xml)?;
     let mut reader = Reader::from_str(sheet_xml);
     reader.config_mut().trim_text(false);
 
@@ -110,14 +111,14 @@ pub fn update_worksheet_xml(sheet_xml: &str, merges: &[Range]) -> Result<String,
             Event::Start(ref e) if e.local_name().as_ref() == b"mergeCells" => {
                 replaced = true;
                 if !merges.is_empty() {
-                    write_merge_cells_block(&mut writer, merges)?;
+                    write_merge_cells_block(&mut writer, merges, worksheet_prefix.as_deref())?;
                 }
                 skip_depth = 1;
             }
             Event::Empty(ref e) if e.local_name().as_ref() == b"mergeCells" => {
                 replaced = true;
                 if !merges.is_empty() {
-                    write_merge_cells_block(&mut writer, merges)?;
+                    write_merge_cells_block(&mut writer, merges, worksheet_prefix.as_deref())?;
                 }
             }
             Event::Start(ref e) | Event::Empty(ref e)
@@ -125,13 +126,13 @@ pub fn update_worksheet_xml(sheet_xml: &str, merges: &[Range]) -> Result<String,
                     && !merges.is_empty()
                     && insert_before_tag(e.local_name().as_ref()) =>
             {
-                write_merge_cells_block(&mut writer, merges)?;
+                write_merge_cells_block(&mut writer, merges, worksheet_prefix.as_deref())?;
                 replaced = true;
                 writer.write_event(event.to_owned())?;
             }
             Event::End(ref e) if e.local_name().as_ref() == b"worksheet" => {
                 if !replaced && !merges.is_empty() {
-                    write_merge_cells_block(&mut writer, merges)?;
+                    write_merge_cells_block(&mut writer, merges, worksheet_prefix.as_deref())?;
                     replaced = true;
                 }
                 writer.write_event(Event::End(e.to_owned()))?;
@@ -149,20 +150,23 @@ pub fn update_worksheet_xml(sheet_xml: &str, merges: &[Range]) -> Result<String,
 fn write_merge_cells_block<W: std::io::Write>(
     writer: &mut Writer<W>,
     merges: &[Range],
+    prefix: Option<&str>,
 ) -> Result<(), XlsxError> {
+    let merge_cells_tag = crate::xml::prefixed_tag(prefix, "mergeCells");
+    let merge_cell_tag = crate::xml::prefixed_tag(prefix, "mergeCell");
     let count = merges.len().to_string();
-    let mut start = BytesStart::new("mergeCells");
+    let mut start = BytesStart::new(merge_cells_tag.as_str());
     start.push_attribute(("count", count.as_str()));
     writer.write_event(Event::Start(start))?;
 
     for merge in merges {
         let range = merge.to_string();
-        let mut elem = BytesStart::new("mergeCell");
+        let mut elem = BytesStart::new(merge_cell_tag.as_str());
         elem.push_attribute(("ref", range.as_str()));
         writer.write_event(Event::Empty(elem))?;
     }
 
-    writer.write_event(Event::End(BytesEnd::new("mergeCells")))?;
+    writer.write_event(Event::End(BytesEnd::new(merge_cells_tag.as_str())))?;
     Ok(())
 }
 

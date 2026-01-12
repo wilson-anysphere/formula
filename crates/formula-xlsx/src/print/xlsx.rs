@@ -342,10 +342,10 @@ fn parse_worksheet_print_settings(
 
     loop {
         match reader.read_event_into(&mut buf)? {
-            Event::Start(e) | Event::Empty(e) if e.name().as_ref() == b"pageMargins" => {
+            Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"pageMargins" => {
                 margins = Some(parse_page_margins(&e)?);
             }
-            Event::Start(e) | Event::Empty(e) if e.name().as_ref() == b"pageSetup" => {
+            Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"pageSetup" => {
                 let (o, p, s, ftw, fth) = parse_page_setup(&e)?;
                 orientation = o.or(orientation);
                 paper_size = p.or(paper_size);
@@ -353,19 +353,19 @@ fn parse_worksheet_print_settings(
                 fit_to_width = ftw.or(fit_to_width);
                 fit_to_height = fth.or(fit_to_height);
             }
-            Event::Start(e) | Event::Empty(e) if e.name().as_ref() == b"pageSetUpPr" => {
+            Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"pageSetUpPr" => {
                 fit_to_page = parse_fit_to_page(&e)?;
             }
-            Event::Start(e) if e.name().as_ref() == b"rowBreaks" => in_row_breaks = true,
-            Event::End(e) if e.name().as_ref() == b"rowBreaks" => in_row_breaks = false,
-            Event::Start(e) if e.name().as_ref() == b"colBreaks" => in_col_breaks = true,
-            Event::End(e) if e.name().as_ref() == b"colBreaks" => in_col_breaks = false,
-            Event::Start(e) | Event::Empty(e) if e.name().as_ref() == b"brk" && in_row_breaks => {
+            Event::Start(e) if e.local_name().as_ref() == b"rowBreaks" => in_row_breaks = true,
+            Event::End(e) if e.local_name().as_ref() == b"rowBreaks" => in_row_breaks = false,
+            Event::Start(e) if e.local_name().as_ref() == b"colBreaks" => in_col_breaks = true,
+            Event::End(e) if e.local_name().as_ref() == b"colBreaks" => in_col_breaks = false,
+            Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"brk" && in_row_breaks => {
                 if let Some(id) = parse_break_id(&e)? {
                     manual_breaks.row_breaks_after.insert(id);
                 }
             }
-            Event::Start(e) | Event::Empty(e) if e.name().as_ref() == b"brk" && in_col_breaks => {
+            Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"brk" && in_col_breaks => {
                 if let Some(id) = parse_break_id(&e)? {
                     manual_breaks.col_breaks_after.insert(id);
                 }
@@ -640,12 +640,16 @@ fn update_worksheet_xml(
     sheet_xml: &[u8],
     settings: &SheetPrintSettings,
 ) -> Result<Vec<u8>, PrintError> {
+    let sheet_xml_str = std::str::from_utf8(sheet_xml)?;
+    let worksheet_prefix = crate::xml::worksheet_spreadsheetml_prefix(sheet_xml_str)?;
+
     let mut reader = Reader::from_reader(sheet_xml);
     let mut writer = Writer::new(Vec::new());
     let mut buf = Vec::new();
 
     let mut seen_sheet_pr = false;
     let mut in_sheet_pr = false;
+    let mut sheet_pr_prefix: Option<String> = None;
     let mut seen_page_setup_pr = false;
 
     let mut seen_page_margins = false;
@@ -653,17 +657,17 @@ fn update_worksheet_xml(
     let mut seen_row_breaks = false;
     let mut seen_col_breaks = false;
 
-    let mut skip_tag: Option<Vec<u8>> = None;
+    let mut skip_tag: Option<&'static [u8]> = None;
     let mut skip_depth = 0usize;
 
     loop {
         let event = reader.read_event_into(&mut buf)?;
 
-        if let Some(ref tag) = skip_tag {
+        if let Some(tag) = skip_tag {
             match event {
                 Event::Start(_) => skip_depth += 1,
                 Event::End(ref e) => {
-                    if skip_depth == 0 && e.name().as_ref() == tag.as_slice() {
+                    if skip_depth == 0 && e.local_name().as_ref() == tag {
                         skip_tag = None;
                     } else if skip_depth > 0 {
                         skip_depth -= 1;
@@ -678,90 +682,142 @@ fn update_worksheet_xml(
         }
 
         match event {
-            Event::Start(ref e) if e.name().as_ref() == b"sheetPr" => {
+            Event::Start(ref e) if e.local_name().as_ref() == b"sheetPr" => {
                 seen_sheet_pr = true;
                 in_sheet_pr = true;
+                let name = e.name();
+                let name = name.as_ref();
+                sheet_pr_prefix = name
+                    .iter()
+                    .rposition(|b| *b == b':')
+                    .map(|idx| &name[..idx])
+                    .and_then(|p| std::str::from_utf8(p).ok())
+                    .map(|s| s.to_string());
                 writer.write_event(event)?;
             }
-            Event::End(ref e) if e.name().as_ref() == b"sheetPr" => {
+            Event::End(ref e) if e.local_name().as_ref() == b"sheetPr" => {
                 if settings.page_setup.scaling.is_fit_to() && !seen_page_setup_pr {
-                    write_page_setup_pr(&mut writer, true)?;
+                    write_page_setup_pr(&mut writer, sheet_pr_prefix.as_deref(), true)?;
                 }
                 in_sheet_pr = false;
+                sheet_pr_prefix = None;
                 writer.write_event(event)?;
             }
             Event::Start(ref e) | Event::Empty(ref e)
-                if in_sheet_pr && e.name().as_ref() == b"pageSetUpPr" =>
+                if in_sheet_pr && e.local_name().as_ref() == b"pageSetUpPr" =>
             {
                 seen_page_setup_pr = true;
                 let fit_to_page = settings.page_setup.scaling.is_fit_to();
                 writer.write_event(update_page_setup_pr_event(&event, fit_to_page)?)?;
             }
-            Event::Start(ref e) if e.name().as_ref() == b"pageMargins" => {
+            Event::Start(ref e) if e.local_name().as_ref() == b"pageMargins" => {
                 seen_page_margins = true;
-                writer.write_event(build_page_margins_event(&settings.page_setup.margins)?)?;
-                skip_tag = Some(b"pageMargins".to_vec());
+                let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                writer.write_event(build_page_margins_event(tag.as_str(), &settings.page_setup.margins)?)?;
+                skip_tag = Some(b"pageMargins");
                 skip_depth = 0;
             }
-            Event::Empty(ref e) if e.name().as_ref() == b"pageMargins" => {
+            Event::Empty(ref e) if e.local_name().as_ref() == b"pageMargins" => {
                 seen_page_margins = true;
-                writer.write_event(build_page_margins_event(&settings.page_setup.margins)?)?;
+                let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                writer.write_event(build_page_margins_event(tag.as_str(), &settings.page_setup.margins)?)?;
             }
-            Event::Start(ref e) if e.name().as_ref() == b"pageSetup" => {
+            Event::Start(ref e) if e.local_name().as_ref() == b"pageSetup" => {
                 seen_page_setup = true;
-                writer.write_event(build_page_setup_event(&settings.page_setup)?)?;
-                skip_tag = Some(b"pageSetup".to_vec());
+                let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                writer.write_event(build_page_setup_event(tag.as_str(), &settings.page_setup)?)?;
+                skip_tag = Some(b"pageSetup");
                 skip_depth = 0;
             }
-            Event::Empty(ref e) if e.name().as_ref() == b"pageSetup" => {
+            Event::Empty(ref e) if e.local_name().as_ref() == b"pageSetup" => {
                 seen_page_setup = true;
-                writer.write_event(build_page_setup_event(&settings.page_setup)?)?;
+                let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                writer.write_event(build_page_setup_event(tag.as_str(), &settings.page_setup)?)?;
             }
-            Event::Start(ref e) if e.name().as_ref() == b"rowBreaks" => {
+            Event::Start(ref e) if e.local_name().as_ref() == b"rowBreaks" => {
                 seen_row_breaks = true;
                 if !settings.manual_page_breaks.row_breaks_after.is_empty() {
-                    write_row_breaks(&mut writer, &settings.manual_page_breaks)?;
+                    let name = e.name();
+                    let name = name.as_ref();
+                    let prefix = name
+                        .iter()
+                        .rposition(|b| *b == b':')
+                        .map(|idx| &name[..idx])
+                        .and_then(|p| std::str::from_utf8(p).ok());
+                    write_row_breaks(&mut writer, prefix, &settings.manual_page_breaks)?;
                 }
-                skip_tag = Some(b"rowBreaks".to_vec());
+                skip_tag = Some(b"rowBreaks");
                 skip_depth = 0;
             }
-            Event::Empty(ref e) if e.name().as_ref() == b"rowBreaks" => {
+            Event::Empty(ref e) if e.local_name().as_ref() == b"rowBreaks" => {
                 seen_row_breaks = true;
                 if !settings.manual_page_breaks.row_breaks_after.is_empty() {
-                    write_row_breaks(&mut writer, &settings.manual_page_breaks)?;
+                    let name = e.name();
+                    let name = name.as_ref();
+                    let prefix = name
+                        .iter()
+                        .rposition(|b| *b == b':')
+                        .map(|idx| &name[..idx])
+                        .and_then(|p| std::str::from_utf8(p).ok());
+                    write_row_breaks(&mut writer, prefix, &settings.manual_page_breaks)?;
                 }
             }
-            Event::Start(ref e) if e.name().as_ref() == b"colBreaks" => {
+            Event::Start(ref e) if e.local_name().as_ref() == b"colBreaks" => {
                 seen_col_breaks = true;
                 if !settings.manual_page_breaks.col_breaks_after.is_empty() {
-                    write_col_breaks(&mut writer, &settings.manual_page_breaks)?;
+                    let name = e.name();
+                    let name = name.as_ref();
+                    let prefix = name
+                        .iter()
+                        .rposition(|b| *b == b':')
+                        .map(|idx| &name[..idx])
+                        .and_then(|p| std::str::from_utf8(p).ok());
+                    write_col_breaks(&mut writer, prefix, &settings.manual_page_breaks)?;
                 }
-                skip_tag = Some(b"colBreaks".to_vec());
+                skip_tag = Some(b"colBreaks");
                 skip_depth = 0;
             }
-            Event::Empty(ref e) if e.name().as_ref() == b"colBreaks" => {
+            Event::Empty(ref e) if e.local_name().as_ref() == b"colBreaks" => {
                 seen_col_breaks = true;
                 if !settings.manual_page_breaks.col_breaks_after.is_empty() {
-                    write_col_breaks(&mut writer, &settings.manual_page_breaks)?;
+                    let name = e.name();
+                    let name = name.as_ref();
+                    let prefix = name
+                        .iter()
+                        .rposition(|b| *b == b':')
+                        .map(|idx| &name[..idx])
+                        .and_then(|p| std::str::from_utf8(p).ok());
+                    write_col_breaks(&mut writer, prefix, &settings.manual_page_breaks)?;
                 }
             }
-            Event::End(ref e) if e.name().as_ref() == b"worksheet" => {
+            Event::End(ref e) if e.local_name().as_ref() == b"worksheet" => {
                 if !seen_sheet_pr && settings.page_setup.scaling.is_fit_to() {
-                    writer.write_event(Event::Start(BytesStart::new("sheetPr")))?;
-                    write_page_setup_pr(&mut writer, true)?;
-                    writer.write_event(Event::End(BytesEnd::new("sheetPr")))?;
+                    let sheet_pr_tag = crate::xml::prefixed_tag(worksheet_prefix.as_deref(), "sheetPr");
+                    writer.write_event(Event::Start(BytesStart::new(sheet_pr_tag.as_str())))?;
+                    write_page_setup_pr(&mut writer, worksheet_prefix.as_deref(), true)?;
+                    writer.write_event(Event::End(BytesEnd::new(sheet_pr_tag.as_str())))?;
                 }
                 if !seen_page_margins {
-                    writer.write_event(build_page_margins_event(&settings.page_setup.margins)?)?;
+                    let tag = crate::xml::prefixed_tag(worksheet_prefix.as_deref(), "pageMargins");
+                    writer.write_event(build_page_margins_event(tag.as_str(), &settings.page_setup.margins)?)?;
                 }
                 if !seen_page_setup {
-                    writer.write_event(build_page_setup_event(&settings.page_setup)?)?;
+                    let tag = crate::xml::prefixed_tag(worksheet_prefix.as_deref(), "pageSetup");
+                    writer.write_event(build_page_setup_event(tag.as_str(), &settings.page_setup)?)?;
                 }
                 if !seen_row_breaks && !settings.manual_page_breaks.row_breaks_after.is_empty() {
-                    write_row_breaks(&mut writer, &settings.manual_page_breaks)?;
+                    write_row_breaks(
+                        &mut writer,
+                        worksheet_prefix.as_deref(),
+                        &settings.manual_page_breaks,
+                    )?;
                 }
                 if !seen_col_breaks && !settings.manual_page_breaks.col_breaks_after.is_empty() {
-                    write_col_breaks(&mut writer, &settings.manual_page_breaks)?;
+                    write_col_breaks(
+                        &mut writer,
+                        worksheet_prefix.as_deref(),
+                        &settings.manual_page_breaks,
+                    )?;
                 }
                 writer.write_event(event)?;
             }
@@ -791,7 +847,11 @@ fn update_page_setup_pr_event(
     event: &Event<'_>,
     fit_to_page: bool,
 ) -> Result<Event<'static>, PrintError> {
-    let mut start = BytesStart::new("pageSetUpPr");
+    let tag = match event {
+        Event::Start(e) | Event::Empty(e) => String::from_utf8_lossy(e.name().as_ref()).into_owned(),
+        _ => unreachable!(),
+    };
+    let mut start = BytesStart::new(tag.as_str()).into_owned();
 
     let mut has_fit = false;
     if let Event::Start(e) | Event::Empty(e) = event {
@@ -818,22 +878,27 @@ fn update_page_setup_pr_event(
     })
 }
 
-fn write_page_setup_pr(writer: &mut Writer<Vec<u8>>, fit_to_page: bool) -> Result<(), PrintError> {
+fn write_page_setup_pr(
+    writer: &mut Writer<Vec<u8>>,
+    prefix: Option<&str>,
+    fit_to_page: bool,
+) -> Result<(), PrintError> {
     let fit = if fit_to_page { "1" } else { "0" };
-    let mut start = BytesStart::new("pageSetUpPr");
+    let tag = crate::xml::prefixed_tag(prefix, "pageSetUpPr");
+    let mut start = BytesStart::new(tag.as_str());
     start.push_attribute(("fitToPage", fit));
     writer.write_event(Event::Empty(start))?;
     Ok(())
 }
 
-fn build_page_margins_event(margins: &PageMargins) -> Result<Event<'static>, PrintError> {
+fn build_page_margins_event(tag: &str, margins: &PageMargins) -> Result<Event<'static>, PrintError> {
     let left = margins.left.to_string();
     let right = margins.right.to_string();
     let top = margins.top.to_string();
     let bottom = margins.bottom.to_string();
     let header = margins.header.to_string();
     let footer = margins.footer.to_string();
-    let mut start = BytesStart::new("pageMargins");
+    let mut start = BytesStart::new(tag).into_owned();
     start.push_attribute(("left", left.as_str()));
     start.push_attribute(("right", right.as_str()));
     start.push_attribute(("top", top.as_str()));
@@ -843,14 +908,14 @@ fn build_page_margins_event(margins: &PageMargins) -> Result<Event<'static>, Pri
     Ok(Event::Empty(start))
 }
 
-fn build_page_setup_event(page_setup: &PageSetup) -> Result<Event<'static>, PrintError> {
+fn build_page_setup_event(tag: &str, page_setup: &PageSetup) -> Result<Event<'static>, PrintError> {
     let paper_size = page_setup.paper_size.code.to_string();
     let orientation = match page_setup.orientation {
         Orientation::Portrait => "portrait",
         Orientation::Landscape => "landscape",
     };
 
-    let mut start = BytesStart::new("pageSetup");
+    let mut start = BytesStart::new(tag).into_owned();
     start.push_attribute(("paperSize", paper_size.as_str()));
     start.push_attribute(("orientation", orientation));
 
@@ -872,42 +937,48 @@ fn build_page_setup_event(page_setup: &PageSetup) -> Result<Event<'static>, Prin
 
 fn write_row_breaks(
     writer: &mut Writer<Vec<u8>>,
+    prefix: Option<&str>,
     breaks: &ManualPageBreaks,
 ) -> Result<(), PrintError> {
+    let row_breaks_tag = crate::xml::prefixed_tag(prefix, "rowBreaks");
+    let brk_tag = crate::xml::prefixed_tag(prefix, "brk");
     let count = breaks.row_breaks_after.len().to_string();
-    let mut outer = BytesStart::new("rowBreaks");
+    let mut outer = BytesStart::new(row_breaks_tag.as_str());
     outer.push_attribute(("count", count.as_str()));
     outer.push_attribute(("manualBreakCount", count.as_str()));
     writer.write_event(Event::Start(outer))?;
     for id in &breaks.row_breaks_after {
         let id_str = id.to_string();
-        let mut brk = BytesStart::new("brk");
+        let mut brk = BytesStart::new(brk_tag.as_str());
         brk.push_attribute(("id", id_str.as_str()));
         brk.push_attribute(("max", "16383"));
         brk.push_attribute(("man", "1"));
         writer.write_event(Event::Empty(brk))?;
     }
-    writer.write_event(Event::End(BytesEnd::new("rowBreaks")))?;
+    writer.write_event(Event::End(BytesEnd::new(row_breaks_tag.as_str())))?;
     Ok(())
 }
 
 fn write_col_breaks(
     writer: &mut Writer<Vec<u8>>,
+    prefix: Option<&str>,
     breaks: &ManualPageBreaks,
 ) -> Result<(), PrintError> {
+    let col_breaks_tag = crate::xml::prefixed_tag(prefix, "colBreaks");
+    let brk_tag = crate::xml::prefixed_tag(prefix, "brk");
     let count = breaks.col_breaks_after.len().to_string();
-    let mut outer = BytesStart::new("colBreaks");
+    let mut outer = BytesStart::new(col_breaks_tag.as_str());
     outer.push_attribute(("count", count.as_str()));
     outer.push_attribute(("manualBreakCount", count.as_str()));
     writer.write_event(Event::Start(outer))?;
     for id in &breaks.col_breaks_after {
         let id_str = id.to_string();
-        let mut brk = BytesStart::new("brk");
+        let mut brk = BytesStart::new(brk_tag.as_str());
         brk.push_attribute(("id", id_str.as_str()));
         brk.push_attribute(("max", "1048575"));
         brk.push_attribute(("man", "1"));
         writer.write_event(Event::Empty(brk))?;
     }
-    writer.write_event(Event::End(BytesEnd::new("colBreaks")))?;
+    writer.write_event(Event::End(BytesEnd::new(col_breaks_tag.as_str())))?;
     Ok(())
 }

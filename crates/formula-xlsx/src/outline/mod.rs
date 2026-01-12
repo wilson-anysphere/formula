@@ -158,6 +158,7 @@ fn parse_u8(value: &[u8], name: &'static str) -> Result<u8, OutlineXlsxError> {
 /// streaming events through `quick-xml` and updating only outline-related
 /// attributes.
 pub fn write_outline_to_worksheet_xml(original_xml: &str, outline: &Outline) -> Result<String, OutlineXlsxError> {
+    let worksheet_prefix = crate::xml::worksheet_spreadsheetml_prefix(original_xml)?;
     let mut reader = Reader::from_str(original_xml);
     reader.config_mut().trim_text(false);
     reader.config_mut().expand_empty_elements = true;
@@ -167,6 +168,7 @@ pub fn write_outline_to_worksheet_xml(original_xml: &str, outline: &Outline) -> 
     let mut buf = Vec::new();
     let mut in_sheet_pr = false;
     let mut wrote_outline_pr = false;
+    let mut sheet_pr_prefix: Option<String> = None;
     let mut skipping_cols_depth: Option<usize> = None;
     let mut cols_written = false;
 
@@ -180,19 +182,35 @@ pub fn write_outline_to_worksheet_xml(original_xml: &str, outline: &Outline) -> 
                     skipping_cols_depth = Some(skipping_cols_depth.unwrap() + 1);
                 } else if name.as_ref() == b"cols" && !outline.cols.is_empty() {
                     // Replace the entire <cols> section.
-                    write_cols(&mut writer, outline)?;
+                    let cols_name = e.name();
+                    let cols_name = cols_name.as_ref();
+                    let cols_prefix = cols_name
+                        .iter()
+                        .rposition(|b| *b == b':')
+                        .map(|idx| &cols_name[..idx])
+                        .and_then(|p| std::str::from_utf8(p).ok());
+                    write_cols(&mut writer, outline, cols_prefix)?;
                     cols_written = true;
                     skipping_cols_depth = Some(1);
                 } else if name.as_ref() == b"sheetPr" {
                     in_sheet_pr = true;
                     wrote_outline_pr = false;
+                    let sheet_pr_name = e.name();
+                    let sheet_pr_name = sheet_pr_name.as_ref();
+                    sheet_pr_prefix = sheet_pr_name
+                        .iter()
+                        .rposition(|b| *b == b':')
+                        .map(|idx| &sheet_pr_name[..idx])
+                        .and_then(|p| std::str::from_utf8(p).ok())
+                        .map(|s| s.to_string());
                     writer.write_event(Event::Start(e))?;
                 } else if name.as_ref() == b"outlinePr" {
                     wrote_outline_pr = true;
-                    writer.write_event(Event::Start(build_outline_pr(outline)))?;
+                    let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                    writer.write_event(Event::Start(build_outline_pr(tag.as_str(), outline)))?;
                 } else if name.as_ref() == b"sheetData" {
                     if !outline.cols.is_empty() && !cols_written {
-                        write_cols(&mut writer, outline)?;
+                        write_cols(&mut writer, outline, worksheet_prefix.as_deref())?;
                         cols_written = true;
                     }
                     writer.write_event(Event::Start(e))?;
@@ -207,19 +225,37 @@ pub fn write_outline_to_worksheet_xml(original_xml: &str, outline: &Outline) -> 
                 if skipping_cols_depth.is_some() {
                     // inside skipped <cols>, ignore
                 } else if name.as_ref() == b"cols" && !outline.cols.is_empty() {
-                    write_cols(&mut writer, outline)?;
+                    let cols_name = e.name();
+                    let cols_name = cols_name.as_ref();
+                    let cols_prefix = cols_name
+                        .iter()
+                        .rposition(|b| *b == b':')
+                        .map(|idx| &cols_name[..idx])
+                        .and_then(|p| std::str::from_utf8(p).ok());
+                    write_cols(&mut writer, outline, cols_prefix)?;
                     cols_written = true;
                 } else if name.as_ref() == b"sheetPr" {
                     // Expand <sheetPr/> so we can inject outlinePr.
-                    writer.write_event(Event::Start(BytesStart::new("sheetPr")))?;
-                    writer.write_event(Event::Empty(build_outline_pr(outline)))?;
-                    writer.write_event(Event::End(BytesEnd::new("sheetPr")))?;
+                    let sheet_pr_tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                    let sheet_pr_prefix = sheet_pr_tag
+                        .split_once(':')
+                        .map(|(p, _)| p.to_string());
+                    let outline_pr_tag =
+                        crate::xml::prefixed_tag(sheet_pr_prefix.as_deref(), "outlinePr");
+
+                    writer.write_event(Event::Start(e.into_owned()))?;
+                    writer.write_event(Event::Empty(build_outline_pr(
+                        outline_pr_tag.as_str(),
+                        outline,
+                    )))?;
+                    writer.write_event(Event::End(BytesEnd::new(sheet_pr_tag.as_str())))?;
                 } else if name.as_ref() == b"outlinePr" {
                     wrote_outline_pr = true;
-                    writer.write_event(Event::Empty(build_outline_pr(outline)))?;
+                    let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                    writer.write_event(Event::Empty(build_outline_pr(tag.as_str(), outline)))?;
                 } else if name.as_ref() == b"sheetData" {
                     if !outline.cols.is_empty() && !cols_written {
-                        write_cols(&mut writer, outline)?;
+                        write_cols(&mut writer, outline, worksheet_prefix.as_deref())?;
                         cols_written = true;
                     }
                     writer.write_event(Event::Empty(e))?;
@@ -241,10 +277,16 @@ pub fn write_outline_to_worksheet_xml(original_xml: &str, outline: &Outline) -> 
                     // swallow the end event
                 } else if name.as_ref() == b"sheetPr" {
                     if in_sheet_pr && !wrote_outline_pr {
-                        writer.write_event(Event::Empty(build_outline_pr(outline)))?;
+                        let outline_pr_tag =
+                            crate::xml::prefixed_tag(sheet_pr_prefix.as_deref(), "outlinePr");
+                        writer.write_event(Event::Empty(build_outline_pr(
+                            outline_pr_tag.as_str(),
+                            outline,
+                        )))?;
                         wrote_outline_pr = true;
                     }
                     in_sheet_pr = false;
+                    sheet_pr_prefix = None;
                     writer.write_event(Event::End(e))?;
                 } else if name.as_ref() == b"worksheet" {
                     writer.write_event(Event::End(e))?;
@@ -323,8 +365,8 @@ fn update_row_attrs<'a>(
     Ok(e)
 }
 
-fn build_outline_pr(outline: &Outline) -> BytesStart<'static> {
-    let mut e = BytesStart::new("outlinePr");
+fn build_outline_pr(tag: &str, outline: &Outline) -> BytesStart<'static> {
+    let mut e = BytesStart::new(tag).into_owned();
     e.push_attribute(("summaryBelow", if outline.pr.summary_below { "1" } else { "0" }));
     e.push_attribute(("summaryRight", if outline.pr.summary_right { "1" } else { "0" }));
     e.push_attribute((
@@ -334,12 +376,19 @@ fn build_outline_pr(outline: &Outline) -> BytesStart<'static> {
     e
 }
 
-fn write_cols<W: Write>(writer: &mut Writer<W>, outline: &Outline) -> Result<(), OutlineXlsxError> {
+fn write_cols<W: Write>(
+    writer: &mut Writer<W>,
+    outline: &Outline,
+    prefix: Option<&str>,
+) -> Result<(), OutlineXlsxError> {
     if outline.cols.is_empty() {
         return Ok(());
     }
 
-    writer.write_event(Event::Start(BytesStart::new("cols")))?;
+    let cols_tag = crate::xml::prefixed_tag(prefix, "cols");
+    let col_tag = crate::xml::prefixed_tag(prefix, "col");
+
+    writer.write_event(Event::Start(BytesStart::new(cols_tag.as_str())))?;
 
     // Group columns into contiguous ranges with identical outline attrs.
     let mut current_range: Option<(u32, u32, OutlineEntry)> = None;
@@ -366,26 +415,27 @@ fn write_cols<W: Write>(writer: &mut Writer<W>, outline: &Outline) -> Result<(),
                 current_range = Some((start, index, current));
             }
             Some((start, end, current)) => {
-                write_col(writer, start, end, &current)?;
+                write_col(writer, col_tag.as_str(), start, end, &current)?;
                 current_range = Some((index, index, outline_entry));
             }
         }
     }
     if let Some((start, end, current)) = current_range {
-        write_col(writer, start, end, &current)?;
+        write_col(writer, col_tag.as_str(), start, end, &current)?;
     }
 
-    writer.write_event(Event::End(BytesEnd::new("cols")))?;
+    writer.write_event(Event::End(BytesEnd::new(cols_tag.as_str())))?;
     Ok(())
 }
 
 fn write_col<W: Write>(
     writer: &mut Writer<W>,
+    tag: &str,
     min: u32,
     max: u32,
     entry: &OutlineEntry,
 ) -> Result<(), OutlineXlsxError> {
-    let mut e = BytesStart::new("col");
+    let mut e = BytesStart::new(tag);
     let min_str = min.to_string();
     let max_str = max.to_string();
     let level_str = entry.level.to_string();

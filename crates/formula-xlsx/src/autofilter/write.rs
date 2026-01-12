@@ -9,25 +9,57 @@ use std::sync::Arc;
 
 pub fn write_autofilter(filter: &SheetAutoFilter) -> Result<String, quick_xml::Error> {
     let mut writer = Writer::new(Cursor::new(Vec::new()));
-    write_autofilter_to(&mut writer, filter)?;
+    write_autofilter_to(&mut writer, filter, None)?;
     let bytes = writer.into_inner().into_inner();
     Ok(String::from_utf8_lossy(&bytes).to_string())
+}
+
+#[derive(Debug, Clone)]
+struct AutoFilterTags {
+    auto_filter: String,
+    filter_column: String,
+    dynamic_filter: String,
+    filters: String,
+    filter: String,
+    custom_filters: String,
+    custom_filter: String,
+    sort_state: String,
+    sort_condition: String,
+}
+
+impl AutoFilterTags {
+    fn new(prefix: Option<&str>) -> Self {
+        Self {
+            auto_filter: crate::xml::prefixed_tag(prefix, "autoFilter"),
+            filter_column: crate::xml::prefixed_tag(prefix, "filterColumn"),
+            dynamic_filter: crate::xml::prefixed_tag(prefix, "dynamicFilter"),
+            filters: crate::xml::prefixed_tag(prefix, "filters"),
+            filter: crate::xml::prefixed_tag(prefix, "filter"),
+            custom_filters: crate::xml::prefixed_tag(prefix, "customFilters"),
+            custom_filter: crate::xml::prefixed_tag(prefix, "customFilter"),
+            sort_state: crate::xml::prefixed_tag(prefix, "sortState"),
+            sort_condition: crate::xml::prefixed_tag(prefix, "sortCondition"),
+        }
+    }
 }
 
 pub(crate) fn write_autofilter_to<W: std::io::Write>(
     writer: &mut Writer<W>,
     filter: &SheetAutoFilter,
+    prefix: Option<&str>,
 ) -> Result<(), quick_xml::Error> {
-    let mut auto_filter = BytesStart::new("autoFilter");
+    let tags = AutoFilterTags::new(prefix);
+
+    let mut auto_filter = BytesStart::new(tags.auto_filter.as_str());
     auto_filter.push_attribute(("ref", filter.range.to_string().as_str()));
     writer.write_event(Event::Start(auto_filter))?;
 
     for col in &filter.filter_columns {
-        write_filter_column(writer, col)?;
+        write_filter_column(writer, col, &tags)?;
     }
 
     if let Some(sort_state) = &filter.sort_state {
-        write_sort_state(writer, sort_state)?;
+        write_sort_state(writer, sort_state, &tags)?;
     }
 
     for raw in &filter.raw_xml {
@@ -37,24 +69,25 @@ pub(crate) fn write_autofilter_to<W: std::io::Write>(
             .map_err(|e| quick_xml::Error::Io(Arc::new(e)))?;
     }
 
-    writer.write_event(Event::End(BytesEnd::new("autoFilter")))?;
+    writer.write_event(Event::End(BytesEnd::new(tags.auto_filter.as_str())))?;
     Ok(())
 }
 
 fn write_filter_column<W: std::io::Write>(
     writer: &mut Writer<W>,
     col: &formula_model::autofilter::FilterColumn,
+    tags: &AutoFilterTags,
 ) -> Result<(), quick_xml::Error> {
-    let mut fc = BytesStart::new("filterColumn");
+    let mut fc = BytesStart::new(tags.filter_column.as_str());
     fc.push_attribute(("colId", col.col_id.to_string().as_str()));
     writer.write_event(Event::Start(fc))?;
 
-    if write_dynamic_filter(writer, col)? {
+    if write_dynamic_filter(writer, col, tags)? {
         // Written.
     } else if can_write_as_filters(col) {
-        write_filters(writer, col)?;
+        write_filters(writer, col, tags)?;
     } else {
-        write_custom_filters(writer, col)?;
+        write_custom_filters(writer, col, tags)?;
     }
 
     for raw in &col.raw_xml {
@@ -64,13 +97,14 @@ fn write_filter_column<W: std::io::Write>(
             .map_err(|e| quick_xml::Error::Io(Arc::new(e)))?;
     }
 
-    writer.write_event(Event::End(BytesEnd::new("filterColumn")))?;
+    writer.write_event(Event::End(BytesEnd::new(tags.filter_column.as_str())))?;
     Ok(())
 }
 
 fn write_dynamic_filter<W: std::io::Write>(
     writer: &mut Writer<W>,
     col: &formula_model::autofilter::FilterColumn,
+    tags: &AutoFilterTags,
 ) -> Result<bool, quick_xml::Error> {
     let criteria = effective_criteria(col);
     if col.join != FilterJoin::Any || criteria.len() != 1 {
@@ -79,15 +113,15 @@ fn write_dynamic_filter<W: std::io::Write>(
 
     match &criteria[0] {
         FilterCriterion::Date(DateComparison::Today) => {
-            write_dynamic_filter_element(writer, "today", None, None)?;
+            write_dynamic_filter_element(writer, tags, "today", None, None)?;
             Ok(true)
         }
         FilterCriterion::Date(DateComparison::Yesterday) => {
-            write_dynamic_filter_element(writer, "yesterday", None, None)?;
+            write_dynamic_filter_element(writer, tags, "yesterday", None, None)?;
             Ok(true)
         }
         FilterCriterion::Date(DateComparison::Tomorrow) => {
-            write_dynamic_filter_element(writer, "tomorrow", None, None)?;
+            write_dynamic_filter_element(writer, tags, "tomorrow", None, None)?;
             Ok(true)
         }
         FilterCriterion::OpaqueDynamic(OpaqueDynamicFilter {
@@ -97,6 +131,7 @@ fn write_dynamic_filter<W: std::io::Write>(
         }) => {
             write_dynamic_filter_element(
                 writer,
+                tags,
                 filter_type,
                 value.as_deref(),
                 max_value.as_deref(),
@@ -109,11 +144,12 @@ fn write_dynamic_filter<W: std::io::Write>(
 
 fn write_dynamic_filter_element<W: std::io::Write>(
     writer: &mut Writer<W>,
+    tags: &AutoFilterTags,
     filter_type: &str,
     value: Option<&str>,
     max_value: Option<&str>,
 ) -> Result<(), quick_xml::Error> {
-    let mut dyn_filter = BytesStart::new("dynamicFilter");
+    let mut dyn_filter = BytesStart::new(tags.dynamic_filter.as_str());
     dyn_filter.push_attribute(("type", filter_type));
     if let Some(value) = value {
         dyn_filter.push_attribute(("val", value));
@@ -137,9 +173,10 @@ fn can_write_as_filters(col: &formula_model::autofilter::FilterColumn) -> bool {
 fn write_filters<W: std::io::Write>(
     writer: &mut Writer<W>,
     col: &formula_model::autofilter::FilterColumn,
+    tags: &AutoFilterTags,
 ) -> Result<(), quick_xml::Error> {
     let criteria = effective_criteria(col);
-    let mut filters = BytesStart::new("filters");
+    let mut filters = BytesStart::new(tags.filters.as_str());
     if criteria.iter().any(|c| matches!(c, FilterCriterion::Blanks)) {
         filters.push_attribute(("blank", "1"));
     }
@@ -147,19 +184,20 @@ fn write_filters<W: std::io::Write>(
 
     for criterion in &criteria {
         if let FilterCriterion::Equals(value) = criterion {
-            let mut f = BytesStart::new("filter");
+            let mut f = BytesStart::new(tags.filter.as_str());
             f.push_attribute(("val", value_to_string(value).as_str()));
             writer.write_event(Event::Empty(f))?;
         }
     }
 
-    writer.write_event(Event::End(BytesEnd::new("filters")))?;
+    writer.write_event(Event::End(BytesEnd::new(tags.filters.as_str())))?;
     Ok(())
 }
 
 fn write_custom_filters<W: std::io::Write>(
     writer: &mut Writer<W>,
     col: &formula_model::autofilter::FilterColumn,
+    tags: &AutoFilterTags,
 ) -> Result<(), quick_xml::Error> {
     let criteria = effective_criteria(col);
     let mut entries: Vec<(String, Option<String>)> = Vec::new();
@@ -181,14 +219,14 @@ fn write_custom_filters<W: std::io::Write>(
         }
     }
 
-    let mut custom = BytesStart::new("customFilters");
+    let mut custom = BytesStart::new(tags.custom_filters.as_str());
     if requires_and {
         custom.push_attribute(("and", "1"));
     }
     writer.write_event(Event::Start(custom))?;
 
     for (op, val) in entries {
-        let mut cf = BytesStart::new("customFilter");
+        let mut cf = BytesStart::new(tags.custom_filter.as_str());
         cf.push_attribute(("operator", op.as_str()));
         if let Some(val) = val {
             cf.push_attribute(("val", val.as_str()));
@@ -196,7 +234,7 @@ fn write_custom_filters<W: std::io::Write>(
         writer.write_event(Event::Empty(cf))?;
     }
 
-    writer.write_event(Event::End(BytesEnd::new("customFilters")))?;
+    writer.write_event(Event::End(BytesEnd::new(tags.custom_filters.as_str())))?;
     Ok(())
 }
 
@@ -265,18 +303,19 @@ fn effective_criteria(col: &formula_model::autofilter::FilterColumn) -> Vec<Filt
 fn write_sort_state<W: std::io::Write>(
     writer: &mut Writer<W>,
     sort_state: &formula_model::autofilter::SortState,
+    tags: &AutoFilterTags,
 ) -> Result<(), quick_xml::Error> {
-    let sort = BytesStart::new("sortState");
+    let sort = BytesStart::new(tags.sort_state.as_str());
     writer.write_event(Event::Start(sort))?;
     for cond in &sort_state.conditions {
-        let mut sc = BytesStart::new("sortCondition");
+        let mut sc = BytesStart::new(tags.sort_condition.as_str());
         sc.push_attribute(("ref", cond.range.to_string().as_str()));
         if cond.descending {
             sc.push_attribute(("descending", "1"));
         }
         writer.write_event(Event::Empty(sc))?;
     }
-    writer.write_event(Event::End(BytesEnd::new("sortState")))?;
+    writer.write_event(Event::End(BytesEnd::new(tags.sort_state.as_str())))?;
     Ok(())
 }
 

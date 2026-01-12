@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use quick_xml::events::Event;
+use quick_xml::Reader;
 use roxmltree::{Document, Node};
 
 #[derive(Debug, thiserror::Error)]
@@ -27,6 +29,45 @@ pub struct XmlElement {
 pub struct QName {
     pub ns: Option<String>,
     pub local: String,
+}
+
+/// Detect the namespace prefix used for SpreadsheetML elements in a worksheet XML document.
+///
+/// This scans the XML until the first `<worksheet>` start/empty tag and returns its prefix, if any
+/// (e.g. `Some("x")` for `<x:worksheet>`). For unprefixed worksheets (`<worksheet>`), this returns
+/// `None`.
+pub(crate) fn worksheet_spreadsheetml_prefix(xml: &str) -> Result<Option<String>, quick_xml::Error> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"worksheet" => {
+                let name = e.name();
+                let name = name.as_ref();
+                let prefix = name
+                    .iter()
+                    .rposition(|b| *b == b':')
+                    .map(|idx| &name[..idx])
+                    .and_then(|p| std::str::from_utf8(p).ok())
+                    .map(|s| s.to_string());
+                return Ok(prefix);
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(None)
+}
+
+pub(crate) fn prefixed_tag(prefix: Option<&str>, local: &str) -> String {
+    match prefix {
+        Some(prefix) => format!("{prefix}:{local}"),
+        None => local.to_string(),
+    }
 }
 
 impl XmlElement {

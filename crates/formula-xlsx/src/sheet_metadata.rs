@@ -191,6 +191,9 @@ pub fn write_sheet_tab_color(
     tab_color: Option<&TabColor>,
 ) -> Result<String, XlsxError> {
     let has_sheet_pr = worksheet_has_sheet_pr(worksheet_xml)?;
+    let worksheet_prefix = crate::xml::worksheet_spreadsheetml_prefix(worksheet_xml)?;
+    let inserted_sheet_pr_tag = crate::xml::prefixed_tag(worksheet_prefix.as_deref(), "sheetPr");
+    let inserted_tab_color_tag = crate::xml::prefixed_tag(worksheet_prefix.as_deref(), "tabColor");
 
     if tab_color.is_none() && !has_sheet_pr {
         return Ok(worksheet_xml.to_string());
@@ -205,6 +208,7 @@ pub fn write_sheet_tab_color(
     let mut in_sheet_pr = false;
     let mut tab_color_written = false;
     let mut inserted_sheet_pr = false;
+    let mut sheet_pr_prefix: Option<String> = None;
 
     loop {
         let event = reader.read_event_into(&mut buf)?;
@@ -212,12 +216,20 @@ pub fn write_sheet_tab_color(
             Event::Eof => break,
             Event::Empty(ref e) if e.local_name().as_ref() == b"worksheet" => {
                 if let Some(color) = tab_color {
-                    let start = e.to_owned();
-                    writer.write_event(Event::Start(start))?;
-                    writer.write_event(Event::Start(BytesStart::new("sheetPr")))?;
-                    writer.write_event(Event::Empty(build_tab_color_element(color)))?;
-                    writer.write_event(Event::End(BytesEnd::new("sheetPr")))?;
-                    writer.write_event(Event::End(BytesEnd::new("worksheet")))?;
+                    let worksheet_tag =
+                        String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                    writer.write_event(Event::Start(e.to_owned()))?;
+                    writer.write_event(Event::Start(BytesStart::new(
+                        inserted_sheet_pr_tag.as_str(),
+                    )))?;
+                    writer.write_event(Event::Empty(build_tab_color_element(
+                        inserted_tab_color_tag.as_str(),
+                        color,
+                    )))?;
+                    writer.write_event(Event::End(BytesEnd::new(
+                        inserted_sheet_pr_tag.as_str(),
+                    )))?;
+                    writer.write_event(Event::End(BytesEnd::new(worksheet_tag.as_str())))?;
                 } else {
                     writer.write_event(Event::Empty(e.to_owned()))?;
                 }
@@ -226,42 +238,71 @@ pub fn write_sheet_tab_color(
             Event::Start(ref e) if e.local_name().as_ref() == b"worksheet" => {
                 writer.write_event(Event::Start(e.to_owned()))?;
                 if tab_color.is_some() && !has_sheet_pr && !inserted_sheet_pr {
-                    writer.write_event(Event::Start(BytesStart::new("sheetPr")))?;
+                    writer.write_event(Event::Start(BytesStart::new(
+                        inserted_sheet_pr_tag.as_str(),
+                    )))?;
                     writer.write_event(Event::Empty(build_tab_color_element(
+                        inserted_tab_color_tag.as_str(),
                         tab_color.expect("color present"),
                     )))?;
-                    writer.write_event(Event::End(BytesEnd::new("sheetPr")))?;
+                    writer.write_event(Event::End(BytesEnd::new(
+                        inserted_sheet_pr_tag.as_str(),
+                    )))?;
                     inserted_sheet_pr = true;
                 }
             }
             Event::Start(ref e) if e.local_name().as_ref() == b"sheetPr" => {
                 in_sheet_pr = true;
                 tab_color_written = false;
+                let name = e.name();
+                let name = name.as_ref();
+                sheet_pr_prefix = name
+                    .iter()
+                    .rposition(|b| *b == b':')
+                    .map(|idx| &name[..idx])
+                    .and_then(|p| std::str::from_utf8(p).ok())
+                    .map(|s| s.to_string());
                 writer.write_event(Event::Start(e.to_owned()))?;
             }
             Event::Empty(ref e) if e.local_name().as_ref() == b"sheetPr" => {
                 if let Some(color) = tab_color {
-                    writer.write_event(Event::Start(BytesStart::new("sheetPr")))?;
-                    writer.write_event(Event::Empty(build_tab_color_element(color)))?;
-                    writer.write_event(Event::End(BytesEnd::new("sheetPr")))?;
+                    let sheet_pr_tag =
+                        String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                    let sheet_pr_prefix = sheet_pr_tag
+                        .split_once(':')
+                        .map(|(p, _)| p.to_string());
+                    let tab_color_tag =
+                        crate::xml::prefixed_tag(sheet_pr_prefix.as_deref(), "tabColor");
+
+                    writer.write_event(Event::Start(e.to_owned()))?;
+                    writer.write_event(Event::Empty(build_tab_color_element(
+                        tab_color_tag.as_str(),
+                        color,
+                    )))?;
+                    writer.write_event(Event::End(BytesEnd::new(sheet_pr_tag.as_str())))?;
                 } else {
                     writer.write_event(Event::Empty(e.to_owned()))?;
                 }
             }
             Event::End(ref e) if e.local_name().as_ref() == b"sheetPr" => {
                 if in_sheet_pr && tab_color.is_some() && !tab_color_written {
+                    let tab_color_tag =
+                        crate::xml::prefixed_tag(sheet_pr_prefix.as_deref(), "tabColor");
                     writer.write_event(Event::Empty(build_tab_color_element(
+                        tab_color_tag.as_str(),
                         tab_color.expect("color present"),
                     )))?;
                 }
                 in_sheet_pr = false;
+                sheet_pr_prefix = None;
                 writer.write_event(Event::End(e.to_owned()))?;
             }
             Event::Empty(ref e) | Event::Start(ref e)
                 if in_sheet_pr && e.local_name().as_ref() == b"tabColor" =>
             {
                 if let Some(color) = tab_color {
-                    writer.write_event(Event::Empty(build_tab_color_element(color)))?;
+                    let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                    writer.write_event(Event::Empty(build_tab_color_element(tag.as_str(), color)))?;
                     tab_color_written = true;
                 }
             }
@@ -275,8 +316,8 @@ pub fn write_sheet_tab_color(
     Ok(String::from_utf8(writer.into_inner())?)
 }
 
-fn build_tab_color_element(color: &TabColor) -> BytesStart<'static> {
-    let mut elem = BytesStart::new("tabColor");
+fn build_tab_color_element(tag: &str, color: &TabColor) -> BytesStart<'static> {
+    let mut elem = BytesStart::new(tag).into_owned();
     if let Some(rgb) = &color.rgb {
         elem.push_attribute(("rgb", rgb.as_str()));
     }

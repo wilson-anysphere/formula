@@ -96,6 +96,7 @@ fn parse_relationships(rels_xml: &str) -> Result<Vec<Relationship>, XlsxError> {
 /// (preferably before elements that are required to come after it, e.g. `<printOptions>`,
 /// `<pageMargins>`, `<drawing>`, `<tableParts>`, `<extLst>`).
 pub fn update_worksheet_xml(sheet_xml: &str, hyperlinks: &[Hyperlink]) -> Result<String, XlsxError> {
+    let worksheet_prefix = crate::xml::worksheet_spreadsheetml_prefix(sheet_xml)?;
     let mut reader = Reader::from_str(sheet_xml);
     reader.config_mut().trim_text(false);
 
@@ -120,14 +121,14 @@ pub fn update_worksheet_xml(sheet_xml: &str, hyperlinks: &[Hyperlink]) -> Result
             Event::Start(ref e) if e.local_name().as_ref() == b"hyperlinks" => {
                 replaced = true;
                 if !hyperlinks.is_empty() {
-                    write_hyperlinks_block(&mut writer, hyperlinks)?;
+                    write_hyperlinks_block(&mut writer, hyperlinks, worksheet_prefix.as_deref())?;
                 }
                 skip_depth = 1;
             }
             Event::Empty(ref e) if e.local_name().as_ref() == b"hyperlinks" => {
                 replaced = true;
                 if !hyperlinks.is_empty() {
-                    write_hyperlinks_block(&mut writer, hyperlinks)?;
+                    write_hyperlinks_block(&mut writer, hyperlinks, worksheet_prefix.as_deref())?;
                 }
             }
             Event::Start(ref e) | Event::Empty(ref e)
@@ -135,13 +136,13 @@ pub fn update_worksheet_xml(sheet_xml: &str, hyperlinks: &[Hyperlink]) -> Result
                     && !hyperlinks.is_empty()
                     && insert_before_tag(e.local_name().as_ref()) =>
             {
-                write_hyperlinks_block(&mut writer, hyperlinks)?;
+                write_hyperlinks_block(&mut writer, hyperlinks, worksheet_prefix.as_deref())?;
                 replaced = true;
                 writer.write_event(event.to_owned())?;
             }
             Event::End(ref e) if e.local_name().as_ref() == b"worksheet" => {
                 if !replaced && !hyperlinks.is_empty() {
-                    write_hyperlinks_block(&mut writer, hyperlinks)?;
+                    write_hyperlinks_block(&mut writer, hyperlinks, worksheet_prefix.as_deref())?;
                     replaced = true;
                 }
                 writer.write_event(Event::End(e.to_owned()))?;
@@ -159,14 +160,18 @@ pub fn update_worksheet_xml(sheet_xml: &str, hyperlinks: &[Hyperlink]) -> Result
 fn write_hyperlinks_block<W: std::io::Write>(
     writer: &mut Writer<W>,
     hyperlinks: &[Hyperlink],
+    prefix: Option<&str>,
 ) -> Result<(), XlsxError> {
-    let mut start = BytesStart::new("hyperlinks");
+    let hyperlinks_tag = crate::xml::prefixed_tag(prefix, "hyperlinks");
+    let hyperlink_tag = crate::xml::prefixed_tag(prefix, "hyperlink");
+
+    let mut start = BytesStart::new(hyperlinks_tag.as_str());
     // Declare the `r:` prefix locally so we can always emit `r:id`.
     start.push_attribute(("xmlns:r", NS_OFFICE_REL));
     writer.write_event(Event::Start(start))?;
 
     for link in hyperlinks {
-        let mut elem = BytesStart::new("hyperlink");
+        let mut elem = BytesStart::new(hyperlink_tag.as_str());
 
         let range = link.range.to_string();
         elem.push_attribute(("ref", range.as_str()));
@@ -197,7 +202,7 @@ fn write_hyperlinks_block<W: std::io::Write>(
         writer.write_event(Event::Empty(elem))?;
     }
 
-    writer.write_event(Event::End(BytesEnd::new("hyperlinks")))?;
+    writer.write_event(Event::End(BytesEnd::new(hyperlinks_tag.as_str())))?;
     Ok(())
 }
 

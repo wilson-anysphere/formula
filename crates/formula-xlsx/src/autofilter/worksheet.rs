@@ -36,6 +36,7 @@ pub fn write_worksheet_autofilter(
     worksheet_xml: &str,
     filter: Option<&SheetAutoFilter>,
 ) -> Result<String, XlsxError> {
+    let worksheet_prefix = crate::xml::worksheet_spreadsheetml_prefix(worksheet_xml)?;
     let mut reader = Reader::from_str(worksheet_xml);
     reader.config_mut().trim_text(false);
 
@@ -51,14 +52,14 @@ pub fn write_worksheet_autofilter(
             Event::Eof => break,
             Event::Start(ref e) if skip_depth == 0 && e.local_name().as_ref() == b"autoFilter" => {
                 if let Some(filter) = filter {
-                    write_autofilter_to(&mut writer, filter)?;
+                    write_autofilter_to(&mut writer, filter, worksheet_prefix.as_deref())?;
                     wrote_autofilter = true;
                 }
                 skip_depth = 1;
             }
             Event::Empty(ref e) if skip_depth == 0 && e.local_name().as_ref() == b"autoFilter" => {
                 if let Some(filter) = filter {
-                    write_autofilter_to(&mut writer, filter)?;
+                    write_autofilter_to(&mut writer, filter, worksheet_prefix.as_deref())?;
                     wrote_autofilter = true;
                 }
             }
@@ -77,14 +78,14 @@ pub fn write_worksheet_autofilter(
                         b"mergeCells" | b"tableParts" | b"extLst"
                     ) =>
             {
-                write_autofilter_to(&mut writer, filter.unwrap())?;
+                write_autofilter_to(&mut writer, filter.unwrap(), worksheet_prefix.as_deref())?;
                 wrote_autofilter = true;
                 writer.write_event(event.to_owned())?;
             }
             Event::End(ref e) if e.local_name().as_ref() == b"worksheet" => {
                 if !wrote_autofilter {
                     if let Some(filter) = filter {
-                        write_autofilter_to(&mut writer, filter)?;
+                        write_autofilter_to(&mut writer, filter, worksheet_prefix.as_deref())?;
                         wrote_autofilter = true;
                     }
                 }
