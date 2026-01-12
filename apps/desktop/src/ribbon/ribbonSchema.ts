@@ -154,9 +154,11 @@ export const defaultRibbonSchema: RibbonSchema = {
           label: "Clipboard",
           buttons: [
             { id: "home.clipboard.paste", label: "Paste", ariaLabel: "Paste", icon: "📋", kind: "dropdown", size: "large", testId: "ribbon-paste" },
+            { id: "home.clipboard.pasteSpecial", label: "Paste Special", ariaLabel: "Paste Special", icon: "📌", kind: "dropdown", size: "small" },
             { id: "home.clipboard.cut", label: "Cut", ariaLabel: "Cut", icon: "✂️", size: "icon" },
             { id: "home.clipboard.copy", label: "Copy", ariaLabel: "Copy", icon: "📄", size: "icon" },
             { id: "home.clipboard.formatPainter", label: "Format Painter", ariaLabel: "Format Painter", icon: "🖌", size: "small" },
+            { id: "home.clipboard.clipboardPane", label: "Clipboard", ariaLabel: "Open Clipboard", icon: "📎", kind: "dropdown", size: "small" },
           ],
         },
         {
@@ -292,7 +294,25 @@ export const defaultRibbonSchema: RibbonSchema = {
             { id: "insert.charts.area", label: "Area", ariaLabel: "Insert Area Chart", icon: "⛰", kind: "dropdown" },
             { id: "insert.charts.scatter", label: "Scatter", ariaLabel: "Insert Scatter (X, Y) Chart", icon: "⋯", kind: "dropdown" },
             { id: "insert.charts.map", label: "Map", ariaLabel: "Insert Map Chart", icon: "🗺", kind: "dropdown" },
+            { id: "insert.charts.histogram", label: "Histogram", ariaLabel: "Insert Statistic Chart (Histogram, Pareto)", icon: "▁▃▆", kind: "dropdown" },
+            { id: "insert.charts.waterfall", label: "Waterfall", ariaLabel: "Insert Waterfall Chart", icon: "💧", kind: "dropdown" },
+            { id: "insert.charts.treemap", label: "Treemap", ariaLabel: "Insert Hierarchy Chart (Treemap)", icon: "🧩", kind: "dropdown" },
+            { id: "insert.charts.sunburst", label: "Sunburst", ariaLabel: "Insert Hierarchy Chart (Sunburst)", icon: "☀️", kind: "dropdown" },
+            { id: "insert.charts.funnel", label: "Funnel", ariaLabel: "Insert Funnel Chart", icon: "⏬", kind: "dropdown" },
+            { id: "insert.charts.boxWhisker", label: "Box & Whisker", ariaLabel: "Insert Box and Whisker Chart", icon: "▣", kind: "dropdown" },
+            { id: "insert.charts.radar", label: "Radar", ariaLabel: "Insert Radar Chart", icon: "🕸", kind: "dropdown" },
+            { id: "insert.charts.surface", label: "Surface", ariaLabel: "Insert Surface Chart", icon: "🗻", kind: "dropdown" },
+            { id: "insert.charts.stock", label: "Stock", ariaLabel: "Insert Stock Chart", icon: "💹", kind: "dropdown" },
+            { id: "insert.charts.combo", label: "Combo", ariaLabel: "Insert Combo Chart", icon: "🔀", kind: "dropdown" },
             { id: "insert.charts.pivotChart", label: "PivotChart", ariaLabel: "PivotChart", icon: "📊", kind: "dropdown" },
+          ],
+        },
+        {
+          id: "insert.tours",
+          label: "Tours",
+          buttons: [
+            { id: "insert.tours.3dMap", label: "3D Map", ariaLabel: "3D Map", icon: "🌍", kind: "dropdown", size: "large" },
+            { id: "insert.tours.launchTour", label: "Launch Tour", ariaLabel: "Launch Tour", icon: "🚀", kind: "dropdown" },
           ],
         },
         {
@@ -450,6 +470,14 @@ export const defaultRibbonSchema: RibbonSchema = {
             { id: "formulas.calculation.calculateSheet", label: "Calculate Sheet", ariaLabel: "Calculate Sheet", icon: "⟲", size: "small" },
           ],
         },
+        {
+          id: "formulas.solutions",
+          label: "Solutions",
+          buttons: [
+            { id: "formulas.solutions.solver", label: "Solver", ariaLabel: "Solver", icon: "🧩", kind: "dropdown", size: "large" },
+            { id: "formulas.solutions.analysisToolPak", label: "Analysis ToolPak", ariaLabel: "Analysis ToolPak", icon: "🧰", kind: "dropdown" },
+          ],
+        },
       ],
     },
     {
@@ -517,6 +545,14 @@ export const defaultRibbonSchema: RibbonSchema = {
             { id: "data.outline.subtotal", label: "Subtotal", ariaLabel: "Subtotal", icon: "Σ", kind: "dropdown" },
             { id: "data.outline.showDetail", label: "Show Detail", ariaLabel: "Show Detail", icon: "＋" },
             { id: "data.outline.hideDetail", label: "Hide Detail", ariaLabel: "Hide Detail", icon: "−" },
+          ],
+        },
+        {
+          id: "data.dataTypes",
+          label: "Data Types",
+          buttons: [
+            { id: "data.dataTypes.stocks", label: "Stocks", ariaLabel: "Stocks", icon: "📈", kind: "dropdown", size: "large" },
+            { id: "data.dataTypes.geography", label: "Geography", ariaLabel: "Geography", icon: "🌎", kind: "dropdown", size: "large" },
           ],
         },
       ],
