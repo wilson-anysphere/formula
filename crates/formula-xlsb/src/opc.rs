@@ -156,8 +156,18 @@ impl XlsbWorkbook {
             bytes
         };
 
-        let (sheets, workbook_context, workbook_properties, defined_names) =
+        let (mut sheets, workbook_context, workbook_properties, defined_names) =
             parse_workbook(&mut Cursor::new(&workbook_bin), &workbook_rels)?;
+
+        // `workbook.bin.rels` targets are compared case-insensitively by Excel on Windows/macOS,
+        // but ZIP entry names are case-sensitive. Normalize sheet part paths to the exact entry
+        // name present in the archive so downstream reads/writes don't fail on case-only
+        // mismatches.
+        for sheet in &mut sheets {
+            if let Some(actual) = find_zip_entry_case_insensitive(&zip, &sheet.part_path) {
+                sheet.part_path = actual;
+            }
+        }
         if options.preserve_parsed_parts {
             preserved_parts.insert("xl/workbook.bin".to_string(), workbook_bin);
         }
