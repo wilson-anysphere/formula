@@ -11,7 +11,7 @@ test.describe("in-cell editor F4 toggles absolute/relative references", () => {
   const modes = ["legacy", "shared"] as const;
 
   for (const mode of modes) {
-    test(`pressing F4 toggles =A1 to =$A$1 while editing a cell (${mode})`, async ({ page }) => {
+    test(`pressing F4 cycles absolute/relative modes while editing a cell (${mode})`, async ({ page }) => {
       await gotoDesktop(page, `/?grid=${mode}`);
       await waitForIdle(page);
 
@@ -33,7 +33,21 @@ test.describe("in-cell editor F4 toggles absolute/relative references", () => {
       await expect(editor).toHaveValue("=$A$1");
       await expect(editor).toHaveJSProperty("selectionStart", 1);
       await expect(editor).toHaveJSProperty("selectionEnd", 5);
+
+      await page.keyboard.press("F4");
+      await expect(editor).toHaveValue("=A$1");
+      await expect(editor).toHaveJSProperty("selectionStart", 1);
+      await expect(editor).toHaveJSProperty("selectionEnd", 4);
+
+      await page.keyboard.press("F4");
+      await expect(editor).toHaveValue("=$A1");
+      await expect(editor).toHaveJSProperty("selectionStart", 1);
+      await expect(editor).toHaveJSProperty("selectionEnd", 4);
+
+      await page.keyboard.press("F4");
+      await expect(editor).toHaveValue("=A1");
+      await expect(editor).toHaveJSProperty("selectionStart", 1);
+      await expect(editor).toHaveJSProperty("selectionEnd", 3);
     });
   }
 });
-

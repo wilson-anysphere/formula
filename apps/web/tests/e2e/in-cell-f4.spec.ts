@@ -23,5 +23,19 @@ test("in-cell editor F4 toggles absolute/relative A1 references", async ({ page 
   await expect(editor).toHaveValue("=$A$1");
   await expect(editor).toHaveJSProperty("selectionStart", 1);
   await expect(editor).toHaveJSProperty("selectionEnd", 5);
-});
 
+  await editor.press("F4");
+  await expect(editor).toHaveValue("=A$1");
+  await expect(editor).toHaveJSProperty("selectionStart", 1);
+  await expect(editor).toHaveJSProperty("selectionEnd", 4);
+
+  await editor.press("F4");
+  await expect(editor).toHaveValue("=$A1");
+  await expect(editor).toHaveJSProperty("selectionStart", 1);
+  await expect(editor).toHaveJSProperty("selectionEnd", 4);
+
+  await editor.press("F4");
+  await expect(editor).toHaveValue("=A1");
+  await expect(editor).toHaveJSProperty("selectionStart", 1);
+  await expect(editor).toHaveJSProperty("selectionEnd", 3);
+});
