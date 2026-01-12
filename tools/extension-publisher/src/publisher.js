@@ -90,6 +90,25 @@ async function publishExtension({ extensionDir, marketplaceUrl, token, privateKe
   if (!token) throw new Error("token is required");
   if (!privateKeyPemOrPath) throw new Error("privateKeyPemOrPath is required");
 
+  // Publisher tooling expects `marketplaceUrl` to be the marketplace origin and appends `/api/...`.
+  // To reduce common confusion (Desktop/Tauri clients typically use an API base URL that includes `/api`),
+  // accept a trailing `/api` and normalize it away here.
+  const normalizedMarketplaceUrl = (() => {
+    const raw = String(marketplaceUrl ?? "").trim();
+    const withoutTrailingSlash = raw.replace(/\/+$/, "");
+    if (!withoutTrailingSlash) {
+      throw new Error("marketplaceUrl must be a non-empty URL (e.g. https://marketplace.formula.app)");
+    }
+    if (withoutTrailingSlash.endsWith("/api")) {
+      const stripped = withoutTrailingSlash.slice(0, -4);
+      if (!stripped) {
+        throw new Error("marketplaceUrl must be an origin URL, not a bare '/api' path");
+      }
+      return stripped;
+    }
+    return withoutTrailingSlash;
+  })();
+
   let privateKeyPem = privateKeyPemOrPath;
   if (privateKeyPemOrPath.includes(path.sep) || privateKeyPemOrPath.includes(".pem")) {
     privateKeyPem = await fs.readFile(privateKeyPemOrPath, "utf8");
@@ -97,7 +116,7 @@ async function publishExtension({ extensionDir, marketplaceUrl, token, privateKe
 
   const { manifest, packageBytes, signatureBase64 } = await packageExtension(extensionDir, { privateKeyPem, formatVersion });
 
-  const base = marketplaceUrl.replace(/\/$/, "");
+  const base = normalizedMarketplaceUrl;
   const packageSha256 = sha256(packageBytes);
   let response = await fetch(`${base}/api/publish-bin`, {
     method: "POST",

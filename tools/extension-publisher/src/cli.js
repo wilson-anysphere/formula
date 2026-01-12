@@ -9,7 +9,11 @@ function usage() {
   console.error(
     [
       "Usage:",
-      "  formula-extension-publisher publish <extensionDir> --marketplace <url> --token <token> --private-key <pemPath> [--format-version <1|2>]",
+      "  formula-extension-publisher publish <extensionDir> --marketplace <origin> --token <token> --private-key <pemPath> [--format-version <1|2>]",
+      "",
+      "Notes:",
+      "  --marketplace should be the marketplace ORIGIN (no trailing /api), e.g. https://marketplace.formula.app",
+      "  (Passing a URL that ends with /api is also accepted and will be normalized.)",
       "",
     ].join("\n"),
   );
