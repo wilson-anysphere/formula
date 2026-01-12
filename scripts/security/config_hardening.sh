@@ -183,7 +183,9 @@ else
     fi
   }
 
-  check_disallowed_fixed "Wildcard CORS response header" "Access-Control-Allow-Origin: *"
+  # Detect common patterns that set wildcard CORS at runtime (avoid false positives from comments/docs).
+  check_disallowed_fixed "Wildcard CORS response header (\"Access-Control-Allow-Origin\", \"*\")" '"Access-Control-Allow-Origin", "*"'
+  check_disallowed_fixed "Wildcard CORS response header ('Access-Control-Allow-Origin', '*')" "'Access-Control-Allow-Origin', '*'"
   check_disallowed_fixed "Node TLS verification disabled" "rejectUnauthorized: false"
   check_disallowed_fixed "Rust TLS verification disabled" "danger_accept_invalid_certs"
 fi
