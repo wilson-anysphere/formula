@@ -255,6 +255,128 @@ fn canonicalize_and_localize_external_data_functions_and_errors_for_es_es() {
 }
 
 #[test]
+fn canonicalize_and_localize_all_cube_function_names() {
+    fn assert_roundtrip(locale: &locale::FormulaLocale, canonical: &str, localized: &str) {
+        assert_eq!(
+            locale::canonicalize_formula(localized, locale).unwrap(),
+            canonical
+        );
+        assert_eq!(locale::localize_formula(canonical, locale).unwrap(), localized);
+    }
+
+    // de-DE
+    assert_roundtrip(
+        &locale::DE_DE,
+        "=CUBEVALUE(\"conn\",\"member\",1.5)",
+        "=CUBEWERT(\"conn\";\"member\";1,5)",
+    );
+    assert_roundtrip(
+        &locale::DE_DE,
+        "=CUBEMEMBER(\"conn\",\"member\",\"caption\")",
+        "=CUBEMITGLIED(\"conn\";\"member\";\"caption\")",
+    );
+    assert_roundtrip(
+        &locale::DE_DE,
+        "=CUBEMEMBERPROPERTY(\"conn\",\"member\",\"prop\")",
+        "=CUBEMITGLIEDSEIGENSCHAFT(\"conn\";\"member\";\"prop\")",
+    );
+    assert_roundtrip(
+        &locale::DE_DE,
+        "=CUBERANKEDMEMBER(\"conn\",\"set\",3,\"caption\")",
+        "=CUBERANGMITGLIED(\"conn\";\"set\";3;\"caption\")",
+    );
+    assert_roundtrip(
+        &locale::DE_DE,
+        "=CUBESET(\"conn\",\"set\",\"caption\",1,\"sort\")",
+        "=CUBEMENGE(\"conn\";\"set\";\"caption\";1;\"sort\")",
+    );
+    assert_roundtrip(
+        &locale::DE_DE,
+        "=CUBESETCOUNT(\"set\")",
+        "=CUBEMENGENANZAHL(\"set\")",
+    );
+    assert_roundtrip(
+        &locale::DE_DE,
+        "=CUBEKPIMEMBER(\"conn\",\"kpi\",\"property\",\"caption\")",
+        "=CUBEKPIMITGLIED(\"conn\";\"kpi\";\"property\";\"caption\")",
+    );
+
+    // fr-FR
+    assert_roundtrip(
+        &locale::FR_FR,
+        "=CUBEVALUE(\"conn\",\"member\",1.5)",
+        "=VALEUR.CUBE(\"conn\";\"member\";1,5)",
+    );
+    assert_roundtrip(
+        &locale::FR_FR,
+        "=CUBEMEMBER(\"conn\",\"member\",\"caption\")",
+        "=MEMBRE.CUBE(\"conn\";\"member\";\"caption\")",
+    );
+    assert_roundtrip(
+        &locale::FR_FR,
+        "=CUBEMEMBERPROPERTY(\"conn\",\"member\",\"prop\")",
+        "=PROPRIETE.MEMBRE.CUBE(\"conn\";\"member\";\"prop\")",
+    );
+    assert_roundtrip(
+        &locale::FR_FR,
+        "=CUBERANKEDMEMBER(\"conn\",\"set\",3,\"caption\")",
+        "=MEMBRE.RANG.CUBE(\"conn\";\"set\";3;\"caption\")",
+    );
+    assert_roundtrip(
+        &locale::FR_FR,
+        "=CUBESET(\"conn\",\"set\",\"caption\",1,\"sort\")",
+        "=ENSEMBLE.CUBE(\"conn\";\"set\";\"caption\";1;\"sort\")",
+    );
+    assert_roundtrip(
+        &locale::FR_FR,
+        "=CUBESETCOUNT(\"set\")",
+        "=NB.ENSEMBLE.CUBE(\"set\")",
+    );
+    assert_roundtrip(
+        &locale::FR_FR,
+        "=CUBEKPIMEMBER(\"conn\",\"kpi\",\"property\",\"caption\")",
+        "=MEMBREKPI.CUBE(\"conn\";\"kpi\";\"property\";\"caption\")",
+    );
+
+    // es-ES
+    assert_roundtrip(
+        &locale::ES_ES,
+        "=CUBEVALUE(\"conn\",\"member\",1.5)",
+        "=VALOR.CUBO(\"conn\";\"member\";1,5)",
+    );
+    assert_roundtrip(
+        &locale::ES_ES,
+        "=CUBEMEMBER(\"conn\",\"member\",\"caption\")",
+        "=MIEMBRO.CUBO(\"conn\";\"member\";\"caption\")",
+    );
+    assert_roundtrip(
+        &locale::ES_ES,
+        "=CUBEMEMBERPROPERTY(\"conn\",\"member\",\"prop\")",
+        "=PROPIEDAD.MIEMBRO.CUBO(\"conn\";\"member\";\"prop\")",
+    );
+    assert_roundtrip(
+        &locale::ES_ES,
+        "=CUBERANKEDMEMBER(\"conn\",\"set\",3,\"caption\")",
+        "=MIEMBRO.RANGO.CUBO(\"conn\";\"set\";3;\"caption\")",
+    );
+    assert_roundtrip(
+        &locale::ES_ES,
+        "=CUBESET(\"conn\",\"set\",\"caption\",1,\"sort\")",
+        "=CONJUNTO.CUBO(\"conn\";\"set\";\"caption\";1;\"sort\")",
+    );
+    assert_roundtrip(
+        &locale::ES_ES,
+        "=CUBESETCOUNT(\"set\")",
+        "=CONTAR.CONJUNTO.CUBO(\"set\")",
+    );
+    assert_roundtrip(
+        &locale::ES_ES,
+        "=CUBEKPIMEMBER(\"conn\",\"kpi\",\"property\",\"caption\")",
+        "=MIEMBROKPI.CUBO(\"conn\";\"kpi\";\"property\";\"caption\")",
+    );
+}
+
+#[test]
 fn engine_accepts_localized_formulas_and_persists_canonical() {
     let mut engine = Engine::new();
     engine
