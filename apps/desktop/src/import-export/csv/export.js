@@ -83,7 +83,11 @@ export function exportDocumentRangeToCsv(doc, sheetId, range, options = {}) {
     /** @type {CellState[]} */
     const outRow = [];
     for (let col = r.start.col; col <= r.end.col; col++) {
-      outRow.push(doc.getCell(sheetId, { row, col }));
+      const cell = doc.getCell(sheetId, { row, col });
+      const format = doc.getCellFormat(sheetId, { row, col });
+      // Export paths expect `cell.format` (not `styleId`) so downstream serialization can
+      // respect number formats (including layered formats inherited from row/col/sheet defaults).
+      outRow.push({ ...cell, format });
     }
     grid.push(outRow);
   }

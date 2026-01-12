@@ -58,6 +58,12 @@ function encodeUtf8(text) {
 
 const NUMERIC_LITERAL_RE = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
 
+// Excel sheet bounds (used for detecting full-row/column formatting ranges like
+// "A1:A1048576"). These let us apply layered row/column formats without eagerly
+// materializing every cell in the range.
+const EXCEL_MAX_ROWS = 1_048_576;
+const EXCEL_MAX_COLS = 16_384;
+
 /**
  * Canonicalize formula text for storage.
  *
@@ -988,6 +994,59 @@ export class DocumentController {
    */
   setRangeFormat(sheetId, range, stylePatch, options = {}) {
     const r = typeof range === "string" ? parseRangeA1(range) : normalizeRange(range);
+
+    const isFullColBand = r.start.row === 0 && r.end.row === EXCEL_MAX_ROWS - 1;
+    const isFullRowBand = r.start.col === 0 && r.end.col === EXCEL_MAX_COLS - 1;
+
+    // Layered formats:
+    // - Full sheet: A1:XFD1048576
+    // - Full column(s): A1:A1048576 (or A1:C1048576)
+    // - Full row(s): A1:XFD1 (or A1:XFD10)
+    //
+    // These should not enumerate every cell; instead they update the row/col/sheet
+    // format layers which are resolved by `getCellFormat()`.
+    if (isFullColBand || isFullRowBand) {
+      // Ensure sheet exists.
+      this.model.getCell(sheetId, 0, 0);
+      const sheet = this.model.sheets.get(sheetId);
+      if (!sheet) return;
+
+      /** @type {FormatDelta[]} */
+      const formatDeltas = [];
+
+      if (isFullColBand && isFullRowBand) {
+        const beforeStyleId = sheet.sheetStyleId ?? 0;
+        const baseStyle = this.styleTable.get(beforeStyleId);
+        const merged = applyStylePatch(baseStyle, stylePatch);
+        const afterStyleId = this.styleTable.intern(merged);
+        if (beforeStyleId !== afterStyleId) {
+          formatDeltas.push({ sheetId, layer: "sheet", beforeStyleId, afterStyleId });
+        }
+      } else if (isFullColBand) {
+        for (let col = r.start.col; col <= r.end.col; col++) {
+          const beforeStyleId = sheet.colStyles.get(col) ?? 0;
+          const baseStyle = this.styleTable.get(beforeStyleId);
+          const merged = applyStylePatch(baseStyle, stylePatch);
+          const afterStyleId = this.styleTable.intern(merged);
+          if (beforeStyleId === afterStyleId) continue;
+          formatDeltas.push({ sheetId, layer: "col", index: col, beforeStyleId, afterStyleId });
+        }
+      } else if (isFullRowBand) {
+        for (let row = r.start.row; row <= r.end.row; row++) {
+          const beforeStyleId = sheet.rowStyles.get(row) ?? 0;
+          const baseStyle = this.styleTable.get(beforeStyleId);
+          const merged = applyStylePatch(baseStyle, stylePatch);
+          const afterStyleId = this.styleTable.intern(merged);
+          if (beforeStyleId === afterStyleId) continue;
+          formatDeltas.push({ sheetId, layer: "row", index: row, beforeStyleId, afterStyleId });
+        }
+      }
+
+      if (formatDeltas.length === 0) return;
+      this.#applyUserFormatDeltas(formatDeltas, { label: options.label });
+      return;
+    }
+
     /** @type {CellDelta[]} */
     const deltas = [];
     for (let row = r.start.row; row <= r.end.row; row++) {
@@ -1515,7 +1574,7 @@ export class DocumentController {
     this.lastMergeTime = 0;
 
     const source = typeof options.source === "string" ? options.source : undefined;
-    this.#applyEdits([], deltas, { recalc: false, emitChange: true, source });
+    this.#applyEdits([], deltas, [], { recalc: false, emitChange: true, source });
 
     // Mark dirty even though we didn't advance the undo cursor.
     if (options.markDirty !== false) {

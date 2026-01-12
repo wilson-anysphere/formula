@@ -1,9 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { exportCellGridToCsv } from "../export.js";
+import { exportCellGridToCsv, exportDocumentRangeToCsv } from "../export.js";
 import { parseCsv } from "../csv.js";
 import { importCsvToCellGrid } from "../import.js";
+import { DocumentController } from "../../../document/documentController.js";
+import { dateToExcelSerial } from "../../../shared/valueParsing.js";
 
 test("CSV parses quoted fields, quotes, and embedded newlines", () => {
   const rows = parseCsv('name,notes\nAlice,"Line1\nLine2"\nBob,"He said ""hi"""', {
@@ -56,4 +58,29 @@ test("CSV export quotes fields when needed", () => {
   );
 
   assert.equal(csv, 'a,"b,c"\r\n1,TRUE');
+});
+
+test("CSV export respects DocumentController cell numberFormat when serializing date numbers", () => {
+  const doc = new DocumentController();
+  const serial = dateToExcelSerial(new Date(Date.UTC(2024, 0, 31)));
+
+  doc.setCellValue("Sheet1", "A1", serial);
+  doc.setRangeFormat("Sheet1", "A1", { numberFormat: "yyyy-mm-dd" });
+
+  const csv = exportDocumentRangeToCsv(doc, "Sheet1", "A1");
+  assert.equal(csv, "2024-01-31");
+});
+
+test("CSV export respects layered column formats (styleId may be 0)", () => {
+  const doc = new DocumentController();
+  const serial = dateToExcelSerial(new Date(Date.UTC(2024, 0, 31)));
+
+  // Apply a full-column format without enumerating every cell.
+  doc.setRangeFormat("Sheet1", "A1:A1048576", { numberFormat: "yyyy-mm-dd" });
+  doc.setCellValue("Sheet1", "A1000", serial);
+
+  assert.equal(doc.getCell("Sheet1", "A1000").styleId, 0);
+
+  const csv = exportDocumentRangeToCsv(doc, "Sheet1", "A1000");
+  assert.equal(csv, "2024-01-31");
 });
