@@ -465,7 +465,7 @@ Depending on the producer, the rich value store may be named:
 
 - `xl/richData/richValue*.xml` (Excel-like naming), or
 - `xl/richData/rdrichvalue*.xml` / `xl/richData/rdRichValueTypes.xml` (rdRichValue naming; observed in this
-  repo from `rust_xlsxwriter` output).
+  repo in both real Excel fixtures and `rust_xlsxwriter` output).
 
 See also:
 
@@ -554,7 +554,7 @@ Observed in `fixtures/xlsx/basic/image-in-cell.xlsx` (explicit overrides present
 - `/xl/richData/rdRichValueTypes.xml`: `application/vnd.ms-excel.rdrichvaluetypes+xml`
 
 Likely patterns seen in the ecosystem for the *unprefixed* `richValue.xml` / `richValueTypes.xml` /
-`richValueStructure.xml` parts (unverified; do not hardcode without a real Excel fixture in `fixtures/xlsx/**`):
+`richValueStructure.xml` parts:
 
 - `application/vnd.ms-excel.richvalue+xml` (for `/xl/richData/richValue.xml`)
 - `application/vnd.ms-excel.richvaluerel+xml` (for `/xl/richData/richValueRel.xml`)
@@ -574,16 +574,19 @@ Likely patterns seen in the ecosystem for the *unprefixed* `richValue.xml` / `ri
   <Override PartName="/xl/metadata.xml"
             ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"/>
 
-  <!-- TODO: confirm these from an Excel fixture -->
-  <Override PartName="/xl/richData/richValueTypes.xml" ContentType="TODO"/>
-  <Override PartName="/xl/richData/richValueStructure.xml" ContentType="TODO"/>
-  <Override PartName="/xl/richData/richValue.xml" ContentType="TODO"/>
+  <!-- Unprefixed “richValue*” naming (observed in synthetic fixtures/tests; not yet observed in a real Excel fixture that emits explicit overrides). -->
+  <Override PartName="/xl/richData/richValue.xml" ContentType="application/vnd.ms-excel.richvalue+xml"/>
   <Override PartName="/xl/richData/richValueRel.xml" ContentType="application/vnd.ms-excel.richvaluerel+xml"/>
+
+  <!-- Likely patterns for the optional schema tables (not yet observed in a real Excel fixture that emits explicit overrides). -->
+  <Override PartName="/xl/richData/richValueTypes.xml" ContentType="application/vnd.ms-excel.richvaluetypes+xml"/>
+  <Override PartName="/xl/richData/richValueStructure.xml" ContentType="application/vnd.ms-excel.richvaluestructure+xml"/>
 </Types>
 ```
 
-**TODO (fixture-driven):** add an Excel-generated workbook using real images-in-cells, then update this
-section with the exact `ContentType="..."` strings for `richData/*`.
+**TODO (fixture-driven):** add an Excel-generated workbook that uses the *unprefixed* `richValue*.xml` naming
+scheme and emits explicit overrides for those parts, then update this section with the exact `ContentType="..."`
+strings for `richValue*` and the optional `richValueTypes.xml` / `richValueStructure.xml` tables.
 
 ## Relationship type URIs (what we know vs TODO)
 
@@ -599,6 +602,8 @@ Partially known (fixture-driven details still recommended):
   - Observed in `fixtures/xlsx/metadata/rich-values-vm.xlsx`:
     - `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata"`
   - Observed in `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`:
+    - `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata"`
+  - Observed in `fixtures/xlsx/basic/image-in-cell.xlsx`:
     - `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata"`
   - Preservation is covered by `crates/formula-xlsx/tests/metadata_rich_values_vm_roundtrip.rs`.
 - Workbook → richData parts (when stored directly in workbook relationships):
@@ -624,8 +629,10 @@ Partially known (fixture-driven details still recommended):
   - Workbook → richData relationships (Type URIs are Microsoft-specific and versioned). Observed in this repo:
     - `http://schemas.microsoft.com/office/2017/06/relationships/richValue` (fixture: `image-in-cell-richdata.xlsx`)
     - `http://schemas.microsoft.com/office/2017/06/relationships/richValueRel` (fixture: `image-in-cell-richdata.xlsx`)
-    - `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValue` (test: `embedded_images_place_in_cell_roundtrip.rs`)
-    - `http://schemas.microsoft.com/office/2022/10/relationships/richValueRel` (test: `embedded_images_place_in_cell_roundtrip.rs`)
+    - `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValue` (fixture: `image-in-cell.xlsx`; also test: `embedded_images_place_in_cell_roundtrip.rs`)
+    - `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueStructure` (fixture: `image-in-cell.xlsx`)
+    - `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueTypes` (fixture: `image-in-cell.xlsx`)
+    - `http://schemas.microsoft.com/office/2022/10/relationships/richValueRel` (fixture: `image-in-cell.xlsx`; also test: `embedded_images_place_in_cell_roundtrip.rs`)
   - (Exact `richValue` schemas and relationship discovery still vary; preserve unknown relationships.)
 
 TODO (confirm via real Excel fixture, then harden parsers/writers):
