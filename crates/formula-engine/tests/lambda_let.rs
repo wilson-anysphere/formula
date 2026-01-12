@@ -83,6 +83,10 @@ fn lambda_used_in_lookup_functions_returns_value_error() {
         Value::Error(ErrorKind::Value)
     );
     assert_eq!(
+        eval(&mut engine, "=XLOOKUP(LAMBDA(x,x),{1,2},{3,4})"),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
         eval(&mut engine, "=VLOOKUP(LAMBDA(x,x),B1:C2,2,FALSE)"),
         Value::Error(ErrorKind::Value)
     );
