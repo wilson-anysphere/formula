@@ -36,10 +36,15 @@ pub struct EmbeddedCellImage {
 impl XlsxPackage {
     /// Extract embedded-in-cell images from the workbook package.
     ///
-    /// Excel stores "in-cell" images by:
-    /// - marking a cell with a `vm="N"` attribute (often alongside `t="e"` / `#VALUE!`)
-    /// - storing RichData mappings in `xl/richData/richValueRel.xml`
-    /// - resolving those `<rel r:id="...">` entries via `xl/richData/_rels/richValueRel.xml.rels`
+    /// Excel stores "in-cell" images by attaching RichData metadata to a worksheet cell via
+    /// `c/@vm` (value-metadata index). In modern files this is resolved through `xl/metadata.xml`
+    /// into a rich value index, which then ultimately references an image relationship slot in
+    /// `xl/richData/richValueRel.xml`.
+    ///
+    /// This function is intentionally best-effort and supports multiple real-world variants:
+    /// - Full RichData: `xl/metadata.xml` + `xl/richData/richValue.xml` / `rdrichvalue.xml`
+    /// - Simplified: cells use `vm` to index directly into `richValueRel.xml` even when rich value
+    ///   tables are missing.
     ///
     /// This API returns a mapping keyed by `(worksheet_part, cell_ref)`.
     pub fn extract_embedded_cell_images(
@@ -53,7 +58,11 @@ impl XlsxPackage {
         let rich_value_rel_xml = std::str::from_utf8(rich_value_rel_bytes)
             .map_err(|e| XlsxError::Invalid(format!("{RICH_VALUE_REL_PART} not utf-8: {e}")))?;
         let rich_value_rel_ids = parse_rich_value_rel_ids(rich_value_rel_xml)?;
+        if rich_value_rel_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
 
+        // Resolve relationship IDs (`rId*`) to concrete targets via the `.rels` part.
         let rich_value_rels_part = rels_for_part(RICH_VALUE_REL_PART);
         let Some(rich_value_rel_rels_bytes) = self.part(&rich_value_rels_part) else {
             // If the richValueRel part exists, we expect its .rels as well. Be defensive and
@@ -63,60 +72,59 @@ impl XlsxPackage {
 
         let image_targets_by_rel_id =
             parse_rich_value_rel_image_targets(rich_value_rel_rels_bytes)?;
-
-        // Value metadata mapping: worksheet `c/@vm` -> rich value index.
-        //
-        // Optional: some producers omit `xl/metadata.xml` and instead use `vm=` as a direct index
-        // into `richValueRel.xml`.
-        let vm_to_rich_value = match self.part("xl/metadata.xml") {
-            Some(metadata_bytes) => crate::rich_data::metadata::parse_value_metadata_vm_to_rich_value_index_map(metadata_bytes)
-                .map_err(|e| XlsxError::Invalid(format!("failed to parse xl/metadata.xml: {e}")))?,
-            None => HashMap::new(),
-        };
-
-        // Full-fidelity path: use `xl/metadata.xml` + `xl/richData/rdrichvalue*.xml` to map the
-        // worksheet cell's `vm=` attribute to a rich-value entry that contains a local image
-        // identifier (plus calcOrigin + alt text).
-        //
-        // Some synthetic/minimal workbooks used in tests omit those parts; in that case we fall
-        // back to treating `vm` as a 1-based index into `richValueRel.xml`'s `<rel>` list.
-        #[derive(Debug)]
-        struct FullImageLookup {
-            vm_to_rich_value: HashMap<u32, u32>,
-            local_image_by_rich_value_index: HashMap<u32, LocalImageRichValueRow>,
+        if image_targets_by_rel_id.is_empty() {
+            return Ok(HashMap::new());
         }
 
-        let full_lookup: Option<FullImageLookup> =
-            (|| -> Result<Option<FullImageLookup>, XlsxError> {
-                if vm_to_rich_value.is_empty() {
-                    return Ok(None);
+        // Optional: value metadata mapping (worksheet `c/@vm` -> rich value index).
+        //
+        // Some simplified workbooks omit or do not populate `xl/metadata.xml`. In that case we
+        // fall back to interpreting `vm` as a direct relationship-slot index.
+        let mut vm_to_rich_value: HashMap<u32, u32> = HashMap::new();
+        if let Some(metadata_bytes) = self.part("xl/metadata.xml") {
+            let parsed = crate::rich_data::metadata::parse_value_metadata_vm_to_rich_value_index_map(
+                metadata_bytes,
+            )
+            .map_err(|e| XlsxError::Invalid(format!("failed to parse xl/metadata.xml: {e}")))?;
+            for (vm, rv_idx) in parsed {
+                vm_to_rich_value.entry(vm).or_insert(rv_idx);
+                // Excel has been observed to encode `vm` as both 0-based and 1-based in the wild.
+                // Insert both so callers don't need to care.
+                if vm > 0 {
+                    vm_to_rich_value.entry(vm - 1).or_insert(rv_idx);
                 }
+            }
+        }
+        let has_vm_mapping = !vm_to_rich_value.is_empty();
 
-                let Some(rd_rich_value_bytes) = self.part(RD_RICH_VALUE_PART) else {
-                    return Ok(None);
-                };
-                let Some(rd_rich_value_structure_bytes) = self.part(RD_RICH_VALUE_STRUCTURE_PART)
-                else {
-                    return Ok(None);
-                };
+        // Optional: richValue.xml relationship indices (rich value index -> relationship slot).
+        let rich_value_rel_indices: Vec<Option<u32>> = match self.part("xl/richData/richValue.xml") {
+            Some(bytes) => crate::rich_data::rich_value::parse_rich_value_relationship_indices(bytes)?
+                .into_iter()
+                .map(|idx| idx.map(|idx| idx as u32))
+                .collect(),
+            None => Vec::new(),
+        };
 
-                let Some(local_image_structure) =
+        // Optional: rdRichValue local-image metadata (rich value index -> relationship slot + alt/calcOrigin).
+        let local_image_by_rich_value_index = match (
+            self.part(RD_RICH_VALUE_PART),
+            self.part(RD_RICH_VALUE_STRUCTURE_PART),
+        ) {
+            (Some(rd_rich_value_bytes), Some(rd_rich_value_structure_bytes)) => {
+                if let Some(local_image_structure) =
                     parse_local_image_structure(rd_rich_value_structure_bytes)?
-                else {
-                    return Ok(None);
-                };
-                let local_image_by_rich_value_index =
-                    parse_local_image_rich_values(rd_rich_value_bytes, &local_image_structure)?;
-
-                if local_image_by_rich_value_index.is_empty() {
-                    return Ok(None);
+                {
+                    parse_local_image_rich_values(rd_rich_value_bytes, &local_image_structure)?
+                } else {
+                    HashMap::new()
                 }
+            }
+            _ => HashMap::new(),
+        };
 
-                Ok(Some(FullImageLookup {
-                    vm_to_rich_value: vm_to_rich_value.clone(),
-                    local_image_by_rich_value_index,
-                }))
-            })()?;
+        let has_rich_value_tables =
+            !local_image_by_rich_value_index.is_empty() || !rich_value_rel_indices.is_empty();
 
         let mut out = HashMap::new();
         for sheet in self.worksheet_parts()? {
@@ -137,51 +145,67 @@ impl XlsxPackage {
                 parse_worksheet_hyperlinks(sheet_xml, sheet_rels_xml).unwrap_or_default();
 
             for (cell_ref, vm) in parse_sheet_vm_image_cells(sheet_xml_bytes)? {
-                let (local_image_identifier, calc_origin, alt_text) = if let Some(full) =
-                    full_lookup.as_ref()
-                {
-                    let Some(&rich_value_index) = full.vm_to_rich_value.get(&vm) else {
+                // First resolve the cell's `vm` into a rich value index when possible.
+                let rich_value_index = if has_vm_mapping {
+                    let Some(&idx) = vm_to_rich_value.get(&vm) else {
                         continue;
                     };
-                    let Some(local_image) =
-                        full.local_image_by_rich_value_index.get(&rich_value_index)
-                    else {
-                        continue;
-                    };
-                    (
-                        local_image.local_image_identifier,
-                        local_image.calc_origin,
-                        local_image.alt_text.clone(),
-                    )
-                } else if let Some(&local_image_identifier) = vm_to_rich_value.get(&vm) {
-                    // Some producers index directly into `richValueRel.xml` via the rich-value
-                    // index resolved from metadata.
-                    (local_image_identifier, 0, None)
+                    Some(idx)
                 } else {
-                    // Best-effort fallback: treat `vm` as an index into richValueRel.xml.
-                    //
-                    // Excel's `vm` is 1-based, while `_rvRel` identifiers are typically 0-based, so
-                    // try `vm-1` first.
-                    let idx_one_based = vm.saturating_sub(1) as usize;
-                    let idx_zero_based = vm as usize;
-                    let local_image_identifier = if idx_one_based < rich_value_rel_ids.len() {
-                        idx_one_based as u32
-                    } else if idx_zero_based < rich_value_rel_ids.len() {
-                        idx_zero_based as u32
-                    } else {
-                        continue;
-                    };
-                    (local_image_identifier, 0, None)
+                    None
                 };
 
-                let Some(image_part) = resolve_local_image_identifier_to_image_part(
-                    &rich_value_rel_ids,
-                    &image_targets_by_rel_id,
-                    local_image_identifier,
-                ) else {
+                let mut calc_origin: u32 = 0;
+                let mut alt_text: Option<String> = None;
+
+                // Determine which relationship-slot index to use for this cell image.
+                // We try, in order:
+                // 1) rdRichValue local image schema (best; includes CalcOrigin + alt text).
+                // 2) richValue.xml relationship index (`<v kind="rel">`).
+                // 3) direct indexing: interpret rich value index as relationship slot (only when rich value tables are missing).
+                // 4) last-ditch: interpret `vm` as the relationship-slot index (tolerating 1-based vs 0-based).
+                let mut slot_candidates: Vec<u32> = Vec::new();
+                if let Some(rich_value_index) = rich_value_index {
+                    if let Some(local_image) = local_image_by_rich_value_index.get(&rich_value_index)
+                    {
+                        slot_candidates.push(local_image.local_image_identifier);
+                        calc_origin = local_image.calc_origin;
+                        alt_text = local_image.alt_text.clone();
+                    } else if let Some(Some(rel_idx)) =
+                        rich_value_rel_indices.get(rich_value_index as usize)
+                    {
+                        slot_candidates.push(*rel_idx);
+                    } else if !has_rich_value_tables {
+                        slot_candidates.push(rich_value_index);
+                    } else {
+                        // We have rich value tables but couldn't map this rich value to a relationship
+                        // slot; treat it as a non-image rich value.
+                        continue;
+                    }
+                } else {
+                    // No metadata mapping; fall back to interpreting `vm` as a relationship slot.
+                    if vm > 0 {
+                        slot_candidates.push(vm - 1);
+                    }
+                    slot_candidates.push(vm);
+                }
+
+                // Resolve the first slot candidate that maps to a concrete image part.
+                let mut image_part: Option<String> = None;
+                for slot in slot_candidates {
+                    if let Some(part) = resolve_local_image_identifier_to_image_part(
+                        &rich_value_rel_ids,
+                        &image_targets_by_rel_id,
+                        slot,
+                    ) {
+                        image_part = Some(part);
+                        break;
+                    }
+                }
+
+                let Some(image_part) = image_part else {
                     continue;
                 };
-
                 let Some(image_bytes) = self.part(&image_part) else {
                     continue;
                 };
