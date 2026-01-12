@@ -80,6 +80,13 @@ export class DocumentBranchingWorkflow {
     /** @type {import("../../../../../packages/versioning/branches/src/types.js").DocumentState} */
     const merged = structuredClone(baseState);
 
+    const supportsSheetMetadata =
+      typeof this.doc.getSheetMeta === "function" ||
+      typeof this.doc.getSheetMetadata === "function" ||
+      this.doc.sheetMetaById != null ||
+      this.doc.sheetMetadataById != null ||
+      this.doc.sheetMeta != null;
+
     const MASKED_CELL_VALUE = "###";
 
     // DocumentController snapshot is authoritative for cell contents *except*
@@ -124,24 +131,59 @@ export class DocumentBranchingWorkflow {
         const nextMeta = nextState.sheets.metaById[sheetId];
         merged.sheets.metaById[sheetId] = {
           id: sheetId,
-          name: sheetId,
+          // Before DocumentController tracked sheet metadata, BranchService owned sheet
+          // names. Once Task 201 lands, DocumentController becomes authoritative for
+          // sheet display names; feature-detect this to avoid clobbering existing
+          // sheet names on older docs.
+          name: supportsSheetMetadata ? (nextMeta?.name ?? sheetId) : sheetId,
           view: nextMeta?.view ? structuredClone(nextMeta.view) : { frozenRows: 0, frozenCols: 0 },
         };
       } else {
-        // DocumentController only knows about sheet ids (names/order live in BranchService),
-        // but it *does* own per-sheet view state (e.g. frozen panes). Preserve the existing
-        // sheet name while syncing view state from the live workbook.
+        // DocumentController always owns per-sheet view state (e.g. frozen panes).
+        // Once sheet metadata is implemented (Task 201), it also becomes authoritative
+        // for display names.
         const nextMeta = nextState.sheets.metaById[sheetId];
+        if (supportsSheetMetadata && nextMeta?.name != null) {
+          const existingName = merged.sheets.metaById[sheetId]?.name;
+          // Avoid clobbering existing BranchService sheet names if the
+          // DocumentController metadata surface exists but hasn't populated a
+          // custom display name yet (common during gradual rollouts).
+          if (nextMeta.name !== sheetId || existingName == null || existingName === sheetId) {
+            merged.sheets.metaById[sheetId] = { ...merged.sheets.metaById[sheetId], name: nextMeta.name };
+          }
+        }
         if (nextMeta?.view) {
           merged.sheets.metaById[sheetId] = { ...merged.sheets.metaById[sheetId], view: structuredClone(nextMeta.view) };
         }
       }
     }
 
-    // Ensure any new sheets are present in the ordering (DocumentController
-    // doesn't maintain sheet order, so append).
-    for (const sheetId of nextState.sheets.order) {
-      if (!merged.sheets.order.includes(sheetId)) merged.sheets.order.push(sheetId);
+    if (supportsSheetMetadata) {
+      // Once DocumentController tracks sheet metadata, treat it as the canonical
+      // sheet ordering source so branch commits preserve user-visible tab order.
+      const desired = nextState.sheets.order;
+      /** @type {string[]} */
+      const nextOrder = [];
+      const seen = new Set();
+      for (const sheetId of desired) {
+        if (seen.has(sheetId)) continue;
+        nextOrder.push(sheetId);
+        seen.add(sheetId);
+      }
+      // Preserve any sheets that still only exist in BranchService (e.g. legacy
+      // empty sheets / workbook metadata not represented in DocumentController).
+      for (const sheetId of merged.sheets.order) {
+        if (seen.has(sheetId)) continue;
+        nextOrder.push(sheetId);
+        seen.add(sheetId);
+      }
+      merged.sheets.order = nextOrder;
+    } else {
+      // Legacy DocumentController: it does not maintain sheet order, so append any
+      // new sheets discovered during this commit.
+      for (const sheetId of nextState.sheets.order) {
+        if (!merged.sheets.order.includes(sheetId)) merged.sheets.order.push(sheetId);
+      }
     }
 
     return this.branchService.commit(actor, { nextState: normalizeDocumentState(merged), message });
