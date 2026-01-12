@@ -1,13 +1,16 @@
 import type { CommandRegistry } from "./commandRegistry.js";
 import type { ContextKeyService } from "./contextKeys.js";
-import { matchesKeybinding, parseKeybinding, type ContributedKeybinding, type ParsedKeybinding } from "./keybindings.js";
+import {
+  buildCommandKeybindingDisplayIndex,
+  matchesKeybinding,
+  parseKeybinding,
+  type ContributedKeybinding,
+  type KeybindingContribution,
+  type ParsedKeybinding,
+} from "./keybindings.js";
 import { evaluateWhenClause } from "./whenClause.js";
 
-export type BuiltinKeybinding = {
-  command: string;
-  key: string;
-  mac?: string | null;
-  when?: string | null;
+export type BuiltinKeybinding = KeybindingContribution & {
   /**
    * Optional tiebreaker within the same priority group. Higher wins.
    * If omitted, all bindings have the same weight.
@@ -41,35 +44,37 @@ function shouldIgnoreTarget(target: EventTarget | null): boolean {
   return tag === "INPUT" || tag === "TEXTAREA" || el.isContentEditable;
 }
 
-// Reserved shortcuts that extensions can never claim (safety net).
-const RESERVED_EXTENSION_SHORTCUTS: ParsedKeybinding[] = [
-  // Copy/Cut/Paste
-  parseKeybinding("__reserved__", "ctrl+c")!,
-  parseKeybinding("__reserved__", "cmd+c")!,
-  parseKeybinding("__reserved__", "ctrl+x")!,
-  parseKeybinding("__reserved__", "cmd+x")!,
-  parseKeybinding("__reserved__", "ctrl+v")!,
-  parseKeybinding("__reserved__", "cmd+v")!,
-  // Paste Special
-  parseKeybinding("__reserved__", "ctrl+shift+v")!,
-  parseKeybinding("__reserved__", "cmd+shift+v")!,
-  // Command palette
-  parseKeybinding("__reserved__", "ctrl+shift+p")!,
-  parseKeybinding("__reserved__", "cmd+shift+p")!,
+const DEFAULT_RESERVED_EXTENSION_SHORTCUTS = [
+  // Copy/Cut/Paste (core text handling should not be overrideable by extensions).
+  "ctrl+c",
+  "cmd+c",
+  "ctrl+x",
+  "cmd+x",
+  "ctrl+v",
+  "cmd+v",
+  // Paste Special (built-in chord; extensions should not claim it).
+  "ctrl+shift+v",
+  "cmd+shift+v",
+  // Command palette (extensions should not claim it).
+  "ctrl+shift+p",
+  "cmd+shift+p",
+  // Some keyboards emit both ctrl+meta on the same chord.
+  "ctrl+cmd+shift+p",
 ];
-
-function isReservedForExtensions(event: KeyboardEvent): boolean {
-  // Fast path: most shortcuts won't be primary modifier combos.
-  if (!event.ctrlKey && !event.metaKey) return false;
-  if (event.altKey) return false;
-  return RESERVED_EXTENSION_SHORTCUTS.some((binding) => matchesKeybinding(binding, event));
-}
 
 export class KeybindingService {
   private readonly platform: "mac" | "other";
+  private readonly reservedExtensionShortcuts: ParsedKeybinding[];
+
+  private builtinKeybindings: BuiltinKeybinding[] = [];
+  private extensionKeybindings: ContributedKeybinding[] = [];
+
   private builtin: StoredKeybinding[] = [];
   private extensions: StoredKeybinding[] = [];
   private orderCounter = 0;
+
+  // Shared `commandId -> [displayKeybinding]` index for UI (palette, menus).
+  private readonly commandKeybindingDisplayIndex = new Map<string, string[]>();
 
   private removeListener: (() => void) | null = null;
 
@@ -86,13 +91,23 @@ export class KeybindingService {
        * Optional error handler for failed command execution.
        */
       onCommandError?: (commandId: string, err: unknown) => void;
+      /**
+       * Keybinding chords that extensions should never be allowed to claim.
+       *
+       * Defaults to reserving common clipboard chords + Ctrl/Cmd+Shift+P.
+       */
+      reservedShortcuts?: string[];
       platform?: "mac" | "other";
     },
   ) {
     this.platform = params.platform ?? detectPlatform();
+    this.reservedExtensionShortcuts = (params.reservedShortcuts ?? DEFAULT_RESERVED_EXTENSION_SHORTCUTS)
+      .map((binding) => parseKeybinding("__reserved__", binding, null))
+      .filter((binding): binding is ParsedKeybinding => binding != null);
   }
 
   setBuiltinKeybindings(bindings: BuiltinKeybinding[]): void {
+    this.builtinKeybindings = [...bindings];
     const next: StoredKeybinding[] = [];
     for (const kb of bindings) {
       const primary = pickPlatformKeybinding(kb, this.platform);
@@ -117,9 +132,11 @@ export class KeybindingService {
       }
     }
     this.builtin = next;
+    this.rebuildCommandKeybindingDisplayIndex();
   }
 
   setExtensionKeybindings(bindings: ContributedKeybinding[]): void {
+    this.extensionKeybindings = [...bindings];
     const next: StoredKeybinding[] = [];
     for (const kb of bindings) {
       const raw = pickPlatformKeybinding(kb, this.platform);
@@ -133,6 +150,11 @@ export class KeybindingService {
       });
     }
     this.extensions = next;
+    this.rebuildCommandKeybindingDisplayIndex();
+  }
+
+  getCommandKeybindingDisplayIndex(): Map<string, string[]> {
+    return this.commandKeybindingDisplayIndex;
   }
 
   /**
@@ -152,6 +174,30 @@ export class KeybindingService {
   dispose(): void {
     this.removeListener?.();
     this.removeListener = null;
+  }
+
+  /**
+   * Synchronous helper for keydown listeners. Dispatches asynchronously.
+   *
+   * Returns `true` when handled and calls `preventDefault()`.
+   */
+  handleKeydown(event: KeyboardEvent): boolean {
+    if (event.defaultPrevented) return false;
+    if (shouldIgnoreTarget(event.target)) return false;
+
+    const match = this.findMatchingBinding(event);
+    if (!match) return false;
+
+    event.preventDefault();
+    void (async () => {
+      try {
+        await this.params.onBeforeExecuteCommand?.(match.binding.command, match.source);
+        await this.params.commandRegistry.executeCommand(match.binding.command);
+      } catch (err) {
+        this.params.onCommandError?.(match.binding.command, err);
+      }
+    })();
+    return true;
   }
 
   async dispatchKeydown(event: KeyboardEvent): Promise<boolean> {
@@ -182,9 +228,30 @@ export class KeybindingService {
     if (builtin) return builtin;
 
     // Safety net: reserved shortcuts should never be claimed by extensions.
-    if (isReservedForExtensions(event)) return null;
+    if (this.isReservedForExtensions(event)) return null;
 
     return this.findFirstMatch(this.extensions, event, lookup);
+  }
+
+  private isReservedForExtensions(event: KeyboardEvent): boolean {
+    // Fast path: most shortcuts won't be primary modifier combos.
+    if (!event.ctrlKey && !event.metaKey) return false;
+    if (event.altKey) return false;
+    return this.reservedExtensionShortcuts.some((binding) => matchesKeybinding(binding, event));
+  }
+
+  private rebuildCommandKeybindingDisplayIndex(): void {
+    const next = buildCommandKeybindingDisplayIndex({
+      platform: this.platform,
+      builtin: this.builtinKeybindings,
+      contributed: this.extensionKeybindings,
+    });
+
+    // Preserve identity so UI surfaces can hold onto a stable map reference.
+    this.commandKeybindingDisplayIndex.clear();
+    for (const [commandId, bindings] of next.entries()) {
+      this.commandKeybindingDisplayIndex.set(commandId, bindings);
+    }
   }
 
   private findFirstMatch(

@@ -93,11 +93,7 @@ import { ContextKeyService } from "./extensions/contextKeys.js";
 import { resolveMenuItems } from "./extensions/contextMenus.js";
 import { CELL_CONTEXT_MENU_ID } from "./extensions/menuIds.js";
 import { buildContextMenuModel } from "./extensions/contextMenuModel.js";
-import {
-  buildCommandKeybindingDisplayIndex,
-  getPrimaryCommandKeybindingDisplay,
-  type ContributedKeybinding,
-} from "./extensions/keybindings.js";
+import { getPrimaryCommandKeybindingDisplay, type ContributedKeybinding } from "./extensions/keybindings.js";
 import { KeybindingService } from "./extensions/keybindingService.js";
 import { deriveSelectionContextKeys } from "./extensions/selectionContextKeys.js";
 import { CommandRegistry } from "./extensions/commandRegistry.js";
@@ -3778,7 +3774,6 @@ if (
     true,
   );
   // Keybindings: central dispatch with built-in precedence over extensions.
-  const commandKeybindingDisplayIndex = new Map<string, string[]>();
   let lastLoadedExtensionIds = new Set<string>();
 
   const platform = /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "mac" : "other";
@@ -3881,23 +3876,15 @@ if (
     },
   });
   keybindingService.setBuiltinKeybindings(builtinKeybindingHints);
+  const commandKeybindingDisplayIndex = keybindingService.getCommandKeybindingDisplayIndex();
   // Bubble-phase listener so SpreadsheetApp can `preventDefault()` first.
   keybindingService.installWindowListener(window, { capture: false });
 
   const updateKeybindings = () => {
-    commandKeybindingDisplayIndex.clear();
     const contributed =
       extensionHostManager.ready && !extensionHostManager.error
         ? (extensionHostManager.getContributedKeybindings() as ContributedKeybinding[])
         : [];
-    const nextKeybindingsIndex = buildCommandKeybindingDisplayIndex({
-      platform,
-      builtin: builtinKeybindingsCatalog,
-      contributed,
-    });
-    for (const [commandId, bindings] of nextKeybindingsIndex.entries()) {
-      commandKeybindingDisplayIndex.set(commandId, bindings);
-    }
     keybindingService.setExtensionKeybindings(contributed);
   };
 
