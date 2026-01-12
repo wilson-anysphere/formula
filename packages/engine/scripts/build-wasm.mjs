@@ -45,6 +45,12 @@ const targets = [
 
 const wasmPackBin = process.platform === "win32" ? "wasm-pack.exe" : "wasm-pack";
 
+function cargoAgentPath() {
+  const abs = path.join(repoRoot, "scripts", "cargo_agent.sh");
+  const rel = path.relative(process.cwd(), abs);
+  return rel || abs;
+}
+
 function fatal(message) {
   console.error(message);
   process.exit(1);
@@ -217,7 +223,7 @@ if (outputExists) {
         "[formula] wasm-pack is required to build the Rust/WASM engine but was not found on PATH.",
         "",
         "Install it with one of:",
-        "  - bash scripts/cargo_agent.sh install wasm-pack",
+        `  - bash ${cargoAgentPath()} install wasm-pack`,
         "  - https://rustwasm.github.io/wasm-pack/installer/",
         "",
         `Original error: ${check.error?.message ?? "unknown"}`

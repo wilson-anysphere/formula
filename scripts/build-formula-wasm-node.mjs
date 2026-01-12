@@ -87,11 +87,13 @@ export function formulaWasmNodeEntryUrl() {
 }
 
 function assertPrereqs() {
+  const cargoAgent = path.relative(process.cwd(), path.join(repoRoot, "scripts", "cargo_agent.sh"));
+  const cargoAgentCmd = cargoAgent || path.join(repoRoot, "scripts", "cargo_agent.sh");
   assertCommand("wasm-pack", ["--version"], `Missing \`wasm-pack\`.
 
 Install it from https://rustwasm.github.io/wasm-pack/installer/ (recommended),
 or via the repo cargo wrapper (agent-safe):
-  bash scripts/cargo_agent.sh install wasm-pack
+  bash ${cargoAgentCmd} install wasm-pack
 `);
 
   // wasm-pack ultimately needs this rust target.
