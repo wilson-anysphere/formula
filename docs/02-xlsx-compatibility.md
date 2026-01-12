@@ -63,6 +63,7 @@ workbook.xlsx (ZIP archive)
 
 See also:
 - [`docs/20-images-in-cells-richdata.md`](./20-images-in-cells-richdata.md) — Excel RichData (`richValue*`) parts used by “Images in Cell” / `IMAGE()`.
+- [`docs/20-images-in-cells.md`](./20-images-in-cells.md) — high-level “images in cells” overview + round-trip constraints.
 
 ---
 
