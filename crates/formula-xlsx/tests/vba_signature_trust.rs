@@ -241,6 +241,97 @@ fn build_oshared_digsig_blob(valid_pkcs7: &[u8]) -> Vec<u8> {
     out
 }
 
+fn build_oshared_wordsig_blob(valid_pkcs7: &[u8]) -> Vec<u8> {
+    // MS-OSHARED WordSigBlob wraps DigSigInfoSerialized with a UTF-16-length prefix (`cch`).
+    //
+    // This fixture mirrors `build_oshared_digsig_blob`:
+    // - Put a corrupted-but-parseable PKCS#7 blob at the location where pbSignatureBuffer would
+    //   typically begin.
+    // - Set DigSigInfoSerialized.signatureOffset to point at the real signature later.
+    // - Append another corrupted PKCS#7 blob after the real signature so naive scan-last heuristics
+    //   would select the wrong blob without WordSigBlob parsing.
+
+    // Corrupt the signature bytes while keeping the overall ASN.1 shape parseable.
+    let mut invalid_pkcs7 = valid_pkcs7.to_vec();
+    if let Some((idx, _)) = invalid_pkcs7
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|&(_i, &b)| b != 0)
+    {
+        invalid_pkcs7[idx] ^= 0xFF;
+    } else if let Some(first) = invalid_pkcs7.get_mut(0) {
+        *first ^= 0xFF;
+    }
+
+    let base = 2usize; // WordSigBlob offsets are relative to cbSigInfo at offset 2.
+    let wordsig_header_len = 10usize; // cch(u16) + cbSigInfo(u32) + serializedPointer(u32)
+    let digsig_info_len = 0x24usize; // DigSigInfoSerialized fixed header: 9 DWORDs
+    let invalid_offset = wordsig_header_len + digsig_info_len; // 0x2E
+
+    // Place the valid signature after the invalid one and align to 2 bytes (WordSigBlob is a
+    // length-prefixed Unicode string).
+    let mut signature_offset = invalid_offset + invalid_pkcs7.len();
+    signature_offset = (signature_offset + 1) & !1;
+    let signature_offset_rel = signature_offset - base;
+
+    let cb_signature = u32::try_from(valid_pkcs7.len()).expect("pkcs7 fits u32");
+    let signature_offset_u32 = u32::try_from(signature_offset_rel).expect("offset fits u32");
+
+    let mut out = Vec::new();
+    // WordSigBlob.cch placeholder + cbSigInfo placeholder + serializedPointer = 8.
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&8u32.to_le_bytes());
+
+    // DigSigInfoSerialized: only cbSignature and signatureOffset matter for our purposes.
+    out.extend_from_slice(&cb_signature.to_le_bytes());
+    out.extend_from_slice(&signature_offset_u32.to_le_bytes());
+    for _ in 0..7 {
+        out.extend_from_slice(&0u32.to_le_bytes());
+    }
+    assert_eq!(
+        out.len(),
+        invalid_offset,
+        "unexpected DigSigInfoSerialized header size"
+    );
+
+    // Decoy PKCS#7 (scan-first heuristics would pick this).
+    out.extend_from_slice(&invalid_pkcs7);
+
+    // Pad up to signatureOffset and append the actual signature bytes.
+    if out.len() < signature_offset {
+        out.resize(signature_offset, 0);
+    }
+    out.extend_from_slice(valid_pkcs7);
+
+    // Trailing decoy PKCS#7 (scan-last heuristics would pick this).
+    out.extend_from_slice(&invalid_pkcs7);
+
+    // WordSigBlob.cbSigInfo: size of the signatureInfo field in bytes (starts at offset 10).
+    let signature_info_offset = wordsig_header_len;
+    let cb_siginfo = out.len().saturating_sub(signature_info_offset);
+
+    // WordSigBlob.padding: pad the *entire* structure to an even byte length.
+    if cb_siginfo % 2 != 0 {
+        out.push(0);
+    }
+
+    // WordSigBlob.cch: half the byte count of the remainder of the structure.
+    let remainder_bytes = out.len().saturating_sub(2);
+    assert_eq!(
+        remainder_bytes % 2,
+        0,
+        "expected WordSigBlob remainder to be even"
+    );
+    let cch = remainder_bytes / 2;
+
+    out[0..2].copy_from_slice(&(cch as u16).to_le_bytes());
+    out[2..6].copy_from_slice(&(cb_siginfo as u32).to_le_bytes());
+
+    out
+}
+
 fn make_unrelated_root_cert_der() -> Vec<u8> {
     use openssl::asn1::Asn1Time;
     use openssl::bn::BigNum;
@@ -524,6 +615,56 @@ fn external_raw_signature_part_binding_v3_and_trust_is_reported_when_digsig_blob
     let signed_content = build_spc_indirect_data_content_sha256(&digest);
     let pkcs7 = make_pkcs7_signed_message(&signed_content);
     let wrapped = build_oshared_digsig_blob(&pkcs7);
+
+    let vba_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.microsoft.com/office/2006/relationships/vbaProjectSignature" Target="vbaProjectSignature.bin"/>
+</Relationships>"#;
+
+    let zip_bytes = build_zip(&[
+        ("xl/vbaProject.bin", &vba_project_bin),
+        ("xl/_rels/vbaProject.bin.rels", vba_rels),
+        ("xl/vbaProjectSignature.bin", &wrapped),
+    ]);
+    let pkg = XlsxPackage::from_bytes(&zip_bytes).expect("read package");
+
+    let signer_der = X509::from_pem(TEST_CERT_PEM.as_bytes())
+        .expect("parse test certificate")
+        .to_der()
+        .expect("convert test certificate to DER");
+
+    // No trust anchors: trust is unknown, but binding should still verify.
+    let sig = pkg
+        .verify_vba_digital_signature_with_trust(&VbaSignatureTrustOptions::default())
+        .expect("verify signature")
+        .expect("signature should be present");
+    assert_eq!(sig.signature.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(sig.signature.binding, VbaSignatureBinding::Bound);
+    assert_eq!(sig.signature.stream_path, "xl/vbaProjectSignature.bin");
+    assert_eq!(sig.cert_trust, VbaCertificateTrust::Unknown);
+
+    // Trusted publisher (root matches signer): binding should still be bound and trust trusted.
+    let sig = pkg
+        .verify_vba_digital_signature_with_trust(&VbaSignatureTrustOptions {
+            trusted_root_certs_der: vec![signer_der],
+        })
+        .expect("verify signature")
+        .expect("signature should be present");
+    assert_eq!(sig.signature.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(sig.signature.binding, VbaSignatureBinding::Bound);
+    assert_eq!(sig.signature.stream_path, "xl/vbaProjectSignature.bin");
+    assert_eq!(sig.cert_trust, VbaCertificateTrust::Trusted);
+}
+
+#[test]
+fn external_raw_signature_part_binding_v3_and_trust_is_reported_when_wordsig_blob_wrapped() {
+    let vba_project_bin = build_minimal_vba_project_bin_v3(b"ABC");
+    let digest =
+        compute_vba_project_digest_v3(&vba_project_bin, DigestAlg::Sha256).expect("digest v3");
+
+    let signed_content = build_spc_indirect_data_content_sha256(&digest);
+    let pkcs7 = make_pkcs7_signed_message(&signed_content);
+    let wrapped = build_oshared_wordsig_blob(&pkcs7);
 
     let vba_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
