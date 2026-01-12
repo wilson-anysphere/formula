@@ -607,12 +607,16 @@ mod write_xlsx_from_storage_tests {
     ) -> anyhow::Result<()> {
         let fixture_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../../fixtures/xlsx/macros/basic.xlsm");
-        let workbook_meta =
+        let mut workbook_meta =
             crate::file_io::read_xlsx_blocking(&fixture_path).context("read macro fixture")?;
+        let signature_bytes = b"fake-vba-project-signature-for-storage-export-test".to_vec();
+        workbook_meta.vba_project_signature_bin = Some(signature_bytes.clone());
+
         let expected_vba = workbook_meta
             .vba_project_bin
             .as_deref()
             .context("expected macro fixture to contain xl/vbaProject.bin")?;
+        let expected_signature = signature_bytes.as_slice();
 
         let storage = formula_storage::Storage::open_in_memory().context("open in-memory storage")?;
         let workbook_id = import_app_workbook(&storage, &workbook_meta)?;
@@ -624,30 +628,35 @@ mod write_xlsx_from_storage_tests {
                 "xlsx",
                 formula_xlsx::WorkbookKind::Workbook,
                 None::<&[u8]>,
+                None::<&[u8]>,
             ),
             (
                 "xlsm",
                 formula_xlsx::WorkbookKind::MacroEnabledWorkbook,
                 Some(expected_vba),
+                Some(expected_signature),
             ),
             (
                 "xltx",
                 formula_xlsx::WorkbookKind::Template,
+                None::<&[u8]>,
                 None::<&[u8]>,
             ),
             (
                 "xltm",
                 formula_xlsx::WorkbookKind::MacroEnabledTemplate,
                 Some(expected_vba),
+                Some(expected_signature),
             ),
             (
                 "xlam",
                 formula_xlsx::WorkbookKind::MacroEnabledAddIn,
                 Some(expected_vba),
+                Some(expected_signature),
             ),
         ];
 
-        for (ext, kind, expected_vba_part) in cases {
+        for (ext, kind, expected_vba_part, expected_signature_part) in cases {
             let out_path = tmp.path().join(format!("export.{ext}"));
             let bytes = write_xlsx_from_storage(&storage, workbook_id, &workbook_meta, &out_path)
                 .with_context(|| format!("export to .{ext}"))?;
@@ -662,6 +671,59 @@ mod write_xlsx_from_storage_tests {
                 expected_vba_part,
                 "unexpected VBA project presence for .{ext}"
             );
+            assert_eq!(
+                pkg.vba_project_signature_bin(),
+                expected_signature_part,
+                "unexpected VBA project signature presence for .{ext}"
+            );
+
+            if expected_vba_part.is_some() {
+                // Ensure we emit a structurally valid macro-enabled package:
+                // - content types contain the VBA overrides
+                // - workbook relationships reference the VBA project part
+                // - vbaProject.bin relationships reference the signature part (when present)
+                let ct_xml = std::str::from_utf8(
+                    pkg.part("[Content_Types].xml")
+                        .context("missing [Content_Types].xml")?,
+                )
+                .context("content types is not valid utf8")?;
+                assert!(
+                    ct_xml.contains("application/vnd.ms-office.vbaProject"),
+                    "expected macro-enabled export to contain vbaProject content type override, got:\n{ct_xml}"
+                );
+                assert!(
+                    ct_xml.contains("application/vnd.ms-office.vbaProjectSignature"),
+                    "expected macro-enabled export to contain vbaProjectSignature content type override, got:\n{ct_xml}"
+                );
+
+                let workbook_rels = std::str::from_utf8(
+                    pkg.part("xl/_rels/workbook.xml.rels")
+                        .context("missing xl/_rels/workbook.xml.rels")?,
+                )
+                .context("workbook rels is not valid utf8")?;
+                assert!(
+                    workbook_rels.contains("vbaProject.bin"),
+                    "expected workbook.xml.rels to reference vbaProject.bin, got:\n{workbook_rels}"
+                );
+                assert!(
+                    workbook_rels.contains("vbaProject"),
+                    "expected workbook.xml.rels to contain a vbaProject relationship type, got:\n{workbook_rels}"
+                );
+
+                let vba_rels = std::str::from_utf8(
+                    pkg.part("xl/_rels/vbaProject.bin.rels")
+                        .context("missing xl/_rels/vbaProject.bin.rels")?,
+                )
+                .context("vbaProject.bin rels is not valid utf8")?;
+                assert!(
+                    vba_rels.contains("vbaProjectSignature.bin"),
+                    "expected vbaProject.bin.rels to reference vbaProjectSignature.bin, got:\n{vba_rels}"
+                );
+                assert!(
+                    vba_rels.contains("vbaProjectSignature"),
+                    "expected vbaProject.bin.rels to contain a vbaProjectSignature relationship type, got:\n{vba_rels}"
+                );
+            }
         }
 
         Ok(())
