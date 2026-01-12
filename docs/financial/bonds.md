@@ -367,9 +367,9 @@ We solve `f(y) = 0`.
 
 ### Root-finding method
 
-Use Newton-Raphson via:
+Use a safeguarded Newton-Raphson solver (Newton + bracketing / bisection) via:
 
-- `crates/formula-engine/src/functions/financial/iterative.rs::newton_raphson`
+- `crates/formula-engine/src/functions/financial/iterative.rs::solve_root_newton_bisection`
 - Convergence tolerance: `EXCEL_ITERATION_TOLERANCE` (`1e-7`)
 
 Recommended constants (matching existing style):
@@ -429,7 +429,7 @@ Use the same schedule/`A`/`DSC`/`E` derivation as `PRICE`:
 
 - `(PCD, NCD)`, `N`, `DSC`, `E`
 - `t0 = DSC / E`
-- `k = yld / f`, `d = 1 + k` (must be `> 0`)
+- `k = yld / f`, `d = 1 + k` (`d == 0` → `#DIV/0!`, `d < 0` → `#NUM!`)
 
 Compute:
 
