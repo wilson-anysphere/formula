@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { gotoDesktop } from "./helpers";
+import { gotoDesktop, openSheetTabContextMenu } from "./helpers";
 
 test.describe("sheet switcher", () => {
   test("only lists visible sheets (hide/unhide)", async ({ page }) => {
@@ -32,7 +32,7 @@ test.describe("sheet switcher", () => {
     await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 3");
 
     // Hide Sheet2 via context menu.
-    await page.getByTestId("sheet-tab-Sheet2").click({ button: "right", position: { x: 10, y: 10 } });
+    await openSheetTabContextMenu(page, "Sheet2");
     const menu = page.getByTestId("sheet-tab-context-menu");
     await expect(page.getByTestId("context-menu")).toBeHidden();
     await expect(menu).toBeVisible();
@@ -63,7 +63,7 @@ test.describe("sheet switcher", () => {
     }
 
     // Unhide Sheet2 via context menu on any visible tab.
-    await page.getByTestId("sheet-tab-Sheet1").click({ button: "right", position: { x: 10, y: 10 } });
+    await openSheetTabContextMenu(page, "Sheet1");
     await expect(page.getByTestId("context-menu")).toBeHidden();
     await expect(menu).toBeVisible();
     await menu.getByRole("button", { name: "Unhide…", exact: true }).click();

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { gotoDesktop } from "./helpers";
+import { gotoDesktop, openSheetTabContextMenu } from "./helpers";
 
 test.describe("sheet tab context menu", () => {
   test("hide/unhide sheets and set tab color", async ({ page }) => {
@@ -23,9 +23,8 @@ test.describe("sheet tab context menu", () => {
     await expect.poll(() => page.evaluate(() => (window.__formulaApp as any).getDocument().isDirty)).toBe(false);
 
     // Hide Sheet2.
-    await sheet2Tab.click({ button: "right", position: { x: 10, y: 10 } });
     const menu = page.getByTestId("sheet-tab-context-menu");
-    await expect(menu).toBeVisible();
+    await openSheetTabContextMenu(page, "Sheet2");
     await menu.getByRole("button", { name: "Hide", exact: true }).click();
 
     await expect(sheet2Tab).toHaveCount(0);
@@ -39,8 +38,7 @@ test.describe("sheet tab context menu", () => {
     });
     await expect.poll(() => page.evaluate(() => (window.__formulaApp as any).getDocument().isDirty)).toBe(false);
 
-    await page.getByTestId("sheet-tab-Sheet1").click({ button: "right", position: { x: 10, y: 10 } });
-    await expect(menu).toBeVisible();
+    await openSheetTabContextMenu(page, "Sheet1");
     await menu.getByRole("button", { name: "Unhide…", exact: true }).click();
     await menu.getByRole("button", { name: "Sheet2" }).click();
 
@@ -55,8 +53,7 @@ test.describe("sheet tab context menu", () => {
     await expect.poll(() => page.evaluate(() => (window.__formulaApp as any).getDocument().isDirty)).toBe(false);
 
     const sheet2TabVisible = page.getByTestId("sheet-tab-Sheet2");
-    await sheet2TabVisible.click({ button: "right", position: { x: 10, y: 10 } });
-    await expect(menu).toBeVisible();
+    await openSheetTabContextMenu(page, "Sheet2");
     await menu.getByRole("button", { name: "Tab Color", exact: true }).click();
     await menu.getByRole("button", { name: "Red" }).click();
 

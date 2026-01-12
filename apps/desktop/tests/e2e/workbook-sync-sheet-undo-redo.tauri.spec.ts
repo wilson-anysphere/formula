@@ -298,10 +298,8 @@ test.describe("tauri workbookSync sheet metadata undo/redo", () => {
     await expect(tab.locator(".sheet-tab__name")).toHaveText("Budget");
 
     // Delete via context menu.
-    await tab.click({ button: "right" });
-    const menu = page.getByTestId("sheet-tab-context-menu");
-    await expect(menu).toBeVisible();
-    await menu.getByRole("button", { name: "Delete" }).click();
+    const menu = await openSheetTabContextMenu(page, "Sheet1");
+    await menu.getByRole("button", { name: "Delete", exact: true }).click();
 
     await expect
       .poll(async () => (await getInvokeCalls(page)).filter((c) => c.cmd === "delete_sheet").length, { timeout: 10_000 })

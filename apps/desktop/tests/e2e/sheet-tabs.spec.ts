@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { gotoDesktop } from "./helpers";
+import { gotoDesktop, openSheetTabContextMenu } from "./helpers";
 
 function installTauriStubForSheetTabDelete() {
   const listeners: Record<string, any> = {};
@@ -356,10 +356,8 @@ test.describe("sheet tabs", () => {
       (window as any).__TAURI__ = { core: { invoke: async () => null } };
     });
 
-    await sheet2Tab.click({ button: "right" });
-    const menu = page.getByTestId("sheet-tab-context-menu");
-    await expect(menu).toBeVisible();
-    await menu.getByRole("button", { name: "Delete" }).click();
+    const menu = await openSheetTabContextMenu(page, "Sheet2");
+    await menu.getByRole("button", { name: "Delete", exact: true }).click();
 
     // Tab should disappear, and the app should fall back to Sheet1.
     await expect(page.locator('[data-testid="sheet-tab-Sheet2"]')).toHaveCount(0);
