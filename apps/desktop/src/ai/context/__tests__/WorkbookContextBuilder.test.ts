@@ -8,7 +8,7 @@ import { CLASSIFICATION_LEVEL } from "../../../../../../packages/security/dlp/sr
 import { LocalClassificationStore, createMemoryStorage } from "../../../../../../packages/security/dlp/src/classificationStore.js";
 
 import { DocumentControllerSpreadsheetApi } from "../../tools/documentControllerSpreadsheetApi.js";
-import { WorkbookContextBuilder } from "../WorkbookContextBuilder.js";
+import { WorkbookContextBuilder, type WorkbookContextPayload } from "../WorkbookContextBuilder.js";
 
 describe("WorkbookContextBuilder", () => {
   it("extracts a schema-first summary from a sheet with headers", async () => {
@@ -237,4 +237,81 @@ describe("WorkbookContextBuilder", () => {
     const snapshotPayload = { ...ctx.payload, budget: { ...ctx.payload.budget, usedPromptContextTokens: 0 } };
     expect(WorkbookContextBuilder.serializePayload(snapshotPayload as any)).toMatchSnapshot();
   });
+
+  it("builds a deterministic compact promptContext", async () => {
+    const documentController = new DocumentController();
+    const header = Array.from({ length: 8 }, (_v, idx) => `Col${idx + 1}`);
+    const rows = Array.from({ length: 14 }, (_v, rIdx) =>
+      Array.from({ length: 8 }, (_v2, cIdx) => `R${rIdx + 1}C${cIdx + 1}`),
+    );
+    documentController.setRangeValues("Sheet1", "A1", [header, ...rows]);
+
+    const spreadsheet = new DocumentControllerSpreadsheetApi(documentController);
+    const builder = new WorkbookContextBuilder({
+      workbookId: "wb_prompt_ctx",
+      documentController,
+      spreadsheet,
+      ragService: null,
+      mode: "chat",
+      model: "unit-test-model",
+      // Avoid trimming so we can compare size differences deterministically.
+      maxPromptContextTokens: 1_000_000,
+    });
+
+    const input = {
+      activeSheetId: "Sheet1",
+      selectedRange: { sheetId: "Sheet1", range: { startRow: 0, endRow: 14, startCol: 0, endCol: 7 } },
+    };
+
+    const ctx1 = await builder.build(input);
+    const ctx2 = await builder.build(input);
+
+    // Deterministic output is critical for caching and for stable prompt packing decisions.
+    expect(ctx1.promptContext).toEqual(ctx2.promptContext);
+
+    // Ensure promptContext is materially smaller than the previous pretty-printed JSON format.
+    const pretty = buildPrettyPromptContext(ctx1.payload);
+    expect(ctx1.promptContext.length).toBeLessThan(pretty.length);
+    expect(pretty.length - ctx1.promptContext.length).toBeGreaterThan(100);
+
+    // Compact JSON should not include pretty-print indentation.
+    expect(ctx1.promptContext).not.toContain('\n  "');
+  });
 });
+
+function buildPrettyPromptContext(payload: WorkbookContextPayload): string {
+  const priorities = { workbook_summary: 5, sheet_schemas: 4, data_blocks: 3, retrieved: 2, attachments: 1 };
+
+  const sheets = payload.sheets.map((s) => ({ sheetId: s.sheetId, schema: s.schema }));
+  const blocks = payload.blocks;
+
+  const workbookSummary = {
+    id: payload.workbookId,
+    activeSheetId: payload.activeSheetId,
+    sheets: payload.sheets.map((s) => s.sheetId).sort(),
+    tables: payload.tables,
+    namedRanges: payload.namedRanges,
+    ...(payload.selection ? { selection: payload.selection } : {}),
+  };
+
+  const sections = [
+    {
+      key: "workbook_summary",
+      priority: priorities.workbook_summary,
+      text: `Workbook summary:\n${JSON.stringify(workbookSummary, null, 2)}`,
+    },
+    {
+      key: "sheet_schemas",
+      priority: priorities.sheet_schemas,
+      text: `Sheet schemas (schema-first):\n${JSON.stringify(sheets, null, 2)}`,
+    },
+    {
+      key: "data_blocks",
+      priority: priorities.data_blocks,
+      text: blocks.length ? `Sampled data blocks:\n${JSON.stringify(blocks, null, 2)}` : "",
+    },
+  ].filter((s) => s.text);
+
+  sections.sort((a, b) => b.priority - a.priority);
+  return sections.map((s) => `## ${s.key}\n${s.text}`).join("\n\n");
+}

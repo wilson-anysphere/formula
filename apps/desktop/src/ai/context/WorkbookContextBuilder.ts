@@ -597,17 +597,17 @@ export class WorkbookContextBuilder {
       {
         key: "workbook_summary",
         priority: priorities.workbook_summary,
-        text: `Workbook summary:\n${JSON.stringify(workbookSummary, null, 2)}`,
+        text: `Workbook summary:\n${stableJsonStringify(workbookSummary)}`,
       },
       {
         key: "sheet_schemas",
         priority: priorities.sheet_schemas,
-        text: `Sheet schemas (schema-first):\n${JSON.stringify(sheets, null, 2)}`,
+        text: `Sheet schemas (schema-first):\n${stableJsonStringify(sheets)}`,
       },
       {
         key: "data_blocks",
         priority: priorities.data_blocks,
-        text: blocks.length ? `Sampled data blocks:\n${JSON.stringify(blocks, null, 2)}` : "",
+        text: blocks.length ? `Sampled data blocks:\n${stableJsonStringify(blocks)}` : "",
       },
       {
         key: "retrieved",
@@ -619,7 +619,7 @@ export class WorkbookContextBuilder {
         priority: priorities.attachments,
         text:
           Array.isArray(params.ragResult?.attachments) && params.ragResult.attachments.length
-            ? `Attachments:\n${JSON.stringify(params.ragResult.attachments, null, 2)}`
+            ? `Attachments:\n${stableJsonStringify(params.ragResult.attachments)}`
             : "",
       },
     ].filter((s) => s.text);
