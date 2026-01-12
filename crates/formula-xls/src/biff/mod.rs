@@ -80,3 +80,47 @@ pub(crate) fn detect_biff_version(workbook_stream: &[u8]) -> BiffVersion {
         _ => BiffVersion::Biff8,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn record(id: u16, payload: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(4 + payload.len());
+        out.extend_from_slice(&id.to_le_bytes());
+        out.extend_from_slice(&(payload.len() as u16).to_le_bytes());
+        out.extend_from_slice(payload);
+        out
+    }
+
+    #[test]
+    fn detects_biff8_from_bof_version() {
+        let stream = record(records::RECORD_BOF_BIFF8, &[0x00, 0x06, 0x00, 0x00]);
+        assert_eq!(detect_biff_version(&stream), BiffVersion::Biff8);
+    }
+
+    #[test]
+    fn detects_biff5_from_bof_version() {
+        let stream = record(records::RECORD_BOF_BIFF5, &[0x00, 0x05, 0x00, 0x00]);
+        assert_eq!(detect_biff_version(&stream), BiffVersion::Biff5);
+    }
+
+    #[test]
+    fn detects_biff5_from_dt_heuristic_when_version_is_zero() {
+        // BIFF version=0, dt=0x1000 => BIFF5 heuristic.
+        let stream = record(records::RECORD_BOF_BIFF5, &[0x00, 0x00, 0x00, 0x10]);
+        assert_eq!(detect_biff_version(&stream), BiffVersion::Biff5);
+    }
+
+    #[test]
+    fn defaults_to_biff8_when_version_is_zero_and_dt_is_not_worksheet() {
+        let stream = record(records::RECORD_BOF_BIFF5, &[0x00, 0x00, 0x00, 0x00]);
+        assert_eq!(detect_biff_version(&stream), BiffVersion::Biff8);
+    }
+
+    #[test]
+    fn defaults_to_biff8_for_missing_bof() {
+        let stream = record(0x0001, &[0x00]);
+        assert_eq!(detect_biff_version(&stream), BiffVersion::Biff8);
+    }
+}
