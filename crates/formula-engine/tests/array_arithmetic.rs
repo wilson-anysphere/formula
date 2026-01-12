@@ -113,6 +113,26 @@ fn outer_broadcasting_over_ranges_spills_2d_arrays() {
 }
 
 #[test]
+fn outer_broadcasting_over_array_literals_spills_2d_arrays() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "={1;2}+{10,20,30}")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "A1").expect("spill range");
+    assert_eq!(start, parse_a1("A1").unwrap());
+    assert_eq!(end, parse_a1("C2").unwrap());
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(11.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(21.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(31.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(12.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(22.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(32.0));
+}
+
+#[test]
 fn row_broadcasting_preserves_column_count() {
     let mut engine = Engine::new();
     engine
