@@ -11,11 +11,11 @@ const SOURCE_EXTS = new Set([".ts", ".tsx", ".js", ".jsx"]);
 // Node-only modules used by Node integration tests (and later bridged via IPC/Tauri).
 // Those modules are allowed to import Node built-ins, but *must not* be imported by
 // any WebView/runtime code.
-// Note: `src/marketplace/` contains runtime-safe WebView code (e.g. URL/config helpers).
+// Note: `src/panels/marketplace/` contains runtime-safe WebView code (e.g. URL/config helpers).
 // If we ever need Node-only marketplace helpers again, they must live under
-// `src/marketplace/node/` (or be added to `NODE_ONLY_FILES`) so the runtime can still
+// `src/panels/marketplace/node/` (or be added to `NODE_ONLY_FILES`) so the runtime can still
 // safely import the shared bits.
-const NODE_ONLY_PATH_PREFIXES = ["src/marketplace/node/", "src/security/"];
+const NODE_ONLY_PATH_PREFIXES = ["src/panels/marketplace/node/", "src/security/"];
 const NODE_ONLY_FILES = ["src/extensions/ExtensionHostManager.js"];
 
 const NODE_BUILTIN_PREFIX = "node:";
