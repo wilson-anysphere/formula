@@ -607,6 +607,43 @@ fn content_normalized_data_parses_spec_dir_stream() {
 }
 
 #[test]
+fn content_normalized_data_parses_spec_dir_stream_with_fixed_length_projectversion_reserved_4() {
+    // Regression: some real-world projects store PROJECTVERSION (0x0009) using the fixed-length
+    // layout with Reserved(u32)=4. The strict dir stream parser must still scan to the module
+    // records and compute ContentNormalizedData correctly.
+    let module_source = concat!(
+        "Attribute VB_Name = \"Module1\"\r\n",
+        "Option Explicit\r",
+        "Print \"Attribute\"\n",
+        "Sub Foo()\r\n",
+        "End Sub",
+    )
+    .as_bytes()
+    .to_vec();
+
+    let project_name = "VBAProject";
+    let module_name = "Module1";
+    let project_constants = "Answer=42";
+    let dir_decompressed =
+        build_dir_decompressed_spec_with_references(project_name, project_constants, module_name, 4, &[]);
+    let vba_project_bin =
+        build_vba_project_bin_spec_with_dir(&dir_decompressed, &module_source, None);
+
+    let normalized = content_normalized_data(&vba_project_bin).expect("ContentNormalizedData");
+
+    // Spec (MS-OVBA §2.4.2.1) appends line bytes without preserving newline delimiters.
+    let expected_module_normalized = b"Option ExplicitPrint \"Attribute\"Sub Foo()End Sub".to_vec();
+    let expected = [
+        b"VBAProject".as_slice(),
+        b"Answer=42".as_slice(),
+        expected_module_normalized.as_slice(),
+    ]
+    .concat();
+
+    assert_eq!(normalized, expected);
+}
+
+#[test]
 fn content_normalized_data_parses_spec_dir_stream_with_unicode_module_stream_name() {
     // Ensure the strict MS-OVBA dir-stream parser can resolve module streams when the
     // MODULESTREAMNAME Unicode field is required (non-ASCII OLE stream name).
