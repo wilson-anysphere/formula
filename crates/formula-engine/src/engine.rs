@@ -8990,9 +8990,8 @@ mod tests {
     #[test]
     fn bytecode_compile_report_classifies_unsupported_operators() {
         let mut engine = Engine::new();
-        engine
-            .set_cell_formula("Sheet1", "B1", "=A1:A2 A2:A3")
-            .unwrap();
+        // The union operator (`,`) is not supported by the bytecode backend.
+        engine.set_cell_formula("Sheet1", "B1", "=A1,C1").unwrap();
 
         let report = engine.bytecode_compile_report(10);
         assert_eq!(report.len(), 1);
@@ -9000,6 +8999,15 @@ mod tests {
             report[0].reason,
             BytecodeCompileReason::LowerError(bytecode::LowerError::Unsupported)
         );
+    }
+
+    #[test]
+    fn bytecode_compile_report_allows_spill_ranges() {
+        let mut engine = Engine::new();
+        engine.set_cell_formula("Sheet1", "B1", "=A1#").unwrap();
+
+        let report = engine.bytecode_compile_report(10);
+        assert_eq!(report.len(), 0);
     }
 
     #[test]
