@@ -102,7 +102,7 @@ an image-in-cell backed by RichData. Key observations (useful for implementers):
 The repository also includes `fixtures/xlsx/basic/image-in-cell.xlsx`, saved by modern Excel. A detailed walkthrough is
 checked in at:
 
-* `fixtures/xlsx/basic/image-in-cell.md`
+* [`fixtures/xlsx/basic/image-in-cell.md`](../fixtures/xlsx/basic/image-in-cell.md)
 
 Key observations (useful for implementers):
 
@@ -161,7 +161,7 @@ the exact relationship/content-type URIs) are documented here:
 The repository also contains an **Excel-produced** fixture workbook that uses the same `rdRichValue` /
 `_localImage` wiring (and also does **not** use `xl/cellImages.xml`):
 
-* `fixtures/xlsx/basic/image-in-cell.xlsx` (notes in `fixtures/xlsx/basic/image-in-cell.md`)
+* `fixtures/xlsx/basic/image-in-cell.xlsx` (notes in [`fixtures/xlsx/basic/image-in-cell.md`](../fixtures/xlsx/basic/image-in-cell.md))
 
 That fixture demonstrates multiple images and multiple value-metadata records:
 
