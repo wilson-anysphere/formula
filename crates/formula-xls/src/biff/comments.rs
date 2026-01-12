@@ -32,8 +32,11 @@ const OBJ_SUBRECORD_FT_CMO: u16 = 0x0015;
 
 // TXO record payload layout [MS-XLS 2.4.334]:
 // - `cchText` lives at offset 6
+// - `cbRuns` lives at offset 12 (byte length of the rich-text formatting run data that follows
+//   the character bytes in the TXO continuation area)
 // - the record is followed by `CONTINUE` records containing the character bytes and formatting runs
 const TXO_TEXT_LEN_OFFSET: usize = 6;
+const TXO_RUNS_LEN_OFFSET: usize = 12;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BiffNote {
@@ -402,7 +405,24 @@ fn parse_txo_text_biff8(
         return Some(String::new());
     }
 
-    let Some(cch_text) = parse_txo_cch_text(first, continues) else {
+    // `cbRuns` indicates how many bytes at the end of the TXO continuation area are reserved for
+    // rich-text formatting runs. We ignore those bytes so we don't misinterpret formatting run data
+    // as characters if `cchText` is larger than the available text bytes (truncated/corrupt files).
+    let cb_runs = first
+        .get(TXO_RUNS_LEN_OFFSET..TXO_RUNS_LEN_OFFSET + 2)
+        .map(|v| u16::from_le_bytes([v[0], v[1]]) as usize)
+        .unwrap_or(0);
+    let total_continue_bytes: usize = continues.iter().map(|frag| frag.len()).sum();
+    let text_continue_bytes = total_continue_bytes.saturating_sub(cb_runs);
+    if cb_runs > total_continue_bytes {
+        warnings.push(format!(
+            "TXO record at offset {} has cbRuns ({cb_runs}) larger than continuation payload ({total_continue_bytes})",
+            record.offset
+        ));
+    }
+
+    let max_chars = estimate_max_chars_with_byte_limit(continues, text_continue_bytes);
+    let Some(cch_text) = parse_txo_cch_text(first, max_chars) else {
         return fallback_decode_first_continue(record, codepage, warnings);
     };
     if cch_text == 0 {
@@ -411,11 +431,15 @@ fn parse_txo_text_biff8(
 
     let mut out = String::new();
     let mut remaining = cch_text;
+    let mut remaining_bytes = text_continue_bytes;
     for frag in continues {
-        if remaining == 0 {
+        if remaining == 0 || remaining_bytes == 0 {
             break;
         }
 
+        let take_len = frag.len().min(remaining_bytes);
+        remaining_bytes = remaining_bytes.saturating_sub(take_len);
+        let frag = &frag[..take_len];
         let Some((&flags, bytes)) = frag.split_first() else {
             continue;
         };
@@ -458,19 +482,23 @@ fn parse_txo_text(
     parse_txo_text_with_warnings(record, biff, codepage, warnings)
 }
 
-fn parse_txo_cch_text(header: &[u8], continues: &[&[u8]]) -> Option<usize> {
+fn parse_txo_cch_text(header: &[u8], max_chars: usize) -> Option<usize> {
     // Heuristic: cchText is typically at offset 6 in the TXO header, but some sources disagree.
     // Try a few common offsets and choose the first plausible value.
     if header.len() < 8 {
         return None;
     }
-    let max_chars = estimate_max_chars(continues);
 
     for off in [TXO_TEXT_LEN_OFFSET, 4usize, 8usize, 10usize, 12usize] {
         if header.len() < off + 2 {
             continue;
         }
         let cch = u16::from_le_bytes([header[off], header[off + 1]]) as usize;
+        // Prefer the spec-defined offset even if the payload looks truncated; we'll surface that as
+        // a decode warning instead of guessing a different offset.
+        if off == TXO_TEXT_LEN_OFFSET {
+            return Some(cch);
+        }
         if max_chars == 0 || cch <= max_chars {
             return Some(cch);
         }
@@ -478,10 +506,17 @@ fn parse_txo_cch_text(header: &[u8], continues: &[&[u8]]) -> Option<usize> {
     None
 }
 
-fn estimate_max_chars(continues: &[&[u8]]) -> usize {
+fn estimate_max_chars_with_byte_limit(continues: &[&[u8]], byte_limit: usize) -> usize {
     // Best-effort estimate used only for header heuristics.
     let mut total = 0usize;
+    let mut remaining = byte_limit;
     for frag in continues {
+        if remaining == 0 {
+            break;
+        }
+        let take_len = frag.len().min(remaining);
+        remaining = remaining.saturating_sub(take_len);
+        let frag = &frag[..take_len];
         let Some((&flags, bytes)) = frag.split_first() else {
             continue;
         };
@@ -653,6 +688,13 @@ mod tests {
     fn txo_with_cch_text(cch_text: u16) -> Vec<u8> {
         let mut payload = vec![0u8; 18];
         payload[TXO_TEXT_LEN_OFFSET..TXO_TEXT_LEN_OFFSET + 2].copy_from_slice(&cch_text.to_le_bytes());
+        record(RECORD_TXO, &payload)
+    }
+
+    fn txo_with_cch_text_and_cb_runs(cch_text: u16, cb_runs: u16) -> Vec<u8> {
+        let mut payload = vec![0u8; 18];
+        payload[TXO_TEXT_LEN_OFFSET..TXO_TEXT_LEN_OFFSET + 2].copy_from_slice(&cch_text.to_le_bytes());
+        payload[TXO_RUNS_LEN_OFFSET..TXO_RUNS_LEN_OFFSET + 2].copy_from_slice(&cb_runs.to_le_bytes());
         record(RECORD_TXO, &payload)
     }
 
@@ -1089,6 +1131,33 @@ mod tests {
         );
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].text, "ABCDE");
+    }
+
+    #[test]
+    fn does_not_decode_formatting_run_bytes_as_text_when_cbruns_is_set() {
+        // cchText is intentionally larger than the available text bytes. Without respecting
+        // `cbRuns`, parsers may decode the formatting run bytes as if they were characters.
+        let stream = [
+            bof(),
+            note(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            // cchText=6 but only 5 chars of actual text bytes.
+            txo_with_cch_text_and_cb_runs(6, 4),
+            continue_text_ascii("Hello"),
+            // Formatting runs CONTINUE payload (dummy bytes, no leading flags byte).
+            record(records::RECORD_CONTINUE, &[0xFFu8; 4]),
+            eof(),
+        ]
+        .concat();
+
+        let (notes, warnings) =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].text, "Hello");
+        assert!(
+            warnings.iter().any(|w| w.contains("truncated text")),
+            "expected truncation warning; warnings={warnings:?}"
+        );
     }
 
     #[test]
