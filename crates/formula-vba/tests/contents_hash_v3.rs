@@ -316,7 +316,7 @@ fn contents_hash_v3_matches_explicit_normalized_transcript_sha256() {
 
     // ---- Expected normalized transcript per MS-OVBA §2.4.2 ----
     //
-    // ContentsHashV3 = SHA-256(ProjectNormalizedData)
+    // ContentsHashV3 = SHA-256(ProjectNormalizedData) (v3 uses SHA-256, not MD5)
     // ProjectNormalizedData = V3ContentNormalizedData || FormsNormalizedData
     //
     // V3ContentNormalizedData includes module identity/metadata (`MODULENAME`, `MODULESTREAMNAME`
