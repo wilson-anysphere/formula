@@ -4767,6 +4767,25 @@ mountRibbon(ribbonRoot, {
       })();
       return;
     }
+    const openRibbonPanel = (panelId: string): void => {
+      const layoutController = ribbonLayoutController;
+      if (!layoutController) {
+        showToast("Panels are not available (layout controller missing).", "error");
+        return;
+      }
+
+      const placement = getPanelPlacement(layoutController.layout, panelId);
+      if (placement.kind === "closed" || placement.kind === "docked") {
+        layoutController.openPanel(panelId);
+        return;
+      }
+
+      // Floating panels can be minimized; opening should restore them.
+      const floating = layoutController.layout?.floating?.[panelId];
+      if (floating?.minimized) {
+        layoutController.setFloatingPanelMinimized(panelId, false);
+      }
+    };
 
     const openCustomZoomQuickPick = async (): Promise<void> => {
       if (!app.supportsZoom()) return;
@@ -4801,7 +4820,6 @@ mountRibbon(ribbonRoot, {
         return;
       }
     }
-
     const fontSizePrefix = "home.font.fontSize.";
     if (commandId.startsWith(fontSizePrefix)) {
       const size = Number(commandId.slice(fontSizePrefix.length));
@@ -5231,6 +5249,36 @@ mountRibbon(ribbonRoot, {
         showToast("Paste Transpose not implemented");
         app.focus();
         return;
+
+      case "view.macros.viewMacros":
+      case "view.macros.viewMacros.run":
+      case "view.macros.viewMacros.edit":
+      case "view.macros.viewMacros.delete":
+        openRibbonPanel(PanelIds.MACROS);
+        // "Edit…" in Excel normally opens an editor; best-effort surface our Script Editor panel too.
+        if (commandId.endsWith(".edit")) {
+          openRibbonPanel(PanelIds.SCRIPT_EDITOR);
+        }
+        return;
+
+      case "developer.code.macros":
+      case "developer.code.macros.run":
+      case "developer.code.macros.edit":
+        openRibbonPanel(PanelIds.MACROS);
+        if (commandId.endsWith(".edit")) {
+          openRibbonPanel(PanelIds.SCRIPT_EDITOR);
+        }
+        return;
+
+      case "developer.code.visualBasic":
+        // Desktop builds expose a VBA migration panel (used as a stand-in for the VBA editor).
+        if (typeof (globalThis as any).__TAURI__?.core?.invoke === "function") {
+          openRibbonPanel(PanelIds.VBA_MIGRATE);
+        } else {
+          openRibbonPanel(PanelIds.SCRIPT_EDITOR);
+        }
+        return;
+
       case "insert.tables.pivotTable":
         ribbonLayoutController?.openPanel(PanelIds.PIVOT_BUILDER);
         window.dispatchEvent(new CustomEvent("pivot-builder:use-selection"));
