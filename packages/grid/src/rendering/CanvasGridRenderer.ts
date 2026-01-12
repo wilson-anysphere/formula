@@ -1,4 +1,4 @@
-import type { CellData, CellProvider, CellProviderUpdate, CellRange } from "../model/CellProvider";
+import type { CellBorderSpec, CellData, CellProvider, CellProviderUpdate, CellRange } from "../model/CellProvider";
 import { DirtyRegionTracker, type Rect } from "./DirtyRegionTracker";
 import { setupHiDpiCanvas } from "./HiDpiCanvas";
 import { LruCache } from "../utils/LruCache";
@@ -3006,6 +3006,8 @@ export class CanvasGridRenderer {
       }
     };
 
+    const diagonalEntries: Array<{ rect: Rect; up?: unknown; down?: unknown }> = [];
+
     // Render merged regions (fill + text) first so we can skip their constituent cells below.
     for (const range of quadrantMergedRanges) {
       const anchorRow = range.startRow;
@@ -3025,6 +3027,10 @@ export class CanvasGridRenderer {
 
       const anchorStyle = anchorCell?.style;
       const isHeader = anchorRow < headerRows || anchorCol < headerCols;
+      const diagonalBorders = anchorStyle?.diagonalBorders;
+      if (diagonalBorders && (diagonalBorders.up || diagonalBorders.down)) {
+        diagonalEntries.push({ rect: { x, y, width, height }, up: diagonalBorders.up, down: diagonalBorders.down });
+      }
 
       const fill = anchorStyle?.fill ?? (isHeader ? headerBg : undefined);
       const fillToDraw = fill && fill !== gridBg ? fill : null;
@@ -3087,6 +3093,10 @@ export class CanvasGridRenderer {
         const cell = getCellCached(row, col);
         const style = cell?.style;
         const isHeader = row < headerRows || col < headerCols;
+        const diagonalBorders = style?.diagonalBorders;
+        if (diagonalBorders && (diagonalBorders.up || diagonalBorders.down)) {
+          diagonalEntries.push({ rect: { x, y, width: colWidth, height: rowHeight }, up: diagonalBorders.up, down: diagonalBorders.down });
+        }
 
         // Background fill (grid layer).
         const fill = style?.fill ?? (isHeader ? headerBg : undefined);
@@ -3283,56 +3293,195 @@ export class CanvasGridRenderer {
       }
 
       gridCtx.stroke();
-      drawCellBorders();
-      return;
-    }
+    } else {
+      gridCtx.beginPath();
+      rowYSheet = startRowYSheet;
+      for (let row = startRow; row < endRow; row++) {
+        const rowHeight = rowAxis.getSize(row);
+        const y = rowYSheet - quadrant.scrollBaseY + quadrant.originY;
+        const yNext = y + rowHeight;
+        const cyTop = row === startRow ? crispLine(y) : 0;
+        const cyBottom = crispLine(yNext);
 
-    gridCtx.beginPath();
-    rowYSheet = startRowYSheet;
-    for (let row = startRow; row < endRow; row++) {
-      const rowHeight = rowAxis.getSize(row);
-      const y = rowYSheet - quadrant.scrollBaseY + quadrant.originY;
-      const yNext = y + rowHeight;
-      const cyTop = row === startRow ? crispLine(y) : 0;
-      const cyBottom = crispLine(yNext);
+        let colXSheet = startColXSheet;
+        const xLeft = colXSheet - quadrant.scrollBaseX + quadrant.originX;
+        const cxLeft = crispLine(xLeft);
+        if (!isInteriorVerticalGridline(mergedIndex, row, startCol - 1)) {
+          gridCtx.moveTo(cxLeft, y);
+          gridCtx.lineTo(cxLeft, yNext);
+        }
 
-      let colXSheet = startColXSheet;
-      const xLeft = colXSheet - quadrant.scrollBaseX + quadrant.originX;
-      const cxLeft = crispLine(xLeft);
-      if (!isInteriorVerticalGridline(mergedIndex, row, startCol - 1)) {
-        gridCtx.moveTo(cxLeft, y);
-        gridCtx.lineTo(cxLeft, yNext);
+        for (let col = startCol; col < endCol; col++) {
+          const colWidth = colAxis.getSize(col);
+          const x = colXSheet - quadrant.scrollBaseX + quadrant.originX;
+          const xNext = x + colWidth;
+
+          if (row === startRow && !isInteriorHorizontalGridline(mergedIndex, startRow - 1, col)) {
+            gridCtx.moveTo(x, cyTop);
+            gridCtx.lineTo(xNext, cyTop);
+          }
+
+          if (!isInteriorHorizontalGridline(mergedIndex, row, col)) {
+            gridCtx.moveTo(x, cyBottom);
+            gridCtx.lineTo(xNext, cyBottom);
+          }
+
+          if (!isInteriorVerticalGridline(mergedIndex, row, col)) {
+            const cx = crispLine(xNext);
+            gridCtx.moveTo(cx, y);
+            gridCtx.lineTo(cx, yNext);
+          }
+
+          colXSheet += colWidth;
+        }
+
+        rowYSheet += rowHeight;
       }
 
-      for (let col = startCol; col < endCol; col++) {
-        const colWidth = colAxis.getSize(col);
-        const x = colXSheet - quadrant.scrollBaseX + quadrant.originX;
-        const xNext = x + colWidth;
-
-        if (row === startRow && !isInteriorHorizontalGridline(mergedIndex, startRow - 1, col)) {
-          gridCtx.moveTo(x, cyTop);
-          gridCtx.lineTo(xNext, cyTop);
-        }
-
-        if (!isInteriorHorizontalGridline(mergedIndex, row, col)) {
-          gridCtx.moveTo(x, cyBottom);
-          gridCtx.lineTo(xNext, cyBottom);
-        }
-
-        if (!isInteriorVerticalGridline(mergedIndex, row, col)) {
-          const cx = crispLine(xNext);
-          gridCtx.moveTo(cx, y);
-          gridCtx.lineTo(cx, yNext);
-        }
-
-        colXSheet += colWidth;
-      }
-
-      rowYSheet += rowHeight;
+      gridCtx.stroke();
     }
 
-    gridCtx.stroke();
+    // Explicit cell borders (grid layer).
     drawCellBorders();
+
+    // Diagonal borders (grid layer), drawn last so they render above gridlines + side borders (Excel-like).
+    if (diagonalEntries.length === 0) return;
+
+    type DiagonalSegment = { x1: number; y1: number; x2: number; y2: number };
+    type DiagonalStrokeGroup = {
+      strokeStyle: string;
+      lineWidth: number;
+      lineDash: number[];
+      clipRects: Rect[];
+      clipRectKeys: Set<string>;
+      segments: DiagonalSegment[];
+    };
+
+    const isCellBorder = (value: unknown): value is CellBorderSpec => {
+      if (!value || typeof value !== "object") return false;
+      const v = value as any;
+      if (typeof v.color !== "string" || v.color.trim() === "") return false;
+      if (typeof v.width !== "number" || !Number.isFinite(v.width) || v.width <= 0) return false;
+      return v.style === "solid" || v.style === "dashed" || v.style === "dotted" || v.style === "double";
+    };
+
+    const dashForStyle = (style: CellBorderSpec["style"], lineWidth: number): number[] => {
+      if (style === "dashed") {
+        const unit = Math.max(1, lineWidth);
+        return [4 * unit, 3 * unit];
+      }
+      if (style === "dotted") {
+        const unit = Math.max(1, lineWidth);
+        return [unit, 2 * unit];
+      }
+      return [];
+    };
+
+    const groups = new Map<string, DiagonalStrokeGroup>();
+
+    const addGroupSegment = (options: {
+      rect: Rect;
+      strokeStyle: string;
+      lineWidth: number;
+      lineDash: number[];
+      segment: DiagonalSegment;
+    }): void => {
+      const dashKey = options.lineDash.length > 0 ? options.lineDash.join(",") : "solid";
+      const key = `${options.strokeStyle}|${options.lineWidth}|${dashKey}`;
+      let group = groups.get(key);
+      if (!group) {
+        group = {
+          strokeStyle: options.strokeStyle,
+          lineWidth: options.lineWidth,
+          lineDash: options.lineDash,
+          clipRects: [],
+          clipRectKeys: new Set<string>(),
+          segments: []
+        };
+        groups.set(key, group);
+      }
+      const rectKey = `${options.rect.x},${options.rect.y},${options.rect.width},${options.rect.height}`;
+      if (!group.clipRectKeys.has(rectKey)) {
+        group.clipRectKeys.add(rectKey);
+        group.clipRects.push(options.rect);
+      }
+      group.segments.push(options.segment);
+    };
+
+    const addDiagonal = (rect: Rect, border: unknown, direction: "up" | "down"): void => {
+      if (!isCellBorder(border)) return;
+      const strokeStyle = border.color;
+      const totalWidth = border.width * zoom;
+      if (!Number.isFinite(totalWidth) || totalWidth <= 0) return;
+
+      const x1 = rect.x;
+      const y1 = direction === "up" ? rect.y + rect.height : rect.y;
+      const x2 = rect.x + rect.width;
+      const y2 = direction === "up" ? rect.y : rect.y + rect.height;
+
+      if (border.style === "double") {
+        const lineWidth = totalWidth / 3;
+        if (!Number.isFinite(lineWidth) || lineWidth <= 0) return;
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const len = Math.hypot(dx, dy);
+        if (!Number.isFinite(len) || len === 0) return;
+        const nx = -dy / len;
+        const ny = dx / len;
+        const offset = lineWidth;
+
+        addGroupSegment({
+          rect,
+          strokeStyle,
+          lineWidth,
+          lineDash: [],
+          segment: { x1: x1 + nx * offset, y1: y1 + ny * offset, x2: x2 + nx * offset, y2: y2 + ny * offset }
+        });
+        addGroupSegment({
+          rect,
+          strokeStyle,
+          lineWidth,
+          lineDash: [],
+          segment: { x1: x1 - nx * offset, y1: y1 - ny * offset, x2: x2 - nx * offset, y2: y2 - ny * offset }
+        });
+        return;
+      }
+
+      addGroupSegment({
+        rect,
+        strokeStyle,
+        lineWidth: totalWidth,
+        lineDash: dashForStyle(border.style, totalWidth),
+        segment: { x1, y1, x2, y2 }
+      });
+    };
+
+    for (const entry of diagonalEntries) {
+      if (entry.up) addDiagonal(entry.rect, entry.up, "up");
+      if (entry.down) addDiagonal(entry.rect, entry.down, "down");
+    }
+
+    for (const group of groups.values()) {
+      gridCtx.save();
+      gridCtx.strokeStyle = group.strokeStyle;
+      gridCtx.lineWidth = group.lineWidth;
+      (gridCtx as any).setLineDash?.(group.lineDash);
+
+      // Clip to the union of cell rects for this group to keep strokes inside cells/merged cells.
+      gridCtx.beginPath();
+      for (const rect of group.clipRects) {
+        gridCtx.rect(rect.x, rect.y, rect.width, rect.height);
+      }
+      gridCtx.clip();
+
+      gridCtx.beginPath();
+      for (const segment of group.segments) {
+        gridCtx.moveTo(segment.x1, segment.y1);
+        gridCtx.lineTo(segment.x2, segment.y2);
+      }
+      gridCtx.stroke();
+      gridCtx.restore();
+    }
   }
 
   private renderQuadrants(layer: Layer, viewport: GridViewportState, region: Rect): void {

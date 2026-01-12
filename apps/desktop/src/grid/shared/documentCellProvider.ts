@@ -290,6 +290,16 @@ export class DocumentCellProvider implements CellProvider {
       if (top) borders.top = top;
       if (bottom) borders.bottom = bottom;
       if (Object.keys(borders).length > 0) out.borders = borders;
+
+      const diagonal = mapEdge(border.diagonal);
+      const diagonalUp = (border as any).diagonalUp === true || (border as any).diagonal_up === true;
+      const diagonalDown = (border as any).diagonalDown === true || (border as any).diagonal_down === true;
+      if (diagonal && (diagonalUp || diagonalDown)) {
+        const diagonalBorders: any = {};
+        if (diagonalUp) diagonalBorders.up = diagonal;
+        if (diagonalDown) diagonalBorders.down = diagonal;
+        if (Object.keys(diagonalBorders).length > 0) out.diagonalBorders = diagonalBorders;
+      }
     }
 
     return Object.keys(out).length > 0 ? (out as CellStyle) : undefined;

@@ -83,7 +83,6 @@ describe("DocumentCellProvider formatting integration", () => {
 
     const headerRows = 1;
     const headerCols = 1;
-
     const provider = new DocumentCellProvider({
       document: doc,
       getSheetId: () => "Sheet1",
@@ -99,6 +98,37 @@ describe("DocumentCellProvider formatting integration", () => {
     expect(cell).not.toBeNull();
     expect(cell?.style?.fontWeight).toBe("700");
     expect(cell?.style?.fill).toBe("#FFFF00");
+  });
+
+  it("maps diagonal border flags from DocumentController styles into grid CellStyle.diagonalBorders", () => {
+    const doc = new DocumentController();
+
+    doc.setCellValue("Sheet1", "A1", "diag");
+    doc.setRangeFormat("Sheet1", "A1", {
+      border: {
+        diagonal: { style: "thin", color: "#FF0000FF" },
+        diagonalDown: true
+      }
+    });
+
+    const headerRows = 1;
+    const headerCols = 1;
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => "Sheet1",
+      headerRows,
+      headerCols,
+      rowCount: 2 + headerRows,
+      colCount: 2 + headerCols,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const cell = provider.getCell(headerRows, headerCols);
+    expect(cell).not.toBeNull();
+    expect(cell?.style?.diagonalBorders).toEqual({
+      down: { width: 1, style: "solid", color: "rgba(0,0,255,1)" }
+    });
   });
 
   it("emits grid invalidation updates for format-layer-only deltas", () => {

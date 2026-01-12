@@ -7,7 +7,8 @@ export type {
   CellStyle,
   CellBorderLineStyle,
   CellBorderSpec,
-  CellBorders
+  CellBorders,
+  CellDiagonalBorders
 } from "./model/CellProvider";
 export { MockCellProvider } from "./model/MockCellProvider";
 

@@ -1,3 +1,28 @@
+export type CellBorderLineStyle = "solid" | "dashed" | "dotted" | "double";
+
+export interface CellBorderSpec {
+  /**
+   * Border width in CSS pixels at zoom=1 (the renderer scales this by the current zoom).
+   */
+  width: number;
+  style: CellBorderLineStyle;
+  color: string;
+}
+
+export interface CellBorders {
+  top?: CellBorderSpec;
+  right?: CellBorderSpec;
+  bottom?: CellBorderSpec;
+  left?: CellBorderSpec;
+}
+
+export interface CellDiagonalBorders {
+  /** Bottom-left → top-right. */
+  up?: CellBorderSpec;
+  /** Top-left → bottom-right. */
+  down?: CellBorderSpec;
+}
+
 export interface CellStyle {
   fill?: string;
   color?: string;
@@ -14,6 +39,7 @@ export interface CellStyle {
   underline?: boolean;
   strike?: boolean;
   borders?: CellBorders;
+  diagonalBorders?: CellDiagonalBorders;
   /**
    * Wrapping strategy for cell text.
    *
@@ -30,21 +56,6 @@ export interface CellStyle {
   verticalAlign?: "top" | "middle" | "bottom";
   /** Basic rotation support (clockwise, degrees). */
   rotationDeg?: number;
-}
-
-export type CellBorderLineStyle = "solid" | "dashed" | "dotted" | "double";
-
-export interface CellBorderSpec {
-  width: number;
-  style: CellBorderLineStyle;
-  color: string;
-}
-
-export interface CellBorders {
-  top?: CellBorderSpec;
-  right?: CellBorderSpec;
-  bottom?: CellBorderSpec;
-  left?: CellBorderSpec;
 }
 
 export interface CellRichTextRun {
