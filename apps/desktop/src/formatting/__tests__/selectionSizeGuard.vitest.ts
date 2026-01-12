@@ -39,6 +39,31 @@ describe("evaluateFormattingSelectionSize", () => {
     expect(res.allRangesBand).toBe(true);
   });
 
+  it("blocks very large full-row selections that exceed the band row cap", () => {
+    const res = evaluateFormattingSelectionSize(
+      [{ startRow: 0, endRow: 60_000, startCol: 0, endCol: excelLimits.maxCols - 1 }],
+      excelLimits,
+    );
+    expect(res.allowed).toBe(false);
+    expect(res.allRangesBand).toBe(false);
+  });
+
+  it("allows full-sheet selections even though they exceed the band row cap", () => {
+    const res = evaluateFormattingSelectionSize(
+      [
+        {
+          startRow: 0,
+          endRow: excelLimits.maxRows - 1,
+          startCol: 0,
+          endCol: excelLimits.maxCols - 1,
+        },
+      ],
+      excelLimits,
+    );
+    expect(res.allowed).toBe(true);
+    expect(res.allRangesBand).toBe(true);
+  });
+
   it("blocks mixed selections when total cells exceed the cap", () => {
     const res = evaluateFormattingSelectionSize(
       [
@@ -52,4 +77,3 @@ describe("evaluateFormattingSelectionSize", () => {
     expect(res.allowed).toBe(false);
   });
 });
-
