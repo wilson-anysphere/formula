@@ -1366,10 +1366,7 @@ fn odd_last_coupon_supports_settlement_before_last_interest() {
         system,
     )
     .expect("ODDLPRICE should accept settlement before last_interest");
-    assert!(
-        price.is_finite() && price > 0.0,
-        "expected finite positive price, got {price}"
-    );
+    assert!(price.is_finite() && price > 0.0, "expected finite positive price, got {price}");
 
     let recovered_yield = oddlyield(
         settlement,

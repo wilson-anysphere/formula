@@ -117,8 +117,8 @@ pub(crate) fn days_between(
 /// - basis 0/2: 360/frequency (constant)
 /// - basis 3: 365/frequency (constant)
 /// - basis 1: actual days between PCD and NCD (variable)
-/// - basis 4: DAYS360(PCD, NCD, method=true) (European 30/360; can differ from 360/frequency for
-///   some EOM schedules)
+/// - basis 4: European DAYS360 between coupon dates (can differ from 360/frequency for some
+///   end-of-month schedules)
 pub(crate) fn coupon_period_e(
     pcd: i32,
     ncd: i32,
@@ -134,7 +134,7 @@ pub(crate) fn coupon_period_e(
     let e = match basis {
         1 => (i64::from(ncd) - i64::from(pcd)) as f64,
         0 | 2 => 360.0 / freq,
-        4 => date_time::days360(pcd, ncd, true, system)? as f64,
+        4 => days_between(pcd, ncd, 4, system)? as f64,
         3 => 365.0 / freq,
         _ => return Err(ExcelError::Num),
     };

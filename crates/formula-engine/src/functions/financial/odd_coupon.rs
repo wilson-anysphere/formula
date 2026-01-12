@@ -255,8 +255,8 @@ fn coupon_schedule_from_maturity(
     Ok(dates_rev)
 }
 
-/// Coupon-period length `E` in days, following the same basis conventions as the regular bond
-/// functions (`COUP*`, `PRICE`, `YIELD`).
+/// Coupon-period length `E` in days for the "regular" coupon period used by the odd-coupon bond
+/// functions (ODDF* / ODDL*).
 fn coupon_period_e(
     pcd: i32,
     ncd: i32,
