@@ -24781,6 +24781,16 @@
       "id": "textjoin_e6e9683e4fb4"
     },
     {
+      "formula": "=TEXTSPLIT(\"a,b,c\",\",\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "text",
+        "TEXTSPLIT"
+      ],
+      "id": "textsplit_basic_5f8d2d2a14b1"
+    },
+    {
       "formula": "=TEXT(1234.567,\"#,##0.00\")",
       "outputCell": "C1",
       "inputs": [],
