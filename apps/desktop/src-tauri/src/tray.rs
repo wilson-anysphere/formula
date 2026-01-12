@@ -4,24 +4,24 @@ use tauri::{App, AppHandle, Emitter, Manager};
 
 use desktop::tray_status::TrayStatusState;
 
-const ITEM_NEW: &str = "new";
-const ITEM_OPEN: &str = "open";
-const ITEM_CHECK_UPDATES: &str = "check_updates";
-const ITEM_QUIT: &str = "quit";
+const TRAY_ITEM_NEW: &str = "new";
+const TRAY_ITEM_OPEN: &str = "open";
+const TRAY_ITEM_CHECK_UPDATES: &str = "check_updates";
+const TRAY_ITEM_QUIT: &str = "quit";
 
 pub fn init(app: &mut App) -> tauri::Result<()> {
     let handle = app.handle();
 
-    let new = MenuItem::with_id(handle, ITEM_NEW, "New Workbook", true, None::<&str>)?;
-    let open = MenuItem::with_id(handle, ITEM_OPEN, "Open…", true, None::<&str>)?;
+    let new = MenuItem::with_id(handle, TRAY_ITEM_NEW, "New Workbook", true, None::<&str>)?;
+    let open = MenuItem::with_id(handle, TRAY_ITEM_OPEN, "Open…", true, None::<&str>)?;
     let check_updates = MenuItem::with_id(
         handle,
-        ITEM_CHECK_UPDATES,
+        TRAY_ITEM_CHECK_UPDATES,
         "Check for Updates",
         true,
         None::<&str>,
     )?;
-    let quit = MenuItem::with_id(handle, ITEM_QUIT, "Quit", true, None::<&str>)?;
+    let quit = MenuItem::with_id(handle, TRAY_ITEM_QUIT, "Quit", true, None::<&str>)?;
 
     let menu = Menu::with_items(
         handle,
@@ -40,18 +40,18 @@ pub fn init(app: &mut App) -> tauri::Result<()> {
         .tooltip("Formula")
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
-            ITEM_NEW => {
+            TRAY_ITEM_NEW => {
                 let _ = app.emit("tray-new", ());
                 show_main_window(app);
             }
-            ITEM_OPEN => {
+            TRAY_ITEM_OPEN => {
                 let _ = app.emit("tray-open", ());
                 show_main_window(app);
             }
-            ITEM_CHECK_UPDATES => {
+            TRAY_ITEM_CHECK_UPDATES => {
                 desktop::updater::spawn_update_check(app, desktop::updater::UpdateCheckSource::Manual);
             }
-            ITEM_QUIT => {
+            TRAY_ITEM_QUIT => {
                 // Delegate quit-handling to the frontend so it can:
                 // - fire `Workbook_BeforeClose` macros
                 // - prompt for unsaved changes

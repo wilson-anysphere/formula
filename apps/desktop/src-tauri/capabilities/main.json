@@ -72,7 +72,6 @@
         "fire_worksheet_change",
         "fire_selection_change",
         "set_tray_status",
-        "open_external_url",
         "show_system_notification",
         "oauth_loopback_listen",
         "report_startup_webview_loaded",
