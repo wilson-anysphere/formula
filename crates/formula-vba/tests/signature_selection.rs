@@ -3,8 +3,10 @@
 use std::io::{Cursor, Write};
 
 use formula_vba::{
-    compress_container, content_normalized_data, verify_vba_digital_signature, VbaSignatureBinding,
-    VbaSignatureVerification,
+    compress_container, compute_vba_project_digest_v3, content_normalized_data,
+    forms_normalized_data, list_vba_digital_signatures, verify_vba_digital_signature,
+    verify_vba_signature_binding_with_stream_path, DigestAlg, VbaSignatureBinding,
+    VbaSignatureStreamKind, VbaSignatureVerification,
 };
 use md5::{Digest as _, Md5};
 
@@ -53,6 +55,105 @@ fn build_minimal_vba_project_bin_with_signature_streams(
     {
         let mut s = ole.create_stream("VBA/Module1").expect("module stream");
         s.write_all(&module_container).expect("write module");
+    }
+
+    for (path, bytes) in signature_streams {
+        let mut s = ole.create_stream(path).expect("signature stream");
+        s.write_all(bytes).expect("write signature");
+    }
+
+    ole.into_inner().into_inner()
+}
+
+fn build_minimal_vba_project_bin_v3_with_signature_streams(
+    signature_streams: &[(&str, &[u8])],
+    designer_payload: &[u8],
+) -> Vec<u8> {
+    let module_source = b"Sub Hello()\r\nEnd Sub\r\n";
+    let module_container = compress_container(module_source);
+    let userform_source = b"Sub FormHello()\r\nEnd Sub\r\n";
+    let userform_container = compress_container(userform_source);
+
+    // Minimal `dir` stream (decompressed form) with:
+    // - a v3-specific reference record,
+    // - one standard module, and
+    // - one UserForm module so FormsNormalizedData is non-empty.
+    let dir_decompressed = {
+        let mut out = Vec::new();
+
+        // Include a v3-specific reference record type so the transcript depends on it.
+        let libid_twiddled = b"REFCTRL-V3";
+        let reserved1: u32 = 0;
+        let reserved2: u16 = 0;
+        let mut reference_control = Vec::new();
+        reference_control.extend_from_slice(&(libid_twiddled.len() as u32).to_le_bytes());
+        reference_control.extend_from_slice(libid_twiddled);
+        reference_control.extend_from_slice(&reserved1.to_le_bytes());
+        reference_control.extend_from_slice(&reserved2.to_le_bytes());
+        push_record(&mut out, 0x002F, &reference_control);
+
+        // MODULENAME (standard module)
+        push_record(&mut out, 0x0019, b"Module1");
+        // MODULESTREAMNAME + reserved u16
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"Module1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+        // MODULETYPE (standard)
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes());
+        // MODULETEXTOFFSET
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+
+        // MODULENAME (UserForm/designer module referenced from PROJECT by BaseClass=)
+        push_record(&mut out, 0x0019, b"UserForm1");
+        // MODULESTREAMNAME + reserved u16
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"UserForm1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+        // MODULETYPE = UserForm (0x0003 per MS-OVBA).
+        push_record(&mut out, 0x0021, &0x0003u16.to_le_bytes());
+        // MODULETEXTOFFSET
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    ole.create_storage("UserForm1").expect("designer storage");
+
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(b"Name=\"VBAProject\"\r\nModule=Module1\r\nBaseClass=\"UserForm1\"\r\n")
+            .expect("write PROJECT");
+    }
+
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        let mut s = ole.create_stream("VBA/Module1").expect("module stream");
+        s.write_all(&module_container).expect("write module");
+    }
+    {
+        let mut s = ole
+            .create_stream("VBA/UserForm1")
+            .expect("userform module stream");
+        s.write_all(&userform_container)
+            .expect("write userform module");
+    }
+
+    // Designer payload so FormsNormalizedData is non-empty (and therefore bound by v3 digest).
+    {
+        let mut s = ole
+            .create_stream("UserForm1/Payload")
+            .expect("designer stream");
+        s.write_all(designer_payload)
+            .expect("write designer payload");
     }
 
     for (path, bytes) in signature_streams {
@@ -170,9 +271,105 @@ fn prefers_bound_verified_signature_stream_over_unbound_verified_candidate() {
 
     assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
     assert_eq!(sig.binding, VbaSignatureBinding::Bound);
-    assert!(
-        sig.stream_path.contains("DigitalSignatureEx"),
+    assert_eq!(
+        sig.stream_kind,
+        VbaSignatureStreamKind::DigitalSignatureEx,
         "expected bound DigitalSignatureEx stream to be selected, got {}",
         sig.stream_path
+    );
+}
+
+#[test]
+fn prefers_bound_verified_digital_signature_ext_over_unbound_verified_ex_candidate() {
+    // Build an unsigned v3-capable project (includes a v3 reference record and a designer storage)
+    // so `compute_vba_project_digest_v3` can derive a v3 digest transcript.
+    let unsigned = build_minimal_vba_project_bin_v3_with_signature_streams(&[], b"ABC");
+    let digest = compute_vba_project_digest_v3(&unsigned, DigestAlg::Sha256).expect("digest v3");
+    assert_eq!(digest.len(), 32, "SHA-256 digest must be 32 bytes");
+
+    // Create a bound `\x05DigitalSignatureExt` stream (digest matches the project).
+    let bound_content = build_spc_indirect_data_content_sha256(&digest);
+    let bound_pkcs7 = signature_test_utils::make_pkcs7_detached_signature(&bound_content);
+    let mut bound_stream = bound_content.clone();
+    bound_stream.extend_from_slice(&bound_pkcs7);
+
+    // Create an unbound `\x05DigitalSignatureEx` stream that is still cryptographically valid, but
+    // whose signed digest does not match the current project.
+    //
+    // Note: For legacy `DigitalSignatureEx` signatures, Office stores an MD5 digest (16 bytes) in
+    // `DigestInfo.digest` even when the DigestInfo algorithm OID is SHA-256 (MS-OSHARED §4.3). Use a
+    // wrong 16-byte digest to guarantee the signature is unbound under legacy binding rules.
+    let content_normalized = content_normalized_data(&unsigned).expect("content normalized data");
+    let content_hash_md5: [u8; 16] = Md5::digest(&content_normalized).into();
+    let forms = forms_normalized_data(&unsigned).expect("forms normalized data");
+    assert!(
+        !forms.is_empty(),
+        "expected FormsNormalizedData to be non-empty (designer payload should contribute)"
+    );
+    let mut h = Md5::new();
+    h.update(&content_normalized);
+    h.update(&forms);
+    let agile_hash_md5: [u8; 16] = h.finalize().into();
+
+    let mut wrong_md5 = content_hash_md5;
+    wrong_md5[0] = wrong_md5[0].wrapping_add(1);
+    if wrong_md5 == content_hash_md5 || wrong_md5 == agile_hash_md5 {
+        wrong_md5[1] ^= 0xFF;
+    }
+    // Avoid a leading 0x30 that could make the digest look like DER.
+    if wrong_md5[0] == 0x30 {
+        wrong_md5[0] = 0x31;
+    }
+
+    let unbound_content = build_spc_indirect_data_content_sha256(&wrong_md5);
+    let unbound_pkcs7 = signature_test_utils::make_pkcs7_detached_signature(&unbound_content);
+    let mut unbound_stream = unbound_content.clone();
+    unbound_stream.extend_from_slice(&unbound_pkcs7);
+
+    let streams = [
+        ("\u{0005}DigitalSignatureEx", unbound_stream.as_slice()),
+        ("\u{0005}DigitalSignatureExt", bound_stream.as_slice()),
+    ];
+    let signed = build_minimal_vba_project_bin_v3_with_signature_streams(&streams, b"ABC");
+
+    // Sanity-check: both signature streams are internally verified.
+    let listed = list_vba_digital_signatures(&signed).expect("list signatures");
+    assert_eq!(listed.len(), 2, "expected exactly two signature streams");
+    for sig in &listed {
+        assert_eq!(
+            sig.verification,
+            VbaSignatureVerification::SignedVerified,
+            "expected {} to be cryptographically verified",
+            sig.stream_path
+        );
+    }
+
+    // Ensure the intended binding split: Ext is bound via v3 digest, Ex is not bound.
+    let ext = listed
+        .iter()
+        .find(|s| s.stream_kind == VbaSignatureStreamKind::DigitalSignatureExt)
+        .expect("DigitalSignatureExt present");
+    let ext_binding = verify_vba_signature_binding_with_stream_path(&signed, &ext.stream_path, &ext.signature);
+    assert_eq!(ext_binding, VbaSignatureBinding::Bound);
+
+    let ex = listed
+        .iter()
+        .find(|s| s.stream_kind == VbaSignatureStreamKind::DigitalSignatureEx)
+        .expect("DigitalSignatureEx present");
+    let ex_binding = verify_vba_signature_binding_with_stream_path(&signed, &ex.stream_path, &ex.signature);
+    assert_eq!(ex_binding, VbaSignatureBinding::NotBound);
+
+    // Finally, assert the selection logic returns the verified+bound `DigitalSignatureExt` stream.
+    let chosen = verify_vba_digital_signature(&signed)
+        .expect("signature verification should succeed")
+        .expect("signature should be present");
+
+    assert_eq!(chosen.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(chosen.binding, VbaSignatureBinding::Bound);
+    assert_eq!(
+        chosen.stream_kind,
+        VbaSignatureStreamKind::DigitalSignatureExt,
+        "expected bound DigitalSignatureExt stream to be selected, got {}",
+        chosen.stream_path
     );
 }
