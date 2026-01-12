@@ -4364,6 +4364,25 @@ fn bytecode_backend_xlookup_xmatch_accept_array_literals() {
 }
 
 #[test]
+fn bytecode_backend_xlookup_accepts_array_if_not_found() {
+    let mut engine = Engine::new();
+
+    // When no match is found, XLOOKUP can return an array literal which should spill.
+    engine
+        .set_cell_formula("Sheet1", "A1", "=XLOOKUP(99,{1;2;3},{10;20;30},{100;200})")
+        .unwrap();
+
+    assert_eq!(
+        engine.bytecode_program_count(),
+        1,
+        "expected formula to compile to bytecode"
+    );
+
+    engine.recalculate_single_threaded();
+    assert_engine_spill_matches_ast(&engine, "=XLOOKUP(99,{1;2;3},{10;20;30},{100;200})", "A1");
+}
+
+#[test]
 fn bytecode_backend_xlookup_xmatch_accept_let_single_cell_reference_locals() {
     let mut engine = Engine::new();
 

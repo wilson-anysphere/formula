@@ -8532,7 +8532,10 @@ fn bytecode_expr_is_eligible_inner(
                 let return_array_ok = return_array_is_range_like
                     && bytecode_expr_is_eligible_inner(&args[2], true, true, lexical_scopes);
                 let if_not_found_ok = args.get(3).map_or(true, |arg| {
-                    bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
+                    // `if_not_found` is a scalar argument, but Excel/XLOOKUP allows it to be an
+                    // array literal/expression so the fallback can spill (e.g.
+                    // `XLOOKUP(99,{1;2},{10;20},{100;200})`).
+                    bytecode_expr_is_eligible_inner(arg, false, true, lexical_scopes)
                 });
                 let match_mode_ok = args.get(4).map_or(true, |arg| {
                     bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
