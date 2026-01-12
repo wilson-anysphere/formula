@@ -5441,10 +5441,10 @@ if (
     },
     goTo: {
       workbook: app.getSearchWorkbook(),
-      // `parseGoTo` operates on sheet *names* (what the user sees/types), but the app
-      // must navigate using stable sheet ids. Use display names for parsing, then resolve
-      // back to an id on navigation to avoid creating phantom sheets.
-      getCurrentSheetName: () => currentSheetDisplayName(),
+      // `parseGoTo` operates on sheet display names (what the user sees/types), but the app
+      // must navigate using stable sheet ids. Use the sheet display name for parsing, then
+      // resolve back to an id on navigation.
+      getCurrentSheetName: () => workbookSheetStore.getName(app.getCurrentSheetId()) ?? app.getCurrentSheetId(),
       onGoTo: (parsed) => {
         const { range } = parsed;
         const sheetId = resolveSheetIdFromName(parsed.sheetName);

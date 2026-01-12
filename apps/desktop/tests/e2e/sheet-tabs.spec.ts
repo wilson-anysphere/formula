@@ -492,6 +492,44 @@ test.describe("sheet tabs", () => {
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(true);
   });
 
+  test("command palette go to resolves renamed sheet display names back to stable sheet ids", async ({ page }) => {
+    await gotoDesktop(page);
+
+    // Rename Sheet1 -> RenamedSheet1 (display name changes, stable id stays Sheet1).
+    const sheet1Tab = page.getByTestId("sheet-tab-Sheet1");
+    await sheet1Tab.dblclick();
+    const renameInput = sheet1Tab.locator("input");
+    await expect(renameInput).toBeVisible();
+    await renameInput.fill("RenamedSheet1");
+    await renameInput.press("Enter");
+    await expect(sheet1Tab.locator(".sheet-tab__name")).toHaveText("RenamedSheet1");
+
+    // Create Sheet2 and switch away so the go-to command must resolve and navigate.
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      app.getDocument().setCellValue("Sheet2", "A1", "Hello from Sheet2");
+    });
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+
+    await page.getByTestId("sheet-tab-Sheet2").click();
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet2");
+
+    // Open command palette via the command registry (same path used by extensions).
+    await page.evaluate(async () => {
+      await (window as any).__formulaCommandRegistry.executeCommand("workbench.showCommandPalette");
+    });
+    await expect(page.getByTestId("command-palette-input")).toBeVisible();
+
+    await page.getByTestId("command-palette-input").fill("RenamedSheet1!A1");
+    await expect(page.locator('[data-testid="command-palette-list"] .command-palette__item').first()).toContainText(
+      "Go to RenamedSheet1!A1",
+    );
+    await page.keyboard.press("Enter");
+
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet1");
+    await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveAttribute("data-active", "true");
+  });
+
   test("switching sheets restores grid focus for immediate keyboard editing", async ({ page }) => {
     await gotoDesktop(page);
 
