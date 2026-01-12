@@ -18,6 +18,10 @@ The `MarketplaceStore` (created internally) reads these environment variables:
 - `MARKETPLACE_SCAN_ALLOWLIST` – CSV of scan finding IDs to ignore (e.g. `js.eval,js.child_process`)
 - `MARKETPLACE_REQUIRE_SCAN_PASSED=1` – if set, downloads and `latestVersion` selection require the
   scan status to be `passed` (pending/unknown are blocked).
+- `MARKETPLACE_EXTERNAL_SCANNER_ENABLED=1` – enable an optional external scanner hook.
+- `MARKETPLACE_EXTERNAL_SCANNER_CMD` – scanner command (e.g. `clamdscan` or `clamscan`).
+- `MARKETPLACE_EXTERNAL_SCANNER_ARGS` – JSON array of arguments (optional).
+- `MARKETPLACE_EXTERNAL_SCANNER_TIMEOUT_MS` – timeout (ms) for external scans (optional).
 
 ## Package scanning
 
@@ -30,7 +34,9 @@ The scan is intentionally conservative and includes:
 
 - Defense-in-depth manifest validation + entrypoint validation
 - SBOM-like file inventory (`files_json`, per-file sha256 + size) for both v1 and v2 packages
+- Native executable detection (ELF / PE / Mach-O signatures), shebang scripts, and NUL bytes in text-like files
 - Basic JS heuristics (e.g. `child_process`, `eval`, `new Function`, hex-escape obfuscation)
+- Optional external scanner hook (feature-flagged)
 
 Downloads are blocked when scan status is `failed`. Operators can tighten policy via
 `MARKETPLACE_REQUIRE_SCAN_PASSED=1`.
@@ -44,6 +50,7 @@ Downloads are blocked when scan status is `failed`. Operators can tighten policy
 - `X-Package-Scan-Status` (`pending|passed|failed|unknown`)
 - `X-Package-Files-Sha256` (sha256 of `extension_versions.files_json`)
 - `X-Package-Format-Version` (1 or 2)
+- `X-Package-Published-At`
 - `X-Publisher`
 - `X-Publisher-Key-Id` (when known)
 
@@ -77,6 +84,7 @@ Admin endpoints require `adminToken` to be configured when starting the server.
 - `POST /api/admin/publishers/:publisher/rotate-token`
 - `POST /api/admin/publishers/:publisher/rotate-key`
 - `POST /api/admin/publishers/:publisher/revoke`
+- `PATCH /api/admin/publishers/:publisher` (set `{ "verified": true|false }`)
 - `GET /api/admin/publishers/:publisher` (publisher record + key history)
 - `POST /api/publishers/:publisher/keys/:id/revoke` (revoke a specific signing key)
 

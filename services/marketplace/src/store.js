@@ -1,6 +1,7 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const crypto = require("node:crypto");
+const childProcess = require("node:child_process");
 const zlib = require("node:zlib");
 
 const { verifyBytesSignature, sha256 } = require("../../../shared/crypto/signing");
@@ -138,6 +139,120 @@ function parseCsvSet(value) {
       .map((v) => v.trim().toLowerCase())
       .filter(Boolean)
   );
+}
+
+function parseJsonEnvArray(name) {
+  const raw = process.env[name];
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((v) => String(v));
+  } catch {
+    return [];
+  }
+}
+
+function externalScannerConfigFromEnv() {
+  const enabled = ["1", "true", "yes"].includes(String(process.env.MARKETPLACE_EXTERNAL_SCANNER_ENABLED || "").toLowerCase());
+  const cmd = process.env.MARKETPLACE_EXTERNAL_SCANNER_CMD;
+  if (!enabled || !cmd) return null;
+  const args = parseJsonEnvArray("MARKETPLACE_EXTERNAL_SCANNER_ARGS");
+  const timeoutMsRaw = Number(process.env.MARKETPLACE_EXTERNAL_SCANNER_TIMEOUT_MS || "30000");
+  const timeoutMs = Number.isFinite(timeoutMsRaw) && timeoutMsRaw > 0 ? timeoutMsRaw : 30000;
+  return { cmd: String(cmd), args, timeoutMs };
+}
+
+function startsWithBytes(bytes, prefix) {
+  if (!bytes || bytes.length < prefix.length) return false;
+  for (let i = 0; i < prefix.length; i++) {
+    if (bytes[i] !== prefix[i]) return false;
+  }
+  return true;
+}
+
+function looksLikePeFile(bytes) {
+  if (!bytes || bytes.length < 64) return false;
+  if (bytes[0] !== 0x4d || bytes[1] !== 0x5a) return false;
+  const peOffset = bytes.readUInt32LE(0x3c);
+  if (!Number.isFinite(peOffset) || peOffset < 0 || peOffset > bytes.length - 4) return false;
+  return bytes[peOffset] === 0x50 && bytes[peOffset + 1] === 0x45 && bytes[peOffset + 2] === 0 && bytes[peOffset + 3] === 0;
+}
+
+function looksLikeExecutableBinary(bytes) {
+  if (startsWithBytes(bytes, Buffer.from([0x7f, 0x45, 0x4c, 0x46]))) return true;
+  if (looksLikePeFile(bytes)) return true;
+  const macho = [
+    [0xfe, 0xed, 0xfa, 0xce],
+    [0xfe, 0xed, 0xfa, 0xcf],
+    [0xce, 0xfa, 0xed, 0xfe],
+    [0xcf, 0xfa, 0xed, 0xfe],
+    [0xca, 0xfe, 0xba, 0xbe],
+    [0xbe, 0xba, 0xfe, 0xca],
+  ];
+  for (const sig of macho) {
+    if (startsWithBytes(bytes, Buffer.from(sig))) return true;
+  }
+  return false;
+}
+
+function isTextLikePath(filePath) {
+  const lower = String(filePath || "").toLowerCase();
+  const ext = path.extname(lower);
+  const base = path.basename(lower);
+  if (ext === "") {
+    return base === "license" || base === "notice" || base === "readme";
+  }
+  return new Set([".js", ".cjs", ".mjs", ".json", ".md", ".txt", ".css", ".html", ".svg", ".map"]).has(ext);
+}
+
+async function runExternalScanner(config, filePath) {
+  return new Promise((resolve) => {
+    let child = null;
+    try {
+      child = childProcess.spawn(config.cmd, [...config.args, filePath], {
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (error) {
+      resolve({ ok: false, details: { error: String(error?.message || error) } });
+      return;
+    }
+
+    const stdout = [];
+    const stderr = [];
+    child.stdout.on("data", (c) => stdout.push(Buffer.from(c)));
+    child.stderr.on("data", (c) => stderr.push(Buffer.from(c)));
+
+    let done = false;
+    const timeout = setTimeout(() => {
+      if (done) return;
+      done = true;
+      child.kill("SIGKILL");
+      resolve({ ok: false, details: { error: "External scanner timed out" } });
+    }, config.timeoutMs);
+
+    child.on("error", (error) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timeout);
+      resolve({ ok: false, details: { error: String(error?.message || error) } });
+    });
+
+    child.on("exit", (code, signal) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timeout);
+      resolve({
+        ok: code === 0 && !signal,
+        details: {
+          code,
+          signal,
+          stdout: Buffer.concat(stdout).toString("utf8").trim(),
+          stderr: Buffer.concat(stderr).toString("utf8").trim(),
+        },
+      });
+    });
+  });
 }
 
 function sha256Utf8(value) {
@@ -441,7 +556,7 @@ function validateEntrypoint(manifest, fileRecords) {
 }
 
 class MarketplaceStore {
-  constructor({ dataDir, scanAllowlist = null, requireScanPassedForDownload = null } = {}) {
+  constructor({ dataDir, scanAllowlist = null, requireScanPassedForDownload = null, externalScanner } = {}) {
     this.dataDir = dataDir;
     this.legacyStorePath = path.join(this.dataDir, "store.json");
     this.legacyPackageDir = path.join(this.dataDir, "packages");
@@ -459,6 +574,8 @@ class MarketplaceStore {
       requireScanPassedForDownload !== null && requireScanPassedForDownload !== undefined
         ? Boolean(requireScanPassedForDownload)
         : process.env.MARKETPLACE_REQUIRE_SCAN_PASSED === "1";
+
+    this.externalScanner = externalScanner === undefined ? externalScannerConfigFromEnv() : externalScanner;
   }
 
   async init() {
@@ -1140,6 +1257,40 @@ class MarketplaceStore {
     return this.getPublisher(publisher);
   }
 
+  async setPublisherVerified(publisher, { verified = true, actor = "admin", ip = null } = {}) {
+    if (!publisher || typeof publisher !== "string") throw new Error("publisher is required");
+
+    const now = nowIso();
+    await this.db.withTransaction((db) => {
+      const stmt = db.prepare(`SELECT publisher FROM publishers WHERE publisher = ? LIMIT 1`);
+      stmt.bind([publisher]);
+      const exists = stmt.step();
+      stmt.free();
+      if (!exists) throw new Error("Publisher not found");
+
+      db.run(`UPDATE publishers SET verified = ? WHERE publisher = ?`, [verified ? 1 : 0, publisher]);
+      db.run(`UPDATE extensions SET verified = ?, updated_at = ? WHERE publisher = ?`, [verified ? 1 : 0, now, publisher]);
+
+      const audit = db.prepare(
+        `INSERT INTO audit_log (id, actor, action, extension_id, version, ip, details_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      );
+      audit.run([
+        randomId(),
+        actor,
+        "publisher.verified",
+        null,
+        null,
+        ip,
+        safeJsonStringify({ publisher, verified: Boolean(verified) }),
+        now,
+      ]);
+      audit.free();
+    });
+
+    return this.getPublisher(publisher);
+  }
+
   async setExtensionFlags(id, { verified, featured, deprecated, blocked, malicious }, { actor = "admin", ip = null } = {}) {
     const now = new Date().toISOString();
     await this.db.withTransaction((db) => {
@@ -1779,6 +1930,39 @@ class MarketplaceStore {
       }
     }
 
+    if (bytes && bytes.length > 0 && this.externalScanner) {
+      let scanPath = null;
+      let tmpPath = null;
+      try {
+        scanPath = meta.packagePath ? resolvePackagePath(this.dataDir, meta.packagePath) : null;
+      } catch {
+        scanPath = null;
+      }
+      if (!scanPath) {
+        const scanDir = path.join(this.dataDir, ".scan");
+        await fs.mkdir(scanDir, { recursive: true });
+        tmpPath = path.join(scanDir, `${randomId()}.fextpkg`);
+        await fs.writeFile(tmpPath, bytes);
+        scanPath = tmpPath;
+      }
+
+      try {
+        const external = await runExternalScanner(this.externalScanner, scanPath);
+        if (!external.ok) {
+          scanData.findings = Array.isArray(scanData.findings) ? scanData.findings : [];
+          scanData.findings.push({
+            id: "scan.external",
+            message: "External scanner rejected package",
+            details: external.details,
+          });
+        }
+      } finally {
+        if (tmpPath) {
+          await fs.unlink(tmpPath).catch(() => {});
+        }
+      }
+    }
+
     const mergedFindings = [...findings, ...(scanData.findings || [])].filter((f) => !allowlist.has(f.id));
     const status = mergedFindings.length > 0 ? PACKAGE_SCAN_STATUS.FAILED : PACKAGE_SCAN_STATUS.PASSED;
     const scannedAt = nowIso();
@@ -1934,6 +2118,19 @@ class MarketplaceStore {
     for (const record of fileRecords) {
       if (!isAllowedFilePath(record.path)) {
         findings.push({ id: "package.disallowed_path", message: `Disallowed file type in extension package: ${record.path}` });
+      }
+    }
+
+    for (const [relPath, data] of files.entries()) {
+      if (!data || data.length === 0) continue;
+      if (looksLikeExecutableBinary(data)) {
+        findings.push({ id: "package.executable_binary", message: "File appears to be a native executable binary", file: relPath });
+      }
+      if (startsWithBytes(data, Buffer.from("#!"))) {
+        findings.push({ id: "package.shebang", message: "Executable script shebang is not allowed", file: relPath });
+      }
+      if (isTextLikePath(relPath) && data.includes(0)) {
+        findings.push({ id: "package.nul_byte", message: "Text-like file contains NUL byte(s)", file: relPath });
       }
     }
 
@@ -2372,7 +2569,7 @@ class MarketplaceStore {
         `SELECT e.publisher,
                 p.revoked AS publisher_revoked,
                 e.blocked, e.malicious,
-                v.signature_base64, v.sha256, v.package_path, v.yanked, v.format_version,
+                v.signature_base64, v.sha256, v.uploaded_at, v.package_path, v.yanked, v.format_version,
                 v.signing_key_id,
                 v.file_count,
                 v.files_json,
@@ -2427,6 +2624,7 @@ class MarketplaceStore {
         publisher: String(row.publisher),
         signatureBase64: String(row.signature_base64),
         sha256: String(row.sha256),
+        uploadedAt: row.uploaded_at ? String(row.uploaded_at) : null,
         formatVersion: Number(row.format_version || 1),
         signingKeyId: row.signing_key_id ? String(row.signing_key_id) : null,
         scanStatus: scanStatusRaw || "unknown",
@@ -2473,6 +2671,7 @@ class MarketplaceStore {
       scanStatus: meta.scanStatus,
       filesSha256: meta.filesSha256,
       packagePath: includePath ? fullPath : null,
+      uploadedAt: meta.uploadedAt,
     };
   }
 

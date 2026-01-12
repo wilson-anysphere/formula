@@ -369,6 +369,9 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
           "X-Package-Format-Version": String(pkgMeta.formatVersion ?? 1),
           "X-Publisher": pkgMeta.publisher,
         };
+        if (pkgMeta.uploadedAt) {
+          baseHeaders["X-Package-Published-At"] = String(pkgMeta.uploadedAt);
+        }
         if (pkgMeta.filesSha256) {
           baseHeaders["X-Package-Files-Sha256"] = String(pkgMeta.filesSha256);
         }
@@ -700,6 +703,44 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
         const keys = await store.getPublisherKeys(publisher, { includeRevoked: true });
         statusCode = 200;
         return sendJson(res, 200, { ...record, keys });
+      }
+
+      if (
+        req.method === "PATCH" &&
+        segments[0] === "api" &&
+        segments[1] === "admin" &&
+        segments[2] === "publishers" &&
+        segments.length === 4
+      ) {
+        route = "/api/admin/publishers/:publisher";
+        res.setHeader("Cache-Control", CACHE_CONTROL_NO_STORE);
+        if (!adminToken) {
+          statusCode = 404;
+          return sendJson(res, 404, { error: "Endpoint disabled" });
+        }
+        const token = getBearerToken(req);
+        if (token !== adminToken) {
+          statusCode = 403;
+          return sendJson(res, 403, { error: "Forbidden" });
+        }
+
+        const publisher = segments[3];
+        const body = await readJsonBody(req).catch(() => null);
+        if (body?.verified === undefined) {
+          statusCode = 400;
+          return sendJson(res, 400, { error: "verified is required" });
+        }
+        try {
+          const updated = await store.setPublisherVerified(publisher, { verified: body.verified, actor: "admin", ip });
+          statusCode = 200;
+          return sendJson(res, 200, updated);
+        } catch (error) {
+          if (String(error?.message || "").toLowerCase().includes("not found")) {
+            statusCode = 404;
+            return sendJson(res, 404, { error: "Publisher not found" });
+          }
+          throw error;
+        }
       }
 
       if (
