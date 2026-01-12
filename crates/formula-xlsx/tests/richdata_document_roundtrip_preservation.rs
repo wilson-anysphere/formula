@@ -5,6 +5,12 @@ use zip::write::FileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 fn build_synthetic_xlsx_with_richdata_parts() -> (Vec<u8>, RichDataFixtures) {
+    let root_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>
+"#;
+
     let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
@@ -46,6 +52,13 @@ fn build_synthetic_xlsx_with_richdata_parts() -> (Vec<u8>, RichDataFixtures) {
 "#
     .to_vec();
 
+    let rich_value_rel_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://example.com/rel" Target="../dummy.xml"/>
+</Relationships>
+"#
+    .to_vec();
+
     // Include RichData overrides. We intentionally omit the `styles.xml` override so the
     // `XlsxDocument` writer has to patch `[Content_Types].xml`, ensuring unknown overrides (our
     // RichData entries) survive those edits.
@@ -68,6 +81,9 @@ fn build_synthetic_xlsx_with_richdata_parts() -> (Vec<u8>, RichDataFixtures) {
 
     zip.start_file("[Content_Types].xml", options).unwrap();
     zip.write_all(content_types_xml).unwrap();
+
+    zip.start_file("_rels/.rels", options).unwrap();
+    zip.write_all(root_rels).unwrap();
 
     zip.start_file("xl/workbook.xml", options).unwrap();
     zip.write_all(workbook_xml).unwrap();
@@ -99,14 +115,7 @@ fn build_synthetic_xlsx_with_richdata_parts() -> (Vec<u8>, RichDataFixtures) {
         options,
     )
     .unwrap();
-    zip.write_all(
-        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://example.com/rel" Target="../dummy.xml"/>
-</Relationships>
-"#,
-    )
-    .unwrap();
+    zip.write_all(&rich_value_rel_rels).unwrap();
 
     let bytes = zip.finish().unwrap().into_inner();
     (
@@ -116,6 +125,7 @@ fn build_synthetic_xlsx_with_richdata_parts() -> (Vec<u8>, RichDataFixtures) {
             rich_value_rel,
             rich_value_types,
             rich_value_structure,
+            rich_value_rel_rels,
         },
     )
 }
@@ -126,6 +136,7 @@ struct RichDataFixtures {
     rich_value_rel: Vec<u8>,
     rich_value_types: Vec<u8>,
     rich_value_structure: Vec<u8>,
+    rich_value_rel_rels: Vec<u8>,
 }
 
 fn read_zip_part(archive: &mut ZipArchive<Cursor<Vec<u8>>>, name: &str) -> Vec<u8> {
@@ -172,6 +183,10 @@ fn xlsx_document_roundtrip_preserves_richdata_parts_byte_for_byte() {
     assert_eq!(
         read_zip_part(&mut archive, "xl/richData/richValueStructure.xml"),
         fixtures.rich_value_structure
+    );
+    assert_eq!(
+        read_zip_part(&mut archive, "xl/richData/_rels/richValueRel.xml.rels"),
+        fixtures.rich_value_rel_rels
     );
 
     // Ensure the RichData content type overrides remain present (even if `[Content_Types].xml` is
