@@ -3172,15 +3172,19 @@ if (
     app.setScroll(pane.scrollX ?? 0, pane.scrollY ?? 0);
   };
 
-  function renderSplitView() {
-    const split = layoutController.layout.splitView;
-    const ratio = typeof split.ratio === "number" ? split.ratio : 0.5;
+  const applySplitRatioCss = (ratio: number): void => {
     const clamped = Math.max(0.1, Math.min(0.9, ratio));
     const primaryPct = Math.round(clamped * 1000) / 10;
     const secondaryPct = Math.round((100 - primaryPct) * 10) / 10;
-    gridSplitEl.dataset.splitDirection = split.direction;
     gridSplitEl.style.setProperty("--split-primary-size", `${primaryPct}%`);
     gridSplitEl.style.setProperty("--split-secondary-size", `${secondaryPct}%`);
+  };
+
+  function renderSplitView() {
+    const split = layoutController.layout.splitView;
+    const ratio = typeof split.ratio === "number" ? split.ratio : 0.5;
+    gridSplitEl.dataset.splitDirection = split.direction;
+    applySplitRatioCss(ratio);
 
     if (split.direction === "none") {
       secondaryGridView?.destroy();
@@ -5680,22 +5684,25 @@ if (
     const pointerId = event.pointerId;
     gridSplitterEl.setPointerCapture(pointerId);
 
-    const updateRatio = (clientX: number, clientY: number) => {
-      const rect = gridSplitEl.getBoundingClientRect();
+    const rect = gridSplitEl.getBoundingClientRect();
+    const updateRatio = (clientX: number, clientY: number, { emit }: { emit: boolean }) => {
       const size = direction === "vertical" ? rect.width : rect.height;
       if (size <= 0) return;
       const offset = direction === "vertical" ? clientX - rect.left : clientY - rect.top;
       const ratio = Math.max(0.1, Math.min(0.9, offset / size));
-      // Dragging the splitter updates very frequently; avoid persisting on every event.
-      layoutController.setSplitRatio(ratio, { persist: false });
+      // Dragging the splitter updates very frequently; keep updates cheap:
+      // - update the in-memory layout without emitting (avoids full renderLayout() churn)
+      // - update CSS variables directly so the UI stays live while dragging
+      layoutController.setSplitRatio(ratio, { persist: false, emit });
+      applySplitRatioCss(ratio);
     };
 
-    updateRatio(event.clientX, event.clientY);
+    updateRatio(event.clientX, event.clientY, { emit: false });
 
     const onMove = (move: PointerEvent) => {
       if (move.pointerId !== pointerId) return;
       move.preventDefault();
-      updateRatio(move.clientX, move.clientY);
+      updateRatio(move.clientX, move.clientY, { emit: false });
     };
 
     const onUp = (up: PointerEvent) => {
@@ -5709,7 +5716,8 @@ if (
       // Ignore capture release errors.
       }
 
-      // Persist the final ratio (without emitting an additional change event).
+      // Emit a final layout change (one-time) and persist it so split ratio restores after reload.
+      updateRatio(up.clientX, up.clientY, { emit: true });
       persistLayoutNow();
     };
 
