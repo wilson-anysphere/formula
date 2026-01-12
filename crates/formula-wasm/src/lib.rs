@@ -586,6 +586,30 @@ fn engine_value_to_json(value: EngineValue) -> JsonValue {
     }
 }
 
+/// Convert an engine value into a scalar workbook `input` representation.
+///
+/// This differs from [`engine_value_to_json`] for text values: workbook inputs must preserve
+/// "quote prefix" escaping so strings that look like formulas/errors (or begin with an
+/// apostrophe) survive `toJson`/`fromJson` round-trips without changing semantics.
+///
+/// Returns `None` for values that cannot be represented in the legacy scalar input map (e.g.
+/// rich values like entities/records, lambdas, references). Callers should treat `None` as
+/// "remove from the sparse input map".
+fn engine_value_to_scalar_json_input(value: EngineValue) -> Option<JsonValue> {
+    match value {
+        EngineValue::Blank => None,
+        EngineValue::Bool(b) => Some(JsonValue::Bool(b)),
+        EngineValue::Number(n) => serde_json::Number::from_f64(n)
+            .map(JsonValue::Number)
+            .or_else(|| Some(JsonValue::String(ErrorKind::Num.as_code().to_string()))),
+        EngineValue::Text(s) => Some(JsonValue::String(encode_scalar_text_input(&s))),
+        EngineValue::Error(kind) => Some(JsonValue::String(kind.as_code().to_string())),
+        EngineValue::Array(arr) => engine_value_to_scalar_json_input(arr.top_left()),
+        // Rich/non-scalar values are not representable in the scalar input map.
+        _ => None,
+    }
+}
+
 fn engine_value_to_json_rich(value: EngineValue) -> JsonValue {
     match value {
         EngineValue::Entity(entity) => {
@@ -1790,12 +1814,11 @@ impl WorkbookState {
                     if let Some(formula) = after.formula.as_deref() {
                         sheet_cells.insert(address.clone(), JsonValue::String(formula.to_string()));
                     } else {
-                        let value = engine_value_to_json(after.value.clone());
-                        if value.is_null() {
+                        let Some(value) = engine_value_to_scalar_json_input(after.value.clone()) else {
                             sheet_cells.remove(&address);
-                        } else {
-                            sheet_cells.insert(address.clone(), value);
-                        }
+                            continue;
+                        };
+                        sheet_cells.insert(address.clone(), value);
                     }
                 }
             }
@@ -2496,7 +2519,7 @@ impl WasmWorkbook {
                     .sheets
                     .get_mut(&sheet_name)
                     .expect("sheet just ensured must exist");
-                sheet_cells.insert(address, cell_value_to_json(&cell.value));
+                sheet_cells.insert(address, cell_value_to_scalar_json_input(&cell.value));
             }
         }
 
@@ -3296,6 +3319,49 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn from_xlsx_bytes_encodes_literal_text_inputs_that_look_like_formulas_or_errors() {
+        use std::io::Cursor;
+
+        let mut workbook = formula_model::Workbook::new();
+        let sheet_id = workbook.add_sheet("Sheet1").unwrap();
+        let sheet = workbook.sheet_mut(sheet_id).unwrap();
+        sheet
+            .set_value_a1("A1", CellValue::String("=hello".to_string()))
+            .unwrap();
+        sheet
+            .set_value_a1("A2", CellValue::String("'hello".to_string()))
+            .unwrap();
+        sheet
+            .set_value_a1("A3", CellValue::String("#REF!".to_string()))
+            .unwrap();
+
+        let mut cursor = Cursor::new(Vec::new());
+        formula_xlsx::write_workbook_to_writer(&workbook, &mut cursor).unwrap();
+        let bytes = cursor.into_inner();
+
+        let wb = WasmWorkbook::from_xlsx_bytes(&bytes).unwrap();
+
+        assert_eq!(
+            wb.inner.engine.get_cell_value(DEFAULT_SHEET, "A1"),
+            EngineValue::Text("=hello".to_string())
+        );
+        assert_eq!(
+            wb.inner.engine.get_cell_value(DEFAULT_SHEET, "A2"),
+            EngineValue::Text("'hello".to_string())
+        );
+
+        let json_str = wb.to_json().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        // These values must be quote-prefixed in the workbook JSON input map so `fromJson`
+        // round-trips preserve them as literal text (not formulas/errors).
+        assert_eq!(parsed["sheets"]["Sheet1"]["cells"]["A1"], json!("'=hello"));
+        assert_eq!(parsed["sheets"]["Sheet1"]["cells"]["A2"], json!("''hello"));
+        assert_eq!(parsed["sheets"]["Sheet1"]["cells"]["A3"], json!("'#REF!"));
+    }
+
+    #[test]
     fn localized_formula_input_is_canonicalized_and_persisted() {
         let mut wb = WasmWorkbook::new();
         assert!(wb.set_locale("de-DE".to_string()));
@@ -3495,6 +3561,39 @@ mod tests {
             Some(&EngineValue::Text("Alice".to_string()))
         );
         assert_eq!(record.fields.get("Active"), Some(&EngineValue::Bool(true)));
+    }
+
+    #[test]
+    fn apply_operation_preserves_quote_prefixed_text_inputs() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+
+        // Literal text that looks like a formula.
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!("'=hello"))
+            .unwrap();
+        // Literal text beginning with an apostrophe (must be double-escaped in inputs).
+        wb.set_cell_internal(DEFAULT_SHEET, "A2", json!("''hello"))
+            .unwrap();
+
+        wb.apply_operation_internal(EditOpDto::InsertRows {
+            sheet: DEFAULT_SHEET.to_string(),
+            row: 0,
+            count: 1,
+        })
+        .unwrap();
+
+        assert_eq!(
+            wb.engine.get_cell_value(DEFAULT_SHEET, "A2"),
+            EngineValue::Text("=hello".to_string())
+        );
+        assert_eq!(
+            wb.engine.get_cell_value(DEFAULT_SHEET, "A3"),
+            EngineValue::Text("'hello".to_string())
+        );
+
+        let sheet_cells = wb.sheets.get(DEFAULT_SHEET).unwrap();
+        assert_eq!(sheet_cells.get("A2"), Some(&json!("'=hello")));
+        assert_eq!(sheet_cells.get("A3"), Some(&json!("''hello")));
+        assert!(!sheet_cells.contains_key("A1"));
     }
 
     #[test]
