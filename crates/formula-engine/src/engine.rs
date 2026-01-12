@@ -7108,8 +7108,6 @@ enum BytecodeLocalBindingKind {
     /// Range reference value.
     Range,
     /// Array literal constant value.
-    ///
-    /// Note: bytecode array literals are currently numeric-only (f64 + NaN for blanks/non-numeric).
     ArrayLiteral,
 }
 
@@ -7118,8 +7116,8 @@ fn bytecode_expr_is_eligible(expr: &bytecode::Expr) -> bool {
     // Top-level formulas use dynamic reference dereference, so range references are eligible and
     // may spill (e.g. `=A1:A3` / `=A1:A3+1`).
     //
-    // Array literals are also eligible at the top-level since the bytecode backend supports
-    // spilling array results.
+    // Array literals are also eligible in top-level contexts now that the bytecode backend can
+    // represent and spill mixed-type arrays (e.g. `={1,2;3,4}`).
     bytecode_expr_is_eligible_inner(expr, true, true, &mut lexical_scopes)
 }
 
@@ -7360,8 +7358,8 @@ fn bytecode_expr_is_eligible_inner(
             bytecode::ast::UnaryOp::Plus | bytecode::ast::UnaryOp::Neg => {
                 bytecode_expr_is_eligible_inner(expr, allow_range, allow_array_literals, lexical_scopes)
             }
-            // Implicit intersection accepts ranges, but should not treat array literals as eligible
-            // until the bytecode backend can represent typed/mixed arrays.
+            // Implicit intersection is only defined for references (ranges) in the bytecode VM.
+            // Keep array literals ineligible so `@{...}` falls back to the AST evaluator.
             bytecode::ast::UnaryOp::ImplicitIntersection => {
                 bytecode_expr_is_eligible_inner(expr, true, false, lexical_scopes)
             }
@@ -7508,9 +7506,9 @@ fn bytecode_expr_is_eligible_inner(
             | bytecode::ast::Function::Count => args
                 .iter()
                 .all(|arg| bytecode_expr_is_eligible_inner(arg, true, true, lexical_scopes)),
-            bytecode::ast::Function::CountA | bytecode::ast::Function::CountBlank => args.iter().all(|arg| {
-                bytecode_expr_is_eligible_inner(arg, true, true, lexical_scopes)
-            }),
+            bytecode::ast::Function::CountA | bytecode::ast::Function::CountBlank => args
+                .iter()
+                .all(|arg| bytecode_expr_is_eligible_inner(arg, true, true, lexical_scopes)),
             bytecode::ast::Function::SumIf | bytecode::ast::Function::AverageIf => {
                 if args.len() != 2 && args.len() != 3 {
                     return false;

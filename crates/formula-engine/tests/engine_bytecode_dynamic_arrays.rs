@@ -129,3 +129,66 @@ fn bytecode_backend_spills_comparison_results() {
     assert_eq!(engine.get_cell_value("Sheet1", "B3"), Value::Bool(false));
 }
 
+#[test]
+fn bytecode_backend_spills_array_literal() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "C1", "={1,2;3,4}")
+        .unwrap();
+
+    // Ensure we're exercising the bytecode backend.
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "C1").expect("spill range");
+    assert_eq!(start, parse_a1("C1").unwrap());
+    assert_eq!(end, parse_a1("D2").unwrap());
+
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "D1"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "D2"), Value::Number(4.0));
+}
+
+#[test]
+fn bytecode_backend_spills_array_literal_plus_scalar() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "C1", "={1,2;3,4}+1")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "C1").expect("spill range");
+    assert_eq!(start, parse_a1("C1").unwrap());
+    assert_eq!(end, parse_a1("D2").unwrap());
+
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "D1"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(4.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "D2"), Value::Number(5.0));
+}
+
+#[test]
+fn bytecode_backend_spills_let_bound_array_literal() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "C1", "=LET(a,{1,2;3,4},a+1)")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "C1").expect("spill range");
+    assert_eq!(start, parse_a1("C1").unwrap());
+    assert_eq!(end, parse_a1("D2").unwrap());
+
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "D1"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(4.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "D2"), Value::Number(5.0));
+}

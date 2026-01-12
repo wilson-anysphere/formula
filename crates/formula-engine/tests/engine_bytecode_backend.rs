@@ -1164,12 +1164,15 @@ fn bytecode_backend_supports_counta_and_countblank_array_literals() {
         .set_cell_formula("Sheet1", "A2", "=COUNTBLANK({\"a\",TRUE,\"\"})")
         .unwrap();
 
+    // Ensure these formulas compile to bytecode.
     assert_eq!(engine.bytecode_program_count(), 2);
 
     engine.recalculate_single_threaded();
 
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(3.0));
     assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(1.0));
+    assert_engine_matches_ast(&engine, "=COUNTA({\"a\",TRUE,\"\"})", "A1");
+    assert_engine_matches_ast(&engine, "=COUNTBLANK({\"a\",TRUE,\"\"})", "A2");
 }
 
 #[test]
