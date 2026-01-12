@@ -11,7 +11,7 @@ describe("Tauri capabilities", () => {
     return capability.permissions as unknown[];
   }
 
-  it("uses the application allow-invoke permission (not core:allow-invoke)", () => {
+  it("uses the application allow-invoke permission (and does not grant unscoped core:allow-invoke)", () => {
     const permissions = readPermissions();
 
     // Application commands (`#[tauri::command]`) are allowlisted via `src-tauri/permissions/allow-invoke.json`
@@ -19,13 +19,32 @@ describe("Tauri capabilities", () => {
     expect(permissions).toContain("allow-invoke");
 
     // Some Tauri toolchains expose a `core:allow-invoke` permission for per-command allowlisting.
-    // This repo intentionally does not use it.
-    const hasAllowInvoke = permissions.some(
-      (permission) =>
-        permission === "core:allow-invoke" ||
-        (Boolean(permission) && typeof permission === "object" && (permission as any).identifier === "core:allow-invoke"),
+    //
+    // If present, it must be scoped via the object form (explicit allowlist). The plain string
+    // form would grant the default/unscoped allowlist, which is not acceptable for hardened
+    // desktop builds.
+    expect(permissions).not.toContain("core:allow-invoke");
+    const coreAllowInvoke = permissions.find(
+      (permission): permission is { identifier: string; allow?: unknown } =>
+        Boolean(permission) && typeof permission === "object" && (permission as any).identifier === "core:allow-invoke",
     );
-    expect(hasAllowInvoke).toBe(false);
+
+    if (coreAllowInvoke) {
+      const allow = (coreAllowInvoke as any).allow;
+      expect(Array.isArray(allow)).toBe(true);
+      expect((allow as unknown[]).length).toBeGreaterThan(0);
+
+      const commands = (allow as any[])
+        .map((scope) => scope?.command)
+        .filter((name): name is string => typeof name === "string");
+      expect(new Set(commands).size).toBe(commands.length);
+
+      for (const cmd of commands) {
+        expect(cmd.trim()).not.toBe("");
+        // Disallow wildcard/pattern scopes; we want explicit command names only.
+        expect(cmd).not.toContain("*");
+      }
+    }
   });
 
   it("defines an explicit invoke command allowlist (no wildcards)", () => {
