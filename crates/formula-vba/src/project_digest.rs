@@ -1,3 +1,4 @@
+use md5::Md5;
 use sha1::Sha1;
 use sha2::Sha256;
 use sha2::Digest as _;
@@ -7,11 +8,15 @@ use crate::{OleFile, signature::SignatureError};
 /// Digest algorithm used by MS-OVBA VBA project signatures.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DigestAlg {
+    /// MD5 (16 bytes). Per MS-OSHARED §4.3 this is the VBA project "source hash" algorithm even
+    /// when the PKCS#7/CMS signature uses SHA-1/SHA-256.
+    Md5,
     Sha1,
     Sha256,
 }
 
 enum Hasher {
+    Md5(Md5),
     Sha1(Sha1),
     Sha256(Sha256),
 }
@@ -19,6 +24,7 @@ enum Hasher {
 impl Hasher {
     fn new(alg: DigestAlg) -> Self {
         match alg {
+            DigestAlg::Md5 => Self::Md5(Md5::new()),
             DigestAlg::Sha1 => Self::Sha1(Sha1::new()),
             DigestAlg::Sha256 => Self::Sha256(Sha256::new()),
         }
@@ -26,6 +32,7 @@ impl Hasher {
 
     fn update(&mut self, bytes: &[u8]) {
         match self {
+            Hasher::Md5(h) => h.update(bytes),
             Hasher::Sha1(h) => h.update(bytes),
             Hasher::Sha256(h) => h.update(bytes),
         }
@@ -33,6 +40,7 @@ impl Hasher {
 
     fn finalize(self) -> Vec<u8> {
         match self {
+            Hasher::Md5(h) => h.finalize().to_vec(),
             Hasher::Sha1(h) => h.finalize().to_vec(),
             Hasher::Sha256(h) => h.finalize().to_vec(),
         }
@@ -94,4 +102,3 @@ fn is_signature_component(component: &str) -> bool {
         "DigitalSignature" | "DigitalSignatureEx" | "DigitalSignatureExt"
     )
 }
-

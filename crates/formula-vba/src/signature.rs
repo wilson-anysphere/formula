@@ -387,23 +387,21 @@ pub fn verify_vba_digital_signature_bound(
         debug.hash_algorithm_oid = Some(signed.digest_algorithm_oid.clone());
         debug.signed_digest = Some(signed.digest.clone());
 
-        if let Some(alg) = digest_alg_from_oid_str(&signed.digest_algorithm_oid) {
-            debug.hash_algorithm_name = Some(match alg {
-                DigestAlg::Sha1 => "SHA-1".to_owned(),
-                DigestAlg::Sha256 => "SHA-256".to_owned(),
-            });
+        debug.hash_algorithm_name =
+            digest_name_from_oid_str(&signed.digest_algorithm_oid).map(str::to_owned);
 
-            if let Ok(computed) = compute_vba_project_digest(vba_project_bin, alg) {
-                debug.computed_digest = Some(computed.clone());
+        // MS-OSHARED §4.3: the VBA project digest is always MD5 (16 bytes), even if the PKCS#7
+        // signature uses SHA-1/SHA-256 and even if the DigestInfo algorithm OID indicates SHA-256.
+        if let Ok(computed) = compute_vba_project_digest(vba_project_bin, DigestAlg::Md5) {
+            debug.computed_digest = Some(computed.clone());
 
-                if signature.verification == VbaSignatureVerification::SignedVerified {
-                    let binding = if computed == signed.digest {
-                        VbaProjectBindingVerification::BoundVerified(debug)
-                    } else {
-                        VbaProjectBindingVerification::BoundMismatch(debug)
-                    };
-                    return Ok(Some(VbaDigitalSignatureBound { signature, binding }));
-                }
+            if signature.verification == VbaSignatureVerification::SignedVerified {
+                let binding = if computed == signed.digest {
+                    VbaProjectBindingVerification::BoundVerified(debug)
+                } else {
+                    VbaProjectBindingVerification::BoundMismatch(debug)
+                };
+                return Ok(Some(VbaDigitalSignatureBound { signature, binding }));
             }
         }
     }
@@ -600,11 +598,9 @@ pub fn verify_vba_signature_binding(vba_project_bin: &[u8], signature: &[u8]) ->
             _ => return VbaSignatureBinding::Unknown,
         };
 
-        let Some(alg) = digest_alg_from_oid_str(&signed.digest_algorithm_oid) else {
-            return VbaSignatureBinding::Unknown;
-        };
-
-        let Ok(computed) = compute_vba_project_digest(vba_project_bin, alg) else {
+        // MS-OSHARED §4.3: the VBA project digest is always MD5 (16 bytes), even if the PKCS#7
+        // signature uses SHA-1/SHA-256 and even if the DigestInfo algorithm OID indicates SHA-256.
+        let Ok(computed) = compute_vba_project_digest(vba_project_bin, DigestAlg::Md5) else {
             return VbaSignatureBinding::Unknown;
         };
 
@@ -634,11 +630,11 @@ pub fn verify_vba_signature_certificate_trust(
     }
     verify_pkcs7_trust(signature, &options.trusted_root_certs_der)
 }
-
-fn digest_alg_from_oid_str(oid: &str) -> Option<DigestAlg> {
+fn digest_name_from_oid_str(oid: &str) -> Option<&'static str> {
     match oid {
-        "1.3.14.3.2.26" => Some(DigestAlg::Sha1),
-        "2.16.840.1.101.3.4.2.1" => Some(DigestAlg::Sha256),
+        "1.2.840.113549.2.5" => Some("MD5"),
+        "1.3.14.3.2.26" => Some("SHA-1"),
+        "2.16.840.1.101.3.4.2.1" => Some("SHA-256"),
         _ => None,
     }
 }
@@ -882,18 +878,6 @@ fn parse_pkcs7_with_offset(signature: &[u8]) -> Option<(openssl::pkcs7::Pkcs7, u
         }
     }
 
-    // Use our BER/DER tolerant SignedData locator (handles indefinite-length encodings). This avoids
-    // mis-parsing inner SEQUENCEs as PKCS#7 when scanning a BER stream.
-    if let Some((offset, len)) = crate::authenticode::locate_pkcs7_signed_data_bounds(signature) {
-        let end = offset.saturating_add(len);
-        if end <= signature.len() {
-            let slice = &signature[offset..end];
-            if let Ok(pkcs7) = Pkcs7::from_der(slice) {
-                return Some((pkcs7, offset));
-            }
-        }
-    }
-
     for start in 0..signature.len() {
         if signature[start] != 0x30 {
             continue;
@@ -918,7 +902,23 @@ fn parse_pkcs7_with_offset(signature: &[u8]) -> Option<(openssl::pkcs7::Pkcs7, u
         }
     }
 
-    best
+    if let Some(best) = best {
+        return Some(best);
+    }
+
+    // Fallback: use our BER/DER tolerant SignedData locator (handles indefinite-length encodings).
+    // We only do this if the definite-length scanner didn't find any candidates.
+    if let Some((offset, len)) = crate::authenticode::locate_pkcs7_signed_data_bounds(signature) {
+        let end = offset.saturating_add(len);
+        if end <= signature.len() {
+            let slice = &signature[offset..end];
+            if let Ok(pkcs7) = Pkcs7::from_der(slice) {
+                return Some((pkcs7, offset));
+            }
+        }
+    }
+
+    None
 }
 
 #[cfg(not(target_arch = "wasm32"))]

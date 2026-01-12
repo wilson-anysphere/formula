@@ -196,7 +196,7 @@ fn build_spc_indirect_data_content_sha1(project_digest: &[u8]) -> Vec<u8> {
 fn bound_signature_sets_binding_bound() {
     let module1 = b"module1-bytes";
     let unsigned = build_minimal_vba_project_bin(module1, None);
-    let digest = compute_vba_project_digest(&unsigned, DigestAlg::Sha1).expect("digest");
+    let digest = compute_vba_project_digest(&unsigned, DigestAlg::Md5).expect("digest");
 
     let signed_content = build_spc_indirect_data_content_sha1(&digest);
     let pkcs7 = make_pkcs7_detached_signature(&signed_content);
@@ -229,7 +229,7 @@ fn bound_signature_sets_binding_bound() {
 fn tampering_project_changes_binding_but_not_pkcs7_verification() {
     let module1 = b"module1-bytes";
     let unsigned = build_minimal_vba_project_bin(module1, None);
-    let digest = compute_vba_project_digest(&unsigned, DigestAlg::Sha1).expect("digest");
+    let digest = compute_vba_project_digest(&unsigned, DigestAlg::Md5).expect("digest");
 
     let signed_content = build_spc_indirect_data_content_sha1(&digest);
     let pkcs7 = make_pkcs7_detached_signature(&signed_content);
@@ -265,7 +265,7 @@ fn tampering_project_changes_binding_but_not_pkcs7_verification() {
 fn embedded_pkcs7_content_is_used_for_binding() {
     let module1 = b"module1-bytes";
     let unsigned = build_minimal_vba_project_bin(module1, None);
-    let digest = compute_vba_project_digest(&unsigned, DigestAlg::Sha1).expect("digest");
+    let digest = compute_vba_project_digest(&unsigned, DigestAlg::Md5).expect("digest");
 
     let signed_content = build_spc_indirect_data_content_sha1(&digest);
     let pkcs7 = make_pkcs7_signed_message(&signed_content);

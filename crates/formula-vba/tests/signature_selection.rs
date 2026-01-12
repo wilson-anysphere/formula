@@ -110,7 +110,7 @@ fn prefers_bound_verified_signature_stream_over_unbound_verified_candidate() {
 
     // Build an unsigned project first to compute the digest that Office would sign.
     let unsigned = build_minimal_vba_project_bin_with_signature_streams(module1, &[]);
-    let digest = compute_vba_project_digest(&unsigned, DigestAlg::Sha1).expect("digest");
+    let digest = compute_vba_project_digest(&unsigned, DigestAlg::Md5).expect("digest");
 
     // Create a bound signature stream (digest matches the project).
     let bound_content = build_spc_indirect_data_content_sha1(&digest);
@@ -147,4 +147,3 @@ fn prefers_bound_verified_signature_stream_over_unbound_verified_candidate() {
         sig.stream_path
     );
 }
-
