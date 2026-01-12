@@ -434,7 +434,7 @@ function pregrantPermissions(extensionId: string, permissions: string[]): void {
   try {
     if (typeof localStorage === "undefined") return;
     const key = "formula.extensionHost.permissions";
-    const existing = (() => {
+    let existing: any = (() => {
       try {
         const raw = localStorage.getItem(key);
         return raw ? JSON.parse(raw) : {};
@@ -442,7 +442,12 @@ function pregrantPermissions(extensionId: string, permissions: string[]): void {
         return {};
       }
     })();
-    const record = { ...(existing?.[extensionId] ?? {}) };
+    if (!existing || typeof existing !== "object" || Array.isArray(existing)) {
+      existing = {};
+    }
+    const current = existing?.[extensionId];
+    const record =
+      current && typeof current === "object" && !Array.isArray(current) ? { ...current } : {};
     for (const perm of permissions) {
       record[String(perm)] = true;
     }
