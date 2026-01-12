@@ -75,6 +75,73 @@ pub enum Workbook {
     Xlsb(xlsb::XlsbWorkbook),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WorkbookFormat {
+    Xlsx,
+    Xls,
+    Xlsb,
+}
+
+fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    match ext.as_str() {
+        "xlsx" | "xlsm" => Ok(WorkbookFormat::Xlsx),
+        "xls" => Ok(WorkbookFormat::Xls),
+        "xlsb" => Ok(WorkbookFormat::Xlsb),
+        other => Err(Error::UnsupportedExtension {
+            path: path.to_path_buf(),
+            extension: other.to_string(),
+        }),
+    }
+}
+
+/// Open a spreadsheet workbook from disk directly into a [`formula_model::Workbook`].
+///
+/// This is a faster, lower-memory alternative to [`open_workbook`] for read-only/import
+/// workflows:
+/// - For `.xlsx`/`.xlsm`, this uses the streaming reader in `formula-xlsx` and avoids inflating
+///   the entire OPC package into memory.
+/// - For `.xls`, this returns the imported model workbook from `formula-xls`.
+/// - For `.xlsb`, this converts the parsed workbook into a model workbook.
+pub fn open_workbook_model(path: impl AsRef<Path>) -> Result<formula_model::Workbook, Error> {
+    use std::fs::File;
+
+    let path = path.as_ref();
+    match workbook_format(path)? {
+        WorkbookFormat::Xlsx => {
+            let file = File::open(path).map_err(|source| Error::OpenIo {
+                path: path.to_path_buf(),
+                source,
+            })?;
+            xlsx::read_workbook_from_reader(file).map_err(|source| Error::OpenXlsx {
+                path: path.to_path_buf(),
+                source,
+            })
+        }
+        WorkbookFormat::Xls => xls::import_xls_path(path)
+            .map(|result| result.workbook)
+            .map_err(|source| Error::OpenXls {
+                path: path.to_path_buf(),
+                source,
+            }),
+        WorkbookFormat::Xlsb => {
+            let wb = xlsb::XlsbWorkbook::open(path).map_err(|source| Error::OpenXlsb {
+                path: path.to_path_buf(),
+                source,
+            })?;
+            xlsb_to_model_workbook(&wb).map_err(|source| Error::OpenXlsb {
+                path: path.to_path_buf(),
+                source,
+            })
+        }
+    }
+}
+
 /// Open a spreadsheet workbook based on file extension.
 ///
 /// Currently supports:
@@ -83,13 +150,8 @@ pub enum Workbook {
 /// - `.xlsx` / `.xlsm` (via `formula-xlsx`)
 pub fn open_workbook(path: impl AsRef<Path>) -> Result<Workbook, Error> {
     let path = path.as_ref();
-    let ext = path
-        .extension()
-        .and_then(|s| s.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    match ext.as_str() {
-        "xlsx" | "xlsm" => {
+    match workbook_format(path)? {
+        WorkbookFormat::Xlsx => {
             let bytes = std::fs::read(path).map_err(|source| Error::OpenIo {
                 path: path.to_path_buf(),
                 source,
@@ -101,22 +163,18 @@ pub fn open_workbook(path: impl AsRef<Path>) -> Result<Workbook, Error> {
                 })?;
             Ok(Workbook::Xlsx(package))
         }
-        "xls" => xls::import_xls_path(path)
+        WorkbookFormat::Xls => xls::import_xls_path(path)
             .map(Workbook::Xls)
             .map_err(|source| Error::OpenXls {
                 path: path.to_path_buf(),
                 source,
             }),
-        "xlsb" => xlsb::XlsbWorkbook::open(path)
+        WorkbookFormat::Xlsb => xlsb::XlsbWorkbook::open(path)
             .map(Workbook::Xlsb)
             .map_err(|source| Error::OpenXlsb {
                 path: path.to_path_buf(),
                 source,
             }),
-        other => Err(Error::UnsupportedExtension {
-            path: path.to_path_buf(),
-            extension: other.to_string(),
-        }),
     }
 }
 
