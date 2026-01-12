@@ -546,6 +546,9 @@ test("clipboard provider", async (t) => {
         assert.ok(item instanceof MockClipboardItem);
 
         const keys = Object.keys(item.data).sort();
+        // The WebView ClipboardItem write is best-effort and currently only includes
+        // HTML + plain text. Rich formats like RTF are written via the native
+        // `clipboard_write` command above.
         assert.deepEqual(keys, ["text/html", "text/plain"].sort());
       }
     );
