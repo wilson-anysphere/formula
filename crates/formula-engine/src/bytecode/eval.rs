@@ -644,6 +644,48 @@ mod tests {
     }
 
     #[test]
+    fn vm_choose_truncates_non_integer_index_toward_zero() {
+        let origin = CellCoord::new(0, 0);
+        let locale = crate::LocaleConfig::en_us();
+        let grid = super::super::grid::ColumnarGrid::new(1, 1);
+
+        // Excel truncates CHOOSE's index (toward zero).
+        let expr = super::super::parse_formula("=CHOOSE(1.9, 10, 20)", origin).expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
+        assert_eq!(value, Value::Number(10.0));
+
+        // After truncation this becomes 0, which is out of range.
+        let expr = super::super::parse_formula("=CHOOSE(0.9, 10, 20)", origin).expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
+        assert_eq!(value, Value::Error(super::super::ErrorKind::Value));
+    }
+
+    #[test]
+    fn vm_choose_propagates_index_error_without_evaluating_choices() {
+        let origin = CellCoord::new(0, 0);
+        let locale = crate::LocaleConfig::en_us();
+
+        // If the index expression is an error, CHOOSE should not evaluate any choice branches.
+        let expr = super::super::parse_formula("=CHOOSE(1/0, A1, 7)", origin).expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+
+        let grid = CountingGrid::new(10, 10);
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
+
+        assert_eq!(value, Value::Error(super::super::value::ErrorKind::Div0));
+        assert_eq!(
+            grid.reads(),
+            0,
+            "CHOOSE branches should not be evaluated when index is an error"
+        );
+    }
+
+    #[test]
     fn vm_short_circuits_ifs_branches() {
         let origin = CellCoord::new(0, 0);
         let expr = super::super::parse_formula("=IFS(FALSE, 1/0, TRUE, 9)", origin).expect("parse");
