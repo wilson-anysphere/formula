@@ -3534,29 +3534,45 @@ export class CanvasGridRenderer {
     (gridCtx as any).setLineDash?.([]);
 
     const drawCellBorders = () => {
-      // Custom per-cell borders (Excel-like), drawn on top of gridlines.
-      //
-      // Shared-edge conflict resolution:
-      // - larger effective width (border.width * zoom) wins
-      // - ties prefer the "right/bottom" side for deterministic output.
-      //
-      // Merged cells: we skip border segments that land on interior merged gridlines.
-      // Cells inside a merged region use the anchor cell's style for boundary borders.
-      type BorderBucket = {
-        style: CellBorderSpec["style"];
-        color: string;
-        lineWidth: number;
-        dash: number[];
-        segments: number[];
-        lineCap: CanvasLineCap;
+      // Excel-like border rendering:
+      // - Borders are collapsed so shared edges are drawn once (deterministic conflict resolution).
+      // - Double borders are rendered as two parallel strokes.
+      // - Merged ranges are drawn as a single rect using the anchor cell's border specs.
+      // - Segments are batched by stroke config (color/width/dash/double) to avoid per-segment strokes.
+
+      type BorderSegment = { x1: number; y1: number; x2: number; y2: number; orientation: "h" | "v" };
+      type BorderWinner = {
+        spec: CellBorderSpec;
+        totalWidth: number;
+        styleRank: number;
+        sourceRow: number;
+        sourceCol: number;
+        segment: BorderSegment;
       };
 
-      const borderBuckets: BorderBucket[] = [];
-      const bucketsByStyle = new Map<string, Map<string, Map<number, BorderBucket>>>();
+      const isCellBorder = (value: unknown): value is CellBorderSpec => {
+        if (!value || typeof value !== "object") return false;
+        const v = value as any;
+        if (typeof v.color !== "string" || v.color.trim() === "") return false;
+        if (typeof v.width !== "number" || !Number.isFinite(v.width) || v.width <= 0) return false;
+        return v.style === "solid" || v.style === "dashed" || v.style === "dotted" || v.style === "double";
+      };
 
-      const setLineDashSafe = (dash: number[]) => {
-        const fn = (gridCtx as unknown as { setLineDash?: (segments: number[]) => void }).setLineDash;
-        if (typeof fn === "function") fn.call(gridCtx, dash);
+      const styleRank = (style: CellBorderSpec["style"]): number => {
+        // Deterministic style ordering when widths tie.
+        // (Higher wins.)
+        switch (style) {
+          case "double":
+            return 4;
+          case "solid":
+            return 3;
+          case "dashed":
+            return 2;
+          case "dotted":
+            return 1;
+          default:
+            return 0;
+        }
       };
 
       const dashForStyle = (style: CellBorderSpec["style"], lineWidth: number): number[] => {
@@ -3571,195 +3587,367 @@ export class CanvasGridRenderer {
         return [];
       };
 
-      const getBucket = (styleKey: CellBorderSpec["style"], color: string, lineWidth: number): BorderBucket => {
-        let byColor = bucketsByStyle.get(styleKey);
-        if (!byColor) {
-          byColor = new Map();
-          bucketsByStyle.set(styleKey, byColor);
-        }
-        let byWidth = byColor.get(color);
-        if (!byWidth) {
-          byWidth = new Map();
-          byColor.set(color, byWidth);
-        }
-        let bucket = byWidth.get(lineWidth);
-        if (bucket) return bucket;
-
-        const dash = styleKey === "double" ? [] : dashForStyle(styleKey, lineWidth);
-        const lineCap: CanvasLineCap = styleKey === "dotted" ? "round" : "butt";
-
-        bucket = {
-          style: styleKey,
-          color,
-          lineWidth,
-          dash,
-          segments: [],
-          lineCap
-        };
-        byWidth.set(lineWidth, bucket);
-        borderBuckets.push(bucket);
-        return bucket;
+      const alignPos = (pos: number, lineWidth: number): number => {
+        // Align strokes to device pixels for crisp output. Mirrors the logic asserted in
+        // `CanvasGridRenderer.cellFormatting.test.ts` (odd widths use half-pixel alignment).
+        const roundedPos = Math.round(pos);
+        const roundedWidth = Math.round(lineWidth);
+        return roundedWidth % 2 === 1 ? roundedPos + 0.5 : roundedPos;
       };
 
-      const effectiveWidth = (border: { width: number } | null | undefined): number => {
-        if (!border) return 0;
-        const w = border.width;
-        if (!Number.isFinite(w) || w <= 0) return 0;
-        return w * zoom;
-      };
-
-      const cellRef = { row: 0, col: 0 };
-      const getCellForBorders = (row: number, col: number): CellData | null => {
-        // Avoid fetching outside of the already-rendered cell window: border conflict resolution
-        // for offscreen neighbors is intentionally skipped for performance.
-        if (row < startRow || row >= endRow || col < startCol || col >= endCol) return null;
-        if (row < 0 || col < 0 || row >= rowCount || col >= colCount) return null;
-        if (hasMerges) {
-          cellRef.row = row;
-          cellRef.col = col;
-          const range = mergedIndex.rangeAt(cellRef);
-          if (range) return getCellCached(range.startRow, range.startCol);
+      const winners = new Map<string, BorderWinner>();
+      const consider = (key: string, candidate: BorderWinner) => {
+        const existing = winners.get(key);
+        if (!existing) {
+          winners.set(key, candidate);
+          return;
         }
-        return getCellCached(row, col);
+
+        if (candidate.totalWidth !== existing.totalWidth) {
+          if (candidate.totalWidth > existing.totalWidth) winners.set(key, candidate);
+          return;
+        }
+
+        if (candidate.styleRank !== existing.styleRank) {
+          if (candidate.styleRank > existing.styleRank) winners.set(key, candidate);
+          return;
+        }
+
+        // Final tie-breaker: prefer the bottom/right cell (deterministic).
+        const candidateTie =
+          candidate.segment.orientation === "h"
+            ? candidate.sourceRow // higher row is the bottom cell
+            : candidate.sourceCol; // higher col is the right cell
+        const existingTie =
+          existing.segment.orientation === "h" ? existing.sourceRow : existing.sourceCol;
+
+        if (candidateTie !== existingTie) {
+          if (candidateTie > existingTie) winners.set(key, candidate);
+          return;
+        }
+
+        // Fully deterministic fallback (should rarely/never happen).
+        if (candidate.sourceRow !== existing.sourceRow) {
+          if (candidate.sourceRow > existing.sourceRow) winners.set(key, candidate);
+          return;
+        }
+        if (candidate.sourceCol !== existing.sourceCol) {
+          if (candidate.sourceCol > existing.sourceCol) winners.set(key, candidate);
+          return;
+        }
+        if (candidate.spec.color !== existing.spec.color) {
+          if (candidate.spec.color > existing.spec.color) winners.set(key, candidate);
+        }
       };
 
-      // Vertical border segments (between columns) per row.
-      {
-        let ySheet = startRowYSheet;
-        for (let row = startRow; row < endRow; row++) {
-          const rowHeight = rowAxis.getSize(row);
-          const y = ySheet - quadrant.scrollBaseY + quadrant.originY;
-          const yNext = y + rowHeight;
+      const addBorder = (options: {
+        key: string;
+        spec: CellBorderSpec;
+        sourceRow: number;
+        sourceCol: number;
+        segment: BorderSegment;
+      }) => {
+        const totalWidth = options.spec.width * zoom;
+        if (!Number.isFinite(totalWidth) || totalWidth <= 0) return;
+        consider(options.key, {
+          spec: options.spec,
+          totalWidth,
+          styleRank: styleRank(options.spec.style),
+          sourceRow: options.sourceRow,
+          sourceCol: options.sourceCol,
+          segment: options.segment
+        });
+      };
 
-          let xSheet = startColXSheet;
-          for (let colBoundary = startCol - 1; colBoundary < endCol; colBoundary++) {
-            if (!hasMerges || !isInteriorVerticalGridline(mergedIndex, row, colBoundary)) {
-              const leftCol = colBoundary;
-              const rightCol = colBoundary + 1;
+      // 1) Collect per-cell borders (skip merged cells, which are handled separately below).
+      let borderRowYSheet = startRowYSheet;
+      for (let row = startRow; row < endRow; row++) {
+        const rowHeight = rowAxis.getSize(row);
+        const y = borderRowYSheet - quadrant.scrollBaseY + quadrant.originY;
 
-              const leftCell = getCellForBorders(row, leftCol);
-              const rightCell = getCellForBorders(row, rightCol);
+        let borderColXSheet = startColXSheet;
+        for (let col = startCol; col < endCol; col++) {
+          const colWidth = colAxis.getSize(col);
+          const x = borderColXSheet - quadrant.scrollBaseX + quadrant.originX;
 
-              const leftBorder = leftCell?.style?.borders?.right;
-              const rightBorder = rightCell?.style?.borders?.left;
+          if (hasMerges && mergedIndex.rangeAt({ row, col })) {
+            borderColXSheet += colWidth;
+            continue;
+          }
 
-              const leftEff = effectiveWidth(leftBorder);
-              const rightEff = effectiveWidth(rightBorder);
+          const cell = getCellCached(row, col);
+          const borders = cell?.style?.borders;
+          if (borders) {
+            const top = borders.top;
+            const right = borders.right;
+            const bottom = borders.bottom;
+            const left = borders.left;
 
-              // Prefer right-side borders on ties for deterministic results.
-              let chosen = leftBorder;
-              let chosenEff = leftEff;
-              if (rightEff > chosenEff || (rightEff === chosenEff && rightEff > 0)) {
-                chosen = rightBorder;
-                chosenEff = rightEff;
-              }
-
-              if (chosen && chosenEff > 0) {
-                const isDouble = chosen.style === "double";
-                const strokeWidth = isDouble ? chosenEff / 3 : chosenEff;
-                if (strokeWidth > 0) {
-                  const bucket = getBucket(isDouble ? "double" : chosen.style, chosen.color, strokeWidth);
-                  const x = xSheet - quadrant.scrollBaseX + quadrant.originX;
-                  const cx = crispStrokePosition(x, strokeWidth);
-                  if (isDouble) {
-                    const offset = strokeWidth;
-                    bucket.segments.push(cx - offset, y, cx - offset, yNext, cx + offset, y, cx + offset, yNext);
-                  } else {
-                    bucket.segments.push(cx, y, cx, yNext);
-                  }
-                }
-              }
+            if (isCellBorder(top)) {
+              addBorder({
+                key: `h:${row}:${col}`,
+                spec: top,
+                sourceRow: row,
+                sourceCol: col,
+                segment: { x1: x, y1: y, x2: x + colWidth, y2: y, orientation: "h" }
+              });
             }
-
-            const nextCol = colBoundary + 1;
-            if (nextCol < endCol) {
-              xSheet += colAxis.getSize(nextCol);
+            if (isCellBorder(bottom)) {
+              addBorder({
+                key: `h:${row + 1}:${col}`,
+                spec: bottom,
+                sourceRow: row,
+                sourceCol: col,
+                segment: { x1: x, y1: y + rowHeight, x2: x + colWidth, y2: y + rowHeight, orientation: "h" }
+              });
+            }
+            if (isCellBorder(left)) {
+              addBorder({
+                key: `v:${row}:${col}`,
+                spec: left,
+                sourceRow: row,
+                sourceCol: col,
+                segment: { x1: x, y1: y, x2: x, y2: y + rowHeight, orientation: "v" }
+              });
+            }
+            if (isCellBorder(right)) {
+              addBorder({
+                key: `v:${row}:${col + 1}`,
+                spec: right,
+                sourceRow: row,
+                sourceCol: col,
+                segment: { x1: x + colWidth, y1: y, x2: x + colWidth, y2: y + rowHeight, orientation: "v" }
+              });
             }
           }
 
-          ySheet += rowHeight;
+          borderColXSheet += colWidth;
+        }
+
+        borderRowYSheet += rowHeight;
+      }
+
+      // 2) Collect merged range borders by drawing the perimeter of the merged rect.
+      if (hasMerges) {
+        for (const range of quadrantMergedRanges) {
+          const anchorRow = range.startRow;
+          const anchorCol = range.startCol;
+          const anchorCell = getCellCached(anchorRow, anchorCol);
+          const borders = anchorCell?.style?.borders;
+          if (!borders) continue;
+
+          const top = borders.top;
+          const right = borders.right;
+          const bottom = borders.bottom;
+          const left = borders.left;
+
+          const yTop = rowAxis.positionOf(range.startRow) - quadrant.scrollBaseY + quadrant.originY;
+          const yBottom = rowAxis.positionOf(range.endRow) - quadrant.scrollBaseY + quadrant.originY;
+          const xLeft = colAxis.positionOf(range.startCol) - quadrant.scrollBaseX + quadrant.originX;
+          const xRight = colAxis.positionOf(range.endCol) - quadrant.scrollBaseX + quadrant.originX;
+
+          // Top edge (split per column).
+          if (isCellBorder(top) && range.startRow >= startRow && range.startRow <= endRow) {
+            const segStartCol = Math.max(startCol, range.startCol);
+            const segEndCol = Math.min(endCol, range.endCol);
+            let xSheet = colAxis.positionOf(segStartCol);
+            for (let col = segStartCol; col < segEndCol; col++) {
+              const colWidth = colAxis.getSize(col);
+              const x = xSheet - quadrant.scrollBaseX + quadrant.originX;
+              addBorder({
+                key: `h:${range.startRow}:${col}`,
+                spec: top,
+                sourceRow: anchorRow,
+                sourceCol: anchorCol,
+                segment: { x1: x, y1: yTop, x2: x + colWidth, y2: yTop, orientation: "h" }
+              });
+              xSheet += colWidth;
+            }
+          }
+
+          // Bottom edge (split per column).
+          if (isCellBorder(bottom) && range.endRow >= startRow && range.endRow <= endRow) {
+            const segStartCol = Math.max(startCol, range.startCol);
+            const segEndCol = Math.min(endCol, range.endCol);
+            let xSheet = colAxis.positionOf(segStartCol);
+            for (let col = segStartCol; col < segEndCol; col++) {
+              const colWidth = colAxis.getSize(col);
+              const x = xSheet - quadrant.scrollBaseX + quadrant.originX;
+              addBorder({
+                key: `h:${range.endRow}:${col}`,
+                spec: bottom,
+                sourceRow: anchorRow,
+                sourceCol: anchorCol,
+                segment: { x1: x, y1: yBottom, x2: x + colWidth, y2: yBottom, orientation: "h" }
+              });
+              xSheet += colWidth;
+            }
+          }
+
+          // Left edge (split per row).
+          if (isCellBorder(left) && range.startCol >= startCol && range.startCol <= endCol) {
+            const segStartRow = Math.max(startRow, range.startRow);
+            const segEndRow = Math.min(endRow, range.endRow);
+            let ySheet = rowAxis.positionOf(segStartRow);
+            for (let row = segStartRow; row < segEndRow; row++) {
+              const rowHeight = rowAxis.getSize(row);
+              const y = ySheet - quadrant.scrollBaseY + quadrant.originY;
+              addBorder({
+                key: `v:${row}:${range.startCol}`,
+                spec: left,
+                sourceRow: anchorRow,
+                sourceCol: anchorCol,
+                segment: { x1: xLeft, y1: y, x2: xLeft, y2: y + rowHeight, orientation: "v" }
+              });
+              ySheet += rowHeight;
+            }
+          }
+
+          // Right edge (split per row).
+          if (isCellBorder(right) && range.endCol >= startCol && range.endCol <= endCol) {
+            const segStartRow = Math.max(startRow, range.startRow);
+            const segEndRow = Math.min(endRow, range.endRow);
+            let ySheet = rowAxis.positionOf(segStartRow);
+            for (let row = segStartRow; row < segEndRow; row++) {
+              const rowHeight = rowAxis.getSize(row);
+              const y = ySheet - quadrant.scrollBaseY + quadrant.originY;
+              addBorder({
+                key: `v:${row}:${range.endCol}`,
+                spec: right,
+                sourceRow: anchorRow,
+                sourceCol: anchorCol,
+                segment: { x1: xRight, y1: y, x2: xRight, y2: y + rowHeight, orientation: "v" }
+              });
+              ySheet += rowHeight;
+            }
+          }
         }
       }
 
-      // Horizontal border segments (between rows) per column.
-      {
-        let ySheet = startRowYSheet;
-        for (let rowBoundary = startRow - 1; rowBoundary < endRow; rowBoundary++) {
-          const y = ySheet - quadrant.scrollBaseY + quadrant.originY;
+      if (winners.size === 0) return;
 
-          let xSheet = startColXSheet;
-          for (let col = startCol; col < endCol; col++) {
-            const colWidth = colAxis.getSize(col);
-            const x = xSheet - quadrant.scrollBaseX + quadrant.originX;
-            const xNext = x + colWidth;
+      // 3) Batch draw by stroke config.
+      type StrokeGroup = {
+        strokeStyle: string;
+        lineWidth: number;
+        lineDash: number[];
+        dashKey: string;
+        lineCap: CanvasLineCap;
+        double: boolean;
+        segments: BorderSegment[];
+      };
 
-            if (!hasMerges || !isInteriorHorizontalGridline(mergedIndex, rowBoundary, col)) {
-              const topRow = rowBoundary;
-              const bottomRow = rowBoundary + 1;
-
-              const topCell = getCellForBorders(topRow, col);
-              const bottomCell = getCellForBorders(bottomRow, col);
-
-              const topSideBorder = topCell?.style?.borders?.bottom;
-              const bottomSideBorder = bottomCell?.style?.borders?.top;
-
-              const topEff = effectiveWidth(topSideBorder);
-              const bottomEff = effectiveWidth(bottomSideBorder);
-
-              // Prefer bottom-side borders on ties for deterministic results.
-              let chosen = topSideBorder;
-              let chosenEff = topEff;
-              if (bottomEff > chosenEff || (bottomEff === chosenEff && bottomEff > 0)) {
-                chosen = bottomSideBorder;
-                chosenEff = bottomEff;
-              }
-
-              if (chosen && chosenEff > 0) {
-                const isDouble = chosen.style === "double";
-                const strokeWidth = isDouble ? chosenEff / 3 : chosenEff;
-                if (strokeWidth > 0) {
-                  const bucket = getBucket(isDouble ? "double" : chosen.style, chosen.color, strokeWidth);
-                  const cy = crispStrokePosition(y, strokeWidth);
-                  if (isDouble) {
-                    const offset = strokeWidth;
-                    bucket.segments.push(x, cy - offset, xNext, cy - offset, x, cy + offset, xNext, cy + offset);
-                  } else {
-                    bucket.segments.push(x, cy, xNext, cy);
-                  }
-                }
-              }
-            }
-
-            xSheet += colWidth;
+      const groups = new Map<string, StrokeGroup>();
+      for (const winner of winners.values()) {
+        const strokeStyle = winner.spec.color;
+        if (winner.spec.style === "double") {
+          const lineWidth = winner.totalWidth / 3;
+          if (!Number.isFinite(lineWidth) || lineWidth <= 0) continue;
+          const dashKey = "solid";
+          const key = `${strokeStyle}|${lineWidth}|double`;
+          let group = groups.get(key);
+          if (!group) {
+            group = { strokeStyle, lineWidth, lineDash: [], dashKey, lineCap: "butt", double: true, segments: [] };
+            groups.set(key, group);
           }
-
-          const nextRow = rowBoundary + 1;
-          if (nextRow < endRow) {
-            ySheet += rowAxis.getSize(nextRow);
+          group.segments.push(winner.segment);
+        } else {
+          const lineWidth = winner.totalWidth;
+          if (!Number.isFinite(lineWidth) || lineWidth <= 0) continue;
+          const lineDash = dashForStyle(winner.spec.style, lineWidth);
+          const dashKey = lineDash.length > 0 ? lineDash.join(",") : "solid";
+          const key = `${strokeStyle}|${lineWidth}|${dashKey}|single`;
+          let group = groups.get(key);
+          if (!group) {
+            group = {
+              strokeStyle,
+              lineWidth,
+              lineDash,
+              dashKey,
+              lineCap: winner.spec.style === "dotted" ? "round" : "butt",
+              double: false,
+              segments: []
+            };
+            groups.set(key, group);
           }
+          group.segments.push(winner.segment);
         }
       }
 
-      for (const bucket of borderBuckets) {
-        if (bucket.segments.length === 0) continue;
-        gridCtx.strokeStyle = bucket.color;
-        gridCtx.lineWidth = bucket.lineWidth;
-        gridCtx.lineCap = bucket.lineCap;
-        setLineDashSafe(bucket.dash);
+      if (groups.size === 0) return;
+
+      const orderedGroups = [...groups.values()].sort((a, b) => {
+        if (a.dashKey !== b.dashKey) return a.dashKey < b.dashKey ? -1 : 1;
+        if (a.strokeStyle !== b.strokeStyle) return a.strokeStyle < b.strokeStyle ? -1 : 1;
+        if (a.lineWidth !== b.lineWidth) return a.lineWidth - b.lineWidth;
+        if (a.double !== b.double) return a.double ? 1 : -1;
+        return 0;
+      });
+
+      let currentStrokeStyle = "";
+      let currentLineWidth = -1;
+      let currentDashKey = "";
+      let currentLineCap: CanvasLineCap = "butt";
+
+      for (const group of orderedGroups) {
+        if (group.strokeStyle !== currentStrokeStyle) {
+          gridCtx.strokeStyle = group.strokeStyle;
+          currentStrokeStyle = group.strokeStyle;
+        }
+        if (group.lineWidth !== currentLineWidth) {
+          gridCtx.lineWidth = group.lineWidth;
+          currentLineWidth = group.lineWidth;
+        }
+        if (group.lineCap !== currentLineCap) {
+          gridCtx.lineCap = group.lineCap;
+          currentLineCap = group.lineCap;
+        }
+        if (group.dashKey !== currentDashKey) {
+          (gridCtx as any).setLineDash?.(group.lineDash);
+          currentDashKey = group.dashKey;
+        }
+
+        if (!group.double) {
+          gridCtx.beginPath();
+          for (const seg of group.segments) {
+            if (seg.orientation === "h") {
+              const y = alignPos(seg.y1, group.lineWidth);
+              gridCtx.moveTo(seg.x1, y);
+              gridCtx.lineTo(seg.x2, y);
+            } else {
+              const x = alignPos(seg.x1, group.lineWidth);
+              gridCtx.moveTo(x, seg.y1);
+              gridCtx.lineTo(x, seg.y2);
+            }
+          }
+          gridCtx.stroke();
+          continue;
+        }
+
+        const offset = group.lineWidth;
         gridCtx.beginPath();
-
-        const segments = bucket.segments;
-        for (let i = 0; i < segments.length; i += 4) {
-          gridCtx.moveTo(segments[i]!, segments[i + 1]!);
-          gridCtx.lineTo(segments[i + 2]!, segments[i + 3]!);
+        for (const seg of group.segments) {
+          if (seg.orientation === "h") {
+            const y1 = alignPos(seg.y1 - offset, group.lineWidth);
+            const y2 = alignPos(seg.y1 + offset, group.lineWidth);
+            gridCtx.moveTo(seg.x1, y1);
+            gridCtx.lineTo(seg.x2, y1);
+            gridCtx.moveTo(seg.x1, y2);
+            gridCtx.lineTo(seg.x2, y2);
+          } else {
+            const x1 = alignPos(seg.x1 - offset, group.lineWidth);
+            const x2 = alignPos(seg.x1 + offset, group.lineWidth);
+            gridCtx.moveTo(x1, seg.y1);
+            gridCtx.lineTo(x1, seg.y2);
+            gridCtx.moveTo(x2, seg.y1);
+            gridCtx.lineTo(x2, seg.y2);
+          }
         }
-
         gridCtx.stroke();
       }
 
-      // Ensure diagonal border rendering starts from a clean dash pattern.
-      setLineDashSafe([]);
-      // Avoid leaking a rounded cap into diagonal borders / other strokes.
+      // Avoid leaking dashed patterns / round caps into diagonal borders (drawn next).
+      (gridCtx as any).setLineDash?.([]);
       gridCtx.lineCap = "butt";
     };
 
