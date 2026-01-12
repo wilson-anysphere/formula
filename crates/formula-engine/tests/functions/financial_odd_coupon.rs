@@ -3606,6 +3606,72 @@ fn odd_coupon_bond_functions_return_value_for_unparseable_date_text() {
 }
 
 #[test]
+fn odd_coupon_bond_functions_return_value_for_unparseable_frequency_and_basis_text() {
+    let mut sheet = TestSheet::new();
+
+    // Unparseable frequency text should return #VALUE! (not #NUM!) because the text cannot be
+    // coerced to a number at all.
+    match sheet.eval(
+        r#"=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,"nope",0)"#,
+    ) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Error(ErrorKind::Value) => {}
+        other => panic!("expected #VALUE!, got {other:?}"),
+    }
+    match sheet.eval(
+        r#"=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,"nope",0)"#,
+    ) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Error(ErrorKind::Value) => {}
+        other => panic!("expected #VALUE!, got {other:?}"),
+    }
+    match sheet.eval(
+        r#"=ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,98,100,"nope",0)"#,
+    ) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Error(ErrorKind::Value) => {}
+        other => panic!("expected #VALUE!, got {other:?}"),
+    }
+    match sheet.eval(
+        r#"=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,98,100,"nope",0)"#,
+    ) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Error(ErrorKind::Value) => {}
+        other => panic!("expected #VALUE!, got {other:?}"),
+    }
+
+    // Unparseable basis text (optional arg) should also return #VALUE!.
+    match sheet.eval(
+        r#"=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,"nope")"#,
+    ) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Error(ErrorKind::Value) => {}
+        other => panic!("expected #VALUE!, got {other:?}"),
+    }
+    match sheet.eval(
+        r#"=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,"nope")"#,
+    ) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Error(ErrorKind::Value) => {}
+        other => panic!("expected #VALUE!, got {other:?}"),
+    }
+    match sheet.eval(
+        r#"=ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,98,100,2,"nope")"#,
+    ) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Error(ErrorKind::Value) => {}
+        other => panic!("expected #VALUE!, got {other:?}"),
+    }
+    match sheet.eval(
+        r#"=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,98,100,2,"nope")"#,
+    ) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Error(ErrorKind::Value) => {}
+        other => panic!("expected #VALUE!, got {other:?}"),
+    }
+}
+
+#[test]
 fn oddfprice_day_count_basis_relationships() {
     let system = ExcelDateSystem::EXCEL_1900;
 
