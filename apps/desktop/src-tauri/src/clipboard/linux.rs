@@ -54,10 +54,10 @@ fn bytes_to_utf8(bytes: &[u8]) -> Option<String> {
 mod gtk_backend {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
 
+    use super::super::{estimate_base64_decoded_len, MAX_IMAGE_BYTES, MAX_RICH_TEXT_BYTES};
     use super::{
         bytes_to_utf8, choose_best_target, ClipboardContent, ClipboardError, ClipboardWritePayload,
     };
-    use super::super::{estimate_base64_decoded_len, MAX_IMAGE_BYTES, MAX_RICH_TEXT_BYTES};
     use crate::clipboard_fallback;
 
     // GTK clipboard APIs must be called on the GTK main thread.
@@ -87,11 +87,12 @@ mod gtk_backend {
         let (tx, rx) = std::sync::mpsc::channel::<Result<R, ClipboardError>>();
 
         ctx.invoke(move || {
-            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(op)).unwrap_or_else(|_| {
-                Err(ClipboardError::OperationFailed(
-                    "GTK clipboard operation panicked".to_string(),
-                ))
-            });
+            let res =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(op)).unwrap_or_else(|_| {
+                    Err(ClipboardError::OperationFailed(
+                        "GTK clipboard operation panicked".to_string(),
+                    ))
+                });
             let _ = tx.send(res);
         });
 
@@ -185,7 +186,20 @@ mod gtk_backend {
             let read_from_clipboard = |clipboard: &gtk::Clipboard| {
                 let targets = clipboard_target_names(clipboard);
 
-                let text = clipboard.wait_for_text().map(|s| s.to_string());
+                // `wait_for_text` covers many common plaintext targets (UTF8_STRING, STRING, TEXT),
+                // but some producers only advertise MIME-like targets (e.g. `text/plain;charset=utf-8`).
+                // Fall back to reading `text/plain*` via the same target-selection logic used for
+                // rich formats so we don't incorrectly treat the clipboard as empty and fall back
+                // to PRIMARY.
+                let text = clipboard
+                    .wait_for_text()
+                    .map(|s| s.to_string())
+                    .filter(|s| !s.is_empty())
+                    .or_else(|| match targets.as_deref() {
+                        Some(targets) => choose_best_target(targets, &["text/plain"])
+                            .and_then(|t| wait_for_utf8_targets(clipboard, &[t], usize::MAX)),
+                        None => wait_for_utf8_targets(clipboard, &["text/plain"], usize::MAX),
+                    });
                 let html = match targets.as_deref() {
                     Some(targets) => choose_best_target(targets, &["text/html"])
                         .and_then(|t| wait_for_utf8_targets(clipboard, &[t], MAX_RICH_TEXT_BYTES)),
