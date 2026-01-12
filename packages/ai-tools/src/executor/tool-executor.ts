@@ -254,6 +254,13 @@ type DlpRangeIndex = {
    */
   rangeRecords: Array<{ startRow: number; endRow: number; startCol: number; endCol: number; rank: number }>;
   /**
+   * Max rank across all range-scoped selectors intersecting the selection.
+   *
+   * Used to skip per-cell range scanning when the current effective rank is already >= the
+   * maximum possible contribution from any range record.
+   */
+  rangeRankMax: number;
+  /**
    * Records that cannot be indexed by (row,col)/(columnIndex) (e.g. tableId/columnId selectors).
    * These are evaluated via the slower `effectiveCellClassification` path when present.
    */
@@ -1243,9 +1250,10 @@ export class ToolExecutor {
 
     let docRankMax = DEFAULT_CLASSIFICATION_RANK;
     let sheetRankMax = DEFAULT_CLASSIFICATION_RANK;
-    const columnRankByOffset = new Uint8Array(Math.max(0, colCount));
+    const columnRankByOffset = new Uint8Array(colCount);
     let cellRankByOffset: Uint8Array | null = null;
     const rangeRecords: Array<{ startRow: number; endRow: number; startCol: number; endCol: number; rank: number }> = [];
+    let rangeRankMax = DEFAULT_CLASSIFICATION_RANK;
     const fallbackRecords: Array<{ selector: any; classification: any }> = [];
 
     for (const record of records || []) {
@@ -1275,8 +1283,7 @@ export class ToolExecutor {
             const colIndex = selector.columnIndex;
             if (colIndex < selectionRange.start.col || colIndex > selectionRange.end.col) break;
             const offset = colIndex - startCol;
-            const existing = columnRankByOffset[offset] ?? DEFAULT_CLASSIFICATION_RANK;
-            columnRankByOffset[offset] = Math.max(existing, recordRank);
+            if (recordRank > columnRankByOffset[offset]!) columnRankByOffset[offset] = recordRank;
           } else {
             // Table/columnId selectors require additional context (tableId/columnId) to evaluate.
             fallbackRecords.push(record);
@@ -1299,11 +1306,10 @@ export class ToolExecutor {
           const colOffset = selector.col - startCol;
           if (rowOffset < 0 || colOffset < 0 || rowOffset >= rowCount || colOffset >= colCount) break;
           if (cellRankByOffset === null) {
-            cellRankByOffset = new Uint8Array(Math.max(0, rowCount * colCount));
+            cellRankByOffset = new Uint8Array(rowCount * colCount);
           }
           const offset = rowOffset * colCount + colOffset;
-          const existing = cellRankByOffset[offset] ?? DEFAULT_CLASSIFICATION_RANK;
-          cellRankByOffset[offset] = Math.max(existing, recordRank);
+          if (recordRank > cellRankByOffset[offset]!) cellRankByOffset[offset] = recordRank;
           break;
         }
         case "range": {
@@ -1311,6 +1317,7 @@ export class ToolExecutor {
           if (!selector.range) break;
           const normalized = normalizeRange(selector.range);
           if (!rangesIntersectNormalized(normalized, selectionRange)) break;
+          if (recordRank > rangeRankMax) rangeRankMax = recordRank;
           rangeRecords.push({
             startRow: normalized.start.row,
             endRow: normalized.end.row,
@@ -1337,6 +1344,7 @@ export class ToolExecutor {
       columnRankByOffset,
       cellRankByOffset,
       rangeRecords,
+      rangeRankMax,
       fallbackRecords
     };
   }
@@ -1405,14 +1413,16 @@ export class ToolExecutor {
       return false;
     }
 
-    for (const record of index.rangeRecords) {
-      if (row0 < record.startRow || row0 > record.endRow || col0 < record.startCol || col0 > record.endCol) continue;
-      if (record.rank > rank) rank = record.rank;
-      if (rank === RESTRICTED_CLASSIFICATION_RANK) {
-        return restrictedAllowed;
-      }
-      if (canShortCircuitOverThreshold && rank > maxAllowedRank) {
-        return false;
+    if (index.rangeRankMax > rank) {
+      for (const record of index.rangeRecords) {
+        if (row0 < record.startRow || row0 > record.endRow || col0 < record.startCol || col0 > record.endCol) continue;
+        if (record.rank > rank) rank = record.rank;
+        if (rank === RESTRICTED_CLASSIFICATION_RANK) {
+          return restrictedAllowed;
+        }
+        if (canShortCircuitOverThreshold && rank > maxAllowedRank) {
+          return false;
+        }
       }
     }
 
