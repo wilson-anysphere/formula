@@ -94,3 +94,53 @@ test("toggleBold considers range-run overrides when computing full-column mixed 
   toggleBold(doc, "Sheet1", "A1:A1048576");
   assert.deepEqual(lastPatch, { font: { bold: true } });
 });
+
+test("toggleBold reads full-row formatting from the row layer (no per-cell scan)", () => {
+  const doc = new DocumentController();
+
+  // Entire row 1 via row layer.
+  doc.setRangeFormat("Sheet1", "A1:XFD1", { font: { bold: true } });
+
+  const sheet = doc.model.sheets.get("Sheet1");
+  assert.ok(sheet);
+  assert.equal(sheet.cells.size, 0, "Full-row formatting should not materialize per-cell overrides");
+
+  // Second toggle should flip bold OFF.
+  toggleBold(doc, "Sheet1", "A1:XFD1");
+  assert.equal(Boolean(doc.getCellFormat("Sheet1", "A1").font?.bold), false);
+  assert.equal(sheet.cells.size, 0);
+});
+
+test("toggleBold treats a single conflicting cell override in a full-row selection as mixed", () => {
+  const doc = new DocumentController();
+
+  doc.setRangeFormat("Sheet1", "A1:XFD1", { font: { bold: true } });
+  doc.setRangeFormat("Sheet1", "B1", { font: { bold: false } });
+
+  const sheet = doc.model.sheets.get("Sheet1");
+  assert.ok(sheet);
+  assert.equal(sheet.cells.size, 1);
+
+  toggleBold(doc, "Sheet1", "A1:XFD1");
+
+  assert.equal(Boolean(doc.getCellFormat("Sheet1", "A1").font?.bold), true);
+  assert.equal(Boolean(doc.getCellFormat("Sheet1", "B1").font?.bold), true);
+  assert.ok(sheet.cells.size <= 1, "Should not materialize per-cell overrides across the full row");
+});
+
+test("toggleBold reads full-sheet formatting from the sheet layer (no per-cell scan)", () => {
+  const doc = new DocumentController();
+
+  // Full sheet in Excel address space.
+  const fullSheet = "A1:XFD1048576";
+  doc.setRangeFormat("Sheet1", fullSheet, { font: { bold: true } });
+
+  const sheet = doc.model.sheets.get("Sheet1");
+  assert.ok(sheet);
+  assert.equal(sheet.cells.size, 0, "Sheet formatting should not materialize per-cell overrides");
+
+  toggleBold(doc, "Sheet1", fullSheet);
+  assert.equal(Boolean(doc.getCellFormat("Sheet1", "A1").font?.bold), false);
+  assert.equal(Boolean(doc.getCellFormat("Sheet1", "XFD1048576").font?.bold), false);
+  assert.equal(sheet.cells.size, 0);
+});
