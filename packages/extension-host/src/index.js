@@ -1787,6 +1787,11 @@ class ExtensionHost {
 
   _broadcastEvent(event, data) {
     for (const extension of this._extensions.values()) {
+      // Only deliver events to active extensions. Workers are spawned eagerly on load, but the
+      // extension entrypoint is not imported/executed until activation. Broadcasting workbook/grid
+      // events to inactive extensions is wasted work and can cause false positives if the host ever
+      // adds event-based taint tracking (as the browser host does for clipboard DLP enforcement).
+      if (!extension.active) continue;
       try {
         extension.worker.postMessage({
           type: "event",
