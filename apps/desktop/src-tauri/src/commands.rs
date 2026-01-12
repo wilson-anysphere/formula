@@ -1837,9 +1837,32 @@ fn build_macro_security_status(
     let signature = if let Some(vba_bin) = workbook.vba_project_bin.as_deref() {
         // Signature parsing is best-effort: failures should not prevent macro listing or
         // execution (trust decisions are still enforced by the fingerprint).
-        let parsed = formula_vba::verify_vba_digital_signature(vba_bin)
-            .ok()
-            .flatten();
+        let parsed = {
+            // Prefer the dedicated `xl/vbaProjectSignature.bin` part when present, because some XLSM
+            // producers store the `\x05DigitalSignature*` streams outside of `vbaProject.bin`.
+            if let Some(origin) = workbook.origin_xlsx_bytes.as_deref() {
+                let sig_part = formula_xlsx::read_part_from_reader(
+                    std::io::Cursor::new(origin.as_ref()),
+                    "xl/vbaProjectSignature.bin",
+                )
+                .ok()
+                .flatten();
+
+                if let Some(sig_part) = sig_part.as_deref() {
+                    match formula_vba::verify_vba_digital_signature_with_project(vba_bin, sig_part)
+                    {
+                        Ok(Some(sig)) => Some(sig),
+                        Ok(None) | Err(_) => formula_vba::verify_vba_digital_signature(vba_bin)
+                            .ok()
+                            .flatten(),
+                    }
+                } else {
+                    formula_vba::verify_vba_digital_signature(vba_bin).ok().flatten()
+                }
+            } else {
+                formula_vba::verify_vba_digital_signature(vba_bin).ok().flatten()
+            }
+        };
         Some(match parsed {
             Some(sig) => MacroSignatureInfo {
                 status: match sig.verification {
@@ -3776,11 +3799,11 @@ mod tests {
         // Create temp dirs inside the allowed filesystem scope (home dir) so `list_dir_blocking`
         // can traverse them during tests.
         let base_dirs = directories::BaseDirs::new().expect("base dirs");
-        let root = tempfile::Builder::new()
+        let root: TempDir = tempfile::Builder::new()
             .prefix("formula-list-dir-symlink-root")
             .tempdir_in(base_dirs.home_dir())
             .expect("create root temp dir");
-        let outside = tempfile::Builder::new()
+        let outside: TempDir = tempfile::Builder::new()
             .prefix("formula-list-dir-symlink-outside")
             .tempdir_in(base_dirs.home_dir())
             .expect("create outside temp dir");

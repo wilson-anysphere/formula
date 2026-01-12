@@ -130,17 +130,27 @@ fn verify_vba_digital_signature_from_parts(
 ) -> Result<Option<VbaDigitalSignature>, SignatureError> {
     let signature_part_name = resolve_vba_signature_part_name(parts);
     let mut signature_part_result: Option<VbaDigitalSignature> = None;
+    let vba_project_bin = parts.get(VBA_PROJECT_BIN).map(Vec::as_slice);
 
     if let Some(signature_part_name) = signature_part_name {
         if let Some(bytes) = parts.get(&signature_part_name) {
             // Attempt to treat the part as an OLE/CFB container first (the most common format).
-            match formula_vba::verify_vba_digital_signature(bytes) {
+            let verified = match vba_project_bin {
+                Some(vba_project_bin) => {
+                    formula_vba::verify_vba_digital_signature_with_project(vba_project_bin, bytes)
+                }
+                None => formula_vba::verify_vba_digital_signature(bytes),
+            };
+
+            match verified {
                 Ok(Some(mut sig)) => {
                     // Preserve which part we read the signature from to avoid ambiguity.
                     sig.stream_path = format!("{signature_part_name}:{}", sig.stream_path);
-                    // `vbaProjectSignature.bin` does not contain the full VBA project streams, so the
-                    // MS-OVBA "binding" digest check cannot be meaningfully evaluated here.
-                    sig.binding = formula_vba::VbaSignatureBinding::Unknown;
+                    // If we couldn't locate the corresponding `vbaProject.bin`, we can't evaluate the
+                    // MS-OVBA "project digest" binding and should not report a mismatch.
+                    if vba_project_bin.is_none() {
+                        sig.binding = formula_vba::VbaSignatureBinding::Unknown;
+                    }
                     signature_part_result = Some(sig);
                 }
                 Ok(None) => {}
@@ -168,7 +178,7 @@ fn verify_vba_digital_signature_from_parts(
     }
 
     // Fall back to inspecting `xl/vbaProject.bin` for embedded signature streams.
-    let Some(vba_project_bin) = parts.get(VBA_PROJECT_BIN) else {
+    let Some(vba_project_bin) = vba_project_bin else {
         return Ok(signature_part_result);
     };
 

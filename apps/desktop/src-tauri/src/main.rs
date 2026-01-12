@@ -348,10 +348,19 @@ fn cwd_from_single_instance_callback(cwd: String) -> Option<PathBuf> {
     Some(PathBuf::from(trimmed))
 }
 
-fn signature_status(vba_project_bin: &[u8]) -> commands::MacroSignatureStatus {
-    let parsed = formula_vba::verify_vba_digital_signature(vba_project_bin)
-        .ok()
-        .flatten();
+fn signature_status(
+    vba_project_bin: &[u8],
+    vba_project_signature_bin: Option<&[u8]>,
+) -> commands::MacroSignatureStatus {
+    let parsed = match vba_project_signature_bin {
+        Some(sig_part) => formula_vba::verify_vba_digital_signature_with_project(vba_project_bin, sig_part)
+            .ok()
+            .flatten()
+            .or_else(|| formula_vba::verify_vba_digital_signature(vba_project_bin).ok().flatten()),
+        None => formula_vba::verify_vba_digital_signature(vba_project_bin)
+            .ok()
+            .flatten(),
+    };
 
     match parsed {
         Some(sig) => match sig.verification {
@@ -399,7 +408,19 @@ fn macros_trusted_for_before_close(
     };
 
     let trust = trust_store.trust_state(&fingerprint);
-    let sig_status = signature_status(vba_bin);
+
+    let sig_part = workbook
+        .origin_xlsx_bytes
+        .as_deref()
+        .and_then(|origin| {
+            formula_xlsx::read_part_from_reader(
+                std::io::Cursor::new(origin.as_ref()),
+                "xl/vbaProjectSignature.bin",
+            )
+            .ok()
+            .flatten()
+        });
+    let sig_status = signature_status(vba_bin, sig_part.as_deref());
     Ok(commands::evaluate_macro_trust(trust, sig_status).is_ok())
 }
 

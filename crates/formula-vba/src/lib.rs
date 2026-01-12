@@ -27,12 +27,12 @@ pub use project_digest::{compute_vba_project_digest, DigestAlg};
 pub use signature::{
     extract_signer_certificate_info, list_vba_digital_signatures,
     parse_and_verify_vba_signature_blob, parse_vba_digital_signature, verify_vba_digital_signature,
-    verify_vba_digital_signature_bound, verify_vba_signature_blob, SignatureError,
-    VbaDigitalSignature, VbaDigitalSignatureBound, VbaDigitalSignatureStream,
-    VbaProjectBindingVerification, VbaProjectDigestDebugInfo, VbaSignatureBinding,
-    VbaSignatureBlobInfo, VbaSignatureTrustOptions, VbaSignatureVerification,
+    verify_vba_digital_signature_bound, verify_vba_digital_signature_with_project,
+    verify_vba_digital_signature_with_trust, verify_vba_signature_blob, SignatureError,
+    VbaCertificateTrust, VbaDigitalSignature, VbaDigitalSignatureBound, VbaDigitalSignatureStream,
+    VbaDigitalSignatureTrusted, VbaProjectBindingVerification, VbaProjectDigestDebugInfo,
+    VbaSignatureBinding, VbaSignatureBlobInfo, VbaSignatureTrustOptions, VbaSignatureVerification,
     VbaSignerCertificateInfo,
-    verify_vba_digital_signature_with_trust, VbaCertificateTrust, VbaDigitalSignatureTrusted,
 };
 
 use std::collections::BTreeMap;

@@ -2,7 +2,7 @@
 
 use std::io::{Cursor, Write};
 
-use formula_vba::VbaSignatureVerification;
+use formula_vba::{compute_vba_project_digest, DigestAlg, VbaSignatureBinding, VbaSignatureVerification};
 use formula_xlsx::XlsxPackage;
 
 const TEST_KEY_PEM: &str = r#"-----BEGIN PRIVATE KEY-----
@@ -74,6 +74,106 @@ fn make_pkcs7_signed_message(data: &[u8]) -> Vec<u8> {
     )
     .expect("pkcs7 sign");
     pkcs7.to_der().expect("pkcs7 DER")
+}
+
+fn der_len(len: usize) -> Vec<u8> {
+    if len < 0x80 {
+        return vec![len as u8];
+    }
+    let mut bytes = Vec::new();
+    let mut tmp = len;
+    while tmp > 0 {
+        bytes.push((tmp & 0xFF) as u8);
+        tmp >>= 8;
+    }
+    bytes.reverse();
+    let mut out = Vec::with_capacity(1 + bytes.len());
+    out.push(0x80 | (bytes.len() as u8));
+    out.extend_from_slice(&bytes);
+    out
+}
+
+fn der_tlv(tag: u8, value: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.push(tag);
+    out.extend_from_slice(&der_len(value.len()));
+    out.extend_from_slice(value);
+    out
+}
+
+fn der_sequence(children: &[Vec<u8>]) -> Vec<u8> {
+    let mut value = Vec::new();
+    for child in children {
+        value.extend_from_slice(child);
+    }
+    der_tlv(0x30, &value)
+}
+
+fn der_octet_string(bytes: &[u8]) -> Vec<u8> {
+    der_tlv(0x04, bytes)
+}
+
+fn der_null() -> Vec<u8> {
+    vec![0x05, 0x00]
+}
+
+fn der_oid(oid: &str) -> Vec<u8> {
+    let arcs: Vec<u32> = oid
+        .split('.')
+        .map(|s| s.parse::<u32>().expect("numeric arc"))
+        .collect();
+    assert!(arcs.len() >= 2, "OID needs at least 2 arcs");
+    let mut out = Vec::new();
+    out.push((arcs[0] * 40 + arcs[1]) as u8);
+    for &arc in &arcs[2..] {
+        let mut tmp = arc;
+        let mut buf = Vec::new();
+        buf.push((tmp & 0x7F) as u8);
+        tmp >>= 7;
+        while tmp > 0 {
+            buf.push(((tmp & 0x7F) as u8) | 0x80);
+            tmp >>= 7;
+        }
+        buf.reverse();
+        out.extend_from_slice(&buf);
+    }
+    der_tlv(0x06, &out)
+}
+
+fn make_spc_indirect_data_content_sha256(digest: &[u8]) -> Vec<u8> {
+    // data SpcAttributeTypeAndOptionalValue ::= SEQUENCE { type OBJECT IDENTIFIER, value [0] EXPLICIT ANY OPTIONAL }
+    let data = der_sequence(&[der_oid("1.3.6.1.4.1.311.2.1.15")]);
+
+    // messageDigest DigestInfo ::= SEQUENCE { digestAlgorithm AlgorithmIdentifier, digest OCTET STRING }
+    let alg = der_sequence(&[der_oid("2.16.840.1.101.3.4.2.1"), der_null()]);
+    let digest_info = der_sequence(&[alg, der_octet_string(digest)]);
+
+    der_sequence(&[data, digest_info])
+}
+
+fn build_minimal_vba_project_bin(module1: &[u8]) -> Vec<u8> {
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(b"Name=\"VBAProject\"\r\nModule=Module1\r\n")
+            .expect("write PROJECT");
+    }
+
+    ole.create_storage("VBA").expect("VBA storage");
+
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(b"dir-stream").expect("write dir");
+    }
+
+    {
+        let mut s = ole.create_stream("VBA/Module1").expect("module stream");
+        s.write_all(module1).expect("write module");
+    }
+
+    ole.into_inner().into_inner()
 }
 
 fn build_ole_with_streams(streams: &[(&str, &[u8])]) -> Vec<u8> {
@@ -179,3 +279,49 @@ fn verify_falls_back_to_vba_project_bin_when_signature_part_is_garbage() {
     assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
 }
 
+#[test]
+fn verify_signature_part_binding_matches_vba_project_bin() {
+    let vba_project_bin = build_minimal_vba_project_bin(b"module-bytes");
+    let digest =
+        compute_vba_project_digest(&vba_project_bin, DigestAlg::Sha256).expect("project digest");
+    let spc = make_spc_indirect_data_content_sha256(&digest);
+
+    let pkcs7 = make_pkcs7_signed_message(&spc);
+    let signature_part = build_vba_signature_ole(&pkcs7);
+
+    let xlsm_bytes = build_xlsm_zip(&vba_project_bin, &signature_part);
+    let pkg = XlsxPackage::from_bytes(&xlsm_bytes).expect("read xlsm");
+
+    let sig = pkg
+        .verify_vba_digital_signature()
+        .expect("verify signature")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(sig.binding, VbaSignatureBinding::Bound);
+}
+
+#[test]
+fn verify_signature_part_binding_detects_tampered_vba_project_bin() {
+    let vba_project_bin = build_minimal_vba_project_bin(b"module-bytes");
+    let digest =
+        compute_vba_project_digest(&vba_project_bin, DigestAlg::Sha256).expect("project digest");
+    let spc = make_spc_indirect_data_content_sha256(&digest);
+
+    let pkcs7 = make_pkcs7_signed_message(&spc);
+    let signature_part = build_vba_signature_ole(&pkcs7);
+
+    // Change the project without changing the signature blob.
+    let tampered_project = build_minimal_vba_project_bin(b"MODULE-BYTES");
+
+    let xlsm_bytes = build_xlsm_zip(&tampered_project, &signature_part);
+    let pkg = XlsxPackage::from_bytes(&xlsm_bytes).expect("read xlsm");
+
+    let sig = pkg
+        .verify_vba_digital_signature()
+        .expect("verify signature")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(sig.binding, VbaSignatureBinding::NotBound);
+}

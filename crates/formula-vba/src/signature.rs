@@ -432,7 +432,26 @@ pub fn verify_vba_digital_signature_bound(
 pub fn verify_vba_digital_signature(
     vba_project_bin: &[u8],
 ) -> Result<Option<VbaDigitalSignature>, SignatureError> {
-    let mut ole = OleFile::open(vba_project_bin)?;
+    verify_vba_digital_signature_with_project(vba_project_bin, vba_project_bin)
+}
+
+/// Verify a VBA digital signature when the signature streams are stored separately from the VBA
+/// project streams.
+///
+/// Some producers (notably XLSM packages) store the `\x05DigitalSignature*` streams in a dedicated
+/// OLE part (`xl/vbaProjectSignature.bin`) instead of embedding them inside `xl/vbaProject.bin`.
+///
+/// In that situation:
+/// - the signature stream bytes live in `signature_container_bin`, but
+/// - the MS-OVBA \"project digest\" binding must be computed over `vba_project_bin`.
+///
+/// This helper verifies signature streams found in `signature_container_bin` and computes binding
+/// against `vba_project_bin`.
+pub fn verify_vba_digital_signature_with_project(
+    vba_project_bin: &[u8],
+    signature_container_bin: &[u8],
+) -> Result<Option<VbaDigitalSignature>, SignatureError> {
+    let mut ole = OleFile::open(signature_container_bin)?;
     let streams = ole.list_streams()?;
 
     let mut candidates = streams
