@@ -1367,22 +1367,22 @@ export const defaultRibbonSchema: RibbonSchema = {
               id: "pageLayout.pageSetup.orientation",
               label: "Orientation",
               ariaLabel: "Orientation",
-              iconId: "arrowLeftRight",
+              iconId: "pagePortrait",
               kind: "dropdown",
               menuItems: [
-                { id: "pageLayout.pageSetup.orientation.portrait", label: "Portrait", ariaLabel: "Portrait", iconId: "file" },
-                { id: "pageLayout.pageSetup.orientation.landscape", label: "Landscape", ariaLabel: "Landscape", icon: "▭" },
+                { id: "pageLayout.pageSetup.orientation.portrait", label: "Portrait", ariaLabel: "Portrait", iconId: "pagePortrait" },
+                { id: "pageLayout.pageSetup.orientation.landscape", label: "Landscape", ariaLabel: "Landscape", iconId: "pageLandscape" },
               ],
             },
             {
               id: "pageLayout.pageSetup.size",
               label: "Size",
               ariaLabel: "Size",
-              iconId: "file",
+              iconId: "pagePortrait",
               kind: "dropdown",
               menuItems: [
-                { id: "pageLayout.pageSetup.size.letter", label: "Letter", ariaLabel: "Letter", iconId: "file" },
-                { id: "pageLayout.pageSetup.size.a4", label: "A4", ariaLabel: "A4", iconId: "file" },
+                { id: "pageLayout.pageSetup.size.letter", label: "Letter", ariaLabel: "Letter", iconId: "pagePortrait" },
+                { id: "pageLayout.pageSetup.size.a4", label: "A4", ariaLabel: "A4", iconId: "pagePortrait" },
                 { id: "pageLayout.pageSetup.size.more", label: "More Paper Sizes…", ariaLabel: "More Paper Sizes", iconId: "moreFormats" },
               ],
             },
@@ -2180,7 +2180,7 @@ export const defaultRibbonSchema: RibbonSchema = {
           buttons: [
             { id: "view.workbookViews.normal", label: "Normal", ariaLabel: "Normal View", iconId: "gridlines", kind: "toggle", defaultPressed: true, size: "large" },
             { id: "view.workbookViews.pageBreakPreview", label: "Page Break Preview", ariaLabel: "Page Break Preview", iconId: "pageBreak", kind: "toggle", size: "large" },
-            { id: "view.workbookViews.pageLayout", label: "Page Layout", ariaLabel: "Page Layout View", iconId: "file", kind: "toggle", size: "large" },
+            { id: "view.workbookViews.pageLayout", label: "Page Layout", ariaLabel: "Page Layout View", iconId: "pagePortrait", kind: "toggle", size: "large" },
             {
               id: "view.workbookViews.customViews",
               label: "Custom Views",
