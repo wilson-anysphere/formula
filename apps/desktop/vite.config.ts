@@ -17,7 +17,6 @@ const collabPersistenceEntry = fileURLToPath(new URL("../../packages/collab/pers
 const collabPersistenceIndexedDbEntry = fileURLToPath(
   new URL("../../packages/collab/persistence/src/indexeddb.ts", import.meta.url),
 );
-const marketplaceSharedRoot = fileURLToPath(new URL("../../shared", import.meta.url));
 const tauriConfigPath = fileURLToPath(new URL("./src-tauri/tauri.conf.json", import.meta.url));
 const tauriCsp = (JSON.parse(readFileSync(tauriConfigPath, "utf8")) as any)?.app?.security?.csp as unknown;
 const isE2E = process.env.FORMULA_E2E === "1";
@@ -96,10 +95,6 @@ export default defineConfig({
       // the desktop dev server/e2e harness resilient.
       { find: "@formula/collab-persistence/indexeddb", replacement: collabPersistenceIndexedDbEntry },
       { find: /^@formula\/collab-persistence$/, replacement: collabPersistenceEntry },
-      // `shared/` isn't a workspace package today, but some packages depend on it via the
-      // `@formula/marketplace-shared/*` import paths. Alias it so Vite can always resolve it,
-      // even in cached/stale installs.
-      { find: "@formula/marketplace-shared", replacement: marketplaceSharedRoot },
     ],
   },
   build: {
