@@ -655,6 +655,40 @@ fn yearfrac_basis1_uses_correct_year_length_within_year() {
         -(1.0 / 365.0),
     );
 
+    // Near-anniversary behavior at year-end should use the correct denominator.
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2019,12,31),DATE(2020,12,30),1)"),
+        365.0 / 366.0,
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2020,12,30),DATE(2019,12,31),1)"),
+        -(365.0 / 366.0),
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2019,12,31),DATE(2020,12,31),1)"),
+        1.0,
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2020,12,31),DATE(2019,12,31),1)"),
+        -1.0,
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2020,12,31),DATE(2021,12,30),1)"),
+        364.0 / 365.0,
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2021,12,30),DATE(2020,12,31),1)"),
+        -(364.0 / 365.0),
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2020,12,31),DATE(2021,12,31),1)"),
+        1.0,
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2021,12,31),DATE(2020,12,31),1)"),
+        -1.0,
+    );
+
     // Feb 28 is month-end in non-leap years; the leap day can fall outside the anniversary
     // denominator.
     assert_number(

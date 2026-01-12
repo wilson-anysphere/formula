@@ -427,6 +427,28 @@ fn yearfrac_basis1_uses_correct_year_length_within_year() {
     assert!((date_time::yearfrac(start, end, 1, system).unwrap() - expected).abs() < 1e-12);
     assert!((date_time::yearfrac(end, start, 1, system).unwrap() + expected).abs() < 1e-12);
 
+    // Near-anniversary behavior at year-end should use the correct denominator (365 vs 366) based
+    // on the anniversary year span.
+    let start = ymd_to_serial(ExcelDate::new(2019, 12, 31), system).unwrap();
+    let end = ymd_to_serial(ExcelDate::new(2020, 12, 30), system).unwrap();
+    let expected = 365.0 / 366.0;
+    assert!((date_time::yearfrac(start, end, 1, system).unwrap() - expected).abs() < 1e-12);
+    assert!((date_time::yearfrac(end, start, 1, system).unwrap() + expected).abs() < 1e-12);
+
+    let end = ymd_to_serial(ExcelDate::new(2020, 12, 31), system).unwrap();
+    assert!((date_time::yearfrac(start, end, 1, system).unwrap() - 1.0).abs() < 1e-12);
+    assert!((date_time::yearfrac(end, start, 1, system).unwrap() + 1.0).abs() < 1e-12);
+
+    let start = ymd_to_serial(ExcelDate::new(2020, 12, 31), system).unwrap();
+    let end = ymd_to_serial(ExcelDate::new(2021, 12, 30), system).unwrap();
+    let expected = 364.0 / 365.0;
+    assert!((date_time::yearfrac(start, end, 1, system).unwrap() - expected).abs() < 1e-12);
+    assert!((date_time::yearfrac(end, start, 1, system).unwrap() + expected).abs() < 1e-12);
+
+    let end = ymd_to_serial(ExcelDate::new(2021, 12, 31), system).unwrap();
+    assert!((date_time::yearfrac(start, end, 1, system).unwrap() - 1.0).abs() < 1e-12);
+    assert!((date_time::yearfrac(end, start, 1, system).unwrap() + 1.0).abs() < 1e-12);
+
     // Feb 28 is month-end in non-leap years. When crossing into a leap year, the anniversary
     // denominator can still be 365 if the leap day occurs *after* the anniversary date.
     let start = ymd_to_serial(ExcelDate::new(2019, 2, 28), system).unwrap();
