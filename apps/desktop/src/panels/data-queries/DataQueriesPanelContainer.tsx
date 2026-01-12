@@ -716,7 +716,11 @@ export function DataQueriesPanelContainer(props: Props) {
         const normalized = normalizeScopes(scopes ?? (config as any)?.defaultScopes);
         setOauthSignedInByKey((prev) => ({ ...prev, [`${providerId}:${normalized.scopesHash}`]: true }));
       } catch (err) {
-        setGlobalError(err instanceof Error ? err.message : String(err));
+        if (err && typeof err === "object" && !Array.isArray(err) && (err as any).cancelled === true) {
+          // User-cancelled PKCE wait; ignore.
+        } else {
+          setGlobalError(err instanceof Error ? err.message : String(err));
+        }
       } finally {
         setPendingDeviceCode(null);
         setPendingPkce(null);
@@ -764,6 +768,12 @@ export function DataQueriesPanelContainer(props: Props) {
       return;
     }
     oauthBroker.resolveRedirect(pendingPkce.redirectUri, redirectUrl);
+  }, [pendingPkce]);
+
+  const cancelPkceRedirect = useCallback(() => {
+    if (!pendingPkce) return;
+    oauthBroker.rejectRedirect(pendingPkce.redirectUri, { cancelled: true });
+    setPendingPkce(null);
   }, [pendingPkce]);
 
   const renderProviderEditor = () => {
@@ -906,6 +916,11 @@ export function DataQueriesPanelContainer(props: Props) {
               <div style={{ fontSize: 12, opacity: 0.85 }}>
                 Complete sign-in in your browser. Formula will continue automatically after the redirect.
               </div>
+              <div style={{ marginTop: 8 }}>
+                <button type="button" onClick={cancelPkceRedirect}>
+                  Cancel sign-in
+                </button>
+              </div>
             </>
           ) : (
             <>
@@ -913,9 +928,14 @@ export function DataQueriesPanelContainer(props: Props) {
               <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 8 }}>
                 After authenticating, copy the full redirect URL and paste it to complete sign-in.
               </div>
-              <button type="button" onClick={resolvePkceRedirect}>
-                Paste redirect URL…
-              </button>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button type="button" onClick={resolvePkceRedirect}>
+                  Paste redirect URL…
+                </button>
+                <button type="button" onClick={cancelPkceRedirect}>
+                  Cancel sign-in
+                </button>
+              </div>
             </>
           )}
         </div>
