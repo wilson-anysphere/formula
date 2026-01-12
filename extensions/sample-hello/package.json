@@ -84,6 +84,12 @@
         "key": "ctrl+shift+y",
         "mac": "cmd+shift+y",
         "when": "hasSelection"
+      },
+      {
+        "command": "sampleHello.sumSelection",
+        "key": "ctrl+shift+'",
+        "mac": "cmd+shift+'",
+        "when": "hasSelection"
       }
     ],
     "menus": {

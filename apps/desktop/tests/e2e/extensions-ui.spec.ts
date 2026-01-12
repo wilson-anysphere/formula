@@ -365,6 +365,52 @@ test.describe("Extensions UI integration", () => {
     await expect(page.getByTestId("toast-root")).toContainText("Sum: 10");
   });
 
+  test("executes a contributed shifted punctuation keybinding via KeyboardEvent.code fallback", async ({ page }) => {
+    await gotoDesktop(page);
+    await grantSampleHelloPermissions(page);
+
+    await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const app: any = (window as any).__formulaApp;
+      if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
+      const doc = app.getDocument();
+      const sheetId = app.getCurrentSheetId();
+
+      doc.setCellValue(sheetId, { row: 0, col: 0 }, 1);
+      doc.setCellValue(sheetId, { row: 0, col: 1 }, 2);
+      doc.setCellValue(sheetId, { row: 1, col: 0 }, 3);
+      doc.setCellValue(sheetId, { row: 1, col: 1 }, 4);
+
+      app.selectRange({
+        sheetId,
+        range: { startRow: 0, startCol: 0, endRow: 1, endCol: 1 },
+      });
+    });
+
+    await getOpenExtensionsPanelButton(page).click();
+    await expect(page.getByTestId("run-command-sampleHello.sumSelection")).toBeVisible();
+
+    // Simulate a shifted punctuation key where `event.key` changes ("'" -> "\""),
+    // but the physical key stays stable via `event.code === "Quote"`.
+    await page.evaluate(() => {
+      const isMac = /mac/i.test(navigator.platform);
+      const root = document.getElementById("grid");
+      root?.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          cancelable: true,
+          key: '"',
+          code: "Quote",
+          ctrlKey: !isMac,
+          metaKey: isMac,
+          shiftKey: true,
+        }),
+      );
+    });
+
+    await expect(page.getByTestId("toast-root")).toContainText("Sum: 10");
+  });
+
   test("does not execute a keybinding when its when-clause fails", async ({ page }) => {
     await gotoDesktop(page);
     await grantSampleHelloPermissions(page);
