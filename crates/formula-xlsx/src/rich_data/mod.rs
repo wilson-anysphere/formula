@@ -360,7 +360,7 @@ fn extract_rich_data_images_via_rel_table(
             let Some(target) = rid_to_target.get(rid) else {
                 continue;
             };
-            let target_part = path::resolve_target(&rich_value_rel_part, target);
+            let target_part = resolve_rich_value_rel_target_part(&rich_value_rel_part, target);
             let Some(bytes) = pkg.part(&target_part) else {
                 continue;
             };
@@ -484,7 +484,7 @@ pub fn extract_rich_cell_images(
         let Some(target) = rid_to_target.get(rid.as_str()) else {
             continue;
         };
-        let target_part = path::resolve_target(&rich_value_rel_part, target);
+        let target_part = resolve_rich_value_rel_target_part(&rich_value_rel_part, target);
         let Some(bytes) = pkg.part(&target_part) else {
             continue;
         };
@@ -645,11 +645,7 @@ fn build_rich_value_rel_index_to_target_part(
         // Some producers emit `Target="media/image1.png"` (relative to `xl/`) rather than the more
         // common `Target="../media/image1.png"` (relative to `xl/richData/`). Make a best-effort
         // guess for this case.
-        let target_part = if target.starts_with("media/") {
-            format!("xl/{target}")
-        } else {
-            path::resolve_target(SOURCE_PART, target)
-        };
+        let target_part = resolve_rich_value_rel_target_part(SOURCE_PART, target);
 
         rid_to_target_part.insert(rel.id, target_part);
     }
@@ -664,6 +660,18 @@ fn build_rich_value_rel_index_to_target_part(
     }
 
     Ok(out)
+}
+
+fn resolve_rich_value_rel_target_part(source_part: &str, target: &str) -> String {
+    // Relationship targets in `xl/richData/_rels/richValueRel.xml.rels` are typically relative to
+    // `xl/richData/` (e.g. `../media/image1.png`). Some producers instead emit targets relative to
+    // `xl/` (e.g. `media/image1.png`), so handle that as a special-case for robust extraction.
+    let target = strip_fragment(target);
+    if target.starts_with("media/") {
+        format!("xl/{target}")
+    } else {
+        path::resolve_target(source_part, target)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
