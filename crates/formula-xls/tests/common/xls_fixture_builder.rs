@@ -594,6 +594,24 @@ pub fn build_note_comment_biff5_author_biff8_short_string_fixture_xls() -> Vec<u
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF5 `.xls` fixture containing a single sheet with a merged region (`A1:B1`).
+///
+/// The NOTE record is targeted at the non-anchor cell (`B1`), but the importer should
+/// anchor the resulting model comment to `A1` per Excel merged-cell semantics.
+pub fn build_note_comment_biff5_in_merged_region_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_note_comment_biff5_in_merged_region_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing a single sheet with a merged region (`A1:B1`).
 ///
 /// The NOTE record is targeted at the non-anchor cell (`B1`), but the importer should
@@ -2119,6 +2137,14 @@ fn build_note_comment_biff5_author_biff8_short_string_workbook_stream() -> Vec<u
     )
 }
 
+fn build_note_comment_biff5_in_merged_region_workbook_stream() -> Vec<u8> {
+    build_single_sheet_workbook_stream_biff5(
+        "MergedNotesBiff5",
+        &build_note_comment_biff5_in_merged_region_sheet_stream(),
+        1252,
+    )
+}
+
 fn build_note_comment_codepage_1251_workbook_stream() -> Vec<u8> {
     build_single_sheet_workbook_stream(
         "NotesCp1251",
@@ -2446,6 +2472,66 @@ fn build_note_comment_biff5_author_biff8_short_string_sheet_stream() -> Vec<u8> 
     let text_bytes = [b'H', b'i'];
     let segments: [&[u8]; 1] = [&text_bytes];
     build_note_comment_biff5_sheet_stream_with_ansi_txo(&author_bytes, &segments, false, true)
+}
+
+fn build_note_comment_biff5_in_merged_region_sheet_stream() -> Vec<u8> {
+    const OBJECT_ID: u16 = 1;
+    const XF_GENERAL_CELL: u16 = 16;
+    const AUTHOR: &str = "Alice";
+    const TEXT: &[u8] = b"Hello";
+
+    let cch_text: u16 = TEXT
+        .len()
+        .try_into()
+        .expect("comment text too long for u16 length");
+
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof_biff5(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS (BIFF5): rows [0, 1), cols [0, 2) to cover A1..B1.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    dims.extend_from_slice(&1u16.to_le_bytes());
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    dims.extend_from_slice(&2u16.to_le_bytes());
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // MERGEDCELLS: 1 range, A1:B1.
+    let mut merged = Vec::<u8>::new();
+    merged.extend_from_slice(&1u16.to_le_bytes()); // cAreas
+    merged.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
+    merged.extend_from_slice(&0u16.to_le_bytes()); // rwLast
+    merged.extend_from_slice(&0u16.to_le_bytes()); // colFirst (A)
+    merged.extend_from_slice(&1u16.to_le_bytes()); // colLast (B)
+    push_record(&mut sheet, RECORD_MERGEDCELLS, &merged);
+
+    // Ensure the anchor cell exists in the calamine value grid.
+    push_record(&mut sheet, RECORD_BLANK, &blank_cell(0, 0, XF_GENERAL_CELL));
+
+    // NOTE record targets B1 (non-anchor) while A1:B1 is merged.
+    push_record(
+        &mut sheet,
+        RECORD_NOTE,
+        &note_record_biff5_author_bytes(0u16, 1u16, OBJECT_ID, AUTHOR.as_bytes()),
+    );
+    push_record(&mut sheet, RECORD_OBJ, &obj_record_with_ftcmo(OBJECT_ID));
+
+    // TXO header: cchText at offset 6, cbRuns at offset 12.
+    let mut txo = [0u8; 18];
+    txo[6..8].copy_from_slice(&cch_text.to_le_bytes());
+    txo[12..14].copy_from_slice(&4u16.to_le_bytes()); // cbRuns
+    push_record(&mut sheet, RECORD_TXO, &txo);
+
+    // CONTINUE: raw bytes.
+    push_record(&mut sheet, RECORD_CONTINUE, TEXT);
+    // Formatting runs continuation (dummy bytes).
+    push_record(&mut sheet, RECORD_CONTINUE, &[0u8; 4]);
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
 }
 
 fn build_note_comment_codepage_1251_sheet_stream() -> Vec<u8> {

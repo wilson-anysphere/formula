@@ -163,6 +163,31 @@ fn anchors_note_comments_to_merged_region_top_left_cell() {
 }
 
 #[test]
+fn anchors_note_comments_to_merged_region_top_left_cell_biff5() {
+    let bytes = xls_fixture_builder::build_note_comment_biff5_in_merged_region_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("MergedNotesBiff5")
+        .expect("MergedNotesBiff5 missing");
+
+    let merge_range = Range::from_a1("A1:B1").unwrap();
+    assert!(
+        sheet.merged_regions.iter().any(|region| region.range == merge_range),
+        "missing expected merged range A1:B1"
+    );
+
+    // The NOTE record in this fixture targets B1, but the model anchors comments
+    // to the merged region's top-left cell (A1).
+    let a1 = CellRef::from_a1("A1").unwrap();
+    let comments = sheet.comments_for_cell(a1);
+    assert_eq!(comments.len(), 1, "expected 1 comment on A1");
+    assert_eq!(comments[0].content, "Hello");
+    assert_eq!(comments[0].id, "xls-note:A1:1");
+}
+
+#[test]
 fn imports_note_comment_text_using_workbook_codepage() {
     let bytes = xls_fixture_builder::build_note_comment_codepage_1251_fixture_xls();
     let result = import_fixture(&bytes);
