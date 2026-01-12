@@ -45,6 +45,22 @@ dialog.goto-dialog::backdrop {
   background: var(--dialog-backdrop);
 }
 
+/* --- Page setup dialog --------------------------------------------------- */
+
+dialog.page-setup-dialog {
+  width: min(520px, calc(100vw - 32px));
+  border: 1px solid var(--dialog-border);
+  border-radius: 12px;
+  padding: 0;
+  background: var(--dialog-bg);
+  color: var(--text-primary);
+  box-shadow: var(--dialog-shadow);
+}
+
+dialog.page-setup-dialog::backdrop {
+  background: var(--dialog-backdrop);
+}
+
 .find-replace-dialog .row,
 .goto-dialog .row {
   display: flex;

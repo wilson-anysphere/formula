@@ -9,6 +9,9 @@ import "./styles/shell.css";
 import "./styles/auditing.css";
 import "./styles/format-cells-dialog.css";
 
+import React from "react";
+import { createRoot } from "react-dom/client";
+
 import { ThemeController } from "./theme/themeController.js";
 
 import { mountRibbon } from "./ribbon/index.js";
@@ -92,6 +95,7 @@ import {
   toggleWrap,
   type CellRange,
 } from "./formatting/toolbar.js";
+import { PageSetupDialog, type CellRange as PrintCellRange, type PageSetup } from "./print/index.js";
 import {
   getDefaultSeedStoreStorage,
   readContributedPanelsSeedStore,
@@ -2553,6 +2557,291 @@ function showDialogAndFocus(dialog: HTMLDialogElement): void {
   requestAnimationFrame(focusInput);
 }
 
+function getTauriInvokeForPrint(): TauriInvoke | null {
+  const invoke =
+    queuedInvoke ?? ((globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined) ?? null;
+  if (!invoke) {
+    showToast("Print/Export is available in the desktop app.");
+    return null;
+  }
+  return invoke;
+}
+
+function selectionBoundingBox1Based(): PrintCellRange {
+  const ranges = app.getSelectionRanges();
+  const active = app.getActiveCell();
+  if (ranges.length === 0) {
+    return { startRow: active.row + 1, endRow: active.row + 1, startCol: active.col + 1, endCol: active.col + 1 };
+  }
+
+  let minRow = Number.POSITIVE_INFINITY;
+  let minCol = Number.POSITIVE_INFINITY;
+  let maxRow = Number.NEGATIVE_INFINITY;
+  let maxCol = Number.NEGATIVE_INFINITY;
+
+  for (const r of ranges) {
+    const startRow0 = Math.min(r.startRow, r.endRow);
+    const endRow0 = Math.max(r.startRow, r.endRow);
+    const startCol0 = Math.min(r.startCol, r.endCol);
+    const endCol0 = Math.max(r.startCol, r.endCol);
+    minRow = Math.min(minRow, startRow0);
+    minCol = Math.min(minCol, startCol0);
+    maxRow = Math.max(maxRow, endRow0);
+    maxCol = Math.max(maxCol, endCol0);
+  }
+
+  if (!Number.isFinite(minRow) || !Number.isFinite(minCol) || !Number.isFinite(maxRow) || !Number.isFinite(maxCol)) {
+    return { startRow: active.row + 1, endRow: active.row + 1, startCol: active.col + 1, endCol: active.col + 1 };
+  }
+
+  return { startRow: minRow + 1, endRow: maxRow + 1, startCol: minCol + 1, endCol: maxCol + 1 };
+}
+
+function decodeBase64ToBytes(data: string): Uint8Array {
+  const binary = atob(data);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function downloadBytes(bytes: Uint8Array, filename: string, mime: string): void {
+  const blob = new Blob([bytes], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+type TauriPageSetup = {
+  orientation: "portrait" | "landscape";
+  paper_size: number;
+  margins: {
+    left: number;
+    right: number;
+    top: number;
+    bottom: number;
+    header: number;
+    footer: number;
+  };
+  scaling:
+    | { kind: "percent"; percent: number }
+    | { kind: "fitTo"; width_pages: number; height_pages: number };
+};
+
+function pageSetupFromTauri(raw: any): PageSetup {
+  const orientation = raw?.orientation === "landscape" ? "landscape" : "portrait";
+  const paperSize = typeof raw?.paper_size === "number" ? raw.paper_size : Number(raw?.paper_size) || 9;
+  const marginsRaw = raw?.margins ?? {};
+  const margins = {
+    left: Number(marginsRaw.left) || 0,
+    right: Number(marginsRaw.right) || 0,
+    top: Number(marginsRaw.top) || 0,
+    bottom: Number(marginsRaw.bottom) || 0,
+    header: Number(marginsRaw.header) || 0,
+    footer: Number(marginsRaw.footer) || 0,
+  };
+
+  const scalingRaw = raw?.scaling ?? {};
+  const scaling: PageSetup["scaling"] =
+    scalingRaw.kind === "fitTo"
+      ? {
+          kind: "fitTo",
+          widthPages: Number(scalingRaw.width_pages) || 1,
+          heightPages: Number(scalingRaw.height_pages) || 0,
+        }
+      : { kind: "percent", percent: Number(scalingRaw.percent) || 100 };
+
+  return { orientation, paperSize, margins, scaling };
+}
+
+function pageSetupToTauri(raw: PageSetup): TauriPageSetup {
+  const toU16 = (value: number): number => {
+    if (!Number.isFinite(value)) return 0;
+    const rounded = Math.round(value);
+    if (rounded < 0) return 0;
+    if (rounded > 65535) return 65535;
+    return rounded;
+  };
+
+  const scaling: TauriPageSetup["scaling"] =
+    raw.scaling.kind === "fitTo"
+      ? {
+          kind: "fitTo",
+          width_pages: toU16(raw.scaling.widthPages),
+          height_pages: toU16(raw.scaling.heightPages),
+        }
+      : { kind: "percent", percent: toU16(raw.scaling.percent) };
+
+  return {
+    orientation: raw.orientation,
+    paper_size: toU16(raw.paperSize),
+    margins: raw.margins,
+    scaling,
+  };
+}
+
+function showPageSetupDialogModal(args: { initialValue: PageSetup; onChange: (next: PageSetup) => void }): void {
+  const dialog = document.createElement("dialog");
+  dialog.className = "page-setup-dialog";
+
+  const container = document.createElement("div");
+  dialog.appendChild(container);
+  document.body.appendChild(dialog);
+
+  const root = createRoot(container);
+
+  const close = () => dialog.close();
+
+  function Wrapper() {
+    const [value, setValue] = React.useState<PageSetup>(args.initialValue);
+
+    const handleChange = React.useCallback(
+      (next: PageSetup) => {
+        setValue(next);
+        args.onChange(next);
+      },
+      [args],
+    );
+
+    return React.createElement(PageSetupDialog, { value, onChange: handleChange, onClose: close });
+  }
+
+  root.render(React.createElement(Wrapper));
+
+  dialog.addEventListener(
+    "close",
+    () => {
+      root.unmount();
+      dialog.remove();
+      app.focus();
+    },
+    { once: true },
+  );
+
+  dialog.addEventListener("cancel", (e) => {
+    e.preventDefault();
+    dialog.close();
+  });
+
+  dialog.showModal();
+}
+
+async function handleRibbonPageSetup(): Promise<void> {
+  const invoke = getTauriInvokeForPrint();
+  if (!invoke) return;
+
+  try {
+    const sheetId = app.getCurrentSheetId();
+    const settings = await invoke("get_sheet_print_settings", { sheet_id: sheetId });
+    const pageSetup = pageSetupFromTauri((settings as any)?.page_setup);
+
+    showPageSetupDialogModal({
+      initialValue: pageSetup,
+      onChange: (next) => {
+        void invoke("set_sheet_page_setup", {
+          sheet_id: sheetId,
+          page_setup: pageSetupToTauri(next),
+        }).catch((err) => {
+          console.error("Failed to set page setup:", err);
+          showToast(`Failed to update page setup: ${String(err)}`, "error");
+        });
+      },
+    });
+  } catch (err) {
+    console.error("Failed to open page setup:", err);
+    showToast(`Failed to open page setup: ${String(err)}`, "error");
+  }
+}
+
+async function handleRibbonSetPrintArea(): Promise<void> {
+  const invoke = getTauriInvokeForPrint();
+  if (!invoke) return;
+
+  try {
+    const sheetId = app.getCurrentSheetId();
+    const range = selectionBoundingBox1Based();
+    await invoke("set_sheet_print_area", {
+      sheet_id: sheetId,
+      print_area: [
+        {
+          start_row: range.startRow,
+          end_row: range.endRow,
+          start_col: range.startCol,
+          end_col: range.endCol,
+        },
+      ],
+    });
+    app.focus();
+  } catch (err) {
+    console.error("Failed to set print area:", err);
+    showToast(`Failed to set print area: ${String(err)}`, "error");
+  }
+}
+
+async function handleRibbonClearPrintArea(): Promise<void> {
+  const invoke = getTauriInvokeForPrint();
+  if (!invoke) return;
+
+  try {
+    const sheetId = app.getCurrentSheetId();
+    await invoke("set_sheet_print_area", { sheet_id: sheetId, print_area: null });
+    app.focus();
+  } catch (err) {
+    console.error("Failed to clear print area:", err);
+    showToast(`Failed to clear print area: ${String(err)}`, "error");
+  }
+}
+
+async function handleRibbonExportPdf(): Promise<void> {
+  const invoke = getTauriInvokeForPrint();
+  if (!invoke) return;
+
+  try {
+    // Best-effort: ensure any pending workbook sync changes are flushed before exporting.
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    await drainBackendSync();
+
+    const sheetId = app.getCurrentSheetId();
+    let range: PrintCellRange = selectionBoundingBox1Based();
+
+    try {
+      const settings = await invoke("get_sheet_print_settings", { sheet_id: sheetId });
+      const printArea = (settings as any)?.print_area;
+      const first = Array.isArray(printArea) ? printArea[0] : null;
+      if (first) {
+        range = {
+          startRow: Number(first.start_row),
+          endRow: Number(first.end_row),
+          startCol: Number(first.start_col),
+          endCol: Number(first.end_col),
+        };
+      }
+    } catch (err) {
+      console.warn("Failed to fetch print area settings; exporting selection instead:", err);
+    }
+
+    const b64 = await invoke("export_sheet_range_pdf", {
+      sheet_id: sheetId,
+      range: { start_row: range.startRow, end_row: range.endRow, start_col: range.startCol, end_col: range.endCol },
+      col_widths_points: undefined,
+      row_heights_points: undefined,
+    });
+
+    const bytes = decodeBase64ToBytes(String(b64));
+    downloadBytes(bytes, `${sheetId}.pdf`, "application/pdf");
+    app.focus();
+  } catch (err) {
+    console.error("Failed to export PDF:", err);
+    showToast(`Failed to export PDF: ${String(err)}`, "error");
+  }
+}
+
 mountRibbon(ribbonRoot, {
   onToggle: (commandId, pressed) => {
     switch (commandId) {
@@ -2657,6 +2946,18 @@ mountRibbon(ribbonRoot, {
         return;
       case "home.editing.findSelect.goTo":
         showDialogAndFocus(goToDialog);
+        return;
+      case "pageLayout.pageSetup.pageSetupDialog":
+        void handleRibbonPageSetup();
+        return;
+      case "pageLayout.printArea.setPrintArea":
+        void handleRibbonSetPrintArea();
+        return;
+      case "pageLayout.printArea.clearPrintArea":
+        void handleRibbonClearPrintArea();
+        return;
+      case "pageLayout.export.exportPdf":
+        void handleRibbonExportPdf();
         return;
       default:
         showToast(`Ribbon: ${commandId}`);

@@ -678,6 +678,7 @@ export const defaultRibbonSchema: RibbonSchema = {
           id: "pageLayout.pageSetup",
           label: "Page Setup",
           buttons: [
+            { id: "pageLayout.pageSetup.pageSetupDialog", label: "Page Setup…", ariaLabel: "Page Setup", icon: "📐", size: "large", testId: "ribbon-page-setup" },
             { id: "pageLayout.pageSetup.margins", label: "Margins", ariaLabel: "Margins", icon: "📏", kind: "dropdown" },
             { id: "pageLayout.pageSetup.orientation", label: "Orientation", ariaLabel: "Orientation", icon: "↔", kind: "dropdown" },
             { id: "pageLayout.pageSetup.size", label: "Size", ariaLabel: "Size", icon: "📄", kind: "dropdown" },
@@ -685,6 +686,21 @@ export const defaultRibbonSchema: RibbonSchema = {
             { id: "pageLayout.pageSetup.breaks", label: "Breaks", ariaLabel: "Breaks", icon: "⤶", kind: "dropdown" },
             { id: "pageLayout.pageSetup.background", label: "Background", ariaLabel: "Background", icon: "🖼", kind: "dropdown" },
             { id: "pageLayout.pageSetup.printTitles", label: "Print Titles", ariaLabel: "Print Titles", icon: "🏷", kind: "dropdown" },
+          ],
+        },
+        {
+          id: "pageLayout.printArea",
+          label: "Print Area",
+          buttons: [
+            { id: "pageLayout.printArea.setPrintArea", label: "Set Print Area", ariaLabel: "Set Print Area", icon: "🖨", testId: "ribbon-set-print-area" },
+            { id: "pageLayout.printArea.clearPrintArea", label: "Clear Print Area", ariaLabel: "Clear Print Area", icon: "✖", testId: "ribbon-clear-print-area" },
+          ],
+        },
+        {
+          id: "pageLayout.export",
+          label: "Export",
+          buttons: [
+            { id: "pageLayout.export.exportPdf", label: "Export to PDF", ariaLabel: "Export to PDF", icon: "📄", testId: "ribbon-export-pdf" },
           ],
         },
         {
