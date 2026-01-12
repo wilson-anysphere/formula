@@ -1192,6 +1192,45 @@ fn build_defined_names_workbook_stream() -> Vec<u8> {
         &name_record("UnionName", 0, false, None, &union_rgce),
     );
 
+    // 5) Function call to exercise PtgFuncVar decoding: MyName -> SUM(Sheet1!$A$1:$A$3)
+    let mut sum_rgce = ptg_area3d(0, 0, 2, 0, 0);
+    sum_rgce.extend_from_slice(&[0x22u8, 0x01, 0x04, 0x00]); // PtgFuncVar argc=1 iftab=4 (SUM)
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &name_record("MyName", 0, false, None, &sum_rgce),
+    );
+
+    // 6) Fixed-arity function to exercise PtgFunc decoding: AbsName -> ABS(1)
+    let abs_rgce = vec![0x1E, 0x01, 0x00, 0x21, 0x18, 0x00]; // PtgInt 1; PtgFunc iftab=24 (ABS)
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &name_record("AbsName", 0, false, None, &abs_rgce),
+    );
+
+    // 7) Union inside a function argument must be parenthesized: UnionFunc -> SUM((Sheet1!$A$1,Sheet1!$B$1))
+    let mut union_func_rgce = [ptg_ref3d(0, 0, 0), ptg_ref3d(0, 0, 1), vec![0x10u8]].concat();
+    union_func_rgce.extend_from_slice(&[0x22u8, 0x01, 0x04, 0x00]); // SUM
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &name_record("UnionFunc", 0, false, None, &union_func_rgce),
+    );
+
+    // 8) Missing argument slot: MissingArgName -> IF(,1,2)
+    let miss_rgce = vec![
+        0x16u8, // PtgMissArg
+        0x1E, 0x01, 0x00, // PtgInt 1
+        0x1E, 0x02, 0x00, // PtgInt 2
+        0x22, 0x03, 0x01, 0x00, // PtgFuncVar argc=3 iftab=1 (IF)
+    ];
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &name_record("MissingArgName", 0, false, None, &miss_rgce),
+    );
+
     push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
 
     // -- Sheet substreams -------------------------------------------------------

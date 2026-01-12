@@ -62,4 +62,41 @@ fn imports_biff_defined_names_with_scope_and_3d_refs() {
         .expect("UnionName missing");
     assert_eq!(union.scope, DefinedNameScope::Workbook);
     assert_eq!(union.refers_to, "Sheet1!$A$1,Sheet1!$B$1");
+
+    let my_name = result
+        .workbook
+        .defined_names
+        .iter()
+        .find(|n| n.name == "MyName")
+        .expect("MyName missing");
+    assert_eq!(my_name.scope, DefinedNameScope::Workbook);
+    assert!(!my_name.hidden);
+    assert_eq!(my_name.refers_to, "SUM(Sheet1!$A$1:$A$3)");
+
+    let abs = result
+        .workbook
+        .defined_names
+        .iter()
+        .find(|n| n.name == "AbsName")
+        .expect("AbsName missing");
+    assert_eq!(abs.scope, DefinedNameScope::Workbook);
+    assert_eq!(abs.refers_to, "ABS(1)");
+
+    let union_func = result
+        .workbook
+        .defined_names
+        .iter()
+        .find(|n| n.name == "UnionFunc")
+        .expect("UnionFunc missing");
+    assert_eq!(union_func.scope, DefinedNameScope::Workbook);
+    assert_eq!(union_func.refers_to, "SUM((Sheet1!$A$1,Sheet1!$B$1))");
+
+    let miss = result
+        .workbook
+        .defined_names
+        .iter()
+        .find(|n| n.name == "MissingArgName")
+        .expect("MissingArgName missing");
+    assert_eq!(miss.scope, DefinedNameScope::Workbook);
+    assert_eq!(miss.refers_to, "IF(,1,2)");
 }
