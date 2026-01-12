@@ -1795,20 +1795,6 @@ app.onEditStateChange(() => scheduleRibbonSelectionFormatStateUpdate());
 window.addEventListener("formula:view-changed", () => scheduleRibbonSelectionFormatStateUpdate());
 scheduleRibbonSelectionFormatStateUpdate();
 
-function isTextInputTarget(target: EventTarget | null): boolean {
-  const el = target as HTMLElement | null;
-  if (!el) return false;
-  const tag = el.tagName;
-  return tag === "INPUT" || tag === "TEXTAREA" || el.isContentEditable;
-}
-
-function canRunGridFormattingShortcuts(event: KeyboardEvent): boolean {
-  if (event.defaultPrevented) return false;
-  if (isSpreadsheetEditing()) return false;
-  if (isTextInputTarget(event.target)) return false;
-  return true;
-}
-
 // --- Focus cycling (Excel-style F6) --------------------------------------------
 //
 // With Tab/Shift+Tab used for in-grid navigation (Excel mental model), we need a
@@ -1952,56 +1938,6 @@ window.addEventListener(
   },
   { capture: true },
 );
-
-window.addEventListener("keydown", (e) => {
-  if (!canRunGridFormattingShortcuts(e)) return;
-  if (e.repeat) return;
-
-  const primary = e.ctrlKey || e.metaKey;
-  if (!primary) return;
-  if (e.altKey) return;
-
-  const key = e.key ?? "";
-  const keyLower = key.toLowerCase();
-
-  // --- Core formatting (Excel shortcuts) ---------------------------------------
-  if (!e.shiftKey) {
-    if (keyLower === "b") {
-      e.preventDefault();
-      applyFormattingToSelection("Bold", (doc, sheetId, ranges) => toggleBold(doc, sheetId, ranges));
-      return;
-    }
-    // Cmd+I is reserved for toggling the AI Chat sidebar. Only bind italic to Ctrl+I.
-    if (keyLower === "i" && e.ctrlKey && !e.metaKey) {
-      e.preventDefault();
-      applyFormattingToSelection("Italic", (doc, sheetId, ranges) => toggleItalic(doc, sheetId, ranges));
-      return;
-    }
-    if (keyLower === "u") {
-      e.preventDefault();
-      applyFormattingToSelection("Underline", (doc, sheetId, ranges) => toggleUnderline(doc, sheetId, ranges));
-      return;
-    }
-  }
-
-  if (e.shiftKey) {
-    const preset =
-      key === "$" || e.code === "Digit4"
-        ? "currency"
-        : key === "%" || e.code === "Digit5"
-          ? "percent"
-          : key === "#" || e.code === "Digit3"
-            ? "date"
-            : null;
-
-    if (preset) {
-      e.preventDefault();
-      const label =
-        preset === "currency" ? "Currency format" : preset === "percent" ? "Percentage format" : "Date format";
-      applyFormattingToSelection(label, (doc, sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, preset));
-    }
-  }
-});
 
 const ZOOM_PRESET_VALUES = new Set<number>(
   Array.from(zoomControlEl.querySelectorAll("option"))
@@ -5548,7 +5484,9 @@ if (
     "keydown",
     (e) => {
       if (e.defaultPrevented) return;
-      if (isTextInputTarget(e.target)) return;
+      // Fail-closed: only allow opening the grid context menu when we can
+      // confidently say focus is not inside a text input.
+      if (contextKeys.get("focus.inTextInput") !== false) return;
 
       const shouldOpen = (e.shiftKey && e.key === "F10") || e.key === "ContextMenu" || e.code === "ContextMenu";
       if (!shouldOpen) return;
