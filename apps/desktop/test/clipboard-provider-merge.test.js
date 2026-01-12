@@ -77,3 +77,61 @@ test("tauri: preserves rich WebView formats when filling missing text from tauri
   );
 });
 
+test("tauri: merges legacy core.invoke('read_clipboard') without clobbering web fields", async () => {
+  const webRtf = String.raw`{\rtf1\ansi web}`;
+  const nativeRtf = String.raw`{\rtf1\ansi native}`;
+  const imageBytes = new Uint8Array([9, 8, 7]);
+
+  /** @type {string[]} */
+  const invokeCalls = [];
+  let readTextCalls = 0;
+
+  await withGlobals(
+    {
+      __TAURI__: {
+        core: {
+          async invoke(cmd) {
+            invokeCalls.push(cmd);
+            if (cmd === "clipboard_read") throw new Error("command not found");
+            if (cmd === "read_clipboard") return { text: "invoke text", rtf: nativeRtf };
+            throw new Error(`unexpected invoke cmd: ${cmd}`);
+          },
+        },
+        clipboard: {
+          async readText() {
+            readTextCalls += 1;
+            return "should not be used";
+          },
+        },
+      },
+      navigator: {
+        clipboard: {
+          async read() {
+            return [
+              {
+                types: ["text/rtf", "image/png"],
+                async getType(type) {
+                  if (type === "text/rtf") return new Blob([webRtf], { type });
+                  if (type === "image/png") return new Blob([imageBytes], { type });
+                  throw new Error(`unexpected clipboard type: ${type}`);
+                },
+              },
+            ];
+          },
+        },
+      },
+    },
+    async () => {
+      const provider = await createClipboardProvider();
+      const content = await provider.read();
+
+      assert.deepStrictEqual(invokeCalls, ["clipboard_read", "read_clipboard"]);
+      assert.equal(readTextCalls, 0);
+
+      assert.equal(content.text, "invoke text");
+      // WebView value should win when merging.
+      assert.equal(content.rtf, webRtf);
+      assert.deepStrictEqual(content.imagePng, imageBytes);
+    },
+  );
+});

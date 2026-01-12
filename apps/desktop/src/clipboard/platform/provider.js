@@ -197,6 +197,7 @@ function createTauriClipboardProvider() {
     async read() {
       /** @type {any | undefined} */
       let native;
+      let clipboardReadErrored = false;
 
       // 1) Prefer rich reads via the native clipboard command when available (Tauri IPC).
       if (typeof tauriInvoke === "function") {
@@ -231,6 +232,7 @@ function createTauriClipboardProvider() {
           }
         } catch {
           // Ignore; command may not exist on older builds.
+          clipboardReadErrored = true;
         }
       }
 
@@ -244,6 +246,18 @@ function createTauriClipboardProvider() {
 
       if (native) {
         mergeClipboardContent(merged, native);
+      }
+
+      // Older desktop builds exposed rich clipboard reads via `read_clipboard` instead of
+      // `clipboard_read`. If the newer command is missing, try the legacy name as a
+      // best-effort merge (never clobbering WebView values).
+      if (clipboardReadErrored && typeof tauriInvoke === "function") {
+        try {
+          const legacy = await tauriInvoke("read_clipboard");
+          mergeClipboardContent(merged, legacy);
+        } catch {
+          // Ignore.
+        }
       }
 
       // 3) Fill missing plain text via the legacy Tauri plain text clipboard API.
