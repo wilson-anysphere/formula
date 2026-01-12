@@ -120,3 +120,104 @@ fn ensure_content_types_default_idempotent() {
     let twice = parts.get("[Content_Types].xml").cloned().unwrap();
     assert_eq!(once, twice);
 }
+
+fn override_element_names(xml: &str) -> Vec<Vec<u8>> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    let mut out = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf).expect("xml parse") {
+            Event::Start(e) | Event::Empty(e) if local_name(e.name().as_ref()) == b"Override" => {
+                out.push(e.name().as_ref().to_vec());
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    out
+}
+
+#[test]
+fn ensure_content_types_override_preserves_prefix_only_content_types() {
+    let ct_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ct:Types xmlns:ct="http://schemas.openxmlformats.org/package/2006/content-types">
+  <ct:Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <ct:Default Extension="xml" ContentType="application/xml"/>
+  <ct:Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+</ct:Types>"#;
+
+    let mut parts = BTreeMap::new();
+    parts.insert("[Content_Types].xml".to_string(), ct_xml.as_bytes().to_vec());
+
+    ensure_content_types_override(
+        &mut parts,
+        "/xl/styles.xml",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml",
+    )
+    .expect("patch content types");
+
+    let updated = std::str::from_utf8(parts.get("[Content_Types].xml").expect("ct part"))
+        .expect("utf8 ct xml");
+
+    assert!(
+        updated.contains(r#"<ct:Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>"#),
+        "expected inserted ct:Override; got:\n{updated}"
+    );
+    assert!(
+        !updated.contains("<Override"),
+        "must not introduce namespace-less <Override> elements; got:\n{updated}"
+    );
+
+    for name in override_element_names(updated) {
+        assert!(
+            name.starts_with(b"ct:"),
+            "expected only prefixed Override elements; saw {:?} in:\n{updated}",
+            String::from_utf8_lossy(&name)
+        );
+    }
+}
+
+#[test]
+fn patch_content_types_for_sheet_edits_preserves_prefix_only_content_types() {
+    let ct_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ct:Types xmlns:ct="http://schemas.openxmlformats.org/package/2006/content-types">
+  <ct:Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <ct:Default Extension="xml" ContentType="application/xml"/>
+  <ct:Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+</ct:Types>"#;
+
+    let mut parts = BTreeMap::new();
+    parts.insert("[Content_Types].xml".to_string(), ct_xml.as_bytes().to_vec());
+
+    let added = vec![SheetMeta {
+        worksheet_id: 1,
+        sheet_id: 1,
+        relationship_id: "rId1".to_string(),
+        state: None,
+        path: "xl/worksheets/sheet2.xml".to_string(),
+    }];
+
+    patch_content_types_for_sheet_edits(&mut parts, &[], &added).expect("patch content types");
+
+    let updated = std::str::from_utf8(parts.get("[Content_Types].xml").expect("ct part"))
+        .expect("utf8 ct xml");
+
+    assert!(
+        updated.contains(r#"<ct:Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>"#),
+        "expected inserted ct:Override for worksheet; got:\n{updated}"
+    );
+    assert!(
+        !updated.contains("<Override"),
+        "must not introduce namespace-less <Override> elements; got:\n{updated}"
+    );
+
+    for name in override_element_names(updated) {
+        assert!(
+            name.starts_with(b"ct:"),
+            "expected only prefixed Override elements; saw {:?} in:\n{updated}",
+            String::from_utf8_lossy(&name)
+        );
+    }
+}

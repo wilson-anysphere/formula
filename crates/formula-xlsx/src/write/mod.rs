@@ -32,6 +32,7 @@ const REL_TYPE_SHARED_STRINGS: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings";
 
 const SPREADSHEETML_NS: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+const CONTENT_TYPES_NS: &str = "http://schemas.openxmlformats.org/package/2006/content-types";
 
 mod dimension;
 mod sheetdata_patch;
@@ -118,6 +119,16 @@ fn worksheet_has_default_spreadsheetml_ns(
     for attr in e.attributes() {
         let attr = attr?;
         if attr.key.as_ref() == b"xmlns" && attr.value.as_ref() == SPREADSHEETML_NS.as_bytes() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn content_types_has_default_ns(e: &quick_xml::events::BytesStart<'_>) -> Result<bool, WriteError> {
+    for attr in e.attributes() {
+        let attr = attr?;
+        if attr.key.as_ref() == b"xmlns" && attr.value.as_ref() == CONTENT_TYPES_NS.as_bytes() {
             return Ok(true);
         }
     }
@@ -3592,19 +3603,99 @@ fn ensure_content_types_override(
         // Avoid synthesizing a full file for existing packages.
         return Ok(());
     };
-    let mut xml = String::from_utf8(existing)
+
+    // Fast path: if the part already exists, avoid rewriting the file to keep roundtrip
+    // output stable.
+    let xml = std::str::from_utf8(&existing)
         .map_err(|e| WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
     if xml.contains(&format!(r#"PartName="{part_name}""#)) {
-        parts.insert("[Content_Types].xml".to_string(), xml.into_bytes());
         return Ok(());
     }
-    if let Some(idx) = xml.rfind("</Types>") {
-        let insert = format!(
-            r#"<Override PartName="{part_name}" ContentType="{content_type}"/>"#
-        );
-        xml.insert_str(idx, &insert);
+
+    let mut reader = Reader::from_reader(existing.as_slice());
+    reader.config_mut().trim_text(false);
+    let mut writer = Writer::new(Vec::with_capacity(existing.len() + 128));
+    let mut buf = Vec::new();
+
+    let mut saw_part = false;
+    let mut inserted = false;
+
+    let mut types_prefix: Option<String> = None;
+    let mut has_default_ns = false;
+    let mut override_prefix: Option<String> = None;
+
+    loop {
+        let event = reader.read_event_into(&mut buf)?;
+        match event {
+            Event::Start(ref e) if local_name(e.name().as_ref()) == b"Types" => {
+                if types_prefix.is_none() {
+                    types_prefix = element_prefix(e.name().as_ref())
+                        .map(|p| String::from_utf8_lossy(p).into_owned());
+                }
+                if !has_default_ns {
+                    has_default_ns = content_types_has_default_ns(e)?;
+                }
+                writer.write_event(Event::Start(e.to_owned()))?;
+            }
+            Event::Start(ref e) if local_name(e.name().as_ref()) == b"Override" => {
+                if override_prefix.is_none() {
+                    override_prefix = element_prefix(e.name().as_ref())
+                        .map(|p| String::from_utf8_lossy(p).into_owned());
+                }
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    if attr.key.as_ref() == b"PartName"
+                        && attr.unescape_value()?.as_ref() == part_name
+                    {
+                        saw_part = true;
+                        break;
+                    }
+                }
+                writer.write_event(Event::Start(e.to_owned()))?;
+            }
+            Event::Empty(ref e) if local_name(e.name().as_ref()) == b"Override" => {
+                if override_prefix.is_none() {
+                    override_prefix = element_prefix(e.name().as_ref())
+                        .map(|p| String::from_utf8_lossy(p).into_owned());
+                }
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    if attr.key.as_ref() == b"PartName"
+                        && attr.unescape_value()?.as_ref() == part_name
+                    {
+                        saw_part = true;
+                        break;
+                    }
+                }
+                writer.write_event(Event::Empty(e.to_owned()))?;
+            }
+            Event::End(ref e) if local_name(e.name().as_ref()) == b"Types" => {
+                if !saw_part {
+                    let prefix = override_prefix.as_deref().or_else(|| {
+                        if !has_default_ns {
+                            types_prefix.as_deref()
+                        } else {
+                            None
+                        }
+                    });
+                    let tag = prefixed_tag(prefix, "Override");
+                    let mut override_el = quick_xml::events::BytesStart::new(tag.as_str());
+                    override_el.push_attribute(("PartName", part_name));
+                    override_el.push_attribute(("ContentType", content_type));
+                    writer.write_event(Event::Empty(override_el))?;
+                    inserted = true;
+                }
+                writer.write_event(Event::End(e.to_owned()))?;
+            }
+            Event::Eof => break,
+            ev => writer.write_event(ev.into_owned())?,
+        }
+        buf.clear();
     }
-    parts.insert("[Content_Types].xml".to_string(), xml.into_bytes());
+
+    if inserted {
+        parts.insert("[Content_Types].xml".to_string(), writer.into_inner());
+    }
     Ok(())
 }
 
@@ -3911,11 +4002,29 @@ fn patch_content_types_for_sheet_edits(
     let mut existing_overrides: HashSet<String> = HashSet::new();
     let mut skipping = false;
 
+    let mut types_prefix: Option<String> = None;
+    let mut has_default_ns = false;
+    let mut override_prefix: Option<String> = None;
+
     loop {
         let event = reader.read_event_into(&mut buf)?;
         match event {
             Event::Eof => break,
-            Event::Start(ref e) if e.name().as_ref() == b"Override" => {
+            Event::Start(ref e) if local_name(e.name().as_ref()) == b"Types" => {
+                if types_prefix.is_none() {
+                    types_prefix = element_prefix(e.name().as_ref())
+                        .map(|p| String::from_utf8_lossy(p).into_owned());
+                }
+                if !has_default_ns {
+                    has_default_ns = content_types_has_default_ns(e)?;
+                }
+                writer.write_event(Event::Start(e.to_owned()))?;
+            }
+            Event::Start(ref e) if local_name(e.name().as_ref()) == b"Override" => {
+                if override_prefix.is_none() {
+                    override_prefix = element_prefix(e.name().as_ref())
+                        .map(|p| String::from_utf8_lossy(p).into_owned());
+                }
                 let mut part_name = None;
                 for attr in e.attributes() {
                     let attr = attr?;
@@ -3932,7 +4041,11 @@ fn patch_content_types_for_sheet_edits(
                 }
                 writer.write_event(Event::Start(e.to_owned()))?;
             }
-            Event::Empty(ref e) if e.name().as_ref() == b"Override" => {
+            Event::Empty(ref e) if local_name(e.name().as_ref()) == b"Override" => {
+                if override_prefix.is_none() {
+                    override_prefix = element_prefix(e.name().as_ref())
+                        .map(|p| String::from_utf8_lossy(p).into_owned());
+                }
                 let mut part_name = None;
                 for attr in e.attributes() {
                     let attr = attr?;
@@ -3948,10 +4061,17 @@ fn patch_content_types_for_sheet_edits(
                 }
                 writer.write_event(Event::Empty(e.to_owned()))?;
             }
-            Event::End(ref e) if skipping && e.name().as_ref() == b"Override" => {
+            Event::End(ref e) if skipping && local_name(e.name().as_ref()) == b"Override" => {
                 skipping = false;
             }
-            Event::End(ref e) if e.name().as_ref() == b"Types" => {
+            Event::End(ref e) if local_name(e.name().as_ref()) == b"Types" => {
+                let prefix = override_prefix.as_deref().or_else(|| {
+                    if !has_default_ns {
+                        types_prefix.as_deref()
+                    } else {
+                        None
+                    }
+                });
                 for sheet in added {
                     let part_name = if sheet.path.starts_with('/') {
                         sheet.path.clone()
@@ -3961,7 +4081,8 @@ fn patch_content_types_for_sheet_edits(
                     if existing_overrides.contains(&part_name) {
                         continue;
                     }
-                    let mut override_el = quick_xml::events::BytesStart::new("Override");
+                    let tag = prefixed_tag(prefix, "Override");
+                    let mut override_el = quick_xml::events::BytesStart::new(tag.as_str());
                     override_el.push_attribute(("PartName", part_name.as_str()));
                     override_el.push_attribute(("ContentType", WORKSHEET_CONTENT_TYPE));
                     writer.write_event(Event::Empty(override_el))?;
