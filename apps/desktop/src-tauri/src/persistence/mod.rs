@@ -666,6 +666,8 @@ mod write_xlsx_from_storage_tests {
 
             let pkg = formula_xlsx::XlsxPackage::from_bytes(bytes.as_ref())
                 .with_context(|| format!("parse exported .{ext} package"))?;
+            formula_xlsx::validate_opc_relationships(pkg.parts_map())
+                .with_context(|| format!("validate OPC relationships for .{ext} export"))?;
             assert_eq!(
                 pkg.vba_project_bin(),
                 expected_vba_part,
