@@ -151,6 +151,7 @@ FUNCTIONALITY (# of Excel buttons/features)
 | Shortcut | Action |
 |----------|--------|
 | `F2` | Edit cell |
+| `Shift+F2` | Add comment (open comments panel and focus new comment input) |
 | `F4` | Toggle absolute/relative reference |
 | `Ctrl+D` | Fill down |
 | `Ctrl+;` | Insert date |
@@ -167,6 +168,7 @@ FUNCTIONALITY (# of Excel buttons/features)
 | Shortcut | Action |
 |----------|--------|
 | `Cmd/Ctrl+Shift+P` | Open command palette |
+| `Cmd/Ctrl+Shift+M` | Toggle comments panel |
 | `/` (in command palette) | Search shortcuts/keybindings |
 
 ### AI Shortcuts

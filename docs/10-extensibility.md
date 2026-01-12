@@ -101,7 +101,7 @@ Built-in keys (desktop UI):
 | `activeCellA1` | string | Active cell address in A1 notation (e.g. `"C3"`). |
 | `commentsPanelVisible` | boolean | Whether the comments panel is currently open. |
 | `cellHasComment` | boolean | Whether the active cell currently has at least one comment thread. |
-| `gridArea` | `"cell" \| "rowHeader" \| "colHeader" \| "corner"` | Where the grid context menu was opened (cell grid vs row/col header vs corner). |
+| `gridArea` | `"cell" \| "rowHeader" \| "colHeader" \| "corner"` | Where the grid context menu was opened (cell grid vs row/col header vs corner/select-all). |
 | `isRowHeader` | boolean | Convenience key: `true` when `gridArea == "rowHeader"`. |
 | `isColHeader` | boolean | Convenience key: `true` when `gridArea == "colHeader"`. |
 | `isCorner` | boolean | Convenience key: `true` when `gridArea == "corner"`. |
@@ -125,7 +125,7 @@ isSingleCell && cellHasValue
 sheetName == "Sheet1" && activeCellA1 == "A1"
 
 # Enable only in the row header context menu
-gridArea == "rowHeader"
+isRowHeader
 
 # Only enable when a comment exists and the comments panel is visible
 commentsPanelVisible && cellHasComment
@@ -161,7 +161,6 @@ Supported menu locations (desktop UI):
     - While extensions are still loading (or if extension loading fails), the menu may show a disabled placeholder entry.
   - While the menu is open, the desktop re-evaluates `when` clauses as context keys change (e.g. selection changes),
     updating enabled/disabled state live.
-
 - `row/context` — the row header context menu (`contributes.menus["row/context"]`).
   - Opened via right-click in the row header region.
 
