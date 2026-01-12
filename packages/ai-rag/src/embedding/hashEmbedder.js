@@ -19,7 +19,7 @@ function fnv1a32(str) {
  * Formula intentionally uses a hash-based embedder so workbook indexing and
  * retrieval work without:
  * - user-supplied API keys
- * - local model downloads / configuration
+ * - local model downloads / setup
  * - sending workbook content to a third-party embedding provider
  *
  * This is not a true ML embedding model, so retrieval quality is meaningfully
