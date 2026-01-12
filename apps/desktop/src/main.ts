@@ -41,6 +41,7 @@ import { installUnsavedChangesPrompt } from "./document/index.js";
 import { DocumentControllerWorkbookAdapter } from "./scripting/documentControllerWorkbookAdapter.js";
 import { registerFindReplaceShortcuts, FindReplaceController } from "./panels/find-replace/index.js";
 import { t } from "./i18n/index.js";
+import { getOpenFileFilters } from "./file_dialog_filters.js";
 import { formatRangeAddress, parseRangeAddress } from "@formula/scripting";
 import { normalizeFormulaTextOpt } from "@formula/engine";
 import { startWorkbookSync } from "./tauri/workbookSync";
@@ -3203,11 +3204,7 @@ async function promptOpenWorkbook(): Promise<void> {
   const { open } = getTauriDialog();
   const selection = await open({
     multiple: false,
-    filters: [
-      { name: "Spreadsheets", extensions: ["xlsx", "xlsm", "xls", "xlsb", "csv"] },
-      { name: "Excel", extensions: ["xlsx", "xlsm", "xls", "xlsb"] },
-      { name: "CSV", extensions: ["csv"] },
-    ],
+    filters: getOpenFileFilters(),
   });
 
   const path = Array.isArray(selection) ? selection[0] : selection;
@@ -3262,7 +3259,10 @@ async function handleSaveAs(): Promise<void> {
   const previousPanelWorkbookId = activePanelWorkbookId;
   const { save } = getTauriDialog();
   const path = await save({
-    filters: [{ name: "Excel Workbook", extensions: ["xlsx"] }],
+    filters: [
+      { name: t("fileDialog.filters.excelWorkbook"), extensions: ["xlsx"] },
+      { name: "Excel Macro-Enabled Workbook", extensions: ["xlsm"] },
+    ],
   });
   if (!path) return;
 
