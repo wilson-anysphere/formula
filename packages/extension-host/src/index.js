@@ -1337,7 +1337,13 @@ class ExtensionHost {
       case "workbook.getActiveWorkbook":
         return this._getWorkbookSnapshot();
       case "workbook.openWorkbook":
-        return this.openWorkbook(args[0]);
+        {
+          const workbookPathStr = args[0] == null ? null : String(args[0]);
+          if (workbookPathStr == null || workbookPathStr.trim().length === 0) {
+            throw new Error("Workbook path must be a non-empty string");
+          }
+          return this.openWorkbook(workbookPathStr);
+        }
       case "workbook.createWorkbook":
         return this.openWorkbook(null);
       case "workbook.save":

@@ -691,6 +691,58 @@ test("api surface: workbook.openWorkbook emits workbookOpened with stable payloa
   assert.deepEqual(result.evt, { workbook: result.workbook });
 });
 
+test("api errors: workbook.openWorkbook requires a non-empty path", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-workbook-open-empty-"));
+  const extDir = path.join(dir, "ext");
+  await fs.mkdir(extDir);
+
+  const commandId = "workbookExt.openEmpty";
+  await writeExtensionFixture(
+    extDir,
+    {
+      name: "workbook-open-empty-ext",
+      version: "1.0.0",
+      publisher: "formula-test",
+      main: "./dist/extension.js",
+      engines: { formula: "^1.0.0" },
+      activationEvents: [`onCommand:${commandId}`],
+      contributes: { commands: [{ command: commandId, title: "Workbook Open Empty" }] },
+      permissions: ["ui.commands", "workbook.manage"]
+    },
+    `
+      const formula = require("@formula/extension-api");
+      exports.activate = async (context) => {
+        context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
+          commandId
+        )}, async () => {
+          try {
+            await formula.workbook.openWorkbook("");
+            return { ok: true };
+          } catch (err) {
+            return { ok: false, message: err?.message ?? String(err) };
+          }
+        }));
+      };
+    `
+  );
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    activationTimeoutMs: ACTIVATION_TIMEOUT_MS,
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await host.loadExtension(extDir);
+  const result = await host.executeCommand(commandId);
+  assert.deepEqual(result, { ok: false, message: "Workbook path must be a non-empty string" });
+});
+
 test("permissions: workbook.openWorkbook requires workbook.manage", async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-workbook-open-deny-"));
   const extDir = path.join(dir, "ext");

@@ -1580,11 +1580,16 @@ class BrowserExtensionHost {
       case "workbook.getActiveWorkbook":
         return this._getActiveWorkbook();
       case "workbook.openWorkbook":
+        {
+          const workbookPathStr = args[0] == null ? null : String(args[0]);
+          if (workbookPathStr == null || workbookPathStr.trim().length === 0) {
+            throw new Error("Workbook path must be a non-empty string");
+          }
+
         if (typeof this._spreadsheet.openWorkbook === "function") {
           // Best-effort: update internal workbook metadata from the input path so
           // `_getActiveWorkbook` has reasonable defaults even if the host doesn't
           // implement `getActiveWorkbook`.
-          const workbookPathStr = args[0] == null ? null : String(args[0]);
           const name =
             workbookPathStr == null || workbookPathStr.trim().length === 0
               ? "MockWorkbook"
@@ -1602,7 +1607,8 @@ class BrowserExtensionHost {
             throw err;
           }
         }
-        return this.openWorkbook(args[0]);
+        return this.openWorkbook(workbookPathStr);
+        }
       case "workbook.createWorkbook":
         if (typeof this._spreadsheet.createWorkbook === "function") {
           // Mirror the browser-host stub: reset workbook metadata before creation so
