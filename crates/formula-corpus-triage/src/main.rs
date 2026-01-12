@@ -640,13 +640,13 @@ fn map_error_value(error: ErrorValue) -> ErrorKind {
         ErrorValue::Name => ErrorKind::Name,
         ErrorValue::Num => ErrorKind::Num,
         ErrorValue::NA => ErrorKind::NA,
+        ErrorValue::GettingData => ErrorKind::GettingData,
         ErrorValue::Spill => ErrorKind::Spill,
         ErrorValue::Calc => ErrorKind::Calc,
-        ErrorValue::GettingData
-        | ErrorValue::Field
-        | ErrorValue::Connect
-        | ErrorValue::Blocked
-        | ErrorValue::Unknown => ErrorKind::Value,
+        ErrorValue::Field => ErrorKind::Field,
+        ErrorValue::Connect => ErrorKind::Connect,
+        ErrorValue::Blocked => ErrorKind::Blocked,
+        ErrorValue::Unknown => ErrorKind::Unknown,
     }
 }
 
@@ -780,4 +780,34 @@ fn render_smoke(doc: &formula_xlsx::XlsxDocument) -> Result<RenderDetails> {
             end_col: print_area.end_col,
         },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preserves_extended_errors_in_normalization_and_engine_seeding() {
+        let mut engine = Engine::new();
+        engine.ensure_sheet("Sheet1");
+
+        for (addr, value, expected_code) in [
+            ("A1", CellValue::Error(ErrorValue::Field), "#FIELD!"),
+            ("A2", CellValue::Error(ErrorValue::GettingData), "#GETTING_DATA"),
+        ] {
+            set_engine_value(&mut engine, "Sheet1", addr, &value).unwrap();
+
+            let seeded = engine.get_cell_value("Sheet1", addr);
+            assert_eq!(
+                normalize_engine_value(&seeded),
+                normalize_model_value(&value),
+                "engine vs model mismatch for {expected_code}"
+            );
+
+            assert_eq!(
+                normalize_engine_value(&seeded),
+                NormalizedValue::Error(expected_code.to_string())
+            );
+        }
+    }
 }
