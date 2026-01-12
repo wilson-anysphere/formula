@@ -117,4 +117,24 @@ test.describe("command palette shortcut hints", () => {
     await expect(item).toBeVisible();
     await expect(item.locator(".command-palette__shortcut")).toHaveText(expectedReplaceShortcut);
   });
+
+  test("renders the platform shortcut hint for Save", async ({ page }) => {
+    await gotoDesktop(page);
+
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    const expectedSaveShortcut = process.platform === "darwin" ? "⌘S" : "Ctrl+S";
+
+    await page.keyboard.press(`${modifier}+Shift+P`);
+    await expect(page.getByTestId("command-palette")).toBeVisible();
+
+    // Use the command id to avoid ambiguity (other commands can match "save").
+    await page.getByTestId("command-palette-input").fill("workbench.saveWorkbook");
+
+    const item = page
+      .locator("li.command-palette__item")
+      .filter({ has: page.locator(".command-palette__item-label", { hasText: /^Save$/ }) })
+      .first();
+    await expect(item).toBeVisible();
+    await expect(item.locator(".command-palette__shortcut")).toHaveText(expectedSaveShortcut);
+  });
 });

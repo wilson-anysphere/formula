@@ -124,14 +124,14 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     key: "ctrl+shift+a",
     // IMPORTANT: Cmd+I is reserved for toggling the AI sidebar (see instructions/ui.md).
     mac: "cmd+i",
-    when: WHEN_COMMAND_PALETTE_CLOSED,
+    when: WHEN_COMMAND_PALETTE_CLOSED_AND_NOT_IN_TEXT_INPUT,
   },
   {
     // Some keyboards (and remote desktop setups) can emit both ctrlKey+metaKey for
     // Cmd-based shortcuts. Add an explicit binding so the AI chat toggle remains reachable.
     command: "view.togglePanel.aiChat",
     key: "ctrl+cmd+i",
-    when: WHEN_COMMAND_PALETTE_CLOSED,
+    when: WHEN_COMMAND_PALETTE_CLOSED_AND_NOT_IN_TEXT_INPUT,
   },
   {
     command: "ai.inlineEdit",

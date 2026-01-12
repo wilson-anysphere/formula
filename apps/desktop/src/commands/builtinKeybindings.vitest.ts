@@ -131,6 +131,12 @@ describe("builtin keybinding catalog", () => {
 
   it("formats expected display strings per platform", () => {
     const otherIndex = buildCommandKeybindingDisplayIndex({ platform: "other", contributed: [], builtin: builtinKeybindings });
+    expect(getPrimaryCommandKeybindingDisplay("workbench.newWorkbook", otherIndex)).toBe("Ctrl+N");
+    expect(getPrimaryCommandKeybindingDisplay("workbench.openWorkbook", otherIndex)).toBe("Ctrl+O");
+    expect(getPrimaryCommandKeybindingDisplay("workbench.saveWorkbook", otherIndex)).toBe("Ctrl+S");
+    expect(getPrimaryCommandKeybindingDisplay("workbench.saveWorkbookAs", otherIndex)).toBe("Ctrl+Shift+S");
+    expect(getPrimaryCommandKeybindingDisplay("workbench.closeWorkbook", otherIndex)).toBe("Ctrl+W");
+    expect(getPrimaryCommandKeybindingDisplay("workbench.quit", otherIndex)).toBe("Ctrl+Q");
     expect(getPrimaryCommandKeybindingDisplay("workbench.showCommandPalette", otherIndex)).toBe("Ctrl+Shift+P");
     expect(getPrimaryCommandKeybindingDisplay("clipboard.copy", otherIndex)).toBe("Ctrl+C");
     expect(getPrimaryCommandKeybindingDisplay("clipboard.cut", otherIndex)).toBe("Ctrl+X");
@@ -164,6 +170,12 @@ describe("builtin keybinding catalog", () => {
     expect(getPrimaryCommandKeybindingDisplay("format.numberFormat.date", otherIndex)).toBe("Ctrl+Shift+#");
 
     const macIndex = buildCommandKeybindingDisplayIndex({ platform: "mac", contributed: [], builtin: builtinKeybindings });
+    expect(getPrimaryCommandKeybindingDisplay("workbench.newWorkbook", macIndex)).toBe("⌘N");
+    expect(getPrimaryCommandKeybindingDisplay("workbench.openWorkbook", macIndex)).toBe("⌘O");
+    expect(getPrimaryCommandKeybindingDisplay("workbench.saveWorkbook", macIndex)).toBe("⌘S");
+    expect(getPrimaryCommandKeybindingDisplay("workbench.saveWorkbookAs", macIndex)).toBe("⇧⌘S");
+    expect(getPrimaryCommandKeybindingDisplay("workbench.closeWorkbook", macIndex)).toBe("⌘W");
+    expect(getPrimaryCommandKeybindingDisplay("workbench.quit", macIndex)).toBe("⌘Q");
     expect(getPrimaryCommandKeybindingDisplay("workbench.showCommandPalette", macIndex)).toBe("⇧⌘P");
     expect(getPrimaryCommandKeybindingDisplay("clipboard.copy", macIndex)).toBe("⌘C");
     expect(getPrimaryCommandKeybindingDisplay("clipboard.cut", macIndex)).toBe("⌘X");
