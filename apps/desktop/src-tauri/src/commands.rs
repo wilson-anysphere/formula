@@ -3614,6 +3614,38 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn list_dir_does_not_follow_symlinked_directories() {
+        use std::fs::{create_dir, File};
+        use std::os::unix::fs::symlink;
+
+        let root = TempDir::new().expect("create root temp dir");
+        let outside = TempDir::new().expect("create outside temp dir");
+
+        // A file that should be discoverable via a real directory in the requested subtree.
+        let real_dir = root.path().join("real");
+        create_dir(&real_dir).expect("create real dir");
+        File::create(real_dir.join("inside.txt")).expect("create inside file");
+
+        // A file that exists outside of the subtree. We create a symlinked directory inside the
+        // root pointing to it; list_dir must not traverse it.
+        File::create(outside.path().join("outside.txt")).expect("create outside file");
+        symlink(outside.path(), root.path().join("link")).expect("create symlinked dir");
+
+        let out = list_dir_blocking(root.path().to_str().unwrap(), true)
+            .expect("list_dir should succeed");
+
+        assert!(
+            out.iter().any(|entry| entry.path.ends_with("inside.txt")),
+            "expected to see inside.txt, got {out:?}"
+        );
+        assert!(
+            out.iter().all(|entry| !entry.path.ends_with("outside.txt")),
+            "expected not to traverse symlinked dir, got {out:?}"
+        );
+    }
+
     #[test]
     fn typescript_migration_interpreter_applies_basic_range_and_cell_assignments() {
         let mut workbook = crate::file_io::Workbook::new_empty(None);
