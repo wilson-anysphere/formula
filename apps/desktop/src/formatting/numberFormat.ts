@@ -47,7 +47,12 @@ function isSupportedDateFormat(format: string): boolean {
   // v1 only supports a couple of known presets. Avoid treating arbitrary numeric
   // formats containing letters (e.g. `0.0,"M"`) as dates.
   const lower = format.toLowerCase();
-  return lower.includes("m/d/yyyy") || lower.includes("yyyy-mm-dd");
+  if (lower.includes("m/d/yyyy") || lower.includes("yyyy-mm-dd")) return true;
+
+  // Time-only presets (Excel-style). These are commonly used for Ctrl+Shift+; insertion.
+  // Keep the detection intentionally narrow to avoid mis-classifying arbitrary formats.
+  const compact = lower.replace(/\s+/g, "");
+  return /^h{1,2}:m{1,2}(:s{1,2})?$/.test(compact);
 }
 
 function formatExcelDate(serial: number, format: string): string {
@@ -60,6 +65,17 @@ function formatExcelDate(serial: number, format: string): string {
   const d = date.getUTCDate();
 
   const lower = format.toLowerCase();
+  const compact = lower.replace(/\s+/g, "");
+
+  // Time-only formats (no date component).
+  const timeOnlyMatch = /^h{1,2}:m{1,2}(:s{1,2})?$/.exec(compact);
+  if (timeOnlyMatch) {
+    const hh = date.getUTCHours();
+    const mm = date.getUTCMinutes();
+    const ss = date.getUTCSeconds();
+    const hasSeconds = compact.includes(":s");
+    return hasSeconds ? `${pad2(hh)}:${pad2(mm)}:${pad2(ss)}` : `${pad2(hh)}:${pad2(mm)}`;
+  }
 
   let dateText = "";
   if (lower.includes("m/d/yyyy")) {
