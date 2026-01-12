@@ -257,128 +257,127 @@ export function ExtensionsPanel({
   return (
     <div className="extensions-panel">
       {webExtensionManager ? (
-        <div className="extensions-panel__card">
-          <div className="extensions-panel__card-title">Installed (IndexedDB)</div>
-          {installError ? (
-            <div className="extensions-panel__empty">Failed to read installed extensions: {installError}</div>
-          ) : installed && installed.length > 0 ? (
-            <div className="extensions-panel__installed-list">
-              {installed.map((item) => {
-                const isCorrupted = Boolean(item.corrupted);
-                const isIncompatible = Boolean(item.incompatible);
-                return (
-                  <div key={item.id} data-testid={`installed-extension-${item.id}`} className="extensions-panel__installed-item">
-                    <div className="extensions-panel__installed-item-id">{item.id}</div>
-                    <div className="extensions-panel__installed-item-version">v{item.version}</div>
-                    <div
-                      data-testid={`installed-extension-status-${item.id}`}
-                      className={
-                        isCorrupted
-                          ? "extensions-panel__installed-item-status extensions-panel__installed-item-status--corrupted"
-                          : isIncompatible
-                            ? "extensions-panel__installed-item-status extensions-panel__installed-item-status--incompatible"
-                          : "extensions-panel__installed-item-status"
-                      }
-                    >
-                      {isCorrupted
-                        ? `Corrupted: ${item.corruptedReason ?? "unknown reason"}`
-                        : isIncompatible
-                          ? `Incompatible: ${item.incompatibleReason ?? "unknown reason"}`
-                          : "OK"}
-                    </div>
-                    {isCorrupted || isIncompatible ? (
-                      <button
-                        type="button"
-                        data-testid={`repair-extension-${item.id}`}
-                        disabled={repairingId === item.id}
-                        onClick={() => {
-                          void (async () => {
-                            if (!webExtensionManager) return;
-                            setRepairingId(item.id);
-                            try {
-                              let shouldAttemptLoad = true;
-                              if (isIncompatible) {
-                                const installedVersion = String(item.version ?? "");
-                                const reason = String(item.incompatibleReason ?? "");
-                                const isEngineMismatch = reason.toLowerCase().includes("engine mismatch");
-                                try {
-                                  const updated = await webExtensionManager.update(item.id);
-                                  const updatedVersion = String(updated?.version ?? "");
-
-                                  const didUpdate = updatedVersion.length > 0 && updatedVersion !== installedVersion;
-                                  if (!didUpdate) {
-                                    // If the extension is quarantined due to a corrupted/invalid stored
-                                    // manifest (not an engine mismatch), reinstalling the current version
-                                    // can repair it even when no update is available.
-                                    if (!isEngineMismatch) {
-                                      await webExtensionManager.repair(item.id);
-                                    } else {
-                                      shouldAttemptLoad = false;
-                                      try {
-                                        showToast("No compatible update", "warning");
-                                      } catch {
-                                        // ignore missing toast root
-                                      }
-                                    }
-                                  }
-                                } catch (error) {
-                                  const msg = String((error as any)?.message ?? error);
-                                  if (msg.toLowerCase().includes("engine mismatch")) {
-                                    if (!isEngineMismatch) {
-                                      // The latest version is incompatible with this engine, but the
-                                      // stored incompatible quarantine may be caused by a corrupted
-                                      // manifest. Reinstall the current version as a recovery path.
-                                      await webExtensionManager.repair(item.id);
-                                    } else {
-                                      shouldAttemptLoad = false;
-                                      try {
-                                        showToast("No compatible update", "warning");
-                                      } catch {
-                                        // ignore missing toast root
-                                      }
-                                    }
-                                  } else {
-                                    throw error;
-                                  }
-                                }
-                              } else {
-                                await webExtensionManager.repair(item.id);
-                              }
-                              if (shouldAttemptLoad) {
-                                await webExtensionManager.loadInstalled(item.id).catch(() => {});
-                              }
-                              await refreshInstalled();
-                              onSyncExtensions?.();
-                              bump((v) => v + 1);
-                            } catch (error: any) {
-                              setInstallError(String(error?.message ?? error));
-                            } finally {
-                              setRepairingId((prev) => (prev === item.id ? null : prev));
-                            }
-                          })();
-                        }}
-                        className="extensions-panel__button extensions-panel__reset-button extensions-panel__repair-button"
+          <div className="extensions-panel__card">
+            <div className="extensions-panel__card-title">Installed (IndexedDB)</div>
+            {installError ? <div className="extensions-panel__error">Installed extensions error: {installError}</div> : null}
+            {installed && installed.length > 0 ? (
+              <div className="extensions-panel__installed-list">
+                {installed.map((item) => {
+                  const isCorrupted = Boolean(item.corrupted);
+                  const isIncompatible = Boolean(item.incompatible);
+                  return (
+                    <div key={item.id} data-testid={`installed-extension-${item.id}`} className="extensions-panel__installed-item">
+                      <div className="extensions-panel__installed-item-id">{item.id}</div>
+                      <div className="extensions-panel__installed-item-version">v{item.version}</div>
+                      <div
+                        data-testid={`installed-extension-status-${item.id}`}
+                        className={
+                          isCorrupted
+                            ? "extensions-panel__installed-item-status extensions-panel__installed-item-status--corrupted"
+                            : isIncompatible
+                              ? "extensions-panel__installed-item-status extensions-panel__installed-item-status--incompatible"
+                              : "extensions-panel__installed-item-status"
+                        }
                       >
-                        {repairingId === item.id
-                          ? isIncompatible
-                            ? "Updating…"
-                            : "Repairing…"
+                        {isCorrupted
+                          ? `Corrupted: ${item.corruptedReason ?? "unknown reason"}`
                           : isIncompatible
-                            ? "Update"
-                            : "Repair"}
-                      </button>
-                    ) : null}
-                  </div>
-                );
-              })}
-            </div>
-          ) : installed ? (
-            <div className="extensions-panel__empty">No marketplace extensions installed.</div>
-          ) : (
-            <div className="extensions-panel__empty">Loading installed extensions…</div>
-          )}
-        </div>
-      ) : null}
+                            ? `Incompatible: ${item.incompatibleReason ?? "unknown reason"}`
+                            : "OK"}
+                      </div>
+                      {isCorrupted || isIncompatible ? (
+                        <button
+                          type="button"
+                          data-testid={`repair-extension-${item.id}`}
+                          disabled={repairingId === item.id}
+                          onClick={() => {
+                            void (async () => {
+                              if (!webExtensionManager) return;
+                              setRepairingId(item.id);
+                              try {
+                                let shouldAttemptLoad = true;
+                                if (isIncompatible) {
+                                  const installedVersion = String(item.version ?? "");
+                                  const reason = String(item.incompatibleReason ?? "");
+                                  const isEngineMismatch = reason.toLowerCase().includes("engine mismatch");
+                                  try {
+                                    const updated = await webExtensionManager.update(item.id);
+                                    const updatedVersion = String(updated?.version ?? "");
+
+                                    const didUpdate = updatedVersion.length > 0 && updatedVersion !== installedVersion;
+                                    if (!didUpdate) {
+                                      // If the extension is quarantined due to a corrupted/invalid stored
+                                      // manifest (not an engine mismatch), reinstalling the current version
+                                      // can repair it even when no update is available.
+                                      if (!isEngineMismatch) {
+                                        await webExtensionManager.repair(item.id);
+                                      } else {
+                                        shouldAttemptLoad = false;
+                                        try {
+                                          showToast("No compatible update", "warning");
+                                        } catch {
+                                          // ignore missing toast root
+                                        }
+                                      }
+                                    }
+                                  } catch (error) {
+                                    const msg = String((error as any)?.message ?? error);
+                                    if (msg.toLowerCase().includes("engine mismatch")) {
+                                      if (!isEngineMismatch) {
+                                        // The latest version is incompatible with this engine, but the
+                                        // stored incompatible quarantine may be caused by a corrupted
+                                        // manifest. Reinstall the current version as a recovery path.
+                                        await webExtensionManager.repair(item.id);
+                                      } else {
+                                        shouldAttemptLoad = false;
+                                        try {
+                                          showToast("No compatible update", "warning");
+                                        } catch {
+                                          // ignore missing toast root
+                                        }
+                                      }
+                                    } else {
+                                      throw error;
+                                    }
+                                  }
+                                } else {
+                                  await webExtensionManager.repair(item.id);
+                                }
+                                if (shouldAttemptLoad) {
+                                  await webExtensionManager.loadInstalled(item.id).catch(() => {});
+                                }
+                                await refreshInstalled();
+                                onSyncExtensions?.();
+                                bump((v) => v + 1);
+                              } catch (error: any) {
+                                setInstallError(String(error?.message ?? error));
+                              } finally {
+                                setRepairingId((prev) => (prev === item.id ? null : prev));
+                              }
+                            })();
+                          }}
+                          className="extensions-panel__button extensions-panel__reset-button extensions-panel__repair-button"
+                        >
+                          {repairingId === item.id
+                            ? isIncompatible
+                              ? "Updating…"
+                              : "Repairing…"
+                            : isIncompatible
+                              ? "Update"
+                              : "Repair"}
+                        </button>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : installed ? (
+              <div className="extensions-panel__empty">No marketplace extensions installed.</div>
+            ) : installError ? null : (
+              <div className="extensions-panel__empty">Loading installed extensions…</div>
+            )}
+          </div>
+        ) : null}
 
       <div className="extensions-panel__toolbar">
         <button
