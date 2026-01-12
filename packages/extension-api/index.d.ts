@@ -163,6 +163,10 @@ export namespace ui {
     prompt?: string;
     value?: string;
     placeHolder?: string;
+    type?: "text" | "password" | "textarea";
+    rows?: number;
+    okLabel?: string;
+    cancelLabel?: string;
   }
 
   interface QuickPickItem<T = any> {
@@ -189,7 +193,7 @@ export namespace ui {
   }
 
   function showMessage(message: string, type?: MessageType): Promise<void>;
-  function showInputBox(options: InputBoxOptions): Promise<string | undefined>;
+  function showInputBox(options?: InputBoxOptions): Promise<string | undefined>;
   function showQuickPick<T>(items: QuickPickItem<T>[], options?: QuickPickOptions): Promise<T | undefined>;
   function registerContextMenu(menuId: MenuId, items: MenuItem[]): Promise<Disposable>;
   function createPanel(id: string, options: PanelOptions): Promise<Panel>;
