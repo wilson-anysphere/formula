@@ -1,5 +1,5 @@
 use formula_io::{open_workbook, save_workbook, Workbook};
-use formula_model::CellValue;
+use formula_model::{sanitize_sheet_name, CellValue};
 
 #[test]
 fn opens_csv_and_saves_as_xlsx() {
@@ -76,6 +76,45 @@ fn opens_utf8_bom_csv_schema_names_are_clean() {
     let sheet = model.sheet_by_name("bom").expect("sheet missing");
     let table = sheet.columnar_table().expect("expected columnar table");
     assert_eq!(table.schema()[0].name, "id");
+}
+
+#[test]
+fn csv_import_sanitizes_sheet_name_from_file_stem() {
+    let dir = tempfile::tempdir().expect("temp dir");
+
+    // `[` and `]` are valid filename characters across platforms, but are invalid worksheet name
+    // characters in Excel.
+    let path = dir.path().join("bad[name].csv");
+
+    std::fs::write(&path, "col1,col2\n1,hello\n2,world\n").expect("write csv");
+
+    let wb = open_workbook(&path).expect("open csv workbook");
+    let model = match wb {
+        Workbook::Model(model) => model,
+        other => panic!("expected Workbook::Model, got {other:?}"),
+    };
+
+    let expected = sanitize_sheet_name("bad[name]");
+    assert_ne!(expected, "Sheet1", "expected sanitized name to not be the default");
+    assert!(
+        model.sheet_by_name("Sheet1").is_none(),
+        "should not fall back to Sheet1 for an invalid but non-empty stem"
+    );
+
+    let sheet = model
+        .sheet_by_name(&expected)
+        .expect("expected worksheet name to be sanitized from file stem");
+
+    assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(1.0));
+    assert_eq!(
+        sheet.value_a1("B1").unwrap(),
+        CellValue::String("hello".to_string())
+    );
+    assert_eq!(sheet.value_a1("A2").unwrap(), CellValue::Number(2.0));
+    assert_eq!(
+        sheet.value_a1("B2").unwrap(),
+        CellValue::String("world".to_string())
+    );
 }
 
 #[test]
