@@ -32,6 +32,12 @@ case ":$PATH:" in
   *) export PATH="$CARGO_HOME/bin:$PATH" ;;
 esac
 
+# Some environments configure Cargo globally with `build.rustc-wrapper` (often `sccache`).
+# When the wrapper is unavailable/misconfigured, builds can fail even for `cargo metadata`.
+# Default to disabling any configured wrapper unless the user explicitly overrides it in the env.
+export RUSTC_WRAPPER="${RUSTC_WRAPPER:-}"
+export RUSTC_WORKSPACE_WRAPPER="${RUSTC_WORKSPACE_WRAPPER:-}"
+
 REPORT_DIR="${REPORT_DIR:-security-report}"
 ALLOWLIST_CARGO="security/allowlist/cargo-audit.txt"
 ALLOWLIST_NODE="security/allowlist/node-audit.txt"
@@ -269,7 +275,7 @@ run_clippy() {
     set +e
     (
       cd "$dir"
-      cargo clippy --workspace --all-targets --all-features -- \
+      bash "${ROOT_DIR}/scripts/cargo_agent.sh" clippy --workspace --all-targets --all-features -- \
         -D clippy::unwrap_used \
         -D clippy::expect_used \
         -D clippy::panic \
@@ -300,7 +306,7 @@ run_clippy() {
     set +e
     (
       cd "$dir"
-      cargo clippy --all-targets --all-features -- \
+      bash "${ROOT_DIR}/scripts/cargo_agent.sh" clippy --all-targets --all-features -- \
         -D clippy::unwrap_used \
         -D clippy::expect_used \
         -D clippy::panic \
