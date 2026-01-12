@@ -118,6 +118,7 @@ impl FromStr for ErrorValue {
             "#NAME?" => Ok(ErrorValue::Name),
             "#NUM!" => Ok(ErrorValue::Num),
             "#N/A" => Ok(ErrorValue::NA),
+            "#N/A!" => Ok(ErrorValue::NA),
             "#GETTING_DATA" => Ok(ErrorValue::GettingData),
             "#SPILL!" => Ok(ErrorValue::Spill),
             "#CALC!" => Ok(ErrorValue::Calc),
@@ -188,6 +189,12 @@ mod tests {
             assert_eq!(err.to_string(), s);
             assert_eq!(s.parse::<ErrorValue>().unwrap(), err);
         }
+    }
+
+    #[test]
+    fn na_exclamation_alias_parses_as_na() {
+        assert_eq!("#N/A!".parse::<ErrorValue>().unwrap(), ErrorValue::NA);
+        assert_eq!("  #n/a!  ".parse::<ErrorValue>().unwrap(), ErrorValue::NA);
     }
 
     #[test]
