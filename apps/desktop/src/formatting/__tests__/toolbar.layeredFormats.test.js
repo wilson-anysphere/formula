@@ -14,8 +14,21 @@ test("toggleBold reads full-column formatting from the column layer (no per-cell
   assert.ok(sheet, "Sheet1 should exist after formatting");
   assert.equal(sheet.cells.size, 0, "Full-column formatting should not materialize per-cell overrides");
 
+  // Guardrail: never enumerate 1M cells via getCellFormat.
+  const originalGetCellFormat = doc.getCellFormat.bind(doc);
+  let getCellFormatCalls = 0;
+  doc.getCellFormat = (...args) => {
+    getCellFormatCalls += 1;
+    if (getCellFormatCalls > 10_000) {
+      throw new Error(`toggleBold performed O(rows) getCellFormat calls (${getCellFormatCalls})`);
+    }
+    return originalGetCellFormat(...args);
+  };
+
   // Toggling again should flip bold OFF (because all cells are currently bold).
   toggleBold(doc, "Sheet1", "A1:A1048576");
+  doc.getCellFormat = originalGetCellFormat;
+
   assert.equal(Boolean(doc.getCellFormat("Sheet1", "A1").font?.bold), false);
   assert.equal(sheet.cells.size, 0, "Toggling full-column formatting should not materialize per-cell overrides");
 });
@@ -32,8 +45,20 @@ test("toggleBold on a full-column selection treats a single conflicting cell ove
   assert.ok(sheet, "Sheet1 should exist after formatting");
   assert.equal(sheet.cells.size, 1, "A single cell override should not expand to the full column");
 
+  // Guardrail: should not enumerate full column.
+  const originalGetCellFormat = doc.getCellFormat.bind(doc);
+  let getCellFormatCalls = 0;
+  doc.getCellFormat = (...args) => {
+    getCellFormatCalls += 1;
+    if (getCellFormatCalls > 10_000) {
+      throw new Error(`toggleBold performed O(rows) getCellFormat calls (${getCellFormatCalls})`);
+    }
+    return originalGetCellFormat(...args);
+  };
+
   // Selection is now mixed, so toggleBold should choose next=true and make everything bold.
   toggleBold(doc, "Sheet1", "A1:A1048576");
+  doc.getCellFormat = originalGetCellFormat;
 
   assert.equal(Boolean(doc.getCellFormat("Sheet1", "A1").font?.bold), true);
   assert.equal(Boolean(doc.getCellFormat("Sheet1", "A2").font?.bold), true);
@@ -105,8 +130,21 @@ test("toggleBold reads full-row formatting from the row layer (no per-cell scan)
   assert.ok(sheet);
   assert.equal(sheet.cells.size, 0, "Full-row formatting should not materialize per-cell overrides");
 
+  // Guardrail: never enumerate 16k columns via getCellFormat.
+  const originalGetCellFormat = doc.getCellFormat.bind(doc);
+  let getCellFormatCalls = 0;
+  doc.getCellFormat = (...args) => {
+    getCellFormatCalls += 1;
+    if (getCellFormatCalls > 10_000) {
+      throw new Error(`toggleBold performed O(cols) getCellFormat calls (${getCellFormatCalls})`);
+    }
+    return originalGetCellFormat(...args);
+  };
+
   // Second toggle should flip bold OFF.
   toggleBold(doc, "Sheet1", "A1:XFD1");
+  doc.getCellFormat = originalGetCellFormat;
+
   assert.equal(Boolean(doc.getCellFormat("Sheet1", "A1").font?.bold), false);
   assert.equal(sheet.cells.size, 0);
 });
@@ -139,7 +177,20 @@ test("toggleBold reads full-sheet formatting from the sheet layer (no per-cell s
   assert.ok(sheet);
   assert.equal(sheet.cells.size, 0, "Sheet formatting should not materialize per-cell overrides");
 
+  // Guardrail: never enumerate the full sheet.
+  const originalGetCellFormat = doc.getCellFormat.bind(doc);
+  let getCellFormatCalls = 0;
+  doc.getCellFormat = (...args) => {
+    getCellFormatCalls += 1;
+    if (getCellFormatCalls > 10_000) {
+      throw new Error(`toggleBold performed O(area) getCellFormat calls (${getCellFormatCalls})`);
+    }
+    return originalGetCellFormat(...args);
+  };
+
   toggleBold(doc, "Sheet1", fullSheet);
+  doc.getCellFormat = originalGetCellFormat;
+
   assert.equal(Boolean(doc.getCellFormat("Sheet1", "A1").font?.bold), false);
   assert.equal(Boolean(doc.getCellFormat("Sheet1", "XFD1048576").font?.bold), false);
   assert.equal(sheet.cells.size, 0);
