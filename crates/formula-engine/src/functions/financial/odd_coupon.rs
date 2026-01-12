@@ -264,10 +264,20 @@ fn coupon_period_e(
     freq: f64,
     system: ExcelDateSystem,
 ) -> ExcelResult<f64> {
-    // `freq` is the number of coupon payments per year. Reuse the shared COUP* helper to ensure
-    // `E` conventions stay in sync across regular and odd coupon bond implementations.
+    // `freq` is the number of coupon payments per year.
+    //
+    // Excel's odd coupon bond functions (ODDF* / ODDL*) match the COUP* conventions for most
+    // bases, but differ for basis 4 (30E/360): the period length `E` is computed via DAYS360
+    // between the coupon dates rather than using the constant `360/frequency`.
+    //
+    // This matters for schedules anchored at end-of-month dates where repeated month stepping is
+    // not additive (e.g. Aug 31 -> Feb 28). Excel's pricing prorates odd coupons using the
+    // *actual* 30E/360 day count for that coupon period.
     //
     // `freq` has already been validated as one of {1, 2, 4} by `normalize_frequency`.
+    if basis == 4 {
+        return days_between(pcd, ncd, 4, system);
+    }
     let frequency = freq as i32;
     super::coupon_schedule::coupon_period_e(pcd, ncd, frequency, basis, system)
 }
