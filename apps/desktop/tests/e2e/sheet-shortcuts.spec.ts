@@ -67,4 +67,55 @@ test.describe("sheet navigation shortcuts", () => {
     await dispatch("PageDown");
     await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveAttribute("data-active", "true");
   });
+
+  test("Ctrl/Cmd+PageDown is global (works from ribbon focus) and restores grid focus", async ({ page }) => {
+    await gotoDesktop(page);
+    await expect(page.getByTestId("sheet-tab-Sheet1")).toBeVisible();
+
+    // Lazily create Sheet2 so sheet navigation is observable.
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      app.getDocument().setCellValue("Sheet2", "A1", "Hello from Sheet2");
+    });
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+
+    // Ensure we start on Sheet1.
+    await page.getByTestId("sheet-tab-Sheet1").click();
+    await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveAttribute("data-active", "true");
+
+    // Focus a non-input UI surface (the ribbon) so Ctrl/Cmd+PgDn must be handled globally.
+    const ribbon = page.getByTestId("ribbon-root");
+    await expect(ribbon).toBeVisible();
+
+    const homeTab = ribbon.getByRole("tab", { name: "Home" });
+    await homeTab.click();
+    await expect(homeTab).toHaveAttribute("aria-selected", "true");
+
+    const bold = ribbon.locator('button[data-command-id="home.font.bold"]');
+    await expect(bold).toBeVisible();
+    await bold.focus();
+    await expect(bold).toBeFocused();
+
+    // Avoid Playwright's keyboard.press to sidestep browser tab-switch shortcuts; dispatching still
+    // exercises our global handler (capture phase) and focus scoping rules.
+    await page.evaluate((isMac) => {
+      const target = document.activeElement ?? window;
+      target.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "PageDown",
+          metaKey: isMac,
+          ctrlKey: !isMac,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    }, process.platform === "darwin");
+
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveAttribute("data-active", "true");
+
+    // After switching sheets, focus should return to the grid so keyboard workflows keep working.
+    await expect
+      .poll(() => page.evaluate(() => (document.activeElement as HTMLElement | null)?.id))
+      .toBe("grid");
+  });
 });
