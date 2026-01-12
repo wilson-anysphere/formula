@@ -187,8 +187,14 @@ describe("DesktopSharedGrid theme reactivity", () => {
       expect(matchMediaMock).toHaveBeenCalledWith("(prefers-color-scheme: dark)");
       expect(matchMediaMock).toHaveBeenCalledWith("(prefers-contrast: more)");
       expect(matchMediaMock).toHaveBeenCalledWith("(forced-colors: active)");
+      expect(matchMediaMock).toHaveBeenCalledWith("(prefers-reduced-motion: reduce)");
 
-      const requiredQueries = ["(prefers-color-scheme: dark)", "(prefers-contrast: more)", "(forced-colors: active)"];
+      const requiredQueries = [
+        "(prefers-color-scheme: dark)",
+        "(prefers-contrast: more)",
+        "(forced-colors: active)",
+        "(prefers-reduced-motion: reduce)"
+      ];
       for (const query of requiredQueries) {
         expect(listenersByQuery.get(query)?.size).toBeGreaterThan(0);
       }
@@ -209,7 +215,12 @@ describe("DesktopSharedGrid theme reactivity", () => {
     }
 
     // Ensure listeners were detached on destroy.
-    for (const query of ["(prefers-color-scheme: dark)", "(prefers-contrast: more)", "(forced-colors: active)"]) {
+    for (const query of [
+      "(prefers-color-scheme: dark)",
+      "(prefers-contrast: more)",
+      "(forced-colors: active)",
+      "(prefers-reduced-motion: reduce)"
+    ]) {
       expect(listenersByQuery.get(query)?.size ?? 0).toBe(0);
     }
   });
@@ -354,9 +365,15 @@ describe("DesktopSharedGrid theme reactivity", () => {
       expect(matchMediaMock).toHaveBeenCalledWith("(prefers-color-scheme: dark)");
       expect(matchMediaMock).toHaveBeenCalledWith("(prefers-contrast: more)");
       expect(matchMediaMock).toHaveBeenCalledWith("(forced-colors: active)");
+      expect(matchMediaMock).toHaveBeenCalledWith("(prefers-reduced-motion: reduce)");
 
       // Ensure listeners were registered via the legacy API.
-      for (const query of ["(prefers-color-scheme: dark)", "(prefers-contrast: more)", "(forced-colors: active)"]) {
+      for (const query of [
+        "(prefers-color-scheme: dark)",
+        "(prefers-contrast: more)",
+        "(forced-colors: active)",
+        "(prefers-reduced-motion: reduce)"
+      ]) {
         expect(listenersByQuery.get(query)?.size).toBeGreaterThan(0);
       }
 
@@ -371,7 +388,12 @@ describe("DesktopSharedGrid theme reactivity", () => {
     }
 
     // Ensure destroy removes legacy listeners.
-    for (const query of ["(prefers-color-scheme: dark)", "(prefers-contrast: more)", "(forced-colors: active)"]) {
+    for (const query of [
+      "(prefers-color-scheme: dark)",
+      "(prefers-contrast: more)",
+      "(forced-colors: active)",
+      "(prefers-reduced-motion: reduce)"
+    ]) {
       expect(listenersByQuery.get(query)?.size ?? 0).toBe(0);
     }
   });
