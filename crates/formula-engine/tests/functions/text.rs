@@ -188,6 +188,33 @@ fn textjoin_includes_record_display_string() {
 }
 
 #[test]
+fn textjoin_ignores_empty_entity_display_string_when_requested() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", Value::Entity(EntityValue::new("")));
+    assert_eq!(
+        sheet.eval(r#"=TEXTJOIN(",",TRUE,A1,"x")"#),
+        Value::Text("x".to_string())
+    );
+}
+
+#[test]
+fn concat_operator_concatenates_entity_display_string() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", Value::Entity(EntityValue::new("hello")));
+    assert_eq!(sheet.eval(r#"=A1&"x""#), Value::Text("hellox".to_string()));
+}
+
+#[test]
+fn concat_function_concatenates_record_display_string() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", Value::Record(RecordValue::new("rec")));
+    assert_eq!(
+        sheet.eval(r#"=CONCAT(A1,"x")"#),
+        Value::Text("recx".to_string())
+    );
+}
+
+#[test]
 fn textjoin_propagates_errors() {
     let values = vec![
         Value::from("a"),
