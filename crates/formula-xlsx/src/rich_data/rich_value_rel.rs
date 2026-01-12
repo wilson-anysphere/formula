@@ -64,10 +64,25 @@ impl RichValueRels {
             .flatten()?;
         let target = strip_fragment(&target);
         if target.is_empty() {
-            None
-        } else {
-            Some(target.to_string())
+            return None;
         }
+
+        // Some producers emit `Target="media/image1.png"` (relative to `xl/`) rather than the more
+        // common `Target="../media/image1.png"` (relative to `xl/richData/`). In that case the
+        // standard relationship resolver produces `xl/richData/media/*`, which won't exist in the
+        // package. Make a best-effort guess for this case when possible.
+        if pkg.part(target).is_none() {
+            if let Some(rest) = target.strip_prefix("xl/richData/") {
+                if rest.starts_with("media/") {
+                    let alt = format!("xl/{rest}");
+                    if pkg.part(&alt).is_some() {
+                        return Some(alt);
+                    }
+                }
+            }
+        }
+
+        Some(target.to_string())
     }
 }
 
