@@ -13,11 +13,13 @@ fn build_oshared_digsig_blob(valid_pkcs7: &[u8]) -> Vec<u8> {
     // MS-OSHARED describes a DigSigBlob wrapper around the PKCS#7 signature bytes.
     //
     // In this synthetic blob:
-    // - DigSigInfoSerialized.signatureOffset points at the *valid* PKCS#7 blob at offset 0x2C.
-    // - We then append a *corrupted but still parseable* PKCS#7 blob *after* the real signature.
-    //   The signature verifier's heuristic scan prefers the last SignedData blob in the stream, so
-    //   without DigSigBlob parsing it would pick the trailing corrupt blob and report the signature
-    //   as invalid.
+    // - We place a *corrupted but still parseable* PKCS#7 blob immediately after the
+    //   DigSigInfoSerialized header (at offset 0x2C). A heuristic scan that picks the first
+    //   SignedData blob would lock onto this and report `SignedInvalid`.
+    // - DigSigInfoSerialized.signatureOffset points at the *valid* PKCS#7 blob later in the stream.
+    // - We append another corrupted PKCS#7 blob *after* the real signature. The verifier's current
+    //   heuristic scan prefers the last SignedData blob in the stream, so without DigSigBlob parsing
+    //   it would pick the trailing corrupt blob and report `SignedInvalid`.
     //
     // This ensures we exercise deterministic DigSigBlob parsing (offset-based) instead of relying
     // on the heuristic scan-for-0x30 fallback.
@@ -31,8 +33,9 @@ fn build_oshared_digsig_blob(valid_pkcs7: &[u8]) -> Vec<u8> {
     let invalid_offset = digsig_blob_header_len + digsig_info_len; // 0x2C (matches MS-OSHARED examples)
     assert_eq!(invalid_offset, 0x2C);
 
-    // MS-OSHARED examples commonly place the signature bytes at offset 0x2C.
-    let signature_offset = invalid_offset;
+    // Place the valid signature after the invalid one and align to 4 bytes.
+    let mut signature_offset = invalid_offset + invalid_pkcs7.len();
+    signature_offset = (signature_offset + 3) & !3;
 
     let cb_signature = u32::try_from(valid_pkcs7.len()).expect("pkcs7 fits u32");
     let signature_offset_u32 = u32::try_from(signature_offset).expect("offset fits u32");
@@ -55,7 +58,13 @@ fn build_oshared_digsig_blob(valid_pkcs7: &[u8]) -> Vec<u8> {
         "unexpected DigSigInfoSerialized size"
     );
 
-    // Append the actual signature bytes at signatureOffset.
+    // Insert a corrupted PKCS#7 blob early in the stream to ensure scan-first heuristics fail.
+    out.extend_from_slice(&invalid_pkcs7);
+
+    // Pad up to signatureOffset and append the actual signature bytes.
+    if out.len() < signature_offset {
+        out.resize(signature_offset, 0);
+    }
     out.extend_from_slice(valid_pkcs7);
 
     // Append an invalid PKCS#7 blob after the real signature to ensure heuristic scanning would
