@@ -165,6 +165,19 @@ var require_extension = __commonJS({
         })
       );
       context.subscriptions.push(
+        await formula.commands.registerCommand("sampleHello.rangeApi", async () => {
+          const sheet = await formula.sheets.getActiveSheet();
+          await sheet.setRange("A1", [["From extension"]]);
+          const a1 = await sheet.getRange("A1");
+          await formula.cells.setRange("Sheet2!B2", [[123]]);
+          const b2 = await formula.cells.getRange("Sheet2!B2");
+          const sheetA1 = a1?.values?.[0]?.[0] ?? null;
+          const sheet2B2 = b2?.values?.[0]?.[0] ?? null;
+          await formula.ui.showMessage(`Range API: ${String(sheetA1)} / ${String(sheet2B2)}`);
+          return { sheetA1, sheet2B2 };
+        })
+      );
+      context.subscriptions.push(
         await formula.commands.registerCommand("sampleHello.openPanel", async () => {
           const created = await ensurePanel(context);
           return created.id;

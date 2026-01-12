@@ -101,7 +101,8 @@ import { createCommandPalette } from "./command-palette/index.js";
 import { registerBuiltinCommands } from "./commands/registerBuiltinCommands.js";
 import type { Range, SelectionState } from "./selection/types";
 import { ContextMenu, type ContextMenuItem } from "./menus/contextMenu.js";
-import { validateSheetName, WorkbookSheetStore, generateDefaultSheetName } from "./sheets/workbookSheetStore";
+import { getPasteSpecialMenuItems } from "./clipboard/pasteSpecial.js";
+import { WorkbookSheetStore, generateDefaultSheetName, validateSheetName } from "./sheets/workbookSheetStore";
 import { startSheetStoreDocumentSync } from "./sheets/sheetStoreDocumentSync";
 import { rewriteSheetNamesInFormula } from "./workbook/formulaRewrite";
 import {
@@ -2750,12 +2751,13 @@ if (
       if (!sheetName) {
         throw new Error("Sheet name must be a non-empty string");
       }
-      if (workbookSheetStore.resolveIdByName(sheetName)) {
+      if (findSheetIdByName(sheetName)) {
         throw new Error(`Sheet already exists: ${sheetName}`);
       }
 
       const activeId = app.getCurrentSheetId();
       const doc = app.getDocument();
+      const validatedName = validateSheetName(sheetName, { sheets: workbookSheetStore.listAll(), ignoreId: null });
 
       const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
       if (typeof baseInvoke === "function") {
@@ -2765,34 +2767,33 @@ if (
         // Allow any microtask-batched workbook edits to enqueue before we request a new sheet id.
         await new Promise<void>((resolve) => queueMicrotask(resolve));
 
-        const info = (await invoke("add_sheet", { name: sheetName })) as SheetUiInfo;
+        const info = (await invoke("add_sheet", { name: validatedName })) as SheetUiInfo;
         const id = String((info as any)?.id ?? "").trim();
         const resolvedName = String((info as any)?.name ?? "").trim();
         if (!id) throw new Error("Backend returned empty sheet id");
 
         // Backend may adjust the name for uniqueness; trust it.
-        workbookSheetStore.addAfter(activeId, { id, name: resolvedName || sheetName });
+        workbookSheetStore.addAfter(activeId, { id, name: resolvedName || validatedName });
         // DocumentController creates sheets lazily; touching any cell ensures the sheet exists.
         doc.getCell(id, { row: 0, col: 0 });
+        doc.markDirty();
         app.activateSheet(id);
         restoreFocusAfterSheetNavigation();
-
-        // Note: `??` cannot be mixed with `||` without parentheses (syntax error in JS).
-        // Prefer the name we just inserted into the workbook sheet store. When it is
-        // unavailable (should be rare), fall back to the backend-resolved name, then
-        // the requested name, then finally the id.
-        return { id, name: workbookSheetStore.getName(id) ?? (resolvedName || sheetName || id) };
+        const storedName = workbookSheetStore.getName(id);
+        return { id, name: storedName ?? (resolvedName || validatedName || id) };
       }
 
       // Web-only behavior: create a local DocumentController sheet lazily.
       // Until the DocumentController gains first-class sheet metadata, keep `id` and
       // `name` in lockstep for newly-created sheets.
-      const newSheetId = sheetName;
-      workbookSheetStore.addAfter(activeId, { id: newSheetId, name: sheetName });
+      const newSheetId = validatedName;
+      workbookSheetStore.addAfter(activeId, { id: newSheetId, name: validatedName });
       doc.getCell(newSheetId, { row: 0, col: 0 });
+      doc.markDirty();
       app.activateSheet(newSheetId);
       restoreFocusAfterSheetNavigation();
-      return { id: newSheetId, name: workbookSheetStore.getName(newSheetId) ?? sheetName };
+      const storedName = workbookSheetStore.getName(newSheetId);
+      return { id: newSheetId, name: storedName ?? validatedName };
     },
     async renameSheet(_oldName: string, _newName: string) {
       const oldName = String(_oldName ?? "");
@@ -2855,8 +2856,59 @@ if (
 
       return { id: sheetId, name: workbookSheetStore.getName(sheetId) ?? normalizedNewName };
     },
-    async deleteSheet(_name: string) {
-      throw new Error("Not implemented");
+    async deleteSheet(name: string) {
+      const sheetId = findSheetIdByName(name);
+      if (!sheetId) {
+        throw new Error(`Unknown sheet: ${String(name)}`);
+      }
+
+      const doc = app.getDocument();
+      const wasActive = app.getCurrentSheetId() === sheetId;
+
+      // Update sheet metadata first to enforce workbook invariants (e.g. last-sheet guard).
+      workbookSheetStore.remove(sheetId);
+
+      // DocumentController doesn't expose first-class sheet deletion yet, but the sheet map
+      // is authoritative for `getSheetIds()` which drives UI reconciliation.
+      try {
+        doc.model?.sheets?.delete?.(sheetId);
+      } catch {
+        // ignore
+      }
+
+      if (wasActive) {
+        const next =
+          workbookSheetStore.listVisible().at(0)?.id ??
+          workbookSheetStore.listAll().at(0)?.id ??
+          app.getCurrentSheetId();
+        if (next && next !== sheetId) {
+          app.activateSheet(next);
+        }
+      }
+
+      // Nudge downstream observers: deleting a sheet via `doc.model.sheets.delete` doesn't
+      // emit a DocumentController change event, but our UI and caches are reconciled on change.
+      try {
+        const nudgeSheetId = app.getCurrentSheetId();
+        const before = doc.getCell(nudgeSheetId, { row: 0, col: 0 });
+        doc.applyExternalDeltas(
+          [
+            {
+              sheetId: nudgeSheetId,
+              row: 0,
+              col: 0,
+              before,
+              after: before,
+            },
+          ],
+          { recalc: false, source: "Extension deleteSheet" },
+        );
+      } catch {
+        // ignore
+      }
+
+      syncSheetUi();
+      updateContextKeys();
     },
     async getSelection() {
       const sheetId = app.getCurrentSheetId();

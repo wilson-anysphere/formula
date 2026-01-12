@@ -177,7 +177,9 @@ test.describe("Extensions UI integration", () => {
     });
 
     await getOpenExtensionsPanelButton(page).click();
-    await page.getByTestId("run-command-sampleHello.copySumToClipboard").click();
+    const copyBtn = page.getByTestId("run-command-sampleHello.copySumToClipboard");
+    await expect(copyBtn).toBeVisible({ timeout: 30_000 });
+    await copyBtn.dispatchEvent("click");
 
     await expect
       .poll(() => page.evaluate(async () => (await navigator.clipboard.readText()).trim()), { timeout: 10_000 })
@@ -243,7 +245,7 @@ test.describe("Extensions UI integration", () => {
       localStorage.setItem(`dlp:classifications:${docId}`, JSON.stringify([record]));
     }, workbookId);
 
-    await page.getByTestId("open-extensions-panel").click();
+    await getOpenExtensionsPanelButton(page).click();
     const copyBtn = page.getByTestId("run-command-sampleHello.copySumToClipboard");
     await expect(copyBtn).toBeVisible({ timeout: 30_000 });
     await copyBtn.dispatchEvent("click");
@@ -257,6 +259,38 @@ test.describe("Extensions UI integration", () => {
     await expect
       .poll(() => page.evaluate(async () => (await navigator.clipboard.readText()).trim()), { timeout: 10_000 })
       .toBe(sentinel);
+  });
+
+  test("supports Sheet.getRange/setRange and sheet-qualified refs via the desktop spreadsheetApi adapter", async ({ page }) => {
+    await gotoDesktop(page);
+    await grantSampleHelloPermissions(page);
+
+    // Pre-create Sheet2 so sheet-qualified refs resolve (desktop spreadsheetApi should error on unknown sheets).
+    await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const app: any = (window as any).__formulaApp;
+      if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
+      app.getDocument().setCellValue("Sheet2", "A1", "Hello from Sheet2");
+    });
+
+    await getOpenExtensionsPanelButton(page).click();
+    const rangeApiBtn = page.getByTestId("run-command-sampleHello.rangeApi");
+    await expect(rangeApiBtn).toBeVisible({ timeout: 30_000 });
+    await rangeApiBtn.dispatchEvent("click");
+
+    await expect(page.getByTestId("toast-root")).toContainText("Range API: From extension / 123");
+
+    const snapshot = await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const app: any = (window as any).__formulaApp;
+      const doc = app.getDocument();
+      const sheet1A1 = (doc.getCell("Sheet1", { row: 0, col: 0 }) as any)?.value ?? null;
+      const sheet2B2 = (doc.getCell("Sheet2", { row: 1, col: 1 }) as any)?.value ?? null;
+      return { sheet1A1, sheet2B2 };
+    });
+
+    expect(snapshot.sheet1A1).toBe("From extension");
+    expect(snapshot.sheet2B2).toBe(123);
   });
 
   test("persists an extension panel in the layout and re-activates it after reload", async ({ page }) => {

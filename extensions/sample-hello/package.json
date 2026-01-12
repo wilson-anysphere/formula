@@ -15,6 +15,7 @@
     "onCommand:sampleHello.sumSelection",
     "onCommand:sampleHello.workbookOpenDemo",
     "onCommand:sampleHello.workbookSaveAsDemo",
+    "onCommand:sampleHello.rangeApi",
     "onCommand:sampleHello.openPanel",
     "onCommand:sampleHello.fetchText",
     "onCommand:sampleHello.copySumToClipboard",
@@ -38,6 +39,11 @@
       {
         "command": "sampleHello.workbookSaveAsDemo",
         "title": "Save Workbook As… (Workbook API Demo)",
+        "category": "Sample Hello"
+      },
+      {
+        "command": "sampleHello.rangeApi",
+        "title": "Range API (Sheet.getRange/setRange)",
         "category": "Sample Hello"
       },
       {
