@@ -80,6 +80,16 @@ fn arb_literal() -> impl Strategy<Value = Expr> {
     ]
 }
 
+fn arb_local_name() -> impl Strategy<Value = Arc<str>> {
+    // Keep names short and uppercase to match the canonical form produced by the bytecode parser.
+    prop_oneof![
+        Just(Arc::from("X")),
+        Just(Arc::from("Y")),
+        Just(Arc::from("Z")),
+        Just(Arc::from("TMP")),
+    ]
+}
+
 fn arb_expr(base: CellCoord, rows: i32, cols: i32) -> impl Strategy<Value = Expr> {
     let leaf = prop_oneof![
         arb_literal(),
@@ -146,6 +156,40 @@ fn arb_expr(base: CellCoord, rows: i32, cols: i32) -> impl Strategy<Value = Expr
                 inner.clone().prop_map(|a| Expr::FuncCall {
                     func: Function::IsNa,
                     args: vec![a],
+                }),
+                // LET(x, value, x+extra)
+                (arb_local_name(), inner.clone(), inner.clone()).prop_map(|(name, value, extra)| {
+                    Expr::FuncCall {
+                        func: Function::Let,
+                        args: vec![
+                            Expr::NameRef(name.clone()),
+                            value,
+                            Expr::Binary {
+                                op: BinaryOp::Add,
+                                left: Box::new(Expr::NameRef(name)),
+                                right: Box::new(extra),
+                            },
+                        ],
+                    }
+                }),
+                // LET(X, v1, Y, X+v2, Y+v3) exercises sequential bindings and local resolution.
+                (inner.clone(), inner.clone(), inner.clone()).prop_map(|(v1, v2, v3)| Expr::FuncCall {
+                    func: Function::Let,
+                    args: vec![
+                        Expr::NameRef(Arc::from("X")),
+                        v1,
+                        Expr::NameRef(Arc::from("Y")),
+                        Expr::Binary {
+                            op: BinaryOp::Add,
+                            left: Box::new(Expr::NameRef(Arc::from("X"))),
+                            right: Box::new(v2),
+                        },
+                        Expr::Binary {
+                            op: BinaryOp::Add,
+                            left: Box::new(Expr::NameRef(Arc::from("Y"))),
+                            right: Box::new(v3),
+                        },
+                    ],
                 }),
                 // Percent postfix lowering: expr% -> expr / 100
                 inner.clone().prop_map(|e| Expr::Binary {
