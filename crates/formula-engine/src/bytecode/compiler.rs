@@ -139,7 +139,12 @@ impl<'a> CompileCtx<'a> {
                 }
             }
             Expr::SpillRange(inner) => {
-                self.compile_expr(inner);
+                // The spill-range operator (`expr#`) evaluates its operand in a "reference context"
+                // (i.e. it must preserve references rather than implicitly intersecting them).
+                //
+                // This matters for LET bindings like `LET(x, A1, x#)`: `x` is a reference value,
+                // and `x#` should behave like `A1#`.
+                self.compile_expr_inner(inner, true);
                 self.program
                     .instrs
                     .push(Instruction::new(OpCode::SpillRange, 0, 0));

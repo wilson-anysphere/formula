@@ -89,3 +89,31 @@ fn spill_operator_hash_on_non_spill_origin_returns_ref() {
         Value::Error(ErrorKind::Ref)
     );
 }
+
+#[test]
+fn spill_operator_hash_preserves_reference_semantics_for_let_bindings() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 3.0).unwrap();
+
+    // C1 spills down (C1:C3).
+    engine.set_cell_formula("Sheet1", "C1", "=A1:A3").unwrap();
+
+    // LET bindings that capture a reference to a spill origin should be usable with the spill
+    // operator (`x#`) without implicit intersection turning the reference into a scalar.
+    engine
+        .set_cell_formula("Sheet1", "D1", "=LET(x,C1,SUM(x#))")
+        .unwrap();
+
+    // Ensure both formulas compile to bytecode (no AST fallback).
+    assert_eq!(
+        engine.bytecode_program_count(),
+        2,
+        "expected spill-range LET formula to compile to bytecode"
+    );
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "D1"), Value::Number(6.0));
+}
