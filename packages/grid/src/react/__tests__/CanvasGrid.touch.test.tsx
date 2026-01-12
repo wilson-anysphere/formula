@@ -162,4 +162,84 @@ describe("CanvasGrid touch interactions", () => {
     });
     host.remove();
   });
+
+  it("touchMode=select lets touch drag select instead of panning", async () => {
+    const apiRef = React.createRef<GridApi>();
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        <CanvasGrid
+          provider={{ getCell: () => null }}
+          rowCount={100}
+          colCount={10}
+          defaultRowHeight={10}
+          defaultColWidth={10}
+          touchMode="select"
+          apiRef={apiRef}
+        />
+      );
+    });
+
+    const selectionCanvas = host.querySelectorAll("canvas")[2] as HTMLCanvasElement;
+    expect(selectionCanvas).toBeTruthy();
+
+    expect(apiRef.current?.getScroll()).toEqual({ x: 0, y: 0 });
+    expect(apiRef.current?.getSelection()).toBeNull();
+
+    await act(async () => {
+      selectionCanvas.dispatchEvent(createTouchPointerEvent("pointerdown", { clientX: 5, clientY: 5, pointerId: 1 }));
+      selectionCanvas.dispatchEvent(createTouchPointerEvent("pointermove", { clientX: 55, clientY: 55, pointerId: 1 }));
+      selectionCanvas.dispatchEvent(createTouchPointerEvent("pointerup", { clientX: 55, clientY: 55, pointerId: 1 }));
+    });
+
+    expect(apiRef.current?.getScroll()).toEqual({ x: 0, y: 0 });
+    expect(apiRef.current?.getSelection()).toEqual({ row: 0, col: 0 });
+    expect(apiRef.current?.getSelectionRange()).toEqual({ startRow: 0, endRow: 6, startCol: 0, endCol: 6 });
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  });
+
+  it("touchMode=pan disables tap-to-select", async () => {
+    const apiRef = React.createRef<GridApi>();
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        <CanvasGrid
+          provider={{ getCell: () => null }}
+          rowCount={100}
+          colCount={10}
+          defaultRowHeight={10}
+          defaultColWidth={10}
+          touchMode="pan"
+          apiRef={apiRef}
+        />
+      );
+    });
+
+    const selectionCanvas = host.querySelectorAll("canvas")[2] as HTMLCanvasElement;
+    expect(selectionCanvas).toBeTruthy();
+
+    await act(async () => {
+      selectionCanvas.dispatchEvent(createTouchPointerEvent("pointerdown", { clientX: 5, clientY: 5, pointerId: 1 }));
+      selectionCanvas.dispatchEvent(createTouchPointerEvent("pointerup", { clientX: 5, clientY: 5, pointerId: 1 }));
+    });
+
+    expect(apiRef.current?.getSelection()).toBeNull();
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  });
 });

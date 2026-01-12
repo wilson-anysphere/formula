@@ -111,6 +111,14 @@ export interface CanvasGridProps {
   defaultColWidth?: number;
   zoom?: number;
   onZoomChange?: (zoom: number) => void;
+  /**
+   * Touch interaction strategy.
+   *
+   * - `"auto"` (default): single-finger drags pan; taps select.
+   * - `"select"`: touch behaves like mouse (drag selects).
+   * - `"pan"`: touch always pans (taps do not select).
+   */
+  touchMode?: "pan" | "select" | "auto";
   enableResize?: boolean;
   /**
    * Fired when a row height or column width is updated via an interactive resize
@@ -308,6 +316,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   const onFillCommitRef = useRef(props.onFillCommit);
   const onZoomChangeRef = useRef(props.onZoomChange);
   const onAxisSizeChangeRef = useRef(props.onAxisSizeChange);
+  const touchModeRef = useRef<CanvasGridProps["touchMode"]>(props.touchMode ?? "auto");
 
   onSelectionChangeRef.current = props.onSelectionChange;
   onSelectionRangeChangeRef.current = props.onSelectionRangeChange;
@@ -321,6 +330,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   onFillCommitRef.current = props.onFillCommit;
   onZoomChangeRef.current = props.onZoomChange;
   onAxisSizeChangeRef.current = props.onAxisSizeChange;
+  touchModeRef.current = props.touchMode ?? "auto";
 
   const selectionAnchorRef = useRef<{ row: number; col: number } | null>(null);
   const keyboardAnchorRef = useRef<{ row: number; col: number } | null>(null);
@@ -1232,7 +1242,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       const renderer = rendererRef.current;
       if (!renderer) return;
 
-      if (event.pointerType === "touch" && interactionModeRef.current !== "rangeSelection") {
+      const touchMode = touchModeRef.current ?? "auto";
+      if (event.pointerType === "touch" && touchMode !== "select" && interactionModeRef.current !== "rangeSelection") {
         event.preventDefault();
         keyboardAnchorRef.current = null;
         stopAutoScroll();
@@ -1253,7 +1264,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         }
 
         if (touchPointers.size === 1) {
-          touchTapDisabled = false;
+          touchTapDisabled = touchMode === "pan";
           touchPan = {
             pointerId: event.pointerId,
             startClientX: event.clientX,
@@ -1536,7 +1547,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       const renderer = rendererRef.current;
       if (!renderer) return;
 
-      if (event.pointerType === "touch" && interactionModeRef.current !== "rangeSelection") {
+      const touchMode = touchModeRef.current ?? "auto";
+      if (event.pointerType === "touch" && touchMode !== "select" && interactionModeRef.current !== "rangeSelection") {
         if (!touchPointers.has(event.pointerId)) return;
 
         event.preventDefault();
@@ -1617,7 +1629,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     };
 
     const endDrag = (event: PointerEvent) => {
-      if (event.pointerType === "touch" && interactionModeRef.current !== "rangeSelection") {
+      const touchMode = touchModeRef.current ?? "auto";
+      if (event.pointerType === "touch" && touchMode !== "select" && interactionModeRef.current !== "rangeSelection") {
         if (!touchPointers.has(event.pointerId)) return;
         event.preventDefault();
 
