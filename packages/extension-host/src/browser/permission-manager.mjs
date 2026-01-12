@@ -219,6 +219,15 @@ class PermissionManager {
     this._save();
   }
 
+  /**
+   * Reset (clear) all stored permissions for a single extension.
+   *
+   * @param {string} extensionId
+   */
+  async resetPermissions(extensionId) {
+    return this.revokePermissions(extensionId, []);
+  }
+
   async resetAllPermissions() {
     this._ensureLoaded();
     this._data = {};

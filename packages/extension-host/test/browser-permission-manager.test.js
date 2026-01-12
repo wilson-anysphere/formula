@@ -167,3 +167,74 @@ test("browser PermissionManager: revokePermissions removes persisted grants for 
 
   assert.equal(promptCalls, 1);
 });
+
+test("browser PermissionManager: revokePermissions + resetPermissions clear grants", async () => {
+  const { PermissionManager } = await importBrowserPermissionManager();
+
+  const storage = createMemoryStorage();
+  const storageKey = "formula.test.permissions.reset";
+  const extensionId = "pub.ext";
+
+  const pm = new PermissionManager({
+    storage,
+    storageKey,
+    prompt: async () => true
+  });
+
+  await pm.ensurePermissions(
+    {
+      extensionId,
+      displayName: "Ext",
+      declaredPermissions: ["network", "clipboard"]
+    },
+    ["network", "clipboard"]
+  );
+
+  assert.deepEqual(await pm.getGrantedPermissions(extensionId), {
+    network: { mode: "full" },
+    clipboard: true
+  });
+
+  await pm.revokePermissions(extensionId, ["clipboard"]);
+  assert.deepEqual(await pm.getGrantedPermissions(extensionId), {
+    network: { mode: "full" }
+  });
+
+  await pm.resetPermissions(extensionId);
+  assert.deepEqual(await pm.getGrantedPermissions(extensionId), {});
+});
+
+test("browser PermissionManager: resetAllPermissions clears all extensions", async () => {
+  const { PermissionManager } = await importBrowserPermissionManager();
+
+  const storage = createMemoryStorage();
+  const storageKey = "formula.test.permissions.resetAll";
+
+  const pm = new PermissionManager({
+    storage,
+    storageKey,
+    prompt: async () => true
+  });
+
+  await pm.ensurePermissions(
+    {
+      extensionId: "pub.one",
+      displayName: "One",
+      declaredPermissions: ["clipboard"]
+    },
+    ["clipboard"]
+  );
+
+  await pm.ensurePermissions(
+    {
+      extensionId: "pub.two",
+      displayName: "Two",
+      declaredPermissions: ["network"]
+    },
+    ["network"]
+  );
+
+  await pm.resetAllPermissions();
+  assert.deepEqual(await pm.getGrantedPermissions("pub.one"), {});
+  assert.deepEqual(await pm.getGrantedPermissions("pub.two"), {});
+});

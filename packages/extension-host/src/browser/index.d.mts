@@ -20,7 +20,7 @@ export class BrowserExtensionHost {
     storage?: any;
   });
 
-  loadExtensionFromUrl(manifestUrl: string): Promise<void>;
+  loadExtensionFromUrl(manifestUrl: string): Promise<string>;
   startup(): Promise<void>;
 
   getContributedCommands(): ContributedCommand[];
@@ -29,6 +29,11 @@ export class BrowserExtensionHost {
   getContributedMenu(menuId: string): any[];
 
   listExtensions(): any[];
+
+  getGrantedPermissions(extensionId: string): Promise<any>;
+  revokePermissions(extensionId: string, permissions?: string[]): Promise<void>;
+  resetPermissions(extensionId: string): Promise<void>;
+  resetAllPermissions(): Promise<void>;
 
   executeCommand(commandId: string, ...args: any[]): Promise<any>;
 }

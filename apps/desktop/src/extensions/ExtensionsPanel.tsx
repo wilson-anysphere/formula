@@ -11,11 +11,6 @@ type NetworkPolicy = {
 
 type GrantedPermissions = Record<string, true | NetworkPolicy>;
 
-type PermissionState =
-  | { status: "loading" }
-  | { status: "error"; error: string }
-  | { status: "ready"; data: GrantedPermissions };
-
 type ContributedCommand = {
   extensionId: string;
   command: string;
@@ -39,6 +34,14 @@ function groupByExtension<T extends { extensionId: string }>(items: T[]): Map<st
   return map;
 }
 
+function normalizeStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((entry) => typeof entry === "string")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
+
 export function ExtensionsPanel({
   manager,
   onExecuteCommand,
@@ -51,6 +54,10 @@ export function ExtensionsPanel({
   const [, bump] = React.useState(0);
   React.useEffect(() => manager.subscribe(() => bump((v) => v + 1)), [manager]);
 
+  const [permissionsByExtension, setPermissionsByExtension] = React.useState<Record<string, GrantedPermissions>>({});
+  const [permissionsError, setPermissionsError] = React.useState<string | null>(null);
+  const [busy, setBusy] = React.useState<string | null>(null);
+
   const extensions = manager.host.listExtensions();
   const commands = manager.getContributedCommands() as ContributedCommand[];
   const panels = manager.getContributedPanels() as ContributedPanel[];
@@ -61,74 +68,35 @@ export function ExtensionsPanel({
   const commandsByExt = groupByExtension(commands);
   const panelsByExt = groupByExtension(panels);
 
-  const [permissionsByExt, setPermissionsByExt] = React.useState<Record<string, PermissionState>>({});
-  const [permissionsVersion, setPermissionsVersion] = React.useState(0);
-
-  const fetchPermissions = React.useCallback(
-    async (extensionId: string): Promise<PermissionState> => {
-      try {
-        const data = (await manager.host.getGrantedPermissions(extensionId)) as GrantedPermissions;
-        return { status: "ready", data };
-      } catch (err) {
-        return { status: "error", error: String((err as any)?.message ?? err) };
-      }
-    },
-    [manager],
-  );
-
-  const loadPermissionsForExtension = React.useCallback(
-    async (extensionId: string) => {
-      const id = String(extensionId);
-      setPermissionsByExt((prev) => ({ ...prev, [id]: { status: "loading" } }));
-      const next = await fetchPermissions(id);
-      setPermissionsByExt((prev) => ({ ...prev, [id]: next }));
-    },
-    [fetchPermissions],
-  );
-
-  const refreshAllPermissions = React.useCallback(
-    async (extensionIds: string[]) => {
-      const ids = extensionIds.map(String);
-      setPermissionsByExt((prev) => {
-        const next = { ...prev };
-        for (const id of ids) next[id] = { status: "loading" };
-        return next;
-      });
-
-      const entries = await Promise.all(ids.map(async (id) => [id, await fetchPermissions(id)] as const));
-      setPermissionsByExt((prev) => ({ ...prev, ...Object.fromEntries(entries) }));
-    },
-    [fetchPermissions],
-  );
+  const refreshPermissions = React.useCallback(async () => {
+    if (!manager.ready || manager.error) return;
+    setPermissionsError(null);
+    try {
+      const exts = manager.host.listExtensions();
+      const entries = await Promise.all(
+        exts.map(async (ext: any) => [ext.id, (await manager.getGrantedPermissions(ext.id)) as GrantedPermissions] as const),
+      );
+      setPermissionsByExtension(Object.fromEntries(entries));
+    } catch (err) {
+      setPermissionsError(String((err as any)?.message ?? err));
+    }
+  }, [manager]);
 
   const extensionsKey = extensions.map((ext: any) => String(ext.id)).join("|");
 
   React.useEffect(() => {
-    if (!manager.ready || manager.error) return;
-    const ids = extensions.map((ext: any) => String(ext.id));
-    void refreshAllPermissions(ids);
-    // Intentionally depend on a stable key instead of the `extensions` array identity.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [manager.ready, manager.error, permissionsVersion, extensionsKey, refreshAllPermissions]);
-
-  const resetAllPermissions = React.useCallback(() => {
-    void (async () => {
-      await manager.host.resetAllPermissions();
-      setPermissionsVersion((v) => v + 1);
-    })().catch((err) => {
-      showToast(`Failed to reset extension permissions: ${String((err as any)?.message ?? err)}`, "error");
-    });
-  }, [manager]);
+    void refreshPermissions();
+  }, [refreshPermissions, manager.ready, manager.error, extensionsKey]);
 
   const executeCommandAndRefreshPermissions = React.useCallback(
-    async (extensionId: string, commandId: string, args: any[] = []) => {
+    async (_extensionId: string, commandId: string, args: any[] = []) => {
       try {
         await Promise.resolve(onExecuteCommand(commandId, ...args));
       } finally {
-        await loadPermissionsForExtension(extensionId);
+        await refreshPermissions();
       }
     },
-    [loadPermissionsForExtension, onExecuteCommand],
+    [onExecuteCommand, refreshPermissions],
   );
 
   const runCommandWithArgs = React.useCallback(
@@ -176,7 +144,18 @@ export function ExtensionsPanel({
         <button
           type="button"
           data-testid="reset-all-extension-permissions"
-          onClick={resetAllPermissions}
+          disabled={busy === "reset-all"}
+          onClick={() => {
+            void (async () => {
+              setBusy("reset-all");
+              try {
+                await manager.resetAllPermissions();
+                await refreshPermissions();
+              } finally {
+                setBusy(null);
+              }
+            })();
+          }}
           style={{
             padding: "8px 10px",
             borderRadius: "10px",
@@ -186,24 +165,33 @@ export function ExtensionsPanel({
             cursor: "pointer",
           }}
         >
-          Reset all extensions permissions
+          Reset all permissions
         </button>
       </div>
+
+      {permissionsError ? (
+        <div style={{ color: "var(--text-secondary)", fontSize: "12px" }}>Failed to load permissions: {permissionsError}</div>
+      ) : null}
+
       {extensions.map((ext: any) => {
         const extCommands = commandsByExt.get(ext.id) ?? [];
         const extPanels = panelsByExt.get(ext.id) ?? [];
-        const permState = permissionsByExt[String(ext.id)] ?? ({ status: "loading" } as const);
-        const granted = permState.status === "ready" ? permState.data : null;
 
-        const booleanPerms =
-          granted != null
-            ? Object.entries(granted)
-                .filter(([key, value]) => key !== "network" && value === true)
-                .map(([key]) => key)
-                .sort((a, b) => a.localeCompare(b))
-            : [];
-        const networkPolicy =
-          granted && typeof (granted as any).network === "object" ? ((granted as any).network as NetworkPolicy) : null;
+        const declaredPermissions = normalizeStringArray(ext.manifest?.permissions);
+        const declaredSet = new Set(declaredPermissions);
+
+        const granted = permissionsByExtension[ext.id] ?? {};
+        const networkPolicy = (granted as any).network ?? null;
+        const networkMode = typeof networkPolicy?.mode === "string" ? String(networkPolicy.mode) : null;
+        const networkHosts = normalizeStringArray(networkPolicy?.hosts);
+
+        const allPermissions = (() => {
+          const set = new Set<string>();
+          for (const perm of declaredPermissions) set.add(perm);
+          for (const perm of Object.keys(granted ?? {})) set.add(perm);
+          return [...set].sort();
+        })();
+
         return (
           <div
             key={ext.id}
@@ -217,6 +205,129 @@ export function ExtensionsPanel({
           >
             <div style={{ fontWeight: 700, marginBottom: "8px" }}>{ext.manifest?.displayName ?? ext.id}</div>
             <div style={{ fontSize: "12px", color: "var(--text-secondary)", marginBottom: "10px" }}>{ext.id}</div>
+
+            <div style={{ marginBottom: "12px" }}>
+              <div style={{ fontWeight: 600, marginBottom: "6px" }}>Permissions</div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                {allPermissions.length === 0 ? (
+                  <div style={{ color: "var(--text-secondary)" }}>No permissions declared.</div>
+                ) : (
+                  allPermissions.map((perm) => {
+                    const declared = declaredSet.has(perm);
+                    const isNetwork = perm === "network";
+                    const grantedValue = isNetwork
+                      ? Boolean(networkPolicy) && networkMode !== "deny"
+                      : (granted as any)?.[perm] === true;
+
+                    const subtitle = isNetwork
+                      ? networkPolicy
+                        ? `mode: ${networkMode ?? "unknown"}${
+                            networkMode === "allowlist" && networkHosts.length > 0 ? ` • hosts: ${networkHosts.join(", ")}` : ""
+                          }`
+                        : "not granted"
+                      : grantedValue
+                        ? "granted"
+                        : "not granted";
+
+                    return (
+                      <div
+                        key={perm}
+                        data-testid={`permission-row-${ext.id}-${perm}`}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: "10px",
+                          padding: "10px 12px",
+                          borderRadius: "10px",
+                          border: "1px solid var(--border)",
+                          background: "var(--bg-secondary)",
+                        }}
+                      >
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: "8px" }}>
+                            <span>{perm}</span>
+                            <span style={{ fontSize: "11px", color: "var(--text-secondary)" }}>
+                              {declared ? "declared" : "not declared"}
+                            </span>
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "12px",
+                              color: "var(--text-secondary)",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                            }}
+                          >
+                            {subtitle}
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          data-testid={`revoke-permission-${ext.id}-${perm}`}
+                          disabled={!grantedValue || busy === `revoke:${ext.id}:${perm}`}
+                          onClick={() => {
+                            void (async () => {
+                              const key = `revoke:${ext.id}:${perm}`;
+                              setBusy(key);
+                              try {
+                                await manager.revokePermission(ext.id, perm);
+                                await refreshPermissions();
+                              } finally {
+                                setBusy(null);
+                              }
+                            })();
+                          }}
+                          style={{
+                            flex: "0 0 auto",
+                            padding: "8px 10px",
+                            borderRadius: "10px",
+                            border: "1px solid var(--border)",
+                            background: "var(--bg-primary)",
+                            color: grantedValue ? "var(--text-primary)" : "var(--text-secondary)",
+                            cursor: grantedValue ? "pointer" : "not-allowed",
+                          }}
+                        >
+                          Revoke
+                        </button>
+                      </div>
+                    );
+                  })
+                )}
+
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "6px" }}>
+                  <button
+                    type="button"
+                    data-testid={`reset-extension-permissions-${ext.id}`}
+                    disabled={busy === `reset:${ext.id}`}
+                    onClick={() => {
+                      void (async () => {
+                        const key = `reset:${ext.id}`;
+                        setBusy(key);
+                        try {
+                          await manager.resetPermissionsForExtension(ext.id);
+                          await refreshPermissions();
+                        } finally {
+                          setBusy(null);
+                        }
+                      })();
+                    }}
+                    style={{
+                      padding: "8px 10px",
+                      borderRadius: "10px",
+                      border: "1px solid var(--border)",
+                      background: "var(--bg-primary)",
+                      color: "var(--text-primary)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Reset permissions for this extension
+                  </button>
+                </div>
+              </div>
+            </div>
 
             {extCommands.length > 0 ? (
               <>
@@ -320,141 +431,6 @@ export function ExtensionsPanel({
                 </div>
               </>
             ) : null}
-
-            <div style={{ fontWeight: 600, marginTop: "12px", marginBottom: "6px" }}>Permissions</div>
-            {permState.status === "loading" ? (
-              <div style={{ color: "var(--text-secondary)" }}>Loading permissions…</div>
-            ) : permState.status === "error" ? (
-              <div style={{ color: "var(--text-secondary)" }}>Failed to load permissions: {permState.error}</div>
-            ) : booleanPerms.length === 0 && !networkPolicy ? (
-              <div data-testid={`permissions-empty-${ext.id}`} style={{ color: "var(--text-secondary)" }}>
-                No permissions granted.
-              </div>
-            ) : (
-              <div
-                data-testid={`permissions-list-${ext.id}`}
-                style={{ display: "flex", flexDirection: "column", gap: "6px" }}
-              >
-                {booleanPerms.map((perm) => (
-                  <div
-                    key={perm}
-                    data-testid={`permission-${ext.id}-${perm}`}
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      gap: "8px",
-                      padding: "6px 8px",
-                      borderRadius: "8px",
-                      border: "1px solid var(--border)",
-                      background: "var(--bg-secondary)",
-                    }}
-                  >
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontFamily: "monospace", fontSize: "12px", wordBreak: "break-all" }}>{perm}</div>
-                      <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>granted</div>
-                    </div>
-                    <button
-                      type="button"
-                      data-testid={`revoke-permission-${ext.id}-${perm}`}
-                      onClick={() => {
-                        void (async () => {
-                          await manager.host.revokePermissions(ext.id, [perm]);
-                          await loadPermissionsForExtension(ext.id);
-                        })().catch((err) => {
-                          showToast(`Failed to revoke permission '${perm}': ${String((err as any)?.message ?? err)}`, "error");
-                        });
-                      }}
-                      style={{
-                        padding: "6px 8px",
-                        borderRadius: "10px",
-                        border: "1px solid var(--border)",
-                        background: "var(--bg-primary)",
-                        color: "var(--text-primary)",
-                        cursor: "pointer",
-                        flex: "0 0 auto",
-                      }}
-                    >
-                      Revoke
-                    </button>
-                  </div>
-                ))}
-
-                {networkPolicy ? (
-                  <div
-                    data-testid={`permission-${ext.id}-network`}
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      gap: "8px",
-                      padding: "6px 8px",
-                      borderRadius: "8px",
-                      border: "1px solid var(--border)",
-                      background: "var(--bg-secondary)",
-                    }}
-                  >
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontFamily: "monospace", fontSize: "12px" }}>network</div>
-                      <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
-                        mode: {String(networkPolicy.mode)}
-                        {Array.isArray(networkPolicy.hosts) && networkPolicy.hosts.length > 0
-                          ? `, hosts: ${networkPolicy.hosts.join(", ")}`
-                          : ""}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      data-testid={`revoke-permission-${ext.id}-network`}
-                      onClick={() => {
-                        void (async () => {
-                          await manager.host.revokePermissions(ext.id, ["network"]);
-                          await loadPermissionsForExtension(ext.id);
-                        })().catch((err) => {
-                          showToast(`Failed to revoke permission 'network': ${String((err as any)?.message ?? err)}`, "error");
-                        });
-                      }}
-                      style={{
-                        padding: "6px 8px",
-                        borderRadius: "10px",
-                        border: "1px solid var(--border)",
-                        background: "var(--bg-primary)",
-                        color: "var(--text-primary)",
-                        cursor: "pointer",
-                        flex: "0 0 auto",
-                      }}
-                    >
-                      Revoke
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            )}
-
-            <div style={{ display: "flex", gap: "8px", marginTop: "10px" }}>
-              <button
-                type="button"
-                data-testid={`revoke-all-permissions-${ext.id}`}
-                onClick={() => {
-                  void (async () => {
-                    await manager.host.revokePermissions(ext.id);
-                    await loadPermissionsForExtension(ext.id);
-                  })().catch((err) => {
-                    showToast(`Failed to revoke permissions: ${String((err as any)?.message ?? err)}`, "error");
-                  });
-                }}
-                style={{
-                  padding: "8px 10px",
-                  borderRadius: "10px",
-                  border: "1px solid var(--border)",
-                  background: "var(--bg-secondary)",
-                  color: "var(--text-primary)",
-                  cursor: "pointer",
-                }}
-              >
-                Revoke all permissions
-              </button>
-            </div>
           </div>
         );
       })}

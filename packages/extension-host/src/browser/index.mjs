@@ -823,6 +823,10 @@ class BrowserExtensionHost {
     return this._permissionManager.revokePermissions(String(extensionId), permissions);
   }
 
+  async resetPermissions(extensionId) {
+    return this._permissionManager.resetPermissions(String(extensionId));
+  }
+
   async resetAllPermissions() {
     return this._permissionManager.resetAllPermissions();
   }

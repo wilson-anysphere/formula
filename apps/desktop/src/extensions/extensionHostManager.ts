@@ -113,6 +113,25 @@ export class DesktopExtensionHostManager {
     return this.host.getContributedMenu(menuId);
   }
 
+  async getGrantedPermissions(extensionId: string): Promise<any> {
+    return this.host.getGrantedPermissions(extensionId);
+  }
+
+  async revokePermission(extensionId: string, permission: string): Promise<void> {
+    await this.host.revokePermissions(extensionId, [permission]);
+    this.emit();
+  }
+
+  async resetPermissionsForExtension(extensionId: string): Promise<void> {
+    await this.host.resetPermissions(extensionId);
+    this.emit();
+  }
+
+  async resetAllPermissions(): Promise<void> {
+    await this.host.resetAllPermissions();
+    this.emit();
+  }
+
   async executeCommand(commandId: string, ...args: any[]): Promise<any> {
     return this.host.executeCommand(commandId, ...args);
   }
