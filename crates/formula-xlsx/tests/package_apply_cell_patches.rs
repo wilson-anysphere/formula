@@ -3,7 +3,7 @@ use std::io::Read as _;
 use std::path::PathBuf;
 
 use formula_model::{CellRef, CellValue};
-use formula_xlsx::{load_from_bytes, PackageCellPatch, XlsxPackage};
+use formula_xlsx::{load_from_bytes, PackageCellPatch, RecalcPolicy, XlsxPackage};
 use xlsx_diff::Severity;
 
 fn fixture_path(rel: &str) -> PathBuf {
@@ -201,6 +201,72 @@ fn apply_cell_patches_drops_calc_chain_when_formulas_change(
         calc_pr.attribute("fullCalcOnLoad"),
         Some("1"),
         "workbook.xml should request full recalculation on load when formulas change"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn apply_cell_patches_to_bytes_recalc_policy_can_clear_cached_values_for_formula_patches(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = include_bytes!("fixtures/rt_simple.xlsx");
+    let pkg = XlsxPackage::from_bytes(bytes)?;
+
+    let patch = PackageCellPatch::for_worksheet_part(
+        "xl/worksheets/sheet1.xml",
+        CellRef::from_a1("C1")?,
+        CellValue::Number(2.0),
+        Some("=1+1".to_string()),
+    );
+
+    let out_bytes = pkg.apply_cell_patches_to_bytes_with_recalc_policy(
+        &[patch.clone()],
+        RecalcPolicy {
+            clear_cached_values_on_formula_change: true,
+            ..Default::default()
+        },
+    )?;
+
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(&out_bytes))?;
+    let mut sheet_xml = String::new();
+    archive
+        .by_name("xl/worksheets/sheet1.xml")?
+        .read_to_string(&mut sheet_xml)?;
+    let doc = roxmltree::Document::parse(&sheet_xml)?;
+    let patched_cell = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "c" && n.attribute("r") == Some("C1"))
+        .expect("patched cell C1 should exist");
+    assert!(
+        patched_cell
+            .children()
+            .any(|n| n.is_element() && n.tag_name().name() == "f"),
+        "patched cell should contain a <f> element"
+    );
+    assert!(
+        !patched_cell
+            .children()
+            .any(|n| n.is_element() && n.tag_name().name() == "v"),
+        "cached value should be omitted when clear_cached_values_on_formula_change is enabled"
+    );
+
+    // Default behavior should continue writing cached `<v>` values.
+    let out_bytes = pkg.apply_cell_patches_to_bytes(&[patch])?;
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(&out_bytes))?;
+    let mut sheet_xml = String::new();
+    archive
+        .by_name("xl/worksheets/sheet1.xml")?
+        .read_to_string(&mut sheet_xml)?;
+    let doc = roxmltree::Document::parse(&sheet_xml)?;
+    let patched_cell = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "c" && n.attribute("r") == Some("C1"))
+        .expect("patched cell C1 should exist");
+    assert!(
+        patched_cell
+            .children()
+            .any(|n| n.is_element() && n.tag_name().name() == "v"),
+        "default apply_cell_patches_to_bytes should preserve cached <v> values"
     );
 
     Ok(())

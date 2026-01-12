@@ -448,6 +448,16 @@ impl XlsxPackage {
     /// updates dependent workbook parts when needed (for example `xl/sharedStrings.xml` and the
     /// calcChain/full-calc settings after formula edits).
     pub fn apply_cell_patches_to_bytes(&self, patches: &[CellPatch]) -> Result<Vec<u8>, XlsxError> {
+        self.apply_cell_patches_to_bytes_with_recalc_policy(patches, RecalcPolicy::default())
+    }
+
+    /// Apply a set of cell edits to the package and return the updated ZIP bytes using the
+    /// provided [`RecalcPolicy`] (applied only when formulas change).
+    pub fn apply_cell_patches_to_bytes_with_recalc_policy(
+        &self,
+        patches: &[CellPatch],
+        policy_on_formula_change: RecalcPolicy,
+    ) -> Result<Vec<u8>, XlsxError> {
         let mut sheet_name_to_part: HashMap<String, String> = HashMap::new();
         if patches
             .iter()
@@ -509,10 +519,11 @@ impl XlsxPackage {
         }
 
         let mut out = Cursor::new(Vec::new());
-        crate::streaming::patch_xlsx_streaming(
+        crate::streaming::patch_xlsx_streaming_with_recalc_policy(
             Cursor::new(input_bytes),
             &mut out,
             &streaming_patches,
+            policy_on_formula_change,
         )?;
         Ok(out.into_inner())
     }
