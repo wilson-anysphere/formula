@@ -1810,7 +1810,8 @@ export function bindYjsToDocumentController(options) {
    * Values are stored sparsely:
    * - missing key means "no default" (style id 0)
    * - row/col keys are deleted when clearing
-   * - empty rowFormats/colFormats maps are removed from the sheet entry
+   * - empty rowFormats/colFormats maps are intentionally kept (rather than deleting the key)
+   *   to avoid falling back to stale legacy `view.rowFormats`/`view.colFormats` snapshots.
    *
    * @param {any[]} deltas
    */
