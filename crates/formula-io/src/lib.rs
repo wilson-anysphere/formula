@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use encoding_rs::WINDOWS_1252;
 use formula_model::import::{
-    import_csv_into_workbook, sniff_csv_delimiter, CsvImportError, CsvOptions, CsvTextEncoding,
+    import_csv_into_workbook, CsvImportError, CsvOptions,
 };
 use formula_model::sanitize_sheet_name;
 use tempfile::NamedTempFile;
@@ -576,18 +576,6 @@ pub fn open_workbook_model(path: impl AsRef<Path>) -> Result<formula_model::Work
             })
         }
         WorkbookFormat::Csv => {
-            let mut sniff_file = File::open(path).map_err(|source| Error::OpenIo {
-                path: path.to_path_buf(),
-                source,
-            })?;
-            let mut sample = vec![0u8; 64 * 1024];
-            let n = sniff_file.read(&mut sample).map_err(|source| Error::OpenIo {
-                path: path.to_path_buf(),
-                source,
-            })?;
-            sample.truncate(n);
-            let delimiter = sniff_csv_delimiter(&sample);
-
             let file = File::open(path).map_err(|source| Error::OpenIo {
                 path: path.to_path_buf(),
                 source,
@@ -605,11 +593,7 @@ pub fn open_workbook_model(path: impl AsRef<Path>) -> Result<formula_model::Work
                 &mut workbook,
                 sheet_name,
                 reader,
-                CsvOptions {
-                    delimiter,
-                    encoding: CsvTextEncoding::Auto,
-                    ..Default::default()
-                },
+                CsvOptions::default(),
             )
             .map_err(|source| Error::OpenCsv {
                 path: path.to_path_buf(),
@@ -685,18 +669,6 @@ pub fn open_workbook(path: impl AsRef<Path>) -> Result<Workbook, Error> {
                 })
         }
         WorkbookFormat::Csv => {
-            let mut sniff_file = std::fs::File::open(path).map_err(|source| Error::OpenIo {
-                path: path.to_path_buf(),
-                source,
-            })?;
-            let mut sample = vec![0u8; 64 * 1024];
-            let n = sniff_file.read(&mut sample).map_err(|source| Error::OpenIo {
-                path: path.to_path_buf(),
-                source,
-            })?;
-            sample.truncate(n);
-            let delimiter = sniff_csv_delimiter(&sample);
-
             let file = std::fs::File::open(path).map_err(|source| Error::OpenIo {
                 path: path.to_path_buf(),
                 source,
@@ -714,11 +686,7 @@ pub fn open_workbook(path: impl AsRef<Path>) -> Result<Workbook, Error> {
                 &mut workbook,
                 sheet_name,
                 reader,
-                CsvOptions {
-                    delimiter,
-                    encoding: CsvTextEncoding::Auto,
-                    ..Default::default()
-                },
+                CsvOptions::default(),
             )
             .map_err(|source| Error::OpenCsv {
                 path: path.to_path_buf(),

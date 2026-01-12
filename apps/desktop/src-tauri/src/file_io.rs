@@ -4,7 +4,7 @@ use anyhow::Context;
 use calamine::{open_workbook_auto, Data, Reader};
 use formula_columnar::{ColumnType as ColumnarType, ColumnarTable, Value as ColumnarValue};
 use formula_model::{
-    import::{import_csv_to_columnar_table, sniff_csv_delimiter, CsvOptions, CsvTextEncoding},
+    import::{import_csv_to_columnar_table, CsvOptions, CsvTextEncoding},
     sanitize_sheet_name, CellValue as ModelCellValue, DateSystem as WorkbookDateSystem, WorksheetId,
 };
 use formula_xlsb::{
@@ -1101,24 +1101,12 @@ fn rich_model_cell_value_to_scalar(value: &ModelCellValue) -> Option<CellScalar>
 }
 
 pub fn read_csv_blocking(path: &Path) -> anyhow::Result<Workbook> {
-    use std::io::Read;
-
-    let mut sample_file =
-        std::fs::File::open(path).with_context(|| format!("open csv {:?}", path))?;
-    let mut sample = vec![0u8; 64 * 1024];
-    let n = sample_file
-        .read(&mut sample)
-        .with_context(|| format!("read csv sniff sample {:?}", path))?;
-    sample.truncate(n);
-    let delimiter = sniff_csv_delimiter(&sample);
-
     let file = std::fs::File::open(path).with_context(|| format!("open csv {:?}", path))?;
     let reader = BufReader::new(file);
     // Default to Excel-like behavior: attempt UTF-8 first, then fall back to Windows-1252.
     let table = import_csv_to_columnar_table(
         reader,
         CsvOptions {
-            delimiter,
             encoding: CsvTextEncoding::Auto,
             ..CsvOptions::default()
         },
