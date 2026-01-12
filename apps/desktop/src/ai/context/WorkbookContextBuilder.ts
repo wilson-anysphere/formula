@@ -265,6 +265,27 @@ export class WorkbookContextBuilder {
     const schemaTablesBySheet = schemaMetadata.schemaTablesBySheet;
     const namedRanges = schemaMetadata.namedRanges;
 
+    // Reuse a single ToolExecutor per build() invocation to avoid repeated schema
+    // validation + option normalization on the hot path. All `read_range` calls
+    // use explicit sheet-prefixed A1 ranges, so `default_sheet` can be stable.
+    // Align `default_sheet` with any provided DLP sheet_id so DLP evaluation for
+    // cross-sheet reads uses the actual range sheet name.
+    const maxReadRangeCells = Math.max(
+      1,
+      this.options.maxSchemaRows * this.options.maxSchemaCols,
+      this.options.maxBlockRows * this.options.maxBlockCols,
+    );
+    const defaultSheetForTools =
+      typeof (this.options.dlp as any)?.sheet_id === "string" && String((this.options.dlp as any).sheet_id).trim()
+        ? String((this.options.dlp as any).sheet_id).trim()
+        : input.activeSheetId;
+    const executor = new ToolExecutor(this.options.spreadsheet, {
+      default_sheet: defaultSheetForTools,
+      dlp: this.options.dlp,
+      max_read_range_cells: maxReadRangeCells,
+      max_read_range_chars: 200_000,
+    });
+
     // Retrieval (semantic search) is optional and query-driven.
     const ragResult =
       input.focusQuestion && this.options.ragService
@@ -281,7 +302,7 @@ export class WorkbookContextBuilder {
     const indexStats = ragResult?.indexStats;
 
     const selectionBlock = selection
-      ? await this.readBlock({
+      ? await this.readBlock(executor, {
           kind: "selection",
           sheetId: selection.sheetId,
           range: selection.range,
@@ -301,7 +322,7 @@ export class WorkbookContextBuilder {
     if (selectionBlock) blocks.push(selectionBlock);
 
     for (const sheetId of sheetsToSummarize) {
-      const summary = await this.buildSheetSummary(sheetId, {
+      const summary = await this.buildSheetSummary(executor, sheetId, {
         schemaVersion: schemaMetadata.schemaVersion,
         namedRanges: schemaNamedRangesBySheet.get(sheetId),
         tables: schemaTablesBySheet.get(sheetId),
@@ -318,7 +339,7 @@ export class WorkbookContextBuilder {
           endCol: summary.analyzedRange.endCol,
         };
         blocks.push(
-          await this.readBlock({
+          await this.readBlock(executor, {
             kind: "sheet_sample",
             sheetId,
             range: sampleRange,
@@ -331,7 +352,7 @@ export class WorkbookContextBuilder {
 
     // Add sampled blocks for retrieved chunks (query-aware).
     if (retrieved.length && this.options.maxRetrievedBlocks > 0) {
-      const retrievedBlocks = await this.blocksFromRetrievedChunks(retrieved, this.options.maxRetrievedBlocks);
+      const retrievedBlocks = await this.blocksFromRetrievedChunks(executor, retrieved, this.options.maxRetrievedBlocks);
       blocks.push(...retrievedBlocks);
     }
 
@@ -435,6 +456,7 @@ export class WorkbookContextBuilder {
   }
 
   private async buildSheetSummary(
+    executor: ToolExecutor,
     sheetId: string,
     extras?: {
       schemaVersion?: number;
@@ -461,7 +483,7 @@ export class WorkbookContextBuilder {
       { maxRows: this.options.maxSchemaRows, maxCols: this.options.maxSchemaCols },
     );
 
-    const block = await this.readBlock({
+    const block = await this.readBlock(executor, {
       kind: "sheet_sample",
       sheetId,
       range: analyzedRange,
@@ -490,7 +512,11 @@ export class WorkbookContextBuilder {
     return summary;
   }
 
-  private async blocksFromRetrievedChunks(retrieved: unknown[], maxBlocks: number): Promise<WorkbookContextDataBlock[]> {
+  private async blocksFromRetrievedChunks(
+    executor: ToolExecutor,
+    retrieved: unknown[],
+    maxBlocks: number,
+  ): Promise<WorkbookContextDataBlock[]> {
     const out: WorkbookContextDataBlock[] = [];
 
     for (const chunk of retrieved) {
@@ -505,7 +531,7 @@ export class WorkbookContextBuilder {
       if (!range) continue;
 
       out.push(
-        await this.readBlock({
+        await this.readBlock(executor, {
           kind: "retrieved",
           sheetId,
           range,
@@ -611,13 +637,16 @@ export class WorkbookContextBuilder {
     return packed.map((s) => `## ${s.key}\n${s.text}`).join("\n\n");
   }
 
-  private async readBlock(params: {
-    kind: WorkbookContextBlockKind;
-    sheetId: string;
-    range: Range;
-    maxRows: number;
-    maxCols: number;
-  }): Promise<WorkbookContextDataBlock> {
+  private async readBlock(
+    executor: ToolExecutor,
+    params: {
+      kind: WorkbookContextBlockKind;
+      sheetId: string;
+      range: Range;
+      maxRows: number;
+      maxCols: number;
+    },
+  ): Promise<WorkbookContextDataBlock> {
     this.ensureCacheVersion();
     const clamped = clampRange(params.range, { maxRows: params.maxRows, maxCols: params.maxCols });
     const rangeRef = this.rangeRef(params.sheetId, clamped);
@@ -625,16 +654,6 @@ export class WorkbookContextBuilder {
     const cacheKey = `${params.kind}\u0000${rangeRef}`;
     const cached = this.blockCache.get(cacheKey);
     if (cached) return cached;
-
-    const executor = new ToolExecutor(this.options.spreadsheet, {
-      default_sheet: params.sheetId,
-      dlp: this.options.dlp,
-      // Keep samples small even if callers accidentally request huge ranges.
-      max_read_range_cells: Math.max(1, params.maxRows * params.maxCols),
-      // Allow somewhat larger payloads for schema extraction, but still guard against
-      // pathological "giant text pasted into a single cell" scenarios.
-      max_read_range_chars: 200_000,
-    });
 
     const toolResult = await executor.execute({
       name: "read_range",

@@ -1,4 +1,20 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+let toolExecutorConstructorCalls = 0;
+
+vi.mock("../../../../../../packages/ai-tools/src/executor/tool-executor.js", async () => {
+  const actual = await vi.importActual<any>("../../../../../../packages/ai-tools/src/executor/tool-executor.js");
+
+  return {
+    ...actual,
+    ToolExecutor: class ToolExecutor extends actual.ToolExecutor {
+      constructor(...args: any[]) {
+        super(...args);
+        toolExecutorConstructorCalls += 1;
+      }
+    }
+  };
+});
 
 import { DocumentController } from "../../../document/documentController.js";
 
@@ -11,6 +27,10 @@ import { DocumentControllerSpreadsheetApi } from "../../tools/documentController
 import { WorkbookContextBuilder, type WorkbookContextPayload } from "../WorkbookContextBuilder.js";
 
 describe("WorkbookContextBuilder", () => {
+  beforeEach(() => {
+    toolExecutorConstructorCalls = 0;
+  });
+
   it("extracts a schema-first summary from a sheet with headers", async () => {
     const documentController = new DocumentController();
     documentController.setRangeValues("Sheet1", "A1", [
@@ -249,6 +269,34 @@ describe("WorkbookContextBuilder", () => {
     expect(selection!.values[0]![0]).toBe("[POLICY_DENIED]");
     expect(ctx.promptContext).toContain("[POLICY_DENIED]");
     expect(ctx.promptContext).not.toContain("TOP SECRET");
+  });
+
+  it("reuses a single ToolExecutor instance for all read_range calls in a build", async () => {
+    const documentController = new DocumentController();
+    documentController.setRangeValues("Sheet1", "A1", [
+      ["Region", "Revenue"],
+      ["North", 1000],
+      ["South", 2000],
+    ]);
+    documentController.setRangeValues("Sheet2", "A1", [["Note"], ["Hello"]]);
+
+    const spreadsheet = new DocumentControllerSpreadsheetApi(documentController);
+    const builder = new WorkbookContextBuilder({
+      workbookId: "wb_tool_executor_reuse",
+      documentController,
+      spreadsheet,
+      ragService: null,
+      mode: "chat",
+      model: "unit-test-model",
+      maxSheets: 5,
+    });
+
+    await builder.build({
+      activeSheetId: "Sheet1",
+      selectedRange: { sheetId: "Sheet1", range: { startRow: 0, endRow: 2, startCol: 0, endCol: 1 } },
+    });
+
+    expect(toolExecutorConstructorCalls).toBe(1);
   });
 
   it("serializes a stable payload snapshot", async () => {
