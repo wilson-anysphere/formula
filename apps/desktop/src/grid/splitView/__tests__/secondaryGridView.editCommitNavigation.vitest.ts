@@ -161,4 +161,52 @@ describe("SecondaryGridView edit commit navigation", () => {
     gridView.destroy();
     container.remove();
   });
+
+  it("commits edits on blur without stealing focus when focus moves outside the pane", () => {
+    const container = document.createElement("div");
+    container.tabIndex = 0;
+    Object.defineProperty(container, "clientWidth", { configurable: true, value: 800 });
+    Object.defineProperty(container, "clientHeight", { configurable: true, value: 600 });
+    document.body.appendChild(container);
+
+    const outside = document.createElement("button");
+    outside.type = "button";
+    outside.textContent = "outside";
+    document.body.appendChild(outside);
+
+    const doc = new DocumentController();
+    const sheetId = "Sheet1";
+
+    const gridView = new SecondaryGridView({
+      container,
+      document: doc,
+      getSheetId: () => sheetId,
+      rowCount: 10,
+      colCount: 10,
+      showFormulas: () => false,
+      getComputedValue: () => null,
+    });
+
+    // Start editing A1.
+    container.dispatchEvent(new KeyboardEvent("keydown", { key: "h", bubbles: true, cancelable: true }));
+
+    const editor = container.querySelector<HTMLTextAreaElement>("[data-testid='cell-editor']");
+    expect(editor).not.toBeNull();
+    if (!editor) throw new Error("Expected editor to exist");
+    editor.value = "hello";
+    expect(document.activeElement).toBe(editor);
+
+    // Move focus elsewhere (e.g. clicking the ribbon, menus, or another panel). The blur-to-commit
+    // handler should commit the edit but should *not* refocus the secondary pane (otherwise it would
+    // steal focus from the clicked surface).
+    outside.focus();
+
+    expect((doc.getCell(sheetId, { row: 0, col: 0 }) as any)?.value).toBe("hello");
+    expect(editor.classList.contains("cell-editor--open")).toBe(false);
+    expect(document.activeElement).toBe(outside);
+
+    gridView.destroy();
+    container.remove();
+    outside.remove();
+  });
 });
