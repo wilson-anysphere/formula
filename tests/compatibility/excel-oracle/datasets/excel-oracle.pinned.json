@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-01-12T07:24:53.08070801Z",
+  "generatedAt": "2026-01-12T07:28:23.43435016Z",
   "source": {
     "kind": "excel",
     "version": "unknown",
@@ -17,8 +17,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "ae72b4e61a2b68db479e30f7bbf5c9accffed5f298888e26f435c388aa879af6",
-    "count": 1522
+    "sha256": "7eee5e135a0aa3ea4f1ef504690446ad1ef653af5e5df5e9cb37a2bb89ef74fa",
+    "count": 1526
   },
   "results": [
     {
@@ -14388,6 +14388,46 @@
       },
       "address": "C1",
       "displayText": "776"
+    },
+    {
+      "caseId": "price_8e866432f10a",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 94.63436162132209
+      },
+      "address": "C1",
+      "displayText": "94.63436162132209"
+    },
+    {
+      "caseId": "yield_23f382f2d8d1",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.06440961173159314
+      },
+      "address": "C1",
+      "displayText": "0.06440961173159314"
+    },
+    {
+      "caseId": "duration_5d31c3b2fd90",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 5.993774955545185
+      },
+      "address": "C1",
+      "displayText": "5.993774955545185"
+    },
+    {
+      "caseId": "mduration_4b098423c29a",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 5.735669813918838
+      },
+      "address": "C1",
+      "displayText": "5.735669813918838"
     },
     {
       "caseId": "accrintm_ca118fca3956",

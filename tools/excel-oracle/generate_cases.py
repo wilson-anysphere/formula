@@ -1758,6 +1758,30 @@ def generate_cases() -> dict[str, Any]:
         inputs=amor_inputs,
         output_cell="C1",
     )
+    _add_case(
+        cases,
+        prefix="price",
+        tags=["financial", "PRICE"],
+        formula="=PRICE(DATE(2008,2,15),DATE(2017,11,15),0.0575,0.065,100,2,0)",
+    )
+    _add_case(
+        cases,
+        prefix="yield",
+        tags=["financial", "YIELD"],
+        formula="=YIELD(DATE(2008,2,15),DATE(2017,11,15),0.0575,95.04287,100,2,0)",
+    )
+    _add_case(
+        cases,
+        prefix="duration",
+        tags=["financial", "DURATION"],
+        formula="=DURATION(DATE(2008,1,1),DATE(2016,1,1),0.08,0.09,2,1)",
+    )
+    _add_case(
+        cases,
+        prefix="mduration",
+        tags=["financial", "MDURATION"],
+        formula="=MDURATION(DATE(2008,1,1),DATE(2016,1,1),0.08,0.09,2,1)",
+    )
 
     # Accrued interest.
     _add_case(

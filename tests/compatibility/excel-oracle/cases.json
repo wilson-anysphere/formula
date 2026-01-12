@@ -30754,6 +30754,46 @@
       "id": "amordegrec_e5b0c12687f4"
     },
     {
+      "formula": "=PRICE(DATE(2008,2,15),DATE(2017,11,15),0.0575,0.065,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "PRICE"
+      ],
+      "id": "price_8e866432f10a"
+    },
+    {
+      "formula": "=YIELD(DATE(2008,2,15),DATE(2017,11,15),0.0575,95.04287,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "YIELD"
+      ],
+      "id": "yield_23f382f2d8d1"
+    },
+    {
+      "formula": "=DURATION(DATE(2008,1,1),DATE(2016,1,1),0.08,0.09,2,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "DURATION"
+      ],
+      "id": "duration_5d31c3b2fd90"
+    },
+    {
+      "formula": "=MDURATION(DATE(2008,1,1),DATE(2016,1,1),0.08,0.09,2,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "MDURATION"
+      ],
+      "id": "mduration_4b098423c29a"
+    },
+    {
       "formula": "=ACCRINTM(A1,A2,0.1,1000,0)",
       "outputCell": "C1",
       "inputs": [

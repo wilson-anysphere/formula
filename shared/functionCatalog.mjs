@@ -916,6 +916,21 @@ export default {
       ]
     },
     {
+      "name": "DURATION",
+      "min_args": 5,
+      "max_args": 6,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number",
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
       "name": "DVAR",
       "min_args": 3,
       "max_args": 3,
@@ -1725,6 +1740,21 @@ export default {
       ]
     },
     {
+      "name": "MDURATION",
+      "min_args": 5,
+      "max_args": 6,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number",
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
       "name": "MEDIAN",
       "min_args": 1,
       "max_args": 255,
@@ -2281,6 +2311,22 @@ export default {
       "volatility": "non_volatile",
       "return_type": "number",
       "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "PRICE",
+      "min_args": 6,
+      "max_args": 7,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number",
+        "number",
+        "number",
+        "number",
         "number"
       ]
     },
@@ -3557,6 +3603,22 @@ export default {
       "arg_types": [
         "any",
         "any",
+        "number"
+      ]
+    },
+    {
+      "name": "YIELD",
+      "min_args": 6,
+      "max_args": 7,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number",
+        "number",
+        "number",
+        "number",
         "number"
       ]
     },

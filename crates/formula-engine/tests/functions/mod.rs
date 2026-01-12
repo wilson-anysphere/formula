@@ -12,6 +12,7 @@ mod dynamic_arrays_textsplit;
 mod financial_cashflows;
 mod financial_accrint;
 mod financial_bonds_date_system;
+mod financial_bonds;
 mod financial_dates;
 mod financial_depreciation;
 mod financial_amortization;
