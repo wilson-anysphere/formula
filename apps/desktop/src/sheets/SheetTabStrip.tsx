@@ -376,7 +376,12 @@ export function SheetTabStrip({
     const promise = (async () => {
       setRenameInFlight(true);
       try {
-        await onRenameSheet(sheetId, draftName);
+        // Read the current input value at commit time instead of trusting the latest
+        // `draftName` state. React batches updates inside event handlers, so it's possible
+        // for a "commit" action (Enter/blur) to run before the state update from the last
+        // keystroke has been flushed, which would otherwise drop characters from the rename.
+        const currentValue = renameInputRef.current?.value ?? draftName;
+        await onRenameSheet(sheetId, currentValue);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         setRenameError(message);
