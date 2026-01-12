@@ -3,10 +3,37 @@
 //
 // NOTE: This client expects `baseUrl` to be the marketplace origin (e.g. `https://marketplace.formula.app`), and it
 // appends `/api/...` internally.
+//
+// To match common usage in the Desktop/Tauri runtime (which typically configures an *API* base URL that already includes
+// `/api`), we also accept a trailing `/api` and normalize it away.
 
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+
+function normalizeMarketplaceOrigin(baseUrl) {
+  const raw = String(baseUrl ?? "").trim();
+  if (!raw) throw new Error("baseUrl is required");
+
+  // Defensive normalization: query/hash are never meaningful for an origin-style base URL,
+  // and leaving them in place can generate confusing URLs like:
+  // `https://host/api?x=y/api/extensions/...`
+  const withoutQueryHash = raw.split("#", 1)[0].split("?", 1)[0];
+  const withoutTrailingSlash = withoutQueryHash.replace(/\/+$/, "");
+  if (!withoutTrailingSlash) {
+    throw new Error("baseUrl must be a non-empty URL (e.g. https://marketplace.formula.app)");
+  }
+
+  if (withoutTrailingSlash.endsWith("/api")) {
+    const stripped = withoutTrailingSlash.slice(0, -4);
+    if (!stripped) {
+      throw new Error("baseUrl must be an origin URL, not a bare '/api' path");
+    }
+    return stripped;
+  }
+
+  return withoutTrailingSlash;
+}
 
 function sha256Hex(bytes) {
   return crypto.createHash("sha256").update(bytes).digest("hex");
@@ -77,8 +104,7 @@ async function atomicWriteFile(filePath, bytes) {
 
 export class MarketplaceClient {
   constructor({ baseUrl, cacheDir = null }) {
-    if (!baseUrl) throw new Error("baseUrl is required");
-    this.baseUrl = baseUrl.replace(/\/$/, "");
+    this.baseUrl = normalizeMarketplaceOrigin(baseUrl);
     this.cacheDir = cacheDir ? path.resolve(cacheDir) : null;
   }
 
