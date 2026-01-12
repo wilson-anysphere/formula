@@ -269,6 +269,14 @@ fn csv_import_decodes_windows1252_euro_symbol_and_parses_currency() {
 }
 
 #[test]
+fn csv_import_decodes_windows1252_header_names() {
+    // Header "café" with Windows-1252 byte 0xE9 for "é" (invalid UTF-8).
+    let bytes = b"caf\xe9\n1\n".to_vec();
+    let table = import_csv_to_columnar_table(Cursor::new(bytes), CsvOptions::default()).unwrap();
+    assert_eq!(table.schema()[0].name, "café");
+}
+
+#[test]
 fn csv_import_strips_utf8_bom_from_first_header_field() {
     let bytes = b"\xEF\xBB\xBFid,text\n1,hello\n".to_vec();
     let table =
