@@ -11093,6 +11093,15 @@ mod tests {
     }
 
     #[test]
+    fn bytecode_ifs_does_not_eval_values_when_no_condition_matches_even_when_volatile() {
+        let v = assert_bytecode_eq_ast("=IFERROR(IFS(FALSE, RAND(), FALSE, RAND()) + RAND(), RAND())");
+        match v {
+            Value::Number(n) => assert!((0.0..1.0).contains(&n), "got {n}"),
+            other => panic!("expected number, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn bytecode_ifs_short_circuits_unused_volatile_args() {
         let v = assert_bytecode_eq_ast("=IFS(TRUE, 1, TRUE, RAND()) + RAND()");
         match v {
@@ -11127,6 +11136,16 @@ mod tests {
     #[test]
     fn bytecode_switch_short_circuits_results_for_unmatched_cases() {
         assert_bytecode_matches_ast("=SWITCH(2, 1, 1/0, 2, 20)", Value::Number(20.0));
+    }
+
+    #[test]
+    fn bytecode_switch_does_not_eval_results_when_no_case_matches_even_when_volatile() {
+        let v =
+            assert_bytecode_eq_ast("=IFERROR(SWITCH(3, 1, RAND(), 2, RAND()) + RAND(), RAND())");
+        match v {
+            Value::Number(n) => assert!((0.0..1.0).contains(&n), "got {n}"),
+            other => panic!("expected number, got {other:?}"),
+        }
     }
 
     #[test]
