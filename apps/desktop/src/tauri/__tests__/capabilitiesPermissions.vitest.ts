@@ -63,4 +63,23 @@ describe("Tauri capabilities", () => {
     expect(permissions).not.toContain("updater:default");
     expect(permissions).not.toContain("updater:allow-download-and-install");
   });
+
+  it("does not grant notification plugin permissions to the webview (notifications go through show_system_notification)", () => {
+    const permissions = readPermissions();
+
+    const identifiers = permissions
+      .map((permission) => {
+        if (typeof permission === "string") return permission;
+        if (permission && typeof permission === "object") {
+          const identifier = (permission as Record<string, unknown>).identifier;
+          if (typeof identifier === "string") return identifier;
+        }
+        return null;
+      })
+      .filter((permission): permission is string => typeof permission === "string");
+
+    expect(identifiers.some((permission) => permission.startsWith("notification:"))).toBe(false);
+    // Some Tauri versions may namespace this as a core permission.
+    expect(identifiers.some((permission) => permission.startsWith("core:notification:"))).toBe(false);
+  });
 });
