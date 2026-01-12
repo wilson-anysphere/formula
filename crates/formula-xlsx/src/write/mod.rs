@@ -2063,6 +2063,14 @@ fn patch_workbook_xml(
             || window.height.is_some()
             || window.state.is_some()
     });
+    let active_tab_idx = doc
+        .workbook
+        .active_sheet_id()
+        .and_then(|active| sheets.iter().position(|meta| meta.worksheet_id == active))
+        .unwrap_or(0);
+    let want_book_views = view_window.is_some() || active_tab_idx != 0;
+    let mut saw_book_views = false;
+    let mut inserted_book_views = false;
     loop {
         let event = reader.read_event_into(&mut buf)?;
 
@@ -2324,6 +2332,7 @@ fn patch_workbook_xml(
             }
 
             Event::Start(e) if e.local_name().as_ref() == b"bookViews" => {
+                saw_book_views = true;
                 if want_workbook_protection
                     && !saw_workbook_protection
                     && !inserted_workbook_protection
@@ -2335,6 +2344,7 @@ fn patch_workbook_xml(
                 writer.write_event(Event::Start(e.into_owned()))?;
             }
             Event::Empty(e) if e.local_name().as_ref() == b"bookViews" => {
+                saw_book_views = true;
                 if want_workbook_protection
                     && !saw_workbook_protection
                     && !inserted_workbook_protection
@@ -2646,6 +2656,61 @@ fn patch_workbook_xml(
                     write_new_workbook_protection(doc, &mut writer, tag.as_str())?;
                     inserted_workbook_protection = true;
                 }
+                if want_book_views && !saw_book_views && !inserted_book_views {
+                    let book_views_tag = prefixed_tag(spreadsheetml_prefix.as_deref(), "bookViews");
+                    let workbook_view_tag =
+                        prefixed_tag(spreadsheetml_prefix.as_deref(), "workbookView");
+                    writer.get_mut().extend_from_slice(b"<");
+                    writer.get_mut().extend_from_slice(book_views_tag.as_bytes());
+                    writer.get_mut().push(b'>');
+                    writer.get_mut().extend_from_slice(b"<");
+                    writer.get_mut().extend_from_slice(workbook_view_tag.as_bytes());
+                    if active_tab_idx != 0 {
+                        writer.get_mut().extend_from_slice(b" activeTab=\"");
+                        writer
+                            .get_mut()
+                            .extend_from_slice(active_tab_idx.to_string().as_bytes());
+                        writer.get_mut().push(b'"');
+                    }
+                    if let Some(window) = view_window {
+                        if let Some(x) = window.x {
+                            writer.get_mut().extend_from_slice(b" xWindow=\"");
+                            writer.get_mut().extend_from_slice(x.to_string().as_bytes());
+                            writer.get_mut().push(b'"');
+                        }
+                        if let Some(y) = window.y {
+                            writer.get_mut().extend_from_slice(b" yWindow=\"");
+                            writer.get_mut().extend_from_slice(y.to_string().as_bytes());
+                            writer.get_mut().push(b'"');
+                        }
+                        if let Some(width) = window.width {
+                            writer.get_mut().extend_from_slice(b" windowWidth=\"");
+                            writer.get_mut().extend_from_slice(width.to_string().as_bytes());
+                            writer.get_mut().push(b'"');
+                        }
+                        if let Some(height) = window.height {
+                            writer.get_mut().extend_from_slice(b" windowHeight=\"");
+                            writer.get_mut().extend_from_slice(height.to_string().as_bytes());
+                            writer.get_mut().push(b'"');
+                        }
+                        if let Some(state) = window.state {
+                            match state {
+                                WorkbookWindowState::Normal => {}
+                                WorkbookWindowState::Minimized => writer
+                                    .get_mut()
+                                    .extend_from_slice(b" windowState=\"minimized\""),
+                                WorkbookWindowState::Maximized => writer
+                                    .get_mut()
+                                    .extend_from_slice(b" windowState=\"maximized\""),
+                            }
+                        }
+                    }
+                    writer.get_mut().extend_from_slice(b"/>");
+                    writer.get_mut().extend_from_slice(b"</");
+                    writer.get_mut().extend_from_slice(book_views_tag.as_bytes());
+                    writer.get_mut().push(b'>');
+                    inserted_book_views = true;
+                }
                 skipping_sheets = true;
                 let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
                 let sheet_tag = prefixed_tag(spreadsheetml_prefix.as_deref(), "sheet");
@@ -2713,6 +2778,61 @@ fn patch_workbook_xml(
                     let tag = prefixed_tag(spreadsheetml_prefix.as_deref(), "workbookProtection");
                     write_new_workbook_protection(doc, &mut writer, tag.as_str())?;
                     inserted_workbook_protection = true;
+                }
+                if want_book_views && !saw_book_views && !inserted_book_views {
+                    let book_views_tag = prefixed_tag(spreadsheetml_prefix.as_deref(), "bookViews");
+                    let workbook_view_tag =
+                        prefixed_tag(spreadsheetml_prefix.as_deref(), "workbookView");
+                    writer.get_mut().extend_from_slice(b"<");
+                    writer.get_mut().extend_from_slice(book_views_tag.as_bytes());
+                    writer.get_mut().push(b'>');
+                    writer.get_mut().extend_from_slice(b"<");
+                    writer.get_mut().extend_from_slice(workbook_view_tag.as_bytes());
+                    if active_tab_idx != 0 {
+                        writer.get_mut().extend_from_slice(b" activeTab=\"");
+                        writer
+                            .get_mut()
+                            .extend_from_slice(active_tab_idx.to_string().as_bytes());
+                        writer.get_mut().push(b'"');
+                    }
+                    if let Some(window) = view_window {
+                        if let Some(x) = window.x {
+                            writer.get_mut().extend_from_slice(b" xWindow=\"");
+                            writer.get_mut().extend_from_slice(x.to_string().as_bytes());
+                            writer.get_mut().push(b'"');
+                        }
+                        if let Some(y) = window.y {
+                            writer.get_mut().extend_from_slice(b" yWindow=\"");
+                            writer.get_mut().extend_from_slice(y.to_string().as_bytes());
+                            writer.get_mut().push(b'"');
+                        }
+                        if let Some(width) = window.width {
+                            writer.get_mut().extend_from_slice(b" windowWidth=\"");
+                            writer.get_mut().extend_from_slice(width.to_string().as_bytes());
+                            writer.get_mut().push(b'"');
+                        }
+                        if let Some(height) = window.height {
+                            writer.get_mut().extend_from_slice(b" windowHeight=\"");
+                            writer.get_mut().extend_from_slice(height.to_string().as_bytes());
+                            writer.get_mut().push(b'"');
+                        }
+                        if let Some(state) = window.state {
+                            match state {
+                                WorkbookWindowState::Normal => {}
+                                WorkbookWindowState::Minimized => writer
+                                    .get_mut()
+                                    .extend_from_slice(b" windowState=\"minimized\""),
+                                WorkbookWindowState::Maximized => writer
+                                    .get_mut()
+                                    .extend_from_slice(b" windowState=\"maximized\""),
+                            }
+                        }
+                    }
+                    writer.get_mut().extend_from_slice(b"/>");
+                    writer.get_mut().extend_from_slice(b"</");
+                    writer.get_mut().extend_from_slice(book_views_tag.as_bytes());
+                    writer.get_mut().push(b'>');
+                    inserted_book_views = true;
                 }
                 // Replace `<sheets/>` with a full section.
                 let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
