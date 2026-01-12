@@ -38,6 +38,7 @@ restrictive CSP (notably `connect-src 'none'`), so panel HTML:
 
 - cannot make network requests directly
 - cannot load remote scripts
+- cannot run inline `<script>` blocks (scripts must be loaded via `data:`/`blob:` URLs)
 
 Panels should communicate with the extension worker via `postMessage`.
 
