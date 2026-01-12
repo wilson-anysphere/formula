@@ -21,6 +21,13 @@ fn normalize_opc_path(path: &str) -> String {
 
 fn resolve_relationship_target(base_part: &str, target: &str) -> String {
     let target = target.replace('\\', "/");
+    // Relationship targets are URIs; internal targets may include a fragment (e.g. `foo.xml#bar`).
+    // OPC part names do not include fragments, so strip them before resolving.
+    let target = target.split_once('#').map(|(t, _)| t).unwrap_or(&target);
+    if target.is_empty() {
+        // A target of just `#fragment` refers to the source part itself.
+        return normalize_opc_path(base_part.trim_start_matches('/'));
+    }
     if let Some(rest) = target.strip_prefix('/') {
         return normalize_opc_path(rest);
     }
