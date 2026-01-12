@@ -156,6 +156,26 @@ function createTauriClipboardProvider() {
       const hasNonText =
         payload.html !== undefined || payload.rtf !== undefined || payload.imagePng !== undefined;
 
+      // Prefer the native Tauri clipboard API for plain text when available.
+      if (!hasNonText && tauriClipboard?.writeText) {
+        try {
+          await tauriClipboard.writeText(payload.text);
+        } catch {
+          // Fall back to Web clipboard below.
+          await createWebClipboardProvider().write({ text: payload.text });
+        }
+        return;
+      }
+
+      // Best-effort: ensure text is written even if rich formats fail.
+      if (tauriClipboard?.writeText) {
+        try {
+          await tauriClipboard.writeText(payload.text);
+        } catch {
+          // Ignore; continue with rich write attempts.
+        }
+      }
+
       if (tauriCore?.invoke && (hasNonText || !tauriClipboard?.writeText)) {
         try {
           await tauriCore.invoke("write_clipboard", {
@@ -164,22 +184,14 @@ function createTauriClipboardProvider() {
             rtf: payload.rtf,
             image_png_base64: payload.imagePng ? encodeBase64(payload.imagePng) : undefined,
           });
+          return;
         } catch {
           // Ignore; bridge command may not exist yet.
         }
       }
 
-      if (tauriClipboard?.writeText) {
-        await tauriClipboard.writeText(payload.text);
-
-        // Best-effort rich write via ClipboardItem when available (WebView-dependent).
-        if (hasNonText) {
-          await createWebClipboardProvider().write(payload);
-        }
-      } else {
-        // No native Tauri clipboard API; fall back to the Web Clipboard API (best effort).
-        await createWebClipboardProvider().write(payload);
-      }
+      // No rich Tauri bridge available; fall back to the Web Clipboard API (best effort).
+      await createWebClipboardProvider().write(payload);
     },
   };
 }

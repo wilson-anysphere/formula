@@ -245,5 +245,86 @@ test("clipboard provider: rich MIME handling", async (t) => {
       }
     );
   });
-});
 
+  await t.test("tauri provider write calls invoke('write_clipboard') for rich payloads", async () => {
+    const imageBytes = Uint8Array.from([9, 8, 7]);
+
+    /** @type {any[]} */
+    const invokeCalls = [];
+    /** @type {string[]} */
+    const writeTextCalls = [];
+
+    await withGlobals(
+      {
+        __TAURI__: {
+          core: {
+            async invoke(cmd, args) {
+              invokeCalls.push([cmd, args]);
+            },
+          },
+          clipboard: {
+            async writeText(text) {
+              writeTextCalls.push(text);
+            },
+          },
+        },
+        navigator: {
+          clipboard: {
+            async write() {
+              throw new Error("web clipboard should not be used when invoke succeeds");
+            },
+            async writeText() {
+              throw new Error("web clipboard should not be used when invoke succeeds");
+            },
+          },
+        },
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        await provider.write({
+          text: "plain",
+          html: "<p>hello</p>",
+          imagePng: imageBytes,
+        });
+
+        assert.deepEqual(writeTextCalls, ["plain"]);
+        assert.equal(invokeCalls.length, 1);
+
+        const [cmd, args] = invokeCalls[0];
+        assert.equal(cmd, "write_clipboard");
+        assert.equal(args.text, "plain");
+        assert.equal(args.html, "<p>hello</p>");
+        assert.equal(args.rtf, undefined);
+        assert.equal(args.image_png_base64, "CQgH");
+      }
+    );
+  });
+
+  await t.test("tauri provider write falls back when invoke throws", async () => {
+    /** @type {string[]} */
+    const writeTextCalls = [];
+
+    await withGlobals(
+      {
+        __TAURI__: {
+          core: {
+            async invoke() {
+              throw new Error("command not found");
+            },
+          },
+          clipboard: {
+            async writeText(text) {
+              writeTextCalls.push(text);
+            },
+          },
+        },
+        navigator: undefined,
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        await provider.write({ text: "hello", html: "<p>x</p>" });
+        assert.deepEqual(writeTextCalls, ["hello"]);
+      }
+    );
+  });
+});
