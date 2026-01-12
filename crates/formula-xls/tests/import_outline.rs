@@ -22,6 +22,11 @@ fn imports_row_and_col_outline_metadata() {
         .sheet_by_name("Outline")
         .expect("Outline sheet missing");
 
+    // WSBOOL-derived sheet-level outline settings.
+    assert!(sheet.outline.pr.summary_below);
+    assert!(sheet.outline.pr.summary_right);
+    assert!(sheet.outline.pr.show_outline_symbols);
+
     // Levels (1-based indexing in the model):
     // - Rows 2-3 are detail rows at level 1.
     // - Row 4 is the collapsed summary row.
@@ -69,4 +74,3 @@ fn imports_row_and_col_outline_metadata() {
     assert!(outline.cols.entry(3).hidden.outline);
     assert!(!outline.cols.entry(4).hidden.outline);
 }
-
