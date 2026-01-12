@@ -7935,11 +7935,10 @@ fn fn_match(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             if len == 0 {
                 return Value::Error(ErrorKind::NA);
             }
-            let value_at = |idx: usize| arr.values.get(idx).cloned().unwrap_or(Value::Empty);
             match match_type {
-                0 => exact_match_1d(lookup_value, len, &value_at),
-                1 => approximate_match_1d(lookup_value, len, &value_at, true),
-                -1 => approximate_match_1d(lookup_value, len, &value_at, false),
+                0 => exact_match_1d_slice(lookup_value, &arr.values),
+                1 => approximate_match_1d_slice(lookup_value, &arr.values, true),
+                -1 => approximate_match_1d_slice(lookup_value, &arr.values, false),
                 _ => return Value::Error(ErrorKind::NA),
             }
         }
@@ -8697,6 +8696,28 @@ fn exact_match_1d(lookup: &Value, len: usize, value_at: &dyn Fn(usize) -> Value)
     None
 }
 
+fn exact_match_1d_slice(lookup: &Value, values: &[Value]) -> Option<usize> {
+    let wildcard_pattern = wildcard_pattern_for_lookup(lookup);
+    for (idx, candidate) in values.iter().enumerate() {
+        if let Some(pattern) = &wildcard_pattern {
+            let text = match candidate {
+                Value::Error(_) => continue,
+                Value::Text(s) => Cow::Borrowed(s.as_ref()),
+                other => match coerce_to_string_for_lookup(other) {
+                    Ok(s) => Cow::Owned(s),
+                    Err(_) => continue,
+                },
+            };
+            if pattern.matches(text.as_ref()) {
+                return Some(idx);
+            }
+        } else if values_equal_for_lookup(lookup, candidate) {
+            return Some(idx);
+        }
+    }
+    None
+}
+
 fn approximate_match_1d(
     lookup: &Value,
     len: usize,
@@ -8716,6 +8737,32 @@ fn approximate_match_1d(
             excel_le(&v, lookup)?
         } else {
             excel_ge(&v, lookup)?
+        };
+        if ok {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+
+    lo.checked_sub(1)
+}
+
+fn approximate_match_1d_slice(lookup: &Value, values: &[Value], ascending: bool) -> Option<usize> {
+    let len = values.len();
+    if len == 0 {
+        return None;
+    }
+
+    let mut lo = 0usize;
+    let mut hi = len;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        let v = &values[mid];
+        let ok = if ascending {
+            excel_le(v, lookup)?
+        } else {
+            excel_ge(v, lookup)?
         };
         if ok {
             lo = mid + 1;
