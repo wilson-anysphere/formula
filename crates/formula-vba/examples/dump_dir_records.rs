@@ -54,6 +54,7 @@ fn run() -> Result<(), String> {
     println!("-- VBA/dir records (decompressed) --");
     dump_dir_records(&dir_decompressed);
 
+    dump_project_normalized_data_v3_dir_records(&vba_project_bin);
     dump_project_normalized_data_v3(&vba_project_bin);
 
     Ok(())
@@ -159,7 +160,24 @@ fn dump_dir_records(decompressed: &[u8]) {
             if !data.is_empty() {
                 println!("      ascii: {}", bytes_to_ascii_preview(data));
             }
-            if looks_like_utf16le(data) {
+
+            // MS-OVBA v3 "Unicode" record variants often store:
+            //   u32 length prefix (code units or bytes) || UTF-16LE bytes
+            // The generic UTF-16LE heuristic will mis-decode the length prefix as a character, so
+            // handle these record ids specially.
+            if is_len_prefixed_unicode_record_id(id) {
+                if let Some(payload) = unicode_record_payload_len_prefixed(data) {
+                    let (cow, had_errors) = UTF_16LE.decode_without_bom_handling(payload);
+                    let mut s = cow.into_owned();
+                    s.retain(|c| c != '\u{0000}');
+                    let escaped = escape_str(&s);
+                    if had_errors {
+                        println!("      utf16le(payload): {escaped} <decode errors>");
+                    } else {
+                        println!("      utf16le(payload): {escaped}");
+                    }
+                }
+            } else if looks_like_utf16le(data) {
                 let (cow, had_errors) = UTF_16LE.decode_without_bom_handling(data);
                 let mut s = cow.into_owned();
                 // This is a debugging aid: strip NULs to keep output readable.
@@ -198,13 +216,19 @@ fn record_name(id: u16) -> Option<&'static str> {
         0x0009 => "PROJECTVERSION",
         0x000C => "PROJECTCONSTANTS",
         0x0014 => "PROJECTLCIDINVOKE",
-        // Unicode variants of selected strings (some producers emit these immediately after the
-        // ANSI form; MS-OVBA ProjectNormalizedData prefers the Unicode form when present).
-        0x003C => "PROJECTCONSTANTSUNICODE",
-        0x0040 => "PROJECTDOCSTRINGUNICODE",
+        // Unicode variants of selected strings.
+        //
+        // MS-OVBA v3 `ProjectNormalizedData` uses the 0x0040..0x0043 Unicode record IDs with an
+        // *internal* u32 length prefix (see docs/vba-digital-signatures.md).
+        0x0040 => "PROJECTNAMEUNICODE",
+        0x0041 => "PROJECTDOCSTRINGUNICODE",
+        0x0042 => "PROJECTHELPFILEPATHUNICODE",
+        0x0043 => "PROJECTCONSTANTSUNICODE",
+        // Legacy/alternate record id seen in some older fixtures/implementations.
+        0x003C => "PROJECTCONSTANTSUNICODE (legacy id 0x003C)",
         // Present in many real-world files, but skipped by the MS-OVBA V3ContentNormalizedData
         // pseudocode.
-        0x004A => "PROJECTCOMPATVERSION",
+        0x004A => "PROJECTCOMPATVERSION / MODULEHELPFILEPATHUNICODE (id collision)",
 
         // ---- Reference records (used by ContentNormalizedData / ProjectNormalizedData) ----
         0x000D => "REFERENCEREGISTERED",
@@ -222,10 +246,15 @@ fn record_name(id: u16) -> Option<&'static str> {
 
         0x0019 => "MODULENAME",
         0x0047 => "MODULENAMEUNICODE",
+        0x001B => "MODULEDOCSTRING",
         0x001A => "MODULESTREAMNAME",
-        0x0032 => "MODULESTREAMNAMEUNICODE",
-        0x001C => "MODULEDOCSTRING",
-        0x0048 => "MODULEDOCSTRINGUNICODE",
+        // MS-OVBA v3 Unicode variant id for MODULESTREAMNAME (with internal u32 length prefix).
+        0x0048 => "MODULESTREAMNAMEUNICODE",
+        // MS-OVBA v3 Unicode variant id for MODULEDOCSTRING (with internal u32 length prefix).
+        0x0049 => "MODULEDOCSTRINGUNICODE",
+        // Legacy/alternate ids seen in some fixtures/implementations.
+        0x0032 => "MODULESTREAMNAMEUNICODE (legacy id 0x0032)",
+        0x001C => "MODULEDOCSTRING (legacy id 0x001C)",
         0x001D => "MODULEHELPFILEPATH",
         0x001E => "MODULEHELPCONTEXT",
         0x0021 => "MODULETYPE (procedural TypeRecord.Id=0x0021)",
@@ -284,10 +313,73 @@ fn escape_str(s: &str) -> String {
     s.chars().flat_map(|c| c.escape_default()).collect()
 }
 
+fn is_len_prefixed_unicode_record_id(id: u16) -> bool {
+    matches!(
+        id,
+        // Project Unicode string variants (MS-OVBA v3).
+        0x0040 | 0x0041 | 0x0042 | 0x0043
+            // Module Unicode string variants (MS-OVBA v3).
+            | 0x0047 | 0x0048 | 0x0049
+            // 0x004A is an ID collision: PROJECTCOMPATVERSION vs MODULEHELPFILEPATHUNICODE.
+            | 0x004A
+    )
+}
+
+fn unicode_record_payload_len_prefixed(data: &[u8]) -> Option<&[u8]> {
+    if data.len() < 4 {
+        return None;
+    }
+    let n = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
+    let remaining = data.len() - 4;
+
+    let bytes_by_units = n.checked_mul(2);
+
+    // Prefer interpretations that exactly match the record length.
+    if let Some(bytes) = bytes_by_units {
+        if bytes == remaining {
+            return Some(&data[4..4 + bytes]);
+        }
+    }
+    if n == remaining {
+        return Some(&data[4..4 + n]);
+    }
+
+    // Otherwise, prefer UTF-16 code unit count when it fits; fall back to byte count.
+    if let Some(bytes) = bytes_by_units {
+        if bytes <= remaining {
+            return Some(&data[4..4 + bytes]);
+        }
+    }
+    if n <= remaining {
+        return Some(&data[4..4 + n]);
+    }
+
+    None
+}
+
+fn dump_project_normalized_data_v3_dir_records(vba_project_bin: &[u8]) {
+    const PREFIX_LEN: usize = 64;
+    println!();
+    println!("-- ProjectNormalizedDataV3 (dir records) --");
+
+    match formula_vba::project_normalized_data_v3_dir_records(vba_project_bin) {
+        Ok(data) => {
+            let n = PREFIX_LEN.min(data.len());
+            println!("len: {} bytes", data.len());
+            println!("first {n} bytes: {}", bytes_to_hex_spaced(&data[..n]));
+        }
+        Err(err) => {
+            // Keep going: this is a developer tool and should be resilient to partially malformed
+            // inputs / in-progress implementations.
+            println!("error: {err}");
+        }
+    }
+}
+
 fn dump_project_normalized_data_v3(vba_project_bin: &[u8]) {
     const PREFIX_LEN: usize = 64;
     println!();
-    println!("-- ProjectNormalizedDataV3 --");
+    println!("-- ProjectNormalizedDataV3 (V3ContentNormalizedData || FormsNormalizedData) --");
 
     match formula_vba::project_normalized_data_v3(vba_project_bin) {
         Ok(data) => {
