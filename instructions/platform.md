@@ -95,8 +95,10 @@ Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the ful
 
 ```jsonc
 {
+  "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "Permissions for the main desktop window",
+  "description": "Permissions for the main desktop window (explicit IPC allowlist).",
+  "local": true,
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -113,7 +115,9 @@ Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the ful
     "window:allow-close",
     "clipboard:allow-read-text",
     "clipboard:allow-write-text",
-    "shell:allow-open"
+    "shell:allow-open",
+    "updater:allow-check",
+    "updater:allow-download-and-install"
   ]
 }
 ```

@@ -491,14 +491,14 @@ Updater events are consumed by the desktop frontend in `apps/desktop/src/tauri/u
 from `apps/desktop/src/main.ts`). The update-available dialog includes a **"View all versions"**
 action that opens the GitHub Releases page for manual downgrade/rollback.
 
-Related frontend → backend events used as acknowledgements:
+Related frontend → backend events used as acknowledgements / readiness signals:
 
 - `close-prep-done` (token)
 - `close-handled` (token)
 - `open-file-ready` (signals that the frontend’s `open-file` listener is installed; causes the Rust host to flush queued open requests)
-- `oauth-redirect-ready` (signals that the frontend’s `oauth-redirect` listener is installed; causes the Rust host to flush queued deep-link redirects)
+- `oauth-redirect-ready` (signals that the frontend’s `oauth-redirect` listener is installed; causes the Rust host to flush queued OAuth/deep-link redirects)
 - `updater-ui-ready` (signals the updater UI listeners are installed; triggers the startup update check)
-- `coi-check-result` (used by the packaged cross-origin isolation smoke check mode, e.g. `pnpm -C apps/desktop check:coi`)
+- `coi-check-result` (used only by the cross-origin isolation smoke check mode; see `pnpm -C apps/desktop check:coi`)
 
 Security note: these event names are **explicitly allowlisted** in
 `apps/desktop/src-tauri/capabilities/main.json`. If you add a new desktop event, you must update
@@ -636,10 +636,16 @@ Capability files list which window labels they apply to via `"windows": [...]` (
 
 - **`core:allow-invoke`**: which `__TAURI__.core.invoke("<command>")` names can be called from the frontend.
 - **`event:allow-listen` / `event:allow-emit`**: which event names the frontend can `listen(...)` for or `emit(...)`.
-- Additional plugin permissions: `dialog:*`, `window:*`, `clipboard:*`, `shell:*`, `updater:*`.
+- Additional plugin permissions for using JS plugin APIs (dialog/window/clipboard/shell/updater), for example:
+  - `dialog:allow-open`, `dialog:allow-save`
+  - `window:allow-hide`, `window:allow-show`, `window:allow-set-focus`, `window:allow-close`
+  - `clipboard:allow-read-text`, `clipboard:allow-write-text`
+  - `shell:allow-open`
+  - `updater:allow-check`, `updater:allow-download`, `updater:allow-install`
 
 High-level contents (see the file for the exhaustive list):
 
+- `core:default` enables the `__TAURI__.core.invoke` bridge; `core:allow-invoke` restricts which command names can be invoked from the webview.
 - `core:allow-invoke` includes workbook operations, Power Query file IO, macro APIs, multi-format clipboard access, updater checks, tray status, notifications, and startup metrics reporting.
 - `event:allow-listen` includes:
   - close flow: `close-prep`, `close-requested`
@@ -650,10 +656,11 @@ High-level contents (see the file for the exhaustive list):
   - startup timing instrumentation: `startup:*` events
   - updater: `update-*` events
 - `event:allow-emit` includes acknowledgements and check-mode signals:
-  - `close-prep-done`, `close-handled`, `open-file-ready`, `oauth-redirect-ready`
+  - `open-file-ready`, `oauth-redirect-ready`
+  - `close-prep-done`, `close-handled`
   - `updater-ui-ready`
   - `coi-check-result` (used by `pnpm -C apps/desktop check:coi`)
-- Updater UI requires `updater:allow-check`, `updater:allow-download`, and `updater:allow-install` to call the updater plugin from JS.
+- Plugin permissions include dialog/window/clipboard/shell APIs plus updater permissions (`updater:allow-check`, `updater:allow-download`, `updater:allow-install`, required for the updater UI).
 
 We intentionally keep capabilities narrow and rely on explicit Rust commands + higher-level app permission gates (macro trust, DLP, extension permissions) for privileged operations.
 
