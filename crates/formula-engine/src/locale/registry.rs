@@ -207,7 +207,13 @@ pub static DE_DE: FormulaLocale = FormulaLocale {
     is_rtl: false,
     boolean_true: "WAHR",
     boolean_false: "FALSCH",
-    error_literal_map: &[("#VALUE!", "#WERT!"), ("#REF!", "#BEZUG!")],
+    // Error literal spellings verified against Microsoft Excel function/error localization
+    // (see locale TSV sources + `tests/locale_parsing.rs`).
+    error_literal_map: &[
+        ("#VALUE!", "#WERT!"),
+        ("#REF!", "#BEZUG!"),
+        ("#GETTING_DATA", "#DATEN_ABRUFEN"),
+    ],
     functions: &DE_DE_FUNCTIONS,
 };
 
@@ -225,7 +231,13 @@ pub static FR_FR: FormulaLocale = FormulaLocale {
     is_rtl: false,
     boolean_true: "VRAI",
     boolean_false: "FAUX",
-    error_literal_map: &[("#VALUE!", "#VALEUR!"), ("#NAME?", "#NOM?")],
+    // Error literal spellings verified against Microsoft Excel function/error localization
+    // (see locale TSV sources + `tests/locale_parsing.rs`).
+    error_literal_map: &[
+        ("#VALUE!", "#VALEUR!"),
+        ("#NAME?", "#NOM?"),
+        ("#GETTING_DATA", "#OBTENTION_DONNEES"),
+    ],
     functions: &FR_FR_FUNCTIONS,
 };
 
@@ -242,7 +254,14 @@ pub static ES_ES: FormulaLocale = FormulaLocale {
     is_rtl: false,
     boolean_true: "VERDADERO",
     boolean_false: "FALSO",
-    error_literal_map: &[],
+    // Error literal spellings verified against Microsoft Excel function/error localization
+    // (see locale TSV sources + `tests/locale_parsing.rs`).
+    //
+    // Note: Some Spanish Excel error literals use leading inverted punctuation
+    // (`#¡VALOR!`, `#¿NOMBRE?`, ...). Those are not covered yet; this table currently
+    // includes only spellings that use plain ASCII and therefore round-trip through
+    // the lexer unchanged.
+    error_literal_map: &[("#GETTING_DATA", "#OBTENIENDO_DATOS")],
     functions: &ES_ES_FUNCTIONS,
 };
 

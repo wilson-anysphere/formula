@@ -142,6 +142,90 @@ fn canonicalize_and_localize_error_literals() {
     );
 }
 
+// NOTE: Localized spellings in these tests are based on Microsoft Excel's function/error
+// translations for the de-DE / fr-FR / es-ES locales. Keep these in sync with
+// `src/locale/data/*.tsv` and `src/locale/registry.rs`.
+#[test]
+fn canonicalize_and_localize_external_data_functions_and_errors_for_de_de() {
+    let localized_rtd = "=RTD(\"my.server\";\"topic\";1,5)";
+    let canonical_rtd = locale::canonicalize_formula(localized_rtd, &locale::DE_DE).unwrap();
+    assert_eq!(canonical_rtd, "=RTD(\"my.server\",\"topic\",1.5)");
+    assert_eq!(
+        locale::localize_formula(&canonical_rtd, &locale::DE_DE).unwrap(),
+        localized_rtd
+    );
+
+    let localized_cube = "=CUBEWERT(\"conn\";\"member\";1,5)";
+    let canonical_cube = locale::canonicalize_formula(localized_cube, &locale::DE_DE).unwrap();
+    assert_eq!(canonical_cube, "=CUBEVALUE(\"conn\",\"member\",1.5)");
+    assert_eq!(
+        locale::localize_formula(&canonical_cube, &locale::DE_DE).unwrap(),
+        localized_cube
+    );
+
+    let localized_err = "=#DATEN_ABRUFEN";
+    let canonical_err = locale::canonicalize_formula(localized_err, &locale::DE_DE).unwrap();
+    assert_eq!(canonical_err, "=#GETTING_DATA");
+    assert_eq!(
+        locale::localize_formula(&canonical_err, &locale::DE_DE).unwrap(),
+        localized_err
+    );
+}
+
+#[test]
+fn canonicalize_and_localize_external_data_functions_and_errors_for_fr_fr() {
+    let localized_rtd = "=RTD(\"my.server\";\"topic\";1,5)";
+    let canonical_rtd = locale::canonicalize_formula(localized_rtd, &locale::FR_FR).unwrap();
+    assert_eq!(canonical_rtd, "=RTD(\"my.server\",\"topic\",1.5)");
+    assert_eq!(
+        locale::localize_formula(&canonical_rtd, &locale::FR_FR).unwrap(),
+        localized_rtd
+    );
+
+    let localized_cube = "=VALEUR.CUBE(\"conn\";\"member\";1,5)";
+    let canonical_cube = locale::canonicalize_formula(localized_cube, &locale::FR_FR).unwrap();
+    assert_eq!(canonical_cube, "=CUBEVALUE(\"conn\",\"member\",1.5)");
+    assert_eq!(
+        locale::localize_formula(&canonical_cube, &locale::FR_FR).unwrap(),
+        localized_cube
+    );
+
+    let localized_err = "=#OBTENTION_DONNEES";
+    let canonical_err = locale::canonicalize_formula(localized_err, &locale::FR_FR).unwrap();
+    assert_eq!(canonical_err, "=#GETTING_DATA");
+    assert_eq!(
+        locale::localize_formula(&canonical_err, &locale::FR_FR).unwrap(),
+        localized_err
+    );
+}
+
+#[test]
+fn canonicalize_and_localize_external_data_functions_and_errors_for_es_es() {
+    let localized_rtd = "=RTD(\"my.server\";\"topic\";1,5)";
+    let canonical_rtd = locale::canonicalize_formula(localized_rtd, &locale::ES_ES).unwrap();
+    assert_eq!(canonical_rtd, "=RTD(\"my.server\",\"topic\",1.5)");
+    assert_eq!(
+        locale::localize_formula(&canonical_rtd, &locale::ES_ES).unwrap(),
+        localized_rtd
+    );
+
+    let localized_cube = "=VALOR.CUBO(\"conn\";\"member\";1,5)";
+    let canonical_cube = locale::canonicalize_formula(localized_cube, &locale::ES_ES).unwrap();
+    assert_eq!(canonical_cube, "=CUBEVALUE(\"conn\",\"member\",1.5)");
+    assert_eq!(
+        locale::localize_formula(&canonical_cube, &locale::ES_ES).unwrap(),
+        localized_cube
+    );
+
+    let localized_err = "=#OBTENIENDO_DATOS";
+    let canonical_err = locale::canonicalize_formula(localized_err, &locale::ES_ES).unwrap();
+    assert_eq!(canonical_err, "=#GETTING_DATA");
+    assert_eq!(
+        locale::localize_formula(&canonical_err, &locale::ES_ES).unwrap(),
+        localized_err
+    );
+}
+
 #[test]
 fn engine_accepts_localized_formulas_and_persists_canonical() {
     let mut engine = Engine::new();
