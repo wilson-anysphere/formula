@@ -53,6 +53,12 @@ def _pretty_input(cell_input: dict[str, Any]) -> dict[str, Any]:
     return {"cell": cell_input.get("cell"), "value": cell_input.get("value")}
 
 
+def _maybe_nonempty_str(value: Any) -> str | None:
+    if isinstance(value, str) and value:
+        return value
+    return None
+
+
 _FUNC_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_.]*)\s*\(")
 
 
@@ -372,34 +378,59 @@ def main() -> int:
         mismatch_reason: str | None = None
         if exp is None:
             mismatch_reason = "missing-expected"
-            actual_value = act.get("result") if isinstance(act, dict) else None
-            mismatches.append(
-                {
-                    "caseId": case_id,
-                    "reason": mismatch_reason,
-                    "formula": case.get("formula"),
-                    "inputs": [_pretty_input(i) for i in case.get("inputs", [])],
-                    "tags": sorted(tag_set),
-                    # When the expected dataset is missing a case (common when new deterministic
-                    # cases are added to cases.json but the pinned dataset wasn't updated yet),
-                    # include the engine-computed value to make patching/regeneration easier.
-                    **({"actual": actual_value} if actual_value is not None else {}),
-                }
-            )
+            entry: dict[str, Any] = {
+                "caseId": case_id,
+                "reason": mismatch_reason,
+                "formula": case.get("formula"),
+                "inputs": [_pretty_input(i) for i in case.get("inputs", [])],
+                "tags": sorted(tag_set),
+            }
+            output_cell = _maybe_nonempty_str(case.get("outputCell"))
+            if output_cell is not None:
+                entry["outputCell"] = output_cell
+
+            if isinstance(act, dict):
+                # When the expected dataset is missing a case (common when new deterministic cases
+                # are added to cases.json but the pinned dataset wasn't updated yet), include the
+                # engine-computed value (and basic rendering metadata) to make patching/regeneration
+                # easier.
+                actual_value = act.get("result")
+                if actual_value is not None:
+                    entry["actual"] = actual_value
+
+                actual_address = _maybe_nonempty_str(act.get("address"))
+                if actual_address is not None:
+                    entry["actualAddress"] = actual_address
+                actual_display = _maybe_nonempty_str(act.get("displayText"))
+                if actual_display is not None:
+                    entry["actualDisplayText"] = actual_display
+
+            mismatches.append(entry)
             reason_counts[mismatch_reason] = reason_counts.get(mismatch_reason, 0) + 1
 
         elif act is None:
             mismatch_reason = "missing-actual"
-            mismatches.append(
-                {
-                    "caseId": case_id,
-                    "reason": mismatch_reason,
-                    "formula": case.get("formula"),
-                    "inputs": [_pretty_input(i) for i in case.get("inputs", [])],
-                    "tags": sorted(tag_set),
-                    "expected": exp.get("result"),
-                }
-            )
+            entry = {
+                "caseId": case_id,
+                "reason": mismatch_reason,
+                "formula": case.get("formula"),
+                "inputs": [_pretty_input(i) for i in case.get("inputs", [])],
+                "tags": sorted(tag_set),
+                "expected": exp.get("result"),
+            }
+            output_cell = _maybe_nonempty_str(case.get("outputCell"))
+            if output_cell is not None:
+                entry["outputCell"] = output_cell
+
+            if isinstance(exp, dict):
+                expected_address = _maybe_nonempty_str(exp.get("address"))
+                if expected_address is not None:
+                    entry["expectedAddress"] = expected_address
+                expected_display = _maybe_nonempty_str(exp.get("displayText"))
+                if expected_display is not None:
+                    entry["expectedDisplayText"] = expected_display
+
+            mismatches.append(entry)
             reason_counts[mismatch_reason] = reason_counts.get(mismatch_reason, 0) + 1
 
         else:
@@ -426,6 +457,24 @@ def main() -> int:
                     "absTol": cfg.abs_tol,
                     "relTol": cfg.rel_tol,
                 }
+                output_cell = _maybe_nonempty_str(case.get("outputCell"))
+                if output_cell is not None:
+                    entry["outputCell"] = output_cell
+
+                if isinstance(exp, dict):
+                    expected_address = _maybe_nonempty_str(exp.get("address"))
+                    if expected_address is not None:
+                        entry["expectedAddress"] = expected_address
+                    expected_display = _maybe_nonempty_str(exp.get("displayText"))
+                    if expected_display is not None:
+                        entry["expectedDisplayText"] = expected_display
+                if isinstance(act, dict):
+                    actual_address = _maybe_nonempty_str(act.get("address"))
+                    if actual_address is not None:
+                        entry["actualAddress"] = actual_address
+                    actual_display = _maybe_nonempty_str(act.get("displayText"))
+                    if actual_display is not None:
+                        entry["actualDisplayText"] = actual_display
 
                 exp_result = exp.get("result")
                 act_result = act.get("result")

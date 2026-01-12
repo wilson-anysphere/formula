@@ -23,8 +23,14 @@ class ComparePartialDatasetsTests(unittest.TestCase):
             cases_payload = {
                 "schemaVersion": 1,
                 "cases": [
-                    {"id": "case-a", "formula": "=1+1", "inputs": []},
-                    {"id": "case-b", "formula": "=2+2", "inputs": [], "tags": ["tag-b"]},
+                    {"id": "case-a", "formula": "=1+1", "outputCell": "C1", "inputs": []},
+                    {
+                        "id": "case-b",
+                        "formula": "=2+2",
+                        "outputCell": "C1",
+                        "inputs": [],
+                        "tags": ["tag-b"],
+                    },
                 ],
             }
             cases_path.write_text(
@@ -53,7 +59,12 @@ class ComparePartialDatasetsTests(unittest.TestCase):
                 "caseSet": {"path": str(cases_path), "count": 2},
                 "results": [
                     {"caseId": "case-a", "result": {"t": "n", "v": 2}},
-                    {"caseId": "case-b", "result": {"t": "n", "v": 4}},
+                    {
+                        "caseId": "case-b",
+                        "result": {"t": "n", "v": 4},
+                        "address": "C1",
+                        "displayText": "4",
+                    },
                 ],
             }
             actual_path.write_text(
@@ -98,6 +109,9 @@ class ComparePartialDatasetsTests(unittest.TestCase):
             self.assertEqual(mismatches[0]["caseId"], "case-b")
             self.assertEqual(mismatches[0]["tags"], ["tag-b"])
             self.assertEqual(mismatches[0]["actual"], {"t": "n", "v": 4})
+            self.assertEqual(mismatches[0]["outputCell"], "C1")
+            self.assertEqual(mismatches[0]["actualAddress"], "C1")
+            self.assertEqual(mismatches[0]["actualDisplayText"], "4")
 
 
 class CompareTagToleranceTests(unittest.TestCase):
@@ -238,6 +252,7 @@ class CompareMismatchDetailTests(unittest.TestCase):
                     {
                         "id": "case-a",
                         "formula": "=1/3",
+                        "outputCell": "C1",
                         "inputs": [],
                         "tags": ["num"],
                     }
@@ -254,7 +269,14 @@ class CompareMismatchDetailTests(unittest.TestCase):
                 "generatedAt": "unit-test",
                 "source": {"kind": "excel", "note": "synthetic test fixture"},
                 "caseSet": {"path": str(cases_path), "count": 1},
-                "results": [{"caseId": "case-a", "result": {"t": "n", "v": expected_value}}],
+                "results": [
+                    {
+                        "caseId": "case-a",
+                        "result": {"t": "n", "v": expected_value},
+                        "address": "C1",
+                        "displayText": str(expected_value),
+                    }
+                ],
             }
             expected_path.write_text(
                 json.dumps(expected_payload, ensure_ascii=False, indent=2) + "\n",
@@ -267,7 +289,14 @@ class CompareMismatchDetailTests(unittest.TestCase):
                 "generatedAt": "unit-test",
                 "source": {"kind": "engine", "note": "synthetic test fixture"},
                 "caseSet": {"path": str(cases_path), "count": 1},
-                "results": [{"caseId": "case-a", "result": {"t": "n", "v": actual_value}}],
+                "results": [
+                    {
+                        "caseId": "case-a",
+                        "result": {"t": "n", "v": actual_value},
+                        "address": "C1",
+                        "displayText": str(actual_value),
+                    }
+                ],
             }
             actual_path.write_text(
                 json.dumps(actual_payload, ensure_ascii=False, indent=2) + "\n",
@@ -311,8 +340,13 @@ class CompareMismatchDetailTests(unittest.TestCase):
             m = mismatches[0]
             self.assertEqual(m.get("reason"), "number-mismatch")
             self.assertEqual(m.get("tags"), ["num"])
+            self.assertEqual(m.get("outputCell"), "C1")
             self.assertEqual(m.get("absTol"), 1e-9)
             self.assertEqual(m.get("relTol"), 1e-9)
+            self.assertEqual(m.get("expectedAddress"), "C1")
+            self.assertEqual(m.get("actualAddress"), "C1")
+            self.assertEqual(m.get("expectedDisplayText"), str(expected_value))
+            self.assertEqual(m.get("actualDisplayText"), str(actual_value))
 
             abs_diff = abs(expected_value - actual_value)
             denom = max(abs(expected_value), abs(actual_value))
