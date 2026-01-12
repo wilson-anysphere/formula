@@ -250,3 +250,13 @@ powershell -ExecutionPolicy Bypass -File tools/excel-oracle/run-excel-oracle.ps1
   -OutPath /path/to/excel-odd-coupon-results.json `
   -IncludeTags odd_coupon
 ```
+
+To focus specifically on the negative yield / negative coupon validation scenarios, filter to
+the `odd_coupon_validation` tag (or use the subset corpus `tools/excel-oracle/odd_coupon_validation_cases.json`):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/excel-oracle/run-excel-oracle.ps1 `
+  -CasesPath tests/compatibility/excel-oracle/cases.json `
+  -OutPath /path/to/excel-odd-coupon-validation-results.json `
+  -IncludeTags odd_coupon_validation
+```
