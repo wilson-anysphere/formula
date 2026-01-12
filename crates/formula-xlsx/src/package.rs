@@ -1350,6 +1350,7 @@ fn ensure_workbook_content_type(
     let mut changed = false;
     let mut found = false;
     let mut skip_depth = 0usize;
+    let mut override_tag_name: Option<String> = None;
 
     loop {
         let ev = reader.read_event_into(&mut buf)?;
@@ -1368,6 +1369,9 @@ fn ensure_workbook_content_type(
         match ev {
             Event::Eof => break,
             Event::Empty(ref e) if crate::openxml::local_name(e.name().as_ref()) == b"Override" => {
+                if override_tag_name.is_none() {
+                    override_tag_name = Some(String::from_utf8_lossy(e.name().as_ref()).into_owned());
+                }
                 let (is_workbook, updated) = patched_workbook_override(e, workbook_content_type)?;
                 if is_workbook {
                     found = true;
@@ -1380,6 +1384,9 @@ fn ensure_workbook_content_type(
                 }
             }
             Event::Start(ref e) if crate::openxml::local_name(e.name().as_ref()) == b"Override" => {
+                if override_tag_name.is_none() {
+                    override_tag_name = Some(String::from_utf8_lossy(e.name().as_ref()).into_owned());
+                }
                 let (is_workbook, updated) = patched_workbook_override(e, workbook_content_type)?;
                 if is_workbook {
                     found = true;
@@ -1393,28 +1400,50 @@ fn ensure_workbook_content_type(
                     writer.write_event(Event::Start(e.to_owned()))?;
                 }
             }
+            Event::End(e) if crate::openxml::local_name(e.name().as_ref()) == b"Types" => {
+                if !found {
+                    // No workbook override found; insert one before `</Types>`.
+                    changed = true;
+                    let override_tag_name =
+                        override_tag_name.clone().unwrap_or_else(|| prefixed_tag(e.name().as_ref(), "Override"));
+                    let mut override_el = BytesStart::new(override_tag_name.as_str());
+                    override_el.push_attribute(("PartName", "/xl/workbook.xml"));
+                    override_el.push_attribute(("ContentType", workbook_content_type));
+                    writer.write_event(Event::Empty(override_el))?;
+                }
+                writer.write_event(Event::End(e))?;
+            }
+            Event::Empty(e) if crate::openxml::local_name(e.name().as_ref()) == b"Types" => {
+                // Degenerate case: a self-closing `<Types/>` root. Expand it so we can inject
+                // the required workbook override.
+                if !found {
+                    changed = true;
+                    let types_tag_name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                    let override_tag_name = override_tag_name
+                        .clone()
+                        .unwrap_or_else(|| prefixed_tag(types_tag_name.as_bytes(), "Override"));
+
+                    writer.write_event(Event::Start(e))?;
+
+                    let mut override_el = BytesStart::new(override_tag_name.as_str());
+                    override_el.push_attribute(("PartName", "/xl/workbook.xml"));
+                    override_el.push_attribute(("ContentType", workbook_content_type));
+                    writer.write_event(Event::Empty(override_el))?;
+
+                    writer.write_event(Event::End(BytesEnd::new(types_tag_name.as_str())))?;
+                    found = true;
+                } else {
+                    writer.write_event(Event::Empty(e))?;
+                }
+            }
             other => writer.write_event(other.into_owned())?,
         }
 
         buf.clear();
     }
 
-    let mut out = writer.into_inner();
-    if !found {
-        // No workbook override found; insert one before </Types>.
-        let mut xml = String::from_utf8(out)?;
-        if let Some(idx) = xml.rfind("</Types>") {
-            let insert = format!(
-                r#"<Override PartName="/xl/workbook.xml" ContentType="{workbook_content_type}"/>"#
-            );
-            xml.insert_str(idx, &insert);
-            changed = true;
-        }
-        out = xml.into_bytes();
-    }
-
     if changed {
-        parts.insert(ct_name.to_string(), out);
+        parts.insert(ct_name.to_string(), writer.into_inner());
     }
     Ok(())
 }
@@ -1557,7 +1586,9 @@ fn patched_workbook_override(
         return Ok((true, None));
     }
 
-    let mut updated = BytesStart::new("Override");
+    let tag_name = e.name();
+    let tag_name = std::str::from_utf8(tag_name.as_ref()).unwrap_or("Override");
+    let mut updated = BytesStart::new(tag_name);
     updated.push_attribute(("PartName", "/xl/workbook.xml"));
     updated.push_attribute(("ContentType", workbook_content_type));
     Ok((true, Some(updated.into_owned())))
@@ -1943,6 +1974,87 @@ mod tests {
             })
             .expect("inserted Default");
         assert_eq!(node.tag_name().namespace(), Some(ct_ns));
+    }
+
+    #[test]
+    fn enforce_workbook_kind_inserts_prefixed_workbook_override_when_missing() {
+        let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ct:Types xmlns:ct="http://schemas.openxmlformats.org/package/2006/content-types">
+  <ct:Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <ct:Default Extension="xml" ContentType="application/xml"/>
+</ct:Types>"#;
+
+        let bytes = build_package(&[("[Content_Types].xml", content_types.as_bytes())]);
+        let mut pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+        pkg.enforce_workbook_kind(WorkbookKind::MacroEnabledWorkbook)
+            .expect("enforce workbook kind");
+
+        let updated = std::str::from_utf8(pkg.part("[Content_Types].xml").unwrap()).unwrap();
+        let doc = Document::parse(updated).expect("parse content types");
+        let ct_ns = "http://schemas.openxmlformats.org/package/2006/content-types";
+
+        let node = doc
+            .descendants()
+            .find(|n| {
+                n.is_element()
+                    && n.tag_name().name() == "Override"
+                    && n.attribute("PartName") == Some("/xl/workbook.xml")
+            })
+            .expect("inserted workbook override");
+        assert_eq!(node.tag_name().namespace(), Some(ct_ns));
+        assert_eq!(
+            node.attribute("ContentType"),
+            Some("application/vnd.ms-excel.sheet.macroEnabled.main+xml")
+        );
+        assert!(
+            updated.contains("<ct:Override"),
+            "expected inserted Override to preserve root prefix, got:\n{updated}"
+        );
+        assert!(
+            !updated.contains("<Override PartName=\"/xl/workbook.xml\""),
+            "should not introduce unprefixed workbook Override, got:\n{updated}"
+        );
+    }
+
+    #[test]
+    fn enforce_workbook_kind_preserves_prefix_when_patching_existing_override() {
+        let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ct:Types xmlns:ct="http://schemas.openxmlformats.org/package/2006/content-types">
+  <ct:Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <ct:Default Extension="xml" ContentType="application/xml"/>
+  <ct:Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+</ct:Types>"#;
+
+        let bytes = build_package(&[("[Content_Types].xml", content_types.as_bytes())]);
+        let mut pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+        pkg.enforce_workbook_kind(WorkbookKind::MacroEnabledWorkbook)
+            .expect("enforce workbook kind");
+
+        let updated = std::str::from_utf8(pkg.part("[Content_Types].xml").unwrap()).unwrap();
+        let doc = Document::parse(updated).expect("parse content types");
+        let ct_ns = "http://schemas.openxmlformats.org/package/2006/content-types";
+
+        let node = doc
+            .descendants()
+            .find(|n| {
+                n.is_element()
+                    && n.tag_name().name() == "Override"
+                    && n.attribute("PartName") == Some("/xl/workbook.xml")
+            })
+            .expect("workbook override");
+        assert_eq!(node.tag_name().namespace(), Some(ct_ns));
+        assert_eq!(
+            node.attribute("ContentType"),
+            Some("application/vnd.ms-excel.sheet.macroEnabled.main+xml")
+        );
+        assert!(
+            updated.contains("<ct:Override"),
+            "expected patched Override to preserve prefix, got:\n{updated}"
+        );
+        assert!(
+            !updated.contains("<Override PartName=\"/xl/workbook.xml\""),
+            "should not rewrite workbook Override without a prefix in a prefix-only document, got:\n{updated}"
+        );
     }
 
     #[test]
