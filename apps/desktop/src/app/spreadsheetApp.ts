@@ -6793,11 +6793,11 @@ export class SpreadsheetApp {
   }
 
   private commitFormulaBar(text: string): void {
-    this.updateEditState();
     const target = this.formulaEditCell ?? { sheetId: this.sheetId, cell: { ...this.selection.active } };
     this.applyEdit(target.sheetId, target.cell, text);
 
     this.formulaEditCell = null;
+    this.updateEditState();
     this.referencePreview = null;
     this.referenceHighlights = [];
     this.referenceHighlightsSource = [];
@@ -6816,9 +6816,9 @@ export class SpreadsheetApp {
   }
 
   private cancelFormulaBar(): void {
-    this.updateEditState();
     const target = this.formulaEditCell;
     this.formulaEditCell = null;
+    this.updateEditState();
     this.referencePreview = null;
     this.referenceHighlights = [];
     this.referenceHighlightsSource = [];
