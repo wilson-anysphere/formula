@@ -49,13 +49,16 @@ test.describe("formatting shortcuts", () => {
     });
     await waitForIdle(page);
 
+    // Ensure the grid is focused so keyboard events route through SpreadsheetApp's keydown handler.
+    await page.locator("#grid").focus();
+
     const before = await getA1FontProp(page, "bold");
-    await page.keyboard.press("ControlOrMeta+B");
+    await page.keyboard.press("ControlOrMeta+b");
     await waitForIdle(page);
 
     expect(await getA1FontProp(page, "bold")).toBe(!before);
 
-    await page.keyboard.press("ControlOrMeta+B");
+    await page.keyboard.press("ControlOrMeta+b");
     await waitForIdle(page);
     expect(await getA1FontProp(page, "bold")).toBe(before);
   });
@@ -73,13 +76,15 @@ test.describe("formatting shortcuts", () => {
     });
     await waitForIdle(page);
 
+    await page.locator("#grid").focus();
+
     const initialItalic = await getA1FontProp(page, "italic");
 
-    await page.keyboard.press("Control+I");
+    await page.keyboard.press("Control+i");
     await waitForIdle(page);
     expect(await getA1FontProp(page, "italic")).toBe(!initialItalic);
 
-    await page.keyboard.press("Control+I");
+    await page.keyboard.press("Control+i");
     await waitForIdle(page);
     const italicAfterToggles = await getA1FontProp(page, "italic");
     expect(italicAfterToggles).toBe(initialItalic);

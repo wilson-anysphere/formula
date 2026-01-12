@@ -9,8 +9,10 @@ test.describe("dockable panels layout persistence", () => {
     await page.reload();
     await waitForDesktopReady(page);
 
+    const ribbon = page.getByTestId("ribbon-root");
+
     // Open AI panel (defaults to right dock via panel registry).
-    await page.getByTestId("ribbon-root").getByTestId("open-panel-ai-chat").click();
+    await ribbon.getByTestId("open-panel-ai-chat").click();
     await expect(page.getByTestId("dock-right").getByTestId("panel-aiChat")).toBeVisible();
 
     // Dock to left.
@@ -32,8 +34,10 @@ test.describe("dockable panels layout persistence", () => {
     await page.reload();
     await waitForDesktopReady(page);
 
+    const ribbon = page.getByTestId("ribbon-root");
+
     // Persist a non-default layout under doc-a.
-    await page.getByTestId("ribbon-root").getByTestId("open-panel-ai-chat").click();
+    await ribbon.getByTestId("open-panel-ai-chat").click();
     await page.getByTestId("dock-ai-panel-left").click();
     await expect(page.getByTestId("dock-left").getByTestId("panel-aiChat")).toBeVisible();
 
@@ -53,13 +57,15 @@ test.describe("dockable panels layout persistence", () => {
     await page.reload();
     await waitForDesktopReady(page);
 
+    const ribbon = page.getByTestId("ribbon-root");
+
     // Open AI panel (defaults to right dock).
-    await page.getByTestId("ribbon-root").getByTestId("open-panel-ai-chat").click();
+    await ribbon.getByTestId("open-panel-ai-chat").click();
     const rightDock = page.getByTestId("dock-right");
     await expect(rightDock.getByTestId("panel-aiChat")).toBeVisible();
 
     // Open another panel in the same dock.
-    await page.getByTestId("ribbon-root").getByTestId("open-macros-panel").click();
+    await ribbon.getByTestId("open-macros-panel").click();
     await expect(rightDock.getByTestId("panel-macros")).toBeVisible();
 
     // Tab strip should be visible and allow switching between panels.
@@ -166,6 +172,38 @@ test.describe("dockable panels layout persistence", () => {
     await expect(page.getByTestId("formula-input")).toBeFocused();
 
     await page.keyboard.press("Meta+I");
+    await expect(page.getByTestId("panel-aiChat")).toHaveCount(0);
+  });
+
+  test("Cmd+I toggles AI chat panel open/closed", async ({ page }) => {
+    await gotoDesktop(page);
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await waitForDesktopReady(page);
+
+    // Ensure focus is on the grid (not an input) so the global shortcut should fire.
+    // Avoid clicking the shared-grid corner header (select-all), which can be slow/flaky under Playwright.
+    await page.locator("#grid").focus();
+
+    await page.keyboard.press("Meta+i");
+    await expect(page.getByTestId("dock-right").getByTestId("panel-aiChat")).toBeVisible();
+
+    await page.keyboard.press("Meta+i");
+    await expect(page.getByTestId("panel-aiChat")).toHaveCount(0);
+  });
+
+  test("Cmd+I does not toggle AI chat while typing in the formula bar", async ({ page }) => {
+    await gotoDesktop(page);
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await waitForDesktopReady(page);
+
+    // Enter formula-bar edit mode (this reveals + focuses the textarea).
+    await page.getByTestId("formula-highlight").click();
+    await expect(page.getByTestId("formula-input")).toBeVisible();
+    await expect(page.getByTestId("formula-input")).toBeFocused();
+
+    await page.keyboard.press("Meta+i");
     await expect(page.getByTestId("panel-aiChat")).toHaveCount(0);
   });
 });
