@@ -2943,40 +2943,6 @@ function renderSheetTabs(): void {
       onRenameSheet: async (sheetId: string, newName: string) => {
         await renameSheetById(sheetId, newName);
       },
-      onPersistSheetVisibility: async (sheetId: string, visibility: SheetVisibility) => {
-        // In collab mode, sheet metadata changes are persisted to the shared Yjs document.
-        // Skip the local workbook backend.
-        const session = app.getCollabSession?.() ?? null;
-        if (session) return;
-
-        const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-        if (typeof baseInvoke !== "function") return;
-
-        // Prefer the queued invoke (it sequences behind pending `set_cell` / `set_range` sync work).
-        const invoke = queuedInvoke ?? ((cmd: string, args?: any) => queueBackendOp(() => baseInvoke(cmd, args)));
-
-        // Allow any microtask-batched workbook edits to enqueue before we request a visibility change.
-        await new Promise<void>((resolve) => queueMicrotask(resolve));
-
-        await invoke("set_sheet_visibility", { sheet_id: sheetId, visibility });
-      },
-      onPersistSheetTabColor: async (sheetId: string, tabColor: TabColor | undefined) => {
-        // In collab mode, sheet metadata changes are persisted to the shared Yjs document.
-        // Skip the local workbook backend.
-        const session = app.getCollabSession?.() ?? null;
-        if (session) return;
-
-        const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-        if (typeof baseInvoke !== "function") return;
-
-        // Prefer the queued invoke (it sequences behind pending `set_cell` / `set_range` sync work).
-        const invoke = queuedInvoke ?? ((cmd: string, args?: any) => queueBackendOp(() => baseInvoke(cmd, args)));
-
-        // Allow any microtask-batched workbook edits to enqueue before we request a tab color update.
-        await new Promise<void>((resolve) => queueMicrotask(resolve));
-
-        await invoke("set_sheet_tab_color", { sheet_id: sheetId, tab_color: tabColor ?? null });
-      },
       onSheetsReordered: () => restoreFocusAfterSheetNavigation(),
       onSheetDeleted: handleSheetDeletedFromTabs,
       onError: (message: string) => showToast(message, "error"),

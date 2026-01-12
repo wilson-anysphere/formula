@@ -165,12 +165,10 @@ function normalizeSheetMeta(raw: unknown, fallbackSheetId: string): SheetMetaSta
   return tabColor ? { name, visibility, tabColor } : { name, visibility };
 }
 
-// NOTE: In desktop mode, sheet metadata operations (rename/reorder/add/delete/hide/tabColor)
-// are persisted to the backend by `main.ts` (both for direct UI actions and doc-driven
-// undo/redo/applyState reconciliations). Workbook sync only needs to:
-// - track sheet ids to avoid sending cell edits for deleted sheets
-// - ensure `mark_saved` runs when undo/redo returns to the last-saved state, even when the
-//   last change was sheet-metadata-only (no cell deltas).
+// NOTE: In desktop mode, the Tauri backend workbook is the persistence layer for both cell edits
+// and sheet structure/metadata (rename/reorder/add/delete/hide/tabColor). Instead of relying on
+// ad-hoc UI hooks to keep the backend in sync (which can drift from undo/redo/applyState), we
+// mirror the authoritative DocumentController change stream to the backend here.
 
 type PendingEdit = { sheetId: string; row: number; col: number; edit: RangeCellEdit };
 
@@ -732,11 +730,10 @@ export function startWorkbookSync(args: {
       // explicitly marked/saved, so we clear it here to keep close prompts aligned.
       if (!args.document.isDirty) {
         try {
-          // Some doc-driven sheet persistence (handled in `main.ts`, not workbookSync) batches backend
-          // commands in microtasks (e.g. reorder coalescing). Yield to the event loop once so those
-          // commands have a chance to enqueue before we clear the backend dirty flag; otherwise we
-          // could accidentally call `mark_saved` *before* a delayed `move_sheet`, leaving the backend
-          // dirty while the document is clean.
+          // Yield to the event loop once before calling `mark_saved`. Some backend sync work can be
+          // queued in microtasks (e.g. coalesced reorders, other listeners), and we do not want to
+          // clear the backend dirty flag *before* those commands execute; otherwise the backend can
+          // remain dirty while the document is clean.
           await new Promise<void>((resolve) => {
             if (typeof setTimeout === "function") {
               setTimeout(resolve, 0);
