@@ -4852,9 +4852,7 @@ fn canonical_expr_contains_external_workbook_refs(expr: &crate::Expr) -> bool {
         crate::Expr::ColRef(r) => r.workbook.is_some(),
         crate::Expr::RowRef(r) => r.workbook.is_some(),
         crate::Expr::StructuredRef(r) => r.workbook.is_some(),
-        crate::Expr::FieldAccess(access) => {
-            canonical_expr_contains_external_workbook_refs(access.base.as_ref())
-        }
+        crate::Expr::FieldAccess(access) => canonical_expr_contains_external_workbook_refs(access.base.as_ref()),
         crate::Expr::FunctionCall(call) => call
             .args
             .iter()
@@ -4893,9 +4891,7 @@ fn canonical_expr_contains_let_or_lambda(expr: &crate::Expr) -> bool {
             }
             call.args.iter().any(canonical_expr_contains_let_or_lambda)
         }
-        crate::Expr::FieldAccess(access) => {
-            canonical_expr_contains_let_or_lambda(access.base.as_ref())
-        },
+        crate::Expr::FieldAccess(access) => canonical_expr_contains_let_or_lambda(access.base.as_ref()),
         crate::Expr::Call(call) => {
             canonical_expr_contains_let_or_lambda(call.callee.as_ref())
                 || call

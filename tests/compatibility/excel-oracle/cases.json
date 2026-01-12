@@ -13001,6 +13001,194 @@
       "id": "sumx2py2_9f5fcf5d6049"
     },
     {
+      "formula": "=ACOSH(0.5)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "ACOSH",
+        "error"
+      ],
+      "id": "acosh_7e6eeb2eb9fb"
+    },
+    {
+      "formula": "=ATANH(1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "ATANH",
+        "error"
+      ],
+      "id": "atanh_4c3ebe74b1a1"
+    },
+    {
+      "formula": "=ACOTH(1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "ACOTH",
+        "error"
+      ],
+      "id": "acoth_cca3f71151bc"
+    },
+    {
+      "formula": "=COTH(0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "COTH",
+        "error"
+      ],
+      "id": "coth_fdfd7fef45b6"
+    },
+    {
+      "formula": "=CSCH(0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "CSCH",
+        "error"
+      ],
+      "id": "csch_37a1506575b9"
+    },
+    {
+      "formula": "=COT(0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "COT",
+        "error"
+      ],
+      "id": "cot_8d9fa2587345"
+    },
+    {
+      "formula": "=CSC(0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "CSC",
+        "error"
+      ],
+      "id": "csc_85cf569a499f"
+    },
+    {
+      "formula": "=FACT(-1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "FACT",
+        "error"
+      ],
+      "id": "fact_55f3f6b6dbd9"
+    },
+    {
+      "formula": "=COMBIN(5,7)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "COMBIN",
+        "error"
+      ],
+      "id": "combin_67b6fbe1a8a9"
+    },
+    {
+      "formula": "=PERMUT(5,7)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "PERMUT",
+        "error"
+      ],
+      "id": "permut_84702e5a902a"
+    },
+    {
+      "formula": "=GCD(-2,4)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "GCD",
+        "error"
+      ],
+      "id": "gcd_aa04def90f29"
+    },
+    {
+      "formula": "=MROUND(-10,3)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "MROUND",
+        "error"
+      ],
+      "id": "mround_b7052d4d9235"
+    },
+    {
+      "formula": "=QUOTIENT(5,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "QUOTIENT",
+        "error"
+      ],
+      "id": "quotient_2571f3334aa0"
+    },
+    {
+      "formula": "=SQRTPI(-1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "SQRTPI",
+        "error"
+      ],
+      "id": "sqrtpi_075b8a350905"
+    },
+    {
+      "formula": "=SERIESSUM(0,-1,1,{1})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "SERIESSUM",
+        "error"
+      ],
+      "id": "seriessum_6e52dc2ac8f8"
+    },
+    {
+      "formula": "=SUMXMY2({1,2},{3})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "SUMXMY2",
+        "error"
+      ],
+      "id": "sumxmy2_771dc7140db3"
+    },
+    {
+      "formula": "=SUMXMY2({1,\"x\",3},{1,2,3})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "SUMXMY2",
+        "coercion"
+      ],
+      "description": "SUMX* treats text as 0 within arrays",
+      "id": "sumxmy2_25125fc69108"
+    },
+    {
       "formula": "=COMPLEX(3,4)",
       "outputCell": "C1",
       "inputs": [],

@@ -333,6 +333,31 @@ def generate_cases() -> dict[str, Any]:
     _add_case(cases, prefix="sumx2my2", tags=["math", "SUMX2MY2"], formula="=SUMX2MY2({1,2},{3,4})")
     _add_case(cases, prefix="sumx2py2", tags=["math", "SUMX2PY2"], formula="=SUMX2PY2({1,2},{3,4})")
 
+    # Math & trig backfill (more) - error/domain semantics.
+    _add_case(cases, prefix="acosh", tags=["math", "ACOSH", "error"], formula="=ACOSH(0.5)")
+    _add_case(cases, prefix="atanh", tags=["math", "ATANH", "error"], formula="=ATANH(1)")
+    _add_case(cases, prefix="acoth", tags=["math", "ACOTH", "error"], formula="=ACOTH(1)")
+    _add_case(cases, prefix="coth", tags=["math", "COTH", "error"], formula="=COTH(0)")
+    _add_case(cases, prefix="csch", tags=["math", "CSCH", "error"], formula="=CSCH(0)")
+    _add_case(cases, prefix="cot", tags=["math", "COT", "error"], formula="=COT(0)")
+    _add_case(cases, prefix="csc", tags=["math", "CSC", "error"], formula="=CSC(0)")
+    _add_case(cases, prefix="fact", tags=["math", "FACT", "error"], formula="=FACT(-1)")
+    _add_case(cases, prefix="combin", tags=["math", "COMBIN", "error"], formula="=COMBIN(5,7)")
+    _add_case(cases, prefix="permut", tags=["math", "PERMUT", "error"], formula="=PERMUT(5,7)")
+    _add_case(cases, prefix="gcd", tags=["math", "GCD", "error"], formula="=GCD(-2,4)")
+    _add_case(cases, prefix="mround", tags=["math", "MROUND", "error"], formula="=MROUND(-10,3)")
+    _add_case(cases, prefix="quotient", tags=["math", "QUOTIENT", "error"], formula="=QUOTIENT(5,0)")
+    _add_case(cases, prefix="sqrtpi", tags=["math", "SQRTPI", "error"], formula="=SQRTPI(-1)")
+    _add_case(cases, prefix="seriessum", tags=["math", "SERIESSUM", "error"], formula="=SERIESSUM(0,-1,1,{1})")
+    _add_case(cases, prefix="sumxmy2", tags=["math", "SUMXMY2", "error"], formula="=SUMXMY2({1,2},{3})")
+    _add_case(
+        cases,
+        prefix="sumxmy2",
+        tags=["math", "SUMXMY2", "coercion"],
+        formula='=SUMXMY2({1,"x",3},{1,2,3})',
+        description="SUMX* treats text as 0 within arrays",
+    )
+
     # ------------------------------------------------------------------
     # Engineering functions (complex + special math)
     # ------------------------------------------------------------------
