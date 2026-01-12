@@ -953,3 +953,27 @@ fn open_workbook_model_csv_truncates_sheet_name_to_excel_max_len_in_utf16_units(
     let mut out = std::io::Cursor::new(Vec::<u8>::new());
     formula_io::xlsx::write_workbook_to_writer(&workbook, &mut out).expect("write xlsx");
 }
+
+#[cfg(feature = "parquet")]
+#[test]
+fn open_workbook_model_parquet_truncates_sheet_name_to_excel_max_len_in_utf16_units() {
+    let parquet_path = parquet_fixture_path("simple.parquet");
+
+    let dir = tempfile::tempdir().expect("temp dir");
+    let prefix = "a".repeat(EXCEL_MAX_SHEET_NAME_LEN - 2);
+    // 🙂 is a non-BMP character, so it counts as 2 UTF-16 code units in Excel.
+    let long_stem = format!("{prefix}🙂{}", "b".repeat(10));
+    let path = dir.path().join(format!("{long_stem}.parquet"));
+    std::fs::copy(&parquet_path, &path).expect("copy parquet fixture");
+
+    let workbook = formula_io::open_workbook_model(&path).expect("open workbook model");
+    assert_eq!(workbook.sheets.len(), 1);
+
+    let expected = sanitize_sheet_name(&long_stem);
+    assert_eq!(expected.encode_utf16().count(), EXCEL_MAX_SHEET_NAME_LEN);
+    assert_eq!(workbook.sheets[0].name, expected);
+
+    // Regression check: writing to XLSX should succeed (sheet name must be Excel-valid).
+    let mut out = std::io::Cursor::new(Vec::<u8>::new());
+    formula_io::xlsx::write_workbook_to_writer(&workbook, &mut out).expect("write xlsx");
+}
