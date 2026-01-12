@@ -194,6 +194,7 @@ export class FormulaBarView {
     });
 
     errorButton.addEventListener("click", () => {
+      if (!this.root.classList.contains("formula-bar--has-error")) return;
       this.#setErrorPanelOpen(!this.#isErrorPanelOpen);
     });
 
@@ -548,6 +549,7 @@ export class FormulaBarView {
       this.#errorPanel.textContent = "";
     } else {
       const address = this.model.activeCell.address;
+      this.root.classList.toggle("formula-bar--has-error", true);
       this.root.classList.toggle("formula-bar--has-error", true);
       this.#errorPanel.innerHTML = `
         <div class="formula-bar-error-title">${explanation.code} (${escapeHtml(address)}): ${explanation.title}</div>

@@ -234,6 +234,8 @@
   overflow: auto;
 }
 
+/* The formula input is only interactive in edit mode; in view mode we allow hover
+   interactions on the highlighted <pre> underneath. */
 .formula-bar:not(.formula-bar--editing) .formula-bar-input {
   display: none;
 }
@@ -303,10 +305,14 @@
 }
 
 .formula-bar-error-button {
+  /* Hidden by default; shown when the active cell has an error explanation. */
   display: none;
   width: 24px;
   height: 24px;
   margin-top: 2px;
+  padding: 0;
+  align-items: center;
+  justify-content: center;
   border: 1px solid var(--error);
   border-radius: 6px;
   background: var(--bg-primary);
@@ -328,6 +334,7 @@
 }
 
 .formula-bar-error-panel {
+  /* Hidden by default; toggled open by the error button. */
   display: none;
   padding: 8px 12px;
   border: 1px solid var(--error);
