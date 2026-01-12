@@ -3092,6 +3092,86 @@ fn bytecode_backend_financial_date_text_uses_datevalue_semantics_for_accrint() {
 }
 
 #[test]
+fn bytecode_backend_discount_security_text_dates_reject_numeric_strings() {
+    let mut engine = Engine::new();
+
+    // Discount security + T-Bill functions should use DATEVALUE-style parsing for *text* date
+    // arguments. Numeric-looking strings like "1" must be rejected as dates (#VALUE!), not coerced
+    // as date serials.
+    engine
+        .set_cell_formula("Sheet1", "A1", r#"=TBILLPRICE("1","2020-06-30",0.05)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", r#"=TBILLYIELD("1","2020-06-30",97)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A3", r#"=TBILLEQ("1","2020-06-30",0.05)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A4", r#"=PRICEDISC("1","2020-12-31",0.05,100)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A5", r#"=YIELDDISC("1","2020-12-31",97,100)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A6", r#"=INTRATE("1","2020-12-31",97,100)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A7", r#"=RECEIVED("1","2020-12-31",97,0.05)"#)
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A8",
+            r#"=PRICEMAT("1","2020-12-31","2019-12-31",0.05,0.04)"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A9",
+            r#"=YIELDMAT("1","2020-12-31","2019-12-31",0.05,95)"#,
+        )
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 9);
+    assert_eq!(stats.compiled, 9);
+    assert_eq!(stats.fallback, 0);
+    assert_eq!(engine.bytecode_program_count(), 9);
+
+    engine.recalculate_single_threaded();
+
+    for cell in ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "A9"] {
+        assert_eq!(
+            engine.get_cell_value("Sheet1", cell),
+            Value::Error(ErrorKind::Value),
+            "expected {cell} to error for invalid text date input"
+        );
+    }
+
+    for (formula, cell) in [
+        (r#"=TBILLPRICE("1","2020-06-30",0.05)"#, "A1"),
+        (r#"=TBILLYIELD("1","2020-06-30",97)"#, "A2"),
+        (r#"=TBILLEQ("1","2020-06-30",0.05)"#, "A3"),
+        (r#"=PRICEDISC("1","2020-12-31",0.05,100)"#, "A4"),
+        (r#"=YIELDDISC("1","2020-12-31",97,100)"#, "A5"),
+        (r#"=INTRATE("1","2020-12-31",97,100)"#, "A6"),
+        (r#"=RECEIVED("1","2020-12-31",97,0.05)"#, "A7"),
+        (
+            r#"=PRICEMAT("1","2020-12-31","2019-12-31",0.05,0.04)"#,
+            "A8",
+        ),
+        (
+            r#"=YIELDMAT("1","2020-12-31","2019-12-31",0.05,95)"#,
+            "A9",
+        ),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
 fn bytecode_backend_financial_date_text_respects_value_locale() {
     let mut engine = Engine::new();
     let formula = r#"=DISC("01/02/2020","01/03/2020",97,100)"#;
