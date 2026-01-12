@@ -122,13 +122,13 @@ jobs:
         run: echo "CARGO_HOME=$HOME/.cargo" >> "$GITHUB_ENV"
 
       - name: Check formula-engine builds for wasm32
-        run: cargo check -p formula-engine --target wasm32-unknown-unknown --all-targets
+        run: cargo check -p formula-engine --target wasm32-unknown-unknown --all-targets --locked
 
       - name: Check formula-engine builds for wasm32 (no default features)
-        run: cargo check -p formula-engine --target wasm32-unknown-unknown --no-default-features --all-targets
+        run: cargo check -p formula-engine --target wasm32-unknown-unknown --no-default-features --all-targets --locked
 
       - name: Check formula-wasm builds for wasm32
-        run: cargo check -p formula-wasm --target wasm32-unknown-unknown --all-targets
+        run: cargo check -p formula-wasm --target wasm32-unknown-unknown --all-targets --locked
 
       - name: Install wasm-pack
         run: cargo install wasm-pack --locked
