@@ -5398,9 +5398,9 @@ if (
       // back to an id on navigation to avoid creating phantom sheets.
       getCurrentSheetName: () => currentSheetDisplayName(),
       onGoTo: (parsed) => {
+        const { range } = parsed;
         const sheetId = resolveSheetIdFromName(parsed.sheetName);
         if (!sheetId) return;
-        const { range } = parsed;
         if (range.startRow === range.endRow && range.startCol === range.endCol) {
           app.activateCell({ sheetId, row: range.startRow, col: range.startCol });
         } else {
