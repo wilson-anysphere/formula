@@ -7,7 +7,6 @@
 mod part_info;
 
 pub use part_info::{CellImageEmbed, CellImagesPartInfo};
-
 use std::collections::{BTreeMap, HashMap};
 
 use formula_model::drawings::{ImageData, ImageId};

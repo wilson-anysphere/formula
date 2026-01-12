@@ -73,6 +73,11 @@ test.describe("desktop OAuth redirect capture", () => {
       (window as any).__TAURI__ = {
         core: {
           invoke: async (cmd: string, args: any) => {
+            if (cmd === "open_external_url") {
+              const url = String(args?.url ?? "");
+              if (url) (window as any).__oauthOpenedUrls.push(url);
+              return null;
+            }
             if (cmd === "power_query_state_get") return null;
             if (cmd === "power_query_state_set") return null;
 
@@ -241,6 +246,11 @@ test.describe("desktop OAuth redirect capture", () => {
           invoke: async (cmd: string, args: any) => {
             invokeCalls.push({ cmd, args });
 
+            if (cmd === "open_external_url") {
+              const url = String(args?.url ?? "");
+              if (url) (window as any).__oauthOpenedUrls.push(url);
+              return null;
+            }
             if (cmd === "power_query_state_get") return null;
             if (cmd === "power_query_state_set") return null;
 
@@ -416,6 +426,11 @@ test.describe("desktop OAuth redirect capture", () => {
       (window as any).__TAURI__ = {
         core: {
           invoke: async (cmd: string, args: any) => {
+            if (cmd === "open_external_url") {
+              const url = String(args?.url ?? "");
+              if (url) (window as any).__oauthOpenedUrls.push(url);
+              return null;
+            }
             if (cmd === "power_query_state_get") return null;
             if (cmd === "power_query_state_set") return null;
 
@@ -563,6 +578,11 @@ test.describe("desktop OAuth redirect capture", () => {
       (window as any).__TAURI__ = {
         core: {
           invoke: async (cmd: string, args: any) => {
+            if (cmd === "open_external_url") {
+              const url = String(args?.url ?? "");
+              if (url) (window as any).__oauthOpenedUrls.push(url);
+              return null;
+            }
             if (cmd === "power_query_state_get") return null;
             if (cmd === "power_query_state_set") return null;
 
@@ -651,6 +671,7 @@ test.describe("desktop OAuth redirect capture", () => {
       const credentialEntries = new Map<string, { id: string; secret: any }>();
       let credentialIdCounter = 0;
 
+      (window as any).__oauthOpenedUrls = [] as string[];
       (window as any).__promptCalls = [] as Array<{ message?: string; defaultValue?: string | null }>;
 
       // Track prompt usage so tests can assert we didn't fall back to manual copy/paste.
@@ -711,6 +732,24 @@ test.describe("desktop OAuth redirect capture", () => {
       (window as any).__TAURI__ = {
         core: {
           invoke: async (cmd: string, args: any) => {
+            if (cmd === "open_external_url") {
+              const url = String(args?.url ?? "");
+              if (url) (window as any).__oauthOpenedUrls.push(url);
+              // Immediately bounce the redirect back via the event channel *before*
+              // the PKCE flow registers `waitForRedirect(...)`.
+              try {
+                const parsed = new URL(url);
+                const state = parsed.searchParams.get("state");
+                const redirectUri = parsed.searchParams.get("redirect_uri");
+                if (state && redirectUri && typeof listeners["oauth-redirect"] === "function") {
+                  const redirectUrl = `${redirectUri}?code=fake_code&state=${encodeURIComponent(state)}`;
+                  listeners["oauth-redirect"]({ payload: redirectUrl });
+                }
+              } catch {
+                // ignore invalid URLs in tests
+              }
+              return null;
+            }
             if (cmd === "power_query_state_get") return null;
             if (cmd === "power_query_state_set") return null;
 
@@ -802,7 +841,7 @@ test.describe("desktop OAuth redirect capture", () => {
     await expect(signIn).toBeVisible();
     await signIn.click();
 
-    // Shell.open triggers the oauth-redirect event immediately; the flow should still
+    // Opening the auth URL triggers the oauth-redirect event immediately; the flow should still
     // complete (without manual paste/prompt) even though the redirect arrives before
     // `waitForRedirect` is registered.
     await expect(page.getByRole("button", { name: "Sign out" }).first()).toBeVisible();
