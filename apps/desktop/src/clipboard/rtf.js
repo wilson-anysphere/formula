@@ -410,7 +410,7 @@ export function serializeCellGridToRtf(grid) {
       out.push(bold ? "\\b" : "\\b0");
       out.push(italic ? "\\i" : "\\i0");
       out.push(underline ? "\\ul" : "\\ul0");
-      out.push(` ${value}\\cell`);
+      out.push(`${value}\\cell`);
     }
 
     out.push("\\row");
@@ -571,9 +571,14 @@ export function extractPlainTextFromRtf(rtf) {
     }
 
     if (!ignorable) {
-      if (word === "tab") {
+      if (word === "tab" || word === "cell") {
         out += "\t";
-      } else if (word === "par" || word === "line") {
+      } else if (word === "par" || word === "line" || word === "row") {
+        if (word === "row") {
+          // RTF tables end each cell with \cell, including the last cell in the row.
+          // Trim the trailing tab so we don't create a phantom empty column in TSV.
+          if (out.endsWith("\t")) out = out.slice(0, -1);
+        }
         out += "\n";
       } else if (word === "u" && typeof param === "number") {
         // `\uN` is a signed 16-bit integer; map negatives back into [0, 65535].
@@ -613,5 +618,7 @@ export function extractPlainTextFromRtf(rtf) {
     }
   }
 
+  // Avoid phantom empty column on the final row when the RTF ends in `\cell`.
+  while (out.endsWith("\t")) out = out.slice(0, -1);
   return out;
 }
