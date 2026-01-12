@@ -27,6 +27,8 @@ const MAX_DECODED_RGBA_BYTES: usize = 4 * super::MAX_IMAGE_BYTES;
 const BITMAPINFOHEADER_SIZE: usize = 40;
 const BITMAPV5HEADER_SIZE: usize = 124;
 const BI_RGB: u32 = 0;
+const BI_RLE8: u32 = 1;
+const BI_RLE4: u32 = 2;
 const BI_BITFIELDS: u32 = 3;
 const BI_PNG: u32 = 5;
 const BI_ALPHABITFIELDS: u32 = 6;
@@ -102,6 +104,230 @@ fn read_bitfield_masks(
     }
 
     None
+}
+
+fn decode_rle8(data: &[u8], width: usize, height: usize) -> Result<Vec<u8>, String> {
+    let len = width
+        .checked_mul(height)
+        .ok_or_else(|| "rle8 decoded index buffer overflows".to_string())?;
+    let mut out = vec![0u8; len];
+
+    let mut x: usize = 0;
+    let mut y: usize = 0;
+    let mut i: usize = 0;
+
+    while i + 1 < data.len() && y < height {
+        let count = data[i] as usize;
+        let value = data[i + 1];
+        i += 2;
+
+        if count == 0 {
+            match value {
+                0 => {
+                    // End of line.
+                    x = 0;
+                    y = y.saturating_add(1);
+                }
+                1 => {
+                    // End of bitmap.
+                    break;
+                }
+                2 => {
+                    // Delta: move by dx, dy.
+                    if i + 1 >= data.len() {
+                        return Err("rle8 delta is truncated".to_string());
+                    }
+                    let dx = data[i] as usize;
+                    let dy = data[i + 1] as usize;
+                    i += 2;
+
+                    x = x.saturating_add(dx);
+                    y = y.saturating_add(dy);
+
+                    if x > width {
+                        x = width;
+                    }
+                    if y > height {
+                        y = height;
+                    }
+                }
+                n => {
+                    // Absolute mode: copy the next n bytes literally.
+                    let n = n as usize;
+                    if x == width {
+                        // Some producers omit end-of-line markers; treat this as an implicit new line.
+                        x = 0;
+                        y = y.saturating_add(1);
+                        if y >= height {
+                            break;
+                        }
+                    }
+                    if i + n > data.len() {
+                        return Err("rle8 absolute mode is truncated".to_string());
+                    }
+
+                    let remaining = width.saturating_sub(x);
+                    let take = remaining.min(n);
+                    for j in 0..take {
+                        out[y * width + x] = data[i + j];
+                        x += 1;
+                    }
+                    // Discard any pixels that would exceed the row width.
+                    if take < n {
+                        x = width;
+                    }
+                    i += n;
+
+                    // Pad to word boundary.
+                    if n % 2 == 1 {
+                        if i < data.len() {
+                            i += 1;
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            }
+        } else {
+            if x == width {
+                // Some producers omit end-of-line markers; treat this as an implicit new line.
+                x = 0;
+                y = y.saturating_add(1);
+                if y >= height {
+                    break;
+                }
+            }
+
+            let remaining = width.saturating_sub(x);
+            let take = remaining.min(count);
+            for _ in 0..take {
+                out[y * width + x] = value;
+                x += 1;
+            }
+            // Discard any pixels that would exceed the row width.
+            if take < count {
+                x = width;
+            }
+        }
+    }
+
+    Ok(out)
+}
+
+fn decode_rle4(data: &[u8], width: usize, height: usize) -> Result<Vec<u8>, String> {
+    let len = width
+        .checked_mul(height)
+        .ok_or_else(|| "rle4 decoded index buffer overflows".to_string())?;
+    let mut out = vec![0u8; len];
+
+    let mut x: usize = 0;
+    let mut y: usize = 0;
+    let mut i: usize = 0;
+
+    while i + 1 < data.len() && y < height {
+        let count = data[i] as usize;
+        let value = data[i + 1];
+        i += 2;
+
+        if count == 0 {
+            match value {
+                0 => {
+                    // End of line.
+                    x = 0;
+                    y = y.saturating_add(1);
+                }
+                1 => {
+                    // End of bitmap.
+                    break;
+                }
+                2 => {
+                    // Delta: move by dx, dy.
+                    if i + 1 >= data.len() {
+                        return Err("rle4 delta is truncated".to_string());
+                    }
+                    let dx = data[i] as usize;
+                    let dy = data[i + 1] as usize;
+                    i += 2;
+
+                    x = x.saturating_add(dx);
+                    y = y.saturating_add(dy);
+
+                    if x > width {
+                        x = width;
+                    }
+                    if y > height {
+                        y = height;
+                    }
+                }
+                n => {
+                    // Absolute mode: n pixels follow, packed 2 per byte (high nibble first).
+                    let n = n as usize;
+                    if x == width {
+                        // Some producers omit end-of-line markers; treat this as an implicit new line.
+                        x = 0;
+                        y = y.saturating_add(1);
+                        if y >= height {
+                            break;
+                        }
+                    }
+
+                    let bytes = (n + 1) / 2;
+                    if i + bytes > data.len() {
+                        return Err("rle4 absolute mode is truncated".to_string());
+                    }
+
+                    let remaining = width.saturating_sub(x);
+                    let take = remaining.min(n);
+                    for p in 0..take {
+                        let b = data[i + p / 2];
+                        let idx = if p % 2 == 0 { b >> 4 } else { b & 0x0F };
+                        out[y * width + x] = idx;
+                        x += 1;
+                    }
+                    // Discard any pixels that would exceed the row width.
+                    if take < n {
+                        x = width;
+                    }
+                    i += bytes;
+
+                    // Pad to word boundary: if the number of bytes in the absolute segment is odd.
+                    if bytes % 2 == 1 {
+                        if i < data.len() {
+                            i += 1;
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            }
+        } else {
+            if x == width {
+                // Some producers omit end-of-line markers; treat this as an implicit new line.
+                x = 0;
+                y = y.saturating_add(1);
+                if y >= height {
+                    break;
+                }
+            }
+
+            let hi = value >> 4;
+            let lo = value & 0x0F;
+
+            let remaining = width.saturating_sub(x);
+            let take = remaining.min(count);
+            for p in 0..take {
+                let idx = if p % 2 == 0 { hi } else { lo };
+                out[y * width + x] = idx;
+                x += 1;
+            }
+            // Discard any pixels that would exceed the row width.
+            if take < count {
+                x = width;
+            }
+        }
+    }
+
+    Ok(out)
 }
 
 fn read_u16_le(bytes: &[u8], offset: usize) -> Option<u16> {
@@ -517,7 +743,7 @@ pub fn dibv5_to_png(dib_bytes: &[u8]) -> Result<Vec<u8>, String> {
             (row, stride)
         }
         8 => {
-            if compression != BI_RGB {
+            if compression != BI_RGB && compression != BI_RLE8 {
                 return Err(format!(
                     "unsupported DIB compression for 8bpp: {compression}"
                 ));
@@ -530,7 +756,7 @@ pub fn dibv5_to_png(dib_bytes: &[u8]) -> Result<Vec<u8>, String> {
             (row, stride)
         }
         4 => {
-            if compression != BI_RGB {
+            if compression != BI_RGB && compression != BI_RLE4 {
                 return Err(format!(
                     "unsupported DIB compression for 4bpp: {compression}"
                 ));
@@ -611,6 +837,70 @@ pub fn dibv5_to_png(dib_bytes: &[u8]) -> Result<Vec<u8>, String> {
         }
         palette = Some(table);
         pixel_offset = table_end;
+    }
+
+    if compression == BI_RLE8 || compression == BI_RLE4 {
+        let table = palette
+            .as_deref()
+            .ok_or_else(|| "dib palette is missing".to_string())?;
+        let size_image = read_u32_le(dib_bytes, 20).unwrap_or(0) as usize;
+        let start = pixel_offset;
+        let end = if size_image == 0 {
+            dib_bytes.len()
+        } else {
+            start
+                .checked_add(size_image)
+                .ok_or_else(|| "dib RLE size overflow".to_string())?
+        };
+        if end > dib_bytes.len() {
+            return Err("dib RLE data exceeds buffer length".to_string());
+        }
+        if end <= start {
+            return Err("dib RLE data is empty".to_string());
+        }
+        let data = &dib_bytes[start..end];
+
+        let indices = match compression {
+            BI_RLE8 => {
+                if bit_count != 8 {
+                    return Err("unsupported BI_RLE8 bit depth".to_string());
+                }
+                decode_rle8(data, width_usize, height_usize)?
+            }
+            BI_RLE4 => {
+                if bit_count != 4 {
+                    return Err("unsupported BI_RLE4 bit depth".to_string());
+                }
+                decode_rle4(data, width_usize, height_usize)?
+            }
+            _ => unreachable!(),
+        };
+
+        let bottom_up = height > 0;
+        let mut rgba = Vec::with_capacity(rgba_len);
+        for y in 0..height_usize {
+            let src_y = if bottom_up {
+                height_usize - 1 - y
+            } else {
+                y
+            };
+            let row_start = src_y
+                .checked_mul(width_usize)
+                .ok_or_else(|| "dib row offset overflows".to_string())?;
+            let row_end = row_start
+                .checked_add(width_usize)
+                .ok_or_else(|| "dib row offset overflows".to_string())?;
+            let row = indices
+                .get(row_start..row_end)
+                .ok_or_else(|| "dib rle indices out of range".to_string())?;
+            for &idx in row {
+                let color = table
+                    .get(idx as usize)
+                    .ok_or_else(|| format!("dib palette index out of range: {idx}"))?;
+                rgba.extend_from_slice(color);
+            }
+        }
+        return encode_png_rgba8(width_u32, height_u32, &rgba);
     }
 
     // For BI_BITFIELDS / BI_ALPHABITFIELDS we may have explicit channel masks. When present, use
@@ -1316,6 +1606,68 @@ mod tests {
         let png = dibv5_to_png(&dib).expect("dibv5_to_png failed");
         let (_w, _h, px) = decode_png(&png);
         assert_eq!(px, vec![0, 0, 0, 255, 255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn dib8_bi_rle8_palette_decodes_correctly() {
+        // BITMAPINFOHEADER (40 bytes) + palette + RLE8 data (bottom-up).
+        let rle = vec![1, 0, 1, 1, 0, 0, 0, 1]; // 2 pixels + EOL + EOB
+
+        let mut dib = Vec::new();
+        push_u32_le(&mut dib, BITMAPINFOHEADER_SIZE as u32); // biSize
+        push_i32_le(&mut dib, 2); // biWidth
+        push_i32_le(&mut dib, 1); // biHeight (bottom-up)
+        push_u16_le(&mut dib, 1); // biPlanes
+        push_u16_le(&mut dib, 8); // biBitCount
+        push_u32_le(&mut dib, BI_RLE8); // biCompression
+        push_u32_le(&mut dib, rle.len() as u32); // biSizeImage
+        push_i32_le(&mut dib, 0); // biXPelsPerMeter
+        push_i32_le(&mut dib, 0); // biYPelsPerMeter
+        push_u32_le(&mut dib, 2); // biClrUsed
+        push_u32_le(&mut dib, 0); // biClrImportant
+
+        debug_assert_eq!(dib.len(), BITMAPINFOHEADER_SIZE);
+
+        // Palette: 0 => red, 1 => green.
+        dib.extend_from_slice(&[0, 0, 255, 0]);
+        dib.extend_from_slice(&[0, 255, 0, 0]);
+
+        dib.extend_from_slice(&rle);
+
+        let png = dibv5_to_png(&dib).expect("dibv5_to_png failed");
+        let (_w, _h, px) = decode_png(&png);
+        assert_eq!(px, vec![255, 0, 0, 255, 0, 255, 0, 255]);
+    }
+
+    #[test]
+    fn dib4_bi_rle4_palette_decodes_correctly() {
+        // BITMAPINFOHEADER (40 bytes) + palette + RLE4 data (bottom-up).
+        let rle = vec![2, 0x01, 0, 0, 0, 1]; // 2 pixels + EOL + EOB
+
+        let mut dib = Vec::new();
+        push_u32_le(&mut dib, BITMAPINFOHEADER_SIZE as u32); // biSize
+        push_i32_le(&mut dib, 2); // biWidth
+        push_i32_le(&mut dib, 1); // biHeight (bottom-up)
+        push_u16_le(&mut dib, 1); // biPlanes
+        push_u16_le(&mut dib, 4); // biBitCount
+        push_u32_le(&mut dib, BI_RLE4); // biCompression
+        push_u32_le(&mut dib, rle.len() as u32); // biSizeImage
+        push_i32_le(&mut dib, 0); // biXPelsPerMeter
+        push_i32_le(&mut dib, 0); // biYPelsPerMeter
+        push_u32_le(&mut dib, 2); // biClrUsed
+        push_u32_le(&mut dib, 0); // biClrImportant
+
+        debug_assert_eq!(dib.len(), BITMAPINFOHEADER_SIZE);
+
+        // Palette: 0 => blue, 1 => yellow.
+        dib.extend_from_slice(&[255, 0, 0, 0]); // blue
+        dib.extend_from_slice(&[0, 255, 255, 0]); // yellow
+
+        dib.extend_from_slice(&rle);
+
+        let png = dibv5_to_png(&dib).expect("dibv5_to_png failed");
+        let (_w, _h, px) = decode_png(&png);
+        assert_eq!(px, vec![0, 0, 255, 255, 255, 255, 0, 255]);
     }
 
     #[test]
