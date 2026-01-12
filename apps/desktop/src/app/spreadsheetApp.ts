@@ -49,7 +49,6 @@ import {
   normalizeSelectionRange,
 } from "../formatting/selectionSizeGuard.js";
 import { formatValueWithNumberFormat } from "../formatting/numberFormat.ts";
-import { dateToExcelSerial } from "../shared/valueParsing.js";
 import { createDesktopDlpContext } from "../dlp/desktopDlp.js";
 import { enforceClipboardCopy } from "../dlp/enforceClipboardCopy.js";
 import { DlpViolationError } from "../../../../packages/security/dlp/src/errors.js";
@@ -90,6 +89,7 @@ import * as Y from "yjs";
 import { CommentManager, bindDocToStorage, createCommentManagerForDoc, getCommentsRoot } from "@formula/collab-comments";
 import type { Comment, CommentAuthor } from "@formula/collab-comments";
 import { bindCollabSessionToDocumentController, createCollabSession, type CollabSession } from "@formula/collab-session";
+import { IndexedDbCollabPersistence } from "@formula/collab-persistence/indexeddb";
 import { getCollabUserIdentity, type CollabUserIdentity } from "../collab/userIdentity";
 
 import { PresenceRenderer } from "../grid/presence-renderer/presenceRenderer.js";
@@ -372,10 +372,34 @@ export type SpreadsheetAppCollabOptions = {
   wsUrl: string;
   docId: string;
   token?: string;
-  offlineEnabled?: boolean;
+  /**
+   * Local durability (offline-first) for the collaborative Yjs document.
+   *
+   * Defaults to enabled; can be disabled via `?collabPersistence=0` for debugging.
+   */
+  persistenceEnabled?: boolean;
   user: CollabUserIdentity;
   disableBc?: boolean;
 };
+
+function resolveCollabPersistenceEnabled(params: URLSearchParams): boolean {
+  const raw = params.get("collabPersistence");
+  if (raw != null) {
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === "0" || normalized === "false" || normalized === "no" || normalized === "off") return false;
+    if (normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on") return true;
+  }
+
+  // Backwards compatibility: `collabOffline=0` historically disabled local durability.
+  // We now use `CollabSession.persistence`; treat it as an alias.
+  const offlineRaw = params.get("collabOffline");
+  if (offlineRaw != null) {
+    const normalized = String(offlineRaw).trim().toLowerCase();
+    if (normalized === "0" || normalized === "false" || normalized === "no" || normalized === "off") return false;
+  }
+
+  return true;
+}
 
 function resolveCollabOptionsFromUrl(): SpreadsheetAppCollabOptions | null {
   if (typeof window === "undefined") return null;
@@ -415,17 +439,13 @@ function resolveCollabOptionsFromUrl(): SpreadsheetAppCollabOptions | null {
     const identity = getCollabUserIdentity({ search: window.location.search });
     const disableBcRaw = params.get("collabDisableBc") ?? params.get("disableBc");
     const disableBc = disableBcRaw === "1" || disableBcRaw === "true" || disableBcRaw === "yes";
-    const offlineRaw = params.get("collabOffline");
-    const offlineEnabled =
-      offlineRaw == null
-        ? true
-        : !["0", "false", "off", "no"].includes(String(offlineRaw).trim().toLowerCase());
+    const persistenceEnabled = resolveCollabPersistenceEnabled(params);
     return {
       wsUrl,
       docId,
       token,
       disableBc,
-      offlineEnabled,
+      persistenceEnabled,
       user: identity,
     };
   } catch {
@@ -450,7 +470,7 @@ function resolveCollabOptionsFromStoredConnection(workbookId: string | undefined
     wsUrl: stored.wsUrl,
     docId: stored.docId,
     token,
-    offlineEnabled: true,
+    persistenceEnabled: resolveCollabPersistenceEnabled(new URL(window.location.href).searchParams),
     user: getCollabUserIdentity({ search: window.location.search }),
   };
 }
@@ -777,20 +797,17 @@ export class SpreadsheetApp {
       // operations) still propagate back into the DocumentController.
       const binderOrigin = { type: "desktop-document-controller:binder" };
 
-      const offlineEnabled = collab.offlineEnabled ?? true;
+      const persistence = collab.persistenceEnabled === false ? undefined : new IndexedDbCollabPersistence();
 
       this.collabSession = createCollabSession({
-        connection: { wsUrl: collab.wsUrl, docId: collab.docId, token: collab.token, disableBc: collab.disableBc },
-        ...(offlineEnabled
-          ? {
-              offline: {
-                mode: "indexeddb",
-                key: collab.docId,
-                autoLoad: true,
-                autoConnectAfterLoad: true,
-              },
-            }
-          : {}),
+        docId: collab.docId,
+        persistence,
+        connection: {
+          wsUrl: collab.wsUrl,
+          docId: collab.docId,
+          token: collab.token,
+          disableBc: collab.disableBc,
+        },
         presence: { user: collab.user, activeSheet: this.sheetId },
         // Enable formula/value conflict monitoring in collab mode.
         formulaConflicts: {
@@ -7447,11 +7464,8 @@ export class SpreadsheetApp {
     if (this.editor.isOpen()) return false;
     if (this.inlineEditController.isOpen()) return false;
     e.preventDefault();
-    if (e.shiftKey) {
-      this.insertCurrentDateTimeIntoSelectionExcelSerial("time");
-    } else {
-      this.insertCurrentDateTimeIntoSelectionExcelSerial("date");
-    }
+    if (e.shiftKey) this.insertCurrentDateTimeIntoSelection("time");
+    else this.insertCurrentDateTimeIntoSelection("date");
     this.refresh();
     this.focus();
     return true;
@@ -7518,81 +7532,6 @@ export class SpreadsheetApp {
 
         const values = Array.from({ length: rowCount }, () => Array(colCount).fill(stringValue));
         this.document.setRangeValues(this.sheetId, { row: range.startRow, col: range.startCol }, values);
-      }
-    } finally {
-      this.document.endBatch();
-    }
-  }
-
-  private insertCurrentDateTimeIntoSelectionExcelSerial(kind: "date" | "time"): void {
-    const now = new Date();
-
-    const value = (() => {
-      if (kind === "date") {
-        // Excel stores dates as integer serials (1900 date system).
-        // Interpret the "current date" in local time, but convert to a UTC midnight
-        // date for deterministic serial conversion.
-        const y = now.getFullYear();
-        const m = now.getMonth();
-        const d = now.getDate();
-        return dateToExcelSerial(new Date(Date.UTC(y, m, d)));
-      }
-
-      const seconds = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
-      return seconds / 86_400;
-    })();
-
-    const numberFormat = kind === "date" ? "yyyy-mm-dd" : "hh:mm:ss";
-    const label = kind === "date" ? t("command.edit.insertDate") : t("command.edit.insertTime");
-
-    const normalizeRange = (range: Range): Range => ({
-      startRow: Math.min(range.startRow, range.endRow),
-      endRow: Math.max(range.startRow, range.endRow),
-      startCol: Math.min(range.startCol, range.endCol),
-      endCol: Math.max(range.startCol, range.endCol),
-    });
-
-    const MAX_SELECTED_CELLS = 10_000;
-    const selectedCellCount = (() => {
-      let count = 0;
-      for (const rawRange of this.selection.ranges) {
-        const range = normalizeRange(rawRange);
-        const rowCount = range.endRow - range.startRow + 1;
-        const colCount = range.endCol - range.startCol + 1;
-        if (rowCount <= 0 || colCount <= 0) continue;
-        count += rowCount * colCount;
-        if (count > MAX_SELECTED_CELLS) break;
-      }
-      return count;
-    })();
-
-    const targetRanges: Range[] =
-      selectedCellCount > MAX_SELECTED_CELLS
-        ? [
-            {
-              startRow: this.selection.active.row,
-              endRow: this.selection.active.row,
-              startCol: this.selection.active.col,
-              endCol: this.selection.active.col,
-            },
-          ]
-        : this.selection.ranges;
-
-    this.document.beginBatch({ label });
-    try {
-      for (const rawRange of targetRanges) {
-        const range = normalizeRange(rawRange);
-        const rowCount = range.endRow - range.startRow + 1;
-        const colCount = range.endCol - range.startCol + 1;
-        if (rowCount <= 0 || colCount <= 0) continue;
-
-        const values = Array.from({ length: rowCount }, () => Array(colCount).fill(value));
-        this.document.setRangeValues(this.sheetId, { row: range.startRow, col: range.startCol }, values);
-        this.document.setRangeFormat(
-          this.sheetId,
-          { start: { row: range.startRow, col: range.startCol }, end: { row: range.endRow, col: range.endCol } },
-          { numberFormat }
-        );
       }
     } finally {
       this.document.endBatch();

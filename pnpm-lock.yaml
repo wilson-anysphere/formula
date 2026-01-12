@@ -59,6 +59,9 @@ importers:
       '@formula/collab-comments':
         specifier: workspace:*
         version: link:../../packages/collab/comments
+      '@formula/collab-persistence':
+        specifier: workspace:*
+        version: link:../../packages/collab/persistence
       '@formula/collab-presence':
         specifier: workspace:*
         version: link:../../packages/collab/presence

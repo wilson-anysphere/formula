@@ -473,48 +473,22 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
   let providerStatus: string | null = null;
   let providerSynced: boolean | null = null;
   let hasEverSynced = false;
-  let currentOffline: unknown = null;
-  let offlinePollTimer: number | null = null;
   let providerPollTimer: number | null = null;
-
-  const stopOfflinePoll = (): void => {
-    if (offlinePollTimer == null) return;
-    globalThis.clearTimeout(offlinePollTimer);
-    offlinePollTimer = null;
-  };
 
   const stopProviderPoll = (): void => {
     if (providerPollTimer == null) return;
     globalThis.clearTimeout(providerPollTimer);
     providerPollTimer = null;
   };
-
-  const startOfflinePoll = (offline: unknown): void => {
-    if (offlinePollTimer != null) return;
-    // Polling is a last resort (offline persistence does not currently expose events).
-    // Keep the interval modest and only run while the indicator is in Loading… state.
-    const tick = (): void => {
-      if (abortController.signal.aborted) {
-        stopOfflinePoll();
-        return;
-      }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const loaded = (offline as any)?.isLoaded;
-      if (loaded === true) {
-        stopOfflinePoll();
-        render();
-        return;
-      }
-      offlinePollTimer = globalThis.setTimeout(tick, 1000) as unknown as number;
-    };
-    offlinePollTimer = globalThis.setTimeout(tick, 250) as unknown as number;
-  };
+  let currentPersistenceSession: unknown = null;
+  let localPersistenceLoaded: boolean | null = null;
+  let localPersistenceWaitStarted = false;
 
   const startProviderPoll = (): void => {
     if (providerPollTimer != null) return;
-    // Similar to `startOfflinePoll`, re-arm on each tick only if polling is still needed.
-    // This avoids a race where `render()` decides polling is no longer required but the
-    // polling tick would otherwise reschedule itself unconditionally.
+    // Re-arm on each tick only if polling is still needed. This avoids a race where
+    // `render()` decides polling is no longer required but the polling tick would
+    // otherwise reschedule itself unconditionally.
     const tick = (): void => {
       if (abortController.signal.aborted) {
         stopProviderPoll();
@@ -623,13 +597,14 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
     const session = getSession();
     if (!session) {
       detachProviderListeners(currentProvider);
-      stopOfflinePoll();
       stopProviderPoll();
       currentProvider = null;
       providerStatus = null;
       providerSynced = null;
       hasEverSynced = false;
-      currentOffline = null;
+      currentPersistenceSession = null;
+      localPersistenceLoaded = null;
+      localPersistenceWaitStarted = false;
       setIndicatorText("Local", { mode: "local" });
       return;
     }
@@ -638,24 +613,35 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
     const s = session as any;
     const docId = getDocId(session);
 
-    const offline = s?.offline as unknown;
-    let offlineLoaded: boolean | null = null;
-    if (offline && typeof offline === "object") {
+    const hasLocalPersistence = Boolean(s?.persistence);
+    if (session !== currentPersistenceSession) {
+      currentPersistenceSession = session;
+      localPersistenceLoaded = hasLocalPersistence ? false : null;
+      localPersistenceWaitStarted = false;
+    }
+
+    const persistenceLoading = hasLocalPersistence && localPersistenceLoaded !== true;
+    if (persistenceLoading && !localPersistenceWaitStarted) {
+      localPersistenceWaitStarted = true;
+      const sessionForWait = session;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const loaded = (offline as any).isLoaded;
-      if (typeof loaded === "boolean") offlineLoaded = loaded;
-    }
-
-    const offlineLoading = offlineLoaded === false;
-    if (offline !== currentOffline) {
-      currentOffline = offline;
-      stopOfflinePoll();
-    }
-
-    if (offlineLoading && offline && typeof offline === "object") {
-      startOfflinePoll(offline);
-    } else {
-      stopOfflinePoll();
+      const whenLoaded = (s as any).whenLocalPersistenceLoaded as (() => Promise<void>) | undefined;
+      if (typeof whenLoaded === "function") {
+        void Promise.resolve()
+          .then(() => whenLoaded.call(s))
+          .catch(() => {
+            // Local persistence load failures should not crash the UI; CollabSession
+            // can still operate in online mode.
+          })
+          .finally(() => {
+            if (currentPersistenceSession !== sessionForWait) return;
+            localPersistenceLoaded = true;
+            if (!abortController.signal.aborted) render();
+          });
+      } else {
+        // No explicit signal; treat persistence as ready.
+        localPersistenceLoaded = true;
+      }
     }
 
     const provider = (s?.provider as unknown) ?? null;
@@ -670,7 +656,7 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
       attachProviderListeners(currentProvider);
     }
 
-    if (offlineLoading) {
+    if (persistenceLoading) {
       setIndicatorText(`${docId} • Loading…`, { mode: "collab", conn: "loading", sync: "loading", docId });
       return;
     }
@@ -753,7 +739,6 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
     window.removeEventListener("online", onNetworkChange);
     window.removeEventListener("offline", onNetworkChange);
     detachProviderListeners(currentProvider);
-    stopOfflinePoll();
     stopProviderPoll();
   });
 

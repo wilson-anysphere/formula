@@ -69,6 +69,8 @@ Window 2:
 http://localhost:4174/?collab=1&wsUrl=ws://127.0.0.1:1234&docId=demo&token=dev-token&collabUserId=u2&collabUserName=Bob&collabUserColor=%23f97316
 ```
 
+Local persistence is enabled by default (IndexedDB). To disable it for debugging, add `&collabPersistence=0`.
+
 Edits and comments should sync in real-time.
 
 The status bar shows a collaboration indicator (`Collab: …`) with:
@@ -334,7 +336,8 @@ Params:
 - `wsUrl` is the base sync-server URL (no trailing `/docId`)
 - `docId` is the shared document/room name (must match across clients)
 - `token` must match the sync-server auth token (defaults to `dev-token`)
-- `collabOffline=0` disables offline persistence (IndexedDB) for debugging/tests (default: enabled)
+- `collabPersistence=0` disables local persistence (IndexedDB) for debugging/tests (default: enabled)
+  - Legacy alias (deprecated): `collabOffline=0`
 - `collabUserId`, `collabUserName`, `collabUserColor` override the per-client identity used for presence/comments/conflicts
   - `collabUserColor` must be URL-encoded (`#` → `%23`)
   - Legacy aliases are still accepted: `userId`, `userName`, `userColor`

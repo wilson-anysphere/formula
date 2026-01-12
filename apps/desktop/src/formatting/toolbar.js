@@ -33,7 +33,7 @@ function ensureSafeFormattingRange(rangeOrRanges) {
   const showTooLargeToast = () => {
     try {
       showToast(
-        `Selection too large to apply formatting (>${MAX_RANGE_FORMATTING_CELLS.toLocaleString()} cells). Select fewer cells and try again.`,
+        `Selection too large to apply formatting (>${MAX_RANGE_FORMATTING_CELLS} cells). Select fewer cells and try again.`,
         "warning",
       );
     } catch {
