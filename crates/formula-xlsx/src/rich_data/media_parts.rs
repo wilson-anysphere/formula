@@ -8,7 +8,7 @@ impl XlsxPackage {
     ///
     /// Prefer [`XlsxPackage::rich_data_media_parts`], which performs a best-effort traversal of the
     /// RichData relationship graph.
-    pub fn extract_rich_data_images(&self) -> Result<BTreeMap<String, Vec<u8>>, XlsxError> {
+    pub fn extract_rich_data_media_parts(&self) -> Result<BTreeMap<String, Vec<u8>>, XlsxError> {
         Ok(self.rich_data_media_parts())
     }
 
