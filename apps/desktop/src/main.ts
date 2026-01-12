@@ -2916,6 +2916,12 @@ if (
     formulaBar.root.addEventListener("click", () => syncSecondaryGridInteractionModeSoon());
   }
 
+  // Programmatic formula bar commit/cancel (e.g. File → Save calling `commitPendingEditsForCommand()`)
+  // may not produce textarea blur/input events. Subscribe to SpreadsheetApp edit-state changes so we
+  // always leave split-view range-selection mode when formula editing ends.
+  const unsubscribeSplitViewEditStateSync = app.onEditStateChange(() => syncSecondaryGridInteractionModeSoon());
+  window.addEventListener("unload", () => unsubscribeSplitViewEditStateSync());
+
   // Range selection insertion updates the formula bar draft + reference highlights via
   // `FormulaBarView.begin/updateRangeSelection()`, which are programmatic (no textarea `input`
   // events). When split view is active, mirror those changing highlights onto the secondary pane
