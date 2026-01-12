@@ -219,19 +219,28 @@ pub(crate) fn content_types_remove_calc_chain(ct_xml: &[u8]) -> Result<Vec<u8>, 
         let event = reader.read_event_into(&mut buf)?;
         match event {
             Event::Eof => break,
-            Event::Start(ref e) if e.name().as_ref() == b"Override" => {
+            // `[Content_Types].xml` can be either prefix-free (`<Override>`) or namespace-prefixed
+            // (`<ct:Override>`). Match on local name so we can remove `xl/calcChain.xml` overrides
+            // in both forms, while preserving the original prefixes when writing other events.
+            Event::Start(ref e)
+                if crate::openxml::local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Override") =>
+            {
                 if override_part_name_is_calc_chain(e)? {
                     skipping = true;
                 } else {
                     writer.write_event(Event::Start(e.to_owned()))?;
                 }
             }
-            Event::Empty(ref e) if e.name().as_ref() == b"Override" => {
+            Event::Empty(ref e)
+                if crate::openxml::local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Override") =>
+            {
                 if !override_part_name_is_calc_chain(e)? {
                     writer.write_event(Event::Empty(e.to_owned()))?;
                 }
             }
-            Event::End(ref e) if skipping && e.name().as_ref() == b"Override" => {
+            Event::End(ref e)
+                if skipping && crate::openxml::local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Override") =>
+            {
                 skipping = false;
             }
             ev if skipping => drop(ev),
@@ -246,7 +255,8 @@ pub(crate) fn content_types_remove_calc_chain(ct_xml: &[u8]) -> Result<Vec<u8>, 
 fn override_part_name_is_calc_chain(e: &BytesStart<'_>) -> Result<bool, RecalcPolicyError> {
     for attr in e.attributes() {
         let attr = attr?;
-        if attr.key.as_ref() == b"PartName" {
+        let key = crate::openxml::local_name(attr.key.as_ref());
+        if key.eq_ignore_ascii_case(b"PartName") {
             let value = attr.unescape_value()?;
             return Ok(value.as_ref().ends_with("calcChain.xml"));
         }
@@ -273,10 +283,14 @@ mod tests {
                 .expect("read content types xml event")
             {
                 Event::Eof => break,
-                Event::Start(ref e) | Event::Empty(ref e) if e.name().as_ref() == b"Override" => {
+                Event::Start(ref e) | Event::Empty(ref e)
+                    if crate::openxml::local_name(e.name().as_ref())
+                        .eq_ignore_ascii_case(b"Override") =>
+                {
                     for attr in e.attributes() {
                         let attr = attr.expect("read Override attribute");
-                        if attr.key.as_ref() != b"PartName" {
+                        let key = crate::openxml::local_name(attr.key.as_ref());
+                        if !key.eq_ignore_ascii_case(b"PartName") {
                             continue;
                         }
                         let part_name = attr
@@ -329,5 +343,24 @@ mod tests {
         .collect();
 
         assert_eq!(updated_overrides, expected);
+    }
+
+    #[test]
+    fn content_types_remove_calc_chain_removes_prefixed_override() {
+        let input = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ct:Types xmlns:ct="http://schemas.openxmlformats.org/package/2006/content-types">
+  <ct:Override PartName="/xl/calcChain.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.calcChain+xml"/>
+</ct:Types>
+"#;
+
+        let updated =
+            content_types_remove_calc_chain(input.as_bytes()).expect("rewrite content types");
+        let updated = std::str::from_utf8(&updated).expect("utf8 updated content types");
+
+        // Calc chain override removed.
+        assert!(!updated.contains("calcChain.xml"));
+
+        // Preserve original prefixes for unrelated elements.
+        assert!(updated.contains("<ct:Types"));
     }
 }
