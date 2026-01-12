@@ -378,7 +378,7 @@ Some features intentionally perform **bulk rewrites** of workbook state (effecti
 
 These origins are **not** “local user edits” and should be treated specially:
 
-- Formula/value conflict monitors (`FormulaConflictMonitor`, `CellConflictMonitor`) accept an `ignoredOrigins` set to completely ignore these transactions
+- Conflict monitors (`FormulaConflictMonitor`, `CellConflictMonitor`, `CellStructuralConflictMonitor`) accept an `ignoredOrigins` set to completely ignore these transactions
   (no conflicts emitted and no local-edit tracking updates). `createCollabSession` configures this by default.
 - Structural conflict monitoring (`CellStructuralConflictMonitor`) only logs operations for origins in its `localOrigins` set; bulk apply origins should not be included.
 
