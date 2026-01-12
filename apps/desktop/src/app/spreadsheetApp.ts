@@ -4269,6 +4269,11 @@ export class SpreadsheetApp {
   }
 
   private rebuildAxisVisibilityCache(): void {
+    if (this.sharedGrid) {
+      // Shared-grid mode intentionally does not build the legacy row/col visibility caches.
+      // Building them is O(maxRows/maxCols) and would be prohibitively expensive for large sheets.
+      return;
+    }
     this.rowIndexByVisual = [];
     this.colIndexByVisual = [];
     this.rowToVisual.clear();
@@ -4917,6 +4922,11 @@ export class SpreadsheetApp {
   }
 
   private ensureActiveCellVisible(): void {
+    if (this.sharedGrid) {
+      // Shared-grid mode does not support hidden rows/cols yet, so the active cell never needs
+      // to be remapped to a "visible" index. Avoid referencing legacy visibility caches.
+      return;
+    }
     const range = this.selection.ranges[this.selection.activeRangeIndex] ?? this.selection.ranges[0] ?? null;
     let { row, col } = this.selection.active;
     let canPreserveSelection = range != null;
@@ -5864,7 +5874,8 @@ export class SpreadsheetApp {
     if (e.altKey && e.shiftKey && (e.key === "ArrowRight" || e.key === "ArrowLeft")) {
       if (this.sharedGrid) {
         // Shared-grid mode doesn't currently implement outline groups or hidden rows/cols.
-        // Treat the shortcut as a no-op so it doesn't affect legacy visibility caches or navigation.
+        // Treat the shortcut as a no-op (legacy outline logic rebuilds visibility caches which are
+        // too expensive for large sheets).
         e.preventDefault();
         return;
       }
@@ -5904,17 +5915,22 @@ export class SpreadsheetApp {
       this.ensureActiveCellVisible();
       const dir = e.key === "PageDown" ? 1 : -1;
       if (this.sharedGrid) {
-        // Shared grid does not build legacy row/col visibility maps. Use direct index
-        // math against the document coordinate space (rows/cols are not hidden in
-        // shared mode yet).
+        const viewport = this.sharedGrid.renderer.scroll.getViewportState();
+        const defaultRowHeight = this.sharedGrid.renderer.scroll.rows.defaultSize;
+        const defaultColWidth = this.sharedGrid.renderer.scroll.cols.defaultSize;
+
+        const scrollableHeight = Math.max(0, viewport.height - viewport.frozenHeight);
+        const scrollableWidth = Math.max(0, viewport.width - viewport.frozenWidth);
+
+        const pageRows = Math.max(1, Math.floor(scrollableHeight / defaultRowHeight));
+        const pageCols = Math.max(1, Math.floor(scrollableWidth / defaultColWidth));
+
         if (e.altKey) {
-          const pageCols = Math.max(1, Math.floor(this.viewportWidth() / this.cellWidth));
           const col = Math.max(0, Math.min(this.limits.maxCols - 1, this.selection.active.col + dir * pageCols));
           this.selection = e.shiftKey
             ? extendSelectionToCell(this.selection, { row: this.selection.active.row, col }, this.limits)
             : setActiveCell(this.selection, { row: this.selection.active.row, col }, this.limits);
         } else {
-          const pageRows = Math.max(1, Math.floor(this.viewportHeight() / this.cellHeight));
           const row = Math.max(0, Math.min(this.limits.maxRows - 1, this.selection.active.row + dir * pageRows));
           this.selection = e.shiftKey
             ? extendSelectionToCell(this.selection, { row, col: this.selection.active.col }, this.limits)
