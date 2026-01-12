@@ -2610,6 +2610,7 @@ mountRibbon(ribbonRoot, {
         showDialogAndFocus(goToDialog);
         return;
       default:
+        showToast(`Ribbon: ${commandId}`);
         return;
     }
   },
