@@ -163,6 +163,89 @@ fn project_normalized_data_skips_projectcompatversion_record() {
 }
 
 #[test]
+fn project_normalized_data_ignores_workspace_section_from_project_stream() {
+    // MS-OVBA `PROJECT` stream structure:
+    //   VBAPROJECTText = ProjectProperties NWLN HostExtenders [NWLN ProjectWorkspace]
+    //
+    // Regression: ProjectNormalizedData MUST ignore ProjectWorkspace / [Workspace] section.
+    //
+    // This is important for V3 signature binding because the Workspace section is machine-local.
+    let project_stream = concat!(
+        "Name=\"VBAProject\"\r\n",
+        "\r\n",
+        "[Host Extender Info]\r\n",
+        "HostExtenderRef=MyHostExtender\r\n",
+        "\r\n",
+        "[Workspace]\r\n",
+        "ThisWorkbook=SHOULD_NOT_APPEAR_IN_HASH\r\n",
+    );
+
+    // `project_normalized_data()` always incorporates data from `VBA/dir`, so include a minimal
+    // stream with a *different* project name to ensure we're asserting the Name property is taken
+    // from the PROJECT stream.
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        // PROJECTSYSKIND
+        push_record(&mut out, 0x0001, &1u32.to_le_bytes());
+        // PROJECTNAME (distinct from the PROJECT stream's `Name="VBAProject"` line)
+        push_record(&mut out, 0x0004, b"DirProject");
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(project_stream.as_bytes())
+            .expect("write PROJECT");
+    }
+
+    let vba_bin = ole.into_inner().into_inner();
+    let normalized = project_normalized_data(&vba_bin).expect("ProjectNormalizedData");
+
+    // ProjectProperties contribution: property name + value bytes (no separators).
+    assert!(
+        find_subslice(&normalized, b"Name").is_some(),
+        "expected ProjectNormalizedData to include PROJECT stream property name bytes"
+    );
+    assert!(
+        find_subslice(&normalized, b"VBAProject").is_some(),
+        "expected ProjectNormalizedData to include PROJECT stream property value bytes"
+    );
+
+    // HostExtenders contribution: include section name and HostExtenderRef line bytes (no NWLN).
+    assert!(
+        find_subslice(&normalized, b"Host Extender Info").is_some(),
+        "expected ProjectNormalizedData to include Host Extender Info section contribution"
+    );
+    assert!(
+        find_subslice(&normalized, b"HostExtenderRef=MyHostExtender").is_some(),
+        "expected ProjectNormalizedData to include HostExtenderRef line bytes"
+    );
+    assert!(
+        find_subslice(&normalized, b"HostExtenderRef=MyHostExtender\r\n").is_none()
+            && find_subslice(&normalized, b"HostExtenderRef=MyHostExtender\n\r").is_none(),
+        "expected HostExtenderRef line bytes to be appended without NWLN"
+    );
+
+    // ProjectWorkspace must be ignored (neither the header nor its distinctive lines should appear).
+    assert!(
+        find_subslice(&normalized, b"Workspace").is_none(),
+        "ProjectNormalizedData must ignore the [Workspace] section"
+    );
+    assert!(
+        find_subslice(&normalized, b"ThisWorkbook=SHOULD_NOT_APPEAR_IN_HASH").is_none(),
+        "ProjectNormalizedData must ignore ProjectWorkspace lines"
+    );
+}
+
+#[test]
 fn project_normalized_data_v3_missing_vba_dir_stream() {
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");

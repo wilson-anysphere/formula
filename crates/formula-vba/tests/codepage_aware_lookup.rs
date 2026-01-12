@@ -62,7 +62,6 @@ fn v3_content_normalized_data_decodes_module_stream_name_using_project_codepage(
 
     let vba_bin = ole.into_inner().into_inner();
     let normalized = v3_content_normalized_data(&vba_bin).expect("V3ContentNormalizedData");
-
     // MS-OVBA §2.4.2.5: V3ContentNormalizedData uses `\n` line endings and appends the module name
     // plus `\n` (HashModuleNameFlag) after the module's normalized source bytes.
     let expected_suffix = b"Sub Hello()\nEnd Sub\n\nModule1\n";

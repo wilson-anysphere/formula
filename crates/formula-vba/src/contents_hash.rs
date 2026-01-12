@@ -26,13 +26,17 @@ const V3_DEFAULT_ATTRIBUTES: [&[u8]; 7] = [
 // MS-OVBA §2.4.2.5: case-insensitive prefix for skipping VB_Name lines.
 const V3_VB_NAME_PREFIX: &[u8] = b"Attribute VB_Name = ";
 
-/// Build the MS-OVBA `ProjectNormalizedData` byte sequence (used by "Contents Hash V3").
+/// Build the MS-OVBA §2.4.2.6 `ProjectNormalizedData` byte sequence.
 ///
-/// This is derived from the decompressed `VBA/dir` stream by iterating records in stored order and
-/// concatenating the **record data bytes** (excluding the 6-byte record header: `id` + `len`) for
-/// the subset of `dir` record types specified by MS-OVBA.
+/// This transcript is derived from the decompressed `VBA/dir` stream and the optional `PROJECT`
+/// stream. It incorporates:
+/// - selected project information record payload bytes from `VBA/dir`,
+/// - `ProjectProperties` and `HostExtenders` from the `PROJECT` stream, and
+/// - (best-effort) designer storage bytes (`FormsNormalizedData`) referenced by `BaseClass=...`.
 ///
-/// Spec reference: MS-OVBA §2.4.2 "ProjectNormalizedData" (Contents Hash V3).
+/// It explicitly ignores the optional `ProjectWorkspace` / `[Workspace]` section in the `PROJECT`
+/// stream (which is intended to be user/machine-local and MUST NOT influence hashing/signature
+/// binding).
 pub fn project_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseError> {
     // Project information record IDs (MS-OVBA 2.3.4.2.1).
     //
@@ -137,6 +141,7 @@ pub fn project_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
     // Keep this best-effort: if the project stream or designer storages are missing, we still
     // return the dir-record-derived prefix above (useful for unit tests and partial inputs).
     if let Some(project_stream_bytes) = ole.read_stream_opt("PROJECT")? {
+        out.extend_from_slice(&project_properties_normalized_bytes(&project_stream_bytes));
         out.extend_from_slice(&host_extender_info_normalized_bytes(&project_stream_bytes));
     }
 
@@ -145,6 +150,63 @@ pub fn project_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
     }
 
     Ok(out)
+}
+
+fn project_properties_normalized_bytes(project_stream_bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for raw_line in split_nwln_lines(project_stream_bytes) {
+        let line = trim_ascii_whitespace(raw_line);
+        if line.is_empty() {
+            continue;
+        }
+
+        // Section headers are bracketed, e.g. `[Host Extender Info]` or `[Workspace]`.
+        // Per MS-OVBA, `ProjectProperties` ends at the first section header.
+        if line.starts_with(b"[") && line.ends_with(b"]") {
+            break;
+        }
+
+        let Some(pos) = line.iter().position(|&b| b == b'=') else {
+            continue;
+        };
+
+        let name = trim_ascii_whitespace(&line[..pos]);
+        let mut value = trim_ascii_whitespace(&line[pos + 1..]);
+        value = strip_ascii_quotes(value);
+
+        if name.is_empty() {
+            continue;
+        }
+
+        // MS-OVBA §2.4.2.6 excludes the ProjectId (`ID=...`) from the transcript.
+        if name.eq_ignore_ascii_case(b"ID") {
+            continue;
+        }
+
+        // MS-OVBA pseudocode appends property name bytes then property value bytes, with no
+        // separator and with any surrounding quotes removed.
+        out.extend_from_slice(name);
+        out.extend_from_slice(value);
+    }
+
+    out
+}
+
+fn strip_ascii_quotes(bytes: &[u8]) -> &[u8] {
+    if bytes.len() >= 2 && bytes[0] == b'"' && bytes[bytes.len() - 1] == b'"' {
+        &bytes[1..bytes.len() - 1]
+    } else {
+        bytes
+    }
+}
+
+fn peek_next_record_id(bytes: &[u8], offset: usize) -> Option<u16> {
+    // `VBA/dir` records are stored as: u16 id, u32 len, payload bytes.
+    // Only treat a next record as present when the full 6-byte header is in-bounds.
+    if offset + 6 > bytes.len() {
+        return None;
+    }
+    Some(u16::from_le_bytes([bytes[offset], bytes[offset + 1]]))
 }
 
 fn host_extender_info_normalized_bytes(project_stream_bytes: &[u8]) -> Vec<u8> {
@@ -1295,13 +1357,6 @@ fn trim_reserved_u16(bytes: &[u8]) -> &[u8] {
     } else {
         bytes
     }
-}
-
-fn peek_next_record_id(bytes: &[u8], offset: usize) -> Option<u16> {
-    if offset + 2 > bytes.len() {
-        return None;
-    }
-    Some(u16::from_le_bytes([bytes[offset], bytes[offset + 1]]))
 }
 
 fn guess_text_offset(module_stream: &[u8]) -> usize {
