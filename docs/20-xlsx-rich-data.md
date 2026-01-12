@@ -239,7 +239,8 @@ Notes:
 </richValueRel>
 ```
 
-* Namespace is **`…/2017/richdata`** for `richValue.xml` and **`…/2017/richdata2`** for `richValueRel.xml`.
+* In this fixture, `richValue.xml` uses **`…/2017/richdata`** and `richValueRel.xml` uses
+  **`…/2017/richdata2`**.
 * The image payload is a single integer `<v>` (in this fixture: `<v kind="rel">…</v>`) and it is the
   0-based index into the `<rel>` list.
   * Shape: `<rv t="image"><v kind="rel">REL_SLOT</v></rv>`
