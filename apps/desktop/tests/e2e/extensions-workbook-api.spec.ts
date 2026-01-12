@@ -29,6 +29,11 @@ test.describe("Extensions workbook API integration (desktop)", () => {
   }
 
   test("extension can open a workbook, observe workbookOpened, and saveAs with beforeSave", async ({ page }) => {
+    // On cold starts the desktop app may spend significant time doing Vite dependency optimization
+    // + bootstrapping engine/extension host. Give this integration test extra runway so we don't
+    // flake on slower CI hosts.
+    test.setTimeout(120_000);
+
     await page.addInitScript(() => {
       const listeners: Record<string, any> = {};
       (window as any).__tauriListeners = listeners;
