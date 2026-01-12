@@ -58,9 +58,25 @@ pub(crate) fn collect_transitive_related_parts(
             if target.is_empty() {
                 continue;
             }
+            let target = target.strip_prefix("./").unwrap_or(target);
             let target_part = resolve_target(&part_name, target);
             if pkg.part(&target_part).is_some() {
                 queue.push_back(target_part);
+                continue;
+            }
+
+            // Some rich-data producers emit relationship targets like `media/image1.png` (relative to
+            // `xl/`) instead of the more common `../media/image1.png` (relative to `xl/richData/`).
+            // Be defensive and try a best-effort fallback for RichData parts.
+            if part_name.starts_with("xl/richData/") {
+                if target.starts_with("media/") {
+                    let alt = format!("xl/{target}");
+                    if pkg.part(&alt).is_some() {
+                        queue.push_back(alt);
+                    }
+                } else if target.starts_with("xl/") && pkg.part(target).is_some() {
+                    queue.push_back(target.to_string());
+                }
             }
         }
     }
