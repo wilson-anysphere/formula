@@ -1714,56 +1714,55 @@ class BrowserExtensionHost {
         }
 
         if (result && typeof result === "object") {
-          const coords = {
-            startRow: result.startRow,
-            startCol: result.startCol,
-            endRow: result.endRow,
-            endCol: result.endCol
-          };
-          const hasNumeric =
-            [coords.startRow, coords.startCol, coords.endRow, coords.endCol].every((v) =>
-              Number.isInteger(v)
-            );
-          let normalizedCoords = null;
+          // Prefer tainting based on the returned A1 `address` when available. This covers
+          // named range lookups and lets sheet-qualified addresses override the sheet inferred
+          // from the input ref.
           let rangeSheetId = sheetId;
-          if (hasNumeric) {
-            normalizedCoords = coords;
-          } else {
-            try {
-              normalizedCoords = this._parseA1RangeRef(a1Ref);
-            } catch {
-              normalizedCoords = null;
-              // Some host implementations may support named ranges / other range identifiers and
-              // return a canonical A1 address without providing numeric coords. Fall back to parsing
-              // the returned address so we still record read taint (best-effort).
-              try {
-                const addr = typeof result.address === "string" ? result.address : null;
-                if (addr) {
-                  const { sheetName: addrSheetName, ref: addrRef } = this._splitSheetQualifier(addr);
-                  if (addrRef) {
-                    normalizedCoords = this._parseA1RangeRef(addrRef);
-                    if (addrSheetName != null) {
-                      // Best-effort: update the resolved sheet id to match the returned address
-                      // when the host provides one.
-                      try {
-                        const addrSheetId = await this._resolveSheetId(addrSheetName);
-                        if (typeof addrSheetId === "string" && addrSheetId.trim()) {
-                          rangeSheetId = addrSheetId.trim();
-                        }
-                      } catch {
-                        // ignore
-                      }
-                    }
+          let coordsFromAddress = null;
+          try {
+            const addr = typeof result.address === "string" ? result.address.trim() : "";
+            if (addr) {
+              const { sheetName: addrSheetName, ref: addrRef } = this._splitSheetQualifier(addr);
+              if (addrSheetName != null) {
+                try {
+                  const addrSheetId = await this._resolveSheetId(addrSheetName);
+                  if (typeof addrSheetId === "string" && addrSheetId.trim()) {
+                    rangeSheetId = addrSheetId.trim();
                   }
+                } catch {
+                  // ignore
                 }
+              }
+              try {
+                coordsFromAddress = this._parseA1RangeRef(addrRef);
               } catch {
-                normalizedCoords = null;
+                coordsFromAddress = null;
               }
             }
+          } catch {
+            coordsFromAddress = null;
           }
 
-          if (normalizedCoords) {
-            this._taintExtensionRange(extension, { sheetId: rangeSheetId, ...normalizedCoords });
+          if (coordsFromAddress) {
+            this._taintExtensionRange(extension, { sheetId: rangeSheetId, ...coordsFromAddress });
+          } else {
+            const direct = normalizeTaintedRange({
+              sheetId: rangeSheetId,
+              startRow: result.startRow,
+              startCol: result.startCol,
+              endRow: result.endRow,
+              endCol: result.endCol
+            });
+            if (direct) {
+              this._taintExtensionRange(extension, direct);
+            } else {
+              try {
+                const parsed = this._parseA1RangeRef(a1Ref);
+                this._taintExtensionRange(extension, { sheetId: rangeSheetId, ...parsed });
+              } catch {
+                // ignore
+              }
+            }
           }
         }
 

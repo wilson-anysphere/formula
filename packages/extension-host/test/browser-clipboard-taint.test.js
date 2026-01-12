@@ -187,6 +187,117 @@ test("BrowserExtensionHost: cells.getRange taints using result.address when ref 
   ]);
 });
 
+test("BrowserExtensionHost: cells.getRange taints numeric-string coords when address is missing", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  installFakeWorker(t, [{}]);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      getActiveSheet() {
+        return { id: "sheet1", name: "Sheet1" };
+      },
+      async getRange(ref) {
+        if (String(ref) !== "NamedRange") throw new Error(`Unexpected range ref: ${ref}`);
+        return { startRow: "0", startCol: "0", endRow: "1", endCol: "1", values: [[1, 2], [3, 4]] };
+      },
+      async setCell() {},
+    },
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.range-string-coords";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "http://example.invalid/",
+    mainUrl: "http://example.invalid/main.js",
+    manifest: {
+      name: "range-string-coords",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: ["cells.read"],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension);
+
+  await host._executeApi("cells", "getRange", ["NamedRange"], extension);
+
+  assert.deepEqual(sortRanges(extension.taintedRanges), [
+    { sheetId: "sheet1", startRow: 0, startCol: 0, endRow: 1, endCol: 1 },
+  ]);
+});
+
+test("BrowserExtensionHost: cells.getRange prefers sheet-qualified result.address when provided", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  installFakeWorker(t, [{}]);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      getActiveSheet() {
+        return { id: "sheet1", name: "Sheet1" };
+      },
+      async getSheet(name) {
+        if (String(name) === "Sheet2") return { id: "sheet2", name: "Sheet2" };
+        return undefined;
+      },
+      async getRange(ref) {
+        if (String(ref) !== "NamedRange") throw new Error(`Unexpected range ref: ${ref}`);
+        return {
+          address: "Sheet2!A1:B2",
+          startRow: 0,
+          startCol: 0,
+          endRow: 1,
+          endCol: 1,
+          values: [[1, 2], [3, 4]],
+        };
+      },
+      async setCell() {},
+    },
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.range-sheet-qualified-address";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "http://example.invalid/",
+    mainUrl: "http://example.invalid/main.js",
+    manifest: {
+      name: "range-sheet-qualified-address",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: ["cells.read"],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension);
+
+  await host._executeApi("cells", "getRange", ["NamedRange"], extension);
+
+  assert.deepEqual(sortRanges(extension.taintedRanges), [
+    { sheetId: "sheet2", startRow: 0, startCol: 0, endRow: 1, endCol: 1 },
+  ]);
+});
+
 test("BrowserExtensionHost: cells.getSelection taints using result.address when coords are missing", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
 
