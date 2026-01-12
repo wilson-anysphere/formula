@@ -77,7 +77,18 @@ test("CellEditorOverlay static visibility + z-index are defined in CSS", () => {
     const parsed = Number.parseInt(zIndexValue, 10);
     const chartsCssPath = path.join(__dirname, "..", "src", "styles", "charts-overlay.css");
     const chartsCss = fs.readFileSync(chartsCssPath, "utf8");
-    const sharedZ = [...chartsCss.matchAll(/\bz-index\s*:\s*(\d+)\s*;/g)].map((m) => Number.parseInt(m[1], 10));
+    // Shared-grid overlay layers are explicitly z-indexed in charts-overlay.css. Keep the
+    // editor above all of them so it can sit on top of selection/charts overlays.
+    const sharedSelectors = [
+      /\.chart-layer--shared\s*\{[\s\S]*?\bz-index\s*:\s*(\d+)/,
+      /\.grid-canvas--shared-selection\s*\{[\s\S]*?\bz-index\s*:\s*(\d+)/,
+      /\.outline-layer--shared\s*\{[\s\S]*?\bz-index\s*:\s*(\d+)/,
+    ];
+    const sharedZ = sharedSelectors
+      .map((re) => chartsCss.match(re)?.[1])
+      .filter((v) => typeof v === "string" && v.trim() !== "")
+      .map((v) => Number.parseInt(String(v), 10))
+      .filter((n) => Number.isFinite(n));
     const maxShared = sharedZ.length === 0 ? 0 : Math.max(...sharedZ);
     assert.ok(
       parsed > maxShared,
