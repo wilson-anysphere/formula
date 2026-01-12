@@ -871,65 +871,58 @@ export function activate(context: ExtensionContext) {
 ### Panel API (Webviews)
 
 ```typescript
-export function activate(context: ExtensionContext) {
-  // Create panel
-  const panel = formula.ui.createPanel("myExtension.panel", {
-    title: "My Panel",
-    icon: "$(graph)",
-    position: "right"
-  });
-  
-  // Set HTML content
-  panel.webview.html = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <style>
-        body { font-family: var(--vscode-font-family); }
-        button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
-      </style>
-    </head>
-    <body>
-      <h1>My Panel</h1>
-      <button id="analyze">Analyze Selection</button>
-      <div id="results"></div>
-      
-      <script>
-        const vscode = acquireVsCodeApi();
-        
-        document.getElementById('analyze').addEventListener('click', () => {
-          vscode.postMessage({ command: 'analyze' });
-        });
-        
-        window.addEventListener('message', event => {
-          const message = event.data;
-          if (message.command === 'results') {
-            document.getElementById('results').innerHTML = message.html;
-          }
-        });
-      </script>
-    </body>
-    </html>
+import * as formula from "@formula/extension-api";
+
+export async function activate(context: formula.ExtensionContext) {
+  const panel = await formula.ui.createPanel("myExtension.panel", { title: "My Panel", position: "right" });
+
+  // IMPORTANT: extension panels run in a sandboxed iframe with a restrictive CSP:
+  // - `connect-src 'none'` (no network)
+  // - `script-src blob: data:` (inline `<script>` blocks are blocked)
+  //
+  // To run scripts, embed them via a `data:` or `blob:` URL.
+  const script = `
+    const send = (message) => window.parent.postMessage(message, "*");
+
+    document.getElementById("analyze")?.addEventListener("click", () => {
+      send({ type: "analyze" });
+    });
+
+    window.addEventListener("message", (event) => {
+      const msg = event.data;
+      if (msg && msg.type === "results") {
+        const node = document.getElementById("results");
+        if (node) node.textContent = String(msg.text ?? "");
+      }
+    });
   `;
-  
-  // Handle messages from webview
-  panel.webview.onDidReceiveMessage(async (message) => {
-    if (message.command === 'analyze') {
-      const selection = formula.cells.getSelection();
-      const values = selection.values;
-      
-      // Process values
-      const sum = values.flat().reduce((a, b) => a + (typeof b === 'number' ? b : 0), 0);
-      
-      // Send results back
-      panel.webview.postMessage({
-        command: 'results',
-        html: `<p>Sum: ${sum}</p>`
-      });
-    }
+  const scriptUrl = `data:text/javascript,${encodeURIComponent(script)}`;
+
+  await panel.webview.setHtml(`<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body { font-family: system-ui, -apple-system, sans-serif; margin: 12px; }
+      button { padding: 6px 10px; }
+    </style>
+  </head>
+  <body>
+    <h1>My Panel</h1>
+    <button id="analyze">Analyze Selection</button>
+    <div id="results"></div>
+    <script src="${scriptUrl}"></script>
+  </body>
+</html>`);
+
+  const disp = panel.webview.onDidReceiveMessage(async (message) => {
+    if (!message || message.type !== "analyze") return;
+    const selection = await formula.cells.getSelection();
+    const sum = (selection.values ?? []).flat().reduce((acc, v) => acc + (typeof v === "number" ? v : 0), 0);
+    await panel.webview.postMessage({ type: "results", text: `Sum: ${sum}` });
   });
-  
-  context.subscriptions.push(panel);
+
+  context.subscriptions.push(panel, disp);
 }
 ```
 
@@ -1510,36 +1503,36 @@ export async function activate(context: formula.ExtensionContext) {
     });
 
     // IMPORTANT: panel HTML runs in a sandboxed iframe with a restrictive CSP
-    // (`connect-src 'none'`, no remote scripts). Bundle everything you need.
-    panel.webview.html = `
-      <!doctype html>
-      <html>
-        <head>
-          <meta charset="utf-8" />
-          <style>
-            body { font-family: system-ui, -apple-system, sans-serif; margin: 12px; }
-            canvas { width: 100%; height: 200px; border: 1px solid #ddd; border-radius: 8px; }
-          </style>
-        </head>
-        <body>
-          <div style="font-weight: 600; margin-bottom: 8px;">Selection preview</div>
-          <canvas id="chart" width="600" height="200"></canvas>
-          <script>
-            const raw = ${JSON.stringify(values)};
-            const numbers = raw.flat().filter((v) => typeof v === "number");
-            const max = Math.max(1, ...numbers);
-            const canvas = document.getElementById("chart");
-            const ctx = canvas.getContext("2d");
-            ctx.fillStyle = "#4e79a7";
-            const barW = canvas.width / Math.max(1, numbers.length);
-            numbers.forEach((n, i) => {
-              const h = (n / max) * (canvas.height - 10);
-              ctx.fillRect(i * barW + 2, canvas.height - h, Math.max(1, barW - 4), h);
-            });
-          </script>
-        </body>
-      </html>
+    // (`connect-src 'none'`, no remote scripts, no inline `<script>`). Bundle everything you need.
+    const script = `
+      const raw = ${JSON.stringify(values)};
+      const numbers = raw.flat().filter((v) => typeof v === "number");
+      const max = Math.max(1, ...numbers);
+      const canvas = document.getElementById("chart");
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#4e79a7";
+      const barW = canvas.width / Math.max(1, numbers.length);
+      numbers.forEach((n, i) => {
+        const h = (n / max) * (canvas.height - 10);
+        ctx.fillRect(i * barW + 2, canvas.height - h, Math.max(1, barW - 4), h);
+      });
     `;
+    const scriptUrl = `data:text/javascript,${encodeURIComponent(script)}`;
+    await panel.webview.setHtml(`<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body { font-family: system-ui, -apple-system, sans-serif; margin: 12px; }
+      canvas { width: 100%; height: 200px; border: 1px solid #ddd; border-radius: 8px; }
+    </style>
+  </head>
+  <body>
+    <div style="font-weight: 600; margin-bottom: 8px;">Selection preview</div>
+    <canvas id="chart" width="600" height="200"></canvas>
+    <script src="${scriptUrl}"></script>
+  </body>
+</html>`);
   });
 
   context.subscriptions.push(cmd);
