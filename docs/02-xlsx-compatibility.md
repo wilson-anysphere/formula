@@ -258,7 +258,7 @@ These pieces are connected via OPC relationships:
 
 Further reading:
 - [20-images-in-cells.md](./20-images-in-cells.md) (images-in-cell are implemented using the same rich-value + metadata mechanism).
-- [20-xlsx-richdata-images-in-cell.md](./20-xlsx-richdata-images-in-cell.md) (additional detail on `xl/richData/*` part shapes and index indirection).
+- [20-images-in-cells-richdata.md](./20-images-in-cells-richdata.md) (additional detail on `xl/richData/*` part shapes and index indirection).
 
 ### Formula Storage
   
