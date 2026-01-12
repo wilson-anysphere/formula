@@ -898,6 +898,10 @@ export class SpreadsheetApp {
         undoService,
         defaultSheetId: this.sheetId,
         userId: collab.user.id,
+        // Opt into binder write semantics required for reliable causal conflict detection.
+        // (E.g. represent clears as explicit `formula=null` markers so FormulaConflictMonitor
+        // can reason about delete-vs-overwrite concurrency deterministically.)
+        formulaConflictsMode: "formula+value",
       })
         .then((binder) => {
           if (this.disposed) {
