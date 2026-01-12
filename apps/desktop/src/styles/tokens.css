@@ -54,6 +54,11 @@
   --warning-bg: rgba(237, 108, 2, 0.12);
   --success-bg: rgba(46, 125, 50, 0.12);
 
+  /* Titlebar (desktop chrome) */
+  --titlebar-window-close: #ff5f57;
+  --titlebar-window-minimize: #febc2e;
+  --titlebar-window-maximize: #28c840;
+
   /* Text on strong accent backgrounds (buttons, etc.) */
   --text-on-accent: #ffffff;
 
@@ -244,6 +249,10 @@
   --warning-bg: Highlight;
   --success-bg: Highlight;
 
+  --titlebar-window-close: CanvasText;
+  --titlebar-window-minimize: CanvasText;
+  --titlebar-window-maximize: CanvasText;
+
   --text-on-accent: HighlightText;
   --selection-text: HighlightText;
   --selection-fill: transparent;
@@ -318,6 +327,10 @@
     --error-bg: Highlight;
     --warning-bg: Highlight;
     --success-bg: Highlight;
+
+    --titlebar-window-close: CanvasText;
+    --titlebar-window-minimize: CanvasText;
+    --titlebar-window-maximize: CanvasText;
 
     --text-on-accent: HighlightText;
     --selection-text: HighlightText;

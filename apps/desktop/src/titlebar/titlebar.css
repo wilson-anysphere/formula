@@ -96,15 +96,15 @@
 }
 
 .formula-titlebar.formula-titlebar--component .formula-titlebar__window-button--close {
-  background: var(--error);
+  background: var(--titlebar-window-close);
 }
 
 .formula-titlebar.formula-titlebar--component .formula-titlebar__window-button--minimize {
-  background: var(--warning);
+  background: var(--titlebar-window-minimize);
 }
 
 .formula-titlebar.formula-titlebar--component .formula-titlebar__window-button--maximize {
-  background: var(--success);
+  background: var(--titlebar-window-maximize);
 }
 
 .formula-titlebar.formula-titlebar--component .formula-titlebar__window-button:disabled {
