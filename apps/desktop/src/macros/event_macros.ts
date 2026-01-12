@@ -775,6 +775,7 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
       source === "applyState" ||
       source === "macro" ||
       source === "python" ||
+      source === "backend" ||
       source === "collab" ||
       source === "undo" ||
       source === "redo" ||

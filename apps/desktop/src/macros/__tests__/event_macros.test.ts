@@ -195,6 +195,63 @@ describe("VBA event macros wiring", () => {
     wiring.dispose();
   });
 
+  it("ignores backend-derived DocumentController updates (e.g. pivot auto-refresh output)", async () => {
+    const calls: Array<{ cmd: string; args?: any }> = [];
+
+    const invoke = vi.fn(async (cmd: string, args?: any) => {
+      calls.push({ cmd, args });
+      if (cmd === "get_macro_security_status") {
+        return {
+          has_macros: true,
+          origin_path: null,
+          workbook_fingerprint: null,
+          signature: null,
+          trust: "trusted_always",
+        };
+      }
+      if (cmd === "set_macro_ui_context") return null;
+      if (cmd === "fire_workbook_open") return { ok: true, output: [], updates: [] };
+      if (cmd === "fire_worksheet_change") return { ok: true, output: [], updates: [] };
+      throw new Error(`Unexpected invoke: ${cmd}`);
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).__TAURI__ = { core: { invoke } };
+
+    const doc = new DocumentController();
+    const app = new FakeApp(doc);
+
+    const wiring = installVbaEventMacros({
+      app,
+      workbookId: "workbook-1",
+      invoke,
+      drainBackendSync: vi.fn(async () => undefined),
+    });
+
+    await flushAsync(); // let Workbook_Open settle
+    calls.length = 0;
+
+    const before = doc.getCell("Sheet1", { row: 0, col: 0 });
+    doc.applyExternalDeltas(
+      [
+        {
+          sheetId: "Sheet1",
+          row: 0,
+          col: 0,
+          before,
+          after: { value: 1, formula: null, styleId: before.styleId },
+        },
+      ],
+      { source: "backend", markDirty: false },
+    );
+
+    await flushAsync();
+
+    expect(calls.some((c) => c.cmd === "fire_worksheet_change")).toBe(false);
+
+    wiring.dispose();
+  });
+
   it("uses the UI context captured at edit time when firing Worksheet_Change", async () => {
     const calls: Array<{ cmd: string; args?: any }> = [];
 
