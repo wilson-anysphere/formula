@@ -791,7 +791,12 @@ mod tests {
         ]
         .concat();
 
-        let notes = parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1251).expect("parse");
+        let (notes, warnings) =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1251).expect("parse");
+        assert!(
+            warnings.is_empty(),
+            "unexpected warnings: {warnings:?}"
+        );
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].text, "\u{0410}");
     }
@@ -811,7 +816,12 @@ mod tests {
         ]
         .concat();
 
-        let notes = parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
+        let (notes, warnings) =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
+        assert!(
+            warnings.is_empty(),
+            "unexpected warnings: {warnings:?}"
+        );
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].text, "ABCDE");
     }
