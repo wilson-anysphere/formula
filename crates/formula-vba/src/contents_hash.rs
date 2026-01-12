@@ -1128,6 +1128,32 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
                 out.extend_from_slice(&normalize_reference_original(data)?);
             }
 
+            // ---- ProjectModules / ProjectCookie / dir Terminator ----
+            //
+            // MS-OVBA §2.4.2.5 V3ContentNormalizedData explicitly appends:
+            // - PROJECTMODULES.Id and PROJECTMODULES.Size (but not Count),
+            // - PROJECTCOOKIE.Id and PROJECTCOOKIE.Size (but not Cookie),
+            // - the dir stream Terminator (0x0010) and Reserved (u32 0) trailer.
+            //
+            // In the decompressed `VBA/dir` stream we parse records in a generic `Id(u16) || Size(u32)
+            // || Data(Size)` form, so including "Id+Size" in the transcript corresponds to emitting
+            // the record header bytes and intentionally excluding the record payload.
+            0x000F | 0x0013 => {
+                out.extend_from_slice(&id.to_le_bytes());
+                out.extend_from_slice(&(len as u32).to_le_bytes());
+            }
+            0x0010 => {
+                // The `dir` stream terminator appears after the final module. Flush the pending
+                // module so the Terminator/Reserved bytes are the *trailing* bytes of the v3
+                // transcript (matching MS-OVBA §2.4.2.5).
+                if let Some(m) = current_module.take() {
+                    append_v3_module(&mut out, &mut ole, &m)?;
+                }
+
+                out.extend_from_slice(&id.to_le_bytes());
+                out.extend_from_slice(&(len as u32).to_le_bytes());
+            }
+
             // ---- Modules ----
 
             // MODULENAME: start a new module record group.

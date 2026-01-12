@@ -31,6 +31,10 @@ pub enum DirParseError {
     Truncated,
     #[error("dir record claims a length beyond the remaining bytes (id={id:#06x}, len={len})")]
     BadRecordLength { id: u16, len: usize },
+    #[error("unexpected dir record id (expected {expected:#06x}, found {found:#06x})")]
+    UnexpectedRecordId { expected: u16, found: u16 },
+    #[error("invalid dir stream: {0}")]
+    Invalid(&'static str),
 }
 
 impl DirStream {
