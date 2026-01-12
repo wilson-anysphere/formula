@@ -3774,6 +3774,7 @@ fn odd_coupon_bond_functions_reject_non_finite_numeric_inputs() {
 fn odd_coupon_bond_functions_return_value_for_unparseable_date_text() {
     let mut sheet = TestSheet::new();
 
+    // Unparseable (non-date-like) text.
     match sheet
         .eval(r#"=ODDFPRICE("nope",DATE(2025,1,1),DATE(2019,1,1),DATE(2020,7,1),0.05,0.05,100,2)"#)
     {
@@ -3782,6 +3783,24 @@ fn odd_coupon_bond_functions_return_value_for_unparseable_date_text() {
     }
 
     match sheet.eval(r#"=ODDLPRICE(DATE(2020,1,1),"nope",DATE(2024,7,1),0.05,0.05,100,2)"#) {
+        Value::Error(ErrorKind::Value) => {}
+        other => panic!("expected #VALUE!, got {other:?}"),
+    }
+
+    // Parseable-but-invalid dates should also return #VALUE! (e.g. Feb 30).
+    match sheet.eval(r#"=ODDFPRICE("2020-02-30",DATE(2025,1,1),DATE(2019,1,1),DATE(2020,7,1),0.05,0.05,100,2)"#) {
+        Value::Error(ErrorKind::Value) => {}
+        other => panic!("expected #VALUE!, got {other:?}"),
+    }
+    match sheet.eval(r#"=ODDFYIELD("2020-02-30",DATE(2025,1,1),DATE(2019,1,1),DATE(2020,7,1),0.05,95,100,2)"#) {
+        Value::Error(ErrorKind::Value) => {}
+        other => panic!("expected #VALUE!, got {other:?}"),
+    }
+    match sheet.eval(r#"=ODDLPRICE(DATE(2020,1,1),"2020-02-30",DATE(2024,7,1),0.05,0.05,100,2)"#) {
+        Value::Error(ErrorKind::Value) => {}
+        other => panic!("expected #VALUE!, got {other:?}"),
+    }
+    match sheet.eval(r#"=ODDLYIELD(DATE(2020,1,1),"2020-02-30",DATE(2024,7,1),0.05,95,100,2)"#) {
         Value::Error(ErrorKind::Value) => {}
         other => panic!("expected #VALUE!, got {other:?}"),
     }
