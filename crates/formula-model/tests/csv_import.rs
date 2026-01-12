@@ -224,6 +224,29 @@ fn csv_import_utf8_encoding_reports_invalid_utf8_with_row_and_column() {
 }
 
 #[test]
+fn csv_import_windows1252_encoding_decodes_invalid_utf8_bytes() {
+    let mut bytes = b"id,text\n1,\"hello".to_vec();
+    bytes.push(0xFF);
+    bytes.extend_from_slice(b"\"\n");
+
+    let sheet = import_csv_to_worksheet(
+        1,
+        "Data",
+        Cursor::new(bytes),
+        CsvOptions {
+            encoding: CsvTextEncoding::Windows1252,
+            ..CsvOptions::default()
+        },
+    )
+    .expect("CSV import should decode bytes as Windows-1252");
+
+    assert_eq!(
+        sheet.value(CellRef::new(0, 1)),
+        CellValue::String("helloÿ".to_string())
+    );
+}
+
+#[test]
 fn csv_import_decodes_windows1252_fallback() {
     // "café" with Windows-1252 byte 0xE9 for "é" (invalid UTF-8).
     let bytes = b"id,text\n1,caf\xe9\n".to_vec();
@@ -238,6 +261,16 @@ fn csv_import_decodes_windows1252_fallback() {
 #[test]
 fn csv_import_strips_utf8_bom_from_first_header_field() {
     let bytes = b"\xEF\xBB\xBFid,text\n1,hello\n".to_vec();
+    let table =
+        import_csv_to_columnar_table(Cursor::new(bytes), CsvOptions::default()).unwrap();
+    assert_eq!(table.schema()[0].name, "id");
+}
+
+#[test]
+fn csv_import_strips_utf8_bom_when_first_header_field_is_quoted() {
+    // If the BOM appears before the opening quote, the CSV parser should still treat the field as
+    // quoted after the BOM is stripped.
+    let bytes = b"\xEF\xBB\xBF\"id\",text\n1,hello\n".to_vec();
     let table =
         import_csv_to_columnar_table(Cursor::new(bytes), CsvOptions::default()).unwrap();
     assert_eq!(table.schema()[0].name, "id");
