@@ -540,7 +540,9 @@ def generate(
     # primarily used to pin current engine behavior in CI; verify real Excel strictness/leniency by
     # generating a real Excel dataset via tools/excel-oracle/run-excel-oracle.ps1 (Task 393).
     #
-    # Locked by `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`.
+    # Locked by:
+    # - `crates/formula-engine/tests/functions/financial_odd_coupon.rs`
+    # - `crates/formula-engine/tests/functions/financial_oddcoupons.rs`
     add_case(
         cases,
         prefix="oddfprice_issue_eq_settlement",
