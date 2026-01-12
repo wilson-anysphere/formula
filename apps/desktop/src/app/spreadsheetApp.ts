@@ -50,7 +50,7 @@ import {
   engineHydrateFromDocument,
   type EngineClient
 } from "@formula/engine";
-import type { UndoService } from "@formula/collab-undo";
+import { createUndoService, type UndoService } from "@formula/collab-undo";
 import { drawCommentIndicator } from "../comments/CommentIndicator";
 import { evaluateFormula, type SpreadsheetValue } from "../spreadsheet/evaluateFormula";
 import { AiCellFunctionEngine } from "../spreadsheet/AiCellFunctionEngine.js";
@@ -665,12 +665,6 @@ export class SpreadsheetApp {
       this.collabSession = createCollabSession({
         connection: { wsUrl: collab.wsUrl, docId: collab.docId, token: collab.token },
         presence: { user: collab.user, activeSheet: this.sheetId },
-        // Enable collaborative undo so conflict monitors treat UndoManager-origin
-        // transactions as local (important for correctly classifying local edits).
-        //
-        // Note: the desktop UI still uses DocumentController's undo stack; this is
-        // currently for origin tracking + conflict detection fidelity.
-        undo: {},
         formulaConflicts: {
           localUserId: collab.user.id,
           mode: "formula+value",
@@ -695,8 +689,26 @@ export class SpreadsheetApp {
         },
       });
 
-      // Treat DocumentController-driven edits as "local" for conflict monitors.
-      this.collabSession.localOrigins.add(binderOrigin);
+      // Collaborative undo/redo in the desktop UI is backed by Yjs UndoManager
+      // semantics (local-only, never overwriting remote edits). The binder origin
+      // is tracked so only DocumentController-origin changes are undoable.
+      const undoService = createUndoService({
+        mode: "collab",
+        doc: this.collabSession.doc,
+        scope: [this.collabSession.cells, this.collabSession.sheets, this.collabSession.metadata, this.collabSession.namedRanges],
+        origin: binderOrigin,
+      }) as UndoService & { origin?: any };
+      // The binder expects an `origin` field for echo suppression; `createUndoService`
+      // does not currently expose it.
+      undoService.origin = binderOrigin;
+      this.setCollabUndoService(undoService);
+
+      // Ensure conflict monitors treat binder + undo transactions as local so they
+      // can log structural operations and avoid misclassifying undo/redo edits as
+      // remote.
+      for (const origin of undoService.localOrigins ?? []) {
+        this.collabSession.localOrigins.add(origin);
+      }
 
       // Comments sync through the shared collaborative Y.Doc when collab is enabled.
       this.commentsDoc = this.collabSession.doc;
@@ -707,7 +719,7 @@ export class SpreadsheetApp {
       void bindCollabSessionToDocumentController({
         session: this.collabSession,
         documentController: this.document,
-        undoService: { origin: binderOrigin },
+        undoService,
         defaultSheetId: this.sheetId,
         userId: collab.user.id,
       })
@@ -1521,6 +1533,7 @@ export class SpreadsheetApp {
   destroy(): void {
     this.disposed = true;
     this.domAbort.abort();
+    this.setCollabUndoService(null);
     this.collabSelectionUnsubscribe?.();
     this.collabSelectionUnsubscribe = null;
     this.collabPresenceUnsubscribe?.();
