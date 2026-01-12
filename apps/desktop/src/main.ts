@@ -6696,7 +6696,7 @@ try {
   const updaterUiListeners = installUpdaterUi(listen);
 
   registerAppQuitHandlers({
-    isDirty: () => app.getDocument().isDirty,
+    isDirty: () => app.getDocument().isDirty && !isCollabModeActive(),
     runWorkbookBeforeClose: async () => {
       if (!queuedInvoke) return;
       await fireWorkbookBeforeCloseBestEffort({ app, workbookId, invoke: queuedInvoke, drainBackendSync });
