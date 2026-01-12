@@ -2813,6 +2813,33 @@ app.selectRange = (...args: Parameters<SpreadsheetApp["selectRange"]>): void => 
 // Keep the canvas renderer in sync with programmatic document mutations (e.g. AI tools)
 // and re-render when edits create new sheets (DocumentController creates sheets lazily).
 app.getDocument().on("change", (payload: any) => {
+  // `DocumentController` creates sheets lazily on access (`getCell`, etc). When a sheet is removed
+  // (via delete, undo, applyState restore, etc) and the UI is still "pointing at" that sheet id,
+  // a synchronous refresh can immediately recreate the sheet by reading from it.
+  //
+  // Guard against this by switching away from any sheet ids that were deleted by this change event
+  // *before* we refresh the grid.
+  try {
+    const sheetMetaDeltas = Array.isArray(payload?.sheetMetaDeltas) ? payload.sheetMetaDeltas : [];
+    const deletedSheetIds = sheetMetaDeltas
+      .filter((delta: any) => delta && typeof delta.sheetId === "string" && (delta.after ?? null) == null)
+      .map((delta: any) => String(delta.sheetId));
+    if (deletedSheetIds.length > 0) {
+      const currentSheetId = app.getCurrentSheetId();
+      if (currentSheetId && deletedSheetIds.includes(currentSheetId)) {
+        const doc = app.getDocument();
+        const candidates = typeof (doc as any).getVisibleSheetIds === "function" ? doc.getVisibleSheetIds() : doc.getSheetIds();
+        const fallback = candidates.find((id: string) => id && !deletedSheetIds.includes(id)) ?? null;
+        if (fallback && fallback !== currentSheetId) {
+          app.activateSheet(fallback);
+          restoreFocusAfterSheetNavigation();
+        }
+      }
+    }
+  } catch {
+    // Best-effort: sheet deletion should never crash the UI.
+  }
+
   if (payload?.source === "applyState") {
     suppressDocReorderFromStore = true;
     queueMicrotask(() => {
