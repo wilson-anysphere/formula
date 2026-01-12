@@ -4,6 +4,17 @@ import { builtinKeybindings } from "./builtinKeybindings.js";
 import { buildCommandKeybindingDisplayIndex, getPrimaryCommandKeybindingDisplay } from "../extensions/keybindings.js";
 
 describe("builtin keybinding catalog", () => {
+  it("does not contain exact duplicate entries", () => {
+    const seen = new Set<string>();
+    const dups: string[] = [];
+    for (const kb of builtinKeybindings) {
+      const signature = `${kb.command}|${kb.key}|${kb.mac ?? ""}|${kb.when ?? ""}`;
+      if (seen.has(signature)) dups.push(signature);
+      seen.add(signature);
+    }
+    expect(dups).toEqual([]);
+  });
+
   it("formats expected display strings per platform", () => {
     const otherIndex = buildCommandKeybindingDisplayIndex({ platform: "other", contributed: [], builtin: builtinKeybindings });
     expect(getPrimaryCommandKeybindingDisplay("workbench.showCommandPalette", otherIndex)).toBe("Ctrl+Shift+P");

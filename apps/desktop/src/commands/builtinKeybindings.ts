@@ -68,12 +68,6 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     when: null,
   },
   {
-    command: "comments.togglePanel",
-    key: "ctrl+shift+m",
-    mac: "cmd+shift+m",
-    when: null,
-  },
-  {
     command: "ai.inlineEdit",
     key: "ctrl+k",
     mac: "cmd+k",
