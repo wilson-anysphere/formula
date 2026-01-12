@@ -18,7 +18,7 @@ import {
   getSheetNameValidationErrorMessage as getMessageFromJs,
 } from "../packages/workbook-backend/src/sheetNameValidation.js";
 
-test("workbook-backend is importable under Node ESM when executing TS sources (strip-types)", async () => {
+test("workbook-backend is importable under Node ESM when executing TS sources directly", async () => {
   // Guardrail: repo-level typecheck can run with TS configs that do *not* enable
   // `allowImportingTsExtensions`. `.ts` specifiers in source imports/exports would
   // then fail the build, so keep the public entrypoint free of `.ts` specifiers.
