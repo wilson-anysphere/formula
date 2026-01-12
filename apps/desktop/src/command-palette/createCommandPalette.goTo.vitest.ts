@@ -166,4 +166,47 @@ describe("createCommandPalette Go to suggestion", () => {
 
     palette.dispose();
   });
+
+  it("hides Go to when the referenced sheet cannot be resolved (workbook.getSheet)", async () => {
+    const commandRegistry = new CommandRegistry();
+    commandRegistry.registerBuiltinCommand("test.sheet2a1Mode", "Sheet2!A1 Mode", () => {}, { category: "Test" });
+
+    // `parseGoTo` doesn't validate sheet existence, so the command palette does a best-effort
+    // validation when the workbook adapter exposes a `getSheet(...)` helper.
+    const workbook = {
+      getTable: () => null,
+      getName: () => null,
+      getSheet: (name: string) => {
+        if (name === "Sheet1") return { name: "Sheet1" };
+        throw new Error(`Unknown sheet: ${name}`);
+      },
+    } as unknown as GoToWorkbookLookup;
+
+    const onGoTo = vi.fn();
+
+    const palette = createCommandPalette({
+      commandRegistry,
+      contextKeys: {} as any,
+      keybindingIndex: new Map(),
+      ensureExtensionsLoaded: async () => {},
+      onCloseFocus: () => {},
+      inputDebounceMs: 0,
+      goTo: { workbook, getCurrentSheetName: () => "Sheet1", onGoTo },
+    });
+
+    palette.open();
+
+    const input = document.querySelector<HTMLInputElement>('[data-testid="command-palette-input"]');
+    expect(input).toBeTruthy();
+    input!.value = "Sheet2!A1";
+    input!.dispatchEvent(new Event("input", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const list = document.querySelector<HTMLElement>('[data-testid="command-palette-list"]');
+    expect(list).toBeTruthy();
+    expect(list!.textContent).not.toContain("Go to Sheet2!A1");
+    expect(list!.textContent).toContain("Sheet2!A1 Mode");
+
+    palette.dispose();
+  });
 });
