@@ -6627,6 +6627,29 @@ fn bytecode_expr_is_eligible_inner(
                 }
                 true
             }
+            bytecode::ast::Function::Row | bytecode::ast::Function::Column => match args.as_slice()
+            {
+                [] => true,
+                [bytecode::Expr::CellRef(_)] => true,
+                [bytecode::Expr::RangeRef(r)] => r.start == r.end,
+                _ => false,
+            },
+            bytecode::ast::Function::Rows | bytecode::ast::Function::Columns => {
+                if args.len() != 1 {
+                    return false;
+                }
+                matches!(
+                    args[0],
+                    bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)
+                )
+            }
+            bytecode::ast::Function::Address => {
+                if !(2..=5).contains(&args.len()) {
+                    return false;
+                }
+                args.iter()
+                    .all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
+            }
             bytecode::ast::Function::CountIf => {
                 if args.len() != 2 {
                     return false;

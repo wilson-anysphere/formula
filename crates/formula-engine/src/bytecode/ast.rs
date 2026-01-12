@@ -75,6 +75,11 @@ pub enum Function {
     T,
     Now,
     Today,
+    Row,
+    Column,
+    Rows,
+    Columns,
+    Address,
     Unknown(Arc<str>),
 }
 
@@ -133,6 +138,11 @@ impl Function {
             "T" => Function::T,
             "NOW" => Function::Now,
             "TODAY" => Function::Today,
+            "ROW" => Function::Row,
+            "COLUMN" => Function::Column,
+            "ROWS" => Function::Rows,
+            "COLUMNS" => Function::Columns,
+            "ADDRESS" => Function::Address,
             _ => Function::Unknown(Arc::from(upper)),
         }
     }
@@ -189,6 +199,11 @@ impl Function {
             Function::T => "T",
             Function::Now => "NOW",
             Function::Today => "TODAY",
+            Function::Row => "ROW",
+            Function::Column => "COLUMN",
+            Function::Rows => "ROWS",
+            Function::Columns => "COLUMNS",
+            Function::Address => "ADDRESS",
             Function::Unknown(s) => s,
         }
     }

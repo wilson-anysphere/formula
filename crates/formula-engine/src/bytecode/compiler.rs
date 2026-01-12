@@ -435,36 +435,8 @@ impl<'a> CompileCtx<'a> {
             Function::CountIfs => arg_idx % 2 == 0,
             Function::SumProduct => true,
             Function::VLookup | Function::HLookup | Function::Match => arg_idx == 1,
-            Function::If
-            | Function::Ifs
-            | Function::IfError
-            | Function::IfNa
-            | Function::IsError
-            | Function::IsNa
-            | Function::Na
-            | Function::Switch
-            | Function::Let
-            | Function::Abs
-            | Function::Int
-            | Function::Round
-            | Function::RoundUp
-            | Function::RoundDown
-            | Function::Mod
-            | Function::Sign
-            | Function::Concat
-            | Function::Not
-            | Function::IsBlank
-            | Function::IsNumber
-            | Function::IsText
-            | Function::IsLogical
-            | Function::IsErr
-            | Function::Type
-            | Function::ErrorType
-            | Function::N
-            | Function::T
-            | Function::Now
-            | Function::Today
-            | Function::Unknown(_) => false,
+            Function::Row | Function::Column | Function::Rows | Function::Columns => true,
+            _ => false,
         };
 
         if treat_cell_as_range {

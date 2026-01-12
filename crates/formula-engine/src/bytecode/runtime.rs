@@ -12,6 +12,7 @@ use crate::value::{
 };
 use chrono::{DateTime, Datelike, Timelike, Utc};
 use formula_format::{DateSystem, FormatOptions, Value as FmtValue};
+use formula_model::{EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 use smallvec::SmallVec;
 use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
@@ -290,6 +291,7 @@ fn eval_ast_inner(
                     Function::CountIfs => arg_idx % 2 == 0,
                     Function::SumProduct => true,
                     Function::VLookup | Function::HLookup | Function::Match => arg_idx == 1,
+                    Function::Row | Function::Column | Function::Rows | Function::Columns => true,
                     Function::If
                     | Function::Ifs
                     | Function::IfError
@@ -319,6 +321,7 @@ fn eval_ast_inner(
                     | Function::T
                     | Function::Now
                     | Function::Today
+                    | Function::Address
                     | Function::Unknown(_) => false,
                 };
 
@@ -715,6 +718,11 @@ pub fn call_function(
         Function::T => fn_t(args, grid, base),
         Function::Now => fn_now(args),
         Function::Today => fn_today(args),
+        Function::Row => fn_row(args, base),
+        Function::Column => fn_column(args, base),
+        Function::Rows => fn_rows(args, base),
+        Function::Columns => fn_columns(args, base),
+        Function::Address => fn_address(args),
         Function::Unknown(_) => Value::Error(ErrorKind::Name),
     }
 }
@@ -1371,6 +1379,211 @@ fn fn_t(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     }
 }
 
+fn fn_row(args: &[Value], base: CellCoord) -> Value {
+    match args {
+        [] => Value::Number((base.row + 1) as f64),
+        [Value::Range(r)] => {
+            let resolved = r.resolve(base);
+            if resolved.rows() == 1 && resolved.cols() == 1 {
+                Value::Number((resolved.row_start + 1) as f64)
+            } else {
+                // `ROW(reference)` can return a dynamic array for multi-cell references, which the
+                // bytecode backend does not currently support.
+                Value::Error(ErrorKind::Spill)
+            }
+        }
+        [Value::Error(e)] => Value::Error(*e),
+        [_] => Value::Error(ErrorKind::Value),
+        _ => Value::Error(ErrorKind::Value),
+    }
+}
+
+fn fn_column(args: &[Value], base: CellCoord) -> Value {
+    match args {
+        [] => Value::Number((base.col + 1) as f64),
+        [Value::Range(r)] => {
+            let resolved = r.resolve(base);
+            if resolved.rows() == 1 && resolved.cols() == 1 {
+                Value::Number((resolved.col_start + 1) as f64)
+            } else {
+                // `COLUMN(reference)` can return a dynamic array for multi-cell references, which
+                // the bytecode backend does not currently support.
+                Value::Error(ErrorKind::Spill)
+            }
+        }
+        [Value::Error(e)] => Value::Error(*e),
+        [_] => Value::Error(ErrorKind::Value),
+        _ => Value::Error(ErrorKind::Value),
+    }
+}
+
+fn fn_rows(args: &[Value], base: CellCoord) -> Value {
+    if args.len() != 1 {
+        return Value::Error(ErrorKind::Value);
+    }
+    match &args[0] {
+        Value::Range(r) => Value::Number(r.resolve(base).rows() as f64),
+        Value::Error(e) => Value::Error(*e),
+        _ => Value::Error(ErrorKind::Value),
+    }
+}
+
+fn fn_columns(args: &[Value], base: CellCoord) -> Value {
+    if args.len() != 1 {
+        return Value::Error(ErrorKind::Value);
+    }
+    match &args[0] {
+        Value::Range(r) => Value::Number(r.resolve(base).cols() as f64),
+        Value::Error(e) => Value::Error(*e),
+        _ => Value::Error(ErrorKind::Value),
+    }
+}
+
+fn fn_address(args: &[Value]) -> Value {
+    if !(2..=5).contains(&args.len()) {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let row_num = match coerce_to_i64(args[0].clone()) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let col_num = match coerce_to_i64(args[1].clone()) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    if row_num < 1 || row_num > EXCEL_MAX_ROWS as i64 {
+        return Value::Error(ErrorKind::Value);
+    }
+    if col_num < 1 || col_num > EXCEL_MAX_COLS as i64 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let abs_num = if args.len() >= 3 && !matches!(args[2], Value::Empty) {
+        match coerce_to_i64(args[2].clone()) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        }
+    } else {
+        1
+    };
+    let (col_abs, row_abs) = match abs_num {
+        1 => (true, true),
+        2 => (false, true),
+        3 => (true, false),
+        4 => (false, false),
+        _ => return Value::Error(ErrorKind::Value),
+    };
+
+    let a1 = if args.len() >= 4 && !matches!(args[3], Value::Empty) {
+        match coerce_to_bool(args[3].clone()) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        }
+    } else {
+        true
+    };
+
+    let sheet_prefix = if args.len() >= 5 && !matches!(args[4], Value::Empty) {
+        match coerce_to_string(args[4].clone()) {
+            Ok(raw) => {
+                if raw.is_empty() {
+                    None
+                } else {
+                    Some(format!("{}!", quote_sheet_name(&raw)))
+                }
+            }
+            Err(e) => return Value::Error(e),
+        }
+    } else {
+        None
+    };
+
+    let addr = if a1 {
+        format_a1_address(row_num as u32, col_num as u32, row_abs, col_abs)
+    } else {
+        format_r1c1_address(row_num, col_num, row_abs, col_abs)
+    };
+
+    if let Some(prefix) = sheet_prefix {
+        Value::Text(Arc::from(format!("{prefix}{addr}")))
+    } else {
+        Value::Text(Arc::from(addr))
+    }
+}
+
+fn is_ident_cont_char(c: char) -> bool {
+    matches!(c, '$' | '_' | '\\' | '.' | 'A'..='Z' | 'a'..='z' | '0'..='9')
+}
+
+fn quote_sheet_name(name: &str) -> String {
+    if name.is_empty() {
+        return String::new();
+    }
+
+    let starts_like_number = matches!(name.chars().next(), Some('0'..='9' | '.'));
+    let starts_like_r1c1 = matches!(name.chars().next(), Some('R' | 'r' | 'C' | 'c'))
+        && matches!(name.chars().nth(1), Some('0'..='9' | '['));
+    let looks_like_a1 = crate::eval::parse_a1(name).is_ok();
+    let needs_quote = starts_like_number
+        || starts_like_r1c1
+        || looks_like_a1
+        || name.chars().any(|c| !is_ident_cont_char(c));
+
+    if !needs_quote {
+        return name.to_string();
+    }
+
+    let escaped = name.replace('\'', "''");
+    format!("'{escaped}'")
+}
+
+fn col_to_name(col: u32) -> String {
+    let mut n = col;
+    let mut out = Vec::<u8>::new();
+    while n > 0 {
+        let rem = (n - 1) % 26;
+        out.push(b'A' + rem as u8);
+        n = (n - 1) / 26;
+    }
+    out.reverse();
+    String::from_utf8(out).expect("column letters are always valid UTF-8")
+}
+
+fn format_a1_address(row_num: u32, col_num: u32, row_abs: bool, col_abs: bool) -> String {
+    let mut out = String::new();
+    if col_abs {
+        out.push('$');
+    }
+    out.push_str(&col_to_name(col_num));
+    if row_abs {
+        out.push('$');
+    }
+    out.push_str(&row_num.to_string());
+    out
+}
+
+fn format_r1c1_address(row_num: i64, col_num: i64, row_abs: bool, col_abs: bool) -> String {
+    let mut out = String::new();
+    if row_abs {
+        out.push('R');
+        out.push_str(&row_num.to_string());
+    } else {
+        out.push_str("R[");
+        out.push_str(&row_num.to_string());
+        out.push(']');
+    }
+    if col_abs {
+        out.push('C');
+        out.push_str(&col_num.to_string());
+    } else {
+        out.push_str("C[");
+        out.push_str(&col_num.to_string());
+        out.push(']');
+    }
+    out
+}
 fn format_number_general(n: f64) -> String {
     // Match the engine's number-to-text coercion semantics used by the AST evaluator.
     //

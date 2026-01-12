@@ -1728,6 +1728,51 @@ fn bytecode_backend_matches_ast_for_information_functions_scalar() {
     assert_engine_matches_ast(&engine, "=TYPE(A26:A27)", "B26");
 }
 
+#[test]
+fn bytecode_backend_matches_ast_for_reference_functions() {
+    let mut engine = Engine::new();
+
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+
+    engine.set_cell_formula("Sheet1", "C1", "=ROW()").unwrap();
+    engine.set_cell_formula("Sheet1", "C2", "=COLUMN()").unwrap();
+    engine.set_cell_formula("Sheet1", "C3", "=ROW(A1)").unwrap();
+    engine.set_cell_formula("Sheet1", "C4", "=COLUMN(A1)").unwrap();
+    engine.set_cell_formula("Sheet1", "C5", "=ROWS(A1:B3)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C6", "=COLUMNS(A1:B3)")
+        .unwrap();
+
+    engine.set_cell_formula("Sheet1", "C7", "=ADDRESS(1,1)").unwrap();
+    engine.set_cell_formula("Sheet1", "C8", "=ADDRESS(1,1,4)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C9", "=ADDRESS(1,1,1,FALSE)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C10", "=ADDRESS(1,1,1,TRUE,\"1\")")
+        .unwrap();
+
+    // Ensure all formulas were eligible for bytecode compilation.
+    assert_eq!(engine.bytecode_program_count(), 10);
+
+    engine.recalculate_single_threaded();
+
+    for (formula, cell) in [
+        ("=ROW()", "C1"),
+        ("=COLUMN()", "C2"),
+        ("=ROW(A1)", "C3"),
+        ("=COLUMN(A1)", "C4"),
+        ("=ROWS(A1:B3)", "C5"),
+        ("=COLUMNS(A1:B3)", "C6"),
+        ("=ADDRESS(1,1)", "C7"),
+        ("=ADDRESS(1,1,4)", "C8"),
+        ("=ADDRESS(1,1,1,FALSE)", "C9"),
+        ("=ADDRESS(1,1,1,TRUE,\"1\")", "C10"),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
 proptest! {
     #![proptest_config(ProptestConfig { cases: 32, .. ProptestConfig::default() })]
     #[test]
