@@ -40,6 +40,7 @@ pub mod merge_cells;
 pub mod minimal;
 pub mod outline;
 pub mod theme;
+mod cell_images;
 mod package;
 pub mod patch;
 mod path;
