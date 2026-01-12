@@ -1,9 +1,25 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createRequire } from "node:module";
 
 import * as Y from "yjs";
 
 import { applyBranchStateToYjsDoc, branchStateFromYjsDoc } from "./branchStateAdapter.js";
+
+function requireYjsCjs() {
+  const require = createRequire(import.meta.url);
+  const prevError = console.error;
+  console.error = (...args) => {
+    if (typeof args[0] === "string" && args[0].startsWith("Yjs was already imported.")) return;
+    prevError(...args);
+  };
+  try {
+    // eslint-disable-next-line import/no-named-as-default-member
+    return require("yjs");
+  } finally {
+    console.error = prevError;
+  }
+}
 
 test("branchStateFromYjsDoc: reads clobbered legacy comments array stored on a Map root", () => {
   const source = new Y.Doc();
@@ -493,4 +509,66 @@ test("applyBranchStateToYjsDoc: clears sheet tabColor when meta.tabColor is null
   const sheet1 = doc.getArray("sheets").get(0);
   assert.ok(sheet1 instanceof Y.Map);
   assert.equal(sheet1.get("tabColor"), undefined);
+});
+
+test("branch adapter works when workbook roots were instantiated by a different Yjs instance (CJS getArray/getMap)", () => {
+  const Ycjs = requireYjsCjs();
+
+  const remote = new Ycjs.Doc();
+  remote.transact(() => {
+    const sheets = remote.getArray("sheets");
+    const sheet = new Ycjs.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+    sheets.push([sheet]);
+
+    const cells = remote.getMap("cells");
+    const cell = new Ycjs.Map();
+    cell.set("value", 42);
+    cells.set("Sheet1:0:0", cell);
+  });
+
+  const update = Ycjs.encodeStateAsUpdate(remote);
+
+  /**
+   * @returns {Y.Doc}
+   */
+  function createDocWithForeignRoots() {
+    const doc = new Y.Doc();
+    // Simulate a mixed-module environment where updates are applied by another
+    // Yjs instance (e.g. y-websocket using CJS `require("yjs")`).
+    Ycjs.applyUpdate(doc, update);
+    // Simulate another instance eagerly instantiating workbook roots before our
+    // code touches them, resulting in foreign root constructors.
+    Ycjs.Doc.prototype.getArray.call(doc, "sheets");
+    Ycjs.Doc.prototype.getMap.call(doc, "cells");
+    return doc;
+  }
+
+  const doc1 = createDocWithForeignRoots();
+  assert.ok(!(doc1.share.get("sheets") instanceof Y.Array));
+  assert.ok(!(doc1.share.get("cells") instanceof Y.Map));
+  assert.throws(() => doc1.getArray("sheets"), /different constructor/);
+  assert.throws(() => doc1.getMap("cells"), /different constructor/);
+
+  const state = branchStateFromYjsDoc(doc1);
+  assert.deepEqual(state.sheets.order, ["Sheet1"]);
+  assert.equal(state.cells.Sheet1?.A1?.value, 42);
+
+  // Reading should normalize roots to the local Yjs instance so subsequent
+  // `doc.getArray/getMap` calls don't throw.
+  assert.ok(doc1.share.get("sheets") instanceof Y.Array);
+  assert.ok(doc1.share.get("cells") instanceof Y.Map);
+  assert.ok(doc1.getArray("sheets") instanceof Y.Array);
+  assert.ok(doc1.getMap("cells") instanceof Y.Map);
+
+  const doc2 = createDocWithForeignRoots();
+  applyBranchStateToYjsDoc(doc2, state, { origin: "test" });
+  assert.ok(doc2.share.get("sheets") instanceof Y.Array);
+  assert.ok(doc2.share.get("cells") instanceof Y.Map);
+  assert.equal(doc2.getMap("cells").get("Sheet1:0:0")?.get("value"), 42);
+
+  remote.destroy();
+  doc1.destroy();
+  doc2.destroy();
 });

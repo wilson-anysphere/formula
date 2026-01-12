@@ -12,11 +12,45 @@ import { a1ToRowCol, rowColToA1 } from "./a1.js";
  */
 
 /**
+ * @typedef {{ Map: new () => any, Array: new () => any, Text: new () => any }} YjsTypeConstructors
+ */
+
+/**
  * @param {any} value
  * @returns {value is Record<string, any>}
  */
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Return constructors for Y.Map/Y.Array/Y.Text that match the module instance used
+ * to create `doc`.
+ *
+ * In pnpm workspaces it is possible to load both the ESM + CJS builds of Yjs in
+ * the same process. Yjs types cannot be moved across module instances; the
+ * safest approach is to construct nested types using constructors from the
+ * target doc's module instance.
+ *
+ * @param {any} doc
+ * @returns {YjsTypeConstructors}
+ */
+function getDocConstructors(doc) {
+  const DocCtor = /** @type {any} */ (doc)?.constructor;
+  if (typeof DocCtor !== "function") {
+    return { Map: Y.Map, Array: Y.Array, Text: Y.Text };
+  }
+
+  try {
+    const probe = new DocCtor();
+    return {
+      Map: probe.getMap("__ctor_probe_map").constructor,
+      Array: probe.getArray("__ctor_probe_array").constructor,
+      Text: probe.getText("__ctor_probe_text").constructor,
+    };
+  } catch {
+    return { Map: Y.Map, Array: Y.Array, Text: Y.Text };
+  }
 }
 
 /**
@@ -75,6 +109,89 @@ function isYText(value) {
   if (typeof maybe.observeDeep !== "function") return false;
   if (typeof maybe.unobserveDeep !== "function") return false;
   return true;
+}
+
+function isYAbstractType(value) {
+  if (value instanceof Y.AbstractType) return true;
+  if (!value || typeof value !== "object") return false;
+  const maybe = /** @type {any} */ (value);
+  if (typeof maybe.observeDeep !== "function") return false;
+  if (typeof maybe.unobserveDeep !== "function") return false;
+  return Boolean(maybe._map instanceof Map || maybe._start || maybe._item || maybe._length != null);
+}
+
+function replaceForeignRootType({ doc, name, existing, create }) {
+  const t = create();
+
+  // Mirror Yjs' own Doc.get conversion logic for AbstractType placeholders, but
+  // also support roots instantiated by a different Yjs module instance (e.g.
+  // CJS `require("yjs")`).
+  t._map = existing?._map;
+  t._start = existing?._start;
+  t._length = existing?._length;
+
+  const map = existing?._map;
+  if (map instanceof Map) {
+    map.forEach((item) => {
+      for (let n = item; n !== null; n = n.left) {
+        n.parent = t;
+      }
+    });
+  }
+
+  for (let n = existing?._start ?? null; n !== null; n = n.right) {
+    n.parent = t;
+  }
+
+  doc.share.set(name, t);
+  t._integrate(doc, null);
+  return t;
+}
+
+function getMapRoot(doc, name) {
+  const existing = doc.share.get(name);
+  if (!existing) return doc.getMap(name);
+
+  const map = getYMap(existing);
+  if (map) {
+    if (map instanceof Y.Map) return map;
+    if (doc instanceof Y.Doc) {
+      return replaceForeignRootType({ doc, name, existing: map, create: () => new Y.Map() });
+    }
+    return map;
+  }
+
+  if (isYAbstractType(existing)) {
+    if (doc instanceof Y.Doc) {
+      return replaceForeignRootType({ doc, name, existing, create: () => new Y.Map() });
+    }
+    return doc.getMap(name);
+  }
+
+  throw new Error(`Unsupported Yjs root type for "${name}"`);
+}
+
+function getArrayRoot(doc, name) {
+  const existing = doc.share.get(name);
+  if (!existing) return doc.getArray(name);
+
+  const array = getYArray(existing);
+  if (array) {
+    if (array instanceof Y.Array) return array;
+    if (doc instanceof Y.Doc) {
+      return replaceForeignRootType({ doc, name, existing: array, create: () => new Y.Array() });
+    }
+    return array;
+  }
+
+  if (isYAbstractType(existing)) {
+    if (doc instanceof Y.Doc) {
+      return replaceForeignRootType({ doc, name, existing, create: () => new Y.Array() });
+    }
+    return doc.getArray(name);
+  }
+
+  throw new Error(`Unsupported Yjs root type for "${name}"`);
 }
 
 /**
@@ -339,7 +456,7 @@ function cellFromYjsValue(cellData) {
  * @returns {DocumentState}
  */
 export function branchStateFromYjsDoc(doc) {
-  const sheetsArray = doc.getArray("sheets");
+  const sheetsArray = getArrayRoot(doc, "sheets");
   /** @type {Record<string, SheetMeta>} */
   const metaById = {};
   /** @type {string[]} */
@@ -419,7 +536,7 @@ export function branchStateFromYjsDoc(doc) {
     order.push(id);
   }
 
-  const cellsMap = doc.getMap("cells");
+  const cellsMap = getMapRoot(doc, "cells");
 
   /** @type {Record<string, CellMap>} */
   const cells = {};
@@ -483,7 +600,7 @@ export function branchStateFromYjsDoc(doc) {
   const namedRanges = {};
   if (doc.share.has("namedRanges")) {
     try {
-      const namedRangesMap = doc.getMap("namedRanges");
+      const namedRangesMap = getMapRoot(doc, "namedRanges");
       for (const key of Array.from(namedRangesMap.keys()).sort()) {
         namedRanges[key] = yjsValueToJson(namedRangesMap.get(key));
       }
@@ -496,7 +613,7 @@ export function branchStateFromYjsDoc(doc) {
   const metadata = {};
   if (doc.share.has("metadata")) {
     try {
-      const metadataMap = doc.getMap("metadata");
+      const metadataMap = getMapRoot(doc, "metadata");
       for (const key of Array.from(metadataMap.keys()).sort()) {
         metadata[key] = yjsValueToJson(metadataMap.get(key));
       }
@@ -559,7 +676,7 @@ export function branchStateFromYjsDoc(doc) {
         const kind = hasStart && mapSize === 0 ? "array" : "map";
 
         if (kind === "map") {
-          const commentsMap = doc.getMap("comments");
+          const commentsMap = getMapRoot(doc, "comments");
           /** @type {Map<string, any>} */
           const byId = new Map();
           for (const id of Array.from(commentsMap.keys()).sort()) {
@@ -575,7 +692,7 @@ export function branchStateFromYjsDoc(doc) {
             comments[id] = byId.get(id);
           }
         } else {
-          const commentsArray = doc.getArray("comments");
+          const commentsArray = getArrayRoot(doc, "comments");
           /** @type {Map<string, any>} */
           const byId = new Map();
           for (const [id, value] of mapEntriesFromArrayRoot(commentsArray)) {
@@ -617,18 +734,19 @@ export function branchStateFromYjsDoc(doc) {
  */
 export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
   const normalized = normalizeDocumentState(state);
+  const docConstructors = getDocConstructors(doc);
 
   /**
    * @param {any} value
    */
   function yMapFromJsonObject(value) {
-    const map = new Y.Map();
+    const map = new docConstructors.Map();
     if (!isRecord(value)) return map;
     const keys = Object.keys(value).sort();
     for (const key of keys) {
       const v = value[key];
       if (key === "replies") {
-        const replies = new Y.Array();
+        const replies = new docConstructors.Array();
         if (Array.isArray(v)) {
           for (const reply of v) {
             if (isRecord(reply)) replies.push([yMapFromJsonObject(reply)]);
@@ -658,19 +776,19 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
    */
   function cloneYjsValue(value) {
     if (isYText(value)) {
-      const out = new Y.Text();
+      const out = new docConstructors.Text();
       out.applyDelta(structuredClone(value.toDelta()));
       return out;
     }
     const array = getYArray(value);
     if (array) {
-      const out = new Y.Array();
+      const out = new docConstructors.Array();
       for (const item of array.toArray()) out.push([cloneYjsValue(item)]);
       return out;
     }
     const map = getYMap(value);
     if (map) {
-      const out = new Y.Map();
+      const out = new docConstructors.Map();
       for (const key of Array.from(map.keys()).sort()) {
         out.set(key, cloneYjsValue(map.get(key)));
       }
@@ -685,7 +803,7 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
   doc.transact(
     (transaction) => {
       // --- Sheets ---
-      const sheetsArray = doc.getArray("sheets");
+      const sheetsArray = getArrayRoot(doc, "sheets");
       if (normalized.sheets.order.length > 0) {
         /** @type {Map<string, Y.Map<any>>} */
         const existingById = new Map();
@@ -698,11 +816,11 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
 
         /** @type {Y.Map<any>[]} */
         const desiredEntries = [];
-      for (const sheetId of normalized.sheets.order) {
-        const meta = normalized.sheets.metaById[sheetId];
-        const existing = existingById.get(sheetId);
-        const entry = new Y.Map();
-        if (existing) {
+        for (const sheetId of normalized.sheets.order) {
+          const meta = normalized.sheets.metaById[sheetId];
+          const existing = existingById.get(sheetId);
+          const entry = new docConstructors.Map();
+          if (existing) {
             for (const key of Array.from(existing.keys()).sort()) {
               if (
                 key === "id" ||
@@ -738,7 +856,7 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
             if (Object.prototype.hasOwnProperty.call(view, "rowFormats")) {
               const raw = view.rowFormats;
               if (raw && typeof raw === "object") {
-                const map = new Y.Map();
+                const map = new docConstructors.Map();
                 for (const key of Object.keys(raw).sort()) {
                   map.set(key, structuredClone(raw[key]));
                 }
@@ -753,7 +871,7 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
             if (Object.prototype.hasOwnProperty.call(view, "colFormats")) {
               const raw = view.colFormats;
               if (raw && typeof raw === "object") {
-                const map = new Y.Map();
+                const map = new docConstructors.Map();
                 for (const key of Object.keys(raw).sort()) {
                   map.set(key, structuredClone(raw[key]));
                 }
@@ -767,7 +885,7 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
 
             if (Object.prototype.hasOwnProperty.call(view, "formatRunsByCol")) {
               const raw = view.formatRunsByCol;
-              const map = new Y.Map();
+              const map = new docConstructors.Map();
               if (Array.isArray(raw)) {
                 for (const item of raw) {
                   const col = Number(item?.col);
@@ -814,7 +932,7 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
         // Yjs workbooks are expected to have at least one sheet. If the branch
         // state is empty (legacy init), preserve app invariants by creating a
         // default sheet.
-        const entry = new Y.Map();
+        const entry = new docConstructors.Map();
         entry.set("id", "Sheet1");
         entry.set("name", "Sheet1");
         entry.set("visibility", "visible");
@@ -822,7 +940,7 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
       }
 
       // --- Cells ---
-      const cellsMap = doc.getMap("cells");
+      const cellsMap = getMapRoot(doc, "cells");
       /** @type {Map<string, Cell>} */
       const desiredCells = new Map();
 
@@ -874,7 +992,7 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
       for (const canonicalKey of canonicalKeysToClear) {
         let yCell = getYMap(cellsMap.get(canonicalKey));
         if (!yCell) {
-          yCell = new Y.Map();
+          yCell = new docConstructors.Map();
           cellsMap.set(canonicalKey, yCell);
         }
 
@@ -888,7 +1006,7 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
       for (const [key, normalizedCell] of desiredCells) {
         let yCell = getYMap(cellsMap.get(key));
         if (!yCell) {
-          yCell = new Y.Map();
+          yCell = new docConstructors.Map();
           cellsMap.set(key, yCell);
         }
 
@@ -931,14 +1049,14 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
       }
 
       // --- Named ranges ---
-      const namedRangesMap = doc.getMap("namedRanges");
+      const namedRangesMap = getMapRoot(doc, "namedRanges");
       for (const key of Array.from(namedRangesMap.keys())) namedRangesMap.delete(key);
       for (const [key, value] of Object.entries(normalized.namedRanges ?? {})) {
         namedRangesMap.set(key, structuredClone(value));
       }
 
       // --- Metadata ---
-      const metadataMap = doc.getMap("metadata");
+      const metadataMap = getMapRoot(doc, "metadata");
       for (const key of Array.from(metadataMap.keys())) metadataMap.delete(key);
       for (const [key, value] of Object.entries(normalized.metadata ?? {})) {
         metadataMap.set(key, structuredClone(value));
@@ -959,7 +1077,7 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
               })();
 
       if (commentsKind === "array") {
-        const commentsArray = doc.getArray("comments");
+        const commentsArray = getArrayRoot(doc, "comments");
         deleteMapEntriesFromArrayRoot(transaction, commentsArray);
         if (commentsArray.length > 0) commentsArray.delete(0, commentsArray.length);
 
@@ -971,7 +1089,7 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
           commentsArray.push([yMapFromJsonObject(obj)]);
         }
       } else {
-        const commentsMap = doc.getMap("comments");
+        const commentsMap = getMapRoot(doc, "comments");
         for (const key of Array.from(commentsMap.keys())) commentsMap.delete(key);
         deleteLegacyListItemsFromMapRoot(transaction, commentsMap);
         for (const [id, value] of Object.entries(normalized.comments ?? {})) {
