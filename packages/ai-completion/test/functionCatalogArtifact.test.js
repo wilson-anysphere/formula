@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -61,4 +62,16 @@ test("function catalog artifact matches committed JSON and is sorted", async () 
   assert.equal(new Set(names).size, names.length, "Expected function catalog to contain unique names");
 
   assert.ok(names.includes("XLOOKUP"), "Expected XLOOKUP to be present in the catalog");
+});
+
+test("function catalog generator script parses (node --check)", () => {
+  const scriptPath = fileURLToPath(
+    new URL("../../../scripts/generate-function-catalog.js", import.meta.url),
+  );
+  const result = spawnSync(process.execPath, ["--check", scriptPath], { encoding: "utf8" });
+  assert.equal(
+    result.status,
+    0,
+    `Expected node --check to succeed for scripts/generate-function-catalog.js.\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+  );
 });
