@@ -11,6 +11,7 @@ use crate::path;
 use crate::rich_data::metadata::parse_value_metadata_vm_to_rich_value_index_map;
 use crate::rich_data::{scan_cells_with_metadata_indices, RichDataError};
 use crate::rich_data::rich_value::parse_rich_value_relationship_indices;
+use crate::drawings::REL_TYPE_IMAGE;
 
 const REL_TYPE_SHEET_METADATA: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata";
@@ -32,8 +33,6 @@ const REL_TYPE_RICH_VALUE_REL_2017_06: &str =
     "http://schemas.microsoft.com/office/2017/06/relationships/richValueRel";
 const REL_TYPE_RICH_VALUE_REL_2017: &str =
     "http://schemas.microsoft.com/office/2017/relationships/richValueRel";
-const REL_TYPE_IMAGE: &str =
-    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
 
 /// Embedded ("Place in Cell") image mapping extracted from an XLSX package.
 #[derive(Debug, Clone, PartialEq, Eq)]

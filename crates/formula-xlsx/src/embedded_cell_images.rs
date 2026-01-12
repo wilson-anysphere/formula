@@ -6,6 +6,7 @@ use quick_xml::events::Event;
 use quick_xml::name::QName;
 use quick_xml::Reader;
 
+use crate::drawings::REL_TYPE_IMAGE;
 use crate::path::{rels_for_part, resolve_target};
 use crate::rich_data::{scan_cells_with_metadata_indices, RichDataError};
 use crate::{parse_worksheet_hyperlinks, XlsxError, XlsxPackage};
@@ -13,8 +14,6 @@ use crate::{parse_worksheet_hyperlinks, XlsxError, XlsxPackage};
 const RICH_VALUE_REL_PART: &str = "xl/richData/richValueRel.xml";
 const RD_RICH_VALUE_PART: &str = "xl/richData/rdrichvalue.xml";
 const RD_RICH_VALUE_STRUCTURE_PART: &str = "xl/richData/rdrichvaluestructure.xml";
-const REL_TYPE_IMAGE: &str =
-    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
 
 /// An embedded image stored inside a cell using Excel's RichData / `vm=` mechanism.
 ///
