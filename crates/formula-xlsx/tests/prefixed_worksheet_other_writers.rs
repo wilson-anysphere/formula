@@ -1,6 +1,6 @@
 use std::io::{Cursor, Write};
 
-use formula_model::{CellRef, Hyperlink, HyperlinkTarget, Range, SheetAutoFilter, TabColor};
+use formula_model::{CellRef, Hyperlink, HyperlinkTarget, Outline, Range, SheetAutoFilter, TabColor};
 use formula_xlsx::print::{ManualPageBreaks, PageSetup, Scaling, SheetPrintSettings, WorkbookPrintSettings};
 use formula_xlsx::XlsxPackage;
 
@@ -296,6 +296,33 @@ fn print_settings_insertion_preserves_worksheet_prefix() -> Result<(), Box<dyn s
             && !updated_xml.contains("<sheetPr")
             && !updated_xml.contains("<pageSetUpPr"),
         "should not introduce unprefixed print settings elements, got:\n{updated_xml}"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn outline_pr_insertion_preserves_worksheet_prefix() -> Result<(), Box<dyn std::error::Error>> {
+    let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <x:sheetPr/>
+  <x:sheetData/>
+</x:worksheet>"#;
+
+    let mut outline = Outline::default();
+    outline.pr.summary_below = false;
+
+    let updated = formula_xlsx::outline::write_outline_to_worksheet_xml(sheet_xml, &outline)?;
+
+    roxmltree::Document::parse(&updated)?;
+    assert!(
+        updated.contains("<x:outlinePr"),
+        "expected inserted <x:outlinePr>, got:\n{updated}"
+    );
+    assert!(
+        !updated.contains("<outlinePr"),
+        "should not introduce an unprefixed <outlinePr> element"
     );
 
     Ok(())
