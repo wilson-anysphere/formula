@@ -1,0 +1,41 @@
+import { describe, expect, it } from "vitest";
+
+import { DocumentController } from "../../../document/documentController.js";
+import { applyNumberFormatPreset } from "../../../formatting/toolbar.js";
+import { DocumentCellProvider } from "../documentCellProvider.js";
+
+describe("DocumentCellProvider numberFormat display rendering", () => {
+  it("renders currency + percent presets as formatted strings and keeps numeric alignment", () => {
+    const doc = new DocumentController();
+    const sheetId = "Sheet1";
+
+    doc.setCellValue(sheetId, "A1", 1234.5);
+    applyNumberFormatPreset(doc, sheetId, "A1", "currency");
+
+    doc.setCellValue(sheetId, "A2", 0.5);
+    applyNumberFormatPreset(doc, sheetId, "A2", "percent");
+
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => sheetId,
+      headerRows: 1,
+      headerCols: 1,
+      rowCount: 10,
+      colCount: 10,
+      showFormulas: () => false,
+      getComputedValue: ({ row, col }) => {
+        const cell = doc.getCell(sheetId, { row, col });
+        return cell.formula ? null : cell.value;
+      }
+    });
+
+    const a1 = provider.getCell(1, 1);
+    expect(a1?.value).toBe("$1,234.50");
+    expect(a1?.style?.textAlign).toBe("end");
+
+    const a2 = provider.getCell(2, 1);
+    expect(a2?.value).toBe("50%");
+    expect(a2?.style?.textAlign).toBe("end");
+  });
+});
+

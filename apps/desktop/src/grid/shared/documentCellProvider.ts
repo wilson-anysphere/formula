@@ -2,6 +2,7 @@ import type { CellData, CellProvider, CellProviderUpdate, CellRange, CellStyle }
 import { LruCache } from "@formula/grid";
 import type { DocumentController } from "../../document/documentController.js";
 import { resolveCssVar } from "../../theme/cssVars.js";
+import { formatValueWithNumberFormat } from "../../formatting/numberFormat.js";
 
 type RichTextValue = { text: string; runs?: Array<{ start: number; end: number; style?: Record<string, unknown> }> };
 
@@ -288,6 +289,27 @@ export class DocumentCellProvider implements CellProvider {
       }
     }
 
+    const styleId = typeof state.styleId === "number" ? state.styleId : 0;
+    const docStyle: DocStyle = this.options.document?.styleTable?.get?.(styleId) ?? {};
+    const styleAny = docStyle as any;
+    const numberFormat =
+      typeof styleAny?.numberFormat === "string"
+        ? (styleAny.numberFormat as string)
+        : typeof styleAny?.number_format === "string"
+          ? (styleAny.number_format as string)
+          : null;
+
+    let style = this.resolveStyle(state.styleId);
+
+    if (typeof value === "number" && numberFormat !== null) {
+      value = formatValueWithNumberFormat(value, numberFormat);
+      // Preserve spreadsheet-like default alignment for numeric values even though we
+      // render them as formatted strings (CanvasGridRenderer defaults to left-aligning strings).
+      if (style?.textAlign === undefined) {
+        style = { ...(style ?? {}), textAlign: "end" };
+      }
+    }
+
     const comment = (() => {
       const metaProvider = this.options.getCommentMeta;
       if (!metaProvider) return null;
@@ -297,7 +319,6 @@ export class DocumentCellProvider implements CellProvider {
       return { resolved: meta.resolved };
     })();
 
-    const style = this.resolveStyle(state.styleId);
     const cell: CellData = { row, col, value, style, comment };
     this.cache.set(key, cell);
     return cell;
