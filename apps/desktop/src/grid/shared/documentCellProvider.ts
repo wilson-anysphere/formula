@@ -454,7 +454,7 @@ export class DocumentCellProvider implements CellProvider {
             cache.delete(base + c);
           }
         }
-      } else if (width <= 4) {
+      } else if (width <= 4 || height <= 4) {
         // Full-height column invalidations (e.g. formatting an entire column) can span millions of
         // rows. Iterating every coordinate is too expensive, but our cache is bounded, so we can
         // evict matching entries by scanning keys.

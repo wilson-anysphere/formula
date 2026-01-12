@@ -522,4 +522,45 @@ describe("DocumentCellProvider formatting integration", () => {
     expect(provider.getCell(headerRows + 0, headerCols + 1)?.value).toBe("colB");
     expect(getCellSpy).toHaveBeenCalledTimes(3);
   });
+
+  it("keeps other rows cached when invalidating multiple full-width rows", () => {
+    const doc = new DocumentController();
+    doc.setCellValue("Sheet1", "A1", "row1");
+    doc.setCellValue("Sheet1", "A6", "row6");
+
+    const headerRows = 1;
+    const headerCols = 1;
+    const docRows = 10;
+    const docCols = 16_384; // Excel max, ensures 4-row full-width invalidation exceeds 50k cells
+
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => "Sheet1",
+      headerRows,
+      headerCols,
+      rowCount: docRows + headerRows,
+      colCount: docCols + headerCols,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const getCellSpy = vi.spyOn(doc, "getCell");
+
+    // Prime cache for an affected row and an unaffected row.
+    expect(provider.getCell(headerRows + 0, headerCols + 0)?.value).toBe("row1");
+    expect(provider.getCell(headerRows + 5, headerCols + 0)?.value).toBe("row6");
+    expect(getCellSpy).toHaveBeenCalledTimes(2);
+
+    // Invalidate rows 0-3 across all columns (doc range). This touches 65,536 cells, but only
+    // 4 rows, so we should not clear the entire sheet cache.
+    provider.invalidateDocCells({ startRow: 0, endRow: 4, startCol: 0, endCol: docCols });
+
+    // Affected row should be refetched...
+    expect(provider.getCell(headerRows + 0, headerCols + 0)?.value).toBe("row1");
+    expect(getCellSpy).toHaveBeenCalledTimes(3);
+
+    // ...but unaffected row should stay cached.
+    expect(provider.getCell(headerRows + 5, headerCols + 0)?.value).toBe("row6");
+    expect(getCellSpy).toHaveBeenCalledTimes(3);
+  });
 });
