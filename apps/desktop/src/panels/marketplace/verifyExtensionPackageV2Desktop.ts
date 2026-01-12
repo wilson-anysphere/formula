@@ -1,5 +1,5 @@
 import type { VerifiedExtensionPackageV2 } from "../../../../../shared/extension-package/v2-browser.mjs";
-import v2Core from "../../../../../shared/extension-package/core/v2-core.js";
+import v2Core from "../../../../../shared/extension-package/core/v2-core.mjs";
 
 const {
   PACKAGE_FORMAT_VERSION,

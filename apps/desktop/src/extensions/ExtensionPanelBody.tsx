@@ -90,7 +90,6 @@ const HARDEN_TAURI_GLOBALS_SOURCE = `(() => {
       let deleted = false;
       try {
         // Some environments (including strict mode) throw if the property is non-configurable.
-        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
         deleted = delete window[key];
       } catch {
         // Ignore.

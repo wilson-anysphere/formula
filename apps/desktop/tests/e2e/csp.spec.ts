@@ -760,7 +760,6 @@ test.describe("Content Security Policy (Tauri parity)", () => {
           "X-Package-Scan-Status": "passed",
           "X-Publisher": "formula",
           "X-Publisher-Key-Id": publisherKeyId,
-          "X-Package-Scan-Status": "passed",
         },
         body: pkgBytes
       });
