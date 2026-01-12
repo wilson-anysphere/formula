@@ -33,6 +33,8 @@ use std::collections::BTreeMap;
 use std::sync::Mutex;
 use thiserror::Error;
 
+use crate::lock_unpoisoned;
+
 /// Matches the JS `packages/security/crypto/encryptedFile.js` magic header for encrypted blobs.
 /// The trailing two digits encode the container version.
 const MAGIC_FMLENC_V1: &[u8; 8] = b"FMLENC01";
@@ -113,7 +115,7 @@ impl InMemoryKeyProvider {
     }
 
     pub fn keyring(&self) -> Option<KeyRing> {
-        self.keyring.lock().expect("key provider mutex poisoned").clone()
+        lock_unpoisoned(&self.keyring).clone()
     }
 }
 
@@ -125,11 +127,11 @@ impl std::fmt::Debug for InMemoryKeyProvider {
 
 impl KeyProvider for InMemoryKeyProvider {
     fn load_keyring(&self) -> std::result::Result<Option<KeyRing>, KeyProviderError> {
-        Ok(self.keyring.lock().expect("key provider mutex poisoned").clone())
+        Ok(lock_unpoisoned(&self.keyring).clone())
     }
 
     fn store_keyring(&self, keyring: &KeyRing) -> std::result::Result<(), KeyProviderError> {
-        *self.keyring.lock().expect("key provider mutex poisoned") = Some(keyring.clone());
+        *lock_unpoisoned(&self.keyring) = Some(keyring.clone());
         Ok(())
     }
 }
@@ -356,19 +358,30 @@ struct ParsedContainer<'a> {
 }
 
 fn parse_container(bytes: &[u8]) -> Result<ParsedContainer<'_>, EncryptionError> {
-    if bytes.len() < 8 {
-        return Err(EncryptionError::TruncatedContainer);
-    }
-
-    let magic: [u8; 8] = bytes[..8].try_into().expect("slice length checked");
+    let magic_slice = bytes.get(..8).ok_or(EncryptionError::TruncatedContainer)?;
+    let magic: [u8; 8] = magic_slice
+        .try_into()
+        .map_err(|_| EncryptionError::TruncatedContainer)?;
 
     if magic == *MAGIC_FMLENC_V1 {
         if bytes.len() < HEADER_LEN_FMLENC_V1 {
             return Err(EncryptionError::TruncatedContainer);
         }
-        let key_version = u32::from_be_bytes(bytes[8..12].try_into().expect("u32 bytes"));
-        let nonce: [u8; NONCE_LEN] = bytes[12..24].try_into().expect("nonce bytes");
-        let tag: [u8; TAG_LEN] = bytes[24..40].try_into().expect("tag bytes");
+        let key_version_bytes = bytes.get(8..12).ok_or(EncryptionError::TruncatedContainer)?;
+        let key_version_bytes: [u8; 4] = key_version_bytes
+            .try_into()
+            .map_err(|_| EncryptionError::TruncatedContainer)?;
+        let key_version = u32::from_be_bytes(key_version_bytes);
+
+        let nonce_slice = bytes.get(12..24).ok_or(EncryptionError::TruncatedContainer)?;
+        let nonce: [u8; NONCE_LEN] = nonce_slice
+            .try_into()
+            .map_err(|_| EncryptionError::TruncatedContainer)?;
+
+        let tag_slice = bytes.get(24..40).ok_or(EncryptionError::TruncatedContainer)?;
+        let tag: [u8; TAG_LEN] = tag_slice
+            .try_into()
+            .map_err(|_| EncryptionError::TruncatedContainer)?;
         return Ok(ParsedContainer {
             magic,
             format: ContainerFormat::Fmlenc { version: 1 },
@@ -387,9 +400,21 @@ fn parse_container(bytes: &[u8]) -> Result<ParsedContainer<'_>, EncryptionError>
         if version != LEGACY_CONTAINER_VERSION {
             return Err(EncryptionError::UnsupportedContainerVersion(version));
         }
-        let key_version = u32::from_be_bytes(bytes[9..13].try_into().expect("u32 bytes"));
-        let nonce: [u8; NONCE_LEN] = bytes[13..25].try_into().expect("nonce bytes");
-        let tag: [u8; TAG_LEN] = bytes[25..41].try_into().expect("tag bytes");
+        let key_version_bytes = bytes.get(9..13).ok_or(EncryptionError::TruncatedContainer)?;
+        let key_version_bytes: [u8; 4] = key_version_bytes
+            .try_into()
+            .map_err(|_| EncryptionError::TruncatedContainer)?;
+        let key_version = u32::from_be_bytes(key_version_bytes);
+
+        let nonce_slice = bytes.get(13..25).ok_or(EncryptionError::TruncatedContainer)?;
+        let nonce: [u8; NONCE_LEN] = nonce_slice
+            .try_into()
+            .map_err(|_| EncryptionError::TruncatedContainer)?;
+
+        let tag_slice = bytes.get(25..41).ok_or(EncryptionError::TruncatedContainer)?;
+        let tag: [u8; TAG_LEN] = tag_slice
+            .try_into()
+            .map_err(|_| EncryptionError::TruncatedContainer)?;
         return Ok(ParsedContainer {
             magic,
             format: ContainerFormat::Legacy { version },

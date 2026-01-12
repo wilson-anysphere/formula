@@ -1523,21 +1523,33 @@ impl<'a> Cursor<'a> {
 
     fn read_u32(&mut self) -> Result<u32> {
         let bytes = self.read_bytes(4)?;
-        Ok(u32::from_le_bytes(bytes.try_into().expect("len==4")))
+        let bytes: [u8; 4] = bytes
+            .try_into()
+            .map_err(|_| StorageError::Sqlite(rusqlite::Error::InvalidQuery))?;
+        Ok(u32::from_le_bytes(bytes))
     }
 
     fn read_u64(&mut self) -> Result<u64> {
         let bytes = self.read_bytes(8)?;
-        Ok(u64::from_le_bytes(bytes.try_into().expect("len==8")))
+        let bytes: [u8; 8] = bytes
+            .try_into()
+            .map_err(|_| StorageError::Sqlite(rusqlite::Error::InvalidQuery))?;
+        Ok(u64::from_le_bytes(bytes))
     }
 
     fn read_i64(&mut self) -> Result<i64> {
         let bytes = self.read_bytes(8)?;
-        Ok(i64::from_le_bytes(bytes.try_into().expect("len==8")))
+        let bytes: [u8; 8] = bytes
+            .try_into()
+            .map_err(|_| StorageError::Sqlite(rusqlite::Error::InvalidQuery))?;
+        Ok(i64::from_le_bytes(bytes))
     }
 
     fn read_f64(&mut self) -> Result<f64> {
         let bytes = self.read_bytes(8)?;
-        Ok(f64::from_le_bytes(bytes.try_into().expect("len==8")))
+        let bytes: [u8; 8] = bytes
+            .try_into()
+            .map_err(|_| StorageError::Sqlite(rusqlite::Error::InvalidQuery))?;
+        Ok(f64::from_le_bytes(bytes))
     }
 }

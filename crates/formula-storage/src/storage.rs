@@ -4,6 +4,7 @@ use crate::encryption::{
     decrypt_sqlite_bytes, encrypt_sqlite_bytes, is_encrypted_container, load_or_create_keyring,
     KeyProvider,
 };
+use crate::lock_unpoisoned;
 use crate::types::{
     canonical_json, CellData, CellSnapshot, CellValue, ImportModelWorkbookOptions, NamedRange,
     SheetMeta, SheetVisibility, Style as StorageStyle, WorkbookMeta,
@@ -261,7 +262,7 @@ impl Storage {
         let Some(ctx) = self.encrypted.as_ref() else {
             return Ok(());
         };
-        let _persist_guard = ctx.persist_lock.lock().expect("storage persist mutex poisoned");
+        let _persist_guard = lock_unpoisoned(&ctx.persist_lock);
         self.persist_inner(ctx)
     }
 
@@ -272,7 +273,7 @@ impl Storage {
         let Some(ctx) = self.encrypted.as_ref() else {
             return Ok(None);
         };
-        let _persist_guard = ctx.persist_lock.lock().expect("storage persist mutex poisoned");
+        let _persist_guard = lock_unpoisoned(&ctx.persist_lock);
 
         let mut keyring = load_or_create_keyring(ctx.key_provider.as_ref(), true)?;
         keyring.rotate();
@@ -285,7 +286,7 @@ impl Storage {
 
     fn persist_inner(&self, ctx: &EncryptedStorageContext) -> Result<()> {
         let sqlite_bytes = {
-            let conn = self.conn.lock().expect("storage mutex poisoned");
+            let conn = lock_unpoisoned(&self.conn);
             export_connection_to_sqlite_bytes(&conn)?
         };
 
@@ -301,7 +302,7 @@ impl Storage {
         // Ensure workbook exists.
         self.get_workbook(workbook_id)?;
 
-        let mut conn = self.conn.lock().expect("storage mutex poisoned");
+        let mut conn = lock_unpoisoned(&self.conn);
         let tx = conn.transaction()?;
         data_model::save_data_model_tx(&tx, workbook_id, model)?;
         touch_workbook_modified_at_by_workbook_id(&tx, workbook_id)?;
@@ -313,7 +314,7 @@ impl Storage {
         // Ensure workbook exists.
         self.get_workbook(workbook_id)?;
 
-        let conn = self.conn.lock().expect("storage mutex poisoned");
+        let conn = lock_unpoisoned(&self.conn);
         data_model::load_data_model(&conn, workbook_id)
     }
 
@@ -321,7 +322,7 @@ impl Storage {
         // Ensure workbook exists.
         self.get_workbook(workbook_id)?;
 
-        let conn = self.conn.lock().expect("storage mutex poisoned");
+        let conn = lock_unpoisoned(&self.conn);
         data_model::load_data_model_schema(&conn, workbook_id)
     }
 
@@ -338,7 +339,7 @@ impl Storage {
         // Ensure workbook exists.
         self.get_workbook(workbook_id)?;
 
-        let conn = self.conn.lock().expect("storage mutex poisoned");
+        let conn = lock_unpoisoned(&self.conn);
         data_model::stream_column_chunks(&conn, workbook_id, table_name, column_name, f)
     }
 
@@ -353,7 +354,7 @@ impl Storage {
             metadata,
         };
 
-        let conn = self.conn.lock().expect("storage mutex poisoned");
+        let conn = lock_unpoisoned(&self.conn);
         conn.execute(
             "INSERT INTO workbooks (id, name, metadata) VALUES (?1, ?2, ?3)",
             params![
@@ -367,7 +368,7 @@ impl Storage {
     }
 
     pub fn get_workbook(&self, id: Uuid) -> Result<WorkbookMeta> {
-        let conn = self.conn.lock().expect("storage mutex poisoned");
+        let conn = lock_unpoisoned(&self.conn);
         let row = conn
             .query_row(
                 "SELECT id, name, metadata FROM workbooks WHERE id = ?1",
@@ -395,7 +396,7 @@ impl Storage {
     }
 
     pub fn list_workbooks(&self) -> Result<Vec<WorkbookMeta>> {
-        let conn = self.conn.lock().expect("storage mutex poisoned");
+        let conn = lock_unpoisoned(&self.conn);
         let mut stmt = conn.prepare("SELECT id, name, metadata FROM workbooks ORDER BY created_at")?;
         let rows = stmt.query_map([], |r| {
             let Some(id_raw) = r.get::<_, Option<String>>(0).ok().flatten() else {
@@ -438,7 +439,7 @@ impl Storage {
             metadata: opts.metadata,
         };
 
-        let mut conn = self.conn.lock().expect("storage mutex poisoned");
+        let mut conn = lock_unpoisoned(&self.conn);
         let tx = conn.transaction()?;
 
         let theme = (!workbook.theme.is_default())
@@ -704,7 +705,7 @@ impl Storage {
     }
 
     pub fn export_model_workbook(&self, workbook_id: Uuid) -> Result<formula_model::Workbook> {
-        let conn = self.conn.lock().expect("storage mutex poisoned");
+        let conn = lock_unpoisoned(&self.conn);
 
         let row = conn
             .query_row(
@@ -999,7 +1000,7 @@ impl Storage {
 
         validate_sheet_name(name).map_err(map_sheet_name_error)?;
 
-        let mut conn = self.conn.lock().expect("storage mutex poisoned");
+        let mut conn = lock_unpoisoned(&self.conn);
         let tx = conn.transaction()?;
         let workbook_id_str = workbook_id.to_string();
 
@@ -1100,7 +1101,7 @@ impl Storage {
     }
 
     pub fn list_sheets(&self, workbook_id: Uuid) -> Result<Vec<SheetMeta>> {
-        let conn = self.conn.lock().expect("storage mutex poisoned");
+        let conn = lock_unpoisoned(&self.conn);
         let mut stmt = conn.prepare(
             r#"
             SELECT
@@ -1173,7 +1174,7 @@ impl Storage {
     }
 
     pub fn get_sheet_meta(&self, sheet_id: Uuid) -> Result<SheetMeta> {
-        let conn = self.conn.lock().expect("storage mutex poisoned");
+        let conn = lock_unpoisoned(&self.conn);
         let row = conn
             .query_row(
                 r#"
@@ -1231,7 +1232,7 @@ impl Storage {
     pub fn rename_sheet(&self, sheet_id: Uuid, name: &str) -> Result<()> {
         validate_sheet_name(name).map_err(map_sheet_name_error)?;
 
-        let mut conn = self.conn.lock().expect("storage mutex poisoned");
+        let mut conn = lock_unpoisoned(&self.conn);
         let tx = conn.transaction()?;
 
         let meta = match self.get_sheet_meta_tx(&tx, sheet_id) {
@@ -1290,7 +1291,7 @@ impl Storage {
     }
 
     pub fn set_sheet_visibility(&self, sheet_id: Uuid, visibility: SheetVisibility) -> Result<()> {
-        let mut conn = self.conn.lock().expect("storage mutex poisoned");
+        let mut conn = lock_unpoisoned(&self.conn);
         let tx = conn.transaction()?;
         let updated = tx.execute(
             "UPDATE sheets SET visibility = ?1 WHERE id = ?2",
@@ -1313,7 +1314,7 @@ impl Storage {
         sheet_id: Uuid,
         tab_color: Option<&formula_model::TabColor>,
     ) -> Result<()> {
-        let mut conn = self.conn.lock().expect("storage mutex poisoned");
+        let mut conn = lock_unpoisoned(&self.conn);
         let tx = conn.transaction()?;
         let tab_color_fast = tab_color.and_then(|c| c.rgb.as_deref());
         let tab_color_json = tab_color.map(serde_json::to_value).transpose()?;
@@ -1338,7 +1339,7 @@ impl Storage {
         xlsx_sheet_id: Option<i64>,
         xlsx_rel_id: Option<&str>,
     ) -> Result<()> {
-        let mut conn = self.conn.lock().expect("storage mutex poisoned");
+        let mut conn = lock_unpoisoned(&self.conn);
         let tx = conn.transaction()?;
         let updated = tx.execute(
             "UPDATE sheets SET xlsx_sheet_id = ?1, xlsx_rel_id = ?2 WHERE id = ?3",
@@ -1360,7 +1361,7 @@ impl Storage {
     ///
     /// This renormalizes positions to be contiguous starting at 0.
     pub fn reorder_sheet(&self, sheet_id: Uuid, new_position: i64) -> Result<()> {
-        let mut conn = self.conn.lock().expect("storage mutex poisoned");
+        let mut conn = lock_unpoisoned(&self.conn);
         let tx = conn.transaction()?;
 
         let meta = match self.get_sheet_meta_tx(&tx, sheet_id) {
@@ -1410,7 +1411,7 @@ impl Storage {
     }
 
     pub fn delete_sheet(&self, sheet_id: Uuid) -> Result<()> {
-        let mut conn = self.conn.lock().expect("storage mutex poisoned");
+        let mut conn = lock_unpoisoned(&self.conn);
         let tx = conn.transaction()?;
 
         let meta = match self.get_sheet_meta_tx(&tx, sheet_id) {
@@ -1522,7 +1523,7 @@ impl Storage {
         sheet_id: Uuid,
         range: CellRange,
     ) -> Result<Vec<((i64, i64), CellSnapshot)>> {
-        let conn = self.conn.lock().expect("storage mutex poisoned");
+        let conn = lock_unpoisoned(&self.conn);
         let mut stmt = conn.prepare(
             r#"
             SELECT row, col, value_type, value_number, value_string, value_json, formula, style_id
@@ -1591,7 +1592,7 @@ impl Storage {
     }
 
     pub fn cell_count(&self, sheet_id: Uuid) -> Result<u64> {
-        let conn = self.conn.lock().expect("storage mutex poisoned");
+        let conn = lock_unpoisoned(&self.conn);
         let count: u64 = conn.query_row(
             "SELECT COUNT(*) FROM cells WHERE sheet_id = ?1",
             params![sheet_id.to_string()],
@@ -1601,7 +1602,7 @@ impl Storage {
     }
 
     pub fn change_log_count(&self, sheet_id: Uuid) -> Result<u64> {
-        let conn = self.conn.lock().expect("storage mutex poisoned");
+        let conn = lock_unpoisoned(&self.conn);
         let count: u64 = conn.query_row(
             "SELECT COUNT(*) FROM change_log WHERE sheet_id = ?1",
             params![sheet_id.to_string()],
@@ -1611,7 +1612,7 @@ impl Storage {
     }
 
     pub fn latest_change(&self, sheet_id: Uuid) -> Result<Option<ChangeLogEntry>> {
-        let conn = self.conn.lock().expect("storage mutex poisoned");
+        let conn = lock_unpoisoned(&self.conn);
         let mut stmt = conn.prepare(
             r#"
             SELECT id, sheet_id, user_id, operation, target, old_value, new_value
@@ -1653,7 +1654,7 @@ impl Storage {
             return Ok(());
         }
 
-        let mut conn = self.conn.lock().expect("storage mutex poisoned");
+        let mut conn = lock_unpoisoned(&self.conn);
         let tx = conn.transaction()?;
 
         for change in changes {
@@ -1665,7 +1666,7 @@ impl Storage {
     }
 
     pub fn get_or_insert_style(&self, style: &StorageStyle) -> Result<i64> {
-        let mut conn = self.conn.lock().expect("storage mutex poisoned");
+        let mut conn = lock_unpoisoned(&self.conn);
         let tx = conn.transaction()?;
         let id = get_or_insert_style_tx(&tx, style)?;
         tx.commit()?;
@@ -1678,7 +1679,7 @@ impl Storage {
         name: &str,
         scope: &str,
     ) -> Result<Option<NamedRange>> {
-        let conn = self.conn.lock().expect("storage mutex poisoned");
+        let conn = lock_unpoisoned(&self.conn);
         let wants_workbook_scope = scope.eq_ignore_ascii_case("workbook");
         let mut stmt = conn.prepare(
             r#"
@@ -1724,7 +1725,7 @@ impl Storage {
     }
 
     pub fn upsert_named_range(&self, range: &NamedRange) -> Result<()> {
-        let mut conn = self.conn.lock().expect("storage mutex poisoned");
+        let mut conn = lock_unpoisoned(&self.conn);
         let tx = conn.transaction()?;
 
         let wants_workbook_scope = range.scope.eq_ignore_ascii_case("workbook");
@@ -2237,7 +2238,7 @@ fn load_sqlite_bytes_into_connection(dst: &mut Connection, sqlite_bytes: &[u8]) 
         ptr::copy_nonoverlapping(sqlite_bytes.as_ptr(), ptr.cast(), sqlite_bytes.len());
     }
 
-    let schema = std::ffi::CString::new("main").expect("main schema name has no nul bytes");
+    let schema = std::ffi::CString::new("main").map_err(|_| rusqlite::Error::InvalidQuery)?;
     let flags = rusqlite::ffi::SQLITE_DESERIALIZE_FREEONCLOSE
         | rusqlite::ffi::SQLITE_DESERIALIZE_RESIZEABLE;
     let handle = unsafe { dst.handle() };

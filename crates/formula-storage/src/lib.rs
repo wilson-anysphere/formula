@@ -38,3 +38,7 @@ pub use types::{
 };
 
 pub use storage::{CellChange, CellRange};
+
+pub(crate) fn lock_unpoisoned<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}

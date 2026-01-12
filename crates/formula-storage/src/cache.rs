@@ -1,3 +1,4 @@
+use crate::lock_unpoisoned;
 use crate::storage::{CellChange, CellRange, Result as StorageResult, Storage};
 use crate::types::{CellData, CellSnapshot, CellValue, SheetMeta, Style};
 use lru::LruCache;
@@ -184,7 +185,7 @@ impl MemoryManager {
         if !config.eviction_watermark.is_finite() {
             config.eviction_watermark = 0.8;
         }
-        let cap = NonZeroUsize::new(config.max_pages).expect("max_pages is non-zero");
+        let cap = NonZeroUsize::new(config.max_pages).unwrap_or(NonZeroUsize::MIN);
         let inner = Inner {
             pages: LruCache::new(cap),
             sheet_meta: HashMap::new(),
@@ -202,37 +203,23 @@ impl MemoryManager {
     }
 
     pub fn estimated_usage_bytes(&self) -> usize {
-        self.inner
-            .lock()
-            .expect("memory manager mutex poisoned")
-            .bytes
+        lock_unpoisoned(&self.inner).bytes
     }
 
     pub fn cached_page_count(&self) -> usize {
-        self.inner
-            .lock()
-            .expect("memory manager mutex poisoned")
-            .pages
-            .len()
+        lock_unpoisoned(&self.inner).pages.len()
     }
 
     pub fn dirty_page_count(&self) -> usize {
-        self.inner
-            .lock()
-            .expect("memory manager mutex poisoned")
-            .dirty_pages
-            .len()
+        lock_unpoisoned(&self.inner).dirty_pages.len()
     }
 
     pub fn stats_snapshot(&self) -> MemoryManagerStats {
-        self.inner
-            .lock()
-            .expect("memory manager mutex poisoned")
-            .stats
+        lock_unpoisoned(&self.inner).stats
     }
 
     pub fn metrics_snapshot(&self) -> MemoryManagerMetrics {
-        let inner = self.inner.lock().expect("memory manager mutex poisoned");
+        let inner = lock_unpoisoned(&self.inner);
         MemoryManagerMetrics {
             stats: inner.stats,
             cached_pages: inner.pages.len(),
@@ -250,7 +237,7 @@ impl MemoryManager {
     /// Callers should flush dirty pages (via [`MemoryManager::flush_dirty_pages`]) before invoking
     /// this to avoid discarding in-memory edits that haven't been persisted yet.
     pub fn clear_cache(&self) {
-        let mut inner = self.inner.lock().expect("memory manager mutex poisoned");
+        let mut inner = lock_unpoisoned(&self.inner);
         inner.pages.clear();
         inner.dirty_pages.clear();
         inner.sheet_meta.clear();
@@ -260,14 +247,14 @@ impl MemoryManager {
 
     pub fn get_sheet(&self, sheet_id: Uuid) -> StorageResult<SheetMeta> {
         {
-            let inner = self.inner.lock().expect("memory manager mutex poisoned");
+            let inner = lock_unpoisoned(&self.inner);
             if let Some(meta) = inner.sheet_meta.get(&sheet_id) {
                 return Ok(meta.clone());
             }
         }
 
         let meta = self.storage.get_sheet_meta(sheet_id)?;
-        let mut inner = self.inner.lock().expect("memory manager mutex poisoned");
+        let mut inner = lock_unpoisoned(&self.inner);
         inner.sheet_meta.insert(sheet_id, meta.clone());
         Ok(meta)
     }
@@ -367,7 +354,7 @@ impl MemoryManager {
         };
 
         {
-            let mut inner = self.inner.lock().expect("memory manager mutex poisoned");
+            let mut inner = lock_unpoisoned(&self.inner);
             let mut hit_pages = 0u64;
             let mut missed_pages = 0u64;
             for key in &page_keys {
@@ -392,7 +379,7 @@ impl MemoryManager {
             }
             let page = PageData::new_loaded(page_cells);
 
-            let mut inner = self.inner.lock().expect("memory manager mutex poisoned");
+            let mut inner = lock_unpoisoned(&self.inner);
             inner.stats.pages_loaded = inner.stats.pages_loaded.saturating_add(1);
             self.insert_page_locked(&mut inner, key, page)?;
 
@@ -406,7 +393,7 @@ impl MemoryManager {
         }
 
         {
-            let mut inner = self.inner.lock().expect("memory manager mutex poisoned");
+            let mut inner = lock_unpoisoned(&self.inner);
             // Keep memory bounded after new page inserts.
             self.evict_if_needed_locked(&mut inner)?;
         }
@@ -430,7 +417,7 @@ impl MemoryManager {
 
     pub fn get_cached_cell(&self, sheet_id: Uuid, row: i64, col: i64) -> Option<CellSnapshot> {
         let key = self.page_key_for_cell(sheet_id, row, col);
-        let mut inner = self.inner.lock().expect("memory manager mutex poisoned");
+        let mut inner = lock_unpoisoned(&self.inner);
         inner
             .pages
             .get(&key)
@@ -444,7 +431,7 @@ impl MemoryManager {
         self.get_sheet(change.sheet_id)?;
 
         let key = self.page_key_for_cell(change.sheet_id, change.row, change.col);
-        let mut inner = self.inner.lock().expect("memory manager mutex poisoned");
+        let mut inner = lock_unpoisoned(&self.inner);
         if inner.pages.contains(&key) {
             inner.stats.page_hits = inner.stats.page_hits.saturating_add(1);
             self.apply_change_to_page_locked(&mut inner, key, change)?;
@@ -463,7 +450,7 @@ impl MemoryManager {
         }
         let page = PageData::new_loaded(cells);
 
-        let mut inner = self.inner.lock().expect("memory manager mutex poisoned");
+        let mut inner = lock_unpoisoned(&self.inner);
         if !inner.pages.contains(&key) {
             inner.stats.pages_loaded = inner.stats.pages_loaded.saturating_add(1);
             self.insert_page_locked(&mut inner, key, page)?;
@@ -502,7 +489,7 @@ impl MemoryManager {
         let page = inner
             .pages
             .get_mut(&key)
-            .expect("page present after insert");
+            .ok_or(crate::storage::StorageError::Sqlite(rusqlite::Error::InvalidQuery))?;
 
         let before_page_bytes = page.bytes;
         let was_clean = page.pending_changes.is_empty();
@@ -562,7 +549,7 @@ impl MemoryManager {
     /// Flush all dirty pages to SQLite. Returns the number of flushed cell
     /// changes and whether the storage was durably persisted.
     pub fn flush_dirty_pages(&self) -> StorageResult<FlushOutcome> {
-        let mut inner = self.inner.lock().expect("memory manager mutex poisoned");
+        let mut inner = lock_unpoisoned(&self.inner);
         self.flush_pending_changes_upto_seq_locked(&mut inner, u64::MAX)
     }
 
