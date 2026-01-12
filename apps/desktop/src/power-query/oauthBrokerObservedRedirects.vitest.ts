@@ -30,4 +30,19 @@ describe("DesktopOAuthBroker.observeRedirect", () => {
 
     await expect(wait).resolves.toBe("formula://other/callback?code=def");
   });
+
+  it("does not buffer early redirects that return a different state", async () => {
+    const broker = new DesktopOAuthBroker();
+    broker.setOpenAuthUrlHandler(async () => {});
+    await broker.openAuthUrl(
+      "https://example.com/oauth/authorize?redirect_uri=formula%3A%2F%2Foauth%2Fcallback&state=expected",
+    );
+
+    // Mismatched state should not be buffered.
+    expect(broker.observeRedirect("formula://oauth/callback?code=abc&state=wrong")).toBe(false);
+
+    const wait = broker.waitForRedirect("formula://oauth/callback");
+    broker.resolveRedirect("formula://oauth/callback", "formula://oauth/callback?code=def&state=expected");
+    await expect(wait).resolves.toBe("formula://oauth/callback?code=def&state=expected");
+  });
 });
