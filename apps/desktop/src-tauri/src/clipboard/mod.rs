@@ -183,8 +183,14 @@ fn sanitize_clipboard_content_with_limits(
     }
     if let Some(ref s) = content.png_base64 {
         let decoded_len = estimate_base64_decoded_len(s).unwrap_or(usize::MAX);
+        // Normalize legacy `data:*;base64,...` prefixes so callers see consistent wire format.
+        let normalized = normalize_base64_str(s);
         if decoded_len > max_image_bytes {
             content.png_base64 = None;
+        } else if normalized.is_empty() {
+            content.png_base64 = None;
+        } else if normalized.len() != s.len() {
+            content.png_base64 = Some(normalized.to_string());
         }
     }
 
@@ -310,6 +316,19 @@ mod tests {
 
         let sanitized = sanitize_clipboard_content_with_limits(content.clone(), 5, 2);
         assert_eq!(sanitized, content);
+    }
+
+    #[test]
+    fn sanitize_clipboard_content_normalizes_data_url_png_base64() {
+        let content = ClipboardContent {
+            text: None,
+            html: None,
+            rtf: None,
+            png_base64: Some("data:image/png;base64,AAAA".to_string()),
+        };
+
+        let sanitized = sanitize_clipboard_content_with_limits(content, 5, 10);
+        assert_eq!(sanitized.png_base64, Some("AAAA".to_string()));
     }
 
     #[test]
