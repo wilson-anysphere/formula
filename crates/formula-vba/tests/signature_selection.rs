@@ -288,6 +288,45 @@ fn prefers_bound_verified_signature_stream_over_unbound_verified_candidate() {
 }
 
 #[test]
+fn prefers_digital_signature_ex_over_legacy_when_both_verified_and_bound() {
+    let module1 = b"Sub A()\r\nEnd Sub\r\n";
+
+    // Build an unsigned project first to compute the digest that Office would sign.
+    let unsigned = build_minimal_vba_project_bin_with_signature_streams(module1, &[]);
+    let normalized = content_normalized_data(&unsigned).expect("content normalized data");
+    let digest: [u8; 16] = Md5::digest(&normalized).into();
+
+    // Create a signature payload that is bound to the project.
+    let content = build_spc_indirect_data_content_sha256(&digest);
+    let pkcs7 = signature_test_utils::make_pkcs7_detached_signature(&content);
+    let mut signature_stream = content.clone();
+    signature_stream.extend_from_slice(&pkcs7);
+
+    // Include both legacy and Ex signature streams. When both are verified+bound, selection should
+    // still prefer `DigitalSignatureEx` per Excel-like stream precedence rules.
+    let signed = build_minimal_vba_project_bin_with_signature_streams(
+        module1,
+        &[
+            ("\u{0005}DigitalSignature", signature_stream.as_slice()),
+            ("\u{0005}DigitalSignatureEx", signature_stream.as_slice()),
+        ],
+    );
+
+    let sig = verify_vba_digital_signature(&signed)
+        .expect("signature verification should succeed")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(sig.binding, VbaSignatureBinding::Bound);
+    assert_eq!(
+        sig.stream_kind,
+        VbaSignatureStreamKind::DigitalSignatureEx,
+        "expected bound DigitalSignatureEx stream to be selected, got {}",
+        sig.stream_path
+    );
+}
+
+#[test]
 fn prefers_bound_verified_digital_signature_ext_over_unbound_verified_ex_candidate() {
     // Build an unsigned v3-capable project (includes a v3 reference record and a designer storage)
     // so `compute_vba_project_digest_v3` can derive a v3 digest transcript.
