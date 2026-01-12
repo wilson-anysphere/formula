@@ -532,6 +532,11 @@ fn main() {
                         eprintln!("[formula][coi-check] failed to eval script: {err}");
                         std::process::exit(2);
                     });
+
+                // Skip the rest of normal app setup (tray icon, updater, open-file wiring, etc).
+                // The check mode should be as lightweight as possible so it can run in headless
+                // environments and exit quickly based on the WebView evaluation result.
+                return Ok(());
             }
 
             tray::init(app)?;
