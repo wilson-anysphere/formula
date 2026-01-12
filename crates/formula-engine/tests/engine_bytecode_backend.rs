@@ -3158,6 +3158,186 @@ fn bytecode_backend_matches_ast_for_discount_securities_and_tbill_functions() {
 }
 
 #[test]
+fn bytecode_backend_financial_functions_compile_with_omitted_optional_args() {
+    let mut engine = Engine::new();
+
+    // COUP* functions: omit `basis`.
+    engine
+        .set_cell_formula("Sheet1", "A1", r#"=COUPDAYBS("2020-02-01","2025-01-15",2)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", r#"=COUPDAYS("2020-02-01","2025-01-15",2)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A3", r#"=COUPDAYSNC("2020-02-01","2025-01-15",2)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A4", r#"=COUPNCD("2020-02-01","2025-01-15",2)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A5", r#"=COUPNUM("2020-02-01","2025-01-15",2)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A6", r#"=COUPPCD("2020-02-01","2025-01-15",2)"#)
+        .unwrap();
+
+    // Standard bond functions: omit `basis`.
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "B1",
+            r#"=PRICE("2020-02-01","2025-01-15",0.05,0.04,100,2)"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "B2",
+            r#"=YIELD("2020-02-01","2025-01-15",0.05,95,100,2)"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "B3",
+            r#"=DURATION("2020-02-01","2025-01-15",0.05,0.04,2)"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "B4",
+            r#"=MDURATION("2020-02-01","2025-01-15",0.05,0.04,2)"#,
+        )
+        .unwrap();
+
+    // Accrued interest functions: omit `basis` and `calc_method`.
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "C1",
+            r#"=ACCRINTM("2019-12-31","2020-03-31",0.05,1000)"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "C2",
+            r#"=ACCRINT("2019-12-31","2020-06-30","2020-03-31",0.05,1000,2)"#,
+        )
+        .unwrap();
+
+    // Discount securities: omit `basis`.
+    engine
+        .set_cell_formula("Sheet1", "D1", r#"=DISC("2020-01-01","2020-12-31",97,100)"#)
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "D2",
+            r#"=PRICEDISC("2020-01-01","2020-12-31",0.05,100)"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "D3",
+            r#"=YIELDDISC("2020-01-01","2020-12-31",97,100)"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "D4",
+            r#"=INTRATE("2020-01-01","2020-12-31",97,100)"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "D5",
+            r#"=RECEIVED("2020-01-01","2020-12-31",97,0.05)"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "D6",
+            r#"=PRICEMAT("2020-01-01","2020-12-31","2019-12-31",0.05,0.04)"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "D7",
+            r#"=YIELDMAT("2020-01-01","2020-12-31","2019-12-31",0.05,95)"#,
+        )
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 19);
+    assert_eq!(stats.compiled, 19);
+    assert_eq!(stats.fallback, 0);
+
+    engine.recalculate_single_threaded();
+
+    for (formula, cell) in [
+        // COUP*
+        (r#"=COUPDAYBS("2020-02-01","2025-01-15",2)"#, "A1"),
+        (r#"=COUPDAYS("2020-02-01","2025-01-15",2)"#, "A2"),
+        (r#"=COUPDAYSNC("2020-02-01","2025-01-15",2)"#, "A3"),
+        (r#"=COUPNCD("2020-02-01","2025-01-15",2)"#, "A4"),
+        (r#"=COUPNUM("2020-02-01","2025-01-15",2)"#, "A5"),
+        (r#"=COUPPCD("2020-02-01","2025-01-15",2)"#, "A6"),
+        // Standard bonds
+        (
+            r#"=PRICE("2020-02-01","2025-01-15",0.05,0.04,100,2)"#,
+            "B1",
+        ),
+        (
+            r#"=YIELD("2020-02-01","2025-01-15",0.05,95,100,2)"#,
+            "B2",
+        ),
+        (
+            r#"=DURATION("2020-02-01","2025-01-15",0.05,0.04,2)"#,
+            "B3",
+        ),
+        (
+            r#"=MDURATION("2020-02-01","2025-01-15",0.05,0.04,2)"#,
+            "B4",
+        ),
+        // ACCRINT*
+        (
+            r#"=ACCRINTM("2019-12-31","2020-03-31",0.05,1000)"#,
+            "C1",
+        ),
+        (
+            r#"=ACCRINT("2019-12-31","2020-06-30","2020-03-31",0.05,1000,2)"#,
+            "C2",
+        ),
+        // Discount securities
+        (r#"=DISC("2020-01-01","2020-12-31",97,100)"#, "D1"),
+        (
+            r#"=PRICEDISC("2020-01-01","2020-12-31",0.05,100)"#,
+            "D2",
+        ),
+        (r#"=YIELDDISC("2020-01-01","2020-12-31",97,100)"#, "D3"),
+        (r#"=INTRATE("2020-01-01","2020-12-31",97,100)"#, "D4"),
+        (r#"=RECEIVED("2020-01-01","2020-12-31",97,0.05)"#, "D5"),
+        (
+            r#"=PRICEMAT("2020-01-01","2020-12-31","2019-12-31",0.05,0.04)"#,
+            "D6",
+        ),
+        (
+            r#"=YIELDMAT("2020-01-01","2020-12-31","2019-12-31",0.05,95)"#,
+            "D7",
+        ),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
 fn bytecode_backend_financial_date_text_uses_datevalue_semantics() {
     let mut engine = Engine::new();
     // For these financial functions, text date arguments must use DATEVALUE-like parsing (not VALUE).
