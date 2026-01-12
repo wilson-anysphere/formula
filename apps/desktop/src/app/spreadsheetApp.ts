@@ -6465,11 +6465,13 @@ export class SpreadsheetApp {
 
     // Excel-style select current region: Ctrl/Cmd+Shift+* (aka Ctrl/Cmd+Shift+8).
     // Use `code===Digit8` to catch layouts where `key` is not "*".
+    //
+    // Some keyboards also have a dedicated Numpad "*" key; Excel typically accepts Ctrl+*
+    // there even without Shift, so we include `code===NumpadMultiply` as a best-effort.
     if (
       primary &&
       !e.altKey &&
-      e.shiftKey &&
-      (e.code === "Digit8" || e.key === "*" || e.key === "8")
+      ((e.shiftKey && (e.code === "Digit8" || e.key === "*" || e.key === "8")) || e.code === "NumpadMultiply")
     ) {
       e.preventDefault();
       const active = { ...this.selection.active };
