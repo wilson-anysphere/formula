@@ -28,7 +28,7 @@ If you are editing collaboration code, start here and keep this doc in sync with
 - Presence (Awareness wrapper): [`packages/collab/presence/src/presenceManager.js`](../packages/collab/presence/src/presenceManager.js) (`PresenceManager`)
 - Desktop presence renderer: [`apps/desktop/src/grid/presence-renderer/`](../apps/desktop/src/grid/presence-renderer/) (`PresenceRenderer`)
 - Permissions + masking: [`packages/collab/permissions/index.js`](../packages/collab/permissions/index.js) (`getCellPermissions`, `maskCellValue`)
-- Offline persistence helper: [`packages/collab/offline/src/index.ts`](../packages/collab/offline/src/index.ts) / [`index.node.ts`](../packages/collab/offline/src/index.node.ts) (`attachOfflinePersistence`)
+- Local persistence implementations: [`packages/collab/persistence/src/`](../packages/collab/persistence/src/) (`IndexedDbCollabPersistence`, `FileCollabPersistence`)
 - Comments (Yjs `comments` root helpers): [`packages/collab/comments/src/manager.ts`](../packages/collab/comments/src/manager.ts) (`CommentManager`, `createCommentManagerForSession`, `migrateCommentsArrayToMap`)
 - Conflict monitors: [`packages/collab/conflicts/index.js`](../packages/collab/conflicts/index.js) (`FormulaConflictMonitor`, `CellConflictMonitor`, `CellStructuralConflictMonitor`)
 - Collab version history glue: [`packages/collab/versioning/src/index.ts`](../packages/collab/versioning/src/index.ts) (`createCollabVersioning`)
@@ -252,11 +252,17 @@ Implementation: see `scheduleProviderConnectAfterHydration()` in [`packages/coll
 
 ### Legacy offline option (`options.offline`, deprecated)
 
-`@formula/collab-session` previously supported a separate `options.offline` API backed by `@formula/collab-offline`.
+`@formula/collab-session` still accepts a legacy `options.offline` option for backwards compatibility.
 
 This option is now **deprecated**. Prefer the unified `options.persistence` interface (`@formula/collab-persistence`) for all new code.
 
-For backwards compatibility, passing `options.offline` will internally construct an equivalent `CollabPersistence` implementation and still expose `session.offline.{whenLoaded,clear,destroy}` as a convenience layer.
+Current implementation detail (as of `packages/collab/session/src/index.ts`):
+
+- `offline.mode: "indexeddb"` maps to `new IndexedDbCollabPersistence()`
+- `offline.mode: "file"` maps to `new FileCollabPersistence(dir)` (and requires `offline.filePath`)
+  - includes best-effort migration of historical on-disk logs written by the deprecated `@formula/collab-offline` file backend
+
+For compatibility, passing `options.offline` will still expose `session.offline.{whenLoaded,clear,destroy}` as a convenience layer.
 
 ### Schema initialization (default sheet + root normalization)
 
