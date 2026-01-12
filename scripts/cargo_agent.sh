@@ -119,15 +119,36 @@ fi
 subcommand="$1"
 shift
 
-# Backwards-compat: the desktop Tauri crate was renamed from `formula-desktop-tauri` to `desktop`.
-# Some task harnesses / scripts may still invoke `cargo test -p formula-desktop-tauri`.
-# Rewrite those invocations so the wrapper continues to work across the rename.
+# Backwards-compat: the desktop Tauri crate has historically used both
+# `formula-desktop-tauri` and `desktop` as the Cargo *package* name.
+#
+# Some task harnesses / scripts still invoke `cargo test -p formula-desktop-tauri`, while others
+# use `-p desktop`. Remap based on the current `[package] name` in
+# `apps/desktop/src-tauri/Cargo.toml` so the wrapper continues to work across renames.
 remapped_args=()
+
+desktop_pkg_name=""
+if [[ -f "${repo_root}/apps/desktop/src-tauri/Cargo.toml" ]]; then
+  desktop_pkg_name="$(
+    awk '
+      /^\[package\]$/ { in_package = 1; next }
+      /^\[/ { in_package = 0 }
+      in_package && $1 == "name" && $2 == "=" {
+        gsub(/"/, "", $3);
+        print $3;
+        exit
+      }
+    ' "${repo_root}/apps/desktop/src-tauri/Cargo.toml" 2>/dev/null || true
+  )"
+fi
+
 expect_pkg_name=false
 for arg in "$@"; do
   if [[ "${expect_pkg_name}" == "true" ]]; then
-    if [[ "${arg}" == "formula-desktop-tauri" ]]; then
+    if [[ "${arg}" == "formula-desktop-tauri" && "${desktop_pkg_name}" == "desktop" ]]; then
       remapped_args+=("desktop")
+    elif [[ "${arg}" == "desktop" && "${desktop_pkg_name}" == "formula-desktop-tauri" ]]; then
+      remapped_args+=("formula-desktop-tauri")
     else
       remapped_args+=("${arg}")
     fi
@@ -141,10 +162,32 @@ for arg in "$@"; do
       expect_pkg_name=true
       ;;
     -p=formula-desktop-tauri)
-      remapped_args+=("-p=desktop")
+      if [[ "${desktop_pkg_name}" == "desktop" ]]; then
+        remapped_args+=("-p=desktop")
+      else
+        remapped_args+=("${arg}")
+      fi
       ;;
     --package=formula-desktop-tauri)
-      remapped_args+=("--package=desktop")
+      if [[ "${desktop_pkg_name}" == "desktop" ]]; then
+        remapped_args+=("--package=desktop")
+      else
+        remapped_args+=("${arg}")
+      fi
+      ;;
+    -p=desktop)
+      if [[ "${desktop_pkg_name}" == "formula-desktop-tauri" ]]; then
+        remapped_args+=("-p=formula-desktop-tauri")
+      else
+        remapped_args+=("${arg}")
+      fi
+      ;;
+    --package=desktop)
+      if [[ "${desktop_pkg_name}" == "formula-desktop-tauri" ]]; then
+        remapped_args+=("--package=formula-desktop-tauri")
+      else
+        remapped_args+=("${arg}")
+      fi
       ;;
     *)
       remapped_args+=("${arg}")

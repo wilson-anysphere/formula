@@ -479,6 +479,10 @@ fn sniff_workbook_format(path: &Path) -> Option<SniffedWorkbookFormat> {
     None
 }
 
+pub(crate) fn looks_like_workbook(path: &Path) -> bool {
+    sniff_workbook_format(path).is_some()
+}
+
 fn read_xlsx_or_xlsm_blocking(path: &Path) -> anyhow::Result<Workbook> {
     let origin_xlsx_bytes = Arc::<[u8]>::from(
         std::fs::read(path).with_context(|| format!("read workbook bytes {:?}", path))?,

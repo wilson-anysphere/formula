@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use crate::file_io::looks_like_workbook;
 use url::Url;
 
 const SUPPORTED_EXTENSIONS: &[&str] = &[
@@ -74,13 +75,22 @@ fn normalize_open_file_candidate(arg: &str, cwd: Option<&Path>) -> Option<PathBu
     let ext = path
         .extension()
         .and_then(|ext| ext.to_str())
-        .map(|ext| ext.to_ascii_lowercase())?;
+        .map(|ext| ext.to_ascii_lowercase());
 
-    if !SUPPORTED_EXTENSIONS.contains(&ext.as_str()) {
-        return None;
+    if let Some(ext) = ext {
+        if SUPPORTED_EXTENSIONS.contains(&ext.as_str()) {
+            return Some(path);
+        }
     }
 
-    Some(path)
+    // If the extension is missing or unsupported, attempt a lightweight content sniff so
+    // workbooks that were downloaded/renamed without an extension (or with a wrong one) can
+    // still be opened via OS open-file events.
+    if looks_like_workbook(&path) {
+        return Some(path);
+    }
+
+    None
 }
 
 #[cfg(test)]
@@ -141,6 +151,34 @@ mod tests {
         let paths = extract_open_file_paths_from_argv(&argv, Some(dir.path()));
 
         assert_eq!(paths, vec![file_path]);
+    }
+
+    #[test]
+    fn accepts_workbook_with_unknown_extension_via_sniffing() {
+        let dir = tempdir().unwrap();
+        let cwd = dir.path();
+
+        let fixture_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/xlsx/basic/basic.xlsx");
+        let renamed = cwd.join("basic.bin");
+        std::fs::copy(&fixture_path, &renamed).expect("copy fixture");
+
+        let argv = vec!["formula-desktop".to_string(), "basic.bin".to_string()];
+        let paths = extract_open_file_paths_from_argv(&argv, Some(cwd));
+        assert_eq!(paths, vec![renamed]);
+    }
+
+    #[test]
+    fn accepts_workbook_without_extension_via_sniffing() {
+        let dir = tempdir().unwrap();
+        let cwd = dir.path();
+
+        let fixture_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/xlsx/basic/basic.xlsx");
+        let renamed = cwd.join("basic");
+        std::fs::copy(&fixture_path, &renamed).expect("copy fixture");
+
+        let argv = vec!["formula-desktop".to_string(), "basic".to_string()];
+        let paths = extract_open_file_paths_from_argv(&argv, Some(cwd));
+        assert_eq!(paths, vec![renamed]);
     }
 
     #[cfg(feature = "parquet")]
