@@ -245,6 +245,7 @@ test.describe("sheet tabs", () => {
     const sheet1Tab = page.getByTestId("sheet-tab-Sheet1");
     await sheet1Tab.click();
     await expect(sheet1Tab).toHaveAttribute("data-active", "true");
+    const initialSheetId = await page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId());
 
     await sheet1Tab.dblclick();
     const input = sheet1Tab.locator("input.sheet-tab__input");
@@ -259,7 +260,7 @@ test.describe("sheet tabs", () => {
       input.dispatchEvent(evt);
     });
 
-    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet1");
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe(initialSheetId);
     await expect(input).toBeVisible();
     await expect(input).toBeFocused();
   });
@@ -275,6 +276,7 @@ test.describe("sheet tabs", () => {
     const formulaInput = page.getByTestId("formula-input");
     await formulaInput.click();
     await expect(formulaInput).toBeFocused();
+    const initialSheetId = await page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId());
 
     await page.evaluate(() => {
       const input = document.querySelector('[data-testid="formula-input"]') as HTMLTextAreaElement | null;
@@ -283,8 +285,8 @@ test.describe("sheet tabs", () => {
       input.dispatchEvent(evt);
     });
 
-    // Active sheet should remain unchanged (Sheet2 is active after using the add button once).
-    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet2");
+    // Active sheet should remain unchanged.
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe(initialSheetId);
   });
 
   test("invalid rename (forbidden characters) keeps editing and blocks switching sheets", async ({ page }) => {
