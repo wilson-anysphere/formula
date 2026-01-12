@@ -3,7 +3,7 @@ use std::io::Read;
 use formula_vba::{
     extract_signer_certificate_info, extract_vba_signature_signed_digest, list_vba_digital_signatures,
     parse_vba_digital_signature, verify_vba_digital_signature, VbaSignatureBinding,
-    VbaSignatureVerification,
+    VbaSignatureStreamKind, VbaSignatureVerification,
 };
 
 fn load_fixture_vba_bin() -> Vec<u8> {
@@ -29,8 +29,9 @@ fn extracts_spc_indirect_data_digest_from_signed_vba_fixture() {
         .expect("signature parse should succeed")
         .expect("signature should be present");
 
-    assert!(
-        sig.stream_path.contains("DigitalSignature"),
+    assert_eq!(
+        sig.stream_kind,
+        VbaSignatureStreamKind::DigitalSignature,
         "expected DigitalSignature stream, got {}",
         sig.stream_path
     );
@@ -167,8 +168,9 @@ fn lists_signature_stream_and_reports_digsig_pkcs7_location() {
     assert_eq!(sigs.len(), 1);
 
     let sig = &sigs[0];
-    assert!(
-        sig.stream_path.contains("DigitalSignature"),
+    assert_eq!(
+        sig.stream_kind,
+        VbaSignatureStreamKind::DigitalSignature,
         "expected DigitalSignature stream, got {}",
         sig.stream_path
     );
