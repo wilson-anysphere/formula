@@ -1903,6 +1903,17 @@ export class SpreadsheetApp {
     return this.sheetId;
   }
 
+  /**
+   * Resolve a sheet display name (as written in formula text) to a stable sheet id.
+   *
+   * Matching is case-insensitive. When provided, the app's `sheetNameResolver`
+   * (typically backed by workbook metadata) is used first, with a fallback to
+   * matching raw sheet ids for legacy formulas and tests.
+   */
+  getSheetIdByName(name: string): string | null {
+    return this.resolveSheetIdByName(name);
+  }
+
   getScroll(): { x: number; y: number } {
     return { x: this.scrollX, y: this.scrollY };
   }
@@ -7516,18 +7527,11 @@ export class SpreadsheetApp {
   ): Array<{ start: CellCoord; end: CellCoord; color: string; active: boolean }> {
     if (!highlights || highlights.length === 0) return [];
 
-    const sheetIds = this.document.getSheetIds();
-    const resolveSheetId = (name: string): string | null => {
-      const trimmed = name.trim();
-      if (!trimmed) return null;
-      return sheetIds.find((id) => id.toLowerCase() === trimmed.toLowerCase()) ?? null;
-    };
-
     return highlights
       .filter((h) => {
         const sheet = h.range.sheet;
         if (!sheet) return true;
-        const resolved = resolveSheetId(sheet);
+        const resolved = this.getSheetIdByName(sheet);
         if (!resolved) return false;
         return resolved.toLowerCase() === sheetId.toLowerCase();
       })
