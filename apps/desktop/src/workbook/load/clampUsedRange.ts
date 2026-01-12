@@ -41,7 +41,7 @@ function parsePositiveInt(value: unknown): number | null {
  *
  * Precedence:
  * 1) defaults
- * 2) env vars (DESKTOP_LOAD_MAX_ROWS/COLS)
+ * 2) env vars (DESKTOP_LOAD_MAX_ROWS/COLS; VITE_DESKTOP_LOAD_MAX_ROWS/COLS)
  * 3) local overrides (e.g. values read from localStorage)
  * 4) URL query params (?loadMaxRows=…&loadMaxCols=…)
  *
@@ -108,7 +108,7 @@ export function resolveWorkbookLoadLimits(
  *
  * Precedence matches `resolveWorkbookLoadLimits`:
  * 1) defaults
- * 2) env vars (DESKTOP_LOAD_CHUNK_ROWS)
+ * 2) env vars (DESKTOP_LOAD_CHUNK_ROWS; VITE_DESKTOP_LOAD_CHUNK_ROWS)
  * 3) local overrides (e.g. values read from localStorage)
  * 4) URL query params (?loadChunkRows=…)
  *
