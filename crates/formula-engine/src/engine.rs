@@ -4921,6 +4921,12 @@ fn canonical_expr_depends_on_external_workbook_refs_inner(
 
             defined_name_depends_on_external_workbook_refs(sheet_id, &name_key, workbook, visiting)
         }
+        crate::Expr::FieldAccess(access) => canonical_expr_depends_on_external_workbook_refs_inner(
+            access.base.as_ref(),
+            current_sheet,
+            workbook,
+            visiting,
+        ),
         crate::Expr::FunctionCall(call) => call.args.iter().any(|arg| {
             canonical_expr_depends_on_external_workbook_refs_inner(
                 arg,

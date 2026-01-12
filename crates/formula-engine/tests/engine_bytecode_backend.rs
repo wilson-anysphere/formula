@@ -2288,6 +2288,41 @@ fn bytecode_compile_diagnostics_reports_external_reference_through_defined_name(
 }
 
 #[test]
+fn bytecode_compile_diagnostics_reports_external_reference_through_defined_name_in_field_access() {
+    let mut engine = Engine::new();
+    engine
+        .define_name(
+            "EXT",
+            NameScope::Workbook,
+            NameDefinition::Reference("[Book.xlsx]Sheet1!A1".to_string()),
+        )
+        .unwrap();
+
+    // Field access expressions like `(EXT).Price` should still be classified as external references
+    // for bytecode compilation when the base name expands to an external workbook reference.
+    //
+    // Note: Without parentheses, `EXT.Price` is currently tokenized as a single dotted identifier
+    // (e.g. to support `_xlfn.` prefixes), so use `(EXT).Price` to ensure we exercise the field
+    // access operator.
+    engine.set_cell_formula("Sheet1", "A1", "=(EXT).Price").unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 1);
+    assert_eq!(stats.compiled, 0);
+    assert_eq!(stats.fallback, 1);
+    assert_eq!(
+        stats
+            .fallback_reasons
+            .get(&BytecodeCompileReason::LowerError(
+                bytecode::LowerError::ExternalReference,
+            ))
+            .copied()
+            .unwrap_or(0),
+        1
+    );
+}
+
+#[test]
 fn bytecode_compile_diagnostics_reports_not_thread_safe_reason() {
     let mut engine = Engine::new();
 
