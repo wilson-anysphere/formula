@@ -445,6 +445,7 @@ mod tests {
         unsafe {
             use std::ffi::c_void;
             use std::sync::mpsc;
+            use std::thread;
 
             type DispatchQueue = *mut c_void;
             type DispatchFn = extern "C" fn(*mut c_void);
@@ -456,14 +457,14 @@ mod tests {
 
             struct Ctx<R: Send + 'static> {
                 f: Option<Box<dyn FnOnce() -> R + Send + 'static>>,
-                tx: mpsc::Sender<R>,
+                tx: mpsc::Sender<thread::Result<R>>,
             }
 
             extern "C" fn trampoline<R: Send + 'static>(ctx: *mut c_void) {
                 unsafe {
                     let mut ctx: Box<Ctx<R>> = Box::from_raw(ctx as *mut Ctx<R>);
                     let f = ctx.f.take().expect("closure already taken");
-                    let result = f();
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
                     let _ = ctx.tx.send(result);
                 }
             }
@@ -478,7 +479,10 @@ mod tests {
                 Box::into_raw(ctx) as *mut c_void,
                 trampoline::<R>,
             );
-            rx.recv().expect("main-thread dispatch failed")
+            match rx.recv().expect("main-thread dispatch failed") {
+                Ok(result) => result,
+                Err(panic) => std::panic::resume_unwind(panic),
+            }
         }
     }
 
