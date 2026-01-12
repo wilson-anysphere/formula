@@ -173,7 +173,8 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
   {
     command: "format.toggleItalic",
     key: "ctrl+i",
-    mac: "cmd+i",
+    // IMPORTANT: Cmd+I is reserved for the AI sidebar (see main.ts). Italic is bound to Ctrl+I instead.
+    mac: "ctrl+i",
     when: null,
   },
   {
