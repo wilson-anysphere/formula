@@ -150,6 +150,17 @@ test.describe("grid scrolling + virtualization", () => {
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
     await expect(address).toBeFocused();
 
+    // Also ensure range selection updates do not steal focus.
+    await page.evaluate(() => {
+      (window as any).__formulaApp.selectRange(
+        { range: { startRow: 0, startCol: 0, endRow: 1, endCol: 1 } },
+        { scrollIntoView: false, focus: false }
+      );
+    });
+
+    await expect(page.getByTestId("selection-range")).toHaveText("A1:B2");
+    await expect(address).toBeFocused();
+
     const scrollAfter = await page.evaluate(() => (window as any).__formulaApp.getScroll());
     expect(scrollAfter.x).toBeCloseTo(scrollBefore.x, 5);
     expect(scrollAfter.y).toBeCloseTo(scrollBefore.y, 5);
