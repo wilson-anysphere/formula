@@ -13,7 +13,9 @@ describe("Tauri capabilities", () => {
 
   it("does not rely on core:allow-invoke permissions (commands must validate in Rust)", () => {
     const permissions = readPermissions();
-
+    // The capability schema used by this repo/toolchain does not support a per-command allowlist for
+    // custom `#[tauri::command]` handlers. Keep `core:allow-invoke` absent so we don't accidentally
+    // broaden capabilities under the assumption it is being enforced.
     expect(permissions).not.toContain("core:allow-invoke");
 
     const allowInvoke = permissions.find(

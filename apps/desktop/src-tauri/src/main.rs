@@ -780,9 +780,10 @@ fn main() {
         // external URL opening goes through the `open_external_url` Rust command which enforces a
         // scheme allowlist.
         //
-        // SECURITY: Commands are allowlisted via `core:allow-invoke` in
-        // `src-tauri/capabilities/main.json`, but commands touching filesystem/network/etc must
-        // still validate inputs and enforce scoping/authorization in Rust (never trust the webview).
+        // SECURITY: App-defined `#[tauri::command]` handlers are not currently permission-gated by
+        // the capability system in this build setup. Capabilities still scope access to core/plugin
+        // APIs (events, dialogs, window ops, etc), but commands touching filesystem/network/etc
+        // must validate inputs and enforce scoping/authorization in Rust (never trust the webview).
         .invoke_handler(tauri::generate_handler![
             clipboard::clipboard_read,
             clipboard::clipboard_write,
