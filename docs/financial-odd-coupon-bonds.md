@@ -211,8 +211,8 @@ boundary equalities `issue == settlement` and `settlement == first_coupon` (as w
 
 The current engine implementation enforces:
 
-- ODDF\*: `issue <= settlement <= first_coupon <= maturity` with the additional constraints
-  `issue < first_coupon` and `settlement < maturity` (allows `first_coupon == maturity`)
+- ODDF\*: `issue <= settlement <= first_coupon <= maturity` with `issue < first_coupon` and `settlement < maturity`
+  (allows the equality boundaries `issue == settlement`, `settlement == first_coupon`, and `first_coupon == maturity`)
 - ODDL\*: `settlement < maturity` and `last_interest < maturity` (settlement may be before, on, or
   after `last_interest`; see `odd_coupon.rs::oddl_equation`).
 

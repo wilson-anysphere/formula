@@ -339,6 +339,10 @@ fn oddf_equation(
     // - `settlement == first_coupon` (settlement on the first coupon date)
     // - `first_coupon == maturity` (single odd stub period paid at maturity)
     //
+    // ODDF* accepts the boundary equalities `issue == settlement`, `settlement == first_coupon`,
+    // and `first_coupon == maturity`, but still rejects `issue == first_coupon` and
+    // `settlement == maturity`.
+    //
     // Chronology:
     // - `issue <= settlement <= first_coupon <= maturity`
     // - `issue < first_coupon` (reject `issue == first_coupon`)
