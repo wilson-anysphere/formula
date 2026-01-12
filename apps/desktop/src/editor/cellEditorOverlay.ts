@@ -35,6 +35,9 @@ export class CellEditorOverlay {
     this.element.autocomplete = "off";
     this.element.wrap = "off";
     this.element.style.display = "none";
+    // Ensure the editor sits above canvas overlay layers (selection, charts, etc),
+    // especially in shared-grid mode where canvases are explicitly z-indexed.
+    this.element.style.zIndex = "10";
 
     this.element.addEventListener("input", () => this.adjustSize());
     this.element.addEventListener("keydown", (e) => this.onKeyDown(e));
