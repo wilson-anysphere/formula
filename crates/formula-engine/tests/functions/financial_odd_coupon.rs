@@ -59,11 +59,12 @@ fn coupon_period_e(
     ncd: i32,
     basis: i32,
     frequency: i32,
-    _system: ExcelDateSystem,
+    system: ExcelDateSystem,
 ) -> f64 {
     let freq = frequency as f64;
     match basis {
-        0 | 2 | 4 => 360.0 / freq,
+        0 | 2 => 360.0 / freq,
+        4 => days_between(pcd, ncd, 4, system),
         3 => 365.0 / freq,
         1 => (ncd - pcd) as f64,
         _ => panic!("invalid basis {basis}"),
@@ -3494,8 +3495,7 @@ fn oddfprice_matches_excel_model_for_30_360_bases() {
     //
     // Include two scenarios:
     // - one where `E` is the "typical" semiannual 180 days for basis=4
-    // - one where the *European* DAYS360 between coupon dates differs from 360/frequency, but `E`
-    //   is still modeled as `360/frequency` (matching `coupon_schedule::coupon_period_e`).
+    // - one where basis=4's `E` differs from 360/frequency (because it uses DAYS360 between coupon dates)
     let scenarios = [
         // issue=2019-01-31, settlement=2019-02-28, first_coupon=2019-03-31, maturity=2019-09-30
         (
@@ -3506,8 +3506,7 @@ fn oddfprice_matches_excel_model_for_30_360_bases() {
         ),
         // maturity=2019-02-28 is EOM, so the maturity-anchored schedule is EOM-pinned:
         // prev_coupon=2018-02-28, first_coupon=2018-08-31.
-        // For basis=4, DAYS360(2018-02-28, 2018-08-31, method=true) = 182 days (not 180), but
-        // `E` remains modeled as 180 (=360/frequency).
+        // For basis=4, coupon-period `E = DAYS360(2018-02-28, 2018-08-31, method=true) = 182` days (not 180).
         (
             ExcelDate::new(2018, 1, 31),
             ExcelDate::new(2018, 2, 15),
@@ -3527,9 +3526,7 @@ fn oddfprice_matches_excel_model_for_30_360_bases() {
         let first_coupon = ymd_to_serial(first_coupon, system).unwrap();
         let maturity = ymd_to_serial(maturity, system).unwrap();
 
-        // Guard: ensure this test actually covers a basis=4 schedule where the European DAYS360
-        // between coupon dates differs from 360/frequency (so we would catch regressions if `E`
-        // were accidentally taken as DAYS360(pcd,ncd)).
+        // Guard: ensure this test actually covers a basis=4 schedule where `E != 360/frequency`.
         if maturity == ymd_to_serial(ExcelDate::new(2019, 2, 28), system).unwrap() {
             let months_per_period = 12 / frequency;
             let eom = is_end_of_month(maturity, system);
@@ -3537,9 +3534,8 @@ fn oddfprice_matches_excel_model_for_30_360_bases() {
             let coupon_dates = oddf_coupon_schedule(first_coupon, maturity, frequency, system);
             let n = coupon_dates.len() as i32;
             let prev_coupon = coupon_date_with_eom(maturity, -(n * months_per_period), eom, system);
-            let days360_eu =
-                date_time::days360(prev_coupon, first_coupon, true, system).unwrap() as f64;
-            assert_close(days360_eu, 182.0, 0.0);
+            let e4 = coupon_period_e(prev_coupon, first_coupon, 4, frequency, system);
+            assert_close(e4, 182.0, 0.0);
         }
 
         for basis in [0, 4] {
