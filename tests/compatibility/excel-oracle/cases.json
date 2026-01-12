@@ -37787,6 +37787,56 @@
       ],
       "description": "COUPPCD EOM schedule restores month-end when maturity is Feb month-end (28th -> 31st)",
       "id": "financial_couppcd_eom_maturity_feb_37fb733d211c"
+    },
+    {
+      "formula": "=ODDFPRICE(DATE(2020,2,15),DATE(2020,12,31),DATE(2020,1,31),DATE(2020,6,30),0.05,0.04,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDFPRICE"
+      ],
+      "description": "Odd first coupon with EOM schedule (30-Jun -> 31-Dec) to exercise end-of-month stepping",
+      "id": "oddfprice_eom_35e06167c692"
+    },
+    {
+      "formula": "=ODDFYIELD(DATE(2020,2,15),DATE(2020,12,31),DATE(2020,1,31),DATE(2020,6,30),0.05,ODDFPRICE(DATE(2020,2,15),DATE(2020,12,31),DATE(2020,1,31),DATE(2020,6,30),0.05,0.04,100,2,0),100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDFYIELD",
+        "ODDFPRICE"
+      ],
+      "description": "ODDFYIELD roundtrip against ODDFPRICE for an EOM-aligned schedule",
+      "id": "oddfyield_eom_10e0a5fbe2dd"
+    },
+    {
+      "formula": "=ODDLPRICE(DATE(2020,7,15),DATE(2020,12,31),DATE(2020,6,30),0.05,0.04,100,2,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLPRICE"
+      ],
+      "description": "Odd last coupon with EOM last_interest/maturity (basis=1) to exercise end-of-month stepping",
+      "id": "oddlprice_eom_b1e5f777ca73"
+    },
+    {
+      "formula": "=ODDLYIELD(DATE(2020,7,15),DATE(2020,12,31),DATE(2020,6,30),0.05,ODDLPRICE(DATE(2020,7,15),DATE(2020,12,31),DATE(2020,6,30),0.05,0.04,100,2,1),100,2,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLYIELD",
+        "ODDLPRICE"
+      ],
+      "description": "ODDLYIELD roundtrip against ODDLPRICE for an EOM-aligned schedule",
+      "id": "oddlyield_eom_78a6a01c7ec6"
     }
   ]
 }

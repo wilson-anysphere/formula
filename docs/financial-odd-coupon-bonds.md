@@ -243,11 +243,16 @@ date-like inputs are truncated to integers before validation:
   - <https://learn.microsoft.com/en-us/office/vba/api/excel.worksheetfunction.oddlprice>
   - <https://learn.microsoft.com/en-us/office/vba/api/excel.worksheetfunction.oddlyield>
 
-In practice, the current engine behavior (pinned by unit tests and by the **synthetic** pinned
-excel-oracle dataset used in CI) accepts the ODDF\* boundary equalities `issue == settlement` and
-`settlement == first_coupon` (as well as `first_coupon == maturity`). This diverges from the strict
-ordering documented in Microsoft’s `WorksheetFunction` docs; re-validate against real Excel by
-running the oracle harness on Windows + Excel (see "Excel oracle run" below).
+In practice, parity testing against the curated excel-oracle corpus (and the current engine behavior
+locked in by unit tests + the **synthetic** pinned oracle dataset used in CI) suggests Excel accepts
+several boundary equalities despite the strict inequalities in the docs above:
+
+- ODDF\*: `issue == settlement`, `settlement == first_coupon`, and `first_coupon == maturity`
+- ODDL\*: `settlement == last_interest`
+
+This diverges from the strict ordering documented in Microsoft’s `WorksheetFunction` docs;
+re-validate against real Excel by running the oracle harness on Windows + Excel (see "Excel oracle run"
+below).
 
 The current engine implementation enforces:
 

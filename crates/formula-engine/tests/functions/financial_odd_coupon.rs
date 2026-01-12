@@ -1315,6 +1315,46 @@ fn oddfprice_matches_known_example_basis0() {
 }
 
 #[test]
+fn oddfprice_eom_coupon_schedule_returns_finite_number() {
+    let system = ExcelDateSystem::EXCEL_1900;
+    let settlement = serial(2020, 2, 15, system);
+    let maturity = serial(2020, 12, 31, system);
+    let issue = serial(2020, 1, 31, system);
+    let first_coupon = serial(2020, 6, 30, system);
+
+    let price_basis0 = oddfprice(
+        settlement,
+        maturity,
+        issue,
+        first_coupon,
+        0.05,
+        0.04,
+        100.0,
+        2,
+        0,
+        system,
+    )
+    .expect("oddfprice basis=0 should succeed for end-of-month coupon schedules");
+    assert!(price_basis0.is_finite());
+
+    // Spot-check Actual/Actual (basis=1) as well, since it computes `E` from adjacent coupon dates.
+    let price_basis1 = oddfprice(
+        settlement,
+        maturity,
+        issue,
+        first_coupon,
+        0.05,
+        0.04,
+        100.0,
+        2,
+        1,
+        system,
+    )
+    .expect("oddfprice basis=1 should succeed for end-of-month coupon schedules");
+    assert!(price_basis1.is_finite());
+}
+
+#[test]
 fn oddfyield_extreme_prices_roundtrip() {
     let system = ExcelDateSystem::EXCEL_1900;
 

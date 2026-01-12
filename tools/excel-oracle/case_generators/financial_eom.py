@@ -73,3 +73,34 @@ def generate(
         description="COUPPCD EOM schedule restores month-end when maturity is Feb month-end (28th -> 31st)",
     )
 
+    # ------------------------------------------------------------------
+    # Odd-coupon bond functions (ODDF* / ODDL*): end-of-month schedules
+    # ------------------------------------------------------------------
+    add_case(
+        cases,
+        prefix="oddfprice_eom",
+        tags=["financial", "odd_coupon", "ODDFPRICE"],
+        formula="=ODDFPRICE(DATE(2020,2,15),DATE(2020,12,31),DATE(2020,1,31),DATE(2020,6,30),0.05,0.04,100,2,0)",
+        description="Odd first coupon with EOM schedule (30-Jun -> 31-Dec) to exercise end-of-month stepping",
+    )
+    add_case(
+        cases,
+        prefix="oddfyield_eom",
+        tags=["financial", "odd_coupon", "ODDFYIELD", "ODDFPRICE"],
+        formula="=ODDFYIELD(DATE(2020,2,15),DATE(2020,12,31),DATE(2020,1,31),DATE(2020,6,30),0.05,ODDFPRICE(DATE(2020,2,15),DATE(2020,12,31),DATE(2020,1,31),DATE(2020,6,30),0.05,0.04,100,2,0),100,2,0)",
+        description="ODDFYIELD roundtrip against ODDFPRICE for an EOM-aligned schedule",
+    )
+    add_case(
+        cases,
+        prefix="oddlprice_eom",
+        tags=["financial", "odd_coupon", "ODDLPRICE"],
+        formula="=ODDLPRICE(DATE(2020,7,15),DATE(2020,12,31),DATE(2020,6,30),0.05,0.04,100,2,1)",
+        description="Odd last coupon with EOM last_interest/maturity (basis=1) to exercise end-of-month stepping",
+    )
+    add_case(
+        cases,
+        prefix="oddlyield_eom",
+        tags=["financial", "odd_coupon", "ODDLYIELD", "ODDLPRICE"],
+        formula="=ODDLYIELD(DATE(2020,7,15),DATE(2020,12,31),DATE(2020,6,30),0.05,ODDLPRICE(DATE(2020,7,15),DATE(2020,12,31),DATE(2020,6,30),0.05,0.04,100,2,1),100,2,1)",
+        description="ODDLYIELD roundtrip against ODDLPRICE for an EOM-aligned schedule",
+    )
