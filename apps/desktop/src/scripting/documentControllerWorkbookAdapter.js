@@ -1,5 +1,6 @@
 import { formatCellAddress, formatRangeAddress, parseRangeAddress } from "../../../../packages/scripting/src/a1.js";
 import { TypedEventEmitter } from "../../../../packages/scripting/src/events.js";
+import { applyStylePatch } from "../formatting/styleTable.js";
 
 // Excel limits used by the scripting A1 address helpers and macro recorder.
 // - Rows: 1..1048576 (0-based: 0..1048575)
@@ -481,6 +482,22 @@ export class DocumentControllerWorkbookAdapter {
     return sheet;
   }
 
+  /**
+   * Return all known sheets.
+   *
+   * DocumentController materializes sheets lazily (on first access). For scripting we still want
+   * a stable surface that always includes the active sheet, so we union the controller's
+   * materialized sheet ids with the adapter's active sheet name.
+   */
+  getSheets() {
+    const raw = this.documentController.getSheetIds?.();
+    const ids = Array.isArray(raw) ? raw : [];
+    const active = this.getActiveSheet().name;
+    const out = ids.slice();
+    if (!out.includes(active)) out.push(active);
+    return out.map((name) => this.getSheet(name));
+  }
+
   getActiveSheet() {
     const sheetName = this.getActiveSheetNameImpl ? this.getActiveSheetNameImpl() : this.activeSheetName;
     return this.getSheet(sheetName);
@@ -899,6 +916,29 @@ class DocumentControllerSheetAdapter {
     return new DocumentControllerRangeAdapter(this, parseRangeAddress(String(address)));
   }
 
+  /**
+   * Return a single-cell range addressed by 0-based row/col coordinates.
+   *
+   * Note: scripts generally use A1 addresses; this helper is mainly for API parity with the
+   * in-memory workbook implementation.
+   */
+  getCell(row, col) {
+    const r = Number(row);
+    const c = Number(col);
+    if (!Number.isInteger(r) || r < 0) throw new Error(`getCell expected non-negative integer row, got ${row}`);
+    if (!Number.isInteger(c) || c < 0) throw new Error(`getCell expected non-negative integer col, got ${col}`);
+    return new DocumentControllerRangeAdapter(this, { startRow: r, startCol: c, endRow: r, endCol: c });
+  }
+
+  getUsedRange() {
+    const bounds = this.workbook.documentController.getUsedRange(this.name, { includeFormat: true });
+    if (!bounds) {
+      // Match the in-memory workbook behavior: empty sheets return A1.
+      return this.getRange("A1");
+    }
+    return new DocumentControllerRangeAdapter(this, bounds);
+  }
+
   setCellValue(address, value) {
     return this.getRange(address).setValue(value);
   }
@@ -1063,9 +1103,80 @@ class DocumentControllerRangeAdapter {
     return scriptFormatFromDocStyle(style);
   }
 
+  getFormats() {
+    const doc = this.sheet.workbook.documentController;
+    const rows = this.coords.endRow - this.coords.startRow + 1;
+    const cols = this.coords.endCol - this.coords.startCol + 1;
+    const out = [];
+
+    for (let r = 0; r < rows; r++) {
+      const row = [];
+      for (let c = 0; c < cols; c++) {
+        const coord = { row: this.coords.startRow + r, col: this.coords.startCol + c };
+
+        if (typeof doc.getCellFormat === "function") {
+          const effective = doc.getCellFormat(this.sheet.name, coord);
+          if (typeof effective === "number") {
+            row.push(scriptFormatFromDocStyle(doc.styleTable?.get(effective) ?? {}));
+            continue;
+          }
+          if (isPlainObject(effective) && typeof effective.styleId === "number") {
+            row.push(scriptFormatFromDocStyle(doc.styleTable?.get(effective.styleId) ?? {}));
+            continue;
+          }
+          row.push(scriptFormatFromDocStyle(effective));
+          continue;
+        }
+
+        const cell = doc.getCell(this.sheet.name, coord);
+        const style = doc.styleTable.get(cell.styleId);
+        row.push(scriptFormatFromDocStyle(style));
+      }
+      out.push(row);
+    }
+
+    return out;
+  }
+
   setFormat(format) {
     const patch = docStylePatchFromScriptFormat(format);
     this.sheet.workbook.documentController.setRangeFormat(this.sheet.name, this.address, patch, { label: "Script: set format" });
+    this.sheet.workbook._notifyMutate();
+  }
+
+  setFormats(formats) {
+    const rows = this.coords.endRow - this.coords.startRow + 1;
+    const cols = this.coords.endCol - this.coords.startCol + 1;
+    if (!Array.isArray(formats) || formats.length !== rows || formats.some((row) => !Array.isArray(row) || row.length !== cols)) {
+      throw new Error(
+        `setFormats expected ${rows}x${cols} matrix for range ${this.address}, got ${formats?.length ?? 0}x${formats?.[0]?.length ?? 0}`,
+      );
+    }
+
+    const doc = this.sheet.workbook.documentController;
+    const styleTable = doc.styleTable;
+
+    const values = [];
+    for (let r = 0; r < rows; r++) {
+      const row = [];
+      for (let c = 0; c < cols; c++) {
+        const coord = { row: this.coords.startRow + r, col: this.coords.startCol + c };
+        const patch = docStylePatchFromScriptFormat(formats[r][c]);
+        if (patch == null) {
+          row.push({ styleId: 0 });
+          continue;
+        }
+
+        const cell = doc.getCell(this.sheet.name, coord);
+        const baseStyle = styleTable.get(cell.styleId ?? 0);
+        const merged = applyStylePatch(baseStyle, patch);
+        const styleId = styleTable.intern(merged);
+        row.push({ styleId });
+      }
+      values.push(row);
+    }
+
+    doc.setRangeValues(this.sheet.name, this.address, values, { label: "Script: set formats" });
     this.sheet.workbook._notifyMutate();
   }
 }

@@ -121,6 +121,56 @@ test("Range.getFormat composes row + col formats when using the real DocumentCon
   workbook.dispose();
 });
 
+test("Range.getFormats returns effective formats for each cell (includes layered row/col formatting)", () => {
+  const controller = new DocumentController();
+  controller.setColFormat("Sheet1", 0, { font: { bold: true } }); // column A
+  controller.setRowFormat("Sheet1", 0, { font: { italic: true } }); // row 1
+
+  const workbook = new DocumentControllerWorkbookAdapter(controller, { activeSheetName: "Sheet1" });
+  const sheet = workbook.getActiveSheet();
+
+  assert.deepEqual(sheet.getRange("A1:B1").getFormats(), [[{ bold: true, italic: true }, { italic: true }]]);
+
+  workbook.dispose();
+});
+
+test("Range.setFormats applies per-cell formatting patches and preserves values", () => {
+  const controller = new DocumentController();
+  const workbook = new DocumentControllerWorkbookAdapter(controller, { activeSheetName: "Sheet1" });
+  const sheet = workbook.getActiveSheet();
+
+  sheet.getRange("A1:B1").setValues([[1, 2]]);
+  sheet.getRange("A1:B1").setFormats([[{ bold: true }, { italic: true }]]);
+
+  assert.deepEqual(sheet.getRange("A1:B1").getValues(), [[1, 2]]);
+  assert.deepEqual(sheet.getRange("A1:B1").getFormats(), [[{ bold: true }, { italic: true }]]);
+
+  workbook.dispose();
+});
+
+test("DocumentControllerWorkbookAdapter.getSheets includes the active sheet", () => {
+  const controller = new DocumentController();
+  const workbook = new DocumentControllerWorkbookAdapter(controller, { activeSheetName: "Sheet1" });
+  assert.deepEqual(
+    workbook.getSheets().map((s) => s.name),
+    ["Sheet1"],
+  );
+  workbook.dispose();
+});
+
+test("DocumentControllerSheetAdapter.getUsedRange returns A1 for empty sheets and expands with content", () => {
+  const controller = new DocumentController();
+  const workbook = new DocumentControllerWorkbookAdapter(controller, { activeSheetName: "Sheet1" });
+  const sheet = workbook.getActiveSheet();
+
+  assert.equal(sheet.getUsedRange().address, "A1");
+
+  sheet.getRange("C3").setValue(42);
+  assert.equal(sheet.getUsedRange().address, "C3");
+
+  workbook.dispose();
+});
+
 test("Macro recorder receives formatChanged for column style deltas (layered formatting)", () => {
   const doc = new FakeDocumentController();
   const boldId = doc.styleTable.intern({ font: { bold: true } });
