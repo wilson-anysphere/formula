@@ -480,14 +480,14 @@ export function CellFormattingDemo(): React.ReactElement {
           <div style={{ flex: "1 1 240px" }}>
             <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
               Zoom
-              <input
-                type="range"
-                min={0.5}
-                max={3}
-                step={0.1}
-                value={zoom}
-                onChange={(event) => setZoom(event.currentTarget.valueAsNumber)}
-              />
+                <input
+                  type="range"
+                  min={0.25}
+                  max={4}
+                  step={0.05}
+                  value={zoom}
+                  onChange={(event) => setZoom(event.currentTarget.valueAsNumber)}
+                />
               <span style={{ width: 44, textAlign: "right" }}>{Math.round(zoom * 100)}%</span>
             </label>
 
