@@ -146,7 +146,12 @@ test("encodeState/applyState preserves sheet insertion order", () => {
   differentOrder.getCell("Sheet2", "A1");
   assert.deepEqual(differentOrder.getSheetIds(), ["Sheet1", "Sheet2"]);
 
+  let idsDuringChange = null;
+  differentOrder.on("change", () => {
+    idsDuringChange = differentOrder.getSheetIds();
+  });
   differentOrder.applyState(snapshot);
+  assert.deepEqual(idsDuringChange, ["Sheet2", "Sheet1"]);
   assert.deepEqual(differentOrder.getSheetIds(), ["Sheet2", "Sheet1"]);
 });
 

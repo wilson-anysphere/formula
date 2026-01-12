@@ -2745,6 +2745,27 @@ export class DocumentController {
       this.model.getCell(sheetId, 0, 0);
     }
 
+    // Match the sheet Map iteration order to the snapshot ordering so sheet tab order
+    // roundtrips through encodeState/applyState.
+    //
+    // Important: do this *before* emitting the `applyState` change event so listeners
+    // (UI tabs, search adapters, etc) can observe the restored order synchronously.
+    //
+    // Include any sheets that will be removed (present in the existing model but not in
+    // the snapshot) after the snapshot-ordered ids so they remain reachable until the
+    // end of `applyState`.
+    const orderedSheetIds = [
+      ...Array.from(nextSheets.keys()),
+      ...Array.from(existingSheetIds).filter((id) => !nextSheetIds.has(id)),
+    ];
+    for (const sheetId of orderedSheetIds) {
+      const sheet = this.model.sheets.get(sheetId);
+      if (!sheet) continue;
+      // Re-insert to update insertion order without changing sheet identity.
+      this.model.sheets.delete(sheetId);
+      this.model.sheets.set(sheetId, sheet);
+    }
+
     // Clear history first: restoring content is not itself undoable.
     this.history = [];
     this.cursor = 0;
@@ -2780,20 +2801,6 @@ export class DocumentController {
 
     for (const sheetId of removedSheetIds) {
       this.model.sheets.delete(sheetId);
-    }
-
-    // Match the sheet Map iteration order to the snapshot ordering so sheet tab order
-    // roundtrips through encodeState/applyState (including when restoring onto an
-    // existing DocumentController instance).
-    const orderedSheetIds = Array.from(nextSheets.keys());
-    if (orderedSheetIds.length > 0) {
-      for (const sheetId of orderedSheetIds) {
-        const sheet = this.model.sheets.get(sheetId);
-        if (!sheet) continue;
-        // Re-insert to update insertion order without changing sheet identity.
-        this.model.sheets.delete(sheetId);
-        this.model.sheets.set(sheetId, sheet);
-      }
     }
 
     this.#emitHistory();
