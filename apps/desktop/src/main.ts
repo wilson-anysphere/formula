@@ -4123,8 +4123,9 @@ if (
 
   const contextMenu = new ContextMenu({
     onClose: () => {
-      // Best-effort: return focus to the grid after closing.
-      app.focus();
+      // Best-effort: restore focus to the appropriate editing surface after closing.
+      // (Typically the grid, but preserve formula-bar focus during range-selection workflows.)
+      app.focusAfterSheetNavigation();
     },
   });
   sharedContextMenu = contextMenu;
