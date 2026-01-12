@@ -817,3 +817,124 @@ fn odd_coupon_invalid_schedule_inputs_return_num_errors() {
         "expected #NUM! for worksheet ODDLYIELD invalid schedule, got {v:?}"
     );
 }
+
+#[test]
+fn odd_coupon_misaligned_last_interest_schedule_is_currently_accepted() {
+    // These cases are mirrored in the Excel-oracle corpus (tagged `odd_coupon` + `invalid_schedule`).
+    //
+    // NOTE: The pinned Excel dataset in CI is currently a synthetic baseline generated from the
+    // engine. Once Task 486 lands (real Excel patching), these numeric expectations should be
+    // validated against real Excel and updated if needed.
+    let system = ExcelDateSystem::EXCEL_1900;
+    let mut sheet = TestSheet::new();
+
+    // ---------------------------------------------------------------------
+    // ODDL*: maturity is EOM but last_interest is not (basis=0).
+    // ---------------------------------------------------------------------
+    let settlement = ymd_to_serial(ExcelDate::new(2024, 8, 1), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2025, 1, 31), system).unwrap();
+    let last_interest = ymd_to_serial(ExcelDate::new(2024, 7, 30), system).unwrap();
+
+    let pr = oddlprice(
+        settlement,
+        maturity,
+        last_interest,
+        0.05,
+        0.04,
+        100.0,
+        2,
+        0,
+        system,
+    )
+    .expect("ODDLPRICE should currently accept misaligned last_interest schedule");
+    assert_close(pr, 100.476_307_189_542_48, 1e-9);
+    let y = oddlyield(
+        settlement,
+        maturity,
+        last_interest,
+        0.05,
+        99.0,
+        100.0,
+        2,
+        0,
+        system,
+    )
+    .expect("ODDLYIELD should currently accept misaligned last_interest schedule");
+    assert_close(y, 0.070_416_608_219_943_12, 1e-9);
+
+    let v = sheet.eval("=ODDLPRICE(DATE(2024,8,1),DATE(2025,1,31),DATE(2024,7,30),0.05,0.04,100,2,0)");
+    match v {
+        Value::Number(n) => assert_close(n, pr, 1e-9),
+        other => panic!("expected number for worksheet ODDLPRICE misaligned schedule, got {other:?}"),
+    }
+    let v = sheet.eval("=ODDLYIELD(DATE(2024,8,1),DATE(2025,1,31),DATE(2024,7,30),0.05,99,100,2,0)");
+    match v {
+        Value::Number(n) => assert_close(n, y, 1e-9),
+        other => panic!("expected number for worksheet ODDLYIELD misaligned schedule, got {other:?}"),
+    }
+
+    // ---------------------------------------------------------------------
+    // ODDL*: EOM mismatch variants under basis=1.
+    // ---------------------------------------------------------------------
+    let settlement = ymd_to_serial(ExcelDate::new(2024, 8, 15), system).unwrap();
+
+    // maturity is EOM but last_interest is not.
+    let maturity = ymd_to_serial(ExcelDate::new(2025, 1, 31), system).unwrap();
+    let last_interest = ymd_to_serial(ExcelDate::new(2024, 7, 30), system).unwrap();
+    let pr = oddlprice(
+        settlement,
+        maturity,
+        last_interest,
+        0.05,
+        0.04,
+        100.0,
+        2,
+        1,
+        system,
+    )
+    .expect("ODDLPRICE should currently accept basis=1 EOM mismatch (maturity EOM, last_interest not)");
+    assert_close(pr, 100.453_115_102_272_87, 1e-9);
+    let y = oddlyield(
+        settlement,
+        maturity,
+        last_interest,
+        0.05,
+        99.0,
+        100.0,
+        2,
+        1,
+        system,
+    )
+    .expect("ODDLYIELD should currently accept basis=1 EOM mismatch (maturity EOM, last_interest not)");
+    assert_close(y, 0.072_192_898_126_549_61, 1e-9);
+
+    // maturity is not EOM but last_interest is EOM.
+    let maturity = ymd_to_serial(ExcelDate::new(2025, 1, 30), system).unwrap();
+    let last_interest = ymd_to_serial(ExcelDate::new(2024, 7, 31), system).unwrap();
+    let pr = oddlprice(
+        settlement,
+        maturity,
+        last_interest,
+        0.05,
+        0.04,
+        100.0,
+        2,
+        1,
+        system,
+    )
+    .expect("ODDLPRICE should currently accept basis=1 EOM mismatch (maturity not EOM, last_interest EOM)");
+    assert_close(pr, 100.450_830_831_707_98, 1e-9);
+    let y = oddlyield(
+        settlement,
+        maturity,
+        last_interest,
+        0.05,
+        99.0,
+        100.0,
+        2,
+        1,
+        system,
+    )
+    .expect("ODDLYIELD should currently accept basis=1 EOM mismatch (maturity not EOM, last_interest EOM)");
+    assert_close(y, 0.072_339_574_523_340_2, 1e-9);
+}

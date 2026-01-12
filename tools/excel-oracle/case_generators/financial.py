@@ -860,6 +860,45 @@ def generate(
         ),
     )
 
+    # Extra EOM mismatch cases for ODDL* (basis=1 so coupon-period `E` depends on the actual
+    # previous regular coupon dates).
+    add_case(
+        cases,
+        prefix="oddlprice_invalid_schedule_maturity_eom_last_not_basis1",
+        tags=["financial", "odd_coupon", "invalid_schedule", "ODDLPRICE", "basis1"],
+        formula="=ODDLPRICE(DATE(2024,8,15),DATE(2025,1,31),DATE(2024,7,30),0.05,0.04,100,2,1)",
+        description=(
+            "ODDLPRICE invalid schedule: maturity is EOM but last_interest is not (basis=1; EOM schedule mismatch)"
+        ),
+    )
+    add_case(
+        cases,
+        prefix="oddlyield_invalid_schedule_maturity_eom_last_not_basis1",
+        tags=["financial", "odd_coupon", "invalid_schedule", "ODDLYIELD", "basis1"],
+        formula="=ODDLYIELD(DATE(2024,8,15),DATE(2025,1,31),DATE(2024,7,30),0.05,99,100,2,1)",
+        description=(
+            "ODDLYIELD invalid schedule: maturity is EOM but last_interest is not (basis=1; EOM schedule mismatch)"
+        ),
+    )
+    add_case(
+        cases,
+        prefix="oddlprice_invalid_schedule_maturity_not_eom_last_is_basis1",
+        tags=["financial", "odd_coupon", "invalid_schedule", "ODDLPRICE", "basis1"],
+        formula="=ODDLPRICE(DATE(2024,8,15),DATE(2025,1,30),DATE(2024,7,31),0.05,0.04,100,2,1)",
+        description=(
+            "ODDLPRICE invalid schedule: maturity is not EOM but last_interest is EOM (basis=1; EOM schedule mismatch)"
+        ),
+    )
+    add_case(
+        cases,
+        prefix="oddlyield_invalid_schedule_maturity_not_eom_last_is_basis1",
+        tags=["financial", "odd_coupon", "invalid_schedule", "ODDLYIELD", "basis1"],
+        formula="=ODDLYIELD(DATE(2024,8,15),DATE(2025,1,30),DATE(2024,7,31),0.05,99,100,2,1)",
+        description=(
+            "ODDLYIELD invalid schedule: maturity is not EOM but last_interest is EOM (basis=1; EOM schedule mismatch)"
+        ),
+    )
+
     add_case(
         cases,
         prefix="oddlprice_invalid_schedule_last_after_maturity",

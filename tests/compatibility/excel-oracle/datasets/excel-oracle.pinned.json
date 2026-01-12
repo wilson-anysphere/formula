@@ -17,8 +17,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "b4cf69b7fe513368e8d52ab0c6d0aa158139645328ef665d60d3de8fdf6864f1",
-    "count": 1816
+    "sha256": "0524bea78ba8ae0ff74de44752e0f7a5d6077eefb04882688d477d76645a6da6",
+    "count": 1820
   },
   "results": [
     {
@@ -18900,6 +18900,46 @@
       },
       "address": "A1",
       "displayText": "31"
+    },
+    {
+      "caseId": "oddlprice_invalid_schedule_maturity_eom_last_not_basis1_33e1dc8781bb",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 100.45311510227287
+      },
+      "address": "C1",
+      "displayText": "100.45311510227287"
+    },
+    {
+      "caseId": "oddlyield_invalid_schedule_maturity_eom_last_not_basis1_a404bf685a42",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.07219289812654961
+      },
+      "address": "C1",
+      "displayText": "0.07219289812654961"
+    },
+    {
+      "caseId": "oddlprice_invalid_schedule_maturity_not_eom_last_is_basis1_1c611371498e",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 100.45083083170798
+      },
+      "address": "C1",
+      "displayText": "100.45083083170798"
+    },
+    {
+      "caseId": "oddlyield_invalid_schedule_maturity_not_eom_last_is_basis1_f57ee459ad99",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.0723395745233402
+      },
+      "address": "C1",
+      "displayText": "0.0723395745233402"
     }
   ]
 }

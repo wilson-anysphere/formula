@@ -33663,6 +33663,62 @@
       "id": "oddlyield_invalid_schedule_misaligned_last_interest_eae16064c1e4"
     },
     {
+      "formula": "=ODDLPRICE(DATE(2024,8,15),DATE(2025,1,31),DATE(2024,7,30),0.05,0.04,100,2,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "invalid_schedule",
+        "ODDLPRICE",
+        "basis1"
+      ],
+      "description": "ODDLPRICE invalid schedule: maturity is EOM but last_interest is not (basis=1; EOM schedule mismatch)",
+      "id": "oddlprice_invalid_schedule_maturity_eom_last_not_basis1_33e1dc8781bb"
+    },
+    {
+      "formula": "=ODDLYIELD(DATE(2024,8,15),DATE(2025,1,31),DATE(2024,7,30),0.05,99,100,2,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "invalid_schedule",
+        "ODDLYIELD",
+        "basis1"
+      ],
+      "description": "ODDLYIELD invalid schedule: maturity is EOM but last_interest is not (basis=1; EOM schedule mismatch)",
+      "id": "oddlyield_invalid_schedule_maturity_eom_last_not_basis1_a404bf685a42"
+    },
+    {
+      "formula": "=ODDLPRICE(DATE(2024,8,15),DATE(2025,1,30),DATE(2024,7,31),0.05,0.04,100,2,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "invalid_schedule",
+        "ODDLPRICE",
+        "basis1"
+      ],
+      "description": "ODDLPRICE invalid schedule: maturity is not EOM but last_interest is EOM (basis=1; EOM schedule mismatch)",
+      "id": "oddlprice_invalid_schedule_maturity_not_eom_last_is_basis1_1c611371498e"
+    },
+    {
+      "formula": "=ODDLYIELD(DATE(2024,8,15),DATE(2025,1,30),DATE(2024,7,31),0.05,99,100,2,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "invalid_schedule",
+        "ODDLYIELD",
+        "basis1"
+      ],
+      "description": "ODDLYIELD invalid schedule: maturity is not EOM but last_interest is EOM (basis=1; EOM schedule mismatch)",
+      "id": "oddlyield_invalid_schedule_maturity_not_eom_last_is_basis1_f57ee459ad99"
+    },
+    {
       "formula": "=ODDLPRICE(DATE(2024,7,1),DATE(2025,1,1),DATE(2025,1,2),0.05,0.04,100,2,0)",
       "outputCell": "C1",
       "inputs": [],
