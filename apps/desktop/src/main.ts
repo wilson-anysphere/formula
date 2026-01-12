@@ -2133,6 +2133,13 @@ if (
     if (isEditableTarget(e.target)) return;
     if (app.isEditing()) return;
 
+    // Excel semantics: Shift+F2 opens the comments panel.
+    if (e.key === "F2" && e.shiftKey) {
+      e.preventDefault();
+      app.openCommentsPanel();
+      return;
+    }
+
     const primary = e.ctrlKey || e.metaKey;
     const key = e.key.toLowerCase();
 
