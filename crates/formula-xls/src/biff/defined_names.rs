@@ -105,7 +105,11 @@ pub(crate) fn parse_biff_defined_names(
     let allows_continuation = |id: u16| id == RECORD_NAME;
     let iter = records::LogicalBiffRecordIter::new(workbook_stream, allows_continuation);
 
-    let mut raw_names: Vec<RawDefinedName> = Vec::new();
+    // We need to preserve workbook `NAME` record order so `PtgName` indices in `rgce` streams
+    // remain stable. If a `NAME` record fails to parse, we insert a placeholder entry so the
+    // 1-based `iname` values stored in formulas still line up with the `defined_names` table used
+    // by the rgce decoder.
+    let mut raw_names: Vec<Option<RawDefinedName>> = Vec::new();
 
     for record in iter {
         let record = match record {
@@ -125,8 +129,11 @@ pub(crate) fn parse_biff_defined_names(
 
         match record_id {
             RECORD_NAME => match parse_biff8_name_record(&record, codepage, sheet_names) {
-                Ok(raw) => raw_names.push(raw),
-                Err(err) => out.warnings.push(format!("failed to parse NAME record: {err}")),
+                Ok(raw) => raw_names.push(Some(raw)),
+                Err(err) => {
+                    out.warnings.push(format!("failed to parse NAME record: {err}"));
+                    raw_names.push(None);
+                }
             },
             records::RECORD_EOF => break,
             _ => {}
@@ -136,9 +143,17 @@ pub(crate) fn parse_biff_defined_names(
     // Build name table metadata (for PtgName resolution), then decode formulas.
     let metas: Vec<rgce::DefinedNameMeta> = raw_names
         .iter()
-        .map(|n| rgce::DefinedNameMeta {
-            name: n.name.clone(),
-            scope_sheet: n.scope_sheet,
+        .map(|n| match n {
+            Some(n) => rgce::DefinedNameMeta {
+                name: n.name.clone(),
+                scope_sheet: n.scope_sheet,
+            },
+            None => rgce::DefinedNameMeta {
+                // Use an Excel error literal so downstream formula parsing stays valid and callers
+                // can distinguish unresolved name references.
+                name: "#NAME?".to_string(),
+                scope_sheet: None,
+            },
         })
         .collect();
 
@@ -150,7 +165,7 @@ pub(crate) fn parse_biff_defined_names(
         defined_names: &metas,
     };
 
-    for raw in raw_names {
+    for raw in raw_names.into_iter().flatten() {
         let decoded = rgce::decode_defined_name_rgce_with_context(&raw.rgce, codepage, &ctx);
         for warning in decoded.warnings {
             out.warnings.push(format!("defined name `{}`: {warning}", raw.name));
@@ -1422,6 +1437,75 @@ mod tests {
             "warnings={:?}",
             parsed.warnings
         );
+    }
+
+    #[test]
+    fn preserves_ptgname_indices_when_name_record_is_skipped() {
+        // Two NAME records:
+        //  - First is malformed (truncated description string) so it is skipped, but it still
+        //    occupies name_id=1.
+        //  - Second refers to name_id=1 via PtgName. The decoder should not mis-resolve that to the
+        //    second name (index-shift bug); it should render as #NAME? via the placeholder meta.
+        let bad_name = "BadDesc";
+        let good_name = "RefBad";
+
+        // NAME #1 formula: `1` (not important; record will be skipped).
+        let bad_rgce: Vec<u8> = vec![0x1E, 0x01, 0x00]; // PtgInt 1
+
+        let mut bad_header = Vec::new();
+        bad_header.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        bad_header.push(0); // chKey
+        bad_header.push(bad_name.len() as u8); // cch
+        bad_header.extend_from_slice(&(bad_rgce.len() as u16).to_le_bytes()); // cce
+        bad_header.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        bad_header.extend_from_slice(&0u16.to_le_bytes()); // itab
+        bad_header.push(0); // cchCustMenu
+        bad_header.push(5); // cchDescription (claims 5 chars, but we truncate below)
+        bad_header.push(0); // cchHelpTopic
+        bad_header.push(0); // cchStatusText
+
+        let bad_name_str = xl_unicode_string_no_cch_compressed(bad_name);
+        // Truncated description: flags + only 2 bytes ("AB"), but header says 5 chars.
+        let bad_desc_partial: Vec<u8> = [vec![0u8], b"AB".to_vec()].concat();
+
+        let bad_record_payload =
+            [bad_header, bad_name_str, bad_rgce.clone(), bad_desc_partial].concat();
+
+        // NAME #2 formula: PtgName(name_id=1).
+        let ptgname_rgce: Vec<u8> = [
+            vec![0x23],                 // PtgName
+            1u32.to_le_bytes().to_vec(), // name_id=1
+            0u16.to_le_bytes().to_vec(), // reserved
+        ]
+        .concat();
+
+        let mut good_header = Vec::new();
+        good_header.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        good_header.push(0); // chKey
+        good_header.push(good_name.len() as u8); // cch
+        good_header.extend_from_slice(&(ptgname_rgce.len() as u16).to_le_bytes()); // cce
+        good_header.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        good_header.extend_from_slice(&0u16.to_le_bytes()); // itab
+        good_header.extend_from_slice(&[0, 0, 0, 0]); // cchCustMenu, cchDescription, cchHelpTopic, cchStatusText
+
+        let good_name_str = xl_unicode_string_no_cch_compressed(good_name);
+        let good_record_payload = [good_header, good_name_str, ptgname_rgce].concat();
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_NAME, &bad_record_payload),
+            record(RECORD_NAME, &good_record_payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed =
+            parse_biff_defined_names(&stream, BiffVersion::Biff8, 1252, &[]).expect("parse names");
+        assert_eq!(parsed.names.len(), 1);
+        assert_eq!(parsed.names[0].name, good_name);
+        assert_eq!(parsed.names[0].refers_to, "#NAME?");
+        assert_eq!(parsed.warnings.len(), 1, "warnings={:?}", parsed.warnings);
+        assert!(parsed.warnings[0].contains("failed to parse NAME record"));
     }
 
     #[test]
