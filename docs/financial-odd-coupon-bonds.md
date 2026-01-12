@@ -110,10 +110,10 @@ If you modify these functions, re-check these areas carefully:
 3. **Error behavior**: Excel’s choice of `#NUM!` vs `#VALUE!` varies by argument and coercion path.
 4. **Yield domain + solvers**:
    - Domain: the per-period discount base must stay positive (`1 + yld/frequency > 0`, i.e.
-     `yld > -frequency`). The boundary `yld == -frequency` produces `#DIV/0!` in Excel; below that is
-     `#NUM!`.
+      `yld > -frequency`). The boundary `yld == -frequency` produces `#DIV/0!` in Excel; below that is
+      `#NUM!`.
    - Solver behavior: Newton-Raphson failures must not silently return incorrect values; when Excel
-     converges, we should converge as well (usually via a fallback/bracketing strategy).
+      converges, we should converge as well (usually via a fallback/bracketing strategy).
 
 ## Long odd periods (DFC/E > 1, DLM/E > 1)
 
@@ -154,3 +154,93 @@ Our implementation follows the standard Excel-style model:
   - `tools/excel-oracle/odd_coupon_long_stub_cases.json`
 - Canonical oracle corpus:
   - `tests/compatibility/excel-oracle/cases.json` (tagged `odd_coupon` + `long_stub`)
+      converges, we should converge as well (usually via a fallback/bracketing strategy).
+
+## Long odd periods (DFC/E > 1, DLM/E > 1)
+
+Excel supports both **short** and **long** odd coupon periods.
+
+The “long” cases are important because they stress:
+
+- coupon scaling (`coupon_1 = C * DFC/E`, `coupon_last = C * DLM/E`) when the odd period spans **multiple**
+  regular coupon intervals
+- discount exponent logic when `DSC/E > 1` (ODDF\*) or `DSM/E > 1` (ODDL\*)
+- `basis=1` actual/actual `E` computation across leap years
+
+Our implementation follows the standard Excel-style model:
+
+- Regular coupon payment per period: `C = redemption * rate / frequency`
+- ODDF\*:
+  - `A = days(issue, settlement)`
+  - `DFC = days(issue, first_coupon)`
+  - `DSC = days(settlement, first_coupon)`
+  - `E = regular coupon period length (days)`
+  - First coupon amount: `C1 = C * (DFC/E)` (so `DFC/E > 1` produces a long first coupon)
+  - Accrued interest: `AI = C * (A/E)`
+  - Discount exponent for cashflow `i` on the coupon schedule: `t_i = (DSC/E) + (i-1)`
+- ODDL\*:
+  - `A = days(last_interest, settlement)`
+  - `DLM = days(last_interest, maturity)`
+  - `DSM = days(settlement, maturity)`
+  - `E = regular coupon period length (days)`
+  - Final coupon amount: `Clast = C * (DLM/E)` (so `DLM/E > 1` produces a long last coupon)
+  - Accrued interest: `AI = C * (A/E)`
+  - Discount exponent: `t = DSM/E`
+
+### Where the long-stub cases live
+
+- Engine unit tests:
+  - `crates/formula-engine/tests/functions/financial_odd_coupon.rs` (search for `round_trip_long_stub`)
+- Excel oracle subsets (for quick Windows + Excel runs):
+  - `tools/excel-oracle/odd_coupon_long_stub_cases.json`
+- Canonical oracle corpus:
+  - `tests/compatibility/excel-oracle/cases.json` (tagged `odd_coupon` + `long_stub`)
+
+## Date validation rules (Excel docs + engine behavior)
+
+The official Microsoft VBA `WorksheetFunction` docs specify strict date ordering and note that
+date-like inputs are truncated to integers before validation:
+
+- ODDF\* (docs): `maturity > first_coupon > settlement > issue`
+  - <https://learn.microsoft.com/en-us/office/vba/api/excel.worksheetfunction.oddfprice>
+  - <https://learn.microsoft.com/en-us/office/vba/api/excel.worksheetfunction.oddfyield>
+- ODDL\* (docs): `maturity > settlement > last_interest`
+  - <https://learn.microsoft.com/en-us/office/vba/api/excel.worksheetfunction.oddlprice>
+  - <https://learn.microsoft.com/en-us/office/vba/api/excel.worksheetfunction.oddlyield>
+
+The current engine implementation enforces:
+
+- ODDF\*: `issue < settlement < first_coupon <= maturity`
+- ODDL\*: `last_interest < settlement < maturity`
+
+So the settlement equality boundary probes in the oracle corpus currently evaluate to `#NUM!` in
+the engine:
+
+| Case ID | Scenario | Engine result (today) |
+|---|---|---|
+| `fin_oddfprice_settle_eq_first_b0_4d9f4b7e1d1a` | `settlement == first_coupon` | `#NUM!` |
+| `fin_oddfprice_settle_after_first_b0_0e5d51d6b24d` | `settlement > first_coupon` | `#NUM!` |
+| `fin_oddlprice_settle_eq_last_b0_4d1a6e0a2d2a` | `settlement == last_interest` | `#NUM!` |
+| `fin_oddlprice_settle_before_last_b0_1c3c4e93d8f2` | `settlement < last_interest` | `#NUM!` |
+| `fin_oddlyield_settle_before_last_b0_4ef7acb86b86` | `settlement < last_interest` | `#NUM!` |
+
+Note: the engine currently allows `first_coupon == maturity` for ODDF\* (a single odd coupon paid
+at maturity). This behavior should be validated against real Excel.
+
+### Notes on `basis = 1` (Actual/Actual)
+
+The Microsoft docs list `basis=1` as **Actual/Actual**. For odd-coupon functions, `basis=1` implies
+the regular coupon-period length `E` is computed as the **actual number of days between coupon
+dates** (consistent with `COUP*`/`PRICE` behavior).
+
+### Excel oracle run (odd-coupon cases only)
+
+To confirm these rules against a specific Excel version/build, run the oracle harness on Windows +
+Excel and filter to the `odd_coupon` tag:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/excel-oracle/run-excel-oracle.ps1 `
+  -CasesPath tests/compatibility/excel-oracle/cases.json `
+  -OutPath /path/to/excel-odd-coupon-results.json `
+  -IncludeTags odd_coupon
+```
