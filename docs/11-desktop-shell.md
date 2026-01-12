@@ -101,7 +101,7 @@ The CSP is set in `app.security.csp` (see `apps/desktop/src-tauri/tauri.conf.jso
 Current policy (exact):
 
 ```text
-default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' blob: data:; worker-src 'self' blob: data:; child-src 'self' blob: data:; connect-src 'self' https: wss: blob: data:
+default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' blob: data:; worker-src 'self' blob: data:; child-src 'self' blob: data:; connect-src 'self' https: ws: wss: blob: data:
 ```
 
 Rationale:
@@ -114,16 +114,16 @@ Rationale:
 - Extension panels are rendered as sandboxed **`blob:` iframes**, so CSP must allow `child-src blob:` (or `frame-src blob:`)
   to avoid blocking the iframe load.
 - We also rely on `script-src 'unsafe-eval'` for the scripting sandbox (`new Function`-based evaluation in a Worker).
-- `connect-src` is intentionally restrictive (no `http:`/`ws:`), but allows TLS-only outbound network (`https:` / `wss:`),
-  along with same-origin + `blob:`/`data:` URLs.
+- `connect-src` is intentionally restrictive (no `http:`), but allows outbound network for collaboration + extensions
+  (`ws:`/`wss:`) and HTTPS APIs (`https:`), along with same-origin + `blob:`/`data:` URLs.
   - Note: Rust IPC network (`network_fetch`, `marketplace_*`) is performed by the desktop backend (reqwest) and is not
     governed by the WebView CSP. Those commands currently allow `http:` URLs (useful for local dev servers) in addition to
     `https:`.
 
 ### Network strategy (extensions + marketplace)
 
-In packaged desktop builds we keep a restrictive CSP that avoids enabling `http:`/`ws:` and only permits `https:`/`wss:`
-plus app-local (`'self'`) and in-memory (`blob:`/`data:`) URLs.
+In packaged desktop builds we keep a restrictive CSP that avoids enabling `http:` and only permits `https:` plus
+WebSockets (`ws:`/`wss:`) and app-local (`'self'`) / in-memory (`blob:`/`data:`) URLs.
 
 Network access is mediated at two layers:
 
@@ -134,8 +134,8 @@ Network access is mediated at two layers:
   - `formula.network.fetch(...)` (and `fetch(...)` inside extensions) is implemented by:
     - **Tauri desktop**: `invoke("network_fetch", ...)` (Rust/reqwest; avoids CORS and enforces an `http(s)` scheme allowlist).
     - **Web / non-Tauri**: a `fetch(...)` fallback.
-  - `formula.network.openWebSocket(...)` is a permission check; the actual socket is opened directly in the extension
-    worker via `new WebSocket(...)` (hence `wss:` in `connect-src`).
+- `formula.network.openWebSocket(...)` is a permission check; the actual socket is opened directly in the extension
+  worker via `new WebSocket(...)` (hence `ws:`/`wss:` in `connect-src`).
 - **Marketplace:** `MarketplaceClient` prefers Rust IPC (`marketplace_search`, `marketplace_get_extension`,
   `marketplace_download_package`) when running under Tauri with an absolute `http(s)` base URL. In other contexts it
   falls back to `fetch(...)`.
