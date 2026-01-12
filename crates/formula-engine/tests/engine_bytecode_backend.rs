@@ -1069,11 +1069,30 @@ fn bytecode_backend_supports_spill_range_operator() {
     engine
         .set_cell_formula("Sheet1", "B1", "=SUM(A1#)")
         .unwrap();
+    // Also verify referencing a spill *child* (`A2#`) resolves to the same spill origin and still
+    // compiles to bytecode.
+    engine
+        .set_cell_formula("Sheet1", "B2", "=SUM(A2#)")
+        .unwrap();
+
+    // Ensure both formulas compiled to bytecode (i.e. are absent from the fallback report).
+    let report = engine.bytecode_compile_report(10);
+    let b1 = parse_a1("B1").unwrap();
+    let b2 = parse_a1("B2").unwrap();
+    assert!(
+        !report.iter().any(|e| e.addr == b1),
+        "expected B1 to compile to bytecode (report={report:?})"
+    );
+    assert!(
+        !report.iter().any(|e| e.addr == b2),
+        "expected B2 to compile to bytecode (report={report:?})"
+    );
 
     engine.recalculate_single_threaded();
 
     assert_eq!(engine.bytecode_program_count(), 1);
     assert_engine_matches_ast(&engine, "=SUM(A1#)", "B1");
+    assert_engine_matches_ast(&engine, "=SUM(A2#)", "B2");
 }
 
 #[test]
