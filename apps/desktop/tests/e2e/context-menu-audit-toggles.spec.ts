@@ -15,8 +15,15 @@ test.describe("grid context menu (Audit toggles)", () => {
     const expectedPrecedentsShortcut = process.platform === "darwin" ? "⌘[" : "Ctrl+[";
     const expectedDependentsShortcut = process.platform === "darwin" ? "⌘]" : "Ctrl+]";
 
+    await page.waitForFunction(() => {
+      const app = (window as any).__formulaApp;
+      const rect = app?.getCellRectA1?.("A1");
+      return rect && rect.width > 0 && rect.height > 0;
+    });
+    const a1 = await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("A1"));
+
     // Toggle precedents.
-    await page.locator("#grid").click({ button: "right", position: { x: 53, y: 29 } });
+    await page.locator("#grid").click({ button: "right", position: { x: a1.x + a1.width / 2, y: a1.y + a1.height / 2 } });
     const menu = page.getByTestId("context-menu");
     await expect(menu).toBeVisible();
 
@@ -29,7 +36,7 @@ test.describe("grid context menu (Audit toggles)", () => {
     expect(afterPrecedents.mode).toBe("precedents");
 
     // Toggle dependents (should become BOTH).
-    await page.locator("#grid").click({ button: "right", position: { x: 53, y: 29 } });
+    await page.locator("#grid").click({ button: "right", position: { x: a1.x + a1.width / 2, y: a1.y + a1.height / 2 } });
     await expect(menu).toBeVisible();
 
     const dependents = menu.getByRole("button", { name: "Toggle Trace Dependents" });
@@ -41,4 +48,3 @@ test.describe("grid context menu (Audit toggles)", () => {
     expect(afterDependents.mode).toBe("both");
   });
 });
-

@@ -24,7 +24,13 @@ test.describe("grid context menu (Show Formulas)", () => {
     expect(before).toBe("2");
 
     // Open context menu at A1.
-    await page.locator("#grid").click({ button: "right", position: { x: 53, y: 29 } });
+    await page.waitForFunction(() => {
+      const app = (window as any).__formulaApp;
+      const rect = app?.getCellRectA1?.("A1");
+      return rect && rect.width > 0 && rect.height > 0;
+    });
+    const a1 = await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("A1"));
+    await page.locator("#grid").click({ button: "right", position: { x: a1.x + a1.width / 2, y: a1.y + a1.height / 2 } });
     const menu = page.getByTestId("context-menu");
     await expect(menu).toBeVisible();
 
@@ -39,4 +45,3 @@ test.describe("grid context menu (Show Formulas)", () => {
     expect(after).toBe("=1+1");
   });
 });
-
