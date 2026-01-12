@@ -426,6 +426,22 @@ fn yearfrac_basis1_uses_correct_year_length_within_year() {
     let expected = 1.0 / 365.0;
     assert!((date_time::yearfrac(start, end, 1, system).unwrap() - expected).abs() < 1e-12);
     assert!((date_time::yearfrac(end, start, 1, system).unwrap() + expected).abs() < 1e-12);
+
+    // Feb 28 is month-end in non-leap years. When crossing into a leap year, the anniversary
+    // denominator can still be 365 if the leap day occurs *after* the anniversary date.
+    let start = ymd_to_serial(ExcelDate::new(2019, 2, 28), system).unwrap();
+    let end = ymd_to_serial(ExcelDate::new(2020, 2, 27), system).unwrap();
+    let expected = 364.0 / 365.0;
+    assert!((date_time::yearfrac(start, end, 1, system).unwrap() - expected).abs() < 1e-12);
+    assert!((date_time::yearfrac(end, start, 1, system).unwrap() + expected).abs() < 1e-12);
+
+    // Conversely, for a start date after Feb 29, the leap day can be inside the anniversary
+    // denominator even if both dates are before year-end.
+    let start = ymd_to_serial(ExcelDate::new(2019, 3, 1), system).unwrap();
+    let end = ymd_to_serial(ExcelDate::new(2020, 2, 28), system).unwrap();
+    let expected = 364.0 / 366.0;
+    assert!((date_time::yearfrac(start, end, 1, system).unwrap() - expected).abs() < 1e-12);
+    assert!((date_time::yearfrac(end, start, 1, system).unwrap() + expected).abs() < 1e-12);
 }
 
 #[test]
