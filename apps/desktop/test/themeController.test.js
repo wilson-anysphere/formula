@@ -109,6 +109,24 @@ test("ThemeController updates theme when following system preferences", () => {
   assert.equal(document.documentElement.getAttribute("data-theme"), "dark");
 });
 
+test("ThemeController updates to high contrast when forced-colors toggles while following system", () => {
+  const env = createMatchMediaStub({
+    "(prefers-color-scheme: dark)": false,
+    "(forced-colors: active)": false
+  });
+  const document = createStubDocument();
+  const storage = createMemoryStorage();
+
+  const controller = new ThemeController({ env, document, storage });
+  controller.start();
+
+  assert.equal(controller.getThemePreference(), "system");
+  assert.equal(document.documentElement.getAttribute("data-theme"), "light");
+
+  env.setMatches("(forced-colors: active)", true);
+  assert.equal(document.documentElement.getAttribute("data-theme"), "high-contrast");
+});
+
 test("ThemeController updates reduced motion attribute when preference changes", () => {
   const env = createMatchMediaStub({ "(prefers-reduced-motion: reduce)": false });
   const document = createStubDocument();
