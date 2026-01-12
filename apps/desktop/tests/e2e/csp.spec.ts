@@ -351,9 +351,21 @@ test.describe("Content Security Policy (Tauri parity)", () => {
         const canBlobModuleUrls =
           typeof URL !== "undefined" && typeof URL.createObjectURL === "function" && typeof Blob !== "undefined";
 
-        const run = async () => {
+        const run = async ({ forceData }: { forceData: boolean }) => {
           const writes: Array<{ row: number; col: number; value: unknown }> = [];
           const cellMap = new Map<string, unknown>();
+
+          const originalProcess = (globalThis as any).process;
+          if (forceData) {
+            // Force the marketplace loader to fall back to `data:` module URLs so we can validate
+            // that the configured CSP permits `data:` entrypoints (some environments do not support
+            // `URL.createObjectURL`, and will use `data:` as a fallback).
+            try {
+              (globalThis as any).process = { versions: { node: "18.0.0" } };
+            } catch {
+              // ignore
+            }
+          }
 
           const spreadsheetApi = {
             async getSelection() {
@@ -385,46 +397,40 @@ test.describe("Content Security Policy (Tauri parity)", () => {
             permissionPrompt: async () => true
           });
 
-          const manager = new WebExtensionManager({ host });
-          await manager.install("formula.sample-hello");
-          const id = await manager.loadInstalled("formula.sample-hello");
+          try {
+            const manager = new WebExtensionManager({ host });
+            await manager.install("formula.sample-hello");
+            const id = await manager.loadInstalled("formula.sample-hello");
 
-          const loadedMainUrl = (manager as any)?._loadedMainUrls?.get(id)?.mainUrl ?? null;
+            const loadedMainUrl = (manager as any)?._loadedMainUrls?.get(id)?.mainUrl ?? null;
 
-          const sum = await host.executeCommand("sampleHello.sumSelection");
-          const fetched = await host.executeCommand("sampleHello.fetchText", "https://example.test/hello");
-          const outCell = await spreadsheetApi.getCell(2, 0);
-          const messages = host.getMessages();
-          await manager.dispose();
-          await host.dispose();
+            const sum = await host.executeCommand("sampleHello.sumSelection");
+            const fetched = await host.executeCommand("sampleHello.fetchText", "https://example.test/hello");
+            const outCell = await spreadsheetApi.getCell(2, 0);
+            const messages = host.getMessages();
+            await manager.dispose();
+            await host.dispose();
 
-          return { id, loadedMainUrl, sum, fetched, outCell, writes, messages };
+            return { id, loadedMainUrl, sum, fetched, outCell, writes, messages };
+          } finally {
+            // Ensure we never leak a `process` shim into later runs.
+            if (forceData) {
+              try {
+                if (originalProcess === undefined) {
+                  delete (globalThis as any).process;
+                } else {
+                  (globalThis as any).process = originalProcess;
+                }
+              } catch {
+                // ignore
+              }
+            }
+          }
         };
 
-        const blob = await run();
-
-        const originalCreateObjectURL = URL.createObjectURL;
-        let forcedData = false;
-        try {
-          // Force the marketplace loader to fall back to `data:` module URLs so we can
-          // validate that the configured CSP permits both `blob:` and `data:` entrypoints.
-          // (In Chromium, `URL.createObjectURL` is usually available so the default path is `blob:`.)
-          (URL as any).createObjectURL = undefined;
-          forcedData = true;
-        } catch {
-          // ignore
-        }
-
-        try {
-          const data = await run();
-          return { canBlobModuleUrls, forcedData, blob, data };
-        } finally {
-          try {
-            (URL as any).createObjectURL = originalCreateObjectURL;
-          } catch {
-            // ignore
-          }
-        }
+        const blob = await run({ forceData: false });
+        const data = await run({ forceData: true });
+        return { canBlobModuleUrls, blob, data };
       },
       { hostModuleUrl, managerModuleUrl }
     );
@@ -443,9 +449,7 @@ test.describe("Content Security Policy (Tauri parity)", () => {
 
     expect(result.data.id).toBe("formula.sample-hello");
     expect(result.data.loadedMainUrl).toMatch(/^(blob:|data:)/);
-    if (result.forcedData) {
-      expect(result.data.loadedMainUrl).toMatch(/^data:/);
-    }
+    expect(result.data.loadedMainUrl).toMatch(/^data:/);
     expect(result.data.sum).toBe(10);
     expect(result.data.fetched).toBe("hello");
     expect(result.data.outCell).toBe(10);
