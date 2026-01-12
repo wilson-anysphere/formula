@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { DocumentController } from "../document/documentController.js";
 import { createSheetNameResolverFromIdToNameMap } from "../sheet/sheetNameResolver.js";
@@ -27,5 +27,19 @@ describe("DocumentControllerWorkbookAdapter (sheet name resolver)", () => {
     expect(controller.getSheetIds()).not.toContain("DoesNotExist");
 
     workbook.dispose();
+  });
+
+  it("throws when DocumentController skips formatting due to safety caps", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const controller = new DocumentController();
+    const workbook = new DocumentControllerWorkbookAdapter(controller as any, { activeSheetName: "Sheet1" });
+    const sheet = workbook.getSheet("Sheet1");
+    try {
+      // Full-width formatting over >50k rows is rejected by DocumentController's safety cap.
+      expect(() => sheet.getRange("A1:XFD60000").setFormat({ bold: true })).toThrow(/setFormat skipped/i);
+    } finally {
+      warnSpy.mockRestore();
+      workbook.dispose();
+    }
   });
 });

@@ -71,4 +71,22 @@ sheet["A2"] = "=A1*2"
 
     expect(format).toMatchObject({ font: { bold: true } });
   });
+
+  it("throws when the underlying DocumentController skips formatting (safety caps)", () => {
+    class RejectingDoc {
+      setRangeFormat(): boolean {
+        return false;
+      }
+    }
+
+    const doc = new RejectingDoc();
+    const api = new DocumentControllerBridge(doc as any, { activeSheetId: "Sheet1" });
+
+    expect(() =>
+      api.set_range_format({
+        range: { sheet_id: "Sheet1", start_row: 0, end_row: 0, start_col: 0, end_col: 0 },
+        format: { font: { bold: true } },
+      }),
+    ).toThrow(/Formatting could not be applied/i);
+  });
 });

@@ -136,7 +136,7 @@ export class DocumentControllerBridge {
   }
 
   set_range_format({ range, format }) {
-    this.doc.setRangeFormat(
+    const ok = this.doc.setRangeFormat(
       range.sheet_id,
       {
         start: { row: range.start_row, col: range.start_col },
@@ -144,6 +144,9 @@ export class DocumentControllerBridge {
       },
       format,
     );
+    if (ok === false) {
+      throw new Error("Formatting could not be applied to the full selection. Try selecting fewer cells/rows.");
+    }
     return null;
   }
 

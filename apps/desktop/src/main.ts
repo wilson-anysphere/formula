@@ -7294,9 +7294,12 @@ mountRibbon(ribbonReactRoot, {
         const next = Math.min(250, current + 1);
         if (next === current) return;
         applyFormattingToSelection("Indent", (doc, sheetId, ranges) => {
+          let applied = true;
           for (const range of ranges) {
-            doc.setRangeFormat(sheetId, range, { alignment: { indent: next } }, { label: "Indent" });
+            const ok = doc.setRangeFormat(sheetId, range, { alignment: { indent: next } }, { label: "Indent" });
+            if (ok === false) applied = false;
           }
+          return applied;
         });
         return;
       }
@@ -7306,9 +7309,12 @@ mountRibbon(ribbonReactRoot, {
         const next = Math.max(0, current - 1);
         if (next === current) return;
         applyFormattingToSelection("Indent", (doc, sheetId, ranges) => {
+          let applied = true;
           for (const range of ranges) {
-            doc.setRangeFormat(sheetId, range, { alignment: { indent: next } }, { label: "Indent" });
+            const ok = doc.setRangeFormat(sheetId, range, { alignment: { indent: next } }, { label: "Indent" });
+            if (ok === false) applied = false;
           }
+          return applied;
         });
         return;
       }
