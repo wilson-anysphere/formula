@@ -49,5 +49,31 @@ test.describe("in-cell editor F4 toggles absolute/relative references", () => {
       await expect(editor).toHaveJSProperty("selectionStart", 2);
       await expect(editor).toHaveJSProperty("selectionEnd", 2);
     });
+
+    test(`F4 expands full-token selections to cover the toggled token (${mode})`, async ({ page }) => {
+      await gotoDesktop(page, `/?grid=${mode}`);
+      await waitForIdle(page);
+
+      // Select B1 (avoid self-reference in A1).
+      await page.click("#grid", { position: { x: 160, y: 40 } });
+      await expect(page.getByTestId("active-cell")).toHaveText("B1");
+
+      await page.keyboard.press("F2");
+      const editor = page.locator("textarea.cell-editor");
+      await expect(editor).toBeVisible();
+      await editor.fill("=A1");
+
+      // Select full reference token.
+      await editor.evaluate((el) => {
+        const textarea = el as HTMLTextAreaElement;
+        textarea.focus();
+        textarea.setSelectionRange(1, 3);
+      });
+
+      await page.keyboard.press("F4");
+      await expect(editor).toHaveValue("=$A$1");
+      await expect(editor).toHaveJSProperty("selectionStart", 1);
+      await expect(editor).toHaveJSProperty("selectionEnd", 5);
+    });
   }
 });
