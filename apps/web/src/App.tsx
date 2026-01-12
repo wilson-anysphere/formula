@@ -745,23 +745,87 @@ function EngineDemoApp() {
     const engine = engineRef.current;
     if (!engine || !provider) return;
 
-    const sourceA1 = cellRangeToA1(event.sourceRange);
-    if (!sourceA1) return;
+    const source0 = cellRangeToRange0(event.sourceRange);
+    const target0 = cellRangeToRange0(event.targetRange);
+    if (!source0 || !target0) return;
 
-    const toEngineRange = (range: CellRange) => {
-      const startRow0 = range.startRow - headerRowOffset;
-      const endRow0Exclusive = range.endRow - headerRowOffset;
-      const startCol0 = range.startCol - headerColOffset;
-      const endCol0Exclusive = range.endCol - headerColOffset;
-      if (startRow0 < 0 || startCol0 < 0) return null;
-      if (endRow0Exclusive <= startRow0 || endCol0Exclusive <= startCol0) return null;
-      return { startRow: startRow0, endRow: endRow0Exclusive, startCol: startCol0, endCol: endCol0Exclusive };
-    };
+    const sourceA1 = range0ToA1(source0);
+    const targetA1 = range0ToA1(target0);
 
-    const sourceRange0 = toEngineRange(event.sourceRange);
-    const targetRange0 = toEngineRange(event.targetRange);
-    if (!sourceRange0 || !targetRange0) return;
+    // For formula-aware fill modes, delegate to the engine's Fill operation so reference rewriting
+    // (e.g., full-row/column ranges, structured refs) matches Excel semantics.
+    if (event.mode === "formulas" || event.mode === "series") {
+      const seriesUpdates: Array<{ address: string; value: CellScalar; sheet: string }> = [];
 
+      if (event.mode === "series") {
+        const sourceMatrix = await engine.getRange(sourceA1, activeSheet);
+        const sourceCells: FillSourceCell[][] = sourceMatrix.map((row) =>
+          row.map((cell) => ({
+            input: cell.input as CellScalar,
+            value: cell.value as CellScalar
+          }))
+        );
+
+        const { edits } = computeFillEdits({
+          sourceRange: {
+            startRow: source0.startRow0,
+            endRow: source0.endRow0Exclusive,
+            startCol: source0.startCol0,
+            endCol: source0.endCol0Exclusive
+          },
+          targetRange: {
+            startRow: target0.startRow0,
+            endRow: target0.endRow0Exclusive,
+            startCol: target0.startCol0,
+            endCol: target0.endCol0Exclusive
+          },
+          sourceCells,
+          mode: "series"
+        });
+
+        for (const edit of edits) {
+          // Ignore formula edits; the engine fill already copied and rewrote those formulas.
+          if (typeof edit.value === "string" && edit.value.trimStart().startsWith("=")) continue;
+          seriesUpdates.push({ sheet: activeSheet, address: toA1(edit.row, edit.col), value: edit.value as CellScalar });
+        }
+      }
+
+      const fillResult = await engine.applyOperation({
+        type: "Fill",
+        sheet: activeSheet,
+        src: sourceA1,
+        dst: targetA1
+      });
+
+      if (seriesUpdates.length > 0) {
+        await engine.setCells(seriesUpdates);
+      }
+
+      const changes = await engine.recalculate(activeSheet);
+
+      const directChanges: CellChange[] = [
+        ...fillResult.changedCells
+          .filter((change) => change.after == null || change.after.formula == null)
+          .map((change) => ({
+            sheet: change.sheet,
+            address: change.address,
+            value: (change.after?.value ?? null) as CellScalar
+          })),
+        ...seriesUpdates.map((update) => ({ sheet: update.sheet, address: update.address, value: update.value }))
+      ];
+
+      provider.applyRecalcChanges(directChanges.length > 0 ? [...changes, ...directChanges] : changes);
+
+      // If the user clicks a new cell while the fill operation is still
+      // fetching/applying changes, the first read can race and show stale data.
+      // Refresh the currently active cell after the commit completes.
+      const currentActiveAddress = gridCellToA1Address(activeCellRef.current ?? activeCell);
+      if (!currentActiveAddress || isFormulaEditingRef.current || editingCellRef.current) return;
+      await syncFormulaBar(currentActiveAddress);
+      return;
+    }
+
+    // `copy` mode fills formulas as values (no formula shifting), so the JS fill engine is fine.
     const sourceMatrix = await engine.getRange(sourceA1, activeSheet);
     const sourceCells: FillSourceCell[][] = sourceMatrix.map((row) =>
       row.map((cell) => ({
@@ -771,10 +835,20 @@ function EngineDemoApp() {
     );
 
     const { edits } = computeFillEdits({
-      sourceRange: sourceRange0,
-      targetRange: targetRange0,
+      sourceRange: {
+        startRow: source0.startRow0,
+        endRow: source0.endRow0Exclusive,
+        startCol: source0.startCol0,
+        endCol: source0.endCol0Exclusive
+      },
+      targetRange: {
+        startRow: target0.startRow0,
+        endRow: target0.endRow0Exclusive,
+        startCol: target0.startCol0,
+        endCol: target0.endCol0Exclusive
+      },
       sourceCells,
-      mode: event.mode
+      mode: "copy"
     });
 
     if (edits.length === 0) return;
@@ -788,13 +862,11 @@ function EngineDemoApp() {
     );
 
     const changes = await engine.recalculate(activeSheet);
-    const directChanges: CellChange[] = edits
-      .filter((edit) => !(typeof edit.value === "string" && edit.value.trimStart().startsWith("=")))
-      .map((edit) => ({
-        sheet: activeSheet,
-        address: toA1(edit.row, edit.col),
-        value: edit.value as CellScalar
-      }));
+    const directChanges: CellChange[] = edits.map((edit) => ({
+      sheet: activeSheet,
+      address: toA1(edit.row, edit.col),
+      value: edit.value as CellScalar
+    }));
 
     provider.applyRecalcChanges(directChanges.length > 0 ? [...changes, ...directChanges] : changes);
 
@@ -1551,13 +1623,7 @@ function EngineDemoApp() {
                 if (editingCell) return;
                 beginCellEdit(request);
               }}
-              onFillCommit={
-                editingCell || isFormulaEditing
-                  ? undefined
-                  : (event) => {
-                      void handleFillCommit(event);
-                    }
-              }
+              onFillCommit={editingCell || isFormulaEditing ? undefined : handleFillCommit}
               interactionMode={isFormulaEditing ? "rangeSelection" : "default"}
               onRangeSelectionStart={beginRangeSelection}
               onRangeSelectionChange={updateRangeSelection}
