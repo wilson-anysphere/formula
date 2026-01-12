@@ -3479,7 +3479,10 @@ export class SpreadsheetApp {
     }
 
     // Comment tooltips only apply to the sheet body (not row/col headers).
-    if (x < this.rowHeaderWidth || y < this.colHeaderHeight) {
+    // In shared-grid mode the header row/col scale with the renderer zoom.
+    const headerWidth = this.rowHeaderWidth * this.sharedGridZoom;
+    const headerHeight = this.colHeaderHeight * this.sharedGridZoom;
+    if (x < headerWidth || y < headerHeight) {
       if (this.lastHoveredCommentCellKey != null) this.hideCommentTooltip();
       return;
     }
