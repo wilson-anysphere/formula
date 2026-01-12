@@ -320,14 +320,13 @@ function buildA1Address(startRow, startCol, endRow, endCol) {
 }
 
 function normalizeNonEmptyWorkbookPath(value) {
-  if (value == null) {
+  if (typeof value !== "string") {
     throw new Error("Workbook path must be a non-empty string");
   }
-  const str = String(value);
-  if (str.trim().length === 0) {
+  if (value.trim().length === 0) {
     throw new Error("Workbook path must be a non-empty string");
   }
-  return str;
+  return value;
 }
 
 // When the host omits `formulas`, we synthesize a null matrix so the runtime matches the

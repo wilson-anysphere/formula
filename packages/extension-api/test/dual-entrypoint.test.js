@@ -243,6 +243,25 @@ test("dual entrypoint: CJS + ESM stay in lockstep", async (t) => {
       ]
     );
 
+    // Workbook path validation should reject non-string/empty args without sending RPC calls.
+    calls.length = 0;
+    await assert.rejects(() => cjsApi.workbook.openWorkbook(123), {
+      message: "Workbook path must be a non-empty string"
+    });
+    assert.equal(calls.filter((m) => m.type === "api_call").length, 0);
+
+    calls.length = 0;
+    await assert.rejects(() => esmApi.workbook.saveAs({}), {
+      message: "Workbook path must be a non-empty string"
+    });
+    assert.equal(calls.filter((m) => m.type === "api_call").length, 0);
+
+    calls.length = 0;
+    await assert.rejects(() => workbookEsm.saveAs(123), {
+      message: "Workbook path must be a non-empty string"
+    });
+    assert.equal(calls.filter((m) => m.type === "api_call").length, 0);
+
     // Sheet shaping + helper methods.
     const sheetCjs = await cjsApi.sheets.getActiveSheet();
     const sheetEsm = await esmApi.sheets.getActiveSheet();
