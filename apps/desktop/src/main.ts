@@ -2080,6 +2080,56 @@ function installSheetStoreSubscription(): void {
   syncSheetUi();
 }
 
+// Excel-like keyboard navigation: Ctrl/Cmd+PgUp/PgDn cycles through sheets.
+//
+// SpreadsheetApp has its own Ctrl+PgUp/PgDn handling, but it is based on
+// `DocumentController.getSheetIds()`, which does not reflect user-driven tab
+// reordering. Intercept the shortcut at the window level so we can use the
+// `WorkbookSheetStore` ordering instead.
+//
+// Note: we intentionally handle this in the capture phase so we can prevent
+// downstream handlers (including SpreadsheetApp + browser defaults) from also
+// consuming the shortcut.
+window.addEventListener(
+  "keydown",
+  (e) => {
+    if (e.defaultPrevented) return;
+    const primary = e.ctrlKey || e.metaKey;
+    if (!primary) return;
+    if (e.altKey) return;
+    if (e.key !== "PageUp" && e.key !== "PageDown") return;
+
+    const target = e.target as EventTarget | null;
+    if (target instanceof HTMLElement) {
+      // Let the sheet tab strip (including inline rename state) handle shortcuts when focused.
+      if (sheetTabsRootEl.contains(target)) return;
+
+      // Never steal the shortcut from text inputs / contenteditable (formula bar, rename input, etc).
+      const tag = target.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return;
+    }
+
+    const visible = workbookSheetStore.listVisible();
+    const ordered = visible.length > 0 ? visible : workbookSheetStore.listAll();
+    if (ordered.length === 0) return;
+
+    const current = app.getCurrentSheetId();
+    const idx = ordered.findIndex((sheet) => sheet.id === current);
+    if (idx === -1) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const delta = e.key === "PageUp" ? -1 : 1;
+    const next = ordered[(idx + delta + ordered.length) % ordered.length];
+    if (!next || next.id === current) return;
+
+    app.activateSheet(next.id);
+    app.focus();
+  },
+  { capture: true },
+);
+
 // `SpreadsheetApp.restoreDocumentState()` replaces the DocumentController model (including sheet ids).
 // Keep the sheet metadata store in sync so tabs/switcher reflect the restored workbook.
 const originalRestoreDocumentState = app.restoreDocumentState.bind(app);
