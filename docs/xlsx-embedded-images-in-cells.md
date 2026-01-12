@@ -50,7 +50,8 @@ Notes:
 
 * `t="e"` is the standard SpreadsheetML *error* cell type.
 * `vm="1"` is the **value-metadata index** that links the cell to `xl/metadata.xml`.
-  * In the observed file, `valueMetadata count="1"` but the cell uses `vm="1"`, which strongly suggests `vm` is **1-based** (with `0` meaning “no value metadata”).
+  * In this sample, `valueMetadata count="1"` but the cell uses `vm="1"`, which suggests `vm` is **1-based** here.
+    Other workbooks can use `vm="0"` for the first record; treat `vm` as ambiguous and resolve best-effort (see [`docs/20-images-in-cells-richdata.md`](./20-images-in-cells-richdata.md)).
 
 ## 2) `xl/_rels/workbook.xml.rels`: required relationships + types
 
