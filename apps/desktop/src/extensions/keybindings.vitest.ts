@@ -95,6 +95,14 @@ describe("keybindings", () => {
     expect(matchesKeybinding(binding!, eventForKey("!", { ctrlKey: true, shiftKey: true, code: "Digit1" }))).toBe(true);
   });
 
+  it("matches digit keys via KeyboardEvent.code fallback when event.key differs by layout (ctrl+1)", () => {
+    const binding = parseKeybinding("cmd", "ctrl+1");
+    expect(binding).not.toBeNull();
+
+    // Example: on AZERTY layouts, the physical `Digit1` key can report `event.key === "&"` without Shift.
+    expect(matchesKeybinding(binding!, eventForKey("&", { ctrlKey: true, code: "Digit1" }))).toBe(true);
+  });
+
   it("matches shifted brackets via KeyboardEvent.code fallback (ctrl+shift+[)", () => {
     const binding = parseKeybinding("cmd", "ctrl+shift+[");
     expect(binding).not.toBeNull();
