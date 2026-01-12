@@ -4231,23 +4231,7 @@ if (
 
   if (hasTauriWorkbookBridge) {
     extensionSpreadsheetApi.getActiveWorkbook = async () => {
-      const sheetId = app.getCurrentSheetId();
-      const activeSheet = { id: sheetId, name: workbookSheetStore.getName(sheetId) ?? sheetId };
-      const sheets = workbookSheetStore.listAll().map((sheet) => ({ id: sheet.id, name: sheet.name }));
-
-      const path =
-        activeWorkbook?.path ??
-        activeWorkbook?.origin_path ??
-        // If no backend workbook is active, treat this as an unsaved session.
-        null;
-
-      const name = (() => {
-        const pick = typeof path === "string" && path.trim() !== "" ? path : null;
-        if (!pick) return "Workbook";
-        return pick.split(/[/\\]/).pop() ?? "Workbook";
-      })();
-
-      return { name, path, sheets, activeSheet };
+      return getWorkbookSnapshotForExtensions();
     };
 
     extensionSpreadsheetApi.openWorkbook = async (path: string) => {
