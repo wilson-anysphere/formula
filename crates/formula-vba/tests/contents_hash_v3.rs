@@ -415,10 +415,16 @@ fn contents_hash_v3_matches_explicit_normalized_transcript_sha256() {
     let designer_bytes = b"FORMDATA";
     let vba_project_bin = build_contents_hash_v3_project(&module_source, designer_bytes);
 
-    // ---- Expected normalized transcript per MS-OVBA §2.4.2 ----
+    // ---- Expected normalized transcript ----
     //
-    // ContentsHashV3 = SHA-256(ProjectNormalizedData) (v3 uses SHA-256, not MD5)
-    // ProjectNormalizedData = V3ContentNormalizedData || FormsNormalizedData
+    // This test targets the current `contents_hash_v3` helper, which computes a legacy SHA-256
+    // digest over the v3 `ProjectNormalizedData` transcript:
+    //
+    // `legacy_contents_hash_v3 = SHA-256(ProjectNormalizedData)`
+    // `ProjectNormalizedData = V3ContentNormalizedData || FormsNormalizedData`
+    //
+    // Note: MS-OVBA §2.4.2.7 defines the V3 Content Hash used for VBA signature binding as an
+    // MD5-based value; see `docs/vba-digital-signatures.md` and MS-OSHARED §4.3.
     //
     // V3ContentNormalizedData includes (for procedural modules) `MODULETYPE.Id || MODULETYPE.Reserved`
     // followed by LF-normalized module source (Attribute filtering per MS-OVBA §2.4.2.5), and the
