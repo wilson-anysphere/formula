@@ -2620,15 +2620,15 @@ if (
     };
 
     extensionSpreadsheetApi.openWorkbook = async (path: string) => {
-      await openWorkbookFromPath(String(path), { notifyExtensions: false });
+      await openWorkbookFromPath(String(path), { notifyExtensions: false, throwOnCancel: true });
     };
 
     extensionSpreadsheetApi.createWorkbook = async () => {
-      await handleNewWorkbook({ notifyExtensions: false });
+      await handleNewWorkbook({ notifyExtensions: false, throwOnCancel: true });
     };
 
     extensionSpreadsheetApi.saveWorkbook = async () => {
-      await handleSave({ notifyExtensions: false });
+      await handleSave({ notifyExtensions: false, throwOnCancel: true });
     };
 
     extensionSpreadsheetApi.saveWorkbookAs = async (path: string) => {
@@ -2636,7 +2636,7 @@ if (
     };
 
     extensionSpreadsheetApi.closeWorkbook = async () => {
-      await handleNewWorkbook({ notifyExtensions: false });
+      await handleNewWorkbook({ notifyExtensions: false, throwOnCancel: true });
     };
   }
 
@@ -6220,12 +6220,17 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
 
 async function openWorkbookFromPath(
   path: string,
-  options: { notifyExtensions?: boolean } = {},
+  options: { notifyExtensions?: boolean; throwOnCancel?: boolean } = {},
 ): Promise<void> {
   if (!tauriBackend) return;
   if (typeof path !== "string" || path.trim() === "") return;
   const ok = await confirmDiscardDirtyState("open another workbook");
-  if (!ok) return;
+  if (!ok) {
+    if (options.throwOnCancel) {
+      throw new Error("Open workbook cancelled");
+    }
+    return;
+  }
 
   const hadActiveWorkbook = activeWorkbook != null;
   const previousPanelWorkbookId = activePanelWorkbookId;
@@ -6344,13 +6349,13 @@ async function copyPowerQueryPersistence(fromWorkbookId: string, toWorkbookId: s
   }
 }
 
-async function handleSave(options: { notifyExtensions?: boolean } = {}): Promise<void> {
+async function handleSave(options: { notifyExtensions?: boolean; throwOnCancel?: boolean } = {}): Promise<void> {
   if (!tauriBackend) return;
   if (!activeWorkbook) return;
   if (!workbookSync) return;
 
   if (!activeWorkbook.path) {
-    await handleSaveAs({ notifyExtensions: options.notifyExtensions });
+    await handleSaveAs(options);
     return;
   }
 
@@ -6365,7 +6370,7 @@ async function handleSave(options: { notifyExtensions?: boolean } = {}): Promise
 }
 
 async function handleSaveAs(
-  options: { previousPanelWorkbookId?: string; notifyExtensions?: boolean } = {},
+  options: { previousPanelWorkbookId?: string; notifyExtensions?: boolean; throwOnCancel?: boolean } = {},
 ): Promise<void> {
   if (!tauriBackend) return;
   if (!activeWorkbook) return;
@@ -6378,7 +6383,12 @@ async function handleSaveAs(
       { name: "Excel Macro-Enabled Workbook", extensions: ["xlsm"] },
     ],
   });
-  if (!path) return;
+  if (!path) {
+    if (options.throwOnCancel) {
+      throw new Error("Save cancelled");
+    }
+    return;
+  }
 
   await handleSaveAsPath(path, { previousPanelWorkbookId, notifyExtensions: options.notifyExtensions });
 }
@@ -6418,10 +6428,15 @@ async function handleSaveAsPath(
   rerenderLayout?.();
 }
 
-async function handleNewWorkbook(options: { notifyExtensions?: boolean } = {}): Promise<void> {
+async function handleNewWorkbook(options: { notifyExtensions?: boolean; throwOnCancel?: boolean } = {}): Promise<void> {
   if (!tauriBackend) return;
   const ok = await confirmDiscardDirtyState("create a new workbook");
-  if (!ok) return;
+  if (!ok) {
+    if (options.throwOnCancel) {
+      throw new Error("Create workbook cancelled");
+    }
+    return;
+  }
 
   const hadActiveWorkbook = activeWorkbook != null;
   const previousPanelWorkbookId = activePanelWorkbookId;
