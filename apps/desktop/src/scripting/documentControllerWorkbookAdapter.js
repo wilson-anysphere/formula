@@ -7,6 +7,21 @@ import { applyStylePatch } from "../formatting/styleTable.js";
 // - Cols: A..XFD (0-based: 0..16383)
 const EXCEL_MAX_ROW = 1048575;
 const EXCEL_MAX_COL = 16383;
+
+// Scripting APIs (and macro recorder) frequently represent ranges as full 2D JS arrays.
+// With Excel-scale sheets this can explode in memory usage if callers request a full
+// column/row/sheet. Keep reads/writes bounded to avoid renderer OOMs.
+const DEFAULT_SCRIPT_RANGE_CELL_LIMIT = 200_000;
+
+function assertScriptRangeWithinLimit(rows, cols, address, action) {
+  const cellCount = rows * cols;
+  if (cellCount > DEFAULT_SCRIPT_RANGE_CELL_LIMIT) {
+    throw new Error(
+      `${action} skipped for range ${address} (rows=${rows}, cols=${cols}, area=${cellCount}). ` +
+        `Limit is ${DEFAULT_SCRIPT_RANGE_CELL_LIMIT} cells.`,
+    );
+  }
+}
 /**
  * @typedef {import("../sheet/sheetNameResolver.js").SheetNameResolver} SheetNameResolver
  */
@@ -1223,6 +1238,7 @@ class DocumentControllerRangeAdapter {
   getValues() {
     const rows = this.coords.endRow - this.coords.startRow + 1;
     const cols = this.coords.endCol - this.coords.startCol + 1;
+    assertScriptRangeWithinLimit(rows, cols, this.address, "getValues");
     const out = [];
     for (let r = 0; r < rows; r++) {
       const row = [];
@@ -1241,6 +1257,7 @@ class DocumentControllerRangeAdapter {
   getFormulas() {
     const rows = this.coords.endRow - this.coords.startRow + 1;
     const cols = this.coords.endCol - this.coords.startCol + 1;
+    assertScriptRangeWithinLimit(rows, cols, this.address, "getFormulas");
     const out = [];
     for (let r = 0; r < rows; r++) {
       const row = [];
@@ -1259,6 +1276,7 @@ class DocumentControllerRangeAdapter {
   setValues(values) {
     const rows = this.coords.endRow - this.coords.startRow + 1;
     const cols = this.coords.endCol - this.coords.startCol + 1;
+    assertScriptRangeWithinLimit(rows, cols, this.address, "setValues");
     if (!Array.isArray(values) || values.length !== rows || values.some((row) => row.length !== cols)) {
       throw new Error(
         `setValues expected ${rows}x${cols} matrix for range ${this.address}, got ${values.length}x${values[0]?.length ?? 0}`,
@@ -1274,6 +1292,7 @@ class DocumentControllerRangeAdapter {
   setFormulas(formulas) {
     const rows = this.coords.endRow - this.coords.startRow + 1;
     const cols = this.coords.endCol - this.coords.startCol + 1;
+    assertScriptRangeWithinLimit(rows, cols, this.address, "setFormulas");
     if (!Array.isArray(formulas) || formulas.length !== rows || formulas.some((row) => row.length !== cols)) {
       throw new Error(
         `setFormulas expected ${rows}x${cols} matrix for range ${this.address}, got ${formulas.length}x${formulas[0]?.length ?? 0}`,
@@ -1357,6 +1376,7 @@ class DocumentControllerRangeAdapter {
     const doc = this.sheet.workbook.documentController;
     const rows = this.coords.endRow - this.coords.startRow + 1;
     const cols = this.coords.endCol - this.coords.startCol + 1;
+    assertScriptRangeWithinLimit(rows, cols, this.address, "getFormats");
     const out = [];
 
     for (let r = 0; r < rows; r++) {
@@ -1408,6 +1428,7 @@ class DocumentControllerRangeAdapter {
   setFormats(formats) {
     const rows = this.coords.endRow - this.coords.startRow + 1;
     const cols = this.coords.endCol - this.coords.startCol + 1;
+    assertScriptRangeWithinLimit(rows, cols, this.address, "setFormats");
     if (!Array.isArray(formats) || formats.length !== rows || formats.some((row) => !Array.isArray(row) || row.length !== cols)) {
       throw new Error(
         `setFormats expected ${rows}x${cols} matrix for range ${this.address}, got ${formats?.length ?? 0}x${formats?.[0]?.length ?? 0}`,

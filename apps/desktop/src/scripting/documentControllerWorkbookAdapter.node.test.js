@@ -38,3 +38,22 @@ test("DocumentControllerWorkbookAdapter uses stable sheet ids for usedRange + fo
   workbook.dispose();
 });
 
+test("DocumentControllerWorkbookAdapter guards getValues against huge ranges", () => {
+  const controller = new DocumentController();
+
+  let scanned = 0;
+  const origGetCell = controller.getCell.bind(controller);
+  controller.getCell = (...args) => {
+    scanned += 1;
+    return origGetCell(...args);
+  };
+
+  const workbook = new DocumentControllerWorkbookAdapter(controller, { activeSheetName: "Sheet1" });
+  const sheet = workbook.getSheet("Sheet1");
+
+  scanned = 0;
+  assert.throws(() => sheet.getRange("A1:Z8000").getValues(), /getValues skipped/i);
+  assert.equal(scanned, 0);
+
+  workbook.dispose();
+});
