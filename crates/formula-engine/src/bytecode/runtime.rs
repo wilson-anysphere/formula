@@ -9500,16 +9500,16 @@ fn sumproduct_range(grid: &dyn Grid, a: ResolvedRange, b: ResolvedRange) -> Resu
                     (true, true) => {
                         // Overlap: the same stored cell may correspond to *two* different SUMPRODUCT
                         // element offsets (once as A, once as B).
-                        let v_for_a = v.clone();
-                        let v_for_b = v;
+                        let v_num = coerce_sumproduct_number(&v);
 
                         // As A
                         let row_off_a = coord.row - a.row_start;
                         let col_off_a = coord.col - a.col_start;
                         let key_a = (row_off_a as i64) * cols_i64 + (col_off_a as i64);
                         if seen_offsets.insert(key_a) {
-                            match coerce_sumproduct_number(&v_for_a) {
+                            match &v_num {
                                 Ok(x) => {
+                                    let x = *x;
                                     let rb = CellCoord {
                                         row: b.row_start + row_off_a,
                                         col: b.col_start + col_off_a,
@@ -9531,7 +9531,7 @@ fn sumproduct_range(grid: &dyn Grid, a: ResolvedRange, b: ResolvedRange) -> Resu
                                     col_off_a,
                                     row_off_a,
                                     0,
-                                    e,
+                                    *e,
                                 ),
                             }
                         }
@@ -9547,14 +9547,14 @@ fn sumproduct_range(grid: &dyn Grid, a: ResolvedRange, b: ResolvedRange) -> Resu
                             };
                             let ra_value = grid.get_value(ra);
                             match coerce_sumproduct_number(&ra_value) {
-                                Ok(x) => match coerce_sumproduct_number(&v_for_b) {
-                                    Ok(y) => sum += x * y,
+                                Ok(x) => match &v_num {
+                                    Ok(y) => sum += x * (*y),
                                     Err(e) => record_error_sumproduct_offset(
                                         &mut best_error,
                                         col_off_b,
                                         row_off_b,
                                         1,
-                                        e,
+                                        *e,
                                     ),
                                 },
                                 Err(e) => record_error_sumproduct_offset(
