@@ -191,6 +191,29 @@ describe("DocumentControllerSpreadsheetApi", () => {
     ]);
   });
 
+  it("returns effective (layered) formatting for getCell() even when cellState.styleId is 0", () => {
+    const controller = new DocumentController();
+    controller.setRangeFormat("Sheet1", "A1:A1048576", { font: { bold: true } }, { label: "Bold column A" });
+
+    const cellState = controller.getCell("Sheet1", "A1");
+    expect(cellState.styleId).toBe(0);
+
+    const api = new DocumentControllerSpreadsheetApi(controller);
+    expect(api.getCell({ sheet: "Sheet1", row: 1, col: 1 }).format).toEqual({ bold: true });
+  });
+
+  it("readRange() includes inherited formatting for empty cells", () => {
+    const controller = new DocumentController();
+    controller.setRangeFormat("Sheet1", "A1:A1048576", { font: { bold: true } }, { label: "Bold column A" });
+
+    const api = new DocumentControllerSpreadsheetApi(controller);
+    const cells = api.readRange({ sheet: "Sheet1", startRow: 1, startCol: 1, endRow: 2, endCol: 1 });
+    expect(cells).toEqual([
+      [{ value: null, format: { bold: true } }],
+      [{ value: null, format: { bold: true } }]
+    ]);
+  });
+
   it("does not leak mutable references to DocumentController cell values from listNonEmptyCells()", () => {
     const controller = new DocumentController();
     controller.setCellValue("Sheet1", "A1", {

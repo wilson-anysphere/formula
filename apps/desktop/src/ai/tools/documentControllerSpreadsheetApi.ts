@@ -1,4 +1,5 @@
 import { DocumentController } from "../../document/documentController.js";
+import { applyStylePatch } from "../../formatting/styleTable.js";
 
 import { normalizeFormulaTextOpt } from "@formula/engine";
 
@@ -223,9 +224,19 @@ function styleForWrite(baseStyle: DocumentControllerStyle, format: CellFormat | 
   return style;
 }
 
-function toCellData(controller: DocumentController, cellState: any): CellData {
-  const styleId = typeof cellState?.styleId === "number" ? cellState.styleId : 0;
-  const style = styleId === 0 ? null : controller.styleTable.get(styleId);
+function toCellData(
+  controller: DocumentController,
+  sheetId: string,
+  coord: { row: number; col: number },
+  cellState: any
+): CellData {
+  const style =
+    typeof (controller as any).getCellFormat === "function"
+      ? (controller as any).getCellFormat(sheetId, coord)
+      : (() => {
+          const styleId = typeof cellState?.styleId === "number" ? cellState.styleId : 0;
+          return styleId === 0 ? null : controller.styleTable.get(styleId);
+        })();
   const format = styleToCellFormat(style);
 
   const rawFormula = cellState?.formula;
@@ -347,8 +358,9 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
   }
 
   getCell(address: CellAddress): CellData {
-    const state = this.controller.getCell(address.sheet, toControllerCoord(address));
-    return toCellData(this.controller, state);
+    const coord = toControllerCoord(address);
+    const state = this.controller.getCell(address.sheet, coord);
+    return toCellData(this.controller, address.sheet, coord, state);
   }
 
   setCell(address: CellAddress, cell: CellData): void {
@@ -395,8 +407,33 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
     // normalize formulas, and perform style lookups.
     const sheetModel = this.controller.model.sheets.get(range.sheet);
     const cellMap: Map<string, any> | undefined = sheetModel?.cells;
-    const formatCache = new Map<number, CellFormat | undefined>();
-    const getFormatForStyleId = (styleId: number): CellFormat | undefined => {
+
+    const hasLayeredFormattingReadPath = typeof (this.controller as any).getCellFormat === "function";
+
+    const formatCache = new Map<string | number, CellFormat | undefined>();
+
+    const getFormatForStyleIds = (styleIds: [number, number, number, number]): CellFormat | undefined => {
+      const [sheetStyleId, rowStyleId, colStyleId, cellStyleId] = styleIds;
+      if (sheetStyleId === 0 && rowStyleId === 0 && colStyleId === 0 && cellStyleId === 0) return undefined;
+      const cacheKey = `${sheetStyleId},${rowStyleId},${colStyleId},${cellStyleId}`;
+      if (formatCache.has(cacheKey)) return formatCache.get(cacheKey);
+
+      const sheetStyle = this.controller.styleTable.get(sheetStyleId);
+      const colStyle = this.controller.styleTable.get(colStyleId);
+      const rowStyle = this.controller.styleTable.get(rowStyleId);
+      const cellStyle = this.controller.styleTable.get(cellStyleId);
+
+      // Precedence: sheet < col < row < cell.
+      const sheetCol = applyStylePatch(sheetStyle, colStyle);
+      const sheetColRow = applyStylePatch(sheetCol, rowStyle);
+      const effectiveStyle = applyStylePatch(sheetColRow, cellStyle);
+
+      const format = styleToCellFormat(effectiveStyle);
+      formatCache.set(cacheKey, format);
+      return format;
+    };
+
+    const getFormatForLegacyStyleId = (styleId: number): CellFormat | undefined => {
       if (styleId === 0) return undefined;
       if (formatCache.has(styleId)) return formatCache.get(styleId);
       const style = this.controller.styleTable.get(styleId);
@@ -414,8 +451,21 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
       for (let c = 0; c < colCount; c++) {
         const col0 = startCol0 + c;
         const cellState = cellMap?.get(`${row0},${col0}`);
+        const styleIds: [number, number, number, number] = hasLayeredFormattingReadPath
+          ? [
+              typeof sheetModel?.defaultStyleId === "number" ? sheetModel.defaultStyleId : 0,
+              typeof sheetModel?.rowStyleIds?.get === "function" ? (sheetModel.rowStyleIds.get(row0) ?? 0) : 0,
+              typeof sheetModel?.colStyleIds?.get === "function" ? (sheetModel.colStyleIds.get(col0) ?? 0) : 0,
+              typeof cellState?.styleId === "number" ? cellState.styleId : 0
+            ]
+          : [0, 0, 0, typeof cellState?.styleId === "number" ? cellState.styleId : 0];
+
+        const format = hasLayeredFormattingReadPath
+          ? getFormatForStyleIds(styleIds)
+          : getFormatForLegacyStyleId(styleIds[3]);
+
         if (!cellState) {
-          row[c] = { value: null };
+          row[c] = { value: null, ...(format ? { format } : {}) };
           continue;
         }
 
@@ -423,16 +473,12 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
         if (rawFormula != null) {
           const normalizedFormula = normalizeFormula(rawFormula);
           if (normalizedFormula) {
-            const styleId = typeof cellState.styleId === "number" ? cellState.styleId : 0;
-            const format = getFormatForStyleId(styleId);
             row[c] = { value: null, formula: normalizedFormula, ...(format ? { format } : {}) };
             continue;
           }
         }
 
         const rawValue = cellState.value ?? null;
-        const styleId = typeof cellState.styleId === "number" ? cellState.styleId : 0;
-        const format = getFormatForStyleId(styleId);
         row[c] = {
           value: rawValue != null && typeof rawValue === "object" ? cloneCellValue(rawValue) : rawValue,
           ...(format ? { format } : {})
