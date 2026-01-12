@@ -932,78 +932,84 @@ fn parse_hyperlink_moniker(input: &[u8], codepage: u16) -> Result<(Option<String
         return Ok(((!url.is_empty()).then_some(url), consumed));
     }
 
-    // File moniker: not fully supported yet. Preserve as best-effort file:// URL when we can.
+    // File moniker: best-effort decode to a `file:` URI.
     if clsid == CLSID_FILE_MONIKER {
         // The file moniker payload is more complex (short/long paths, UNC). We attempt a
         // best-effort parse that recovers both the path and the correct payload length so the
         // caller can continue parsing subsequent fields in the HLINK record (tooltip, location,
         // etc) without becoming misaligned.
+        //
+        // Common layout (best-effort) [MS-OSHARED] / [MS-XLS]:
+        //
+        //   [cAnti:u32] [ansiPath:cAnti bytes (including NUL)] [endServer:u16] [reserved:u16]
+        //   [cbUnicode:u32] [unicodePath:cbUnicode bytes (UTF-16LE, including NUL)]
         if input.len() < 20 {
             return Err("truncated file moniker".to_string());
         }
+
         let ansi_len = u32::from_le_bytes([input[16], input[17], input[18], input[19]]) as usize;
         let mut pos = 20usize;
 
+        // ANSI path (8-bit, NUL terminated within the declared byte length).
         let ansi_path = if ansi_len > 0 {
             if input.len() < pos + ansi_len {
                 return Err("truncated file moniker ANSI path".to_string());
             }
             let bytes = &input[pos..pos + ansi_len];
             pos += ansi_len;
-            let mut path = strings::decode_ansi(codepage, bytes);
-            path = path.trim_end_matches('\0').to_string();
+
+            let nul = bytes.iter().position(|b| *b == 0).unwrap_or(bytes.len());
+            let path = strings::decode_ansi(codepage, &bytes[..nul]);
+            let path = trim_at_first_nul(path);
             (!path.is_empty()).then_some(path)
         } else {
             None
         };
 
-        // The remaining part of the file moniker often contains:
-        // - endServer (u16)
-        // - reserved (u16)
-        // - unicode_len (u32) in bytes, followed by UTF-16LE (NUL terminated)
-        //
-        // Not all producers include the Unicode section, but when present we should consume it so
-        // subsequent HLINK fields parse correctly.
+        // Optional Unicode path extension. Many producers include it; consuming it is important so
+        // following HLINK fields parse correctly.
         let mut unicode_path: Option<String> = None;
         if input.len() >= pos + 8 {
-            // endServer + reserved
+            // endServer + reserved/version (ignored)
             pos += 4;
 
-            let unicode_len = u32::from_le_bytes([
-                input[pos],
-                input[pos + 1],
-                input[pos + 2],
-                input[pos + 3],
-            ]) as usize;
+            let unicode_len = u32::from_le_bytes([input[pos], input[pos + 1], input[pos + 2], input[pos + 3]])
+                as usize;
             pos += 4;
 
             if unicode_len > 0 {
                 if input.len() < pos + unicode_len {
                     return Err("truncated file moniker Unicode path".to_string());
                 }
+                if unicode_len % 2 != 0 {
+                    return Err("invalid file moniker Unicode path length".to_string());
+                }
                 let bytes = &input[pos..pos + unicode_len];
                 pos += unicode_len;
+
                 let s = decode_utf16le(bytes)?;
-                let s = trim_trailing_nuls(s);
+                let s = trim_at_first_nul(trim_trailing_nuls(s));
                 if !s.is_empty() {
                     unicode_path = Some(s);
                 }
             }
         }
 
-        if let Some(path) = unicode_path.or(ansi_path) {
-            let uri = file_path_to_uri(&path);
-            return Ok((Some(uri), pos));
-        }
-
-        return Err("unsupported file moniker".to_string());
+        let path = unicode_path
+            .or(ansi_path)
+            .ok_or_else(|| "unsupported file moniker".to_string())?;
+        let uri = file_path_to_uri(&path);
+        return Ok((Some(uri), pos));
     }
 
     Err(format!("unsupported hyperlink moniker CLSID {:02X?}", clsid))
 }
 
 fn file_path_to_uri(path: &str) -> String {
-    let normalized = path.trim().replace('\\', "/");
+    let mut normalized = path.trim().replace('\\', "/");
+    if let Some(idx) = normalized.find('\0') {
+        normalized.truncate(idx);
+    }
     if normalized.is_empty() {
         return normalized;
     }
@@ -1095,6 +1101,13 @@ fn decode_utf16le(bytes: &[u8]) -> Result<String, String> {
 fn trim_trailing_nuls(mut s: String) -> String {
     while s.ends_with('\0') {
         s.pop();
+    }
+    s
+}
+
+fn trim_at_first_nul(mut s: String) -> String {
+    if let Some(idx) = s.find('\0') {
+        s.truncate(idx);
     }
     s
 }

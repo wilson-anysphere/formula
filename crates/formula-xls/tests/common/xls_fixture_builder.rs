@@ -2053,6 +2053,52 @@ pub fn build_mailto_hyperlink_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a single file hyperlink (`file:`) on `A1` backed by a
+/// `CLSID_FILE_MONIKER` payload.
+pub fn build_file_hyperlink_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_hyperlink_workbook_stream(
+        "File",
+        hlink_file_moniker(0, 0, 0, 0, r"C:\foo\bar.txt", "Local file", "File tooltip"),
+    );
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture containing a single UNC file hyperlink (`file:`) on `A1` backed by
+/// a `CLSID_FILE_MONIKER` payload.
+pub fn build_unc_file_hyperlink_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_hyperlink_workbook_stream(
+        "UNC",
+        hlink_file_moniker(
+            0,
+            0,
+            0,
+            0,
+            r"\\server\share\file.xlsx",
+            "UNC file",
+            "UNC tooltip",
+        ),
+    );
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing a single internal hyperlink on `A1`.
 pub fn build_internal_hyperlink_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_hyperlink_workbook_stream(
@@ -2497,6 +2543,70 @@ fn hlink_external_url_with_location(
     out
 }
 
+fn hlink_file_moniker(
+    rw_first: u16,
+    rw_last: u16,
+    col_first: u16,
+    col_last: u16,
+    path: &str,
+    display: &str,
+    tooltip: &str,
+) -> Vec<u8> {
+    // HLINK record layout (BIFF8) [MS-XLS 2.4.110], matching the importer’s best-effort parser.
+    //
+    // ref8 (8) + guid (16) + streamVersion (4) + linkOpts (4) + variable data.
+    const STREAM_VERSION: u32 = 2;
+    const LINK_OPTS_HAS_MONIKER: u32 = 0x0000_0001;
+    const LINK_OPTS_HAS_DISPLAY: u32 = 0x0000_0010;
+    const LINK_OPTS_HAS_TOOLTIP: u32 = 0x0000_0020;
+
+    // File moniker CLSID: 00000303-0000-0000-C000-000000000046 (COM GUID little-endian fields).
+    const CLSID_FILE_MONIKER: [u8; 16] = [
+        0x03, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x46,
+    ];
+
+    let link_opts = LINK_OPTS_HAS_MONIKER | LINK_OPTS_HAS_DISPLAY | LINK_OPTS_HAS_TOOLTIP;
+
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&rw_first.to_le_bytes());
+    out.extend_from_slice(&rw_last.to_le_bytes());
+    out.extend_from_slice(&col_first.to_le_bytes());
+    out.extend_from_slice(&col_last.to_le_bytes());
+
+    out.extend_from_slice(&[0u8; 16]); // hyperlink GUID (unused)
+    out.extend_from_slice(&STREAM_VERSION.to_le_bytes());
+    out.extend_from_slice(&link_opts.to_le_bytes());
+
+    write_hyperlink_string(&mut out, display);
+
+    // File moniker payload:
+    // [CLSID][cAnti:u32][ansiPath:cAnti bytes incl NUL][endServer:u16][version:u16][cbUnicode:u32][unicodePath bytes].
+    out.extend_from_slice(&CLSID_FILE_MONIKER);
+
+    // ANSI path (Windows-1252/ASCII in our fixtures) including a terminating NUL.
+    let mut ansi_bytes = path.as_bytes().to_vec();
+    ansi_bytes.push(0);
+    out.extend_from_slice(&(ansi_bytes.len() as u32).to_le_bytes());
+    out.extend_from_slice(&ansi_bytes);
+
+    // endServer + version (unused in our importer, but common in real-world monikers).
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+
+    // Unicode path (UTF-16LE) including a terminating NUL.
+    let mut u16s: Vec<u16> = path.encode_utf16().collect();
+    u16s.push(0);
+    let unicode_bytes_len: u32 = (u16s.len() * 2) as u32;
+    out.extend_from_slice(&unicode_bytes_len.to_le_bytes());
+    for cu in u16s {
+        out.extend_from_slice(&cu.to_le_bytes());
+    }
+    write_hyperlink_string(&mut out, tooltip);
+
+    out
+}
+
 fn hlink_file_moniker_with_location(
     rw_first: u16,
     rw_last: u16,
@@ -2534,10 +2644,10 @@ fn hlink_file_moniker_with_location(
 
     write_hyperlink_string(&mut out, display);
 
+    // File moniker payload:
+    // [CLSID][cAnti:u32][ansiPath:cAnti bytes incl NUL][endServer:u16][reserved:u16][cbUnicode:u32][unicodePath bytes].
     out.extend_from_slice(&CLSID_FILE_MONIKER);
 
-    // FileMoniker: ANSI path length (bytes incl NUL) + bytes, followed by endServer/reserved and
-    // an optional Unicode path (bytes incl NUL).
     let mut ansi_bytes = path.as_bytes().to_vec();
     ansi_bytes.push(0);
     out.extend_from_slice(&(ansi_bytes.len() as u32).to_le_bytes());
