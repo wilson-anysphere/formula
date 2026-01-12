@@ -1117,6 +1117,78 @@ impl ParserImpl {
         Ok(expr)
     }
 
+    fn parse_dotted_identifier_with_sheet(
+        &mut self,
+        overall_start: usize,
+        addr_span: Span,
+        raw: &str,
+        sheet: &SheetReference<String>,
+    ) -> Result<SpannedExpr<String>, FormulaParseError> {
+        // When parsing a sheet-qualified reference like `Sheet1!A1.Price`, the lexer will emit the
+        // address portion as a single identifier token (`A1.Price`). We need to split it and apply
+        // the sheet reference to the base before building postfix field-access nodes.
+        let mut parts: Vec<&str> = raw.split('.').collect();
+        debug_assert!(
+            parts.len() >= 2,
+            "parse_dotted_identifier_with_sheet called without a '.' in the identifier"
+        );
+
+        let mut pending_selector = false;
+        if parts.last().is_some_and(|p| p.is_empty()) {
+            parts.pop();
+            pending_selector = true;
+        }
+        if parts.iter().any(|p| p.is_empty()) {
+            return Err(FormulaParseError::UnexpectedToken(
+                "invalid dotted identifier".to_string(),
+            ));
+        }
+
+        let base_raw = parts
+            .first()
+            .copied()
+            .expect("split('.') always returns at least one element");
+        let base_end = addr_span.start + base_raw.len();
+        let base_span = Span::new(overall_start, base_end);
+
+        let mut expr = match parse_a1(base_raw) {
+            Ok(addr) => SpannedExpr {
+                span: base_span,
+                kind: SpannedExprKind::CellRef(crate::eval::CellRef {
+                    sheet: sheet.clone(),
+                    addr,
+                }),
+            },
+            Err(_) => SpannedExpr {
+                span: base_span,
+                kind: SpannedExprKind::NameRef(crate::eval::NameRef {
+                    sheet: sheet.clone(),
+                    name: base_raw.to_string(),
+                }),
+            },
+        };
+
+        let mut cursor = base_raw.len();
+        for field in parts.iter().skip(1) {
+            cursor += 1; // '.'
+            cursor += field.len();
+            let end = addr_span.start + cursor;
+            expr = SpannedExpr {
+                span: Span::new(expr.span.start, end),
+                kind: SpannedExprKind::FieldAccess {
+                    base: Box::new(expr),
+                    field: (*field).to_string(),
+                },
+            };
+        }
+
+        if pending_selector {
+            expr = self.parse_field_access_after_dot(expr)?;
+        }
+
+        Ok(expr)
+    }
+
     fn parse_field_access_after_dot(
         &mut self,
         mut base: SpannedExpr<String>,
@@ -1447,6 +1519,15 @@ impl ParserImpl {
                 })
             }
         };
+
+        if addr_str.contains('.') {
+            return self.parse_dotted_identifier_with_sheet(
+                sheet_tok.span.start,
+                addr_tok.span,
+                &addr_str,
+                &sheet,
+            );
+        }
         match parse_a1(&addr_str) {
             Ok(addr) => {
                 self.parse_cell_or_range(sheet, sheet_tok.span.start, addr, addr_tok.span.end)
@@ -3557,6 +3638,46 @@ mod tests {
                 SpannedExprKind::Error(kind),
                 "unexpected kind for {lit}"
             );
+        }
+    }
+
+    #[test]
+    fn parse_spanned_formula_supports_sheet_field_access() {
+        let expr = parse_spanned_formula("=Sheet1!A1.Price")
+            .expect("sheet-qualified field access should parse");
+
+        match expr.kind {
+            SpannedExprKind::FieldAccess { base, field } => {
+                assert_eq!(field, "Price");
+                match base.kind {
+                    SpannedExprKind::CellRef(cell) => {
+                        assert_eq!(cell.sheet, SheetReference::Sheet("Sheet1".to_string()));
+                        assert_eq!(cell.addr, parse_a1("A1").unwrap());
+                    }
+                    other => panic!("expected base CellRef, got {other:?}"),
+                }
+            }
+            other => panic!("expected FieldAccess, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_spanned_formula_supports_sheet_bracket_field_access() {
+        let expr = parse_spanned_formula(r#"=Sheet1!A1.["Change%"]"#)
+            .expect("sheet-qualified bracket field access should parse");
+
+        match expr.kind {
+            SpannedExprKind::FieldAccess { base, field } => {
+                assert_eq!(field, "Change%");
+                match base.kind {
+                    SpannedExprKind::CellRef(cell) => {
+                        assert_eq!(cell.sheet, SheetReference::Sheet("Sheet1".to_string()));
+                        assert_eq!(cell.addr, parse_a1("A1").unwrap());
+                    }
+                    other => panic!("expected base CellRef, got {other:?}"),
+                }
+            }
+            other => panic!("expected FieldAccess, got {other:?}"),
         }
     }
 }
