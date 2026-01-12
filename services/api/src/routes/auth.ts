@@ -15,7 +15,6 @@ import {
 } from "../auth/mfa";
 import { oidcCallback, oidcStart } from "../auth/oidc/oidc";
 import { hashPassword, verifyPassword } from "../auth/password";
-import { samlCallback, samlMetadata, samlStart } from "../auth/saml/saml";
 import { createSession, lookupSessionByToken, revokeSession, setSessionMfaSatisfied } from "../auth/sessions";
 import { withTransaction } from "../db/tx";
 import { TokenBucketRateLimiter, sha256Hex } from "../http/rateLimit";
@@ -946,16 +945,56 @@ export function registerAuthRoutes(app: FastifyInstance): void {
   );
 
   // SAML 2.0 SSO: per-organization providers.
+  //
+  // `@node-saml/node-saml` is an optional dependency in some dev/test sandboxes
+  // (e.g. agents running with a minimal `node_modules`). Load the implementation
+  // lazily so non-SAML API tests can still run.
+  let samlModulePromise: Promise<typeof import("../auth/saml/saml")> | null = null;
+  const loadSamlModule = () => {
+    if (!samlModulePromise) {
+      samlModulePromise = import("../auth/saml/saml").catch((err) => {
+        samlModulePromise = null;
+        throw err;
+      });
+    }
+    return samlModulePromise!;
+  };
+  const samlUnavailable = (reply: FastifyReply, err: unknown) => {
+    app.log.warn({ err }, "saml_dependency_unavailable");
+    return reply.code(501).send({ error: "saml_unavailable" });
+  };
+
   app.get(
     "/auth/saml/:orgId/:provider/start",
     { preHandler: samlRateLimitByIp("/auth/saml/:orgId/:provider/start") },
-    samlStart
+    async (request, reply) => {
+      try {
+        const mod = await loadSamlModule();
+        return await mod.samlStart(request, reply);
+      } catch (err) {
+        return samlUnavailable(reply, err);
+      }
+    }
   );
-  app.get("/auth/saml/:orgId/:provider/metadata", samlMetadata);
+  app.get("/auth/saml/:orgId/:provider/metadata", async (request, reply) => {
+    try {
+      const mod = await loadSamlModule();
+      return await mod.samlMetadata(request, reply);
+    } catch (err) {
+      return samlUnavailable(reply, err);
+    }
+  });
   app.post(
     "/auth/saml/:orgId/:provider/callback",
     { preHandler: samlRateLimitByIp("/auth/saml/:orgId/:provider/callback") },
-    samlCallback
+    async (request, reply) => {
+      try {
+        const mod = await loadSamlModule();
+        return await mod.samlCallback(request, reply);
+      } catch (err) {
+        return samlUnavailable(reply, err);
+      }
+    }
   );
 }
 

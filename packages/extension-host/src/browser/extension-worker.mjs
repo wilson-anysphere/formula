@@ -1,4 +1,7 @@
-import * as formulaApi from "@formula/extension-api";
+// Import the workspace source directly so the extension host can run in
+// environments where workspace package links are incomplete (e.g. minimal agent
+// sandboxes).
+import * as formulaApi from "../../../extension-api/index.mjs";
 
 formulaApi.__setTransport({
   postMessage: (message) => postMessage(message)

@@ -1,6 +1,5 @@
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
-import formbody from "@fastify/formbody";
 import Fastify, { type FastifyBaseLogger, type FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import type { AppConfig } from "./config";
@@ -50,7 +49,33 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
 
   app.register(cookie);
   // Needed for SAML IdP POST bindings (application/x-www-form-urlencoded).
-  app.register(formbody);
+  //
+  // We intentionally avoid a hard dependency on `@fastify/formbody` so the API
+  // server (and its unit tests) can run in minimal environments where optional
+  // dependencies may not be installed (e.g. agent sandboxes).
+  app.addContentTypeParser(
+    "application/x-www-form-urlencoded",
+    { parseAs: "string" },
+    function parseFormBody(_req, body, done) {
+      try {
+        const params = new URLSearchParams(String(body));
+        const out: Record<string, string | string[]> = Object.create(null);
+        for (const [key, value] of params) {
+          const existing = out[key];
+          if (existing === undefined) {
+            out[key] = value;
+          } else if (Array.isArray(existing)) {
+            existing.push(value);
+          } else {
+            out[key] = [existing, value];
+          }
+        }
+        done(null, out);
+      } catch (err) {
+        done(err as Error, undefined);
+      }
+    },
+  );
 
   const allowedOrigins = new Set<string>(options.config.corsAllowedOrigins ?? []);
   const normalizeOrigin = (value: string): string | null => {

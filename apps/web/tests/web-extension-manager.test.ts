@@ -19,7 +19,7 @@ const { generateEd25519KeyPair } = signingPkg;
 const { createExtensionPackageV2 } = extensionPackagePkg;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const browserHostPkg: any = await import("@formula/extension-host/browser");
+const browserHostPkg: any = await import("../../../packages/extension-host/src/browser/index.mjs");
 const { BrowserExtensionHost } = browserHostPkg;
 
 const WORKER_WRAPPER_URL = new URL("./helpers/node-web-worker.mjs", import.meta.url);

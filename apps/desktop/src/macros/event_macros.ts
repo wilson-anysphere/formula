@@ -365,7 +365,35 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
 
     if (runningEventMacro) {
       // Avoid re-entrancy; callers will re-schedule after the current macro finishes.
-      if (kind === "worksheet_change") changeQueuedAfterMacro = true;
+      if (kind === "worksheet_change") {
+        // Worksheet change flushes batch and clear their pending map before awaiting
+        // `runEventMacro()`. If we bail out here (because another event macro is already
+        // running), we must restore the rect into the pending map or it can be dropped
+        // permanently.
+        const sheetId = String(cmdArgs["sheet_id"] ?? "").trim();
+        const startRow = Number(cmdArgs["start_row"]);
+        const startCol = Number(cmdArgs["start_col"]);
+        const endRow = Number(cmdArgs["end_row"]);
+        const endCol = Number(cmdArgs["end_col"]);
+        if (
+          sheetId &&
+          Number.isInteger(startRow) &&
+          startRow >= 0 &&
+          Number.isInteger(startCol) &&
+          startCol >= 0 &&
+          Number.isInteger(endRow) &&
+          endRow >= 0 &&
+          Number.isInteger(endCol) &&
+          endCol >= 0
+        ) {
+          const prev = pendingChangesBySheet.get(sheetId);
+          let next = unionCell(prev, startRow, startCol);
+          next = unionCell(next, endRow, endCol);
+          pendingChangesBySheet.set(sheetId, next);
+        }
+
+        changeQueuedAfterMacro = true;
+      }
       if (kind === "selection_change") selectionQueuedAfterMacro = true;
       return;
     }
