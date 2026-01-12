@@ -25,10 +25,20 @@ function isRecord(value: unknown): value is Record<string, any> {
 }
 
 function isYText(value: unknown): value is { toString: () => string } {
+  if (value instanceof Y.Text) return true;
   if (!value || typeof value !== "object") return false;
   const maybe = value as any;
-  if (maybe.constructor?.name !== "YText") return false;
-  return typeof maybe.toString === "function";
+  // Bundlers can rename constructors and pnpm workspaces can load multiple `yjs`
+  // module instances (ESM + CJS). Avoid relying on `constructor.name`; prefer a
+  // structural check instead.
+  if (typeof maybe.toString !== "function") return false;
+  if (typeof maybe.toDelta !== "function") return false;
+  if (typeof maybe.applyDelta !== "function") return false;
+  if (typeof maybe.insert !== "function") return false;
+  if (typeof maybe.delete !== "function") return false;
+  if (typeof maybe.observeDeep !== "function") return false;
+  if (typeof maybe.unobserveDeep !== "function") return false;
+  return true;
 }
 
 function getYMap(value: unknown): Y.Map<any> | null {
@@ -37,11 +47,14 @@ function getYMap(value: unknown): Y.Map<any> | null {
   // Duck-type to handle multiple `yjs` module instances.
   if (!value || typeof value !== "object") return null;
   const maybe = value as any;
-  if (maybe.constructor?.name !== "YMap") return null;
   if (typeof maybe.get !== "function") return null;
   if (typeof maybe.set !== "function") return null;
   if (typeof maybe.delete !== "function") return null;
   if (typeof maybe.forEach !== "function") return null;
+  // Plain JS Maps also have get/set/delete/forEach, so additionally require Yjs'
+  // deep observer APIs.
+  if (typeof maybe.observeDeep !== "function") return null;
+  if (typeof maybe.unobserveDeep !== "function") return null;
   return maybe as Y.Map<any>;
 }
 
@@ -325,8 +338,8 @@ export function bindSheetViewToCollabSession(options: {
     const changedSheetIds = new Set<string>();
 
     for (const event of events) {
-      const targetCtor = event?.target?.constructor?.name;
-      if (targetCtor === "YArray") {
+      // If the root sheets array itself changed, hydrate all sheets.
+      if (event?.target === session.sheets) {
         // Sheet added/removed/reordered.
         shouldHydrateAll = true;
         continue;
@@ -391,4 +404,3 @@ export function bindSheetViewToCollabSession(options: {
     },
   };
 }
-

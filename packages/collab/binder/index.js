@@ -32,9 +32,20 @@ function isPlainObject(value) {
 }
 
 function isYText(value) {
+  if (value instanceof Y.Text) return true;
   if (!value || typeof value !== "object") return false;
-  if (value.constructor?.name === "YText") return true;
-  return typeof value.toString === "function" && typeof value.toDelta === "function";
+  const maybe = value;
+  // Bundlers can rename constructors and pnpm workspaces can load multiple `yjs`
+  // module instances (ESM + CJS). Avoid relying on `constructor.name`; prefer a
+  // structural check instead.
+  if (typeof maybe.toString !== "function") return false;
+  if (typeof maybe.toDelta !== "function") return false;
+  if (typeof maybe.applyDelta !== "function") return false;
+  if (typeof maybe.insert !== "function") return false;
+  if (typeof maybe.delete !== "function") return false;
+  if (typeof maybe.observeDeep !== "function") return false;
+  if (typeof maybe.unobserveDeep !== "function") return false;
+  return true;
 }
 
 /**

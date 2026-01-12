@@ -70,7 +70,11 @@ function isYAbstractType(value: unknown): value is Y.AbstractType<any> {
   if (value instanceof Y.AbstractType) return true;
   if (!value || typeof value !== "object") return false;
   const maybe = value as any;
-  if (maybe.constructor?.name === "AbstractType") return true;
+  // Bundlers can rename constructors and pnpm workspaces can load multiple `yjs`
+  // module instances (ESM + CJS). Avoid relying on `constructor.name`; prefer a
+  // structural check instead.
+  if (typeof maybe.observeDeep !== "function") return false;
+  if (typeof maybe.unobserveDeep !== "function") return false;
   return Boolean(maybe._map instanceof Map || maybe._start || maybe._item || maybe._length != null);
 }
 
@@ -377,10 +381,8 @@ function defaultTransact(doc: Y.Doc): WorkbookTransact {
 }
 
 function coerceString(value: unknown): string | null {
-  const maybe: any = value;
-  if (maybe?.constructor?.name === "YText" && typeof maybe.toString === "function") {
-    return maybe.toString();
-  }
+  const text = getYText(value);
+  if (text) return text.toString();
   if (typeof value === "string") return value;
   if (value == null) return null;
   return String(value);

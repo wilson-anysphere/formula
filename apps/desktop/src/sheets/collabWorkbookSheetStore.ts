@@ -8,14 +8,68 @@ type CollabSessionLike = Pick<CollabSession, "sheets" | "transactLocal">;
 
 export type CollabSheetsKeyRef = { value: string };
 
+function getYText(value: unknown): any | null {
+  if (value instanceof Y.Text) return value;
+  if (!value || typeof value !== "object") return null;
+  const maybe = value as any;
+  // Bundlers can rename constructors and pnpm workspaces can load multiple `yjs`
+  // module instances (ESM + CJS). Avoid relying on `constructor.name`; prefer a
+  // structural check instead.
+  if (typeof maybe.toString !== "function") return null;
+  if (typeof maybe.toDelta !== "function") return null;
+  if (typeof maybe.applyDelta !== "function") return null;
+  if (typeof maybe.insert !== "function") return null;
+  if (typeof maybe.delete !== "function") return null;
+  if (typeof maybe.observeDeep !== "function") return null;
+  if (typeof maybe.unobserveDeep !== "function") return null;
+  return maybe;
+}
+
+function getYMap(value: unknown): any | null {
+  if (value instanceof Y.Map) return value;
+  if (!value || typeof value !== "object") return null;
+  const maybe = value as any;
+  if (typeof maybe.get !== "function") return null;
+  if (typeof maybe.set !== "function") return null;
+  if (typeof maybe.delete !== "function") return null;
+  if (typeof maybe.forEach !== "function") return null;
+  // Plain JS Maps also have get/set/delete/forEach, so additionally require Yjs'
+  // deep observer APIs.
+  if (typeof maybe.observeDeep !== "function") return null;
+  if (typeof maybe.unobserveDeep !== "function") return null;
+  return maybe;
+}
+
+function getYArray(value: unknown): any | null {
+  if (value instanceof Y.Array) return value;
+  if (!value || typeof value !== "object") return null;
+  const maybe = value as any;
+  if (typeof maybe.get !== "function") return null;
+  if (typeof maybe.toArray !== "function") return null;
+  if (typeof maybe.push !== "function") return null;
+  if (typeof maybe.delete !== "function") return null;
+  if (typeof maybe.observeDeep !== "function") return null;
+  if (typeof maybe.unobserveDeep !== "function") return null;
+  return maybe;
+}
+
+function isYAbstractType(value: unknown): boolean {
+  if (value instanceof Y.AbstractType) return true;
+  if (!value || typeof value !== "object") return false;
+  const maybe = value as any;
+  if (typeof maybe.observeDeep !== "function") return false;
+  if (typeof maybe.unobserveDeep !== "function") return false;
+  return Boolean(maybe._map instanceof Map || maybe._start || maybe._item || maybe._length != null);
+}
+
 function coerceCollabSheetField(value: unknown): string | null {
   if (value == null) return null;
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean") return String(value);
-  const maybe = value as any;
-  if (maybe?.constructor?.name === "YText" && typeof maybe.toString === "function") {
+  const text = getYText(value);
+  if (text) {
     try {
-      return maybe.toString();
+      return text.toString();
     } catch {
       return null;
     }
@@ -97,21 +151,19 @@ function cloneCollabSheetMetaValue(value: unknown): unknown {
   if (value == null) return value;
   if (typeof value !== "object") return value;
 
-  const maybe: any = value;
-  const ctor = maybe?.constructor?.name ?? "";
-
   // Clone nested Yjs types into local constructors so they can be safely re-inserted
   // into the document (Yjs types cannot be "re-parented" after deletion).
-  if (ctor === "YText" && typeof maybe.toDelta === "function") {
+  const text = getYText(value);
+  if (text) {
     const out = new Y.Text();
-    const delta = maybe.toDelta();
+    const delta = text.toDelta();
     const structuredCloneFn = (globalThis as any).structuredClone as ((input: unknown) => unknown) | undefined;
     try {
       out.applyDelta(typeof structuredCloneFn === "function" ? structuredCloneFn(delta) : JSON.parse(JSON.stringify(delta)));
     } catch {
       // Best-effort: fall back to inserting the string representation.
       try {
-        out.insert(0, maybe.toString());
+        out.insert(0, text.toString());
       } catch {
         // ignore
       }
@@ -119,17 +171,19 @@ function cloneCollabSheetMetaValue(value: unknown): unknown {
     return out;
   }
 
-  if (ctor === "YMap" && typeof maybe.forEach === "function") {
+  const map = getYMap(value);
+  if (map) {
     const out = new Y.Map<unknown>();
-    maybe.forEach((v: unknown, k: string) => {
+    map.forEach((v: unknown, k: string) => {
       out.set(String(k), cloneCollabSheetMetaValue(v));
     });
     return out;
   }
 
-  if (ctor === "YArray" && typeof maybe.toArray === "function") {
+  const array = getYArray(value);
+  if (array) {
     const out = new Y.Array<unknown>();
-    for (const item of maybe.toArray()) {
+    for (const item of array.toArray()) {
       out.push([cloneCollabSheetMetaValue(item)]);
     }
     return out;
@@ -137,7 +191,7 @@ function cloneCollabSheetMetaValue(value: unknown): unknown {
 
   // Avoid copying other Yjs types directly (e.g. Xml) since we don't have a safe
   // cloning strategy for them here.
-  if (ctor.startsWith("Y") || ctor === "AbstractType") return undefined;
+  if (isYAbstractType(value)) return undefined;
 
   const structuredCloneFn = (globalThis as any).structuredClone as ((input: unknown) => unknown) | undefined;
   if (typeof structuredCloneFn === "function") {

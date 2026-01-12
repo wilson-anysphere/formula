@@ -4067,15 +4067,23 @@ export class SpreadsheetApp {
     if (!localOrigins) return;
 
     let undoManager: Y.UndoManager | null = null;
+    const isYUndoManager = (value: unknown): value is Y.UndoManager => {
+      if (value instanceof Y.UndoManager) return true;
+      if (!value || typeof value !== "object") return false;
+      const maybe = value as any;
+      // Bundlers can rename constructors and pnpm workspaces can load multiple `yjs`
+      // module instances (ESM + CJS). Avoid relying on `constructor.name`; prefer a
+      // structural check instead.
+      return (
+        typeof maybe.addToScope === "function" &&
+        typeof maybe.undo === "function" &&
+        typeof maybe.redo === "function" &&
+        typeof maybe.stopCapturing === "function"
+      );
+    };
     for (const origin of localOrigins) {
-      if (origin instanceof Y.UndoManager) {
-        undoManager = origin;
-        break;
-      }
-      // Tolerate multiple `yjs` module instances (ESM/CJS) by duck-typing.
-      const maybe = origin as any;
-      if (maybe && typeof maybe === "object" && maybe.constructor?.name === "UndoManager" && typeof maybe.addToScope === "function") {
-        undoManager = maybe as Y.UndoManager;
+      if (isYUndoManager(origin)) {
+        undoManager = origin as Y.UndoManager;
         break;
       }
     }

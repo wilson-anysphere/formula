@@ -36,6 +36,40 @@ export type VersionStore = {
   deleteVersion(versionId: string): Promise<void>;
 };
 
+function isYMapLike(value: unknown): value is {
+  get: (...args: any[]) => any;
+  set: (...args: any[]) => any;
+  delete: (...args: any[]) => any;
+  observeDeep: (...args: any[]) => any;
+  unobserveDeep: (...args: any[]) => any;
+} {
+  if (!value || typeof value !== "object") return false;
+  const maybe = value as any;
+  // Plain JS Maps also have get/set/delete, so additionally require Yjs'
+  // deep observer APIs.
+  return (
+    typeof maybe.get === "function" &&
+    typeof maybe.set === "function" &&
+    typeof maybe.delete === "function" &&
+    typeof maybe.observeDeep === "function" &&
+    typeof maybe.unobserveDeep === "function"
+  );
+}
+
+function isYjsVersionStore(store: VersionStore): store is YjsVersionStore {
+  // Prefer `instanceof`, but tolerate multiple copies of the class and/or mixed
+  // module instances (ESM + CJS) via structural checks.
+  if (store instanceof (YjsVersionStore as any)) return true;
+  const maybe = store as any;
+  if (!maybe || typeof maybe !== "object") return false;
+  const doc = maybe.doc;
+  if (!doc || typeof doc !== "object") return false;
+  if (typeof doc.getMap !== "function") return false;
+  if (!isYMapLike(maybe.versions)) return false;
+  if (!isYMapLike(maybe.meta)) return false;
+  return true;
+}
+
 export type CollabVersioningOptions = {
   session: CollabSession;
   /**
@@ -86,8 +120,7 @@ export class CollabVersioning {
     // (YjsVersionStore), we must exclude those roots from snapshots/restores to
     // avoid recursive snapshots and to prevent restores from rolling back
     // history.
-    const storeCtorName = (store as any)?.constructor?.name ?? "";
-    const storeInDoc = store instanceof (YjsVersionStore as any) || storeCtorName === "YjsVersionStore";
+    const storeInDoc = isYjsVersionStore(store);
     const excludeRoots = [
       // Always excluded internal collaboration roots.
       "cellStructuralOps",

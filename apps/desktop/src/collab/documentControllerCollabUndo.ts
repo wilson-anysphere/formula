@@ -15,6 +15,21 @@ export type DocumentControllerCollabUndoBinding = {
   binderOrigin: object;
 };
 
+function isYUndoManager(value: unknown): value is Y.UndoManager {
+  if (value instanceof Y.UndoManager) return true;
+  if (!value || typeof value !== "object") return false;
+  const maybe = value as any;
+  // Bundlers can rename constructors and pnpm workspaces can load multiple `yjs`
+  // module instances (ESM + CJS). Avoid relying on `constructor.name`; prefer a
+  // structural check instead.
+  return (
+    typeof maybe.addToScope === "function" &&
+    typeof maybe.undo === "function" &&
+    typeof maybe.redo === "function" &&
+    typeof maybe.stopCapturing === "function"
+  );
+}
+
 export async function bindDocumentControllerWithCollabUndo(options: {
   session: CollabSession;
   documentController: any;
@@ -71,11 +86,7 @@ export async function bindDocumentControllerWithCollabUndo(options: {
   // instantiate the `comments` root (older docs may still use an Array-backed schema).
   const undoManager: Y.UndoManager | null = (() => {
     for (const origin of undoService.localOrigins ?? []) {
-      if (origin instanceof Y.UndoManager) return origin;
-      const maybe = origin as any;
-      if (maybe && typeof maybe === "object" && maybe.constructor?.name === "UndoManager" && typeof maybe.addToScope === "function") {
-        return maybe as Y.UndoManager;
-      }
+      if (isYUndoManager(origin)) return origin as Y.UndoManager;
     }
     return null;
   })();
