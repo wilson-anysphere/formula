@@ -18,6 +18,8 @@ export const deDE = {
   "commandPalette.empty.noShortcuts": "Keine Tastenkürzel",
   "commandPalette.searching": "Suche…",
   "commandPalette.placeholder": "Befehl eingeben…",
+  "commandPalette.aria.label": "Befehlspalette",
+  "commandPalette.aria.commandsList": "Befehle",
   "commandPalette.extensions.loading": "Erweiterungen werden geladen…",
   "commandPalette.extensions.failedToLoad": "Erweiterungen konnten nicht geladen werden: {message}",
   "updater.alreadyChecking": "Es wird bereits nach Updates gesucht…",

@@ -18,6 +18,8 @@ export const ar = {
   "commandPalette.empty.noShortcuts": "لا توجد اختصارات",
   "commandPalette.searching": "جارٍ البحث…",
   "commandPalette.placeholder": "اكتب أمرًا…",
+  "commandPalette.aria.label": "لوحة الأوامر",
+  "commandPalette.aria.commandsList": "الأوامر",
   "commandPalette.extensions.loading": "جارٍ تحميل الإضافات…",
   "commandPalette.extensions.failedToLoad": "فشل تحميل الإضافات: {message}",
   "updater.alreadyChecking": "يتم بالفعل التحقق من التحديثات…",

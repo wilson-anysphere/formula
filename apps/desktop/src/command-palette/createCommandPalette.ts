@@ -293,7 +293,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   overlay.hidden = true;
   overlay.setAttribute("role", "dialog");
   overlay.setAttribute("aria-modal", "true");
-  overlay.setAttribute("aria-label", "Command Palette");
+  overlay.setAttribute("aria-label", t("commandPalette.aria.label"));
 
   const palette = document.createElement("div");
   palette.className = "command-palette";
@@ -313,7 +313,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   list.className = "command-palette__list";
   list.dataset.testid = "command-palette-list";
   list.setAttribute("role", "listbox");
-  list.setAttribute("aria-label", "Commands");
+  list.setAttribute("aria-label", t("commandPalette.aria.commandsList"));
   // Ensure there's always a second tabbable target for the focus trap.
   list.tabIndex = 0;
 
