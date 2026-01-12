@@ -1537,19 +1537,61 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
         // V3ContentNormalizedData (MS-OVBA §2.4.2.5) needs to be able to scan through these
         // project-information records to reach references/modules, so we special-case them here.
         if id == 0x0009 {
-            // PROJECTVERSION: fixed-length record (12 bytes total):
-            // - Id (u16)
-            // - Reserved (u32)
-            // - VersionMajor (u32)
-            // - VersionMinor (u16)
-            let end = offset.saturating_add(12);
-            if end > dir_decompressed.len() {
+            // PROJECTVERSION (0x0009) record layout is fixed-length in MS-OVBA, but some producers
+            // (and synthetic fixtures) encode it as a normal TLV record (`Id || Size || Data`).
+            // Disambiguate the two encodings by checking which yields a plausible next record
+            // boundary.
+            if offset + 6 > dir_decompressed.len() {
                 return Err(DirParseError::Truncated.into());
             }
 
-            // For v3 transcript, include the full record bytes (MS-OVBA §2.4.2.5).
-            out.extend_from_slice(&dir_decompressed[offset..end]);
-            offset = end;
+            // For the fixed-length layout, this u32 is `Reserved`.
+            // For the TLV layout, this u32 is `Size` (and must be excluded from the transcript).
+            let size_or_reserved = u32::from_le_bytes([
+                dir_decompressed[offset + 2],
+                dir_decompressed[offset + 3],
+                dir_decompressed[offset + 4],
+                dir_decompressed[offset + 5],
+            ]) as usize;
+            let tlv_end = offset.saturating_add(6).saturating_add(size_or_reserved);
+            let fixed_end = offset.saturating_add(12);
+
+            let tlv_next_ok = looks_like_projectversion_following_record(&dir_decompressed, tlv_end);
+            let fixed_next_ok =
+                looks_like_projectversion_following_record(&dir_decompressed, fixed_end);
+
+            // Prefer the fixed-length interpretation when the TLV interpretation would leave us at
+            // an implausible record boundary, or when the u32 field is too small to be a valid TLV
+            // payload size (the TLV payload must contain 10 bytes: Reserved||Major||Minor).
+            if fixed_end <= dir_decompressed.len()
+                && fixed_next_ok
+                && (!tlv_next_ok || size_or_reserved < 10)
+            {
+                // Fixed-length form: emit the record bytes verbatim.
+                out.extend_from_slice(&dir_decompressed[offset..fixed_end]);
+                offset = fixed_end;
+                continue;
+            }
+
+            // Fall back to the TLV form: emit the normalized fixed-length bytes (exclude the Size
+            // field but include the 10-byte payload prefix).
+            let data_start = offset + 6;
+            let data_end = data_start.saturating_add(size_or_reserved);
+            if data_end > dir_decompressed.len() {
+                return Err(DirParseError::BadRecordLength {
+                    id: 0x0009,
+                    len: size_or_reserved,
+                }
+                .into());
+            }
+            if size_or_reserved < 10 {
+                return Err(DirParseError::Truncated.into());
+            }
+
+            out.extend_from_slice(&0x0009u16.to_le_bytes());
+            out.extend_from_slice(&dir_decompressed[data_start..data_start + 10]);
+            offset = data_end;
+            expect_reference_name_unicode = false;
             continue;
         }
 
