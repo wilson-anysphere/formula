@@ -230,6 +230,22 @@ dialog.page-setup-dialog::backdrop {
   color: var(--text-secondary);
 }
 
+.statusbar__collab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 280px;
+}
+
+.statusbar__collab [data-testid="collab-status"] {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .statusbar__spacer {
   flex: 1;
   min-width: 0;
