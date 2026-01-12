@@ -72,3 +72,30 @@ test("desktop renderer Node-free guards fail on imports from apps/desktop/tools"
   }
 });
 
+test("desktop renderer Node-free guards catch comment-wrapped dynamic imports", async () => {
+  const filename = `__node_comment_import_test__.${process.pid}.${Date.now()}.ts`;
+  const filePath = path.join(desktopSrcDir, filename);
+  const relToRepo = `apps/desktop/src/${filename}`;
+  const relToDesktop = `src/${filename}`;
+
+  await fs.writeFile(
+    filePath,
+    [
+      "// intentionally invalid for the desktop renderer bundle",
+      'await import(/* @vite-ignore */ "node:fs");',
+      "",
+    ].join("\n"),
+  );
+
+  try {
+    const guard = runNode(nodeFreeGuardScript);
+    assert.notEqual(guard.status, 0, "expected tools/ci/check-desktop-renderer-node-free.mjs to fail");
+    assert.match(guard.stderr ?? "", new RegExp(relToRepo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+
+    const checkNoNode = runNode(checkNoNodeScript);
+    assert.notEqual(checkNoNode.status, 0, "expected apps/desktop/scripts/check-no-node.mjs to fail");
+    assert.match(checkNoNode.stderr ?? "", new RegExp(relToDesktop.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  } finally {
+    await fs.rm(filePath, { force: true }).catch(() => {});
+  }
+});
