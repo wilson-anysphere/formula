@@ -410,8 +410,16 @@ pub(crate) fn load_data_model(
     })?;
 
     for table_row in tables {
-        let (table_id, table_name, schema_json, row_count) = table_row?;
-        let schema: TableSchemaV1 = serde_json::from_str(&schema_json)?;
+        let Ok((table_id, table_name, schema_json, row_count)) = table_row else {
+            continue;
+        };
+        let Ok(row_count) = usize::try_from(row_count) else {
+            continue;
+        };
+        let schema: TableSchemaV1 = match serde_json::from_str(&schema_json) {
+            Ok(schema) => schema,
+            Err(_) => continue,
+        };
         let options = formula_columnar::TableOptions {
             page_size_rows: schema.page_size_rows,
             cache: formula_columnar::PageCacheConfig {
@@ -443,15 +451,33 @@ pub(crate) fn load_data_model(
         })?;
 
         for col_row in cols {
-            let (column_id, name, column_type_raw, _encoding_json, stats_json, dictionary_blob) =
-                col_row?;
-            let column_type: ColumnTypeV1 = serde_json::from_str(&column_type_raw)?;
+            let Ok((
+                column_id,
+                name,
+                column_type_raw,
+                _encoding_json,
+                stats_json,
+                dictionary_blob,
+            )) = col_row
+            else {
+                continue;
+            };
+            let column_type: ColumnTypeV1 = match serde_json::from_str(&column_type_raw) {
+                Ok(column_type) => column_type,
+                Err(_) => continue,
+            };
             let column_type: formula_columnar::ColumnType = column_type.into();
 
-            let stats_v1: ColumnStatsV1 = serde_json::from_str(&stats_json)?;
+            let stats_v1: ColumnStatsV1 = match serde_json::from_str(&stats_json) {
+                Ok(stats) => stats,
+                Err(_) => continue,
+            };
             let stats = stats_v1.into_column_stats(column_type);
 
-            let dictionary = dictionary_blob.map(decode_dictionary).transpose()?;
+            let dictionary = match dictionary_blob.map(decode_dictionary).transpose() {
+                Ok(dict) => dict,
+                Err(_) => continue,
+            };
 
             let mut chunk_stmt = conn.prepare(
                 r#"
@@ -463,18 +489,37 @@ pub(crate) fn load_data_model(
             )?;
 
             let mut chunks: Vec<formula_columnar::EncodedChunk> = Vec::new();
-            let rows_iter = chunk_stmt.query_map(params![column_id], |row| {
+            let rows_iter = match chunk_stmt.query_map(params![column_id], |row| {
                 Ok((
                     row.get::<_, i64>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, Vec<u8>>(2)?,
                 ))
-            })?;
+            }) {
+                Ok(iter) => iter,
+                Err(_) => continue,
+            };
+            let mut chunk_failed = false;
             for chunk_row in rows_iter {
-                let (_chunk_index, kind_raw, data) = chunk_row?;
-                let kind = DataModelChunkKind::parse(&kind_raw)
-                    .ok_or_else(|| StorageError::Sqlite(rusqlite::Error::InvalidQuery))?;
-                chunks.push(decode_chunk(kind, &data)?);
+                let Ok((_chunk_index, kind_raw, data)) = chunk_row else {
+                    chunk_failed = true;
+                    break;
+                };
+                let Some(kind) = DataModelChunkKind::parse(&kind_raw) else {
+                    chunk_failed = true;
+                    break;
+                };
+                let decoded = match decode_chunk(kind, &data) {
+                    Ok(decoded) => decoded,
+                    Err(_) => {
+                        chunk_failed = true;
+                        break;
+                    }
+                };
+                chunks.push(decoded);
+            }
+            if chunk_failed {
+                continue;
             }
 
             let col_schema = formula_columnar::ColumnSchema {
@@ -490,13 +535,18 @@ pub(crate) fn load_data_model(
             });
         }
 
-        let table = formula_columnar::ColumnarTable::from_encoded(
-            schema_out,
-            columns_out,
-            row_count as usize,
-            options,
-        );
-        model.add_table(formula_dax::Table::from_columnar(table_name, table))?;
+        if schema_out.is_empty() {
+            continue;
+        }
+
+        let table =
+            formula_columnar::ColumnarTable::from_encoded(schema_out, columns_out, row_count, options);
+        if model
+            .add_table(formula_dax::Table::from_columnar(table_name, table))
+            .is_err()
+        {
+            continue;
+        }
     }
 
     // Relationships.
@@ -532,20 +582,38 @@ pub(crate) fn load_data_model(
     })?;
 
     for rel_row in rels {
-        let (name, from_table, from_column, to_table, to_column, card_raw, dir_raw, active, ri) =
-            rel_row?;
+        let Ok((
+            name,
+            from_table,
+            from_column,
+            to_table,
+            to_column,
+            card_raw,
+            dir_raw,
+            active,
+            ri,
+        )) = rel_row
+        else {
+            continue;
+        };
+        let Ok(cardinality) = parse_cardinality(&card_raw) else {
+            continue;
+        };
+        let Ok(cross_filter_direction) = parse_cross_filter_direction(&dir_raw) else {
+            continue;
+        };
         let relationship = formula_dax::Relationship {
             name,
             from_table,
             from_column,
             to_table,
             to_column,
-            cardinality: parse_cardinality(&card_raw)?,
-            cross_filter_direction: parse_cross_filter_direction(&dir_raw)?,
+            cardinality,
+            cross_filter_direction,
             is_active: active != 0,
             enforce_referential_integrity: ri != 0,
         };
-        model.add_relationship(relationship)?;
+        let _ = model.add_relationship(relationship);
     }
 
     // Measures.
@@ -561,8 +629,10 @@ pub(crate) fn load_data_model(
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
     })?;
     for row in measures {
-        let (name, expr) = row?;
-        model.add_measure(name, expr)?;
+        let Ok((name, expr)) = row else {
+            continue;
+        };
+        let _ = model.add_measure(name, expr);
     }
 
     // Calculated columns (definition only; values are stored in the table data).
@@ -582,8 +652,10 @@ pub(crate) fn load_data_model(
         ))
     })?;
     for row in calcs {
-        let (table, name, expr) = row?;
-        model.add_calculated_column_definition(table, name, expr)?;
+        let Ok((table, name, expr)) = row else {
+            continue;
+        };
+        let _ = model.add_calculated_column_definition(table, name, expr);
     }
 
     Ok(model)
@@ -613,7 +685,9 @@ pub(crate) fn load_data_model_schema(
 
     let mut tables = Vec::new();
     for row in table_rows {
-        let (table_id, name, row_count) = row?;
+        let Ok((table_id, name, row_count)) = row else {
+            continue;
+        };
         let mut col_stmt = conn.prepare(
             r#"
             SELECT name, column_type
@@ -627,8 +701,13 @@ pub(crate) fn load_data_model_schema(
         })?;
         let mut columns = Vec::new();
         for col in col_rows {
-            let (name, column_type_raw) = col?;
-            let column_type: ColumnTypeV1 = serde_json::from_str(&column_type_raw)?;
+            let Ok((name, column_type_raw)) = col else {
+                continue;
+            };
+            let column_type: ColumnTypeV1 = match serde_json::from_str(&column_type_raw) {
+                Ok(column_type) => column_type,
+                Err(_) => continue,
+            };
             columns.push(DataModelColumnSchema {
                 name,
                 column_type: column_type.into(),
@@ -636,7 +715,7 @@ pub(crate) fn load_data_model_schema(
         }
         tables.push(DataModelTableSchema {
             name,
-            row_count: row_count as usize,
+            row_count: usize::try_from(row_count).unwrap_or(0),
             columns,
         });
     }
@@ -673,15 +752,24 @@ pub(crate) fn load_data_model_schema(
     })?;
     let mut relationships = Vec::new();
     for row in rel_rows {
-        let (name, from_table, from_column, to_table, to_column, card, dir, active, ri) = row?;
+        let Ok((name, from_table, from_column, to_table, to_column, card, dir, active, ri)) = row
+        else {
+            continue;
+        };
+        let Ok(cardinality) = parse_cardinality(&card) else {
+            continue;
+        };
+        let Ok(cross_filter_direction) = parse_cross_filter_direction(&dir) else {
+            continue;
+        };
         relationships.push(formula_dax::Relationship {
             name,
             from_table,
             from_column,
             to_table,
             to_column,
-            cardinality: parse_cardinality(&card)?,
-            cross_filter_direction: parse_cross_filter_direction(&dir)?,
+            cardinality,
+            cross_filter_direction,
             is_active: active != 0,
             enforce_referential_integrity: ri != 0,
         });
@@ -703,7 +791,10 @@ pub(crate) fn load_data_model_schema(
     })?;
     let mut measures = Vec::new();
     for row in measure_rows {
-        measures.push(row?);
+        let Ok(row) = row else {
+            continue;
+        };
+        measures.push(row);
     }
 
     let mut calc_stmt = conn.prepare(
@@ -723,7 +814,10 @@ pub(crate) fn load_data_model_schema(
     })?;
     let mut calculated_columns = Vec::new();
     for row in calc_rows {
-        calculated_columns.push(row?);
+        let Ok(row) = row else {
+            continue;
+        };
+        calculated_columns.push(row);
     }
 
     Ok(DataModelSchema {
