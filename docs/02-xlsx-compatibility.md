@@ -24,6 +24,11 @@ workbook.xlsx (ZIP archive)
 │   ├── sharedStrings.xml        # Deduplicated text strings
 │   ├── cellimages.xml           # Excel “image in cell” definitions (in-cell pictures)
 │   ├── calcChain.xml            # Calculation order hints
+│   ├── richData/                # RichData tables (images-in-cell, linked data types)
+│   │   ├── richValue.xml
+│   │   ├── richValueRel.xml
+│   │   ├── richValueTypes.xml
+│   │   └── richValueStructure.xml
 │   ├── theme/
 │   │   └── theme1.xml           # Color/font theme
 │   ├── worksheets/
@@ -51,6 +56,9 @@ workbook.xlsx (ZIP archive)
     ├── workbook.xml.rels        # Workbook relationships
     └── cellimages.xml.rels      # Relationships for in-cell images (to xl/media/*)
 ```
+
+See also:
+- [`docs/20-xlsx-richdata-images-in-cell.md`](./20-xlsx-richdata-images-in-cell.md) — Excel RichData (`richValue*`) parts used by “Images in Cell” / `IMAGE()`.
 
 ---
 
