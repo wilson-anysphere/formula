@@ -138,20 +138,6 @@ pub(crate) fn parse_digsig_info_serialized(stream: &[u8]) -> Option<DigSigInfoSe
         .into_iter()
         .flatten()
         {
-            // Total size of all variable blobs must fit inside the stream for any ordering.
-            let total_min = match header
-                .header_size
-                .checked_add(header.sig_len)
-                .and_then(|n| n.checked_add(header.cert_len))
-                .and_then(|n| n.checked_add(proj_bytes))
-            {
-                Some(n) => n,
-                None => continue,
-            };
-            if total_min > stream.len() {
-                continue;
-            }
-
             // The signature can appear at a small number of offsets depending on the ordering of
             // the (project name, cert store, signature) blobs.
             // Some producers include additional unknown blobs/fields before the signature bytes.
@@ -590,6 +576,40 @@ mod tests {
 
         let parsed = parse_digsig_info_serialized(&stream).expect("should parse");
         let expected_offset = 12 + project_name_bytes.len() + unknown.len() + cert_store.len();
+        assert_eq!(parsed.pkcs7_offset, expected_offset);
+        assert_eq!(parsed.pkcs7_len, pkcs7.len());
+    }
+
+    #[test]
+    fn parses_digsig_info_serialized_even_when_cert_store_len_is_inconsistent() {
+        let pkcs7 = include_bytes!("../tests/fixtures/cms_indefinite.der");
+
+        // Build a stream where `cbSigningCertStore` is clearly bogus (too large), but cbSignature is
+        // accurate and the PKCS#7 blob is appended at the end of the stream.
+        //
+        // A permissive parser should still be able to find the PKCS#7 payload by counting back from
+        // the end of the stream using cbSignature.
+        let project_name_utf16: Vec<u16> = "VBAProject\0".encode_utf16().collect();
+        let mut project_name_bytes = Vec::new();
+        for ch in &project_name_utf16 {
+            project_name_bytes.extend_from_slice(&ch.to_le_bytes());
+        }
+        let cert_store = vec![0xAA, 0xBB];
+
+        let cb_signature = pkcs7.len() as u32;
+        let cb_cert_store = 0xFFFF_FFFFu32; // intentionally inconsistent
+        let cch_project = project_name_utf16.len() as u32;
+
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&cb_signature.to_le_bytes());
+        stream.extend_from_slice(&cb_cert_store.to_le_bytes());
+        stream.extend_from_slice(&cch_project.to_le_bytes());
+        stream.extend_from_slice(&project_name_bytes);
+        stream.extend_from_slice(&cert_store);
+        stream.extend_from_slice(pkcs7);
+
+        let parsed = parse_digsig_info_serialized(&stream).expect("should parse");
+        let expected_offset = stream.len().saturating_sub(pkcs7.len());
         assert_eq!(parsed.pkcs7_offset, expected_offset);
         assert_eq!(parsed.pkcs7_len, pkcs7.len());
     }
