@@ -42,6 +42,45 @@ unzip -l fixtures/xlsx/basic/image-in-cell.xlsx | rg 'cellimages|richData|metada
 23:      427  1980-01-01 00:00   xl/richData/_rels/richValueRel.xml.rels
 ```
 
+## Workbook-level relationships (`xl/_rels/workbook.xml.rels`)
+
+Relevant `<Relationship>` entries (IDs may vary; `Type` + `Target` are the important bits):
+
+```xml
+<Relationship Id="rId5"
+              Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata"
+              Target="metadata.xml"/>
+<Relationship Id="rId6"
+              Type="http://schemas.microsoft.com/office/2022/10/relationships/richValueRel"
+              Target="richData/richValueRel.xml"/>
+<Relationship Id="rId7"
+              Type="http://schemas.microsoft.com/office/2017/06/relationships/rdRichValue"
+              Target="richData/rdrichvalue.xml"/>
+<Relationship Id="rId8"
+              Type="http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueStructure"
+              Target="richData/rdrichvaluestructure.xml"/>
+<Relationship Id="rId9"
+              Type="http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueTypes"
+              Target="richData/rdRichValueTypes.xml"/>
+```
+
+## Content types (`[Content_Types].xml`)
+
+Relevant `<Override>` entries:
+
+```xml
+<Override PartName="/xl/metadata.xml"
+          ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"/>
+<Override PartName="/xl/richData/richValueRel.xml"
+          ContentType="application/vnd.ms-excel.richvaluerel+xml"/>
+<Override PartName="/xl/richData/rdrichvalue.xml"
+          ContentType="application/vnd.ms-excel.rdrichvalue+xml"/>
+<Override PartName="/xl/richData/rdrichvaluestructure.xml"
+          ContentType="application/vnd.ms-excel.rdrichvaluestructure+xml"/>
+<Override PartName="/xl/richData/rdRichValueTypes.xml"
+          ContentType="application/vnd.ms-excel.rdrichvaluetypes+xml"/>
+```
+
 ## Worksheet cell XML (`vm=` on `<c>`)
 
 From `xl/worksheets/sheet1.xml`:

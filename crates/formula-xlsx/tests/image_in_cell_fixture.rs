@@ -53,6 +53,55 @@ fn image_in_cell_fixture_has_expected_rich_value_parts() {
         "expected docProps/app.xml Application=Microsoft Excel, got: {app_props}"
     );
 
+    // Ensure our rich-data parser can actually resolve the embedded images for this fixture.
+    let pkg = formula_xlsx::XlsxPackage::from_bytes(&bytes).expect("parse xlsx package");
+    let embedded = formula_xlsx::extract_embedded_images(&pkg).expect("extract embedded images");
+    assert_eq!(
+        embedded.len(),
+        3,
+        "expected 3 embedded image cells (Sheet1!B2,B3,B4)"
+    );
+
+    let image1 = pkg
+        .part("xl/media/image1.png")
+        .expect("xl/media/image1.png")
+        .to_vec();
+    let image2 = pkg
+        .part("xl/media/image2.png")
+        .expect("xl/media/image2.png")
+        .to_vec();
+
+    let mut by_cell: std::collections::HashMap<formula_model::CellRef, formula_xlsx::EmbeddedImageCell> =
+        std::collections::HashMap::new();
+    for entry in embedded {
+        assert_eq!(entry.sheet_part, "xl/worksheets/sheet1.xml");
+        by_cell.insert(entry.cell, entry);
+    }
+
+    let b2 = formula_model::CellRef::from_a1("B2").unwrap();
+    let b3 = formula_model::CellRef::from_a1("B3").unwrap();
+    let b4 = formula_model::CellRef::from_a1("B4").unwrap();
+
+    let e_b2 = by_cell.get(&b2).expect("expected embedded image at B2");
+    let e_b3 = by_cell.get(&b3).expect("expected embedded image at B3");
+    let e_b4 = by_cell.get(&b4).expect("expected embedded image at B4");
+
+    assert_eq!(e_b2.image_target, "xl/media/image1.png");
+    assert_eq!(e_b3.image_target, "xl/media/image1.png");
+    assert_eq!(e_b4.image_target, "xl/media/image2.png");
+
+    assert_eq!(e_b2.bytes, image1);
+    assert_eq!(e_b3.bytes, image1);
+    assert_eq!(e_b4.bytes, image2);
+
+    // This fixture stores "Place in Cell" images as decorative (CalcOrigin=5) with no alt text.
+    assert!(e_b2.decorative);
+    assert!(e_b3.decorative);
+    assert!(e_b4.decorative);
+    assert_eq!(e_b2.alt_text, None);
+    assert_eq!(e_b3.alt_text, None);
+    assert_eq!(e_b4.alt_text, None);
+
     // workbook.xml.rels should link the metadata + richData parts at the workbook level.
     let mut workbook_rels = String::new();
     archive
@@ -111,14 +160,4 @@ fn image_in_cell_fixture_has_expected_rich_value_parts() {
         rich_value_rels.contains("../media/image2.png"),
         "expected image2.png target in richValueRel.xml.rels"
     );
-
-    // If/when rich-value image extraction is implemented in `load_from_bytes`, ensure the
-    // workbook has images populated. (Today this is best-effort and may be empty.)
-    let doc = formula_xlsx::load_from_bytes(&bytes).expect("load_from_bytes");
-    if !doc.workbook.images.is_empty() {
-        assert!(
-            doc.workbook.images.ids().count() >= 1,
-            "expected at least one extracted cell image"
-        );
-    }
 }
