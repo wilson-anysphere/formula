@@ -52,6 +52,7 @@ import { DesktopExtensionHostManager } from "./extensions/extensionHostManager.j
 import { ExtensionPanelBridge } from "./extensions/extensionPanelBridge.js";
 import { ContextKeyService } from "./extensions/contextKeys.js";
 import { resolveMenuItems } from "./extensions/contextMenus.js";
+import { buildContextMenuModel } from "./extensions/contextMenuModel.js";
 import { matchesKeybinding, parseKeybinding, platformKeybinding, type ContributedKeybinding } from "./extensions/keybindings.js";
 import { deriveSelectionContextKeys } from "./extensions/selectionContextKeys.js";
 import { evaluateWhenClause } from "./extensions/whenClause.js";
@@ -1000,12 +1001,23 @@ if (
     e.preventDefault();
     contextMenu.replaceChildren();
 
-    for (const item of items) {
+    const model = buildContextMenuModel(items, commandRegistry);
+
+    for (const entry of model) {
+      if (entry.kind === "separator") {
+        const separator = document.createElement("div");
+        separator.setAttribute("role", "separator");
+        separator.style.height = "1px";
+        separator.style.margin = "4px 2px";
+        separator.style.background = "var(--border)";
+        contextMenu.appendChild(separator);
+        continue;
+      }
+
       const btn = document.createElement("button");
       btn.type = "button";
-      const command = commandRegistry.getCommand(item.command);
-      btn.textContent = command ? (command.category ? `${command.category}: ${command.title}` : command.title) : item.command;
-      btn.disabled = !item.enabled;
+      btn.textContent = entry.label;
+      btn.disabled = !entry.enabled;
       btn.style.display = "block";
       btn.style.width = "100%";
       btn.style.textAlign = "left";
@@ -1013,12 +1025,12 @@ if (
       btn.style.borderRadius = "8px";
       btn.style.border = "1px solid transparent";
       btn.style.background = "transparent";
-      btn.style.color = item.enabled ? "var(--text-primary)" : "var(--text-secondary)";
-      btn.style.cursor = item.enabled ? "pointer" : "default";
+      btn.style.color = entry.enabled ? "var(--text-primary)" : "var(--text-secondary)";
+      btn.style.cursor = entry.enabled ? "pointer" : "default";
       btn.addEventListener("click", () => {
-        if (!item.enabled) return;
+        if (!entry.enabled) return;
         hideContextMenu();
-        executeExtensionCommand(item.command);
+        executeExtensionCommand(entry.commandId);
       });
       contextMenu.appendChild(btn);
     }
