@@ -1,0 +1,18 @@
+{
+  "identifier": "main",
+  "description": "Permissions for the main desktop window",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "event:allow-listen",
+    "event:allow-emit",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "window:allow-hide",
+    "window:allow-show",
+    "window:allow-close",
+    "clipboard:allow-read-text",
+    "clipboard:allow-write-text",
+    "shell:allow-open"
+  ]
+}
