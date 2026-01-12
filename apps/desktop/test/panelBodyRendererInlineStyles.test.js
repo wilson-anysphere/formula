@@ -32,6 +32,14 @@ test("panelBodyRenderer.tsx avoids inline style assignments for dock panel mount
     );
   }
 
+  for (const legacyClass of ["dock-panel__mount", "panel-mount--fill-column", "dock-panel__body--fill"]) {
+    assert.equal(
+      source.includes(legacyClass),
+      false,
+      `panelBodyRenderer.tsx should not reference legacy CSS class ${legacyClass}; prefer panel-body__container/panel-body--fill`,
+    );
+  }
+
   const versionHistorySection = extractSection(source, "function CollabVersionHistoryPanel", "function CollabBranchManagerPanel");
   assert.equal(
     /\bstyle=\{\{/.test(versionHistorySection),

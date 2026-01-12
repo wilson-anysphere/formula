@@ -51,6 +51,13 @@ test("desktop main.ts avoids static inline style assignments", () => {
     /panel-body__container/,
     "Script Editor panel mount container should apply the panel-body__container CSS class",
   );
+  for (const legacyClass of ["dock-panel__mount", "panel-mount--fill-column"]) {
+    assert.equal(
+      scriptEditorMountSection.includes(legacyClass),
+      false,
+      `Script Editor panel mount container should not apply legacy class ${legacyClass}; use panel-body__container instead`,
+    );
+  }
 
   const pythonMountSection = extractSection(
     source,
@@ -67,4 +74,11 @@ test("desktop main.ts avoids static inline style assignments", () => {
     /panel-body__container/,
     "Python panel mount container should apply the panel-body__container CSS class",
   );
+  for (const legacyClass of ["dock-panel__mount", "panel-mount--fill-column"]) {
+    assert.equal(
+      pythonMountSection.includes(legacyClass),
+      false,
+      `Python panel mount container should not apply legacy class ${legacyClass}; use panel-body__container instead`,
+    );
+  }
 });
