@@ -42,7 +42,7 @@ The security workflow will enforce these expectations once the monorepo includes
 ### 4) Configuration hardening checks
 
 The workflow includes best-effort checks for:
-- **Tauri** allowlist/CSP hardening (`tauri.conf.json` must not use permissive defaults)
+- **Tauri (desktop)** capabilities/CSP hardening (Tauri v2 uses “capabilities” instead of the old v1 allowlist; see `apps/desktop/src-tauri/tauri.conf.json` and `docs/11-desktop-shell.md`)
 - **API/sync services** secure defaults (detects obviously unsafe patterns like wildcard CORS and disabled TLS verification)
 
 These checks are designed to **fail only when relevant files exist**. As the codebase grows, expand the checks to cover additional configurations.
