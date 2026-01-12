@@ -63,9 +63,18 @@ describe("purgeLegacyDesktopLLMSettings", () => {
     window.localStorage.setItem("formula:openaiApiKey", "sk-legacy-test");
     window.localStorage.setItem("formula:llm:provider", "openai");
 
+    const completionPrefix = "formula:" + "aiCompletion:";
+    window.localStorage.setItem(completionPrefix + "localModelEnabled", "true");
+    window.localStorage.setItem(completionPrefix + "localModelName", "formula-completion");
+    window.localStorage.setItem(completionPrefix + "localModelBaseUrl", "http://localhost:11434");
+
     purgeLegacyDesktopLLMSettings();
 
     expect(window.localStorage.getItem("formula:openaiApiKey")).toBeNull();
     expect(window.localStorage.getItem("formula:llm:provider")).toBeNull();
+
+    expect(window.localStorage.getItem(completionPrefix + "localModelEnabled")).toBeNull();
+    expect(window.localStorage.getItem(completionPrefix + "localModelName")).toBeNull();
+    expect(window.localStorage.getItem(completionPrefix + "localModelBaseUrl")).toBeNull();
   });
 });

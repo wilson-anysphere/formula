@@ -6,6 +6,7 @@ let cachedClient: LLMClient | null = null;
 const LEGACY_OPENAI_API_KEY_STORAGE_KEY = "formula:openaiApiKey";
 const LLM_PROVIDER_STORAGE_KEY = "formula:llm:provider";
 const LLM_SETTINGS_PREFIX = "formula:llm:";
+const AI_COMPLETION_SETTINGS_PREFIX = "formula:" + "aiCompletion:";
 
 function getLocalStorageOrNull(): Storage | null {
   // Prefer `window.localStorage` when available (jsdom + browser runtimes).
@@ -55,6 +56,23 @@ export function purgeLegacyDesktopLLMSettings(): void {
     // ignore
   }
 
+  // Legacy formula bar local model tab-completion flags.
+  try {
+    storage.removeItem(AI_COMPLETION_SETTINGS_PREFIX + "localModelEnabled");
+  } catch {
+    // ignore
+  }
+  try {
+    storage.removeItem(AI_COMPLETION_SETTINGS_PREFIX + "localModelName");
+  } catch {
+    // ignore
+  }
+  try {
+    storage.removeItem(AI_COMPLETION_SETTINGS_PREFIX + "localModelBaseUrl");
+  } catch {
+    // ignore
+  }
+
   // Best-effort: remove every `formula:llm:*` key, including provider + per-provider settings.
   try {
     const keysToRemove: string[] = [];
@@ -66,7 +84,12 @@ export function purgeLegacyDesktopLLMSettings(): void {
       } catch {
         continue;
       }
-      if (typeof key === "string" && key.startsWith(LLM_SETTINGS_PREFIX)) keysToRemove.push(key);
+      if (
+        typeof key === "string" &&
+        (key.startsWith(LLM_SETTINGS_PREFIX) || key.startsWith(AI_COMPLETION_SETTINGS_PREFIX))
+      ) {
+        keysToRemove.push(key);
+      }
     }
 
     for (const key of keysToRemove) {
