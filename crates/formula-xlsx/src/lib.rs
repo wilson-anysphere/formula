@@ -35,6 +35,7 @@ mod preserve;
 mod xml;
 pub mod drawingml;
 pub mod drawings;
+pub mod embedded_cell_images;
 pub mod hyperlinks;
 pub mod merge_cells;
 pub mod metadata;
@@ -72,6 +73,7 @@ pub use crate::minimal::write_minimal_xlsx;
 pub use calc_settings::CalcSettingsError;
 pub use compare::*;
 pub use conditional_formatting::*;
+pub use embedded_cell_images::EmbeddedCellImage;
 pub use hyperlinks::{
     parse_worksheet_hyperlinks, update_worksheet_relationships, update_worksheet_xml,
 };
