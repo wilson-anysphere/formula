@@ -34,7 +34,7 @@ describe("toolbar formatting safety cap", () => {
     expect(toast?.textContent).toMatch(/Selection too large to apply formatting/i);
   });
 
-  it("refuses to apply formatting for enormous rectangular selections", () => {
+  it("allows formatting for enormous rectangles using the range-run fast path", () => {
     const doc = new DocumentController();
     const spy = vi.spyOn(doc, "setRangeFormat");
 
@@ -43,16 +43,9 @@ describe("toolbar formatting safety cap", () => {
     const elapsed = performance.now() - start;
 
     expect(elapsed).toBeLessThan(250);
-    expect(applied).toBe(false);
-    expect(spy).not.toHaveBeenCalled();
-
-    const toast = document.querySelector('[data-testid="toast"]') as HTMLElement | null;
-    expect(toast).not.toBeNull();
-    expect(toast?.dataset.type).toBe("warning");
-    expect(toast?.textContent).toMatch(/Selection too large to apply formatting/i);
-
-    const style = doc.getCellFormat("Sheet1", { row: 0, col: 0 }) as any;
-    expect(style?.fill?.fgColor).not.toBe("#FFFF0000");
+    expect(applied).toBe(true);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('[data-testid="toast"]')).toBeNull();
   });
 
   it("refuses to apply formatting to extremely large full-row selections (row band cap)", () => {
