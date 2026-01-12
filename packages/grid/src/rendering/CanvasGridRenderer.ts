@@ -168,6 +168,8 @@ type RichTextRunStyle = {
   bold?: boolean;
   italic?: boolean;
   underline?: string | boolean;
+  strike?: boolean;
+  strikethrough?: boolean;
   color?: string;
   font?: string;
   size_100pt?: number;
@@ -265,9 +267,16 @@ function normalizeRichTextRuns(
   return out;
 }
 
-function isUnderline(style: RichTextRunStyle | undefined): boolean {
+function resolveUnderline(style: RichTextRunStyle | undefined, defaultValue: boolean): boolean {
   const value = style?.underline;
+  if (value === undefined) return defaultValue;
   return Boolean(value && value !== "none");
+}
+
+function resolveStrike(style: RichTextRunStyle | undefined, defaultValue: boolean): boolean {
+  const value = style?.strike ?? style?.strikethrough;
+  if (value === undefined) return defaultValue;
+  return value === true;
 }
 
 function fontSpecForRichTextStyle(
@@ -2704,6 +2713,8 @@ export class CanvasGridRenderer {
           const hasExplicitNewline = EXPLICIT_NEWLINE_RE.test(text);
           const rotationRad = (rotationDeg * Math.PI) / 180;
 
+          type DecorationSegment = { x1: number; x2: number; y: number; color: string; lineWidth: number };
+
           const offsets = buildCodePointIndex(text);
           const textLen = offsets.length - 1;
           const rawRuns = normalizeRichTextRuns(textLen, richText?.runs);
@@ -2715,6 +2726,9 @@ export class CanvasGridRenderer {
             style: fontStyle
           } satisfies Required<Pick<FontSpec, "family" | "sizePx">> & { weight: string | number; style: string };
 
+          const cellUnderline = style?.underline === true;
+          const cellStrike = style?.strike === true;
+
           const layoutRuns = rawRuns.map((run) => {
             const runStyle =
               run.style && typeof run.style === "object" ? (run.style as RichTextRunStyle) : (undefined as RichTextRunStyle | undefined);
@@ -2722,7 +2736,8 @@ export class CanvasGridRenderer {
               text: sliceByCodePointRange(text, offsets, run.start, run.end),
               font: fontSpecForRichTextStyle(runStyle, defaults, zoom),
               color: engineColorToCanvasColor(runStyle?.color),
-              underline: isUnderline(runStyle)
+              underline: resolveUnderline(runStyle, cellUnderline),
+              strike: resolveStrike(runStyle, cellStrike)
             };
           });
 
@@ -2774,7 +2789,8 @@ export class CanvasGridRenderer {
               baselineY = y + height - paddingY - lineDescent;
             }
 
-            const underlineSegments: Array<{ x1: number; x2: number; y: number; color: string; lineWidth: number }> = [];
+            const underlineSegments: DecorationSegment[] = [];
+            const strikeSegments: DecorationSegment[] = [];
 
             const drawFragments = () => {
               let xCursor = cursorX;
@@ -2790,6 +2806,17 @@ export class CanvasGridRenderer {
                     x1: xCursor,
                     x2: xCursor + fragment.width,
                     y: underlineY,
+                    color: contentCtx.fillStyle as string,
+                    lineWidth: Math.max(1, Math.round(fragment.font.sizePx / 16))
+                  });
+                }
+
+                if (fragment.strike) {
+                  const strikeY = baselineY - Math.max(1, Math.round(fragment.ascent * 0.3));
+                  strikeSegments.push({
+                    x1: xCursor,
+                    x2: xCursor + fragment.width,
+                    y: strikeY,
                     color: contentCtx.fillStyle as string,
                     lineWidth: Math.max(1, Math.round(fragment.font.sizePx / 16))
                   });
@@ -2866,7 +2893,7 @@ export class CanvasGridRenderer {
               drawFragments();
             }
 
-            if (underlineSegments.length > 0) {
+            if (underlineSegments.length > 0 || strikeSegments.length > 0) {
               contentCtx.save();
               contentCtx.beginPath();
               contentCtx.rect(x, y, width, height);
@@ -2879,11 +2906,21 @@ export class CanvasGridRenderer {
                 contentCtx.lineTo(segment.x2, segment.y);
                 contentCtx.stroke();
               }
+              for (const segment of strikeSegments) {
+                contentCtx.beginPath();
+                contentCtx.strokeStyle = segment.color;
+                contentCtx.lineWidth = segment.lineWidth;
+                contentCtx.moveTo(segment.x1, segment.y);
+                contentCtx.lineTo(segment.x2, segment.y);
+                contentCtx.stroke();
+              }
               contentCtx.restore();
             }
           } else if (layoutEngine && availableWidth > 0) {
             const layout = layoutEngine.layout({
-              runs: layoutRuns.map((r) => ({ text: r.text, font: r.font, color: r.color, underline: r.underline })),
+              runs: layoutRuns.map(
+                (r) => ({ text: r.text, font: r.font, color: r.color, underline: r.underline, strike: r.strike }) as any
+              ),
               text: undefined,
               font: defaults,
               maxWidth: availableWidth,
@@ -2904,15 +2941,16 @@ export class CanvasGridRenderer {
             const originX = x + paddingX;
             const shouldClip = layout.width > availableWidth || layout.height > availableHeight || rotationDeg !== 0;
 
-            const drawLayout = (collectUnderlines: boolean) => {
-              const underlineSegments: Array<{ x1: number; x2: number; y: number; color: string; lineWidth: number }> = [];
+            const drawLayout = (collectDecorations: boolean) => {
+              const underlineSegments: DecorationSegment[] = [];
+              const strikeSegments: DecorationSegment[] = [];
 
               for (let i = 0; i < layout.lines.length; i++) {
                 const line = layout.lines[i];
                 let xCursor = originX + line.x;
                 const baselineY = originY + i * layout.lineHeight + line.ascent;
 
-                for (const run of line.runs as Array<{ text: string; font: FontSpec; color?: string; underline?: boolean }>) {
+                for (const run of line.runs as Array<{ text: string; font: FontSpec; color?: string; underline?: boolean; strike?: boolean }>) {
                   const measurement = layoutEngine.measure(run.text, run.font);
                   contentCtx.font = toCanvasFontString(run.font);
                   contentCtx.fillStyle = run.color ?? fillStyle;
@@ -2922,7 +2960,7 @@ export class CanvasGridRenderer {
                     const underlineOffset = Math.max(1, Math.round(run.font.sizePx * 0.08));
                     const underlineY = baselineY + underlineOffset;
                     const lineWidth = Math.max(1, Math.round(run.font.sizePx / 16));
-                    if (collectUnderlines) {
+                    if (collectDecorations) {
                       underlineSegments.push({
                         x1: xCursor,
                         x2: xCursor + measurement.width,
@@ -2940,11 +2978,32 @@ export class CanvasGridRenderer {
                     }
                   }
 
+                  if (run.strike) {
+                    const strikeY = baselineY - Math.max(1, Math.round(measurement.ascent * 0.3));
+                    const lineWidth = Math.max(1, Math.round(run.font.sizePx / 16));
+                    if (collectDecorations) {
+                      strikeSegments.push({
+                        x1: xCursor,
+                        x2: xCursor + measurement.width,
+                        y: strikeY,
+                        color: contentCtx.fillStyle as string,
+                        lineWidth
+                      });
+                    } else {
+                      contentCtx.beginPath();
+                      contentCtx.strokeStyle = contentCtx.fillStyle;
+                      contentCtx.lineWidth = lineWidth;
+                      contentCtx.moveTo(xCursor, strikeY);
+                      contentCtx.lineTo(xCursor + measurement.width, strikeY);
+                      contentCtx.stroke();
+                    }
+                  }
+
                   xCursor += measurement.width;
                 }
               }
 
-              return underlineSegments;
+              return { underlineSegments, strikeSegments };
             };
 
             if (shouldClip) {
@@ -2964,13 +3023,21 @@ export class CanvasGridRenderer {
               drawLayout(false);
               contentCtx.restore();
             } else {
-              const underlineSegments = drawLayout(true);
-              if (underlineSegments.length > 0) {
+              const { underlineSegments, strikeSegments } = drawLayout(true);
+              if (underlineSegments.length > 0 || strikeSegments.length > 0) {
                 contentCtx.save();
                 contentCtx.beginPath();
                 contentCtx.rect(x, y, width, height);
                 contentCtx.clip();
                 for (const segment of underlineSegments) {
+                  contentCtx.beginPath();
+                  contentCtx.strokeStyle = segment.color;
+                  contentCtx.lineWidth = segment.lineWidth;
+                  contentCtx.moveTo(segment.x1, segment.y);
+                  contentCtx.lineTo(segment.x2, segment.y);
+                  contentCtx.stroke();
+                }
+                for (const segment of strikeSegments) {
                   contentCtx.beginPath();
                   contentCtx.strokeStyle = segment.color;
                   contentCtx.lineWidth = segment.lineWidth;
