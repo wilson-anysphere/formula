@@ -142,6 +142,9 @@ function buildWithWasmPack() {
   const jobs = process.env.FORMULA_CARGO_JOBS ?? process.env.CARGO_BUILD_JOBS ?? "4";
   const makeflags = process.env.MAKEFLAGS ?? `-j${jobs}`;
   const rayonThreads = process.env.RAYON_NUM_THREADS ?? process.env.FORMULA_RAYON_NUM_THREADS ?? jobs;
+  const limitAs = process.env.FORMULA_CARGO_LIMIT_AS ?? "14G";
+  const runLimited = path.join(repoRoot, "scripts", "run_limited.sh");
+  const canUseRunLimited = process.platform !== "win32" && existsSync(runLimited);
 
   // Equivalent to: `wasm-pack build crates/formula-wasm --target nodejs --out-dir pkg-node`
   // but avoids any ambiguity around relative output paths by running from the crate dir.
@@ -150,28 +153,33 @@ function buildWithWasmPack() {
   // When `sccache` is unavailable/misconfigured, wasm-pack builds can fail even for
   // `cargo metadata`/`rustc -vV`. Explicitly setting `RUSTC_WRAPPER=""` disables
   // any configured wrapper unless the user overrides it in the environment.
-  const res = spawnSync(
-    "wasm-pack",
-    ["build", "--target", "nodejs", "--out-dir", "pkg-node", "--dev"],
-    {
-      cwd: crateDir,
-      env: {
-        ...process.env,
-        CARGO_HOME: cargoHome,
-        // Keep builds safe in high-core-count environments (e.g. agent sandboxes) even
-        // if the caller didn't source `scripts/agent-init.sh`.
-        CARGO_BUILD_JOBS: jobs,
-        MAKEFLAGS: makeflags,
-        CARGO_PROFILE_DEV_CODEGEN_UNITS: process.env.CARGO_PROFILE_DEV_CODEGEN_UNITS ?? jobs,
-        // Rayon defaults to spawning one worker per core; cap it for multi-agent hosts unless
-        // callers explicitly override it.
-        RAYON_NUM_THREADS: rayonThreads,
-        RUSTC_WRAPPER: process.env.RUSTC_WRAPPER ?? "",
-        RUSTC_WORKSPACE_WRAPPER: process.env.RUSTC_WORKSPACE_WRAPPER ?? "",
-      },
-      stdio: "inherit",
-    }
-  );
+  const wasmPackArgs = ["build", "--target", "nodejs", "--out-dir", "pkg-node", "--dev"];
+  const env = {
+    ...process.env,
+    CARGO_HOME: cargoHome,
+    // Keep builds safe in high-core-count environments (e.g. agent sandboxes) even
+    // if the caller didn't source `scripts/agent-init.sh`.
+    CARGO_BUILD_JOBS: jobs,
+    MAKEFLAGS: makeflags,
+    CARGO_PROFILE_DEV_CODEGEN_UNITS: process.env.CARGO_PROFILE_DEV_CODEGEN_UNITS ?? jobs,
+    // Rayon defaults to spawning one worker per core; cap it for multi-agent hosts unless
+    // callers explicitly override it.
+    RAYON_NUM_THREADS: rayonThreads,
+    RUSTC_WRAPPER: process.env.RUSTC_WRAPPER ?? "",
+    RUSTC_WORKSPACE_WRAPPER: process.env.RUSTC_WORKSPACE_WRAPPER ?? "",
+  };
+
+  const res = canUseRunLimited
+    ? spawnSync("bash", [runLimited, "--as", limitAs, "--", "wasm-pack", ...wasmPackArgs], {
+        cwd: crateDir,
+        env,
+        stdio: "inherit",
+      })
+    : spawnSync("wasm-pack", wasmPackArgs, {
+        cwd: crateDir,
+        env,
+        stdio: "inherit",
+      });
   if (res.error) {
     throw res.error;
   }

@@ -297,39 +297,48 @@ function defaultWasmConcurrency() {
 }
 
 function runWasmPack({ jobs, makeflags, releaseCodegenUnits, rayonThreads, binaryenCores }) {
+  const limitAs = process.env.FORMULA_CARGO_LIMIT_AS ?? "14G";
+  const runLimited = path.join(repoRoot, "scripts", "run_limited.sh");
+  const canUseRunLimited = process.platform !== "win32" && existsSync(runLimited);
+
+  const wasmPackArgs = [
+    "build",
+    crateDir,
+    "--target",
+    "web",
+    "--release",
+    "--out-dir",
+    outDir,
+    "--out-name",
+    "formula_wasm",
+    // Avoid generating a nested package.json in the output directory; consumers
+    // import the wrapper by URL and do not need `wasm-pack`'s npm packaging.
+    "--no-pack",
+  ];
+
+  const env = {
+    ...wasmPackEnv,
+    // Keep builds safe in high-core-count environments (e.g. agent sandboxes) even
+    // if the caller didn't source `scripts/agent-init.sh`.
+    CARGO_BUILD_JOBS: jobs,
+    MAKEFLAGS: makeflags,
+    CARGO_PROFILE_RELEASE_CODEGEN_UNITS: releaseCodegenUnits,
+    // Rayon defaults to spawning one thread per core. On multi-agent hosts this can be very
+    // large and can even fail to initialize ("Resource temporarily unavailable"). Default it
+    // to our safe cargo job count unless explicitly overridden by the caller.
+    RAYON_NUM_THREADS: rayonThreads,
+    BINARYEN_CORES: binaryenCores,
+  };
+
   return spawnSync(
-    wasmPackBin,
-    [
-      "build",
-      crateDir,
-      "--target",
-      "web",
-      "--release",
-      "--out-dir",
-      outDir,
-      "--out-name",
-      "formula_wasm",
-      // Avoid generating a nested package.json in the output directory; consumers
-      // import the wrapper by URL and do not need `wasm-pack`'s npm packaging.
-      "--no-pack",
-    ],
+    ...(canUseRunLimited
+      ? ["bash", [runLimited, "--as", limitAs, "--", wasmPackBin, ...wasmPackArgs]]
+      : [wasmPackBin, wasmPackArgs]),
     {
       cwd: repoRoot,
       stdio: "inherit",
-      env: {
-        ...wasmPackEnv,
-        // Keep builds safe in high-core-count environments (e.g. agent sandboxes) even
-        // if the caller didn't source `scripts/agent-init.sh`.
-        CARGO_BUILD_JOBS: jobs,
-        MAKEFLAGS: makeflags,
-        CARGO_PROFILE_RELEASE_CODEGEN_UNITS: releaseCodegenUnits,
-        // Rayon defaults to spawning one thread per core. On multi-agent hosts this can be very
-        // large and can even fail to initialize ("Resource temporarily unavailable"). Default it
-        // to our safe cargo job count unless explicitly overridden by the caller.
-        RAYON_NUM_THREADS: rayonThreads,
-        BINARYEN_CORES: binaryenCores,
-      },
-    },
+      env,
+    }
   );
 }
 
