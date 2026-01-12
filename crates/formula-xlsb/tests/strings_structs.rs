@@ -114,16 +114,18 @@ fn build_minimal_xlsb(sheet_bin: &[u8]) -> Vec<u8> {
     let mut cursor = Cursor::new(Vec::new());
     {
         let mut zip = zip::ZipWriter::new(&mut cursor);
-        let options =
-            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        let options = zip::write::FileOptions::<()>::default()
+            .compression_method(zip::CompressionMethod::Deflated);
 
-        zip.start_file("xl/workbook.bin", options).unwrap();
+        zip.start_file("xl/workbook.bin", options.clone()).unwrap();
         zip.write_all(&workbook_bin).unwrap();
 
-        zip.start_file("xl/_rels/workbook.bin.rels", options).unwrap();
+        zip.start_file("xl/_rels/workbook.bin.rels", options.clone())
+            .unwrap();
         zip.write_all(workbook_rels).unwrap();
 
-        zip.start_file("xl/worksheets/sheet1.bin", options).unwrap();
+        zip.start_file("xl/worksheets/sheet1.bin", options.clone())
+            .unwrap();
         zip.write_all(sheet_bin).unwrap();
 
         zip.finish().unwrap();

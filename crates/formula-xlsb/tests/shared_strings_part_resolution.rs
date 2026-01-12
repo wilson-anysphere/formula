@@ -80,9 +80,11 @@ fn build_shared_strings_fixture_variant(
     );
 
     let mut zip_out = ZipWriter::new(Cursor::new(Vec::new()));
-    let options = FileOptions::default().compression_method(CompressionMethod::Stored);
+    let options = FileOptions::<()>::default().compression_method(CompressionMethod::Stored);
     for (name, bytes) in parts {
-        zip_out.start_file(name, options).expect("start file");
+        zip_out
+            .start_file(name, options.clone())
+            .expect("start file");
         zip_out.write_all(&bytes).expect("write bytes");
     }
 

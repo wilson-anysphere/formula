@@ -316,52 +316,52 @@ fn build_fixture_bytes() -> Vec<u8> {
 
     let cursor = Cursor::new(Vec::new());
     let mut zip_out = ZipWriter::new(cursor);
-    let options = FileOptions::default().compression_method(CompressionMethod::Stored);
+    let options = FileOptions::<()>::default().compression_method(CompressionMethod::Stored);
 
     zip_out
-        .start_file("[Content_Types].xml", options)
+        .start_file("[Content_Types].xml", options.clone())
         .expect("start [Content_Types].xml");
     zip_out
         .write_all(build_content_types_xml().as_bytes())
         .expect("write [Content_Types].xml");
 
     zip_out
-        .start_file("_rels/.rels", options)
+        .start_file("_rels/.rels", options.clone())
         .expect("start _rels/.rels");
     zip_out
         .write_all(build_root_rels_xml().as_bytes())
         .expect("write _rels/.rels");
 
     zip_out
-        .start_file("xl/workbook.bin", options)
+        .start_file("xl/workbook.bin", options.clone())
         .expect("start xl/workbook.bin");
     zip_out
         .write_all(&workbook_bin)
         .expect("write xl/workbook.bin");
 
     zip_out
-        .start_file("xl/_rels/workbook.bin.rels", options)
+        .start_file("xl/_rels/workbook.bin.rels", options.clone())
         .expect("start xl/_rels/workbook.bin.rels");
     zip_out
         .write_all(build_workbook_rels_xml().as_bytes())
         .expect("write xl/_rels/workbook.bin.rels");
 
     zip_out
-        .start_file("xl/worksheets/sheet1.bin", options)
+        .start_file("xl/worksheets/sheet1.bin", options.clone())
         .expect("start xl/worksheets/sheet1.bin");
     zip_out
         .write_all(&sheet1_bin)
         .expect("write xl/worksheets/sheet1.bin");
 
     zip_out
-        .start_file("xl/worksheets/sheet2.bin", options)
+        .start_file("xl/worksheets/sheet2.bin", options.clone())
         .expect("start xl/worksheets/sheet2.bin");
     zip_out
         .write_all(&sheet2_bin)
         .expect("write xl/worksheets/sheet2.bin");
 
     zip_out
-        .start_file("xl/sharedStrings.bin", options)
+        .start_file("xl/sharedStrings.bin", options.clone())
         .expect("start xl/sharedStrings.bin");
     zip_out
         .write_all(&shared_strings_bin)
@@ -469,4 +469,3 @@ fn save_with_cell_edits_streaming_multi_shared_strings_updates_sheets_and_sst() 
         "unexpected diff parts: {unexpected_parts:?}\n{report_text}"
     );
 }
-

@@ -83,11 +83,13 @@ fn build_fixture_with_calc_chain_and_styles(base_bytes: &[u8]) -> Vec<u8> {
 
     let cursor = Cursor::new(Vec::new());
     let mut zip_out = ZipWriter::new(cursor);
-    let options =
-        zip::write::FileOptions::default().compression_method(CompressionMethod::Deflated);
+    let options = zip::write::FileOptions::<()>::default()
+        .compression_method(CompressionMethod::Deflated);
 
     for (name, bytes) in parts {
-        zip_out.start_file(name, options).expect("start zip file");
+        zip_out
+            .start_file(name, options.clone())
+            .expect("start zip file");
         zip_out.write_all(&bytes).expect("write zip bytes");
     }
 

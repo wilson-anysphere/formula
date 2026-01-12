@@ -1162,7 +1162,8 @@ impl XlsbWorkbook {
 
         // Use a consistent compression method for output. This does *not* affect payload
         // preservation: we always copy/write the uncompressed part bytes.
-        let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
+        let options =
+            FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
 
         let mut used_overrides: HashSet<String> = HashSet::new();
 
@@ -1173,7 +1174,7 @@ impl XlsbWorkbook {
             if entry.is_dir() {
                 // Directory entries are optional in ZIPs, but we recreate them when present to
                 // preserve the package layout more closely.
-                writer.add_directory(name, options)?;
+                writer.add_directory(name, options.clone())?;
                 continue;
             }
 
@@ -1185,7 +1186,7 @@ impl XlsbWorkbook {
                 continue;
             }
 
-            writer.start_file(name.as_str(), options)?;
+            writer.start_file(name.as_str(), options.clone())?;
 
             // When invalidating calcChain, we may need to rewrite XML parts even if they're
             // present in `overrides`.
@@ -1355,7 +1356,8 @@ impl XlsbWorkbook {
 
         // Use a consistent compression method for output. This does *not* affect payload
         // preservation: we always copy/write the uncompressed part bytes.
-        let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
+        let options =
+            FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
 
         let mut used_overrides: HashSet<String> = HashSet::new();
         let mut used_stream_overrides: HashSet<String> = HashSet::new();
@@ -1365,7 +1367,7 @@ impl XlsbWorkbook {
             let name = entry.name().to_string();
 
             if entry.is_dir() {
-                writer.add_directory(name, options)?;
+                writer.add_directory(name, options.clone())?;
                 continue;
             }
 
@@ -1377,7 +1379,7 @@ impl XlsbWorkbook {
                 continue;
             }
 
-            writer.start_file(name.as_str(), options)?;
+            writer.start_file(name.as_str(), options.clone())?;
 
             // When invalidating calcChain, we may need to rewrite XML parts even if they're
             // present in `overrides`.

@@ -190,41 +190,42 @@ impl XlsbFixtureBuilder {
         let workbook_rels_xml = build_workbook_rels_xml(shared_strings_bin.is_some());
 
         let mut zip = ZipWriter::new(Cursor::new(Vec::<u8>::new()));
-        let options = FileOptions::default().compression_method(CompressionMethod::Stored);
+        let options = FileOptions::<()>::default().compression_method(CompressionMethod::Stored);
 
-        zip.start_file("[Content_Types].xml", options)
+        zip.start_file("[Content_Types].xml", options.clone())
             .expect("start [Content_Types].xml");
         zip.write_all(content_types_xml.as_bytes())
             .expect("write [Content_Types].xml");
 
-        zip.start_file("_rels/.rels", options)
+        zip.start_file("_rels/.rels", options.clone())
             .expect("start _rels/.rels");
         zip.write_all(rels_xml.as_bytes())
             .expect("write _rels/.rels");
 
-        zip.start_file("xl/workbook.bin", options)
+        zip.start_file("xl/workbook.bin", options.clone())
             .expect("start xl/workbook.bin");
         zip.write_all(&workbook_bin).expect("write xl/workbook.bin");
 
-        zip.start_file("xl/_rels/workbook.bin.rels", options)
+        zip.start_file("xl/_rels/workbook.bin.rels", options.clone())
             .expect("start xl/_rels/workbook.bin.rels");
         zip.write_all(workbook_rels_xml.as_bytes())
             .expect("write xl/_rels/workbook.bin.rels");
 
-        zip.start_file("xl/worksheets/sheet1.bin", options)
+        zip.start_file("xl/worksheets/sheet1.bin", options.clone())
             .expect("start xl/worksheets/sheet1.bin");
         zip.write_all(&sheet1_bin)
             .expect("write xl/worksheets/sheet1.bin");
 
         if let Some(shared_strings_bin) = shared_strings_bin {
-            zip.start_file("xl/sharedStrings.bin", options)
+            zip.start_file("xl/sharedStrings.bin", options.clone())
                 .expect("start xl/sharedStrings.bin");
             zip.write_all(&shared_strings_bin)
                 .expect("write xl/sharedStrings.bin");
         }
 
         for (name, bytes) in &self.extra_zip_parts {
-            zip.start_file(name, options).unwrap_or_else(|_| panic!("start {name}"));
+            zip.start_file(name, options.clone())
+                .unwrap_or_else(|_| panic!("start {name}"));
             zip.write_all(bytes).unwrap_or_else(|_| panic!("write {name}"));
         }
 

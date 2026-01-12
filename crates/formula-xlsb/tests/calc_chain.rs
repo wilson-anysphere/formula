@@ -60,12 +60,12 @@ fn build_fixture_with_calc_chain_custom(base_bytes: &[u8], calc_chain_part: &str
 
     let cursor = Cursor::new(Vec::new());
     let mut zip_out = zip::ZipWriter::new(cursor);
-    let options =
-        zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let options = zip::write::FileOptions::<()>::default()
+        .compression_method(zip::CompressionMethod::Deflated);
 
     for (name, bytes) in parts {
         zip_out
-            .start_file(name, options)
+            .start_file(name, options.clone())
             .expect("write part header");
         zip_out.write_all(&bytes).expect("write part bytes");
     }
@@ -129,12 +129,12 @@ fn replace_zip_part(zip_bytes: &[u8], part_name: &str, new_bytes: Vec<u8>) -> Ve
 
     let cursor = Cursor::new(Vec::new());
     let mut zip_out = zip::ZipWriter::new(cursor);
-    let options =
-        zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let options = zip::write::FileOptions::<()>::default()
+        .compression_method(zip::CompressionMethod::Deflated);
 
     for (name, bytes) in parts {
         zip_out
-            .start_file(name, options)
+            .start_file(name, options.clone())
             .expect("write part header");
         zip_out.write_all(&bytes).expect("write part bytes");
     }

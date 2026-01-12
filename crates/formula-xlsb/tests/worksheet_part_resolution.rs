@@ -44,9 +44,11 @@ fn build_case_mismatched_sheet_part_fixture() -> Vec<u8> {
     parts.insert("[Content_Types].xml".to_string(), content_types.into_bytes());
 
     let mut zip_out = ZipWriter::new(Cursor::new(Vec::new()));
-    let options = FileOptions::default().compression_method(CompressionMethod::Stored);
+    let options = FileOptions::<()>::default().compression_method(CompressionMethod::Stored);
     for (name, bytes) in parts {
-        zip_out.start_file(name, options).expect("start file");
+        zip_out
+            .start_file(name, options.clone())
+            .expect("start file");
         zip_out.write_all(&bytes).expect("write bytes");
     }
 

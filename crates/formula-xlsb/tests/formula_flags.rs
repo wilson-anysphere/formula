@@ -125,8 +125,8 @@ fn write_fixture_like_xlsb(sheet1_bin: &[u8]) -> tempfile::NamedTempFile {
     let mut zip = zip::ZipArchive::new(file).expect("open zip");
 
     let mut out_file = tempfile::NamedTempFile::new().expect("create temp file");
-    let options =
-        zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let options = zip::write::FileOptions::<()>::default()
+        .compression_method(zip::CompressionMethod::Deflated);
     {
         let mut writer = zip::ZipWriter::new(out_file.as_file_mut());
         for i in 0..zip.len() {
@@ -141,7 +141,9 @@ fn write_fixture_like_xlsb(sheet1_bin: &[u8]) -> tempfile::NamedTempFile {
                 bytes.clear();
                 bytes.extend_from_slice(sheet1_bin);
             }
-            writer.start_file(name, options).expect("start zip entry");
+            writer
+                .start_file(name, options.clone())
+                .expect("start zip entry");
             writer.write_all(&bytes).expect("write zip entry");
         }
         writer.finish().expect("finish zip");

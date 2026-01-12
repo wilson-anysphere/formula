@@ -256,9 +256,9 @@ fn with_corrupt_sst_unique_count(input: &[u8], bad_unique_count: u32) -> Vec<u8>
     }
 
     let mut out = ZipWriter::new(Cursor::new(Vec::<u8>::new()));
-    let options = FileOptions::default().compression_method(CompressionMethod::Stored);
+    let options = FileOptions::<()>::default().compression_method(CompressionMethod::Stored);
     for (name, bytes) in parts {
-        out.start_file(name, options).expect("start file");
+        out.start_file(name, options.clone()).expect("start file");
         out.write_all(&bytes).expect("write bytes");
     }
     out.finish().expect("finish zip").into_inner()
