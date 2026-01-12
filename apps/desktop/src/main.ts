@@ -1185,6 +1185,45 @@ if (
     return null;
   }
 
+  function findSheetIdByName(name: string): string | null {
+    const query = String(name ?? "").trim();
+    if (!query) return null;
+
+    // Prefer matching against display names loaded from the workbook backend.
+    for (const [sheetId, sheetName] of workbookSheetNames.entries()) {
+      if (sheetName === query) return sheetId;
+    }
+
+    // Fall back to treating the name as a raw sheet id (eg: in-memory sessions where
+    // sheet ids are "Sheet1", "Sheet2", ... and `workbookSheetNames` is empty).
+    if (workbookSheetNames.has(query)) return query;
+    if (app.getDocument().getSheetIds().includes(query)) return query;
+
+    const activeSheetId = app.getCurrentSheetId();
+    const activeSheetName = workbookSheetNames.get(activeSheetId) ?? activeSheetId;
+    if (query === activeSheetId || query === activeSheetName) return activeSheetId;
+
+    return null;
+  }
+
+  function parseSheetQualifiedRange(ref: string): {
+    sheetId: string;
+    startRow: number;
+    startCol: number;
+    endRow: number;
+    endCol: number;
+  } {
+    const { sheetName, ref: a1Ref } = splitSheetQualifier(ref);
+    const sheetId =
+      sheetName == null ? app.getCurrentSheetId() : findSheetIdByName(sheetName) ?? null;
+    if (!sheetId) {
+      throw new Error(`Unknown sheet: ${String(sheetName)}`);
+    }
+
+    const { startRow, startCol, endRow, endCol } = parseRangeAddress(a1Ref);
+    return { sheetId, startRow, startCol, endRow, endCol };
+  }
+
   const contextKeys = new ContextKeyService();
 
   let lastSelection: SelectionState | null = null;
@@ -1230,6 +1269,29 @@ if (
       const list = ids.length > 0 ? ids : ["Sheet1"];
       return list.map((id) => ({ id, name: workbookSheetNames.get(id) ?? id }));
     },
+    async getSheet(name: string) {
+      const sheetId = findSheetIdByName(name);
+      if (!sheetId) return undefined;
+      return { id: sheetId, name: workbookSheetNames.get(sheetId) ?? sheetId };
+    },
+    async activateSheet(name: string) {
+      const sheetId = findSheetIdByName(name);
+      if (!sheetId) {
+        throw new Error(`Unknown sheet: ${String(name)}`);
+      }
+      app.activateSheet(sheetId);
+      app.focus();
+      return { id: sheetId, name: workbookSheetNames.get(sheetId) ?? sheetId };
+    },
+    async createSheet(_name: string) {
+      throw new Error("Not implemented");
+    },
+    async renameSheet(_oldName: string, _newName: string) {
+      throw new Error("Not implemented");
+    },
+    async deleteSheet(_name: string) {
+      throw new Error("Not implemented");
+    },
     async getSelection() {
       const sheetId = app.getCurrentSheetId();
       const range = app.getSelectionRanges()[0] ?? { startRow: 0, startCol: 0, endRow: 0, endCol: 0 };
@@ -1252,6 +1314,52 @@ if (
     async setCell(row: number, col: number, value: unknown) {
       const sheetId = app.getCurrentSheetId();
       app.getDocument().setCellValue(sheetId, { row, col }, value);
+    },
+    async getRange(ref: string) {
+      const { sheetId, startRow, startCol, endRow, endCol } = parseSheetQualifiedRange(ref);
+      const values: Array<Array<string | number | boolean | null>> = [];
+      for (let r = startRow; r <= endRow; r++) {
+        const row: Array<string | number | boolean | null> = [];
+        for (let c = startCol; c <= endCol; c++) {
+          const cell = app.getDocument().getCell(sheetId, { row: r, col: c }) as any;
+          row.push(normalizeExtensionCellValue(cell?.value ?? null));
+        }
+        values.push(row);
+      }
+      return { startRow, startCol, endRow, endCol, values };
+    },
+    async setRange(ref: string, values: unknown[][]) {
+      const { sheetId, startRow, startCol, endRow, endCol } = parseSheetQualifiedRange(ref);
+      const expectedRows = endRow - startRow + 1;
+      const expectedCols = endCol - startCol + 1;
+
+      if (!Array.isArray(values) || values.length !== expectedRows) {
+        throw new Error(
+          `Range values must be a ${expectedRows}x${expectedCols} array (got ${Array.isArray(values) ? values.length : 0} rows)`,
+        );
+      }
+
+      const inputs: Array<{ sheetId: string; row: number; col: number; value: unknown; formula: null }> = [];
+
+      for (let r = 0; r < expectedRows; r++) {
+        const rowValues = values[r];
+        if (!Array.isArray(rowValues) || rowValues.length !== expectedCols) {
+          throw new Error(
+            `Range values must be a ${expectedRows}x${expectedCols} array (row ${r} has ${Array.isArray(rowValues) ? rowValues.length : 0} cols)`,
+          );
+        }
+        for (let c = 0; c < expectedCols; c++) {
+          inputs.push({
+            sheetId,
+            row: startRow + r,
+            col: startCol + c,
+            value: rowValues[c],
+            formula: null,
+          });
+        }
+      }
+
+      app.getDocument().setCellInputs(inputs, { label: "Extension setRange" });
     },
   };
 
