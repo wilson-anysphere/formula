@@ -1746,11 +1746,6 @@ fn patch_cell_element(
         match attr.key.as_ref() {
             b"s" if style_override.is_some() => continue,
             b"t" if update_value => continue,
-            // `vm` points into `xl/metadata.xml` richData/value metadata. Excel uses this for
-            // "place in cell" images and other rich values. If we're updating the cached cell
-            // value away from the original rich-value placeholder semantics, preserve everything
-            // else but drop `vm` to avoid leaving a dangling metadata pointer.
-            b"vm" if update_value => continue,
             b"r" => has_r = true,
             _ => {}
         }
