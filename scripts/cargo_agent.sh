@@ -137,10 +137,28 @@ fi
 # Override:
 # - set `OPENSSL_NO_VENDOR` explicitly to control openssl-sys directly, or
 # - set `FORMULA_OPENSSL_VENDOR=1` to prevent this wrapper from setting `OPENSSL_NO_VENDOR`.
+# Note: if the caller is cross-compiling (explicit `--target` or `CARGO_BUILD_TARGET`), don't force
+# openssl-sys to use the host OpenSSL install; the correct target OpenSSL may not be present.
 if [[ -z "${CI:-}" && -z "${OPENSSL_NO_VENDOR:-}" && -z "${FORMULA_OPENSSL_VENDOR:-}" ]]; then
-  if command -v uname >/dev/null 2>&1 && [[ "$(uname -s)" == "Linux" ]]; then
-    if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists openssl; then
-      export OPENSSL_NO_VENDOR=1
+  allow_system_openssl=1
+  if [[ -n "${CARGO_BUILD_TARGET:-}" ]]; then
+    allow_system_openssl=0
+  else
+    for arg in "$@"; do
+      case "${arg}" in
+        --target|--target=*)
+          allow_system_openssl=0
+          break
+          ;;
+      esac
+    done
+  fi
+
+  if [[ "${allow_system_openssl}" == "1" ]]; then
+    if command -v uname >/dev/null 2>&1 && [[ "$(uname -s)" == "Linux" ]]; then
+      if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists openssl; then
+        export OPENSSL_NO_VENDOR=1
+      fi
     fi
   fi
 fi
@@ -251,6 +269,23 @@ if [[ -z "${CARGO_PROFILE_DEV_CODEGEN_UNITS:-}" ]]; then
 fi
 if [[ -z "${CARGO_PROFILE_TEST_CODEGEN_UNITS:-}" ]]; then
   export CARGO_PROFILE_TEST_CODEGEN_UNITS="${default_codegen_units}"
+fi
+
+# `scripts/agent-init.sh` sets a default `RUSTFLAGS=-C codegen-units=4`. Cargo appends RUSTFLAGS at
+# the end of the rustc command line, which can override `CARGO_PROFILE_*_CODEGEN_UNITS` (including
+# our test default of 1).
+#
+# To ensure our chosen test codegen-units value actually takes effect, append it to RUSTFLAGS so it
+# wins as the final `-C codegen-units=...` flag.
+if [[ "${subcommand}" == "test" ]]; then
+  codegen_units_rustflags="${CARGO_PROFILE_TEST_CODEGEN_UNITS:-}"
+  if [[ -n "${codegen_units_rustflags}" ]]; then
+    if [[ -z "${RUSTFLAGS:-}" ]]; then
+      export RUSTFLAGS="-C codegen-units=${codegen_units_rustflags}"
+    else
+      export RUSTFLAGS="${RUSTFLAGS} -C codegen-units=${codegen_units_rustflags}"
+    fi
+  fi
 fi
 
 # Only some Cargo subcommands accept `-j/--jobs`. `cargo fmt`, `cargo clean`, etc
