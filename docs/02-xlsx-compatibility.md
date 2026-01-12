@@ -163,7 +163,7 @@ Notes:
 ```
 
 ### Cell Value Types
-
+ 
 | Type Attribute | Meaning | Value Content |
 |---------------|---------|---------------|
 | (absent) | Number | Raw numeric value |
@@ -186,8 +186,74 @@ This is distinct from legacy “floating” images stored under `xl/drawings/*`.
 **Packaging note:** see [In-cell images (cellimages.xml)](#in-cell-images-cellimagesxml) for the OPC
 part/relationships conventions that must be preserved for round-trip safety.
 
-### Formula Storage
+### Linked data types / Rich values (Stocks, Geography, etc.)
 
+Modern Excel supports **linked data types** (Stocks, Geography, Organization, Power BI, etc.) where a cell has a normal displayed value *plus* an attached structured payload (used for the “card” UI and for field extraction like `=A1.Price`).
+
+At the worksheet level, this shows up as additional attributes on the `<c>` (cell) element:
+
+- `vm="…"`, the **value metadata index**
+- `cm="…"`, the **cell metadata index**
+
+These are integer indices (typically 0-based) into metadata tables stored at the workbook level.
+
+Example cell carrying rich/linked metadata:
+
+```xml
+<row r="2">
+  <!-- The visible value is a shared string, but rich metadata is attached. -->
+  <c r="A2" t="s" s="1" vm="1" cm="0">
+    <v>0</v>
+  </c>
+</row>
+```
+
+Workbook-level metadata is stored in `xl/metadata.xml`. The exact contents vary by Excel version and feature usage, but common top-level tables include:
+
+- `<metadataTypes>`: declares the metadata “type” records referenced by the other tables.
+- `<valueMetadata>`: indexed by cell `vm`.
+- `<cellMetadata>`: indexed by cell `cm`.
+- `<futureMetadata>`: an extension container often present for newer features (including rich values).
+
+Minimal sketch of `xl/metadata.xml` structure:
+
+```xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <metadataTypes count="1">
+    <metadataType name="XLRICHVALUE" minSupportedVersion="120000"/>
+  </metadataTypes>
+
+  <valueMetadata count="2">
+    <bk><!-- ... --></bk>
+    <bk><!-- ... --></bk>
+  </valueMetadata>
+
+  <cellMetadata count="1">
+    <bk><!-- ... --></bk>
+  </cellMetadata>
+
+  <futureMetadata name="XLRICHVALUE" count="1">
+    <!-- ... -->
+  </futureMetadata>
+</metadata>
+```
+
+The structured payloads referenced by this metadata live under `xl/richData/` (commonly `richValueTypes.xml` + `richValues.xml`).
+
+These pieces are connected via OPC relationships:
+
+- `xl/_rels/workbook.xml.rels` typically has a relationship from the workbook to `xl/metadata.xml`.
+- `xl/_rels/metadata.xml.rels` typically has relationships from `xl/metadata.xml` to `xl/richData/*` parts.
+
+**Formula’s current strategy:**
+
+- Preserve `vm` / `cm` attributes on `<c>` elements when editing cell values.
+- Preserve `xl/metadata.xml`, `xl/richData/**`, and their relationship parts byte-for-byte whenever possible.
+- Treat linked-data-type metadata as **opaque** until the calculation engine and data model grow first-class rich/linked value support.
+
+### Formula Storage
+ 
 ```xml
 <!-- Simple formula -->
 <c r="A1">
