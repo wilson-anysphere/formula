@@ -148,6 +148,17 @@ unsafe fn pasteboard_data_for_type(
 }
 
 unsafe fn tiff_to_png_bytes(tiff: &[u8]) -> Result<Vec<u8>, ClipboardError> {
+    if tiff.is_empty() {
+        return Err(ClipboardError::OperationFailed(
+            "TIFF payload was empty".to_string(),
+        ));
+    }
+    if tiff.len() > MAX_PNG_BYTES {
+        return Err(ClipboardError::OperationFailed(format!(
+            "TIFF exceeds maximum size ({MAX_PNG_BYTES} bytes)"
+        )));
+    }
+
     // [NSBitmapImageRep imageRepWithData:data]
     let data = nsdata_from_bytes(tiff)?;
     let rep: *mut AnyObject =
@@ -194,6 +205,17 @@ unsafe fn tiff_to_png_bytes(tiff: &[u8]) -> Result<Vec<u8>, ClipboardError> {
 }
 
 unsafe fn png_to_tiff_bytes(png: &[u8]) -> Result<Vec<u8>, ClipboardError> {
+    if png.is_empty() {
+        return Err(ClipboardError::OperationFailed(
+            "PNG payload was empty".to_string(),
+        ));
+    }
+    if png.len() > MAX_PNG_BYTES {
+        return Err(ClipboardError::OperationFailed(format!(
+            "PNG exceeds maximum size ({MAX_PNG_BYTES} bytes)"
+        )));
+    }
+
     // [NSBitmapImageRep imageRepWithData:data]
     let data = nsdata_from_bytes(png)?;
     let rep: *mut AnyObject =
