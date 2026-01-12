@@ -6960,14 +6960,16 @@ impl BytecodeColumnCache {
                 | Value::Reference(_)
                 | Value::ReferenceUnion(_)
                 | Value::Array(_)
-                | Value::Record(_)
                 | Value::Lambda(_)
                 | Value::Spill { .. } => {
                     seg.blocked_rows_strict.push(row);
                     seg.blocked_rows_ignore_nonnumeric.push(row);
                 }
+                // Rich values (Entity/Record) should behave like text: ignored by most aggregates,
+                // but they disqualify strict-numeric column slices.
+                Value::Entity(_) | Value::Record(_) => seg.blocked_rows_strict.push(row),
                 // Excel ignores logical/text values in references for most aggregates, so allow
-                // IgnoreNonNumeric SIMD slices. Rich values (Entity/Record) should behave like text.
+                // IgnoreNonNumeric SIMD slices.
                 _ => seg.blocked_rows_strict.push(row),
             }
         }
@@ -9421,8 +9423,9 @@ fn numeric_value(value: &Value) -> Option<f64> {
         Value::Number(n) => Some(*n),
         Value::Blank => Some(0.0),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        // Treat any non-scalar / rich values (e.g. Entity/Record) as non-numeric so iterative
-        // convergence uses `INFINITY` deltas unless the values are identical.
+        Value::Entity(_) | Value::Record(_) => None,
+        // Treat any other non-numeric values as non-numeric so iterative convergence uses
+        // `INFINITY` deltas unless the values are identical.
         _ => None,
     }
 }
