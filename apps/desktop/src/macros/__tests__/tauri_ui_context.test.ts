@@ -86,4 +86,31 @@ describe("Tauri macro backend UI context", () => {
     await expect(backend.listMacros("workbook-1")).resolves.toEqual([]);
     await expect(backend.getMacroSecurityStatus("workbook-1")).resolves.toMatchObject({ hasMacros: false, trust: "blocked" });
   });
+
+  it("sanitizes macro UI context indices before invoking set_macro_ui_context", async () => {
+    const invoke = vi.fn(async (cmd: string, args?: any) => {
+      if (cmd !== "set_macro_ui_context") throw new Error(`Unexpected invoke: ${cmd}`);
+      return args;
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).__TAURI__ = { core: { invoke } };
+
+    const backend = new TauriMacroBackend();
+    await backend.setMacroUiContext({
+      workbookId: "workbook-1",
+      sheetId: "Sheet1",
+      activeRow: -1,
+      activeCol: 1.9,
+      selection: { startRow: -5, startCol: 2.4, endRow: 3.1, endCol: Number.NaN },
+    });
+
+    expect(invoke).toHaveBeenCalledWith("set_macro_ui_context", {
+      workbook_id: "workbook-1",
+      sheet_id: "Sheet1",
+      active_row: 0,
+      active_col: 1,
+      selection: { start_row: 0, start_col: 2, end_row: 3, end_col: 0 },
+    });
+  });
 });

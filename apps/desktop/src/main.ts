@@ -2205,19 +2205,27 @@ try {
 
       const invokeForContext = queuedInvoke ?? invoke;
       if (invokeForContext) {
+        const nonNegativeInt = (value: unknown) => {
+          const num = typeof value === "number" ? value : Number(value);
+          if (!Number.isFinite(num)) return 0;
+          const floored = Math.floor(num);
+          if (!Number.isSafeInteger(floored) || floored < 0) return 0;
+          return floored;
+        };
+
         const selection = currentSelectionRect();
-        const active_row = selection.activeRow;
-        const active_col = selection.activeCol;
+        const active_row = nonNegativeInt(selection.activeRow);
+        const active_col = nonNegativeInt(selection.activeCol);
         await invokeForContext("set_macro_ui_context", {
           workbook_id: workbookId,
           sheet_id: selection.sheetId,
           active_row,
           active_col,
           selection: {
-            start_row: selection.startRow,
-            start_col: selection.startCol,
-            end_row: selection.endRow,
-            end_col: selection.endCol,
+            start_row: nonNegativeInt(selection.startRow),
+            start_col: nonNegativeInt(selection.startCol),
+            end_row: nonNegativeInt(selection.endRow),
+            end_col: nonNegativeInt(selection.endCol),
           },
         });
       }

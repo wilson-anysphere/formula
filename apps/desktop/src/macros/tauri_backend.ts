@@ -14,6 +14,14 @@ import type {
 
 type TauriInvoke = (cmd: string, args?: any) => Promise<any>;
 
+function nonNegativeInt(value: unknown): number {
+  const num = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(num)) return 0;
+  const floored = Math.floor(num);
+  if (!Number.isSafeInteger(floored) || floored < 0) return 0;
+  return floored;
+}
+
 function getTauriInvoke(): TauriInvoke {
   const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
   if (!invoke) {
@@ -207,10 +215,10 @@ export class TauriMacroBackend implements MacroBackend {
   async setMacroUiContext(options: { workbookId: string } & MacroUiContext): Promise<void> {
     const selection = options.selection
       ? {
-          start_row: options.selection.startRow,
-          start_col: options.selection.startCol,
-          end_row: options.selection.endRow,
-          end_col: options.selection.endCol,
+          start_row: nonNegativeInt(options.selection.startRow),
+          start_col: nonNegativeInt(options.selection.startCol),
+          end_row: nonNegativeInt(options.selection.endRow),
+          end_col: nonNegativeInt(options.selection.endCol),
         }
       : null;
 
@@ -218,8 +226,8 @@ export class TauriMacroBackend implements MacroBackend {
       await this.invoke("set_macro_ui_context", {
         workbook_id: options.workbookId,
         sheet_id: options.sheetId,
-        active_row: options.activeRow,
-        active_col: options.activeCol,
+        active_row: nonNegativeInt(options.activeRow),
+        active_col: nonNegativeInt(options.activeCol),
         selection,
       });
     } catch (err) {
