@@ -445,7 +445,10 @@ export class CommentManager {
   }
 }
 
-export function createCommentManagerForSession(session: { doc: Y.Doc; transactLocal: (fn: () => void) => void }): CommentManager {
+export function createCommentManagerForDoc(params: (
+  | { doc: Y.Doc; transactLocal: (fn: () => void) => void }
+  | { doc: Y.Doc; transact: (fn: () => void) => void }
+)): CommentManager {
   // In Node environments, remote updates can be applied using a different Yjs
   // module instance (CJS vs ESM). This can leave nested comment maps (the values
   // inside the `comments` root map) backed by foreign Item constructors, which
@@ -455,11 +458,17 @@ export function createCommentManagerForSession(session: { doc: Y.Doc; transactLo
   // Normalize any foreign nested types into local Yjs instances so comment edits
   // are undoable even when the doc was hydrated by a foreign Yjs build.
   try {
-    normalizeCommentsRootToLocalTypes(session.doc);
+    normalizeCommentsRootToLocalTypes(params.doc);
   } catch {
     // Best-effort; never block comment usage on normalization.
   }
-  return new CommentManager(session.doc, { transact: (fn) => session.transactLocal(fn) });
+
+  const transact = "transactLocal" in params ? params.transactLocal : params.transact;
+  return new CommentManager(params.doc, { transact: (fn) => transact(fn) });
+}
+
+export function createCommentManagerForSession(session: { doc: Y.Doc; transactLocal: (fn: () => void) => void }): CommentManager {
+  return createCommentManagerForDoc(session);
 }
 
 function createId(): string {

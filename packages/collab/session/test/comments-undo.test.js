@@ -4,9 +4,9 @@ import { createRequire } from "node:module";
 
 import * as Y from "yjs";
 
-import { REMOTE_ORIGIN } from "@formula/collab-undo";
+import { REMOTE_ORIGIN, createCollabUndoService } from "@formula/collab-undo";
 
-import { createCommentManagerForSession, createYComment } from "../../comments/src/manager.ts";
+import { createCommentManagerForDoc, createCommentManagerForSession, createYComment } from "../../comments/src/manager.ts";
 import { createCollabSession } from "../src/index.ts";
 
 function requireYjsCjs() {
@@ -286,5 +286,62 @@ test("CollabSession undo captures comment edits when comments root is a legacy a
   assert.equal(commentsMgr.listAll()[0]?.content, "from-cjs");
 
   session.destroy();
+  doc.destroy();
+});
+
+test("Binder-origin collaborative undo captures comment add/edit when using a tracked transact wrapper (desktop-style)", () => {
+  const doc = new Y.Doc();
+
+  // Desktop's binder-origin undo service tracks only transactions that run with
+  // the binder origin. If comment edits do not use that transact wrapper they
+  // won't be captured by UndoManager.
+  const binderOrigin = { type: "document-controller:binder" };
+
+  // Ensure the comments root exists *before* creating the UndoManager so it's
+  // included in its scope (mirrors desktop's undo scope construction).
+  const commentsRoot = doc.getMap("comments");
+
+  const undo = createCollabUndoService({
+    doc,
+    scope: commentsRoot,
+    origin: binderOrigin,
+  });
+
+  const comments = createCommentManagerForDoc({ doc, transact: undo.transact });
+
+  const commentId = comments.addComment({
+    id: "c1",
+    cellRef: "Sheet1:0:0",
+    kind: "threaded",
+    content: "Hello",
+    author: { id: "u1", name: "Alice" },
+    now: 1,
+  });
+
+  // Split the add/edit into separate undo stack entries.
+  undo.stopCapturing();
+
+  comments.setCommentContent({ commentId, content: "Hello (edited)", now: 2 });
+  assert.equal(comments.listAll().find((c) => c.id === commentId)?.content ?? null, "Hello (edited)");
+  assert.equal(undo.canUndo(), true);
+
+  // Undo the edit.
+  undo.undo();
+  assert.equal(comments.listAll().find((c) => c.id === commentId)?.content ?? null, "Hello");
+
+  // Undo the add.
+  assert.equal(undo.canUndo(), true);
+  undo.undo();
+  assert.equal(comments.listAll().find((c) => c.id === commentId)?.content ?? null, null);
+
+  // Redo add + edit.
+  assert.equal(undo.canRedo(), true);
+  undo.redo();
+  assert.equal(comments.listAll().find((c) => c.id === commentId)?.content ?? null, "Hello");
+
+  assert.equal(undo.canRedo(), true);
+  undo.redo();
+  assert.equal(comments.listAll().find((c) => c.id === commentId)?.content ?? null, "Hello (edited)");
+
   doc.destroy();
 });
