@@ -28,85 +28,89 @@ test.describe("collab presence: sheet switching", () => {
     await child.stop();
   });
 
-  test("filters remote presences by the local active sheet", async ({ page }) => {
-    test.setTimeout(120_000);
+  const GRID_MODES = ["legacy", "shared"] as const;
 
-    const page2 = await page.context().newPage();
-    const docId = `e2e-doc-${Date.now()}`;
-    const token = "dev-token";
+  for (const gridMode of GRID_MODES) {
+    test(`filters remote presences by the local active sheet (${gridMode})`, async ({ page }) => {
+      test.setTimeout(120_000);
 
-    const urlForUser = (userId: string): string => {
-      const params = new URLSearchParams({
-        grid: "shared",
-        collab: "1",
-        docId,
-        wsUrl,
-        token,
-        userId,
-        userName: userId,
-      });
-      return `/?${params.toString()}`;
-    };
+      const page2 = await page.context().newPage();
+      const docId = `e2e-doc-${gridMode}-${Date.now()}`;
+      const token = "dev-token";
 
-    await Promise.all([gotoDesktop(page, urlForUser("user1")), gotoDesktop(page2, urlForUser("user2"))]);
+      const urlForUser = (userId: string): string => {
+        const params = new URLSearchParams({
+          grid: gridMode,
+          collab: "1",
+          docId,
+          wsUrl,
+          token,
+          userId,
+          userName: userId,
+        });
+        return `/?${params.toString()}`;
+      };
 
-    await expect(page.getByTestId("collab-status")).toBeVisible();
-    await expect(page2.getByTestId("collab-status")).toBeVisible();
-    await expect(page.getByTestId("collab-status")).toHaveAttribute("data-collab-sync", "synced", { timeout: 30_000 });
-    await expect(page2.getByTestId("collab-status")).toHaveAttribute("data-collab-sync", "synced", { timeout: 30_000 });
+      await Promise.all([gotoDesktop(page, urlForUser("user1")), gotoDesktop(page2, urlForUser("user2"))]);
 
-    const remotePresenceIds = async (targetPage: typeof page): Promise<string[]> => {
-      return targetPage.evaluate(() => {
-        const app = (window as any).__formulaApp;
-        if (!app) return [];
-        const mode = app.getGridMode?.() ?? null;
+      await expect(page.getByTestId("collab-status")).toBeVisible();
+      await expect(page2.getByTestId("collab-status")).toBeVisible();
+      await expect(page.getByTestId("collab-status")).toHaveAttribute("data-collab-sync", "synced", { timeout: 30_000 });
+      await expect(page2.getByTestId("collab-status")).toHaveAttribute("data-collab-sync", "synced", { timeout: 30_000 });
 
-        // Shared-grid mode: presences are pushed into the CanvasGridRenderer selection layer.
-        if (mode === "shared") {
-          const renderer = (app as any).sharedGrid?.renderer;
-          const presences = renderer?.remotePresences ?? [];
+      const remotePresenceIds = async (targetPage: typeof page): Promise<string[]> => {
+        return targetPage.evaluate(() => {
+          const app = (window as any).__formulaApp;
+          if (!app) return [];
+          const mode = app.getGridMode?.() ?? null;
+
+          // Shared-grid mode: presences are pushed into the CanvasGridRenderer selection layer.
+          if (mode === "shared") {
+            const renderer = (app as any).sharedGrid?.renderer;
+            const presences = renderer?.remotePresences ?? [];
+            return Array.isArray(presences)
+              ? presences.map((presence: any) => presence?.id).filter((id: any) => typeof id === "string")
+              : [];
+          }
+
+          // Legacy mode: remote presences are stored on the app and rendered via `renderPresence()`.
+          const presences = (app as any).remotePresences ?? [];
           return Array.isArray(presences)
             ? presences.map((presence: any) => presence?.id).filter((id: any) => typeof id === "string")
             : [];
-        }
+        });
+      };
 
-        // Legacy mode fallback (shouldn't happen here because we pass `grid=shared`).
-        const presences = (app as any).remotePresences ?? [];
-        return Array.isArray(presences)
-          ? presences.map((presence: any) => presence?.id).filter((id: any) => typeof id === "string")
-          : [];
-      });
-    };
+      // With both clients on the initial sheet, user2 should see user1's presence.
+      await expect
+        .poll(async () => {
+          return remotePresenceIds(page2);
+        })
+        .toEqual(["user1"]);
 
-    // With both clients on the initial sheet, user2 should see user1's presence in the renderer.
-    await expect
-      .poll(async () => {
-        return remotePresenceIds(page2);
-      })
-      .toEqual(["user1"]);
+      // Add a second sheet in user1; the desktop UI automatically activates it.
+      await page.getByTestId("sheet-add").click();
 
-    // Add a second sheet in user1; the desktop UI automatically activates it.
-    await page.getByTestId("sheet-add").click();
+      await expect(page.getByRole("tab", { name: "Sheet2" })).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByRole("tab", { name: "Sheet2" })).toHaveAttribute("aria-selected", "true", { timeout: 30_000 });
+      await expect(page2.getByRole("tab", { name: "Sheet2" })).toBeVisible({ timeout: 30_000 });
 
-    await expect(page.getByRole("tab", { name: "Sheet2" })).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByRole("tab", { name: "Sheet2" })).toHaveAttribute("aria-selected", "true", { timeout: 30_000 });
-    await expect(page2.getByRole("tab", { name: "Sheet2" })).toBeVisible({ timeout: 30_000 });
+      // user2 stays on Sheet1, so user1 should no longer appear in user2's filtered remote presences.
+      await expect
+        .poll(async () => {
+          return remotePresenceIds(page2);
+        })
+        .toEqual([]);
 
-    // user2 stays on Sheet1, so user1 should no longer appear in user2's filtered remote presences.
-    await expect
-      .poll(async () => {
-        return remotePresenceIds(page2);
-      })
-      .toEqual([]);
+      // When user2 switches to the same sheet, they should see user1 again.
+      await page2.getByRole("tab", { name: "Sheet2" }).click();
+      await expect(page2.getByRole("tab", { name: "Sheet2" })).toHaveAttribute("aria-selected", "true", { timeout: 30_000 });
 
-    // When user2 switches to the same sheet, they should see user1 again.
-    await page2.getByRole("tab", { name: "Sheet2" }).click();
-    await expect(page2.getByRole("tab", { name: "Sheet2" })).toHaveAttribute("aria-selected", "true", { timeout: 30_000 });
-
-    await expect
-      .poll(async () => {
-        return remotePresenceIds(page2);
-      })
-      .toEqual(["user1"]);
-  });
+      await expect
+        .poll(async () => {
+          return remotePresenceIds(page2);
+        })
+        .toEqual(["user1"]);
+    });
+  }
 });
