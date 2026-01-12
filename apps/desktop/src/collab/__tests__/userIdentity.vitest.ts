@@ -56,5 +56,30 @@ describe("collab user identity", () => {
     const storedAfter = JSON.parse(storage.getItem(COLLAB_USER_STORAGE_KEY) ?? "{}") as any;
     expect(storedAfter.id).toBe("stored-id");
   });
-});
 
+  it("accepts legacy userId/userName/userColor query params", () => {
+    const storage = createInMemoryLocalStorage();
+    const identity = getCollabUserIdentity({
+      storage,
+      search: "?userId=legacy-id&userName=Legacy&userColor=%2300ff00",
+    });
+
+    expect(identity).toEqual({ id: "legacy-id", name: "Legacy", color: "#00ff00" });
+  });
+
+  it("falls back to generating a new identity when stored data is corrupt", () => {
+    const storage = createInMemoryLocalStorage();
+    storage.setItem(COLLAB_USER_STORAGE_KEY, "not-json");
+
+    const identity = getCollabUserIdentity({
+      storage,
+      search: "",
+      crypto: { randomUUID: () => "uuid-0000" } as any,
+    });
+
+    expect(identity.id).toBe("uuid-0000");
+    expect(identity.name).toBe("User uuid");
+    expect(identity.color).toMatch(/^#[0-9a-f]{6}$/);
+    expect(storage.getItem(COLLAB_USER_STORAGE_KEY)).toContain("uuid-0000");
+  });
+});
