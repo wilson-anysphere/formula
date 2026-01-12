@@ -142,20 +142,21 @@ def _validate_against_function_catalog(payload: dict[str, Any]) -> None:
         else:
             raise SystemExit(f"Unknown volatility in functionCatalog.json for {name!r}: {vol!r}")
 
-    used: set[str] = set()
+    used_case_formulas: set[str] = set()
+    used_input_formulas: set[str] = set()
     for case in payload.get("cases", []):
         if not isinstance(case, dict):
             continue
-        used.update(_extract_function_names(case.get("formula")))
+        used_case_formulas.update(_extract_function_names(case.get("formula")))
         # Input cells can also contain formulas (e.g. error values like `=NA()`).
         inputs = case.get("inputs", [])
         if isinstance(inputs, list):
             for cell_input in inputs:
                 if not isinstance(cell_input, dict):
                     continue
-                used.update(_extract_function_names(cell_input.get("formula")))
+                used_input_formulas.update(_extract_function_names(cell_input.get("formula")))
 
-    missing_nonvolatile = sorted(catalog_nonvolatile.difference(used))
+    missing_nonvolatile = sorted(catalog_nonvolatile.difference(used_case_formulas))
     if missing_nonvolatile:
         preview = ", ".join(missing_nonvolatile[:25])
         suffix = "" if len(missing_nonvolatile) <= 25 else f" (+{len(missing_nonvolatile) - 25} more)"
@@ -164,7 +165,8 @@ def _validate_against_function_catalog(payload: dict[str, Any]) -> None:
             f"Missing ({len(missing_nonvolatile)}): {preview}{suffix}"
         )
 
-    present_volatile = sorted(catalog_volatile.intersection(used))
+    used_any = used_case_formulas | used_input_formulas
+    present_volatile = sorted(catalog_volatile.intersection(used_any))
     if present_volatile:
         raise SystemExit(
             "Oracle corpus must not include volatile functions (non-deterministic). "
