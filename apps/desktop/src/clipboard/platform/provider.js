@@ -325,16 +325,14 @@ function createTauriClipboardProvider() {
         }
       }
 
-      // 2) Secondary path: Best-effort rich write via ClipboardItem when available (WebView-dependent).
+      // 2) Secondary path: Best-effort HTML write via ClipboardItem when available (WebView-dependent).
       const clipboard = globalThis.navigator?.clipboard;
-      if ((html || rtf) && typeof ClipboardItem !== "undefined" && clipboard?.write) {
+      if (html && typeof ClipboardItem !== "undefined" && clipboard?.write) {
         try {
-          /** @type {Record<string, Blob>} */
           const itemPayload = {
             "text/plain": new Blob([payload.text], { type: "text/plain" }),
+            "text/html": new Blob([html], { type: "text/html" }),
           };
-          if (html) itemPayload["text/html"] = new Blob([html], { type: "text/html" });
-          if (rtf) itemPayload["text/rtf"] = new Blob([rtf], { type: "text/rtf" });
 
           await clipboard.write([new ClipboardItem(itemPayload)]);
         } catch {
