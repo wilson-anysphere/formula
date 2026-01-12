@@ -20,6 +20,12 @@ test("panelBodyRenderer.tsx avoids inline style assignments for dock panel mount
   const filePath = path.join(__dirname, "..", "src", "panels", "panelBodyRenderer.tsx");
   const source = fs.readFileSync(filePath, "utf8");
 
+  assert.equal(
+    source.includes("style={{"),
+    false,
+    "panelBodyRenderer.tsx should avoid React inline styles (style={{...}}); use CSS classes instead",
+  );
+
   for (const forbidden of [
     'container.style.height = "100%"',
     'container.style.display = "flex"',
