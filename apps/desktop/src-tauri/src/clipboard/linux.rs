@@ -107,7 +107,7 @@ mod gtk_backend {
             Err(RecvTimeoutError::Disconnected) => Err(ClipboardError::OperationFailed(
                 "failed to receive result from GTK main thread".to_string(),
             )),
-        }?
+        }
     }
 
     fn ensure_gtk() -> Result<(), ClipboardError> {

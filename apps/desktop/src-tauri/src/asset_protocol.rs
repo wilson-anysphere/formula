@@ -8,7 +8,7 @@ use tauri::http::{
 use tauri::path::SafePathBuf;
 use tauri::scope::fs::Scope;
 use tauri::utils::mime_type::MimeType;
-use tauri::{Manager, Runtime, UriSchemeContext};
+use tauri::{Runtime, UriSchemeContext};
 
 /// Custom `asset:` protocol handler with COEP-friendly headers.
 ///

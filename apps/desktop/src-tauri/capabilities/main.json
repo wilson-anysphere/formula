@@ -6,7 +6,7 @@
   "windows": ["main"],
   "permissions": [
     {
-      "identifier": "event:allow-listen",
+      "identifier": "core:event:allow-listen",
       "allow": [
         { "event": "close-prep" },
         { "event": "close-requested" },
@@ -54,7 +54,7 @@
       ]
     },
     {
-      "identifier": "event:allow-emit",
+      "identifier": "core:event:allow-emit",
       "allow": [
         { "event": "close-prep-done" },
         { "event": "close-handled" },
