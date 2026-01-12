@@ -808,9 +808,11 @@ if (!titlebarRoot) {
 }
 const titlebarRootEl = titlebarRoot;
 
-if (!document.getElementById("ribbon")) {
+const ribbonRoot = document.getElementById("ribbon");
+if (!ribbonRoot) {
   throw new Error("Missing #ribbon container");
 }
+const ribbonRootEl = ribbonRoot;
 const ribbonReactRoot = document.getElementById("ribbon-react-root");
 if (!ribbonReactRoot) {
   throw new Error("Missing #ribbon-react-root container");
@@ -820,6 +822,13 @@ const formulaBarRoot = document.getElementById("formula-bar");
 if (!formulaBarRoot) {
   throw new Error("Missing #formula-bar container");
 }
+const formulaBarRootEl = formulaBarRoot;
+
+const statusBarRoot = document.querySelector<HTMLElement>(".statusbar");
+if (!statusBarRoot) {
+  throw new Error("Missing .statusbar container");
+}
+const statusBarRootEl = statusBarRoot;
 
 const statusMode = document.querySelector<HTMLElement>('[data-testid="status-mode"]');
 const activeCell = document.querySelector<HTMLElement>('[data-testid="active-cell"]');
@@ -1799,6 +1808,150 @@ function canRunGridFormattingShortcuts(event: KeyboardEvent): boolean {
   if (isTextInputTarget(event.target)) return false;
   return true;
 }
+
+// --- Focus cycling (Excel-style F6) --------------------------------------------
+//
+// With Tab/Shift+Tab used for in-grid navigation (Excel mental model), we need a
+// dedicated shortcut to move focus between major UI regions so the rest of the
+// desktop shell remains keyboard-accessible.
+//
+// Excel uses F6 / Shift+F6 to cycle focus between panes; we mirror that pattern.
+function focusWithoutScroll(el: HTMLElement): void {
+  try {
+    el.focus({ preventScroll: true });
+  } catch {
+    el.focus();
+  }
+}
+
+type FocusRegion = {
+  id: "ribbon" | "formulaBar" | "grid" | "sheetTabs" | "statusBar";
+  contains: (active: Element | null) => boolean;
+  focus: () => void;
+};
+
+function focusRibbonRegion(): void {
+  // Prefer the active ribbon tab (ARIA tablist semantics).
+  const activeTab =
+    ribbonRootEl.querySelector<HTMLElement>('.ribbon__tab[role="tab"][aria-selected="true"]') ??
+    ribbonRootEl.querySelector<HTMLElement>('.ribbon__tab[role="tab"][tabindex="0"]');
+  if (activeTab) {
+    focusWithoutScroll(activeTab);
+    return;
+  }
+  const firstFocusable = ribbonRootEl.querySelector<HTMLElement>(
+    'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+  );
+  if (firstFocusable) focusWithoutScroll(firstFocusable);
+}
+
+function focusFormulaBarRegion(): void {
+  // Focus the Name Box (address input) so we don't accidentally start formula editing
+  // just by cycling focus.
+  const address = formulaBarRootEl.querySelector<HTMLElement>('[data-testid="formula-address"]');
+  if (address) {
+    focusWithoutScroll(address);
+    return;
+  }
+  const firstFocusable = formulaBarRootEl.querySelector<HTMLElement>(
+    'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+  );
+  if (firstFocusable) focusWithoutScroll(firstFocusable);
+}
+
+function focusGridRegion(): void {
+  app.focus();
+}
+
+function focusSheetTabsRegion(): void {
+  const root = document.getElementById("sheet-tabs");
+  if (!root) return;
+  const activeTab =
+    root.querySelector<HTMLElement>('button[role="tab"][aria-selected="true"]') ??
+    root.querySelector<HTMLElement>('button[role="tab"]');
+  if (activeTab) {
+    focusWithoutScroll(activeTab);
+    return;
+  }
+  const fallback = root.querySelector<HTMLElement>(
+    'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+  );
+  if (fallback) focusWithoutScroll(fallback);
+}
+
+function focusStatusBarRegion(): void {
+  const zoom = statusBarRootEl.querySelector<HTMLElement>('[data-testid="zoom-control"]');
+  if (zoom) {
+    focusWithoutScroll(zoom);
+    return;
+  }
+  const firstFocusable = statusBarRootEl.querySelector<HTMLElement>(
+    'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+  );
+  if (firstFocusable) focusWithoutScroll(firstFocusable);
+}
+
+const focusRegions: FocusRegion[] = [
+  {
+    id: "ribbon",
+    contains: (active) => Boolean(active && ribbonRootEl.contains(active)),
+    focus: focusRibbonRegion,
+  },
+  {
+    id: "formulaBar",
+    contains: (active) => Boolean(active && formulaBarRootEl.contains(active)),
+    focus: focusFormulaBarRegion,
+  },
+  {
+    id: "grid",
+    contains: (active) =>
+      Boolean(
+        active &&
+          (gridRoot.contains(active) || document.getElementById("grid-secondary")?.contains(active)),
+      ),
+    focus: focusGridRegion,
+  },
+  {
+    id: "sheetTabs",
+    contains: (active) => Boolean(active && document.getElementById("sheet-tabs")?.contains(active)),
+    focus: focusSheetTabsRegion,
+  },
+  {
+    id: "statusBar",
+    contains: (active) => Boolean(active && statusBarRootEl.contains(active)),
+    focus: focusStatusBarRegion,
+  },
+];
+
+function cycleFocus(dir: 1 | -1): void {
+  const active = document.activeElement as Element | null;
+  const currentIndex = focusRegions.findIndex((region) => region.contains(active));
+  const nextIndex =
+    currentIndex === -1
+      ? dir === 1
+        ? 0
+        : focusRegions.length - 1
+      : (currentIndex + dir + focusRegions.length) % focusRegions.length;
+  focusRegions[nextIndex]?.focus();
+}
+
+window.addEventListener(
+  "keydown",
+  (e) => {
+    if (e.defaultPrevented) return;
+    if (e.key !== "F6") return;
+    // Avoid collisions with OS/browser-specific modified-F6 shortcuts.
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+    // Don't break modal focus traps (find/replace, go to, etc).
+    const active = document.activeElement as Element | null;
+    if (active?.closest("dialog[open]")) return;
+
+    e.preventDefault();
+    cycleFocus(e.shiftKey ? -1 : 1);
+  },
+  { capture: true },
+);
 
 window.addEventListener("keydown", (e) => {
   if (!canRunGridFormattingShortcuts(e)) return;

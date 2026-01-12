@@ -538,6 +538,7 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
                   .filter(Boolean)
                   .join(" ")}
                 role="tab"
+                data-testid={`ribbon-tab-${tab.id}`}
                 id={tabDomId(tab.id)}
                 aria-selected={isActive}
                 aria-controls={panelDomId(tab.id)}

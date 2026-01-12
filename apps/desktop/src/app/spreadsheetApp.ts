@@ -8323,10 +8323,10 @@ export class SpreadsheetApp {
       return;
     }
 
-    // Preserve keyboard access to non-grid UI (sheet tabs, ribbon, status bar, etc) by
-    // allowing Tab to follow the browser's focus order instead of treating it as a
-    // cell-navigation key. In-cell editing still uses Tab/Enter via the editor overlay.
-    if (e.key === "Tab") {
+    // When the formula bar is actively editing (including range-selection mode where focus may
+    // temporarily move to the grid), do not treat Tab as cell navigation. Let the formula bar
+    // and browser focus order stay in control (Excel-style editing surfaces win over grid nav).
+    if (e.key === "Tab" && (this.formulaBar?.isEditing() || this.formulaEditCell)) {
       return;
     }
 

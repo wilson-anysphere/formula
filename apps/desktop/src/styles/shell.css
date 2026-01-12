@@ -159,6 +159,12 @@ dialog.page-setup-dialog::backdrop {
   overflow: hidden;
 }
 
+.grid-root:focus-visible {
+  /* Show a stable keyboard focus ring around the grid region (separate from the
+     active-cell selection border) so F6-driven focus cycling has a clear affordance. */
+  box-shadow: inset 0 0 0 2px var(--selection-border);
+}
+
 .grid-canvas {
   position: absolute;
   inset: 0;
@@ -239,6 +245,10 @@ dialog.page-setup-dialog::backdrop {
   font-size: 12px;
   align-items: stretch;
   min-width: 0;
+}
+
+.statusbar:focus-within {
+  box-shadow: inset 0 0 0 2px var(--selection-border);
 }
 
 .statusbar__main {

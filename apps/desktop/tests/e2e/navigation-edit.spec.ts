@@ -39,6 +39,50 @@ test.describe("grid keyboard navigation + in-place editing", () => {
     await expect(page.getByTestId("active-cell")).toHaveText("C2");
   });
 
+  test("Tab/Shift+Tab navigate cells when the grid is focused", async ({ page }) => {
+    await gotoDesktop(page);
+    await waitForIdle(page);
+    await page.click("#grid", { position: { x: 80, y: 40 } });
+
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+
+    await page.keyboard.press("Tab");
+    await expect(page.getByTestId("active-cell")).toHaveText("B1");
+
+    await page.keyboard.press("Shift+Tab");
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+  });
+
+  test("Tab wraps within a multi-cell selection (Excel-style)", async ({ page }) => {
+    await gotoDesktop(page);
+    await waitForIdle(page);
+
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const sheetId = app.getCurrentSheetId();
+      app.selectRange({ sheetId, range: { startRow: 0, startCol: 0, endRow: 1, endCol: 1 } });
+    });
+
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+
+    await page.keyboard.press("Tab");
+    await expect(page.getByTestId("active-cell")).toHaveText("B1");
+
+    await page.keyboard.press("Tab");
+    await expect(page.getByTestId("active-cell")).toHaveText("A2");
+
+    await page.keyboard.press("Tab");
+    await expect(page.getByTestId("active-cell")).toHaveText("B2");
+
+    // Wrap back to the start of the selection.
+    await page.keyboard.press("Tab");
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+
+    // Shift+Tab wraps backwards.
+    await page.keyboard.press("Shift+Tab");
+    await expect(page.getByTestId("active-cell")).toHaveText("B2");
+  });
+
   test("typing begins in-place edit and commits", async ({ page }) => {
     await gotoDesktop(page);
     await waitForIdle(page);
