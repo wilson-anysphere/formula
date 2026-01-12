@@ -86,6 +86,15 @@ test.describe("command palette shortcut hints", () => {
     const addComment = page.locator("li.command-palette__item", { hasText: "Add Comment" }).first();
     await expect(addComment).toBeVisible();
     await expect(addComment.locator(".command-palette__shortcut")).toHaveText(expectedAddCommentShortcut);
+
+    // Function keys should be searchable as tokens (e.g. `/ f2`).
+    await input.fill("/ f2");
+    const editCell = page
+      .locator("li.command-palette__item", { hasText: "Edit Cell" })
+      .filter({ hasText: "Edit the active cell" })
+      .first();
+    await expect(editCell).toBeVisible();
+    await expect(editCell.locator(".command-palette__shortcut")).toHaveText("F2");
   });
 
   test("renders the platform shortcut hint for Replace", async ({ page }) => {
