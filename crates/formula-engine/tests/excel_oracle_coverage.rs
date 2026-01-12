@@ -173,7 +173,9 @@ fn excel_oracle_corpus_covers_nonvolatile_function_catalog() {
         .collect();
     assert!(
         present_volatile.is_empty(),
-        "oracle corpus includes volatile functions:\n{}",
+        "oracle corpus includes volatile functions (non-deterministic).\n\
+         Remove them from tests/compatibility/excel-oracle/cases.json (the oracle corpus is intended to stay deterministic).\n\
+         Volatile functions:\n{}",
         present_volatile
             .iter()
             .map(|name| format!("  - {name}"))
@@ -188,7 +190,10 @@ fn excel_oracle_corpus_covers_nonvolatile_function_catalog() {
         .collect();
     assert!(
         missing.is_empty(),
-        "oracle corpus missing coverage (case.formula) for {} non-volatile functions from shared/functionCatalog.json:\n{}",
+        "oracle corpus is missing coverage (case.formula) for {} non-volatile functions from shared/functionCatalog.json.\n\
+         Add at least one case in tests/compatibility/excel-oracle/cases.json for each missing function.\n\
+         (Tip: regenerate the corpus with `python tools/excel-oracle/generate_cases.py --out tests/compatibility/excel-oracle/cases.json`.)\n\
+         Missing functions:\n{}",
         missing.len(),
         missing
             .iter()
