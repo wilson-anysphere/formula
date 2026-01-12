@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
+import * as Y from "yjs";
 
 import { StructuralConflictUiController } from "./structural-conflict-ui-controller.js";
+import { CellStructuralConflictMonitor } from "../../../../../packages/collab/conflicts/index.js";
 
 describe("StructuralConflictUiController", () => {
   it("renders conflict locations using sheet display names when sheetNameResolver is provided", () => {
@@ -205,5 +207,88 @@ describe("StructuralConflictUiController", () => {
 
     ui.destroy();
     container.remove();
+  });
+
+  it("integrates with CellStructuralConflictMonitor (cell conflict)", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const needsCryptoStub = typeof (globalThis as any).crypto?.randomUUID !== "function";
+    if (needsCryptoStub) {
+      vi.stubGlobal("crypto", { randomUUID: () => `uuid-${Math.random().toString(16).slice(2)}` } as any);
+    }
+
+    const doc = new Y.Doc();
+    let ui: StructuralConflictUiController | null = null;
+    const monitor = new CellStructuralConflictMonitor({
+      doc,
+      localUserId: "u1",
+      onConflict: (conflict: any) => ui?.addConflict(conflict),
+    });
+
+    ui = new StructuralConflictUiController({ container, monitor });
+
+    (monitor as any)._emitConflict({
+      type: "cell",
+      reason: "content",
+      sourceCellKey: "Sheet1:0:0",
+      local: { kind: "edit", userId: "u1", cellKey: "Sheet1:0:0", before: null, after: { value: 123 } },
+      remote: { kind: "edit", userId: "u2", cellKey: "Sheet1:0:0", before: null, after: { value: 456 } },
+    });
+
+    container.querySelector<HTMLButtonElement>('[data-testid="structural-conflict-toast-open"]')!.click();
+    container.querySelector<HTMLButtonElement>('[data-testid="structural-conflict-choose-ours"]')!.click();
+
+    const ycell = doc.getMap("cells").get("Sheet1:0:0") as any;
+    expect(ycell?.get?.("value")).toBe(123);
+    expect(monitor.listConflicts().length).toBe(0);
+
+    ui.destroy();
+    monitor.dispose();
+    container.remove();
+    if (needsCryptoStub) vi.unstubAllGlobals();
+  });
+
+  it("integrates with CellStructuralConflictMonitor (move conflict)", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const needsCryptoStub = typeof (globalThis as any).crypto?.randomUUID !== "function";
+    if (needsCryptoStub) {
+      vi.stubGlobal("crypto", { randomUUID: () => `uuid-${Math.random().toString(16).slice(2)}` } as any);
+    }
+
+    const doc = new Y.Doc();
+    let ui: StructuralConflictUiController | null = null;
+    const monitor = new CellStructuralConflictMonitor({
+      doc,
+      localUserId: "u1",
+      onConflict: (conflict: any) => ui?.addConflict(conflict),
+    });
+
+    ui = new StructuralConflictUiController({ container, monitor });
+
+    (monitor as any)._emitConflict({
+      type: "move",
+      reason: "move-destination",
+      sourceCellKey: "Sheet1:0:0",
+      local: { kind: "move", userId: "u1", fromCellKey: "Sheet1:0:0", toCellKey: "Sheet1:0:1", cell: { value: 1 } },
+      remote: { kind: "move", userId: "u2", fromCellKey: "Sheet1:0:0", toCellKey: "Sheet1:0:2", cell: { value: 2 } },
+    });
+
+    container.querySelector<HTMLButtonElement>('[data-testid="structural-conflict-toast-open"]')!.click();
+    container.querySelector<HTMLButtonElement>('[data-testid="structural-conflict-choose-ours"]')!.click();
+
+    const cells = doc.getMap("cells") as any;
+    expect(cells.get("Sheet1:0:0")).toBeUndefined();
+    expect(cells.get("Sheet1:0:2")).toBeUndefined();
+    const dest = cells.get("Sheet1:0:1") as any;
+    expect(dest?.get?.("value")).toBe(1);
+    expect(monitor.listConflicts().length).toBe(0);
+
+    ui.destroy();
+    monitor.dispose();
+    container.remove();
+    if (needsCryptoStub) vi.unstubAllGlobals();
   });
 });
