@@ -2597,6 +2597,13 @@ export class SpreadsheetApp {
         this.reindexCommentCells();
         this.chartStore.setDefaultSheet(this.sheetId);
       }
+      // In collab mode, comment indicators/tooltips are indexed per active sheet (to avoid
+      // collisions between `SheetA!A1` and `SheetB!A1`). If a restore changes the active sheet
+      // (or just changes the sheet list used for legacy comment fallback), ensure the comment
+      // indexes track the new active sheet.
+      if (this.collabMode) {
+        this.reindexCommentCells();
+      }
       this.referencePreview = null;
       this.referenceHighlights = this.computeReferenceHighlightsForSheet(this.sheetId, this.referenceHighlightsSource);
       if (this.sharedGrid) this.syncSharedGridReferenceHighlights();

@@ -232,4 +232,56 @@ describe("SpreadsheetApp comments sheet qualification", () => {
       else process.env.DESKTOP_GRID_MODE = priorGridMode;
     }
   });
+
+  it("reindexes per-sheet comment indicator caches when restoreDocumentState changes the active sheet (collab mode)", async () => {
+    const priorGridMode = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status, { collabMode: true });
+      const doc = app.getDocument();
+      doc.setCellValue("Sheet2", { row: 0, col: 0 }, "Seed2");
+
+      app.activateSheet("Sheet2");
+
+      (app as any).commentManager.addComment({
+        cellRef: "Sheet2!A1",
+        kind: "threaded",
+        content: "Comment on Sheet2",
+        author: (app as any).currentUser,
+      });
+
+      // In collab mode, coord-keyed indexes are scoped to the active sheet.
+      expect((app as any).commentMetaByCoord.get(0)).toEqual({ resolved: false });
+
+      // Restore a workbook snapshot that only contains Sheet1. This should force the app
+      // to fall back to Sheet1 as the active sheet, and should also reindex comment caches
+      // so Sheet2's A1 comment doesn't "bleed" into Sheet1.
+      const snapshot = new TextEncoder().encode(
+        JSON.stringify({
+          schemaVersion: 1,
+          sheetOrder: ["Sheet1"],
+          sheets: [{ id: "Sheet1", frozenRows: 0, frozenCols: 0, cells: [] }],
+        }),
+      );
+
+      await app.restoreDocumentState(snapshot);
+
+      expect(app.getCurrentSheetId()).toBe("Sheet1");
+      expect((app as any).commentMetaByCoord.size).toBe(0);
+      expect((app as any).commentPreviewByCoord.size).toBe(0);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (priorGridMode === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = priorGridMode;
+    }
+  });
 });
