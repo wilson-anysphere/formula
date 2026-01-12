@@ -193,3 +193,24 @@ fn binding_is_unknown_when_forms_normalized_data_is_unavailable() {
     assert_eq!(sig.binding, VbaSignatureBinding::Unknown);
 }
 
+#[test]
+fn binding_is_bound_when_content_hash_matches_even_if_forms_normalized_data_is_unavailable() {
+    let unsigned = build_project_with_missing_designer_storage(None);
+    assert!(
+        forms_normalized_data(&unsigned).is_err(),
+        "expected FormsNormalizedData computation to fail for a missing designer storage"
+    );
+
+    // Compute the legacy Content Hash (MD5(ContentNormalizedData)).
+    let content = content_normalized_data(&unsigned).expect("ContentNormalizedData");
+    let digest: [u8; 16] = Md5::digest(&content).into();
+
+    let sig_stream = make_signature_stream_detached(&digest);
+    let signed = build_project_with_missing_designer_storage(Some(&sig_stream));
+
+    let sig = verify_vba_digital_signature(&signed)
+        .expect("signature inspection should succeed")
+        .expect("signature should be present");
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(sig.binding, VbaSignatureBinding::Bound);
+}
