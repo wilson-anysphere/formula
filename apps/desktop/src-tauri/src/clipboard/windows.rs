@@ -445,7 +445,9 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
     // - CF_DIB is more widely supported but may ignore alpha; we provide an opaque buffer to avoid
     //   consumers accidentally treating the 4th byte as transparent alpha.
     if let Some(bytes) = dibv5_bytes.as_deref() {
-        set_clipboard_bytes(CF_DIBV5, bytes)?;
+        // Best-effort: clipboard image data is already available via the registered PNG format, so
+        // failure to set the DIBV5 representation shouldn't fail the whole write.
+        let _ = set_clipboard_bytes(CF_DIBV5, bytes);
     }
     if let Some(bytes) = dib_bytes.as_deref() {
         // Best-effort: don't fail the entire clipboard write if the legacy format can't be set.
