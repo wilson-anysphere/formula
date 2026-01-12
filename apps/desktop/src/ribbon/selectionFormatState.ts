@@ -164,8 +164,13 @@ export function computeSelectionFormatState(
     visited.add(key);
     state.inspected += 1;
 
-    const cell = doc.getCell(sheetId, { row, col }) as any;
-    const style = doc.styleTable.get(cell?.styleId ?? 0) as any;
+    // Prefer effective formatting (layered sheet/row/col/cell styles) when available.
+    // Fall back to legacy cell-level styleId for older controller implementations.
+    const anyDoc = doc as any;
+    const style =
+      typeof anyDoc.getCellFormat === "function"
+        ? (anyDoc.getCellFormat(sheetId, { row, col }) as any)
+        : (doc.styleTable.get((doc.getCell(sheetId, { row, col }) as any)?.styleId ?? 0) as any);
 
     state.bold = state.bold && Boolean(style?.font?.bold);
     state.italic = state.italic && Boolean(style?.font?.italic);

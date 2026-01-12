@@ -50,5 +50,24 @@ describe("computeSelectionFormatState", () => {
     expect(state.bold).toBe(true);
     expect(state.align).toBe("center");
   });
-});
 
+  it("uses effective (layered) formatting for full-column format overrides", () => {
+    const doc = new DocumentController();
+    // Full column range - this should be stored as a column style layer, leaving most
+    // individual cells with `styleId === 0`.
+    doc.setRangeFormat("Sheet1", "A1:A1048576", { font: { bold: true } });
+
+    const state = computeSelectionFormatState(doc, "Sheet1", [
+      { startRow: 0, startCol: 0, endRow: 1_048_575, endCol: 0 },
+    ]);
+    expect(state.bold).toBe(true);
+  });
+
+  it("uses effective formatting for sheet-level number formats", () => {
+    const doc = new DocumentController();
+    doc.setSheetFormat("Sheet1", { numberFormat: "0.00" });
+
+    const state = computeSelectionFormatState(doc, "Sheet1", [{ startRow: 0, startCol: 0, endRow: 0, endCol: 0 }]);
+    expect(state.numberFormat).toBe("0.00");
+  });
+});
