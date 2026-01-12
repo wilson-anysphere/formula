@@ -603,6 +603,14 @@ impl XlsxDocument {
         sheet_id: WorksheetId,
         cell: CellRef,
     ) -> Result<Option<u32>, XlsxError> {
+        // Match workbook semantics for merged regions: any cell inside a merge resolves to the
+        // anchor (top-left) cell.
+        let cell = self
+            .workbook
+            .sheet(sheet_id)
+            .map(|sheet| sheet.merged_regions.resolve_cell(cell))
+            .unwrap_or(cell);
+
         // Only report rich values for cells that still have stored `vm` metadata.
         // (e.g. a cell cleared after load may retain a stale `rich_value_cells` entry.)
         let has_vm = self
