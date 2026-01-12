@@ -21,6 +21,10 @@ import type { CollabSession } from "@formula/collab-session";
 import { buildVersionHistoryItems } from "./version-history/index.js";
 import { BranchManagerPanel, type Actor as BranchActor } from "./branch-manager/BranchManagerPanel.js";
 import { MergeBranchPanel } from "./branch-manager/MergeBranchPanel.js";
+// Import the browser-safe branch store/service modules directly.
+//
+// `packages/versioning/branches/src/index.js` also re-exports a Node-only `SQLiteBranchStore`,
+// which pulls `node:*` built-ins into the web bundle and breaks the desktop web shell / e2e.
 import { BranchService } from "../../../../packages/versioning/branches/src/BranchService.js";
 import { YjsBranchStore } from "../../../../packages/versioning/branches/src/store/YjsBranchStore.js";
 import { applyDocumentStateToYjsDoc, yjsDocToDocumentState } from "../../../../packages/versioning/branches/src/yjs/index.js";

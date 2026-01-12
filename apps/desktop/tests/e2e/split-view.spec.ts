@@ -695,9 +695,6 @@ test.describe("split view / shared grid zoom", () => {
       return Boolean(canvas && canvas.width > 0 && canvas.height > 0);
     });
 
-    const secondaryBox = await secondaryGrid.boundingBox();
-    if (!secondaryBox) throw new Error("Missing secondary grid bounding box");
-
     const before = await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("B1"));
     if (!before) throw new Error("Missing B1 rect");
 
@@ -705,9 +702,10 @@ test.describe("split view / shared grid zoom", () => {
     const boundaryX = before.x;
     const boundaryY = before.y / 2;
 
-    await page.mouse.move(secondaryBox.x + boundaryX, secondaryBox.y + boundaryY);
+    // Use locator-relative hovers so Playwright will auto-scroll the target point into view.
+    await secondaryGrid.hover({ position: { x: boundaryX, y: boundaryY } });
     await page.mouse.down();
-    await page.mouse.move(secondaryBox.x + boundaryX + 80, secondaryBox.y + boundaryY, { steps: 4 });
+    await secondaryGrid.hover({ position: { x: boundaryX + 80, y: boundaryY } });
     await page.mouse.up();
 
     await page.waitForFunction(
