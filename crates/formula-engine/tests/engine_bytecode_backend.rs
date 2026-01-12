@@ -4253,6 +4253,66 @@ fn bytecode_backend_inlines_constant_defined_names_inside_let() {
 }
 
 #[test]
+fn bytecode_backend_inlines_constant_defined_names_in_let_body() {
+    // Constant defined names referenced in the LET body should still be inlined so the formula
+    // stays bytecode-eligible.
+    let mut engine = Engine::new();
+    engine
+        .define_name(
+            "RATE",
+            NameScope::Workbook,
+            NameDefinition::Constant(Value::Number(0.1)),
+        )
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LET(x, 1, RATE*2+x)")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    let via_bytecode = engine.get_cell_value("Sheet1", "A1");
+    assert_eq!(via_bytecode, Value::Number(1.2));
+
+    engine.set_bytecode_enabled(false);
+    engine.recalculate_single_threaded();
+    let via_ast = engine.get_cell_value("Sheet1", "A1");
+
+    assert_eq!(via_bytecode, via_ast);
+}
+
+#[test]
+fn bytecode_backend_let_binding_value_can_reference_defined_name_it_shadows() {
+    // LET bindings should not shadow themselves while their value expression is being evaluated.
+    //
+    // If the binding name collides with a constant defined name, the RHS should resolve to the
+    // defined name (not the local), and then the local should shadow the defined name in the body.
+    let mut engine = Engine::new();
+    engine
+        .define_name(
+            "X",
+            NameScope::Workbook,
+            NameDefinition::Constant(Value::Number(10.0)),
+        )
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LET(x, x+1, x*2)")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    let via_bytecode = engine.get_cell_value("Sheet1", "A1");
+    assert_eq!(via_bytecode, Value::Number(22.0));
+
+    engine.set_bytecode_enabled(false);
+    engine.recalculate_single_threaded();
+    let via_ast = engine.get_cell_value("Sheet1", "A1");
+
+    assert_eq!(via_bytecode, via_ast);
+}
+
+#[test]
 fn bytecode_backend_inlines_constant_defined_names_case_insensitive_and_recompiles() {
     // Exercise case-insensitive name matching and ensure bytecode programs are recompiled when
     // a constant defined name changes (since the constant is inlined into the bytecode AST).
