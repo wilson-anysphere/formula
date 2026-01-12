@@ -79,8 +79,8 @@ pub(crate) fn build_cf_html_payload(html: &str) -> Result<Vec<u8>, String> {
     let start_fragment_rel = find_subslice(html_bytes, START_FRAGMENT_MARKER.as_bytes())
         .map(|idx| idx + START_FRAGMENT_MARKER.len())
         .unwrap_or(0);
-    let end_fragment_rel = find_subslice(html_bytes, END_FRAGMENT_MARKER.as_bytes())
-        .unwrap_or(html_bytes.len());
+    let end_fragment_rel =
+        find_subslice(html_bytes, END_FRAGMENT_MARKER.as_bytes()).unwrap_or(html_bytes.len());
 
     // Placeholder header to compute the byte length of the header itself. The header uses fixed
     // width (10-digit) offsets, so the header length is stable as long as we don't exceed that
@@ -198,9 +198,24 @@ pub(crate) fn decode_cf_html_bytes(payload: &[u8]) -> Option<String> {
     Some(String::from_utf8_lossy(&bytes[start..]).into_owned())
 }
 
+/// Best-effort extraction of the HTML fragment from a CF_HTML payload.
+///
+/// If parsing fails, returns the entire decoded payload (lossy UTF-8).
+pub(crate) fn extract_cf_html_fragment_best_effort(payload: &[u8]) -> String {
+    if let Some(decoded) = decode_cf_html_bytes(payload) {
+        return decoded;
+    }
+
+    let mut end = payload.len();
+    while end > 0 && payload[end - 1] == 0 {
+        end -= 1;
+    }
+    String::from_utf8_lossy(&payload[..end]).into_owned()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{build_cf_html_payload, decode_cf_html, decode_cf_html_bytes};
+    use super::{build_cf_html_payload, decode_cf_html, decode_cf_html_bytes, extract_cf_html_fragment_best_effort};
 
     fn parse_offset(s: &str, name: &str) -> usize {
         for line in s.split("\r\n") {
@@ -257,8 +272,7 @@ mod tests {
 
     #[test]
     fn decode_cf_html_extracts_fragment_from_markers_when_no_header() {
-        let payload =
-            "<html><body><!--StartFragment--><p>Hi</p><!--EndFragment--></body></html>\0";
+        let payload = "<html><body><!--StartFragment--><p>Hi</p><!--EndFragment--></body></html>\0";
         let decoded = decode_cf_html(payload).expect("decoded");
         assert_eq!(decoded, "<p>Hi</p>");
     }
@@ -270,5 +284,13 @@ mod tests {
         let s = String::from_utf8(payload).expect("utf8");
         let decoded = decode_cf_html(&s).expect("decoded");
         assert_eq!(decoded, fragment);
+    }
+
+    #[test]
+    fn extract_cf_html_bytes_roundtrip_preserves_fragment() {
+        let fragment = "<table><tr><td>Hello</td></tr></table>";
+        let payload = build_cf_html_payload(fragment).expect("payload");
+        let extracted = extract_cf_html_fragment_best_effort(&payload);
+        assert_eq!(extracted, fragment);
     }
 }

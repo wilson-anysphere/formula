@@ -72,6 +72,7 @@ tokio = { version = "1.38", features = ["io-util", "macros", "net", "rt-multi-th
 url = "2.5"
 uuid = { version = "1.8", features = ["v4"] }
 keyring = "3.6"
+png = "0.17"
 rand_core = "0.6"
 sha2 = "0.10"
 hex = "0.4"
@@ -105,8 +106,13 @@ objc2-app-kit = "0.3.2"
 objc2-foundation = "0.3.2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-# Win32 clipboard integration for rich clipboard formats (HTML/RTF/PNG).
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_DataExchange", "Win32_System_Memory"] }
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [dev-dependencies]
 tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }

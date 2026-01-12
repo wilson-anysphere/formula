@@ -1975,6 +1975,7 @@ dependencies = [
  "objc2-app-kit",
  "objc2-foundation",
  "percent-encoding",
+ "png",
  "rand_core 0.6.4",
  "serde",
  "serde_json",
@@ -1994,7 +1995,7 @@ dependencies = [
  "tokio",
  "url",
  "uuid",
- "windows-sys 0.61.2",
+ "windows",
  "xlsx-diff",
  "zip 2.4.2",
 ]

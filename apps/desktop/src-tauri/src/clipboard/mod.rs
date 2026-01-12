@@ -4,7 +4,12 @@ pub mod platform;
 
 mod cf_html;
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "windows", test))]
+mod windows_dib;
+#[cfg(target_os = "windows")]
+mod windows;
+
+#[cfg(all(target_os = "linux", feature = "desktop"))]
 mod linux;
 
 #[cfg(target_os = "macos")]

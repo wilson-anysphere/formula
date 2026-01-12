@@ -1,0 +1,337 @@
+//! PNG <-> CF_DIBV5 conversion helpers.
+//!
+//! CF_DIBV5 is a Windows clipboard format containing a `BITMAPV5HEADER` followed by pixel data.
+//! For interoperability with apps that don't understand the registered "PNG" clipboard format
+//! (notably some Office apps), we write both formats.
+//!
+//! This module is platform-neutral: it operates on bytes only and does not call Win32 APIs.
+
+use std::io::Cursor;
+
+use png::{BitDepth, ColorType};
+
+const BITMAPV5HEADER_SIZE: usize = 124;
+const BI_RGB: u32 = 0;
+const BI_BITFIELDS: u32 = 3;
+
+// 'sRGB' as a u32 in little-endian.
+const LCS_SRGB: u32 = 0x7352_4742;
+const LCS_GM_IMAGES: u32 = 4;
+
+fn read_u16_le(bytes: &[u8], offset: usize) -> Option<u16> {
+    let b = bytes.get(offset..offset + 2)?;
+    Some(u16::from_le_bytes([b[0], b[1]]))
+}
+
+fn read_u32_le(bytes: &[u8], offset: usize) -> Option<u32> {
+    let b = bytes.get(offset..offset + 4)?;
+    Some(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+}
+
+fn read_i32_le(bytes: &[u8], offset: usize) -> Option<i32> {
+    let b = bytes.get(offset..offset + 4)?;
+    Some(i32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+}
+
+fn push_u16_le(out: &mut Vec<u8>, v: u16) {
+    out.extend_from_slice(&v.to_le_bytes());
+}
+
+fn push_u32_le(out: &mut Vec<u8>, v: u32) {
+    out.extend_from_slice(&v.to_le_bytes());
+}
+
+fn push_i32_le(out: &mut Vec<u8>, v: i32) {
+    out.extend_from_slice(&v.to_le_bytes());
+}
+
+fn decode_png_rgba8(png_bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
+    let mut decoder = png::Decoder::new(Cursor::new(png_bytes));
+    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let mut reader = decoder
+        .read_info()
+        .map_err(|e| format!("png decode header failed: {e}"))?;
+
+    let mut buf = vec![0u8; reader.output_buffer_size()];
+    let info = reader
+        .next_frame(&mut buf)
+        .map_err(|e| format!("png decode frame failed: {e}"))?;
+
+    let bytes = &buf[..info.buffer_size()];
+
+    let width = info.width;
+    let height = info.height;
+
+    if width == 0 || height == 0 {
+        return Err("png has zero width/height".to_string());
+    }
+
+    let mut rgba = Vec::with_capacity(width as usize * height as usize * 4);
+
+    match (info.color_type, info.bit_depth) {
+        (ColorType::Rgba, BitDepth::Eight) => rgba.extend_from_slice(bytes),
+        (ColorType::Rgb, BitDepth::Eight) => {
+            for chunk in bytes.chunks_exact(3) {
+                rgba.extend_from_slice(&[chunk[0], chunk[1], chunk[2], 255]);
+            }
+        }
+        (ColorType::Grayscale, BitDepth::Eight) => {
+            for &g in bytes {
+                rgba.extend_from_slice(&[g, g, g, 255]);
+            }
+        }
+        (ColorType::GrayscaleAlpha, BitDepth::Eight) => {
+            for chunk in bytes.chunks_exact(2) {
+                let g = chunk[0];
+                let a = chunk[1];
+                rgba.extend_from_slice(&[g, g, g, a]);
+            }
+        }
+        (ct, bd) => {
+            return Err(format!(
+                "unsupported png output format: color={ct:?} depth={bd:?}"
+            ))
+        }
+    }
+
+    Ok((width, height, rgba))
+}
+
+fn encode_png_rgba8(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
+    let mut out = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut out, width, height);
+        encoder.set_color(ColorType::Rgba);
+        encoder.set_depth(BitDepth::Eight);
+        let mut writer = encoder
+            .write_header()
+            .map_err(|e| format!("png encode header failed: {e}"))?;
+        writer
+            .write_image_data(rgba)
+            .map_err(|e| format!("png encode data failed: {e}"))?;
+    }
+    Ok(out)
+}
+
+/// Convert PNG bytes into CF_DIBV5 bytes (BITMAPV5HEADER + BGRA pixels).
+pub fn png_to_dibv5(png_bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let (width, height, rgba) = decode_png_rgba8(png_bytes)?;
+
+    let width_usize = width as usize;
+    let height_usize = height as usize;
+
+    // DIB is stored bottom-up when height is positive.
+    let mut bgra = vec![0u8; width_usize * height_usize * 4];
+    for y in 0..height_usize {
+        let dst_y = height_usize - 1 - y;
+        for x in 0..width_usize {
+            let src = (y * width_usize + x) * 4;
+            let dst = (dst_y * width_usize + x) * 4;
+            let r = rgba[src];
+            let g = rgba[src + 1];
+            let b = rgba[src + 2];
+            let a = rgba[src + 3];
+            bgra[dst] = b;
+            bgra[dst + 1] = g;
+            bgra[dst + 2] = r;
+            bgra[dst + 3] = a;
+        }
+    }
+
+    let size_image = bgra.len() as u32;
+
+    let mut out = Vec::with_capacity(BITMAPV5HEADER_SIZE + bgra.len());
+
+    // BITMAPV5HEADER
+    push_u32_le(&mut out, BITMAPV5HEADER_SIZE as u32); // bV5Size
+    push_i32_le(&mut out, width as i32); // bV5Width
+    push_i32_le(&mut out, height as i32); // bV5Height (positive => bottom-up)
+    push_u16_le(&mut out, 1); // bV5Planes
+    push_u16_le(&mut out, 32); // bV5BitCount
+    push_u32_le(&mut out, BI_BITFIELDS); // bV5Compression
+    push_u32_le(&mut out, size_image); // bV5SizeImage
+    push_i32_le(&mut out, 0); // bV5XPelsPerMeter
+    push_i32_le(&mut out, 0); // bV5YPelsPerMeter
+    push_u32_le(&mut out, 0); // bV5ClrUsed
+    push_u32_le(&mut out, 0); // bV5ClrImportant
+
+    // Color masks for BGRA.
+    push_u32_le(&mut out, 0x00FF_0000); // bV5RedMask
+    push_u32_le(&mut out, 0x0000_FF00); // bV5GreenMask
+    push_u32_le(&mut out, 0x0000_00FF); // bV5BlueMask
+    push_u32_le(&mut out, 0xFF00_0000); // bV5AlphaMask
+
+    push_u32_le(&mut out, LCS_SRGB); // bV5CSType
+
+    // bV5Endpoints (CIEXYZTRIPLE) - leave zeroed.
+    out.extend_from_slice(&[0u8; 36]);
+
+    // Gamma values.
+    push_u32_le(&mut out, 0); // bV5GammaRed
+    push_u32_le(&mut out, 0); // bV5GammaGreen
+    push_u32_le(&mut out, 0); // bV5GammaBlue
+
+    push_u32_le(&mut out, LCS_GM_IMAGES); // bV5Intent
+    push_u32_le(&mut out, 0); // bV5ProfileData
+    push_u32_le(&mut out, 0); // bV5ProfileSize
+    push_u32_le(&mut out, 0); // bV5Reserved
+
+    debug_assert_eq!(out.len(), BITMAPV5HEADER_SIZE);
+
+    out.extend_from_slice(&bgra);
+    Ok(out)
+}
+
+/// Convert CF_DIBV5 bytes (BITMAPV5HEADER + pixels) into PNG bytes.
+pub fn dibv5_to_png(dib_bytes: &[u8]) -> Result<Vec<u8>, String> {
+    if dib_bytes.len() < BITMAPV5HEADER_SIZE {
+        return Err("dib is too small to contain BITMAPV5HEADER".to_string());
+    }
+
+    let header_size = read_u32_le(dib_bytes, 0).ok_or("failed to read bV5Size")? as usize;
+    if header_size < BITMAPV5HEADER_SIZE {
+        return Err(format!(
+            "unsupported DIB header size: {header_size} (expected >= {BITMAPV5HEADER_SIZE})"
+        ));
+    }
+    if header_size > dib_bytes.len() {
+        return Err("dib header size exceeds buffer length".to_string());
+    }
+
+    let width = read_i32_le(dib_bytes, 4).ok_or("failed to read bV5Width")?;
+    let height = read_i32_le(dib_bytes, 8).ok_or("failed to read bV5Height")?;
+    let planes = read_u16_le(dib_bytes, 12).ok_or("failed to read bV5Planes")?;
+    let bit_count = read_u16_le(dib_bytes, 14).ok_or("failed to read bV5BitCount")?;
+    let compression = read_u32_le(dib_bytes, 16).ok_or("failed to read bV5Compression")?;
+
+    if width <= 0 {
+        return Err(format!("unsupported DIB width: {width}"));
+    }
+    if height == 0 {
+        return Err("unsupported DIB height: 0".to_string());
+    }
+    if planes != 1 {
+        return Err(format!("unsupported DIB planes: {planes}"));
+    }
+
+    let width_u32 = width as u32;
+    let height_abs = height.unsigned_abs();
+    let height_u32 = height_abs;
+
+    let (row_bytes, stride) = match bit_count {
+        32 => {
+            if compression != BI_RGB && compression != BI_BITFIELDS {
+                return Err(format!(
+                    "unsupported DIB compression for 32bpp: {compression}"
+                ));
+            }
+            let row = width_u32 as usize * 4;
+            (row, row)
+        }
+        24 => {
+            if compression != BI_RGB {
+                return Err(format!(
+                    "unsupported DIB compression for 24bpp: {compression}"
+                ));
+            }
+            let row = width_u32 as usize * 3;
+            let stride = (row + 3) & !3;
+            (row, stride)
+        }
+        other => return Err(format!("unsupported DIB bit depth: {other}")),
+    };
+
+    let pixel_offset = header_size;
+    let needed = pixel_offset + stride * height_u32 as usize;
+    if dib_bytes.len() < needed {
+        return Err("dib does not contain full pixel data".to_string());
+    }
+    let pixels = &dib_bytes[pixel_offset..needed];
+
+    let bottom_up = height > 0;
+
+    let mut rgba = Vec::with_capacity(width_u32 as usize * height_u32 as usize * 4);
+    for y in 0..height_u32 as usize {
+        let src_y = if bottom_up {
+            height_u32 as usize - 1 - y
+        } else {
+            y
+        };
+        let row = &pixels[src_y * stride..src_y * stride + row_bytes];
+        match bit_count {
+            32 => {
+                for px in row.chunks_exact(4) {
+                    let b = px[0];
+                    let g = px[1];
+                    let r = px[2];
+                    let a = px[3];
+                    rgba.extend_from_slice(&[r, g, b, a]);
+                }
+            }
+            24 => {
+                for px in row.chunks_exact(3) {
+                    let b = px[0];
+                    let g = px[1];
+                    let r = px[2];
+                    rgba.extend_from_slice(&[r, g, b, 255]);
+                }
+            }
+            _ => unreachable!("validated above"),
+        }
+    }
+
+    encode_png_rgba8(width_u32, height_u32, &rgba)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn encode_test_png() -> Vec<u8> {
+        // 2x2 RGBA image:
+        // (0,0) red opaque
+        // (1,0) green 50% alpha
+        // (0,1) blue opaque
+        // (1,1) yellow transparent
+        let pixels: [u8; 16] = [
+            255, 0, 0, 255, // red
+            0, 255, 0, 128, // green
+            0, 0, 255, 255, // blue
+            255, 255, 0, 0, // yellow
+        ];
+        encode_png_rgba8(2, 2, &pixels).expect("png encode failed")
+    }
+
+    fn decode_png(png_bytes: &[u8]) -> (u32, u32, Vec<u8>) {
+        let mut decoder = png::Decoder::new(Cursor::new(png_bytes));
+        decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+        let mut reader = decoder.read_info().expect("png read_info");
+        let mut buf = vec![0u8; reader.output_buffer_size()];
+        let info = reader.next_frame(&mut buf).expect("png next_frame");
+        let bytes = &buf[..info.buffer_size()];
+        let mut rgba = Vec::new();
+        match (info.color_type, info.bit_depth) {
+            (ColorType::Rgba, BitDepth::Eight) => rgba.extend_from_slice(bytes),
+            (ColorType::Rgb, BitDepth::Eight) => {
+                for chunk in bytes.chunks_exact(3) {
+                    rgba.extend_from_slice(&[chunk[0], chunk[1], chunk[2], 255]);
+                }
+            }
+            (ct, bd) => panic!("unexpected decoded png format: {ct:?} {bd:?}"),
+        }
+        (info.width, info.height, rgba)
+    }
+
+    #[test]
+    fn png_dibv5_png_roundtrip_preserves_pixels() {
+        let png = encode_test_png();
+        let dib = png_to_dibv5(&png).expect("png_to_dibv5 failed");
+        let png2 = dibv5_to_png(&dib).expect("dibv5_to_png failed");
+
+        let (w1, h1, px1) = decode_png(&png);
+        let (w2, h2, px2) = decode_png(&png2);
+
+        assert_eq!((w1, h1), (w2, h2));
+        assert_eq!(px1, px2);
+    }
+}
