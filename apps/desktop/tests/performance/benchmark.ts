@@ -30,6 +30,13 @@ export interface BenchmarkResult {
   iterations: number;
   warmup: number;
   unit: 'ms';
+  /**
+   * Timing source used for this benchmark result.
+   *
+   * This is currently only set for JS/TS benchmarks run via `runBenchmark`.
+   * Rust benchmarks (parsed from `perf_bench`) omit it.
+   */
+  clock?: 'wall' | 'cpu';
 
   mean: number;
   median: number;
@@ -102,6 +109,7 @@ export async function runBenchmark(
     iterations,
     warmup,
     unit,
+    clock,
     mean: avg,
     median: med,
     p95,

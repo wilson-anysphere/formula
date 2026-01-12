@@ -104,7 +104,8 @@ For rendering, we also run the real `@formula/grid` canvas renderer under Node (
 - `gridRenderer.scrollStepHorizontal.p95` (horizontal scroll + frame)
 - `gridRenderer.selectionChange.p95` (selection update + frame)
 
-These benchmarks enforce a 16ms p95 budget (60fps target).
+These benchmarks enforce a 16ms p95 budget (60fps target). They are timed using CPU time
+(`process.cpuUsage()`) rather than wall time to reduce noise from OS scheduling on shared CI runners.
 
 ```typescript
 // tests/performance/benchmark.ts
