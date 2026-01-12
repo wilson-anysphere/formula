@@ -25,6 +25,24 @@ fn serial(year: i32, month: u8, day: u8, system: ExcelDateSystem) -> i32 {
     ymd_to_serial(ExcelDate::new(year, month, day), system).expect("valid excel serial")
 }
 
+fn eval_number_or_skip(sheet: &mut TestSheet, formula: &str) -> Option<f64> {
+    match sheet.eval(formula) {
+        Value::Number(n) => Some(n),
+        // The odd-coupon bond functions are not yet implemented in every build of the engine.
+        // Skip these tests when the function registry doesn't recognize the name.
+        Value::Error(ErrorKind::Name) => None,
+        other => panic!("expected number, got {other:?} from {formula}"),
+    }
+}
+
+fn cell_number_or_skip(sheet: &TestSheet, addr: &str) -> Option<f64> {
+    match sheet.get(addr) {
+        Value::Number(n) => Some(n),
+        Value::Error(ErrorKind::Name) => None,
+        other => panic!("expected number, got {other:?} from cell {addr}"),
+    }
+}
+
 fn eval_value_or_skip(sheet: &mut TestSheet, formula: &str) -> Option<Value> {
     match sheet.eval(formula) {
         Value::Error(ErrorKind::Name) => None,
@@ -593,6 +611,50 @@ fn odd_first_coupon_bond_functions_respect_workbook_date_system() {
 
     assert_close(price_1904, price_1900, 1e-9);
     assert_close(yield_1904, yield_1900, 1e-10);
+}
+
+#[test]
+fn odd_first_coupon_bond_functions_round_trip_long_stub() {
+    let mut sheet = TestSheet::new();
+
+    // Long odd-first coupon period:
+    // - issue is far before first_coupon so DFC/E > 1 (long stub)
+    // - settlement is between issue and first_coupon
+    // - maturity is aligned with the regular schedule after first_coupon
+    //
+    // Also includes a basis=1 variant that crosses the 2020 leap day, exercising
+    // E computation for actual/actual.
+    //
+    // (Excel oracle values are validated separately; this unit test asserts ODDFPRICE/ODDFYIELD
+    // are internally consistent.)
+    let yield_target = 0.0625;
+    let rate = 0.0785;
+
+    for basis in [0, 1] {
+        let price_formula = format!(
+            "=ODDFPRICE(DATE(2019,6,1),DATE(2022,3,1),DATE(2019,1,1),DATE(2020,3,1),{rate},{yield_target},100,2,{basis})"
+        );
+        sheet.set_formula("A1", &price_formula);
+        sheet.recalc();
+
+        let Some(price) = cell_number_or_skip(&sheet, "A1") else {
+            return;
+        };
+
+        // Round-trip: compute yield from the computed price.
+        let yield_formula = format!(
+            "=ODDFYIELD(DATE(2019,6,1),DATE(2022,3,1),DATE(2019,1,1),DATE(2020,3,1),{rate},A1,100,2,{basis})"
+        );
+        let Some(y) = eval_number_or_skip(&mut sheet, &yield_formula) else {
+            return;
+        };
+
+        assert!(
+            price.is_finite() && price > 0.0,
+            "expected positive finite price, got {price}"
+        );
+        assert_close(y, yield_target, 1e-9);
+    }
 }
 
 #[test]
@@ -1187,4 +1249,43 @@ fn odd_coupon_bond_price_allows_zero_coupon_rate() {
         matches!(out, Value::Number(_)),
         "expected a numeric price for ODDLPRICE with rate=0, got {out:?}"
     );
+}
+
+#[test]
+fn odd_last_coupon_bond_functions_round_trip_long_stub() {
+    let mut sheet = TestSheet::new();
+
+    // Long odd-last coupon period:
+    // - last_interest is far before maturity so DSM/E > 1 (long stub)
+    // - settlement is between last_interest and maturity
+    //
+    // We keep the schedule simple: there are no regular coupon payments between settlement
+    // and maturity, so the functions must correctly scale the final coupon amount.
+    let yield_target = 0.0625;
+    let rate = 0.0785;
+
+    for basis in [0, 1] {
+        let price_formula = format!(
+            "=ODDLPRICE(DATE(2021,2,1),DATE(2022,3,1),DATE(2020,10,15),{rate},{yield_target},100,2,{basis})"
+        );
+        sheet.set_formula("A1", &price_formula);
+        sheet.recalc();
+
+        let Some(price) = cell_number_or_skip(&sheet, "A1") else {
+            return;
+        };
+
+        let yield_formula = format!(
+            "=ODDLYIELD(DATE(2021,2,1),DATE(2022,3,1),DATE(2020,10,15),{rate},A1,100,2,{basis})"
+        );
+        let Some(y) = eval_number_or_skip(&mut sheet, &yield_formula) else {
+            return;
+        };
+
+        assert!(
+            price.is_finite() && price > 0.0,
+            "expected positive finite price, got {price}"
+        );
+        assert_close(y, yield_target, 1e-9);
+    }
 }

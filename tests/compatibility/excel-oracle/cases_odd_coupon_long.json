@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "caseSet": "financial-odd-coupon-long",
+  "defaultSheet": "Sheet1",
+  "cases": [
+    {
+      "id": "financial_oddfprice_long_first_basis0",
+      "description": "ODDFPRICE long odd-first coupon period (DFC/E > 1), basis=0",
+      "formula": "=ODDFPRICE(DATE(2019,6,1),DATE(2022,3,1),DATE(2019,1,1),DATE(2020,3,1),0.0785,0.0625,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": ["financial", "ODDFPRICE", "odd_coupon", "long_stub", "basis0"]
+    },
+    {
+      "id": "financial_oddfyield_long_first_basis0",
+      "description": "ODDFYIELD long odd-first coupon period (DFC/E > 1), basis=0",
+      "formula": "=ODDFYIELD(DATE(2019,6,1),DATE(2022,3,1),DATE(2019,1,1),DATE(2020,3,1),0.0785,98,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": ["financial", "ODDFYIELD", "odd_coupon", "long_stub", "basis0"]
+    },
+    {
+      "id": "financial_oddfprice_long_first_basis1",
+      "description": "ODDFPRICE long odd-first coupon period (DFC/E > 1), basis=1 (crosses leap day)",
+      "formula": "=ODDFPRICE(DATE(2019,6,1),DATE(2022,3,1),DATE(2019,1,1),DATE(2020,3,1),0.0785,0.0625,100,2,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": ["financial", "ODDFPRICE", "odd_coupon", "long_stub", "basis1"]
+    },
+    {
+      "id": "financial_oddfyield_long_first_basis1",
+      "description": "ODDFYIELD long odd-first coupon period (DFC/E > 1), basis=1 (crosses leap day)",
+      "formula": "=ODDFYIELD(DATE(2019,6,1),DATE(2022,3,1),DATE(2019,1,1),DATE(2020,3,1),0.0785,98,100,2,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": ["financial", "ODDFYIELD", "odd_coupon", "long_stub", "basis1"]
+    },
+    {
+      "id": "financial_oddlprice_long_last_basis0",
+      "description": "ODDLPRICE long odd-last coupon period (DSM/E > 1), basis=0",
+      "formula": "=ODDLPRICE(DATE(2021,2,1),DATE(2022,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": ["financial", "ODDLPRICE", "odd_coupon", "long_stub", "basis0"]
+    },
+    {
+      "id": "financial_oddlyield_long_last_basis0",
+      "description": "ODDLYIELD long odd-last coupon period (DSM/E > 1), basis=0",
+      "formula": "=ODDLYIELD(DATE(2021,2,1),DATE(2022,3,1),DATE(2020,10,15),0.0785,98,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": ["financial", "ODDLYIELD", "odd_coupon", "long_stub", "basis0"]
+    },
+    {
+      "id": "financial_oddlprice_long_last_basis1",
+      "description": "ODDLPRICE long odd-last coupon period (DSM/E > 1), basis=1",
+      "formula": "=ODDLPRICE(DATE(2021,2,1),DATE(2022,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": ["financial", "ODDLPRICE", "odd_coupon", "long_stub", "basis1"]
+    },
+    {
+      "id": "financial_oddlyield_long_last_basis1",
+      "description": "ODDLYIELD long odd-last coupon period (DSM/E > 1), basis=1",
+      "formula": "=ODDLYIELD(DATE(2021,2,1),DATE(2022,3,1),DATE(2020,10,15),0.0785,98,100,2,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": ["financial", "ODDLYIELD", "odd_coupon", "long_stub", "basis1"]
+    }
+  ]
+}
+
