@@ -1410,6 +1410,11 @@ export function createSyncServer(
           return;
         }
 
+        if (req.method !== "GET") {
+          sendUpgradeRejection(socket, 405, "Method Not Allowed");
+          return;
+        }
+
         if (!req.url) {
           sendUpgradeRejection(socket, 400, "Missing URL");
           return;

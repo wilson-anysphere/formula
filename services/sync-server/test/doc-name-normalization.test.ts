@@ -54,6 +54,7 @@ async function rawWebSocketUpgradeStatus(opts: {
   host: string;
   port: number;
   pathWithQuery: string;
+  method?: string;
 }): Promise<number> {
   return await new Promise((resolve, reject) => {
     const socket = net.connect(opts.port, opts.host);
@@ -67,8 +68,9 @@ async function rawWebSocketUpgradeStatus(opts: {
 
     socket.on("connect", () => {
       const key = crypto.randomBytes(16).toString("base64");
+      const method = opts.method ?? "GET";
       const request = [
-        `GET ${opts.pathWithQuery} HTTP/1.1`,
+        `${method} ${opts.pathWithQuery} HTTP/1.1`,
         `Host: ${opts.host}:${opts.port}`,
         "Upgrade: websocket",
         "Connection: Upgrade",
@@ -134,3 +136,32 @@ test("docName extraction does not normalize dot segments during websocket upgrad
   assert.equal(status, 403);
 });
 
+test("websocket upgrade only accepts GET requests", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-docname-method-"));
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const secret = "test-secret";
+  const logger = createLogger("silent");
+  const server = createSyncServer(createConfig(dataDir, secret), logger);
+  const { port } = await server.start();
+  t.after(async () => {
+    await server.stop();
+  });
+
+  const docName = "method-doc";
+  const token = jwt.sign(
+    { sub: "u1", docId: docName, orgId: "o1", role: "editor" },
+    secret,
+    { algorithm: "HS256", audience: "formula-sync" }
+  );
+
+  const status = await rawWebSocketUpgradeStatus({
+    host: "127.0.0.1",
+    port,
+    method: "POST",
+    pathWithQuery: `/${docName}?token=${encodeURIComponent(token)}`,
+  });
+  assert.equal(status, 405);
+});
