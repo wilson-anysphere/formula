@@ -18,6 +18,12 @@ export type ExtensionPermissionPromptRequest = {
 
 export type ExtensionPermissionPrompt = (req: ExtensionPermissionPromptRequest) => Promise<boolean>;
 
+let permissionPromptTitleId = 0;
+function nextPermissionPromptTitleId(): string {
+  permissionPromptTitleId += 1;
+  return `extension-permission-prompt-title-${permissionPromptTitleId}`;
+}
+
 function showModal(dialog: HTMLDialogElement): void {
   if (typeof dialog.showModal === "function") {
     dialog.showModal();
@@ -71,6 +77,8 @@ async function promptOnce(req: ExtensionPermissionPromptRequest): Promise<boolea
   const title = document.createElement("div");
   title.className = "dialog__title";
   title.textContent = "Extension Permission Request";
+  title.id = nextPermissionPromptTitleId();
+  dialog.setAttribute("aria-labelledby", title.id);
 
   const extensionMeta = document.createElement("div");
   extensionMeta.className = "permission-prompt__meta";

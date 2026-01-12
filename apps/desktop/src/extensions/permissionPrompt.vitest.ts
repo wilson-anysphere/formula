@@ -23,6 +23,12 @@ describe("createDesktopPermissionPrompt", () => {
     expect(dialog?.textContent).toContain("network");
     expect(dialog?.textContent).toContain("clipboard");
     expect(dialog?.textContent).toContain("api.example.com");
+    const title = dialog?.querySelector<HTMLElement>(".dialog__title");
+    expect(title).not.toBeNull();
+    const titleId = title?.id ?? "";
+    expect(titleId).not.toEqual("");
+    expect(dialog?.getAttribute("aria-labelledby")).toBe(titleId);
+    expect(document.getElementById(titleId)).toBe(title);
 
     const deny = dialog?.querySelector<HTMLButtonElement>('button[data-testid="extension-permission-deny"]');
     expect(deny).not.toBeNull();
@@ -73,4 +79,3 @@ describe("createDesktopPermissionPrompt", () => {
     await expect(second).resolves.toBe(false);
   });
 });
-
