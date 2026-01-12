@@ -80,16 +80,19 @@ export function Titlebar({
           type="button"
           className="formula-titlebar__window-button formula-titlebar__window-button--close"
           aria-label="Close window"
+          title="Close window"
         />
         <button
           type="button"
           className="formula-titlebar__window-button formula-titlebar__window-button--minimize"
           aria-label="Minimize window"
+          title="Minimize window"
         />
         <button
           type="button"
           className="formula-titlebar__window-button formula-titlebar__window-button--maximize"
           aria-label="Maximize window"
+          title="Maximize window"
         />
       </div>
 
@@ -174,6 +177,7 @@ export function Titlebar({
               type="button"
               className={["formula-titlebar__action-button", variantClass].filter(Boolean).join(" ")}
               aria-label={action.ariaLabel}
+              title={action.ariaLabel}
               onClick={action.onClick}
             >
               {action.label}
