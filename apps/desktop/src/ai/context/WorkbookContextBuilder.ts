@@ -137,6 +137,21 @@ export interface WorkbookSchemaProvider {
   getTables?: () => Array<{ name: string; sheetId: string; range: Range }>;
 }
 
+type NormalizedWorkbookSchemaMetadata = {
+  schemaVersion: number;
+  schemaNamedRangesBySheet: Map<string, Array<{ name: string; range: string }>>;
+  schemaTablesBySheet: Map<string, Array<{ name: string; range: string }>>;
+  namedRanges: Array<{ name: string; range: string }>;
+  explicitTables: Array<{ sheetId: string; name: string; range: string }>;
+};
+
+// Shared cache across WorkbookContextBuilder instances.
+//
+// The desktop chat orchestrator constructs a new WorkbookContextBuilder per message. Keeping the
+// schema metadata cache here lets us avoid re-reading and re-sorting named ranges / tables on
+// every message as long as the provider's schemaVersion is unchanged.
+const GLOBAL_SCHEMA_METADATA_CACHE = new WeakMap<WorkbookSchemaProvider, NormalizedWorkbookSchemaMetadata>();
+
 export interface WorkbookContextBuilderOptions {
   workbookId: string;
   documentController: DocumentController;
@@ -735,6 +750,18 @@ export class WorkbookContextBuilder {
       this.sheetSummaryCache.clear();
     }
 
+    // If this provider supports schemaVersion, consult a shared cross-builder cache first.
+    // This keeps chat (which creates a new builder each message) from re-enumerating the
+    // workbook's named ranges/tables on every message.
+    if (schemaProvider?.getSchemaVersion) {
+      const shared = GLOBAL_SCHEMA_METADATA_CACHE.get(schemaProvider);
+      if (shared && shared.schemaVersion === schemaVersion) {
+        const out = { provider: schemaProvider, ...shared };
+        this.cachedSchemaMetadata = out;
+        return out;
+      }
+    }
+
     const namedRangeDefs = safeList(() => schemaProvider?.getNamedRanges?.() ?? []);
     const explicitTableDefs = safeList(() => schemaProvider?.getTables?.() ?? []);
 
@@ -796,14 +823,22 @@ export class WorkbookContextBuilder {
         return ak.localeCompare(bk);
       });
 
-    const out = {
-      provider: schemaProvider,
+    const normalized: NormalizedWorkbookSchemaMetadata = {
       schemaVersion,
       schemaNamedRangesBySheet,
       schemaTablesBySheet,
       namedRanges,
       explicitTables,
     };
+
+    // Only persist in the shared cache when the provider exposes schemaVersion. Otherwise, we
+    // don't have a reliable invalidation mechanism and should avoid surprising cross-builder
+    // staleness (e.g. tests swapping out provider results).
+    if (schemaProvider?.getSchemaVersion) {
+      GLOBAL_SCHEMA_METADATA_CACHE.set(schemaProvider, normalized);
+    }
+
+    const out = { provider: schemaProvider, ...normalized };
     this.cachedSchemaMetadata = out;
     return out;
   }

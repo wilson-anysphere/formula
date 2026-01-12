@@ -193,6 +193,69 @@ describe("WorkbookContextBuilder", () => {
     expect(getTables).toHaveBeenCalledTimes(2);
   });
 
+  it("shares schemaProvider metadata cache across builders when schemaVersion is stable", async () => {
+    const documentController = new DocumentController();
+    documentController.setRangeValues("Sheet1", "A1", [["A"]]);
+
+    const spreadsheet = new DocumentControllerSpreadsheetApi(documentController);
+
+    let schemaVersion = 1;
+    const getNamedRanges = vi.fn(() => [
+      { name: "MyRange", sheetId: "Sheet1", range: { startRow: 0, endRow: 0, startCol: 0, endCol: 0 } },
+    ]);
+    const getTables = vi.fn(() => [
+      { name: "MyTable", sheetId: "Sheet1", range: { startRow: 0, endRow: 0, startCol: 0, endCol: 0 } },
+    ]);
+
+    const schemaProvider = {
+      getSchemaVersion: () => schemaVersion,
+      getNamedRanges,
+      getTables,
+    };
+
+    const builder1 = new WorkbookContextBuilder({
+      workbookId: "wb_schema_cache_shared",
+      documentController,
+      spreadsheet,
+      ragService: null,
+      mode: "chat",
+      model: "unit-test-model",
+      schemaProvider,
+    });
+    await builder1.build({ activeSheetId: "Sheet1" });
+    expect(getNamedRanges).toHaveBeenCalledTimes(1);
+    expect(getTables).toHaveBeenCalledTimes(1);
+
+    // New builder instance, same schemaVersion -> shared cache should avoid provider reads.
+    const builder2 = new WorkbookContextBuilder({
+      workbookId: "wb_schema_cache_shared",
+      documentController,
+      spreadsheet,
+      ragService: null,
+      mode: "chat",
+      model: "unit-test-model",
+      schemaProvider,
+    });
+    await builder2.build({ activeSheetId: "Sheet1" });
+    expect(getNamedRanges).toHaveBeenCalledTimes(1);
+    expect(getTables).toHaveBeenCalledTimes(1);
+
+    // Version bump should invalidate the shared cache.
+    schemaVersion += 1;
+    const builder3 = new WorkbookContextBuilder({
+      workbookId: "wb_schema_cache_shared",
+      documentController,
+      spreadsheet,
+      ragService: null,
+      mode: "chat",
+      model: "unit-test-model",
+      schemaProvider,
+    });
+    await builder3.build({ activeSheetId: "Sheet1" });
+    expect(getNamedRanges).toHaveBeenCalledTimes(2);
+    expect(getTables).toHaveBeenCalledTimes(2);
+  });
+
   it("redacts restricted cells in sampled blocks (DLP)", async () => {
     const workbookId = "wb_dlp";
     const documentController = new DocumentController();
