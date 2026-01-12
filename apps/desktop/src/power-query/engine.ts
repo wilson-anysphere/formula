@@ -22,7 +22,7 @@ import { effectiveDocumentClassification, effectiveRangeClassification } from ".
 
 import type { DocumentController } from "../document/documentController.js";
 import { getTableSignatureRegistry } from "./tableSignatures.ts";
-import * as nativeDialogs from "../tauri/nativeDialogs.js";
+import * as nativeDialogs from "../tauri/nativeDialogs.ts";
 
 type DlpContext = {
   documentId: string;

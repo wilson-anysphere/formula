@@ -17,7 +17,7 @@ test("createDesktopQueryEngine uses Tauri invoke file commands when FS plugin is
       invoke: async (cmd, args) => {
         calls.push({ cmd, args });
         if (cmd === "stat_file") {
-          return { mtimeMs: 123 };
+          return { mtimeMs: 123, sizeBytes: 3 };
         }
         if (cmd === "read_text_file") {
           return ["A,B", "1,2"].join("\n");

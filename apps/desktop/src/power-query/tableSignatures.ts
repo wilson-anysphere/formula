@@ -2,7 +2,7 @@ import { hashValue } from "@formula/power-query";
 import { parseA1Range, splitSheetQualifier } from "../../../../packages/search/index.js";
 
 import type { DocumentController } from "../document/documentController.js";
-import type { DefinedNameInfo, TableInfo } from "../tauri/workbookBackend";
+import type { DefinedNameInfo, TableInfo } from "../tauri/workbookBackend.ts";
 
 export type TableRectangle = {
   sheetId: string;

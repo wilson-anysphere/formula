@@ -1,4 +1,4 @@
-import { shellOpen } from "../tauri/shellOpen";
+import { shellOpen } from "../tauri/shellOpen.ts";
 
 export type OAuthBroker = {
   /**
