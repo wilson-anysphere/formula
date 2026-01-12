@@ -32,6 +32,16 @@ test("extension UI dialogs avoid inline style assignments", () => {
     false,
     "showInputBox should not set inline styles; use token-based CSS classes instead",
   );
+  assert.equal(
+    /cssText\b/.test(inputBoxSection),
+    false,
+    "showInputBox should not assign cssText; use token-based CSS classes instead",
+  );
+  assert.equal(
+    /setAttribute\(\s*["']style["']/.test(inputBoxSection),
+    false,
+    "showInputBox should not set style attributes; use token-based CSS classes instead",
+  );
   assert.match(
     inputBoxSection,
     /input\.className\s*=\s*"dialog__field"/,
@@ -58,6 +68,16 @@ test("extension UI dialogs avoid inline style assignments", () => {
     /\.style\b/.test(quickPickSection),
     false,
     "showQuickPick should not set inline styles; use token-based CSS classes instead",
+  );
+  assert.equal(
+    /cssText\b/.test(quickPickSection),
+    false,
+    "showQuickPick should not assign cssText; use token-based CSS classes instead",
+  );
+  assert.equal(
+    /setAttribute\(\s*["']style["']/.test(quickPickSection),
+    false,
+    "showQuickPick should not set style attributes; use token-based CSS classes instead",
   );
   assert.match(
     quickPickSection,
