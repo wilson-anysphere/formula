@@ -818,6 +818,47 @@ describe("ToolExecutor", () => {
     ]);
   });
 
+  it("fetch_external_data enforces max_tool_range_cells before writing large json_to_table results", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook, { allow_external_data: true, allowed_external_hosts: ["api.example.com"] });
+
+    // 201 * 1000 = 201,000 cells (exceeds the default max_tool_range_cells of 200k).
+    const rows = 201;
+    const cols = 1000;
+    const data = Array.from({ length: rows }, () => Array.from({ length: cols }, () => 0));
+    const payload = JSON.stringify(data);
+    const payloadBytes = Buffer.byteLength(payload);
+
+    const fetchMock = vi.fn(async (_url: string, _init?: any) => {
+      return new Response(payload, {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "content-length": String(payloadBytes)
+        }
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock as any);
+
+    const writeSpy = vi.spyOn(workbook, "writeRange");
+
+    const result = await executor.execute({
+      name: "fetch_external_data",
+      parameters: {
+        source_type: "api",
+        url: "https://api.example.com/data",
+        destination: "Sheet1!A1",
+        transform: "json_to_table"
+      }
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.tool).toBe("fetch_external_data");
+    expect(result.error?.code).toBe("permission_denied");
+    expect(result.error?.message).toContain("max_tool_range_cells");
+    expect(writeSpy).not.toHaveBeenCalled();
+  });
+
   it("fetch_external_data raw_text writes a single cell and returns provenance metadata", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const executor = new ToolExecutor(workbook, { allow_external_data: true, allowed_external_hosts: ["example.com"] });

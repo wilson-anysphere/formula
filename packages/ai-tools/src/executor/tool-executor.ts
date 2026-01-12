@@ -1589,7 +1589,7 @@ export class ToolExecutor {
     }
 
     const json = JSON.parse(decodeUtf8(bodyBytes));
-    const table = jsonToTable(json);
+    const table = jsonToTable(json, { maxCells: this.options.max_tool_range_cells });
     const range = {
       sheet: destination.sheet,
       startRow: destination.row,
@@ -1597,6 +1597,7 @@ export class ToolExecutor {
       endRow: destination.row + table.length - 1,
       endCol: destination.col + (table[0]?.length ?? 1) - 1
     };
+    this.assertRangeWithinMaxToolCells("fetch_external_data", range);
 
     const cells: CellData[][] = table.map((row) => row.map((value) => ({ value })));
     this.spreadsheet.writeRange(range, cells);
@@ -2441,22 +2442,80 @@ function cellValuesEqual(left: unknown, right: unknown): boolean {
   return false;
 }
 
-function jsonToTable(payload: unknown): CellScalar[][] {
+function jsonToTable(payload: unknown, options: { maxCells?: number } = {}): CellScalar[][] {
+  const rawMaxCells = options.maxCells;
+  const maxCells = (() => {
+    if (!Number.isFinite(rawMaxCells)) return null;
+    const n = Number(rawMaxCells);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    return Math.floor(n);
+  })();
+
+  const assertWithinMaxCells = (rows: number, cols: number): void => {
+    if (maxCells == null) return;
+    const cellCount = rows * cols;
+    if (!Number.isFinite(cellCount) || cellCount < 0) {
+      throw toolError(
+        "permission_denied",
+        `fetch_external_data would materialize an unsafe table size (rows=${rows}, cols=${cols}). Reduce the response size or increase max_tool_range_cells (${maxCells}).`
+      );
+    }
+    if (cellCount > maxCells) {
+      throw toolError(
+        "permission_denied",
+        `fetch_external_data would write ${cellCount} cells (rows=${rows}, cols=${cols}), which exceeds max_tool_range_cells (${maxCells}). Reduce the response size or increase max_tool_range_cells.`
+      );
+    }
+  };
+
   if (Array.isArray(payload)) {
     if (payload.length === 0) return [[null]];
     if (payload.every((row) => Array.isArray(row))) {
-      const rows = (payload as unknown[]).map((row) => (row as unknown[]).map((value) => normalizeJsonScalar(value)));
-      const maxCols = rows.reduce((max, row) => Math.max(max, row.length), 0);
+      const rowCount = payload.length;
+      if (rowCount > 0) {
+        // Fast-path rejection: even 1 column per row would exceed the limit.
+        assertWithinMaxCells(rowCount, 1);
+      }
+
+      let maxCols = 0;
+      for (const row of payload as unknown[]) {
+        const cols = Array.isArray(row) ? row.length : 0;
+        if (cols > maxCols) maxCols = cols;
+        if (maxCols > 0) {
+          // Check incrementally so wide rows short-circuit before we allocate matrices.
+          assertWithinMaxCells(rowCount, Math.max(maxCols, 1));
+        }
+      }
+
       const normalizedCols = Math.max(maxCols, 1);
-      return rows.map((row) => [...row, ...new Array(normalizedCols - row.length).fill(null)]);
+      assertWithinMaxCells(rowCount, normalizedCols);
+
+      return (payload as unknown[]).map((rawRow) => {
+        const rowValues = (rawRow as unknown[]).map((value) => normalizeJsonScalar(value));
+        if (rowValues.length < normalizedCols) {
+          rowValues.push(...new Array(normalizedCols - rowValues.length).fill(null));
+        }
+        return rowValues;
+      });
     }
     if (payload.every((row) => row && typeof row === "object" && !Array.isArray(row))) {
       const objects = payload as Array<Record<string, unknown>>;
-      const headers = Array.from(new Set(objects.flatMap((obj) => Object.keys(obj))));
+      const headersSet = new Set<string>();
+      const rowCount = objects.length + 1;
+      for (const obj of objects) {
+        for (const key of Object.keys(obj)) {
+          if (headersSet.has(key)) continue;
+          headersSet.add(key);
+          assertWithinMaxCells(rowCount, headersSet.size);
+        }
+      }
+      const headers = Array.from(headersSet);
       const rows = objects.map((obj) => headers.map((header) => normalizeJsonScalar(obj[header])));
       if (headers.length === 0) return [[null]];
+      assertWithinMaxCells(rowCount, headers.length);
       return [headers, ...rows];
     }
+    assertWithinMaxCells(1, Math.max((payload as unknown[]).length, 1));
     return [(payload as unknown[]).map((value) => normalizeJsonScalar(value))];
   }
 
@@ -2465,6 +2524,7 @@ function jsonToTable(payload: unknown): CellScalar[][] {
     const headers = Object.keys(obj);
     const row = headers.map((header) => normalizeJsonScalar(obj[header]));
     if (headers.length === 0) return [[null]];
+    assertWithinMaxCells(2, headers.length);
     return [headers, row];
   }
 
