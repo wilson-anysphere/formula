@@ -530,11 +530,9 @@ impl<'a> CompileCtx<'a> {
 
         let choice_count = args.len() - 1;
 
-        // Compute a normalized integer selection using the runtime CHOOSE implementation
-        // over constant 1..=choice_count. This preserves the engine's coercion rules for:
-        // - numeric truncation (including NaN -> 0 via float->int cast)
-        // - text-to-number parsing
-        // - range/array rejection via #SPILL
+        // Compute a normalized integer selection using the runtime CHOOSE implementation over
+        // constant 1..=choice_count. This preserves the engine's coercion rules (including NaN
+        // handling via float->int casts) while keeping the actual choice expressions lazy.
         //
         // The constant arguments have no side effects, so eager evaluation here is fine.
         self.compile_expr_inner(&args[0], false);
@@ -554,8 +552,8 @@ impl<'a> CompileCtx<'a> {
             .instrs
             .push(Instruction::new(OpCode::CallFunc, func_idx, args.len() as u32));
 
-        // Store the selection result so we can branch on it multiple times without
-        // re-evaluating the index expression.
+        // Store the selection result so we can branch on it multiple times without re-evaluating
+        // the index expression.
         let sel_local = self.alloc_temp_local("\u{0}CHOOSE_SEL");
         self.program
             .instrs
@@ -620,8 +618,8 @@ impl<'a> CompileCtx<'a> {
             jump_end_idxs.push(jump_end_idx);
         }
 
-        // Should be unreachable because the selection call above guarantees the index is in
-        // range when it's not an error, but keep a deterministic fallback.
+        // Should be unreachable because the selection call above guarantees the index is in range
+        // when it's not an error, but keep a deterministic fallback.
         self.push_error_const(ErrorKind::Value);
         let end_target = self.program.instrs.len() as u32;
 
