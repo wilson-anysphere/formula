@@ -1419,7 +1419,7 @@ const manager = new WebExtensionManager({ marketplaceClient: marketplace, host, 
 backend (Tauri IPC: `marketplace_search`, `marketplace_get_extension`, `marketplace_download_package`) when running under
 Tauri with an absolute `http(s)` marketplace base URL. This avoids relying on permissive CORS headers for the `tauri://…`
 origin (and avoids WebView CSP/CORS constraints) and lets the desktop CSP remain relatively restrictive (no
-`http:`/`ws:`). In pure web/in-browser dev, `MarketplaceClient` uses plain `fetch()` and is subject to normal browser CSP +
+`http:`). In pure web/in-browser dev, `MarketplaceClient` uses plain `fetch()` and is subject to normal browser CSP +
 CORS rules.
 
 ### End-to-end: local marketplace → install in Desktop (dev)
