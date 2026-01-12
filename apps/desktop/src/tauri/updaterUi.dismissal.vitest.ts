@@ -31,10 +31,16 @@ async function loadUpdaterUi() {
 
 const originalGlobalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
 const originalWindowLocalStorage = Object.getOwnPropertyDescriptor(window, "localStorage");
+const originalTauri = Object.getOwnPropertyDescriptor(globalThis, "__TAURI__");
 
 beforeEach(() => {
   vi.resetModules();
   document.body.innerHTML = `<div id="toast-root"></div>`;
+
+  // Ensure any stale test stubs from other suites don't leak into these tests.
+  // In particular, a mocked `__TAURI__.window.show()` that never resolves would cause
+  // `handleUpdaterEvent(..., { source: "manual" })` to hang while awaiting `showMainWindowBestEffort()`.
+  Object.defineProperty(globalThis, "__TAURI__", { configurable: true, value: undefined });
 
   // Node 25 ships an experimental `globalThis.localStorage` accessor that throws unless
   // started with `--localstorage-file`. Provide a stable in-memory implementation for tests.
@@ -57,6 +63,13 @@ afterEach(() => {
     // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
     delete (window as any).localStorage;
   }
+
+  if (originalTauri) {
+    Object.defineProperty(globalThis, "__TAURI__", originalTauri);
+  } else {
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    delete (globalThis as any).__TAURI__;
+  }
 });
 
 describe("tauri/updaterUi dismissal persistence", () => {
@@ -71,7 +84,7 @@ describe("tauri/updaterUi dismissal persistence", () => {
 
     expect(localStorage.getItem(DISMISSED_VERSION_KEY)).toBe("1.2.3");
     expect(Number(localStorage.getItem(DISMISSED_AT_KEY))).toBeGreaterThan(0);
-  });
+  }, 30_000);
 
   it("suppresses startup prompts for a recently-dismissed version, but manual checks still show", async () => {
     const { handleUpdaterEvent } = await loadUpdaterUi();

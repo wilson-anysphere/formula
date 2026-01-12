@@ -762,6 +762,10 @@ export async function handleUpdaterEvent(name: UpdaterEventName, payload: Update
 
   // Tray-triggered manual checks can happen while the app is hidden to tray. Ensure the
   // window is visible before rendering any toast/dialog feedback.
+  // Note: `source` may be rewritten from "startup" -> "manual" when the user clicks
+  // "Check for Updates" while a startup check is in-flight. In that follow-up case, we
+  // still want manual-style toasts/dialogs, but we should not spam `show()`/`setFocus()`
+  // twice; the initial manual event already raised the window.
   if (rawSource === "manual") {
     await showMainWindowBestEffort();
   }

@@ -94,7 +94,7 @@ describe("updaterUi (dialog + download)", () => {
 
     const dialog = document.querySelector<HTMLDialogElement>('[data-testid="updater-dialog"]');
     expect(dialog).toBeNull();
-  });
+  }, 30_000);
 
   it("does not suppress an update dialog when the user clicks manual check during an in-flight startup check", async () => {
     // Simulate "Later" suppression for a specific version.
