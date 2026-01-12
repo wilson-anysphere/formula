@@ -227,9 +227,10 @@ fn scan_unicode_presence(
                 let start_new = current_module.is_none() || current_module_seen_non_name_record;
                 if start_new {
                     current_module = Some(modules_unicode.len());
-                    let mut presence = ModuleUnicodePresence::default();
-                    presence.module_name = true;
-                    modules_unicode.push(presence);
+                    modules_unicode.push(ModuleUnicodePresence {
+                        module_name: true,
+                        ..Default::default()
+                    });
                     current_module_seen_non_name_record = false;
                 } else if let Some(idx) = current_module {
                     modules_unicode[idx].module_name = true;

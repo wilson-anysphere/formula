@@ -821,7 +821,7 @@ pub fn verify_vba_digital_signature_with_trust(
 /// contents-hash transcript:
 /// - `\x05DigitalSignature`    → ContentsHashV1 (MD5 over `ContentNormalizedData`)
 /// - `\x05DigitalSignatureEx`  → ContentsHashV2 (Agile Content Hash; MD5 over
-///                               `ContentNormalizedData || FormsNormalizedData`)
+///   `ContentNormalizedData || FormsNormalizedData`)
 /// - `\x05DigitalSignatureExt` → ContentsHashV3 (SHA-256 over v3 `ProjectNormalizedData`)
 ///
 /// When the stream path is unknown or ambiguous, this uses a conservative fallback: it computes
@@ -1045,9 +1045,10 @@ fn signature_component_stream_kind(component: &str) -> Option<VbaSignatureStream
 /// - Only exact, known variant names map to a contents-hash version.
 /// - If the path contains multiple distinct known variants, we treat it as ambiguous and return
 ///   `None` (callers should fall back to a conservative "try all versions" strategy).
+#[cfg(not(target_arch = "wasm32"))]
 fn signature_path_known_variant(path: &str) -> Option<VbaSignatureStreamKind> {
     let mut found: Option<VbaSignatureStreamKind> = None;
-    for component in path.split(|c| c == '/' || c == ':') {
+    for component in path.split(['/', ':']) {
         let trimmed = component.trim_start_matches(|c: char| c <= '\u{001F}');
         let kind = match trimmed {
             "DigitalSignatureExt" => VbaSignatureStreamKind::DigitalSignatureExt,
