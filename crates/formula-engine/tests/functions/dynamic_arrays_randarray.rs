@@ -52,6 +52,24 @@ fn randarray_missing_rows_uses_default() {
 }
 
 #[test]
+fn randarray_handles_large_min_max_without_overflowing_span() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=RANDARRAY(1,1,-1E308,1E308)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    let Value::Number(n) = engine.get_cell_value("Sheet1", "A1") else {
+        panic!("expected RANDARRAY to return a number");
+    };
+    assert!(n.is_finite(), "expected result to be finite, got {n}");
+    assert!(
+        (-1e308..=1e308).contains(&n),
+        "expected result to be within [-1e308, 1e308], got {n}"
+    );
+}
+
+#[test]
 fn randarray_whole_numbers_respect_min_max() {
     let mut engine = Engine::new();
     engine

@@ -1044,16 +1044,13 @@ fn randarray_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             values.push(Value::Number((low + offset) as f64));
         }
     } else {
-        let span = max - min;
-        if !span.is_finite() {
-            return Value::Error(ErrorKind::Num);
-        }
-        if span == 0.0 {
+        if min == max {
             values.resize(total, Value::Number(min));
             return Value::Array(Array::new(rows_usize, cols_usize, values));
         }
         for _ in 0..total {
-            values.push(Value::Number(min + ctx.volatile_rand() * span));
+            let r = ctx.volatile_rand();
+            values.push(Value::Number((1.0 - r) * min + r * max));
         }
     }
 
