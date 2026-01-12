@@ -752,6 +752,16 @@ fn relationship_id_number(id: &str) -> Option<u32> {
     digits.parse::<u32>().ok()
 }
 
+fn prefixed_tag(container_name: &[u8], local: &str) -> String {
+    match container_name.iter().position(|&b| b == b':') {
+        Some(idx) => {
+            let prefix = std::str::from_utf8(&container_name[..idx]).unwrap_or_default();
+            format!("{prefix}:{local}")
+        }
+        None => local.to_string(),
+    }
+}
+
 fn ensure_xlsm_content_types(parts: &mut BTreeMap<String, Vec<u8>>) -> Result<(), XlsxError> {
     let ct_name = "[Content_Types].xml";
     let Some(existing) = parts.get(ct_name).cloned() else {
@@ -782,6 +792,8 @@ fn ensure_xlsm_content_types(parts: &mut BTreeMap<String, Vec<u8>>) -> Result<()
     reader.config_mut().trim_text(false);
     let mut writer = XmlWriter::new(Vec::with_capacity(existing.len() + 256));
     let mut buf = Vec::new();
+
+    let mut override_tag_name: Option<String> = None;
 
     let mut has_workbook_override = false;
     let mut has_vba_override = false;
@@ -842,7 +854,9 @@ fn ensure_xlsm_content_types(parts: &mut BTreeMap<String, Vec<u8>>) -> Result<()
             if content_type.as_deref() != Some(desired_content_type) {
                 *changed = true;
 
-                let mut patched = BytesStart::new("Override");
+                let tag_name = e.name();
+                let tag_name = std::str::from_utf8(tag_name.as_ref()).unwrap_or("Override");
+                let mut patched = BytesStart::new(tag_name);
                 let mut saw_content_type = false;
                 for attr in e.attributes().with_checks(false) {
                     let attr = attr?;
@@ -880,6 +894,9 @@ fn ensure_xlsm_content_types(parts: &mut BTreeMap<String, Vec<u8>>) -> Result<()
         let event = reader.read_event_into(&mut buf)?;
         match event {
             Event::Start(e) if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Override") => {
+                if override_tag_name.is_none() {
+                    override_tag_name = Some(String::from_utf8_lossy(e.name().as_ref()).into_owned());
+                }
                 handle_override(
                     e,
                     true,
@@ -894,6 +911,9 @@ fn ensure_xlsm_content_types(parts: &mut BTreeMap<String, Vec<u8>>) -> Result<()
                 )?;
             }
             Event::Empty(e) if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Override") => {
+                if override_tag_name.is_none() {
+                    override_tag_name = Some(String::from_utf8_lossy(e.name().as_ref()).into_owned());
+                }
                 handle_override(
                     e,
                     false,
@@ -908,9 +928,12 @@ fn ensure_xlsm_content_types(parts: &mut BTreeMap<String, Vec<u8>>) -> Result<()
                 )?;
             }
             Event::End(e) if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Types") => {
+                let override_tag_name =
+                    override_tag_name.clone().unwrap_or_else(|| prefixed_tag(e.name().as_ref(), "Override"));
+
                 if !has_workbook_override {
                     changed = true;
-                    let mut override_el = BytesStart::new("Override");
+                    let mut override_el = BytesStart::new(override_tag_name.as_str());
                     override_el.push_attribute(("PartName", WORKBOOK_PART_NAME));
                     override_el.push_attribute(("ContentType", WORKBOOK_MACRO_CONTENT_TYPE));
                     writer.write_event(Event::Empty(override_el))?;
@@ -918,7 +941,7 @@ fn ensure_xlsm_content_types(parts: &mut BTreeMap<String, Vec<u8>>) -> Result<()
 
                 if !has_vba_override {
                     changed = true;
-                    let mut override_el = BytesStart::new("Override");
+                    let mut override_el = BytesStart::new(override_tag_name.as_str());
                     override_el.push_attribute(("PartName", VBA_PART_NAME));
                     override_el.push_attribute(("ContentType", VBA_CONTENT_TYPE));
                     writer.write_event(Event::Empty(override_el))?;
@@ -926,7 +949,7 @@ fn ensure_xlsm_content_types(parts: &mut BTreeMap<String, Vec<u8>>) -> Result<()
 
                 if needs_signature && !has_vba_signature_override {
                     changed = true;
-                    let mut override_el = BytesStart::new("Override");
+                    let mut override_el = BytesStart::new(override_tag_name.as_str());
                     override_el.push_attribute(("PartName", VBA_SIGNATURE_PART_NAME));
                     override_el.push_attribute(("ContentType", VBA_SIGNATURE_CONTENT_TYPE));
                     writer.write_event(Event::Empty(override_el))?;
@@ -934,7 +957,7 @@ fn ensure_xlsm_content_types(parts: &mut BTreeMap<String, Vec<u8>>) -> Result<()
 
                 if needs_vba_data && !has_vba_data_override {
                     changed = true;
-                    let mut override_el = BytesStart::new("Override");
+                    let mut override_el = BytesStart::new(override_tag_name.as_str());
                     override_el.push_attribute(("PartName", VBA_DATA_PART_NAME));
                     override_el.push_attribute(("ContentType", VBA_DATA_CONTENT_TYPE));
                     writer.write_event(Event::Empty(override_el))?;
@@ -946,33 +969,38 @@ fn ensure_xlsm_content_types(parts: &mut BTreeMap<String, Vec<u8>>) -> Result<()
                 // Degenerate case: a self-closing `<Types/>` root. Expand it so we can inject
                 // the required overrides.
                 changed = true;
+                let types_tag_name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                let override_tag_name = override_tag_name
+                    .clone()
+                    .unwrap_or_else(|| prefixed_tag(types_tag_name.as_bytes(), "Override"));
+
                 writer.write_event(Event::Start(e))?;
 
-                let mut workbook_override = BytesStart::new("Override");
+                let mut workbook_override = BytesStart::new(override_tag_name.as_str());
                 workbook_override.push_attribute(("PartName", WORKBOOK_PART_NAME));
                 workbook_override.push_attribute(("ContentType", WORKBOOK_MACRO_CONTENT_TYPE));
                 writer.write_event(Event::Empty(workbook_override))?;
 
-                let mut vba_override = BytesStart::new("Override");
+                let mut vba_override = BytesStart::new(override_tag_name.as_str());
                 vba_override.push_attribute(("PartName", VBA_PART_NAME));
                 vba_override.push_attribute(("ContentType", VBA_CONTENT_TYPE));
                 writer.write_event(Event::Empty(vba_override))?;
 
                 if needs_signature {
-                    let mut sig_override = BytesStart::new("Override");
+                    let mut sig_override = BytesStart::new(override_tag_name.as_str());
                     sig_override.push_attribute(("PartName", VBA_SIGNATURE_PART_NAME));
                     sig_override.push_attribute(("ContentType", VBA_SIGNATURE_CONTENT_TYPE));
                     writer.write_event(Event::Empty(sig_override))?;
                 }
 
                 if needs_vba_data {
-                    let mut data_override = BytesStart::new("Override");
+                    let mut data_override = BytesStart::new(override_tag_name.as_str());
                     data_override.push_attribute(("PartName", VBA_DATA_PART_NAME));
                     data_override.push_attribute(("ContentType", VBA_DATA_CONTENT_TYPE));
                     writer.write_event(Event::Empty(data_override))?;
                 }
 
-                writer.write_event(Event::End(BytesEnd::new("Types")))?;
+                writer.write_event(Event::End(BytesEnd::new(types_tag_name.as_str())))?;
             }
             Event::Eof => break,
             other => writer.write_event(other)?,
@@ -1000,6 +1028,8 @@ fn ensure_workbook_rels_has_vba(parts: &mut BTreeMap<String, Vec<u8>>) -> Result
     reader.config_mut().trim_text(false);
     let mut writer = XmlWriter::new(Vec::with_capacity(existing.len() + 128));
     let mut buf = Vec::new();
+
+    let mut relationship_tag_name: Option<String> = None;
 
     let mut has_vba_rel = false;
     let mut changed = false;
@@ -1048,7 +1078,9 @@ fn ensure_workbook_rels_has_vba(parts: &mut BTreeMap<String, Vec<u8>>) -> Result
                 *has_vba_rel = true;
                 *changed = true;
 
-                let mut patched = BytesStart::new("Relationship");
+                let tag_name = e.name();
+                let tag_name = std::str::from_utf8(tag_name.as_ref()).unwrap_or("Relationship");
+                let mut patched = BytesStart::new(tag_name);
                 let mut saw_target = false;
                 for attr in e.attributes().with_checks(false) {
                     let attr = attr?;
@@ -1081,9 +1113,37 @@ fn ensure_workbook_rels_has_vba(parts: &mut BTreeMap<String, Vec<u8>>) -> Result
     loop {
         let event = reader.read_event_into(&mut buf)?;
         match event {
+            Event::Start(e) if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationships") => {
+                writer.write_event(Event::Start(e))?;
+            }
+            Event::Empty(e) if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationships") => {
+                // Degenerate case: self-closing `<Relationships/>` root; expand to insert the vba
+                // relationship.
+                changed = true;
+                let relationships_tag_name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                let relationship_tag_name = relationship_tag_name
+                    .clone()
+                    .unwrap_or_else(|| prefixed_tag(relationships_tag_name.as_bytes(), "Relationship"));
+
+                writer.write_event(Event::Start(e))?;
+
+                let next_rid = max_rid + 1;
+                let rel_id = format!("rId{next_rid}");
+                let mut rel = BytesStart::new(relationship_tag_name.as_str());
+                rel.push_attribute(("Id", rel_id.as_str()));
+                rel.push_attribute(("Type", VBA_REL_TYPE));
+                rel.push_attribute(("Target", VBA_TARGET));
+                writer.write_event(Event::Empty(rel))?;
+
+                writer.write_event(Event::End(BytesEnd::new(relationships_tag_name.as_str())))?;
+            }
             Event::Start(e)
                 if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationship") =>
             {
+                if relationship_tag_name.is_none() {
+                    relationship_tag_name =
+                        Some(String::from_utf8_lossy(e.name().as_ref()).into_owned());
+                }
                 handle_relationship(
                     e,
                     true,
@@ -1096,6 +1156,10 @@ fn ensure_workbook_rels_has_vba(parts: &mut BTreeMap<String, Vec<u8>>) -> Result
             Event::Empty(e)
                 if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationship") =>
             {
+                if relationship_tag_name.is_none() {
+                    relationship_tag_name =
+                        Some(String::from_utf8_lossy(e.name().as_ref()).into_owned());
+                }
                 handle_relationship(
                     e,
                     false,
@@ -1110,33 +1174,18 @@ fn ensure_workbook_rels_has_vba(parts: &mut BTreeMap<String, Vec<u8>>) -> Result
             {
                 if !has_vba_rel {
                     changed = true;
+                    let relationship_tag_name = relationship_tag_name
+                        .clone()
+                        .unwrap_or_else(|| prefixed_tag(e.name().as_ref(), "Relationship"));
                     let next_rid = max_rid + 1;
                     let rel_id = format!("rId{next_rid}");
-                    let mut rel = BytesStart::new("Relationship");
+                    let mut rel = BytesStart::new(relationship_tag_name.as_str());
                     rel.push_attribute(("Id", rel_id.as_str()));
                     rel.push_attribute(("Type", VBA_REL_TYPE));
                     rel.push_attribute(("Target", VBA_TARGET));
                     writer.write_event(Event::Empty(rel))?;
                 }
                 writer.write_event(Event::End(e))?;
-            }
-            Event::Empty(e)
-                if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationships") =>
-            {
-                // Degenerate case: self-closing `<Relationships/>` root; expand to insert the vba
-                // relationship.
-                changed = true;
-                writer.write_event(Event::Start(e))?;
-
-                let next_rid = max_rid + 1;
-                let rel_id = format!("rId{next_rid}");
-                let mut rel = BytesStart::new("Relationship");
-                rel.push_attribute(("Id", rel_id.as_str()));
-                rel.push_attribute(("Type", VBA_REL_TYPE));
-                rel.push_attribute(("Target", VBA_TARGET));
-                writer.write_event(Event::Empty(rel))?;
-
-                writer.write_event(Event::End(BytesEnd::new("Relationships")))?;
             }
             Event::Eof => break,
             other => writer.write_event(other)?,
@@ -1168,6 +1217,8 @@ fn ensure_vba_project_rels_has_signature(
             reader.config_mut().trim_text(false);
             let mut writer = XmlWriter::new(Vec::with_capacity(existing.len() + 128));
             let mut buf = Vec::new();
+
+            let mut relationship_tag_name: Option<String> = None;
 
             let mut has_signature_rel = false;
             let mut changed = false;
@@ -1216,7 +1267,9 @@ fn ensure_vba_project_rels_has_signature(
                         *has_signature_rel = true;
                         *changed = true;
 
-                        let mut patched = BytesStart::new("Relationship");
+                        let tag_name = e.name();
+                        let tag_name = std::str::from_utf8(tag_name.as_ref()).unwrap_or("Relationship");
+                        let mut patched = BytesStart::new(tag_name);
                         let mut saw_target = false;
                         for attr in e.attributes().with_checks(false) {
                             let attr = attr?;
@@ -1250,8 +1303,41 @@ fn ensure_vba_project_rels_has_signature(
                 let event = reader.read_event_into(&mut buf)?;
                 match event {
                     Event::Start(e)
+                        if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationships") =>
+                    {
+                        writer.write_event(Event::Start(e))?;
+                    }
+                    Event::Empty(e)
+                        if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationships") =>
+                    {
+                        // Degenerate case: self-closing `<Relationships/>` root; expand to insert
+                        // the signature relationship.
+                        changed = true;
+                        let relationships_tag_name =
+                            String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                        let relationship_tag_name = relationship_tag_name.clone().unwrap_or_else(|| {
+                            prefixed_tag(relationships_tag_name.as_bytes(), "Relationship")
+                        });
+
+                        writer.write_event(Event::Start(e))?;
+
+                        let next_rid = max_rid + 1;
+                        let rel_id = format!("rId{next_rid}");
+                        let mut rel = BytesStart::new(relationship_tag_name.as_str());
+                        rel.push_attribute(("Id", rel_id.as_str()));
+                        rel.push_attribute(("Type", REL_TYPE));
+                        rel.push_attribute(("Target", TARGET));
+                        writer.write_event(Event::Empty(rel))?;
+
+                        writer.write_event(Event::End(BytesEnd::new(relationships_tag_name.as_str())))?;
+                    }
+                    Event::Start(e)
                         if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationship") =>
                     {
+                        if relationship_tag_name.is_none() {
+                            relationship_tag_name =
+                                Some(String::from_utf8_lossy(e.name().as_ref()).into_owned());
+                        }
                         handle_relationship(
                             e,
                             true,
@@ -1264,6 +1350,10 @@ fn ensure_vba_project_rels_has_signature(
                     Event::Empty(e)
                         if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationship") =>
                     {
+                        if relationship_tag_name.is_none() {
+                            relationship_tag_name =
+                                Some(String::from_utf8_lossy(e.name().as_ref()).into_owned());
+                        }
                         handle_relationship(
                             e,
                             false,
@@ -1278,33 +1368,18 @@ fn ensure_vba_project_rels_has_signature(
                     {
                         if !has_signature_rel {
                             changed = true;
+                            let relationship_tag_name = relationship_tag_name.clone().unwrap_or_else(|| {
+                                prefixed_tag(e.name().as_ref(), "Relationship")
+                            });
                             let next_rid = max_rid + 1;
                             let rel_id = format!("rId{next_rid}");
-                            let mut rel = BytesStart::new("Relationship");
+                            let mut rel = BytesStart::new(relationship_tag_name.as_str());
                             rel.push_attribute(("Id", rel_id.as_str()));
                             rel.push_attribute(("Type", REL_TYPE));
                             rel.push_attribute(("Target", TARGET));
                             writer.write_event(Event::Empty(rel))?;
                         }
                         writer.write_event(Event::End(e))?;
-                    }
-                    Event::Empty(e)
-                        if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationships") =>
-                    {
-                        // Degenerate case: self-closing `<Relationships/>` root; expand to insert
-                        // the signature relationship.
-                        changed = true;
-                        writer.write_event(Event::Start(e))?;
-
-                        let next_rid = max_rid + 1;
-                        let rel_id = format!("rId{next_rid}");
-                        let mut rel = BytesStart::new("Relationship");
-                        rel.push_attribute(("Id", rel_id.as_str()));
-                        rel.push_attribute(("Type", REL_TYPE));
-                        rel.push_attribute(("Target", TARGET));
-                        writer.write_event(Event::Empty(rel))?;
-
-                        writer.write_event(Event::End(BytesEnd::new("Relationships")))?;
                     }
                     Event::Eof => break,
                     other => writer.write_event(other)?,
@@ -1678,6 +1753,193 @@ mod tests {
                 rel.id
             );
         }
+    }
+
+    #[test]
+    fn repairs_xlsm_with_prefixed_content_types_xml() {
+        let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ct:Types xmlns:ct="http://schemas.openxmlformats.org/package/2006/content-types">
+  <ct:Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <ct:Default Extension="xml" ContentType="application/xml"/>
+  <ct:Override ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml" PartName="/xl/workbook.xml"/>
+</ct:Types>"#;
+
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+        let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+
+        let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"></worksheet>"#;
+
+        let bytes = build_package(&[
+            ("[Content_Types].xml", content_types.as_bytes()),
+            ("xl/workbook.xml", workbook_xml.as_bytes()),
+            ("xl/_rels/workbook.xml.rels", workbook_rels.as_bytes()),
+            ("xl/worksheets/sheet1.xml", worksheet_xml.as_bytes()),
+            ("xl/vbaProject.bin", b"fake-vba-project"),
+        ]);
+
+        let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+        let written = pkg.write_to_bytes().expect("write pkg");
+        let pkg2 = XlsxPackage::from_bytes(&written).expect("read pkg2");
+
+        let ct = std::str::from_utf8(pkg2.part("[Content_Types].xml").unwrap()).unwrap();
+        let doc = Document::parse(ct).expect("parse content types");
+
+        let ct_ns = "http://schemas.openxmlformats.org/package/2006/content-types";
+
+        let workbook_override = doc
+            .descendants()
+            .find(|n| {
+                n.is_element()
+                    && n.tag_name().name() == "Override"
+                    && n.attribute("PartName") == Some("/xl/workbook.xml")
+            })
+            .expect("workbook override");
+        assert_eq!(workbook_override.tag_name().namespace(), Some(ct_ns));
+        assert_eq!(
+            workbook_override.attribute("ContentType"),
+            Some("application/vnd.ms-excel.sheet.macroEnabled.main+xml")
+        );
+
+        let vba_override = doc
+            .descendants()
+            .find(|n| {
+                n.is_element()
+                    && n.tag_name().name() == "Override"
+                    && n.attribute("PartName") == Some("/xl/vbaProject.bin")
+            })
+            .expect("vbaProject override");
+        assert_eq!(vba_override.tag_name().namespace(), Some(ct_ns));
+        assert_eq!(
+            vba_override.attribute("ContentType"),
+            Some("application/vnd.ms-office.vbaProject")
+        );
+    }
+
+    #[test]
+    fn repairs_workbook_rels_with_prefixed_self_closing_root() {
+        let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+</Types>"#;
+
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+        // Self-closing root with a prefix (no default namespace).
+        let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pr:Relationships xmlns:pr="http://schemas.openxmlformats.org/package/2006/relationships"/>"#;
+
+        let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"></worksheet>"#;
+
+        let bytes = build_package(&[
+            ("[Content_Types].xml", content_types.as_bytes()),
+            ("xl/workbook.xml", workbook_xml.as_bytes()),
+            ("xl/_rels/workbook.xml.rels", workbook_rels.as_bytes()),
+            ("xl/worksheets/sheet1.xml", worksheet_xml.as_bytes()),
+            ("xl/vbaProject.bin", b"fake-vba-project"),
+        ]);
+
+        let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+        let written = pkg.write_to_bytes().expect("write pkg");
+        let pkg2 = XlsxPackage::from_bytes(&written).expect("read pkg2");
+
+        let rels_xml = std::str::from_utf8(pkg2.part("xl/_rels/workbook.xml.rels").unwrap()).unwrap();
+        let doc = Document::parse(rels_xml).expect("parse workbook rels");
+
+        let rel_ns = "http://schemas.openxmlformats.org/package/2006/relationships";
+        let vba_rel = doc
+            .descendants()
+            .find(|n| {
+                n.is_element()
+                    && n.tag_name().name() == "Relationship"
+                    && n.attribute("Type")
+                        == Some("http://schemas.microsoft.com/office/2006/relationships/vbaProject")
+            })
+            .expect("vbaProject relationship");
+        assert_eq!(vba_rel.tag_name().namespace(), Some(rel_ns));
+        assert_eq!(vba_rel.attribute("Target"), Some("vbaProject.bin"));
+        assert_eq!(vba_rel.attribute("Id"), Some("rId1"));
+    }
+
+    #[test]
+    fn repairs_vba_project_rels_with_prefixed_self_closing_root() {
+        let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="bin" ContentType="application/vnd.openxmlformats-officedocument.oleObject"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+</Types>"#;
+
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+        let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+
+        let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"></worksheet>"#;
+
+        let vba_project_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pr:Relationships xmlns:pr="http://schemas.openxmlformats.org/package/2006/relationships"/>"#;
+
+        let bytes = build_package(&[
+            ("[Content_Types].xml", content_types.as_bytes()),
+            ("xl/workbook.xml", workbook_xml.as_bytes()),
+            ("xl/_rels/workbook.xml.rels", workbook_rels.as_bytes()),
+            ("xl/worksheets/sheet1.xml", worksheet_xml.as_bytes()),
+            ("xl/vbaProject.bin", b"fake-vba-project"),
+            ("xl/vbaProjectSignature.bin", b"fake-signature"),
+            ("xl/_rels/vbaProject.bin.rels", vba_project_rels.as_bytes()),
+        ]);
+
+        let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+        let written = pkg.write_to_bytes().expect("write pkg");
+        let pkg2 = XlsxPackage::from_bytes(&written).expect("read pkg2");
+
+        let rels_xml =
+            std::str::from_utf8(pkg2.part("xl/_rels/vbaProject.bin.rels").unwrap()).unwrap();
+        let doc = Document::parse(rels_xml).expect("parse vbaProject.bin.rels");
+
+        let rel_ns = "http://schemas.openxmlformats.org/package/2006/relationships";
+        let sig_rel = doc
+            .descendants()
+            .find(|n| {
+                n.is_element()
+                    && n.tag_name().name() == "Relationship"
+                    && n.attribute("Type")
+                        == Some("http://schemas.microsoft.com/office/2006/relationships/vbaProjectSignature")
+            })
+            .expect("signature relationship");
+        assert_eq!(sig_rel.tag_name().namespace(), Some(rel_ns));
+        assert_eq!(sig_rel.attribute("Target"), Some("vbaProjectSignature.bin"));
+        assert_eq!(sig_rel.attribute("Id"), Some("rId1"));
     }
 
     #[test]
