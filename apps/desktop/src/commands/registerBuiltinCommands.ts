@@ -241,4 +241,64 @@ export function registerBuiltinCommands(params: {
       keywords: ["clear", "contents", "delete"],
     },
   );
+
+  commandRegistry.registerBuiltinCommand(
+    "edit.fillDown",
+    "Fill Down",
+    () => app.fillDown(),
+    {
+      category: "Editing",
+      icon: null,
+      description: "Fill the selection down (Excel: Ctrl+D)",
+      keywords: ["fill", "fill down", "excel"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "edit.fillRight",
+    "Fill Right",
+    () => app.fillRight(),
+    {
+      category: "Editing",
+      icon: null,
+      description: "Fill the selection right (Excel: Ctrl+R)",
+      keywords: ["fill", "fill right", "excel"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "edit.insertDate",
+    "Insert Date",
+    () => app.insertDate(),
+    {
+      category: "Editing",
+      icon: null,
+      description: "Insert the current date into the selection (Excel: Ctrl+;)",
+      keywords: ["date", "insert date", "excel"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "edit.insertTime",
+    "Insert Time",
+    () => app.insertTime(),
+    {
+      category: "Editing",
+      icon: null,
+      description: "Insert the current time into the selection (Excel: Ctrl+Shift+;)",
+      keywords: ["time", "insert time", "excel"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "edit.autoSum",
+    "AutoSum",
+    () => app.autoSum(),
+    {
+      category: "Editing",
+      icon: null,
+      description: "Insert a SUM formula based on adjacent numeric cells (Excel: Alt+=)",
+      keywords: ["autosum", "sum", "excel"],
+    },
+  );
 }

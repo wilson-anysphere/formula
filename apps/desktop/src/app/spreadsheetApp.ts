@@ -62,6 +62,7 @@ import { openExternalHyperlink } from "../hyperlinks/openExternal.js";
 import { shellOpen } from "../tauri/shellOpen.js";
 import { applyFillCommitToDocumentController } from "../fill/applyFillCommit";
 import type { CellRange as FillEngineRange, FillMode as FillHandleMode } from "@formula/fill-engine";
+import { dateToExcelSerial } from "../shared/valueParsing.js";
 
 import * as Y from "yjs";
 import { CommentManager, bindDocToStorage } from "@formula/collab-comments";
@@ -90,22 +91,6 @@ function looksLikeExternalHyperlink(text: string): boolean {
   // separator (`://`) or a `mailto:` prefix.
   if (/^mailto:/i.test(trimmed)) return true;
   return /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed);
-}
-
-function formatDateForInsertion(date: Date): string {
-  // Use a deterministic, Excel-like date string (MM/DD/YYYY without leading zeros).
-  // Store as plain text until we have a real date serial + number-format layer.
-  const month = date.getMonth() + 1;
-  const day = date.getDate();
-  const year = date.getFullYear();
-  return `${month}/${day}/${year}`;
-}
-
-function formatTimeForInsertion(date: Date): string {
-  // Use 24h time with a 2-digit minute component. Store as plain text.
-  const hours = date.getHours();
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  return `${hours}:${minutes}`;
 }
 
 /**
@@ -2048,6 +2033,32 @@ export class SpreadsheetApp {
     if (picked.row < headerRows || picked.col < headerCols) return null;
 
     return { row: picked.row - headerRows, col: picked.col - headerCols };
+  }
+
+  fillDown(): void {
+    this.applyFillShortcut("down");
+  }
+
+  fillRight(): void {
+    this.applyFillShortcut("right");
+  }
+
+  insertDate(): void {
+    this.insertCurrentDateTimeIntoSelection("date");
+    this.refresh();
+    this.focus();
+  }
+
+  insertTime(): void {
+    this.insertCurrentDateTimeIntoSelection("time");
+    this.refresh();
+    this.focus();
+  }
+
+  autoSum(): void {
+    this.autoSumSelection();
+    this.refresh();
+    this.focus();
   }
 
   subscribeSelection(listener: (selection: SelectionState) => void): () => void {
@@ -5202,7 +5213,7 @@ export class SpreadsheetApp {
     if (operations.length === 0) return;
 
     // Explicit batch so multi-range selections become a single undo step.
-    this.document.beginBatch({ label: "Fill" });
+    this.document.beginBatch({ label: direction === "down" ? "Fill Down" : "Fill Right" });
     try {
       for (const op of operations) {
         applyFillCommitToDocumentController({
@@ -5228,6 +5239,11 @@ export class SpreadsheetApp {
     }
     if (this.editor.isOpen()) {
       // The editor handles Enter/Tab/Escape itself. We keep focus on the textarea.
+      return;
+    }
+
+    const target = e.target as HTMLElement | null;
+    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
       return;
     }
 
@@ -5285,7 +5301,6 @@ export class SpreadsheetApp {
     }
 
     const primary = e.ctrlKey || e.metaKey;
-
     // Excel-style fill shortcuts:
     // - Ctrl/Cmd+D: Fill Down
     // - Ctrl/Cmd+R: Fill Right
@@ -5293,14 +5308,14 @@ export class SpreadsheetApp {
     if (primary && !e.altKey && !e.shiftKey && (e.key === "d" || e.key === "D")) {
       if (this.formulaBar?.isEditing() || this.formulaEditCell) return;
       e.preventDefault();
-      this.applyFillShortcut("down");
+      this.fillDown();
       return;
     }
 
     if (primary && !e.altKey && !e.shiftKey && (e.key === "r" || e.key === "R")) {
       if (this.formulaBar?.isEditing() || this.formulaEditCell) return;
       e.preventDefault();
-      this.applyFillShortcut("right");
+      this.fillRight();
       return;
     }
 
@@ -5506,43 +5521,61 @@ export class SpreadsheetApp {
     }
 
     e.preventDefault();
-    this.insertCurrentDateTimeIntoSelection(e.shiftKey ? "time" : "date");
-    this.refresh();
+    if (e.shiftKey) this.insertTime();
+    else this.insertDate();
     return true;
   }
 
   private insertCurrentDateTimeIntoSelection(kind: "date" | "time"): void {
     const now = new Date();
-    const value = kind === "date" ? formatDateForInsertion(now) : formatTimeForInsertion(now);
 
-    const ranges = this.selection.ranges.length > 0 ? this.selection.ranges : [];
-    const active = this.selection.active;
-
-    const MAX_CELLS = 10_000;
-    let totalCells = 0;
-    for (const range of ranges) {
-      const rows = range.endRow - range.startRow + 1;
-      const cols = range.endCol - range.startCol + 1;
-      if (rows <= 0 || cols <= 0) continue;
-      totalCells += rows * cols;
-      if (totalCells > MAX_CELLS) break;
-    }
-
-    const inputs: Array<{ sheetId: string; row: number; col: number; value: string; formula: null }> = [];
-
-    if (totalCells > MAX_CELLS || ranges.length === 0) {
-      inputs.push({ sheetId: this.sheetId, row: active.row, col: active.col, value, formula: null });
-    } else {
-      for (const range of ranges) {
-        for (let row = range.startRow; row <= range.endRow; row += 1) {
-          for (let col = range.startCol; col <= range.endCol; col += 1) {
-            inputs.push({ sheetId: this.sheetId, row, col, value, formula: null });
-          }
-        }
+    const serialValue = (() => {
+      if (kind === "date") {
+        // Excel stores dates/times as a floating-point serial number (1900 date system).
+        // Use UTC midnight so the inserted value is stable and deterministic.
+        const dateUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+        return dateToExcelSerial(dateUtc);
       }
-    }
 
-    this.document.setCellInputs(inputs, { label: kind === "date" ? "Insert Date" : "Insert Time" });
+      // Time-only: use the fractional part (rounded to seconds) so formatting as hh:mm:ss
+      // shows the current time without pinning it to a specific date.
+      const serialNow = dateToExcelSerial(now);
+      const frac = serialNow - Math.floor(serialNow);
+      return Math.round(frac * 86_400) / 86_400;
+    })();
+
+    const numberFormat = kind === "date" ? "yyyy-mm-dd" : "hh:mm:ss";
+    const label = kind === "date" ? "Insert Date" : "Insert Time";
+
+    const normalizeRange = (range: Range): Range => ({
+      startRow: Math.min(range.startRow, range.endRow),
+      endRow: Math.max(range.startRow, range.endRow),
+      startCol: Math.min(range.startCol, range.endCol),
+      endCol: Math.max(range.startCol, range.endCol),
+    });
+
+    this.document.beginBatch({ label });
+    try {
+      for (const rawRange of this.selection.ranges) {
+        const range = normalizeRange(rawRange);
+        const rowCount = range.endRow - range.startRow + 1;
+        const colCount = range.endCol - range.startCol + 1;
+        if (rowCount <= 0 || colCount <= 0) continue;
+
+        const values = Array.from({ length: rowCount }, () => Array.from({ length: colCount }, () => serialValue));
+        this.document.setRangeValues(this.sheetId, { row: range.startRow, col: range.startCol }, values);
+        this.document.setRangeFormat(
+          this.sheetId,
+          {
+            start: { row: range.startRow, col: range.startCol },
+            end: { row: range.endRow, col: range.endCol },
+          },
+          { numberFormat },
+        );
+      }
+    } finally {
+      this.document.endBatch();
+    }
   }
 
   private handleAutoSumShortcut(e: KeyboardEvent): boolean {
@@ -5555,46 +5588,46 @@ export class SpreadsheetApp {
     if (this.formulaBar?.isEditing() || this.formulaEditCell) return false;
 
     e.preventDefault();
-    this.autoSumSelection();
+    this.autoSum();
     return true;
   }
 
   private autoSumSelection(): void {
-    const range = this.selection.ranges[this.selection.activeRangeIndex] ?? this.selection.ranges[0];
-    if (!range) return;
+    const active = this.selection.active;
+    const sheetId = this.sheetId;
 
-    const target = this.autoSumTargetCell(range);
-    if (!target) return;
+    const isNumericishCell = (row: number, col: number): boolean => {
+      const state = this.document.getCell(sheetId, { row, col }) as { value: unknown; formula: string | null };
+      if (!state) return false;
+      if (state.formula != null) {
+        const computed = this.getCellComputedValue({ row, col });
+        return typeof computed === "number" && Number.isFinite(computed);
+      }
+      return coerceNumber(state.value) != null;
+    };
 
-    const formula = `=SUM(${rangeToA1(range)})`;
-    this.document.setCellInput(this.sheetId, target, formula, { label: "AutoSum" });
-    this.activateCell({ row: target.row, col: target.col });
-    this.refresh();
-  }
+    const sumRange = (() => {
+      // Prefer a contiguous numeric block above the active cell in the same column.
+      if (active.row > 0 && isNumericishCell(active.row - 1, active.col)) {
+        let startRow = active.row - 1;
+        while (startRow > 0 && isNumericishCell(startRow - 1, active.col)) startRow -= 1;
+        return { startRow, endRow: active.row - 1, startCol: active.col, endCol: active.col };
+      }
 
-  private autoSumTargetCell(range: Range): CellCoord | null {
-    const inBounds = (cell: CellCoord): boolean =>
-      cell.row >= 0 && cell.col >= 0 && cell.row < this.limits.maxRows && cell.col < this.limits.maxCols;
+      // Else, try a contiguous block to the left in the same row.
+      if (active.col > 0 && isNumericishCell(active.row, active.col - 1)) {
+        let startCol = active.col - 1;
+        while (startCol > 0 && isNumericishCell(active.row, startCol - 1)) startCol -= 1;
+        return { startRow: active.row, endRow: active.row, startCol, endCol: active.col - 1 };
+      }
 
-    const isSingleCol = range.startCol === range.endCol;
-    const isSingleRow = range.startRow === range.endRow;
+      return null;
+    })();
 
-    if (isSingleCol) {
-      const below = { row: range.endRow + 1, col: range.startCol };
-      return inBounds(below) ? below : null;
-    }
+    if (!sumRange) return;
 
-    if (isSingleRow) {
-      const right = { row: range.startRow, col: range.endCol + 1 };
-      return inBounds(right) ? right : null;
-    }
-
-    const diag = { row: range.endRow + 1, col: range.endCol + 1 };
-    if (inBounds(diag)) return diag;
-
-    // Fall back to a cell directly below the selected range.
-    const below = { row: range.endRow + 1, col: range.endCol };
-    return inBounds(below) ? below : null;
+    const formula = `=SUM(${rangeToA1(sumRange)})`;
+    this.document.setCellInput(this.sheetId, active, formula, { label: "AutoSum" });
   }
 
   private shouldHandleSpreadsheetClipboardCommand(): boolean {

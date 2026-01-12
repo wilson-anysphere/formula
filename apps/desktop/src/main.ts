@@ -1620,6 +1620,11 @@ if (
     { command: "edit.replace", key: "ctrl+h", mac: "cmd+h" },
     { command: "navigation.goTo", key: "ctrl+g", mac: "cmd+g" },
     { command: "edit.clearContents", key: "delete", mac: "backspace" },
+    { command: "edit.fillDown", key: "ctrl+d", mac: "cmd+d" },
+    { command: "edit.fillRight", key: "ctrl+r", mac: "cmd+r" },
+    { command: "edit.insertDate", key: "ctrl+;", mac: "cmd+;" },
+    { command: "edit.insertTime", key: "ctrl+shift+;", mac: "cmd+shift+;" },
+    { command: "edit.autoSum", key: "alt+=", mac: "option+=" },
   ];
 
   const syncContributedCommands = () => {
