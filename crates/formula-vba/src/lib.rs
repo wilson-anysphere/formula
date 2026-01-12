@@ -124,7 +124,7 @@ impl VBAProject {
 
         if let Some(project_stream_bytes) = project_stream_bytes.as_deref() {
             let text = decode_with_encoding(project_stream_bytes, encoding);
-            for line in text.lines() {
+            for line in split_crlf_lines(&text) {
                 if let Some(rest) = line.strip_prefix("Name=") {
                     name_from_project_stream = Some(rest.trim_matches('"').to_owned());
                 } else if let Some(rest) = line.strip_prefix("Reference=") {
@@ -252,6 +252,12 @@ fn detect_project_codepage(project_stream_bytes: &[u8]) -> Option<&'static Encod
     }
 
     None
+}
+
+fn split_crlf_lines<'a>(text: &'a str) -> impl Iterator<Item = &'a str> {
+    text.split(|c| c == '\n' || c == '\r')
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
 }
 
 fn encoding_for_codepage(codepage: u32) -> &'static Encoding {
@@ -492,6 +498,58 @@ mod tests {
         let bytes = b"\xEF\xBB\xBFCodePage=1251\r\n";
         let enc = detect_project_codepage(bytes).expect("detect CodePage");
         assert_eq!(enc, WINDOWS_1251);
+    }
+
+    #[test]
+    fn parses_project_stream_with_cr_line_endings() {
+        use std::io::{Cursor, Write};
+
+        let module_code = "Sub Hello()\r\nEnd Sub\r\n";
+        let module_container = compress_container(module_code.as_bytes());
+
+        let dir_decompressed = {
+            let mut out = Vec::new();
+            // Omit PROJECTNAME (0x0004) so project name comes from PROJECT stream parsing.
+
+            // MODULENAME / MODULESTREAMNAME
+            push_record(&mut out, 0x0019, b"Module1");
+            let mut stream_name = Vec::new();
+            stream_name.extend_from_slice(b"Module1");
+            stream_name.extend_from_slice(&0u16.to_le_bytes());
+            push_record(&mut out, 0x001A, &stream_name);
+
+            // MODULETYPE (standard) + MODULETEXTOFFSET (0)
+            push_record(&mut out, 0x0021, &0u16.to_le_bytes());
+            push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+            out
+        };
+        let dir_container = compress_container(&dir_decompressed);
+
+        // CR-only PROJECT stream lines.
+        let project_stream = b"CodePage=1252\rName=\"MyProj\"\rModule=Module1\r";
+
+        let cursor = Cursor::new(Vec::new());
+        let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+        {
+            let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+            s.write_all(project_stream).expect("write PROJECT");
+        }
+        ole.create_storage("VBA").expect("VBA storage");
+        {
+            let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+            s.write_all(&dir_container).expect("write dir");
+        }
+        {
+            let mut s = ole.create_stream("VBA/Module1").expect("module stream");
+            s.write_all(&module_container).expect("write module");
+        }
+
+        let vba_bin = ole.into_inner().into_inner();
+        let project = VBAProject::parse(&vba_bin).expect("parse");
+        assert_eq!(project.name.as_deref(), Some("MyProj"));
+
+        let module = project.modules.iter().find(|m| m.name == "Module1").unwrap();
+        assert!(module.code.contains("Sub Hello"));
     }
 
     #[test]

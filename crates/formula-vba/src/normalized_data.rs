@@ -110,8 +110,7 @@ fn parse_project_designer_modules(
 ) -> Vec<String> {
     let (cow, _, _) = encoding.decode(project_stream_bytes);
     let mut out = Vec::new();
-    for line in cow.split(|c| c == '\r' || c == '\n') {
-        let line = line.trim();
+    for line in crate::split_crlf_lines(cow.as_ref()) {
         let Some((key, rest)) = line.split_once('=') else {
             continue;
         };
