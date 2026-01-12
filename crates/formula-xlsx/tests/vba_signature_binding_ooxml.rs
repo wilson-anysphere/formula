@@ -204,7 +204,9 @@ fn build_xlsm_with_external_signature(project_ole: &[u8], signature_ole: &[u8]) 
 #[test]
 fn verifies_project_digest_binding_with_external_signature_part() {
     let project_ole = build_vba_project_bin(b'A');
-    let digest = compute_vba_project_digest(&project_ole, DigestAlg::Sha1).expect("digest");
+    // Per MS-OSHARED §4.3, VBA signature DigestInfo digest bytes are MD5 (16 bytes) even when the
+    // DigestInfo algorithm OID indicates SHA-1/SHA-256.
+    let digest = compute_vba_project_digest(&project_ole, DigestAlg::Md5).expect("digest");
 
     // VBA signatures sign an Authenticode `SpcIndirectDataContent` whose DigestInfo is the
     // project digest. We store it as:
