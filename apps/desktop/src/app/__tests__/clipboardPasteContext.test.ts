@@ -29,6 +29,25 @@ describe("clipboardPasteContext", () => {
     expect(nextContext).toEqual(initialContext);
   });
 
+  it("treats rtf-only clipboard reads as internal when extracted text matches the last internal plain-text payload", () => {
+    const initialContext = {
+      range: { startRow: 0, endRow: 0, startCol: 0, endCol: 1 },
+      payload: {
+        text: "A\tB",
+        html: "<table><tr><td>A</td><td>B</td></tr></table>",
+        rtf: "{\\rtf1\\ansi A\\cell B\\row}",
+      },
+      cells: [[{ value: "A", formula: null, styleId: 0 }, { value: "B", formula: null, styleId: 0 }]],
+    };
+
+    // Different RTF payload (uses \tab/\par), but extracts to the same TSV text.
+    const content = { rtf: "{\\rtf1\\ansi\\deff0\\uc1\\pard A\\tab B\\par}" };
+    const { isInternalPaste, nextContext } = reconcileClipboardCopyContextForPaste(initialContext, content);
+
+    expect(isInternalPaste).toBe(true);
+    expect(nextContext).toEqual(initialContext);
+  });
+
   it("treats image-only clipboard reads (pngBase64) as usable and clears stale context", () => {
     const initialContext = {
       range: { startRow: 0, endRow: 0, startCol: 0, endCol: 0 },

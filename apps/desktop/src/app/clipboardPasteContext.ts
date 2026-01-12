@@ -1,3 +1,5 @@
+import { extractPlainTextFromRtf } from "../clipboard/index.js";
+
 type ClipboardPayload = { text?: string; html?: string; rtf?: string };
 
 export type ClipboardCopyContextLike = { payload: ClipboardPayload };
@@ -46,10 +48,25 @@ export function detectInternalPaste(ctx: ClipboardCopyContextLike | null, conten
   const htmlMatches =
     typeof content.html === "string" && typeof ctx.payload.html === "string" && content.html === ctx.payload.html;
 
-  const rtfMatches =
-    typeof content.rtf === "string" &&
-    typeof ctx.payload.rtf === "string" &&
-    normalizeClipboardRtf(content.rtf) === normalizeClipboardRtf(ctx.payload.rtf);
+  const rtfMatches = (() => {
+    if (typeof content.rtf !== "string") return false;
+
+    if (typeof ctx.payload.rtf === "string" && normalizeClipboardRtf(content.rtf) === normalizeClipboardRtf(ctx.payload.rtf)) {
+      return true;
+    }
+
+    // Some platforms expose only `text/rtf` on read. If the RTF payload was rewritten (whitespace,
+    // font tables, etc) but the extracted TSV matches our internal copy payload, still treat it as
+    // an internal paste so formula shifting applies.
+    if (typeof ctx.payload.text === "string") {
+      const extracted = extractPlainTextFromRtf(content.rtf);
+      if (extracted && normalizeClipboardText(extracted) === normalizeClipboardText(ctx.payload.text)) {
+        return true;
+      }
+    }
+
+    return false;
+  })();
 
   return textMatches || htmlMatches || rtfMatches;
 }
