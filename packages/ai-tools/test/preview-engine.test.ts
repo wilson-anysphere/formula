@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { PreviewEngine } from "../src/preview/preview-engine.js";
 import { InMemoryWorkbook } from "../src/spreadsheet/in-memory-workbook.js";
 import { parseA1Cell } from "../src/spreadsheet/a1.js";
+import type { CreateChartResult, CreateChartSpec, SpreadsheetApi } from "../src/spreadsheet/api.js";
 
 describe("PreviewEngine", () => {
   afterEach(() => {
@@ -129,5 +130,152 @@ describe("PreviewEngine", () => {
     expect(preview.summary.total_changes).toBe(0);
     expect(preview.requires_approval).toBe(false);
     expect(preview.tool_results[0]?.ok).toBe(true);
+  });
+
+  it("resolves display sheet names via executorOptions.sheet_name_resolver", async () => {
+    const sheetNameResolver = {
+      getSheetIdByName(name: string) {
+        return name.toLowerCase() === "budget" ? "Sheet2" : null;
+      },
+      getSheetNameById(id: string) {
+        return id === "Sheet2" ? "Budget" : null;
+      }
+    };
+
+    class StrictWorkbook implements SpreadsheetApi {
+      private readonly inner: InMemoryWorkbook;
+      private readonly chartCalls: CreateChartSpec[];
+
+      constructor(sheetNames: string[], chartCalls: CreateChartSpec[]) {
+        this.inner = new InMemoryWorkbook(sheetNames);
+        this.chartCalls = chartCalls;
+      }
+
+      private assertSheetExists(sheet: string): void {
+        if (!this.inner.listSheets().includes(sheet)) {
+          throw new Error(`Unknown sheet "${sheet}"`);
+        }
+      }
+
+      clone(): SpreadsheetApi {
+        // Keep the same chart call recorder across clones so PreviewEngine tests can
+        // observe what the simulated workbook invoked.
+        const next = new StrictWorkbook([], this.chartCalls);
+        (next as any).inner = this.inner.clone();
+        return next;
+      }
+
+      listSheets(): string[] {
+        return this.inner.listSheets();
+      }
+      listNonEmptyCells(sheet?: string) {
+        if (sheet) this.assertSheetExists(sheet);
+        return this.inner.listNonEmptyCells(sheet);
+      }
+      getCell(address: any) {
+        this.assertSheetExists(address.sheet);
+        return this.inner.getCell(address);
+      }
+      setCell(address: any, cell: any) {
+        this.assertSheetExists(address.sheet);
+        return this.inner.setCell(address, cell);
+      }
+      readRange(range: any) {
+        this.assertSheetExists(range.sheet);
+        return this.inner.readRange(range);
+      }
+      writeRange(range: any, cells: any) {
+        this.assertSheetExists(range.sheet);
+        return this.inner.writeRange(range, cells);
+      }
+      applyFormatting(range: any, format: any) {
+        this.assertSheetExists(range.sheet);
+        return this.inner.applyFormatting(range, format);
+      }
+      getLastUsedRow(sheet: string) {
+        this.assertSheetExists(sheet);
+        return this.inner.getLastUsedRow(sheet);
+      }
+      createChart(spec: CreateChartSpec): CreateChartResult {
+        this.chartCalls.push(spec);
+        return { chart_id: `chart_${this.chartCalls.length}` };
+      }
+    }
+
+    const chartCalls: CreateChartSpec[] = [];
+    const workbook = new StrictWorkbook(["Sheet2"], chartCalls);
+    const previewEngine = new PreviewEngine();
+
+    const preview = await previewEngine.generatePreview(
+      [
+        {
+          name: "write_cell",
+          parameters: { cell: "Budget!A1", value: 1 }
+        }
+      ],
+      workbook,
+      { default_sheet: "Sheet2", sheet_name_resolver: sheetNameResolver }
+    );
+
+    expect(preview.tool_results[0]?.ok).toBe(true);
+    expect(preview.tool_results[0]?.tool).toBe("write_cell");
+    expect((preview.tool_results[0] as any)?.data?.cell).toBe("Budget!A1");
+
+    // Preview does not mutate the live workbook.
+    expect(workbook.listNonEmptyCells()).toEqual([]);
+  });
+
+  it("passes stable sheet ids to createChart during preview when using sheet_name_resolver", async () => {
+    const sheetNameResolver = {
+      getSheetIdByName(name: string) {
+        return name.toLowerCase() === "budget" ? "Sheet2" : null;
+      },
+      getSheetNameById(id: string) {
+        return id === "Sheet2" ? "Budget" : null;
+      }
+    };
+
+    class CapturingWorkbook extends InMemoryWorkbook {
+      constructor(sheetNames: string[], private readonly calls: CreateChartSpec[]) {
+        super(sheetNames);
+      }
+
+      override clone(): CapturingWorkbook {
+        const next = new CapturingWorkbook([], this.calls);
+        // Copy internal state via base clone, then copy its private fields onto the wrapper.
+        const cloned = super.clone() as any;
+        (next as any).sheets = cloned.sheets;
+        (next as any).nextChartId = cloned.nextChartId;
+        (next as any).charts = cloned.charts;
+        return next;
+      }
+
+      override createChart(spec: CreateChartSpec): CreateChartResult {
+        this.calls.push(spec);
+        return { chart_id: `chart_${this.calls.length}` };
+      }
+    }
+
+    const chartCalls: CreateChartSpec[] = [];
+    const workbook = new CapturingWorkbook(["Sheet2"], chartCalls);
+    const previewEngine = new PreviewEngine();
+
+    const preview = await previewEngine.generatePreview(
+      [
+        {
+          name: "create_chart",
+          parameters: { chart_type: "bar", data_range: "Budget!A1:B3", title: "Sales" }
+        }
+      ],
+      workbook,
+      { default_sheet: "Sheet2", sheet_name_resolver: sheetNameResolver }
+    );
+
+    expect(preview.tool_results[0]?.ok).toBe(true);
+    expect(preview.tool_results[0]?.tool).toBe("create_chart");
+    expect((preview.tool_results[0] as any)?.data?.data_range).toBe("Budget!A1:B3");
+
+    expect(chartCalls).toHaveLength(1);
+    expect(chartCalls[0]?.data_range).toBe("Sheet2!A1:B3");
   });
 });
