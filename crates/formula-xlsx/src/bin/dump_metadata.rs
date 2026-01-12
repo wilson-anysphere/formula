@@ -1,18 +1,29 @@
+#[cfg(not(target_arch = "wasm32"))]
 use std::error::Error;
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs;
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::Cursor;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 
+#[cfg(not(target_arch = "wasm32"))]
 use formula_xlsx::metadata::parse_metadata_xml;
+#[cfg(not(target_arch = "wasm32"))]
 use formula_xlsx::openxml;
+#[cfg(not(target_arch = "wasm32"))]
 use formula_xlsx::XlsxPackage;
+#[cfg(not(target_arch = "wasm32"))]
 use quick_xml::events::Event;
+#[cfg(not(target_arch = "wasm32"))]
 use quick_xml::Reader;
+#[cfg(not(target_arch = "wasm32"))]
 use std::cmp::Ordering;
 
+#[cfg(not(target_arch = "wasm32"))]
 const MAX_CELL_REFS: usize = 10;
 
+#[cfg(not(target_arch = "wasm32"))]
 fn usage() -> &'static str {
     "dump_metadata <path.xlsx|path.xlsm>\n\
 \n\
@@ -53,6 +64,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn dump_metadata_xml(pkg: &XlsxPackage) {
     println!("[xl/metadata.xml]");
 
@@ -121,6 +133,7 @@ fn dump_metadata_xml(pkg: &XlsxPackage) {
     println!();
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn dump_metadata_relationships(pkg: &XlsxPackage) {
     println!("[xl/_rels/metadata.xml.rels]");
 
@@ -165,6 +178,7 @@ fn dump_metadata_relationships(pkg: &XlsxPackage) {
     println!();
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn dump_richdata_parts(pkg: &XlsxPackage) {
     println!("[xl/richData/*]");
 
@@ -182,6 +196,7 @@ fn dump_richdata_parts(pkg: &XlsxPackage) {
     println!();
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Default)]
 struct WorksheetCellMetadataSummary {
     cm_cells: usize,
@@ -191,6 +206,7 @@ struct WorksheetCellMetadataSummary {
     warning: Option<String>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn dump_worksheet_vm_cm_summary(pkg: &XlsxPackage) {
     println!("[xl/worksheets/sheet*.xml vm/cm]");
 
@@ -232,6 +248,7 @@ fn dump_worksheet_vm_cm_summary(pkg: &XlsxPackage) {
     println!();
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn relationship_id_sort_cmp(a: &str, b: &str) -> Ordering {
     match (parse_rid_index(a), parse_rid_index(b)) {
         (Some(ai), Some(bi)) => ai.cmp(&bi).then_with(|| a.cmp(b)),
@@ -241,6 +258,7 @@ fn relationship_id_sort_cmp(a: &str, b: &str) -> Ordering {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn worksheet_part_sort_cmp(a: &str, b: &str) -> Ordering {
     match (parse_sheet_index(a), parse_sheet_index(b)) {
         (Some(ai), Some(bi)) => ai.cmp(&bi).then_with(|| a.cmp(b)),
@@ -250,6 +268,7 @@ fn worksheet_part_sort_cmp(a: &str, b: &str) -> Ordering {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn parse_rid_index(id: &str) -> Option<u32> {
     let prefix = id.get(0..3)?;
     if !prefix.eq_ignore_ascii_case("rid") {
@@ -258,6 +277,7 @@ fn parse_rid_index(id: &str) -> Option<u32> {
     id[3..].parse().ok()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn parse_sheet_index(part_name: &str) -> Option<u32> {
     let file_name = part_name.rsplit('/').next()?;
     let rest = file_name.strip_prefix("sheet")?;
@@ -265,6 +285,7 @@ fn parse_sheet_index(part_name: &str) -> Option<u32> {
     num.parse().ok()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn format_first_refs(total: usize, refs: &[String]) -> String {
     if refs.is_empty() {
         return String::new();
@@ -272,6 +293,7 @@ fn format_first_refs(total: usize, refs: &[String]) -> String {
     format!(" (first {} of {}: {})", refs.len(), total, refs.join(", "))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn scan_worksheet_cells_for_vm_cm(bytes: &[u8], max_refs: usize) -> WorksheetCellMetadataSummary {
     let mut summary = WorksheetCellMetadataSummary::default();
 

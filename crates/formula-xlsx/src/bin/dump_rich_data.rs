@@ -1,3 +1,4 @@
+#[cfg(not(target_arch = "wasm32"))]
 use std::error::Error;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -16,6 +17,7 @@ use formula_xlsx::metadata::parse_metadata_xml;
 #[cfg(not(target_arch = "wasm32"))]
 use formula_xlsx::{parse_value_metadata_vm_to_rich_value_index_map, XlsxPackage};
 
+#[cfg(not(target_arch = "wasm32"))]
 fn usage() -> &'static str {
     "dump_rich_data <path.xlsx> [--print-parts]\n\
 \n\

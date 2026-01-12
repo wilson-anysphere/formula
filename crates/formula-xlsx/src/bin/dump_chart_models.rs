@@ -1,14 +1,22 @@
+#[cfg(not(target_arch = "wasm32"))]
 use std::error::Error;
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 
+#[cfg(not(target_arch = "wasm32"))]
 use formula_model::charts::ChartModel;
+#[cfg(not(target_arch = "wasm32"))]
 use formula_model::drawings::Anchor;
+#[cfg(not(target_arch = "wasm32"))]
 use formula_xlsx::drawingml::charts::parse_chart_space;
+#[cfg(not(target_arch = "wasm32"))]
 use formula_xlsx::XlsxPackage;
+#[cfg(not(target_arch = "wasm32"))]
 use serde::{Deserialize, Serialize};
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ChartParts {
@@ -19,6 +27,7 @@ struct ChartParts {
     colors_part: Option<String>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ChartFixtureModel {
@@ -29,6 +38,7 @@ struct ChartFixtureModel {
     model: ChartModel,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn usage() -> &'static str {
     "dump_chart_models <path.xlsx|dir> [--out-dir <dir>] [--print-parts]\n\
 \n\
