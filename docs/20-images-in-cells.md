@@ -160,7 +160,7 @@ Observed root namespaces (from in-repo tests; Excel versions may vary):
 - `http://schemas.microsoft.com/office/spreadsheetml/2019/cellimages`
 - `http://schemas.microsoft.com/office/spreadsheetml/2022/cellimages`
 
-Representative example (from `crates/formula-xlsx/tests/cell_images.rs`):
+Representative example (from `crates/formula-xlsx/tests/cell_images.rs`; non-normative):
 
 ```xml
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -256,6 +256,12 @@ Observed values (from in-repo tests; preserve whatever is in the source workbook
 - `application/vnd.ms-excel.cellimages+xml`
   - used by `crates/formula-xlsx/tests/cellimages_preservation.rs`
 
+Excel uses Microsoft-specific content type strings for this part, and the exact string may vary across
+versions/builds.
+
+**Round-trip rule:** treat any `<Override PartName="/xl/cellimages.xml" .../>` as authoritative and
+preserve its `ContentType` value byte-for-byte (do not hardcode a single MIME type in the writer).
+
 ### Other content types (TODO: fixture-driven)
 
 Content types for `xl/metadata.xml` and `xl/richData/*` still need confirmation from a real Excel-exported
@@ -285,6 +291,13 @@ Known (stable, used across OOXML):
 
 - Image relationships (used by DrawingML and expected to be used by `cellimages.xml`):
   - `http://schemas.openxmlformats.org/officeDocument/2006/relationships/image`
+
+Partially known (fixture-driven details still recommended):
+
+- Workbook → `xl/cellimages.xml` relationship:
+  - Excel uses a Microsoft-extension relationship `Type` URI that has been observed to vary.
+  - **Round-trip / detection rule:** identify the relationship by resolved `Target` (`/xl/cellimages.xml`)
+    rather than hardcoding a single `Type`.
 
 TODO (confirm via real Excel fixture, then harden parsers/writers):
 
