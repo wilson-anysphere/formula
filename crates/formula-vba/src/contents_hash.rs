@@ -406,11 +406,28 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
                 }
             }
 
-            // MODULETYPE (u16 LE).
+            // MODULETYPE
+            //
+            // MS-OVBA defines MODULETYPE records with an `Id` of either:
+            // - 0x0021 (procedural module)
+            // - 0x0022 (non-procedural module)
+            //
+            // For the v3 transcript (MS-OVBA §2.4.2.5), we only append the module's TypeRecord bytes
+            // when `TypeRecord.Id == 0x0021`, and the bytes to append are:
+            // `TypeRecord.Id (u16 LE) || TypeRecord.Reserved (u16 LE)`.
             0x0021 => {
                 if let Some(m) = current_module.as_mut() {
-                    m.transcript_prefix.extend_from_slice(data);
+                    m.transcript_prefix.extend_from_slice(&0x0021u16.to_le_bytes());
+                    if data.len() >= 2 {
+                        m.transcript_prefix.extend_from_slice(&data[..2]);
+                    } else {
+                        m.transcript_prefix.extend_from_slice(&0u16.to_le_bytes());
+                    }
                 }
+            }
+            0x0022 => {
+                // Explicitly ignored: non-procedural module type records do not contribute to the
+                // v3 transcript per MS-OVBA §2.4.2.5 pseudocode.
             }
 
             // MODULETEXTOFFSET (u32 LE).

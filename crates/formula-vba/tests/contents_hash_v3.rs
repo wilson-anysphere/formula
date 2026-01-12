@@ -92,8 +92,9 @@ fn build_contents_hash_v3_project(module_source: &[u8], designer_stream_bytes: &
     let project_stream = b"Name=\"VBAProject\"\r\nBaseClass=\"UserForm1\"\r\n";
 
     // Minimal decompressed `VBA/dir` stream for:
-    // - one standard module (`Module1`)
-    // - one UserForm module (`UserForm1`) whose designer storage is `UserForm1/*`
+    // - one procedural module (`Module1`; TypeRecord.Id=0x0021)
+    // - one non-procedural module (`UserForm1`; TypeRecord.Id=0x0022) whose designer storage is
+    //   `UserForm1/*`
     let dir_decompressed = {
         let mut out = Vec::new();
 
@@ -103,7 +104,8 @@ fn build_contents_hash_v3_project(module_source: &[u8], designer_stream_bytes: &
         stream_name.extend_from_slice(b"Module1");
         stream_name.extend_from_slice(&0u16.to_le_bytes());
         push_record(&mut out, 0x001A, &stream_name);
-        push_record(&mut out, 0x0021, &0u16.to_le_bytes()); // standard
+        // Procedural module type record (Id=0x0021): reserved u16
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes());
         push_record(&mut out, 0x0031, &0u32.to_le_bytes()); // text offset 0
 
         // UserForm module (designer). `FormsNormalizedData` will include `UserForm1/*` streams.
@@ -112,7 +114,8 @@ fn build_contents_hash_v3_project(module_source: &[u8], designer_stream_bytes: &
         stream_name.extend_from_slice(b"UserForm1");
         stream_name.extend_from_slice(&0u16.to_le_bytes());
         push_record(&mut out, 0x001A, &stream_name);
-        push_record(&mut out, 0x0021, &0x0003u16.to_le_bytes()); // UserForm
+        // Non-procedural module type record (Id=0x0022): reserved u16 (ignored by v3 transcript)
+        push_record(&mut out, 0x0022, &0u16.to_le_bytes());
         push_record(&mut out, 0x0031, &0u32.to_le_bytes());
 
         out
@@ -318,12 +321,14 @@ fn contents_hash_v3_matches_explicit_normalized_transcript_sha256() {
     // ProjectNormalizedData = V3ContentNormalizedData || FormsNormalizedData
     //
     // V3ContentNormalizedData includes module identity/metadata (`MODULENAME`, `MODULESTREAMNAME`
-    // sans the reserved u16, and `MODULETYPE`) followed by the module's normalized source.
+    // sans the reserved u16, and for procedural modules `MODULETYPE.Id || MODULETYPE.Reserved`)
+    // followed by the module's normalized source.
     let mut expected = Vec::new();
 
-    // Module1 prefix: MODULENAME || MODULESTREAMNAME(trimmed) || MODULETYPE
+    // Module1 prefix: MODULENAME || MODULESTREAMNAME(trimmed) || (TypeRecord.Id || Reserved)
     expected.extend_from_slice(b"Module1");
     expected.extend_from_slice(b"Module1");
+    expected.extend_from_slice(&0x0021u16.to_le_bytes());
     expected.extend_from_slice(&0u16.to_le_bytes());
 
     // Module1 normalized source.
@@ -337,10 +342,9 @@ fn contents_hash_v3_matches_explicit_normalized_transcript_sha256() {
         .as_bytes(),
     );
 
-    // UserForm1 prefix + source.
+    // UserForm1 prefix + source (non-procedural: TypeRecord bytes omitted).
     expected.extend_from_slice(b"UserForm1");
     expected.extend_from_slice(b"UserForm1");
-    expected.extend_from_slice(&0x0003u16.to_le_bytes());
     expected.extend_from_slice(b"Sub FormHello()\r\nEnd Sub\r\n");
 
     // FormsNormalizedData: one 1023-byte block for the designer stream.

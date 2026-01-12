@@ -35,7 +35,9 @@ fn build_project_no_designers() -> Vec<u8> {
         stream_name.extend_from_slice(&0u16.to_le_bytes());
         push_record(&mut out, 0x001A, &stream_name);
 
-        push_record(&mut out, 0x0021, &0u16.to_le_bytes()); // MODULETYPE (standard)
+        // MODULETYPE (procedural; TypeRecord.Id=0x0021)
+        // Reserved is a u16 and is typically 0x0000.
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes());
         push_record(&mut out, 0x0031, &0u32.to_le_bytes()); // MODULETEXTOFFSET (0)
         out
     };
@@ -80,8 +82,9 @@ fn build_project_with_designer_storage() -> Vec<u8> {
         stream_name.extend_from_slice(&0u16.to_le_bytes());
         push_record(&mut out, 0x001A, &stream_name);
 
-        // MODULETYPE = UserForm (0x0003 per MS-OVBA).
-        push_record(&mut out, 0x0021, &0x0003u16.to_le_bytes());
+        // MODULETYPE (non-procedural; TypeRecord.Id=0x0022)
+        // Reserved is a u16 and is ignored by the v3 transcript pseudocode.
+        push_record(&mut out, 0x0022, &0u16.to_le_bytes());
         push_record(&mut out, 0x0031, &0u32.to_le_bytes()); // MODULETEXTOFFSET (0)
         out
     };
@@ -216,10 +219,11 @@ fn v3_content_normalized_data_includes_module_metadata_even_without_designers() 
     assert_eq!(content, b"Sub Foo()\r\nEnd Sub\r\n".to_vec());
 
     // Per MS-OVBA v3, the module transcript includes:
-    // MODULENAME || MODULESTREAMNAME(trimmed) || MODULETYPE || normalized_source
+    // MODULENAME || MODULESTREAMNAME(trimmed) || (TypeRecord.Id || Reserved if Id==0x0021) || normalized_source
     let mut expected = Vec::new();
     expected.extend_from_slice(b"Module1");
     expected.extend_from_slice(b"Module1");
+    expected.extend_from_slice(&0x0021u16.to_le_bytes());
     expected.extend_from_slice(&0u16.to_le_bytes());
     expected.extend_from_slice(b"Sub Foo()\r\nEnd Sub\r\n");
 
@@ -241,7 +245,6 @@ fn project_normalized_data_v3_appends_padded_forms_normalized_data_when_designer
     let mut expected_content_v3 = Vec::new();
     expected_content_v3.extend_from_slice(b"UserForm1");
     expected_content_v3.extend_from_slice(b"UserForm1");
-    expected_content_v3.extend_from_slice(&0x0003u16.to_le_bytes());
     expected_content_v3.extend_from_slice(b"Sub FormHello()\r\nEnd Sub\r\n");
     assert_eq!(content_v3, expected_content_v3);
 
