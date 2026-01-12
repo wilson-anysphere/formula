@@ -49,6 +49,7 @@ mod math_extended;
 mod math_more;
 mod math_random;
 mod math_rounding;
+mod roman_arabic;
 mod reference;
 mod statistical;
 mod statistical_distributions_normal;

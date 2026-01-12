@@ -4,6 +4,7 @@ mod combinatorics;
 mod hyperbolic;
 mod integer;
 mod random;
+mod roman;
 mod rounding;
 mod series;
 mod trig;
@@ -22,6 +23,7 @@ pub use integer::{
     delta, even, gestep, gcd, iseven, isodd, lcm, mround, odd, quotient, sqrtpi,
 };
 pub use random::{rand, randbetween};
+pub use roman::{arabic, roman};
 pub use rounding::{
     ceiling, ceiling_math, ceiling_precise, floor, floor_math, floor_precise, iso_ceiling,
 };

@@ -290,6 +290,8 @@ def generate_cases() -> dict[str, Any]:
     _add_case(cases, prefix="floor", tags=["math", "FLOOR"], formula="=FLOOR(1.2,1)")
     _add_case(cases, prefix="floor_math", tags=["math", "FLOOR.MATH"], formula="=FLOOR.MATH(1.2,1)")
     _add_case(cases, prefix="floor_precise", tags=["math", "FLOOR.PRECISE"], formula="=FLOOR.PRECISE(1.2,1)")
+    _add_case(cases, prefix="roman", tags=["math", "ROMAN"], formula="=ROMAN(499,0)")
+    _add_case(cases, prefix="arabic", tags=["math", "ARABIC"], formula='=ARABIC("MCMXCIX")')
 
     # Math & trig backfill (more).
     _add_case(cases, prefix="radians", tags=["math", "RADIANS"], formula="=RADIANS(180)")

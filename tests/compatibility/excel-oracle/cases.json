@@ -12601,6 +12601,26 @@
       "id": "floor_precise_50e867625242"
     },
     {
+      "formula": "=ROMAN(499,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "ROMAN"
+      ],
+      "id": "roman_6f7f757e7335"
+    },
+    {
+      "formula": "=ARABIC(\"MCMXCIX\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "ARABIC"
+      ],
+      "id": "arabic_0f602467781d"
+    },
+    {
       "formula": "=RADIANS(180)",
       "outputCell": "C1",
       "inputs": [],

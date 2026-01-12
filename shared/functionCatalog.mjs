@@ -151,6 +151,16 @@ export default {
       ]
     },
     {
+      "name": "ARABIC",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "text"
+      ]
+    },
+    {
       "name": "ASC",
       "min_args": 1,
       "max_args": 1,
@@ -3175,6 +3185,17 @@ export default {
       "return_type": "text",
       "arg_types": [
         "text",
+        "number"
+      ]
+    },
+    {
+      "name": "ROMAN",
+      "min_args": 1,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "number",
         "number"
       ]
     },
