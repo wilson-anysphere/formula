@@ -28,6 +28,12 @@ export type TitlebarAction = {
   disabled?: boolean;
 };
 
+export type TitlebarWindowControls = {
+  onClose?: () => void;
+  onMinimize?: () => void;
+  onToggleMaximize?: () => void;
+};
+
 export type TitlebarProps = {
   /**
    * App / product name shown in the titlebar.
@@ -55,6 +61,13 @@ export type TitlebarProps = {
    */
   actions?: TitlebarAction[];
   /**
+   * Optional callbacks for native desktop window controls (Tauri desktop builds).
+   *
+   * When a callback is omitted, the corresponding window control is rendered as
+   * disabled to make it clear the action isn't available.
+   */
+  windowControls?: TitlebarWindowControls;
+  /**
    * Optional extra class name for the root element.
    */
   className?: string;
@@ -70,6 +83,7 @@ export function Titlebar({
   documentName = "Untitled.xlsx",
   undoRedo,
   actions = defaultActions,
+  windowControls,
   className,
 }: TitlebarProps) {
   const undoTitle = undoRedo?.undoLabel ? `Undo ${undoRedo.undoLabel}` : "Undo";
@@ -87,18 +101,24 @@ export function Titlebar({
           className="formula-titlebar__window-button formula-titlebar__window-button--close"
           aria-label="Close window"
           title="Close window"
+          disabled={!windowControls?.onClose}
+          onClick={windowControls?.onClose}
         />
         <button
           type="button"
           className="formula-titlebar__window-button formula-titlebar__window-button--minimize"
           aria-label="Minimize window"
           title="Minimize window"
+          disabled={!windowControls?.onMinimize}
+          onClick={windowControls?.onMinimize}
         />
         <button
           type="button"
           className="formula-titlebar__window-button formula-titlebar__window-button--maximize"
           aria-label="Maximize window"
           title="Maximize window"
+          disabled={!windowControls?.onToggleMaximize}
+          onClick={windowControls?.onToggleMaximize}
         />
       </div>
 

@@ -508,6 +508,28 @@ const onRedo = () => {
   app.focus();
 };
 
+const titlebarWindowControls = (() => {
+  const winApi = (globalThis as any).__TAURI__?.window;
+  const hasWindowHandle =
+    winApi &&
+    (typeof winApi.getCurrentWebviewWindow === "function" ||
+      typeof winApi.getCurrentWindow === "function" ||
+      typeof winApi.getCurrent === "function" ||
+      Boolean(winApi.appWindow));
+  if (!hasWindowHandle) return undefined;
+  return {
+    onClose: () => {
+      void hideTauriWindow();
+    },
+    onMinimize: () => {
+      void minimizeTauriWindow();
+    },
+    onToggleMaximize: () => {
+      void toggleTauriWindowMaximize();
+    },
+  };
+})();
+
 function basename(path: string): string {
   const normalized = path.replace(/\\/g, "/").replace(/\/+$/g, "");
   const parts = normalized.split("/");
@@ -545,6 +567,7 @@ const buildTitlebarProps = () => ({
       onClick: () => showToast("Share is not implemented yet."),
     },
   ],
+  windowControls: titlebarWindowControls,
   undoRedo: {
     ...app.getUndoRedoState(),
     onUndo,
@@ -4625,6 +4648,58 @@ async function hideTauriWindow(): Promise<void> {
   }
   // Best-effort fallback; browsers may ignore this, but the call is harmless.
   window.close();
+}
+
+async function minimizeTauriWindow(): Promise<void> {
+  try {
+    const win = getTauriWindowHandle();
+    if (typeof win.minimize === "function") {
+      await win.minimize();
+      return;
+    }
+    // Older/newer Tauri variants may expose a setter-style API.
+    if (typeof win.setMinimized === "function") {
+      await win.setMinimized(true);
+    }
+  } catch {
+    // Best-effort; ignore window API failures.
+  }
+}
+
+async function toggleTauriWindowMaximize(): Promise<void> {
+  try {
+    const win = getTauriWindowHandle();
+    if (typeof win.toggleMaximize === "function") {
+      await win.toggleMaximize();
+      return;
+    }
+
+    const maximize = typeof win.maximize === "function" ? (win.maximize as () => Promise<void> | void).bind(win) : null;
+    const unmaximize =
+      typeof win.unmaximize === "function" ? (win.unmaximize as () => Promise<void> | void).bind(win) : null;
+
+    if (maximize && unmaximize && typeof win.isMaximized === "function") {
+      const isMaximized = await win.isMaximized();
+      if (isMaximized) await unmaximize();
+      else await maximize();
+      return;
+    }
+
+    // Best-effort fallback when we can't query current state.
+    if (maximize) {
+      try {
+        await maximize();
+        return;
+      } catch {
+        // Fall through to unmaximize below.
+      }
+    }
+    if (unmaximize) {
+      await unmaximize();
+    }
+  } catch {
+    // Best-effort; ignore window API failures.
+  }
 }
 
 function encodeDocumentSnapshot(snapshot: unknown): Uint8Array {

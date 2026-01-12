@@ -48,9 +48,17 @@ describe("mountTitlebar", () => {
     expect(container.querySelector(".formula-titlebar__document-name")?.textContent).toBe("Untitled.xlsx");
 
     // Window controls exist with accessible labels.
-    expect(container.querySelector('[aria-label="Close window"]')).toBeInstanceOf(HTMLButtonElement);
-    expect(container.querySelector('[aria-label="Minimize window"]')).toBeInstanceOf(HTMLButtonElement);
-    expect(container.querySelector('[aria-label="Maximize window"]')).toBeInstanceOf(HTMLButtonElement);
+    const closeButton = container.querySelector('[aria-label="Close window"]');
+    const minimizeButton = container.querySelector('[aria-label="Minimize window"]');
+    const maximizeButton = container.querySelector('[aria-label="Maximize window"]');
+    expect(closeButton).toBeInstanceOf(HTMLButtonElement);
+    expect(minimizeButton).toBeInstanceOf(HTMLButtonElement);
+    expect(maximizeButton).toBeInstanceOf(HTMLButtonElement);
+
+    // Without callbacks, window controls should be disabled.
+    expect((closeButton as HTMLButtonElement).disabled).toBe(true);
+    expect((minimizeButton as HTMLButtonElement).disabled).toBe(true);
+    expect((maximizeButton as HTMLButtonElement).disabled).toBe(true);
 
     // Actions exist with aria labels.
     const actionsToolbar = container.querySelector<HTMLElement>(".formula-titlebar__actions");
@@ -73,6 +81,48 @@ describe("mountTitlebar", () => {
     // It should also be safe to call .dispose() explicitly.
     act(() => {
       titlebar?.dispose();
+    });
+  }, TEST_TIMEOUT_MS);
+
+  it("wires window control callbacks when provided", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const calls = { close: 0, minimize: 0, maximize: 0 };
+    let handle: ReturnType<typeof mountTitlebar> | null = null;
+    await act(async () => {
+      handle = mountTitlebar(container, {
+        actions: [],
+        windowControls: {
+          onClose: () => {
+            calls.close += 1;
+          },
+          onMinimize: () => {
+            calls.minimize += 1;
+          },
+          onToggleMaximize: () => {
+            calls.maximize += 1;
+          },
+        },
+      });
+    });
+
+    const closeButton = container.querySelector<HTMLButtonElement>('[aria-label="Close window"]');
+    const minimizeButton = container.querySelector<HTMLButtonElement>('[aria-label="Minimize window"]');
+    const maximizeButton = container.querySelector<HTMLButtonElement>('[aria-label="Maximize window"]');
+
+    expect(closeButton?.disabled).toBe(false);
+    expect(minimizeButton?.disabled).toBe(false);
+    expect(maximizeButton?.disabled).toBe(false);
+
+    closeButton?.click();
+    minimizeButton?.click();
+    maximizeButton?.click();
+
+    expect(calls).toEqual({ close: 1, minimize: 1, maximize: 1 });
+
+    act(() => {
+      handle?.dispose();
     });
   }, TEST_TIMEOUT_MS);
 });
