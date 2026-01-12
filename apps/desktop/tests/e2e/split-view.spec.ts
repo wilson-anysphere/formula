@@ -143,7 +143,7 @@ test.describe("split view", () => {
       .toBeCloseTo(persistedZoom, 2);
   });
 
-  test("horizontal split view mounts and persists direction", async ({ page }) => {
+  test("horizontal split view mounts secondary pane with independent scroll and persists direction", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
 
     await page.evaluate(() => localStorage.clear());
@@ -152,18 +152,36 @@ test.describe("split view", () => {
     await waitForIdle(page);
 
     await page.getByTestId("ribbon-root").getByTestId("split-horizontal").click();
+    await expect(page.locator("#grid-split")).toHaveAttribute("data-split-direction", "horizontal");
 
     const secondary = page.locator("#grid-secondary");
     await expect(secondary).toBeVisible();
     await expect(secondary.locator("canvas")).toHaveCount(3);
     await waitForGridCanvasesToBeSized(page, "#grid-secondary");
 
-    const persisted = await page.evaluate((key) => {
-      const raw = localStorage.getItem(key);
-      if (!raw) return null;
-      return JSON.parse(raw);
-    }, LAYOUT_KEY);
-    expect(persisted?.splitView?.direction).toBe("horizontal");
+    const primaryScrollBefore = await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
+    const secondaryScrollBefore = Number((await secondary.getAttribute("data-scroll-y")) ?? 0);
+
+    await secondary.hover({ position: { x: 60, y: 40 } });
+    await page.mouse.wheel(0, 600);
+
+    await expect
+      .poll(async () => Number((await secondary.getAttribute("data-scroll-y")) ?? 0))
+      .toBeGreaterThan(secondaryScrollBefore);
+
+    const primaryScrollAfter = await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
+    expect(primaryScrollAfter).toBe(primaryScrollBefore);
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate((key) => {
+          const raw = localStorage.getItem(key);
+          if (!raw) return "none";
+          const layout = JSON.parse(raw);
+          return layout?.splitView?.direction ?? "none";
+        }, LAYOUT_KEY);
+      })
+      .toBe("horizontal");
 
     // Reload and ensure horizontal split restores.
     await page.reload();
@@ -172,6 +190,78 @@ test.describe("split view", () => {
 
     await expect(page.locator("#grid-secondary")).toBeVisible();
     await expect(page.locator("#grid-split")).toHaveAttribute("data-split-direction", "horizontal");
+  });
+
+  test("splitter drag updates split ratio (clamped) and restores it on reload", async ({ page }) => {
+    await gotoDesktop(page, "/?grid=shared");
+
+    // Start from a clean persisted layout so the test is deterministic.
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await waitForDesktopReady(page);
+    await waitForIdle(page);
+
+    await page.getByTestId("ribbon-root").getByTestId("split-horizontal").click();
+    await expect(page.locator("#grid-split")).toHaveAttribute("data-split-direction", "horizontal");
+
+    const gridSplit = page.locator("#grid-split");
+    const gridSplitter = page.locator("#grid-splitter");
+    await expect(gridSplitter).toBeVisible();
+
+    const getInMemoryRatio = async () => {
+      return await page.evaluate(() => (window as any).__layoutController?.layout?.splitView?.ratio ?? 0);
+    };
+
+    const getPersistedRatio = async () => {
+      return await page.evaluate((key) => {
+        const raw = localStorage.getItem(key);
+        if (!raw) return 0;
+        const layout = JSON.parse(raw);
+        return layout?.splitView?.ratio ?? 0;
+      }, LAYOUT_KEY);
+    };
+
+    const splitBox = await gridSplit.boundingBox();
+    if (!splitBox) throw new Error("Missing #grid-split bounding box");
+
+    // Drag the splitter near the very top of the split region; ratio should clamp to 0.1.
+    let splitterBox = await gridSplitter.boundingBox();
+    if (!splitterBox) throw new Error("Missing #grid-splitter bounding box");
+
+    const splitterCenter = { x: splitterBox.x + splitterBox.width / 2, y: splitterBox.y + splitterBox.height / 2 };
+    await dragFromTo(page, splitterCenter, { x: splitterCenter.x, y: splitBox.y + Math.max(1, splitBox.height * 0.01) });
+
+    await expect.poll(getInMemoryRatio).toBeCloseTo(0.1, 3);
+    await expect.poll(getPersistedRatio).toBeCloseTo(0.1, 3);
+
+    // Drag to a mid-range ratio and ensure it is reflected both in-memory and in persisted layout.
+    const targetRatio = 0.73;
+    splitterBox = await gridSplitter.boundingBox();
+    if (!splitterBox) throw new Error("Missing #grid-splitter bounding box after clamp drag");
+
+    const splitterCenter2 = { x: splitterBox.x + splitterBox.width / 2, y: splitterBox.y + splitterBox.height / 2 };
+    await dragFromTo(page, splitterCenter2, { x: splitterCenter2.x, y: splitBox.y + splitBox.height * targetRatio });
+
+    await expect.poll(getInMemoryRatio).toBeCloseTo(targetRatio, 1);
+    await expect.poll(getPersistedRatio).toBeCloseTo(targetRatio, 1);
+
+    const inMemoryRatio = await getInMemoryRatio();
+    const persistedRatio = await getPersistedRatio();
+
+    // Sanity: the ratio should always be clamped within [0.1, 0.9].
+    expect(inMemoryRatio).toBeGreaterThanOrEqual(0.1);
+    expect(inMemoryRatio).toBeLessThanOrEqual(0.9);
+    expect(persistedRatio).toBeGreaterThanOrEqual(0.1);
+    expect(persistedRatio).toBeLessThanOrEqual(0.9);
+
+    // Reload and ensure the ratio restores.
+    await page.reload();
+    await waitForDesktopReady(page);
+    await waitForIdle(page);
+
+    await expect(page.locator("#grid-split")).toHaveAttribute("data-split-direction", "horizontal");
+    await expect.poll(getPersistedRatio).toBeCloseTo(persistedRatio, 3);
+    await expect.poll(getInMemoryRatio).toBeCloseTo(inMemoryRatio, 3);
   });
 
   test("secondary pane supports clipboard shortcuts + Delete key", async ({ page }) => {
