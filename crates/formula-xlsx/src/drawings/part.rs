@@ -196,6 +196,7 @@ impl DrawingPart {
             id: embed_rel_id.clone(),
             type_: REL_TYPE_IMAGE.to_string(),
             target,
+            target_mode: None,
         });
 
         let size = match anchor {

@@ -52,6 +52,7 @@ pub(crate) fn ensure_rels_has_relationships(
                     id: mapped.clone(),
                     type_: rel_type.to_string(),
                     target: desired_target.to_string(),
+                    target_mode: None,
                 };
                 rels.push(rel.clone());
                 to_insert.push(rel);
@@ -83,6 +84,7 @@ pub(crate) fn ensure_rels_has_relationships(
             id: final_id.clone(),
             type_: rel_type.to_string(),
             target: desired_target.to_string(),
+            target_mode: None,
         };
         rels.push(rel.clone());
         to_insert.push(rel);
@@ -116,4 +118,3 @@ pub(crate) fn xml_escape(input: &str) -> String {
         .replace('"', "&quot;")
         .replace('\'', "&apos;")
 }
-

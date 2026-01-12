@@ -13,6 +13,7 @@ pub struct Relationship {
     pub id: String,
     pub type_: String,
     pub target: String,
+    pub target_mode: Option<String>,
 }
 
 /// Parse a `.rels` part using the chart extraction error type.
@@ -40,7 +41,13 @@ pub fn parse_relationships(
         };
         let type_ = node.attribute("Type").unwrap_or_default().to_string();
         let target = node.attribute("Target").unwrap_or_default().to_string();
-        rels.push(Relationship { id, type_, target });
+        let target_mode = node.attribute("TargetMode").map(|v| v.to_string());
+        rels.push(Relationship {
+            id,
+            type_,
+            target,
+            target_mode,
+        });
     }
 
     Ok(rels)
@@ -75,8 +82,14 @@ impl Relationships {
                 .attribute("Target")
                 .ok_or_else(|| XlsxError::MissingAttr("Target"))?
                 .to_string();
+            let target_mode = node.attribute("TargetMode").map(str::to_string);
 
-            rels.push(Relationship { id, type_, target });
+            rels.push(Relationship {
+                id,
+                type_,
+                target,
+                target_mode,
+            });
         }
 
         Ok(Self::new(rels))
@@ -129,11 +142,15 @@ impl Relationships {
         out.push_str(&format!(r#"<Relationships xmlns="{PACKAGE_REL_NS}">"#));
         for rel in &self.rels {
             out.push_str(&format!(
-                r#"<Relationship Id="{}" Type="{}" Target="{}"/>"#,
+                r#"<Relationship Id="{}" Type="{}" Target="{}""#,
                 xml_escape(&rel.id),
                 xml_escape(&rel.type_),
                 xml_escape(&rel.target)
             ));
+            if let Some(mode) = &rel.target_mode {
+                out.push_str(&format!(r#" TargetMode="{}""#, xml_escape(mode)));
+            }
+            out.push_str("/>");
         }
         out.push_str("</Relationships>");
         out.into_bytes()
@@ -149,3 +166,22 @@ fn xml_escape(input: &str) -> String {
         .replace('\'', "&apos;")
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn relationships_round_trip_preserves_target_mode() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://example.com" TargetMode="External"/>
+</Relationships>"#;
+
+        let rels = Relationships::from_xml(xml).expect("parse rels");
+        let serialized = String::from_utf8(rels.to_xml()).expect("utf8");
+        assert!(
+            serialized.contains(r#"TargetMode="External""#),
+            "expected TargetMode to be preserved, got:\n{serialized}"
+        );
+    }
+}
