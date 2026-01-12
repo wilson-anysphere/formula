@@ -10,7 +10,6 @@ import {
   range0ToA1,
   serializeGridToHtmlTable,
   serializeGridToTsv,
-  shiftA1References,
   toggleA1AbsoluteAtCursor,
   toA1,
   type Range0
@@ -1031,9 +1030,17 @@ function EngineDemoApp() {
       return null;
     })();
 
-    const mod = (value: number, modulo: number) => ((value % modulo) + modulo) % modulo;
+    // Always delegate to the engine's Fill operation so formula rewriting matches Excel semantics
+    // (structured refs, external refs, etc). We still layer custom number/text series behavior on
+    // top by overwriting those cells with computed values below.
+    const fillResult = await engine.applyOperation({
+      type: "Fill",
+      sheet: activeSheet,
+      src: range0ToA1(source0),
+      dst: range0ToA1(target0)
+    });
 
-    const updates: Array<{ address: string; value: CellScalar; sheet: string }> = [];
+    const seriesUpdates: Array<{ address: string; value: CellScalar; sheet: string }> = [];
     for (let row0 = fillArea0.startRow0; row0 < fillArea0.endRow0Exclusive; row0++) {
       for (let col0 = fillArea0.startCol0; col0 < fillArea0.endCol0Exclusive; col0++) {
         if (fillSeries?.axis === "vertical") {
@@ -1048,7 +1055,7 @@ function EngineDemoApp() {
               const digits = Math.abs(n).toString().padStart(series.padWidth, "0");
               value = `${series.prefix}${n < 0 ? "-" : ""}${digits}${series.suffix}`;
             }
-            updates.push({ address: toA1(row0, col0), value, sheet: activeSheet });
+            seriesUpdates.push({ address: toA1(row0, col0), value, sheet: activeSheet });
             continue;
           }
         }
@@ -1065,34 +1072,29 @@ function EngineDemoApp() {
               const digits = Math.abs(n).toString().padStart(series.padWidth, "0");
               value = `${series.prefix}${n < 0 ? "-" : ""}${digits}${series.suffix}`;
             }
-            updates.push({ address: toA1(row0, col0), value, sheet: activeSheet });
+            seriesUpdates.push({ address: toA1(row0, col0), value, sheet: activeSheet });
             continue;
           }
         }
-
-        const sourceRowOffset = mod(row0 - source0.startRow0, sourceHeight);
-        const sourceColOffset = mod(col0 - source0.startCol0, sourceWidth);
-        const sourceRow0 = source0.startRow0 + sourceRowOffset;
-        const sourceCol0 = source0.startCol0 + sourceColOffset;
-        const sourceCell = sourceCells[sourceRowOffset]?.[sourceColOffset];
-
-        const sourceInput = (sourceCell?.input ?? null) as CellScalar;
-        const value = isFormulaInput(sourceInput)
-          ? shiftA1References(sourceInput, row0 - sourceRow0, col0 - sourceCol0)
-          : sourceInput;
-
-        updates.push({ address: toA1(row0, col0), value, sheet: activeSheet });
       }
     }
 
-    if (updates.length === 0) return;
+    if (seriesUpdates.length > 0) {
+      await engine.setCells(seriesUpdates);
+    }
 
-    await engine.setCells(updates);
     const changes = await engine.recalculate(activeSheet);
 
-    const directChanges: CellChange[] = updates
-      .filter((update) => !isFormulaInput(update.value))
-      .map((update) => ({ sheet: update.sheet, address: update.address, value: update.value }));
+    const directChanges: CellChange[] = [
+      ...fillResult.changedCells
+        .filter((change) => change.after == null || change.after.formula == null)
+        .map((change) => ({
+          sheet: change.sheet,
+          address: change.address,
+          value: (change.after?.value ?? null) as CellScalar
+        })),
+      ...seriesUpdates.map((update) => ({ sheet: update.sheet, address: update.address, value: update.value }))
+    ];
 
     provider.applyRecalcChanges(directChanges.length > 0 ? [...changes, ...directChanges] : changes);
 
