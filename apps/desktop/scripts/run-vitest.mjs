@@ -1,4 +1,7 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 // `pnpm -C apps/desktop vitest …` runs from within `apps/desktop/`, but some
 // callsites pass file paths rooted at the repo (e.g. `apps/desktop/src/...`).
@@ -15,11 +18,24 @@ if (delimiterIdx >= 0) {
 
 const normalizedArgs = args.map((arg) => {
   if (typeof arg !== "string") return arg;
+  // Vitest treats `--silent <pattern>` as "silent has value <pattern>". Normalize to the
+  // explicit boolean form so `pnpm -C apps/desktop vitest --silent <file>` works.
+  if (arg === "--silent") return "--silent=true";
   if (arg.startsWith(PREFIX)) return arg.slice(PREFIX.length);
   return arg;
 });
 
-const child = spawn("vitest", normalizedArgs, {
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const localVitestBin = path.join(
+  packageRoot,
+  "node_modules",
+  ".bin",
+  process.platform === "win32" ? "vitest.cmd" : "vitest",
+);
+const vitestCmd = existsSync(localVitestBin) ? localVitestBin : "vitest";
+
+const child = spawn(vitestCmd, normalizedArgs, {
+  cwd: packageRoot,
   stdio: "inherit",
   // On Windows, `.cmd` shims in PATH are easiest to resolve via a shell.
   shell: process.platform === "win32",

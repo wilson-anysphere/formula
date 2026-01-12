@@ -1,4 +1,7 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 // `pnpm -C apps/desktop test:e2e -- ...` forwards a literal `"--"` argument.
 // Playwright treats `--` as an option-parsing sentinel, so any subsequent flags (e.g. `--grep`)
@@ -19,7 +22,17 @@ const normalizedArgs = args.map((arg) => {
   return arg;
 });
 
-const child = spawn("playwright", ["test", ...normalizedArgs], {
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const localPlaywrightBin = path.join(
+  packageRoot,
+  "node_modules",
+  ".bin",
+  process.platform === "win32" ? "playwright.cmd" : "playwright",
+);
+const playwrightCmd = existsSync(localPlaywrightBin) ? localPlaywrightBin : "playwright";
+
+const child = spawn(playwrightCmd, ["test", ...normalizedArgs], {
+  cwd: packageRoot,
   stdio: "inherit",
   // On Windows, `.cmd` shims in PATH are easiest to resolve via a shell.
   shell: process.platform === "win32",
