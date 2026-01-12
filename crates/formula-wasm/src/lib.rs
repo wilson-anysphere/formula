@@ -2050,6 +2050,20 @@ mod tests {
     }
 
     #[test]
+    fn fallback_context_scanner_counts_args_in_unterminated_string() {
+        let ctx = scan_fallback_function_context(r#"=SUM(1,"hello"#, ',').unwrap();
+        assert_eq!(ctx.name, "SUM");
+        assert_eq!(ctx.arg_index, 1);
+    }
+
+    #[test]
+    fn fallback_context_scanner_ignores_commas_in_brackets_with_escaped_close() {
+        let ctx = scan_fallback_function_context("=FOO([a]],b],1", ',').unwrap();
+        assert_eq!(ctx.name, "FOO");
+        assert_eq!(ctx.arg_index, 1);
+    }
+
+    #[test]
     fn recalculate_includes_spill_output_cells() {
         let mut wb = WorkbookState::new_with_default_sheet();
         wb.set_cell_internal(DEFAULT_SHEET, "A1", json!("=SEQUENCE(1,2)"))
