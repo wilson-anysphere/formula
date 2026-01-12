@@ -811,7 +811,6 @@ export class SpreadsheetApp {
       // (e.g. frozen panes). In shared-grid mode, frozen panes must be pushed
       // down to the CanvasGridRenderer explicitly.
       if (
-        this.sharedGrid &&
         Array.isArray(payload?.sheetViewDeltas) &&
         payload.sheetViewDeltas.some((delta: any) => delta?.sheetId === this.sheetId)
       ) {
@@ -1105,22 +1104,18 @@ export class SpreadsheetApp {
   freezePanes(): void {
     const active = this.selection.active;
     this.document.setFrozen(this.sheetId, active.row, active.col, { label: "Freeze Panes" });
-    this.syncFrozenPanes();
   }
 
   freezeTopRow(): void {
     this.document.setFrozen(this.sheetId, 1, 0, { label: "Freeze Top Row" });
-    this.syncFrozenPanes();
   }
 
   freezeFirstColumn(): void {
     this.document.setFrozen(this.sheetId, 0, 1, { label: "Freeze First Column" });
-    this.syncFrozenPanes();
   }
 
   unfreezePanes(): void {
     this.document.setFrozen(this.sheetId, 0, 0, { label: "Unfreeze Panes" });
-    this.syncFrozenPanes();
   }
 
   addChart(spec: CreateChartSpec): CreateChartResult {
