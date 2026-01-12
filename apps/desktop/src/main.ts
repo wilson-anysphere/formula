@@ -515,7 +515,7 @@ function toggleDockPanel(panelId: string): void {
 }
 let handleCloseRequestForRibbon: ((opts: { quit: boolean }) => Promise<void>) | null = null;
 
-function installCollabStatusIndicator(app: unknown, element: HTMLElement): void {
+function installCollabStatusIndicator(app: SpreadsheetApp, element: HTMLElement): void {
   const abortController = new AbortController();
 
   const cleanup = (): void => {
@@ -525,13 +525,10 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
 
   window.addEventListener("unload", cleanup, { once: true });
 
-  // If SpreadsheetApp exposes a `destroy()` method, wrap it so collab listeners detach
-  // in tests / fast-refresh scenarios.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const anyApp = app as any;
-  if (anyApp && typeof anyApp.destroy === "function") {
-    const originalDestroy = anyApp.destroy.bind(anyApp) as () => void;
-    anyApp.destroy = () => {
+  // Wrap destroy so collab listeners detach in tests / fast-refresh scenarios.
+  if (typeof app.destroy === "function") {
+    const originalDestroy = app.destroy.bind(app) as () => void;
+    app.destroy = () => {
       cleanup();
       originalDestroy();
     };
@@ -3558,12 +3555,7 @@ if (
       // SpreadsheetApp doesn't currently subscribe to DocumentController changes; it re-renders
       // directly after user-initiated edits. Scripts mutate the document out-of-band, so we
       // force a repaint after each script-side mutation.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const anyApp = app as any;
-      anyApp.renderGrid?.();
-      anyApp.renderCharts?.();
-      anyApp.renderSelection?.();
-      anyApp.updateStatus?.();
+      app.refresh();
     },
   });
 
@@ -5184,64 +5176,7 @@ if (
   };
 
   const hitTestGridAreaAtClientPoint = (clientX: number, clientY: number): GridHitTest => {
-    const anyApp = app as any;
-    const rootRect = gridRoot.getBoundingClientRect();
-    const x = clientX - rootRect.left;
-    const y = clientY - rootRect.top;
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return { area: "cell", row: null, col: null };
-
-    // Shared-grid mode: row/col headers are rendered as real cells (headerRows/headerCols = 1),
-    // so rely on the renderer's hit-test instead of legacy pixel thresholds.
-    const sharedGrid = (anyApp.sharedGrid ?? null) as
-      | { renderer?: { pickCellAt?: (x: number, y: number) => { row: number; col: number } | null } }
-      | null;
-    const selectionCanvas = (anyApp.selectionCanvas ?? null) as HTMLElement | null;
-    if (sharedGrid?.renderer && typeof sharedGrid.renderer.pickCellAt === "function" && selectionCanvas) {
-      const canvasRect = selectionCanvas.getBoundingClientRect();
-      const vx = clientX - canvasRect.left;
-      const vy = clientY - canvasRect.top;
-      if (Number.isFinite(vx) && Number.isFinite(vy) && vx >= 0 && vy >= 0 && vx <= canvasRect.width && vy <= canvasRect.height) {
-        const picked = sharedGrid.renderer.pickCellAt(vx, vy);
-        if (picked) {
-          const headerRows = 1;
-          const headerCols = 1;
-          if (picked.row < headerRows && picked.col < headerCols) return { area: "corner", row: null, col: null };
-          if (picked.col < headerCols) return { area: "rowHeader", row: picked.row - headerRows, col: null };
-          if (picked.row < headerRows) return { area: "colHeader", row: null, col: picked.col - headerCols };
-          return { area: "cell", row: picked.row - headerRows, col: picked.col - headerCols };
-        }
-      }
-    }
-
-    const rowHeaderWidth = Number.isFinite(anyApp.rowHeaderWidth) ? Number(anyApp.rowHeaderWidth) : 0;
-    const colHeaderHeight = Number.isFinite(anyApp.colHeaderHeight) ? Number(anyApp.colHeaderHeight) : 0;
-
-    const inRowHeader = x < rowHeaderWidth;
-    const inColHeader = y < colHeaderHeight;
-    if (inRowHeader && inColHeader) return { area: "corner", row: null, col: null };
-
-    if (inRowHeader || inColHeader) {
-      let cell: { row: number; col: number } | null = null;
-      if (typeof anyApp.cellFromPoint === "function") {
-        try {
-          cell = anyApp.cellFromPoint(x, y) as { row: number; col: number } | null;
-        } catch {
-          cell = null;
-        }
-      }
-      if (!cell) {
-        const picked = app.pickCellAtClientPoint(clientX, clientY);
-        if (picked) cell = { row: picked.row, col: picked.col };
-      }
-      if (inRowHeader) return { area: "rowHeader", row: cell?.row ?? null, col: null };
-      return { area: "colHeader", row: null, col: cell?.col ?? null };
-    }
-
-    // Task 40 hit-test: if we're over a sheet cell, treat this as a cell-area click.
-    const pickedCell = app.pickCellAtClientPoint(clientX, clientY);
-    if (pickedCell) return { area: "cell", row: pickedCell.row, col: pickedCell.col };
-
-    return { area: "cell", row: null, col: null };
+    return app.hitTestGridAreaAtClientPoint(clientX, clientY);
   };
 
   const hitTestSplitGridAreaAtClientPoint = (clientX: number, clientY: number): GridHitTest => {
@@ -9083,9 +9018,8 @@ mountRibbon(ribbonReactRoot, {
 // SpreadsheetApp may attach collaboration support asynchronously, so we check
 // `getCollabSession()` at prompt time instead of only once at startup.
 function isCollabSessionActive(): boolean {
-  const anyApp = app as any;
   try {
-    return typeof anyApp.getCollabSession === "function" && anyApp.getCollabSession() != null;
+    return app.getCollabSession() != null;
   } catch {
     // Ignore collab detection failures and fall back to normal dirty tracking.
     return false;

@@ -3575,6 +3575,60 @@ export class SpreadsheetApp {
     return { row: picked.row - headerRows, col: picked.col - headerCols };
   }
 
+  /**
+   * Hit-test the grid and return the area under the provided client coordinates.
+   *
+   * Unlike `pickCellAtClientPoint`, this also reports hits on the row/column headers.
+   *
+   * Returns `area:"cell"` with null row/col when the point cannot be resolved.
+   */
+  hitTestGridAreaAtClientPoint(
+    clientX: number,
+    clientY: number,
+  ): { area: "cell" | "rowHeader" | "colHeader" | "corner"; row: number | null; col: number | null } {
+    const rootRect = this.root.getBoundingClientRect();
+    const x = clientX - rootRect.left;
+    const y = clientY - rootRect.top;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return { area: "cell", row: null, col: null };
+
+    if (this.sharedGrid) {
+      // Shared grid uses its own internal coordinate space anchored on the selection canvas.
+      const canvasRect = this.selectionCanvas.getBoundingClientRect();
+      const vx = clientX - canvasRect.left;
+      const vy = clientY - canvasRect.top;
+      if (!Number.isFinite(vx) || !Number.isFinite(vy)) return { area: "cell", row: null, col: null };
+      if (vx < 0 || vy < 0 || vx > canvasRect.width || vy > canvasRect.height) {
+        return { area: "cell", row: null, col: null };
+      }
+
+      const picked = this.sharedGrid.renderer.pickCellAt(vx, vy);
+      if (!picked) return { area: "cell", row: null, col: null };
+
+      const headerRows = this.sharedHeaderRows();
+      const headerCols = this.sharedHeaderCols();
+
+      if (picked.row < headerRows && picked.col < headerCols) return { area: "corner", row: null, col: null };
+      if (picked.col < headerCols) return { area: "rowHeader", row: picked.row - headerRows, col: null };
+      if (picked.row < headerRows) return { area: "colHeader", row: null, col: picked.col - headerCols };
+      return { area: "cell", row: picked.row - headerRows, col: picked.col - headerCols };
+    }
+
+    const inRowHeader = x < this.rowHeaderWidth;
+    const inColHeader = y < this.colHeaderHeight;
+    if (inRowHeader && inColHeader) return { area: "corner", row: null, col: null };
+
+    if (inRowHeader || inColHeader) {
+      const cell = this.cellFromPoint(x, y);
+      if (inRowHeader) return { area: "rowHeader", row: cell.row, col: null };
+      return { area: "colHeader", row: null, col: cell.col };
+    }
+
+    const picked = this.pickCellAtClientPoint(clientX, clientY);
+    if (picked) return { area: "cell", row: picked.row, col: picked.col };
+
+    return { area: "cell", row: null, col: null };
+  }
+
   fillDown(): void {
     this.applyFillShortcut("down");
   }
