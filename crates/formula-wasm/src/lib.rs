@@ -801,6 +801,14 @@ struct WasmSpan {
 }
 
 #[derive(Debug, Serialize)]
+struct WasmToken {
+    kind: String,
+    span: WasmSpan,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    value: Option<JsonValue>,
+}
+
+#[derive(Debug, Serialize)]
 struct WasmParseError {
     message: String,
     span: WasmSpan,
@@ -823,6 +831,152 @@ struct WasmPartialParse {
     ast: formula_engine::Ast,
     error: Option<WasmParseError>,
     context: WasmParseContext,
+}
+
+#[wasm_bindgen(js_name = "lexFormula")]
+pub fn lex_formula(formula: String, opts: Option<JsValue>) -> Result<JsValue, JsValue> {
+    ensure_rust_constructors_run();
+
+    let opts: formula_engine::ParseOptions = match opts {
+        Some(value) if !value.is_undefined() && !value.is_null() => {
+            serde_wasm_bindgen::from_value(value).map_err(|err| js_err(err.to_string()))?
+        }
+        _ => formula_engine::ParseOptions::default(),
+    };
+
+    let (expr_src, span_offset) = if let Some(rest) = formula.strip_prefix('=') {
+        (rest, 1usize)
+    } else {
+        (formula.as_str(), 0usize)
+    };
+
+    let mut fallback_error: Option<(formula_engine::ParseError, usize)> = None;
+    let mut tokens = match formula_engine::lex(expr_src, &opts) {
+        Ok(tokens) => tokens,
+        Err(err) => {
+            // Best-effort fallback: return tokens up to the error span start, and surface the
+            // remainder as a final token so editor highlighting can still function during
+            // incomplete input (e.g. unterminated strings).
+            let mut error_start = err.span.start.min(expr_src.len());
+            while error_start > 0 && !expr_src.is_char_boundary(error_start) {
+                error_start -= 1;
+            }
+            fallback_error = Some((err, error_start));
+
+            let prefix = &expr_src[..error_start];
+            formula_engine::lex(prefix, &opts).unwrap_or_default()
+        }
+    };
+
+    // Drop EOF: editor consumers care about concrete spans within the input.
+    tokens.retain(|t| !matches!(&t.kind, formula_engine::TokenKind::Eof));
+
+    let mut wasm_tokens: Vec<WasmToken> = tokens
+        .into_iter()
+        .map(|token| {
+            let span = token.span;
+            let (kind, value) = match token.kind {
+                formula_engine::TokenKind::Number(raw) => ("number".to_string(), Some(JsonValue::String(raw))),
+                formula_engine::TokenKind::String(value) => ("string".to_string(), Some(JsonValue::String(value))),
+                formula_engine::TokenKind::Boolean(v) => ("boolean".to_string(), Some(JsonValue::Bool(v))),
+                formula_engine::TokenKind::Error(code) => ("error".to_string(), Some(JsonValue::String(code))),
+                formula_engine::TokenKind::Cell(cell) => (
+                    "cell".to_string(),
+                    Some(serde_json::json!({
+                        "col": cell.col,
+                        "row": cell.row,
+                        "colAbs": cell.col_abs,
+                        "rowAbs": cell.row_abs,
+                    })),
+                ),
+                formula_engine::TokenKind::R1C1Cell(cell) => (
+                    "r1c1Cell".to_string(),
+                    Some(serde_json::json!({
+                        "row": cell.row,
+                        "col": cell.col,
+                    })),
+                ),
+                formula_engine::TokenKind::R1C1Row(row) => {
+                    ("r1c1Row".to_string(), Some(serde_json::json!({ "row": row.row })))
+                }
+                formula_engine::TokenKind::R1C1Col(col) => {
+                    ("r1c1Col".to_string(), Some(serde_json::json!({ "col": col.col })))
+                }
+                formula_engine::TokenKind::Ident(name) => ("ident".to_string(), Some(JsonValue::String(name))),
+                formula_engine::TokenKind::QuotedIdent(name) => {
+                    ("quotedIdent".to_string(), Some(JsonValue::String(name)))
+                }
+                formula_engine::TokenKind::Whitespace(raw) => {
+                    ("whitespace".to_string(), Some(JsonValue::String(raw)))
+                }
+                formula_engine::TokenKind::Intersect(raw) => {
+                    ("intersect".to_string(), Some(JsonValue::String(raw)))
+                }
+                formula_engine::TokenKind::LParen => ("lParen".to_string(), None),
+                formula_engine::TokenKind::RParen => ("rParen".to_string(), None),
+                formula_engine::TokenKind::LBrace => ("lBrace".to_string(), None),
+                formula_engine::TokenKind::RBrace => ("rBrace".to_string(), None),
+                formula_engine::TokenKind::LBracket => ("lBracket".to_string(), None),
+                formula_engine::TokenKind::RBracket => ("rBracket".to_string(), None),
+                formula_engine::TokenKind::Bang => ("bang".to_string(), None),
+                formula_engine::TokenKind::Colon => ("colon".to_string(), None),
+                formula_engine::TokenKind::ArgSep => ("argSep".to_string(), None),
+                formula_engine::TokenKind::Union => ("union".to_string(), None),
+                formula_engine::TokenKind::ArrayRowSep => ("arrayRowSep".to_string(), None),
+                formula_engine::TokenKind::ArrayColSep => ("arrayColSep".to_string(), None),
+                formula_engine::TokenKind::Plus => ("plus".to_string(), None),
+                formula_engine::TokenKind::Minus => ("minus".to_string(), None),
+                formula_engine::TokenKind::Star => ("star".to_string(), None),
+                formula_engine::TokenKind::Slash => ("slash".to_string(), None),
+                formula_engine::TokenKind::Caret => ("caret".to_string(), None),
+                formula_engine::TokenKind::Amp => ("amp".to_string(), None),
+                formula_engine::TokenKind::Percent => ("percent".to_string(), None),
+                formula_engine::TokenKind::Hash => ("hash".to_string(), None),
+                formula_engine::TokenKind::Eq => ("eq".to_string(), None),
+                formula_engine::TokenKind::Ne => ("ne".to_string(), None),
+                formula_engine::TokenKind::Lt => ("lt".to_string(), None),
+                formula_engine::TokenKind::Gt => ("gt".to_string(), None),
+                formula_engine::TokenKind::Le => ("le".to_string(), None),
+                formula_engine::TokenKind::Ge => ("ge".to_string(), None),
+                formula_engine::TokenKind::At => ("at".to_string(), None),
+                formula_engine::TokenKind::Eof => ("eof".to_string(), None),
+            };
+
+            let start_byte = span.start.saturating_add(span_offset);
+            let end_byte = span.end.saturating_add(span_offset);
+            WasmToken {
+                kind,
+                span: WasmSpan {
+                    start: byte_index_to_utf16_cursor(&formula, start_byte),
+                    end: byte_index_to_utf16_cursor(&formula, end_byte),
+                },
+                value,
+            }
+        })
+        .collect();
+
+    if let Some((err, error_start)) = fallback_error {
+        if error_start < expr_src.len() {
+            let kind = match err.message.as_str() {
+                "Unterminated string literal" => "string".to_string(),
+                "Unterminated quoted identifier" => "quotedIdent".to_string(),
+                _ => "lexError".to_string(),
+            };
+
+            let start_byte = error_start.saturating_add(span_offset);
+            let end_byte = formula.len();
+            wasm_tokens.push(WasmToken {
+                kind,
+                span: WasmSpan {
+                    start: byte_index_to_utf16_cursor(&formula, start_byte),
+                    end: byte_index_to_utf16_cursor(&formula, end_byte),
+                },
+                value: Some(JsonValue::String(err.message)),
+            });
+        }
+    }
+
+    serde_wasm_bindgen::to_value(&wasm_tokens).map_err(|err| js_err(err.to_string()))
 }
 
 #[wasm_bindgen(js_name = "parseFormulaPartial")]
@@ -1276,6 +1430,49 @@ impl WasmWorkbook {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn parse_formula_partial_uses_utf16_cursor_and_spans() {
+        // Emoji (`😀`) is a surrogate pair in UTF-16 (2 code units) but 4 bytes in UTF-8.
+        // Ensure cursor positions expressed as UTF-16 offsets do not panic when slicing, and that
+        // returned spans are also expressed in UTF-16 code units.
+        let formula = "=\"😀";
+        let cursor_utf16 = formula.encode_utf16().count() as u32;
+
+        let byte_cursor = utf16_cursor_to_byte_index(formula, cursor_utf16);
+        assert_eq!(byte_cursor, formula.len());
+
+        let prefix = &formula[..byte_cursor];
+        let parsed = formula_engine::parse_formula_partial(prefix, formula_engine::ParseOptions::default());
+        let err = parsed.error.expect("expected unterminated string literal error");
+        assert_eq!(err.message, "Unterminated string literal");
+
+        let span_start = byte_index_to_utf16_cursor(prefix, err.span.start);
+        let span_end = byte_index_to_utf16_cursor(prefix, err.span.end);
+        assert_eq!(span_start, 1);
+        assert_eq!(span_end, cursor_utf16 as usize);
+    }
+
+    #[test]
+    fn lex_formula_emits_utf16_spans_for_emoji() {
+        let formula = "=\"😀\"";
+        let (expr_src, span_offset) = formula
+            .strip_prefix('=')
+            .map(|rest| (rest, 1usize))
+            .unwrap_or((formula, 0usize));
+
+        let tokens = formula_engine::lex(expr_src, &formula_engine::ParseOptions::default())
+            .expect("lexing should succeed");
+        let string_token = tokens
+            .iter()
+            .find(|t| matches!(&t.kind, formula_engine::TokenKind::String(_)))
+            .expect("expected a string token");
+
+        let start = byte_index_to_utf16_cursor(formula, string_token.span.start + span_offset);
+        let end = byte_index_to_utf16_cursor(formula, string_token.span.end + span_offset);
+        assert_eq!(start, 1);
+        assert_eq!(end, formula.encode_utf16().count());
+    }
 
     #[test]
     fn recalculate_includes_spill_output_cells() {
