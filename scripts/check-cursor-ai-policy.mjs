@@ -338,9 +338,19 @@ function gitGrepMatches(rootDir, needles) {
  * @param {string} relativePath posix-ish relative path (we normalize separators)
  */
 function isPolicyGuardTestFile(relativePath) {
-  const base = path.basename(relativePath).toLowerCase();
-  // Name-based allowlist so the rule is explicit and hard to "accidentally" hit.
-  return base.includes("cursor-ai-policy") || base.includes("check-cursor-ai-policy");
+  const normalized = relativePath.split(path.sep).join("/");
+  // Keep the exception narrow: only top-level `test/` and `tests/` suites may
+  // mention forbidden provider strings, and only when the file name clearly
+  // indicates it is testing this policy guard.
+  if (!(normalized.startsWith("tests/") || normalized.startsWith("test/"))) return false;
+
+  const base = path.basename(normalized).toLowerCase();
+  if (!(base.includes("cursor-ai-policy") || base.includes("check-cursor-ai-policy"))) return false;
+
+  // Only allow code test files (avoid accidental allowlisting of config blobs like
+  // `*.test.toml`).
+  const ext = path.extname(base);
+  return [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts"].includes(ext);
 }
 
 /**

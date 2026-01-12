@@ -1170,10 +1170,10 @@ test("cursor AI policy guard fails when OpenAI appears in *.vitest.* unit tests"
 test("cursor AI policy guard allows forbidden strings in the guard's own tests", async () => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-test-pass-"));
   try {
-    // This file name intentionally matches the allowlist rule for policy guard tests.
+    // This file path intentionally matches the allowlist rule for policy guard tests.
     await writeFixtureFile(
       tmpRoot,
-      "packages/example/src/cursor-ai-policy.test.js",
+      "tests/cursor-ai-policy.test.js",
       'const fixtures = ["openai", "anthropic", "ollama", "formula:openaiApiKey"];\n',
     );
 
