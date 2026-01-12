@@ -108,6 +108,11 @@ export interface CellStructuralConflict {
   cellKey: string;
   local: any;
   remote: any;
+  /**
+   * Best-effort id of the remote user who made the conflicting structural change.
+   *
+   * May be an empty string when unavailable (e.g. legacy/unknown op records).
+   */
   remoteUserId: string;
   detectedAt: number;
 }

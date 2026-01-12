@@ -19,7 +19,7 @@ import { cellRefFromKey, numberToCol } from "./cell-ref.js";
  * @property {string} cellKey Full Yjs key (e.g. "Sheet1:0:0") for the conflicting cell (source for moves).
  * @property {any} local
  * @property {any} remote
- * @property {string} remoteUserId
+ * @property {string} remoteUserId Best-effort id of the remote user. May be an empty string when unavailable.
  * @property {number} detectedAt
  */
  
