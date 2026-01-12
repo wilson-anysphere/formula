@@ -18,6 +18,14 @@ fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         .position(|window| window == needle)
 }
 
+fn utf16le_bytes(s: &str) -> Vec<u8> {
+    let mut out = Vec::new();
+    for unit in s.encode_utf16() {
+        out.extend_from_slice(&unit.to_le_bytes());
+    }
+    out
+}
+
 #[test]
 fn project_normalized_data_project_properties_parse_name_and_value_tokens_without_separators() {
     // Regression test for MS-OVBA §2.4.2.6 `ProjectNormalizedData` `ProjectProperties`:
@@ -412,4 +420,79 @@ fn project_normalized_data_project_properties_excludes_cmg_dpb_gc_and_related_se
 
     // Included properties should still contribute as name bytes + value bytes (no separators).
     assert_eq!(normalized, b"NameVBAProjectHelpContextID1");
+}
+
+#[test]
+fn project_normalized_data_baseclass_matches_case_insensitively_for_non_ascii() {
+    // Regression test: BaseClass module identifiers are case-insensitive, including for non-ASCII
+    // names (e.g. Cyrillic). Ensure ProjectNormalizedData can resolve the designer storage bytes
+    // even when the PROJECT stream uses a different Unicode case than `VBA/dir`.
+
+    // Dir module name uses mixed-case Cyrillic.
+    let module_name_dir = "Форма";
+    // PROJECT stream uses lowercase Cyrillic.
+    let module_name_project = "форма";
+    let (module_name_project_bytes, _, _) = WINDOWS_1251.encode(module_name_project);
+
+    let project_stream_bytes = [&b"BaseClass="[..], module_name_project_bytes.as_ref(), b"\r\n"].concat();
+
+    // Minimal decompressed `VBA/dir` stream:
+    // - PROJECTCODEPAGE (1251) so we can decode PROJECT stream BaseClass without a CodePage= line.
+    // - MODULENAMEUNICODE for the designer module identifier.
+    // - MODULESTREAMNAME mapping to the root-level designer storage name.
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        push_record(&mut out, 0x0003, &1251u16.to_le_bytes()); // PROJECTCODEPAGE
+        push_record(&mut out, 0x0047, &utf16le_bytes(module_name_dir)); // MODULENAMEUNICODE
+
+        let mut stream_name_record = Vec::new();
+        stream_name_record.extend_from_slice(b"UserForm1");
+        stream_name_record.extend_from_slice(&0u16.to_le_bytes()); // reserved u16
+        push_record(&mut out, 0x001A, &stream_name_record); // MODULESTREAMNAME
+        push_record(&mut out, 0x0021, &3u16.to_le_bytes()); // MODULETYPE (UserForm)
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(&project_stream_bytes)
+            .expect("write PROJECT");
+    }
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+
+    // Designer storage referenced by MODULESTREAMNAME.
+    ole.create_storage("UserForm1")
+        .expect("create designer storage");
+    {
+        let mut s = ole
+            .create_stream("UserForm1/Payload")
+            .expect("create designer stream");
+        s.write_all(b"ABC").expect("write designer bytes");
+    }
+
+    let vba_project_bin = ole.into_inner().into_inner();
+    let normalized =
+        project_normalized_data(&vba_project_bin).expect("compute ProjectNormalizedData");
+
+    // Expected:
+    // - PROJECTCODEPAGE record data (u16 1251)
+    // - NormalizeDesignerStorage output for BaseClass (1023-byte padded designer stream)
+    // - BaseClass property token bytes (`BaseClass` + raw MBCS bytes for module identifier)
+    let mut expected = Vec::new();
+    expected.extend_from_slice(&1251u16.to_le_bytes());
+
+    expected.extend_from_slice(b"ABC");
+    expected.extend(std::iter::repeat_n(0u8, 1023 - 3));
+
+    expected.extend_from_slice(b"BaseClass");
+    expected.extend_from_slice(module_name_project_bytes.as_ref());
+
+    assert_eq!(normalized, expected);
 }
