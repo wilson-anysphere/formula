@@ -100,6 +100,36 @@ test.describe("Extensions UI integration", () => {
     await expect(page.getByTestId("toast-root")).toContainText("Sum: 10");
   });
 
+  test("writes selection sum to the real clipboard via formula.clipboard.writeText", async ({ page }) => {
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await gotoDesktop(page);
+
+    await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const app: any = (window as any).__formulaApp;
+      if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
+      const doc = app.getDocument();
+      const sheetId = app.getCurrentSheetId();
+
+      doc.setCellValue(sheetId, { row: 0, col: 0 }, 101);
+      doc.setCellValue(sheetId, { row: 0, col: 1 }, 202);
+      doc.setCellValue(sheetId, { row: 1, col: 0 }, 303);
+      doc.setCellValue(sheetId, { row: 1, col: 1 }, 404);
+
+      app.selectRange({
+        sheetId,
+        range: { startRow: 0, startCol: 0, endRow: 1, endCol: 1 },
+      });
+    });
+
+    await page.getByTestId("open-extensions-panel").click();
+    await page.getByTestId("run-command-sampleHello.copySumToClipboard").click();
+
+    await expect
+      .poll(() => page.evaluate(async () => (await navigator.clipboard.readText()).trim()), { timeout: 10_000 })
+      .toBe("1010");
+  });
+
   test("persists an extension panel in the layout and re-activates it after reload", async ({ page }) => {
     await gotoDesktop(page);
     await grantSampleHelloPermissions(page);

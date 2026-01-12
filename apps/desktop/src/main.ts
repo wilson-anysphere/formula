@@ -73,6 +73,7 @@ import {
   setDesktopPowerQueryService,
 } from "./power-query/service.js";
 import { createPowerQueryRefreshStateStore } from "./power-query/refreshStateStore.js";
+import { createClipboardProvider } from "./clipboard/platform/provider.js";
 import { showInputBox, showQuickPick, showToast } from "./extensions/ui.js";
 import { openFormatCellsDialog } from "./formatting/openFormatCellsDialog.js";
 import { DesktopExtensionHostManager } from "./extensions/extensionHostManager.js";
@@ -1915,9 +1916,22 @@ if (
     };
   }
 
+  const clipboardProviderPromise = createClipboardProvider();
+
   const extensionHostManager = new DesktopExtensionHostManager({
     engineVersion: "1.0.0",
     spreadsheetApi: extensionSpreadsheetApi,
+    clipboardApi: {
+      readText: async () => {
+        const provider = await clipboardProviderPromise;
+        const { text } = await provider.read();
+        return text ?? "";
+      },
+      writeText: async (text: string) => {
+        const provider = await clipboardProviderPromise;
+        await provider.write({ text: String(text ?? "") });
+      },
+    },
     uiApi: {
       showMessage: async (message: string, type?: string) => {
         showToast(String(message ?? ""), (type as any) ?? "info");

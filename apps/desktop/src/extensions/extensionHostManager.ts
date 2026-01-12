@@ -21,104 +21,6 @@ type ClipboardApi = {
   writeText: (text: string) => Promise<void>;
 };
 
-type TauriClipboardApi = {
-  readText?: () => Promise<string>;
-  writeText?: (text: string) => Promise<void>;
-};
-
-function getTauriClipboardApi(): TauriClipboardApi | null {
-  const clipboard = (globalThis as any)?.__TAURI__?.clipboard as TauriClipboardApi | undefined;
-  return clipboard ?? null;
-}
-
-function createDesktopClipboardApi(uiApi: ExtensionHostUiApi): ClipboardApi {
-  // Mirror the BrowserExtensionHost in-memory fallback so extensions always have a usable
-  // clipboard even when the real Clipboard API is unavailable/permission-gated.
-  let fallbackText = "";
-  let warnedWriteFailure = false;
-  let warnedReadFailure = false;
-
-  const warnOnce = (kind: "read" | "write", err: unknown) => {
-    const alreadyWarned = kind === "write" ? warnedWriteFailure : warnedReadFailure;
-    if (alreadyWarned) return;
-    if (kind === "write") warnedWriteFailure = true;
-    else warnedReadFailure = true;
-
-    const message =
-      kind === "write"
-        ? "Could not write to the system clipboard. Falling back to an in-memory clipboard for extensions."
-        : "Could not read from the system clipboard. Falling back to an in-memory clipboard for extensions.";
-
-    try {
-      uiApi.showMessage?.(message, "warning");
-    } catch {
-      // ignore
-    }
-
-    // eslint-disable-next-line no-console
-    console.warn(message, err);
-  };
-
-  return {
-    async readText() {
-      const navClipboard = globalThis.navigator?.clipboard;
-      let lastError: unknown = null;
-
-      if (typeof navClipboard?.readText === "function") {
-        try {
-          const text = await navClipboard.readText();
-          fallbackText = String(text ?? "");
-          return fallbackText;
-        } catch (err) {
-          lastError = err;
-        }
-      }
-
-      const tauriClipboard = getTauriClipboardApi();
-      if (typeof tauriClipboard?.readText === "function") {
-        try {
-          const text = await tauriClipboard.readText();
-          fallbackText = String(text ?? "");
-          return fallbackText;
-        } catch (err) {
-          lastError = err;
-        }
-      }
-
-      warnOnce("read", lastError ?? new Error("Clipboard API not available"));
-      return fallbackText;
-    },
-
-    async writeText(text: string) {
-      const value = String(text ?? "");
-      fallbackText = value;
-
-      const navClipboard = globalThis.navigator?.clipboard;
-      let lastError: unknown = null;
-      if (typeof navClipboard?.writeText === "function") {
-        try {
-          await navClipboard.writeText(value);
-          return;
-        } catch (err) {
-          lastError = err;
-        }
-      }
-
-      const tauriClipboard = getTauriClipboardApi();
-      if (typeof tauriClipboard?.writeText === "function") {
-        try {
-          await tauriClipboard.writeText(value);
-          return;
-        } catch (err) {
-          lastError = err;
-        }
-      }
-
-      warnOnce("write", lastError ?? new Error("Clipboard API not available"));
-    },
-  };
-}
-
 export class DesktopExtensionHostManager {
   readonly host: InstanceType<typeof BrowserExtensionHost>;
   readonly engineVersion: string;
@@ -129,6 +31,7 @@ export class DesktopExtensionHostManager {
   constructor(params: {
     engineVersion: string;
     spreadsheetApi: any;
+    clipboardApi?: ClipboardApi;
     uiApi: ExtensionHostUiApi;
     permissionPrompt?: any;
   }) {
@@ -151,9 +54,9 @@ export class DesktopExtensionHostManager {
     this.host = new BrowserExtensionHost({
       engineVersion: this.engineVersion,
       spreadsheetApi: params.spreadsheetApi,
+      clipboardApi: params.clipboardApi,
       uiApi: params.uiApi,
       permissionPrompt,
-      clipboardApi: createDesktopClipboardApi(params.uiApi),
     });
   }
 
