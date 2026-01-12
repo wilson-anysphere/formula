@@ -3936,10 +3936,9 @@ if (
 
   let contextMenuSession = 0;
 
-  const openGridContextMenuAtPoint = (x: number, y: number, options: { focusFirst?: boolean } = {}) => {
+  const openGridContextMenuAtPoint = (x: number, y: number) => {
     const session = (contextMenuSession += 1);
-    const focusFirst = options.focusFirst === true;
-    contextMenu.open({ x, y, items: buildGridContextMenuItems(), focusFirst });
+    contextMenu.open({ x, y, items: buildGridContextMenuItems() });
 
     // Extensions are lazy-loaded to keep startup light. Right-clicking should still
     // surface extension-contributed context menu items, so load them on-demand and
@@ -3951,14 +3950,12 @@ if (
           if (!contextMenu.isOpen()) return;
           if (!extensionHostManager.ready) return;
           contextMenu.update(buildGridContextMenuItems());
-          if (focusFirst) contextMenu.focusFirst();
         })
         .catch(() => {
           // Best-effort: keep the context menu functional even if extension loading fails.
           if (session !== contextMenuSession) return;
           if (!contextMenu.isOpen()) return;
           contextMenu.update(buildGridContextMenuItems());
-          if (focusFirst) contextMenu.focusFirst();
         });
     }
   };
@@ -3995,12 +3992,12 @@ if (
   const openGridContextMenuAtActiveCell = () => {
     const rect = app.getActiveCellRect();
     if (rect) {
-      openGridContextMenuAtPoint(rect.x, rect.y + rect.height, { focusFirst: true });
+      openGridContextMenuAtPoint(rect.x, rect.y + rect.height);
       return;
     }
 
     const gridRect = gridRoot.getBoundingClientRect();
-    openGridContextMenuAtPoint(gridRect.left + gridRect.width / 2, gridRect.top + gridRect.height / 2, { focusFirst: true });
+    openGridContextMenuAtPoint(gridRect.left + gridRect.width / 2, gridRect.top + gridRect.height / 2);
   };
 
   window.addEventListener(
