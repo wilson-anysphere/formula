@@ -184,7 +184,8 @@ instead of the optional Tauri FS plugin. Those commands enforce an explicit scop
 - `$DOCUMENT/**`
 - `$DOWNLOADS/**` (if the OS/user has a Downloads dir configured and it exists/canonicalizes successfully; on Linux this may be outside `$HOME` via XDG user dirs)
 
-The scope check uses canonicalization to normalize paths and prevent symlink-based escapes.
+The scope check uses canonicalization to normalize paths and prevent symlink-based escapes. Privileged commands also enforce
+**main-window + trusted app origin** checks via `apps/desktop/src-tauri/src/ipc_origin.rs` (defense-in-depth).
 
 ### Auto-Update
 

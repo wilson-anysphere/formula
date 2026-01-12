@@ -735,6 +735,10 @@ Known platform limitations:
 
 Security boundaries:
 
+- **IPC origin hardening (defense-in-depth):** clipboard commands (`clipboard_read`, `clipboard_write`, and legacy
+  `read_clipboard` / `write_clipboard`) enforce **main-window + trusted app origin** checks in Rust via
+  `apps/desktop/src-tauri/src/ipc_origin.rs` (trusted: `localhost` / `*.localhost` / `127.0.0.1` / `::1`, best-effort
+  `file://`; denied: remote hosts, `data:`).
 - **DLP enforcement happens before writing**: grid copy/cut paths perform DLP checks before touching the system clipboard:
   - `SpreadsheetApp.copySelectionToClipboard()` / `cutSelectionToClipboard()`
   - → `enforceClipboardCopy` (`apps/desktop/src/dlp/enforceClipboardCopy.js`)
@@ -939,6 +943,8 @@ These commands enforce a filesystem scope equivalent to the platform allowlist:
 Implementation notes:
 
 - The scope helper lives in `apps/desktop/src-tauri/src/fs_scope.rs`.
+- Commands additionally enforce **main-window + trusted app origin** checks via `apps/desktop/src-tauri/src/ipc_origin.rs`
+  (defense-in-depth so remote/untrusted navigations can't invoke privileged filesystem reads).
 - Requested paths are **canonicalized** before checking scope.
 - Canonicalization normalizes `..` traversal and prevents symlink escapes (e.g. a symlink inside `$HOME` pointing to `/etc/passwd` is rejected).
 - `list_dir` validates the root directory and validates individual entries before returning metadata.
