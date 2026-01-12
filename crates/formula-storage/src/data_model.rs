@@ -878,11 +878,18 @@ where
     })?;
 
     for row in rows {
-        let (chunk_index, kind_raw, data) = row?;
-        let kind = DataModelChunkKind::parse(&kind_raw)
-            .ok_or_else(|| StorageError::Sqlite(rusqlite::Error::InvalidQuery))?;
+        let (chunk_index, kind_raw, data) = match row {
+            Ok(row) => row,
+            Err(_) => continue,
+        };
+        let Ok(chunk_index) = usize::try_from(chunk_index) else {
+            continue;
+        };
+        let Some(kind) = DataModelChunkKind::parse(&kind_raw) else {
+            continue;
+        };
         f(DataModelChunk {
-            chunk_index: chunk_index as usize,
+            chunk_index,
             kind,
             data,
         })?;
