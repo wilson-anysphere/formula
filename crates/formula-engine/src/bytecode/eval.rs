@@ -355,6 +355,43 @@ mod tests {
         }
     }
 
+    struct NanIndexGrid {
+        reads: AtomicUsize,
+    }
+
+    impl NanIndexGrid {
+        fn new() -> Self {
+            Self {
+                reads: AtomicUsize::new(0),
+            }
+        }
+
+        fn reads(&self) -> usize {
+            self.reads.load(Ordering::SeqCst)
+        }
+    }
+
+    impl super::super::grid::Grid for NanIndexGrid {
+        fn get_value(&self, coord: CellCoord) -> Value {
+            self.reads.fetch_add(1, Ordering::SeqCst);
+            if coord == CellCoord::new(0, 0) {
+                return Value::Number(f64::NAN);
+            }
+            if coord == CellCoord::new(1, 0) {
+                panic!("unexpected evaluation of CHOOSE branch expression");
+            }
+            Value::Empty
+        }
+
+        fn column_slice(&self, _col: i32, _row_start: i32, _row_end: i32) -> Option<&[f64]> {
+            None
+        }
+
+        fn bounds(&self) -> (i32, i32) {
+            (10, 10)
+        }
+    }
+
     #[test]
     fn vm_short_circuits_if_branches() {
         let origin = CellCoord::new(0, 0);
@@ -684,6 +721,20 @@ mod tests {
         let mut vm = Vm::with_capacity(32);
         let value = vm.eval(&program, &grid, 0, origin, &locale);
         assert_eq!(value, Value::Error(super::super::ErrorKind::Value));
+    }
+
+    #[test]
+    fn vm_choose_nan_index_returns_value_error_without_evaluating_choices() {
+        let origin = CellCoord::new(0, 0);
+        let expr = super::super::parse_formula("=CHOOSE(A1, A2, 7)", origin).expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+        let grid = NanIndexGrid::new();
+        let locale = crate::LocaleConfig::en_us();
+
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
+        assert_eq!(value, Value::Error(super::super::ErrorKind::Value));
+        assert_eq!(grid.reads(), 1, "CHOOSE should only evaluate the index");
     }
 
     #[test]
