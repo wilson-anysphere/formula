@@ -49,12 +49,6 @@ pub fn parse_value_metadata_vm_to_rich_value_index_map(
         return Ok(HashMap::new());
     };
 
-    let future_bk_indices = parse_future_rich_value_indices(&doc, "XLRICHVALUE");
-    if future_bk_indices.is_empty() {
-        // Without the futureMetadata mapping we can't resolve any vm->rv index.
-        return Ok(HashMap::new());
-    }
-
     // Excel has been observed to encode `rc/@t` as either 0-based or 1-based indices into the
     // `<metadataTypes>` list. Accept both for robustness.
     let Ok(xlrichvalue_t_zero_based) = u32::try_from(xlrichvalue_type_idx) else {
@@ -65,6 +59,40 @@ pub fn parse_value_metadata_vm_to_rich_value_index_map(
     };
 
     let rc_t_indexing = infer_value_metadata_rc_t_indexing(&doc, metadata_types_count);
+    let future_bk_indices = parse_future_rich_value_indices(&doc, "XLRICHVALUE");
+    if future_bk_indices.is_empty() {
+        // Variant B (observed in `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`):
+        //
+        // Some producers omit `<futureMetadata name="XLRICHVALUE">` entirely and instead store the
+        // rich value index directly in `<valueMetadata><bk><rc ... v="..."/>`.
+        let out = match rc_t_indexing {
+            RcTIndexing::ZeroBased => parse_value_metadata_direct_mappings(
+                &doc,
+                &[xlrichvalue_t_zero_based],
+            ),
+            RcTIndexing::OneBased => parse_value_metadata_direct_mappings(
+                &doc,
+                &[xlrichvalue_t_one_based],
+            ),
+            RcTIndexing::Ambiguous => {
+                // When we can't infer whether rc/@t is 0-based or 1-based, fall back to the
+                // tolerant behavior: accept both and keep whichever mapping we see first for a
+                // given vm entry.
+                let mut merged = parse_value_metadata_direct_mappings(
+                    &doc,
+                    &[xlrichvalue_t_zero_based, xlrichvalue_t_one_based],
+                );
+                if merged.is_empty() {
+                    let a = parse_value_metadata_direct_mappings(&doc, &[xlrichvalue_t_zero_based]);
+                    let b = parse_value_metadata_direct_mappings(&doc, &[xlrichvalue_t_one_based]);
+                    merged = if a.len() >= b.len() { a } else { b };
+                }
+                merged
+            }
+        };
+        return Ok(out);
+    }
+
     let out = match rc_t_indexing {
         RcTIndexing::ZeroBased => {
             parse_value_metadata_mappings(&doc, &[xlrichvalue_t_zero_based], &future_bk_indices)
@@ -187,7 +215,8 @@ fn parse_future_rich_value_indices(doc: &Document<'_>, name: &str) -> Vec<BkRun<
     let future_metadata = doc.descendants().find(|n| {
         n.is_element()
             && n.tag_name().name() == "futureMetadata"
-            && n.attribute("name").is_some_and(|n| n.eq_ignore_ascii_case(name))
+            && n.attribute("name")
+                .is_some_and(|n| n.eq_ignore_ascii_case(name))
     });
 
     let Some(future_metadata) = future_metadata else {
@@ -288,6 +317,58 @@ fn resolve_bk_run<T: Copy>(runs: &[BkRun<T>], idx: u32) -> Option<T> {
         cursor = end;
     }
     None
+}
+
+fn parse_value_metadata_direct_mappings(
+    doc: &Document<'_>,
+    xlrichvalue_t_values: &[u32],
+) -> HashMap<u32, u32> {
+    let Some(value_metadata) = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "valueMetadata")
+    else {
+        return HashMap::new();
+    };
+
+    let mut out = HashMap::new();
+
+    let mut vm_start_1_based: u32 = 1;
+
+    for bk in value_metadata
+        .children()
+        .filter(|n| n.is_element() && n.tag_name().name() == "bk")
+    {
+        let count = bk
+            .attribute("count")
+            .and_then(|c| c.trim().parse::<u32>().ok())
+            .filter(|c| *c >= 1)
+            .unwrap_or(1);
+
+        let rc = bk.descendants().find(|n| {
+            n.is_element()
+                && n.tag_name().name() == "rc"
+                && n.attribute("t")
+                    .and_then(|t| t.parse::<u32>().ok())
+                    .is_some_and(|t| xlrichvalue_t_values.contains(&t))
+        });
+
+        let Some(rc) = rc else {
+            vm_start_1_based = vm_start_1_based.saturating_add(count);
+            continue;
+        };
+
+        let Some(v) = rc.attribute("v").and_then(|v| v.parse::<u32>().ok()) else {
+            vm_start_1_based = vm_start_1_based.saturating_add(count);
+            continue;
+        };
+
+        for offset in 0..count {
+            out.insert(vm_start_1_based.saturating_add(offset), v);
+        }
+        vm_start_1_based = vm_start_1_based.saturating_add(count);
+    }
+
+    out
 }
 
 #[cfg(test)]

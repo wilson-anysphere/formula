@@ -381,9 +381,19 @@ fn parse_vm_to_rich_value_index_map(
     if !primary.is_empty() {
         // Excel's `vm` appears in the wild as both 0-based and 1-based. To be tolerant, insert
         // both the original key and its 0-based equivalent.
+        //
+        // Note: `primary` is a `HashMap`, so iteration order is not deterministic. Insert in two
+        // passes so the canonical (1-based) `vm` keys always win when the shifted `vm-1` entries
+        // collide (e.g. vm=1 and vm=2 both attempt to populate key 1).
         let mut out = HashMap::new();
-        for (vm, rv) in primary {
+
+        // Pass 1: canonical keys.
+        for (&vm, &rv) in primary.iter() {
             out.entry(vm).or_insert(rv);
+        }
+
+        // Pass 2: tolerate 0-based vm indices.
+        for (vm, rv) in primary {
             if vm > 0 {
                 out.entry(vm - 1).or_insert(rv);
             }

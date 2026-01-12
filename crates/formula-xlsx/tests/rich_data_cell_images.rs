@@ -80,8 +80,8 @@ fn build_rich_image_xlsx(
 
     let cursor = Cursor::new(Vec::new());
     let mut zip = zip::ZipWriter::new(cursor);
-    let options =
-        zip::write::FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+    let options = zip::write::FileOptions::<()>::default()
+        .compression_method(zip::CompressionMethod::Deflated);
 
     zip.start_file("xl/workbook.xml", options).unwrap();
     zip.write_all(workbook_xml.as_bytes()).unwrap();
@@ -105,7 +105,8 @@ fn build_rich_image_xlsx(
     zip.start_file("xl/richData/richValue.xml", options).unwrap();
     zip.write_all(rich_value_xml.as_bytes()).unwrap();
 
-    zip.start_file("xl/richData/richValueRel.xml", options).unwrap();
+    zip.start_file("xl/richData/richValueRel.xml", options)
+        .unwrap();
     zip.write_all(rich_value_rel_xml.as_bytes()).unwrap();
 
     if include_rich_value_rels {
@@ -272,4 +273,64 @@ fn extracts_rich_cell_image_bytes_from_workbook_sheet_metadata_relationship() {
     );
 
     assert_eq!(images, expected);
+}
+
+#[test]
+fn rich_data_cell_images_extracts_image_in_cell_richdata_fixture() {
+    let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/xlsx/basic/image-in-cell-richdata.xlsx");
+    let bytes = std::fs::read(&fixture_path)
+        .unwrap_or_else(|e| panic!("read fixture {}: {e}", fixture_path.display()));
+    let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+
+    let images = extract_rich_cell_images(&pkg).expect("extract images");
+
+    let key = ("Sheet1".to_string(), CellRef::from_a1("A1").unwrap());
+    let expected = pkg
+        .part("xl/media/image1.png")
+        .expect("xl/media/image1.png present")
+        .to_vec();
+
+    assert_eq!(images.get(&key), Some(&expected));
+    assert_eq!(
+        images.len(),
+        1,
+        "unexpected extra images extracted: keys={:?}",
+        images.keys().collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn rich_data_cell_images_extracts_image_in_cell_fixture() {
+    let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/xlsx/basic/image-in-cell.xlsx");
+    let bytes = std::fs::read(&fixture_path)
+        .unwrap_or_else(|e| panic!("read fixture {}: {e}", fixture_path.display()));
+    let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+
+    let images = extract_rich_cell_images(&pkg).expect("extract images");
+
+    let img1 = pkg
+        .part("xl/media/image1.png")
+        .expect("xl/media/image1.png present")
+        .to_vec();
+    let img2 = pkg
+        .part("xl/media/image2.png")
+        .expect("xl/media/image2.png present")
+        .to_vec();
+
+    let b2 = ("Sheet1".to_string(), CellRef::from_a1("B2").unwrap());
+    let b3 = ("Sheet1".to_string(), CellRef::from_a1("B3").unwrap());
+    let b4 = ("Sheet1".to_string(), CellRef::from_a1("B4").unwrap());
+
+    assert_eq!(images.get(&b2), Some(&img1));
+    assert_eq!(images.get(&b3), Some(&img1));
+    assert_eq!(images.get(&b4), Some(&img2));
+
+    assert_eq!(
+        images.len(),
+        3,
+        "unexpected extra images extracted: keys={:?}",
+        images.keys().collect::<Vec<_>>()
+    );
 }
