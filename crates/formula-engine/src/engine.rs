@@ -1538,8 +1538,11 @@ impl Engine {
 
             // Non-thread-safe tasks are always serialized.
             let mut vm = bytecode::Vm::with_capacity(32);
-            let _eval_ctx_guard =
-                bytecode::runtime::set_thread_eval_context(date_system, value_locale, recalc_ctx.now_utc.clone());
+            let _eval_ctx_guard = bytecode::runtime::set_thread_eval_context(
+                date_system,
+                value_locale,
+                recalc_ctx.now_utc.clone(),
+            );
             for (k, compiled) in &serial_tasks {
                 let ctx = crate::eval::EvalContext {
                     current_sheet: k.sheet,

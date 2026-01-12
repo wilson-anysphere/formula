@@ -1,7 +1,6 @@
 use super::ast::{BinaryOp, Expr, Function, UnaryOp};
 use super::grid::Grid;
 use super::value::{Array as ArrayValue, CellCoord, ErrorKind, RangeRef, ResolvedRange, Value};
-use chrono::{DateTime, Utc};
 use crate::date::ExcelDateSystem;
 use crate::error::ExcelError;
 use crate::functions::math::criteria::Criteria as EngineCriteria;
@@ -10,6 +9,7 @@ use crate::value::{
     cmp_case_insensitive, parse_number, ErrorKind as EngineErrorKind, Value as EngineValue,
 };
 use crate::simd::{self, CmpOp, NumericCriteria};
+use chrono::{DateTime, Utc};
 use smallvec::SmallVec;
 use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;

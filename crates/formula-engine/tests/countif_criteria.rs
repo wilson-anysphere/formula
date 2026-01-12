@@ -1,4 +1,5 @@
 use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
+use formula_engine::locale::ValueLocaleConfig;
 use formula_engine::{Engine, ErrorKind, Value};
 
 fn eval(engine: &mut Engine, formula: &str) -> Value {
@@ -111,6 +112,27 @@ fn countif_date_criteria_parses_date_strings() {
         eval(&mut engine, r#"=COUNTIF(A1:A3, "=1/1/2020")"#),
         Value::Number(1.0)
     );
+}
+
+#[test]
+fn countif_criteria_parses_numbers_using_value_locale() {
+    let mut engine = Engine::new();
+    engine.set_value_locale(ValueLocaleConfig::de_de());
+
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 3.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "Z1", r#"=COUNTIF(A1:A3, ">1,5")"#)
+        .unwrap();
+    assert!(
+        engine.bytecode_program_count() > 0,
+        "expected COUNTIF formula to compile to bytecode for this test"
+    );
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "Z1"), Value::Number(2.0));
 }
 
 #[test]
