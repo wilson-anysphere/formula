@@ -6555,8 +6555,14 @@ fn bytecode_value_to_engine(value: bytecode::Value) -> Value {
         bytecode::Value::Number(n) => Value::Number(n),
         bytecode::Value::Bool(b) => Value::Bool(b),
         bytecode::Value::Text(s) => Value::Text(s.to_string()),
-        bytecode::Value::Entity(v) => Value::Entity(v.as_ref().clone()),
-        bytecode::Value::Record(v) => Value::Record(v.as_ref().clone()),
+        bytecode::Value::Entity(v) => match Arc::try_unwrap(v) {
+            Ok(entity) => Value::Entity(entity),
+            Err(shared) => Value::Entity(shared.as_ref().clone()),
+        },
+        bytecode::Value::Record(v) => match Arc::try_unwrap(v) {
+            Ok(record) => Value::Record(record),
+            Err(shared) => Value::Record(shared.as_ref().clone()),
+        },
         bytecode::Value::Empty => Value::Blank,
         bytecode::Value::Missing => Value::Blank,
         bytecode::Value::Error(e) => Value::Error(bytecode_error_to_engine(e)),

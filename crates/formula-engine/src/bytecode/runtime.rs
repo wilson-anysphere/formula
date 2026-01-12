@@ -7223,8 +7223,14 @@ fn bytecode_value_to_engine(value: Value) -> EngineValue {
         Value::Number(n) => EngineValue::Number(n),
         Value::Bool(b) => EngineValue::Bool(b),
         Value::Text(s) => EngineValue::Text(s.to_string()),
-        Value::Entity(v) => EngineValue::Entity(v.as_ref().clone()),
-        Value::Record(v) => EngineValue::Record(v.as_ref().clone()),
+        Value::Entity(v) => match Arc::try_unwrap(v) {
+            Ok(entity) => EngineValue::Entity(entity),
+            Err(shared) => EngineValue::Entity(shared.as_ref().clone()),
+        },
+        Value::Record(v) => match Arc::try_unwrap(v) {
+            Ok(record) => EngineValue::Record(record),
+            Err(shared) => EngineValue::Record(shared.as_ref().clone()),
+        },
         Value::Empty | Value::Missing => EngineValue::Blank,
         Value::Error(e) => EngineValue::Error(e.into()),
         // Array/range values are not valid scalar values, but the bytecode runtime uses `#SPILL!`
