@@ -14,7 +14,21 @@ function readEnvFlag(): string | null {
   return null;
 }
 
-export function resolveDesktopGridMode(search: string = typeof window !== "undefined" ? window.location.search : ""): DesktopGridMode {
+/**
+ * Resolve the desktop grid renderer mode.
+ *
+ * Precedence:
+ * 1) Query param overrides (`?grid=legacy|shared`)
+ * 2) Environment overrides (Vite `import.meta.env.*` or Node `process.env.*`)
+ * 3) Default: `shared`
+ *
+ * Note: `envOverride` exists to make unit tests deterministic without needing to
+ * mutate `import.meta.env` (which may be read-only depending on the runner).
+ */
+export function resolveDesktopGridMode(
+  search: string = typeof window !== "undefined" ? window.location.search : "",
+  envOverride?: string | boolean | null
+): DesktopGridMode {
   try {
     const params = new URLSearchParams(search);
     const raw = params.get("grid") ?? params.get("gridMode") ?? params.get("renderer");
@@ -27,8 +41,9 @@ export function resolveDesktopGridMode(search: string = typeof window !== "undef
     // Ignore invalid URLSearchParams input.
   }
 
-  const env = readEnvFlag();
-  if (env) {
+  const env = envOverride !== undefined ? envOverride : readEnvFlag();
+  if (typeof env === "boolean") return env ? "shared" : "legacy";
+  if (typeof env === "string" && env.trim() !== "") {
     const normalized = env.trim().toLowerCase();
     if (normalized === "shared" || normalized === "1" || normalized === "true") return "shared";
     if (normalized === "legacy" || normalized === "0" || normalized === "false") return "legacy";
