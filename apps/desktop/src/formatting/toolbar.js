@@ -429,9 +429,12 @@ function allCellsMatchRange(doc, sheetId, range, predicate) {
 export function toggleBold(doc, sheetId, range, options = {}) {
   const next =
     typeof options.next === "boolean" ? options.next : !allCellsMatch(doc, sheetId, range, (s) => Boolean(s.font?.bold));
+  let applied = true;
   for (const r of normalizeRanges(range)) {
-    doc.setRangeFormat(sheetId, r, { font: { bold: next } }, { label: "Bold" });
+    const ok = doc.setRangeFormat(sheetId, r, { font: { bold: next } }, { label: "Bold" });
+    if (ok === false) applied = false;
   }
+  return applied;
 }
 
 export function toggleItalic(doc, sheetId, range, options = {}) {
@@ -439,9 +442,12 @@ export function toggleItalic(doc, sheetId, range, options = {}) {
     typeof options.next === "boolean"
       ? options.next
       : !allCellsMatch(doc, sheetId, range, (s) => Boolean(s.font?.italic));
+  let applied = true;
   for (const r of normalizeRanges(range)) {
-    doc.setRangeFormat(sheetId, r, { font: { italic: next } }, { label: "Italic" });
+    const ok = doc.setRangeFormat(sheetId, r, { font: { italic: next } }, { label: "Italic" });
+    if (ok === false) applied = false;
   }
+  return applied;
 }
 
 export function toggleUnderline(doc, sheetId, range, options = {}) {
@@ -449,32 +455,44 @@ export function toggleUnderline(doc, sheetId, range, options = {}) {
     typeof options.next === "boolean"
       ? options.next
       : !allCellsMatch(doc, sheetId, range, (s) => Boolean(s.font?.underline));
+  let applied = true;
   for (const r of normalizeRanges(range)) {
-    doc.setRangeFormat(sheetId, r, { font: { underline: next } }, { label: "Underline" });
+    const ok = doc.setRangeFormat(sheetId, r, { font: { underline: next } }, { label: "Underline" });
+    if (ok === false) applied = false;
   }
+  return applied;
 }
 
 export function setFontSize(doc, sheetId, range, sizePt) {
+  let applied = true;
   for (const r of normalizeRanges(range)) {
-    doc.setRangeFormat(sheetId, r, { font: { size: sizePt } }, { label: "Font size" });
+    const ok = doc.setRangeFormat(sheetId, r, { font: { size: sizePt } }, { label: "Font size" });
+    if (ok === false) applied = false;
   }
+  return applied;
 }
 
 export function setFontColor(doc, sheetId, range, argb) {
+  let applied = true;
   for (const r of normalizeRanges(range)) {
-    doc.setRangeFormat(sheetId, r, { font: { color: argb } }, { label: "Font color" });
+    const ok = doc.setRangeFormat(sheetId, r, { font: { color: argb } }, { label: "Font color" });
+    if (ok === false) applied = false;
   }
+  return applied;
 }
 
 export function setFillColor(doc, sheetId, range, argb) {
+  let applied = true;
   for (const r of normalizeRanges(range)) {
-    doc.setRangeFormat(
+    const ok = doc.setRangeFormat(
       sheetId,
       r,
       { fill: { pattern: "solid", fgColor: argb } },
       { label: "Fill color" },
     );
+    if (ok === false) applied = false;
   }
+  return applied;
 }
 
 const DEFAULT_BORDER_ARGB = "FF000000";
@@ -482,25 +500,31 @@ const DEFAULT_BORDER_ARGB = "FF000000";
 export function applyAllBorders(doc, sheetId, range, { style = "thin", color } = {}) {
   const resolvedColor = color ?? `#${DEFAULT_BORDER_ARGB}`;
   const edge = { style, color: resolvedColor };
+  let applied = true;
   for (const r of normalizeRanges(range)) {
-    doc.setRangeFormat(
+    const ok = doc.setRangeFormat(
       sheetId,
       r,
       { border: { left: edge, right: edge, top: edge, bottom: edge } },
       { label: "Borders" },
     );
+    if (ok === false) applied = false;
   }
+  return applied;
 }
 
 export function setHorizontalAlign(doc, sheetId, range, align) {
+  let applied = true;
   for (const r of normalizeRanges(range)) {
-    doc.setRangeFormat(
+    const ok = doc.setRangeFormat(
       sheetId,
       r,
       { alignment: { horizontal: align } },
       { label: "Horizontal align" },
     );
+    if (ok === false) applied = false;
   }
+  return applied;
 }
 
 export function toggleWrap(doc, sheetId, range, options = {}) {
@@ -508,9 +532,12 @@ export function toggleWrap(doc, sheetId, range, options = {}) {
     typeof options.next === "boolean"
       ? options.next
       : !allCellsMatch(doc, sheetId, range, (s) => Boolean(s.alignment?.wrapText));
+  let applied = true;
   for (const r of normalizeRanges(range)) {
-    doc.setRangeFormat(sheetId, r, { alignment: { wrapText: next } }, { label: "Wrap" });
+    const ok = doc.setRangeFormat(sheetId, r, { alignment: { wrapText: next } }, { label: "Wrap" });
+    if (ok === false) applied = false;
   }
+  return applied;
 }
 
 export const NUMBER_FORMATS = {
@@ -522,7 +549,10 @@ export const NUMBER_FORMATS = {
 export function applyNumberFormatPreset(doc, sheetId, range, preset) {
   const code = NUMBER_FORMATS[preset];
   if (!code) throw new Error(`Unknown number format preset: ${preset}`);
+  let applied = true;
   for (const r of normalizeRanges(range)) {
-    doc.setRangeFormat(sheetId, r, { numberFormat: code }, { label: "Number format" });
+    const ok = doc.setRangeFormat(sheetId, r, { numberFormat: code }, { label: "Number format" });
+    if (ok === false) applied = false;
   }
+  return applied;
 }
