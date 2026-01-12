@@ -363,3 +363,155 @@ fn discount_security_functions_reject_non_finite_numbers() {
         Value::Error(ErrorKind::Num)
     );
 }
+
+#[test]
+fn discount_security_functions_coerce_basis_like_excel() {
+    use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
+    use formula_engine::functions::financial;
+
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    let settlement = ymd_to_serial(ExcelDate::new(2020, 1, 1), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2020, 7, 1), system).unwrap();
+    let pr = 97.0;
+    let redemption = 100.0;
+
+    let expected_basis0 = financial::disc(settlement, maturity, pr, redemption, 0, system).unwrap();
+    let expected_basis1 = financial::disc(settlement, maturity, pr, redemption, 1, system).unwrap();
+    let expected_basis2 = financial::disc(settlement, maturity, pr, redemption, 2, system).unwrap();
+    let expected_basis3 = financial::disc(settlement, maturity, pr, redemption, 3, system).unwrap();
+    let expected_basis4 = financial::disc(settlement, maturity, pr, redemption, 4, system).unwrap();
+
+    let mut engine = Engine::new();
+
+    // Reference basis values through cells to exercise coercion rules.
+    engine.set_cell_value("Sheet1", "B1", "2").unwrap(); // text -> number 2
+    engine.set_cell_value("Sheet1", "B2", true).unwrap(); // TRUE -> 1
+    engine.set_cell_value("Sheet1", "B3", false).unwrap(); // FALSE -> 0
+    // B4 intentionally left blank (missing cell) -> blank -> 0
+    engine.set_cell_value("Sheet1", "B5", 4.9).unwrap(); // trunc -> 4
+
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A1",
+            "=DISC(DATE(2020,1,1),DATE(2020,7,1),97,100)",
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A2",
+            "=DISC(DATE(2020,1,1),DATE(2020,7,1),97,100,)",
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A3",
+            "=DISC(DATE(2020,1,1),DATE(2020,7,1),97,100,B4)",
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A4",
+            "=DISC(DATE(2020,1,1),DATE(2020,7,1),97,100,B3)",
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A5",
+            "=DISC(DATE(2020,1,1),DATE(2020,7,1),97,100,B2)",
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A6",
+            "=DISC(DATE(2020,1,1),DATE(2020,7,1),97,100,B1)",
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A7",
+            "=DISC(DATE(2020,1,1),DATE(2020,7,1),97,100,\"3\")",
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A8",
+            "=DISC(DATE(2020,1,1),DATE(2020,7,1),97,100,B5)",
+        )
+        .unwrap();
+
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A9",
+            "=DISC(DATE(2020,1,1),DATE(2020,7,1),97,100,\"5\")",
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A10",
+            "=DISC(DATE(2020,1,1),DATE(2020,7,1),97,100,\"nope\")",
+        )
+        .unwrap();
+
+    engine.recalculate();
+
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "A1")),
+        expected_basis0,
+        1e-12,
+    );
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "A2")),
+        expected_basis0,
+        1e-12,
+    );
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "A3")),
+        expected_basis0,
+        1e-12,
+    );
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "A4")),
+        expected_basis0,
+        1e-12,
+    );
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "A5")),
+        expected_basis1,
+        1e-12,
+    );
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "A6")),
+        expected_basis2,
+        1e-12,
+    );
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "A7")),
+        expected_basis3,
+        1e-12,
+    );
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "A8")),
+        expected_basis4,
+        1e-12,
+    );
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A9"),
+        Value::Error(ErrorKind::Num)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A10"),
+        Value::Error(ErrorKind::Value)
+    );
+}
