@@ -4605,7 +4605,23 @@ if (
   // BrowserExtensionHost. When that happens we need to resync contributed commands/panels/keybindings
   // so the desktop UI surfaces the new contributions without requiring a reload.
   window.addEventListener("formula:extensions-changed", () => {
+    // Preserve the desktop "lazy-load extensions" behavior: do not start the extension host
+    // just because something changed in IndexedDB.
+    //
+    // If extensions are already loading (Extensions panel opened / command executed) or the host
+    // is already ready, then sync any newly-installed extensions into the runtime and refresh
+    // contributions.
+    if (!extensionHostManager.ready && !extensionsLoadPromise) return;
+
     void ensureExtensionsLoaded()
+      .then(async () => {
+        try {
+          // Pick up any installs that happened after the initial `loadAllInstalled()` pass.
+          await extensionHostManager.getMarketplaceExtensionManager().loadAllInstalled();
+        } catch {
+          // ignore
+        }
+      })
       .then(() => {
         updateKeybindings();
         syncContributedCommands();
