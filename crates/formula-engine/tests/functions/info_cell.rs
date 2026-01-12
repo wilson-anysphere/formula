@@ -52,7 +52,8 @@ fn info_recalc_and_unknown_keys() {
     assert_eq!(
         sheet.eval("=INFO(\"recalc\")"),
         // The engine defaults to manual calculation mode; callers can opt into Excel-like
-        // automatic calculation by setting `CalcSettings.calculation_mode`.
+        // automatic calculation by setting `CalcSettings.calculation_mode` (via
+        // `Engine::set_calc_settings`).
         Value::Text("Manual".to_string())
     );
     assert_eq!(sheet.eval("=INFO(\"no_such_key\")"), Value::Error(ErrorKind::Value));
