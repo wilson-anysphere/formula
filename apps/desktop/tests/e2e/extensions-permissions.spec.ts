@@ -23,15 +23,25 @@ test.describe("Extensions permissions UI", () => {
 
     try {
       await page.addInitScript(({ extensionId }) => {
-        // Seed a granted network permission so the first fetch succeeds without prompting.
+        // Seed granted permissions so the extension can activate without prompts.
         const key = "formula.extensionHost.permissions";
-        const store = { [extensionId]: { network: { mode: "full" } } };
-        localStorage.setItem(key, JSON.stringify(store));
-
-        // Deny future network permission prompts (used after revocation below).
-        (window as any).__formulaPermissionPrompt = ({ permissions }: { permissions?: string[] }) => {
-          return !Array.isArray(permissions) || !permissions.includes("network");
+        const existing = (() => {
+          try {
+            const raw = localStorage.getItem(key);
+            return raw ? JSON.parse(raw) : {};
+          } catch {
+            return {};
+          }
+        })();
+        existing[extensionId] = {
+          ...(existing[extensionId] ?? {}),
+          "ui.commands": true,
+          "ui.panels": true,
+          "cells.read": true,
+          "cells.write": true,
+          network: { mode: "full" },
         };
+        localStorage.setItem(key, JSON.stringify(existing));
       }, { extensionId });
 
       await gotoDesktop(page);
@@ -42,38 +52,27 @@ test.describe("Extensions permissions UI", () => {
       await expect(page.getByTestId(`extension-card-${extensionId}`)).toBeVisible();
       await expect(page.getByTestId(`permission-${extensionId}-network`)).toContainText("mode: full");
 
-      const firstFetch = await page.evaluate(
-        async ({ url }) => {
-          const mgr = (window as any).__formulaExtensionHostManager;
-          if (!mgr) throw new Error("Missing window.__formulaExtensionHostManager");
-          return await mgr.executeCommand("sampleHello.fetchText", url);
-        },
-        { url },
-      );
-      expect(firstFetch).toBe("hello");
+      page.once("dialog", async (dialog) => {
+        expect(dialog.type()).toBe("prompt");
+        await dialog.accept(JSON.stringify([url]));
+      });
+      await page.getByTestId("run-command-with-args-sampleHello.fetchText").click();
+      await expect(page.getByTestId("toast-root")).toContainText("Fetched: hello");
 
       await page.getByTestId(`revoke-all-permissions-${extensionId}`).click();
       await expect(page.getByTestId(`permissions-empty-${extensionId}`)).toBeVisible();
 
-      const secondFetch = await page.evaluate(
-        async ({ url }) => {
-          const mgr = (window as any).__formulaExtensionHostManager;
-          if (!mgr) throw new Error("Missing window.__formulaExtensionHostManager");
-          try {
-            await mgr.executeCommand("sampleHello.fetchText", url);
-            return { ok: true, errorMessage: "" };
-          } catch (err: any) {
-            return { ok: false, errorMessage: String(err?.message ?? err) };
-          }
-        },
-        { url },
-      );
-
-      expect(secondFetch.ok).toBe(false);
-      expect(secondFetch.errorMessage).toContain("Permission denied");
+      page.once("dialog", async (dialog) => {
+        expect(dialog.type()).toBe("prompt");
+        await dialog.accept(JSON.stringify([url]));
+      });
+      await page.getByTestId("run-command-with-args-sampleHello.fetchText").click();
+      await expect(page.getByTestId("extension-permission-prompt")).toBeVisible();
+      await expect(page.getByTestId("extension-permission-network")).toBeVisible();
+      await page.getByTestId("extension-permission-deny").click();
+      await expect(page.getByTestId("toast-root")).toContainText("Permission denied");
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
 });
-

@@ -302,7 +302,7 @@ export interface PanelBodyRendererOptions {
   panelRegistry?: PanelRegistry;
   extensionPanelBridge?: ExtensionPanelBridge;
   extensionHostManager?: DesktopExtensionHostManager;
-  onExecuteExtensionCommand?: (commandId: string) => void;
+  onExecuteExtensionCommand?: (commandId: string, ...args: any[]) => void;
   onOpenExtensionPanel?: (panelId: string) => void;
 }
 

@@ -44,7 +44,7 @@ export function ExtensionsPanel({
   onOpenPanel,
 }: {
   manager: DesktopExtensionHostManager;
-  onExecuteCommand: (commandId: string) => void;
+  onExecuteCommand: (commandId: string, ...args: any[]) => void;
   onOpenPanel: (panelId: string) => void;
 }) {
   const [, bump] = React.useState(0);
@@ -119,6 +119,29 @@ export function ExtensionsPanel({
     });
   }, [manager]);
 
+  const runCommandWithArgs = React.useCallback(
+    (commandId: string) => {
+      const raw = globalThis.prompt?.("Command arguments (JSON array)", "[]");
+      if (raw == null) return;
+
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          onExecuteCommand(commandId, ...parsed);
+        } else {
+          onExecuteCommand(commandId, parsed);
+        }
+      } catch (err) {
+        try {
+          globalThis.alert?.(`Invalid JSON: ${String((err as any)?.message ?? err)}`);
+        } catch {
+          // ignore
+        }
+      }
+    },
+    [onExecuteCommand],
+  );
+
   if (!manager.ready) {
     return <div>Loading extensions…</div>;
   }
@@ -184,47 +207,67 @@ export function ExtensionsPanel({
                 <div style={{ fontWeight: 600, marginBottom: "6px" }}>Commands</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                   {extCommands.map((cmd) => (
-                    <button
-                      key={cmd.command}
-                      type="button"
-                      data-testid={`run-command-${cmd.command}`}
-                      onClick={() => onExecuteCommand(cmd.command)}
-                      style={{
-                        textAlign: "left",
-                        padding: "10px 12px",
-                        borderRadius: "10px",
-                        border: "1px solid var(--border)",
-                        background: "var(--bg-secondary)",
-                        color: "var(--text-primary)",
-                        cursor: "pointer",
-                      }}
-                    >
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
-                        <div style={{ fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
-                          {cmd.category ? `${cmd.category}: ` : ""}
-                          {cmd.title}
+                    <div key={cmd.command} style={{ display: "flex", gap: "8px", alignItems: "stretch" }}>
+                      <button
+                        type="button"
+                        data-testid={`run-command-${cmd.command}`}
+                        onClick={() => onExecuteCommand(cmd.command)}
+                        style={{
+                          textAlign: "left",
+                          padding: "10px 12px",
+                          borderRadius: "10px",
+                          border: "1px solid var(--border)",
+                          background: "var(--bg-secondary)",
+                          color: "var(--text-primary)",
+                          cursor: "pointer",
+                          flex: "1 1 auto",
+                        }}
+                      >
+                        <div
+                          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}
+                        >
+                          <div style={{ fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+                            {cmd.category ? `${cmd.category}: ` : ""}
+                            {cmd.title}
+                          </div>
+                          {(() => {
+                            const shortcut = getPrimaryCommandKeybindingDisplay(cmd.command, keybindingIndex);
+                            if (!shortcut) return null;
+                            return (
+                              <div
+                                aria-hidden="true"
+                                style={{
+                                  fontSize: "12px",
+                                  color: "var(--text-secondary)",
+                                  whiteSpace: "nowrap",
+                                  fontFamily:
+                                    "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
+                                }}
+                              >
+                                {shortcut}
+                              </div>
+                            );
+                          })()}
                         </div>
-                        {(() => {
-                          const shortcut = getPrimaryCommandKeybindingDisplay(cmd.command, keybindingIndex);
-                          if (!shortcut) return null;
-                          return (
-                            <div
-                              aria-hidden="true"
-                              style={{
-                                fontSize: "12px",
-                                color: "var(--text-secondary)",
-                                whiteSpace: "nowrap",
-                                fontFamily:
-                                  "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
-                              }}
-                            >
-                              {shortcut}
-                            </div>
-                          );
-                        })()}
-                      </div>
-                      <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>{cmd.command}</div>
-                    </button>
+                        <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>{cmd.command}</div>
+                      </button>
+                      <button
+                        type="button"
+                        data-testid={`run-command-with-args-${cmd.command}`}
+                        onClick={() => runCommandWithArgs(cmd.command)}
+                        style={{
+                          padding: "10px 12px",
+                          borderRadius: "10px",
+                          border: "1px solid var(--border)",
+                          background: "var(--bg-secondary)",
+                          color: "var(--text-primary)",
+                          cursor: "pointer",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        Run…
+                      </button>
+                    </div>
                   ))}
                 </div>
               </>

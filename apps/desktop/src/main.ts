@@ -1551,11 +1551,11 @@ if (
     await extensionsLoadPromise;
   };
 
-  const executeExtensionCommand = (commandId: string) => {
+  const executeExtensionCommand = (commandId: string, ...args: any[]) => {
     void (async () => {
       await ensureExtensionsLoaded();
       syncContributedCommands();
-      await commandRegistry.executeCommand(commandId);
+      await commandRegistry.executeCommand(commandId, ...args);
     })().catch((err) => {
       showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
     });
