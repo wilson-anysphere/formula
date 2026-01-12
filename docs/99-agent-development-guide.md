@@ -163,8 +163,13 @@ The scheduler handles CPU contention well. The issue is that **parallelism corre
 machines, Node defaults to running many test files in parallel, which can cause
 timeouts in heavier integration tests.
 
-The repo test wrapper (`scripts/run-node-tests.mjs`) caps test-file concurrency
-by default. To tune it explicitly:
+The repo test wrapper (`scripts/run-node-tests.mjs`) keeps the suite reliable by:
+
+- capping overall test-file concurrency by default
+- running `*.e2e.test.js` files serially (`--test-concurrency=1`)
+- running sync-server-backed tests (files that reference `startSyncServer`) serially
+
+To tune the default non-e2e/non-sync-server test-file concurrency explicitly:
 
 ```bash
 FORMULA_NODE_TEST_CONCURRENCY=4 pnpm test:node
