@@ -127,18 +127,6 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     when: null,
   },
   {
-    command: "audit.tracePrecedents",
-    key: "ctrl+[",
-    mac: "cmd+[",
-    when: null,
-  },
-  {
-    command: "audit.traceDependents",
-    key: "ctrl+]",
-    mac: "cmd+]",
-    when: null,
-  },
-  {
     command: "edit.find",
     key: "ctrl+f",
     mac: "cmd+f",
