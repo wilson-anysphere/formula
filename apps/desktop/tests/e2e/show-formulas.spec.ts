@@ -7,8 +7,8 @@ async function waitForIdle(page: import("@playwright/test").Page): Promise<void>
   // Retry once if the execution context is destroyed mid-wait.
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      await page.waitForFunction(() => Boolean((window as any).__formulaApp?.whenIdle), null, { timeout: 10_000 });
-      await page.evaluate(() => (window as any).__formulaApp.whenIdle());
+      await page.waitForFunction(() => Boolean((window.__formulaApp as any)?.whenIdle), null, { timeout: 10_000 });
+      await page.evaluate(() => (window.__formulaApp as any).whenIdle());
       return;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -55,18 +55,18 @@ test.describe("show formulas", () => {
     await page.keyboard.press("Enter");
     await waitForIdle(page);
 
-    const computedValue = await page.evaluate(() => (window as any).__formulaApp.getCellDisplayValueA1("C1"));
+    const computedValue = await page.evaluate(() => (window.__formulaApp as any).getCellDisplayValueA1("C1"));
     expect(computedValue).toBe("3");
 
-    const defaultRenderText = await page.evaluate(() => (window as any).__formulaApp.getCellDisplayTextForRenderA1("C1"));
+    const defaultRenderText = await page.evaluate(() => (window.__formulaApp as any).getCellDisplayTextForRenderA1("C1"));
     expect(defaultRenderText).toBe("3");
 
     await toggleShowFormulas(page);
-    const formulaRenderText = await page.evaluate(() => (window as any).__formulaApp.getCellDisplayTextForRenderA1("C1"));
+    const formulaRenderText = await page.evaluate(() => (window.__formulaApp as any).getCellDisplayTextForRenderA1("C1"));
     expect(formulaRenderText).toBe("=SUM(A1:A2)");
 
     await toggleShowFormulas(page);
-    const toggledBackText = await page.evaluate(() => (window as any).__formulaApp.getCellDisplayTextForRenderA1("C1"));
+    const toggledBackText = await page.evaluate(() => (window.__formulaApp as any).getCellDisplayTextForRenderA1("C1"));
     expect(toggledBackText).toBe("3");
   });
 
@@ -75,7 +75,7 @@ test.describe("show formulas", () => {
     await waitForIdle(page);
 
     await page.evaluate(() => {
-      const app = (window as any).__formulaApp;
+      const app = window.__formulaApp as any;
       app.selectRange({
         range: {
           startRow: 0,
@@ -86,7 +86,7 @@ test.describe("show formulas", () => {
       });
     });
 
-    const drawn = await page.evaluate(() => (window as any).__formulaApp.getLastSelectionDrawn());
+    const drawn = await page.evaluate(() => (window.__formulaApp as any).getLastSelectionDrawn());
     expect(drawn).toBeTruthy();
     expect(drawn.ranges.length).toBeGreaterThan(0);
     expect(drawn.ranges[0].rect.width).toBeGreaterThan(0);

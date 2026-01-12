@@ -3,8 +3,8 @@ import { expect, test } from "@playwright/test";
 import { gotoDesktop } from "./helpers";
 
 async function waitForIdle(page: import("@playwright/test").Page): Promise<void> {
-  await page.waitForFunction(() => Boolean((window as any).__formulaApp?.whenIdle), null, { timeout: 10_000 });
-  await page.evaluate(() => (window as any).__formulaApp.whenIdle());
+  await page.waitForFunction(() => Boolean((window.__formulaApp as any)?.whenIdle), null, { timeout: 10_000 });
+  await page.evaluate(() => (window.__formulaApp as any).whenIdle());
 }
 
 async function toggleShowFormulasShortcut(page: import("@playwright/test").Page): Promise<void> {
@@ -46,14 +46,14 @@ test.describe("ribbon view toggles", () => {
     const showFormulasToggle = page.getByTestId("ribbon-root").getByTestId("ribbon-show-formulas");
     await expect(showFormulasToggle).toHaveAttribute("aria-pressed", "false");
 
-    const defaultRenderText = await page.evaluate(() => (window as any).__formulaApp.getCellDisplayTextForRenderA1("C1"));
+    const defaultRenderText = await page.evaluate(() => (window.__formulaApp as any).getCellDisplayTextForRenderA1("C1"));
     expect(defaultRenderText).toBe("3");
 
     // Toggle via Ribbon: shows formula text and pressed state updates.
     await showFormulasToggle.click();
     await expect(showFormulasToggle).toHaveAttribute("aria-pressed", "true");
 
-    const formulaRenderText = await page.evaluate(() => (window as any).__formulaApp.getCellDisplayTextForRenderA1("C1"));
+    const formulaRenderText = await page.evaluate(() => (window.__formulaApp as any).getCellDisplayTextForRenderA1("C1"));
     expect(formulaRenderText).toBe("=SUM(A1:A2)");
 
     // Formulas tab has its own Show Formulas toggle; it should stay in sync with the View tab toggle.
@@ -67,7 +67,7 @@ test.describe("ribbon view toggles", () => {
     await formulasShowFormulasToggle.click();
     await waitForIdle(page);
     await expect(formulasShowFormulasToggle).toHaveAttribute("aria-pressed", "false");
-    const ribbonToggledOffText = await page.evaluate(() => (window as any).__formulaApp.getCellDisplayTextForRenderA1("C1"));
+    const ribbonToggledOffText = await page.evaluate(() => (window.__formulaApp as any).getCellDisplayTextForRenderA1("C1"));
     expect(ribbonToggledOffText).toBe("3");
 
     await viewTab.click();
@@ -80,7 +80,7 @@ test.describe("ribbon view toggles", () => {
     await expect(showFormulasToggle).toHaveAttribute("aria-pressed", "true");
     await formulasTab.click();
     await expect(formulasShowFormulasToggle).toHaveAttribute("aria-pressed", "true");
-    const toggledBackText = await page.evaluate(() => (window as any).__formulaApp.getCellDisplayTextForRenderA1("C1"));
+    const toggledBackText = await page.evaluate(() => (window.__formulaApp as any).getCellDisplayTextForRenderA1("C1"));
     expect(toggledBackText).toBe("=SUM(A1:A2)");
   });
 
@@ -91,17 +91,17 @@ test.describe("ribbon view toggles", () => {
     await page.getByRole("tab", { name: "View", exact: true }).click();
     const perfStatsToggle = page.getByTestId("ribbon-root").getByTestId("ribbon-perf-stats");
 
-    const initialEnabled = await page.evaluate(() => Boolean((window as any).__formulaApp.getGridPerfStats()?.enabled));
+    const initialEnabled = await page.evaluate(() => Boolean((window.__formulaApp as any).getGridPerfStats()?.enabled));
     await expect(perfStatsToggle).toHaveAttribute("aria-pressed", initialEnabled ? "true" : "false");
 
     await perfStatsToggle.click();
     await expect(perfStatsToggle).toHaveAttribute("aria-pressed", initialEnabled ? "false" : "true");
-    const enabled = await page.evaluate(() => Boolean((window as any).__formulaApp.getGridPerfStats()?.enabled));
+    const enabled = await page.evaluate(() => Boolean((window.__formulaApp as any).getGridPerfStats()?.enabled));
     expect(enabled).toBe(!initialEnabled);
 
     await perfStatsToggle.click();
     await expect(perfStatsToggle).toHaveAttribute("aria-pressed", initialEnabled ? "true" : "false");
-    const disabled = await page.evaluate(() => Boolean((window as any).__formulaApp.getGridPerfStats()?.enabled));
+    const disabled = await page.evaluate(() => Boolean((window.__formulaApp as any).getGridPerfStats()?.enabled));
     expect(disabled).toBe(initialEnabled);
   });
 });

@@ -5,8 +5,8 @@ async function waitForIdle(page: import("@playwright/test").Page): Promise<void>
   // Retry once if the execution context is destroyed mid-wait.
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      await page.waitForFunction(() => Boolean((window as any).__formulaApp?.whenIdle), null, { timeout: 10_000 });
-      await page.evaluate(() => (window as any).__formulaApp.whenIdle());
+      await page.waitForFunction(() => Boolean((window.__formulaApp as any)?.whenIdle), null, { timeout: 10_000 });
+      await page.evaluate(() => (window.__formulaApp as any).whenIdle());
       return;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -269,7 +269,7 @@ test.describe("formula auditing overlays", () => {
       (window as any).__tauriListeners["file-dropped"]({ payload: ["/tmp/fake.xlsx"] });
     });
 
-    await page.waitForFunction(async () => (await (window as any).__formulaApp.getCellValueA1("A1")) === "Hello");
+    await page.waitForFunction(async () => (await (window.__formulaApp as any).getCellValueA1("A1")) === "Hello");
     await waitForIdle(page);
 
     await page.click("#grid", { position: { x: 60, y: 40 } });
@@ -307,20 +307,20 @@ test.describe("formula auditing overlays", () => {
 
     await expect(page.getByTestId("active-cell")).toHaveText("B1");
 
-    const highlightsB1 = await page.evaluate(() => (window as any).__formulaApp.getAuditingHighlights());
+    const highlightsB1 = await page.evaluate(() => (window.__formulaApp as any).getAuditingHighlights());
     expect(highlightsB1.mode).toBe("both");
     expect(highlightsB1.precedents).toEqual(["A1"]);
     expect(highlightsB1.dependents).toEqual(["C1"]);
 
     await page.keyboard.press("ArrowRight");
     await waitForIdle(page);
-    const highlightsC1 = await page.evaluate(() => (window as any).__formulaApp.getAuditingHighlights());
+    const highlightsC1 = await page.evaluate(() => (window.__formulaApp as any).getAuditingHighlights());
     expect(highlightsC1.precedents).toEqual(["B1"]);
     expect(highlightsC1.dependents).toEqual([]);
 
     await page.getByTestId("ribbon-root").getByTestId("audit-transitive").click();
     await waitForIdle(page);
-    const highlightsC1Transitive = await page.evaluate(() => (window as any).__formulaApp.getAuditingHighlights());
+    const highlightsC1Transitive = await page.evaluate(() => (window.__formulaApp as any).getAuditingHighlights());
     expect(highlightsC1Transitive.transitive).toBe(true);
     expect(highlightsC1Transitive.precedents.sort()).toEqual(["A1", "B1"]);
 
@@ -335,21 +335,21 @@ test.describe("formula auditing overlays", () => {
 
     await page.locator('button[data-command-id="formulas.formulaAuditing.tracePrecedents"]').click();
     await waitForIdle(page);
-    const ribbonPrecedents = await page.evaluate(() => (window as any).__formulaApp.getAuditingHighlights());
+    const ribbonPrecedents = await page.evaluate(() => (window.__formulaApp as any).getAuditingHighlights());
     expect(ribbonPrecedents.mode).toBe("precedents");
     expect(ribbonPrecedents.precedents).toEqual(["A1"]);
     expect(ribbonPrecedents.dependents).toEqual([]);
 
     await page.locator('button[data-command-id="formulas.formulaAuditing.traceDependents"]').click();
     await waitForIdle(page);
-    const ribbonDependents = await page.evaluate(() => (window as any).__formulaApp.getAuditingHighlights());
+    const ribbonDependents = await page.evaluate(() => (window.__formulaApp as any).getAuditingHighlights());
     expect(ribbonDependents.mode).toBe("dependents");
     expect(ribbonDependents.precedents).toEqual([]);
     expect(ribbonDependents.dependents).toEqual(["C1"]);
 
     await page.locator('button[data-command-id="formulas.formulaAuditing.removeArrows"]').click();
     await waitForIdle(page);
-    const ribbonCleared = await page.evaluate(() => (window as any).__formulaApp.getAuditingHighlights());
+    const ribbonCleared = await page.evaluate(() => (window.__formulaApp as any).getAuditingHighlights());
     expect(ribbonCleared.mode).toBe("off");
     expect(ribbonCleared.precedents).toEqual([]);
     expect(ribbonCleared.dependents).toEqual([]);

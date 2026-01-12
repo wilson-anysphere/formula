@@ -90,30 +90,30 @@ test.describe("Built-in commands", () => {
   test("view.togglePanel.versionHistory + view.togglePanel.branchManager open/close panels", async ({ page }) => {
     await gotoDesktop(page);
 
-    await page.waitForFunction(() => Boolean((window as any).__formulaCommandRegistry), undefined, { timeout: 10_000 });
+    await page.waitForFunction(() => Boolean(window.__formulaCommandRegistry), undefined, { timeout: 10_000 });
 
     // Version History.
     await page.evaluate(async () => {
-      const registry = (window as any).__formulaCommandRegistry;
+      const registry = window.__formulaCommandRegistry as any;
       await registry.executeCommand("view.togglePanel.versionHistory");
     });
     await expect(page.getByTestId("panel-versionHistory")).toBeVisible();
 
     await page.evaluate(async () => {
-      const registry = (window as any).__formulaCommandRegistry;
+      const registry = window.__formulaCommandRegistry as any;
       await registry.executeCommand("view.togglePanel.versionHistory");
     });
     await expect(page.getByTestId("panel-versionHistory")).toHaveCount(0);
 
     // Branch Manager.
     await page.evaluate(async () => {
-      const registry = (window as any).__formulaCommandRegistry;
+      const registry = window.__formulaCommandRegistry as any;
       await registry.executeCommand("view.togglePanel.branchManager");
     });
     await expect(page.getByTestId("panel-branchManager")).toBeVisible();
 
     await page.evaluate(async () => {
-      const registry = (window as any).__formulaCommandRegistry;
+      const registry = window.__formulaCommandRegistry as any;
       await registry.executeCommand("view.togglePanel.branchManager");
     });
     await expect(page.getByTestId("panel-branchManager")).toHaveCount(0);
