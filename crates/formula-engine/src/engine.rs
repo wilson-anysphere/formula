@@ -3544,6 +3544,16 @@ impl Engine {
                         visiting,
                         lexical_scopes,
                     ),
+                    crate::Expr::NameRef(_) => {
+                        // Allow reference definitions to alias other defined names as long as they
+                        // ultimately resolve to a static reference that can be lowered to bytecode.
+                        self.extract_static_ref_expr_for_bytecode(
+                            &ast.expr,
+                            sheet_id,
+                            visiting,
+                            lexical_scopes,
+                        )
+                    }
                     crate::Expr::Binary(b) if b.op == crate::BinaryOp::Range => {
                         // Reference definitions must be a direct cell/range reference.
                         if !matches!(
