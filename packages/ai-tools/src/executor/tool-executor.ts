@@ -233,13 +233,22 @@ type DlpRangeIndex = {
    */
   sheetRankMax: number;
   /**
-   * Max classification rank for each 0-based column index in the sheet.
+   * Cached selection bounds (0-based) used for fast column/cell array indexing.
    */
-  columnRankByIndex: Map<number, number>;
+  startRow: number;
+  startCol: number;
+  rowCount: number;
+  colCount: number;
   /**
-   * Max classification rank for each 0-based cell coordinate ("row,col") in the sheet.
+   * Max classification rank for each 0-based column offset in the selection range.
    */
-  cellRankByCoord: Map<string, number>;
+  columnRankByOffset: Uint8Array;
+  /**
+   * Max classification rank for each cell in the selection range, stored row-major.
+   *
+   * Null when there are no non-Public cell-scoped classification records intersecting the selection.
+   */
+  cellRankByOffset: Uint8Array | null;
   /**
    * Range-scoped records for the sheet (normalized to ensure start <= end).
    */
@@ -1219,6 +1228,10 @@ export class ToolExecutor {
     records: Array<{ selector: any; classification: any }>
   ): DlpRangeIndex {
     const selectionRange = ref.range;
+    const startRow = selectionRange.start.row;
+    const startCol = selectionRange.start.col;
+    const rowCount = selectionRange.end.row - selectionRange.start.row + 1;
+    const colCount = selectionRange.end.col - selectionRange.start.col + 1;
 
     const rankFromClassification = (classification: any): number => {
       if (!classification) return DEFAULT_CLASSIFICATION_RANK;
@@ -1230,8 +1243,8 @@ export class ToolExecutor {
 
     let docRankMax = DEFAULT_CLASSIFICATION_RANK;
     let sheetRankMax = DEFAULT_CLASSIFICATION_RANK;
-    const columnRankByIndex = new Map<number, number>();
-    const cellRankByCoord = new Map<string, number>();
+    const columnRankByOffset = new Uint8Array(Math.max(0, colCount));
+    let cellRankByOffset: Uint8Array | null = null;
     const rangeRecords: Array<{ startRow: number; endRow: number; startCol: number; endCol: number; rank: number }> = [];
     const fallbackRecords: Array<{ selector: any; classification: any }> = [];
 
@@ -1261,8 +1274,9 @@ export class ToolExecutor {
           if (typeof selector.columnIndex === "number") {
             const colIndex = selector.columnIndex;
             if (colIndex < selectionRange.start.col || colIndex > selectionRange.end.col) break;
-            const existing = columnRankByIndex.get(colIndex) ?? DEFAULT_CLASSIFICATION_RANK;
-            columnRankByIndex.set(colIndex, Math.max(existing, recordRank));
+            const offset = colIndex - startCol;
+            const existing = columnRankByOffset[offset] ?? DEFAULT_CLASSIFICATION_RANK;
+            columnRankByOffset[offset] = Math.max(existing, recordRank);
           } else {
             // Table/columnId selectors require additional context (tableId/columnId) to evaluate.
             fallbackRecords.push(record);
@@ -1281,9 +1295,15 @@ export class ToolExecutor {
           ) {
             break;
           }
-          const key = `${selector.row},${selector.col}`;
-          const existing = cellRankByCoord.get(key) ?? DEFAULT_CLASSIFICATION_RANK;
-          cellRankByCoord.set(key, Math.max(existing, recordRank));
+          const rowOffset = selector.row - startRow;
+          const colOffset = selector.col - startCol;
+          if (rowOffset < 0 || colOffset < 0 || rowOffset >= rowCount || colOffset >= colCount) break;
+          if (cellRankByOffset === null) {
+            cellRankByOffset = new Uint8Array(Math.max(0, rowCount * colCount));
+          }
+          const offset = rowOffset * colCount + colOffset;
+          const existing = cellRankByOffset[offset] ?? DEFAULT_CLASSIFICATION_RANK;
+          cellRankByOffset[offset] = Math.max(existing, recordRank);
           break;
         }
         case "range": {
@@ -1310,8 +1330,12 @@ export class ToolExecutor {
     return {
       docRankMax,
       sheetRankMax,
-      columnRankByIndex,
-      cellRankByCoord,
+      startRow,
+      startCol,
+      rowCount,
+      colCount,
+      columnRankByOffset,
+      cellRankByOffset,
       rangeRecords,
       fallbackRecords
     };
@@ -1356,8 +1380,9 @@ export class ToolExecutor {
       return false;
     }
 
-    const colRank = index.columnRankByIndex.get(col0);
-    if (colRank !== undefined && colRank > rank) rank = colRank;
+    const colOffset = col0 - index.startCol;
+    const colRank = index.columnRankByOffset[colOffset] ?? DEFAULT_CLASSIFICATION_RANK;
+    if (colRank > rank) rank = colRank;
     if (rank === RESTRICTED_CLASSIFICATION_RANK) {
       return restrictedAllowed;
     }
@@ -1365,10 +1390,13 @@ export class ToolExecutor {
       return false;
     }
 
-    if (index.cellRankByCoord.size > 0) {
-      const coordKey = `${row0},${col0}`;
-      const cellRank = index.cellRankByCoord.get(coordKey);
-      if (cellRank !== undefined && cellRank > rank) rank = cellRank;
+    if (index.cellRankByOffset !== null) {
+      const rowOffset = row0 - index.startRow;
+      if (rowOffset >= 0 && rowOffset < index.rowCount && colOffset >= 0 && colOffset < index.colCount) {
+        const offset = rowOffset * index.colCount + colOffset;
+        const cellRank = index.cellRankByOffset[offset] ?? DEFAULT_CLASSIFICATION_RANK;
+        if (cellRank > rank) rank = cellRank;
+      }
     }
     if (rank === RESTRICTED_CLASSIFICATION_RANK) {
       return restrictedAllowed;
