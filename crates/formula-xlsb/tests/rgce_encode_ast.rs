@@ -1,5 +1,6 @@
 #![cfg(feature = "write")]
 
+use formula_engine::parse_formula;
 use formula_xlsb::rgce::{
     decode_rgce, decode_rgce_with_context, decode_rgce_with_rgcb, encode_rgce_with_context_ast,
     CellCoord,
@@ -16,6 +17,11 @@ fn ctx_table1() -> WorkbookContext {
     ctx.add_table_column(1, 3, "Price");
     ctx.add_table_column(1, 4, "Total");
     ctx
+}
+
+fn normalize_formula(src: &str) -> String {
+    let ast = parse_formula(src, Default::default()).expect("parse");
+    ast.to_string(Default::default()).expect("serialize")
 }
 
 #[test]
@@ -217,8 +223,21 @@ fn ast_encoder_roundtrips_structured_ref_this_row_without_table_name() {
         encode_rgce_with_context_ast("=[@Qty]", &ctx, CellCoord::new(0, 0)).expect("encode");
     assert!(encoded.rgcb.is_empty());
 
+    assert_eq!(
+        encoded.rgce,
+        vec![
+            0x18, 0x19, // PtgExtend + etpg=PtgList
+            1, 0, 0, 0, // table id (inferred)
+            0x10, 0x00, // flags (#This Row)
+            2, 0, // col_first
+            2, 0, // col_last
+            0, 0, // reserved
+        ]
+    );
+
     let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
     assert_eq!(decoded, "[@Qty]");
+    assert_eq!(normalize_formula(&decoded), normalize_formula("[@Qty]"));
 }
 
 #[test]
