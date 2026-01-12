@@ -31,3 +31,30 @@ fn xlsx_document_exposes_cell_meta() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[test]
+fn xlsx_document_exposes_vm_metadata() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/xlsx/metadata/rich-values-vm.xlsx");
+
+    let doc = formula_xlsx::load_from_path(&fixture)?;
+    let sheet_id = doc.workbook.sheets[0].id;
+
+    let a1 = CellRef::from_a1("A1")?;
+    let b1 = CellRef::from_a1("B1")?;
+
+    let a1_meta = doc
+        .cell_meta(sheet_id, a1)
+        .expect("expected cell metadata for A1");
+    assert_eq!(
+        a1_meta.vm.as_deref(),
+        Some("1"),
+        "expected A1 to preserve vm attribute via CellMeta, got: {a1_meta:?}"
+    );
+
+    let b1_meta = doc
+        .cell_meta(sheet_id, b1)
+        .expect("expected cell metadata for B1");
+    assert_eq!(b1_meta.vm.as_deref(), None);
+
+    Ok(())
+}
