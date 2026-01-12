@@ -5562,7 +5562,7 @@ fn rewrite_defined_name_constants_for_bytecode(
                         field: access.field.clone(),
                     })
                 })
-            },
+            }
             crate::Expr::FunctionCall(call) => {
                 if matches!(
                     bytecode::ast::Function::from_name(&call.name.name_upper),

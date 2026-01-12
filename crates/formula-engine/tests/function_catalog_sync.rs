@@ -221,8 +221,10 @@ fn function_catalog_sync() {
         return;
     }
 
-    let mut report =
-        String::from("shared/functionCatalog.json is out of sync with formula-engine registry\n");
+    let mut report = String::from("shared/functionCatalog.json is out of sync with formula-engine registry\n");
+    report.push_str(
+        "\nTo regenerate function catalog artifacts, run:\n  pnpm -w run generate:function-catalog\n",
+    );
 
     if !missing_in_registry.is_empty() {
         report.push_str("\nMissing in registry (present in functionCatalog.json):\n");
