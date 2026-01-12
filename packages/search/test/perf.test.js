@@ -112,7 +112,10 @@ test("perf: AbortSignal cancels long-running index builds quickly", async () => 
   let yields = 0;
   const scheduler = async () => {
     yields++;
-    if (yields === 1) controller.abort();
+    // Under heavy CI load, the first timeslice checkpoint can occur before the first cell
+    // is processed. Abort on the *second* yield so we deterministically observe partial
+    // progress before cancellation.
+    if (yields === 2) controller.abort();
     await immediate();
   };
 

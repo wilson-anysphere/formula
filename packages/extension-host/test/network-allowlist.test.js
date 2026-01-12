@@ -74,6 +74,9 @@ test("network allowlist: blocks non-allowlisted hosts but allows allowed hosts",
     engineVersion: "1.0.0",
     permissionsStoragePath: permissionsPath,
     extensionStoragePath: path.join(dir, "storage.json"),
+    // Worker startup can be slow under heavy CI load; keep this test focused on the
+    // allowlist behavior rather than the default 5s activation SLA.
+    activationTimeoutMs: 20_000,
     permissionPrompt: async ({ permissions }) => {
       // The allowlisted host should not prompt; blocked hosts should prompt and be denied.
       if (permissions.includes("network")) return false;
@@ -134,6 +137,7 @@ test("permissions: revokePermissions blocks subsequent network calls until re-gr
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
+    activationTimeoutMs: 20_000,
     permissionPrompt: async ({ permissions }) => {
       if (permissions.includes("network")) {
         networkPrompts += 1;
@@ -160,4 +164,3 @@ test("permissions: revokePermissions blocks subsequent network calls until re-gr
   await assert.rejects(() => host.executeCommand(commandId, "https://allowed.example/"), /Permission denied/i);
   assert.equal(networkPrompts, 2);
 });
-

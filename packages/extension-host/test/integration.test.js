@@ -14,6 +14,9 @@ test("integration: load sample extension and execute contributed command", async
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
+    // Worker startup can be slow under heavy CI load; keep integration tests focused on
+    // correctness rather than the default 5s activation SLA.
+    activationTimeoutMs: 20_000,
     permissionPrompt: async ({ permissions }) => {
       // Allow command registration, but deny outbound network access.
       if (permissions.includes("network")) return false;
@@ -50,6 +53,7 @@ test("integration: panel command creates panel and sets HTML", async (t) => {
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
+    activationTimeoutMs: 20_000,
     permissionPrompt: async () => true
   });
 
@@ -75,6 +79,7 @@ test("integration: view activation creates and renders contributed panel", async
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
+    activationTimeoutMs: 20_000,
     permissionPrompt: async () => true
   });
 
@@ -110,6 +115,7 @@ test("integration: viewActivated is broadcast even if view activation fails", as
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
+    activationTimeoutMs: 20_000,
     permissionPrompt: async () => false
   });
 
@@ -144,6 +150,7 @@ test("integration: viewActivated payload normalizes viewId to string", async (t)
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
+    activationTimeoutMs: 20_000,
     permissionPrompt: async () => true
   });
 
@@ -175,6 +182,7 @@ test("integration: panel messaging (webview -> extension -> webview)", async (t)
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
+    activationTimeoutMs: 20_000,
     permissionPrompt: async () => true
   });
 
@@ -209,6 +217,7 @@ test("integration: invoke custom function activates extension and returns result
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
+    activationTimeoutMs: 20_000,
     permissionPrompt: async () => true
   });
 
@@ -241,6 +250,7 @@ test("integration: network.fetch is permission gated and can fetch via host", as
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
+    activationTimeoutMs: 20_000,
     permissionPrompt: async () => true
   });
 
