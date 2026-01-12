@@ -85,7 +85,6 @@ pub fn text(
         Value::Bool(b) => FmtValue::Bool(*b),
         Value::Blank => FmtValue::Blank,
     };
-
     let options = FormatOptions {
         locale: value_locale.separators,
         date_system: match date_system {

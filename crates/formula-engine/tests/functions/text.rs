@@ -2,6 +2,7 @@ use formula_engine::eval::parse_a1;
 use formula_engine::date::ExcelDateSystem;
 use formula_engine::functions::text;
 use formula_engine::locale::ValueLocaleConfig;
+use formula_engine::value::{EntityValue, RecordValue};
 use formula_engine::{Engine, ErrorKind, ExcelError, Value};
 
 use super::harness::TestSheet;
@@ -143,6 +144,46 @@ fn text_formats_numbers_with_simple_patterns() {
         )
         .unwrap(),
         "x"
+    );
+}
+
+#[test]
+fn text_formats_entity_display_string() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", Value::Entity(EntityValue::new("hello")));
+    assert_eq!(
+        sheet.eval(r#"=TEXT(A1,"@")"#),
+        Value::Text("hello".to_string())
+    );
+}
+
+#[test]
+fn text_formats_record_display_string() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", Value::Record(RecordValue::new("rec")));
+    assert_eq!(
+        sheet.eval(r#"=TEXT(A1,"@")"#),
+        Value::Text("rec".to_string())
+    );
+}
+
+#[test]
+fn textjoin_includes_entity_display_string() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", Value::Entity(EntityValue::new("hello")));
+    assert_eq!(
+        sheet.eval(r#"=TEXTJOIN(",",TRUE,A1,"x")"#),
+        Value::Text("hello,x".to_string())
+    );
+}
+
+#[test]
+fn textjoin_includes_record_display_string() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", Value::Record(RecordValue::new("rec")));
+    assert_eq!(
+        sheet.eval(r#"=TEXTJOIN(",",TRUE,A1,"x")"#),
+        Value::Text("rec,x".to_string())
     );
 }
 

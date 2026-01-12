@@ -53,9 +53,19 @@ fn value_to_text(value: &Value, options: &FormatOptions) -> Result<String, Error
         Value::Record(v) => Ok(v.display.clone()),
         Value::Bool(b) => Ok(if *b { "TRUE".to_string() } else { "FALSE".to_string() }),
         Value::Error(e) => Err(*e),
-        Value::Reference(_) | Value::ReferenceUnion(_) => Err(ErrorKind::Value),
-        Value::Array(arr) => value_to_text(&arr.top_left(), options),
-        Value::Lambda(_) => Err(ErrorKind::Value),
-        Value::Spill { .. } => Err(ErrorKind::Spill),
+        other => {
+            if matches!(other, Value::Spill { .. }) {
+                return Err(ErrorKind::Spill);
+            }
+            if matches!(other, Value::Reference(_) | Value::ReferenceUnion(_) | Value::Lambda(_)) {
+                return Err(ErrorKind::Value);
+            }
+            if let Value::Array(arr) = other {
+                return value_to_text(&arr.top_left(), options);
+            }
+
+            // Other rich scalar values: treat as their display string.
+            Ok(other.to_string())
+        }
     }
 }
