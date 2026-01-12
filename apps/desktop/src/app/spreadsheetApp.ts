@@ -61,6 +61,7 @@ import { resolveDesktopGridMode, type DesktopGridMode } from "../grid/shared/des
 import { DocumentCellProvider } from "../grid/shared/documentCellProvider.js";
 import { DesktopSharedGrid } from "../grid/shared/desktopSharedGrid.js";
 import { openExternalHyperlink } from "../hyperlinks/openExternal.js";
+import * as nativeDialogs from "../tauri/nativeDialogs.js";
 import { shellOpen } from "../tauri/shellOpen.js";
 import { applyFillCommitToDocumentController } from "../fill/applyFillCommit";
 import type { CellRange as FillEngineRange, FillMode as FillHandleMode } from "@formula/fill-engine";
@@ -5344,12 +5345,7 @@ export class SpreadsheetApp {
 
         void openExternalHyperlink(renderedText.trim(), {
           shellOpen,
-          confirmUntrustedProtocol: async (message) => {
-            if (typeof window !== "undefined" && typeof window.confirm === "function") {
-              return window.confirm(message);
-            }
-            return false;
-          },
+          confirmUntrustedProtocol: async (message) => nativeDialogs.confirm(message),
         }).catch(() => {
           // Best-effort: link opening should not crash grid interaction.
         });

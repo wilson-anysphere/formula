@@ -89,6 +89,21 @@ export class DesktopOAuthBroker implements OAuthBroker {
   }
 
   async openAuthUrl(url: string) {
+    // Security: auth URLs should always be opened via a trusted web protocol.
+    // This prevents malicious callers from using the OAuth broker as a generic
+    // "open arbitrary protocol" primitive.
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw new Error(`Invalid OAuth auth URL: ${url}`);
+    }
+
+    const protocol = parsed.protocol.replace(":", "").toLowerCase();
+    if (protocol !== "http" && protocol !== "https") {
+      throw new Error(`Refusing to open OAuth auth URL with untrusted protocol "${protocol}:"`);
+    }
+
     if (!this.openAuthUrlHandler) {
       await shellOpen(url);
       return;
