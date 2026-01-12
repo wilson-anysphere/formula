@@ -16,11 +16,11 @@ pub mod rich_value_types;
 mod images;
 mod media_parts;
 mod rich_value_images;
+mod worksheet_scan;
 
 pub use images::resolve_rich_value_image_targets;
-pub use rich_value_images::{
-    ExtractedRichValueImages, RichValueEntry, RichValueIndex, RichValueWarning,
-};
+pub use worksheet_scan::scan_cells_with_metadata_indices;
+pub use rich_value_images::{ExtractedRichValueImages, RichValueEntry, RichValueIndex, RichValueWarning};
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -88,7 +88,7 @@ pub fn extract_rich_cell_images(
         let Some(sheet_bytes) = pkg.part(&sheet.worksheet_part) else {
             continue;
         };
-        let cells = parse_worksheet_vm_cells(sheet_bytes, &sheet.worksheet_part)?;
+        let cells = parse_worksheet_vm_cells(sheet_bytes)?;
         for (cell, vm) in cells {
             let Some(&rich_value_idx) = vm_to_rich_value.get(&vm) else {
                 continue;
@@ -352,40 +352,13 @@ fn map_xml_dom_error(part: &str, err: crate::xml::XmlDomError) -> RichDataError 
     }
 }
 
-fn parse_worksheet_vm_cells(
-    bytes: &[u8],
-    part_name: &str,
-) -> Result<Vec<(CellRef, u32)>, RichDataError> {
-    let xml = std::str::from_utf8(bytes).map_err(|source| RichDataError::XmlNonUtf8 {
-        part: part_name.to_string(),
-        source,
-    })?;
-    let doc = roxmltree::Document::parse(xml).map_err(|source| RichDataError::XmlParse {
-        part: part_name.to_string(),
-        source,
-    })?;
-
-    let mut out: Vec<(CellRef, u32)> = Vec::new();
-    for cell in doc
-        .descendants()
-        .filter(|n| n.is_element() && n.tag_name().name() == "c")
-    {
-        let Some(vm) = cell.attribute("vm") else {
-            continue;
-        };
-        let Ok(vm_idx) = vm.trim().parse::<u32>() else {
-            continue;
-        };
-        let Some(r) = cell.attribute("r") else {
-            continue;
-        };
-        let Ok(cell_ref) = CellRef::from_a1(r) else {
-            continue;
-        };
-        out.push((cell_ref, vm_idx));
-    }
-
-    Ok(out)
+fn parse_worksheet_vm_cells(bytes: &[u8]) -> Result<Vec<(CellRef, u32)>, RichDataError> {
+    // Use the streaming scan to avoid materializing a DOM for large worksheets.
+    let cells = scan_cells_with_metadata_indices(bytes)?;
+    Ok(cells
+        .into_iter()
+        .filter_map(|(cell, vm, _cm)| vm.map(|vm| (cell, vm)))
+        .collect())
 }
 
 fn parse_rich_value_parts_rel_indices(

@@ -129,6 +129,8 @@ pub use streaming::{
 };
 pub use styles::*;
 pub use workbook::ChartExtractionError;
+pub use rich_data::RichDataError;
+pub use rich_data::scan_cells_with_metadata_indices;
 #[cfg(not(target_arch = "wasm32"))]
 pub use writer::{
     write_workbook, write_workbook_to_writer, write_workbook_to_writer_with_kind, XlsxWriteError,
