@@ -40,8 +40,11 @@ In this schema, the *cell value itself is an error* (`#VALUE!`). The **image is 
 xl/worksheets/sheet1.xml    <c t="e" vm="…"><v>#VALUE!</v></c>
           │ vm (value-metadata index)
           ▼
-xl/metadata.xml             <valueMetadata> … <rc t="…" v="…"/> … </valueMetadata>
-          │ v (rich value index)
+xl/metadata.xml             valueMetadata[bk] → <rc t="…" v="…"/>
+          │ v (futureMetadata bk index)
+          ▼
+xl/metadata.xml             futureMetadata(XLRICHVALUE)[bk] → <xlrd:rvb i="…"/>
+          │ i (rich value index)
           ▼
 xl/richData/rdrichvalue.xml <rv s="…"><v>LocalImageIdentifier</v><v>CalcOrigin</v>…</rv>
           │ LocalImageIdentifier (index into richValueRel list)
