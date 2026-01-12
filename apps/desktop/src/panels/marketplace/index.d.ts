@@ -5,7 +5,14 @@ export type MarketplacePanelDeps = {
   };
   extensionManager: {
     getInstalled: (id: string) => Promise<any>;
-    install: (id: string) => Promise<any>;
+    install: (
+      id: string,
+      version?: string | null,
+      options?: {
+        scanPolicy?: "enforce" | "allow" | "ignore" | string;
+        confirm?: (warning: { kind: string; message: string; scanStatus?: string | null }) => Promise<boolean> | boolean;
+      },
+    ) => Promise<any>;
     uninstall: (id: string) => Promise<any>;
     checkForUpdates: () => Promise<any>;
     update: (id: string) => Promise<any>;
