@@ -59,16 +59,16 @@ function updateContributedPanelSeedsFromHost(extensionHostManager, extensionId) 
 
 function badge(text, { tone = "neutral", title = null } = {}) {
   const bgByTone = {
-    neutral: "rgba(148, 163, 184, 0.18)",
-    good: "rgba(34, 197, 94, 0.18)",
-    warn: "rgba(234, 179, 8, 0.18)",
-    bad: "rgba(239, 68, 68, 0.18)",
+    neutral: "var(--bg-hover)",
+    good: "var(--bg-hover)",
+    warn: "var(--bg-hover)",
+    bad: "var(--bg-hover)",
   };
   const fgByTone = {
-    neutral: "var(--text-secondary, #64748b)",
-    good: "#166534",
-    warn: "#92400e",
-    bad: "#991b1b",
+    neutral: "var(--text-secondary)",
+    good: "var(--success)",
+    warn: "var(--warning)",
+    bad: "var(--error)",
   };
   const span = el(
     "span",
