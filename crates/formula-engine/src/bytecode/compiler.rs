@@ -275,22 +275,84 @@ impl<'a> CompileCtx<'a> {
     }
 
     fn infer_let_value_kind(&self, expr: &Expr) -> LocalKind {
-        match expr {
-            Expr::CellRef(_) => LocalKind::RefSingle,
-            Expr::RangeRef(r) => {
-                if r.start == r.end {
-                    LocalKind::RefSingle
-                } else {
-                    LocalKind::RefMulti
+        fn local_kind_in(
+            scopes: &[HashMap<Arc<str>, LocalKind>],
+            name: &Arc<str>,
+        ) -> Option<LocalKind> {
+            for scope in scopes.iter().rev() {
+                if let Some(kind) = scope.get(name) {
+                    return Some(*kind);
                 }
             }
-            Expr::NameRef(name) => self
-                .resolve_local(name)
-                .map(|info| info.kind)
-                .unwrap_or(LocalKind::Scalar),
-            Expr::Unary { op, .. } if *op == UnaryOp::ImplicitIntersection => LocalKind::Scalar,
-            _ => LocalKind::Scalar,
+            None
         }
+
+        fn infer_kind(
+            ctx: &CompileCtx<'_>,
+            expr: &Expr,
+            scopes: &mut Vec<HashMap<Arc<str>, LocalKind>>,
+        ) -> LocalKind {
+            match expr {
+                Expr::CellRef(_) => LocalKind::RefSingle,
+                Expr::RangeRef(r) => {
+                    if r.start == r.end {
+                        LocalKind::RefSingle
+                    } else {
+                        LocalKind::RefMulti
+                    }
+                }
+                Expr::NameRef(name) => local_kind_in(scopes, name)
+                    .or_else(|| ctx.resolve_local(name).map(|info| info.kind))
+                    .unwrap_or(LocalKind::Scalar),
+                Expr::Unary { op, .. } if *op == UnaryOp::ImplicitIntersection => LocalKind::Scalar,
+                Expr::FuncCall { func, args } => match func {
+                    Function::Let => {
+                        if args.len() < 3 || args.len() % 2 == 0 {
+                            return LocalKind::Scalar;
+                        }
+
+                        scopes.push(HashMap::new());
+                        for pair in args[..args.len() - 1].chunks_exact(2) {
+                            let Expr::NameRef(name) = &pair[0] else {
+                                scopes.pop();
+                                return LocalKind::Scalar;
+                            };
+                            if name.is_empty() {
+                                scopes.pop();
+                                return LocalKind::Scalar;
+                            }
+
+                            let kind = infer_kind(ctx, &pair[1], scopes);
+                            scopes
+                                .last_mut()
+                                .expect("pushed scope")
+                                .insert(name.clone(), kind);
+                        }
+
+                        let kind = infer_kind(ctx, &args[args.len() - 1], scopes);
+                        scopes.pop();
+                        kind
+                    }
+                    Function::Choose => {
+                        // The index argument is always scalar; CHOOSE's result kind depends on the
+                        // selected value argument.
+                        let mut out = LocalKind::Scalar;
+                        for arg in args.iter().skip(1) {
+                            match infer_kind(ctx, arg, scopes) {
+                                LocalKind::Scalar => {}
+                                LocalKind::RefSingle => out = LocalKind::RefSingle,
+                                LocalKind::RefMulti => return LocalKind::RefMulti,
+                            }
+                        }
+                        out
+                    }
+                    _ => LocalKind::Scalar,
+                },
+                _ => LocalKind::Scalar,
+            }
+        }
+
+        infer_kind(self, expr, &mut Vec::new())
     }
 
     fn compile_let(&mut self, args: &[Expr], allow_range: bool) {

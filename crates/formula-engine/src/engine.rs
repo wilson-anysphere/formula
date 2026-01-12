@@ -7501,6 +7501,26 @@ fn bytecode_expr_is_eligible_inner(
             // scalar-only bytecode contexts (e.g. ABS/CONCAT), which would otherwise compile to
             // bytecode but produce incorrect `#SPILL!` errors at runtime.
             bytecode::Expr::FuncCall { func, args } => match func {
+                // CHOOSE can return either scalars, ranges, or array literals depending on the
+                // selected value argument. Use the "widest" kind across its value args so LET
+                // locals cannot smuggle range/array results into scalar-only bytecode contexts.
+                Function::Choose => {
+                    let mut kind = BytecodeLocalBindingKind::Scalar;
+                    // Skip the index argument: it is always a scalar in bytecode-eligible CHOOSE.
+                    for arg in args.iter().skip(1) {
+                        match infer_binding_kind(arg, scopes) {
+                            BytecodeLocalBindingKind::Scalar => {}
+                            BytecodeLocalBindingKind::Range => {
+                                kind = BytecodeLocalBindingKind::Range;
+                            }
+                            BytecodeLocalBindingKind::ArrayLiteral => {
+                                kind = BytecodeLocalBindingKind::ArrayLiteral;
+                                break;
+                            }
+                        }
+                    }
+                    kind
+                }
                 Function::Row
                 | Function::Column
                 | Function::IsError

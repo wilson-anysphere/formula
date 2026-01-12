@@ -1466,6 +1466,71 @@ fn bytecode_backend_let_nested_let_range_result_locals_do_not_enable_scalar_func
 }
 
 #[test]
+fn bytecode_backend_let_nested_let_cell_ref_result_is_scalar_safe() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", -1.0).unwrap();
+
+    // Nested LETs that return a single-cell reference should still behave like a scalar in scalar
+    // contexts (via implicit intersection), and remain bytecode-eligible.
+    engine
+        .set_cell_formula("Sheet1", "B1", "=ABS(LET(x, LET(r, A1, r), x))")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
+    assert_engine_matches_ast(&engine, "=ABS(LET(x, LET(r, A1, r), x))", "B1");
+}
+
+#[test]
+fn bytecode_backend_let_choose_single_cell_reference_locals_are_scalar_safe() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", -1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", -2.0).unwrap();
+
+    // CHOOSE can return references. When those references are single-cell, LET locals should apply
+    // implicit intersection in scalar contexts so scalar-only bytecode functions (like ABS) behave
+    // correctly.
+    engine
+        .set_cell_formula("Sheet1", "B1", "=ABS(LET(x, CHOOSE(2, 1/0, A2), x))")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(2.0));
+    assert_engine_matches_ast(&engine, "=ABS(LET(x, CHOOSE(2, 1/0, A2), x))", "B1");
+}
+
+#[test]
+fn bytecode_backend_let_choose_range_locals_do_not_enable_scalar_functions() {
+    let mut engine = Engine::new();
+
+    engine.set_cell_value("Sheet1", "A1", -1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", -2.0).unwrap();
+
+    // CHOOSE can also return multi-cell ranges. Ensure LET locals don't allow scalar-only bytecode
+    // functions to accept those reference values (bytecode ABS does not lift over arrays/ranges).
+    engine
+        .set_cell_formula("Sheet1", "C1", "=ABS(LET(x, CHOOSE(1, A1:A2, A1:A2), x))")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 0);
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.spill_range("Sheet1", "C1"),
+        Some((parse_a1("C1").unwrap(), parse_a1("C2").unwrap()))
+    );
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(2.0));
+}
+
+#[test]
 fn bytecode_backend_let_array_returning_function_locals_do_not_enable_scalar_functions() {
     let mut engine = Engine::new();
 
