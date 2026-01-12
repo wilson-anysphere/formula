@@ -345,7 +345,12 @@ Implementation notes:
 
 - `oauth-redirect` (payload: string URL)
 
-The frontend handles this in `apps/desktop/src/main.ts` and resolves the pending OAuth broker promise without requiring manual copy/paste.
+Implementation notes:
+
+- Similar to open-file, `main.rs` maintains a small in-memory queue (`OauthRedirectState`) so redirects received *before* the frontend installs its listener aren’t lost.
+  - Backend emits: `oauth-redirect` (payload: `string` URL)
+  - Frontend emits: `oauth-redirect-ready` once its `listen("oauth-redirect", ...)` handler is installed, which flushes any queued URLs.
+- The frontend resolves the pending OAuth broker promise without requiring manual copy/paste.
 
 #### Tray + app menu + global shortcuts
 
@@ -376,7 +381,8 @@ The desktop UI intentionally avoids a hard dependency on `@tauri-apps/api` and i
 
 Desktop-specific listeners are set up near the bottom of `apps/desktop/src/main.ts`:
 
-- `oauth-redirect` → resolve pending OAuth broker redirect
+- `oauth-redirect` → resolve pending OAuth broker redirect (and buffers early redirects to avoid a rare PKCE race where the redirect arrives before `waitForRedirect` is registered)
+- emits `oauth-redirect-ready` once the handler is installed (flushes queued redirects on the Rust side)
 - `close-prep` → flush pending workbook sync + call `set_macro_ui_context` → emit `close-prep-done`
 - `close-requested` → run `handleCloseRequest(...)` (unsaved changes prompt + hide vs quit) → emit `close-handled`
 - `open-file` → queue workbook opens; then emits `open-file-ready` once the handler is installed (flushes any queued open-file requests on the Rust side)
