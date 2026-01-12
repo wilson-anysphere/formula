@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { serializeCellGridToClipboardPayload } from "../clipboard.js";
-import { serializeCellGridToRtf } from "../rtf.js";
+import { parseClipboardContentToCellGrid, serializeCellGridToClipboardPayload } from "../clipboard.js";
+import { extractPlainTextFromRtf, serializeCellGridToRtf } from "../rtf.js";
 
 test("clipboard RTF serializes a table with values", () => {
   const rtf = serializeCellGridToRtf([
@@ -82,4 +82,28 @@ test("serializeCellGridToClipboardPayload includes rtf", () => {
   const payload = serializeCellGridToClipboardPayload([[{ value: "X" }]]);
   assert.equal(typeof payload.rtf, "string");
   assert.ok(payload.rtf.startsWith("{\\rtf1"));
+});
+
+test("clipboard RTF fallback converts tab/paragraph control words into TSV-like text", () => {
+  const text = extractPlainTextFromRtf(
+    "{\\rtf1\\ansi{\\fonttbl{\\f0\\fnil Calibri;}}A\\tab B\\par C\\tab D}"
+  );
+  assert.equal(text, "A\tB\nC\tD");
+});
+
+test("clipboard RTF fallback decodes hex escapes", () => {
+  const text = extractPlainTextFromRtf("{\\rtf1\\ansi Caf\\'e9}");
+  assert.equal(text, "Café");
+});
+
+test("parseClipboardContentToCellGrid falls back to rtf when text/html are missing", () => {
+  const grid = parseClipboardContentToCellGrid({ rtf: "{\\rtf1\\ansi 1\\tab 2\\par 3\\tab 4}" });
+  assert.ok(grid);
+  assert.equal(grid.length, 2);
+  assert.equal(grid[0].length, 2);
+  assert.equal(grid[1].length, 2);
+  assert.equal(grid[0][0].value, 1);
+  assert.equal(grid[0][1].value, 2);
+  assert.equal(grid[1][0].value, 3);
+  assert.equal(grid[1][1].value, 4);
 });

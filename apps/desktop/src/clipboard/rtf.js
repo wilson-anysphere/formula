@@ -420,6 +420,72 @@ export function serializeCellGridToRtf(grid) {
   return out.join("\n");
 }
 
+const WINDOWS_1252_EXTENDED_TABLE = [
+  0x20ac, // 0x80 €
+  null, // 0x81
+  0x201a, // 0x82 ‚
+  0x0192, // 0x83 ƒ
+  0x201e, // 0x84 „
+  0x2026, // 0x85 …
+  0x2020, // 0x86 †
+  0x2021, // 0x87 ‡
+  0x02c6, // 0x88 ˆ
+  0x2030, // 0x89 ‰
+  0x0160, // 0x8a Š
+  0x2039, // 0x8b ‹
+  0x0152, // 0x8c Œ
+  null, // 0x8d
+  0x017d, // 0x8e Ž
+  null, // 0x8f
+  null, // 0x90
+  0x2018, // 0x91 ‘
+  0x2019, // 0x92 ’
+  0x201c, // 0x93 “
+  0x201d, // 0x94 ”
+  0x2022, // 0x95 •
+  0x2013, // 0x96 –
+  0x2014, // 0x97 —
+  0x02dc, // 0x98 ˜
+  0x2122, // 0x99 ™
+  0x0161, // 0x9a š
+  0x203a, // 0x9b ›
+  0x0153, // 0x9c œ
+  null, // 0x9d
+  0x017e, // 0x9e ž
+  0x0178, // 0x9f Ÿ
+];
+
+/**
+ * @param {number} byte
+ * @returns {string}
+ */
+function decodeWindows1252Byte(byte) {
+  if (byte >= 0x80 && byte <= 0x9f) {
+    const codePoint = WINDOWS_1252_EXTENDED_TABLE[byte - 0x80];
+    if (codePoint != null) return String.fromCharCode(codePoint);
+  }
+  return String.fromCharCode(byte);
+}
+
+/** @type {Set<string>} */
+const IGNORED_RTF_DESTINATIONS = new Set([
+  "fonttbl",
+  "colortbl",
+  "stylesheet",
+  "info",
+  "filetbl",
+  "revtbl",
+  "rsidtbl",
+  "xmlnstbl",
+  "listtable",
+  "listoverridetable",
+  "generator",
+  "pict",
+  "object",
+  "datastore",
+  "themedata",
+]);
+
 /**
  * Best-effort RTF -> plain text extraction.
  *
@@ -430,31 +496,24 @@ export function serializeCellGridToRtf(grid) {
  * This is intentionally conservative: we translate a small set of common control
  * words and drop everything else (control words, groups, destinations).
  *
+ * Supported conversions:
+ * - `\par` / `\line` / `\row` -> `\n`
+ * - `\tab` / `\cell` -> `\t`
+ * - Hex escapes `\'hh` decoded as Windows-1252 bytes (best-effort)
+ *
  * @param {string} rtf
  * @returns {string}
  */
 export function extractPlainTextFromRtf(rtf) {
   if (typeof rtf !== "string" || rtf.trim() === "") return "";
 
-  /** @type {Set<string>} */
-  const IGNORED_DESTINATIONS = new Set([
-    "fonttbl",
-    "colortbl",
-    "stylesheet",
-    "info",
-    "pict",
-    "object",
-    "datastore",
-    "themedata",
-  ]);
-
   let out = "";
-
-  // RTF state is scoped to groups; treat `\ucN` as state.
   let ignorable = false;
   let ucSkip = 1;
   let atStart = true;
   let inTable = false;
+  let lastTabFromCell = false;
+
   /** @type {{ ignorable: boolean, ucSkip: number, atStart: boolean, inTable: boolean }[]} */
   const stack = [];
 
@@ -490,7 +549,10 @@ export function extractPlainTextFromRtf(rtf) {
     }
 
     if (ch !== "\\") {
-      if (!ignorable) out += ch;
+      if (!ignorable) {
+        out += ch;
+        lastTabFromCell = false;
+      }
       atStart = false;
       i += 1;
       continue;
@@ -502,7 +564,10 @@ export function extractPlainTextFromRtf(rtf) {
 
     // Escaped literal.
     if (next === "\\" || next === "{" || next === "}") {
-      if (!ignorable) out += next;
+      if (!ignorable) {
+        out += next;
+        lastTabFromCell = false;
+      }
       atStart = false;
       i += 2;
       continue;
@@ -512,7 +577,10 @@ export function extractPlainTextFromRtf(rtf) {
     if (next === "'") {
       const hex = rtf.slice(i + 2, i + 4);
       if (/^[0-9a-fA-F]{2}$/.test(hex)) {
-        if (!ignorable) out += String.fromCharCode(Number.parseInt(hex, 16));
+        if (!ignorable) {
+          out += decodeWindows1252Byte(Number.parseInt(hex, 16));
+          lastTabFromCell = false;
+        }
         atStart = false;
         i += 4;
         continue;
@@ -528,7 +596,7 @@ export function extractPlainTextFromRtf(rtf) {
         if (next === "~") out += " ";
         else if (next === "_") out += "-";
         else if (next === "-") out += ""; // optional hyphen
-        // Else: drop unknown control symbols.
+        lastTabFromCell = false;
       }
 
       if (next === "*") {
@@ -580,8 +648,21 @@ export function extractPlainTextFromRtf(rtf) {
 
     // Some destinations should be skipped entirely (font tables, embedded images, etc).
     if (atStart) {
-      if (IGNORED_DESTINATIONS.has(word)) ignorable = true;
+      if (IGNORED_RTF_DESTINATIONS.has(word)) ignorable = true;
       atStart = false;
+    }
+
+    if (word === "uc" && typeof param === "number") {
+      // Number of "fallback" characters to skip after a unicode escape.
+      ucSkip = Math.max(0, param);
+      i = j;
+      continue;
+    }
+
+    if (word === "bin" && typeof param === "number" && Number.isFinite(param) && param > 0) {
+      // `\binN` means the next N bytes are raw data and may contain braces/backslashes.
+      i = Math.min(len, j + param);
+      continue;
     }
 
     if (!ignorable) {
@@ -591,28 +672,30 @@ export function extractPlainTextFromRtf(rtf) {
 
       if (word === "tab") {
         // Treat \tab inside RTF tables as indentation, not as a TSV delimiter.
-        // Cell boundaries are represented by \cell in table-mode.
+        // Cell boundaries are represented by \cell/\row in table-mode.
         out += inTable ? " " : "\t";
+        lastTabFromCell = false;
       } else if (word === "cell") {
         out += "\t";
+        lastTabFromCell = true;
       } else if (word === "row") {
         // RTF tables usually emit a trailing `\cell` for the last column and then `\row`.
         // Drop the trailing tab so TSV parsing doesn't add a spurious empty column.
-        if (out.endsWith("\t")) out = out.slice(0, -1);
+        if (lastTabFromCell && out.endsWith("\t")) out = out.slice(0, -1);
         inTable = false;
         out += "\n";
+        lastTabFromCell = false;
       } else if (word === "par" || word === "line") {
         // Line breaks inside tables are cell-internal. TSV parsing cannot represent embedded
         // newlines, so preserve table structure by treating them as spaces.
         out += inTable ? " " : "\n";
+        lastTabFromCell = false;
       } else if (word === "u" && typeof param === "number") {
         // `\uN` is a signed 16-bit integer; map negatives back into [0, 65535].
         let code = param;
         if (code < 0) code = 65536 + code;
         out += String.fromCharCode(code);
-      } else if (word === "uc" && typeof param === "number") {
-        // Number of "fallback" characters to skip after a unicode escape.
-        ucSkip = Math.max(0, param);
+        lastTabFromCell = false;
       }
     } else if (word === "uc" && typeof param === "number") {
       // Even in ignored destinations, maintain `\ucN` state so `\uN` skipping stays in sync.
@@ -643,7 +726,7 @@ export function extractPlainTextFromRtf(rtf) {
     }
   }
 
-  // Avoid phantom empty column on the final row when the RTF ends in `\cell`.
-  while (out.endsWith("\t")) out = out.slice(0, -1);
+  // Avoid a phantom empty column when the payload ends with a table cell terminator.
+  if (lastTabFromCell && out.endsWith("\t")) out = out.slice(0, -1);
   return out;
 }
