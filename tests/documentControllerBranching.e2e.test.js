@@ -72,7 +72,7 @@ test("DocumentController + BranchService: checkout/merge mutate the live workboo
   });
 });
 
-test("DocumentController + BranchService: commitCurrentState preserves sheet order + names when DocumentController sheet metadata is available", async () => {
+test("DocumentController + BranchService: commitCurrentState preserves sheet order + metadata when DocumentController sheet metadata is available", async () => {
   const actor = { userId: "u1", role: "owner" };
 
   const doc = new DocumentController();
@@ -80,12 +80,13 @@ test("DocumentController + BranchService: commitCurrentState preserves sheet ord
   doc.setCellValue("SheetB", "A1", 1);
   doc.setCellValue("SheetA", "A1", 2);
 
-  // Shim sheet metadata until Task 201 lands in DocumentController.
-  /** @type {Map<string, any>} */
-  const metaById = new Map();
-  doc.getSheetMeta = (sheetId) => metaById.get(sheetId) ?? null;
-  metaById.set("SheetA", { id: "SheetA", name: "Alpha", visibility: "hidden", tabColor: "ff00ff00" });
-  metaById.set("SheetB", { id: "SheetB", name: "Beta", visibility: "visible", tabColor: null });
+  // Sheet metadata is now first-class in DocumentController (Task 201+).
+  doc.renameSheet("SheetA", "Alpha");
+  doc.hideSheet("SheetA");
+  doc.setSheetTabColor("SheetA", "ff00ff00");
+  doc.renameSheet("SheetB", "Beta");
+  // Explicitly clear any tab color so branching commits can remove prior colors.
+  doc.setSheetTabColor("SheetB", null);
 
   const store = new InMemoryBranchStore();
   const branchService = new BranchService({ docId: "doc-sheet-meta", store });
