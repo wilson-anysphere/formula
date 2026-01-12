@@ -912,6 +912,30 @@ fn bytecode_eval_ast_choose_does_not_eval_choices_when_index_is_error() {
 }
 
 #[test]
+fn bytecode_choose_range_index_returns_spill_without_evaluating_choices() {
+    // Bytecode coercion treats ranges/arrays in scalar contexts as a spill attempt.
+    // CHOOSE should surface that error without evaluating any branch expressions.
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=CHOOSE(A1:A2, A2, 7)", origin).expect("parse");
+    let program = bytecode::Compiler::compile(Arc::from("choose_range_index_spill_lazy"), &expr);
+
+    let grid = PanicGrid {
+        // A2 relative to origin (A1) => (row=1, col=0)
+        panic_coord: CellCoord::new(1, 0),
+    };
+
+    let mut vm = bytecode::Vm::with_capacity(32);
+    let value = vm.eval(
+        &program,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Error(bytecode::ErrorKind::Spill));
+}
+
+#[test]
 fn bytecode_choose_does_not_eval_choices_when_index_is_out_of_range() {
     // If the index is out of range, CHOOSE should return #VALUE! without evaluating any choices.
     let origin = CellCoord::new(0, 0);
