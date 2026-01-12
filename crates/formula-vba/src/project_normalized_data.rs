@@ -418,12 +418,12 @@ fn unicode_record_payload(data: &[u8]) -> Result<&[u8], DirParseError> {
     }
     // Some producers include a trailing UTF-16 NUL terminator but do not count it in the internal
     // length prefix.
-    if rest.len() >= 2 && rest.ends_with(&[0x00, 0x00]) {
-        if n.saturating_add(2) == rest.len()
-            || n.saturating_mul(2).saturating_add(2) == rest.len()
-        {
-            return Ok(&rest[..rest.len() - 2]);
-        }
+    if rest.len() >= 2
+        && rest.ends_with(&[0x00, 0x00])
+        && (n.saturating_add(2) == rest.len()
+            || n.saturating_mul(2).saturating_add(2) == rest.len())
+    {
+        return Ok(&rest[..rest.len() - 2]);
     }
 
     // Otherwise assume the record is raw UTF-16LE bytes.

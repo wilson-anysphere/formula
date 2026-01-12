@@ -1744,7 +1744,7 @@ fn build_project_with_modulestreamname_unicode_marker_0048() -> Vec<u8> {
     }
     {
         let mut s = ole
-            .create_stream(&format!("VBA/{module_stream_name_unicode}"))
+            .create_stream(format!("VBA/{module_stream_name_unicode}"))
             .expect("module stream");
         s.write_all(&module_container).expect("write module");
     }

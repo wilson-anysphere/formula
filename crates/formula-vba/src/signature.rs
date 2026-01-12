@@ -824,9 +824,9 @@ pub fn verify_vba_digital_signature_with_trust(
 /// transcript:
 /// - `\x05DigitalSignature`    → legacy Content Hash (MD5 over `ContentNormalizedData`; MS-OSHARED §4.3)
 /// - `\x05DigitalSignatureEx`  → legacy Agile Content Hash (MD5 over
-///                               `ContentNormalizedData || FormsNormalizedData`; MS-OSHARED §4.3)
+///   `ContentNormalizedData || FormsNormalizedData`; MS-OSHARED §4.3)
 /// - `\x05DigitalSignatureExt` → MS-OVBA v3 transcript; `formula-vba` currently compares the signed
-///                               digest bytes to [`crate::contents_hash_v3`] (SHA-256 helper)
+///   digest bytes to [`crate::contents_hash_v3`] (SHA-256 helper)
 ///
 /// When the stream path is unknown or ambiguous, this uses a best-effort fallback:
 /// - Compute every supported contents-hash version that could plausibly match the signed digest

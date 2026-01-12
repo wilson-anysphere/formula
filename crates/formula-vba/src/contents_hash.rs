@@ -419,7 +419,7 @@ fn append_stream_padded_1023(out: &mut Vec<u8>, bytes: &[u8]) {
     out.extend_from_slice(bytes);
     let rem = bytes.len() % 1023;
     if rem != 0 {
-        out.extend(std::iter::repeat(0u8).take(1023 - rem));
+        out.extend(std::iter::repeat_n(0u8, 1023 - rem));
     }
 }
 

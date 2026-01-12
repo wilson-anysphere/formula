@@ -410,7 +410,7 @@ fn forms_normalized_data_handles_modulestreamnameunicode_len_prefix_excluding_nu
 
     let mut expected = Vec::new();
     expected.extend_from_slice(b"ABC");
-    expected.extend(std::iter::repeat(0u8).take(1020));
+    expected.extend(std::iter::repeat_n(0u8, 1020));
 
     assert_eq!(normalized.len(), 1023);
     assert_eq!(normalized, expected);
@@ -505,7 +505,7 @@ fn forms_normalized_data_matches_unicode_baseclass_case_insensitively() {
 
     let mut expected = Vec::new();
     expected.extend_from_slice(b"ABC");
-    expected.extend(std::iter::repeat(0u8).take(1020));
+    expected.extend(std::iter::repeat_n(0u8, 1020));
 
     assert_eq!(normalized.len(), 1023);
     assert_eq!(normalized, expected);
@@ -735,7 +735,7 @@ fn forms_normalized_data_decodes_baseclass_using_project_codepage() {
 
     let mut expected = Vec::new();
     expected.extend_from_slice(b"ABC");
-    expected.extend(std::iter::repeat(0u8).take(1020));
+    expected.extend(std::iter::repeat_n(0u8, 1020));
 
     assert_eq!(normalized.len(), 1023);
     assert_eq!(normalized, expected);
@@ -786,7 +786,7 @@ fn forms_normalized_data_falls_back_to_dir_codepage_when_project_lacks_codepage_
 
     let mut expected = Vec::new();
     expected.extend_from_slice(b"ABC");
-    expected.extend(std::iter::repeat(0u8).take(1020));
+    expected.extend(std::iter::repeat_n(0u8, 1020));
 
     assert_eq!(normalized.len(), 1023);
     assert_eq!(normalized, expected);
@@ -843,7 +843,7 @@ fn forms_normalized_data_matches_baseclass_case_insensitively_for_non_ascii() {
 
     let mut expected = Vec::new();
     expected.extend_from_slice(b"ABC");
-    expected.extend(std::iter::repeat(0u8).take(1020));
+    expected.extend(std::iter::repeat_n(0u8, 1020));
 
     assert_eq!(normalized.len(), 1023);
     assert_eq!(normalized, expected);
