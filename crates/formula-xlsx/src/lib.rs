@@ -218,6 +218,9 @@ pub struct XlsxMeta {
     pub calc_pr: CalcPr,
     pub sheets: Vec<SheetMeta>,
     pub cell_meta: HashMap<(WorksheetId, CellRef), CellMeta>,
+    /// Mapping from worksheet cells to rich value record indices (e.g. images-in-cell backed by
+    /// `xl/richData/richValue.xml`).
+    pub rich_value_cells: HashMap<(WorksheetId, CellRef), u32>,
 }
 
 /// A workbook paired with the original OPC package parts needed for high-fidelity round-trip.
@@ -267,6 +270,10 @@ impl XlsxDocument {
 
     pub fn parts(&self) -> &BTreeMap<String, Vec<u8>> {
         &self.parts
+    }
+
+    pub fn rich_value_index(&self, sheet: WorksheetId, cell: CellRef) -> Option<u32> {
+        self.meta.rich_value_cells.get(&(sheet, cell)).copied()
     }
 
     pub fn save_to_vec(&self) -> Result<Vec<u8>, write::WriteError> {

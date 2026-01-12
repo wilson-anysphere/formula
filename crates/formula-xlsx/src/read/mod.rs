@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{Cursor, Read, Seek, SeekFrom};
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs::File;
@@ -37,6 +37,8 @@ const REL_TYPE_STYLES: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles";
 const REL_TYPE_SHARED_STRINGS: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings";
+const REL_TYPE_METADATA: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata";
 
 #[derive(Debug, Error)]
 pub enum ReadError {
@@ -147,6 +149,15 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
         None => Vec::new(),
     };
 
+    let metadata_part_name = rels_info
+        .metadata_target
+        .as_deref()
+        .map(|target| resolve_target(WORKBOOK_PART, target))
+        .unwrap_or_else(|| "xl/metadata.xml".to_string());
+    let metadata_part = read_zip_part_optional(archive, &metadata_part_name)?
+        .as_deref()
+        .and_then(|bytes| MetadataPart::parse(bytes).ok());
+
     for sheet in sheets {
         let ws_id = workbook.add_sheet(sheet.name.clone())?;
         worksheet_ids_by_index.push(ws_id);
@@ -210,7 +221,16 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
             archive,
         );
 
-        parse_worksheet_into_model(ws, ws_id, &sheet_xml, &shared_strings, &styles_part, None)?;
+        parse_worksheet_into_model(
+            ws,
+            ws_id,
+            &sheet_xml,
+            &shared_strings,
+            &styles_part,
+            None,
+            None,
+            metadata_part.as_ref(),
+        )?;
     }
 
     for defined in defined_names {
@@ -405,8 +425,18 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
     } else {
         Vec::new()
     };
+
+    let metadata_part_name = rels_info
+        .metadata_target
+        .as_deref()
+        .map(|target| resolve_target(WORKBOOK_PART, target))
+        .unwrap_or_else(|| "xl/metadata.xml".to_string());
+    let metadata_part = parts
+        .get(&metadata_part_name)
+        .and_then(|bytes| MetadataPart::parse(bytes).ok());
     let mut sheet_meta: Vec<SheetMeta> = Vec::with_capacity(sheets.len());
     let mut cell_meta = std::collections::HashMap::new();
+    let mut rich_value_cells = std::collections::HashMap::new();
 
     let mut worksheet_ids_by_index: Vec<formula_model::WorksheetId> = Vec::new();
     for sheet in sheets {
@@ -491,6 +521,8 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
             &shared_strings,
             &styles_part,
             Some(&mut cell_meta),
+            Some(&mut rich_value_cells),
+            metadata_part.as_ref(),
         )?;
 
         expand_shared_formulas(ws, ws_id, &cell_meta);
@@ -536,6 +568,7 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
             calc_pr,
             sheets: sheet_meta,
             cell_meta,
+            rich_value_cells,
         },
         calc_affecting_edits: false,
     })
@@ -548,6 +581,7 @@ fn parse_relationships(bytes: &[u8]) -> Result<RelationshipsInfo, ReadError> {
     let mut id_to_target = BTreeMap::new();
     let mut styles_target = None;
     let mut shared_strings_target = None;
+    let mut metadata_target = None;
     loop {
         match reader.read_event_into(&mut buf)? {
             Event::Start(e) | Event::Empty(e)
@@ -577,6 +611,9 @@ fn parse_relationships(bytes: &[u8]) -> Result<RelationshipsInfo, ReadError> {
                             REL_TYPE_SHARED_STRINGS => {
                                 shared_strings_target.get_or_insert_with(|| target.clone());
                             }
+                            REL_TYPE_METADATA => {
+                                metadata_target.get_or_insert_with(|| target.clone());
+                            }
                             _ => {}
                         }
                     }
@@ -592,6 +629,7 @@ fn parse_relationships(bytes: &[u8]) -> Result<RelationshipsInfo, ReadError> {
         id_to_target,
         styles_target,
         shared_strings_target,
+        metadata_target,
     })
 }
 
@@ -600,6 +638,247 @@ struct RelationshipsInfo {
     id_to_target: BTreeMap<String, String>,
     styles_target: Option<String>,
     shared_strings_target: Option<String>,
+    metadata_target: Option<String>,
+}
+
+/// Parsed representation of `xl/metadata.xml` for resolving cell `vm` attributes to rich value
+/// indices (e.g. images-in-cell stored in `xl/richData/richValue.xml`).
+///
+/// This is intentionally best-effort; Excel occasionally emits `vm` attributes that cannot be
+/// resolved. In that case we treat the cell as having no rich value.
+#[derive(Debug, Clone, Default)]
+struct MetadataPart {
+    /// Metadata type indices that appear to represent rich values.
+    rich_type_indices: HashSet<u32>,
+    /// Mapping of `metadataRecords` entry index -> rich value record index.
+    rich_value_by_record: HashMap<u32, u32>,
+    /// `valueMetadata` entries, indexed by `vm` (with potential 0/1-based ambiguity handled in
+    /// [`Self::vm_to_rich_value_index`]).
+    value_metadata: Vec<Vec<(u32, u32)>>,
+}
+
+impl MetadataPart {
+    fn parse(xml: &[u8]) -> Result<Self, ReadError> {
+        let mut reader = Reader::from_reader(xml);
+        reader.config_mut().trim_text(true);
+        let mut buf = Vec::new();
+
+        let mut rich_type_indices: HashSet<u32> = HashSet::new();
+        let mut rich_value_by_record: HashMap<u32, u32> = HashMap::new();
+        let mut value_metadata: Vec<Vec<(u32, u32)>> = Vec::new();
+
+        let mut in_metadata_types = false;
+        let mut next_metadata_type_idx: u32 = 0;
+
+        let mut in_metadata_records = false;
+        let mut in_mdr = false;
+        let mut next_mdr_idx: u32 = 0;
+        let mut current_mdr_idx: Option<u32> = None;
+
+        let mut in_value_metadata = false;
+        let mut in_bk = false;
+        let mut current_bk: Vec<(u32, u32)> = Vec::new();
+
+        loop {
+            match reader.read_event_into(&mut buf)? {
+                Event::Start(e) if e.local_name().as_ref() == b"metadataTypes" => {
+                    in_metadata_types = true
+                }
+                Event::End(e) if e.local_name().as_ref() == b"metadataTypes" => {
+                    in_metadata_types = false
+                }
+                Event::Start(e) | Event::Empty(e)
+                    if in_metadata_types && e.local_name().as_ref() == b"metadataType" =>
+                {
+                    let mut name: Option<String> = None;
+                    for attr in e.attributes() {
+                        let attr = attr?;
+                        if crate::openxml::local_name(attr.key.as_ref()) == b"name" {
+                            name = Some(attr.unescape_value()?.into_owned());
+                        }
+                    }
+
+                    if let Some(name) = name {
+                        let lower = name.to_ascii_lowercase();
+                        if lower.contains("richvalue")
+                            || lower.contains("rich_value")
+                            || lower.contains("richdata")
+                            || lower.contains("rich")
+                        {
+                            rich_type_indices.insert(next_metadata_type_idx);
+                        }
+                    }
+                    next_metadata_type_idx = next_metadata_type_idx.saturating_add(1);
+                }
+
+                Event::Start(e) if e.local_name().as_ref() == b"metadataRecords" => {
+                    in_metadata_records = true
+                }
+                Event::End(e) if e.local_name().as_ref() == b"metadataRecords" => {
+                    in_metadata_records = false;
+                    in_mdr = false;
+                    current_mdr_idx = None;
+                }
+                Event::Start(e)
+                    if in_metadata_records && e.local_name().as_ref() == b"mdr" =>
+                {
+                    in_mdr = true;
+                    current_mdr_idx = Some(next_mdr_idx);
+                    next_mdr_idx = next_mdr_idx.saturating_add(1);
+                    drop(e);
+                }
+                Event::Empty(e) if in_metadata_records && e.local_name().as_ref() == b"mdr" => {
+                    // Empty metadata record; still consume an index.
+                    next_mdr_idx = next_mdr_idx.saturating_add(1);
+                    drop(e);
+                }
+                Event::End(e) if in_metadata_records && e.local_name().as_ref() == b"mdr" => {
+                    in_mdr = false;
+                    current_mdr_idx = None;
+                    drop(e);
+                }
+                Event::Start(e) | Event::Empty(e) if in_mdr => {
+                    let Some(record_idx) = current_mdr_idx else {
+                        continue;
+                    };
+
+                    let local_name = e.local_name();
+                    let local = local_name.as_ref();
+                    let looks_like_rich_value = local == b"rvb"
+                        || local == b"richValue"
+                        || local == b"richvalue"
+                        || local == b"rv";
+                    if !looks_like_rich_value {
+                        continue;
+                    }
+
+                    let mut rich_idx: Option<u32> = None;
+                    for attr in e.attributes() {
+                        let attr = attr?;
+                        let key = crate::openxml::local_name(attr.key.as_ref());
+                        if key == b"i" || key == b"idx" || key == b"index" || key == b"v" {
+                            rich_idx = attr
+                                .unescape_value()?
+                                .into_owned()
+                                .parse::<u32>()
+                                .ok();
+                            if rich_idx.is_some() {
+                                break;
+                            }
+                        }
+                    }
+
+                    if let Some(rich_idx) = rich_idx {
+                        rich_value_by_record.entry(record_idx).or_insert(rich_idx);
+                    }
+                }
+
+                Event::Start(e) if e.local_name().as_ref() == b"valueMetadata" => {
+                    in_value_metadata = true;
+                    drop(e);
+                }
+                Event::End(e) if e.local_name().as_ref() == b"valueMetadata" => {
+                    in_value_metadata = false;
+                    in_bk = false;
+                    drop(e);
+                }
+
+                Event::Start(e) if in_value_metadata && e.local_name().as_ref() == b"bk" => {
+                    in_bk = true;
+                    current_bk.clear();
+                    drop(e);
+                }
+                Event::Empty(e) if in_value_metadata && e.local_name().as_ref() == b"bk" => {
+                    value_metadata.push(Vec::new());
+                    drop(e);
+                }
+                Event::End(e) if in_bk && e.local_name().as_ref() == b"bk" => {
+                    value_metadata.push(std::mem::take(&mut current_bk));
+                    in_bk = false;
+                    drop(e);
+                }
+                Event::Start(e) | Event::Empty(e) if in_bk && e.local_name().as_ref() == b"rc" => {
+                    let mut t: Option<u32> = None;
+                    let mut v: Option<u32> = None;
+                    for attr in e.attributes() {
+                        let attr = attr?;
+                        match crate::openxml::local_name(attr.key.as_ref()) {
+                            b"t" => {
+                                t = attr
+                                    .unescape_value()?
+                                    .into_owned()
+                                    .parse::<u32>()
+                                    .ok();
+                            }
+                            b"v" => {
+                                v = attr
+                                    .unescape_value()?
+                                    .into_owned()
+                                    .parse::<u32>()
+                                    .ok();
+                            }
+                            _ => {}
+                        }
+                    }
+                    if let (Some(t), Some(v)) = (t, v) {
+                        current_bk.push((t, v));
+                    }
+                }
+
+                Event::Eof => break,
+                _ => {}
+            }
+            buf.clear();
+        }
+
+        Ok(Self {
+            rich_type_indices,
+            rich_value_by_record,
+            value_metadata,
+        })
+    }
+
+    fn vm_to_rich_value_index(&self, vm: u32) -> Option<u32> {
+        self.vm_to_rich_value_index_with_candidate(vm)
+            .or_else(|| vm.checked_sub(1).and_then(|vm| self.vm_to_rich_value_index_with_candidate(vm)))
+    }
+
+    fn vm_to_rich_value_index_with_candidate(&self, vm_idx: u32) -> Option<u32> {
+        let rc_refs = self.value_metadata.get(vm_idx as usize)?;
+
+        // Prefer record references whose metadata type looks like a rich value type, but fall back
+        // to any record if we don't know the type.
+        for pass in 0..2 {
+            for (t, v) in rc_refs {
+                if pass == 0 && !self.rich_type_indices.is_empty() && !self.rich_type_indices.contains(t)
+                {
+                    continue;
+                }
+
+                if let Some(idx) = self.rich_value_by_record.get(v) {
+                    return Some(*idx);
+                }
+                // Some files appear to use 1-based indices into `metadataRecords`.
+                if *v > 0 {
+                    if let Some(idx) = self.rich_value_by_record.get(&(*v - 1)) {
+                        return Some(*idx);
+                    }
+                }
+
+                // If we couldn't resolve via `metadataRecords`, avoid guessing unless we have no
+                // parsed record mapping at all.
+                if self.rich_value_by_record.is_empty() {
+                    return Some(*v);
+                }
+            }
+
+            if self.rich_type_indices.is_empty() {
+                break;
+            }
+        }
+
+        None
+    }
 }
 
 fn parse_shared_strings(bytes: &[u8]) -> Result<Vec<RichText>, ReadError> {
@@ -805,6 +1084,10 @@ fn parse_worksheet_into_model(
     mut cell_meta_map: Option<
         &mut std::collections::HashMap<(formula_model::WorksheetId, CellRef), CellMeta>,
     >,
+    mut rich_value_cells: Option<
+        &mut std::collections::HashMap<(formula_model::WorksheetId, CellRef), u32>,
+    >,
+    metadata_part: Option<&MetadataPart>,
 ) -> Result<(), ReadError> {
     let mut reader = Reader::from_reader(worksheet_xml);
     reader.config_mut().trim_text(false);
@@ -828,6 +1111,7 @@ fn parse_worksheet_into_model(
     let mut current_formula: Option<FormulaMeta> = None;
     let mut current_value_text: Option<String> = None;
     let mut current_inline_text: Option<String> = None;
+    let mut current_vm: Option<u32> = None;
     let mut in_v = false;
     let mut in_f = false;
 
@@ -1010,6 +1294,7 @@ fn parse_worksheet_into_model(
                 current_formula = None;
                 current_value_text = None;
                 current_inline_text = None;
+                current_vm = None;
                 in_v = false;
                 in_f = false;
 
@@ -1027,6 +1312,7 @@ fn parse_worksheet_into_model(
                             let xf_index = attr.unescape_value()?.into_owned().parse().unwrap_or(0);
                             current_style = styles_part.style_id_for_xf(xf_index);
                         }
+<<<<<<< HEAD
                         b"cm" => {
                             current_cm = attr
                                 .unescape_value()?
@@ -1034,6 +1320,8 @@ fn parse_worksheet_into_model(
                                 .parse::<u32>()
                                 .ok();
                         }
+=======
+>>>>>>> 66d5c0c (feat: expose rich value indices via metadata.xml vm mapping)
                         b"vm" => {
                             current_vm = attr
                                 .unescape_value()?
@@ -1048,7 +1336,10 @@ fn parse_worksheet_into_model(
             Event::Empty(e) if in_sheet_data && e.local_name().as_ref() == b"c" => {
                 let mut cell_ref = None;
                 let mut style_id = 0u32;
+<<<<<<< HEAD
                 let mut cm: Option<u32> = None;
+=======
+>>>>>>> 66d5c0c (feat: expose rich value indices via metadata.xml vm mapping)
                 let mut vm: Option<u32> = None;
                 for attr in e.attributes() {
                     let attr = attr?;
@@ -1063,9 +1354,12 @@ fn parse_worksheet_into_model(
                             let xf_index = attr.unescape_value()?.into_owned().parse().unwrap_or(0);
                             style_id = styles_part.style_id_for_xf(xf_index);
                         }
+<<<<<<< HEAD
                         b"cm" => {
                             cm = attr.unescape_value()?.into_owned().parse::<u32>().ok();
                         }
+=======
+>>>>>>> 66d5c0c (feat: expose rich value indices via metadata.xml vm mapping)
                         b"vm" => {
                             vm = attr.unescape_value()?.into_owned().parse::<u32>().ok();
                         }
@@ -1075,11 +1369,20 @@ fn parse_worksheet_into_model(
                 if let Some(cell_ref) = cell_ref {
                     // Skip non-anchor cells inside merged regions. Excel stores the value
                     // (and typically formatting) on the top-left cell only.
-                    if worksheet.merged_regions.resolve_cell(cell_ref) == cell_ref && style_id != 0
-                    {
-                        let mut cell = Cell::default();
-                        cell.style_id = style_id;
-                        worksheet.set_cell(cell_ref, cell);
+                    if worksheet.merged_regions.resolve_cell(cell_ref) == cell_ref {
+                        if let (Some(vm), Some(metadata_part), Some(rich_value_cells)) =
+                            (vm, metadata_part, rich_value_cells.as_mut())
+                        {
+                            if let Some(idx) = metadata_part.vm_to_rich_value_index(vm) {
+                                rich_value_cells.insert((worksheet_id, cell_ref), idx);
+                            }
+                        }
+
+                        if style_id != 0 {
+                            let mut cell = Cell::default();
+                            cell.style_id = style_id;
+                            worksheet.set_cell(cell_ref, cell);
+                        }
                     }
 
                     if let Some(cell_meta_map) = cell_meta_map.as_mut() {
@@ -1165,6 +1468,14 @@ fn parse_worksheet_into_model(
                         cell.formula = formula_in_model;
                         cell.style_id = current_style;
 
+                        if let (Some(vm), Some(metadata_part), Some(rich_value_cells)) =
+                            (current_vm, metadata_part, rich_value_cells.as_mut())
+                        {
+                            if let Some(idx) = metadata_part.vm_to_rich_value_index(vm) {
+                                rich_value_cells.insert((worksheet_id, cell_ref), idx);
+                            }
+                        }
+
                         if !cell.is_truly_empty() {
                             worksheet.set_cell(cell_ref, cell);
                         }
@@ -1198,6 +1509,7 @@ fn parse_worksheet_into_model(
                 current_formula = None;
                 current_value_text = None;
                 current_inline_text = None;
+                current_vm = None;
                 in_v = false;
                 in_f = false;
             }
