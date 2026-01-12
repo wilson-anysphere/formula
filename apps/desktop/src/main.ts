@@ -76,7 +76,7 @@ import { installOpenFileIpc } from "./tauri/openFileIpc";
 import { notify } from "./tauri/notifications";
 import { registerAppQuitHandlers, requestAppQuit } from "./tauri/appQuit";
 import { checkForUpdatesFromCommandPalette } from "./tauri/updater.js";
-import type { SheetUsedRange, WorkbookInfo } from "@formula/workbook-backend";
+import type { WorkbookInfo } from "@formula/workbook-backend";
 import { chartThemeFromWorkbookPalette } from "./charts/theme";
 import { parseA1Range, splitSheetQualifier } from "../../../packages/search/index.js";
 import { refreshDefinedNameSignaturesFromBackend, refreshTableSignaturesFromBackend } from "./power-query/tableSignatures";
@@ -171,6 +171,7 @@ import {
   WORKBOOK_LOAD_MAX_COLS_STORAGE_KEY,
   WORKBOOK_LOAD_MAX_ROWS_STORAGE_KEY,
 } from "./workbook/load/clampUsedRange.js";
+import { warnIfWorkbookLoadTruncated, type WorkbookLoadTruncation } from "./workbook/load/truncationWarning.js";
 import { exportDocumentRangeToCsv } from "./import-export/csv/export.js";
 
 // Best-effort: older desktop builds persisted provider selection + API keys in localStorage.
@@ -7642,16 +7643,8 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
   const CHUNK_ROWS = 200;
   const { maxRows: MAX_ROWS, maxCols: MAX_COLS } = getWorkbookLoadLimits();
 
-  const truncations: Array<{
-    sheetId: string;
-    sheetName: string;
-    originalRange: SheetUsedRange;
-    loadedRange: { startRow: number; endRow: number; startCol: number; endCol: number };
-    truncatedRows: boolean;
-    truncatedCols: boolean;
-  }> = [];
-
   const snapshotSheets: Array<{ id: string; cells: any[] }> = [];
+  const truncations: WorkbookLoadTruncation[] = [];
 
   for (const sheet of sheets) {
     const cells: Array<{ row: number; col: number; value: unknown | null; formula: string | null; format: null }> = [];
@@ -7716,28 +7709,6 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     snapshotSheets.push({ id: sheet.id, cells });
   }
 
-  const truncationWarning =
-    truncations.length === 0
-      ? null
-      : (() => {
-          const formatBackendRange = (range: SheetUsedRange) =>
-            `rows ${range.start_row}-${range.end_row}, cols ${range.start_col}-${range.end_col}`;
-          const formatLoadedRange = (range: { startRow: number; endRow: number; startCol: number; endCol: number }) =>
-            range.startRow > range.endRow || range.startCol > range.endCol
-              ? "no cells loaded within caps"
-              : `rows ${range.startRow}-${range.endRow}, cols ${range.startCol}-${range.endCol}`;
-
-          const capText = `maxRows=${MAX_ROWS}, maxCols=${MAX_COLS}`;
-          const sheetText = truncations
-            .map(
-              (t) =>
-                `${t.sheetName || t.sheetId} (${t.sheetId}) used range ${formatBackendRange(t.originalRange)} → loaded ${formatLoadedRange(t.loadedRange)}`,
-            )
-            .join("; ");
-
-          return `Workbook partially loaded due to load limits (${capText}). ${sheetText}`;
-        })();
-
   const snapshot = encodeDocumentSnapshot({ schemaVersion: 1, sheets: snapshotSheets });
   const workbookSignature = await workbookSignaturePromise;
   // Reset Power Query table signatures before applying the snapshot so any
@@ -7747,10 +7718,7 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
   refreshDefinedNameSignaturesFromBackend(doc, [], { workbookSignature });
   await app.restoreDocumentState(snapshot);
 
-  if (truncationWarning) {
-    console.warn(`[formula][desktop] ${truncationWarning}`);
-    showToast(truncationWarning, "warning", { timeoutMs: 15_000 });
-  }
+  warnIfWorkbookLoadTruncated(truncations, { maxRows: MAX_ROWS, maxCols: MAX_COLS }, showToast);
 
   // Refresh workbook metadata (defined names + tables) used by the name box and
   // AI completion. This is separate from the cell snapshot that populates the
