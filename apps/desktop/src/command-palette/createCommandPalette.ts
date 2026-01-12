@@ -89,7 +89,7 @@ export type CreateCommandPaletteOptions = {
   onSelectFunction?: (name: string) => void;
 };
 
-export type CommandPaletteController = {
+export type CommandPaletteHandle = {
   open: () => void;
   close: () => void;
   isOpen: () => boolean;
@@ -282,7 +282,7 @@ function renderHighlightedText(text: string, ranges: MatchRange[]): DocumentFrag
   return fragment;
 }
 
-export function createCommandPalette(options: CreateCommandPaletteOptions): CommandPaletteController {
+export function createCommandPalette(options: CreateCommandPaletteOptions): CommandPaletteHandle {
   const {
     commandRegistry,
     contextKeys,
