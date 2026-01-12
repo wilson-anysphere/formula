@@ -1125,6 +1125,76 @@ export class SpreadsheetApp {
     }
   }
 
+  async clipboardCopy(): Promise<void> {
+    await this.copySelectionToClipboard();
+  }
+
+  async clipboardCut(): Promise<void> {
+    await this.cutSelectionToClipboard();
+  }
+
+  async clipboardPaste(): Promise<void> {
+    await this.pasteClipboardToSelection();
+  }
+
+  async clipboardPasteSpecial(mode: "all" | "values" | "formulas" | "formats" = "all"): Promise<void> {
+    const normalized: "all" | "values" | "formulas" | "formats" =
+      mode === "values" || mode === "formulas" || mode === "formats" ? mode : "all";
+
+    try {
+      const provider = await this.getClipboardProvider();
+      const content = await provider.read();
+      const grid = parseClipboardContentToCellGrid(content);
+      if (!grid) return;
+
+      const rowCount = grid.length;
+      const colCount = Math.max(0, ...grid.map((row) => row.length));
+      if (rowCount === 0 || colCount === 0) return;
+
+      const start = { ...this.selection.active };
+
+      const values = Array.from({ length: rowCount }, (_, r) => {
+        const row = grid[r] ?? [];
+        return Array.from({ length: colCount }, (_, c) => {
+          const cell = (row[c] ?? null) as any;
+
+          if (normalized === "values") return cell?.value ?? null;
+
+          if (normalized === "formulas") {
+            return cell?.formula != null ? { formula: cell.formula } : cell?.value ?? null;
+          }
+
+          if (normalized === "formats") return { format: cell?.format ?? null };
+
+          // normalized === "all"
+          if (cell?.formula != null) return { formula: cell.formula, value: null, format: cell?.format ?? null };
+          return { value: cell?.value ?? null, format: cell?.format ?? null };
+        });
+      });
+
+      this.document.setRangeValues(this.sheetId, start, values, { label: t("clipboard.paste") });
+
+      const range: Range = {
+        startRow: start.row,
+        endRow: start.row + rowCount - 1,
+        startCol: start.col,
+        endCol: start.col + colCount - 1
+      };
+      this.selection = buildSelection({ ranges: [range], active: start, anchor: start, activeRangeIndex: 0 }, this.limits);
+
+      this.syncEngineNow();
+      this.refresh();
+      this.focus();
+    } catch {
+      // Ignore clipboard failures (permissions, platform restrictions).
+    }
+  }
+
+  clearContents(): void {
+    this.clearSelectionContents();
+    this.refresh();
+    this.focus();
+  }
   async whenIdle(): Promise<void> {
     // `wasmSyncPromise` and `auditingIdlePromise` are growing promise chains (see `enqueueWasmSync`
     // and `scheduleAuditingUpdate`). While awaiting them, additional work can be appended

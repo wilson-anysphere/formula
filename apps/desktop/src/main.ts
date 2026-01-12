@@ -60,6 +60,8 @@ import { deriveSelectionContextKeys } from "./extensions/selectionContextKeys.js
 import { evaluateWhenClause } from "./extensions/whenClause.js";
 import { CommandRegistry } from "./extensions/commandRegistry.js";
 import type { Range, SelectionState } from "./selection/types";
+import { ContextMenu, type ContextMenuItem } from "./menus/contextMenu.js";
+import { getPasteSpecialMenuItems } from "./clipboard/pasteSpecial.js";
 import {
   applyAllBorders,
   applyNumberFormatPreset,
@@ -869,6 +871,15 @@ if (
   });
 
   const commandRegistry = new CommandRegistry();
+  // Built-in spreadsheet commands. These must be registered in the CommandRegistry so
+  // context menus (and eventually the command palette) can execute them uniformly.
+  commandRegistry.registerBuiltinCommand("clipboard.cut", t("clipboard.cut"), () => app.clipboardCut());
+  commandRegistry.registerBuiltinCommand("clipboard.copy", t("clipboard.copy"), () => app.clipboardCopy());
+  commandRegistry.registerBuiltinCommand("clipboard.paste", t("clipboard.paste"), () => app.clipboardPaste());
+  commandRegistry.registerBuiltinCommand("clipboard.pasteSpecial", "Paste Special…", (mode?: unknown) =>
+    app.clipboardPasteSpecial((mode as any) ?? "all"),
+  );
+  commandRegistry.registerBuiltinCommand("edit.clearContents", "Clear Contents", () => app.clearContents());
 
   extensionPanelBridge = new ExtensionPanelBridge({
     host: extensionHostManager.host as any,
@@ -1054,92 +1065,109 @@ if (
     true,
   );
 
-  // Context menus (foundation): show cell/context contributions.
-  const contextMenu = document.createElement("div");
-  contextMenu.dataset.testid = "context-menu";
-  contextMenu.style.position = "fixed";
-  contextMenu.style.display = "none";
-  contextMenu.style.flexDirection = "column";
-  contextMenu.style.minWidth = "220px";
-  contextMenu.style.padding = "6px";
-  contextMenu.style.borderRadius = "10px";
-  contextMenu.style.border = "1px solid var(--border)";
-  contextMenu.style.background = "var(--dialog-bg)";
-  contextMenu.style.boxShadow = "var(--dialog-shadow)";
-  contextMenu.style.zIndex = "200";
-  document.body.appendChild(contextMenu);
-
-  const hideContextMenu = () => {
-    contextMenu.style.display = "none";
-    contextMenu.replaceChildren();
-  };
-
-  gridRoot.addEventListener("contextmenu", (e) => {
-    if (!extensionHostManager.ready) return;
-
-    const picked = app.pickCellAtClientPoint(e.clientX, e.clientY);
-    if (!picked) return;
-
-    const ranges = app.getSelectionRanges();
-    const inSelection = ranges.some((range) => {
-      const startRow = Math.min(range.startRow, range.endRow);
-      const endRow = Math.max(range.startRow, range.endRow);
-      const startCol = Math.min(range.startCol, range.endCol);
-      const endCol = Math.max(range.startCol, range.endCol);
-      return picked.row >= startRow && picked.row <= endRow && picked.col >= startCol && picked.col <= endCol;
-    });
-    if (!inSelection) {
-      app.activateCell({ row: picked.row, col: picked.col });
-    }
-
-    const items = resolveMenuItems(extensionHostManager.getContributedMenu("cell/context"), contextKeys.asLookup());
-    if (items.length === 0) return;
-
-    e.preventDefault();
-    contextMenu.replaceChildren();
-
-    const model = buildContextMenuModel(items, commandRegistry);
-
-    for (const entry of model) {
-      if (entry.kind === "separator") {
-        const separator = document.createElement("div");
-        separator.setAttribute("role", "separator");
-        separator.style.height = "1px";
-        separator.style.margin = "4px 2px";
-        separator.style.background = "var(--border)";
-        contextMenu.appendChild(separator);
-        continue;
-      }
-
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.textContent = entry.label;
-      btn.disabled = !entry.enabled;
-      btn.style.display = "block";
-      btn.style.width = "100%";
-      btn.style.textAlign = "left";
-      btn.style.padding = "8px 10px";
-      btn.style.borderRadius = "8px";
-      btn.style.border = "1px solid transparent";
-      btn.style.background = "transparent";
-      btn.style.color = entry.enabled ? "var(--text-primary)" : "var(--text-secondary)";
-      btn.style.cursor = entry.enabled ? "pointer" : "default";
-      btn.addEventListener("click", () => {
-        if (!entry.enabled) return;
-        hideContextMenu();
-        executeExtensionCommand(entry.commandId);
-      });
-      contextMenu.appendChild(btn);
-    }
-
-    contextMenu.style.left = `${e.clientX}px`;
-    contextMenu.style.top = `${e.clientY}px`;
-    contextMenu.style.display = "flex";
+  const contextMenu = new ContextMenu({
+    onClose: () => {
+      // Best-effort: return focus to the grid after closing.
+      app.focus();
+    },
   });
 
-  window.addEventListener("click", () => hideContextMenu(), true);
-  window.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") hideContextMenu();
+  const executeBuiltinCommand = (commandId: string, ...args: any[]) => {
+    void commandRegistry.executeCommand(commandId, ...args).catch((err) => {
+      showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
+    });
+  };
+
+  const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+  const primaryShortcut = (key: string) => (isMac ? `⌘${key}` : `Ctrl+${key}`);
+
+  gridRoot.addEventListener("contextmenu", (e) => {
+    // Always prevent the native context menu; we render our own.
+    e.preventDefault();
+
+    const picked = app.pickCellAtClientPoint(e.clientX, e.clientY);
+    if (picked) {
+      // Excel-like behavior: if the user right-clicks outside the current selection,
+      // move the active cell to the clicked coordinate. If they right-click within
+      // the selection, keep it intact (important for when-clause context keys like
+      // `hasSelection`).
+      const ranges = app.getSelectionRanges();
+      const inSelection = ranges.some((range) => {
+        const startRow = Math.min(range.startRow, range.endRow);
+        const endRow = Math.max(range.startRow, range.endRow);
+        const startCol = Math.min(range.startCol, range.endCol);
+        const endCol = Math.max(range.startCol, range.endCol);
+        return picked.row >= startRow && picked.row <= endRow && picked.col >= startCol && picked.col <= endCol;
+      });
+      if (!inSelection) {
+        app.activateCell({ row: picked.row, col: picked.col });
+      }
+    }
+
+    const menuItems: ContextMenuItem[] = [
+      {
+        type: "item",
+        label: t("clipboard.cut"),
+        shortcut: primaryShortcut("X"),
+        onSelect: () => executeBuiltinCommand("clipboard.cut"),
+      },
+      {
+        type: "item",
+        label: t("clipboard.copy"),
+        shortcut: primaryShortcut("C"),
+        onSelect: () => executeBuiltinCommand("clipboard.copy"),
+      },
+      {
+        type: "item",
+        label: t("clipboard.paste"),
+        shortcut: primaryShortcut("V"),
+        onSelect: () => executeBuiltinCommand("clipboard.paste"),
+      },
+      { type: "separator" },
+      {
+        type: "item",
+        label: "Paste Special…",
+        shortcut: isMac ? "⌘⌥V" : "Ctrl+Alt+V",
+        onSelect: async () => {
+          const options = getPasteSpecialMenuItems().map((item) => ({ label: item.label, value: item.mode }));
+          const selected = await showQuickPick(options, { placeHolder: "Paste Special" });
+          if (!selected) return;
+          executeBuiltinCommand("clipboard.pasteSpecial", selected);
+        },
+      },
+      { type: "separator" },
+      {
+        type: "item",
+        label: "Clear Contents",
+        shortcut: isMac ? "⌫" : "Del",
+        onSelect: () => executeBuiltinCommand("edit.clearContents"),
+      },
+    ];
+
+    if (extensionHostManager.ready) {
+      // Ensure command labels are available.
+      syncContributedCommands();
+
+      const contributed = resolveMenuItems(extensionHostManager.getContributedMenu("cell/context"), contextKeys.asLookup());
+      if (contributed.length > 0) {
+        menuItems.push({ type: "separator" });
+        const model = buildContextMenuModel(contributed, commandRegistry);
+        for (const entry of model) {
+          if (entry.kind === "separator") {
+            menuItems.push({ type: "separator" });
+            continue;
+          }
+          menuItems.push({
+            type: "item",
+            label: entry.label,
+            enabled: entry.enabled,
+            onSelect: () => executeExtensionCommand(entry.commandId),
+          });
+        }
+      }
+    }
+
+    contextMenu.open({ x: e.clientX, y: e.clientY, items: menuItems });
   });
 
   let macrosBackend: unknown | null = null;
