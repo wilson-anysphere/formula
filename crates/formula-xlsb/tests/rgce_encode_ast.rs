@@ -125,6 +125,33 @@ fn ast_encoder_roundtrips_sheet_range_ref() {
 }
 
 #[test]
+fn ast_encoder_roundtrips_external_workbook_sheet_range_ref() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet_external_workbook("Book2.xlsx", "SheetA", "SheetB", 0);
+
+    let encoded_unquoted = encode_rgce_with_context_ast(
+        "=SUM([Book2.xlsx]SheetA:SheetB!A1)",
+        &ctx,
+        CellCoord::new(0, 0),
+    )
+    .expect("encode");
+    assert!(encoded_unquoted.rgcb.is_empty());
+
+    // Round-trip through the parseable single-token prefix emitted by the rgce decoder.
+    let encoded_quoted = encode_rgce_with_context_ast(
+        "=SUM('[Book2.xlsx]SheetA:SheetB'!A1)",
+        &ctx,
+        CellCoord::new(0, 0),
+    )
+    .expect("encode");
+    assert!(encoded_quoted.rgcb.is_empty());
+    assert_eq!(encoded_unquoted.rgce, encoded_quoted.rgce);
+
+    let decoded = decode_rgce_with_context(&encoded_unquoted.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "SUM('[Book2.xlsx]SheetA:SheetB'!A1)");
+}
+
+#[test]
 fn ast_encoder_roundtrips_implicit_intersection_on_name() {
     let mut ctx = WorkbookContext::default();
     ctx.add_workbook_name("MyNamedRange", 1);
