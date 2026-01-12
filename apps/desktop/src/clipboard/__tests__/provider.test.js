@@ -234,6 +234,107 @@ test("clipboard provider", async (t) => {
     );
   });
 
+  await t.test("web: write includes small image/png when provided", async () => {
+    /** @type {any[]} */
+    const writes = [];
+    /** @type {string[]} */
+    const writeTextCalls = [];
+
+    class MockClipboardItem {
+      /**
+       * @param {Record<string, Blob>} data
+       */
+      constructor(data) {
+        this.data = data;
+      }
+    }
+
+    const imageBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+
+    await withGlobals(
+      {
+        __TAURI__: undefined,
+        ClipboardItem: MockClipboardItem,
+        navigator: {
+          clipboard: {
+            async write(items) {
+              writes.push(items);
+            },
+            async writeText(text) {
+              writeTextCalls.push(text);
+            },
+          },
+        },
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        await provider.write({ text: "plain", html: "<p>hello</p>", imagePng: imageBytes });
+
+        assert.equal(writes.length, 1);
+        assert.equal(writeTextCalls.length, 0);
+
+        assert.equal(writes[0].length, 1);
+        const item = writes[0][0];
+        assert.ok(item instanceof MockClipboardItem);
+
+        const keys = Object.keys(item.data).sort();
+        assert.deepEqual(keys, ["image/png", "text/html", "text/plain"].sort());
+
+        assert.equal(item.data["image/png"].type, "image/png");
+        assert.equal(item.data["image/png"].size, imageBytes.byteLength);
+      }
+    );
+  });
+
+  await t.test("web: write omits oversized image/png blobs but still writes html/text", async () => {
+    /** @type {any[]} */
+    const writes = [];
+    /** @type {string[]} */
+    const writeTextCalls = [];
+
+    class MockClipboardItem {
+      /**
+       * @param {Record<string, Blob>} data
+       */
+      constructor(data) {
+        this.data = data;
+      }
+    }
+
+    const largeImage = new Blob([new ArrayBuffer(11 * 1024 * 1024)], { type: "image/png" });
+
+    await withGlobals(
+      {
+        __TAURI__: undefined,
+        ClipboardItem: MockClipboardItem,
+        navigator: {
+          clipboard: {
+            async write(items) {
+              writes.push(items);
+            },
+            async writeText(text) {
+              writeTextCalls.push(text);
+            },
+          },
+        },
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        await provider.write({ text: "plain", html: "<p>hello</p>", imagePng: largeImage });
+
+        assert.equal(writes.length, 1);
+        assert.equal(writeTextCalls.length, 0);
+
+        assert.equal(writes[0].length, 1);
+        const item = writes[0][0];
+        assert.ok(item instanceof MockClipboardItem);
+
+        const keys = Object.keys(item.data).sort();
+        assert.deepEqual(keys, ["text/html", "text/plain"].sort());
+      }
+    );
+  });
+
   await t.test("web: write falls back to writeText when rich write throws", async () => {
     /** @type {string[]} */
     const writeTextCalls = [];
