@@ -186,26 +186,52 @@ The relationship ID is resolved via:
 
 This is how `_rvRel:LocalImageIdentifier = 0` ultimately maps to an actual file in `xl/media/`.
 
-## 7) `[Content_Types].xml` overrides for “Place in Cell” image parts
+## 7) `[Content_Types].xml`: defaults + overrides (complete set for the sample)
 
-The following overrides are required for the additional parts involved in this schema (in addition to the normal workbook/worksheet/styles/theme overrides):
+The rust_xlsxwriter-generated “Place in Cell” workbook used for schema verification contains the
+following content types (formatted for readability):
 
 ```xml
-<Override PartName="/xl/metadata.xml"
-  ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"/>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels"
+           ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="png" ContentType="image/png"/>
 
-<Override PartName="/xl/richData/rdRichValueTypes.xml"
-  ContentType="application/vnd.ms-excel.rdrichvaluetypes+xml"/>
+  <Override PartName="/docProps/app.xml"
+            ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+  <Override PartName="/docProps/core.xml"
+            ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
 
-<Override PartName="/xl/richData/rdrichvalue.xml"
-  ContentType="application/vnd.ms-excel.rdrichvalue+xml"/>
+  <Override PartName="/xl/styles.xml"
+            ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+  <Override PartName="/xl/theme/theme1.xml"
+            ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>
+  <Override PartName="/xl/workbook.xml"
+            ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml"
+            ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
 
-<Override PartName="/xl/richData/rdrichvaluestructure.xml"
-  ContentType="application/vnd.ms-excel.rdrichvaluestructure+xml"/>
+  <Override PartName="/xl/metadata.xml"
+            ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"/>
 
-<Override PartName="/xl/richData/richValueRel.xml"
-  ContentType="application/vnd.ms-excel.richvaluerel+xml"/>
+  <Override PartName="/xl/richData/rdRichValueTypes.xml"
+            ContentType="application/vnd.ms-excel.rdrichvaluetypes+xml"/>
+  <Override PartName="/xl/richData/rdrichvalue.xml"
+            ContentType="application/vnd.ms-excel.rdrichvalue+xml"/>
+  <Override PartName="/xl/richData/rdrichvaluestructure.xml"
+            ContentType="application/vnd.ms-excel.rdrichvaluestructure+xml"/>
+  <Override PartName="/xl/richData/richValueRel.xml"
+            ContentType="application/vnd.ms-excel.richvaluerel+xml"/>
+</Types>
 ```
+
+Notes:
+
+* Other producers may use the default `application/xml` for some of these parts; preserve whatever the
+  source file uses when round-tripping.
+* The image bytes are stored under `xl/media/*.png` (or other formats) and typically use the relevant
+  `<Default Extension="…">` entry rather than an explicit `<Override>`.
 
 ## 8) Important: **no `xl/cellimages.xml`** (for Place in Cell)
 
@@ -220,4 +246,4 @@ Instead, it uses:
 
 Open question:
 
-* Excel has multiple image-related features (floating drawings, background images, legacy objects, the `IMAGE()` function, “data types”, etc.). It is still possible that **other** Excel scenarios use `xl/cellimages.xml` or additional parts. If/when we encounter such files in the corpus, we should extend this document with concrete samples.
+* Excel has multiple image-related features (floating drawings, background images, legacy objects, the `IMAGE()` function, “data types”, etc.). It is still possible that **other** Excel scenarios use a `cellImages` part (`xl/cellImages.xml` / `xl/cellimages.xml`) or additional parts. If/when we encounter such files in the corpus, we should extend this document with concrete samples.
