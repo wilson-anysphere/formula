@@ -2459,6 +2459,24 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
     }
 
     #[test]
+    fn read_csv_blocking_respects_excel_sep_directive() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let path = tmp.path().join("data.csv");
+        std::fs::write(&path, "sep=;\na;b\n1;2\n").expect("write csv");
+
+        let workbook = read_csv_blocking(&path).expect("read csv");
+        assert_eq!(workbook.sheets.len(), 1);
+
+        let sheet = &workbook.sheets[0];
+        let table = sheet.columnar.as_deref().expect("expected columnar table");
+        assert_eq!(table.column_count(), 2);
+        assert_eq!(table.row_count(), 1);
+
+        assert_eq!(sheet.get_cell(0, 0).computed_value, CellScalar::Number(1.0));
+        assert_eq!(sheet.get_cell(0, 1).computed_value, CellScalar::Number(2.0));
+    }
+
+    #[test]
     fn read_csv_blocking_sniffs_tab_delimiter() {
         let tmp = tempfile::tempdir().expect("temp dir");
         let path = tmp.path().join("data.csv");

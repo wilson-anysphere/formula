@@ -253,3 +253,22 @@ fn opens_pipe_delimited_csv_with_sniffed_delimiter() {
     assert_eq!(sheet.value_a1("B1").unwrap(), CellValue::Number(2.0));
 }
 
+#[test]
+fn opens_csv_with_excel_sep_directive() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let csv_path = dir.path().join("sep.csv");
+    std::fs::write(&csv_path, "sep=;\na;b\n1;2\n").expect("write csv");
+
+    let wb = open_workbook(&csv_path).expect("open csv workbook");
+    let model = match wb {
+        Workbook::Model(model) => model,
+        other => panic!("expected Workbook::Model, got {other:?}"),
+    };
+
+    let sheet = model.sheet_by_name("sep").expect("sheet missing");
+    let table = sheet.columnar_table().expect("expected columnar table");
+    assert_eq!(table.column_count(), 2);
+
+    assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(1.0));
+    assert_eq!(sheet.value_a1("B1").unwrap(), CellValue::Number(2.0));
+}

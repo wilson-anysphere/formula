@@ -55,3 +55,14 @@ fn csv_auto_detect_ignores_commas_inside_quoted_strings() {
     );
 }
 
+#[test]
+fn csv_auto_detect_respects_excel_sep_directive() {
+    // Excel supports `sep=<delimiter>` as a special first line that chooses the delimiter and is
+    // not treated as a header/data row.
+    let csv = "sep=;\na;b\n1;2\n";
+    let sheet = import_csv_to_worksheet(1, "Data", Cursor::new(csv.as_bytes()), CsvOptions::default())
+        .unwrap();
+
+    assert_eq!(sheet.value(CellRef::new(0, 0)), CellValue::Number(1.0));
+    assert_eq!(sheet.value(CellRef::new(0, 1)), CellValue::Number(2.0));
+}

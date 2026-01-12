@@ -167,6 +167,20 @@ pub fn import_csv_to_columnar_table<R: BufRead>(
     }
     record_index += 1;
 
+    // Excel supports a special first line `sep=<delimiter>` which explicitly specifies the
+    // delimiter. When present, Excel uses it for delimiter selection and does not surface it as
+    // a header/data row.
+    if is_csv_sep_directive_record(&record, record_index, delimiter, options.encoding) {
+        record.clear();
+        let has_next = csv_reader
+            .read_byte_record(&mut record)
+            .map_err(|e| map_csv_error(e, record_index + 1))?;
+        if !has_next {
+            return Err(CsvImportError::EmptyInput);
+        }
+        record_index += 1;
+    }
+
     let mut header_names: Vec<String> = Vec::new();
     let mut sample_rows: Vec<Vec<String>> = Vec::new();
     let mut column_count: usize;
@@ -273,6 +287,84 @@ const CSV_SNIFF_DELIMITERS: [u8; 4] = [b',', b';', b'\t', b'|'];
 const CSV_SNIFF_MAX_RECORDS: usize = 20;
 const CSV_SNIFF_MAX_BYTES: usize = 64 * 1024;
 
+fn is_csv_sep_directive_record(
+    record: &ByteRecord,
+    row: u64,
+    delimiter: u8,
+    encoding: CsvTextEncoding,
+) -> bool {
+    if row != 1 {
+        return false;
+    }
+    if !CSV_SNIFF_DELIMITERS.contains(&delimiter) {
+        return false;
+    }
+    let first = match record.get(0) {
+        Some(bytes) => match decode_field(bytes, row, 1, encoding) {
+            Ok(s) => s,
+            Err(_) => return false,
+        },
+        None => return false,
+    };
+    if !first.trim().eq_ignore_ascii_case("sep=") {
+        return false;
+    }
+    if record.len() < 2 {
+        return false;
+    }
+    for (idx, field) in record.iter().enumerate().skip(1) {
+        let col = idx as u64 + 1;
+        let value = match decode_field(field, row, col, encoding) {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+        if !value.trim().is_empty() {
+            return false;
+        }
+    }
+    true
+}
+
+fn parse_csv_sep_directive(prefix: &[u8]) -> Option<u8> {
+    // Excel supports a special first line `sep=<delimiter>` which explicitly specifies the CSV
+    // delimiter (commonly used for semicolon-delimited CSVs in locales where `,` is the decimal
+    // separator). When present, Excel uses it to pick the delimiter and does not treat it as a
+    // data/header record.
+    //
+    // Example: `sep=;` (followed by `\n` or `\r\n`).
+    let line_end = prefix
+        .iter()
+        .position(|b| matches!(b, b'\n' | b'\r'))?;
+    let mut line = &prefix[..line_end];
+    if line.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        line = &line[3..];
+    }
+
+    // Trim ASCII spaces/tabs.
+    let mut start = 0usize;
+    let mut end = line.len();
+    while start < end && matches!(line[start], b' ' | b'\t') {
+        start += 1;
+    }
+    while start < end && matches!(line[end - 1], b' ' | b'\t') {
+        end -= 1;
+    }
+    let line = &line[start..end];
+
+    if line.len() != 5 {
+        return None;
+    }
+    if !line[..4].eq_ignore_ascii_case(b"sep=") {
+        return None;
+    }
+    let delimiter = line[4];
+    if CSV_SNIFF_DELIMITERS.contains(&delimiter) {
+        Some(delimiter)
+    } else {
+        None
+    }
+}
+
 fn sniff_csv_delimiter_prefix<R: Read>(reader: &mut R) -> Result<(Vec<u8>, u8), std::io::Error> {
     let mut prefix: Vec<u8> = Vec::new();
     let mut hists: Vec<HashMap<usize, usize>> =
@@ -298,6 +390,9 @@ fn sniff_csv_delimiter_prefix<R: Read>(reader: &mut R) -> Result<(Vec<u8>, u8), 
         }
 
         prefix.extend_from_slice(&buf[..n]);
+        if let Some(delimiter) = parse_csv_sep_directive(&prefix) {
+            return Ok((prefix, delimiter));
+        }
 
         for &byte in &buf[..n] {
             if sampled_records >= CSV_SNIFF_MAX_RECORDS {
