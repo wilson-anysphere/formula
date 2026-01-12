@@ -380,7 +380,8 @@ sudo sysctl -p
 
 ```bash
 # Install sccache
-cargo install sccache
+source scripts/agent-init.sh
+bash scripts/cargo_agent.sh install sccache
 
 # Configure (add to ~/.bashrc)
 export RUSTC_WRAPPER=sccache

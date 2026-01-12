@@ -186,9 +186,11 @@ There is also an optional size gate (off by default):
 1. Build the desktop bundles for your platform:
 
    ```bash
-   cargo install cargo-tauri --locked
-   cd apps/desktop/src-tauri
-   cargo tauri build
+   source scripts/agent-init.sh
+
+   bash scripts/cargo_agent.sh install cargo-tauri --locked
+   cd apps/desktop
+   bash ../../scripts/cargo_agent.sh tauri build
    ```
 
 2. From the repo root, print a bundle size table:

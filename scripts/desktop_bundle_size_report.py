@@ -287,7 +287,7 @@ def main() -> int:
             "bundle-size: ERROR No Tauri bundle directories found.\n"
             f"Searched for: target/**/release/bundle (from {repo_root})\n"
             f"Expected a directory like: {expected}\n"
-            "Hint: build the desktop app with `cargo tauri build` before running this script."
+            "Hint: build the desktop app with `cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build` before running this script."
         )
         print(msg, file=sys.stderr)
         # Still write a summary so CI logs show something useful.
