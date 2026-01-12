@@ -839,7 +839,10 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
         return read_xlsb_blocking(path);
     }
 
-    if matches!(extension.as_deref(), Some("xlsx") | Some("xlsm")) {
+    if matches!(
+        extension.as_deref(),
+        Some("xlsx") | Some("xlsm") | Some("xltx") | Some("xltm") | Some("xlam")
+    ) {
         return read_xlsx_or_xlsm_blocking(path);
     }
 
@@ -1439,8 +1442,8 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
             }
         }
 
-        let wants_drop_vba =
-            matches!(extension.as_deref(), Some("xlsx") | Some("xltx")) && workbook.vba_project_bin.is_some();
+        let wants_drop_vba = matches!(extension.as_deref(), Some("xlsx") | Some("xltx"))
+            && workbook.vba_project_bin.is_some();
 
         if patches.is_empty() && !print_settings_changed && !wants_drop_vba && !power_query_changed {
             write_file_atomic(path, origin_bytes).with_context(|| format!("write workbook {:?}", path))?;
@@ -1596,7 +1599,10 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
                 .context("remove VBA parts for .xlsx")?;
         }
 
-        if matches!(extension.as_deref(), Some("xlsx") | Some("xlsm"))
+        if matches!(
+            extension.as_deref(),
+            Some("xlsx") | Some("xlsm") | Some("xltx") | Some("xltm") | Some("xlam")
+        )
             && matches!(workbook.date_system, WorkbookDateSystem::Excel1904)
         {
             pkg.set_workbook_date_system(xlsx_date_system)
@@ -1623,11 +1629,17 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
         .map_err(|e| anyhow::anyhow!(e.to_string()))
         .with_context(|| "serialize workbook to buffer")?;
     let mut bytes = cursor.into_inner();
-    let wants_vba =
-        workbook.vba_project_bin.is_some() && matches!(extension.as_deref(), Some("xlsm"));
+    let wants_vba = workbook.vba_project_bin.is_some()
+        && matches!(
+            extension.as_deref(),
+            Some("xlsm") | Some("xltm") | Some("xlam")
+        );
     let wants_preserved_drawings = workbook.preserved_drawing_parts.is_some();
     let wants_preserved_pivots = workbook.preserved_pivot_parts.is_some();
-    let needs_date_system_update = matches!(extension.as_deref(), Some("xlsx") | Some("xlsm"))
+    let needs_date_system_update = matches!(
+        extension.as_deref(),
+        Some("xlsx") | Some("xlsm") | Some("xltx") | Some("xltm") | Some("xlam")
+    )
         && matches!(workbook.date_system, WorkbookDateSystem::Excel1904);
     let wants_power_query = workbook.power_query_xml.is_some();
 
@@ -1673,7 +1685,10 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
             .context("repack workbook package with preserved parts")?;
     }
 
-    if matches!(extension.as_deref(), Some("xlsx") | Some("xlsm")) {
+    if matches!(
+        extension.as_deref(),
+        Some("xlsx") | Some("xlsm") | Some("xltx") | Some("xltm") | Some("xlam")
+    ) {
         bytes = write_workbook_print_settings(&bytes, &workbook.print_settings)
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
     }
@@ -3354,6 +3369,96 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
 
         let out_path = tmp.path().join("sanitized.xlsx");
         write_xlsx_blocking(&out_path, &workbook).expect("write xlsx");
+    }
+
+    #[test]
+    fn reads_xltx_fixture_via_xlsx_path() {
+        let src_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/basic/basic.xlsx"
+        ));
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let xltx_path = tmp.path().join("basic.xltx");
+        std::fs::copy(src_path, &xltx_path).expect("copy fixture to .xltx");
+
+        let workbook = read_xlsx_blocking(&xltx_path).expect("read xltx workbook");
+        assert_eq!(workbook.sheets.len(), 1);
+    }
+
+    #[test]
+    fn reads_xltm_and_xlam_capture_vba_project() {
+        let src_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/macros/basic.xlsm"
+        ));
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        for ext in ["xltm", "xlam"] {
+            let dst = tmp.path().join(format!("basic.{ext}"));
+            std::fs::copy(src_path, &dst).expect("copy macro fixture");
+
+            let workbook = read_xlsx_blocking(&dst).expect("read macro workbook");
+            assert!(
+                workbook.vba_project_bin.is_some(),
+                "expected vba_project_bin to be captured for {ext}"
+            );
+        }
+    }
+
+    #[test]
+    fn xltm_save_preserves_vba_and_xltx_save_strips_vba() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/macros/basic.xlsm"
+        ));
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let xltm_path = tmp.path().join("basic.xltm");
+        std::fs::copy(fixture_path, &xltm_path).expect("copy fixture to .xltm");
+
+        let original_bytes = std::fs::read(&xltm_path).expect("read xltm bytes");
+        let original_pkg = XlsxPackage::from_bytes(&original_bytes).expect("parse fixture package");
+        let original_vba = original_pkg
+            .vba_project_bin()
+            .expect("fixture has vbaProject.bin")
+            .to_vec();
+
+        let workbook = read_xlsx_blocking(&xltm_path).expect("read xltm workbook");
+
+        // Save back to `.xltm` should preserve VBA verbatim.
+        let out_xltm = tmp.path().join("roundtrip.xltm");
+        write_xlsx_blocking(&out_xltm, &workbook).expect("write xltm workbook");
+        let written_bytes = std::fs::read(&out_xltm).expect("read written xltm");
+        let written_pkg = XlsxPackage::from_bytes(&written_bytes).expect("parse written package");
+        assert_eq!(
+            written_pkg
+                .vba_project_bin()
+                .expect("written xltm should contain vbaProject.bin"),
+            original_vba.as_slice()
+        );
+
+        // Save to `.xlam` should also preserve VBA verbatim.
+        let out_xlam = tmp.path().join("roundtrip.xlam");
+        write_xlsx_blocking(&out_xlam, &workbook).expect("write xlam workbook");
+        let written_bytes = std::fs::read(&out_xlam).expect("read written xlam");
+        let written_pkg = XlsxPackage::from_bytes(&written_bytes).expect("parse written package");
+        assert_eq!(
+            written_pkg
+                .vba_project_bin()
+                .expect("written xlam should contain vbaProject.bin"),
+            original_vba.as_slice()
+        );
+
+        // Save to `.xltx` should strip VBA.
+        let out_xltx = tmp.path().join("converted.xltx");
+        write_xlsx_blocking(&out_xltx, &workbook).expect("write xltx workbook");
+        let written_bytes = std::fs::read(&out_xltx).expect("read written xltx");
+        let written_pkg = XlsxPackage::from_bytes(&written_bytes).expect("parse written package");
+        assert!(
+            written_pkg.vba_project_bin().is_none(),
+            "expected vbaProject.bin to be removed when saving as .xltx"
+        );
     }
 
     #[test]

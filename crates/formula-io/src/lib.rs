@@ -375,8 +375,8 @@ fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
         .to_ascii_lowercase();
 
     let ext_format = match ext.as_str() {
-        "xlsx" => Some(WorkbookFormat::Xlsx),
-        "xlsm" => Some(WorkbookFormat::Xlsm),
+        "xlsx" | "xltx" => Some(WorkbookFormat::Xlsx),
+        "xlsm" | "xltm" | "xlam" => Some(WorkbookFormat::Xlsm),
         "xls" => Some(WorkbookFormat::Xls),
         "xlsb" => Some(WorkbookFormat::Xlsb),
         "csv" => Some(WorkbookFormat::Csv),
@@ -646,7 +646,7 @@ fn stream_exists<R: std::io::Read + std::io::Write + std::io::Seek>(
 /// Currently supports:
 /// - `.xls` (via `formula-xls`)
 /// - `.xlsb` (via `formula-xlsb`)
-/// - `.xlsx` / `.xlsm` (via `formula-xlsx`)
+/// - `.xlsx` / `.xlsm` / `.xltx` / `.xltm` / `.xlam` (via `formula-xlsx`)
 /// - `.csv` (via `formula-model` CSV import)
 /// - `.parquet` (via `formula-columnar`, requires the `formula-io` crate feature `parquet`)
 pub fn open_workbook(path: impl AsRef<Path>) -> Result<Workbook, Error> {
