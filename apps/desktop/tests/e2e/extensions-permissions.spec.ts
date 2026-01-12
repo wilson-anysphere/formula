@@ -111,7 +111,7 @@ test.describe("Extensions permissions UI", () => {
       await expect(page.getByTestId("panel-extensions")).toBeVisible();
 
       await expect(page.getByTestId(`extension-card-${extensionId}`)).toBeVisible();
-      await expect(page.getByTestId(`permissions-empty-${extensionId}`)).toBeVisible();
+      await expect(page.getByTestId(`permission-row-${extensionId}-network`)).toContainText("not granted");
 
       // First run: allow ui.commands + network so we have something to reset.
       await page.getByTestId("run-command-with-args-sampleHello.fetchText").click();
@@ -125,11 +125,11 @@ test.describe("Extensions permissions UI", () => {
       await page.getByTestId("extension-permission-allow").click();
 
       await expect(page.getByTestId("toast-root")).toContainText("Fetched: hello");
-      await expect(page.getByTestId(`permission-${extensionId}-network`)).toBeVisible();
+      await expect(page.getByTestId(`permission-row-${extensionId}-network`)).toContainText("mode: allowlist");
 
       // Reset all extension permissions globally.
       await page.getByTestId("reset-all-extension-permissions").click();
-      await expect(page.getByTestId(`permissions-empty-${extensionId}`)).toBeVisible();
+      await expect(page.getByTestId(`permission-row-${extensionId}-network`)).toContainText("not granted");
 
       // Next run: deny network permission.
       await page.getByTestId("run-command-with-args-sampleHello.fetchText").click();
@@ -138,10 +138,14 @@ test.describe("Extensions permissions UI", () => {
       await page.getByTestId("input-box-ok").click();
 
       await expect(page.getByTestId("extension-permission-prompt")).toBeVisible();
+      if (await page.getByTestId("extension-permission-ui.commands").isVisible()) {
+        await page.getByTestId("extension-permission-allow").click();
+        await expect(page.getByTestId("extension-permission-prompt")).toBeVisible();
+      }
       await expect(page.getByTestId("extension-permission-network")).toBeVisible();
       await page.getByTestId("extension-permission-deny").click();
       await expect(page.getByTestId("toast-root")).toContainText("Permission denied");
-      await expect(page.getByTestId(`permissions-empty-${extensionId}`)).toBeVisible();
+      await expect(page.getByTestId(`permission-row-${extensionId}-network`)).toContainText("not granted");
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
@@ -180,7 +184,7 @@ test.describe("Extensions permissions UI", () => {
       await page.getByTestId("open-extensions-panel").click();
       await expect(page.getByTestId("panel-extensions")).toBeVisible();
 
-      await expect(page.getByTestId(`permissions-empty-${extensionId}`)).toBeVisible();
+      await expect(page.getByTestId(`permission-row-${extensionId}-network`)).toContainText("not granted");
 
       await page.getByTestId("run-command-with-args-sampleHello.fetchText").click();
       await expect(page.getByTestId("input-box")).toBeVisible();
@@ -193,7 +197,7 @@ test.describe("Extensions permissions UI", () => {
       await page.getByTestId("extension-permission-allow").click();
 
       await expect(page.getByTestId("toast-root")).toContainText("Fetched: hello");
-      await expect(page.getByTestId(`permission-${extensionId}-network`)).toContainText("127.0.0.1");
+      await expect(page.getByTestId(`permission-row-${extensionId}-network`)).toContainText("127.0.0.1");
 
       await page.reload();
       await waitForDesktopReady(page);
@@ -201,7 +205,7 @@ test.describe("Extensions permissions UI", () => {
       await page.getByTestId("open-extensions-panel").click();
       await expect(page.getByTestId("panel-extensions")).toBeVisible();
 
-      await expect(page.getByTestId(`permission-${extensionId}-network`)).toContainText("127.0.0.1");
+      await expect(page.getByTestId(`permission-row-${extensionId}-network`)).toContainText("127.0.0.1");
 
       // Running again should succeed without prompting (permissions were persisted).
       await page.getByTestId("run-command-with-args-sampleHello.fetchText").click();
