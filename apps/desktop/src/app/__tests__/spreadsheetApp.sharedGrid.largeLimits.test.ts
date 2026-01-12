@@ -121,8 +121,10 @@ describe("SpreadsheetApp shared grid (large limits)", () => {
       activeValue: document.createElement("div"),
     };
 
+    const rebuildSpy = vi.spyOn(SpreadsheetApp.prototype as any, "rebuildAxisVisibilityCache");
     const app = new SpreadsheetApp(root, status);
     expect(app.getGridMode()).toBe("shared");
+    expect(rebuildSpy).not.toHaveBeenCalled();
 
     const limits = (app as any).limits as { maxRows: number; maxCols: number };
     expect(limits.maxRows).toBe(1_048_576);
