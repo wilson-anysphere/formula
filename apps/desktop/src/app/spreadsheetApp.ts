@@ -627,6 +627,7 @@ export class SpreadsheetApp {
   private renderScheduled = false;
   private pendingRenderMode: "full" | "scroll" = "full";
   private statusUpdateScheduled = false;
+  private chartContentRefreshScheduled = false;
   private windowKeyDownListener: ((e: KeyboardEvent) => void) | null = null;
   private clipboardProviderPromise: ReturnType<typeof createClipboardProvider> | null = null;
   private clipboardCopyContext:
@@ -1299,6 +1300,9 @@ export class SpreadsheetApp {
       // wasn't directly edited (e.g. a dependency cell changes). Ensure the status bar + formula bar
       // stay in sync without forcing a full re-render.
       this.scheduleStatusUpdate();
+      // Similarly, chart SVG content is only rendered on "full" refreshes. Schedule a debounced
+      // chart-content update so charts reflect remote data edits in real time.
+      this.scheduleChartContentRefresh();
     });
 
     if (!collabEnabled && typeof window !== "undefined") {
@@ -1407,6 +1411,8 @@ export class SpreadsheetApp {
       // used by AI chart creation.
       this.chartStore.createChart({
         chart_type: "bar",
+        // Use an unqualified range so ChartStore can resolve the active sheet id even
+        // when a `sheetNameResolver` is present (display names may not include "Sheet1").
         data_range: "A2:B5",
         title: "Example Chart"
       });
@@ -1729,6 +1735,31 @@ export class SpreadsheetApp {
       if (this.disposed) return;
       if (!this.uiReady) return;
       this.updateStatus();
+    });
+  }
+
+  private scheduleChartContentRefresh(): void {
+    if (this.disposed) return;
+    if (!this.uiReady) return;
+    // A pending full refresh will render chart content anyway.
+    if (this.renderScheduled && this.pendingRenderMode === "full") return;
+    if (this.chartContentRefreshScheduled) return;
+    // No charts to render on the active sheet => nothing to do.
+    if (!this.chartStore.listCharts().some((chart) => chart.sheetId === this.sheetId)) return;
+
+    this.chartContentRefreshScheduled = true;
+
+    const schedule =
+      typeof requestAnimationFrame === "function"
+        ? requestAnimationFrame
+        : (cb: FrameRequestCallback) =>
+            globalThis.setTimeout(() => cb(typeof performance !== "undefined" ? performance.now() : Date.now()), 0);
+
+    schedule(() => {
+      this.chartContentRefreshScheduled = false;
+      if (this.disposed) return;
+      if (!this.uiReady) return;
+      this.renderCharts(true);
     });
   }
 

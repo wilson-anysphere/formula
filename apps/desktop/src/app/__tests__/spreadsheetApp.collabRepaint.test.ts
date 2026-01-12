@@ -191,4 +191,48 @@ describe("SpreadsheetApp collab repaint", () => {
     app.destroy();
     root.remove();
   });
+
+  it("re-renders chart SVG content when remote edits change chart data", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    expect(app.getGridMode()).toBe("legacy");
+
+    const charts = app.listCharts();
+    expect(charts.length).toBeGreaterThan(0);
+    const chartId = charts[0]!.id;
+
+    const chartElements = (app as any).chartElements as Map<string, HTMLElement>;
+    const host = chartElements.get(chartId);
+    expect(host).toBeTruthy();
+    const beforeHtml = host!.innerHTML;
+
+    const doc = app.getDocument();
+    const sheetId = app.getCurrentSheetId();
+    // Mutate one of the demo chart's value cells (B2 is part of Sheet1!A2:B5).
+    const before = doc.getCell(sheetId, { row: 1, col: 1 }) as any;
+
+    doc.applyExternalDeltas(
+      [
+        {
+          sheetId,
+          row: 1,
+          col: 1,
+          before,
+          after: { value: 10, formula: null, styleId: before?.styleId ?? 0 },
+        },
+      ],
+      { source: "collab" },
+    );
+
+    expect(host!.innerHTML).not.toBe(beforeHtml);
+
+    app.destroy();
+    root.remove();
+  });
 });
