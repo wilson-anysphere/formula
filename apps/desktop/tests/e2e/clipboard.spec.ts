@@ -257,6 +257,19 @@ test.describe("clipboard shortcuts (copy/cut/paste)", () => {
     });
     await waitForIdle(page);
 
+    // Sanity check: A1 should *not* have a per-cell styleId (it inherits via column default),
+    // otherwise this test wouldn't catch the regression.
+    const { a1StyleId, a1EffectiveBold } = await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const doc = app.getDocument();
+      const sheetId = app.getCurrentSheetId();
+      const a1 = doc.getCell(sheetId, "A1");
+      const effective = doc.getCellFormat(sheetId, "A1");
+      return { a1StyleId: a1.styleId, a1EffectiveBold: effective?.font?.bold === true };
+    });
+    expect(a1StyleId).toBe(0);
+    expect(a1EffectiveBold).toBe(true);
+
     // Copy A1 and paste to B1.
     await page.click("#grid", { position: { x: 53, y: 29 } });
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
