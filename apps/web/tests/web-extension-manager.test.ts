@@ -759,6 +759,47 @@ test("uninstall clears persisted permission + extension storage state (localStor
   await host.dispose();
 });
 
+test("uninstall clears persisted permissions even when host is absent", async () => {
+  const keys = generateEd25519KeyPair();
+  const extensionDir = path.resolve("extensions/sample-hello");
+  const pkgBytes = await createExtensionPackageV2(extensionDir, { privateKeyPem: keys.privateKeyPem });
+
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "formula.sample-hello",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes }
+  });
+
+  const manager = new WebExtensionManager({ marketplaceClient, host: null, engineVersion: "1.0.0" });
+
+  await manager.install("formula.sample-hello");
+
+  globalThis.localStorage.setItem(
+    "formula.extensionHost.permissions",
+    JSON.stringify({
+      "formula.sample-hello": { storage: true },
+      "other.extension": { "ui.commands": true }
+    })
+  );
+  globalThis.localStorage.setItem(
+    "formula.extensionHost.storage.formula.sample-hello",
+    JSON.stringify({ foo: "bar" })
+  );
+
+  await manager.uninstall("formula.sample-hello");
+
+  const permissionsRaw = globalThis.localStorage.getItem("formula.extensionHost.permissions");
+  expect(permissionsRaw).not.toBe(null);
+  const permissions = JSON.parse(String(permissionsRaw));
+  expect(permissions["formula.sample-hello"]).toBeUndefined();
+  expect(permissions["other.extension"]).toEqual({ "ui.commands": true });
+
+  expect(globalThis.localStorage.getItem("formula.extensionHost.storage.formula.sample-hello")).toBe(null);
+
+  await manager.dispose();
+});
+
 test("detects IndexedDB corruption on load and supports repair()", async () => {
   const keys = generateEd25519KeyPair();
   const extensionDir = path.resolve("extensions/sample-hello");

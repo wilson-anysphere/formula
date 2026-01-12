@@ -74,6 +74,7 @@ const DB_VERSION = 1;
 const STORE_INSTALLED = "installed";
 const STORE_PACKAGES = "packages";
 
+const PERMISSIONS_STORE_KEY = "formula.extensionHost.permissions";
 const CONTRIBUTED_PANELS_SEED_STORE_KEY = "formula.extensions.contributedPanels.v1";
 
 type ContributedPanelSeed = {
@@ -142,6 +143,26 @@ function removeContributedPanelSeedsForExtension(storage: Storage, extensionId: 
   }
   if (!changed) return;
   writeContributedPanelSeedStore(storage, next);
+}
+
+function removePermissionGrantsForExtension(storage: Storage, extensionId: string): void {
+  const owner = String(extensionId ?? "").trim();
+  if (!owner) return;
+  try {
+    const raw = storage.getItem(PERMISSIONS_STORE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return;
+    if (!Object.prototype.hasOwnProperty.call(parsed, owner)) return;
+    delete (parsed as Record<string, unknown>)[owner];
+    if (Object.keys(parsed as Record<string, unknown>).length === 0) {
+      storage.removeItem(PERMISSIONS_STORE_KEY);
+      return;
+    }
+    storage.setItem(PERMISSIONS_STORE_KEY, JSON.stringify(parsed));
+  } catch {
+    // ignore
+  }
 }
 
 function prepareContributedPanelSeedsUpdate(
@@ -779,6 +800,17 @@ export class WebExtensionManager {
       await this.host?.revokePermissions?.(String(id));
     } catch {
       // ignore (host might not support permissions, or storage might be unavailable)
+    }
+
+    // Fallback: if the host is unavailable (or does not implement revokePermissions), ensure we still
+    // remove persisted permission grants from localStorage so a reinstall prompts again.
+    const permissionStorage = getLocalStorage();
+    if (permissionStorage) {
+      try {
+        removePermissionGrantsForExtension(permissionStorage, String(id));
+      } catch {
+        // ignore
+      }
     }
 
     try {
