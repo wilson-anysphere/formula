@@ -141,6 +141,7 @@ function assertCommand(cmd, args, message) {
 function buildWithWasmPack() {
   const jobs = process.env.CARGO_BUILD_JOBS ?? "4";
   const makeflags = process.env.MAKEFLAGS ?? `-j${jobs}`;
+  const rayonThreads = process.env.RAYON_NUM_THREADS ?? process.env.FORMULA_RAYON_NUM_THREADS ?? jobs;
 
   // Equivalent to: `wasm-pack build crates/formula-wasm --target nodejs --out-dir pkg-node`
   // but avoids any ambiguity around relative output paths by running from the crate dir.
@@ -164,7 +165,7 @@ function buildWithWasmPack() {
         CARGO_PROFILE_DEV_CODEGEN_UNITS: process.env.CARGO_PROFILE_DEV_CODEGEN_UNITS ?? jobs,
         // Rayon defaults to spawning one worker per core; cap it for multi-agent hosts unless
         // callers explicitly override it.
-        RAYON_NUM_THREADS: process.env.RAYON_NUM_THREADS ?? jobs,
+        RAYON_NUM_THREADS: rayonThreads,
         RUSTC_WRAPPER: process.env.RUSTC_WRAPPER ?? "",
         RUSTC_WORKSPACE_WRAPPER: process.env.RUSTC_WORKSPACE_WRAPPER ?? "",
       },

@@ -17,6 +17,11 @@ export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
 # Make: Limit parallel jobs
 export MAKEFLAGS="${MAKEFLAGS:--j${CARGO_BUILD_JOBS}}"
 
+# Rayon: Limit thread pool size (defaults to one thread per core otherwise).
+if [ -z "${RAYON_NUM_THREADS:-}" ]; then
+  export RAYON_NUM_THREADS="${FORMULA_RAYON_NUM_THREADS:-${CARGO_BUILD_JOBS}}"
+fi
+
 # Rust codegen units:
 #
 # Avoid setting `RUSTFLAGS=-C codegen-units=N` here. While it can reduce memory usage,
