@@ -1238,10 +1238,22 @@ impl<'a> Lexer<'a> {
                     } else {
                         let ident = self.lex_ident();
                         let upper = ident.to_ascii_uppercase();
-                        if upper == "TRUE" {
-                            self.push(TokenKind::Boolean(true), start, self.idx);
-                        } else if upper == "FALSE" {
-                            self.push(TokenKind::Boolean(false), start, self.idx);
+                        if upper == "TRUE" || upper == "FALSE" {
+                            // Match `lex()` behavior: `TRUE`/`FALSE` can be used as both boolean
+                            // literals and zero-arg functions (`TRUE()` / `FALSE()`).
+                            //
+                            // Lex them as booleans only when they are standalone literals; if the
+                            // next non-whitespace character is `(`, treat them as identifiers.
+                            let next_non_ws = self.src[self.idx..]
+                                .chars()
+                                .find(|c| !matches!(c, ' ' | '\t' | '\r' | '\n'));
+                            if next_non_ws == Some('(') {
+                                self.push(TokenKind::Ident(ident), start, self.idx);
+                            } else if upper == "TRUE" {
+                                self.push(TokenKind::Boolean(true), start, self.idx);
+                            } else {
+                                self.push(TokenKind::Boolean(false), start, self.idx);
+                            }
                         } else {
                             self.push(TokenKind::Ident(ident), start, self.idx);
                         }

@@ -38,3 +38,17 @@ fn lex_partial_unterminated_quoted_identifier_returns_tokens_and_error() {
     assert_eq!(out.tokens[1].span.end, 7);
 }
 
+#[test]
+fn lex_partial_true_false_are_ident_when_followed_by_paren() {
+    let out_true = lex_partial("TRUE()", &ParseOptions::default());
+    assert!(out_true.error.is_none());
+    assert_eq!(out_true.tokens[0].kind, TokenKind::Ident("TRUE".to_string()));
+
+    let out_false = lex_partial("FALSE()", &ParseOptions::default());
+    assert!(out_false.error.is_none());
+    assert_eq!(out_false.tokens[0].kind, TokenKind::Ident("FALSE".to_string()));
+
+    let out_literal = lex_partial("TRUE", &ParseOptions::default());
+    assert!(out_literal.error.is_none());
+    assert_eq!(out_literal.tokens[0].kind, TokenKind::Boolean(true));
+}
