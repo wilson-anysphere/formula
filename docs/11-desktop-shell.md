@@ -506,6 +506,10 @@ Security note: these event names are **explicitly allowlisted** in
 that allowlist (and the guardrail test `apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts`)
 or the event will fail with a permissions error in hardened desktop builds.
 
+Manual verification: in a Tauri desktop build, try calling `__TAURI__.event.listen(...)` or
+`__TAURI__.event.emit(...)` with an event name that is **not** in the allowlist; the call should
+be rejected with a permissions error.
+
 ---
 
 ## Clipboard
