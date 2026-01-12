@@ -4,7 +4,6 @@ use crate::{
     authenticode::extract_vba_signature_signed_digest,
     compute_vba_project_digest,
     contents_hash::content_normalized_data,
-    DigestAlg,
     normalized_data::forms_normalized_data,
     OleError, OleFile,
 };
@@ -734,11 +733,12 @@ fn digest_alg_from_oid_str(oid: &str) -> Option<DigestAlg> {
 }
 
 fn digest_name_from_oid_str(oid: &str) -> Option<&'static str> {
-    digest_alg_from_oid_str(oid).map(|alg| match alg {
-        DigestAlg::Md5 => "MD5",
-        DigestAlg::Sha1 => "SHA-1",
-        DigestAlg::Sha256 => "SHA-256",
-    })
+    match oid {
+        "1.2.840.113549.2.5" => Some("MD5"),
+        "1.3.14.3.2.26" => Some("SHA-1"),
+        "2.16.840.1.101.3.4.2.1" => Some("SHA-256"),
+        _ => None,
+    }
 }
 fn is_signature_component(component: &str) -> bool {
     let trimmed = component.trim_start_matches(|c: char| c <= '\u{001F}');
