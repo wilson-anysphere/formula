@@ -915,18 +915,45 @@ function renderSheetTabs(sheets: SheetUiInfo[] = listSheetsForUi()) {
   addSheetBtn.textContent = "+";
   addSheetBtn.setAttribute("aria-label", "Add sheet");
   addSheetBtn.addEventListener("click", () => {
-    const activeId = app.getCurrentSheetId();
-    const newName = generateDefaultSheetName(workbookSheetStore.listAll());
-    // Until the DocumentController gains first-class sheet metadata, keep `id` and
-    // `name` in lockstep for newly-created sheets.
-    const newSheetId = newName;
-    workbookSheetStore.addAfter(activeId, { id: newSheetId, name: newName });
+    void (async () => {
+      const activeId = app.getCurrentSheetId();
+      const desiredName = generateDefaultSheetName(workbookSheetStore.listAll());
+      const doc = app.getDocument();
 
-    const doc = app.getDocument();
-    // DocumentController creates sheets lazily; touching any cell ensures the sheet exists.
-    doc.getCell(newSheetId, { row: 0, col: 0 });
-    app.activateSheet(newSheetId);
-    app.focus();
+      const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
+      if (typeof baseInvoke === "function") {
+        // Prefer the queued invoke (it sequences behind pending `set_cell` / `set_range` sync work).
+        const invoke = queuedInvoke ?? ((cmd: string, args?: any) => queueBackendOp(() => baseInvoke(cmd, args)));
+
+        // Allow any microtask-batched workbook edits to enqueue before we request a new sheet id.
+        await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+        const info = (await invoke("add_sheet", { name: desiredName })) as SheetUiInfo;
+        const id = String((info as any)?.id ?? "").trim();
+        const name = String((info as any)?.name ?? "").trim();
+        if (!id) throw new Error("Backend returned empty sheet id");
+
+        // Backend may adjust the name for uniqueness; trust it.
+        workbookSheetStore.addAfter(activeId, { id, name: name || desiredName });
+
+        // DocumentController creates sheets lazily; touching any cell ensures the sheet exists.
+        doc.getCell(id, { row: 0, col: 0 });
+        app.activateSheet(id);
+        app.focus();
+        return;
+      }
+
+      // Web-only behavior: create a local DocumentController sheet lazily.
+      // Until the DocumentController gains first-class sheet metadata, keep `id` and
+      // `name` in lockstep for newly-created sheets.
+      const newSheetId = desiredName;
+      workbookSheetStore.addAfter(activeId, { id: newSheetId, name: desiredName });
+      doc.getCell(newSheetId, { row: 0, col: 0 });
+      app.activateSheet(newSheetId);
+      app.focus();
+    })().catch((err) => {
+      showToast(`Failed to add sheet: ${String((err as any)?.message ?? err)}`, "error");
+    });
   });
 
   sheetTabsRootEl.append(nav, tabStrip, addSheetBtn);
