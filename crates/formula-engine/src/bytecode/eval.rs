@@ -23,7 +23,12 @@ impl Vm {
         }
     }
 
-    pub fn eval(&mut self, program: &Program, grid: &dyn Grid, base: CellCoord) -> Value {
+    pub fn eval(
+        &mut self,
+        program: &Program,
+        grid: &dyn Grid,
+        base: CellCoord,
+    ) -> Value {
         self.stack.clear();
         for inst in program.instrs() {
             match inst.op() {

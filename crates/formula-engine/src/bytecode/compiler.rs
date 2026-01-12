@@ -98,6 +98,7 @@ impl Compiler {
             | Function::Mod
             | Function::Sign
             | Function::Concat
+            | Function::Not
             | Function::Unknown(_) => false,
         };
 

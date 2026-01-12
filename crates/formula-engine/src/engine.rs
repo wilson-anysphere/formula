@@ -253,6 +253,7 @@ struct SpillState {
 pub struct Engine {
     workbook: Workbook,
     bytecode_cache: bytecode::BytecodeCache,
+    bytecode_enabled: bool,
     external_value_provider: Option<Arc<dyn ExternalValueProvider>>,
     name_dependents: HashMap<String, HashSet<CellKey>>,
     cell_name_refs: HashMap<CellKey, HashSet<String>>,
@@ -319,6 +320,7 @@ impl Engine {
         Self {
             workbook: Workbook::default(),
             bytecode_cache: bytecode::BytecodeCache::new(),
+            bytecode_enabled: true,
             external_value_provider: None,
             name_dependents: HashMap::new(),
             cell_name_refs: HashMap::new(),
@@ -365,6 +367,81 @@ impl Engine {
 
     pub fn bytecode_program_count(&self) -> usize {
         self.bytecode_cache.program_count()
+    }
+
+    pub fn set_bytecode_enabled(&mut self, enabled: bool) {
+        if self.bytecode_enabled == enabled {
+            return;
+        }
+        self.bytecode_enabled = enabled;
+
+        // Rebuild compiled formula variants to match the new bytecode setting. This ensures tests
+        // (and callers) can force AST vs bytecode evaluation deterministically.
+        let mut updates: Vec<(CellKey, CompiledFormula)> = Vec::new();
+        for (sheet_id, sheet) in self.workbook.sheets.iter().enumerate() {
+            for (addr, cell) in &sheet.cells {
+                let Some(formula) = cell.formula.as_deref() else {
+                    continue;
+                };
+                let Some(compiled) = cell.compiled.as_ref() else {
+                    continue;
+                };
+
+                let key = CellKey {
+                    sheet: sheet_id,
+                    addr: *addr,
+                };
+                let ast = compiled.ast().clone();
+
+                if !enabled {
+                    updates.push((key, CompiledFormula::Ast(ast)));
+                    continue;
+                }
+
+                let origin = crate::CellAddr::new(addr.row, addr.col);
+                let parsed = match crate::parse_formula(
+                    formula,
+                    crate::ParseOptions {
+                        locale: crate::LocaleConfig::en_us(),
+                        reference_style: crate::ReferenceStyle::A1,
+                        normalize_relative_to: Some(origin),
+                    },
+                ) {
+                    Ok(parsed) => parsed,
+                    Err(_) => {
+                        updates.push((key, CompiledFormula::Ast(ast)));
+                        continue;
+                    }
+                };
+
+                let compiled_formula = match self.try_compile_bytecode(
+                    &parsed.expr,
+                    key,
+                    cell.volatile,
+                    cell.thread_safe,
+                ) {
+                    Some(program) => CompiledFormula::Bytecode(BytecodeFormula { ast, program }),
+                    None => CompiledFormula::Ast(ast),
+                };
+                updates.push((key, compiled_formula));
+            }
+        }
+
+        for (key, compiled) in updates {
+            if let Some(cell) = self
+                .workbook
+                .sheets
+                .get_mut(key.sheet)
+                .and_then(|sheet| sheet.cells.get_mut(&key.addr))
+            {
+                cell.compiled = Some(compiled);
+            }
+        }
+
+        self.mark_all_compiled_cells_dirty();
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
     }
 
     pub fn set_date_system(&mut self, system: ExcelDateSystem) {
@@ -1460,7 +1537,7 @@ impl Engine {
                                 row: k.addr.row as i32,
                                 col: k.addr.col as i32,
                             };
-                            let v = vm.eval_with_value_locale(&bc.program, &grid, base, value_locale);
+                            let v = vm.eval(&bc.program, &grid, base);
                             bytecode_value_to_engine(v)
                         }
                     };
@@ -1518,7 +1595,7 @@ impl Engine {
                                                 row: k.addr.row as i32,
                                                 col: k.addr.col as i32,
                                             };
-                                            let v = vm.eval_with_value_locale(&bc.program, &grid, base, value_locale);
+                                            let v = vm.eval(&bc.program, &grid, base);
                                             (*k, bytecode_value_to_engine(v))
                                         }
                                     }
@@ -1572,7 +1649,7 @@ impl Engine {
                             row: k.addr.row as i32,
                             col: k.addr.col as i32,
                         };
-                        let v = vm.eval_with_value_locale(&bc.program, &grid, base, value_locale);
+                        let v = vm.eval(&bc.program, &grid, base);
                         bytecode_value_to_engine(v)
                     }
                 };
@@ -1628,7 +1705,7 @@ impl Engine {
                             row: k.addr.row as i32,
                             col: k.addr.col as i32,
                         };
-                        let v = vm.eval_with_value_locale(&bc.program, &grid, base, value_locale);
+                        let v = vm.eval(&bc.program, &grid, base);
                         bytecode_value_to_engine(v)
                     }
                 };
@@ -2334,6 +2411,9 @@ impl Engine {
         volatile: bool,
         thread_safe: bool,
     ) -> Option<Arc<bytecode::Program>> {
+        if !self.bytecode_enabled {
+            return None;
+        }
         if volatile || !thread_safe {
             return None;
         }
@@ -4469,7 +4549,8 @@ fn bytecode_expr_is_eligible_inner(expr: &bytecode::Expr, allow_range: bool) -> 
             | bytecode::ast::Function::RoundDown
             | bytecode::ast::Function::Mod
             | bytecode::ast::Function::Sign
-            | bytecode::ast::Function::Concat => args
+            | bytecode::ast::Function::Concat
+            | bytecode::ast::Function::Not => args
                 .iter()
                 .all(|arg| bytecode_expr_is_eligible_inner(arg, false)),
             bytecode::ast::Function::Unknown(_) => false,

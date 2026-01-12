@@ -124,6 +124,7 @@ pub fn eval_ast(expr: &Expr, grid: &dyn Grid, base: CellCoord) -> Value {
                     | Function::Mod
                     | Function::Sign
                     | Function::Concat
+                    | Function::Not
                     | Function::Unknown(_) => false,
                 };
 
@@ -157,6 +158,38 @@ fn coerce_to_number(v: Value) -> Result<f64, ErrorKind> {
         Value::Text(s) => parse_value_from_text(&s),
         Value::Error(e) => Err(e),
         // Dynamic arrays / range-as-scalar: treat as a spill attempt (engine semantics).
+        Value::Array(_) | Value::Range(_) => Err(ErrorKind::Spill),
+    }
+}
+
+fn map_excel_error(error: ExcelError) -> ErrorKind {
+    match error {
+        ExcelError::Div0 => ErrorKind::Div0,
+        ExcelError::Value => ErrorKind::Value,
+        ExcelError::Num => ErrorKind::Num,
+    }
+}
+
+fn coerce_to_bool(v: Value) -> Result<bool, ErrorKind> {
+    match v {
+        Value::Bool(b) => Ok(b),
+        Value::Number(n) => Ok(n != 0.0),
+        Value::Empty => Ok(false),
+        Value::Text(s) => {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                return Ok(false);
+            }
+            if trimmed.eq_ignore_ascii_case("TRUE") {
+                return Ok(true);
+            }
+            if trimmed.eq_ignore_ascii_case("FALSE") {
+                return Ok(false);
+            }
+            let n = parse_number(trimmed, thread_number_locale()).map_err(map_excel_error)?;
+            Ok(n != 0.0)
+        }
+        Value::Error(e) => Err(e),
         Value::Array(_) | Value::Range(_) => Err(ErrorKind::Spill),
     }
 }
@@ -416,6 +449,7 @@ pub fn call_function(func: &Function, args: &[Value], grid: &dyn Grid, base: Cel
         Function::Mod => fn_mod(args),
         Function::Sign => fn_sign(args),
         Function::Concat => fn_concat(args),
+        Function::Not => fn_not(args),
         Function::Unknown(_) => Value::Error(ErrorKind::Name),
     }
 }
@@ -549,6 +583,16 @@ fn fn_sign(args: &[Value]) -> Value {
         Value::Number(-1.0)
     } else {
         Value::Number(0.0)
+    }
+}
+
+fn fn_not(args: &[Value]) -> Value {
+    if args.len() != 1 {
+        return Value::Error(ErrorKind::Value);
+    }
+    match coerce_to_bool(args[0].clone()) {
+        Ok(b) => Value::Bool(!b),
+        Err(e) => Value::Error(e),
     }
 }
 

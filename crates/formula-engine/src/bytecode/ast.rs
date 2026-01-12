@@ -39,6 +39,7 @@ pub enum Function {
     Mod,
     Sign,
     Concat,
+    Not,
     Unknown(Arc<str>),
 }
 
@@ -60,6 +61,7 @@ impl Function {
             "MOD" => Function::Mod,
             "SIGN" => Function::Sign,
             "CONCAT" => Function::Concat,
+            "NOT" => Function::Not,
             other => Function::Unknown(Arc::from(other)),
         }
     }
@@ -81,6 +83,7 @@ impl Function {
             Function::Mod => "MOD",
             Function::Sign => "SIGN",
             Function::Concat => "CONCAT",
+            Function::Not => "NOT",
             Function::Unknown(s) => s,
         }
     }
