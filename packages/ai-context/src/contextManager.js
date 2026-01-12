@@ -205,9 +205,9 @@ export class ContextManager {
 
     // Index once per build for now; in the app this should be cached per sheet.
     throwIfAborted(signal);
-    await awaitWithAbort(this.ragIndex.indexSheet(sheetForContext), signal);
+    await this.ragIndex.indexSheet(sheetForContext, { signal });
     throwIfAborted(signal);
-    const retrieved = await awaitWithAbort(this.ragIndex.search(params.query, 5), signal);
+    const retrieved = await this.ragIndex.search(params.query, 5, { signal });
     throwIfAborted(signal);
 
     const sampleRows = params.sampleRows ?? 20;

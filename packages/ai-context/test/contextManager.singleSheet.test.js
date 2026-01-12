@@ -75,3 +75,19 @@ test("buildContext: caps matrix size to avoid Excel-scale allocations", async ()
   assert.equal(out.sampledRows.length, 1);
   assert.equal(out.sampledRows[0].length, 200);
 });
+
+test("buildContext: respects AbortSignal", async () => {
+  const cm = new ContextManager({ tokenBudgetTokens: 1_000 });
+  const sheet = makeSheet([
+    ["Region", "Revenue"],
+    ["North", 1000],
+    ["South", 2000],
+  ]);
+
+  const abortController = new AbortController();
+  abortController.abort();
+
+  await assert.rejects(cm.buildContext({ sheet, query: "revenue", signal: abortController.signal }), {
+    name: "AbortError",
+  });
+});

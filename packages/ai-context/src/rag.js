@@ -1,6 +1,16 @@
 import { isCellEmpty, normalizeRange, parseA1Range, rangeToA1 } from "./a1.js";
 import { extractSheetSchema } from "./schema.js";
 
+function createAbortError(message = "Aborted") {
+  const err = new Error(message);
+  err.name = "AbortError";
+  return err;
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw createAbortError();
+}
+
 /**
  * @param {string} input
  */
@@ -48,12 +58,16 @@ export class HashEmbedder {
    * token-overlap similarity.
    *
    * @param {string} text
+   * @param {{ signal?: AbortSignal }} [options]
    * @returns {Promise<number[]>}
    */
-  async embed(text) {
+  async embed(text, options = {}) {
+    const signal = options.signal;
+    throwIfAborted(signal);
     const vec = Array.from({ length: this.dimension }, () => 0);
     const tokens = text.toLowerCase().match(/[a-z0-9_]+/g) ?? [];
     for (const token of tokens) {
+      throwIfAborted(signal);
       const h = hashString(token);
       vec[h % this.dimension] += 1;
     }
@@ -76,9 +90,12 @@ export class InMemoryVectorStore {
 
   /**
    * @param {{ id: string, embedding: number[], metadata: any, text: string }[]} items
+   * @param {{ signal?: AbortSignal }} [options]
    */
-  async add(items) {
+  async add(items, options = {}) {
+    const signal = options.signal;
     for (const item of items) {
+      throwIfAborted(signal);
       this.items.set(item.id, item);
     }
   }
@@ -86,13 +103,19 @@ export class InMemoryVectorStore {
   /**
    * @param {number[]} queryEmbedding
    * @param {number} topK
+   * @param {{ signal?: AbortSignal }} [options]
    */
-  async search(queryEmbedding, topK) {
-    const scored = Array.from(this.items.values()).map((item) => ({
-      item,
-      score: cosineSimilarity(queryEmbedding, item.embedding),
-    }));
+  async search(queryEmbedding, topK, options = {}) {
+    const signal = options.signal;
+    /** @type {{ item: any, score: number }[]} */
+    const scored = [];
+    for (const item of this.items.values()) {
+      throwIfAborted(signal);
+      scored.push({ item, score: cosineSimilarity(queryEmbedding, item.embedding) });
+    }
+    throwIfAborted(signal);
     scored.sort((a, b) => b.score - a.score);
+    throwIfAborted(signal);
     return scored.slice(0, topK);
   }
 
@@ -100,9 +123,12 @@ export class InMemoryVectorStore {
    * Remove items whose ids start with a given prefix. Useful for per-sheet
    * re-indexing when the number of chunks can shrink.
    * @param {string} prefix
+   * @param {{ signal?: AbortSignal }} [options]
    */
-  async deleteByPrefix(prefix) {
+  async deleteByPrefix(prefix, options = {}) {
+    const signal = options.signal;
     for (const id of this.items.keys()) {
+      throwIfAborted(signal);
       if (id.startsWith(prefix)) this.items.delete(id);
     }
   }
@@ -185,19 +211,25 @@ export class RagIndex {
 
   /**
    * @param {{ name: string, values: unknown[][] }} sheet
+   * @param {{ signal?: AbortSignal }} [options]
    */
-  async indexSheet(sheet) {
+  async indexSheet(sheet, options = {}) {
+    const signal = options.signal;
+    throwIfAborted(signal);
     // `chunkSheetByRegions()` ids are deterministic (sheet name + region index),
     // but the number of regions can change over time. Clear the previous region
     // chunks for this sheet so stale chunks don't linger in the store.
     if (typeof this.store.deleteByPrefix === "function") {
-      await this.store.deleteByPrefix(`${sheet.name}-region-`);
+      await this.store.deleteByPrefix(`${sheet.name}-region-`, { signal });
     }
 
+    throwIfAborted(signal);
     const chunks = chunkSheetByRegions(sheet);
     const items = [];
     for (const chunk of chunks) {
-      const embedding = await this.embedder.embed(chunk.text);
+      throwIfAborted(signal);
+      const embedding = await this.embedder.embed(chunk.text, { signal });
+      throwIfAborted(signal);
       items.push({
         id: chunk.id,
         embedding,
@@ -205,16 +237,22 @@ export class RagIndex {
         text: chunk.text,
       });
     }
-    await this.store.add(items);
+    throwIfAborted(signal);
+    await this.store.add(items, { signal });
   }
 
   /**
    * @param {string} query
    * @param {number} [topK]
+   * @param {{ signal?: AbortSignal }} [options]
    */
-  async search(query, topK = 5) {
-    const queryEmbedding = await this.embedder.embed(query);
-    const results = await this.store.search(queryEmbedding, topK);
+  async search(query, topK = 5, options = {}) {
+    const signal = options.signal;
+    throwIfAborted(signal);
+    const queryEmbedding = await this.embedder.embed(query, { signal });
+    throwIfAborted(signal);
+    const results = await this.store.search(queryEmbedding, topK, { signal });
+    throwIfAborted(signal);
     return results.map((r) => ({
       range: r.item.metadata.range,
       score: r.score,
