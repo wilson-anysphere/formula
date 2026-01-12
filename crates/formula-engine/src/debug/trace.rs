@@ -3081,4 +3081,12 @@ mod tests {
             "#getting_data"
         );
     }
+
+    #[test]
+    fn parse_spanned_formula_accepts_getting_data_error_literal() {
+        let formula = "=#GETTING_DATA";
+        let expr = parse_spanned_formula(formula).expect("parse should succeed");
+        assert_eq!(expr.span, Span::new(1, 14));
+        assert_eq!(expr.kind, SpannedExprKind::Error(ErrorKind::GettingData));
+    }
 }
