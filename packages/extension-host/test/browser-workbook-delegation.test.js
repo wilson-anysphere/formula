@@ -513,6 +513,103 @@ test("BrowserExtensionHost: workbook.saveAs delegates to spreadsheetApi and emit
   });
 });
 
+test("BrowserExtensionHost: workbook.saveAs restores workbook snapshot when spreadsheetApi throws", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  let saveAsCalls = 0;
+  /** @type {string | null} */
+  let saveAsPath = null;
+  let active = { name: "Initial", path: "/tmp/initial.xlsx" };
+  const sheets = [{ id: "sheet1", name: "Sheet1" }];
+  const activeSheet = sheets[0];
+
+  /** @type {any} */
+  let apiError;
+
+  /** @type {(value?: unknown) => void} */
+  let resolveDone;
+  const done = new Promise((resolve) => {
+    resolveDone = resolve;
+  });
+
+  const scenarios = [
+    {
+      onPostMessage(msg) {
+        if (msg?.type === "api_error" && msg.id === "req1") {
+          apiError = msg.error;
+          resolveDone();
+        }
+      },
+    },
+  ];
+
+  installFakeWorker(t, scenarios);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      listSheets() {
+        return sheets;
+      },
+      getActiveSheet() {
+        return activeSheet;
+      },
+      async getActiveWorkbook() {
+        return active;
+      },
+      async saveWorkbookAs(pathArg) {
+        saveAsCalls += 1;
+        saveAsPath = String(pathArg);
+        throw new Error("disk full");
+      },
+    },
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  // Seed the internal workbook snapshot so we can validate it gets restored when saveAs fails.
+  await host._getActiveWorkbook();
+
+  const extensionId = "test.workbook-saveas-throws";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "memory://workbook-saveas-throws/",
+    mainUrl: "memory://workbook-saveas-throws/main.mjs",
+    manifest: {
+      name: "workbook-saveas-throws",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: ["workbook.manage"],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension?.worker);
+  extension.active = true;
+
+  extension.worker.emitMessage({
+    type: "api_call",
+    id: "req1",
+    namespace: "workbook",
+    method: "saveAs",
+    args: ["/tmp/test.xlsx"],
+  });
+
+  await done;
+
+  assert.equal(saveAsCalls, 1);
+  assert.equal(saveAsPath, "/tmp/test.xlsx");
+  assert.equal(apiError?.message, "disk full");
+  assert.equal(host._workbook.path, "/tmp/initial.xlsx");
+  assert.equal(active.path, "/tmp/initial.xlsx");
+});
+
 test("BrowserExtensionHost: workbook.saveAs permission denial does not call spreadsheetApi or emit beforeSave", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
 
