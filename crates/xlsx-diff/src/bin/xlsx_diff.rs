@@ -5,7 +5,7 @@ use clap::Parser;
 use globset::Glob;
 
 #[derive(Parser)]
-#[command(about = "Diff two XLSX/XLSM workbooks at the OpenXML part level.")]
+#[command(about = "Diff two XLSX/XLSM/XLSB workbooks at the Open Packaging Convention part level.")]
 struct Args {
     /// Original workbook.
     original: PathBuf,
@@ -55,7 +55,7 @@ fn main() -> Result<()> {
     let actual = xlsx_diff::WorkbookArchive::open(&args.modified)?;
     let report = xlsx_diff::diff_archives_with_options(&expected, &actual, &options);
 
-    println!("XLSX diff report");
+    println!("Workbook diff report (OPC parts)");
     println!("  original: {}", args.original.display());
     println!("  modified: {}", args.modified.display());
     let mut parts: Vec<&str> = options.ignore_parts.iter().map(|s| s.as_str()).collect();

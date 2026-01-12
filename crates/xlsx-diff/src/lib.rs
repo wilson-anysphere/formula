@@ -1,4 +1,4 @@
-//! XLSX round-trip diff tooling.
+//! XLSX/XLSB round-trip diff tooling.
 //!
 //! This crate intentionally operates at the ZIP/Open Packaging Convention layer:
 //! it compares workbook "parts" (files within the archive) rather than the ZIP
