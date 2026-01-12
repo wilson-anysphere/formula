@@ -454,6 +454,58 @@ fn odd_coupon_price_and_yield_handle_zero_yield() {
     assert_close(recovered_last, 0.0, 1e-7);
 }
 #[test]
+fn oddfprice_invalid_date_text_returns_value_error() {
+    let mut sheet = TestSheet::new();
+    let formula = r#"=ODDFPRICE("not a date",DATE(2021,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.06,100,2,0)"#;
+    match sheet.eval(formula) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Error(ErrorKind::Value) => {}
+        other => panic!("expected #VALUE! for invalid date text in ODDFPRICE, got {other:?}"),
+    }
+}
+
+#[test]
+fn oddlprice_invalid_date_text_returns_value_error() {
+    let mut sheet = TestSheet::new();
+
+    let invalid_maturity = r#"=ODDLPRICE(DATE(2020,11,11),"not a date",DATE(2020,10,15),0.0785,0.0625,100,2,0)"#;
+    match sheet.eval(invalid_maturity) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Error(ErrorKind::Value) => {}
+        other => panic!(
+            "expected #VALUE! for invalid maturity date text in ODDLPRICE, got {other:?}"
+        ),
+    }
+
+    let invalid_settlement = r#"=ODDLPRICE("not a date",DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,0)"#;
+    match sheet.eval(invalid_settlement) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Error(ErrorKind::Value) => {}
+        other => panic!(
+            "expected #VALUE! for invalid settlement date text in ODDLPRICE, got {other:?}"
+        ),
+    }
+}
+
+#[test]
+fn oddfprice_accepts_locale_stable_date_text() {
+    let mut sheet = TestSheet::new();
+
+    let baseline = "=ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,100,1,0)";
+    let baseline_value = match eval_number_or_skip(&mut sheet, baseline) {
+        Some(v) => v,
+        None => return,
+    };
+
+    // Use ISO-8601-ish year-month-day, which should be locale-stable.
+    let text_settlement = r#"=ODDFPRICE("2020-03-01",DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,100,1,0)"#;
+    let text_value = eval_number_or_skip(&mut sheet, text_settlement)
+        .expect("ODDFPRICE should accept settlement supplied as ISO date text");
+
+    assert_close(text_value, baseline_value, 1e-9);
+}
+
+#[test]
 fn oddfprice_zero_coupon_rate_reduces_to_discounted_redemption() {
     let system = ExcelDateSystem::EXCEL_1900;
 
@@ -2340,6 +2392,229 @@ fn oddfprice_rejects_yield_at_or_below_negative_frequency() {
         matches!(result, Err(ExcelError::Num)),
         "expected #NUM! for yld < -frequency, got {result:?}"
     );
+}
+
+#[test]
+fn odd_coupon_internal_api_rejects_non_finite_numeric_inputs() {
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    // ODDF* setup.
+    let issue = ymd_to_serial(ExcelDate::new(2019, 10, 1), system).unwrap();
+    let settlement = ymd_to_serial(ExcelDate::new(2020, 1, 1), system).unwrap();
+    let first_coupon = ymd_to_serial(ExcelDate::new(2020, 7, 1), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2021, 7, 1), system).unwrap();
+
+    // ODDL* setup.
+    let last_interest = ymd_to_serial(ExcelDate::new(2021, 1, 1), system).unwrap();
+    let settlement2 = ymd_to_serial(ExcelDate::new(2021, 2, 1), system).unwrap();
+    let maturity2 = ymd_to_serial(ExcelDate::new(2021, 5, 1), system).unwrap();
+
+    let rate = 0.05;
+    let yld = 0.06;
+    let pr = 98.0;
+    let redemption = 100.0;
+    let frequency = 2;
+    let basis = 0;
+
+    for bad in [f64::NAN, f64::INFINITY] {
+        let result = oddfprice(
+            settlement,
+            maturity,
+            issue,
+            first_coupon,
+            bad,
+            yld,
+            redemption,
+            frequency,
+            basis,
+            system,
+        );
+        assert!(
+            matches!(result, Err(ExcelError::Num)),
+            "expected #NUM! for ODDFPRICE non-finite rate={bad}, got {result:?}"
+        );
+
+        let result = oddfprice(
+            settlement,
+            maturity,
+            issue,
+            first_coupon,
+            rate,
+            bad,
+            redemption,
+            frequency,
+            basis,
+            system,
+        );
+        assert!(
+            matches!(result, Err(ExcelError::Num)),
+            "expected #NUM! for ODDFPRICE non-finite yld={bad}, got {result:?}"
+        );
+
+        let result = oddfprice(
+            settlement,
+            maturity,
+            issue,
+            first_coupon,
+            rate,
+            yld,
+            bad,
+            frequency,
+            basis,
+            system,
+        );
+        assert!(
+            matches!(result, Err(ExcelError::Num)),
+            "expected #NUM! for ODDFPRICE non-finite redemption={bad}, got {result:?}"
+        );
+
+        let result = oddfyield(
+            settlement,
+            maturity,
+            issue,
+            first_coupon,
+            bad,
+            pr,
+            redemption,
+            frequency,
+            basis,
+            system,
+        );
+        assert!(
+            matches!(result, Err(ExcelError::Num)),
+            "expected #NUM! for ODDFYIELD non-finite rate={bad}, got {result:?}"
+        );
+
+        let result = oddfyield(
+            settlement,
+            maturity,
+            issue,
+            first_coupon,
+            rate,
+            bad,
+            redemption,
+            frequency,
+            basis,
+            system,
+        );
+        assert!(
+            matches!(result, Err(ExcelError::Num)),
+            "expected #NUM! for ODDFYIELD non-finite pr={bad}, got {result:?}"
+        );
+
+        let result = oddfyield(
+            settlement,
+            maturity,
+            issue,
+            first_coupon,
+            rate,
+            pr,
+            bad,
+            frequency,
+            basis,
+            system,
+        );
+        assert!(
+            matches!(result, Err(ExcelError::Num)),
+            "expected #NUM! for ODDFYIELD non-finite redemption={bad}, got {result:?}"
+        );
+
+        let result = oddlprice(
+            settlement2,
+            maturity2,
+            last_interest,
+            bad,
+            yld,
+            redemption,
+            frequency,
+            basis,
+            system,
+        );
+        assert!(
+            matches!(result, Err(ExcelError::Num)),
+            "expected #NUM! for ODDLPRICE non-finite rate={bad}, got {result:?}"
+        );
+
+        let result = oddlprice(
+            settlement2,
+            maturity2,
+            last_interest,
+            rate,
+            bad,
+            redemption,
+            frequency,
+            basis,
+            system,
+        );
+        assert!(
+            matches!(result, Err(ExcelError::Num)),
+            "expected #NUM! for ODDLPRICE non-finite yld={bad}, got {result:?}"
+        );
+
+        let result = oddlprice(
+            settlement2,
+            maturity2,
+            last_interest,
+            rate,
+            yld,
+            bad,
+            frequency,
+            basis,
+            system,
+        );
+        assert!(
+            matches!(result, Err(ExcelError::Num)),
+            "expected #NUM! for ODDLPRICE non-finite redemption={bad}, got {result:?}"
+        );
+
+        let result = oddlyield(
+            settlement2,
+            maturity2,
+            last_interest,
+            bad,
+            pr,
+            redemption,
+            frequency,
+            basis,
+            system,
+        );
+        assert!(
+            matches!(result, Err(ExcelError::Num)),
+            "expected #NUM! for ODDLYIELD non-finite rate={bad}, got {result:?}"
+        );
+
+        let result = oddlyield(
+            settlement2,
+            maturity2,
+            last_interest,
+            rate,
+            bad,
+            redemption,
+            frequency,
+            basis,
+            system,
+        );
+        assert!(
+            matches!(result, Err(ExcelError::Num)),
+            "expected #NUM! for ODDLYIELD non-finite pr={bad}, got {result:?}"
+        );
+
+        let result = oddlyield(
+            settlement2,
+            maturity2,
+            last_interest,
+            rate,
+            pr,
+            bad,
+            frequency,
+            basis,
+            system,
+        );
+        assert!(
+            matches!(result, Err(ExcelError::Num)),
+            "expected #NUM! for ODDLYIELD non-finite redemption={bad}, got {result:?}"
+        );
+    }
 }
 
 #[test]
