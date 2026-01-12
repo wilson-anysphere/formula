@@ -6,7 +6,9 @@ and **bind** those signatures against the MS-OVBA “VBA project digest”.
 In this repo, `crates/formula-vba` implements best-effort:
 
 - signature stream parsing + PKCS#7/CMS internal verification (`verify_vba_digital_signature`)
-- extraction of the signed digest (`SpcIndirectDataContent` → `DigestInfo`)
+- extraction of the signed digest:
+  - classic Authenticode `SpcIndirectDataContent` → `DigestInfo.digest`
+  - newer MS-OSHARED `SpcIndirectDataContentV2` → `SigDataV1Serialized.sourceHash`
 - MS-OVBA §2.4.2 “Contents Hash” binding verification (signature is bound to the normalized VBA
   project content: `ContentNormalizedData` + optional `FormsNormalizedData`), exposed via
   `VbaDigitalSignature::binding`
@@ -136,10 +138,13 @@ High-level extraction steps:
      contained bytes as DER.
    - If the CMS *is* detached and the stream is `content || pkcs7`, the `content` prefix plays the
      same role as `eContent`.
-4. **Parse `SpcIndirectDataContent` and read its `messageDigest: DigestInfo`**
-   - `DigestInfo` includes:
-     - a hash algorithm identifier (OID)
-     - the digest bytes
+4. **Parse the encapsulated signed-content structure**
+   - Classic Authenticode uses `SpcIndirectDataContent` and stores the digest in
+     `messageDigest: DigestInfo`:
+     - `DigestInfo.digestAlgorithm.algorithm` (OID; informational for VBA binding)
+     - `DigestInfo.digest` (digest bytes)
+   - Newer Office VBA signatures can use `SpcIndirectDataContentV2`, which stores the digest in
+     `SigDataV1Serialized.sourceHash` (MS-OSHARED).
 
 That `(hash_oid, digest_bytes)` pair is the “signed digest” we extract from the signature. For VBA
 project binding, we compare the **digest bytes** against a freshly computed MD5 Content Hash / Agile

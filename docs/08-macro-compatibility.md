@@ -1079,9 +1079,10 @@ How to obtain the signed digest for MS-OVBA signature binding:
   - In the detached `content || pkcs7` variant, the detached `content` prefix plays the same role
     as `eContent`.
 - Decode the `SpcIndirectDataContent` / `SpcIndirectDataContentV2` structure and extract its
-  `messageDigest: DigestInfo`:
-  - digest algorithm (OID; informational for VBA signatures, often SHA-256 in the wild)
-  - digest bytes (expected to be 16-byte MD5 for VBA per MS-OSHARED §4.3)
+  VBA project digest bytes:
+  - `SpcIndirectDataContent`: `messageDigest: DigestInfo.digest`
+  - `SpcIndirectDataContentV2`: `SigDataV1Serialized.sourceHash`
+  - digest bytes are expected to be 16-byte MD5 for VBA per MS-OSHARED §4.3
 
 Binding (best-effort; see MS-OVBA):
 
