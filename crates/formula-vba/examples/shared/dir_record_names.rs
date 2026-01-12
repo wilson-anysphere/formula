@@ -60,6 +60,9 @@ pub fn record_name(id: u16) -> Option<&'static str> {
         0x001A => "MODULESTREAMNAME",
         0x0032 => "MODULESTREAMNAMEUNICODE",
 
+        // Some producers use 0x001B as an alternate MODULEDOCSTRING record id (see
+        // `contents_hash::parse_moduledocstring_record`).
+        0x001B => "MODULEDOCSTRING (alt id 0x001B)",
         0x001C => "MODULEDOCSTRING",
         0x0048 => "MODULEDOCSTRINGUNICODE",
 

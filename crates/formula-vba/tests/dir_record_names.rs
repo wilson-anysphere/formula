@@ -52,3 +52,12 @@ fn unicode_dir_record_ids_match_ms_ovba_table() {
         Some("PROJECTCOMPATVERSION")
     );
 }
+
+#[test]
+fn alternate_dir_record_ids_are_named() {
+    // Some producers use an alternate record id for MODULEDOCSTRING.
+    assert_eq!(
+        dir_record_names::record_name(0x001B),
+        Some("MODULEDOCSTRING (alt id 0x001B)")
+    );
+}
