@@ -20,6 +20,8 @@ fn months_per_period(frequency: i32) -> Option<i32> {
     }
 }
 
+const MAX_COUPON_STEPS: usize = 50_000;
+
 /// ACCRINTM(issue, settlement, rate, par, [basis])
 ///
 /// Accrued interest for a security that pays interest at maturity.
@@ -91,11 +93,27 @@ pub fn accrint(
         let pcd = date_time::edate(first_interest, -months, system)?;
         (pcd, first_interest)
     } else {
+        // IMPORTANT: EDATE month-stepping is not invertible due to end-of-month clamping.
+        // Compute each coupon date as an offset from `first_interest` to avoid day-of-month drift
+        // (matching how Excel's COUP* functions behave when anchored at maturity).
         let mut pcd = first_interest;
         let mut ncd = date_time::edate(first_interest, months, system)?;
-        while settlement >= ncd {
+        let mut k: i32 = 0;
+
+        for _ in 0..MAX_COUPON_STEPS {
+            if settlement < ncd {
+                break;
+            }
+            k = k.checked_add(1).ok_or(ExcelError::Num)?;
             pcd = ncd;
-            ncd = date_time::edate(ncd, months, system)?;
+
+            let next_k = k.checked_add(1).ok_or(ExcelError::Num)?;
+            let months_fwd = next_k.checked_mul(months).ok_or(ExcelError::Num)?;
+            ncd = date_time::edate(first_interest, months_fwd, system)?;
+        }
+
+        if settlement >= ncd {
+            return Err(ExcelError::Num);
         }
         (pcd, ncd)
     };

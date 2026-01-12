@@ -111,6 +111,29 @@ fn accrint_allows_zero_rate() {
 }
 
 #[test]
+fn accrint_coupon_schedule_is_anchored_to_first_interest_to_avoid_edate_drift() {
+    let mut sheet = TestSheet::new();
+
+    // When stepping coupon dates forward from an end-of-month date, naive iterative EDATE stepping
+    // can "drift" the day-of-month (e.g. Jan 31 + 3 months = Apr 30, then +3 months = Jul 30).
+    //
+    // Excel's COUP* schedule functions avoid this by anchoring each coupon date as an offset from the
+    // anchor date (maturity). ACCRINT should do the same when anchored at first_interest.
+    //
+    // first_interest=2020-01-31, frequency=4 => months=3.
+    // Coupon dates anchored at first_interest are: 2020-01-31, 2020-04-30, 2020-07-31, 2020-10-31, ...
+    //
+    // Settlement 2020-08-15 is in the period 2020-07-31..2020-10-31.
+    // Coupon payment C = par * rate / f = 1000 * 0.12 / 4 = 30.
+    // Basis 1 => A = 15 days, E = 92 days.
+    let expected = 30.0 * (15.0 / 92.0);
+    assert_number(
+        &sheet.eval("=ACCRINT(DATE(2019,12,15),DATE(2020,1,31),DATE(2020,8,15),0.12,1000,4,1)"),
+        expected,
+    );
+}
+
+#[test]
 fn accrint_calc_method_affects_only_stub_period_before_first_interest() {
     let mut sheet = TestSheet::new();
 
