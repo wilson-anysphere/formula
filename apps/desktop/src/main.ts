@@ -1996,12 +1996,17 @@ window.addEventListener(
     e.preventDefault();
     e.stopPropagation();
 
-    const delta = e.key === "PageUp" ? -1 : 1;
-    const next = ordered[(idx + delta + ordered.length) % ordered.length];
-    if (!next || next.id === current) return;
-
-    app.activateSheet(next.id);
-    restoreFocusAfterSheetNavigation();
+    const commandId = e.key === "PageUp" ? "workbook.previousSheet" : "workbook.nextSheet";
+    // Prefer the command registry so the shortcut shares the same behavior as other
+    // keybinding surfaces (focus restore hook, analytics, etc). Fall back to a direct
+    // sheet switch if commands haven't been registered yet (early startup).
+    void commandRegistry.executeCommand(commandId).catch(() => {
+      const delta = e.key === "PageUp" ? -1 : 1;
+      const next = ordered[(idx + delta + ordered.length) % ordered.length];
+      if (!next || next.id === current) return;
+      app.activateSheet(next.id);
+      restoreFocusAfterSheetNavigation();
+    });
   },
   { capture: true },
 );
