@@ -184,8 +184,9 @@ impl XlsxPackage {
         // Optional: richValue*.xml relationship indices (rich value index -> relationship slot).
         //
         // Excel can split rich values across multiple parts (`richValue.xml`, `richValue1.xml`, ...).
-        // Concatenate them in numeric-suffix order so that the resulting vector index matches the
-        // global rich value index.
+        // Some producers use the pluralized `richValues*.xml` naming. `rich_value_part_suffix_index`
+        // accepts both naming patterns; concatenate them in numeric-suffix order so that the
+        // resulting vector index matches the global rich value index.
         let rich_value_rel_indices: Vec<Option<u32>> = {
             let mut rich_value_parts: Vec<(u32, String)> = self
                 .part_names()
@@ -459,7 +460,14 @@ fn rich_value_part_suffix_index(part_path: &str) -> Option<u32> {
     }
 
     let stem = &file_name_lower[..file_name_lower.len() - ".xml".len()];
-    let suffix = stem.strip_prefix("richvalue")?;
+    // Check the plural prefix first: `richvalues` starts with `richvalue`.
+    let suffix = if let Some(rest) = stem.strip_prefix("richvalues") {
+        rest
+    } else if let Some(rest) = stem.strip_prefix("richvalue") {
+        rest
+    } else {
+        return None;
+    };
     if suffix.is_empty() {
         return Some(0);
     }

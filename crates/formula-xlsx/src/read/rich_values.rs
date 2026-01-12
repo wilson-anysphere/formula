@@ -190,7 +190,10 @@ fn rich_value_part_sort_key(part_name: &str) -> Option<(u8, u32, &str)> {
     }
     let stem_lower = &file_name_lower[..file_name_lower.len() - ".xml".len()];
 
-    let (family, suffix) = if let Some(rest) = stem_lower.strip_prefix("richvalue") {
+    // Check the plural prefix first: `richvalues` starts with `richvalue`.
+    let (family, suffix) = if let Some(rest) = stem_lower.strip_prefix("richvalues") {
+        (0u8, rest)
+    } else if let Some(rest) = stem_lower.strip_prefix("richvalue") {
         (0u8, rest)
     } else if let Some(rest) = stem_lower.strip_prefix("rdrichvalue") {
         (1u8, rest)

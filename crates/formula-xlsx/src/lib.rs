@@ -786,19 +786,32 @@ impl XlsxDocument {
         }
 
         fn rich_value_part_suffix(part_name: &str) -> Option<u32> {
-            const PREFIX: &str = "xl/richData/richValue";
-            const SUFFIX: &str = ".xml";
-            if !part_name.starts_with(PREFIX) || !part_name.ends_with(SUFFIX) {
+            if !part_name.starts_with("xl/richData/") {
                 return None;
             }
-            let mid = &part_name[PREFIX.len()..part_name.len() - SUFFIX.len()];
-            if mid.is_empty() {
+            let file_name = part_name.rsplit('/').next()?;
+            let file_name_lower = file_name.to_ascii_lowercase();
+            if !file_name_lower.ends_with(".xml") {
+                return None;
+            }
+
+            let stem_lower = &file_name_lower[..file_name_lower.len() - ".xml".len()];
+            // Check the plural prefix first: `richvalues` starts with `richvalue`.
+            let suffix = if let Some(rest) = stem_lower.strip_prefix("richvalues") {
+                rest
+            } else if let Some(rest) = stem_lower.strip_prefix("richvalue") {
+                rest
+            } else {
+                return None;
+            };
+
+            if suffix.is_empty() {
                 return Some(0);
             }
-            if !mid.chars().all(|c| c.is_ascii_digit()) {
+            if !suffix.chars().all(|c| c.is_ascii_digit()) {
                 return None;
             }
-            mid.parse::<u32>().ok()
+            suffix.parse::<u32>().ok()
         }
 
         fn parse_rv_explicit_index(rv: roxmltree::Node<'_, '_>) -> Option<u32> {

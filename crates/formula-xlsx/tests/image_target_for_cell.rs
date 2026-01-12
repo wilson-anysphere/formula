@@ -5,7 +5,7 @@ use formula_xlsx::load_from_bytes;
 use zip::write::FileOptions;
 use zip::ZipWriter;
 
-fn build_rich_cell_image_fixture() -> Vec<u8> {
+fn build_rich_cell_image_fixture_with_rich_value_part_base(rich_value_part_base: &str) -> Vec<u8> {
     let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
@@ -122,13 +122,25 @@ fn build_rich_cell_image_fixture() -> Vec<u8> {
     zip.start_file("xl/metadata.xml", options).unwrap();
     zip.write_all(metadata_xml.as_bytes()).unwrap();
 
-    zip.start_file("xl/richData/richValue.xml", options).unwrap();
+    zip.start_file(
+        format!("xl/richData/{rich_value_part_base}.xml"),
+        options,
+    )
+    .unwrap();
     zip.write_all(rich_value_xml.as_bytes()).unwrap();
 
-    zip.start_file("xl/richData/richValue2.xml", options).unwrap();
+    zip.start_file(
+        format!("xl/richData/{rich_value_part_base}2.xml"),
+        options,
+    )
+    .unwrap();
     zip.write_all(rich_value2_xml.as_bytes()).unwrap();
 
-    zip.start_file("xl/richData/richValue10.xml", options).unwrap();
+    zip.start_file(
+        format!("xl/richData/{rich_value_part_base}10.xml"),
+        options,
+    )
+    .unwrap();
     zip.write_all(rich_value10_xml.as_bytes()).unwrap();
 
     zip.start_file("xl/richData/richValueRel2.xml", options).unwrap();
@@ -153,9 +165,40 @@ fn build_rich_cell_image_fixture() -> Vec<u8> {
     zip.finish().unwrap().into_inner()
 }
 
+fn build_rich_cell_image_fixture() -> Vec<u8> {
+    build_rich_cell_image_fixture_with_rich_value_part_base("richValue")
+}
+
+fn build_rich_cell_image_fixture_plural_richvalues() -> Vec<u8> {
+    build_rich_cell_image_fixture_with_rich_value_part_base("richValues")
+}
+
 #[test]
 fn resolves_image_target_for_rich_value_cell() -> Result<(), Box<dyn std::error::Error>> {
     let bytes = build_rich_cell_image_fixture();
+    let doc = load_from_bytes(&bytes)?;
+    let sheet_id = doc.workbook.sheets[0].id;
+
+    assert_eq!(
+        doc.image_target_for_cell(sheet_id, CellRef::from_a1("A1")?)?,
+        Some("xl/media/image2.png".to_string())
+    );
+    assert_eq!(
+        doc.image_target_for_cell(sheet_id, CellRef::from_a1("B1")?)?,
+        Some("xl/media/image2.png".to_string())
+    );
+    assert_eq!(
+        doc.image_target_for_cell(sheet_id, CellRef::from_a1("C1")?)?,
+        None
+    );
+
+    Ok(())
+}
+
+#[test]
+fn resolves_image_target_for_rich_value_cell_with_plural_richvalues_parts(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = build_rich_cell_image_fixture_plural_richvalues();
     let doc = load_from_bytes(&bytes)?;
     let sheet_id = doc.workbook.sheets[0].id;
 

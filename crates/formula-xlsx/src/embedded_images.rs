@@ -255,8 +255,13 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
     if metadata_part.is_none() && pkg.part("xl/metadata.xml").is_some() {
         metadata_part = Some("xl/metadata.xml".to_string());
     }
-    if rich_value_part.is_none() && pkg.part("xl/richData/richValue.xml").is_some() {
-        rich_value_part = Some("xl/richData/richValue.xml".to_string());
+    if rich_value_part.is_none() {
+        if pkg.part("xl/richData/richValue.xml").is_some() {
+            rich_value_part = Some("xl/richData/richValue.xml".to_string());
+        } else if pkg.part("xl/richData/richValues.xml").is_some() {
+            // Some producers use the pluralized `richValues*.xml` naming pattern.
+            rich_value_part = Some("xl/richData/richValues.xml".to_string());
+        }
     }
     if rdrichvalue_part.is_none() && pkg.part("xl/richData/rdrichvalue.xml").is_some() {
         rdrichvalue_part = Some("xl/richData/rdrichvalue.xml".to_string());
@@ -886,7 +891,14 @@ fn rich_value_part_suffix_index(part_path: &str) -> Option<u32> {
     }
 
     let stem = &file_name_lower[..file_name_lower.len() - ".xml".len()];
-    let suffix = stem.strip_prefix("richvalue")?;
+    // Check the plural prefix first: `richvalues` starts with `richvalue`.
+    let suffix = if let Some(rest) = stem.strip_prefix("richvalues") {
+        rest
+    } else if let Some(rest) = stem.strip_prefix("richvalue") {
+        rest
+    } else {
+        return None;
+    };
     if suffix.is_empty() {
         return Some(0);
     }
