@@ -1,8 +1,8 @@
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 
+use crate::coercion::datetime::parse_value_text;
 use crate::coercion::ValueLocaleConfig;
 use crate::date::ExcelDateSystem;
-use crate::functions::date_time::{datevalue, timevalue};
 use crate::functions::wildcard::WildcardPattern;
 use crate::simd::{CmpOp, NumericCriteria};
 use crate::value::{parse_number, NumberLocale};
@@ -51,6 +51,7 @@ impl TextCriteria {
 pub struct Criteria {
     op: CriteriaOp,
     rhs: CriteriaRhs,
+    number_locale: NumberLocale,
 }
 
 impl Criteria {
@@ -61,25 +62,57 @@ impl Criteria {
 
     /// Parse an Excel criteria value, resolving date/time strings using the supplied workbook
     /// date system.
-    pub fn parse_with_date_system(input: &Value, system: ExcelDateSystem) -> Result<Self, ErrorKind> {
+    pub fn parse_with_date_system(
+        input: &Value,
+        system: ExcelDateSystem,
+    ) -> Result<Self, ErrorKind> {
+        Self::parse_with_date_system_and_locale(
+            input,
+            system,
+            ValueLocaleConfig::en_us(),
+            Utc::now(),
+        )
+    }
+
+    /// Parse an Excel criteria value, resolving numeric/date/time strings using the provided value
+    /// locale (decimal/thousands separators, date order) and workbook date system.
+    ///
+    /// Excel interprets criteria strings using the workbook locale. For example, `">1,5"` in the
+    /// `de-DE` locale should be treated as `>1.5`.
+    pub fn parse_with_date_system_and_locale(
+        input: &Value,
+        system: ExcelDateSystem,
+        value_locale: ValueLocaleConfig,
+        now_utc: DateTime<Utc>,
+    ) -> Result<Self, ErrorKind> {
+        let separators = value_locale.separators;
+        let number_locale =
+            NumberLocale::new(separators.decimal_sep, Some(separators.thousands_sep));
+
         match input {
             Value::Number(n) => Ok(Criteria {
                 op: CriteriaOp::Eq,
                 rhs: CriteriaRhs::Number(*n),
+                number_locale,
             }),
             Value::Bool(b) => Ok(Criteria {
                 op: CriteriaOp::Eq,
                 rhs: CriteriaRhs::Bool(*b),
+                number_locale,
             }),
             Value::Error(e) => Ok(Criteria {
                 op: CriteriaOp::Eq,
                 rhs: CriteriaRhs::Error(*e),
+                number_locale,
             }),
             Value::Blank => Ok(Criteria {
                 op: CriteriaOp::Eq,
                 rhs: CriteriaRhs::Blank,
+                number_locale,
             }),
-            Value::Text(s) => parse_criteria_string(s, system),
+            Value::Text(s) => {
+                parse_criteria_string(s, system, value_locale, now_utc, number_locale)
+            }
             Value::Reference(_)
             | Value::ReferenceUnion(_)
             | Value::Array(_)
@@ -124,8 +157,15 @@ impl Criteria {
                 _ => false,
             },
             CriteriaRhs::Error(_) => matches_error_criteria(&self.op, &self.rhs, value),
-            CriteriaRhs::Bool(b) => matches_numeric_criteria(self.op, if *b { 1.0 } else { 0.0 }, value),
-            CriteriaRhs::Number(n) => matches_numeric_criteria(self.op, *n, value),
+            CriteriaRhs::Bool(b) => matches_numeric_criteria(
+                self.op,
+                if *b { 1.0 } else { 0.0 },
+                value,
+                self.number_locale,
+            ),
+            CriteriaRhs::Number(n) => {
+                matches_numeric_criteria(self.op, *n, value, self.number_locale)
+            }
             CriteriaRhs::Text(pattern) => matches_text_criteria(self.op, pattern, value),
         }
     }
@@ -149,8 +189,8 @@ fn matches_error_criteria(op: &CriteriaOp, rhs: &CriteriaRhs, value: &Value) -> 
     }
 }
 
-fn matches_numeric_criteria(op: CriteriaOp, rhs: f64, value: &Value) -> bool {
-    let Some(value_num) = coerce_to_number(value) else {
+fn matches_numeric_criteria(op: CriteriaOp, rhs: f64, value: &Value, locale: NumberLocale) -> bool {
+    let Some(value_num) = coerce_to_number(value, locale) else {
         return false;
     };
 
@@ -193,7 +233,13 @@ fn matches_text_criteria(op: CriteriaOp, pattern: &TextCriteria, value: &Value) 
     }
 }
 
-fn parse_criteria_string(raw: &str, system: ExcelDateSystem) -> Result<Criteria, ErrorKind> {
+fn parse_criteria_string(
+    raw: &str,
+    system: ExcelDateSystem,
+    value_locale: ValueLocaleConfig,
+    now_utc: DateTime<Utc>,
+    number_locale: NumberLocale,
+) -> Result<Criteria, ErrorKind> {
     let (op, rhs_str) = split_op(raw);
     let rhs_trimmed = rhs_str.trim();
 
@@ -203,6 +249,7 @@ fn parse_criteria_string(raw: &str, system: ExcelDateSystem) -> Result<Criteria,
             CriteriaOp::Eq | CriteriaOp::Ne => Ok(Criteria {
                 op,
                 rhs: CriteriaRhs::Blank,
+                number_locale,
             }),
             _ => Err(ErrorKind::Value),
         };
@@ -212,6 +259,7 @@ fn parse_criteria_string(raw: &str, system: ExcelDateSystem) -> Result<Criteria,
         return Ok(Criteria {
             op,
             rhs: CriteriaRhs::Error(err),
+            number_locale,
         });
     }
 
@@ -219,34 +267,29 @@ fn parse_criteria_string(raw: &str, system: ExcelDateSystem) -> Result<Criteria,
         return Ok(Criteria {
             op,
             rhs: CriteriaRhs::Bool(true),
+            number_locale,
         });
     }
     if rhs_trimmed.eq_ignore_ascii_case("FALSE") {
         return Ok(Criteria {
             op,
             rhs: CriteriaRhs::Bool(false),
+            number_locale,
         });
     }
 
-    if !rhs_trimmed.is_empty() {
-        if let Ok(num) = parse_number(rhs_str, NumberLocale::en_us()) {
-            return Ok(Criteria {
-                op,
-                rhs: CriteriaRhs::Number(num),
-            });
-        }
-    }
-
-    if let Some(serial) = parse_date_time_criteria(rhs_str, system) {
+    if let Ok(serial) = parse_value_text(rhs_str, value_locale, now_utc, system) {
         return Ok(Criteria {
             op,
             rhs: CriteriaRhs::Number(serial),
+            number_locale,
         });
     }
 
     Ok(Criteria {
         op,
         rhs: CriteriaRhs::Text(TextCriteria::new(rhs_str)),
+        number_locale,
     })
 }
 
@@ -275,13 +318,13 @@ fn is_blank_value(value: &Value) -> bool {
     }
 }
 
-fn coerce_to_number(value: &Value) -> Option<f64> {
+fn coerce_to_number(value: &Value, locale: NumberLocale) -> Option<f64> {
     match value {
         Value::Number(n) => Some(*n),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
         Value::Blank => Some(0.0),
-        Value::Text(s) => parse_number(s, NumberLocale::en_us()).ok(),
-        Value::Array(arr) => coerce_to_number(&arr.top_left()),
+        Value::Text(s) => parse_number(s, locale).ok(),
+        Value::Array(arr) => coerce_to_number(&arr.top_left(), locale),
         Value::Error(_)
         | Value::Reference(_)
         | Value::ReferenceUnion(_)
@@ -294,7 +337,11 @@ fn coerce_to_text(value: &Value) -> Option<String> {
     match value {
         Value::Blank => None,
         Value::Number(_) | Value::Text(_) | Value::Bool(_) => value.coerce_to_string().ok(),
-        Value::Error(_) | Value::Reference(_) | Value::ReferenceUnion(_) | Value::Lambda(_) | Value::Spill { .. } => None,
+        Value::Error(_)
+        | Value::Reference(_)
+        | Value::ReferenceUnion(_)
+        | Value::Lambda(_)
+        | Value::Spill { .. } => None,
         Value::Array(arr) => coerce_to_text(&arr.top_left()),
     }
 }
@@ -312,19 +359,6 @@ fn parse_error_kind(raw: &str) -> Option<ErrorKind> {
         "#SPILL!" => Some(ErrorKind::Spill),
         "#CALC!" => Some(ErrorKind::Calc),
         _ => None,
-    }
-}
-
-fn parse_date_time_criteria(raw: &str, system: ExcelDateSystem) -> Option<f64> {
-    let cfg = ValueLocaleConfig::en_us();
-    let now_utc = Utc::now();
-    let date = datevalue(raw, cfg, now_utc, system).ok().map(|d| d as f64);
-    let time = timevalue(raw, cfg).ok();
-    match (date, time) {
-        (Some(d), Some(t)) => Some(d + t),
-        (Some(d), None) => Some(d),
-        (None, Some(t)) => Some(t),
-        (None, None) => None,
     }
 }
 

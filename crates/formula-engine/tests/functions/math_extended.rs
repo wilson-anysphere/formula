@@ -1,4 +1,5 @@
 use formula_engine::date::ExcelDateSystem;
+use formula_engine::locale::ValueLocaleConfig;
 use formula_engine::{ErrorKind, Value};
 
 use super::harness::{assert_number, TestSheet};
@@ -185,6 +186,22 @@ fn criteria_aggregates_respect_workbook_date_system() {
 }
 
 #[test]
+fn criteria_aggregates_respect_value_locale_for_numeric_and_date_criteria() {
+    let mut sheet = TestSheet::new();
+    sheet.set_value_locale(ValueLocaleConfig::de_de());
+
+    sheet.set("A1", 1.0);
+    sheet.set("A2", 1.5);
+    sheet.set("A3", 2.0);
+    assert_number(&sheet.eval("=SUMIF(A1:A3,\">1,5\")"), 2.0);
+
+    sheet.set_formula("B1", "=DATE(2020,2,1)");
+    sheet.set_formula("B2", "=DATE(2020,1,2)");
+    sheet.recalculate();
+    assert_number(&sheet.eval("=COUNTIF(B1:B2,\"1.2.2020\")"), 1.0);
+}
+
+#[test]
 fn subtotal_and_aggregate_cover_common_subtypes() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", 1.0);
@@ -203,5 +220,8 @@ fn subtotal_and_aggregate_cover_common_subtypes() {
     sheet.set("E2", Value::Error(ErrorKind::Div0));
     sheet.set("E3", 2.0);
     assert_number(&sheet.eval("=AGGREGATE(9,2,E1:E3)"), 3.0);
-    assert_eq!(sheet.eval("=AGGREGATE(9,4,E1:E3)"), Value::Error(ErrorKind::Div0));
+    assert_eq!(
+        sheet.eval("=AGGREGATE(9,4,E1:E3)"),
+        Value::Error(ErrorKind::Div0)
+    );
 }

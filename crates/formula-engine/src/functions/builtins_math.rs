@@ -554,7 +554,12 @@ fn countif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     if let Value::Error(e) = criteria_value {
         return Value::Error(e);
     }
-    let criteria = match Criteria::parse_with_date_system(&criteria_value, ctx.date_system()) {
+    let criteria = match Criteria::parse_with_date_system_and_locale(
+        &criteria_value,
+        ctx.date_system(),
+        ctx.value_locale(),
+        ctx.now_utc(),
+    ) {
         Ok(c) => c,
         Err(e) => return Value::Error(e),
     };
@@ -714,7 +719,12 @@ fn countifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         if let Value::Error(e) = criteria_value {
             return Value::Error(e);
         }
-        let compiled = match Criteria::parse_with_date_system(&criteria_value, date_system) {
+        let compiled = match Criteria::parse_with_date_system_and_locale(
+            &criteria_value,
+            date_system,
+            ctx.value_locale(),
+            ctx.now_utc(),
+        ) {
             Ok(c) => c,
             Err(e) => return Value::Error(e),
         };
@@ -836,7 +846,12 @@ fn sumif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     if let Value::Error(e) = criteria_value {
         return Value::Error(e);
     }
-    let criteria = match Criteria::parse_with_date_system(&criteria_value, ctx.date_system()) {
+    let criteria = match Criteria::parse_with_date_system_and_locale(
+        &criteria_value,
+        ctx.date_system(),
+        ctx.value_locale(),
+        ctx.now_utc(),
+    ) {
         Ok(c) => c,
         Err(e) => return Value::Error(e),
     };
@@ -960,7 +975,12 @@ fn sumifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         if let Value::Error(e) = crit_value {
             return Value::Error(e);
         }
-        let crit = match Criteria::parse_with_date_system(&crit_value, ctx.date_system()) {
+        let crit = match Criteria::parse_with_date_system_and_locale(
+            &crit_value,
+            ctx.date_system(),
+            ctx.value_locale(),
+            ctx.now_utc(),
+        ) {
             Ok(c) => c,
             Err(e) => return Value::Error(e),
         };
@@ -1046,7 +1066,12 @@ fn averageif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     if let Value::Error(e) = criteria_value {
         return Value::Error(e);
     }
-    let criteria = match Criteria::parse_with_date_system(&criteria_value, ctx.date_system()) {
+    let criteria = match Criteria::parse_with_date_system_and_locale(
+        &criteria_value,
+        ctx.date_system(),
+        ctx.value_locale(),
+        ctx.now_utc(),
+    ) {
         Ok(c) => c,
         Err(e) => return Value::Error(e),
     };
@@ -1183,7 +1208,12 @@ fn averageifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         if let Value::Error(e) = crit_value {
             return Value::Error(e);
         }
-        let crit = match Criteria::parse_with_date_system(&crit_value, ctx.date_system()) {
+        let crit = match Criteria::parse_with_date_system_and_locale(
+            &crit_value,
+            ctx.date_system(),
+            ctx.value_locale(),
+            ctx.now_utc(),
+        ) {
             Ok(c) => c,
             Err(e) => return Value::Error(e),
         };
