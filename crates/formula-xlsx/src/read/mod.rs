@@ -786,17 +786,20 @@ impl MetadataPart {
             if !parsed.is_empty() {
                 // Excel's `vm` appears in the wild as both 0-based and 1-based. To be tolerant,
                 // insert both the original key and its 0-based equivalent.
+                //
+                // Note: `parsed` is a `HashMap`, so iteration order is not deterministic. Insert in
+                // two passes so the canonical (1-based) keys always win when the shifted `vm-1`
+                // entries collide (e.g. vm=1 and vm=2 both attempt to populate key 1).
                 let mut vm_to_rich_value: HashMap<u32, u32> =
                     HashMap::with_capacity(parsed.len().saturating_mul(2));
-                // `parsed` is a HashMap so iteration order is non-deterministic. When we insert both
-                // `vm` and `vm-1` keys, collisions are possible (e.g. `vm=1` for 1-based and
-                // `vm=2 -> vm-1=1` for 0-based). Sort to ensure deterministic preference for the
-                // smallest `vm` (which matches real Excel fixtures where `vm` is typically 1-based
-                // for rich value metadata).
-                let mut entries: Vec<(u32, u32)> = parsed.into_iter().collect();
-                entries.sort_by_key(|(vm, _)| *vm);
-                for (vm, idx) in entries {
+
+                // Pass 1: canonical keys.
+                for (&vm, &idx) in parsed.iter() {
                     vm_to_rich_value.entry(vm).or_insert(idx);
+                }
+
+                // Pass 2: tolerate 0-based vm indices.
+                for (vm, idx) in parsed {
                     if vm > 0 {
                         vm_to_rich_value.entry(vm - 1).or_insert(idx);
                     }
