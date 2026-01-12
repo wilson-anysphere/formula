@@ -758,22 +758,27 @@ pub async fn set_sheet_visibility(
     visibility: SheetVisibility,
     state: State<'_, SharedAppState>,
 ) -> Result<(), String> {
-    // The desktop UI only supports toggling visible/hidden. Preserve veryHidden when present in a
-    // workbook file, but refuse to set it from the webview.
-    if matches!(visibility, SheetVisibility::VeryHidden) {
-        return Err("setting veryHidden sheet visibility is not supported".to_string());
-    }
-
+    // Note: the desktop UI only exposes "visible" / "hidden", but we still accept `veryHidden`
+    // from the webview so workbook state reconciliation (applyState/restore) and automation can
+    // round-trip Excel-compatible visibility metadata. Backend invariants (e.g. "cannot hide the
+    // last visible sheet") are enforced in `AppState::set_sheet_visibility`.
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();
-        state
-            .set_sheet_visibility(&sheet_id, visibility.into())
-            .map_err(app_error)?;
+        set_sheet_visibility_core(&mut state, &sheet_id, visibility).map_err(app_error)?;
         Ok::<_, String>(())
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn set_sheet_visibility_core(
+    state: &mut AppState,
+    sheet_id: &str,
+    visibility: SheetVisibility,
+) -> Result<(), AppStateError> {
+    state.set_sheet_visibility(sheet_id, visibility.into())
 }
 
 #[cfg(any(feature = "desktop", test))]
@@ -5360,6 +5365,39 @@ mod tests {
                 "expected wants_origin_bytes_for_save_path to reject {ext}"
             );
         }
+    }
+
+    #[test]
+    fn set_sheet_visibility_allows_very_hidden_from_ipc_enum() {
+        // Ensure the IPC contract (`"veryHidden"`) can be deserialized and applied to the backend
+        // state without rejection at the command layer.
+        let visibility: SheetVisibility =
+            serde_json::from_str("\"veryHidden\"").expect("deserialize veryHidden");
+        assert_eq!(visibility, SheetVisibility::VeryHidden);
+        assert_eq!(
+            serde_json::to_string(&visibility).expect("serialize"),
+            "\"veryHidden\""
+        );
+
+        // Make sure we have more than one visible sheet; Excel forbids hiding the last visible
+        // sheet, and the backend enforces that invariant.
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        set_sheet_visibility_core(&mut state, "Sheet1", visibility)
+            .expect("set veryHidden visibility");
+
+        let info = state.workbook_info().expect("workbook info");
+        let sheet1 = info
+            .sheets
+            .iter()
+            .find(|sheet| sheet.id == "Sheet1")
+            .expect("Sheet1 present");
+        assert_eq!(sheet1.visibility, formula_model::SheetVisibility::VeryHidden);
     }
 
     #[test]
