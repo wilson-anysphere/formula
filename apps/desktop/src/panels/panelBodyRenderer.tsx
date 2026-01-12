@@ -107,14 +107,14 @@ function CollabVersionHistoryPanel({ session }: { session: CollabSession }) {
 
   if (loadError) {
     return (
-      <div style={{ padding: 12, fontFamily: "system-ui, sans-serif", color: "var(--error)" }}>
+      <div className="collab-panel__message collab-panel__message--error">
         Version history is unavailable: {loadError}
       </div>
     );
   }
 
   if (!collabVersioning) {
-    return <div style={{ padding: 12, fontFamily: "system-ui, sans-serif" }}>Loading version history…</div>;
+    return <div className="collab-panel__message">Loading version history…</div>;
   }
 
   return (
@@ -289,14 +289,14 @@ function CollabBranchManagerPanel({
 
   if (error) {
     return (
-      <div style={{ padding: 12, color: "var(--error)" }}>
+      <div className="collab-panel__message collab-panel__message--error">
         {error}
       </div>
     );
   }
 
   if (!ready) {
-    return <div style={{ padding: 12 }}>Loading branches…</div>;
+    return <div className="collab-panel__message">Loading branches…</div>;
   }
 
   if (mergeSource) {
@@ -468,7 +468,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
     let instance = reactPanels.get(panelId);
     if (!instance) {
       const container = document.createElement("div");
-      container.className = "dock-panel__mount panel-mount--fill-column";
+      container.className = "dock-panel__mount panel-mount--fill-column panel-body__container";
       instance = { root: createRoot(container), container };
       reactPanels.set(panelId, instance);
     }
@@ -481,8 +481,9 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
     let instance = domPanels.get(panelId);
     if (!instance) {
       const container = document.createElement("div");
-      container.className = "dock-panel__mount panel-mount--fill-column";
+      container.className = "dock-panel__mount panel-mount--fill-column panel-body__container";
       instance = mount(container);
+      instance.container.classList.add("dock-panel__mount", "panel-mount--fill-column", "panel-body__container");
       domPanels.set(panelId, instance);
     }
 

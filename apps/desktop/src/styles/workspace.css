@@ -255,10 +255,19 @@
 }
 
 .dock-panel__mount,
-.panel-mount--fill-column {
+.panel-mount--fill-column,
+.panel-body__container {
   height: 100%;
   display: flex;
   flex-direction: column;
+}
+
+.collab-panel__message {
+  padding: 12px;
+}
+
+.collab-panel__message--error {
+  color: var(--error);
 }
 
 .macros-panel {
