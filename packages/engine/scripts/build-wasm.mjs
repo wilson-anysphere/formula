@@ -45,6 +45,30 @@ const targets = [
 
 const wasmPackBin = process.platform === "win32" ? "wasm-pack.exe" : "wasm-pack";
 
+const scriptArgs = process.argv.slice(2);
+const forceBuild =
+  scriptArgs.includes("--force") ||
+  scriptArgs.includes("-f") ||
+  process.env.FORMULA_WASM_FORCE_BUILD === "1";
+const showHelp = scriptArgs.includes("--help") || scriptArgs.includes("-h");
+if (showHelp) {
+  console.log(
+    [
+      "Build the Rust/WASM engine (used by apps/*).",
+      "",
+      "Usage:",
+      "  pnpm -C packages/engine build:wasm [-- --force]",
+      "",
+      "Options:",
+      "  --force, -f    Rebuild even if artifacts appear up to date.",
+      "",
+      "Environment:",
+      "  FORMULA_WASM_FORCE_BUILD=1   Same as --force.",
+    ].join("\n"),
+  );
+  process.exit(0);
+}
+
 function cargoAgentPath() {
   const abs = path.join(repoRoot, "scripts", "cargo_agent.sh");
   const rel = path.relative(process.cwd(), abs);
@@ -207,10 +231,13 @@ if (outputExists) {
     sourceStamp = Math.max(sourceStamp, await latestMtime(dependencyCrate));
   }
 
-  if (outputStamp >= sourceStamp) {
+  if (outputStamp >= sourceStamp && !forceBuild) {
     console.log("[formula] WASM artifacts up to date; copying runtime assets into apps/*/public/engine.");
     await copyToPublic();
     process.exit(0);
+  }
+  if (outputStamp >= sourceStamp && forceBuild) {
+    console.log("[formula] --force specified; rebuilding WASM artifacts.");
   }
 }
 
