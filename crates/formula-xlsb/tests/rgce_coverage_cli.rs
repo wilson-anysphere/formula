@@ -94,6 +94,15 @@ fn rgce_coverage_cli_reports_zero_failures_for_fixtures() {
             "fixture {rel} --sheet {first_sheet_name}"
         );
 
+        let by_name_ci = run_rgce_coverage(&path, &["--sheet", &first_sheet_name.to_lowercase()]);
+        let by_name_ci_summary = summary_from_output(&by_name_ci);
+        assert_eq!(
+            by_name_ci_summary["decoded_failed"],
+            0,
+            "fixture {rel} --sheet {} (case-insensitive)",
+            first_sheet_name.to_lowercase()
+        );
+
         // Max should cap formulas_total when formulas exist.
         let capped = run_rgce_coverage(&path, &["--max", "1"]);
         let capped_summary = summary_from_output(&capped);
