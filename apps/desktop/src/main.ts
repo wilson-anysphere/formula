@@ -2967,6 +2967,137 @@ function installSheetStoreSubscription(): void {
         }
       }
     }
+
+    // When the sheet store is mutated as a *result* of DocumentController-driven state changes
+    // (undo/redo/applyState/script-driven edits), reconcile the local workbook backend so future
+    // saves reflect the restored sheet structure.
+    if (syncingSheetUi && prevSnapshot) {
+      const session = app.getCollabSession?.() ?? null;
+      if (!session) {
+        const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
+        // Prefer the queued invoke (it sequences behind pending `set_cell` / `set_range` sync work).
+        const invoke =
+          queuedInvoke ??
+          (typeof baseInvoke === "function" ? ((cmd: string, args?: any) => queueBackendOp(() => baseInvoke(cmd, args))) : null);
+
+        if (typeof invoke === "function") {
+          const tabColorEqual = (a: TabColor | undefined, b: TabColor | undefined): boolean => {
+            if (a === b) return true;
+            if (!a || !b) return !a && !b;
+            return (
+              (a.rgb ?? null) === (b.rgb ?? null) &&
+              (a.theme ?? null) === (b.theme ?? null) &&
+              (a.indexed ?? null) === (b.indexed ?? null) &&
+              (a.tint ?? null) === (b.tint ?? null) &&
+              (a.auto ?? null) === (b.auto ?? null)
+            );
+          };
+
+          const prevOrder = prevSnapshot.order;
+          const nextOrder = nextSnapshot.order;
+          const prevById = prevSnapshot.byId;
+          const nextById = nextSnapshot.byId;
+
+          const added = nextOrder.filter((id) => !prevById.has(id));
+          const removed = prevOrder.filter((id) => !nextById.has(id));
+
+          const hasMetaChange = nextOrder.some((sheetId) => {
+            if (added.includes(sheetId)) return false;
+            if (removed.includes(sheetId)) return false;
+            const before = prevById.get(sheetId);
+            const after = nextById.get(sheetId);
+            if (!before || !after) return false;
+            return (
+              before.name !== after.name ||
+              before.visibility !== after.visibility ||
+              !tabColorEqual(before.tabColor, after.tabColor)
+            );
+          });
+
+          const prevKey = prevOrder.join("|");
+          const nextKey = nextOrder.join("|");
+          const hasOrderChange = prevKey !== nextKey;
+
+          if (added.length > 0 || removed.length > 0 || hasMetaChange || hasOrderChange) {
+            const reportError = (label: string, err: unknown): void => {
+              console.error(`[formula][desktop] Failed to reconcile sheet ${label} to backend:`, err);
+              const message = err instanceof Error ? err.message : String(err);
+              showToast(`Failed to sync sheet changes to workbook: ${message}`, "error");
+            };
+
+            // Deletes.
+            for (const sheetId of removed) {
+              void invoke("delete_sheet", { sheet_id: sheetId }).catch((err) => reportError("delete", err));
+            }
+
+            // Adds.
+            for (const sheetId of added) {
+              const meta = nextById.get(sheetId);
+              if (!meta) continue;
+              const idx = nextOrder.indexOf(sheetId);
+              const afterSheetId = idx > 0 ? nextOrder[idx - 1] : null;
+              void invoke("add_sheet_with_id", {
+                sheet_id: sheetId,
+                name: meta.name,
+                after_sheet_id: afterSheetId,
+                index: idx,
+              }).catch((err) => reportError("add", err));
+            }
+
+            // Metadata updates.
+            for (const sheetId of nextOrder) {
+              if (added.includes(sheetId)) continue;
+              if (removed.includes(sheetId)) continue;
+              const before = prevById.get(sheetId);
+              const after = nextById.get(sheetId);
+              if (!before || !after) continue;
+
+              if (before.name !== after.name) {
+                void invoke("rename_sheet", { sheet_id: sheetId, name: after.name }).catch((err) => reportError("rename", err));
+              }
+
+              if (before.visibility !== after.visibility) {
+                void invoke("set_sheet_visibility", { sheet_id: sheetId, visibility: after.visibility }).catch((err) =>
+                  reportError("visibility", err),
+                );
+              }
+
+              if (!tabColorEqual(before.tabColor, after.tabColor)) {
+                void invoke("set_sheet_tab_color", { sheet_id: sheetId, tab_color: after.tabColor ?? null }).catch((err) =>
+                  reportError("tab color", err),
+                );
+              }
+            }
+
+            // Reorder (including hidden sheets).
+            if (hasOrderChange) {
+              // Compute a sequence of `move_sheet` operations that transforms the previous order
+              // into the desired next order. This mirrors the `WorkbookSheetStore.move` semantics
+              // used by `sheetStoreDocumentSync.ts`.
+              const working = prevOrder.filter((id) => !removed.includes(id));
+              for (const sheetId of added) {
+                const idx = nextOrder.indexOf(sheetId);
+                if (idx < 0) continue;
+                const insert = Math.max(0, Math.min(idx, working.length));
+                working.splice(insert, 0, sheetId);
+              }
+
+              for (let targetIndex = 0; targetIndex < nextOrder.length; targetIndex += 1) {
+                const sheetId = nextOrder[targetIndex]!;
+                const currentIndex = working.indexOf(sheetId);
+                if (currentIndex === -1) continue;
+                if (currentIndex === targetIndex) continue;
+                working.splice(currentIndex, 1);
+                working.splice(targetIndex, 0, sheetId);
+                void invoke("move_sheet", { sheet_id: sheetId, to_index: targetIndex }).catch((err) =>
+                  reportError("reorder", err),
+                );
+              }
+            }
+          }
+        }
+      }
+    }
     const sheets = listSheetsForUi();
     const activeId = app.getCurrentSheetId();
 

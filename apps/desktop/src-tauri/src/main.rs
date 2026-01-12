@@ -868,6 +868,7 @@ fn main() {
             commands::open_workbook,
             commands::new_workbook,
             commands::add_sheet,
+            commands::add_sheet_with_id,
             commands::rename_sheet,
             commands::set_sheet_visibility,
             commands::set_sheet_tab_color,

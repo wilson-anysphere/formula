@@ -546,6 +546,94 @@ impl AppState {
         })
     }
 
+    pub fn add_sheet_with_id(
+        &mut self,
+        sheet_id: String,
+        name: String,
+        after_sheet_id: Option<String>,
+        index: Option<usize>,
+    ) -> Result<(), AppStateError> {
+        let (sheet_id, name, insert_index) = {
+            let workbook = self.get_workbook()?;
+
+            let sheet_id = sheet_id.trim();
+            if sheet_id.is_empty() {
+                return Err(AppStateError::WhatIf(
+                    "sheet id must be non-empty".to_string(),
+                ));
+            }
+            if workbook
+                .sheets
+                .iter()
+                .any(|sheet| sheet.id.eq_ignore_ascii_case(sheet_id))
+            {
+                return Err(AppStateError::WhatIf("sheet id must be unique".to_string()));
+            }
+
+            let trimmed = name.trim();
+            formula_model::validate_sheet_name(trimmed)
+                .map_err(|e| AppStateError::WhatIf(e.to_string()))?;
+            if workbook
+                .sheets
+                .iter()
+                .any(|sheet| sheet_name_eq_case_insensitive(&sheet.name, trimmed))
+            {
+                return Err(AppStateError::WhatIf(
+                    formula_model::SheetNameError::DuplicateName.to_string(),
+                ));
+            }
+
+            let insert_index = after_sheet_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+                .and_then(|after_id| {
+                    workbook
+                        .sheets
+                        .iter()
+                        .position(|sheet| sheet.id.eq_ignore_ascii_case(after_id))
+                        .map(|idx| idx.saturating_add(1))
+                })
+                .unwrap_or_else(|| index.unwrap_or(workbook.sheets.len()))
+                .min(workbook.sheets.len());
+
+            (sheet_id.to_string(), trimmed.to_string(), insert_index)
+        };
+
+        if let Some(persistent) = self.persistent.as_mut() {
+            let sheet = persistent
+                .storage
+                .create_sheet(
+                    persistent.workbook_id,
+                    &name,
+                    insert_index as i64,
+                    None,
+                )
+                .map_err(|e| AppStateError::Persistence(e.to_string()))?;
+            persistent.sheet_map.insert(sheet_id.clone(), sheet.id);
+        }
+
+        {
+            let workbook = self.get_workbook_mut()?;
+            workbook.sheets.insert(
+                insert_index,
+                crate::file_io::Sheet::new(sheet_id.clone(), name.clone()),
+            );
+
+            // Adding sheets is a structural XLSX edit. The patch-based save path (which relies on
+            // `origin_xlsx_bytes`) can only patch existing worksheet parts; it cannot add new sheets.
+            // Drop the origin bytes so the next save/export regenerates from storage.
+            workbook.origin_xlsx_bytes = None;
+            workbook.origin_xlsb_path = None;
+        }
+
+        self.engine.ensure_sheet(&name);
+
+        self.dirty = true;
+        self.redo_stack.clear();
+        Ok(())
+    }
+
     pub fn rename_sheet(&mut self, sheet_id: &str, name: String) -> Result<(), AppStateError> {
         let trimmed = name.trim();
         formula_model::validate_sheet_name(trimmed)

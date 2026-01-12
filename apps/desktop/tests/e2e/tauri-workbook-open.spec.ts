@@ -6,6 +6,7 @@ function installTauriStubForTests(
   options: {
     usedRange?: { start_row: number; end_row: number; start_col: number; end_col: number };
     sheets?: Array<{ id: string; name: string; visibility?: string }>;
+    cellValues?: Array<{ sheet_id: string; row: number; col: number; value: unknown | null; formula?: string | null }>;
   } = {},
 ) {
   const listeners: Record<string, any> = {};
@@ -14,6 +15,21 @@ function installTauriStubForTests(
   const usedRange = options.usedRange ?? { start_row: 0, end_row: 0, start_col: 0, end_col: 0 };
   const sheets =
     Array.isArray(options.sheets) && options.sheets.length > 0 ? options.sheets : [{ id: "Sheet1", name: "Sheet1" }];
+  const cellValues = Array.isArray(options.cellValues) ? options.cellValues : [];
+
+  const cellKey = (sheetId: string, row: number, col: number) => `${sheetId}:${row},${col}`;
+  const seededCells = new Map<string, { value: unknown | null; formula: string | null }>();
+  for (const cell of cellValues) {
+    const sheetId = String((cell as any)?.sheet_id ?? "").trim();
+    const row = Number((cell as any)?.row);
+    const col = Number((cell as any)?.col);
+    if (!sheetId) continue;
+    if (!Number.isFinite(row) || !Number.isFinite(col)) continue;
+    seededCells.set(cellKey(sheetId, row, col), {
+      value: (cell as any)?.value ?? null,
+      formula: typeof (cell as any)?.formula === "string" ? (cell as any).formula : null,
+    });
+  }
 
   const pushCall = (cmd: string, args: any) => {
     (window as any).__tauriInvokeCalls.push({ cmd, args });
@@ -47,11 +63,19 @@ function installTauriStubForTests(
             const endCol = Number(args?.end_col ?? startCol);
             const rows = Math.max(0, endRow - startRow + 1);
             const cols = Math.max(0, endCol - startCol + 1);
+            const sheetId = String(args?.sheet_id ?? args?.sheetId ?? "");
 
             const values = Array.from({ length: rows }, (_v, r) =>
               Array.from({ length: cols }, (_w, c) => {
                 const row = startRow + r;
                 const col = startCol + c;
+                const seeded = seededCells.get(cellKey(sheetId, row, col));
+                if (seeded) {
+                  const formula = typeof seeded.formula === "string" ? seeded.formula : null;
+                  const value = formula == null ? (seeded.value ?? null) : null;
+                  return { value, formula, display_value: value == null ? "" : String(value) };
+                }
+
                 if (row === 0 && col === 0) {
                   return { value: "Hello", formula: null, display_value: "Hello" };
                 }
@@ -89,6 +113,7 @@ function installTauriStubForTests(
           case "mark_saved":
           case "delete_sheet":
           case "rename_sheet":
+          case "add_sheet_with_id":
           case "move_sheet":
           case "set_sheet_visibility":
           case "set_sheet_tab_color":
@@ -659,11 +684,84 @@ test.describe("tauri workbook integration", () => {
       .toBe("FFFF0000");
   });
 
-  test("undo restore of deleted renamed sheet re-adds backend sheet using stable id", async ({ page }) => {
+  test("undoing a sheet delete recreates the sheet in the backend before syncing restored cells", async ({ page }) => {
+    await page.addInitScript(installTauriStubForTests, {
+      usedRange: { start_row: 0, end_row: 0, start_col: 0, end_col: 2 },
+      sheets: [
+        { id: "sheet-1", name: "Budget" },
+        { id: "sheet-2", name: "Summary" },
+      ],
+      // Include a second non-adjacent non-empty cell so the workbook sync bridge uses `set_cell`
+      // (not `set_range`) when the sheet is restored on undo.
+      cellValues: [{ sheet_id: "sheet-2", row: 0, col: 2, value: "World", formula: null }],
+    });
+
+    await gotoDesktop(page);
+
+    // Auto-accept the delete confirmation dialog.
+    page.on("dialog", (dialog) => dialog.accept());
+
+    await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["file-dropped"]));
+    await page.evaluate(() => {
+      (window as any).__tauriListeners["file-dropped"]({ payload: ["/tmp/fake.xlsx"] });
+    });
+
+    await page.waitForFunction(async () => (await (window as any).__formulaApp.getCellValueA1("A1")) === "Hello");
+
+    // Delete sheet-2 via the sheet tab context menu.
+    await page.getByTestId("sheet-tab-sheet-2").click({ button: "right" });
+    const menu = page.getByTestId("sheet-tab-context-menu");
+    await expect(menu).toBeVisible();
+    await menu.getByRole("button", { name: "Delete" }).click();
+
+    await page.waitForFunction(
+      () =>
+        ((window as any).__tauriInvokeCalls ?? []).some(
+          (c: any) => c?.cmd === "delete_sheet" && c?.args?.sheet_id === "sheet-2",
+        ),
+      undefined,
+      { timeout: 5_000 },
+    );
+
+    // Undo should restore the sheet (doc->store sync) and reconcile the backend workbook structure.
+    await page.evaluate(() => {
+      (window as any).__formulaApp.getDocument().undo();
+    });
+
+    await page.waitForFunction(
+      () =>
+        ((window as any).__tauriInvokeCalls ?? []).some(
+          (c: any) => c?.cmd === "add_sheet_with_id" && c?.args?.sheet_id === "sheet-2",
+        ),
+      undefined,
+      { timeout: 5_000 },
+    );
+
+    await page.waitForFunction(
+      () =>
+        ((window as any).__tauriInvokeCalls ?? []).some((c: any) => c?.cmd === "set_cell" && c?.args?.sheet_id === "sheet-2"),
+      undefined,
+      { timeout: 5_000 },
+    );
+
+    const { addCall, addIndex, firstSetCellIndex } = await page.evaluate(() => {
+      const calls = (window as any).__tauriInvokeCalls ?? [];
+      const addIndex = calls.findIndex((c: any) => c?.cmd === "add_sheet_with_id" && c?.args?.sheet_id === "sheet-2");
+      const firstSetCellIndex = calls.findIndex((c: any) => c?.cmd === "set_cell" && c?.args?.sheet_id === "sheet-2");
+      return { addCall: calls[addIndex] ?? null, addIndex, firstSetCellIndex };
+    });
+
+    expect(addCall?.args).toEqual({ sheet_id: "sheet-2", name: "Summary", after_sheet_id: "sheet-1", index: 1 });
+    expect(addIndex).toBeGreaterThanOrEqual(0);
+    expect(firstSetCellIndex).toBeGreaterThan(addIndex);
+  });
+
+  test("undo/redo of sheet reorder reconciles backend order via move_sheet", async ({ page }) => {
     await page.addInitScript(installTauriStubForTests, {
       sheets: [
-        { id: "Sheet1", name: "Budget" },
+        { id: "Sheet1", name: "Sheet1" },
         { id: "Sheet2", name: "Sheet2" },
+        { id: "Sheet3", name: "Sheet3" },
       ],
     });
 
@@ -676,78 +774,66 @@ test.describe("tauri workbook integration", () => {
 
     await page.waitForFunction(async () => (await (window as any).__formulaApp.getCellValueA1("A1")) === "Hello");
 
-    await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveText("Budget");
-    await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveText("Sheet2");
-
-    // Delete the renamed sheet (Sheet1 -> "Budget").
-    // Avoid flaky right-click handling in the desktop shell; dispatch a deterministic contextmenu event.
+    // Drag Sheet3 before Sheet2 to reorder (UI-driven; this also calls move_sheet once).
     await page.evaluate(() => {
-      const tab = document.querySelector('[data-testid="sheet-tab-Sheet1"]') as HTMLElement | null;
-      if (!tab) throw new Error("Missing Sheet1 tab");
-      const rect = tab.getBoundingClientRect();
-      tab.dispatchEvent(
-        new MouseEvent("contextmenu", {
-          bubbles: true,
-          cancelable: true,
-          clientX: rect.left + 10,
-          clientY: rect.top + 10,
-        }),
-      );
-    });
-    const menu = page.getByTestId("sheet-tab-context-menu");
-    await expect(menu).toBeVisible();
+      const target = document.querySelector('[data-testid="sheet-tab-Sheet2"]') as HTMLElement | null;
+      if (!target) throw new Error("Missing sheet-tab-Sheet2");
 
-    await menu.getByRole("button", { name: "Delete" }).click();
-    // The desktop web harness uses the non-blocking quick-pick dialog instead of the
-    // browser-native `window.confirm` prompt.
-    await page.getByTestId("quick-pick").getByTestId("quick-pick-item-0").click();
+      const rect = target.getBoundingClientRect();
+      const dt = new DataTransfer();
+      dt.setData("text/plain", "Sheet3");
 
-    await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveCount(0);
-
-    // Confirm backend delete_sheet invoked.
-    await expect
-      .poll(() => page.evaluate(() => (window as any).__tauriInvokeCalls?.filter((c: any) => c.cmd === "delete_sheet")?.length ?? 0))
-      .toBe(1);
-    await expect
-      .poll(() => page.evaluate(() => (window as any).__tauriInvokeCalls?.find((c: any) => c.cmd === "delete_sheet")?.args?.sheet_id))
-      .toBe("Sheet1");
-
-    // Undo should restore the sheet, and main.ts should reconcile the backend by creating the sheet with the same id.
-    await page.evaluate(async () => {
-      const registry = window.__formulaCommandRegistry as any;
-      await registry.executeCommand("edit.undo");
-      await (window.__formulaApp as any).whenIdle();
+      const drop = new DragEvent("drop", {
+        bubbles: true,
+        cancelable: true,
+        clientX: rect.left + 1,
+        clientY: rect.top + rect.height / 2,
+      });
+      Object.defineProperty(drop, "dataTransfer", { value: dt });
+      target.dispatchEvent(drop);
     });
 
-    await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveText("Budget");
+    await page.waitForFunction(
+      () => ((window as any).__tauriInvokeCalls ?? []).filter((c: any) => c?.cmd === "move_sheet").length >= 1,
+      undefined,
+      { timeout: 5_000 },
+    );
+    const initialMoveCount = await page.evaluate(
+      () => ((window as any).__tauriInvokeCalls ?? []).filter((c: any) => c?.cmd === "move_sheet").length,
+    );
 
-    await expect
-      .poll(() =>
-        page.evaluate(
-          () =>
-            (window as any).__tauriInvokeCalls?.some(
-              (c: any) => c.cmd === "add_sheet" && c.args?.sheet_id === "Sheet1" && c.args?.name === "Budget",
-            ) ?? false,
-        ),
-      )
-      .toBe(true);
-
-    // Optional: a subsequent cell edit on the restored sheet should flush to the backend using the stable sheet id.
-    await page.getByTestId("sheet-tab-Sheet1").click();
-    const beforeEdits = await page.evaluate(() => (window as any).__tauriInvokeCalls?.length ?? 0);
+    // Undo should restore the prior order (doc->store sync) and invoke move_sheet again.
     await page.evaluate(() => {
-      const app = (window as any).__formulaApp;
-      const doc = app.getDocument();
-      doc.setCellValue("Sheet1", "A1", "AfterUndo");
-      app.refresh();
+      (window as any).__formulaApp.getDocument().undo();
     });
     await page.waitForFunction(
-      (beforeEdits) =>
-        ((window as any).__tauriInvokeCalls ?? []).slice(beforeEdits).some(
-          (c: any) =>
-            (c.cmd === "set_cell" || c.cmd === "set_range") && (c.args?.sheet_id ?? c.args?.sheetId) === "Sheet1",
-        ),
-      beforeEdits,
+      (count) =>
+        ((window as any).__tauriInvokeCalls ?? []).filter((c: any) => c?.cmd === "move_sheet").length > (count as number),
+      initialMoveCount,
+      { timeout: 5_000 },
     );
+    const undoMove = await page.evaluate(() => {
+      const calls = ((window as any).__tauriInvokeCalls ?? []).filter((c: any) => c?.cmd === "move_sheet");
+      return calls.at(-1) ?? null;
+    });
+    expect(undoMove?.args).toEqual({ sheet_id: "Sheet2", to_index: 1 });
+
+    const moveCountAfterUndo = initialMoveCount + 1;
+
+    // Redo should re-apply the reorder and invoke move_sheet again.
+    await page.evaluate(() => {
+      (window as any).__formulaApp.getDocument().redo();
+    });
+    await page.waitForFunction(
+      (count) =>
+        ((window as any).__tauriInvokeCalls ?? []).filter((c: any) => c?.cmd === "move_sheet").length > (count as number),
+      moveCountAfterUndo,
+      { timeout: 5_000 },
+    );
+    const redoMove = await page.evaluate(() => {
+      const calls = ((window as any).__tauriInvokeCalls ?? []).filter((c: any) => c?.cmd === "move_sheet");
+      return calls.at(-1) ?? null;
+    });
+    expect(redoMove?.args).toEqual({ sheet_id: "Sheet3", to_index: 1 });
   });
 });
