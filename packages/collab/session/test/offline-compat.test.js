@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 
 import { indexedDB, IDBKeyRange } from "fake-indexeddb";
@@ -263,9 +263,14 @@ test("CollabSession legacy `options.offline` binds before load so edits during l
 
   // Artificially slow down FileCollabPersistence.load() so we can reliably make
   // edits while load is still in flight.
+  const docHash = createHash("sha256").update(filePath).digest("hex");
+  const hashedPath = path.join(dir, `${docHash}.yjs`);
   const realReadFile = fs.readFile;
   fs.readFile = async (...args) => {
-    await sleep(50);
+    const candidate = args[0];
+    if (candidate && String(candidate) === hashedPath) {
+      await sleep(50);
+    }
     return await realReadFile(...args);
   };
   t.after(() => {
