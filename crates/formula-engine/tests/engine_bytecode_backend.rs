@@ -16,6 +16,7 @@ use formula_engine::{
 use formula_model::table::TableColumn;
 use formula_model::{Range, Table};
 use proptest::prelude::*;
+use chrono::{DateTime, Utc};
 use std::sync::Arc;
 
 fn not_thread_safe_test(
@@ -81,6 +82,45 @@ fn eval_via_ast(engine: &Engine, formula: &str, current_cell: &str) -> Value {
     let separators = engine.value_locale().separators;
     recalc_ctx.number_locale =
         NumberLocale::new(separators.decimal_sep, Some(separators.thousands_sep));
+
+    let parsed = formula_engine::eval::Parser::parse(formula).unwrap();
+    let compiled = {
+        let mut map = |sref: &SheetReference<String>| match sref {
+            SheetReference::Current => SheetReference::Current,
+            SheetReference::Sheet(_name) => SheetReference::Sheet(0),
+            SheetReference::SheetRange(_start, _end) => SheetReference::SheetRange(0, 0),
+            SheetReference::External(wb) => SheetReference::External(wb.clone()),
+        };
+        parsed.map_sheets(&mut map)
+    };
+
+    let ctx = EvalContext {
+        current_sheet: 0,
+        current_cell: parse_a1(current_cell).unwrap(),
+    };
+    Evaluator::new_with_date_system_and_locale(
+        &resolver,
+        ctx,
+        &recalc_ctx,
+        engine.date_system(),
+        engine.value_locale(),
+    )
+    .eval_formula(&compiled)
+}
+
+fn eval_via_ast_with_now_utc(
+    engine: &Engine,
+    formula: &str,
+    current_cell: &str,
+    now_utc: DateTime<Utc>,
+) -> Value {
+    let resolver = EngineResolver { engine };
+    let separators = engine.value_locale().separators;
+    let recalc_ctx = RecalcContext {
+        now_utc,
+        recalc_id: 0,
+        number_locale: NumberLocale::new(separators.decimal_sep, Some(separators.thousands_sep)),
+    };
 
     let parsed = formula_engine::eval::Parser::parse(formula).unwrap();
     let compiled = {
@@ -260,8 +300,19 @@ fn bytecode_backend_compiles_and_evaluates_today() {
     // Volatile formulas should still compile to bytecode (when thread-safe and non-dynamic).
     assert_eq!(engine.bytecode_program_count(), 1);
 
+    let before = Utc::now();
     engine.recalculate_single_threaded();
-    assert_engine_matches_ast(&engine, "=TODAY()", "A1");
+    let after = Utc::now();
+
+    let got = engine.get_cell_value("Sheet1", "A1");
+    // `TODAY()` only changes at the day boundary; if the test happens to cross midnight between
+    // `before` and `after`, accept either result.
+    let expected_before = eval_via_ast_with_now_utc(&engine, "=TODAY()", "A1", before);
+    let expected_after = eval_via_ast_with_now_utc(&engine, "=TODAY()", "A1", after);
+    assert!(
+        got == expected_before || got == expected_after,
+        "TODAY() mismatch: bytecode={got:?}, ast_before={expected_before:?}, ast_after={expected_after:?}"
+    );
 }
 
 #[test]
@@ -275,21 +326,35 @@ fn bytecode_backend_compiles_and_evaluates_now() {
     // Volatile formulas should still compile to bytecode (when thread-safe and non-dynamic).
     assert_eq!(engine.bytecode_program_count(), 1);
 
+    let before = Utc::now();
     engine.recalculate_single_threaded();
+    let after = Utc::now();
 
     let got = engine.get_cell_value("Sheet1", "A1");
-    let expected = eval_via_ast(&engine, "=NOW()", "A1");
-    match (got, expected) {
-        (Value::Number(a), Value::Number(b)) => {
-            // Engine recalc and this test's standalone AST evaluation use different `now_utc`
-            // instants, so allow a small tolerance.
-            let tolerance_days = 60.0 / 86_400.0; // 60 seconds
+    let expected_before = eval_via_ast_with_now_utc(&engine, "=NOW()", "A1", before);
+    let expected_after = eval_via_ast_with_now_utc(&engine, "=NOW()", "A1", after);
+    match (got, expected_before, expected_after) {
+        (Value::Number(got), Value::Number(before), Value::Number(after)) => {
+            let (low, high) = if before <= after {
+                (before, after)
+            } else {
+                (after, before)
+            };
+            // Allow a small epsilon to account for runtime differences between `Utc::now()` and
+            // formula evaluation.
+            let eps = 1.0 / 86_400.0; // 1 second
             assert!(
-                (a - b).abs() <= tolerance_days,
-                "NOW() mismatch: bytecode={a}, ast={b}"
+                got >= low - eps && got <= high + eps,
+                "NOW() mismatch: bytecode={got}, ast_low={low}, ast_high={high}"
             );
         }
-        (got, expected) => assert_eq!(got, expected),
+        (got, expected_before, expected_after) => {
+            // Should never happen for NOW(), but keep the failure mode clear.
+            assert!(
+                got == expected_before || got == expected_after,
+                "NOW() mismatch: bytecode={got:?}, ast_before={expected_before:?}, ast_after={expected_after:?}"
+            );
+        }
     }
 }
 
