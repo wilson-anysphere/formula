@@ -138,6 +138,21 @@ fn unparseable_date_text_maps_to_value_error_in_bond_coupon_builtins() {
     if let Some(v) = eval_or_skip(&mut sheet, r#"=COUPDAYS("nope",DATE(2025,1,1),2,0)"#) {
         assert_eq!(v, Value::Error(ErrorKind::Value));
     }
+    if let Some(v) = eval_or_skip(&mut sheet, r#"=COUPDAYBS("nope",DATE(2025,1,1),2,0)"#) {
+        assert_eq!(v, Value::Error(ErrorKind::Value));
+    }
+    if let Some(v) = eval_or_skip(&mut sheet, r#"=COUPDAYSNC("nope",DATE(2025,1,1),2,0)"#) {
+        assert_eq!(v, Value::Error(ErrorKind::Value));
+    }
+    if let Some(v) = eval_or_skip(&mut sheet, r#"=COUPNUM("nope",DATE(2025,1,1),2,0)"#) {
+        assert_eq!(v, Value::Error(ErrorKind::Value));
+    }
+    if let Some(v) = eval_or_skip(&mut sheet, r#"=COUPNCD("nope",DATE(2025,1,1),2,0)"#) {
+        assert_eq!(v, Value::Error(ErrorKind::Value));
+    }
+    if let Some(v) = eval_or_skip(&mut sheet, r#"=COUPPCD("nope",DATE(2025,1,1),2,0)"#) {
+        assert_eq!(v, Value::Error(ErrorKind::Value));
+    }
 
     if let Some(v) = eval_or_skip(&mut sheet, r#"=ACCRINTM("nope",DATE(2020,7,1),0.1,1000,0)"#) {
         assert_eq!(v, Value::Error(ErrorKind::Value));
