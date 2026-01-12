@@ -22,6 +22,7 @@ Build the native desktop application shell using **Tauri**. Handle system integr
 |----------|---------|
 | `apps/desktop/src-tauri/` | Rust backend, Tauri commands |
 | `apps/desktop/src-tauri/capabilities/` | Tauri v2 capability allowlists (permissions for core APIs/plugins) |
+| `apps/desktop/src-tauri/gen/schemas/` | Generated JSON schemas used to validate Tauri config/capabilities (reference only) |
 | `apps/desktop/src/tauri/` | TypeScript Tauri bindings |
 | `apps/desktop/` | Desktop app entrypoint, Vite config |
 | `apps/web/` | Web build target (secondary) |
