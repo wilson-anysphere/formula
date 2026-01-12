@@ -18,15 +18,6 @@ type BenchmarkDef = {
  * dirty region handling, scroll blitting decisions), not GPU/Skia time.
  */
 function ensureDomAndCanvasMocks(): void {
-  if (typeof window !== 'undefined' && typeof document !== 'undefined') return;
-
-  const dom = new JSDOM('<!doctype html><html><body></body></html>', {
-    pretendToBeVisual: true,
-    url: 'https://benchmark.local/',
-  });
-
-  const win = dom.window as unknown as Window & typeof globalThis;
-
   const defineGlobal = (key: string, value: unknown) => {
     const desc = Object.getOwnPropertyDescriptor(globalThis, key);
     if (desc && !desc.configurable) return;
@@ -37,10 +28,21 @@ function ensureDomAndCanvasMocks(): void {
     });
   };
 
-  defineGlobal('window', win);
-  defineGlobal('document', win.document);
-  defineGlobal('HTMLElement', win.HTMLElement);
-  defineGlobal('HTMLCanvasElement', win.HTMLCanvasElement);
+  let win: Window & typeof globalThis;
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    const dom = new JSDOM('<!doctype html><html><body></body></html>', {
+      pretendToBeVisual: true,
+      url: 'https://benchmark.local/',
+    });
+    win = dom.window as unknown as Window & typeof globalThis;
+
+    defineGlobal('window', win);
+    defineGlobal('document', win.document);
+    defineGlobal('HTMLElement', win.HTMLElement);
+    defineGlobal('HTMLCanvasElement', win.HTMLCanvasElement);
+  } else {
+    win = window as unknown as Window & typeof globalThis;
+  }
 
   // The renderer schedules frames via rAF when state changes. Benchmarks drive frames
   // manually via `renderImmediately()`, so keep rAF a cheap no-op.
