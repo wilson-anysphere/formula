@@ -1,4 +1,5 @@
 import { readdir, readFile, stat } from "node:fs/promises";
+import { builtinModules } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -11,15 +12,26 @@ const SOURCE_EXTS = new Set([".ts", ".tsx", ".js", ".jsx"]);
 // Node-only modules used by Node integration tests (and later bridged via IPC/Tauri).
 // Those modules are allowed to import Node built-ins, but *must not* be imported by
 // any WebView/runtime code.
-// Note: `src/panels/marketplace/` contains runtime-safe WebView code (e.g. URL/config helpers).
-// If we ever need Node-only marketplace helpers again, they must live under
-// `src/panels/marketplace/node/` (or be added to `NODE_ONLY_FILES`) so the runtime can still
-// safely import the shared bits.
-const NODE_ONLY_PATH_PREFIXES = ["src/panels/marketplace/node/", "src/security/"];
-const NODE_ONLY_FILES = ["src/extensions/ExtensionHostManager.js"];
+//
+// Policy: any Node-only tooling should live outside the renderer source tree (`src/`), e.g.:
+// - `apps/desktop/tools/**`
+// - `apps/desktop/scripts/**`
+//
+// This check ensures WebView/runtime code under `src/` does not import from those Node-only
+// tooling directories.
+const NODE_ONLY_PATH_PREFIXES = ["tools/", "scripts/"];
+const NODE_ONLY_FILES = [];
 
 const NODE_BUILTIN_PREFIX = "node:";
-const NODE_BUILTIN_BARE = ["fs", "path", "worker_threads"];
+const NODE_BUILTIN_SPECIFIERS = new Set();
+for (const mod of builtinModules) {
+  NODE_BUILTIN_SPECIFIERS.add(mod);
+  if (mod.startsWith(NODE_BUILTIN_PREFIX)) {
+    NODE_BUILTIN_SPECIFIERS.add(mod.slice(NODE_BUILTIN_PREFIX.length));
+  } else {
+    NODE_BUILTIN_SPECIFIERS.add(`${NODE_BUILTIN_PREFIX}${mod}`);
+  }
+}
 
 const TEST_FILE_RE = /\.(test|spec)\.[jt]sx?$|\.vitest\.[jt]sx?$|\.e2e\.[jt]sx?$/;
 const IGNORED_DIRS = new Set([
@@ -170,10 +182,8 @@ function classifyNodeBuiltinSpecifier(specifier) {
     return `imports Node built-in via "${NODE_BUILTIN_PREFIX}" scheme: "${cleaned}"`;
   }
 
-  for (const bare of NODE_BUILTIN_BARE) {
-    if (cleaned === bare || cleaned.startsWith(`${bare}/`)) {
-      return `imports Node built-in module "${cleaned}"`;
-    }
+  if (NODE_BUILTIN_SPECIFIERS.has(cleaned)) {
+    return `imports Node built-in module "${cleaned}"`;
   }
 
   return null;
