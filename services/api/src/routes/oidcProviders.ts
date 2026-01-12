@@ -6,7 +6,7 @@ import { requireOrgMfaSatisfied } from "../auth/mfa";
 import { withTransaction } from "../db/tx";
 import { getClientIp, getUserAgent } from "../http/request-meta";
 import { isOrgAdmin, type OrgRole } from "../rbac/roles";
-import { deleteSecret, listSecrets, putSecret } from "../secrets/secretStore";
+import { deleteSecret, listSecrets, putSecret, secretExists } from "../secrets/secretStore";
 import { requireAuth } from "./auth";
 
 type OrgOidcProviderRow = {
@@ -196,8 +196,7 @@ export function registerOidcProviderRoutes(app: FastifyInstance): void {
     const row = providerRes.rows[0] as OrgOidcProviderRow;
 
     const secretName = oidcSecretName(orgId, providerId);
-    const secretRes = await app.db.query("SELECT 1 FROM secrets WHERE name = $1", [secretName]);
-    const secretConfigured = secretRes.rowCount === 1;
+    const secretConfigured = await secretExists(app.db, secretName);
 
     return reply.send({
       provider: {
@@ -282,7 +281,7 @@ export function registerOidcProviderRoutes(app: FastifyInstance): void {
 
       const secretConfigured = parsedBody.data.clientSecret !== undefined
         ? true
-        : (await client.query("SELECT 1 FROM secrets WHERE name = $1", [secretName])).rowCount === 1;
+        : await secretExists(client, secretName);
 
       const providerRes = await client.query<OrgOidcProviderRow>(
         `
