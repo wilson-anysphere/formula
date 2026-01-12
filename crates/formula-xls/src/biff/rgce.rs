@@ -1483,10 +1483,13 @@ fn format_external_workbook_name(workbook: &str) -> String {
         .next()
         .unwrap_or(&without_nuls);
     let trimmed = basename.trim();
-    let inner = trimmed
-        .strip_prefix('[')
-        .and_then(|s| s.strip_suffix(']'))
-        .unwrap_or(trimmed);
+    // Be permissive about bracket placement: we sometimes see values like:
+    // - "[Book.xlsx]"
+    // - "Book.xlsx"
+    // - "[C:\\path\\Book.xlsx]" (bracketed full path; the `[` is lost when taking the basename)
+    let mut inner = trimmed;
+    inner = inner.strip_prefix('[').unwrap_or(inner);
+    inner = inner.strip_suffix(']').unwrap_or(inner);
     format!("[{inner}]")
 }
 
@@ -3362,7 +3365,9 @@ mod tests {
             },
             SupBookInfo {
                 ctab: 0,
-                virt_path: r"C:\work\[Book2.xlsx]".to_string(),
+                // Bracketed full path (e.g. `[C:\work\Book2.xlsx]`) is not canonical Excel output,
+                // but it appears in some writer implementations.
+                virt_path: r"[C:\work\Book2.xlsx]".to_string(),
                 kind: SupBookKind::ExternalWorkbook,
                 workbook_name: None,
                 sheet_names: vec!["Sheet1".to_string()],

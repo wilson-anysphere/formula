@@ -265,7 +265,7 @@ fn workbook_name_from_virt_path(virt_path: &str) -> String {
     // Best-effort conversion:
     // - strip embedded NULs
     // - take basename after path separators
-    // - strip surrounding brackets if present
+    // - strip brackets if present
     let without_nuls = virt_path.replace('\0', "");
 
     let basename = without_nuls
@@ -274,10 +274,11 @@ fn workbook_name_from_virt_path(virt_path: &str) -> String {
         .unwrap_or(&without_nuls);
 
     let trimmed = basename.trim();
-    let inner = trimmed
-        .strip_prefix('[')
-        .and_then(|s| s.strip_suffix(']'))
-        .unwrap_or(trimmed);
+    // Be permissive about bracket placement: some producers wrap the full path in brackets
+    // (`[C:\\path\\Book.xlsx]`), which means we might lose the opening `[` when taking the basename.
+    let mut inner = trimmed;
+    inner = inner.strip_prefix('[').unwrap_or(inner);
+    inner = inner.strip_suffix(']').unwrap_or(inner);
     inner.to_string()
 }
 
@@ -687,6 +688,32 @@ mod tests {
     #[test]
     fn extracts_workbook_name_from_path_and_brackets() {
         let virt_path = "C:\\tmp\\[Book2.xlsx]\u{0000}";
+
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0u16.to_le_bytes()); // ctab
+        payload.extend_from_slice(&xl_unicode_string_compressed(virt_path));
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_SUPBOOK, &payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff8_supbook_table(&stream, 1252);
+        assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
+        assert_eq!(parsed.supbooks.len(), 1);
+        let sb = &parsed.supbooks[0];
+        assert_eq!(sb.kind, SupBookKind::ExternalWorkbook);
+        assert_eq!(sb.workbook_name.as_deref(), Some("Book2.xlsx"));
+    }
+
+    #[test]
+    fn extracts_workbook_name_from_bracketed_path() {
+        // Some producers wrap the full path in brackets (`[C:\tmp\Book2.xlsx]`). When we take the
+        // basename after the last path separator, we lose the leading `[` but keep the trailing
+        // `]` (e.g. `Book2.xlsx]`). We should still normalize to `Book2.xlsx`.
+        let virt_path = "[C:\\tmp\\Book2.xlsx]\u{0000}";
 
         let mut payload = Vec::new();
         payload.extend_from_slice(&0u16.to_le_bytes()); // ctab
