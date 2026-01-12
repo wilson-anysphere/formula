@@ -11,9 +11,10 @@ use anyhow::Context;
 use directories::ProjectDirs;
 use formula_model::{
     display_formula_text, normalize_formula_text, Cell as ModelCell, CellRef,
-    CellValue as ModelCellValue, DefinedNameScope, Workbook as ModelWorkbook,
+    CellValue as ModelCellValue, DefinedNameScope, Style, Workbook as ModelWorkbook,
 };
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::io::Cursor;
 use std::path::Path;
 use std::path::PathBuf;
@@ -44,16 +45,15 @@ pub fn workbook_to_model(workbook: &AppWorkbook) -> anyhow::Result<ModelWorkbook
     model.id = 0;
     model.date_system = workbook.date_system;
 
+    let mut number_format_style_ids: HashMap<String, u32> = HashMap::new();
+
     for sheet in &workbook.sheets {
         let sheet_id = model.add_sheet(sheet.name.clone())?;
-        let Some(model_sheet) = model.sheet_mut(sheet_id) else {
-            continue;
-        };
 
         for ((row, col), cell) in sheet.cells_iter() {
             let cell_ref = CellRef::new(row as u32, col as u32);
 
-            let out = match (&cell.formula, &cell.input_value) {
+            let mut out = match (&cell.formula, &cell.input_value) {
                 (Some(formula), _) => {
                     let mut c = ModelCell::new(scalar_to_model_value(&cell.computed_value));
                     c.formula = normalize_formula_text(formula);
@@ -63,11 +63,32 @@ pub fn workbook_to_model(workbook: &AppWorkbook) -> anyhow::Result<ModelWorkbook
                 (None, None) => ModelCell::new(ModelCellValue::Empty),
             };
 
+            if let Some(fmt) = cell
+                .number_format
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                if let Some(existing) = number_format_style_ids.get(fmt) {
+                    out.style_id = *existing;
+                } else {
+                    let fmt = fmt.to_string();
+                    let style_id = model.styles.intern(Style {
+                        number_format: Some(fmt.clone()),
+                        ..Default::default()
+                    });
+                    number_format_style_ids.insert(fmt, style_id);
+                    out.style_id = style_id;
+                }
+            }
+
             if out.is_truly_empty() {
                 continue;
             }
 
-            model_sheet.set_cell(cell_ref, out);
+            if let Some(model_sheet) = model.sheet_mut(sheet_id) {
+                model_sheet.set_cell(cell_ref, out);
+            }
         }
     }
 

@@ -3207,6 +3207,41 @@ mod tests {
     }
 
     #[test]
+    fn xls_number_formats_survive_persistent_recovery() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../crates/formula-xls/tests/fixtures/dates.xls"
+        ));
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let db_path = tmp.path().join("autosave.sqlite");
+        let location = WorkbookPersistenceLocation::OnDisk(db_path);
+
+        {
+            let workbook = read_xlsx_blocking(fixture_path).expect("read xls workbook");
+            let mut state = AppState::new();
+            state
+                .load_workbook_persistent(workbook, location.clone())
+                .expect("load persistent workbook");
+        }
+
+        let workbook = read_xlsx_blocking(fixture_path).expect("re-read xls workbook");
+        let mut state = AppState::new();
+        state
+            .load_workbook_persistent(workbook, location)
+            .expect("recover workbook from autosave storage");
+
+        let recovered = state.get_workbook().expect("workbook");
+        let dates_sheet = recovered
+            .sheets
+            .iter()
+            .find(|s| s.name.eq_ignore_ascii_case("Dates"))
+            .expect("Dates sheet exists");
+        let cell = dates_sheet.get_cell(0, 0);
+        assert_eq!(cell.number_format.as_deref(), Some("m/d/yy"));
+    }
+
+    #[test]
     fn normalize_formula_matches_formula_model_display_semantics() {
         assert_eq!(normalize_formula(None), None);
         assert_eq!(normalize_formula(Some("".to_string())), None);
