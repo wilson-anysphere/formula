@@ -17,6 +17,7 @@ import type { DesktopExtensionHostManager } from "../extensions/extensionHostMan
 import type { PanelRegistry } from "./panelRegistry.js";
 import { PivotBuilderPanelContainer } from "./pivot-builder/PivotBuilderPanelContainer.js";
 import type { SpreadsheetApi } from "../../../../packages/ai-tools/src/spreadsheet/api.js";
+import { MarketplaceClient, WebExtensionManager } from "@formula/extension-marketplace";
 import type { CollabSession } from "@formula/collab-session";
 import { buildVersionHistoryItems } from "./version-history/index.js";
 import { BranchManagerPanel, type Actor as BranchActor } from "./branch-manager/BranchManagerPanel.js";
@@ -29,7 +30,7 @@ import { BranchService } from "../../../../packages/versioning/branches/src/Bran
 import { YjsBranchStore } from "../../../../packages/versioning/branches/src/store/YjsBranchStore.js";
 import { applyDocumentStateToYjsDoc, yjsDocToDocumentState } from "../../../../packages/versioning/branches/src/yjs/index.js";
 import { getMarketplaceBaseUrl } from "./marketplace/getMarketplaceBaseUrl.js";
-import { MarketplaceClient, WebExtensionManager } from "@formula/extension-marketplace";
+import * as nativeDialogs from "../tauri/nativeDialogs.js";
 
 function formatVersionTimestamp(timestampMs: number): string {
   try {
@@ -141,7 +142,10 @@ function CollabVersionHistoryPanel({ session }: { session: CollabSession }) {
           onClick={async () => {
             const id = selectedId;
             if (!id) return;
-            if (!window.confirm("Restore this version? This will overwrite the current collaborative document state.")) return;
+            const ok = await nativeDialogs.confirm(
+              "Restore this version? This will overwrite the current collaborative document state.",
+            );
+            if (!ok) return;
             try {
               setBusy(true);
               setError(null);
