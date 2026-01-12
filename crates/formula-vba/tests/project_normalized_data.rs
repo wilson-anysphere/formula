@@ -112,6 +112,65 @@ fn project_normalized_data_includes_expected_dir_records_and_prefers_unicode_var
 }
 
 #[test]
+fn project_normalized_data_prefers_alternate_unicode_dir_record_ids() {
+    // Some real-world `VBA/dir` streams use non-canonical record IDs for Unicode/alternate string
+    // variants:
+    // - PROJECTDOCSTRINGUNICODE: 0x0041
+    // - PROJECTHELPFILEPATH2:    0x0042
+    // - PROJECTCONSTANTSUNICODE: 0x0043
+    //
+    // Ensure ProjectNormalizedData prefers these variants and skips the ANSI record payload when
+    // the Unicode form immediately follows.
+    let dir_decompressed = {
+        let mut out = Vec::new();
+
+        // Included: PROJECTNAME
+        push_record(&mut out, 0x0004, b"MyProject");
+
+        // PROJECTDOCSTRING (ANSI) followed by alternate Unicode record id 0x0041.
+        push_record(&mut out, 0x0005, b"DocAnsi");
+        push_record(&mut out, 0x0041, &utf16le_bytes("DocUni"));
+
+        // PROJECTHELPFILEPATH (ANSI) followed by alternate second-path/Unicode record id 0x0042.
+        push_record(&mut out, 0x0006, b"HelpAnsi");
+        push_record(&mut out, 0x0042, &utf16le_bytes("HelpUni"));
+
+        // PROJECTCONSTANTS (ANSI) followed by alternate Unicode record id 0x0043.
+        push_record(&mut out, 0x000C, b"ConstAnsi");
+        push_record(&mut out, 0x0043, &utf16le_bytes("ConstUni"));
+
+        out
+    };
+
+    let vba_bin = build_vba_bin_with_dir_decompressed(&dir_decompressed);
+    let normalized = project_normalized_data(&vba_bin).expect("ProjectNormalizedData");
+
+    let expected = [
+        b"MyProject".as_slice(),
+        utf16le_bytes("DocUni").as_slice(),
+        utf16le_bytes("HelpUni").as_slice(),
+        utf16le_bytes("ConstUni").as_slice(),
+        // PROJECT stream ProjectProperties contribution: key bytes + value bytes (no separators).
+        b"NameVBAProject".as_slice(),
+    ]
+    .concat();
+
+    assert_eq!(normalized, expected);
+    assert!(
+        find_subslice(&normalized, b"DocAnsi").is_none(),
+        "expected ANSI PROJECTDOCSTRING bytes to be omitted when Unicode variant is present"
+    );
+    assert!(
+        find_subslice(&normalized, b"HelpAnsi").is_none(),
+        "expected ANSI PROJECTHELPFILEPATH bytes to be omitted when alternate Unicode variant is present"
+    );
+    assert!(
+        find_subslice(&normalized, b"ConstAnsi").is_none(),
+        "expected ANSI PROJECTCONSTANTS bytes to be omitted when Unicode variant is present"
+    );
+}
+
+#[test]
 fn project_normalized_data_includes_projectcompatversion_record() {
     // Real-world `VBA/dir` streams often include PROJECTCOMPATVERSION (0x004A) in the
     // ProjectInformation record list. Ensure it contributes to ProjectNormalizedData.

@@ -75,7 +75,13 @@ pub fn project_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
     // These record IDs are not part of the minimal VBA project fixture used by this repo, but they
     // occur in real-world files.
     const PROJECTDOCSTRINGUNICODE: u16 = 0x0040;
+    const PROJECTDOCSTRINGUNICODE_ALT: u16 = 0x0041;
+    // PROJECTHELPFILEPATH has an optional second string record that is often Unicode (0x003D), with
+    // an observed alternate ID (0x0042).
+    const PROJECTHELPFILEPATH2: u16 = 0x003D;
+    const PROJECTHELPFILEPATH2_ALT: u16 = 0x0042;
     const PROJECTCONSTANTSUNICODE: u16 = 0x003C;
+    const PROJECTCONSTANTSUNICODE_ALT: u16 = 0x0043;
 
     let mut ole = OleFile::open(vba_project_bin)?;
 
@@ -173,7 +179,6 @@ pub fn project_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
             | PROJECTLCIDINVOKE
             | PROJECTCODEPAGE
             | PROJECTNAME
-            | PROJECTHELPFILEPATH
             | PROJECTHELPCONTEXT
             | PROJECTLIBFLAGS
             | PROJECTVERSION => {
@@ -181,20 +186,39 @@ pub fn project_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
             }
 
             PROJECTDOCSTRING => {
-                if next_id != Some(PROJECTDOCSTRINGUNICODE) {
+                if !matches!(
+                    next_id,
+                    Some(PROJECTDOCSTRINGUNICODE) | Some(PROJECTDOCSTRINGUNICODE_ALT)
+                ) {
                     out.extend_from_slice(data);
                 }
             }
-            PROJECTDOCSTRINGUNICODE => {
+            PROJECTDOCSTRINGUNICODE | PROJECTDOCSTRINGUNICODE_ALT => {
+                out.extend_from_slice(data);
+            }
+
+            PROJECTHELPFILEPATH => {
+                // Prefer the second string record when present; it is commonly a Unicode form.
+                if !matches!(
+                    next_id,
+                    Some(PROJECTHELPFILEPATH2) | Some(PROJECTHELPFILEPATH2_ALT)
+                ) {
+                    out.extend_from_slice(data);
+                }
+            }
+            PROJECTHELPFILEPATH2 | PROJECTHELPFILEPATH2_ALT => {
                 out.extend_from_slice(data);
             }
 
             PROJECTCONSTANTS => {
-                if next_id != Some(PROJECTCONSTANTSUNICODE) {
+                if !matches!(
+                    next_id,
+                    Some(PROJECTCONSTANTSUNICODE) | Some(PROJECTCONSTANTSUNICODE_ALT)
+                ) {
                     out.extend_from_slice(data);
                 }
             }
-            PROJECTCONSTANTSUNICODE => {
+            PROJECTCONSTANTSUNICODE | PROJECTCONSTANTSUNICODE_ALT => {
                 out.extend_from_slice(data);
             }
 
@@ -428,8 +452,26 @@ fn looks_like_projectversion_following_record(bytes: &[u8], offset: usize) -> bo
     // ProjectModules header, or (in some real-world streams) module records.
     if !matches!(
         id,
-        0x000C | 0x003C | 0x004A | 0x000D | 0x000E | 0x0016 | 0x002F | 0x0030 | 0x0033 | 0x000F
-            | 0x0013 | 0x0010 | 0x0019 | 0x0047 | 0x001A | 0x0032
+        0x000C
+            | 0x003C
+            | 0x0043
+            | 0x003D
+            | 0x0042
+            | 0x0041
+            | 0x004A
+            | 0x000D
+            | 0x000E
+            | 0x0016
+            | 0x002F
+            | 0x0030
+            | 0x0033
+            | 0x000F
+            | 0x0013
+            | 0x0010
+            | 0x0019
+            | 0x0047
+            | 0x001A
+            | 0x0032
     ) {
         return false;
     }
