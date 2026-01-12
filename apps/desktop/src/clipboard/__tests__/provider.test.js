@@ -322,6 +322,57 @@ test("clipboard provider", async (t) => {
     );
   });
 
+  await t.test("web: write falls back to html/plain when text/rtf ClipboardItem write fails", async () => {
+    /** @type {any[]} */
+    const writes = [];
+    /** @type {string[]} */
+    const writeTextCalls = [];
+
+    class MockClipboardItem {
+      /**
+       * @param {Record<string, Blob>} data
+       */
+      constructor(data) {
+        this.data = data;
+      }
+    }
+
+    await withGlobals(
+      {
+        __TAURI__: undefined,
+        ClipboardItem: MockClipboardItem,
+        navigator: {
+          clipboard: {
+            async write(items) {
+              writes.push(items);
+              const keys = Object.keys(items?.[0]?.data ?? {});
+              if (keys.includes("text/rtf")) {
+                throw new Error("unsupported type: text/rtf");
+              }
+            },
+            async writeText(text) {
+              writeTextCalls.push(text);
+            },
+          },
+        },
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        await provider.write({ text: "plain", html: "<p>hello</p>", rtf: "{\\\\rtf1 hello}" });
+
+        // First attempt includes RTF, then we retry without it.
+        assert.equal(writes.length, 2);
+        assert.equal(writeTextCalls.length, 0);
+
+        const firstKeys = Object.keys(writes[0][0].data).sort();
+        assert.deepEqual(firstKeys, ["text/html", "text/plain", "text/rtf"].sort());
+
+        const secondKeys = Object.keys(writes[1][0].data).sort();
+        assert.deepEqual(secondKeys, ["text/html", "text/plain"].sort());
+      }
+    );
+  });
+
   await t.test("web: write includes small image/png when provided", async () => {
     /** @type {any[]} */
     const writes = [];
@@ -735,9 +786,64 @@ test("clipboard provider", async (t) => {
         assert.ok(item instanceof MockClipboardItem);
 
         const keys = Object.keys(item.data).sort();
-        // ClipboardItem writes are best-effort and intentionally omit RTF so we don't
-        // regress HTML clipboard writes on platforms that reject unsupported types.
-        assert.deepEqual(keys, ["text/html", "text/plain"].sort());
+        // ClipboardItem writes are best-effort: include rich formats (like RTF) when provided,
+        // but the provider may fall back to HTML/plain if the platform rejects them.
+        assert.deepEqual(keys, ["text/html", "text/plain", "text/rtf"].sort());
+      }
+    );
+  });
+
+  await t.test("tauri: write falls back to html/plain when text/rtf ClipboardItem write fails", async () => {
+    /** @type {any[]} */
+    const invokeCalls = [];
+    /** @type {any[]} */
+    const writes = [];
+
+    class MockClipboardItem {
+      /**
+       * @param {Record<string, Blob>} data
+       */
+      constructor(data) {
+        this.data = data;
+      }
+    }
+
+    await withGlobals(
+      {
+        __TAURI__: {
+          core: {
+            async invoke(cmd, args) {
+              invokeCalls.push([cmd, args]);
+            },
+          },
+        },
+        ClipboardItem: MockClipboardItem,
+        navigator: {
+          clipboard: {
+            async write(items) {
+              writes.push(items);
+              const keys = Object.keys(items?.[0]?.data ?? {});
+              if (keys.includes("text/rtf")) {
+                throw new Error("unsupported type: text/rtf");
+              }
+            },
+          },
+        },
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        await provider.write({ text: "plain", html: "<p>hello</p>", rtf: "{\\\\rtf1 hello}" });
+
+        assert.equal(invokeCalls.length, 1);
+        assert.equal(invokeCalls[0][0], "clipboard_write");
+
+        // First attempt includes RTF, then we retry without it.
+        assert.equal(writes.length, 2);
+        const firstKeys = Object.keys(writes[0][0].data).sort();
+        assert.deepEqual(firstKeys, ["text/html", "text/plain", "text/rtf"].sort());
+
+        const secondKeys = Object.keys(writes[1][0].data).sort();
+        assert.deepEqual(secondKeys, ["text/html", "text/plain"].sort());
       }
     );
   });
