@@ -7975,10 +7975,6 @@ export class SpreadsheetApp {
     return this.computeCellValue(sheetId, cell, memo, stack, { useEngineCache });
   }
 
-  private computedKey(sheetId: string, address: string): string {
-    return `${sheetId}:${address.replaceAll("$", "").toUpperCase()}`;
-  }
-
   private resolveSheetIdByName(name: string): string | null {
     const trimmed = (() => {
       const raw = name.trim();
@@ -8157,18 +8153,27 @@ export class SpreadsheetApp {
       }
     }
 
-    const address = cellToA1(cell);
-    const computedKey = this.computedKey(sheetId, address);
+    const state = this.document.getCell(sheetId, cell) as { value: unknown; formula: string | null };
+
+    // Fast path: plain values do not participate in reference cycles and do not need to
+    // be memoized per evaluation call. Avoid generating A1/key strings for them.
+    if (state?.formula == null) {
+      if (state?.value != null) {
+        return isRichTextValue(state.value) ? state.value.text : (state.value as SpreadsheetValue);
+      }
+      return null;
+    }
+
+    const computedKey = `${sheetId}\u0000${cell.row},${cell.col}`;
     const cached = memo.get(computedKey);
     if (cached !== undefined || memo.has(computedKey)) return cached ?? null;
     if (stack.has(computedKey)) return "#REF!";
 
     stack.add(computedKey);
-    const state = this.document.getCell(sheetId, cell) as { value: unknown; formula: string | null };
     let value: SpreadsheetValue;
 
-    if (state?.formula != null) {
-      value = evaluateFormula(state.formula, (ref) => {
+    const address = cellToA1(cell);
+    value = evaluateFormula(state.formula, (ref) => {
         const normalized = ref.replaceAll("$", "").trim();
         let targetSheet = sheetId;
         let targetAddress = normalized;
@@ -8184,14 +8189,9 @@ export class SpreadsheetApp {
          const coord = parseA1(targetAddress);
          return this.computeCellValue(targetSheet, coord, memo, stack, options);
        }, {
-         ai: this.aiCellFunctions,
-         cellAddress: `${sheetId}!${address}`,
-       });
-    } else if (state?.value != null) {
-      value = isRichTextValue(state.value) ? state.value.text : (state.value as SpreadsheetValue);
-    } else {
-      value = null;
-    }
+          ai: this.aiCellFunctions,
+          cellAddress: `${sheetId}!${address}`,
+        });
 
     stack.delete(computedKey);
     memo.set(computedKey, value);

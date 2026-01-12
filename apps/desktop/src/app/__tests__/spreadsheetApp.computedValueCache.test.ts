@@ -139,8 +139,9 @@ describe("SpreadsheetApp computed-value cache", () => {
     // Sanity check: when the numeric cache entry is missing, we should fall back and
     // build an A1 address.
     byCoord.delete(key);
+    doc.setCellFormula(sheetId, { row, col }, "=1+1");
     spy.mockClear();
-    (app as any).getCellComputedValue({ row, col });
+    expect((app as any).getCellComputedValue({ row, col })).toBe(2);
     expect(spy).toHaveBeenCalled();
 
     app.destroy();
