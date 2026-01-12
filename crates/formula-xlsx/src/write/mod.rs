@@ -615,7 +615,6 @@ fn build_parts(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u8>>, WriteErr
         let desired_views = SheetViewSettings::from_sheet(sheet);
         let views_changed = desired_views != orig_views;
 
-        let cols_xml = render_cols(sheet);
         let cols_changed = &sheet.col_properties != &orig_cols;
 
         let autofilter_changed = sheet.auto_filter.as_ref() != orig_autofilter.as_ref();
@@ -652,6 +651,8 @@ fn build_parts(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u8>>, WriteErr
             sheet_xml = update_sheet_views_xml(&sheet_xml, desired_views)?;
         }
         if is_new_sheet || cols_changed {
+            let worksheet_prefix = crate::xml::worksheet_spreadsheetml_prefix(&sheet_xml)?;
+            let cols_xml = render_cols(sheet, worksheet_prefix.as_deref());
             sheet_xml = update_cols_xml(&sheet_xml, &cols_xml)?;
         }
         if is_new_sheet || merges_changed {
@@ -794,24 +795,36 @@ fn parse_sheet_view_settings(xml: &str) -> Result<SheetViewSettings, WriteError>
     Ok(settings)
 }
 
-fn render_sheet_views_section(views: SheetViewSettings) -> String {
+fn render_sheet_views_section(views: SheetViewSettings, prefix: Option<&str>) -> String {
     if views.is_default() {
         return String::new();
     }
 
+    let sheet_views_tag = crate::xml::prefixed_tag(prefix, "sheetViews");
+    let sheet_view_tag = crate::xml::prefixed_tag(prefix, "sheetView");
+    let pane_tag = crate::xml::prefixed_tag(prefix, "pane");
+
     let mut out = String::new();
-    out.push_str("<sheetViews><sheetView workbookViewId=\"0\"");
+    out.push('<');
+    out.push_str(&sheet_views_tag);
+    out.push('>');
+    out.push('<');
+    out.push_str(&sheet_view_tag);
+    out.push_str(" workbookViewId=\"0\"");
     if views.zoom_scale != 100 {
         out.push_str(&format!(r#" zoomScale="{}""#, views.zoom_scale));
     }
 
     if views.frozen_rows == 0 && views.frozen_cols == 0 {
-        out.push_str("/></sheetViews>");
+        out.push_str("/></");
+        out.push_str(&sheet_views_tag);
+        out.push('>');
         return out;
     }
 
     out.push('>');
-    out.push_str("<pane");
+    out.push('<');
+    out.push_str(&pane_tag);
     if views.frozen_cols > 0 {
         out.push_str(&format!(r#" xSplit="{}""#, views.frozen_cols));
     }
@@ -831,12 +844,17 @@ fn render_sheet_views_section(views: SheetViewSettings) -> String {
     out.push_str(&format!(
         r#" activePane="{active_pane}" state="frozen"/>"#
     ));
-    out.push_str("</sheetView></sheetViews>");
+    out.push_str("</");
+    out.push_str(&sheet_view_tag);
+    out.push_str("></");
+    out.push_str(&sheet_views_tag);
+    out.push('>');
     out
 }
 
 fn update_sheet_views_xml(sheet_xml: &str, views: SheetViewSettings) -> Result<String, WriteError> {
-    let new_section = render_sheet_views_section(views);
+    let worksheet_prefix = crate::xml::worksheet_spreadsheetml_prefix(sheet_xml)?;
+    let new_section = render_sheet_views_section(views, worksheet_prefix.as_deref());
 
     let mut reader = Reader::from_str(sheet_xml);
     reader.config_mut().trim_text(false);
@@ -1909,7 +1927,7 @@ fn write_worksheet_xml(
     }
  
     let dimension = dimension::worksheet_dimension_range(sheet).to_string();
-    let cols_xml = render_cols(sheet);
+    let cols_xml = render_cols(sheet, None);
     let sheet_data_xml = render_sheet_data(
         doc,
         sheet_meta,
@@ -2101,13 +2119,18 @@ fn patch_worksheet_dimension(
     Ok(writer.into_inner())
 }
 
-fn render_cols(sheet: &Worksheet) -> String {
+fn render_cols(sheet: &Worksheet, prefix: Option<&str>) -> String {
     if sheet.col_properties.is_empty() {
         return String::new();
     }
 
+    let cols_tag = crate::xml::prefixed_tag(prefix, "cols");
+    let col_tag = crate::xml::prefixed_tag(prefix, "col");
+
     let mut out = String::new();
-    out.push_str("<cols>");
+    out.push('<');
+    out.push_str(&cols_tag);
+    out.push('>');
 
     let mut current: Option<(u32, u32, formula_model::ColProperties)> = None;
     for (col, props) in sheet.col_properties.iter() {
@@ -2119,24 +2142,31 @@ fn render_cols(sheet: &Worksheet) -> String {
                 current = Some((start, col, cur));
             }
             Some((start, end, cur)) => {
-                out.push_str(&render_col_range(start, end, &cur));
+                out.push_str(&render_col_range(&col_tag, start, end, &cur));
                 current = Some((col, col, props));
             }
         }
     }
     if let Some((start, end, cur)) = current {
-        out.push_str(&render_col_range(start, end, &cur));
+        out.push_str(&render_col_range(&col_tag, start, end, &cur));
     }
 
-    out.push_str("</cols>");
+    out.push_str("</");
+    out.push_str(&cols_tag);
+    out.push('>');
     out
 }
 
-fn render_col_range(start_col: u32, end_col: u32, props: &formula_model::ColProperties) -> String {
+fn render_col_range(
+    col_tag: &str,
+    start_col: u32,
+    end_col: u32,
+    props: &formula_model::ColProperties,
+) -> String {
     let mut s = String::new();
     let min = start_col + 1;
     let max = end_col + 1;
-    s.push_str(&format!(r#"<col min="{min}" max="{max}""#));
+    s.push_str(&format!(r#"<{col_tag} min="{min}" max="{max}""#));
     if let Some(width) = props.width {
         s.push_str(&format!(r#" width="{width}""#));
         s.push_str(r#" customWidth="1""#);
