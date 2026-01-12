@@ -1126,16 +1126,66 @@ class BrowserExtensionHost {
       case "workbook.getActiveWorkbook":
         return this._getActiveWorkbook();
       case "workbook.openWorkbook":
+        if (typeof this._spreadsheet.openWorkbook === "function") {
+          // Best-effort: update internal workbook metadata from the input path so
+          // `_getActiveWorkbook` has reasonable defaults even if the host doesn't
+          // implement `getActiveWorkbook`.
+          const workbookPathStr = args[0] == null ? null : String(args[0]);
+          const name =
+            workbookPathStr == null || workbookPathStr.trim().length === 0
+              ? "MockWorkbook"
+              : workbookPathStr.split(/[/\\]/).pop() ?? workbookPathStr;
+          this._workbook = { name, path: workbookPathStr };
+
+          await this._spreadsheet.openWorkbook(workbookPathStr);
+          const workbook = await this._getActiveWorkbook();
+          this._broadcastEvent("workbookOpened", { workbook });
+          return workbook;
+        }
         return this.openWorkbook(args[0]);
       case "workbook.createWorkbook":
+        if (typeof this._spreadsheet.createWorkbook === "function") {
+          // Mirror the browser-host stub: reset workbook metadata before creation so
+          // consumers relying on the in-memory snapshot get deterministic fields.
+          this._workbook = { name: "MockWorkbook", path: null };
+          await this._spreadsheet.createWorkbook();
+          const workbook = await this._getActiveWorkbook();
+          this._broadcastEvent("workbookOpened", { workbook });
+          return workbook;
+        }
         return this.openWorkbook(null);
       case "workbook.save":
+        if (typeof this._spreadsheet.saveWorkbook === "function") {
+          this._broadcastEvent("beforeSave", { workbook: await this._getActiveWorkbook() });
+          await this._spreadsheet.saveWorkbook();
+          return null;
+        }
         this.saveWorkbook();
         return null;
       case "workbook.saveAs":
+        if (typeof this._spreadsheet.saveWorkbookAs === "function") {
+          const workbookPathStr = args[0] == null ? null : String(args[0]);
+          if (workbookPathStr == null || workbookPathStr.trim().length === 0) {
+            throw new Error("Workbook path must be a non-empty string");
+          }
+          const name = workbookPathStr.split(/[/\\]/).pop() ?? workbookPathStr;
+          this._workbook = { name, path: workbookPathStr };
+          this._broadcastEvent("beforeSave", { workbook: this._getWorkbookSnapshot() });
+          await this._spreadsheet.saveWorkbookAs(workbookPathStr);
+          return null;
+        }
         this.saveWorkbookAs(args[0]);
         return null;
       case "workbook.close":
+        if (typeof this._spreadsheet.closeWorkbook === "function") {
+          // Mirror browser-host semantics: after close, treat the session as a fresh workbook
+          // (close is modeled as "open empty workbook").
+          this._workbook = { name: "MockWorkbook", path: null };
+          await this._spreadsheet.closeWorkbook();
+          const workbook = await this._getActiveWorkbook();
+          this._broadcastEvent("workbookOpened", { workbook });
+          return null;
+        }
         this.closeWorkbook();
         return null;
       case "sheets.getActiveSheet":

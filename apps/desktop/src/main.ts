@@ -1038,7 +1038,7 @@ if (
   const extensionHostManager = new DesktopExtensionHostManager({
     engineVersion: "1.0.0",
     spreadsheetApi: {
-      async getActiveSheet() {
+      getActiveSheet() {
         const sheetId = app.getCurrentSheetId();
         return { id: sheetId, name: workbookSheetNames.get(sheetId) ?? sheetId };
       },
@@ -1069,6 +1069,44 @@ if (
       async setCell(row: number, col: number, value: unknown) {
         const sheetId = app.getCurrentSheetId();
         app.getDocument().setCellValue(sheetId, { row, col }, value);
+      },
+      async getActiveWorkbook() {
+        const sheetId = app.getCurrentSheetId();
+        const activeSheet = { id: sheetId, name: workbookSheetNames.get(sheetId) ?? sheetId };
+        const sheets = (() => {
+          const ids = app.getDocument().getSheetIds();
+          const list = ids.length > 0 ? ids : ["Sheet1"];
+          return list.map((id) => ({ id, name: workbookSheetNames.get(id) ?? id }));
+        })();
+
+        const path =
+          activeWorkbook?.path ??
+          activeWorkbook?.origin_path ??
+          // If no backend workbook is active, treat this as an unsaved session.
+          null;
+
+        const name = (() => {
+          const pick = typeof path === "string" && path.trim() !== "" ? path : null;
+          if (!pick) return "Workbook";
+          return pick.split(/[/\\]/).pop() ?? "Workbook";
+        })();
+
+        return { name, path, sheets, activeSheet };
+      },
+      async openWorkbook(path: string) {
+        await openWorkbookFromPath(String(path));
+      },
+      async createWorkbook() {
+        await handleNewWorkbook();
+      },
+      async saveWorkbook() {
+        await handleSave();
+      },
+      async saveWorkbookAs(path: string) {
+        await handleSaveAsPath(String(path));
+      },
+      async closeWorkbook() {
+        await handleNewWorkbook();
       },
     },
     uiApi: {
@@ -3470,6 +3508,19 @@ async function handleSaveAs(): Promise<void> {
     ],
   });
   if (!path) return;
+
+  await handleSaveAsPath(path, { previousPanelWorkbookId });
+}
+
+async function handleSaveAsPath(
+  path: string,
+  options: { previousPanelWorkbookId?: string } = {},
+): Promise<void> {
+  if (!tauriBackend) return;
+  if (!activeWorkbook) return;
+  if (typeof path !== "string" || path.trim() === "") return;
+
+  const previousPanelWorkbookId = options.previousPanelWorkbookId ?? activePanelWorkbookId;
 
   // Ensure any pending microtask-batched workbook edits are flushed before saving.
   await new Promise<void>((resolve) => queueMicrotask(resolve));

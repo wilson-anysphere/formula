@@ -239,11 +239,116 @@ test.describe("BrowserExtensionHost", () => {
         { manifestUrl, hostModuleUrl, url }
       );
 
-      expect(result.text).toBe("hello");
-      expect(result.messages.some((m: any) => String(m.message).includes("Fetched: hello"))).toBe(true);
-    } finally {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-    }
+    expect(result.text).toBe("hello");
+    expect(result.messages.some((m: any) => String(m.message).includes("Fetched: hello"))).toBe(true);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+  });
+
+  test("delegates workbook.createWorkbook to the provided spreadsheetApi and returns a workbook snapshot", async ({
+    page,
+  }) => {
+    await gotoDesktop(page);
+
+    const hostModuleUrl = viteFsUrl(path.join(repoRoot, "packages/extension-host/src/browser/index.mjs"));
+    const extensionApiUrl = viteFsUrl(path.join(repoRoot, "packages/extension-api/index.mjs"));
+
+    const result = await page.evaluate(
+      async ({ hostModuleUrl, extensionApiUrl }) => {
+        const { BrowserExtensionHost } = await import(hostModuleUrl);
+
+        // The extension entrypoint is loaded via `blob:` URL, so its module resolution base is
+        // non-hierarchical. Convert Vite's `/@fs/...` path into an absolute http(s) URL so
+        // `import` inside the blob-backed worker can resolve it.
+        const extensionApiAbsoluteUrl = new URL(extensionApiUrl, location.href).href;
+
+        const commandId = "wbExt.createAndRead";
+        const manifest = {
+          name: "wb-ext",
+          version: "1.0.0",
+          publisher: "formula-test",
+          main: "./dist/extension.mjs",
+          engines: { formula: "^1.0.0" },
+          activationEvents: [`onCommand:${commandId}`],
+          contributes: { commands: [{ command: commandId, title: "Create Workbook + Read" }] },
+          permissions: ["ui.commands", "workbook.manage"],
+        };
+
+        const code = `
+          import * as formula from ${JSON.stringify(extensionApiAbsoluteUrl)};
+          export async function activate(context) {
+            context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
+              commandId,
+            )}, async () => {
+              await formula.workbook.createWorkbook();
+              const wb = await formula.workbook.getActiveWorkbook();
+              return { name: wb.name, path: wb.path, sheets: wb.sheets, activeSheet: wb.activeSheet };
+            }));
+          }
+          export default { activate };
+        `;
+
+        const blob = new Blob([code], { type: "text/javascript" });
+        const mainUrl = URL.createObjectURL(blob);
+
+        const sheet = { id: "Sheet1", name: "Sheet1" };
+        const state = { name: "InitialWorkbook", path: null };
+
+        const spreadsheetApi = {
+          listSheets() {
+            return [sheet];
+          },
+          getActiveSheet() {
+            return sheet;
+          },
+          async getActiveWorkbook() {
+            return { name: state.name, path: state.path };
+          },
+          async createWorkbook() {
+            state.name = "CreatedWorkbook";
+            state.path = null;
+          },
+          async getSelection() {
+            return { startRow: 0, startCol: 0, endRow: 0, endCol: 0, values: [[null]] };
+          },
+          async getCell() {
+            return null;
+          },
+          async setCell() {
+            // noop
+          },
+        };
+
+        const host = new BrowserExtensionHost({
+          engineVersion: "1.0.0",
+          spreadsheetApi,
+          permissionPrompt: async () => true,
+          sandbox: { strictImports: false },
+        });
+
+        await host.loadExtension({
+          extensionId: `${manifest.publisher}.${manifest.name}`,
+          extensionPath: "memory://wb-ext/",
+          manifest,
+          mainUrl,
+        });
+
+        const workbook = await host.executeCommand(commandId);
+        await host.dispose();
+        URL.revokeObjectURL(mainUrl);
+
+        return workbook;
+      },
+      { hostModuleUrl, extensionApiUrl },
+    );
+
+    expect(result.name).toBe("CreatedWorkbook");
+    expect(result.path).toBeNull();
+    expect(Array.isArray(result.sheets)).toBe(true);
+    expect(result.sheets.length).toBeGreaterThan(0);
+    expect(result.sheets[0]).toEqual({ id: "Sheet1", name: "Sheet1" });
+    expect(result.activeSheet).toEqual({ id: "Sheet1", name: "Sheet1" });
   });
 
   test("clipboard.writeText writes to the system clipboard (desktop adapter)", async ({ page }) => {
