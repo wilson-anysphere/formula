@@ -16,8 +16,23 @@ export type ParsedKeybinding = {
   key: string;
 };
 
+const KEY_ALIASES: Record<string, string> = {
+  esc: "escape",
+  del: "delete",
+  return: "enter",
+  spacebar: "space",
+  up: "arrowup",
+  down: "arrowdown",
+  left: "arrowleft",
+  right: "arrowright",
+};
+
 function normalizeKeyToken(token: string): string {
-  return token.trim().toLowerCase();
+  // `KeyboardEvent.key` uses a literal space for the spacebar in modern browsers.
+  // Keep our internal string key representation consistent with extension manifests.
+  if (token === " ") return "space";
+  const normalized = token.trim().toLowerCase();
+  return KEY_ALIASES[normalized] ?? normalized;
 }
 
 export function parseKeybinding(command: string, binding: string, when: string | null = null): ParsedKeybinding | null {
@@ -52,10 +67,7 @@ export function parseKeybinding(command: string, binding: string, when: string |
 }
 
 function normalizeEventKey(event: KeyboardEvent): string {
-  if (event.key === " ") return "space";
-  const key = event.key.toLowerCase();
-  if (key === "esc") return "escape";
-  return key;
+  return normalizeKeyToken(event.key);
 }
 
 export function matchesKeybinding(binding: ParsedKeybinding, event: KeyboardEvent): boolean {
