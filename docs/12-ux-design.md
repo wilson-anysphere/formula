@@ -163,13 +163,13 @@ The user experience must honor Excel's familiar mental model while introducing m
 
 | Shortcut | Action |
 |----------|--------|
-| `Ctrl+B` | Bold |
-| `Ctrl+I` | Italic |
-| `Ctrl+U` | Underline |
-| `Ctrl+1` | Format cells dialog |
-| `Ctrl+Shift+$` | Currency format |
-| `Ctrl+Shift+%` | Percentage format |
-| `Ctrl+Shift+#` | Date format |
+| `Cmd/Ctrl+B` | Bold |
+| `Cmd/Ctrl+I` | Italic |
+| `Cmd/Ctrl+U` | Underline |
+| `Cmd/Ctrl+1` | Format cells dialog |
+| `Cmd/Ctrl+Shift+$` | Currency format |
+| `Cmd/Ctrl+Shift+%` | Percentage format |
+| `Cmd/Ctrl+Shift+#` | Date format |
 
 ### AI (New)
 
@@ -181,8 +181,10 @@ The user experience must honor Excel's familiar mental model while introducing m
 
 Platform notes:
 
-- **macOS:** `Cmd+I` is reserved for **Italic** (Excel-compatible). Use `Cmd+Shift+A` to toggle the AI chat sidebar.
-- **Windows/Linux:** `Ctrl+I` is reserved for **Italic** (Excel-compatible). Use `Ctrl+Shift+A` to toggle the AI chat sidebar.
+- **macOS:** `Cmd+I` is reserved for **Italic** (Excel-compatible).
+  Use `Cmd+Shift+A` to toggle the AI chat sidebar.
+- **Windows/Linux:** `Ctrl+I` is reserved for **Italic** (Excel-compatible).
+  Use `Ctrl+Shift+A` to toggle the AI chat sidebar.
 
 ---
 
