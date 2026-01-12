@@ -1060,7 +1060,9 @@ export class CollabSession {
     }
     if (offline.mode === "file") {
       if (!offline.filePath) {
-        throw new Error('CollabSession offline mode "file" requires offline.filePath');
+        // Match the legacy `@formula/collab-offline` error message for easier
+        // migration (some callers may assert on it).
+        throw new Error('Offline persistence mode "file" requires opts.filePath');
       }
       // Avoid a top-level import of the Node-only persistence implementation so
       // this module can still be bundled for browser environments.
@@ -1075,7 +1077,7 @@ export class CollabSession {
           /* @vite-ignore */ specifier
         ));
       } catch {
-        throw new Error('CollabSession offline mode "file" is only supported in Node environments');
+        throw new Error('Offline persistence mode "file" is only supported in Node environments');
       }
       // Use node:path.dirname for correctness (handles POSIX roots, Windows drive
       // roots, etc) without a static Node import that would break browser bundlers.
@@ -1088,7 +1090,7 @@ export class CollabSession {
           /* @vite-ignore */ pathSpecifier
         );
       } catch {
-        throw new Error('CollabSession offline mode "file" is only supported in Node environments');
+        throw new Error('Offline persistence mode "file" is only supported in Node environments');
       }
       const dir = typeof path.dirname === "function" ? path.dirname(offline.filePath) : this.dirnameForOfflineFilePath(offline.filePath);
 
