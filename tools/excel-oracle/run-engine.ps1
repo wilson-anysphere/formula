@@ -84,6 +84,28 @@ if (-not ($pathEntries -contains $cargoBinDir)) {
   $env:Path = "$cargoBinDir;$env:Path"
 }
 
+# Concurrency defaults: keep Rust builds stable on high-core-count multi-agent hosts.
+$jobsRaw = if ($env:FORMULA_CARGO_JOBS) { $env:FORMULA_CARGO_JOBS } elseif ($env:CARGO_BUILD_JOBS) { $env:CARGO_BUILD_JOBS } else { "4" }
+$jobsInt = 0
+if (-not [int]::TryParse($jobsRaw, [ref]$jobsInt) -or $jobsInt -lt 1) { $jobsInt = 4 }
+$jobs = $jobsInt.ToString()
+
+$env:CARGO_BUILD_JOBS = $jobs
+if (-not $env:MAKEFLAGS) { $env:MAKEFLAGS = "-j$jobs" }
+if (-not $env:CARGO_PROFILE_DEV_CODEGEN_UNITS) { $env:CARGO_PROFILE_DEV_CODEGEN_UNITS = $jobs }
+if (-not $env:CARGO_PROFILE_TEST_CODEGEN_UNITS) { $env:CARGO_PROFILE_TEST_CODEGEN_UNITS = $jobs }
+if (-not $env:CARGO_PROFILE_RELEASE_CODEGEN_UNITS) { $env:CARGO_PROFILE_RELEASE_CODEGEN_UNITS = $jobs }
+if (-not $env:CARGO_PROFILE_BENCH_CODEGEN_UNITS) { $env:CARGO_PROFILE_BENCH_CODEGEN_UNITS = $jobs }
+if (-not $env:RAYON_NUM_THREADS) {
+  $env:RAYON_NUM_THREADS = if ($env:FORMULA_RAYON_NUM_THREADS) { $env:FORMULA_RAYON_NUM_THREADS } else { $jobs }
+}
+
+# Some environments configure Cargo globally with `build.rustc-wrapper`. When the wrapper is
+# unavailable/misconfigured, builds can fail even for `cargo metadata`. Default to disabling any
+# configured wrapper unless the user explicitly overrides it.
+if (-not $env:RUSTC_WRAPPER) { $env:RUSTC_WRAPPER = "" }
+if (-not $env:RUSTC_WORKSPACE_WRAPPER) { $env:RUSTC_WORKSPACE_WRAPPER = "" }
+
 if (-not $EngineCommand) {
   $EngineCommand = $env:FORMULA_ENGINE_CMD
 }
