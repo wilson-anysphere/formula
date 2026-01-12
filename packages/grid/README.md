@@ -60,6 +60,58 @@ Cell-level styling notes:
 - `CellStyle.underlineStyle?: "single" | "double"` can be used to request a double underline without rich text.
 - `CellStyle.strike?: boolean` enables strike-through for the whole cell.
 
+## Borders
+
+Cells can render Excel-style borders (on top of default gridlines) via `CellStyle.borders`:
+
+```ts
+import type { CellData } from "@formula/grid";
+
+const cell: CellData = {
+  row: 0,
+  col: 0,
+  value: "Bordered",
+  style: {
+    borders: {
+      top: { width: 1, style: "solid", color: "#0f172a" },
+      right: { width: 1, style: "dashed", color: "#ef4444" },
+      bottom: { width: 2, style: "double", color: "#a855f7" },
+      left: { width: 1, style: "dotted", color: "#3b82f6" }
+    }
+  }
+};
+```
+
+Notes:
+
+- Border widths are in **CSS pixels at zoom=1**. The renderer scales them by the current zoom.
+- Supported styles: `"solid" | "dashed" | "dotted" | "double"`.
+- When two adjacent cells specify borders on the same shared edge, the renderer deterministically picks the winner:
+  - larger effective width wins, then
+  - style rank (`double` > `solid` > `dashed` > `dotted`), then
+  - right/bottom cell wins (stable tie-breaker).
+- Borders inside merged regions are suppressed; merged range borders use the anchor cell’s border specs.
+
+### Diagonal borders
+
+You can draw diagonal borders (Excel-style) via `CellStyle.diagonalBorders`:
+
+```ts
+const cell: CellData = {
+  row: 0,
+  col: 0,
+  value: "X",
+  style: {
+    diagonalBorders: {
+      // Top-left → bottom-right
+      down: { width: 1, style: "solid", color: "#0f172a" },
+      // Bottom-left → top-right
+      up: { width: 1, style: "dotted", color: "#0f172a" }
+    }
+  }
+};
+```
+
 ## Theming
 
 `CanvasGrid` / `CanvasGridRenderer` use a `GridTheme` token set (no hard-coded UI colors). You can theme the grid in two ways:
