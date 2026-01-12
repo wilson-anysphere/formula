@@ -756,7 +756,12 @@ pub fn verify_vba_signature_binding_with_stream_path(
         };
 
         if treat_as_v3 {
-            let Some(alg) = digest_alg_from_oid_str(&signed.digest_algorithm_oid) else {
+            // Prefer selecting the digest algorithm by digest length rather than the OID. Office VBA
+            // signatures sometimes use an inconsistent digest algorithm OID (see MS-OSHARED §4.3),
+            // so the digest length is a more reliable signal for MD5/SHA-1/SHA-256.
+            let Some(alg) = digest_alg_from_digest_len(signed_digest.len())
+                .or_else(|| digest_alg_from_oid_str(&signed.digest_algorithm_oid))
+            else {
                 return VbaSignatureBinding::Unknown;
             };
             let computed = match compute_vba_project_digest_v3(vba_project_bin, alg) {
@@ -863,6 +868,15 @@ fn digest_alg_from_oid_str(oid: &str) -> Option<crate::DigestAlg> {
         "1.2.840.113549.1.1.4" => Some(crate::DigestAlg::Md5),
         "1.2.840.113549.1.1.5" => Some(crate::DigestAlg::Sha1),
         "1.2.840.113549.1.1.11" => Some(crate::DigestAlg::Sha256),
+        _ => None,
+    }
+}
+
+fn digest_alg_from_digest_len(len: usize) -> Option<DigestAlg> {
+    match len {
+        16 => Some(DigestAlg::Md5),
+        20 => Some(DigestAlg::Sha1),
+        32 => Some(DigestAlg::Sha256),
         _ => None,
     }
 }
@@ -1417,7 +1431,12 @@ pub fn verify_vba_project_signature_binding(
         };
 
         if treat_as_v3 {
-            let Some(alg) = digest_alg_from_oid_str(&signed.digest_algorithm_oid) else {
+            // Prefer selecting the digest algorithm by digest length rather than the OID. Office VBA
+            // signatures sometimes use an inconsistent digest algorithm OID (see MS-OSHARED §4.3),
+            // so the digest length is a more reliable signal for MD5/SHA-1/SHA-256.
+            let Some(alg) = digest_alg_from_digest_len(signed_digest.len())
+                .or_else(|| digest_alg_from_oid_str(&signed.digest_algorithm_oid))
+            else {
                 continue;
             };
 
