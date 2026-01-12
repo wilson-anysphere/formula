@@ -18,6 +18,8 @@ The source of truth for “what the engine currently implements” is:
     **[`crates/formula-engine/tests/function_catalog_sync.rs`](../crates/formula-engine/tests/function_catalog_sync.rs)**.
   - Used by downstream tooling (JS/TS, docs, scripts) without having to compile Rust.
 
+Current implemented function count (from `shared/functionCatalog.json`): **344**
+
 Why it’s committed:
 
 - Stable interface for non-Rust tooling (autocomplete, docs, parity scripts, etc).
@@ -45,6 +47,8 @@ Update the committed function catalog (requires a Rust toolchain):
 ```bash
 pnpm -w run generate:function-catalog
 ```
+
+(Under the hood this runs `node scripts/generate-function-catalog.js`.)
 
 Validate that the committed catalog matches the Rust registry:
 
