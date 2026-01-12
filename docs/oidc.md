@@ -15,7 +15,7 @@ OIDC providers are stored in `org_oidc_providers` and managed through org-admin 
 - `providerId` (path param): A short identifier for the IdP configuration (e.g. `okta`, `azuread`).
 - `issuerUrl`: OIDC issuer URL (must be a valid URL; **HTTPS required in production**; must not include credentials, query params, fragments, or localhost in production). Trailing slashes are stripped.
 - `clientId`: OIDC client id.
-- `clientSecret`: OIDC client secret (**stored in the secret store**, not returned by list/get endpoints).
+- `clientSecret`: OIDC client secret (**stored in the secret store**, not returned by list/get endpoints). This must be configured for the OIDC login flow; if it is missing, `/auth/oidc/:orgId/:provider/start` fails with `error: "oidc_not_configured"`.
 - `scopes`: Scopes requested during login (default: `["openid", "email", "profile"]`). The API always ensures `openid` is included.
 - `enabled`: Whether this provider can be used for login.
 
