@@ -124,6 +124,17 @@ fn linked_data_types_fixture_roundtrips_richdata_parts() -> Result<(), Box<dyn s
         "expected /xl/metadata.xml content type override; [Content_Types].xml: {content_types_xml}"
     );
     for part in &richdata_parts {
+        // RichData may also include relationship parts like:
+        // `xl/richData/_rels/richValueRel.xml.rels`
+        // Those are covered by the `[Content_Types].xml` default `rels` mapping rather than an
+        // explicit override, so only validate overrides for the richData XML payload parts.
+        if part.starts_with("xl/richData/_rels/") || part.ends_with(".rels") {
+            continue;
+        }
+        if !part.ends_with(".xml") {
+            continue;
+        }
+
         let ct_part_name = format!("/{part}");
         let Some(content_type) = overrides.get(&ct_part_name) else {
             panic!(
