@@ -259,6 +259,45 @@ export async function activate(context) {
         timeout: 30_000,
       });
 
+      // Seed some persisted state owned by the extension so we can assert uninstall cleans it up.
+      await page.evaluate(
+        ({ extensionId, panelId, panelTitle }) => {
+          try {
+            localStorage.setItem(
+              `formula.extensionHost.storage.${extensionId}`,
+              JSON.stringify({ foo: "bar" }),
+            );
+          } catch {
+            // ignore
+          }
+
+          try {
+            const seedKey = "formula.extensions.contributedPanels.v1";
+            let existing: any = {};
+            try {
+              const raw = localStorage.getItem(seedKey);
+              existing = raw ? JSON.parse(raw) : {};
+            } catch {
+              existing = {};
+            }
+            if (!existing || typeof existing !== "object" || Array.isArray(existing)) existing = {};
+            existing[panelId] = { extensionId, title: panelTitle };
+            localStorage.setItem(seedKey, JSON.stringify(existing));
+          } catch {
+            // ignore
+          }
+        },
+        { extensionId, panelId, panelTitle },
+      );
+
+      // Ensure the permission store includes this extension before uninstall so the cleanup assertion
+      // is meaningful (the suite also pre-seeds `formula.e2e-events`).
+      const permissionsBefore = await page.evaluate(() => localStorage.getItem("formula.extensionHost.permissions"));
+      expect(permissionsBefore).not.toBeNull();
+      const parsedBefore = permissionsBefore ? JSON.parse(String(permissionsBefore)) : {};
+      expect(parsedBefore[extensionId]).toBeTruthy();
+      expect(parsedBefore["formula.e2e-events"]).toBeTruthy();
+
       // Switch back to Marketplace before clicking Uninstall.
       await page.getByTestId("dock-tab-marketplace").click();
       await expect(page.getByTestId("panel-marketplace")).toBeVisible();
@@ -279,6 +318,106 @@ export async function activate(context) {
       await expect(page.getByTestId("command-palette-input")).toBeVisible();
       await page.getByTestId("command-palette-input").fill(extensionId);
       await expect(page.getByTestId("command-palette-list")).toContainText("No matching commands", { timeout: 30_000 });
+
+      // Verify uninstall cleans up persisted state so a reinstall behaves like a clean slate.
+      await page.waitForFunction(
+        ({ extensionId, panelId }) => {
+          if (localStorage.getItem(`formula.extensionHost.storage.${extensionId}`) !== null) return false;
+          const seedsRaw = localStorage.getItem("formula.extensions.contributedPanels.v1");
+          if (seedsRaw != null) return false;
+          try {
+            const permissionsRaw = localStorage.getItem("formula.extensionHost.permissions");
+            if (!permissionsRaw) return false;
+            const parsed = JSON.parse(permissionsRaw);
+            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+            // Ensure only this extension was removed (others should remain).
+            if (Object.prototype.hasOwnProperty.call(parsed, extensionId)) return false;
+            if (!Object.prototype.hasOwnProperty.call(parsed, "formula.e2e-events")) return false;
+          } catch {
+            return false;
+          }
+          return true;
+        },
+        { extensionId, panelId },
+        { timeout: 30_000 },
+      );
+
+      const persistedState = await page.evaluate(async ({ extensionId }) => {
+        const storageKey = `formula.extensionHost.storage.${extensionId}`;
+        const permissionsKey = "formula.extensionHost.permissions";
+        const seedKey = "formula.extensions.contributedPanels.v1";
+
+        const readDb = async () => {
+          const openReq = indexedDB.open("formula.webExtensions");
+          const db = await new Promise<IDBDatabase>((resolve, reject) => {
+            openReq.onerror = () => reject(openReq.error ?? new Error("Failed to open IndexedDB"));
+            openReq.onsuccess = () => resolve(openReq.result);
+          });
+          try {
+            const tx = db.transaction(["installed", "packages"], "readonly");
+            const installedStore = tx.objectStore("installed");
+            const packagesStore = tx.objectStore("packages");
+
+            const installedPresent = await new Promise<boolean>((resolve, reject) => {
+              const req = installedStore.get(extensionId);
+              req.onerror = () => reject(req.error ?? new Error("IndexedDB get failed"));
+              req.onsuccess = () => resolve(req.result !== undefined);
+            });
+
+            const packagesCount = await new Promise<number>((resolve, reject) => {
+              try {
+                const index = packagesStore.index("byId");
+                const req = index.count(extensionId);
+                req.onerror = () => reject(req.error ?? new Error("IndexedDB count failed"));
+                req.onsuccess = () => resolve(Number(req.result ?? 0));
+              } catch (err) {
+                reject(err);
+              }
+            });
+
+            await new Promise<void>((resolve, reject) => {
+              tx.oncomplete = () => resolve();
+              tx.onerror = () => reject(tx.error ?? new Error("IndexedDB tx failed"));
+              tx.onabort = () => reject(tx.error ?? new Error("IndexedDB tx aborted"));
+            });
+
+            return { installedPresent, packagesCount };
+          } finally {
+            db.close();
+          }
+        };
+
+        // Poll briefly in case UI updated before the IndexedDB transactions finished.
+        const start = Date.now();
+        let dbState = { installedPresent: true, packagesCount: -1 };
+        for (;;) {
+          dbState = await readDb();
+          if (!dbState.installedPresent && dbState.packagesCount === 0) break;
+          if (Date.now() - start > 3_000) break;
+          await new Promise<void>((r) => setTimeout(r, 50));
+        }
+
+        let permissions: any = null;
+        try {
+          const raw = localStorage.getItem(permissionsKey);
+          permissions = raw ? JSON.parse(raw) : null;
+        } catch {
+          permissions = null;
+        }
+
+        return {
+          storage: localStorage.getItem(storageKey),
+          seeds: localStorage.getItem(seedKey),
+          permissions,
+          dbState,
+        };
+      }, { extensionId });
+
+      expect(persistedState.storage).toBeNull();
+      expect(persistedState.seeds).toBeNull();
+      expect(persistedState.permissions?.[extensionId]).toBeUndefined();
+      expect(persistedState.permissions?.["formula.e2e-events"]).toBeTruthy();
+      expect(persistedState.dbState).toEqual({ installedPresent: false, packagesCount: 0 });
     } finally {
       await fs.rm(tmp, { recursive: true, force: true });
     }
