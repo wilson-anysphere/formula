@@ -2668,11 +2668,6 @@ async function renameSheetById(
     // Best-effort; context keys should never block a rename.
   }
 
-  // Renaming sheets affects workbook metadata and does not necessarily produce cell deltas (e.g.
-  // when no formulas referenced the old name). Mark the document dirty explicitly so unsaved-changes
-  // prompts behave as expected (Excel-like).
-  app.getDocument().markDirty();
-
   return { id, name: workbookSheetStore.getName(id) ?? normalizedNewName };
 }
 
