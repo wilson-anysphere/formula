@@ -409,6 +409,11 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
   let currentOffline: unknown = null;
   let offlineWaitStarted = false;
 
+  const setIndicatorText = (text: string): void => {
+    element.textContent = text;
+    element.title = text;
+  };
+
   const detachProviderListeners = (provider: unknown): void => {
     if (!provider) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -487,7 +492,7 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
       providerSynced = null;
       currentOffline = null;
       offlineWaitStarted = false;
-      element.textContent = "Local";
+      setIndicatorText("Local");
       return;
     }
 
@@ -535,7 +540,7 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
     }
 
     if (offlineLoading) {
-      element.textContent = `${docId} • Loading…`;
+      setIndicatorText(`${docId} • Loading…`);
       return;
     }
 
@@ -570,7 +575,7 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
 
     const syncLabel = currentProvider ? (synced === true ? "Synced" : "Syncing…") : "Local";
 
-    element.textContent = `${docId} • ${connectionLabel} • ${syncLabel}`;
+    setIndicatorText(`${docId} • ${connectionLabel} • ${syncLabel}`);
   };
 
   abortController.signal.addEventListener("abort", () => {

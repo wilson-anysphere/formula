@@ -104,6 +104,9 @@ test.describe("collab status indicator (collab mode)", () => {
 
     await Promise.all([gotoDesktop(page, urlForUser("user1")), gotoDesktop(page2, urlForUser("user2"))]);
 
+    await expect(page.getByTestId("collab-status")).toBeVisible();
+    await expect(page2.getByTestId("collab-status")).toBeVisible();
+
     await expect(page.getByTestId("collab-status")).toContainText(docId);
     await expect(page2.getByTestId("collab-status")).toContainText(docId);
 
