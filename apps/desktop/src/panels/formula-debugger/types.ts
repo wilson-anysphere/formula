@@ -10,6 +10,7 @@ export type TraceKind =
   | { type: "bool" }
   | { type: "cell_ref" }
   | { type: "range_ref" }
+  | { type: "structured_ref" }
   | { type: "group" }
   | { type: "unary_op"; op: string }
   | { type: "binary_op"; op: string }
@@ -40,4 +41,3 @@ export type DebugStep = {
   kind: TraceKind;
   children: DebugStep[];
 };
-
