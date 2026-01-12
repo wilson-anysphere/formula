@@ -20,10 +20,26 @@ import os from "node:os";
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const DEFAULT_REPO_ROOT = path.resolve(path.dirname(SCRIPT_PATH), "..");
 
-// Default scan roots. We intentionally include top-level `test/` + `tests/` so the
-// "no provider names in unit tests" rule applies to both workspace tests and the
-// repo's node:test suites.
-const INCLUDED_DIRS = ["apps", "packages", "services", "crates", "tools", "test", "tests"];
+// Default scan roots. We intentionally include:
+// - top-level `test/` + `tests/` so the "no provider names in unit tests" rule
+//   applies to both workspace tests and the repo's node:test suites.
+// - `shared/` and `extensions/` so common libs + first-party extension bundles
+//   can't accidentally reintroduce provider-specific deps/config.
+// - `scripts/` and `python/` so CI/util scripts can't silently add provider
+//   integrations outside the main app/package trees.
+const INCLUDED_DIRS = [
+  "apps",
+  "packages",
+  "services",
+  "crates",
+  "tools",
+  "shared",
+  "extensions",
+  "scripts",
+  "python",
+  "test",
+  "tests",
+];
 
 // Explicitly excluded paths (relative to repo root). We mostly avoid these by
 // only scanning included source directories, but keep them here as belt+suspenders.
@@ -36,11 +52,13 @@ const EXCLUDED_ROOT_PATHS = new Set([
   "pnpm-lock.yaml",
 ]);
 
-// These files document the policy and may include forbidden words intentionally.
+// These files document the policy (or implement this guard) and may include
+// forbidden words intentionally.
 const ALLOWLISTED_FILES = new Set([
   "AGENTS.md",
   "instructions/ai.md",
   "docs/05-ai-integration.md",
+  "scripts/check-cursor-ai-policy.mjs",
 ]);
 
 const SKIP_DIR_NAMES = new Set([

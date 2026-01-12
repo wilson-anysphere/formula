@@ -61,6 +61,19 @@ test("cursor AI policy guard fails when forbidden provider strings are present i
   }
 });
 
+test("cursor AI policy guard scans scripts/ directory by default", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-scripts-dir-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, "scripts/example.mjs", 'import OpenAI from "openai";\n');
+
+    const proc = runPolicy(tmpRoot);
+    assert.notEqual(proc.status, 0);
+    assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test("cursor AI policy guard fails when forbidden strings appear in unrelated unit tests", async () => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-test-fail-"));
   try {
