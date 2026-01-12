@@ -2728,6 +2728,78 @@ mod tests {
     }
 
     #[test]
+    fn set_cell_rich_supports_bracketed_field_access_for_special_characters() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+
+        let entity = json!({
+            "type": "entity",
+            "entityType": "stock",
+            "entityId": "AAPL",
+            "displayValue": "Apple",
+            "properties": { "Change%": 0.0133 }
+        });
+
+        wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", entity).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!(r#"=A1.["Change%"]"#))
+            .unwrap();
+        wb.recalculate_internal(None).unwrap();
+
+        let b1 = wb.get_cell_data(DEFAULT_SHEET, "B1").unwrap();
+        assert_eq!(b1.value, json!(0.0133));
+    }
+
+    #[test]
+    fn set_cell_rich_supports_nested_field_access_through_record_properties() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+
+        let entity = json!({
+            "type": "entity",
+            "entityType": "stock",
+            "entityId": "AAPL",
+            "displayValue": "Apple",
+            "properties": {
+                "Owner": {
+                    "type": "record",
+                    "displayField": "Name",
+                    "fields": {
+                        "Name": "Alice",
+                        "Age": 42.0
+                    }
+                }
+            }
+        });
+
+        wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", entity).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("=A1.Owner.Age"))
+            .unwrap();
+        wb.recalculate_internal(None).unwrap();
+
+        let b1 = wb.get_cell_data(DEFAULT_SHEET, "B1").unwrap();
+        assert_eq!(b1.value, json!(42.0));
+    }
+
+    #[test]
+    fn set_cell_rich_field_access_returns_field_error_for_missing_properties() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+
+        let entity = json!({
+            "type": "entity",
+            "entityType": "stock",
+            "entityId": "AAPL",
+            "displayValue": "Apple",
+            "properties": { "Price": 12.5 }
+        });
+
+        wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", entity).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("=A1.Nope"))
+            .unwrap();
+        wb.recalculate_internal(None).unwrap();
+
+        let b1 = wb.get_cell_data(DEFAULT_SHEET, "B1").unwrap();
+        assert_eq!(b1.value, json!("#FIELD!"));
+    }
+
+    #[test]
     fn rich_value_json_roundtrips_entity_and_record() {
         let input = json!({
             "type": "entity",
