@@ -193,6 +193,7 @@ fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
 ///   the entire OPC package into memory.
 /// - For `.xls`, this returns the imported model workbook from `formula-xls`.
 /// - For `.xlsb`, this converts the parsed workbook into a model workbook.
+/// - For `.csv`, this imports the CSV into a columnar-backed worksheet.
 pub fn open_workbook_model(path: impl AsRef<Path>) -> Result<formula_model::Workbook, Error> {
     use std::fs::File;
 
@@ -269,6 +270,7 @@ pub fn open_workbook_model(path: impl AsRef<Path>) -> Result<formula_model::Work
 /// - `.xls` (via `formula-xls`)
 /// - `.xlsb` (via `formula-xlsb`)
 /// - `.xlsx` / `.xlsm` (via `formula-xlsx`)
+/// - `.csv` (via `formula-model` CSV import)
 pub fn open_workbook(path: impl AsRef<Path>) -> Result<Workbook, Error> {
     let path = path.as_ref();
     match workbook_format(path)? {
@@ -335,6 +337,7 @@ pub fn open_workbook(path: impl AsRef<Path>) -> Result<Workbook, Error> {
 /// - [`Workbook::Xls`] is exported as `.xlsx` (writing `.xls` is out of scope).
 /// - [`Workbook::Xlsb`] can be saved losslessly back to `.xlsb` (package copy),
 ///   or exported to `.xlsx` depending on the output extension.
+/// - [`Workbook::Model`] is exported as `.xlsx`.
 pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), Error> {
     let path = path.as_ref();
     let ext = path

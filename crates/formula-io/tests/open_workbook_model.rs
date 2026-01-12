@@ -136,3 +136,26 @@ fn open_workbook_model_sniffs_extensionless_xls() {
     assert_eq!(workbook.sheets[0].name, "Sheet1");
     assert_eq!(workbook.sheets[1].name, "Second");
 }
+
+#[test]
+fn open_workbook_model_csv() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let csv_path = dir.path().join("data.csv");
+    std::fs::write(&csv_path, "col1,col2\n1,hello\n2,world\n").expect("write csv");
+
+    let workbook = formula_io::open_workbook_model(&csv_path).expect("open workbook model");
+    assert_eq!(workbook.sheets.len(), 1);
+    assert_eq!(workbook.sheets[0].name, "data");
+
+    let sheet = workbook.sheet_by_name("data").expect("data sheet missing");
+    assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(1.0));
+    assert_eq!(
+        sheet.value_a1("B1").unwrap(),
+        CellValue::String("hello".to_string())
+    );
+    assert_eq!(sheet.value_a1("A2").unwrap(), CellValue::Number(2.0));
+    assert_eq!(
+        sheet.value_a1("B2").unwrap(),
+        CellValue::String("world".to_string())
+    );
+}
