@@ -1,8 +1,8 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use formula_vba::{
-    list_vba_digital_signatures, parse_vba_digital_signature, verify_vba_digital_signature,
-    VbaSignatureBinding, VbaSignatureVerification,
+    extract_vba_signature_signed_digest, list_vba_digital_signatures, parse_vba_digital_signature,
+    verify_vba_digital_signature, VbaSignatureBinding, VbaSignatureVerification,
 };
 
 mod signature_test_utils;
@@ -136,6 +136,63 @@ fn ber_indefinite_pkcs7_signature_wrapped_in_oshared_digsig_blob_is_verified() {
         .expect("signature should be present");
 
     assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+}
+
+#[test]
+fn extracts_signed_digest_from_ber_indefinite_pkcs7_wrapped_in_oshared_digsig_blob() {
+    // This fixture is a CMS/PKCS#7 SignedData blob emitted by OpenSSL with `cms -stream`, which
+    // uses BER indefinite-length encodings. Its embedded SpcIndirectDataContent digest is 0..31.
+    let pkcs7 = include_bytes!("fixtures/cms_indefinite.der");
+    let expected_digest = (0u8..0x20).collect::<Vec<_>>();
+
+    // Create a *parseable* decoy PKCS#7 blob with a different digest so that if our code were to
+    // rely on heuristic scanning (which prefers later candidates), it would return the wrong
+    // digest.
+    let mut decoy = pkcs7.to_vec();
+    let mut matches = 0usize;
+    for i in 0..=decoy.len().saturating_sub(expected_digest.len()) {
+        if decoy[i..i + expected_digest.len()] == expected_digest {
+            matches += 1;
+            // Flip one byte in the digest.
+            decoy[i] ^= 0xFF;
+        }
+    }
+    assert_eq!(
+        matches, 1,
+        "expected digest pattern to appear exactly once in fixture"
+    );
+
+    // Build a minimal MS-OSHARED DigSigBlob where signatureOffset points at the *valid* PKCS#7,
+    // but we append a decoy PKCS#7 afterwards.
+    //
+    // Without DigSigBlob parsing, the extractor's scan would prefer the trailing decoy and return
+    // the wrong digest.
+    let digsig_blob_header_len = 8usize; // cb + serializedPointer
+    let digsig_info_len = 0x24usize; // 9 DWORDs
+    let signature_offset = digsig_blob_header_len + digsig_info_len; // 0x2C
+    let cb_signature = u32::try_from(pkcs7.len()).expect("pkcs7 fits u32");
+    let signature_offset_u32 = u32::try_from(signature_offset).expect("offset fits u32");
+
+    let mut blob = Vec::new();
+    blob.extend_from_slice(&0u32.to_le_bytes()); // cb placeholder
+    blob.extend_from_slice(&8u32.to_le_bytes()); // serializedPointer
+    blob.extend_from_slice(&cb_signature.to_le_bytes());
+    blob.extend_from_slice(&signature_offset_u32.to_le_bytes());
+    for _ in 0..7 {
+        blob.extend_from_slice(&0u32.to_le_bytes());
+    }
+    assert_eq!(blob.len(), signature_offset, "unexpected DigSigInfoSerialized size");
+    blob.extend_from_slice(pkcs7);
+    blob.extend_from_slice(&decoy);
+    let cb =
+        u32::try_from(blob.len().saturating_sub(digsig_blob_header_len)).expect("blob fits u32");
+    blob[0..4].copy_from_slice(&cb.to_le_bytes());
+
+    let got = extract_vba_signature_signed_digest(&blob)
+        .expect("extract should succeed")
+        .expect("digest should be present");
+    assert_eq!(got.digest_algorithm_oid, "2.16.840.1.101.3.4.2.1"); // SHA-256
+    assert_eq!(got.digest, expected_digest);
 }
 
 #[test]
