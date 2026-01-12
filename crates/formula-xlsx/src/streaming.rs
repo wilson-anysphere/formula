@@ -344,6 +344,16 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_recalc_policy<
     let rels = parse_relationships(&workbook_rels_bytes)?;
     let mut rel_targets: HashMap<String, String> = HashMap::new();
     for rel in rels {
+        if rel
+            .target_mode
+            .as_deref()
+            .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+        {
+            // Workbook relationships may reference external resources (typically hyperlinks).
+            // These do not correspond to OPC part names and should not participate in internal
+            // target resolution.
+            continue;
+        }
         rel_targets.insert(rel.id, resolve_target("xl/workbook.xml", &rel.target));
     }
 
@@ -483,6 +493,13 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_part_overrides_and_recalc
     let rels = parse_relationships(&workbook_rels_bytes)?;
     let mut rel_targets: HashMap<String, String> = HashMap::new();
     for rel in rels {
+        if rel
+            .target_mode
+            .as_deref()
+            .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+        {
+            continue;
+        }
         rel_targets.insert(rel.id, resolve_target("xl/workbook.xml", &rel.target));
     }
 
@@ -1703,9 +1720,16 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles_and_recalc_policy<
     let mut rel_targets: HashMap<String, String> = HashMap::new();
     let mut styles_part: Option<String> = None;
     for rel in rels {
+        if rel
+            .target_mode
+            .as_deref()
+            .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+        {
+            continue;
+        }
         let resolved = resolve_target("xl/workbook.xml", &rel.target);
         if rel.type_uri == REL_TYPE_STYLES {
-            styles_part = Some(resolved.clone());
+            styles_part.get_or_insert(resolved.clone());
         }
         rel_targets.insert(rel.id, resolved);
     }
@@ -4645,4 +4669,90 @@ fn parse_dimension_ref(s: &str) -> Option<(CellRef, CellRef)> {
         .and_then(|p| CellRef::from_a1(p).ok())
         .unwrap_or(start);
     Some((start, end))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::io::{Cursor, Write};
+
+    use formula_model::{CellRef, CellValue, Style, StyleTable};
+    use zip::write::FileOptions;
+    use zip::ZipWriter;
+
+    #[test]
+    fn streaming_patch_with_styles_ignores_external_workbook_styles_relationship() {
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+        // Internal styles relationship appears before an external one. We should ignore the
+        // external relationship so it cannot shadow the real `xl/styles.xml` part.
+        let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="https://example.com/styles.xml" TargetMode="External"/>
+</Relationships>"#;
+
+        let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="A1"/>
+  <sheetData/>
+</worksheet>"#;
+
+        // Minimal styles.xml. The streaming style-aware patcher should load this part (not the
+        // external URI) and append a new `<xf>` when a new style_id is introduced.
+        let styles_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>"#;
+
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = ZipWriter::new(cursor);
+        let options =
+            FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+        zip.start_file("xl/workbook.xml", options).unwrap();
+        zip.write_all(workbook_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/_rels/workbook.xml.rels", options)
+            .unwrap();
+        zip.write_all(workbook_rels.as_bytes()).unwrap();
+
+        zip.start_file("xl/worksheets/sheet1.xml", options)
+            .unwrap();
+        zip.write_all(worksheet_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/styles.xml", options).unwrap();
+        zip.write_all(styles_xml.as_bytes()).unwrap();
+
+        let input_bytes = zip.finish().unwrap().into_inner();
+
+        let mut style_table = StyleTable::default();
+        let style_id = style_table.intern(Style {
+            number_format: Some("0".to_string()),
+            ..Default::default()
+        });
+        assert_eq!(style_id, 1);
+
+        let mut patches = WorkbookCellPatches::default();
+        patches.set_cell(
+            "Sheet1",
+            CellRef::from_a1("A1").unwrap(),
+            CellPatch::set_value_with_style_id(CellValue::Number(1.0), style_id),
+        );
+
+        let mut output = Cursor::new(Vec::new());
+        patch_xlsx_streaming_workbook_cell_patches_with_styles(
+            Cursor::new(input_bytes),
+            &mut output,
+            &patches,
+            &style_table,
+        )
+        .expect("streaming patch should succeed");
+    }
 }
