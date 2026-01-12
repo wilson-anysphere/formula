@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -151,23 +151,6 @@ declare const catalog: {
 export default catalog;
 `;
 await writeFile(outputTypesPath, dtsContents, "utf8");
-
-// Keep the parity doc's function count in sync without requiring manual edits.
-const parityDocPath = path.join(repoRoot, "docs", "15-excel-feature-parity.md");
-try {
-  const rawDoc = await readFile(parityDocPath, "utf8");
-  const markerRe =
-    /(Catalog functions \(shared\/functionCatalog\.json\): )\d+/;
-  const updatedDoc = rawDoc.replace(
-    markerRe,
-    `$1${parsed.functions.length}`
-  );
-  if (updatedDoc !== rawDoc) {
-    await writeFile(parityDocPath, updatedDoc, "utf8");
-  }
-} catch {
-  // Ignore missing docs in minimal builds.
-}
 
 console.log(
   `Wrote ${path.relative(repoRoot, outputJsonPath)} + ${path.relative(repoRoot, outputModulePath)} + ${path.relative(repoRoot, outputTypesPath)} (${parsed.functions.length} functions)`
