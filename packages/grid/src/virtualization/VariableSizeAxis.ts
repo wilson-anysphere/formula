@@ -25,7 +25,10 @@ export class VariableSizeAxis {
 
   private overrides = new Map<number, number>();
   private overrideIndices: number[] = [];
-  private prefixDiffs: number[] = [];
+  // Size diffs (override - default) aligned with `overrideIndices`.
+  private diffs: number[] = [];
+  // Fenwick tree over `diffs` for fast prefix sums (1-indexed).
+  private diffBit: number[] = [];
 
   constructor(defaultSize: number) {
     if (!Number.isFinite(defaultSize) || defaultSize <= 0) {
@@ -64,20 +67,19 @@ export class VariableSizeAxis {
 
     const nextOverrides = new Map<number, number>();
     const nextIndices = new Array<number>(entries.length);
-    const nextPrefix = new Array<number>(entries.length);
+    const nextDiffs = new Array<number>(entries.length);
 
-    let running = 0;
     for (let i = 0; i < entries.length; i++) {
       const [index, size] = entries[i]!;
       nextOverrides.set(index, size);
       nextIndices[i] = index;
-      running += size - this.defaultSize;
-      nextPrefix[i] = running;
+      nextDiffs[i] = size - this.defaultSize;
     }
 
     this.overrides = nextOverrides;
     this.overrideIndices = nextIndices;
-    this.prefixDiffs = nextPrefix;
+    this.diffs = nextDiffs;
+    this.rebuildDiffBit();
   }
 
   setSize(index: number, size: number): void {
@@ -97,18 +99,24 @@ export class VariableSizeAxis {
     this.overrides.set(index, size);
 
     const pos = lowerBound(this.overrideIndices, index);
-    if (this.overrideIndices[pos] !== index) {
-      this.overrideIndices.splice(pos, 0, index);
-      this.prefixDiffs.splice(pos, 0, 0);
-    }
-
     const diff = size - this.defaultSize;
     const previousDiff = existing === undefined ? 0 : existing - this.defaultSize;
     const delta = diff - previousDiff;
 
-    for (let i = pos; i < this.prefixDiffs.length; i++) {
-      this.prefixDiffs[i] += delta;
+    if (this.overrideIndices[pos] !== index) {
+      // New override inserted into the sorted list. This shifts later indices, so rebuild
+      // the Fenwick tree from scratch (still O(n), but insertion itself already costs O(n)
+      // due to array splices and is typically rare compared to "update existing override"
+      // operations during resize drags).
+      this.overrideIndices.splice(pos, 0, index);
+      this.diffs.splice(pos, 0, diff);
+      this.rebuildDiffBit();
+      return;
     }
+
+    // Existing override updated in place; adjust the diff and update the Fenwick tree.
+    this.diffs[pos] = diff;
+    this.diffBitAdd(pos, delta);
   }
 
   deleteSize(index: number): void {
@@ -121,11 +129,8 @@ export class VariableSizeAxis {
     if (this.overrideIndices[pos] !== index) return;
 
     this.overrideIndices.splice(pos, 1);
-    const diff = existing - this.defaultSize;
-    this.prefixDiffs.splice(pos, 1);
-    for (let i = pos; i < this.prefixDiffs.length; i++) {
-      this.prefixDiffs[i] -= diff;
-    }
+    this.diffs.splice(pos, 1);
+    this.rebuildDiffBit();
   }
 
   positionOf(index: number): number {
@@ -220,6 +225,42 @@ export class VariableSizeAxis {
   private diffBefore(index: number): number {
     const pos = lowerBound(this.overrideIndices, index);
     if (pos === 0) return 0;
-    return this.prefixDiffs[pos - 1];
+    return this.diffBitSum(pos);
+  }
+
+  private rebuildDiffBit(): void {
+    const n = this.diffs.length;
+    const bit = new Array<number>(n + 1).fill(0);
+
+    // Build in O(n): write raw values then propagate partial sums to parent buckets.
+    for (let i = 0; i < n; i++) {
+      bit[i + 1] = this.diffs[i]!;
+    }
+    for (let i = 1; i <= n; i++) {
+      const j = i + (i & -i);
+      if (j <= n) bit[j] += bit[i]!;
+    }
+
+    this.diffBit = bit;
+  }
+
+  private diffBitAdd(pos0: number, delta: number): void {
+    if (delta === 0) return;
+    const bit = this.diffBit;
+    for (let i = pos0 + 1; i < bit.length; i += i & -i) {
+      bit[i] = (bit[i] ?? 0) + delta;
+    }
+  }
+
+  /**
+   * @param count Number of leading entries to sum (i.e. sum diffs[0..count-1]).
+   */
+  private diffBitSum(count: number): number {
+    const bit = this.diffBit;
+    let sum = 0;
+    for (let i = count; i > 0; i -= i & -i) {
+      sum += bit[i] ?? 0;
+    }
+    return sum;
   }
 }
