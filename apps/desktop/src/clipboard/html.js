@@ -133,6 +133,46 @@ function parseGoogleSheetsValue(data) {
 }
 
 /**
+ * Extract plain text from a DOM table cell while preserving explicit line breaks.
+ *
+ * DOMParser's `textContent` drops `<br>` elements, collapsing multiline content.
+ * This walker reconstitutes those line breaks as `\n` for proper round-tripping.
+ *
+ * @param {Element} cellEl
+ * @returns {string}
+ */
+function extractCellTextDom(cellEl) {
+  /** @type {string[]} */
+  const out = [];
+
+  /**
+   * @param {Node} node
+   */
+  const walk = (node) => {
+    // Text node.
+    if (node.nodeType === 3) {
+      out.push(node.nodeValue ?? "");
+      return;
+    }
+
+    // Element node.
+    if (node.nodeType === 1) {
+      const el = /** @type {Element} */ (node);
+      if (el.tagName.toLowerCase() === "br") {
+        out.push("\n");
+        return;
+      }
+
+      for (const child of Array.from(el.childNodes)) walk(child);
+    }
+  };
+
+  for (const child of Array.from(cellEl.childNodes)) walk(child);
+
+  return out.join("").replaceAll("\u00a0", " ");
+}
+
+/**
  * @param {CellGrid} grid
  * @returns {string}
  */
@@ -217,7 +257,7 @@ function parseHtmlToCellGridDom(html) {
       let raw;
       if (sheetsValueAttr) raw = parseGoogleSheetsValue(sheetsValueAttr);
       if (raw === undefined && excelNumAttr) raw = excelNumAttr;
-      if (raw === undefined) raw = (cellEl.textContent ?? "").replaceAll("\u00a0", " ");
+      if (raw === undefined) raw = extractCellTextDom(cellEl);
 
       const parsed = parseScalar(String(raw));
       if (parsed.type === "datetime" && !parsedStyle.numberFormat) {
