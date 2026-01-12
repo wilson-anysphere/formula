@@ -3,7 +3,7 @@
 The desktop app is a **Tauri v2.9** shell around the standard web UI. The goal of the Tauri layer is to:
 
 - host the Vite-built UI in a system WebView
-- provide native integration (tray, global shortcuts, file open via drag/drop, auto-update)
+- provide native integrations (tray, app menu, global shortcuts, drag/drop + file associations, auto-update)
 - expose a small, explicit Rust IPC surface for privileged operations
 
 This document is a “what’s real in the repo” reference for contributors.
@@ -12,34 +12,46 @@ This document is a “what’s real in the repo” reference for contributors.
 
 - **Frontend (TypeScript/Vite):** `apps/desktop/src/`
   - Entry point + desktop host wiring: `apps/desktop/src/main.ts`
+  - Desktop wrappers (events, notifications, updater UI, etc): `apps/desktop/src/tauri/`
+    - Updater dialog + event handling: `apps/desktop/src/tauri/updaterUi.ts`
+    - Notifications wrapper: `apps/desktop/src/tauri/notifications.ts`
+    - Startup timings listeners: `apps/desktop/src/tauri/startupMetrics.ts`
 - **Tauri (Rust):** `apps/desktop/src-tauri/`
   - Tauri config: `apps/desktop/src-tauri/tauri.conf.json`
+  - Capabilities (permissions): `apps/desktop/src-tauri/capabilities/main.json`
   - Entry point: `apps/desktop/src-tauri/src/main.rs`
   - IPC commands: `apps/desktop/src-tauri/src/commands.rs`
-  - Custom asset protocol handler (COEP-friendly headers): `apps/desktop/src-tauri/src/asset_protocol.rs`
   - “Open file” path normalization: `apps/desktop/src-tauri/src/open_file.rs`
-  - Native menu bar: `apps/desktop/src-tauri/src/menu.rs`
+  - Filesystem scope helpers: `apps/desktop/src-tauri/src/fs_scope.rs`
+  - Custom `asset:` protocol handler (COEP/CORP): `apps/desktop/src-tauri/src/asset_protocol.rs`
   - Tray: `apps/desktop/src-tauri/src/tray.rs`
   - Tray status (icon + tooltip updates): `apps/desktop/src-tauri/src/tray_status.rs`
+  - App menu: `apps/desktop/src-tauri/src/menu.rs`
   - Global shortcuts: `apps/desktop/src-tauri/src/shortcuts.rs`
   - Updater integration: `apps/desktop/src-tauri/src/updater.rs`
 
 ## Startup performance instrumentation
 
-The desktop shell reports real startup timings from the Rust host + webview so we can track cold-start regressions:
+The desktop shell reports real startup timings from the Rust host + webview so we can track cold-start regressions.
 
-- `startup:window-visible` — milliseconds since native process start
-- `startup:webview-loaded` — milliseconds since native process start
-- `startup:tti` — milliseconds since native process start (time-to-interactive)
+Events emitted by the Rust host (to the `main` window):
+
+- `startup:window-visible` — `number` (milliseconds since native process start)
+- `startup:webview-loaded` — `number` (milliseconds since native process start)
+- `startup:tti` — `number` (milliseconds since native process start; time-to-interactive)
+- `startup:metrics` — snapshot payload containing some/all of `{ window_visible_ms, webview_loaded_ms, tti_ms }`
+
+The frontend installs listeners in `apps/desktop/src/tauri/startupMetrics.ts` and mirrors the latest snapshot into
+`globalThis.__FORMULA_STARTUP_TIMINGS__`.
 
 ### Viewing startup timings
 
-- **Dev builds**: the Rust backend prints a single line to stdout once TTI is reported, e.g.
+- **Dev builds**: the Rust host prints a single line to stdout once TTI is reported, e.g.
   ```
   [startup] window_visible_ms=123 webview_loaded_ms=234 tti_ms=456
   ```
 - **Release builds**: set `FORMULA_STARTUP_METRICS=1` to enable the same log line.
-- **Frontend access**: the latest metrics are mirrored into `globalThis.__FORMULA_STARTUP_TIMINGS__` (inspect via DevTools).
+- **Frontend access**: inspect `globalThis.__FORMULA_STARTUP_TIMINGS__` in DevTools.
 - **Optional multi-run benchmark**: `apps/desktop/tests/performance/desktop-startup-runner.ts` can launch a built desktop binary multiple times and compute p50/p95 for window-visible + TTI.
   - Example:
     ```bash
@@ -73,7 +85,9 @@ Top-level keys in `tauri.conf.json` define the packaged app identity:
 - `build.frontendDist`: `../dist`
 - `build.features: ["desktop"]` enables the Cargo feature gate for the real desktop binary (see “Cargo feature gating” below)
 
-### `app.security.csp`
+### `app.security.headers` / `app.security.csp`
+
+`app.security.headers` configures response headers for the built-in `tauri://…` protocol. In this repo it is used to set COOP/COEP (see “Cross-origin isolation” below).
 
 The CSP is set in `app.security.csp` (see `apps/desktop/src-tauri/tauri.conf.json`).
 
@@ -96,12 +110,15 @@ Rationale:
 
 ### Tauri v2 capabilities (permissions)
 
-Tauri v2 permissions are granted via **capability files**:
+Tauri v2 replaces Tauri v1’s “allowlist” with **capabilities**, defined as JSON files under:
 
-- `apps/desktop/src-tauri/capabilities/*.json` (for example: `capabilities/main.json`)
+- `apps/desktop/src-tauri/capabilities/` (main capability: `capabilities/main.json`)
 
 Capabilities are associated to windows by **label** using the capability file’s `"windows": [...]` list, which
-matches `app.windows[].label` in `apps/desktop/src-tauri/tauri.conf.json`.
+matches `app.windows[].label` in `apps/desktop/src-tauri/tauri.conf.json` (the main window label is `main`).
+
+When adding new uses of privileged APIs (e.g. clipboard, dialog, updater, shell, window APIs) or adding new desktop event
+names, update the relevant allowlists in `capabilities/main.json`.
 
 See “Tauri v2 Capabilities & Permissions” below for the concrete `main.json` contents.
 
@@ -118,8 +135,11 @@ How this is (currently) handled in the repo:
 - **Dev / preview (Vite):** `apps/desktop/vite.config.ts` sets COOP/COEP headers on dev/preview responses.
 - **Packaged Tauri builds:** COOP/COEP are set via `app.security.headers` in `apps/desktop/src-tauri/tauri.conf.json`,
   which Tauri applies to its built-in `tauri://…` protocol responses.
-  If this is missing in a production desktop build, the UI logs an error and shows a long-lived toast (see
-  `warnIfMissingCrossOriginIsolationInTauriProd()` in `apps/desktop/src/main.ts`).
+  - Additionally, the desktop shell overrides the `asset:` protocol handler (see `apps/desktop/src-tauri/src/asset_protocol.rs`)
+    to attach `Cross-Origin-Resource-Policy: cross-origin` so `convertFileSrc(...)` URLs can still be embedded when
+    `Cross-Origin-Embedder-Policy: require-corp` is enabled.
+  - If isolation is missing in a production desktop build, the UI logs an error and shows a long-lived toast (see
+    `warnIfMissingCrossOriginIsolationInTauriProd()` in `apps/desktop/src/main.ts`).
 
 Quick verification guidance lives in `apps/desktop/README.md` (“Production/Tauri: `crossOriginIsolated` check”),
 including an automated smoke check:
@@ -128,15 +148,21 @@ including an automated smoke check:
 pnpm -C apps/desktop check:coi
 ```
 
+To validate `asset://` (i.e. `convertFileSrc`) resources still load under COEP, the repo also includes:
+
+- `apps/desktop/asset-protocol-test.html` (open in the desktop app and follow the instructions on the page)
+
 Practical warning: with `Cross-Origin-Embedder-Policy: require-corp`, *every* subresource must be same-origin or explicitly opt-in via CORS/CORP.
-In Tauri production it’s common to load icons/fonts/images via `asset:`/`asset://…`, which may require adding a `Cross-Origin-Resource-Policy`
-header for those responses (or ensuring assets are served from the same origin as the main document).
+In Tauri, `convertFileSrc(...)` produces `asset://...` URLs; those `asset:` responses need a CORP header or they won’t load under COEP.
+The repo’s custom `asset:` handler adds `Cross-Origin-Resource-Policy: cross-origin` for this reason.
 
 ### `bundle.*` (packaging)
 
 Notable keys:
 
-- `bundle.fileAssociations` registers `.xlsx`, `.xls`, `.xlsm`, `.xlsb`, `.csv` with the OS.
+- `bundle.fileAssociations` registers `.xlsx`, `.xls`, `.xlsm`, `.xlsb`, `.csv`, `.parquet` with the OS.
+  - `.parquet` open support is behind the Cargo `parquet` feature (enabled by the `desktop` feature; see `apps/desktop/src-tauri/Cargo.toml` and `apps/desktop/src-tauri/src/open_file.rs`).
+- `bundle.protocols` registers the custom URL scheme `formula://` (used for deep links like OAuth redirects; see `main.rs` → `oauth-redirect` event).
 - `bundle.linux.deb.depends` documents runtime deps for Linux packaging (e.g. `libwebkit2gtk-4.1-0`, `libgtk-3-0t64 | libgtk-3-0`,
   appindicator, `librsvg2-2`, `libssl3t64 | libssl3`).
 - `bundle.macOS.entitlements` / signing keys and `bundle.windows.timestampUrl`.
@@ -150,6 +176,7 @@ Auto-update is configured under `plugins.updater` (Tauri v2 plugin config). In t
   - `https://github.com/wilson-anysphere/formula/releases/latest/download/latest.json`
   - (The matching signature, `latest.json.sig`, is uploaded by `tauri-action` and verified using `pubkey`.)
 - `plugins.updater.dialog: false` → the Rust host emits events instead of showing a built-in dialog (custom UI in the frontend)
+- `plugins.updater.windows.installMode` controls the Windows update install mode (currently `passive`)
 
 Frontend event contract (emitted by `apps/desktop/src-tauri/src/updater.rs`):
 
@@ -161,6 +188,11 @@ Frontend event contract (emitted by `apps/desktop/src-tauri/src/updater.rs`):
 
 Release CI note: when `plugins.updater.active=true`, tagged releases will fail if `pubkey`/`endpoints`
 are still placeholders. You can validate locally with `node scripts/check-updater-config.mjs`.
+
+### `plugins.notification`
+
+Native system notifications are enabled via `plugins.notification` and are used for lightweight UX
+signals (e.g. “Update available”). The frontend wrapper lives in `apps/desktop/src/tauri/notifications.ts`.
 
 Minimal excerpt (not copy/pasteable; see the full file for everything):
 
@@ -191,7 +223,8 @@ Minimal excerpt (not copy/pasteable; see the full file for everything):
     ]
   },
   "bundle": {
-    "fileAssociations": [{ "ext": ["xlsx"], "name": "Excel Spreadsheet", "role": "Editor" }]
+    "fileAssociations": [{ "ext": ["xlsx"], "name": "Excel Spreadsheet", "role": "Editor" }],
+    "protocols": { "name": "formula", "schemes": ["formula"] }
   },
   "plugins": {
     "updater": {
@@ -199,7 +232,8 @@ Minimal excerpt (not copy/pasteable; see the full file for everything):
       "dialog": false,
       "endpoints": ["https://github.com/wilson-anysphere/formula/releases/latest/download/latest.json"],
       "pubkey": "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY"
-    }
+    },
+    "notification": {}
   }
 }
 ```
@@ -253,10 +287,12 @@ delete prior release assets.
 - **state** (`SharedAppState`) + **macro trust store** (`SharedMacroTrustStore`)
 - Tauri plugins:
   - `tauri_plugin_global_shortcut` (registers accelerators + emits app events)
+  - `tauri_plugin_shell` (enables `shell.open` from the frontend; guarded by capabilities)
   - `tauri_plugin_updater` (update checks)
+  - `tauri_plugin_notification` (native notifications)
   - `tauri_plugin_single_instance` (forward argv/cwd from subsequent launches into the running instance)
-  - `tauri_plugin_shell` (open external URLs in the OS browser)
-  - `tauri_plugin_notification` (native system notifications)
+- A custom `asset:` protocol handler (`asset_protocol.rs`) to attach COEP/CORP-friendly headers for `asset://...` URLs (used by `convertFileSrc`).
+- App menu setup (see `apps/desktop/src-tauri/src/menu.rs`) and `.on_menu_event(...)` forwarding.
 - `invoke_handler(...)` mapping commands in `commands.rs`
 - window/tray event forwarding to the frontend via `app.emit(...)` / `window.emit(...)`
 
@@ -300,18 +336,24 @@ Implementation notes:
 - `main.rs` uses a small in-memory queue (`OpenFileState`) so open-file requests received *before* the frontend installs its listeners aren’t lost.
   - Backend emits: `open-file` (payload: `string[]` paths)
   - Frontend emits: `open-file-ready` once its `listen("open-file", ...)` handler is installed, which flushes any queued paths.
-- Capability reminder: **new event names must be reflected in the Tauri v2 capability allow-lists** (see
-  `apps/desktop/src-tauri/capabilities/main.json` under `event:allow-listen` / `event:allow-emit`), otherwise hardened builds can silently block
-  the event and leave requests queued forever.
 - When an open-file request is handled, `main.rs` **shows + focuses** the main window before emitting `open-file` so the request is visible to the user.
 - On macOS, `tauri::RunEvent::Opened { urls, .. }` is routed through the same pipeline so opening a document in Finder reaches the running instance.
 
-#### Tray + global shortcuts
+#### Deep links (`formula://...`) / OAuth redirects
+
+`bundle.protocols` registers `formula://` as a custom URL scheme. When the OS launches the app with a `formula://...` URL (e.g. an OAuth PKCE redirect), `main.rs` forwards it to the frontend by emitting:
+
+- `oauth-redirect` (payload: string URL)
+
+The frontend handles this in `apps/desktop/src/main.ts` and resolves the pending OAuth broker promise without requiring manual copy/paste.
+
+#### Tray + app menu + global shortcuts
 
 - Tray menu and click behavior are implemented in `apps/desktop/src-tauri/src/tray.rs`.
   - Emits: `tray-new`, `tray-open`, `tray-quit`
   - “Check for Updates” runs an update check (`updater::spawn_update_check(..., UpdateCheckSource::Manual)`)
-- In release builds, `main.rs` also runs a lightweight update check on startup (`updater::spawn_update_check(..., UpdateCheckSource::Startup)`, behind `#[cfg(not(debug_assertions))]`).
+- App menu items are implemented in `apps/desktop/src-tauri/src/menu.rs` and forwarded as `menu-*` events.
+- In release builds, `main.rs` can run a startup update check, but it waits for the frontend to emit `updater-ui-ready` so update events aren’t dropped before listeners are installed.
 - Global shortcuts are registered in `apps/desktop/src-tauri/src/shortcuts.rs`.
   - Accelerators: `CmdOrCtrl+Shift+O`, `CmdOrCtrl+Shift+P`
   - The plugin handler in `main.rs` emits: `shortcut-quick-open`, `shortcut-command-palette`
@@ -329,17 +371,26 @@ The desktop UI intentionally avoids a hard dependency on `@tauri-apps/api` and i
 
 - `globalThis.__TAURI__.core.invoke` for `#[tauri::command]` calls
 - `globalThis.__TAURI__.event.listen` / `emit` for events
-- `globalThis.__TAURI__.window.*` for hiding the window
+- `globalThis.__TAURI__.window.*` for hiding/showing/focusing the window
 - `globalThis.__TAURI__.dialog.open/save` for file open/save prompts
 
 Desktop-specific listeners are set up near the bottom of `apps/desktop/src/main.ts`:
 
+- `oauth-redirect` → resolve pending OAuth broker redirect
 - `close-prep` → flush pending workbook sync + call `set_macro_ui_context` → emit `close-prep-done`
 - `close-requested` → run `handleCloseRequest(...)` (unsaved changes prompt + hide vs quit) → emit `close-handled`
 - `open-file` → queue workbook opens; then emits `open-file-ready` once the handler is installed (flushes any queued open-file requests on the Rust side)
 - `file-dropped` → open the first dropped path
 - `tray-open` / `tray-new` / `tray-quit` → open dialog/new workbook/quit flow
+- `menu-*` (e.g. open/save/quit) → routed to the same “open/save/close” logic used by keyboard shortcuts and tray menu items
 - `shortcut-quick-open` / `shortcut-command-palette` → open dialog/palette
+- updater events → handled by the updater UI (`apps/desktop/src/tauri/updaterUi.ts`)
+  - `main.ts` emits `updater-ui-ready` once the updater listeners are installed (so the Rust host can safely start a startup update check in release builds).
+
+Separately, startup metrics listeners are installed at the top of `main.ts` via:
+
+- `installStartupTimingsListeners()` (listens for `startup:*` events)
+- `reportStartupWebviewLoaded()` (invokes the host command to emit the initial timing events)
 
 Important implementation detail: invoke calls are serialized via `queueBackendOp(...)` / `pendingBackendSync` so that bulk edits (workbook sync) don’t race with open/save/close.
 
@@ -347,7 +398,9 @@ Important implementation detail: invoke calls are serialized via `queueBackendOp
 
 ## Desktop IPC surface
 
-### Commands (`#[tauri::command]` in `apps/desktop/src-tauri/src/commands.rs`)
+### Commands (`#[tauri::command]` endpoints)
+
+Most command handlers live in `apps/desktop/src-tauri/src/commands.rs`, with a few “shell” commands defined alongside the desktop host (e.g. in `apps/desktop/src-tauri/src/main.rs` and `apps/desktop/src-tauri/src/tray_status.rs`).
 
 The command list is large; below are the “core” ones most contributors will interact with (not exhaustive):
 
@@ -379,26 +432,32 @@ The command list is large; below are the “core” ones most contributors will 
   - Execution/context: `set_macro_ui_context`, `run_macro`, `validate_vba_migration`
   - Python: `run_python_script`
   - VBA event hooks: `fire_workbook_open`, `fire_workbook_before_close`, `fire_worksheet_change`, `fire_selection_change`
+- **Updates**
+  - `check_for_updates` (triggers `updater::spawn_update_check(...)`; used by the command palette / manual update checks)
 - **Lifecycle**
-  - `quit_app` (hard-exits the process; used by the tray quit flow)
-  - `restart_app` (Tauri-managed restart/exit; intended for updater install flows so shutdown hooks can run)
-  - `exit_process` (hard-exits with a given code; used by `pnpm -C apps/desktop check:coi`)
-  - `report_cross_origin_isolation` (logs `crossOriginIsolated` + `SharedArrayBuffer` status for the COOP/COEP smoke check)
+  - `quit_app` (hard-exits the process; used by the tray/menu quit flow)
+  - `restart_app` (Tauri-managed restart/exit; intended for updater install flows so Tauri/plugins can shut down cleanly)
 
-Note: updater-driven installs should use `restart_app`, not `quit_app`. `quit_app` intentionally hard-exits (`std::process::exit(0)`) to avoid re-entering the hide-to-tray close handler, but hard exits can bypass normal shutdown hooks.
+Note: `quit_app` intentionally hard-exits (`std::process::exit(0)`) to avoid re-entering the hide-to-tray close handler.
+For update-driven restarts prefer `restart_app` (graceful).
 - **Tray integration**
   - `set_tray_status` (update tray icon + tooltip for simple statuses: `idle`, `syncing`, `error`)
+- **Startup metrics**
+  - `report_startup_webview_loaded`, `report_startup_tti`
+- **Notifications**
+  - `show_system_notification` (best-effort native notification via `tauri-plugin-notification`; used as a fallback by `apps/desktop/src/tauri/notifications.ts`, and restricted to the main window)
 
 ### Backend → frontend events
 
-Events emitted by the Rust host (see `main.rs`, `tray.rs`, `updater.rs`):
+Events emitted by the Rust host (see `main.rs`, `menu.rs`, `tray.rs`, `updater.rs`):
 
 - Window lifecycle:
   - `close-prep` (payload: token `string`)
   - `close-requested` (payload: `{ token: string, updates: CellUpdate[] }`)
-  - `oauth-redirect` (payload: `string` URL, e.g. `formula://oauth/callback?...`)
   - `open-file` (payload: `string[]` paths)
   - `file-dropped` (payload: `string[]` paths)
+- Deep links:
+  - `oauth-redirect` (payload: `string` URL, e.g. `formula://oauth/callback?...`)
 - Menu bar:
   - `menu-open`, `menu-new`, `menu-save`, `menu-save-as`, `menu-close-window`, `menu-quit`
   - `menu-undo`, `menu-redo`, `menu-cut`, `menu-copy`, `menu-paste`, `menu-select-all`
@@ -407,23 +466,29 @@ Events emitted by the Rust host (see `main.rs`, `tray.rs`, `updater.rs`):
   - `tray-new`, `tray-open`, `tray-quit`
 - Shortcuts:
   - `shortcut-quick-open`, `shortcut-command-palette`
+- Startup metrics:
+  - `startup:window-visible` (payload: `number`)
+  - `startup:webview-loaded` (payload: `number`)
+  - `startup:tti` (payload: `number`)
+  - `startup:metrics` (payload: `{ window_visible_ms?, webview_loaded_ms?, tti_ms? }`)
 - Updates:
-  - `update-check-already-running` (payload: `{ source }`)
   - `update-check-started` (payload: `{ source }`)
+  - `update-check-already-running` (payload: `{ source }`)
   - `update-not-available` (payload: `{ source }`)
   - `update-check-error` (payload: `{ source, message }`)
   - `update-available` (payload: `{ source, version, body }`)
 
-These events are consumed by the desktop frontend in `apps/desktop/src/tauri/updaterUi.ts` (installed
+Updater events are consumed by the desktop frontend in `apps/desktop/src/tauri/updaterUi.ts` (installed
 from `apps/desktop/src/main.ts`). The update-available dialog includes a **"View all versions"**
 action that opens the GitHub Releases page for manual downgrade/rollback.
 
-Related frontend → backend events used as acknowledgements during close:
+Related frontend → backend events used as acknowledgements:
 
 - `close-prep-done` (token)
 - `close-handled` (token)
 - `open-file-ready` (signals that the frontend’s `open-file` listener is installed; causes the Rust host to flush queued open requests)
 - `updater-ui-ready` (signals the updater UI listeners are installed; triggers the startup update check)
+- `coi-check-result` (used by the packaged cross-origin isolation smoke check mode)
 
 ---
 
@@ -520,7 +585,8 @@ Where it’s defined:
 - `apps/desktop/src-tauri/Cargo.toml`
   - The desktop binary (`[[bin]]`) has `required-features = ["desktop"]`.
   - The `desktop` feature enables the optional deps: `tauri`, `tauri-build`, and the desktop-only Tauri plugins
-    (currently `tauri-plugin-global-shortcut`, `tauri-plugin-updater`, `tauri-plugin-single-instance`, `tauri-plugin-shell`, `tauri-plugin-notification`).
+    (currently `tauri-plugin-global-shortcut`, `tauri-plugin-single-instance`, `tauri-plugin-notification`, `tauri-plugin-shell`, `tauri-plugin-updater`),
+    plus a few desktop-only helper crates (e.g. `http-range`, `percent-encoding`).
 - `apps/desktop/src-tauri/tauri.conf.json`
   - `build.features: ["desktop"]` ensures `tauri dev` / `tauri build` compiles the real desktop binary with the correct feature set.
 
@@ -538,60 +604,51 @@ backend library can still compile (and be tested) without linking Tauri or syste
 
 ## Tauri v2 Capabilities & Permissions
 
-### Source of truth
+In Tauri v2, permissioning is driven by **capabilities** rather than the Tauri v1 “allowlist”.
 
-In Tauri v2, permissioning is driven by **capabilities**:
+Source of truth in this repo:
 
-- `apps/desktop/src-tauri/capabilities/*.json` is the source of truth for what the webview is allowed to do.
+- `apps/desktop/src-tauri/capabilities/main.json`
 
-The main capability in this repo is:
+Capability files list which window labels they apply to via `"windows": [...]` (matching `app.windows[].label` in
+`apps/desktop/src-tauri/tauri.conf.json`). The main window label is `main`.
 
-- `apps/desktop/src-tauri/capabilities/main.json` (capabilities live under `apps/desktop/src-tauri/capabilities/`)
+### What `main.json` does
 
-Capability files list which window labels they apply to via `"windows": [...]` (matching the `app.windows[].label`
-values in `apps/desktop/src-tauri/tauri.conf.json`).
+`apps/desktop/src-tauri/capabilities/main.json` is intentionally an explicit allowlist for what the webview is allowed to do:
 
-### How the main window is assigned a capability
+- **`core:allow-invoke`**: which `__TAURI__.core.invoke("<command>")` names can be called from the frontend.
+- **`event:allow-listen` / `event:allow-emit`**: which event names the frontend can `listen(...)` for or `emit(...)`.
+- Additional plugin permissions: `dialog:*`, `window:*`, `clipboard:*`, `shell:*`, `updater:*`.
 
-Capabilities are assigned to windows by **label**.
+High-level contents (see the file for the exhaustive list):
 
-- The main window label is `main` (see `apps/desktop/src-tauri/tauri.conf.json`).
-- `apps/desktop/src-tauri/capabilities/main.json` includes `"windows": ["main"]`, which grants the main window the listed permissions.
-
-### Which APIs are granted (and why)
-
-`apps/desktop/src-tauri/capabilities/main.json` currently grants:
-
-- `core:default`
-  - Enables `__TAURI__.core.invoke` for the app’s Rust IPC surface (`#[tauri::command]`).
-  - Enables core window/event plumbing used by the desktop shell (hide/close flows, host-emitted events like `file-dropped`).
-- `event:allow-listen` (scoped to a small allowlist of event names)
-  - Allows the frontend to install listeners for host-emitted events used by the desktop shell:
-    - close flow: `close-prep`, `close-requested`
-    - open flows: `open-file`, `file-dropped`
-    - deep links / OAuth: `oauth-redirect`
-    - native menu bar: `menu-*` events (open/new/save/edit actions)
-    - tray + shortcuts: `tray-open`, `tray-new`, `tray-quit`, `shortcut-quick-open`, `shortcut-command-palette`
-    - updater: `update-check-already-running`, `update-check-started`, `update-not-available`, `update-check-error`, `update-available`
-    - startup timing instrumentation: `startup:*` events
-- `event:allow-emit` (scoped to a small allowlist of event names)
-  - Allows the frontend to emit acknowledgement events during close handling:
-    - `close-prep-done`, `close-handled`
-  - Allows the frontend to signal that its open-file listener is installed:
-    - `open-file-ready`
-  - Allows the frontend to signal that its updater UI event listeners are installed:
-    - `updater-ui-ready`
-- `dialog:allow-open`, `dialog:allow-save`
-  - Enables native open/save dialogs from the UI (`__TAURI__.dialog.open` / `save`).
-- `window:allow-hide`, `window:allow-show`, `window:allow-close`
-  - Enables the hide-to-tray close flow (the Rust host prevents default close; the UI hides/shows/closes based on user intent).
-- `clipboard:allow-read-text`, `clipboard:allow-write-text`
-  - Enables the legacy plain-text clipboard helpers (`globalThis.__TAURI__.clipboard.readText` / `writeText`) used as a fallback path.
-  - Rich clipboard (HTML/RTF/PNG) is handled via custom commands (`clipboard_read` / `clipboard_write`).
-- `shell:allow-open`
-  - Allows opening external URLs in the user’s default browser (e.g. help/docs links).
+- `core:allow-invoke` includes workbook operations, Power Query file IO, macro APIs, multi-format clipboard access, updater checks, tray status, notifications, and startup metrics reporting.
+- `event:allow-listen` includes:
+  - close flow: `close-prep`, `close-requested`
+  - open flow: `open-file`, `file-dropped`
+  - deep links / OAuth: `oauth-redirect`
+  - native menu bar: `menu-*` events
+  - tray + shortcuts: `tray-*`, `shortcut-*`
+  - startup timing instrumentation: `startup:*` events
+  - updater: `update-*` events
+- `event:allow-emit` includes acknowledgements and check-mode signals:
+  - `close-prep-done`, `close-handled`, `open-file-ready`
+  - `updater-ui-ready`
+  - `coi-check-result` (used by `pnpm -C apps/desktop check:coi`)
+- Updater UI requires `updater:allow-check` and `updater:allow-download-and-install` to call the updater plugin from JS.
 
 We intentionally keep capabilities narrow and rely on explicit Rust commands + higher-level app permission gates (macro trust, DLP, extension permissions) for privileged operations.
+
+### Practical workflow
+
+- If you add a new `#[tauri::command]` and the frontend needs to call it, add the command name to the `core:allow-invoke` allowlist.
+- If you add a new event name used by `listen(...)` or `emit(...)`, update the `event:allow-listen` / `event:allow-emit` allowlists.
+- If the frontend starts using a new Tauri core/plugin API (dialog/window/clipboard/shell/updater), add the corresponding `*:allow-*` permission string.
+
+For background on capability syntax/semantics, see the upstream Tauri v2 docs:
+
+- https://tauri.app/v2/guides/security/capabilities/
 
 ---
 
