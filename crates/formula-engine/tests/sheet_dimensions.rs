@@ -1,6 +1,6 @@
 use formula_engine::eval::CellAddr;
 use formula_engine::{Engine, ErrorKind, NameDefinition, NameScope, PrecedentNode, Value};
-use formula_model::EXCEL_MAX_COLS;
+use formula_model::{EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 
 #[test]
 fn sheet_dimensions_affect_full_column_rows() {
@@ -235,4 +235,41 @@ fn precedents_clamp_whole_row_and_column_from_defined_names_and_indirect() {
             "unexpected precedents for {addr}"
         );
     }
+}
+
+#[test]
+fn precedents_clamp_external_whole_row_and_column_to_excel_dimensions() {
+    let mut engine = Engine::new();
+
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SUM([Book.xlsx]Sheet1!A:A)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=SUM([Book.xlsx]Sheet1!1:1)")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(
+        engine.precedents("Sheet1", "A1").unwrap(),
+        vec![PrecedentNode::ExternalRange {
+            sheet: "[Book.xlsx]Sheet1".to_string(),
+            start: CellAddr { row: 0, col: 0 },
+            end: CellAddr {
+                row: EXCEL_MAX_ROWS.saturating_sub(1),
+                col: 0
+            },
+        }]
+    );
+
+    assert_eq!(
+        engine.precedents("Sheet1", "A2").unwrap(),
+        vec![PrecedentNode::ExternalRange {
+            sheet: "[Book.xlsx]Sheet1".to_string(),
+            start: CellAddr { row: 0, col: 0 },
+            end: CellAddr {
+                row: 0,
+                col: EXCEL_MAX_COLS.saturating_sub(1)
+            },
+        }]
+    );
 }

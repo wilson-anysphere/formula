@@ -4873,6 +4873,23 @@ fn sheet_id_from_graph(sheet: u32) -> SheetId {
     usize::try_from(sheet).expect("sheet id exceeds usize")
 }
 
+fn clamp_addr_to_excel_dimensions(addr: CellAddr) -> CellAddr {
+    let max_row = EXCEL_MAX_ROWS.saturating_sub(1);
+    let max_col = EXCEL_MAX_COLS.saturating_sub(1);
+    CellAddr {
+        row: if addr.row == CellAddr::SHEET_END {
+            max_row
+        } else {
+            addr.row
+        },
+        col: if addr.col == CellAddr::SHEET_END {
+            max_col
+        } else {
+            addr.col
+        },
+    }
+}
+
 fn clamp_addr_to_sheet_dimensions(workbook: &Workbook, sheet: SheetId, addr: CellAddr) -> CellAddr {
     let (max_row, max_col) = workbook
         .sheets
@@ -8534,8 +8551,8 @@ fn walk_external_expr(
                 if crate::eval::is_valid_external_sheet_key(key) {
                     precedents.insert(PrecedentNode::ExternalRange {
                         sheet: key.clone(),
-                        start: r.start,
-                        end: r.end,
+                        start: clamp_addr_to_excel_dimensions(r.start),
+                        end: clamp_addr_to_excel_dimensions(r.end),
                     });
                 }
             }
