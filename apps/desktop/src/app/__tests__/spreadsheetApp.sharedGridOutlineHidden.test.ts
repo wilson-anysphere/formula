@@ -145,12 +145,24 @@ describe("SpreadsheetApp shared-grid outline compatibility", () => {
       expect(provider.isRowHidden(1)).toBe(false);
       expect(provider.isColHidden(1)).toBe(false);
 
+      // Ensure Ctrl+Arrow (jump-to-edge) logic doesn't skip outline-hidden indices either.
+      // Make row 2 (0-based row 1) non-empty and row 3 empty so Ctrl+ArrowDown should land on row 2.
+      const documentController = (app as any).document;
+      const sheetId = (app as any).sheetId;
+      documentController.setCellValue(sheetId, { row: 1, col: 0 }, "X");
+      documentController.setCellValue(sheetId, { row: 2, col: 0 }, null);
+
       const selection = (app as any).selection;
       const limits = (app as any).limits;
       const movedDown = navigateSelectionByKey(selection, "ArrowDown", { shift: false, primary: false }, provider, limits);
       expect(movedDown?.active.row).toBe(1);
       const movedRight = navigateSelectionByKey(selection, "ArrowRight", { shift: false, primary: false }, provider, limits);
       expect(movedRight?.active.col).toBe(1);
+
+      const jumpedDown = navigateSelectionByKey(selection, "ArrowDown", { shift: false, primary: true }, provider, limits);
+      expect(jumpedDown?.active.row).toBe(1);
+      const jumpedRight = navigateSelectionByKey(selection, "ArrowRight", { shift: false, primary: true }, provider, limits);
+      expect(jumpedRight?.active.col).toBe(1);
 
       app.destroy();
       root.remove();
