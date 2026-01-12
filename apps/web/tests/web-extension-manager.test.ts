@@ -670,9 +670,16 @@ test("uninstall clears persisted permission + extension storage state (localStor
     JSON.stringify({ foo: "bar" })
   );
 
+  // Ensure the host has the extension store cached in-memory; uninstall should clear it too.
+  const storeBefore = (host as any)._storageApi.getExtensionStore("formula.sample-hello");
+  expect(storeBefore.foo).toBe("bar");
+
   await manager.uninstall("formula.sample-hello");
 
   expect(globalThis.localStorage.getItem("formula.extensionHost.storage.formula.sample-hello")).toBe(null);
+  const storeAfter = (host as any)._storageApi.getExtensionStore("formula.sample-hello");
+  expect(storeAfter).not.toBe(storeBefore);
+  expect(storeAfter.foo).toBeUndefined();
 
   const permissionsRaw = globalThis.localStorage.getItem("formula.extensionHost.permissions");
   expect(permissionsRaw).not.toBe(null);

@@ -36,6 +36,7 @@ export interface BrowserExtensionHostLike {
   }): Promise<string>;
   unloadExtension?(extensionId: string): Promise<void | boolean> | void | boolean;
   revokePermissions?(extensionId: string, permissions?: string[]): Promise<void> | void;
+  clearExtensionStorage?(extensionId: string): Promise<void> | void;
   listExtensions(): Array<{ id: string }>;
 }
 
@@ -485,6 +486,12 @@ export class WebExtensionManager {
       await this.host?.revokePermissions?.(String(id));
     } catch {
       // ignore (host might not support permissions, or storage might be unavailable)
+    }
+
+    try {
+      await this.host?.clearExtensionStorage?.(String(id));
+    } catch {
+      // ignore
     }
 
     try {

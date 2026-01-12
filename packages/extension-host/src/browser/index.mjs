@@ -164,6 +164,14 @@ class InMemoryExtensionStorage {
     if (!this._data[extensionId]) this._data[extensionId] = {};
     return this._data[extensionId];
   }
+
+  /**
+   * Clears any cached/in-memory storage for the given extension.
+   * @param {string} extensionId
+   */
+  clearExtensionStore(extensionId) {
+    delete this._data[String(extensionId)];
+  }
 }
 
 function getDefaultLocalStorage() {
@@ -256,6 +264,21 @@ class LocalStorageExtensionStorage {
 
     this._stores.set(id, { target, proxy });
     return proxy;
+  }
+
+  /**
+   * Clears persisted + in-memory storage for the given extension.
+   * @param {string} extensionId
+   */
+  clearExtensionStore(extensionId) {
+    const id = String(extensionId);
+    this._stores.delete(id);
+    if (!this._storage) return;
+    try {
+      this._storage.removeItem(this._key(id));
+    } catch {
+      // ignore
+    }
   }
 }
 
@@ -753,6 +776,25 @@ class BrowserExtensionHost {
 
   async resetAllPermissions() {
     return this._permissionManager.resetAllPermissions();
+  }
+
+  /**
+   * Best-effort clearing of extension storage/config state.
+   * This is intended for uninstall flows so a reinstall starts fresh.
+   *
+   * @param {string} extensionId
+   */
+  async clearExtensionStorage(extensionId) {
+    const id = String(extensionId);
+    const api = this._storageApi;
+    if (!api) return;
+    const fn = api.clearExtensionStore;
+    if (typeof fn !== "function") return;
+    try {
+      fn.call(api, id);
+    } catch {
+      // ignore
+    }
   }
 
   getContributedCommands() {
