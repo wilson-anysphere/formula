@@ -164,3 +164,33 @@ fn engine_evaluates_r1c1_field_access_and_tracks_dependencies() {
 
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(25.0));
 }
+
+#[test]
+fn engine_evaluates_r1c1_bracket_field_access_and_roundtrips() {
+    let mut engine = Engine::new();
+
+    engine
+        .set_cell_value(
+            "Sheet1",
+            "A1",
+            Value::Record(RecordValue::with_fields(
+                "Record",
+                HashMap::from([("Change%".to_string(), Value::Number(5.0))]),
+            )),
+        )
+        .unwrap();
+
+    // Field names that aren't valid identifier segments (spaces, punctuation, etc) use Excel's
+    // bracketed selector syntax.
+    engine
+        .set_cell_formula_r1c1("Sheet1", "B1", r#"=RC[-1].["Change%"]"#)
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(5.0));
+    assert_eq!(engine.get_cell_formula("Sheet1", "B1"), Some(r#"=A1.["Change%"]"#));
+    assert_eq!(
+        engine.get_cell_formula_r1c1("Sheet1", "B1"),
+        Some(r#"=RC[-1].["Change%"]"#.to_string())
+    );
+}
