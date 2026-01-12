@@ -166,10 +166,14 @@ export function ExtensionsPanel({
               try {
                 await manager.resetAllPermissions();
                 await refreshPermissions();
+              } catch (err) {
+                showToast(`Failed to reset permissions: ${String((err as any)?.message ?? err)}`, "error");
               } finally {
                 setBusy(null);
               }
-            })();
+            })().catch(() => {
+              // ignore
+            });
           }}
           style={{
             padding: "8px 10px",
@@ -191,10 +195,14 @@ export function ExtensionsPanel({
               setBusy("refresh");
               try {
                 await refreshPermissions();
+              } catch (err) {
+                showToast(`Failed to refresh permissions: ${String((err as any)?.message ?? err)}`, "error");
               } finally {
                 setBusy(null);
               }
-            })();
+            })().catch(() => {
+              // ignore
+            });
           }}
           style={{
             padding: "8px 10px",
@@ -311,15 +319,22 @@ export function ExtensionsPanel({
                           onClick={() => {
                             void (async () => {
                               const key = `revoke:${ext.id}:${perm}`;
-                                setBusy(key);
-                                try {
-                                  await manager.revokePermission(ext.id, perm);
+                              setBusy(key);
+                              try {
+                                await manager.revokePermission(ext.id, perm);
                                 await refreshPermissionsForExtension(ext.id);
-                                } finally {
-                                  setBusy(null);
-                                }
-                              })();
-                            }}
+                              } catch (err) {
+                                showToast(
+                                  `Failed to revoke permission '${perm}': ${String((err as any)?.message ?? err)}`,
+                                  "error",
+                                );
+                              } finally {
+                                setBusy(null);
+                              }
+                            })().catch(() => {
+                              // ignore
+                            });
+                          }}
                           style={{
                             flex: "0 0 auto",
                             padding: "8px 10px",
@@ -349,10 +364,19 @@ export function ExtensionsPanel({
                         try {
                           await manager.resetPermissionsForExtension(ext.id);
                           await refreshPermissionsForExtension(ext.id);
+                        } catch (err) {
+                          showToast(
+                            `Failed to reset permissions for ${String(ext.manifest?.displayName ?? ext.id)}: ${String(
+                              (err as any)?.message ?? err,
+                            )}`,
+                            "error",
+                          );
                         } finally {
                           setBusy(null);
                         }
-                      })();
+                      })().catch(() => {
+                        // ignore
+                      });
                     }}
                     style={{
                       padding: "8px 10px",
