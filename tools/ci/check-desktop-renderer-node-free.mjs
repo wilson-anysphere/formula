@@ -41,6 +41,16 @@ function isDesktopRendererSourceFile(absPath) {
   if (!SOURCE_EXTENSIONS.has(ext)) return false;
 
   const base = path.basename(absPath);
+  // TypeScript declaration files are not part of the runtime bundle, but they can
+  // legitimately reference Node types. Skip them to avoid false positives.
+  if (
+    base.endsWith(".d.ts") ||
+    base.endsWith(".d.tsx") ||
+    base.endsWith(".d.mts") ||
+    base.endsWith(".d.cts")
+  ) {
+    return false;
+  }
   if (base.includes(".test.") || base.includes(".spec.") || base.includes(".vitest.") || base.includes(".e2e.")) {
     return false;
   }
