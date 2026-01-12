@@ -7816,6 +7816,9 @@ try {
     if (typeof token !== "string" || token.trim() === "") return;
 
     try {
+      // If the user is mid-edit when a native window close is requested, ensure the edit
+      // is committed before we flush workbook sync and before the backend runs Workbook_BeforeClose.
+      app.commitPendingEditsForCommand();
       await new Promise<void>((resolve) => queueMicrotask(resolve));
       await drainBackendSync();
 
