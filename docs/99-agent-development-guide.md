@@ -513,7 +513,7 @@ xvfb-run npm run test:e2e
 cargo build                           # No memory limit!
 cargo test                            # No memory limit!
 cargo build -j$(nproc)               # 192 parallel rustc = OOM
-cargo build -j0                       # Unlimited = OOM
+make -j0                              # Unlimited parallelism = OOM
 
 # WRONG - kills OTHER agents' processes:
 pkill cargo                           # NEVER USE pkill
