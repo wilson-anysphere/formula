@@ -187,3 +187,10 @@ test("clipboard HTML strips leading/trailing NUL padding from clipboard payloads
   assert.ok(grid);
   assert.equal(grid[0][0].value, "Hello");
 });
+
+test("clipboard HTML strips NUL padding from non-CF_HTML HTML payloads", () => {
+  const html = `\u0000<!DOCTYPE html><html><body><table><tr><td>Hello</td></tr></table></body></html>\u0000`;
+  const grid = parseHtmlToCellGrid(html);
+  assert.ok(grid);
+  assert.equal(grid[0][0].value, "Hello");
+});
