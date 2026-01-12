@@ -32,11 +32,14 @@ export function deriveSecretStoreKey(secret: string): Buffer {
   return crypto.createHash("sha256").update(secret, "utf8").digest();
 }
 
-function secretAad(name: string): Buffer {
-  // Cryptographic binding between ciphertext and the intended secret name. The
-  // `secret:` prefix serves as a fixed context string so ciphertext can't be
-  // replayed across other AES-GCM uses.
-  return crypto.createHash("sha256").update(`secret:${name}`, "utf8").digest();
+const SECRET_STORE_AAD_CONTEXT_V2 = "formula-secret-store";
+const SECRET_STORE_AAD_CONTEXT_V2_LEGACY = "secret";
+
+function secretAad(name: string, context: string): Buffer {
+  // Cryptographic binding between ciphertext and the intended secret name.
+  // Including a fixed context string ensures domain separation across other
+  // AES-GCM uses.
+  return crypto.createHash("sha256").update(`${context}:${name}`, "utf8").digest();
 }
 
 function packEncrypted(iv: Buffer, tag: Buffer, ciphertext: Buffer): string {
@@ -62,7 +65,7 @@ function decryptV1(key: Buffer, packed: string): string {
 function encryptV2(key: Buffer, name: string, plaintext: string): string {
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
-  cipher.setAAD(secretAad(name));
+  cipher.setAAD(secretAad(name, SECRET_STORE_AAD_CONTEXT_V2));
   const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
   return packEncrypted(iv, tag, ciphertext);
@@ -70,10 +73,25 @@ function encryptV2(key: Buffer, name: string, plaintext: string): string {
 
 function decryptV2(key: Buffer, name: string, packed: string): string {
   const { iv, tag, ciphertext } = unpackEncrypted(packed);
-  const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
-  decipher.setAAD(secretAad(name));
-  decipher.setAuthTag(tag);
-  return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
+
+  // The earliest v2 implementation used `secret:${name}` as the AAD context. We
+  // now use `formula-secret-store:${name}` but keep decrypt compatibility so
+  // existing rows continue to work.
+  const aadContexts = [SECRET_STORE_AAD_CONTEXT_V2, SECRET_STORE_AAD_CONTEXT_V2_LEGACY];
+
+  let lastErr: unknown;
+  for (const context of aadContexts) {
+    try {
+      const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+      decipher.setAAD(secretAad(name, context));
+      decipher.setAuthTag(tag);
+      return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+
+  throw lastErr instanceof Error ? lastErr : new Error("Failed to decrypt secret");
 }
 
 export function getSecretEncodingInfo(value: string): SecretEncodingInfo {
@@ -198,4 +216,3 @@ export async function listSecrets(db: Queryable, options: { prefix?: string } = 
     updatedAt: new Date(row.updated_at)
   }));
 }
-

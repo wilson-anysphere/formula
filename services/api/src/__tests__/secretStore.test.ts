@@ -38,6 +38,18 @@ function encryptV1(key: Buffer, plaintext: string): string {
   return `v1:${packed}`;
 }
 
+function encryptV2LegacyAad(key: Buffer, keyId: string, name: string, plaintext: string): string {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  // Legacy v2 AAD context was `secret:${name}` (SHA-256 digest).
+  const aad = crypto.createHash("sha256").update(`secret:${name}`, "utf8").digest();
+  cipher.setAAD(aad);
+  const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  const packed = Buffer.concat([iv, tag, ciphertext]).toString("base64");
+  return `v2:${keyId}:${packed}`;
+}
+
 describe("secretStore", () => {
   it("roundtrips v2 secrets with AAD binding", () => {
     const key = crypto.randomBytes(32);
@@ -82,6 +94,14 @@ describe("secretStore", () => {
 
     const encrypted = encryptV1(oldKey, "legacy");
     expect(decryptSecretValue(keyring, "ignored-name", encrypted)).toBe("legacy");
+  });
+
+  it("decrypts v2 secrets written with the legacy AAD context", () => {
+    const key = crypto.randomBytes(32);
+    const keyring: SecretStoreKeyring = { currentKeyId: "k1", keys: { k1: key } };
+
+    const encrypted = encryptV2LegacyAad(key, "k1", "legacy-aad", "value");
+    expect(decryptSecretValue(keyring, "legacy-aad", encrypted)).toBe("value");
   });
 
   it("fails decryption on AAD mismatch", () => {
@@ -177,4 +197,3 @@ describe("secrets rotation (integration)", () => {
     }
   });
 });
-

@@ -628,7 +628,7 @@ like per-org OIDC client secrets and SIEM auth tokens. Values are encrypted usin
 
 As of **secret store v2**, ciphertext is bound to the secret's metadata via **AAD**:
 
-- A fixed context string
+- A fixed context string (`formula-secret-store`)
 - The secret `name` (which often includes an org scope like `oidc:<orgId>:<providerId>`)
 
 This means secrets cannot be copied between rows (or renamed) without re-encrypting: decryption will
