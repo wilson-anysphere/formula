@@ -446,8 +446,10 @@ For images-in-cells, these rich values ultimately resolve to an **image binary**
 but there appear to be multiple packaging patterns in the ecosystem:
 
 1. **RichData → RichValueRel → media (no `cellImages.xml` part)**
-   - Observed in this repo via `crates/formula-xlsx/tests/embedded_images_place_in_cell_roundtrip.rs`
-     (generated with `rust_xlsxwriter::Worksheet::embed_image_with_format`).
+   - Observed in this repo in both:
+     - `fixtures/xlsx/basic/image-in-cell.xlsx` (real Excel “Place in Cell” fixture; notes in `fixtures/xlsx/basic/image-in-cell.md`), and
+     - `crates/formula-xlsx/tests/embedded_images_place_in_cell_roundtrip.rs`
+       (generated with `rust_xlsxwriter::Worksheet::embed_image_with_format`).
    - The image bytes are resolved via:
      - `xl/richData/richValueRel.xml` → `xl/richData/_rels/richValueRel.xml.rels` → `xl/media/*`
 2. **`cellImages.xml` “cell image store” → media**
@@ -455,9 +457,11 @@ but there appear to be multiple packaging patterns in the ecosystem:
    - The image bytes are resolved via:
      - `xl/cellImages.xml` → `xl/_rels/cellImages.xml.rels` → `xl/media/*`
 
-The exact way that a worksheet cell points at a `cellImages.xml` entry (if that part is present) is
-still not fully verified against a real Excel-generated “Place in Cell” workbook; treat that linkage
-as **opaque** and preserve all related parts for safe round-trip.
+The exact way that a worksheet cell points at a `cellImages.xml` entry (when that part is present) is
+still not fully verified against a real Excel-generated workbook that uses `xl/cellImages*.xml` for
+images-in-cells; treat that linkage as **opaque** and preserve all related parts for safe round-trip.
+The real Excel “Place in Cell” fixture in this repo (`fixtures/xlsx/basic/image-in-cell.xlsx`) does
+**not** use `xl/cellImages*.xml`.
 
 At minimum, a rich value store is expected to exist when `xl/metadata.xml` indicates the `XLRICHVALUE`
 metadata type (the exact mapping schema varies by producer/Excel build).
