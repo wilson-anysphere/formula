@@ -10697,7 +10697,7 @@ try {
   // - open-file, file-dropped
   // - tray-open, tray-new, tray-quit
   // - shortcut-quick-open, shortcut-command-palette
-  // - menu-open, menu-new, menu-save, menu-save-as, menu-export-pdf, menu-close-window, menu-quit,
+  // - menu-open, menu-new, menu-save, menu-save-as, menu-print, menu-print-preview, menu-export-pdf, menu-close-window, menu-quit,
   //   menu-undo, menu-redo, menu-cut, menu-copy, menu-paste, menu-paste-special, menu-select-all,
   //   menu-zoom-in, menu-zoom-out, menu-zoom-reset, menu-about, menu-check-updates, menu-open-release-page
   // - startup:window-visible, startup:webview-loaded, startup:tti, startup:metrics
@@ -10891,6 +10891,20 @@ try {
     void handleSaveAs().catch((err) => {
       console.error("Failed to save workbook:", err);
       void nativeDialogs.alert(`Failed to save workbook: ${String(err)}`);
+    });
+  });
+
+  void listen("menu-print", () => {
+    void handleRibbonPrintPreview({ autoPrint: true }).catch((err) => {
+      console.error("Failed to print:", err);
+      showToast(`Failed to print: ${String(err)}`, "error");
+    });
+  });
+
+  void listen("menu-print-preview", () => {
+    void handleRibbonPrintPreview({ autoPrint: false }).catch((err) => {
+      console.error("Failed to open print preview:", err);
+      showToast(`Failed to open print preview: ${String(err)}`, "error");
     });
   });
 

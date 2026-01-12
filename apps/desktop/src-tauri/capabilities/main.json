@@ -102,6 +102,8 @@
         { "event": "menu-new" },
         { "event": "menu-save" },
         { "event": "menu-save-as" },
+        { "event": "menu-print" },
+        { "event": "menu-print-preview" },
         { "event": "menu-export-pdf" },
         { "event": "menu-close-window" },
         { "event": "menu-quit" },

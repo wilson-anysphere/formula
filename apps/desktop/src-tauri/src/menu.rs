@@ -5,6 +5,8 @@ pub const ITEM_NEW: &str = "menu-new";
 pub const ITEM_OPEN: &str = "menu-open";
 pub const ITEM_SAVE: &str = "menu-save";
 pub const ITEM_SAVE_AS: &str = "menu-save-as";
+pub const ITEM_PRINT: &str = "menu-print";
+pub const ITEM_PRINT_PREVIEW: &str = "menu-print-preview";
 pub const ITEM_EXPORT_PDF: &str = "menu-export-pdf";
 pub const ITEM_CLOSE_WINDOW: &str = "menu-close-window";
 pub const ITEM_QUIT: &str = "menu-quit";
@@ -52,6 +54,14 @@ pub fn on_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
         ITEM_SAVE_AS => {
             show_main_window(app);
             let _ = app.emit(ITEM_SAVE_AS, ());
+        }
+        ITEM_PRINT => {
+            show_main_window(app);
+            let _ = app.emit(ITEM_PRINT, ());
+        }
+        ITEM_PRINT_PREVIEW => {
+            show_main_window(app);
+            let _ = app.emit(ITEM_PRINT_PREVIEW, ());
         }
         ITEM_EXPORT_PDF => {
             show_main_window(app);
@@ -158,6 +168,8 @@ fn build_menu(handle: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         true,
         Some("CmdOrCtrl+Shift+S"),
     )?;
+    let print = MenuItem::with_id(handle, ITEM_PRINT, "Print…", true, Some("CmdOrCtrl+P"))?;
+    let print_preview = MenuItem::with_id(handle, ITEM_PRINT_PREVIEW, "Print Preview", true, None::<&str>)?;
     let export_pdf = MenuItem::with_id(handle, ITEM_EXPORT_PDF, "Export PDF…", true, None::<&str>)?;
     let close_window = MenuItem::with_id(
         handle,
@@ -227,6 +239,8 @@ fn build_menu(handle: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
                     &sep_file_1,
                     &save,
                     &save_as,
+                    &print,
+                    &print_preview,
                     &export_pdf,
                     &sep_file_2,
                     &close_window,
@@ -246,6 +260,8 @@ fn build_menu(handle: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
                     &sep_file_1,
                     &save,
                     &save_as,
+                    &print,
+                    &print_preview,
                     &export_pdf,
                     &sep_file_2,
                     &close_window,

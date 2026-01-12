@@ -51,7 +51,7 @@ static CLOSE_REQUEST_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 // - open-file, file-dropped
 // - tray-open, tray-new, tray-quit
 // - shortcut-quick-open, shortcut-command-palette
-// - menu-open, menu-new, menu-save, menu-save-as, menu-export-pdf, menu-close-window, menu-quit,
+// - menu-open, menu-new, menu-save, menu-save-as, menu-print, menu-print-preview, menu-export-pdf, menu-close-window, menu-quit,
 //   menu-undo, menu-redo, menu-cut, menu-copy, menu-paste, menu-paste-special, menu-select-all,
 //   menu-zoom-in, menu-zoom-out, menu-zoom-reset, menu-about, menu-check-updates, menu-open-release-page
 // - startup:window-visible, startup:webview-loaded, startup:tti, startup:metrics

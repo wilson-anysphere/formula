@@ -151,6 +151,8 @@ describe("tauri capability event permissions", () => {
       "menu-new",
       "menu-save",
       "menu-save-as",
+      "menu-print",
+      "menu-print-preview",
       "menu-export-pdf",
       "menu-close-window",
       "menu-quit",
