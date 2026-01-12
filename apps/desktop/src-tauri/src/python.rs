@@ -306,9 +306,7 @@ impl<'a> PythonRpcHost<'a> {
                     .unwrap_or_default()
                     .trim()
                     .to_string();
-                if name.is_empty() {
-                    return Err("create_sheet expects a non-empty name".to_string());
-                }
+                formula_model::validate_sheet_name(&name).map_err(|e| e.to_string())?;
 
                 {
                     let workbook = self.state.get_workbook().map_err(|e| e.to_string())?;
@@ -910,5 +908,23 @@ mod tests {
         let workbook = host.state.get_workbook().expect("workbook should exist");
         let sheet_names: Vec<_> = workbook.sheets.iter().map(|s| s.name.as_str()).collect();
         assert_eq!(sheet_names, vec!["AtStart", "First", "Second", "Third"]);
+    }
+
+    #[test]
+    fn python_rpc_create_sheet_rejects_blank_name_with_canonical_error() {
+        let mut workbook = crate::file_io::Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let mut host = PythonRpcHost::new(&mut state, None).expect("host should init");
+        let err = host
+            .handle_rpc("create_sheet", Some(json!({ "name": "   " })))
+            .expect_err("expected create_sheet to reject blank name");
+        assert_eq!(
+            err,
+            formula_model::SheetNameError::EmptyName.to_string(),
+            "unexpected error: {err}"
+        );
     }
 }
