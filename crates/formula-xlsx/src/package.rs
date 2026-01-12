@@ -1073,6 +1073,85 @@ mod tests {
     }
 
     #[test]
+    fn remove_vba_project_preserves_vml_legacy_drawing_linkage_while_stripping_macro_shapes() {
+        let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <legacyDrawing r:id="rIdVml"/>
+</worksheet>"#;
+
+        let sheet_rels_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdVml" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing" Target="../drawings/vmlDrawing1.vml"/>
+</Relationships>"#;
+
+        let vml_xml = r##"<?xml version="1.0" encoding="UTF-8"?>
+<xml xmlns:v="urn:schemas-microsoft-com:vml"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <v:shape id="_x0000_s1025" type="#_x0000_t75">
+    <o:OLEObject r:id="rIdOle"/>
+  </v:shape>
+  <v:shape id="_x0000_s1026" type="#_x0000_t75">
+    <x:ClientData ObjectType="Note"></x:ClientData>
+  </v:shape>
+</xml>"##;
+
+        let vml_rels_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdOle" Type="http://schemas.microsoft.com/office/2006/relationships/activeXControlBinary" Target="../activeX/activeX1.bin"/>
+</Relationships>"#;
+
+        let bytes = build_package(&[
+            ("xl/worksheets/sheet1.xml", worksheet_xml.as_bytes()),
+            ("xl/worksheets/_rels/sheet1.xml.rels", sheet_rels_xml.as_bytes()),
+            ("xl/drawings/vmlDrawing1.vml", vml_xml.as_bytes()),
+            ("xl/drawings/_rels/vmlDrawing1.vml.rels", vml_rels_xml.as_bytes()),
+            ("xl/activeX/activeX1.bin", b"dummy-bin"),
+        ]);
+
+        let mut pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+        pkg.remove_vba_project().expect("strip macros");
+
+        assert!(
+            pkg.part("xl/drawings/vmlDrawing1.vml").is_some(),
+            "expected vmlDrawing1.vml to be preserved (worksheet legacyDrawing reference)"
+        );
+        assert!(
+            pkg.part("xl/worksheets/_rels/sheet1.xml.rels").is_some(),
+            "expected worksheet relationship part to be preserved"
+        );
+
+        let updated_sheet =
+            std::str::from_utf8(pkg.part("xl/worksheets/sheet1.xml").unwrap()).unwrap();
+        assert!(updated_sheet.contains("legacyDrawing"));
+        assert!(updated_sheet.contains("rIdVml"));
+
+        let updated_sheet_rels =
+            std::str::from_utf8(pkg.part("xl/worksheets/_rels/sheet1.xml.rels").unwrap()).unwrap();
+        assert!(updated_sheet_rels.contains("rIdVml"));
+        assert!(updated_sheet_rels.contains("vmlDrawing1.vml"));
+
+        let updated_vml =
+            std::str::from_utf8(pkg.part("xl/drawings/vmlDrawing1.vml").unwrap()).unwrap();
+        assert!(!updated_vml.contains("rIdOle"));
+        assert!(!updated_vml.contains("OLEObject"));
+        assert!(updated_vml.contains("ObjectType=\"Note\""));
+
+        let updated_vml_rels = std::str::from_utf8(
+            pkg.part("xl/drawings/_rels/vmlDrawing1.vml.rels").unwrap(),
+        )
+        .unwrap();
+        assert!(!updated_vml_rels.contains("rIdOle"));
+
+        assert!(pkg.part("xl/activeX/activeX1.bin").is_none());
+
+        crate::macro_strip::validate_opc_relationships(pkg.parts_map())
+            .expect("stripped package relationships are consistent");
+    }
+
+    #[test]
     fn remove_vba_project_strips_drawing_embed_references() {
         let drawing_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
