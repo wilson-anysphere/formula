@@ -2656,36 +2656,6 @@ if (
     { category: "Format" },
   );
 
-  // --- Built-in commands (Task 28) --------------------------------------------
-  commandRegistry.registerBuiltinCommand(
-    "comments.togglePanel",
-    "Toggle Comments Panel",
-    () => {
-      app.toggleCommentsPanel();
-    },
-    {
-      category: "Comments",
-      icon: null,
-      description: "Toggle the comments side panel",
-      keywords: ["comments", "panel"],
-    },
-  );
-
-  commandRegistry.registerBuiltinCommand(
-    "comments.addComment",
-    "Add Comment",
-    () => {
-      app.openCommentsPanel();
-      app.focusNewCommentInput();
-    },
-    {
-      category: "Comments",
-      icon: null,
-      description: "Open the comments panel and focus the new comment input",
-      keywords: ["comment", "add comment", "new comment"],
-    },
-  );
-
   extensionPanelBridge = new ExtensionPanelBridge({
     host: extensionHostManager.host as any,
     panelRegistry,

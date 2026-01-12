@@ -220,6 +220,21 @@ export function registerBuiltinCommands(params: {
   );
 
   commandRegistry.registerBuiltinCommand(
+    "comments.addComment",
+    "Add Comment",
+    () => {
+      app.openCommentsPanel();
+      app.focusNewCommentInput();
+    },
+    {
+      category: "Comments",
+      icon: null,
+      description: "Open the comments panel and focus the new comment input",
+      keywords: ["comment", "add comment", "new comment"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
     "view.freezePanes",
     "Freeze Panes",
     () => {

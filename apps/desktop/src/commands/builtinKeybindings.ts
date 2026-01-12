@@ -187,4 +187,10 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     mac: "shift+f2",
     when: null,
   },
+  {
+    command: "comments.togglePanel",
+    key: "ctrl+shift+m",
+    mac: "cmd+shift+m",
+    when: null,
+  },
 ];
