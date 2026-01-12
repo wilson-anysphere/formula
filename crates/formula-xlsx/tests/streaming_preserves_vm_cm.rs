@@ -71,7 +71,11 @@ fn patch_xlsx_streaming_drops_vm_but_preserves_cm_on_existing_cells(
         .find(|n| n.is_element() && n.tag_name().name() == "c" && n.attribute("r") == Some("A1"))
         .ok_or("expected A1 cell")?;
 
-    assert_eq!(cell.attribute("vm"), None, "vm should be dropped on value edit");
+    assert_eq!(
+        cell.attribute("vm"),
+        None,
+        "vm should be dropped on value edit, got: {sheet_xml}"
+    );
     assert_eq!(
         cell.attribute("cm"),
         Some("2"),
