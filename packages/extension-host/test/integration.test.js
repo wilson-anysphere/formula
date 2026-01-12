@@ -126,7 +126,7 @@ test("integration: viewActivated is broadcast even if view activation fails", as
 
   await assert.rejects(() => host.activateView("sampleHello.panel"), /Permission denied/);
 
-  const expected = "[view-logger] viewActivated:sampleHello.panel";
+  const expected = "[view-logger] viewActivated:string:sampleHello.panel";
   const deadline = Date.now() + 1_000;
   while (Date.now() < deadline) {
     const messages = host.getMessages().map((m) => String(m.message));
@@ -135,6 +135,37 @@ test("integration: viewActivated is broadcast even if view activation fails", as
   }
 
   assert.fail("Timed out waiting for viewActivated message from view-logger extension");
+});
+
+test("integration: viewActivated payload normalizes viewId to string", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-view-id-normalization-"));
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const viewLoggerPath = path.resolve(__dirname, "./fixtures/view-logger");
+  await host.loadExtension(viewLoggerPath);
+  await host.startup();
+
+  await host.activateView(123);
+
+  const expected = "[view-logger] viewActivated:string:123";
+  const deadline = Date.now() + 1_000;
+  while (Date.now() < deadline) {
+    const messages = host.getMessages().map((m) => String(m.message));
+    if (messages.some((m) => m.includes(expected))) return;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+
+  assert.fail("Timed out waiting for normalized viewActivated payload");
 });
 
 test("integration: panel messaging (webview -> extension -> webview)", async (t) => {

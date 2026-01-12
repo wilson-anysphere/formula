@@ -7,10 +7,11 @@ const formula = require("@formula/extension-api");
 async function activate(context) {
   context.subscriptions.push(
     formula.events.onViewActivated(({ viewId }) => {
-      void formula.ui.showMessage(`[view-logger] viewActivated:${String(viewId)}`);
+      void formula.ui.showMessage(
+        `[view-logger] viewActivated:${typeof viewId}:${String(viewId)}`,
+      );
     })
   );
 }
 
 module.exports = { activate };
-
