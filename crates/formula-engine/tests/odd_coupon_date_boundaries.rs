@@ -10,31 +10,31 @@ fn eval_formula(formula: &str) -> Value {
 }
 
 #[test]
-fn oddfprice_rejects_issue_equal_settlement() {
+fn oddfprice_allows_issue_equal_settlement() {
     let v = eval_formula("=ODDFPRICE(DATE(2020,1,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0)");
-    assert_eq!(v, Value::Error(ErrorKind::Num));
+    assert!(matches!(v, Value::Number(n) if n.is_finite()));
 }
 
 #[test]
-fn oddfyield_rejects_issue_equal_settlement() {
+fn oddfyield_allows_issue_equal_settlement() {
     let v = eval_formula(
         "=ODDFYIELD(DATE(2020,1,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,99,100,2,0)",
     );
-    assert_eq!(v, Value::Error(ErrorKind::Num));
+    assert!(matches!(v, Value::Number(n) if n.is_finite()));
 }
 
 #[test]
-fn oddfprice_rejects_settlement_equal_first_coupon() {
+fn oddfprice_allows_settlement_equal_first_coupon() {
     let v = eval_formula("=ODDFPRICE(DATE(2020,7,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0)");
-    assert_eq!(v, Value::Error(ErrorKind::Num));
+    assert!(matches!(v, Value::Number(n) if n.is_finite()));
 }
 
 #[test]
-fn oddfyield_rejects_settlement_equal_first_coupon() {
+fn oddfyield_allows_settlement_equal_first_coupon() {
     let v = eval_formula(
         "=ODDFYIELD(DATE(2020,7,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,99,100,2,0)",
     );
-    assert_eq!(v, Value::Error(ErrorKind::Num));
+    assert!(matches!(v, Value::Number(n) if n.is_finite()));
 }
 
 #[test]

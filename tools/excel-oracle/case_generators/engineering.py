@@ -57,3 +57,10 @@ def generate(
     add_case(cases, prefix="bessely", tags=["engineering", "BESSELY"], formula="=BESSELY(1,0)")
     add_case(cases, prefix="besseli", tags=["engineering", "BESSELI"], formula="=BESSELI(1,0)")
     add_case(cases, prefix="besselk", tags=["engineering", "BESSELK"], formula="=BESSELK(1,0)")
+
+    add_case(
+        cases,
+        prefix="convert",
+        tags=["engineering", "CONVERT"],
+        formula='=CONVERT(1,"m","ft")',
+    )

@@ -13429,6 +13429,16 @@
       "id": "besselk_6c4f0aad0bbc"
     },
     {
+      "formula": "=CONVERT(1,\"m\",\"ft\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "CONVERT"
+      ],
+      "id": "convert_a89703f2a31c"
+    },
+    {
       "formula": "=SUM(A1:A3)",
       "outputCell": "C1",
       "inputs": [

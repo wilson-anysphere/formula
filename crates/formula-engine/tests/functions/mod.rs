@@ -11,6 +11,7 @@ mod dynamic_arrays_sortby;
 mod dynamic_arrays_stack;
 mod dynamic_arrays_textsplit;
 mod engineering_complex;
+mod engineering_convert;
 mod financial_bonds;
 mod financial_cashflows;
 mod financial_accrint;
