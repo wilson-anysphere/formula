@@ -62,7 +62,7 @@ let externalDepsFilteredCount = 0;
 let missingWorkspaceDepsFilteredCount = 0;
 if (!hasDeps) {
   const before = runnableTestFiles.length;
-  runnableTestFiles = await filterExternalDependencyTests(runnableTestFiles);
+  runnableTestFiles = await filterExternalDependencyTests(runnableTestFiles, { canStripTypes });
   externalDepsFilteredCount = before - runnableTestFiles.length;
 } else {
   const before = runnableTestFiles.length;
@@ -209,7 +209,14 @@ async function filterTypeScriptImportTests(files) {
   return out;
 }
 
-async function filterExternalDependencyTests(files) {
+/**
+ * Filter out node:test suites that depend on third-party dependencies when `node_modules`
+ * is not installed.
+ *
+ * @param {string[]} files
+ * @param {{ canStripTypes: boolean }} opts
+ */
+async function filterExternalDependencyTests(files, opts) {
   /** @type {Map<string, boolean>} */
   const dependencyCache = new Map();
   /**
@@ -369,6 +376,23 @@ async function filterExternalDependencyTests(files) {
         const stats = await stat(base);
         if (stats.isFile()) return base;
       } catch {
+        // Bundler-style TS sources often import `./foo.js` while the file on disk is
+        // `foo.ts` / `foo.tsx`. When `--experimental-strip-types` is available (and we
+        // install the `.js` -> `.ts` loader), treat those as resolvable dependencies
+        // for dependency analysis too.
+        if (opts.canStripTypes && (ext === ".js" || ext === ".jsx")) {
+          const baseNoExt = base.slice(0, -ext.length);
+          const fallbacks = ext === ".jsx" ? [".tsx", ".ts"] : [".ts", ".tsx"];
+          for (const fallbackExt of fallbacks) {
+            const candidate = `${baseNoExt}${fallbackExt}`;
+            try {
+              const candidateStats = await stat(candidate);
+              if (candidateStats.isFile()) return candidate;
+            } catch {
+              // continue
+            }
+          }
+        }
         return null;
       }
       return null;
@@ -588,6 +612,21 @@ async function filterMissingWorkspaceDependencyTests(files, opts) {
         const stats = await stat(base);
         if (stats.isFile()) return base;
       } catch {
+        // See `scripts/resolve-ts-imports-loader.mjs`: bundler-style `.js` specifiers
+        // often point at `.ts`/`.tsx` sources.
+        if (opts.canStripTypes && (ext === ".js" || ext === ".jsx")) {
+          const baseNoExt = base.slice(0, -ext.length);
+          const fallbacks = ext === ".jsx" ? [".tsx", ".ts"] : [".ts", ".tsx"];
+          for (const fallbackExt of fallbacks) {
+            const candidate = `${baseNoExt}${fallbackExt}`;
+            try {
+              const candidateStats = await stat(candidate);
+              if (candidateStats.isFile()) return candidate;
+            } catch {
+              // continue
+            }
+          }
+        }
         return null;
       }
       return null;
