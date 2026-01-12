@@ -137,5 +137,47 @@ describe("CanvasGridRenderer horizontalAlign=fill", () => {
     const uniqueXs = new Set(textCalls.map((c) => c.x));
     expect(uniqueXs.size).toBeGreaterThan(1);
   });
-});
 
+  it("repeats fillText calls for single-line rich text cells", () => {
+    const provider: CellProvider = {
+      getCell: (row, col) => {
+        if (row !== 0 || col !== 0) return null;
+        return { row, col, value: null, richText: { text: "ab" }, style: { horizontalAlign: "fill" } };
+      }
+    };
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const fillTextCalls: Array<{ text: string; x: number; y: number }> = [];
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>();
+    contexts.set(gridCanvas, createMock2dContext({ canvas: gridCanvas }));
+    contexts.set(
+      contentCanvas,
+      createMock2dContext({
+        canvas: contentCanvas,
+        onFillText: (args) => fillTextCalls.push(args)
+      })
+    );
+    contexts.set(selectionCanvas, createMock2dContext({ canvas: selectionCanvas }));
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      const existing = contexts.get(this);
+      if (existing) return existing;
+      // CanvasGridRenderer creates an internal measurer canvas; ensure it can acquire a 2D context.
+      const fallback = createMock2dContext({ canvas: this });
+      contexts.set(this, fallback);
+      return fallback;
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const renderer = new CanvasGridRenderer({ provider, rowCount: 1, colCount: 1 });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(200, 80, 1);
+    renderer.renderImmediately();
+
+    const textCalls = fillTextCalls.filter((c) => c.text === "ab");
+    expect(textCalls.length).toBeGreaterThan(1);
+  });
+});

@@ -2677,6 +2677,7 @@ export class CanvasGridRenderer {
           const direction = style?.direction ?? "auto";
           const verticalAlign = style?.verticalAlign ?? "middle";
           const rotationDeg = style?.rotationDeg ?? 0;
+          const horizontalAlign = style?.horizontalAlign;
 
           const availableWidth = Math.max(0, width - paddingX * 2);
           const availableHeight = Math.max(0, height - paddingY * 2);
@@ -2818,8 +2819,11 @@ export class CanvasGridRenderer {
             const underlineSegments: DecorationSegment[] = [];
             const strikeSegments: DecorationSegment[] = [];
 
-            const drawFragments = () => {
-              let xCursor = cursorX;
+            const drawFragmentsAt = (startX: number, options?: { extraSpacePerAdjustableGap?: number; adjustableGapMask?: boolean[] }) => {
+              const extraPerGap = options?.extraSpacePerAdjustableGap ?? 0;
+              const adjustableMask = options?.adjustableGapMask ?? null;
+              let xCursor = startX;
+              let gapIdx = 0;
               for (const fragment of fragments) {
                 contentCtx.font = toCanvasFontString(fragment.font);
                 contentCtx.fillStyle = fragment.color ?? fillStyle;
@@ -2866,9 +2870,33 @@ export class CanvasGridRenderer {
                 }
 
                 xCursor += fragment.width;
+                if (extraPerGap !== 0) {
+                  const add = adjustableMask ? (adjustableMask[gapIdx] ? extraPerGap : 0) : extraPerGap;
+                  if (add) xCursor += add;
+                  gapIdx += 1;
+                }
               }
             };
 
+            if (horizontalAlign === "fill" && totalWidth > 0 && maxWidth > 0) {
+              // Excel-style "Fill" alignment: repeat the single-line rich text horizontally to fill
+              // the available width. This is intentionally clipped to the cell rect (unlike the
+              // default overflow behavior for long left/right-aligned text).
+              const startX = originX;
+              const maxRepeats = 512;
+              const repeats = Math.min(maxRepeats, Math.max(1, Math.ceil(maxWidth / totalWidth)));
+
+              contentCtx.save();
+              contentCtx.beginPath();
+              contentCtx.rect(x, y, width, height);
+              contentCtx.clip();
+
+              for (let i = 0; i < repeats; i++) {
+                drawFragmentsAt(startX + i * totalWidth);
+              }
+
+              contentCtx.restore();
+            } else {
             const shouldClip = totalWidth > maxWidth;
             let clipX = x;
             let clipWidth = width;
@@ -2937,10 +2965,11 @@ export class CanvasGridRenderer {
               contentCtx.beginPath();
               contentCtx.rect(clipX, y, clipWidth, height);
               contentCtx.clip();
-              drawFragments();
+              drawFragmentsAt(cursorX);
               contentCtx.restore();
             } else {
-              drawFragments();
+              drawFragmentsAt(cursorX);
+            }
             }
 
             if (underlineSegments.length > 0 || strikeSegments.length > 0) {
@@ -2987,10 +3016,131 @@ export class CanvasGridRenderer {
               const underlineSegments: DecorationSegment[] = [];
               const strikeSegments: DecorationSegment[] = [];
 
+              const justifyEnabled =
+                horizontalAlign === "justify" && wrapMode !== "none" && rotationDeg === 0 && resolvedAlign === "left" && layout.lines.length > 1;
+              const whitespaceRe = /^\s+$/;
+
               for (let i = 0; i < layout.lines.length; i++) {
                 const line = layout.lines[i];
-                let xCursor = originX + line.x;
                 const baselineY = originY + i * layout.lineHeight + line.ascent;
+
+                // Preserve non-justified semantics for the last line (Excel-like).
+                const justifyLine = justifyEnabled && i < layout.lines.length - 1 && line.width > 0 && maxWidth > line.width;
+
+                if (justifyLine) {
+                  const tokens: Array<{
+                    text: string;
+                    font: FontSpec;
+                    color?: string;
+                    underline?: boolean;
+                    underlineStyle?: "single" | "double";
+                    strike?: boolean;
+                    isWhitespace: boolean;
+                    adjustableGap: boolean;
+                  }> = [];
+
+                  for (const run of line.runs as Array<{
+                    text: string;
+                    font: FontSpec;
+                    color?: string;
+                    underline?: boolean;
+                    underlineStyle?: "single" | "double";
+                    strike?: boolean;
+                  }>) {
+                    if (!run.text) continue;
+                    const parts = run.text.split(/(\s+)/).filter((p) => p.length > 0);
+                    for (const part of parts) {
+                      tokens.push({
+                        text: part,
+                        font: run.font,
+                        color: run.color,
+                        underline: run.underline,
+                        underlineStyle: run.underlineStyle,
+                        strike: run.strike,
+                        isWhitespace: whitespaceRe.test(part),
+                        adjustableGap: false
+                      });
+                    }
+                  }
+
+                  let gapCount = 0;
+                  for (let ti = 0; ti < tokens.length; ti++) {
+                    const tok = tokens[ti]!;
+                    if (!tok.isWhitespace) continue;
+                    if (ti === 0 || ti === tokens.length - 1) continue;
+                    const left = tokens[ti - 1];
+                    const right = tokens[ti + 1];
+                    if (!left || !right) continue;
+                    if (left.isWhitespace || right.isWhitespace) continue;
+                    tok.adjustableGap = true;
+                    gapCount += 1;
+                  }
+
+                  if (gapCount > 0) {
+                    const extra = maxWidth - line.width;
+                    const extraPerGap = extra > 0 ? extra / gapCount : 0;
+
+                    let xCursor = originX;
+                    for (const token of tokens) {
+                      if (!token.text) continue;
+                      const measurement = layoutEngine.measure(token.text, token.font);
+                      const width = measurement?.width ?? contentCtx.measureText(token.text).width;
+                      const ascent = measurement?.ascent ?? token.font.sizePx * 0.8;
+                      const descent = measurement?.descent ?? token.font.sizePx * 0.2;
+                      const extraAdvance = token.adjustableGap ? extraPerGap : 0;
+                      const advance = token.isWhitespace ? width + extraAdvance : width;
+
+                      contentCtx.font = toCanvasFontString(token.font);
+                      contentCtx.fillStyle = token.color ?? fillStyle;
+
+                      if (!token.isWhitespace) {
+                        contentCtx.fillText(token.text, xCursor, baselineY);
+                      }
+
+                      if (token.underline) {
+                        const underlineOffset = Math.max(1, Math.round(token.font.sizePx * 0.08));
+                        const lineWidth = Math.max(1, Math.round(token.font.sizePx / 16));
+                        const underlineY = alignDecorationY(baselineY + underlineOffset, lineWidth);
+                        underlineSegments.push({
+                          x1: xCursor,
+                          x2: xCursor + advance,
+                          y: underlineY,
+                          color: contentCtx.fillStyle as string,
+                          lineWidth
+                        });
+
+                        if (token.underlineStyle === "double") {
+                          const doubleGap = Math.max(2, Math.round(lineWidth * 2));
+                          const underlineY2 = alignDecorationY(baselineY + underlineOffset + doubleGap, lineWidth);
+                          underlineSegments.push({
+                            x1: xCursor,
+                            x2: xCursor + advance,
+                            y: underlineY2,
+                            color: contentCtx.fillStyle as string,
+                            lineWidth
+                          });
+                        }
+                      }
+
+                      if (token.strike) {
+                        const lineWidth = Math.max(1, Math.round(token.font.sizePx / 16));
+                        const strikeY = alignDecorationY(baselineY - Math.max(1, Math.round(ascent * 0.3)), lineWidth);
+                        strikeSegments.push({
+                          x1: xCursor,
+                          x2: xCursor + advance,
+                          y: strikeY,
+                          color: contentCtx.fillStyle as string,
+                          lineWidth
+                        });
+                      }
+
+                      xCursor += advance;
+                    }
+                    continue;
+                  }
+                }
+
+                let xCursor = originX + line.x;
 
                 for (const run of line.runs as Array<{
                   text: string;
