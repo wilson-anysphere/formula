@@ -1024,7 +1024,14 @@ export class CollabSession {
       }
       // Avoid a top-level import of the Node-only persistence implementation so
       // this module can still be bundled for browser environments.
-      const { FileCollabPersistence } = await import("@formula/collab-persistence/file");
+      // Use a computed specifier so browser bundlers don't try to resolve this
+      // Node-only module unless it's actually used at runtime.
+      const specifier = ["@formula/collab-persistence", "file"].join("/");
+      // eslint-disable-next-line no-undef
+      const { FileCollabPersistence } = await import(
+        // eslint-disable-next-line no-undef
+        /* @vite-ignore */ specifier
+      );
       const dir = this.dirnameForOfflineFilePath(offline.filePath);
 
       // Best-effort migration: older `@formula/collab-offline` used `offline.filePath`
@@ -1053,9 +1060,24 @@ export class CollabSession {
     // Only relevant in Node environments. Keep this logic self-contained so
     // browser bundlers can tree-shake it.
     try {
-      const { promises: fs } = await import("node:fs");
-      const { createHash } = await import("node:crypto");
-      const path = await import("node:path");
+      const fsSpecifier = ["node", "fs"].join(":");
+      const cryptoSpecifier = ["node", "crypto"].join(":");
+      const pathSpecifier = ["node", "path"].join(":");
+      // eslint-disable-next-line no-undef
+      const { promises: fs } = await import(
+        // eslint-disable-next-line no-undef
+        /* @vite-ignore */ fsSpecifier
+      );
+      // eslint-disable-next-line no-undef
+      const { createHash } = await import(
+        // eslint-disable-next-line no-undef
+        /* @vite-ignore */ cryptoSpecifier
+      );
+      // eslint-disable-next-line no-undef
+      const path = await import(
+        // eslint-disable-next-line no-undef
+        /* @vite-ignore */ pathSpecifier
+      );
 
       const docHash = createHash("sha256").update(opts.docId).digest("hex");
       const nextFilePath = path.join(opts.dir, `${docHash}.yjs`);
@@ -1150,7 +1172,12 @@ export class CollabSession {
     // resurrect cleared state on the next session start.
     if (this.legacyOfflineFilePath) {
       try {
-        const { promises: fs } = await import("node:fs");
+        const fsSpecifier = ["node", "fs"].join(":");
+        // eslint-disable-next-line no-undef
+        const { promises: fs } = await import(
+          // eslint-disable-next-line no-undef
+          /* @vite-ignore */ fsSpecifier
+        );
         await fs.rm(this.legacyOfflineFilePath, { force: true });
       } catch {
         // Best-effort cleanup.
