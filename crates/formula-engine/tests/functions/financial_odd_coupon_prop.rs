@@ -199,6 +199,51 @@ fn prop_oddf_yield_price_roundtrip_basis0() {
                 (price_roundtrip - price).abs() <= 1e-6,
                 "ODDF price roundtrip failed: price_in={price} price_out={price_roundtrip} yld_out={yld_out} case={case:?}",
             );
+
+            // Monotonicity sanity check: higher yield => lower price (for positive cashflows).
+            let y_lo = (case.yld - 0.01).max(0.0);
+            let y_hi = (case.yld + 0.01).min(0.2);
+            if y_hi > y_lo {
+                let p_lo = oddfprice(
+                    case.settlement,
+                    case.maturity,
+                    case.issue,
+                    case.first_coupon,
+                    case.rate,
+                    y_lo,
+                    REDEMPTION,
+                    case.frequency,
+                    BASIS,
+                    SYSTEM,
+                )
+                .map_err(|e| {
+                    TestCaseError::fail(format!(
+                        "ODDFPRICE(y_lo) errored: {e:?} y_lo={y_lo} case={case:?}"
+                    ))
+                })?;
+                let p_hi = oddfprice(
+                    case.settlement,
+                    case.maturity,
+                    case.issue,
+                    case.first_coupon,
+                    case.rate,
+                    y_hi,
+                    REDEMPTION,
+                    case.frequency,
+                    BASIS,
+                    SYSTEM,
+                )
+                .map_err(|e| {
+                    TestCaseError::fail(format!(
+                        "ODDFPRICE(y_hi) errored: {e:?} y_hi={y_hi} case={case:?}"
+                    ))
+                })?;
+                prop_assert!(p_lo.is_finite() && p_hi.is_finite());
+                prop_assert!(
+                    p_hi <= p_lo + 1e-8,
+                    "ODDF monotonicity failed: y_lo={y_lo} p_lo={p_lo} y_hi={y_hi} p_hi={p_hi} case={case:?}",
+                );
+            }
             Ok(())
         })
         .unwrap();
@@ -279,6 +324,48 @@ fn prop_oddl_yield_price_roundtrip_basis0() {
                 (price_roundtrip - price).abs() <= 1e-6,
                 "ODDL price roundtrip failed: price_in={price} price_out={price_roundtrip} yld_out={yld_out} case={case:?}",
             );
+
+            let y_lo = (case.yld - 0.01).max(0.0);
+            let y_hi = (case.yld + 0.01).min(0.2);
+            if y_hi > y_lo {
+                let p_lo = oddlprice(
+                    case.settlement,
+                    case.maturity,
+                    case.last_interest,
+                    case.rate,
+                    y_lo,
+                    REDEMPTION,
+                    case.frequency,
+                    BASIS,
+                    SYSTEM,
+                )
+                .map_err(|e| {
+                    TestCaseError::fail(format!(
+                        "ODDLPRICE(y_lo) errored: {e:?} y_lo={y_lo} case={case:?}"
+                    ))
+                })?;
+                let p_hi = oddlprice(
+                    case.settlement,
+                    case.maturity,
+                    case.last_interest,
+                    case.rate,
+                    y_hi,
+                    REDEMPTION,
+                    case.frequency,
+                    BASIS,
+                    SYSTEM,
+                )
+                .map_err(|e| {
+                    TestCaseError::fail(format!(
+                        "ODDLPRICE(y_hi) errored: {e:?} y_hi={y_hi} case={case:?}"
+                    ))
+                })?;
+                prop_assert!(p_lo.is_finite() && p_hi.is_finite());
+                prop_assert!(
+                    p_hi <= p_lo + 1e-8,
+                    "ODDL monotonicity failed: y_lo={y_lo} p_lo={p_lo} y_hi={y_hi} p_hi={p_hi} case={case:?}",
+                );
+            }
             Ok(())
         })
         .unwrap();
