@@ -845,6 +845,8 @@ Guardrail tests (to prevent accidental “allow everything” capability drift):
   allowlists (including any `core:`-namespaced variants, depending on the Tauri toolchain) match the desktop shell’s real
   event usage (and contain no wildcards).
 - `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts` — asserts required plugin permissions stay explicit/minimal (dialog, clipboard plain text, window ops, updater).
+- `apps/desktop/src/tauri/__tests__/openFileIpcWiring.vitest.ts` — asserts the open-file IPC handshake (`open-file-ready`) is still wired in `main.ts` (prevents cold-start open drops).
+- `apps/desktop/src/tauri/__tests__/updaterMainListeners.vitest.ts` — asserts updater UX listeners remain consolidated in `tauri/updaterUi.ts` and the `updater-ui-ready` handshake stays intact.
 
 ### Practical workflow
 
