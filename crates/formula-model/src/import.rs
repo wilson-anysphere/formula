@@ -60,6 +60,17 @@ impl Default for CsvOptions {
 ///
 /// Auto-detection considers (in priority order) `,`, `;`, tab, and `|`.
 pub const CSV_DELIMITER_AUTO: u8 = 0;
+/// Guess a CSV delimiter from a byte sample.
+///
+/// This mirrors the importer behavior when using [`CSV_DELIMITER_AUTO`], but operates on an
+/// in-memory prefix (useful for callers that need the delimiter before constructing their own CSV
+/// reader).
+pub fn sniff_csv_delimiter(sample: &[u8]) -> u8 {
+    let mut cursor = Cursor::new(sample);
+    sniff_csv_delimiter_prefix(&mut cursor)
+        .map(|(_, delimiter)| delimiter)
+        .unwrap_or(b',')
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CsvTextEncoding {
@@ -406,20 +417,27 @@ fn commit_csv_sniff_record(
 fn select_sniffed_csv_delimiter(hists: &[HashMap<usize, usize>]) -> u8 {
     // Pick the delimiter whose sampled records most frequently share the same column count (>1).
     //
+    // If two delimiters are equally consistent, prefer the one with the higher consistent column
+    // count (mode field count), matching Excel-like behavior.
+    //
     // Tie-break deterministically in `CSV_SNIFF_DELIMITERS` order: `,` > `;` > tab > `|`.
     let mut best_delim = b',';
     let mut best_mode_count: usize = 0;
+    let mut best_mode_fields: usize = 0;
 
     for (idx, hist) in hists.iter().enumerate() {
-        let mode_count = hist
-            .iter()
-            .filter(|(fields, _)| **fields > 1)
-            .map(|(_, count)| *count)
-            .max()
-            .unwrap_or(0);
+        let mut mode_count = 0usize;
+        let mut mode_fields = 0usize;
+        for (fields, count) in hist.iter().filter(|(fields, _)| **fields > 1) {
+            if *count > mode_count || (*count == mode_count && *fields > mode_fields) {
+                mode_count = *count;
+                mode_fields = *fields;
+            }
+        }
 
-        if mode_count > best_mode_count {
+        if (mode_count, mode_fields) > (best_mode_count, best_mode_fields) {
             best_mode_count = mode_count;
+            best_mode_fields = mode_fields;
             best_delim = CSV_SNIFF_DELIMITERS[idx];
         }
     }

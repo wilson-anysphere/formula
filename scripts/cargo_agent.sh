@@ -94,6 +94,19 @@ fi
 jobs="${FORMULA_CARGO_JOBS:-${CARGO_BUILD_JOBS:-4}}"
 limit_as="${FORMULA_CARGO_LIMIT_AS:-12G}"
 
+# Rustc can spawn many internal worker threads during codegen (roughly proportional to
+# `codegen-units`). On multi-agent machines this can hit OS thread limits and manifest as
+# rustc ICEs like "failed to spawn work thread: Resource temporarily unavailable".
+#
+# To keep per-process thread counts proportional to our chosen Cargo job parallelism, default
+# dev/test codegen units to `jobs` unless the caller has explicitly overridden them.
+if [[ -z "${CARGO_PROFILE_DEV_CODEGEN_UNITS:-}" ]]; then
+  export CARGO_PROFILE_DEV_CODEGEN_UNITS="${jobs}"
+fi
+if [[ -z "${CARGO_PROFILE_TEST_CODEGEN_UNITS:-}" ]]; then
+  export CARGO_PROFILE_TEST_CODEGEN_UNITS="${jobs}"
+fi
+
 # Cargo also supports configuring the default parallelism via `CARGO_BUILD_JOBS`.
 # Export it so commands that *don't* accept `-j` (e.g. `cargo fmt`, `cargo clean`)
 # still inherit our safe default.

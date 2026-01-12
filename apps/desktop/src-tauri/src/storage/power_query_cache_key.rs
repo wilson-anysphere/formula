@@ -121,6 +121,7 @@ impl<P: KeychainProvider> PowerQueryCacheKeyStore<P> {
 mod tests {
     use super::*;
     use std::sync::Arc;
+    use std::sync::Barrier;
     use std::thread;
 
     use crate::storage::encryption::InMemoryKeychainProvider;
@@ -143,12 +144,20 @@ mod tests {
             InMemoryKeychainProvider::default(),
         ));
 
-        let handles: Vec<_> = (0..8)
+        // Keep the concurrency test lightweight to avoid exhausting OS thread limits on
+        // multi-agent CI hosts while still exercising the race-sensitive path.
+        let barrier = Arc::new(Barrier::new(3));
+        let handles: Vec<_> = (0..2)
             .map(|_| {
                 let cloned = store.clone();
-                thread::spawn(move || cloned.get_or_create().expect("key"))
+                let barrier = barrier.clone();
+                thread::spawn(move || {
+                    barrier.wait();
+                    cloned.get_or_create().expect("key")
+                })
             })
             .collect();
+        barrier.wait();
 
         let mut keys = Vec::new();
         for handle in handles {

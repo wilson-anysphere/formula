@@ -192,3 +192,64 @@ fn opens_extensionless_csv() {
         CellValue::String("world".to_string())
     );
 }
+
+#[test]
+fn opens_semicolon_delimited_csv_with_sniffed_delimiter() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let csv_path = dir.path().join("semi.csv");
+    std::fs::write(&csv_path, "a;b\n1;2\n").expect("write csv");
+
+    let wb = open_workbook(&csv_path).expect("open csv workbook");
+    let model = match wb {
+        Workbook::Model(model) => model,
+        other => panic!("expected Workbook::Model, got {other:?}"),
+    };
+
+    let sheet = model.sheet_by_name("semi").expect("sheet missing");
+    let table = sheet.columnar_table().expect("expected columnar table");
+    assert_eq!(table.column_count(), 2);
+
+    assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(1.0));
+    assert_eq!(sheet.value_a1("B1").unwrap(), CellValue::Number(2.0));
+}
+
+#[test]
+fn opens_tab_delimited_csv_with_sniffed_delimiter() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let csv_path = dir.path().join("tab.csv");
+    std::fs::write(&csv_path, "a\tb\n1\t2\n").expect("write csv");
+
+    let wb = open_workbook(&csv_path).expect("open csv workbook");
+    let model = match wb {
+        Workbook::Model(model) => model,
+        other => panic!("expected Workbook::Model, got {other:?}"),
+    };
+
+    let sheet = model.sheet_by_name("tab").expect("sheet missing");
+    let table = sheet.columnar_table().expect("expected columnar table");
+    assert_eq!(table.column_count(), 2);
+
+    assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(1.0));
+    assert_eq!(sheet.value_a1("B1").unwrap(), CellValue::Number(2.0));
+}
+
+#[test]
+fn opens_pipe_delimited_csv_with_sniffed_delimiter() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let csv_path = dir.path().join("pipe.csv");
+    std::fs::write(&csv_path, "a|b\n1|2\n").expect("write csv");
+
+    let wb = open_workbook(&csv_path).expect("open csv workbook");
+    let model = match wb {
+        Workbook::Model(model) => model,
+        other => panic!("expected Workbook::Model, got {other:?}"),
+    };
+
+    let sheet = model.sheet_by_name("pipe").expect("sheet missing");
+    let table = sheet.columnar_table().expect("expected columnar table");
+    assert_eq!(table.column_count(), 2);
+
+    assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(1.0));
+    assert_eq!(sheet.value_a1("B1").unwrap(), CellValue::Number(2.0));
+}
+
