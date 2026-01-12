@@ -734,7 +734,7 @@ fn build_rich_value_rel_index_to_target_part(
     Ok(out)
 }
 
-fn resolve_rich_value_rel_target_part(source_part: &str, target: &str) -> String {
+pub(crate) fn resolve_rich_value_rel_target_part(source_part: &str, target: &str) -> String {
     // Relationship targets in `xl/richData/_rels/*.rels` are typically relative to `xl/richData/`
     // (e.g. `../media/image1.png`). Some producers instead emit targets relative to `xl/`
     // (e.g. `media/image1.png`), or emit `Target="xl/..."` without a leading `/` (which would

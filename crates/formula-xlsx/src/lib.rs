@@ -900,7 +900,14 @@ impl XlsxDocument {
             if target.is_empty() {
                 return Ok(None);
             }
-            let target_part = crate::path::resolve_target(&rich_value_rel_part, target);
+            // Some producers emit rich-data relationship targets that are relative to `xl/`
+            // (e.g. `Target="media/image1.png"`) or omit the leading `/` for package-root targets
+            // (e.g. `Target="xl/media/image1.png"`). Use the same best-effort target normalization
+            // as the other rich-data extractors.
+            let target_part = crate::rich_data::resolve_rich_value_rel_target_part(
+                &rich_value_rel_part,
+                target,
+            );
             if !self.parts.contains_key(&target_part) {
                 return Ok(None);
             }

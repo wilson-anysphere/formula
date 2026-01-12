@@ -5,7 +5,10 @@ use formula_xlsx::load_from_bytes;
 use zip::write::FileOptions;
 use zip::ZipWriter;
 
-fn build_rich_cell_image_fixture_with_rich_value_part_base(rich_value_part_base: &str) -> Vec<u8> {
+fn build_rich_cell_image_fixture_with_rich_value_part_base(
+    rich_value_part_base: &str,
+    rid2_target: &str,
+) -> Vec<u8> {
     let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
@@ -98,13 +101,15 @@ fn build_rich_cell_image_fixture_with_rich_value_part_base(rich_value_part_base:
 </richValueRel>
 "#;
 
-    let rich_value_rel2_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    let rich_value_rel2_rels = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
-  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image2.png#fragment"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="{rid2_target}"/>
   <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image3.png"/>
 </Relationships>
-"#;
+"#
+    );
 
     let cursor = Cursor::new(Vec::new());
     let mut zip = ZipWriter::new(cursor);
@@ -166,11 +171,14 @@ fn build_rich_cell_image_fixture_with_rich_value_part_base(rich_value_part_base:
 }
 
 fn build_rich_cell_image_fixture() -> Vec<u8> {
-    build_rich_cell_image_fixture_with_rich_value_part_base("richValue")
+    build_rich_cell_image_fixture_with_rich_value_part_base("richValue", "../media/image2.png#fragment")
 }
 
 fn build_rich_cell_image_fixture_plural_richvalues() -> Vec<u8> {
-    build_rich_cell_image_fixture_with_rich_value_part_base("richValues")
+    build_rich_cell_image_fixture_with_rich_value_part_base(
+        "richValues",
+        "../media/image2.png#fragment",
+    )
 }
 
 #[test]
@@ -213,6 +221,46 @@ fn resolves_image_target_for_rich_value_cell_with_plural_richvalues_parts(
     assert_eq!(
         doc.image_target_for_cell(sheet_id, CellRef::from_a1("C1")?)?,
         None
+    );
+
+    Ok(())
+}
+
+#[test]
+fn resolves_image_target_for_rich_value_cell_with_media_relative_relationship_targets(
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Some producers emit `Target="media/image2.png"` (relative to `xl/`) rather than the more
+    // common `Target="../media/image2.png"` (relative to `xl/richData/`).
+    let bytes = build_rich_cell_image_fixture_with_rich_value_part_base(
+        "richValue",
+        "media/image2.png#fragment",
+    );
+    let doc = load_from_bytes(&bytes)?;
+    let sheet_id = doc.workbook.sheets[0].id;
+
+    assert_eq!(
+        doc.image_target_for_cell(sheet_id, CellRef::from_a1("A1")?)?,
+        Some("xl/media/image2.png".to_string())
+    );
+
+    Ok(())
+}
+
+#[test]
+fn resolves_image_target_for_rich_value_cell_with_xl_prefixed_relationship_targets(
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Some producers emit `Target="xl/media/image2.png"` without a leading `/`. If treated as
+    // relative to `xl/richData/` this would incorrectly resolve to `xl/richData/xl/media/...`.
+    let bytes = build_rich_cell_image_fixture_with_rich_value_part_base(
+        "richValue",
+        "xl/media/image2.png#fragment",
+    );
+    let doc = load_from_bytes(&bytes)?;
+    let sheet_id = doc.workbook.sheets[0].id;
+
+    assert_eq!(
+        doc.image_target_for_cell(sheet_id, CellRef::from_a1("A1")?)?,
+        Some("xl/media/image2.png".to_string())
     );
 
     Ok(())
