@@ -30,7 +30,10 @@ fn imports_defined_names_via_calamine_fallback_when_biff_is_unavailable() {
         .map(|(name, refers_to)| {
             let name = name.replace('\0', "");
             let refers_to = refers_to.trim();
-            let refers_to = refers_to.strip_prefix('=').unwrap_or(refers_to).to_string();
+            let refers_to = refers_to
+                .strip_prefix('=')
+                .unwrap_or(refers_to)
+                .replace('\0', "");
             (name, refers_to)
         })
         .find(|(name, _)| validate_defined_name(name).is_ok())

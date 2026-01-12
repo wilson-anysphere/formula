@@ -262,7 +262,7 @@ fn rewrites_calamine_defined_name_formulas_to_sanitized_sheet_names() {
             .find(|(name, _)| name.replace('\0', "") == "TestName")
             .map(|(_, refers_to)| refers_to.as_str())
             .unwrap_or("<missing>")
-            .to_string()
+            .replace('\0', "")
     };
     assert!(
         calamine_refers_to.contains("Bad:Name"),
