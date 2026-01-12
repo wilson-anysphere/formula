@@ -357,12 +357,20 @@ export interface CollabSessionOptions {
   offline?: {
     mode: "indexeddb" | "file";
     /**
-     * Storage key / namespace. Defaults to `connection.docId` (when provided)
-     * and otherwise `doc.guid`.
+     * Storage key / namespace.
+     *
+     * - `mode: "indexeddb"`: defaults to `connection.docId` / `options.docId` / `doc.guid`.
+     * - `mode: "file"`: the persistence doc id is derived from `connection.docId` / `options.docId`
+     *   (and otherwise falls back to `filePath`, then `key`, then `doc.guid`).
      */
     key?: string;
     /**
-     * File path for Node/desktop persistence when `mode: "file"` is used.
+     * Legacy file path for Node/desktop persistence when `mode: "file"` is used.
+     *
+     * Internally, CollabSession maps this to `new FileCollabPersistence(dirname(filePath))`
+     * and uses a hashed per-doc file name. If a legacy `.yjslog` file exists at
+     * `filePath`, CollabSession will copy it into the new hashed file on first run
+     * (best-effort migration).
      */
     filePath?: string;
     /**
