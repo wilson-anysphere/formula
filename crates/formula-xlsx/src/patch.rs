@@ -1601,7 +1601,9 @@ fn write_cell_patch(
         write_formula_element(writer, None, formula, false, &formula_tag)?;
     }
 
-    write_value_element(writer, &body_kind, &v_tag, &is_tag, &t_tag)?;
+    if !(clear_cached_values_on_formula_change && formula.is_some()) {
+        write_value_element(writer, &body_kind, &v_tag, &is_tag, &t_tag)?;
+    }
 
     writer.write_event(Event::End(BytesEnd::new(cell_tag.as_str())))?;
     Ok(true)
@@ -1690,6 +1692,9 @@ fn patch_cell_element(
     let update_value = !value_eq || clear_value;
     let any_change = style_change || update_formula || update_value;
 
+    let clear_cached_value =
+        clear_cached_values_on_formula_change && update_formula && patch_formula.is_some();
+
     if !any_change {
         if original_was_empty {
             writer.write_event(Event::Empty(original_start))?;
@@ -1774,6 +1779,7 @@ fn patch_cell_element(
         &formula_tag,
         update_value,
         &body_kind,
+        clear_cached_value,
         &v_tag,
         &is_tag,
         &t_tag,
@@ -2128,6 +2134,7 @@ fn write_patched_cell_children(
     formula_tag: &str,
     update_value: bool,
     body_kind: &CellBodyKind,
+    clear_cached_value: bool,
     v_tag: &str,
     is_tag: &str,
     t_tag: &str,
@@ -2152,7 +2159,8 @@ fn write_patched_cell_children(
     };
 
     let mut formula_written = !update_formula || patch_formula.is_none();
-    let mut value_written = !update_value || matches!(body_kind, CellBodyKind::None);
+    let mut value_written =
+        !update_value || matches!(body_kind, CellBodyKind::None) || clear_cached_value;
     let mut saw_formula = false;
     let mut saw_value = false;
 
@@ -2230,7 +2238,7 @@ fn write_patched_cell_children(
                     value_written = true;
                 }
 
-                if update_value {
+                if update_value || clear_cached_value {
                     idx = skip_owned_subtree(inner_events, idx);
                 } else {
                     idx = write_owned_subtree(writer, inner_events, idx)?;
@@ -2263,7 +2271,7 @@ fn write_patched_cell_children(
                     value_written = true;
                 }
 
-                if !update_value {
+                if !update_value && !clear_cached_value {
                     writer.write_event(Event::Empty(e.clone()))?;
                 }
 

@@ -371,7 +371,6 @@ fn image_id_from_target_path(target_path: &str) -> ImageId {
         .to_string();
     ImageId::new(file_name)
 }
-
 fn slice_node_xml(node: &roxmltree::Node<'_, '_>, doc: &str) -> Option<String> {
     let range = node.range();
     doc.get(range).map(|s| s.to_string())
