@@ -3927,14 +3927,19 @@ if (
       const wasActive = app.getCurrentSheetId() === sheetId;
       const deletedName = workbookSheetStore.getName(sheetId) ?? sheetId;
 
-      const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-      if (typeof baseInvoke === "function") {
-        // Prefer the queued invoke (it sequences behind pending `set_cell` / `set_range` sync work).
-        const invoke = queuedInvoke ?? ((cmd: string, args?: any) => queueBackendOp(() => baseInvoke(cmd, args)));
+      // In collab mode, sheet operations are persisted through the shared Yjs document.
+      // Avoid mutating the local Tauri workbook backend (if present).
+      const collabSession = app.getCollabSession?.() ?? null;
+      if (!collabSession) {
+        const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
+        if (typeof baseInvoke === "function") {
+          // Prefer the queued invoke (it sequences behind pending `set_cell` / `set_range` sync work).
+          const invoke = queuedInvoke ?? ((cmd: string, args?: any) => queueBackendOp(() => baseInvoke(cmd, args)));
 
-        // Allow any microtask-batched workbook edits to enqueue before we request deletion.
-        await new Promise<void>((resolve) => queueMicrotask(resolve));
-        await invoke("delete_sheet", { sheet_id: sheetId });
+          // Allow any microtask-batched workbook edits to enqueue before we request deletion.
+          await new Promise<void>((resolve) => queueMicrotask(resolve));
+          await invoke("delete_sheet", { sheet_id: sheetId });
+        }
       }
 
       // Update sheet metadata to enforce workbook invariants (e.g. last-sheet guard) and drive UI
