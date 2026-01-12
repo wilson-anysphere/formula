@@ -224,6 +224,8 @@ fn find_rich_value_types_table(
 ) -> Result<Option<(String, super::rich_value_types::RichValueTypes)>, RichDataError> {
     if let Some(part_name) = find_part_case_insensitive(pkg, DEFAULT_RICH_VALUE_TYPES_PART) {
         if let Some(bytes) = pkg.part(part_name) {
+            // If the canonical part is present but malformed, surface the error. This avoids silently
+            // masking a corrupted `richValueTypes.xml` in well-formed workbooks.
             let parsed = parse_rich_value_types(bytes, part_name)?;
             if !parsed.is_empty() {
                 return Ok(Some((part_name.to_string(), parsed)));
@@ -233,13 +235,18 @@ fn find_rich_value_types_table(
 
     // If metadata has a `.rels`, prefer it as a discovery mechanism for non-canonical part names.
     // This avoids hard-coding relationship Type URIs.
-    for part in super::discover_rich_data_part_names(pkg)? {
-        let Some(bytes) = pkg.part(&part) else {
-            continue;
-        };
-        let parsed = parse_rich_value_types(bytes, &part)?;
-        if !parsed.is_empty() {
-            return Ok(Some((part, parsed)));
+    if let Ok(discovered) = super::discover_rich_data_part_names(pkg) {
+        for part in discovered {
+            let Some(bytes) = pkg.part(&part) else {
+                continue;
+            };
+            let parsed = match parse_rich_value_types(bytes, &part) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            if !parsed.is_empty() {
+                return Ok(Some((part, parsed)));
+            }
         }
     }
 
@@ -253,7 +260,10 @@ fn find_rich_value_types_table(
         let Some(bytes) = pkg.part(part_name) else {
             continue;
         };
-        let parsed = parse_rich_value_types(bytes, part_name)?;
+        let parsed = match parse_rich_value_types(bytes, part_name) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
         if !parsed.is_empty() {
             return Ok(Some((part_name.to_string(), parsed)));
         }
@@ -267,6 +277,8 @@ fn find_rich_value_structure_table(
 ) -> Result<Option<(String, super::rich_value_structure::RichValueStructures)>, RichDataError> {
     if let Some(part_name) = find_part_case_insensitive(pkg, DEFAULT_RICH_VALUE_STRUCTURE_PART) {
         if let Some(bytes) = pkg.part(part_name) {
+            // If the canonical part is present but malformed, surface the error. This avoids silently
+            // masking a corrupted `richValueStructure.xml` in well-formed workbooks.
             let parsed = parse_rich_value_structure(bytes, part_name)?;
             if !parsed.is_empty() {
                 return Ok(Some((part_name.to_string(), parsed)));
@@ -274,13 +286,18 @@ fn find_rich_value_structure_table(
         }
     }
 
-    for part in super::discover_rich_data_part_names(pkg)? {
-        let Some(bytes) = pkg.part(&part) else {
-            continue;
-        };
-        let parsed = parse_rich_value_structure(bytes, &part)?;
-        if !parsed.is_empty() {
-            return Ok(Some((part, parsed)));
+    if let Ok(discovered) = super::discover_rich_data_part_names(pkg) {
+        for part in discovered {
+            let Some(bytes) = pkg.part(&part) else {
+                continue;
+            };
+            let parsed = match parse_rich_value_structure(bytes, &part) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            if !parsed.is_empty() {
+                return Ok(Some((part, parsed)));
+            }
         }
     }
 
@@ -292,7 +309,10 @@ fn find_rich_value_structure_table(
         let Some(bytes) = pkg.part(part_name) else {
             continue;
         };
-        let parsed = parse_rich_value_structure(bytes, part_name)?;
+        let parsed = match parse_rich_value_structure(bytes, part_name) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
         if !parsed.is_empty() {
             return Ok(Some((part_name.to_string(), parsed)));
         }
