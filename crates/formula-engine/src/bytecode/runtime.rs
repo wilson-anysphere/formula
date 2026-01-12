@@ -1774,7 +1774,9 @@ pub fn call_function(
         Function::OddFYield => fn_oddfyield(args),
         Function::OddLPrice => fn_oddlprice(args),
         Function::OddLYield => fn_oddlyield(args),
-        Function::Concat => fn_concat(args),
+        Function::ConcatOp => fn_concat_op(args, grid, base),
+        Function::Concat => fn_concat(args, grid, base),
+        Function::Concatenate => fn_concatenate(args, grid, base),
         Function::Rand => fn_rand(args, base),
         Function::RandBetween => fn_randbetween(args, base),
         Function::Not => fn_not(args, grid, base),
@@ -4750,7 +4752,30 @@ fn coerce_to_string(v: &Value) -> Result<String, ErrorKind> {
     }
 }
 
-fn fn_concat(args: &[Value]) -> Value {
+fn concat_binary(left: &Value, right: &Value) -> Value {
+    // Elementwise concatenation: propagate errors per-element.
+    if let Value::Error(e) = left {
+        return Value::Error(*e);
+    }
+    if let Value::Error(e) = right {
+        return Value::Error(*e);
+    }
+
+    let left_str = match coerce_to_string(left) {
+        Ok(s) => s,
+        Err(e) => return Value::Error(e),
+    };
+    let right_str = match coerce_to_string(right) {
+        Ok(s) => s,
+        Err(e) => return Value::Error(e),
+    };
+    let mut out = String::new();
+    out.push_str(&left_str);
+    out.push_str(&right_str);
+    Value::Text(out.into())
+}
+
+fn fn_concat_scalar(args: &[Value]) -> Value {
     if args.is_empty() {
         return Value::Error(ErrorKind::Value);
     }
@@ -4760,6 +4785,144 @@ fn fn_concat(args: &[Value]) -> Value {
             Ok(s) => out.push_str(&s),
             Err(e) => return Value::Error(e),
         }
+    }
+    Value::Text(out.into())
+}
+
+fn fn_concat_op(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
+    if args.len() < 2 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    // Dereference any range arguments so `A1:A2&"c"` produces a spilled array.
+    // Keep single-cell ranges scalar (deref returns the cell value directly).
+    let mut deref_args = Vec::with_capacity(args.len());
+    let mut saw_array = false;
+    for arg in args {
+        let v = deref_value_dynamic(arg.clone(), grid, base);
+        saw_array |= matches!(v, Value::Array(_));
+        deref_args.push(v);
+    }
+
+    if !saw_array {
+        return fn_concat_scalar(&deref_args);
+    }
+
+    let mut acc = deref_args
+        .first()
+        .cloned()
+        .unwrap_or(Value::Error(ErrorKind::Value));
+    for next in deref_args.iter().skip(1) {
+        acc = elementwise_binary(&acc, next, concat_binary);
+        if matches!(acc, Value::Error(_)) {
+            break;
+        }
+    }
+    acc
+}
+
+fn fn_concat(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
+    if args.is_empty() {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let mut out = String::new();
+
+    for arg in args {
+        match arg {
+            Value::Array(arr) => {
+                for v in arr.iter() {
+                    let s = match coerce_to_string(v) {
+                        Ok(s) => s,
+                        Err(e) => return Value::Error(e),
+                    };
+                    out.push_str(&s);
+                }
+            }
+            Value::Range(r) => {
+                let range = r.resolve(base);
+                if !range_in_bounds(grid, range) {
+                    return Value::Error(ErrorKind::Ref);
+                }
+                for row in range.row_start..=range.row_end {
+                    for col in range.col_start..=range.col_end {
+                        let v = grid.get_value(CellCoord { row, col });
+                        let s = match coerce_to_string(&v) {
+                            Ok(s) => s,
+                            Err(e) => return Value::Error(e),
+                        };
+                        out.push_str(&s);
+                    }
+                }
+            }
+            Value::MultiRange(r) => {
+                if r.is_empty() {
+                    return Value::Error(ErrorKind::Ref);
+                }
+
+                // Match `Evaluator::eval_arg`: ensure stable ordering for deterministic behavior.
+                let mut areas: Vec<(SheetRangeRef, ResolvedRange)> = r
+                    .areas
+                    .iter()
+                    .copied()
+                    .map(|area| {
+                        let resolved = area.range.resolve(base);
+                        (area, resolved)
+                    })
+                    .collect();
+                areas.sort_by(|(a_area, a_range), (b_area, b_range)| {
+                    a_area
+                        .sheet
+                        .cmp(&b_area.sheet)
+                        .then_with(|| a_range.row_start.cmp(&b_range.row_start))
+                        .then_with(|| a_range.col_start.cmp(&b_range.col_start))
+                        .then_with(|| a_range.row_end.cmp(&b_range.row_end))
+                        .then_with(|| a_range.col_end.cmp(&b_range.col_end))
+                });
+
+                for (area, range) in areas {
+                    if !range_in_bounds_on_sheet(grid, area.sheet, range) {
+                        return Value::Error(ErrorKind::Ref);
+                    }
+
+                    for row in range.row_start..=range.row_end {
+                        for col in range.col_start..=range.col_end {
+                            let v = grid.get_value_on_sheet(area.sheet, CellCoord { row, col });
+                            let s = match coerce_to_string(&v) {
+                                Ok(s) => s,
+                                Err(e) => return Value::Error(e),
+                            };
+                            out.push_str(&s);
+                        }
+                    }
+                }
+            }
+            other => {
+                let s = match coerce_to_string(other) {
+                    Ok(s) => s,
+                    Err(e) => return Value::Error(e),
+                };
+                out.push_str(&s);
+            }
+        }
+    }
+
+    Value::Text(out.into())
+}
+
+fn fn_concatenate(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
+    if args.is_empty() {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let mut out = String::new();
+    for arg in args {
+        let v = apply_implicit_intersection(arg.clone(), grid, base);
+        let s = match coerce_to_string(&v) {
+            Ok(s) => s,
+            Err(e) => return Value::Error(e),
+        };
+        out.push_str(&s);
     }
     Value::Text(out.into())
 }

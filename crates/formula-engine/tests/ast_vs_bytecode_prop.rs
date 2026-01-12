@@ -271,9 +271,9 @@ fn arb_expr(base: CellCoord, rows: i32, cols: i32) -> impl Strategy<Value = Expr
                     left: Box::new(e),
                     right: Box::new(Expr::Literal(Value::Number(100.0))),
                 }),
-                // CONCAT(a, b) (used by engine lowering for the `&` operator).
+                // CONCAT_OP(a, b) (used by engine lowering for the `&` operator).
                 (inner.clone(), inner.clone()).prop_map(|(a, b)| Expr::FuncCall {
-                    func: Function::Concat,
+                    func: Function::ConcatOp,
                     args: vec![a, b],
                 }),
                 // SUM(range)

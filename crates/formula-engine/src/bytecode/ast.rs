@@ -107,7 +107,14 @@ pub enum Function {
     OddFYield,
     OddLPrice,
     OddLYield,
+    /// Variadic concatenation operator (`&`) lowered by the engine parser/lowerer.
+    ///
+    /// This uses Excel's elementwise/broadcasting semantics and can spill arrays.
+    ConcatOp,
+    /// `CONCAT(...)` function (flattens ranges/arrays into a single string).
     Concat,
+    /// `CONCATENATE(...)` function (scalar-only; applies implicit intersection on references).
+    Concatenate,
     Rand,
     RandBetween,
     Not,
@@ -208,7 +215,8 @@ impl Function {
             "ODDFYIELD" => Function::OddFYield,
             "ODDLPRICE" => Function::OddLPrice,
             "ODDLYIELD" => Function::OddLYield,
-            "CONCAT" | "CONCATENATE" => Function::Concat,
+            "CONCAT" => Function::Concat,
+            "CONCATENATE" => Function::Concatenate,
             "RAND" => Function::Rand,
             "RANDBETWEEN" => Function::RandBetween,
             "NOT" => Function::Not,
@@ -294,7 +302,9 @@ impl Function {
             Function::OddFYield => "ODDFYIELD",
             Function::OddLPrice => "ODDLPRICE",
             Function::OddLYield => "ODDLYIELD",
+            Function::ConcatOp => "CONCAT_OP",
             Function::Concat => "CONCAT",
+            Function::Concatenate => "CONCATENATE",
             Function::Rand => "RAND",
             Function::RandBetween => "RANDBETWEEN",
             Function::Not => "NOT",
@@ -453,7 +463,9 @@ impl<'a> Parser<'a> {
             if self.peek_byte() == Some(b'#') && postfix_bp >= min_bp {
                 self.pos += 1;
                 lhs = match lhs {
-                    Expr::CellRef(r) => Expr::SpillRange(Box::new(Expr::RangeRef(RangeRef::new(r, r)))),
+                    Expr::CellRef(r) => {
+                        Expr::SpillRange(Box::new(Expr::RangeRef(RangeRef::new(r, r))))
+                    }
                     other => Expr::SpillRange(Box::new(other)),
                 };
                 continue;
@@ -476,23 +488,23 @@ impl<'a> Parser<'a> {
                     right: Box::new(rhs),
                 },
                 InfixOp::Concat => {
-                    // Flatten concat chains (`a&b&c`) into a single CONCAT call.
+                    // Flatten concat chains (`a&b&c`) into a single CONCAT_OP call.
                     let mut args = match lhs {
                         Expr::FuncCall {
-                            func: Function::Concat,
+                            func: Function::ConcatOp,
                             args,
                         } => args,
                         other => vec![other],
                     };
                     match rhs {
                         Expr::FuncCall {
-                            func: Function::Concat,
+                            func: Function::ConcatOp,
                             args: rhs_args,
                         } => args.extend(rhs_args),
                         other => args.push(other),
                     }
                     Expr::FuncCall {
-                        func: Function::Concat,
+                        func: Function::ConcatOp,
                         args,
                     }
                 }
@@ -872,13 +884,13 @@ mod tests {
     }
 
     #[test]
-    fn parses_concat_operator_as_concat_function_call() {
+    fn parses_concat_operator_as_concat_op_function_call() {
         let origin = CellCoord::new(0, 0);
         let expr = parse_formula("=\"a\"&\"b\"", origin).expect("parse");
         assert_eq!(
             expr,
             Expr::FuncCall {
-                func: Function::Concat,
+                func: Function::ConcatOp,
                 args: vec![
                     Expr::Literal(Value::Text(Arc::from("a"))),
                     Expr::Literal(Value::Text(Arc::from("b"))),
@@ -894,9 +906,15 @@ mod tests {
         let Expr::FuncCall { func, args } = expr else {
             panic!("expected concat function call");
         };
-        assert_eq!(func, Function::Concat);
+        assert_eq!(func, Function::ConcatOp);
         assert_eq!(args.len(), 2);
-        assert!(matches!(args[0], Expr::Binary { op: BinaryOp::Add, .. }));
+        assert!(matches!(
+            args[0],
+            Expr::Binary {
+                op: BinaryOp::Add,
+                ..
+            }
+        ));
         assert!(matches!(
             args[1],
             Expr::Literal(Value::Number(n)) if n == 3.0
@@ -914,7 +932,7 @@ mod tests {
         assert!(matches!(
             left.as_ref(),
             Expr::FuncCall {
-                func: Function::Concat,
+                func: Function::ConcatOp,
                 ..
             }
         ));
@@ -935,7 +953,10 @@ mod tests {
         assert!(
             matches!(
                 right.as_ref(),
-                Expr::Binary { op: BinaryOp::Div, .. }
+                Expr::Binary {
+                    op: BinaryOp::Div,
+                    ..
+                }
             ),
             "expected RHS to be lowered as division by 100"
         );
@@ -978,7 +999,7 @@ mod tests {
         assert_eq!(
             expr,
             Expr::FuncCall {
-                func: Function::Concat,
+                func: Function::ConcatOp,
                 args: vec![
                     Expr::Literal(Value::Text(Arc::from("a"))),
                     Expr::Literal(Value::Text(Arc::from("b"))),
@@ -991,7 +1012,7 @@ mod tests {
         assert_eq!(
             expr,
             Expr::FuncCall {
-                func: Function::Concat,
+                func: Function::ConcatOp,
                 args: vec![
                     Expr::Literal(Value::Text(Arc::from("a"))),
                     Expr::Literal(Value::Text(Arc::from("b"))),

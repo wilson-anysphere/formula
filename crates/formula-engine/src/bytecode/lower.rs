@@ -175,7 +175,9 @@ fn lower_cell_ref_expr(
                 .into_iter()
                 .map(|sheet| SheetRangeRef::new(sheet, range))
                 .collect();
-            Ok(BytecodeExpr::MultiRangeRef(MultiRangeRef::new(areas.into())))
+            Ok(BytecodeExpr::MultiRangeRef(MultiRangeRef::new(
+                areas.into(),
+            )))
         }
     }
 }
@@ -296,7 +298,9 @@ fn lower_range_ref(
                 .into_iter()
                 .map(|sheet| SheetRangeRef::new(sheet, range))
                 .collect();
-            Ok(BytecodeExpr::MultiRangeRef(MultiRangeRef::new(areas.into())))
+            Ok(BytecodeExpr::MultiRangeRef(MultiRangeRef::new(
+                areas.into(),
+            )))
         }
         _ => Ok(BytecodeExpr::RangeRef(range)),
     }
@@ -521,7 +525,9 @@ fn lower_canonical_expr_inner(
                         .into_iter()
                         .map(|sheet| SheetRangeRef::new(sheet, range))
                         .collect();
-                    Ok(BytecodeExpr::MultiRangeRef(MultiRangeRef::new(areas.into())))
+                    Ok(BytecodeExpr::MultiRangeRef(MultiRangeRef::new(
+                        areas.into(),
+                    )))
                 }
                 _ => Ok(BytecodeExpr::RangeRef(range)),
             }
@@ -531,7 +537,7 @@ fn lower_canonical_expr_inner(
                 lower_range_ref(&b.left, &b.right, origin, current_sheet, resolve_sheet)
             }
             crate::BinaryOp::Concat => {
-                // Flatten `a&b&c` into a single CONCAT call so we avoid intermediate allocations
+                // Flatten `a&b&c` into a single CONCAT_OP call so we avoid intermediate allocations
                 // during evaluation and maximize cache sharing between equivalent concat chains.
                 let mut operands = Vec::new();
                 collect_concat_operands(&b.left, &mut operands);
@@ -548,7 +554,7 @@ fn lower_canonical_expr_inner(
                     )?);
                 }
                 Ok(BytecodeExpr::FuncCall {
-                    func: Function::Concat,
+                    func: Function::ConcatOp,
                     args,
                 })
             }

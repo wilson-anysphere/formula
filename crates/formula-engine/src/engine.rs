@@ -1125,21 +1125,17 @@ impl Engine {
             let deps = CellDeps::new(calc_vec).volatile(volatile);
             self.calc_graph.update_cell_dependencies(cell_id, deps);
 
-            let (compiled_formula, bytecode_compile_reason) = match self.try_compile_bytecode(
-                &parsed.expr,
-                key,
-                thread_safe,
-                dynamic_deps,
-            ) {
-                Ok(program) => (
-                    CompiledFormula::Bytecode(BytecodeFormula {
-                        ast: compiled_ast.clone(),
-                        program,
-                    }),
-                    None,
-                ),
-                Err(reason) => (CompiledFormula::Ast(compiled_ast), Some(reason)),
-            };
+            let (compiled_formula, bytecode_compile_reason) =
+                match self.try_compile_bytecode(&parsed.expr, key, thread_safe, dynamic_deps) {
+                    Ok(program) => (
+                        CompiledFormula::Bytecode(BytecodeFormula {
+                            ast: compiled_ast.clone(),
+                            program,
+                        }),
+                        None,
+                    ),
+                    Err(reason) => (CompiledFormula::Ast(compiled_ast), Some(reason)),
+                };
 
             if let Some(cell) = self
                 .workbook
@@ -1347,8 +1343,7 @@ impl Engine {
         self.calc_graph.update_cell_dependencies(cell_id, deps);
 
         let (compiled_formula, bytecode_compile_reason) =
-            match self.try_compile_bytecode(&parsed.expr, key, thread_safe, dynamic_deps)
-            {
+            match self.try_compile_bytecode(&parsed.expr, key, thread_safe, dynamic_deps) {
                 Ok(program) => (
                     CompiledFormula::Bytecode(BytecodeFormula {
                         ast: compiled.clone(),
@@ -3229,9 +3224,11 @@ impl Engine {
         // name inlining (or eliminated by it). Run the prefix check on the final expression shape
         // that will be lowered so bytecode eligibility and diagnostics reflect the actual lowered
         // references.
-        if let Some(lower_error) =
-            canonical_expr_depends_on_lowering_prefix_error(expr_to_lower, key.sheet, &self.workbook)
-        {
+        if let Some(lower_error) = canonical_expr_depends_on_lowering_prefix_error(
+            expr_to_lower,
+            key.sheet,
+            &self.workbook,
+        ) {
             return Err(BytecodeCompileReason::LowerError(lower_error));
         }
 
@@ -6093,15 +6090,17 @@ fn rewrite_structured_refs_for_bytecode(
                 Some(build_union_expr(parts))
             }
         }
-        crate::Expr::FieldAccess(access) => Some(crate::Expr::FieldAccess(crate::FieldAccessExpr {
-            base: Box::new(rewrite_structured_refs_for_bytecode(
-                access.base.as_ref(),
-                origin_sheet,
-                origin_cell,
-                tables_by_sheet,
-            )?),
-            field: access.field.clone(),
-        })),
+        crate::Expr::FieldAccess(access) => {
+            Some(crate::Expr::FieldAccess(crate::FieldAccessExpr {
+                base: Box::new(rewrite_structured_refs_for_bytecode(
+                    access.base.as_ref(),
+                    origin_sheet,
+                    origin_cell,
+                    tables_by_sheet,
+                )?),
+                field: access.field.clone(),
+            }))
+        }
         crate::Expr::FunctionCall(call) => Some(crate::Expr::FunctionCall(crate::FunctionCall {
             name: call.name.clone(),
             args: call
@@ -7869,9 +7868,7 @@ fn bytecode_expr_is_eligible_inner(
                     (
                         BytecodeLocalBindingKind::Scalar | BytecodeLocalBindingKind::RefSingle,
                         BytecodeLocalBindingKind::Scalar | BytecodeLocalBindingKind::RefSingle,
-                    ) => {
-                        BytecodeLocalBindingKind::Scalar
-                    }
+                    ) => BytecodeLocalBindingKind::Scalar,
                     _ => BytecodeLocalBindingKind::ArrayLiteral,
                 }
             }
@@ -7907,7 +7904,7 @@ fn bytecode_expr_is_eligible_inner(
             // array/range inputs (e.g. ISBLANK) or can return dynamic arrays (e.g. ROW/ COLUMN).
             //
             // This kind inference is used to prevent LET locals from "smuggling" array results into
-            // scalar-only bytecode contexts (e.g. ABS/CONCAT), which would otherwise compile to
+            // scalar-only bytecode contexts (e.g. ABS / CONCAT_OP), which would otherwise compile to
             // bytecode but produce incorrect `#SPILL!` errors at runtime.
             bytecode::Expr::FuncCall { func, args } => match func {
                 // CHOOSE can return either scalars, ranges, or array literals depending on the
@@ -7954,6 +7951,7 @@ fn bytecode_expr_is_eligible_inner(
                 | Function::RoundDown
                 | Function::Mod
                 | Function::Sign
+                | Function::ConcatOp
                 | Function::Not => {
                     let mut all_scalar = true;
                     for arg in args {
@@ -8197,7 +8195,8 @@ fn bytecode_expr_is_eligible_inner(
                 if args.len() != 2 && args.len() != 3 {
                     return false;
                 }
-                let range_ok = bytecode_expr_is_eligible_inner(&args[0], true, true, lexical_scopes);
+                let range_ok =
+                    bytecode_expr_is_eligible_inner(&args[0], true, true, lexical_scopes);
                 let criteria_ok =
                     bytecode_expr_is_eligible_inner(&args[1], false, false, lexical_scopes);
                 let sum_range_ok = match args.get(2) {
@@ -8431,20 +8430,21 @@ fn bytecode_expr_is_eligible_inner(
             | bytecode::ast::Function::RoundDown
             | bytecode::ast::Function::Mod
             | bytecode::ast::Function::Sign
-            | bytecode::ast::Function::Not => args
+            | bytecode::ast::Function::ConcatOp
+            | bytecode::ast::Function::Not => args.iter().all(|arg| {
+                if allow_array_literals {
+                    bytecode_expr_is_eligible_inner(arg, true, true, lexical_scopes)
+                } else {
+                    bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
+                }
+            }),
+            bytecode::ast::Function::Concat | bytecode::ast::Function::Concatenate => args
                 .iter()
-                .all(|arg| {
-                    if allow_array_literals {
-                        bytecode_expr_is_eligible_inner(arg, true, true, lexical_scopes)
-                    } else {
-                        bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
-                    }
-                }),
+                .all(|arg| bytecode_expr_is_eligible_inner(arg, true, true, lexical_scopes)),
             bytecode::ast::Function::Now
             | bytecode::ast::Function::Today
             | bytecode::ast::Function::Db
-            | bytecode::ast::Function::Vdb
-            | bytecode::ast::Function::Concat => args
+            | bytecode::ast::Function::Vdb => args
                 .iter()
                 .all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)),
             bytecode::ast::Function::IsBlank
@@ -10281,7 +10281,10 @@ mod tests {
         };
 
         // Ensure the volatile RNG formulas compile to bytecode when the backend is enabled.
-        let sheet_id = bytecode_engine.workbook.sheet_id("Sheet1").expect("sheet exists");
+        let sheet_id = bytecode_engine
+            .workbook
+            .sheet_id("Sheet1")
+            .expect("sheet exists");
         for addr in ["A1", "A2", "A3", "B1"] {
             let addr = parse_a1(addr).unwrap();
             let cell = bytecode_engine.workbook.sheets[sheet_id]
@@ -11975,7 +11978,8 @@ mod tests {
 
     #[test]
     fn bytecode_ifs_does_not_eval_values_when_no_condition_matches_even_when_volatile() {
-        let v = assert_bytecode_eq_ast("=IFERROR(IFS(FALSE, RAND(), FALSE, RAND()) + RAND(), RAND())");
+        let v =
+            assert_bytecode_eq_ast("=IFERROR(IFS(FALSE, RAND(), FALSE, RAND()) + RAND(), RAND())");
         match v {
             Value::Number(n) => assert!((0.0..1.0).contains(&n), "got {n}"),
             other => panic!("expected number, got {other:?}"),
@@ -12067,8 +12071,9 @@ mod tests {
 
     #[test]
     fn bytecode_switch_does_not_eval_case_results_when_case_value_is_error_even_when_volatile() {
-        let v =
-            assert_bytecode_eq_ast("=IFERROR(SWITCH(2, 1/0, RAND(), RAND(), RAND()) + RAND(), RAND())");
+        let v = assert_bytecode_eq_ast(
+            "=IFERROR(SWITCH(2, 1/0, RAND(), RAND(), RAND()) + RAND(), RAND())",
+        );
         match v {
             Value::Number(n) => assert!((0.0..1.0).contains(&n), "got {n}"),
             other => panic!("expected number, got {other:?}"),

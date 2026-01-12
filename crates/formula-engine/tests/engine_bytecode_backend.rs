@@ -960,16 +960,8 @@ fn bytecode_backend_supports_sumifs_averageifs_minifs_maxifs_array_literal_range
         r#"=AVERAGEIFS({10,20,30,40},{"A","A","B","B"},"A",{1,2,3,4},">1")"#,
         "A2",
     );
-    assert_engine_matches_ast(
-        &engine,
-        r#"=MAXIFS({10,20,30,40},{1,2,3,4},">2")"#,
-        "A3",
-    );
-    assert_engine_matches_ast(
-        &engine,
-        r#"=MINIFS({10,20,30,40},{1,2,3,4},">2")"#,
-        "A4",
-    );
+    assert_engine_matches_ast(&engine, r#"=MAXIFS({10,20,30,40},{1,2,3,4},">2")"#, "A3");
+    assert_engine_matches_ast(&engine, r#"=MINIFS({10,20,30,40},{1,2,3,4},">2")"#, "A4");
 }
 
 #[test]
@@ -1443,7 +1435,10 @@ fn bytecode_backend_choose_is_scalar_safe_for_concat() {
     assert_eq!(engine.bytecode_program_count(), 1);
 
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text("hello".into()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("hello".into())
+    );
     assert_engine_matches_ast(&engine, "=CONCAT(CHOOSE(1, A1, 1/0))", "B1");
 }
 
@@ -1467,19 +1462,18 @@ fn bytecode_backend_choose_is_scalar_safe_for_abs() {
 }
 
 #[test]
-fn bytecode_backend_let_array_returning_abs_does_not_enable_concat_bytecode() {
+fn bytecode_backend_let_array_returning_abs_allows_concat_to_flatten_arrays() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", -1.0).unwrap();
     engine.set_cell_value("Sheet1", "A2", -2.0).unwrap();
 
-    // ABS supports array-lifting semantics in bytecode, but CONCAT is a scalar-only bytecode
-    // function. Ensure LET kind inference prevents smuggling ABS's array result into CONCAT.
+    // ABS supports array-lifting semantics in bytecode, and CONCAT flattens array/range arguments
+    // into a single scalar text value. Ensure LET kind inference does not prevent compiling this to
+    // bytecode.
     let formula = "=CONCAT(LET(x, ABS(A1:A2), x))";
     engine.set_cell_formula("Sheet1", "B1", formula).unwrap();
 
-    // CONCAT should fall back to the AST evaluator here, since the bytecode CONCAT implementation
-    // does not flatten array arguments the way Excel does.
-    assert_eq!(engine.bytecode_program_count(), 0);
+    assert_eq!(engine.bytecode_program_count(), 1);
 
     engine.recalculate_single_threaded();
 
@@ -3674,8 +3668,61 @@ fn bytecode_lower_flattens_concat_operator_chains() {
     let bytecode::Expr::FuncCall { func, args } = expr else {
         panic!("expected FuncCall");
     };
-    assert_eq!(func, bytecode::ast::Function::Concat);
+    assert_eq!(func, bytecode::ast::Function::ConcatOp);
     assert_eq!(args.len(), 3, "expected concat chain to flatten");
+}
+
+#[test]
+fn bytecode_backend_supports_concat_and_concatenate_with_ranges() {
+    let mut engine = Engine::new();
+
+    engine
+        .set_cell_value("Sheet1", "A1", Value::Text("a".to_string()))
+        .unwrap();
+    engine
+        .set_cell_value("Sheet1", "A2", Value::Text("b".to_string()))
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", r#"=CONCAT(A1:A2,"c")"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C1", r#"=CONCATENATE(A1:A2,"c")"#)
+        .unwrap();
+
+    // Ensure we're exercising the bytecode path.
+    assert_eq!(engine.bytecode_program_count(), 2);
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("abc".to_string())
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "C1"),
+        Value::Text("ac".to_string())
+    );
+
+    assert_engine_matches_ast(&engine, r#"=CONCAT(A1:A2,"c")"#, "B1");
+    assert_engine_matches_ast(&engine, r#"=CONCATENATE(A1:A2,"c")"#, "C1");
+}
+
+#[test]
+fn bytecode_backend_supports_concat_operator_spilling_over_ranges() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", "a").unwrap();
+    engine.set_cell_value("Sheet1", "A2", "b").unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", r#"=A1:A2&"c""#)
+        .unwrap();
+
+    // Ensure we're exercising the bytecode path.
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_engine_spill_matches_ast(&engine, r#"=A1:A2&"c""#, "B1");
 }
 
 #[test]
@@ -4281,7 +4328,11 @@ fn bytecode_backend_matches_ast_for_xlookup_and_xmatch() {
         .unwrap();
     // Wildcard + last-to-first should find the last matching value.
     engine
-        .set_cell_formula("Sheet1", "D10", r#"=XLOOKUP("b*",B1:B4,C1:C4,"missing",2,-1)"#)
+        .set_cell_formula(
+            "Sheet1",
+            "D10",
+            r#"=XLOOKUP("b*",B1:B4,C1:C4,"missing",2,-1)"#,
+        )
         .unwrap();
 
     // 2D lookup arrays should error with #VALUE!
@@ -4670,7 +4721,11 @@ fn bytecode_backend_xlookup_xmatch_accept_let_single_cell_reference_locals() {
         .unwrap();
 
     engine
-        .set_cell_formula("Sheet1", "D1", r#"=LET(arr,A2,ret,B2,XLOOKUP("b",arr,ret))"#)
+        .set_cell_formula(
+            "Sheet1",
+            "D1",
+            r#"=LET(arr,A2,ret,B2,XLOOKUP("b",arr,ret))"#,
+        )
         .unwrap();
     engine
         .set_cell_formula(
@@ -4701,7 +4756,10 @@ fn bytecode_backend_xlookup_xmatch_accept_let_single_cell_reference_locals() {
             r#"=LET(arr,CHOOSE(1,A2,1/0),ret,CHOOSE(1,B2,1/0),XLOOKUP("b",arr,ret))"#,
             "D2",
         ),
-        (r#"=LET(arr,CHOOSE(2,A2,1/0),ret,B2,XLOOKUP("b",arr,ret))"#, "D3"),
+        (
+            r#"=LET(arr,CHOOSE(2,A2,1/0),ret,B2,XLOOKUP("b",arr,ret))"#,
+            "D3",
+        ),
     ] {
         assert_engine_matches_ast(&engine, formula, cell);
     }
@@ -4734,7 +4792,8 @@ fn bytecode_backend_row_column_accept_let_reference_locals() {
     let stats = engine.bytecode_compile_stats();
     assert_eq!(stats.total_formula_cells, 4);
     assert_eq!(
-        stats.compiled, 4,
+        stats.compiled,
+        4,
         "expected all ROW/COLUMN LET formulas to compile to bytecode (report={:?})",
         engine.bytecode_compile_report(32)
     );
@@ -5780,13 +5839,21 @@ fn bytecode_backend_matches_ast_for_information_functions_with_range_args() {
     engine
         .set_cell_formula("Sheet1", "F1", "=ISERROR(A1:A7)")
         .unwrap();
-    engine.set_cell_formula("Sheet1", "G1", "=ISNA(A1:A7)").unwrap();
-    engine.set_cell_formula("Sheet1", "H1", "=ISERR(A1:A7)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "G1", "=ISNA(A1:A7)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "H1", "=ISERR(A1:A7)")
+        .unwrap();
     engine
         .set_cell_formula("Sheet1", "I1", "=ERROR.TYPE(A1:A7)")
         .unwrap();
-    engine.set_cell_formula("Sheet1", "J1", "=N(A1:A7)").unwrap();
-    engine.set_cell_formula("Sheet1", "K1", "=T(A1:A7)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "J1", "=N(A1:A7)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "K1", "=T(A1:A7)")
+        .unwrap();
 
     // Array literals should also be eligible for these functions.
     engine
@@ -7977,11 +8044,7 @@ fn bytecode_backend_supports_array_ranges_for_sumif_and_averageif() {
         .set_cell_formula("Sheet1", "A2", r#"=AVERAGEIF({1,2,3,4},">2")"#)
         .unwrap();
     engine
-        .set_cell_formula(
-            "Sheet1",
-            "A3",
-            r#"=SUMIF({1,2,3,4},">2",{10,20,30,40})"#,
-        )
+        .set_cell_formula("Sheet1", "A3", r#"=SUMIF({1,2,3,4},">2",{10,20,30,40})"#)
         .unwrap();
     engine
         .set_cell_formula(
@@ -8101,18 +8164,10 @@ fn bytecode_backend_supports_array_ranges_for_ifs_family() {
         )
         .unwrap();
     engine
-        .set_cell_formula(
-            "Sheet1",
-            "A4",
-            r#"=MINIFS({10,20,30,40},{1,2,3,4},">2")"#,
-        )
+        .set_cell_formula("Sheet1", "A4", r#"=MINIFS({10,20,30,40},{1,2,3,4},">2")"#)
         .unwrap();
     engine
-        .set_cell_formula(
-            "Sheet1",
-            "A5",
-            r#"=MAXIFS({10,20,30,40},{1,2,3,4},">2")"#,
-        )
+        .set_cell_formula("Sheet1", "A5", r#"=MAXIFS({10,20,30,40},{1,2,3,4},">2")"#)
         .unwrap();
 
     // Array expression used as the criteria_range / criteria_range1.
@@ -8161,10 +8216,7 @@ fn bytecode_backend_supports_array_ranges_for_ifs_family() {
             r#"=AVERAGEIFS({10,20,30,40},{"A","A","B","B"},"A",{1,2,3,4},">1")"#,
             "A2",
         ),
-        (
-            r#"=COUNTIFS({"A","A","B","B"},"A",{1,2,3,4},">1")"#,
-            "A3",
-        ),
+        (r#"=COUNTIFS({"A","A","B","B"},"A",{1,2,3,4},">1")"#, "A3"),
         (r#"=MINIFS({10,20,30,40},{1,2,3,4},">2")"#, "A4"),
         (r#"=MAXIFS({10,20,30,40},{1,2,3,4},">2")"#, "A5"),
         ("=SUMIFS(E1:E3,D1:D3>0,TRUE)", "B1"),

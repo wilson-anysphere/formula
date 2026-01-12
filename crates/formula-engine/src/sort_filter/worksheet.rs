@@ -380,11 +380,11 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
                                     .get("value")
                                     .and_then(|v| v.as_str())
                                     .map(|s| CellValue::Text(s.to_string())),
-                                "boolean" => display_value
-                                    .get("value")
-                                    .and_then(|v| v.as_bool())
-                                    .map(CellValue::Bool),
-                                "error" => display_value
+                                 "boolean" => display_value
+                                     .get("value")
+                                     .and_then(|v| v.as_bool())
+                                     .map(CellValue::Bool),
+                                 "error" => display_value
                                     .get("value")
                                     .and_then(|v| v.as_str())
                                     .map(|err_str| {
@@ -409,21 +409,21 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
                                     let display = alt_text.filter(|s| !s.is_empty()).unwrap_or("[Image]");
                                     Some(CellValue::Text(display.to_string()))
                                 }
-                                // Degrade nested rich values (e.g. records whose display field is
-                                // an entity/record) using the same logic as the main conversion.
-                                //
-                                // Note: `"image"` is handled above so we can prefer its alt-text.
-                                "entity" | "record" => {
-                                    serde_json::from_value(display_value.clone())
-                                        .ok()
-                                        .map(|v: ModelCellValue| model_cell_value_to_sort_value(&v))
-                                }
-                                _ => None,
-                            };
+                                 // Degrade nested rich values (e.g. records whose display field is
+                                 // an entity/record) using the same logic as the main conversion.
+                                 //
+                                 // Note: `"image"` is handled above so we can prefer its alt-text.
+                                 "entity" | "record" => {
+                                     serde_json::from_value(display_value.clone())
+                                         .ok()
+                                         .map(|v: ModelCellValue| model_cell_value_to_sort_value(&v))
+                                 }
+                                 _ => None,
+                             };
 
-                            if parsed.is_some() {
-                                return parsed;
-                            }
+                             if parsed.is_some() {
+                                 return parsed;
+                             }
                         }
                     }
                 }
