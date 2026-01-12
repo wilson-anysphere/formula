@@ -4707,6 +4707,10 @@ try {
   void listen("menu-check-updates", () => {
     // Keep a stable menu event id; the actual update UX is driven by the
     // `update-check-*` events emitted by the Rust updater wrapper.
+    void checkForUpdatesFromCommandPalette("manual").catch((err) => {
+      console.error("Failed to check for updates:", err);
+      showToast(`Update check failed: ${String((err as any)?.message ?? err)}`, "error", { timeoutMs: 10_000 });
+    });
   });
 
   // Updater UI (toasts / dialogs / focus management) is handled by `installUpdaterUi(...)`.
