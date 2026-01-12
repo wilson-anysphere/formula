@@ -204,6 +204,37 @@ fn setup_sparse_huge_range_engine() -> (Engine, String, String) {
         .expect("set COUNTIF formula");
 
     engine.recalculate_single_threaded();
+
+    (engine, sum_cell, countif_cell)
+}
+
+fn setup_range_aggregate_engine_ast(size: usize) -> (Engine, String, String) {
+    let mut engine = Engine::new();
+
+    for row in 1..=size {
+        let addr = format!("A{row}");
+        engine
+            .set_cell_value("Sheet1", &addr, (row % 1000) as f64)
+            .expect("seed value");
+    }
+
+    let sum_cell = "C1".to_string();
+    let countif_cell = "C2".to_string();
+
+    // Wrap in LET to force the AST evaluator (bytecode backend does not currently compile LET).
+    engine
+        .set_cell_formula("Sheet1", &sum_cell, &format!("=LET(r,A1:A{size},SUM(r))"))
+        .expect("set SUM/LET formula");
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            &countif_cell,
+            &format!("=LET(r,A1:A{size},COUNTIF(r, \">500\"))"),
+        )
+        .expect("set COUNTIF/LET formula");
+
+    engine.recalculate_single_threaded();
+
     (engine, sum_cell, countif_cell)
 }
 
@@ -321,16 +352,16 @@ pub fn run_benchmarks() -> Vec<BenchmarkResult> {
     //   FORMULA_ENGINE_BENCH_SPARSE_HUGE_RANGES=1 cargo run -p formula-engine --bin perf_bench
     if std::env::var("FORMULA_ENGINE_BENCH_SPARSE_HUGE_RANGES").is_ok() {
         let (mut engine_sparse, sum_cell, countif_cell) = setup_sparse_huge_range_engine();
-        let mut counter4 = 0_i64;
+        let mut counter_sparse = 0_i64;
         results.push(run_benchmark(
             "calc.recalc_sparse_sum_countif_full_column.p95",
             20,
             5,
             50.0,
             || {
-                counter4 += 1;
+                counter_sparse += 1;
                 engine_sparse
-                    .set_cell_value("Sheet1", "A1", (counter4 % 10) as f64)
+                    .set_cell_value("Sheet1", "A1", (counter_sparse % 10) as f64)
                     .expect("update");
                 engine_sparse.recalculate_single_threaded();
                 let a = engine_sparse.get_cell_value("Sheet1", &sum_cell);
@@ -339,6 +370,43 @@ pub fn run_benchmarks() -> Vec<BenchmarkResult> {
             },
         ));
     }
+
+    // Same workload as the range aggregation benchmark, but forced through the AST evaluator so we
+    // can catch regressions in non-bytecode aggregation performance (e.g. LET/LAMBDA-heavy sheets).
+    let (mut engine_range_ast, sum_cell_ast, countif_cell_ast) =
+        setup_range_aggregate_engine_ast(100_000);
+    let mut counter_ast = 0_i64;
+    results.push(run_benchmark(
+        "calc.recalc_sum_countif_range_100k_cells_ast.p95",
+        4,
+        1,
+        1000.0,
+        || {
+            counter_ast += 1;
+            engine_range_ast
+                .set_cell_value("Sheet1", "A1", (counter_ast % 1000) as f64)
+                .expect("update");
+            engine_range_ast.recalculate_single_threaded();
+            let a = engine_range_ast.get_cell_value("Sheet1", &sum_cell_ast);
+            let b = engine_range_ast.get_cell_value("Sheet1", &countif_cell_ast);
+            std::hint::black_box((a, b));
+        },
+    ));
+
+    // Dynamic array aggregation: SUM(SEQUENCE(n)) exercises array aggregation in the AST evaluator
+    // (SEQUENCE is not currently bytecode-eligible).
+    let parsed_seq = Parser::parse("=SUM(SEQUENCE(50000))").expect("parse SEQUENCE benchmark");
+    let compiled_seq = compile_for_benchmark(&parsed_seq);
+    results.push(run_benchmark(
+        "calc.evaluate_sum_sequence_50k_cells.p95",
+        6,
+        1,
+        250.0,
+        || {
+            let v = evaluator.eval_formula(&compiled_seq);
+            std::hint::black_box(v);
+        },
+    ));
 
     results
 }

@@ -35,6 +35,108 @@ fn sum_propagates_errors() {
 }
 
 #[test]
+fn simd_aggregate_fast_paths_match_scalar_semantics_for_large_arrays() {
+    let mut sheet = TestSheet::new();
+
+    // Build a 1x512 array literal with mixed types. Only numeric values should be considered by
+    // SUM/AVERAGE/MIN/MAX/COUNT when the argument is an array (Excel reference semantics).
+    //
+    // Pattern per 4 cells: [number, TRUE, "x", blank]
+    let mut elems = Vec::with_capacity(512);
+    for i in 1..=512 {
+        let entry = match i % 4 {
+            0 => i.to_string(),
+            1 => "TRUE".to_string(),
+            2 => "\"x\"".to_string(),
+            _ => String::new(), // blank cell in array literal.
+        };
+        elems.push(entry);
+    }
+    let array_literal = format!("{{{}}}", elems.join(","));
+
+    // Numbers are 4, 8, ..., 512 (128 values).
+    let expected_sum = 4.0 * (128.0 * 129.0 / 2.0);
+    let expected_count = 128.0;
+    let expected_avg = expected_sum / expected_count;
+    let expected_min = 4.0;
+    let expected_max = 512.0;
+
+    assert_number(
+        &sheet.eval(&format!("=LET(x,{array_literal},SUM(x))")),
+        expected_sum,
+    );
+    assert_number(
+        &sheet.eval(&format!("=LET(x,{array_literal},AVERAGE(x))")),
+        expected_avg,
+    );
+    assert_number(
+        &sheet.eval(&format!("=LET(x,{array_literal},MIN(x))")),
+        expected_min,
+    );
+    assert_number(
+        &sheet.eval(&format!("=LET(x,{array_literal},MAX(x))")),
+        expected_max,
+    );
+    assert_number(
+        &sheet.eval(&format!("=LET(x,{array_literal},COUNT(x))")),
+        expected_count,
+    );
+
+    // COUNTIF with numeric criteria coerces bool/blank/text exactly like the scalar criteria
+    // matcher. Here, TRUE counts as 1 (matches >0) while "x" does not.
+    assert_number(
+        &sheet.eval(&format!("=LET(x,{array_literal},COUNTIF(x,\">0\"))")),
+        256.0,
+    );
+}
+
+#[test]
+fn simd_array_aggregates_propagate_errors() {
+    let mut sheet = TestSheet::new();
+
+    let mut elems = Vec::new();
+    for i in 1..=64 {
+        if i == 40 {
+            elems.push("#DIV/0!".to_string());
+        } else {
+            elems.push("1".to_string());
+        }
+    }
+    let array_literal = format!("{{{}}}", elems.join(","));
+
+    assert_eq!(
+        sheet.eval(&format!("=LET(x,{array_literal},SUM(x))")),
+        Value::Error(ErrorKind::Div0)
+    );
+    assert_eq!(
+        sheet.eval(&format!("=LET(x,{array_literal},AVERAGE(x))")),
+        Value::Error(ErrorKind::Div0)
+    );
+    assert_eq!(
+        sheet.eval(&format!("=LET(x,{array_literal},MIN(x))")),
+        Value::Error(ErrorKind::Div0)
+    );
+    assert_eq!(
+        sheet.eval(&format!("=LET(x,{array_literal},MAX(x))")),
+        Value::Error(ErrorKind::Div0)
+    );
+}
+
+#[test]
+fn simd_numeric_criteria_aggregates_over_large_arrays() {
+    let mut sheet = TestSheet::new();
+
+    // SEQUENCE is not currently bytecode-compiled, ensuring this hits the AST evaluator. These
+    // sizes also exceed the SIMD threshold for array aggregates.
+    assert_number(&sheet.eval("=COUNTIF(SEQUENCE(256),\">128\")"), 128.0);
+    assert_number(
+        &sheet.eval("=SUMIF(SEQUENCE(256),\">128\",SEQUENCE(256))"),
+        24_640.0,
+    );
+    assert_number(&sheet.eval("=AVERAGEIF(SEQUENCE(256),\">128\")"), 192.5);
+}
+
+#[test]
 fn aggregates_reject_lambda_values_inside_arrays() {
     let mut sheet = TestSheet::new();
     assert_eq!(

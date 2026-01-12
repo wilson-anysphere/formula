@@ -11,6 +11,38 @@ use crate::value::{parse_number, Array, ErrorKind, Value};
 const VAR_ARGS: usize = 255;
 const SIMD_AGGREGATE_BLOCK: usize = 1024;
 
+// Criteria aggregates (SUMIF/AVERAGEIF) require extra per-element coercion work before the SIMD
+// kernels can run. Avoid paying that overhead for tiny ranges.
+const SIMD_CRITERIA_ARRAY_MIN_LEN: usize = 32;
+
+#[inline]
+fn count_value_to_f64(v: &Value) -> f64 {
+    match v {
+        // COUNT counts numeric cells and ignores everything else (including errors).
+        Value::Number(_) => 0.0,
+        _ => f64::NAN,
+    }
+}
+
+#[inline]
+fn coerce_countif_value_to_number(v: &Value, locale: crate::value::NumberLocale) -> Option<f64> {
+    match v {
+        Value::Number(n) => Some(*n),
+        Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
+        // COUNTIF numeric criteria treat blank as 0 for comparison.
+        Value::Blank => Some(0.0),
+        Value::Text(s) => parse_number(s, locale).ok(),
+        Value::Entity(_) | Value::Record(_) => None,
+        // Criteria matching uses implicit intersection for array candidates.
+        Value::Array(arr) => coerce_countif_value_to_number(&arr.top_left(), locale),
+        Value::Error(_)
+        | Value::Reference(_)
+        | Value::ReferenceUnion(_)
+        | Value::Lambda(_)
+        | Value::Spill { .. } => None,
+    }
+}
+
 inventory::submit! {
     FunctionSpec {
         name: "RAND",
@@ -883,11 +915,24 @@ fn count_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         match ctx.eval_arg(arg) {
             ArgValue::Scalar(v) => match v {
                 Value::Array(arr) => {
+                    let mut buf = [0.0_f64; SIMD_AGGREGATE_BLOCK];
+                    let mut len = 0usize;
+                    let mut count = 0usize;
+
                     for v in arr.iter() {
-                        if matches!(v, Value::Number(_)) {
-                            total += 1;
+                        buf[len] = count_value_to_f64(v);
+                        len += 1;
+                        if len == SIMD_AGGREGATE_BLOCK {
+                            count += simd::count_ignore_nan_f64(&buf);
+                            len = 0;
                         }
                     }
+
+                    if len > 0 {
+                        count += simd::count_ignore_nan_f64(&buf[..len]);
+                    }
+
+                    total += count as u64;
                 }
                 other => {
                     if matches!(other, Value::Number(_)) {
@@ -896,26 +941,52 @@ fn count_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 }
             },
             ArgValue::Reference(r) => {
+                let mut buf = [0.0_f64; SIMD_AGGREGATE_BLOCK];
+                let mut len = 0usize;
+                let mut count = 0usize;
+
                 for addr in ctx.iter_reference_cells(&r) {
                     let v = ctx.get_cell_value(&r.sheet_id, addr);
-                    if matches!(v, Value::Number(_)) {
-                        total += 1;
+                    buf[len] = count_value_to_f64(&v);
+                    len += 1;
+                    if len == SIMD_AGGREGATE_BLOCK {
+                        count += simd::count_ignore_nan_f64(&buf);
+                        len = 0;
                     }
                 }
+
+                if len > 0 {
+                    count += simd::count_ignore_nan_f64(&buf[..len]);
+                }
+
+                total += count as u64;
             }
             ArgValue::ReferenceUnion(ranges) => {
                 let mut seen = std::collections::HashSet::new();
+                let mut buf = [0.0_f64; SIMD_AGGREGATE_BLOCK];
+                let mut len = 0usize;
+                let mut count = 0usize;
+
                 for r in ranges {
                     for addr in ctx.iter_reference_cells(&r) {
                         if !seen.insert((r.sheet_id.clone(), addr)) {
                             continue;
                         }
                         let v = ctx.get_cell_value(&r.sheet_id, addr);
-                        if matches!(v, Value::Number(_)) {
-                            total += 1;
+                        buf[len] = count_value_to_f64(&v);
+                        len += 1;
+                        if len == SIMD_AGGREGATE_BLOCK {
+                            count += simd::count_ignore_nan_f64(&buf);
+                            len = 0;
                         }
                     }
                 }
+
+                if len > 0 {
+                    count += simd::count_ignore_nan_f64(&buf[..len]);
+                }
+
+                total += count as u64;
             }
         }
     }
@@ -1412,6 +1483,117 @@ fn sumif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         }
     }
 
+    // SIMD fast path: SUMIF over array literals / spilled arrays with numeric criteria.
+    //
+    // This intentionally only triggers when we can safely coerce every criteria-range entry to a
+    // number (using COUNTIF-style coercion). That ensures we never accidentally treat a non-numeric
+    // value as a blank/0 due to NaN normalization inside the SIMD kernel.
+    if let (Some(numeric), Range2D::Array(criteria_arr)) =
+        (criteria.as_numeric_criteria(), &criteria_range)
+    {
+        let len = criteria_arr.values.len();
+        if len >= SIMD_CRITERIA_ARRAY_MIN_LEN {
+            let locale = ctx.number_locale();
+            match &sum_range {
+                None => {
+                    let mut crit_buf: Vec<f64> = Vec::with_capacity(SIMD_AGGREGATE_BLOCK);
+                    let mut sum_buf: Vec<f64> = Vec::with_capacity(SIMD_AGGREGATE_BLOCK);
+                    let mut sum = 0.0;
+                    let mut can_simd = true;
+
+                    for v in criteria_arr.iter() {
+                        let Some(n) = coerce_countif_value_to_number(v, locale) else {
+                            can_simd = false;
+                            break;
+                        };
+                        if n.is_nan() {
+                            can_simd = false;
+                            break;
+                        }
+                        crit_buf.push(n);
+
+                        match v {
+                            Value::Number(x) => {
+                                if x.is_nan() {
+                                    can_simd = false;
+                                    break;
+                                }
+                                sum_buf.push(*x);
+                            }
+                            Value::Error(_) | Value::Lambda(_) => {
+                                can_simd = false;
+                                break;
+                            }
+                            _ => sum_buf.push(f64::NAN),
+                        }
+
+                        if crit_buf.len() == SIMD_AGGREGATE_BLOCK {
+                            sum += simd::sum_if_f64(&sum_buf, &crit_buf, numeric);
+                            crit_buf.clear();
+                            sum_buf.clear();
+                        }
+                    }
+
+                    if can_simd {
+                        if !crit_buf.is_empty() {
+                            sum += simd::sum_if_f64(&sum_buf, &crit_buf, numeric);
+                        }
+                        return Value::Number(sum);
+                    }
+                }
+                Some(Range2D::Array(sum_arr)) => {
+                    let mut crit_buf: Vec<f64> = Vec::with_capacity(SIMD_AGGREGATE_BLOCK);
+                    let mut sum_buf: Vec<f64> = Vec::with_capacity(SIMD_AGGREGATE_BLOCK);
+                    let mut sum = 0.0;
+                    let mut can_simd = true;
+
+                    for (crit_v, sum_v) in criteria_arr.iter().zip(sum_arr.iter()) {
+                        let Some(n) = coerce_countif_value_to_number(crit_v, locale) else {
+                            can_simd = false;
+                            break;
+                        };
+                        if n.is_nan() {
+                            can_simd = false;
+                            break;
+                        }
+                        crit_buf.push(n);
+
+                        match sum_v {
+                            Value::Number(x) => {
+                                if x.is_nan() {
+                                    can_simd = false;
+                                    break;
+                                }
+                                sum_buf.push(*x);
+                            }
+                            Value::Error(_) | Value::Lambda(_) => {
+                                // Errors in sum_range must be able to short-circuit when criteria
+                                // matches, so fall back to scalar evaluation when present.
+                                can_simd = false;
+                                break;
+                            }
+                            _ => sum_buf.push(f64::NAN),
+                        }
+
+                        if crit_buf.len() == SIMD_AGGREGATE_BLOCK {
+                            sum += simd::sum_if_f64(&sum_buf, &crit_buf, numeric);
+                            crit_buf.clear();
+                            sum_buf.clear();
+                        }
+                    }
+
+                    if can_simd {
+                        if !crit_buf.is_empty() {
+                            sum += simd::sum_if_f64(&sum_buf, &crit_buf, numeric);
+                        }
+                        return Value::Number(sum);
+                    }
+                }
+                Some(Range2D::Reference(_)) => {}
+            }
+        }
+    }
+
     let mut sum = 0.0;
     match (&sum_range, &criteria_range) {
         (Some(Range2D::Reference(sum_ref)), _) => {
@@ -1637,6 +1819,130 @@ fn averageif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         let (avg_rows, avg_cols) = average_range.shape();
         if rows != avg_rows || cols != avg_cols {
             return Value::Error(ErrorKind::Value);
+        }
+    }
+
+    // SIMD fast path: AVERAGEIF over array literals / spilled arrays with numeric criteria.
+    //
+    // See SUMIF for details on why we require every criteria-range entry to be numerically
+    // coercible for this optimization.
+    if let (Some(numeric), Range2D::Array(criteria_arr)) =
+        (criteria.as_numeric_criteria(), &criteria_range)
+    {
+        let len = criteria_arr.values.len();
+        if len >= SIMD_CRITERIA_ARRAY_MIN_LEN {
+            let locale = ctx.number_locale();
+            match &average_range {
+                None => {
+                    let mut crit_buf: Vec<f64> = Vec::with_capacity(SIMD_AGGREGATE_BLOCK);
+                    let mut avg_buf: Vec<f64> = Vec::with_capacity(SIMD_AGGREGATE_BLOCK);
+                    let mut sum = 0.0;
+                    let mut count = 0u64;
+                    let mut can_simd = true;
+
+                    for v in criteria_arr.iter() {
+                        let Some(n) = coerce_countif_value_to_number(v, locale) else {
+                            can_simd = false;
+                            break;
+                        };
+                        if n.is_nan() {
+                            can_simd = false;
+                            break;
+                        }
+                        crit_buf.push(n);
+
+                        match v {
+                            Value::Number(x) => {
+                                if x.is_nan() {
+                                    can_simd = false;
+                                    break;
+                                }
+                                avg_buf.push(*x);
+                            }
+                            Value::Error(_) | Value::Lambda(_) => {
+                                can_simd = false;
+                                break;
+                            }
+                            _ => avg_buf.push(f64::NAN),
+                        }
+
+                        if crit_buf.len() == SIMD_AGGREGATE_BLOCK {
+                            let (s, c) = simd::sum_count_if_f64(&avg_buf, &crit_buf, numeric);
+                            sum += s;
+                            count += c as u64;
+                            crit_buf.clear();
+                            avg_buf.clear();
+                        }
+                    }
+
+                    if can_simd {
+                        if !crit_buf.is_empty() {
+                            let (s, c) = simd::sum_count_if_f64(&avg_buf, &crit_buf, numeric);
+                            sum += s;
+                            count += c as u64;
+                        }
+                        if count == 0 {
+                            return Value::Error(ErrorKind::Div0);
+                        }
+                        return Value::Number(sum / count as f64);
+                    }
+                }
+                Some(Range2D::Array(avg_arr)) => {
+                    let mut crit_buf: Vec<f64> = Vec::with_capacity(SIMD_AGGREGATE_BLOCK);
+                    let mut avg_buf: Vec<f64> = Vec::with_capacity(SIMD_AGGREGATE_BLOCK);
+                    let mut sum = 0.0;
+                    let mut count = 0u64;
+                    let mut can_simd = true;
+
+                    for (crit_v, avg_v) in criteria_arr.iter().zip(avg_arr.iter()) {
+                        let Some(n) = coerce_countif_value_to_number(crit_v, locale) else {
+                            can_simd = false;
+                            break;
+                        };
+                        if n.is_nan() {
+                            can_simd = false;
+                            break;
+                        }
+                        crit_buf.push(n);
+
+                        match avg_v {
+                            Value::Number(x) => {
+                                if x.is_nan() {
+                                    can_simd = false;
+                                    break;
+                                }
+                                avg_buf.push(*x);
+                            }
+                            Value::Error(_) | Value::Lambda(_) => {
+                                can_simd = false;
+                                break;
+                            }
+                            _ => avg_buf.push(f64::NAN),
+                        }
+
+                        if crit_buf.len() == SIMD_AGGREGATE_BLOCK {
+                            let (s, c) = simd::sum_count_if_f64(&avg_buf, &crit_buf, numeric);
+                            sum += s;
+                            count += c as u64;
+                            crit_buf.clear();
+                            avg_buf.clear();
+                        }
+                    }
+
+                    if can_simd {
+                        if !crit_buf.is_empty() {
+                            let (s, c) = simd::sum_count_if_f64(&avg_buf, &crit_buf, numeric);
+                            sum += s;
+                            count += c as u64;
+                        }
+                        if count == 0 {
+                            return Value::Error(ErrorKind::Div0);
+                        }
+                        return Value::Number(sum / count as f64);
+                    }
+                }
+                Some(Range2D::Reference(_)) => {}
+            }
         }
     }
 
