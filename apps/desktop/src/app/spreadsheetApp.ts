@@ -4,7 +4,7 @@ import { FormulaBarView } from "../formula-bar/FormulaBarView";
 import { Outline, groupDetailRange, isHidden } from "../grid/outline/outline.js";
 import { parseA1Range } from "../charts/a1.js";
 import { emuToPx } from "../charts/overlay.js";
-import { renderChartSvg } from "../charts/renderSvg.js";
+import { placeholderSvg, renderChartSvg } from "../charts/renderSvg.js";
 import { ChartStore, type ChartRecord } from "../charts/chartStore";
 import { FALLBACK_CHART_THEME, type ChartTheme } from "../charts/theme";
 import { applyPlainTextEdit } from "../grid/text/rich-text/edit.js";
@@ -102,6 +102,9 @@ const MAX_KEYBOARD_FORMATTING_CELLS = 50_000;
 // and (for internal pastes) a per-cell snapshot of effective formats. Keep this bounded so
 // Excel-scale sheet limits don't allow accidental multi-million-cell allocations.
 const MAX_CLIPBOARD_CELLS = 200_000;
+// Chart rendering is synchronous and (today) materializes the full series ranges into JS arrays.
+// Keep charts bounded so a large A1 range doesn't allocate millions of values on every render.
+const MAX_CHART_DATA_CELLS = 100_000;
 // Encode (row, col) into a single numeric key for allocation-free lookups.
 // `16_384` matches Excel's maximum column count, so the mapping is collision-free for Excel-sized sheets.
 const COMMENT_COORD_COL_STRIDE = 16_384;
@@ -4624,11 +4627,36 @@ export class SpreadsheetApp {
       host.style.height = `${rect.height}px`;
 
       if (shouldRenderContent) {
-        host.innerHTML = renderChartSvg(chart, provider ?? createProvider(), {
-          width: rect.width,
-          height: rect.height,
-          theme: this.chartTheme,
-        });
+        const chartDataTooLarge = (() => {
+          for (const ser of chart.series ?? []) {
+            const refs = [ser.categories, ser.values, ser.xValues, ser.yValues];
+            for (const rangeRef of refs) {
+              if (typeof rangeRef !== "string" || rangeRef.trim() === "") continue;
+              const parsed = parseA1Range(rangeRef);
+              if (!parsed) continue;
+              const sheetId = parsed.sheetName ? this.resolveSheetIdByName(parsed.sheetName) : this.sheetId;
+              if (!sheetId) continue;
+              const rows = Math.max(0, parsed.endRow - parsed.startRow + 1);
+              const cols = Math.max(0, parsed.endCol - parsed.startCol + 1);
+              if (rows * cols > MAX_CHART_DATA_CELLS) return true;
+            }
+          }
+          return false;
+        })();
+
+        if (chartDataTooLarge) {
+          host.innerHTML = placeholderSvg({
+            width: rect.width,
+            height: rect.height,
+            label: `Chart range too large (>${MAX_CHART_DATA_CELLS.toLocaleString()} cells)`,
+          });
+        } else {
+          host.innerHTML = renderChartSvg(chart, provider ?? createProvider(), {
+            width: rect.width,
+            height: rect.height,
+            theme: this.chartTheme,
+          });
+        }
       }
     }
 
