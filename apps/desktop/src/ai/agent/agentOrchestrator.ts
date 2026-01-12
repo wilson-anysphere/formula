@@ -360,6 +360,7 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
       const ctx = await guard(
         contextBuilder.build({
           activeSheetId: defaultSheetId,
+          signal,
           dlp,
           focusQuestion: goal
         })

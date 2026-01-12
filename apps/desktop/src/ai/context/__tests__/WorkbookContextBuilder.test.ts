@@ -525,6 +525,49 @@ describe("WorkbookContextBuilder", () => {
     spy.mockRestore();
   });
 
+  it("cancels promptly when aborted during a read_range call (no extra reads after abort)", async () => {
+    const documentController = new DocumentController();
+    documentController.setRangeValues("Sheet1", "A1", [
+      ["A"],
+      ["B"],
+    ]);
+    documentController.setRangeValues("Sheet2", "A1", [
+      ["C"],
+      ["D"],
+    ]);
+
+    const spreadsheet = new DocumentControllerSpreadsheetApi(documentController);
+    const abortController = new AbortController();
+    const signal = abortController.signal;
+
+    const originalReadRange = spreadsheet.readRange.bind(spreadsheet);
+    let readRangeCalls = 0;
+    const readRangeSpy = vi.spyOn(spreadsheet, "readRange").mockImplementation((range: any) => {
+      readRangeCalls += 1;
+      if (readRangeCalls === 1) abortController.abort();
+      return originalReadRange(range);
+    });
+
+    const builder = new WorkbookContextBuilder({
+      workbookId: "wb_abort",
+      documentController,
+      spreadsheet,
+      ragService: null,
+      mode: "chat",
+      model: "unit-test-model",
+      maxSheets: 2,
+    });
+
+    await expect(builder.build({ activeSheetId: "Sheet1", signal })).rejects.toMatchObject({ name: "AbortError" });
+    expect(readRangeCalls).toBe(1);
+
+    // Give any stray background work a chance to schedule, then assert we didn't keep reading.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(readRangeCalls).toBe(1);
+
+    readRangeSpy.mockRestore();
+  });
+
   it("serializes a stable payload snapshot", async () => {
     const documentController = new DocumentController();
     documentController.setRangeValues("Sheet1", "A1", [

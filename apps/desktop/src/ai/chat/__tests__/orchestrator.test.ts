@@ -440,6 +440,73 @@ describe("ai chat orchestrator", () => {
     }
   });
 
+  it("aborts during context building without continuing read_range work in the background (and does not call the LLM)", async () => {
+    const controller = new DocumentController();
+    controller.setRangeValues("Sheet1", "A1", [
+      ["A"],
+      ["B"],
+    ]);
+    controller.setRangeValues("Sheet2", "A1", [
+      ["C"],
+      ["D"],
+    ]);
+
+    const abortController = new AbortController();
+    const signal = abortController.signal;
+
+    const originalReadRange = (DocumentControllerSpreadsheetApi.prototype as any).readRange;
+    let readRangeCalls = 0;
+    const readRangeSpy = vi.spyOn(DocumentControllerSpreadsheetApi.prototype as any, "readRange").mockImplementation(function (
+      this: any,
+      range: any,
+    ) {
+      readRangeCalls += 1;
+      if (readRangeCalls === 1) abortController.abort();
+      return originalReadRange.call(this, range);
+    });
+
+    try {
+      const ragService = {
+        async getContextManager() {
+          return new ContextManager({ tokenBudgetTokens: 800 });
+        },
+        async buildWorkbookContextFromSpreadsheetApi() {
+          // Keep the test focused on WorkbookContextBuilder's own sheet/block reads.
+          return { retrieved: [] };
+        },
+        async dispose() {}
+      };
+
+      const llmClient = {
+        chat: vi.fn(async () => ({ message: { role: "assistant", content: "should not be called" } })),
+      };
+
+      const auditStore = new LocalStorageAIAuditStore({ key: "test_audit_abort_during_context_build" });
+
+      const orchestrator = createAiChatOrchestrator({
+        documentController: controller,
+        workbookId: "wb_abort_during_context_build",
+        llmClient: llmClient as any,
+        model: "mock-model",
+        getActiveSheetId: () => "Sheet1",
+        auditStore,
+        sessionId: "session_abort_during_context_build",
+        ragService: ragService as any,
+        previewOptions: { approval_cell_threshold: 0 }
+      });
+
+      await expect(orchestrator.sendMessage({ text: "Hello", history: [], signal })).rejects.toMatchObject({ name: "AbortError" });
+      expect(llmClient.chat).not.toHaveBeenCalled();
+
+      const callsAfterAbort = readRangeCalls;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(readRangeCalls).toBe(callsAfterAbort);
+      expect(readRangeCalls).toBe(1);
+    } finally {
+      readRangeSpy.mockRestore();
+    }
+  });
+
   it("recreates WorkbookContextBuilder when DLP inputs change (prevents cache reuse across policy/classification changes)", async () => {
     const storage = createInMemoryLocalStorage();
     const original = (globalThis as any).localStorage;

@@ -418,6 +418,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
         signal,
         cachedContextBuilder.build({
           activeSheetId,
+          signal,
           dlp,
           ...(selectedRange ? { selectedRange } : {}),
           focusQuestion: text,

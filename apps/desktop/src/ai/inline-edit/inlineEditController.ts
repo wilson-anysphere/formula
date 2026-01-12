@@ -206,6 +206,7 @@ export class InlineEditController {
       });
       const ctx = await contextBuilder.build({
         activeSheetId: params.sheetId,
+        signal,
         selectedRange: { sheetId: params.sheetId, range: params.range },
         focusQuestion: params.prompt
       });
