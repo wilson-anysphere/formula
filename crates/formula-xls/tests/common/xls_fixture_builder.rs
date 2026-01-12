@@ -404,6 +404,25 @@ pub fn build_view_state_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture that contains sheet-scoped built-in defined names (`NAME` records).
+///
+/// This is used to validate that the importer maps BIFF8 built-in name ids to the expected
+/// Excel-visible `_xlnm.*` defined name strings, preserves the hidden flag, and imports the
+/// correct sheet scope.
+pub fn build_defined_names_builtins_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_defined_names_builtins_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture that exercises rich style import (FONT/XF/PALETTE).
 ///
 /// The fixture contains a single sheet named `Styles` with a value cell (`A1`) that references
@@ -2715,6 +2734,142 @@ fn build_view_state_workbook_stream() -> Vec<u8> {
     globals.extend_from_slice(&sheet2);
 
     globals
+}
+
+fn build_defined_names_builtins_workbook_stream() -> Vec<u8> {
+    // Build workbook globals containing two sheets plus a handful of `NAME` records scoped to
+    // individual sheets.
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // Minimal XF table (style XFs only).
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+
+    // One General cell XF (required by some readers).
+    let xf_general = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Two worksheets.
+    let boundsheet1_start = globals.len();
+    let mut boundsheet1 = Vec::<u8>::new();
+    boundsheet1.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet1.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet1, "Sheet1");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet1);
+    let boundsheet1_offset_pos = boundsheet1_start + 4;
+
+    let boundsheet2_start = globals.len();
+    let mut boundsheet2 = Vec::<u8>::new();
+    boundsheet2.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet2.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet2, "Sheet2");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet2);
+    let boundsheet2_offset_pos = boundsheet2_start + 4;
+
+    // Minimal EXTERNSHEET table with two internal sheet entries so we can encode 3D references.
+    push_record(
+        &mut globals,
+        RECORD_EXTERNSHEET,
+        &externsheet_record(&[(0, 0), (1, 1)]),
+    );
+
+    // Built-in defined names (`NAME` records).
+    //
+    // Print_Area on Sheet1: Sheet1!$A$1:$A$2,Sheet1!$C$1:$C$2 (hidden).
+    let print_area_rgce = [
+        ptg_area3d(0, 0, 1, 0, 0),
+        ptg_area3d(0, 0, 1, 2, 2),
+        vec![0x10], // PtgUnion
+    ]
+    .concat();
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &builtin_name_record(true, 1, 0x06, &print_area_rgce),
+    );
+
+    // Print_Titles on Sheet2: Sheet2!$1:$1,Sheet2!$A:$A (not hidden).
+    let print_titles_rgce = [
+        // Whole-row area: row=1, cols=all (0..255).
+        ptg_area3d(1, 0, 0, 0, 0x00FF),
+        // Whole-column area: col=A, rows=all (0..65535).
+        ptg_area3d(1, 0, 0xFFFF, 0, 0),
+        vec![0x10], // PtgUnion
+    ]
+    .concat();
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &builtin_name_record(false, 2, 0x07, &print_titles_rgce),
+    );
+
+    // _FilterDatabase on Sheet1: Sheet1!$A$1:$C$10 (hidden).
+    let filter_db_rgce = ptg_area3d(0, 0, 9, 0, 2);
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &builtin_name_record(true, 1, 0x0D, &filter_db_rgce),
+    );
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    // -- Sheet substreams -------------------------------------------------------
+    let sheet1_offset = globals.len();
+    let sheet1 = build_empty_sheet_stream(xf_general);
+    let sheet2_offset = sheet1_offset + sheet1.len();
+    let sheet2 = build_empty_sheet_stream(xf_general);
+
+    globals[boundsheet1_offset_pos..boundsheet1_offset_pos + 4]
+        .copy_from_slice(&(sheet1_offset as u32).to_le_bytes());
+    globals[boundsheet2_offset_pos..boundsheet2_offset_pos + 4]
+        .copy_from_slice(&(sheet2_offset as u32).to_le_bytes());
+
+    globals.extend_from_slice(&sheet1);
+    globals.extend_from_slice(&sheet2);
+
+    globals
+}
+
+fn builtin_name_record(hidden: bool, itab: u16, builtin_id: u8, rgce: &[u8]) -> Vec<u8> {
+    // BIFF8 NAME record [MS-XLS] 2.4.150.
+    const NAME_FLAG_HIDDEN: u16 = 0x0001;
+    const NAME_FLAG_BUILTIN: u16 = 0x0020;
+
+    let mut out = Vec::<u8>::new();
+
+    let mut grbit: u16 = NAME_FLAG_BUILTIN;
+    if hidden {
+        grbit |= NAME_FLAG_HIDDEN;
+    }
+
+    out.extend_from_slice(&grbit.to_le_bytes()); // grbit
+    out.push(0); // chKey
+    out.push(1); // cch (built-in name id length)
+    out.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+    out.extend_from_slice(&0u16.to_le_bytes()); // ixals
+    out.extend_from_slice(&itab.to_le_bytes()); // itab (1-based sheet index, 0=workbook)
+    out.extend_from_slice(&[0, 0, 0, 0]); // cchCustMenu, cchDescription, cchHelpTopic, cchStatusText
+
+    out.push(builtin_id); // rgchName (built-in id)
+    out.extend_from_slice(rgce); // rgce
+    out
+}
+
+fn ptg_area(rw_first: u16, rw_last: u16, col_first: u16, col_last: u16) -> Vec<u8> {
+    // PtgArea token (ref class): [ptg=0x25][rwFirst][rwLast][colFirst][colLast]
+    let mut out = Vec::<u8>::new();
+    out.push(0x25);
+    out.extend_from_slice(&rw_first.to_le_bytes());
+    out.extend_from_slice(&rw_last.to_le_bytes());
+    out.extend_from_slice(&col_first.to_le_bytes());
+    out.extend_from_slice(&col_last.to_le_bytes());
+    out
 }
 
 fn window2() -> [u8; 18] {

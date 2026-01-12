@@ -2084,7 +2084,6 @@ dependencies = [
  "cfb 0.10.0",
  "encoding_rs",
  "formula-biff",
- "formula-engine",
  "formula-format",
  "formula-model",
  "log",

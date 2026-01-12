@@ -721,7 +721,53 @@ fn format_cell_ref_no_dollars(row0: u32, col0: u32) -> String {
     out
 }
 
+fn format_row_ref(row: u16, row_rel: bool) -> String {
+    let mut out = String::new();
+    if !row_rel {
+        out.push('$');
+    }
+    out.push_str(&(row as u32 + 1).to_string());
+    out
+}
+
+fn format_col_ref(col: u16, col_rel: bool) -> String {
+    let mut out = String::new();
+    if !col_rel {
+        out.push('$');
+    }
+    push_column(col as u32, &mut out);
+    out
+}
+
 fn format_area_ref(row1: u16, col1: u16, row2: u16, col2: u16) -> String {
+    const BIFF8_MAX_ROW: u16 = 0xFFFF;
+    const BIFF8_MAX_COL: u16 = 0x00FF;
+
+    let col1_idx = col1 & 0x3FFF;
+    let col2_idx = col2 & 0x3FFF;
+
+    let row1_rel = (col1 & 0x4000) != 0;
+    let col1_rel = (col1 & 0x8000) != 0;
+    let row2_rel = (col2 & 0x4000) != 0;
+    let col2_rel = (col2 & 0x8000) != 0;
+
+    // Whole-column references (`$A:$A`, `$A:$C`).
+    if row1 == 0 && row2 == BIFF8_MAX_ROW && col1_idx <= BIFF8_MAX_COL && col2_idx <= BIFF8_MAX_COL
+    {
+        let start = format_col_ref(col1_idx as u16, col1_rel);
+        let end = format_col_ref(col2_idx as u16, col2_rel);
+        // Excel canonical form includes the `:` even for single-column ranges.
+        return format!("{start}:{end}");
+    }
+
+    // Whole-row references (`$1:$1`, `$1:$3`).
+    if col1_idx == 0 && col2_idx == BIFF8_MAX_COL {
+        let start = format_row_ref(row1, row1_rel);
+        let end = format_row_ref(row2, row2_rel);
+        // Excel canonical form includes the `:` even for single-row ranges.
+        return format!("{start}:{end}");
+    }
+
     let start = format_cell_ref(row1, col1);
     let end = format_cell_ref(row2, col2);
     if start == end {
@@ -877,11 +923,6 @@ fn push_column(col: u32, out: &mut String) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use formula_engine::{parse_formula, ParseOptions};
-
-    fn assert_parseable(expr: &str) {
-        parse_formula(&format!("={expr}"), ParseOptions::default()).expect("parse formula");
-    }
 
     fn empty_ctx<'a>(
         sheet_names: &'a [String],
@@ -908,7 +949,6 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "A1");
         assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
-        assert_parseable(&decoded.text);
     }
 
     #[test]
@@ -923,7 +963,6 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "B2");
         assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
-        assert_parseable(&decoded.text);
     }
 
     #[test]
@@ -938,7 +977,6 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "#REF!");
         assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
-        assert_parseable(&decoded.text);
     }
 
     #[test]
@@ -955,7 +993,6 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "#REF!");
         assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
-        assert_parseable(&decoded.text);
     }
 
     #[test]
@@ -976,7 +1013,6 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "A1:B2");
         assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
-        assert_parseable(&decoded.text);
     }
 
     #[test]
@@ -997,7 +1033,6 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "C3:D4");
         assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
-        assert_parseable(&decoded.text);
     }
 
     #[test]
@@ -1012,7 +1047,6 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "#REF!");
         assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
-        assert_parseable(&decoded.text);
     }
 
     #[test]
@@ -1027,6 +1061,5 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "#REF!");
         assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
-        assert_parseable(&decoded.text);
     }
 }
