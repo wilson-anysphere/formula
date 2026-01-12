@@ -123,13 +123,15 @@ describe("secrets rotation (integration)", () => {
       const alphaV1 = encryptV1(oldKey, "alpha-value");
       const betaOld = encryptSecretValue({ currentKeyId: "old", keys: keyring.keys }, "beta", "beta-value");
       const gammaCurrent = encryptSecretValue(keyring, "gamma", "gamma-value");
+      const deltaLegacyAad = encryptV2LegacyAad(newKey, "new", "delta", "delta-value");
 
       await db.query("INSERT INTO secrets (name, encrypted_value) VALUES ($1, $2)", ["alpha", alphaV1]);
       await db.query("INSERT INTO secrets (name, encrypted_value) VALUES ($1, $2)", ["beta", betaOld]);
       await db.query("INSERT INTO secrets (name, encrypted_value) VALUES ($1, $2)", ["gamma", gammaCurrent]);
+      await db.query("INSERT INTO secrets (name, encrypted_value) VALUES ($1, $2)", ["delta", deltaLegacyAad]);
 
       const result = await runSecretsRotation(db, keyring, { batchSize: 2 });
-      expect(result).toEqual({ scanned: 3, rotated: 2, failed: 0 });
+      expect(result).toEqual({ scanned: 4, rotated: 3, failed: 0 });
 
       const gammaRow = await db.query("SELECT encrypted_value FROM secrets WHERE name = $1", ["gamma"]);
       expect(String(gammaRow.rows[0].encrypted_value)).toBe(gammaCurrent);
@@ -137,6 +139,7 @@ describe("secrets rotation (integration)", () => {
       expect(await getSecret(db, keyring, "alpha")).toBe("alpha-value");
       expect(await getSecret(db, keyring, "beta")).toBe("beta-value");
       expect(await getSecret(db, keyring, "gamma")).toBe("gamma-value");
+      expect(await getSecret(db, keyring, "delta")).toBe("delta-value");
     } finally {
       await db.end();
     }

@@ -1,6 +1,7 @@
 import type { Pool, QueryResult } from "pg";
 import {
   decryptSecretValue,
+  decryptSecretValueV2CurrentAad,
   encryptSecretValue,
   getSecretEncodingInfo,
   type SecretStoreKeyring
@@ -73,7 +74,15 @@ export async function runSecretsRotation(
       try {
         const info = getSecretEncodingInfo(encryptedValue);
         if (info.version === "v2" && info.keyId === keyring.currentKeyId) {
-          shouldRotate = false;
+          // Secrets already using the current key may still be using the legacy
+          // v2 AAD context (from early deployments). If so, rotate them in-place
+          // so we can eventually drop legacy AAD support.
+          try {
+            decryptSecretValueV2CurrentAad(keyring, name, encryptedValue);
+            shouldRotate = false;
+          } catch {
+            shouldRotate = true;
+          }
         }
       } catch {
         // Unknown/invalid encoding: we'll count it as failed below.

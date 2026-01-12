@@ -71,9 +71,15 @@ function encryptV2(key: Buffer, name: string, plaintext: string): string {
   return packEncrypted(iv, tag, ciphertext);
 }
 
-function decryptV2(key: Buffer, name: string, packed: string): string {
+function decryptV2WithContext(key: Buffer, name: string, packed: string, context: string): string {
   const { iv, tag, ciphertext } = unpackEncrypted(packed);
+  const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+  decipher.setAAD(secretAad(name, context));
+  decipher.setAuthTag(tag);
+  return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
+}
 
+function decryptV2(key: Buffer, name: string, packed: string): string {
   // The earliest v2 implementation used `secret:${name}` as the AAD context. We
   // now use `formula-secret-store:${name}` but keep decrypt compatibility so
   // existing rows continue to work.
@@ -82,16 +88,33 @@ function decryptV2(key: Buffer, name: string, packed: string): string {
   let lastErr: unknown;
   for (const context of aadContexts) {
     try {
-      const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
-      decipher.setAAD(secretAad(name, context));
-      decipher.setAuthTag(tag);
-      return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
+      return decryptV2WithContext(key, name, packed, context);
     } catch (err) {
       lastErr = err;
     }
   }
 
   throw lastErr instanceof Error ? lastErr : new Error("Failed to decrypt secret");
+}
+
+/**
+ * Decrypt a v2 secret using the *current* AAD context only.
+ *
+ * This is primarily intended for rotation tooling so we can detect whether a v2
+ * row is still using the legacy AAD context (`secret:${name}`) even when the
+ * key id matches the current key.
+ */
+export function decryptSecretValueV2CurrentAad(keyring: SecretStoreKeyring, name: string, value: string): string {
+  const info = getSecretEncodingInfo(value);
+  if (info.version !== "v2") throw new Error("Not a v2 secret");
+  const firstColon = value.indexOf(":", 3);
+  if (firstColon === -1) throw new Error("Invalid secret encoding");
+  const packed = value.slice(firstColon + 1);
+
+  const key = keyring.keys[info.keyId];
+  if (!key) throw new Error(`Secret store key not found for keyId=${info.keyId}`);
+  if (key.byteLength !== 32) throw new Error(`Secret store key ${info.keyId} must be 32 bytes (got ${key.byteLength})`);
+  return decryptV2WithContext(key, name, packed, SECRET_STORE_AAD_CONTEXT_V2);
 }
 
 export function getSecretEncodingInfo(value: string): SecretEncodingInfo {
