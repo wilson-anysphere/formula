@@ -1,6 +1,7 @@
 use std::io::{Cursor, Write};
 
 use formula_model::{CellRef, Hyperlink, HyperlinkTarget, Range, SheetAutoFilter, TabColor};
+use formula_xlsx::print::{ManualPageBreaks, PageSetup, Scaling, SheetPrintSettings, WorkbookPrintSettings};
 use formula_xlsx::XlsxPackage;
 
 fn build_minimal_xlsx(sheet_xml: &str) -> Vec<u8> {
@@ -244,6 +245,57 @@ fn autofilter_insertion_preserves_worksheet_prefix() -> Result<(), Box<dyn std::
     assert!(
         !updated.contains("<autoFilter"),
         "should not introduce an unprefixed <autoFilter> element"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn print_settings_insertion_preserves_worksheet_prefix() -> Result<(), Box<dyn std::error::Error>>
+{
+    let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <x:sheetData/>
+</x:worksheet>"#;
+
+    let bytes = build_minimal_xlsx(sheet_xml);
+    let settings = WorkbookPrintSettings {
+        sheets: vec![SheetPrintSettings {
+            sheet_name: "Sheet1".to_string(),
+            print_area: None,
+            print_titles: None,
+            page_setup: PageSetup {
+                scaling: Scaling::FitTo { width: 1, height: 0 },
+                ..PageSetup::default()
+            },
+            manual_page_breaks: ManualPageBreaks::default(),
+        }],
+    };
+    let updated_bytes = formula_xlsx::print::write_workbook_print_settings(&bytes, &settings)?;
+    let updated_pkg = XlsxPackage::from_bytes(&updated_bytes)?;
+
+    let updated_xml = std::str::from_utf8(
+        updated_pkg
+            .part("xl/worksheets/sheet1.xml")
+            .expect("worksheet part exists"),
+    )?;
+
+    roxmltree::Document::parse(updated_xml)?;
+    assert!(
+        updated_xml.contains("<x:pageMargins") && updated_xml.contains("<x:pageSetup"),
+        "expected prefixed page setup elements, got:\n{updated_xml}"
+    );
+    assert!(
+        updated_xml.contains("<x:sheetPr") && updated_xml.contains("<x:pageSetUpPr"),
+        "expected prefixed sheetPr/pageSetUpPr elements, got:\n{updated_xml}"
+    );
+    assert!(
+        !updated_xml.contains("<pageMargins")
+            && !updated_xml.contains("<pageSetup")
+            && !updated_xml.contains("<sheetPr")
+            && !updated_xml.contains("<pageSetUpPr"),
+        "should not introduce unprefixed print settings elements, got:\n{updated_xml}"
     );
 
     Ok(())
