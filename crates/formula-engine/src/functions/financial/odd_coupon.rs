@@ -399,8 +399,7 @@ fn oddl_equation(
         return Err(ExcelError::Num);
     }
 
-    // Excel-style chronology: last_interest < settlement < maturity.
-    if !(last_interest < settlement && settlement < maturity) {
+    if !(settlement < maturity) {
         return Err(ExcelError::Num);
     }
     if !(last_interest < maturity) {
@@ -415,36 +414,107 @@ fn oddl_equation(
     let months_per_period = 12 / frequency;
     let eom = is_end_of_month(last_interest, system)?;
 
-    // Day-count quantities.
-    let a = days_between(last_interest, settlement, basis, system)?;
+    // Odd last period length (days) and coupon prorating.
     let dlm = days_between(last_interest, maturity, basis, system)?;
-    let dsm = days_between(settlement, maturity, basis, system)?;
-    if a < 0.0 || dlm <= 0.0 || dsm <= 0.0 {
+    if dlm <= 0.0 {
         return Err(ExcelError::Num);
     }
 
     // Regular coupon period length `E` (days).
     let prev_coupon = coupon_date_with_eom(last_interest, -months_per_period, eom, system)?;
-    let e = coupon_period_e(prev_coupon, last_interest, basis, freq, system)?;
+    let e_last = coupon_period_e(prev_coupon, last_interest, basis, freq, system)?;
 
     // Regular coupon payment.
     let c = redemption * rate / freq;
     validate_finite(c)?;
 
-    let accrued_interest = c * (a / e);
-    validate_finite(accrued_interest)?;
-
     // Odd last coupon at maturity, prorated by DLM/E.
-    let odd_last_coupon = c * (dlm / e);
+    let stub_periods = dlm / e_last;
+    validate_finite(stub_periods)?;
+    let odd_last_coupon = c * stub_periods;
     validate_finite(odd_last_coupon)?;
-    let amount = redemption + odd_last_coupon;
-    validate_finite(amount)?;
+    let maturity_amount = redemption + odd_last_coupon;
+    validate_finite(maturity_amount)?;
 
-    // Fractional periods from settlement to maturity.
-    let t = dsm / e;
-    validate_finite(t)?;
+    if settlement >= last_interest {
+        // Settlement inside the odd last coupon period (the legacy/Excel formula case).
+        let a = days_between(last_interest, settlement, basis, system)?;
+        let dsm = days_between(settlement, maturity, basis, system)?;
+        if a < 0.0 || dsm <= 0.0 {
+            return Err(ExcelError::Num);
+        }
 
-    BondEquation::new(freq, accrued_interest, vec![(t, amount)])
+        let accrued_interest = c * (a / e_last);
+        validate_finite(accrued_interest)?;
+
+        let t = dsm / e_last;
+        validate_finite(t)?;
+
+        BondEquation::new(freq, accrued_interest, vec![(t, maturity_amount)])
+    } else {
+        // Settlement before the last regular coupon date: PV all remaining regular coupons
+        // through `last_interest` plus the final odd stub cashflow at maturity.
+        // Find the regular coupon period containing settlement (PCD <= S < NCD) by stepping
+        // backward from `last_interest`. We compute each coupon date from the fixed `last_interest`
+        // anchor (not by iterative EDATE stepping) to avoid "EDATE drift" across short months.
+        let mut k_found: Option<usize> = None;
+        for k in 1..=MAX_COUPON_STEPS {
+            let k_i32 = i32::try_from(k).map_err(|_| ExcelError::Num)?;
+            let offset = k_i32
+                .checked_mul(months_per_period)
+                .ok_or(ExcelError::Num)?;
+            let pcd = coupon_date_with_eom(last_interest, -offset, eom, system)?;
+            if pcd <= settlement {
+                k_found = Some(k);
+                break;
+            }
+        }
+        let k = k_found.ok_or(ExcelError::Num)?;
+        let k_prev = k.checked_sub(1).ok_or(ExcelError::Num)?;
+        let pcd_offset = i32::try_from(k).map_err(|_| ExcelError::Num)?
+            .checked_mul(months_per_period)
+            .ok_or(ExcelError::Num)?;
+        let ncd_offset = i32::try_from(k_prev).map_err(|_| ExcelError::Num)?
+            .checked_mul(months_per_period)
+            .ok_or(ExcelError::Num)?;
+
+        let pcd = coupon_date_with_eom(last_interest, -pcd_offset, eom, system)?;
+        let ncd = coupon_date_with_eom(last_interest, -ncd_offset, eom, system)?;
+
+        let e_settle = coupon_period_e(pcd, ncd, basis, freq, system)?;
+        let a = days_between(pcd, settlement, basis, system)?;
+        let dsc = days_between(settlement, ncd, basis, system)?;
+        if a < 0.0 || dsc < 0.0 {
+            return Err(ExcelError::Num);
+        }
+
+        let accrued_interest = c * (a / e_settle);
+        validate_finite(accrued_interest)?;
+
+        let frac = dsc / e_settle;
+        validate_finite(frac)?;
+
+        let n_reg = k;
+        if n_reg == 0 {
+            return Err(ExcelError::Num);
+        }
+
+        let mut payments = Vec::with_capacity(n_reg.saturating_add(1));
+        for idx in 0..n_reg {
+            let t = frac + idx as f64;
+            validate_finite(t)?;
+            payments.push((t, c));
+        }
+
+        // Maturity is `stub_periods` after `last_interest`.
+        let t_last_interest = frac + (n_reg as f64 - 1.0);
+        validate_finite(t_last_interest)?;
+        let t_maturity = t_last_interest + stub_periods;
+        validate_finite(t_maturity)?;
+        payments.push((t_maturity, maturity_amount));
+
+        BondEquation::new(freq, accrued_interest, payments)
+    }
 }
 
 fn solve_odd_yield(pr: f64, equation: &BondEquation) -> ExcelResult<f64> {

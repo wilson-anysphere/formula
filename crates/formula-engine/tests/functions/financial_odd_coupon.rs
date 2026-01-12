@@ -1091,6 +1091,51 @@ fn oddlyield_extreme_prices_roundtrip() {
 }
 
 #[test]
+fn odd_last_coupon_supports_settlement_before_last_interest() {
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    // Semiannual schedule with an odd last stub from last_interest -> maturity.
+    // Settlement is well before last_interest, so multiple regular coupons remain.
+    let settlement = ymd_to_serial(ExcelDate::new(2023, 1, 15), system).unwrap();
+    let last_interest = ymd_to_serial(ExcelDate::new(2024, 8, 31), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2024, 11, 15), system).unwrap();
+
+    let rate = 0.05;
+    let redemption = 100.0;
+    let frequency = 2;
+    let basis = 1;
+    let yld = 0.06;
+
+    let price = oddlprice(
+        settlement,
+        maturity,
+        last_interest,
+        rate,
+        yld,
+        redemption,
+        frequency,
+        basis,
+        system,
+    )
+    .expect("ODDLPRICE should accept settlement before last_interest");
+    assert!(price.is_finite() && price > 0.0, "expected finite positive price, got {price}");
+
+    let recovered_yield = oddlyield(
+        settlement,
+        maturity,
+        last_interest,
+        rate,
+        price,
+        redemption,
+        frequency,
+        basis,
+        system,
+    )
+    .expect("ODDLYIELD should converge for settlement before last_interest");
+    assert_close(recovered_yield, yld, 1e-10);
+}
+
+#[test]
 fn odd_coupon_functions_coerce_frequency_like_excel() {
     let mut sheet = TestSheet::new();
     // Task: coercion edge cases for `frequency`.
