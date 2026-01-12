@@ -945,6 +945,11 @@ fn push_column(col: u32, out: &mut String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use formula_engine::{parse_formula, ParseOptions};
+
+    fn assert_parseable(expr: &str) {
+        parse_formula(&format!("={expr}"), ParseOptions::default()).expect("parse formula");
+    }
 
     fn empty_ctx<'a>(
         sheet_names: &'a [String],
@@ -971,6 +976,7 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "A1");
         assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
     }
 
     #[test]
@@ -985,6 +991,7 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "B2");
         assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
     }
 
     #[test]
@@ -999,6 +1006,7 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "#REF!");
         assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
     }
 
     #[test]
@@ -1015,6 +1023,7 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "#REF!");
         assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
     }
 
     #[test]
@@ -1035,6 +1044,7 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "A1:B2");
         assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
     }
 
     #[test]
@@ -1055,6 +1065,7 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "C3:D4");
         assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
     }
 
     #[test]
@@ -1069,6 +1080,7 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "#REF!");
         assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
     }
 
     #[test]
@@ -1083,6 +1095,7 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "#REF!");
         assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
     }
 
     #[test]
@@ -1100,6 +1113,7 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "#REF!");
         assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
     }
 
     #[test]
@@ -1123,5 +1137,6 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "#REF!");
         assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
     }
 }
