@@ -388,13 +388,16 @@ test("Binder-origin collaborative undo captures comment add/edit when using a tr
   });
   undo.stopCapturing();
 
-  comments.setResolved({ commentId, resolved: true, now: 4 });
+  comments.setReplyContent({ commentId, replyId: "r1", content: "First reply (edited)", now: 4 });
+  undo.stopCapturing();
+
+  comments.setResolved({ commentId, resolved: true, now: 5 });
 
   const get = () => comments.listAll().find((c) => c.id === commentId) ?? null;
 
   assert.equal(get()?.content ?? null, "Hello (edited)");
   assert.equal(get()?.replies.length ?? 0, 1);
-  assert.equal(get()?.replies[0]?.content ?? null, "First reply");
+  assert.equal(get()?.replies[0]?.content ?? null, "First reply (edited)");
   assert.equal(get()?.resolved ?? null, true);
   assert.equal(undo.canUndo(), true);
 
@@ -402,7 +405,13 @@ test("Binder-origin collaborative undo captures comment add/edit when using a tr
   undo.undo();
   assert.equal(get()?.resolved ?? null, false);
 
-  // Undo reply.
+  // Undo reply edit.
+  assert.equal(undo.canUndo(), true);
+  undo.undo();
+  assert.equal(get()?.replies.length ?? 0, 1);
+  assert.equal(get()?.replies[0]?.content ?? null, "First reply");
+
+  // Undo reply add.
   assert.equal(undo.canUndo(), true);
   undo.undo();
   assert.equal(get()?.replies.length ?? 0, 0);
@@ -430,6 +439,11 @@ test("Binder-origin collaborative undo captures comment add/edit when using a tr
   undo.redo();
   assert.equal(get()?.replies.length ?? 0, 1);
   assert.equal(get()?.replies[0]?.content ?? null, "First reply");
+
+  assert.equal(undo.canRedo(), true);
+  undo.redo();
+  assert.equal(get()?.replies.length ?? 0, 1);
+  assert.equal(get()?.replies[0]?.content ?? null, "First reply (edited)");
 
   assert.equal(undo.canRedo(), true);
   undo.redo();

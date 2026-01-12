@@ -117,13 +117,16 @@ describe("collaboration-safe undo/redo (desktop)", () => {
     });
     undoService.stopCapturing();
 
-    comments.setResolved({ commentId, resolved: true, now: 4 });
+    comments.setReplyContent({ commentId, replyId: "r1", content: "First reply (edited)", now: 4 });
+    undoService.stopCapturing();
+
+    comments.setResolved({ commentId, resolved: true, now: 5 });
 
     const get = () => comments.listAll().find((c) => c.id === commentId) ?? null;
 
     expect(get()?.content ?? null).toBe("hello (edited)");
     expect(get()?.replies.length ?? 0).toBe(1);
-    expect(get()?.replies[0]?.content ?? null).toBe("First reply");
+    expect(get()?.replies[0]?.content ?? null).toBe("First reply (edited)");
     expect(get()?.resolved ?? null).toBe(true);
     expect(undoService.canUndo()).toBe(true);
 
@@ -131,7 +134,13 @@ describe("collaboration-safe undo/redo (desktop)", () => {
     undoService.undo();
     expect(get()?.resolved ?? null).toBe(false);
 
-    // Undo reply.
+    // Undo reply edit.
+    expect(undoService.canUndo()).toBe(true);
+    undoService.undo();
+    expect(get()?.replies.length ?? 0).toBe(1);
+    expect(get()?.replies[0]?.content ?? null).toBe("First reply");
+
+    // Undo reply add.
     expect(undoService.canUndo()).toBe(true);
     undoService.undo();
     expect(get()?.replies.length ?? 0).toBe(0);
@@ -158,6 +167,11 @@ describe("collaboration-safe undo/redo (desktop)", () => {
     undoService.redo();
     expect(get()?.replies.length ?? 0).toBe(1);
     expect(get()?.replies[0]?.content ?? null).toBe("First reply");
+
+    expect(undoService.canRedo()).toBe(true);
+    undoService.redo();
+    expect(get()?.replies.length ?? 0).toBe(1);
+    expect(get()?.replies[0]?.content ?? null).toBe("First reply (edited)");
 
     expect(undoService.canRedo()).toBe(true);
     undoService.redo();
