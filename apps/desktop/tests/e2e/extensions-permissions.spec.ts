@@ -230,14 +230,14 @@ test.describe("Extensions permissions UI", () => {
       }
     });
 
-    await gotoDesktop(page);
+      await gotoDesktop(page);
 
-    await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const app: any = (window as any).__formulaApp;
-      if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
-      const doc = app.getDocument();
-      const sheetId = app.getCurrentSheetId();
+      await page.evaluate(() => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const app: any = window.__formulaApp as any;
+        if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
+        const doc = app.getDocument();
+        const sheetId = app.getCurrentSheetId();
 
       doc.setCellValue(sheetId, { row: 0, col: 0 }, 1);
       doc.setCellValue(sheetId, { row: 0, col: 1 }, 2);
@@ -590,7 +590,7 @@ test.describe("Extensions permissions UI", () => {
 
     await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const app: any = (window as any).__formulaApp;
+      const app: any = window.__formulaApp as any;
       if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
       const doc = app.getDocument();
       const sheetId = app.getCurrentSheetId();

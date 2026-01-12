@@ -32,7 +32,7 @@ async function gotoDesktop(page: Page, urlPath: string = "/"): Promise<void> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       await page.goto(urlPath, { waitUntil: "domcontentloaded" });
-      await page.waitForFunction(() => Boolean((window as any).__formulaApp), undefined, { timeout: 120_000 });
+      await page.waitForFunction(() => Boolean(window.__formulaApp), undefined, { timeout: 120_000 });
       return;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -48,7 +48,7 @@ async function gotoDesktop(page: Page, urlPath: string = "/"): Promise<void> {
 async function waitForDesktopReady(page: Page): Promise<void> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      await page.waitForFunction(() => Boolean((window as any).__formulaApp), undefined, { timeout: 120_000 });
+      await page.waitForFunction(() => Boolean(window.__formulaApp), undefined, { timeout: 120_000 });
       return;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

@@ -112,7 +112,7 @@ test.describe("AutoSave (tauri)", () => {
     });
 
     await page.waitForFunction(() => (window as any).__tauriDialogOpenCalls === 1);
-    await page.waitForFunction(async () => (await (window as any).__formulaApp.getCellValueA1("A1")) === "Hello");
+    await page.waitForFunction(async () => (await (window.__formulaApp as any).getCellValueA1("A1")) === "Hello");
 
     // Enable AutoSave from the File backstage.
     const ribbon = page.getByTestId("ribbon-root");
@@ -149,4 +149,3 @@ test.describe("AutoSave (tauri)", () => {
     );
   });
 });
-
