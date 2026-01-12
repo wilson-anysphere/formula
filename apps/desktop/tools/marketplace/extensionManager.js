@@ -157,6 +157,25 @@ export class ExtensionManager {
       throw new Error(`Extension publisher is revoked (refusing to install): ${id}`);
     }
 
+    const warnings = [];
+    const confirm = typeof options.confirm === "function" ? options.confirm : null;
+    const addWarning = async (warning) => {
+      warnings.push(warning);
+      if (confirm) {
+        const ok = await confirm(warning);
+        if (!ok) {
+          throw new Error("Extension install cancelled");
+        }
+      }
+    };
+
+    if (ext.deprecated) {
+      await addWarning({
+        kind: "deprecated",
+        message: `Extension ${id} is deprecated. It may be unmaintained and could be removed from the marketplace.`,
+      });
+    }
+
     const resolvedVersion = version || ext.latestVersion;
     if (!resolvedVersion) throw new Error("Marketplace did not provide latestVersion");
 
@@ -192,6 +211,13 @@ export class ExtensionManager {
         throw new Error(
           `Refusing to install ${id}@${resolvedVersion}: package scan status is "${scanStatus}" (expected "passed")`
         );
+      }
+      if (policy === "allow") {
+        await addWarning({
+          kind: "scanStatus",
+          scanStatus,
+          message: `Extension ${id}@${resolvedVersion} has package scan status "${scanStatus}". Proceed with caution.`,
+        });
       }
     }
 
@@ -287,7 +313,7 @@ export class ExtensionManager {
       };
       await this._saveState(state);
 
-      return state.installed[id];
+      return warnings.length > 0 ? { ...state.installed[id], warnings } : state.installed[id];
     } catch (error) {
       // verifyAndExtractExtensionPackage has already written the extracted extension to disk. If we fail
       // after that (e.g. provenance mismatch), ensure we don't leave behind an untracked directory.

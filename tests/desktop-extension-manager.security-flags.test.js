@@ -330,6 +330,95 @@ test("ExtensionManager.install can allow non-passed scanStatus when configured",
   assert.equal(record.id, extensionId);
   assert.equal(record.version, "1.0.0");
   assert.equal(record.scanStatus, "pending");
+  assert.ok(Array.isArray(record.warnings));
+  assert.ok(record.warnings.some((w) => w && w.kind === "scanStatus" && String(w.scanStatus) === "pending"));
   assert.equal(await pathExists(installDir), true);
   assert.equal(await pathExists(statePath), true);
+});
+
+test("ExtensionManager.install warns when installing a deprecated extension", async (t) => {
+  const fixture = await createFixture();
+  const { tmpRoot, extensionsDir, statePath, extensionId, installDir, publicKeyPem, packageBytes, packageSha256 } =
+    fixture;
+
+  t.after(async () => {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  /** @type {any} */
+  const marketplaceClient = {
+    async getExtension(id) {
+      if (id !== extensionId) return null;
+      return { id, latestVersion: "1.0.0", publisherPublicKeyPem: publicKeyPem, deprecated: true };
+    },
+    async downloadPackage(id, version) {
+      if (id !== extensionId || version !== "1.0.0") return null;
+      return {
+        bytes: Buffer.from(packageBytes),
+        sha256: packageSha256,
+        formatVersion: 2,
+        signatureBase64: null,
+        publisher: "formula",
+        scanStatus: "passed",
+        filesSha256: null,
+      };
+    },
+  };
+
+  const manager = new ExtensionManager({ marketplaceClient, extensionsDir, statePath });
+  const record = await manager.install(extensionId);
+  assert.equal(record.id, extensionId);
+  assert.equal(record.version, "1.0.0");
+  assert.equal(record.deprecated, true);
+  assert.ok(Array.isArray(record.warnings));
+  assert.ok(record.warnings.some((w) => w && w.kind === "deprecated"));
+  assert.equal(await pathExists(installDir), true);
+  assert.equal(await pathExists(statePath), true);
+});
+
+test("ExtensionManager.install can be cancelled via confirm() when installing a deprecated extension", async (t) => {
+  const fixture = await createFixture();
+  const { tmpRoot, extensionsDir, statePath, extensionId, installDir, publicKeyPem, packageBytes, packageSha256 } =
+    fixture;
+
+  t.after(async () => {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  /** @type {any} */
+  const marketplaceClient = {
+    async getExtension(id) {
+      if (id !== extensionId) return null;
+      return { id, latestVersion: "1.0.0", publisherPublicKeyPem: publicKeyPem, deprecated: true };
+    },
+    async downloadPackage(id, version) {
+      if (id !== extensionId || version !== "1.0.0") return null;
+      return {
+        bytes: Buffer.from(packageBytes),
+        sha256: packageSha256,
+        formatVersion: 2,
+        signatureBase64: null,
+        publisher: "formula",
+        scanStatus: "passed",
+        filesSha256: null,
+      };
+    },
+  };
+
+  const manager = new ExtensionManager({ marketplaceClient, extensionsDir, statePath });
+  let confirmCalled = false;
+  await assert.rejects(
+    () =>
+      manager.install(extensionId, null, {
+        confirm: async (warning) => {
+          confirmCalled = true;
+          assert.equal(warning.kind, "deprecated");
+          return false;
+        },
+      }),
+    /cancel/i
+  );
+  assert.equal(confirmCalled, true);
+  assert.equal(await pathExists(installDir), false);
+  assert.equal(await pathExists(statePath), false);
 });
