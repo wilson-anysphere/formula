@@ -1524,6 +1524,49 @@ fn bytecode_backend_matches_ast_for_conditional_aggregates_numeric_criteria() {
 }
 
 #[test]
+fn bytecode_backend_conditional_aggregates_error_precedence_is_row_major_for_2d_ranges() {
+    let mut engine = Engine::new();
+
+    // Criteria range (2x2) matches all cells.
+    for addr in ["A1", "A2", "B1", "B2"] {
+        engine.set_cell_value("Sheet1", addr, 1.0).unwrap();
+    }
+
+    // Sum/average range (2x2) contains two different errors. Excel (and the AST evaluator) return
+    // the first included error in row-major range order: C1, D1, C2, D2.
+    engine.set_cell_value("Sheet1", "C1", 10.0).unwrap();
+    engine
+        .set_cell_value("Sheet1", "D1", Value::Error(ErrorKind::Ref))
+        .unwrap();
+    engine
+        .set_cell_value("Sheet1", "C2", Value::Error(ErrorKind::Div0))
+        .unwrap();
+    engine.set_cell_value("Sheet1", "D2", 20.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "E1", r#"=SUMIFS(C1:D2,A1:B2,">0")"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "E2", r#"=AVERAGEIFS(C1:D2,A1:B2,">0")"#)
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 2);
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "E1"),
+        Value::Error(ErrorKind::Ref)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "E2"),
+        Value::Error(ErrorKind::Ref)
+    );
+
+    assert_engine_matches_ast(&engine, r#"=SUMIFS(C1:D2,A1:B2,">0")"#, "E1");
+    assert_engine_matches_ast(&engine, r#"=AVERAGEIFS(C1:D2,A1:B2,">0")"#, "E2");
+}
+
+#[test]
 fn bytecode_backend_compiles_xlfn_prefixed_minmaxifs() {
     let mut engine = Engine::new();
 

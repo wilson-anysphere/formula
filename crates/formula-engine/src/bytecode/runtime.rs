@@ -1196,44 +1196,38 @@ fn fn_sumif(
     }
 
     if let Some(numeric) = criteria.as_numeric_criteria() {
-        let mut sum = 0.0;
+        // Only use the numeric SIMD fast path when *all* required slices are available across the
+        // full range. When any slice is missing (blocked rows, errors, etc.) we fall back to the
+        // generic row-major scan so error precedence matches the AST evaluator.
+        let mut slices_ok = true;
         for col_off in 0..cols {
             let crit_col = crit_range.col_start + col_off;
             let sum_col = sum_range.col_start + col_off;
-
-            if let (Some(crit_slice), Some(sum_slice)) = (
-                grid.column_slice(crit_col, crit_range.row_start, crit_range.row_end),
-                grid.column_slice(sum_col, sum_range.row_start, sum_range.row_end),
-            ) {
-                sum += simd::sum_if_f64(sum_slice, crit_slice, numeric);
-                continue;
-            }
-
-            // Fallback: per-cell scan for this column (needed for blocked rows or missing cache).
-            for row_off in 0..rows {
-                let engine_value = bytecode_value_to_engine(grid.get_value(CellCoord {
-                    row: crit_range.row_start + row_off,
-                    col: crit_col,
-                }));
-                if !criteria.matches(&engine_value) {
-                    continue;
-                }
-                match grid.get_value(CellCoord {
-                    row: sum_range.row_start + row_off,
-                    col: sum_col,
-                }) {
-                    Value::Number(v) => sum += v,
-                    Value::Error(e) => return Value::Error(e),
-                    // SUMIF ignores text/logicals/blanks in references.
-                    Value::Bool(_)
-                    | Value::Text(_)
-                    | Value::Empty
-                    | Value::Array(_)
-                    | Value::Range(_) => {}
-                }
+            if grid
+                .column_slice(crit_col, crit_range.row_start, crit_range.row_end)
+                .is_none()
+                || grid
+                    .column_slice(sum_col, sum_range.row_start, sum_range.row_end)
+                    .is_none()
+            {
+                slices_ok = false;
+                break;
             }
         }
-        return Value::Number(sum);
+
+        if slices_ok {
+            let mut sum = 0.0;
+            for col_off in 0..cols {
+                let crit_col = crit_range.col_start + col_off;
+                let sum_col = sum_range.col_start + col_off;
+                let crit_slice =
+                    grid.column_slice(crit_col, crit_range.row_start, crit_range.row_end).unwrap();
+                let sum_slice =
+                    grid.column_slice(sum_col, sum_range.row_start, sum_range.row_end).unwrap();
+                sum += simd::sum_if_f64(sum_slice, crit_slice, numeric);
+            }
+            return Value::Number(sum);
+        }
     }
 
     let mut sum = 0.0;
@@ -1325,24 +1319,49 @@ fn fn_sumifs(
 
     let all_numeric = !numeric_crits.is_empty() && numeric_crits.len() == crits.len();
 
-    let mut sum = 0.0;
-    for col_off in 0..cols {
-        let sum_col = sum_range.col_start + col_off;
-
-        if all_numeric {
-            let sum_slice = grid.column_slice(sum_col, sum_range.row_start, sum_range.row_end);
-            let mut crit_slices: SmallVec<[&[f64]; 4]> = SmallVec::with_capacity(crits.len());
+    if all_numeric {
+        // Like MINIFS/MAXIFS, only take the numeric slice fast path when all slices are available
+        // for the full rectangular region. Otherwise fall back to a row-major scan so error
+        // precedence matches the AST evaluator.
+        let mut slices_ok = true;
+        for col_off in 0..cols {
+            let sum_col = sum_range.col_start + col_off;
+            if grid
+                .column_slice(sum_col, sum_range.row_start, sum_range.row_end)
+                .is_none()
+            {
+                slices_ok = false;
+                break;
+            }
             for range in &crit_ranges {
                 let col = range.col_start + col_off;
-                let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) else {
-                    crit_slices.clear();
+                if grid
+                    .column_slice(col, range.row_start, range.row_end)
+                    .is_none()
+                {
+                    slices_ok = false;
                     break;
-                };
-                crit_slices.push(slice);
+                }
             }
+            if !slices_ok {
+                break;
+            }
+        }
 
-            if let (Some(sum_slice), true) = (sum_slice, crit_slices.len() == crits.len()) {
-                // All slices are available; do a tight numeric scan.
+        if slices_ok {
+            let mut sum = 0.0;
+            for col_off in 0..cols {
+                let sum_col = sum_range.col_start + col_off;
+                let sum_slice =
+                    grid.column_slice(sum_col, sum_range.row_start, sum_range.row_end).unwrap();
+                let mut crit_slices: SmallVec<[&[f64]; 4]> = SmallVec::with_capacity(crits.len());
+                for range in &crit_ranges {
+                    let col = range.col_start + col_off;
+                    let slice = grid.column_slice(col, range.row_start, range.row_end).unwrap();
+                    crit_slices.push(slice);
+                }
+
+                // Tight numeric scan.
                 if numeric_crits.len() == 1 {
                     sum += simd::sum_if_f64(sum_slice, crit_slices[0], numeric_crits[0]);
                     continue;
@@ -1394,12 +1413,15 @@ fn fn_sumifs(
                         sum += v;
                     }
                 }
-                continue;
             }
-        }
 
-        // Fallback: per-cell scan for this column.
-        'row: for row_off in 0..rows {
+            return Value::Number(sum);
+        }
+    }
+
+    let mut sum = 0.0;
+    for row_off in 0..rows {
+        'cell: for col_off in 0..cols {
             for (range, crit) in crit_ranges.iter().zip(crits.iter()) {
                 let cell = CellCoord {
                     row: range.row_start + row_off,
@@ -1407,13 +1429,13 @@ fn fn_sumifs(
                 };
                 let engine_value = bytecode_value_to_engine(grid.get_value(cell));
                 if !crit.matches(&engine_value) {
-                    continue 'row;
+                    continue 'cell;
                 }
             }
 
             match grid.get_value(CellCoord {
                 row: sum_range.row_start + row_off,
-                col: sum_col,
+                col: sum_range.col_start + col_off,
             }) {
                 Value::Number(v) => sum += v,
                 Value::Error(e) => return Value::Error(e),
@@ -1604,53 +1626,45 @@ fn fn_averageif(
     }
 
     if let Some(numeric) = criteria.as_numeric_criteria() {
-        let mut sum = 0.0;
-        let mut count = 0usize;
+        // Only use the numeric SIMD fast path when *all* required slices are available across the
+        // full range. When any slice is missing (blocked rows, errors, etc.) we fall back to the
+        // generic row-major scan so error precedence matches the AST evaluator.
+        let mut slices_ok = true;
         for col_off in 0..cols {
             let crit_col = crit_range.col_start + col_off;
             let avg_col = avg_range.col_start + col_off;
+            if grid
+                .column_slice(crit_col, crit_range.row_start, crit_range.row_end)
+                .is_none()
+                || grid
+                    .column_slice(avg_col, avg_range.row_start, avg_range.row_end)
+                    .is_none()
+            {
+                slices_ok = false;
+                break;
+            }
+        }
 
-            if let (Some(crit_slice), Some(avg_slice)) = (
-                grid.column_slice(crit_col, crit_range.row_start, crit_range.row_end),
-                grid.column_slice(avg_col, avg_range.row_start, avg_range.row_end),
-            ) {
+        if slices_ok {
+            let mut sum = 0.0;
+            let mut count = 0usize;
+            for col_off in 0..cols {
+                let crit_col = crit_range.col_start + col_off;
+                let avg_col = avg_range.col_start + col_off;
+                let crit_slice =
+                    grid.column_slice(crit_col, crit_range.row_start, crit_range.row_end).unwrap();
+                let avg_slice =
+                    grid.column_slice(avg_col, avg_range.row_start, avg_range.row_end).unwrap();
                 let (s, c) = simd::sum_count_if_f64(avg_slice, crit_slice, numeric);
                 sum += s;
                 count += c;
-                continue;
             }
 
-            for row_off in 0..rows {
-                let engine_value = bytecode_value_to_engine(grid.get_value(CellCoord {
-                    row: crit_range.row_start + row_off,
-                    col: crit_col,
-                }));
-                if !criteria.matches(&engine_value) {
-                    continue;
-                }
-
-                match grid.get_value(CellCoord {
-                    row: avg_range.row_start + row_off,
-                    col: avg_col,
-                }) {
-                    Value::Number(v) => {
-                        sum += v;
-                        count += 1;
-                    }
-                    Value::Error(e) => return Value::Error(e),
-                    Value::Bool(_)
-                    | Value::Text(_)
-                    | Value::Empty
-                    | Value::Array(_)
-                    | Value::Range(_) => {}
-                }
+            if count == 0 {
+                return Value::Error(ErrorKind::Div0);
             }
+            return Value::Number(sum / count as f64);
         }
-
-        if count == 0 {
-            return Value::Error(ErrorKind::Div0);
-        }
-        return Value::Number(sum / count as f64);
     }
 
     let mut sum = 0.0;
@@ -1749,24 +1763,49 @@ fn fn_averageifs(
 
     let all_numeric = !numeric_crits.is_empty() && numeric_crits.len() == crits.len();
 
-    let mut sum = 0.0;
-    let mut count = 0usize;
-    for col_off in 0..cols {
-        let avg_col = avg_range.col_start + col_off;
-
-        if all_numeric {
-            let avg_slice = grid.column_slice(avg_col, avg_range.row_start, avg_range.row_end);
-            let mut crit_slices: SmallVec<[&[f64]; 4]> = SmallVec::with_capacity(crits.len());
+    if all_numeric {
+        // Like MINIFS/MAXIFS, only take the numeric slice fast path when all slices are available
+        // for the full rectangular region. Otherwise fall back to a row-major scan so error
+        // precedence matches the AST evaluator.
+        let mut slices_ok = true;
+        for col_off in 0..cols {
+            let avg_col = avg_range.col_start + col_off;
+            if grid
+                .column_slice(avg_col, avg_range.row_start, avg_range.row_end)
+                .is_none()
+            {
+                slices_ok = false;
+                break;
+            }
             for range in &crit_ranges {
                 let col = range.col_start + col_off;
-                let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) else {
-                    crit_slices.clear();
+                if grid
+                    .column_slice(col, range.row_start, range.row_end)
+                    .is_none()
+                {
+                    slices_ok = false;
                     break;
-                };
-                crit_slices.push(slice);
+                }
             }
+            if !slices_ok {
+                break;
+            }
+        }
 
-            if let (Some(avg_slice), true) = (avg_slice, crit_slices.len() == crits.len()) {
+        if slices_ok {
+            let mut sum = 0.0;
+            let mut count = 0usize;
+            for col_off in 0..cols {
+                let avg_col = avg_range.col_start + col_off;
+                let avg_slice =
+                    grid.column_slice(avg_col, avg_range.row_start, avg_range.row_end).unwrap();
+                let mut crit_slices: SmallVec<[&[f64]; 4]> = SmallVec::with_capacity(crits.len());
+                for range in &crit_ranges {
+                    let col = range.col_start + col_off;
+                    let slice = grid.column_slice(col, range.row_start, range.row_end).unwrap();
+                    crit_slices.push(slice);
+                }
+
                 if numeric_crits.len() == 1 {
                     let (s, c) =
                         simd::sum_count_if_f64(avg_slice, crit_slices[0], numeric_crits[0]);
@@ -1823,12 +1862,19 @@ fn fn_averageifs(
                         count += 1;
                     }
                 }
-                continue;
             }
-        }
 
-        // Fallback: per-cell scan for this column.
-        'row: for row_off in 0..rows {
+            if count == 0 {
+                return Value::Error(ErrorKind::Div0);
+            }
+            return Value::Number(sum / count as f64);
+        }
+    }
+
+    let mut sum = 0.0;
+    let mut count = 0usize;
+    for row_off in 0..rows {
+        'cell: for col_off in 0..cols {
             for (range, crit) in crit_ranges.iter().zip(crits.iter()) {
                 let cell = CellCoord {
                     row: range.row_start + row_off,
@@ -1836,13 +1882,13 @@ fn fn_averageifs(
                 };
                 let engine_value = bytecode_value_to_engine(grid.get_value(cell));
                 if !crit.matches(&engine_value) {
-                    continue 'row;
+                    continue 'cell;
                 }
             }
 
             match grid.get_value(CellCoord {
                 row: avg_range.row_start + row_off,
-                col: avg_col,
+                col: avg_range.col_start + col_off,
             }) {
                 Value::Number(v) => {
                     sum += v;
