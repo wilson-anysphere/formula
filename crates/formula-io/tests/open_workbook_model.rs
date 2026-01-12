@@ -372,6 +372,31 @@ fn open_workbook_model_sniffs_csv_with_wrong_extension() {
 }
 
 #[test]
+fn open_workbook_model_sniffs_csv_with_wrong_extension_and_sanitizes_sheet_name() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    // Note: the extension is intentionally wrong; content sniffing should still treat it as CSV.
+    let path = dir.path().join("bad[name].xlsx");
+
+    std::fs::write(&path, "col1,col2\n1,hello\n2,world\n").expect("write csv");
+
+    let workbook = formula_io::open_workbook_model(&path).expect("open workbook model");
+    assert_eq!(workbook.sheets.len(), 1);
+    assert_eq!(workbook.sheets[0].name, "badname");
+
+    let sheet = workbook.sheet_by_name("badname").expect("sheet missing");
+    assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(1.0));
+    assert_eq!(
+        sheet.value_a1("B1").unwrap(),
+        CellValue::String("hello".to_string())
+    );
+    assert_eq!(sheet.value_a1("A2").unwrap(), CellValue::Number(2.0));
+    assert_eq!(
+        sheet.value_a1("B2").unwrap(),
+        CellValue::String("world".to_string())
+    );
+}
+
+#[test]
 fn open_workbook_model_sniffs_extensionless_csv() {
     let csv_bytes = b"col1,col2\n1,hello\n2,world\n";
 
@@ -618,6 +643,36 @@ fn open_workbook_model_rejects_unknown_binary() {
     match err {
         formula_io::Error::UnsupportedExtension { .. } => {}
         other => panic!("expected UnsupportedExtension, got {other:?}"),
+    }
+}
+
+#[cfg(not(feature = "parquet"))]
+#[test]
+fn open_workbook_model_parquet_requires_feature() {
+    let parquet_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../packages/data-io/test/fixtures")
+        .join("simple.parquet");
+    let err = formula_io::open_workbook_model(&parquet_path).expect_err("expected error");
+    match err {
+        formula_io::Error::ParquetSupportNotEnabled { path } => {
+            assert_eq!(path, parquet_path);
+        }
+        other => panic!("expected ParquetSupportNotEnabled, got {other:?}"),
+    }
+}
+
+#[cfg(not(feature = "parquet"))]
+#[test]
+fn open_workbook_parquet_requires_feature() {
+    let parquet_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../packages/data-io/test/fixtures")
+        .join("simple.parquet");
+    let err = formula_io::open_workbook(&parquet_path).expect_err("expected error");
+    match err {
+        formula_io::Error::ParquetSupportNotEnabled { path } => {
+            assert_eq!(path, parquet_path);
+        }
+        other => panic!("expected ParquetSupportNotEnabled, got {other:?}"),
     }
 }
 
