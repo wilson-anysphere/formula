@@ -659,13 +659,14 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                         sheet_info.offset
                     )));
                 } else {
-                    match biff::comments::parse_biff_sheet_notes(
+                    match biff::parse_biff_sheet_notes(
                         workbook_stream,
                         sheet_info.offset,
                         biff_version,
                         codepage,
                     ) {
                         Ok((notes, note_warnings)) => {
+                            let notes: Vec<biff::BiffNote> = notes;
                             warnings.extend(note_warnings.into_iter().map(|w| {
                                 ImportWarning::new(format!(
                                     "failed to fully import `.xls` note comments for sheet `{sheet_name}` (index {sheet_idx}): {w}"
