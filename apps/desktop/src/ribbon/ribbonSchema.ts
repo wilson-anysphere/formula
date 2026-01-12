@@ -1851,18 +1851,16 @@ export const defaultRibbonSchema: RibbonSchema = {
           id: "view.debug.panels",
           label: "Panels",
           buttons: [
-            { id: "open-ai-panel", label: "AI panel", ariaLabel: "Toggle AI panel", icon: "🤖", testId: "open-ai-panel" },
             {
               id: "open-panel-ai-chat",
-              label: "AI chat",
-              ariaLabel: "Toggle AI chat panel",
+              label: "AI panel",
+              ariaLabel: "Toggle AI panel",
               icon: "🤖",
               testId: "open-panel-ai-chat",
             },
-            { id: "open-ai-audit-panel", label: "Audit log", ariaLabel: "Toggle AI audit log panel", icon: "🧾", testId: "open-ai-audit-panel" },
             {
               id: "open-panel-ai-audit",
-              label: "Audit log (alt)",
+              label: "Audit log",
               ariaLabel: "Toggle AI audit log panel",
               icon: "🧾",
               testId: "open-panel-ai-audit",
