@@ -1094,6 +1094,10 @@ class BrowserExtensionHost {
 
   async dispose() {
     const extensions = [...this._extensions.values()];
+    for (const ext of extensions) {
+      this._terminateWorker(ext, { reason: "dispose", cause: new Error("BrowserExtensionHost disposed") });
+    }
+
     this._extensions.clear();
     this._commands.clear();
     this._panelContributions.clear();
@@ -1102,10 +1106,6 @@ class BrowserExtensionHost {
     this._customFunctions.clear();
     this._dataConnectors.clear();
     this._messages = [];
-
-    for (const ext of extensions) {
-      this._terminateWorker(ext, { reason: "dispose", cause: new Error("BrowserExtensionHost disposed") });
-    }
   }
 
   async reloadExtension(extensionId) {

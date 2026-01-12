@@ -3652,6 +3652,14 @@ if (
       const source = def?.source;
       if (source?.kind !== "extension" || source.contributed !== true) continue;
       if (keepIds.has(id)) continue;
+      try {
+        const placement = getPanelPlacement(layoutController.layout, id);
+        if (placement.kind !== "closed") {
+          layoutController.closePanel(id);
+        }
+      } catch {
+        // ignore
+      }
       panelRegistry.unregisterPanel(id, { owner: source.extensionId });
     }
   };
