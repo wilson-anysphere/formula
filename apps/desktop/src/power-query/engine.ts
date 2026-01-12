@@ -1348,7 +1348,6 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
       },
       tableAdapter,
       connectors: { ...(http ? { http } : null), ...(odata ? { odata } : null), ...(sharepoint ? { sharepoint } : null), sql },
-      tableAdapter,
       privacyMode: options.privacyMode,
       onCredentialRequest: options.onCredentialRequest,
       onPermissionRequest: async (kind: string, details: unknown) => {
